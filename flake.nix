@@ -11,7 +11,12 @@
         let
           pkgs = nixpkgs.legacyPackages.${system};
           nativeLibraryPath = nixpkgs.lib.makeLibraryPath [
+            pkgs.libffi
             pkgs.openssl
+            pkgs.sdl3
+            pkgs.sdl3-image
+            pkgs.sdl3-mixer
+            pkgs.sdl3-ttf
             pkgs.vulkan-loader
           ];
           # Nixpkgs' vk package handles its unusually large generated binding;
@@ -39,6 +44,9 @@
           default = env.pkgs.mkShell {
             packages = [
               env.lisp
+              env.pkgs.libffi
+              env.pkgs.pkg-config
+              env.pkgs.sdl3
               env.pkgs.vulkan-tools
             ];
             LD_LIBRARY_PATH = env.nativeLibraryPath;

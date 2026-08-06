@@ -1,9 +1,22 @@
 # luv
 
 `luv` is an experimental atelier for hacking on Vulkan graphics with Common
-Lisp.  The initial spike uses
+Lisp. The initial spike uses
 [`JolifantoBambla/vk`](https://github.com/JolifantoBambla/vk) to load Vulkan,
-create an instance, enumerate physical devices, and clean the instance up.
+and [`aiffc/cl-sdl3`](https://github.com/aiffc/cl-sdl3) to let SDL own the
+native Wayland window while luv owns the Vulkan instance and surface queries.
+
+## One-time Lisp setup
+
+`cl-sdl3` is not in Quicklisp, so install it as a local project:
+
+```sh
+git clone https://github.com/aiffc/cl-sdl3 \
+  ~/quicklisp/local-projects/cl-sdl3
+```
+
+Its ordinary Lisp dependencies are fetched by Quicklisp when `luv` is loaded.
+Nix supplies SDL3, its companion native libraries, libffi, Vulkan, and SBCL.
 
 ## Run the probe
 
@@ -13,24 +26,32 @@ Enter the reproducible development environment:
 nix develop
 ```
 
-Then load the ASDF system and run the probe:
+Then load the ASDF system and run the SDL-backed surface probe:
 
 ```sh
 sbcl --non-interactive \
-  --eval '(require :asdf)' \
-  --load luv.asd \
-  --eval '(asdf:load-system :luv)' \
+  --load ~/quicklisp/setup.lisp \
+  --eval '(asdf:load-asd (truename "luv.asd"))' \
+  --eval '(ql:quickload :luv :silent t)' \
   --eval '(luv:main)'
 ```
 
-For interactive hacking, start `sbcl`, evaluate the first three forms above,
-and call `(luv:probe)` whenever you want to check the Vulkan connection.
+This creates a hidden SDL Vulkan window, creates a real `VkSurfaceKHR`, and
+reports the active SDL backend, required instance extensions, surface formats,
+present modes, and present-capable queue families. Set
+`SDL_VIDEODRIVER=wayland` to require native Wayland rather than allowing SDL to
+choose another available backend.
 
-Quicklisp supplies ordinary Lisp systems, including `cl-mcp`. Nix supplies
-SBCL, the large generated `vk` binding, native Vulkan and OpenSSL libraries,
-and `vulkaninfo`. A Vulkan implementation/ICD still comes from the host
-graphics stack. If the probe cannot see a device, `vulkaninfo --summary` is
-the first diagnostic to try.
+For interactive hacking, start `sbcl`, load Quicklisp and `luv`, then call
+`(luv:surface-probe)`. The original windowless loader/device check remains
+available as `(luv:probe)`.
+
+Quicklisp supplies ordinary Lisp systems, including `cl-mcp` and the
+dependencies of the locally installed `cl-sdl3`. Nix supplies SBCL, the large
+generated `vk` binding, native SDL/Vulkan/OpenSSL libraries, and `vulkaninfo`.
+A Vulkan implementation/ICD still comes from the host graphics stack. If the
+probe cannot see a device, `vulkaninfo --summary` is the first diagnostic to
+try.
 
 ## Lisp-aware MCP server
 
