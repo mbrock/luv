@@ -1,5 +1,7 @@
 #!/usr/bin/env -S sbcl --script
 
+(load (merge-pathnames #P"parinfer.lisp" *load-truename*))
+
 (defpackage #:sly-client
   (:use #:cl))
 
@@ -638,6 +640,7 @@
 
 (defun usage (&optional (stream *standard-output*))
   (format stream "Usage: ./sly eval CODE [--package PACKAGE]~%")
+  (format stream "       ./sly parinfer [CODE]~%")
   (format stream "       ./sly inspect CODE [--package PACKAGE]~%")
   (format stream "       ./sly describe NAME... [--function] [--package PACKAGE]~%")
   (format stream "       ./sly describe-package PACKAGE...~%")
@@ -648,6 +651,21 @@
   (format stream "       ./sly xref TYPE NAME... [--package PACKAGE]~%")
   (format stream "~%Xref types: calls, calls-who, references, binds, sets,~%")
   (format stream "            macroexpands, specializes, callers, callees, uses~%"))
+
+(defun read-standard-input-to-end ()
+  (with-output-to-string (output)
+    (loop for character = (read-char *standard-input* nil nil)
+          while character
+          do (write-char character output))))
+
+(defun run-parinfer (arguments)
+  (when (cdr arguments)
+    (error "parinfer accepts at most one source argument"))
+  (write-string
+   (sly-client/parinfer:apply-indent-mode
+    (if arguments
+        (first arguments)
+        (read-standard-input-to-end)))))
 
 (defun parse-code-arguments (command arguments)
   (unless arguments
@@ -777,6 +795,9 @@
        (multiple-value-bind (code package)
            (parse-code-arguments command arguments)
          (evaluate code package))
+       0)
+      ((string= command "parinfer")
+       (run-parinfer arguments)
        0)
       ((string= command "inspect")
        (multiple-value-bind (code package)

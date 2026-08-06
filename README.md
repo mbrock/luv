@@ -141,3 +141,17 @@ equivalent of SLY's `M-.` definition lookup. Xref types are `calls`, `calls-who`
 `callees`. The aggregate `uses` query runs all of SLY's ordinary use-site
 queries and groups the nonempty results. File-backed definitions and xrefs are
 printed as `file:line:column` with their first source-snippet line.
+
+The client also includes a connection-free, minimal Parinfer-like repair
+filter adapted from cl-mcp. Give it one source argument, or pipe multiline
+source through stdin:
+
+```sh
+./sly parinfer $'(defun twice (x)\n  (* x 2)'
+./sly parinfer < unfinished.lisp
+```
+
+It closes open forms on dedent or at end of input and drops unmatched closing
+parentheses while ignoring strings, line comments, and character literals.
+This is a deliberately small, lossy heuristic rather than a complete Common
+Lisp parser, so inspect its output before replacing a source file with it.
