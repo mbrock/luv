@@ -16,6 +16,7 @@
   (:use #:cl)
   (:export #:probe
            #:surface-probe
+           #:yellow-window
            #:main))
 
 (in-package #:luv)
@@ -202,8 +203,3 @@ instance are all destroyed before this function returns."
                        (cffi:null-pointer))))))
            (sdl3:destroy-window window)))
     (sdl3:quit)))
-
-(defun main ()
-  "Command-line entry point for the SDL-backed Vulkan surface probe."
-  (surface-probe)
-  (values))

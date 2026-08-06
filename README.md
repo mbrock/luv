@@ -26,7 +26,7 @@ Enter the reproducible development environment:
 nix develop
 ```
 
-Then load the ASDF system and run the SDL-backed surface probe:
+Then load the ASDF system and open the yellow Vulkan window:
 
 ```sh
 sbcl --non-interactive \
@@ -36,15 +36,16 @@ sbcl --non-interactive \
   --eval '(luv:main)'
 ```
 
-This creates a hidden SDL Vulkan window, creates a real `VkSurfaceKHR`, and
-reports the active SDL backend, required instance extensions, surface formats,
-present modes, and present-capable queue families. Set
+This creates an SDL Vulkan window and swapchain, clears one acquired image to
+yellow, presents it, and dispatches SDL events until the window is closed. Set
 `SDL_VIDEODRIVER=wayland` to require native Wayland rather than allowing SDL to
 choose another available backend.
 
 For interactive hacking, start `sbcl`, load Quicklisp and `luv`, then call
-`(luv:surface-probe)`. The original windowless loader/device check remains
-available as `(luv:probe)`.
+`(luv:yellow-window)`. `(luv:surface-probe)` performs the same native-window
+setup without creating a device or swapchain, and the original windowless
+loader/device check remains available as `(luv:probe)`. A timed smoke test can
+use `(luv:yellow-window :duration 2)`.
 
 Quicklisp supplies ordinary Lisp systems, including `cl-mcp` and the
 dependencies of the locally installed `cl-sdl3`. Nix supplies SBCL, the large

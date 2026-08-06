@@ -5,4 +5,5 @@
   :depends-on (#:sdl3
                #:vk)
   :serial t
-  :components ((:file "luv")))
+  :components ((:file "luv")
+               (:file "yellow")))
