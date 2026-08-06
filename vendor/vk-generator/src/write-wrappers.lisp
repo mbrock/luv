@@ -273,9 +273,15 @@ See ~a~]
     ;; todo: void pointers should also be treaded as :raw instead of :handle to get rid of the ambiguity
     (when (or (and (gethash (get-type-name arg) *vk-platform*)
                    (value-p (type-info arg)))
+              (and (gethash (get-type-name arg) *misc-os-types*)
+                   (not (consp (gethash (get-type-name arg) *misc-os-types*)))
+                   (value-p (type-info arg)))
               (and (string= "char" (get-type-name arg))
                    (not (string= "**" (postfix (type-info arg)))))
               (gethash (get-type-name arg) (enums vk-spec))
+              (find-if (lambda (candidate)
+                         (member (get-type-name arg) (alias candidate) :test #'string=))
+                       (alexandria:hash-table-values (enums vk-spec)))
               (gethash (get-type-name arg) (bitmasks vk-spec))
               (and (gethash (get-type-name arg) (base-types vk-spec))
                    (value-p (type-info arg))))
@@ -284,7 +290,8 @@ See ~a~]
               (string= "void" (get-type-name arg)) ;; it's a void pointer
               (and (gethash (get-type-name arg) (types vk-spec)) ;; it's a vk-defined type
                    (eq :requires (category (gethash (get-type-name arg) (types vk-spec))))
-                   (not (gethash (get-type-name arg) *vk-platform*))))
+                   (not (gethash (get-type-name arg) *vk-platform*))
+                   (not (gethash (get-type-name arg) *misc-os-types*))))
       (push :handle qualifiers))
     (when (handlep (get-type-name arg) vk-spec)
       (push (if (non-dispatch-handle-p (get-handle (get-type-name arg) vk-spec))

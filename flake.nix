@@ -18,9 +18,12 @@
             pkgs.sdl3-ttf
             pkgs.vulkan-loader
           ];
-          # Nixpkgs' vk package handles its unusually large generated binding;
-          # ordinary Lisp dependencies stay in Quicklisp.
-          lisp = pkgs.sbcl.withPackages (lispPackages: [ lispPackages.vk ]);
+          # The generated vk binding is vendored in this repository. Keep its
+          # ordinary dependencies available without installing Nixpkgs' vk.
+          lisp = pkgs.sbcl.withPackages (lispPackages: [
+            lispPackages.alexandria
+            lispPackages.cffi
+          ]);
         in
         { inherit pkgs lisp nativeLibraryPath; };
     in

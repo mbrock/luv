@@ -54,6 +54,7 @@ contents is the source of the data which should be translated to the args memory
                                (not (member :list var)))
                           (and (member :raw var)
                                (member :in var)
+                               (not (member :list var))
                                (eq (first var) (third var))))
                       (first var)
                       var-sym)

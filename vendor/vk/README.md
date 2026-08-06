@@ -56,9 +56,9 @@ CMUCL fails to find `libvulkan.so` in the test action.
 MacOS might also work if [MoltenVK](https://github.com/KhronosGroup/MoltenVK) is set up correctly.
 
 ### Supported Vulkan API versions
-**The current version of `vk` is based on version `v1.2.198`.**
+**This vendored version of `vk` is generated from version `v1.4.358`.**
 
-`vk` targets Vulkan 1.2, so all versions support the core API of version 1.2.x.
+This tree targets Vulkan 1.4 and includes the core API through version 1.4.x.
 The main branch is always generated from the most recent version of the [Vulkan API XML registry](https://github.com/KhronosGroup/Vulkan-Docs)
 supported by [vk-generator](https://github.com/JolifantoBambla/vk-generator) which also made it to a Vulkan SDK release.
 Other versions are available on other branches named after the version (e.g. `v1.2.153`).

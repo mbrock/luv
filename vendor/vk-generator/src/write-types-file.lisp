@@ -31,7 +31,9 @@
 (defun make-arg-type (arg-name type-info vk-spec)
   "TODO"
   (let* ((type-name (type-name type-info))
-         (primitive-type (gethash type-name *vk-platform*))
+         (primitive-type (or (gethash type-name *vk-platform*)
+                             (let ((misc-type (gethash type-name *misc-os-types*)))
+                               (and (atom misc-type) misc-type))))
          (vk-type (gethash type-name (types vk-spec)))
          (external-required-p (and vk-type
                                    (eq :requires (category vk-type))

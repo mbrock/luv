@@ -6,7 +6,7 @@
              sly-lisp-implementations
              `((luv ("nix" "develop" ,root
                      "--command" "sbcl"
-                     "--dynamic-space-size" "4096"
+                     "--dynamic-space-size" "6144"
                      "--noinform"
                      "--eval" "(proclaim '(optimize (debug 3)))"
                      "--load" ,bootstrap))))

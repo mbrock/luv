@@ -229,15 +229,11 @@
                min-image-transfer-granularity)))
 
 (defmethod print-object ((obj physical-device-memory-properties) out)
-  (with-slots (memory-type-count
-               memory-types
-               memory-heap-count
+  (with-slots (memory-types
                memory-heaps)
       obj
-    (cl:format out "~i(~@<PHYSICAL-DEVICE-MEMORY-PROPERTIES~:@_:memory-type-count ~s~:@_:memory-types ~s~:@_:memory-heap-count ~s~:@_:memory-heaps ~s~:>)"
-               memory-type-count 
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-MEMORY-PROPERTIES~:@_:memory-types ~s~:@_:memory-heaps ~s~:>)"
                memory-types 
-               memory-heap-count 
                memory-heaps)))
 
 (defmethod print-object ((obj memory-allocate-info) out)
@@ -396,6 +392,14 @@
                dst-array-element 
                descriptor-count)))
 
+(defmethod print-object ((obj buffer-usage-flags-2-create-info) out)
+  (with-slots (next
+               usage)
+      obj
+    (cl:format out "~i(~@<BUFFER-USAGE-FLAGS-2-CREATE-INFO~:@_:next ~s~:@_:usage ~s~:>)"
+               next 
+               usage)))
+
 (defmethod print-object ((obj buffer-create-info) out)
   (with-slots (next
                flags
@@ -545,6 +549,22 @@
                sharing-mode 
                queue-family-indices 
                initial-layout)))
+
+(defmethod print-object ((obj image-create-flags-2-create-info-khr) out)
+  (with-slots (next
+               flags)
+      obj
+    (cl:format out "~i(~@<IMAGE-CREATE-FLAGS-2-CREATE-INFO-KHR~:@_:next ~s~:@_:flags ~s~:>)"
+               next 
+               flags)))
+
+(defmethod print-object ((obj image-usage-flags-2-create-info-khr) out)
+  (with-slots (next
+               usage)
+      obj
+    (cl:format out "~i(~@<IMAGE-USAGE-FLAGS-2-CREATE-INFO-KHR~:@_:next ~s~:@_:usage ~s~:>)"
+               next 
+               usage)))
 
 (defmethod print-object ((obj subresource-layout) out)
   (with-slots (offset
@@ -700,6 +720,72 @@
                image-offset 
                image-extent)))
 
+(defmethod print-object ((obj strided-device-address-range-khr) out)
+  (with-slots (address
+               size
+               stride)
+      obj
+    (cl:format out "~i(~@<STRIDED-DEVICE-ADDRESS-RANGE-KHR~:@_:address ~s~:@_:size ~s~:@_:stride ~s~:>)"
+               address 
+               size 
+               stride)))
+
+(defmethod print-object ((obj copy-memory-indirect-command-khr) out)
+  (with-slots (src-address
+               dst-address
+               size)
+      obj
+    (cl:format out "~i(~@<COPY-MEMORY-INDIRECT-COMMAND-KHR~:@_:src-address ~s~:@_:dst-address ~s~:@_:size ~s~:>)"
+               src-address 
+               dst-address 
+               size)))
+
+(defmethod print-object ((obj copy-memory-indirect-info-khr) out)
+  (with-slots (next
+               src-copy-flags
+               dst-copy-flags
+               copy-count
+               copy-address-range)
+      obj
+    (cl:format out "~i(~@<COPY-MEMORY-INDIRECT-INFO-KHR~:@_:next ~s~:@_:src-copy-flags ~s~:@_:dst-copy-flags ~s~:@_:copy-count ~s~:@_:copy-address-range ~s~:>)"
+               next 
+               src-copy-flags 
+               dst-copy-flags 
+               copy-count 
+               copy-address-range)))
+
+(defmethod print-object ((obj copy-memory-to-image-indirect-command-khr) out)
+  (with-slots (src-address
+               buffer-row-length
+               buffer-image-height
+               image-subresource
+               image-offset
+               image-extent)
+      obj
+    (cl:format out "~i(~@<COPY-MEMORY-TO-IMAGE-INDIRECT-COMMAND-KHR~:@_:src-address ~s~:@_:buffer-row-length ~s~:@_:buffer-image-height ~s~:@_:image-subresource ~s~:@_:image-offset ~s~:@_:image-extent ~s~:>)"
+               src-address 
+               buffer-row-length 
+               buffer-image-height 
+               image-subresource 
+               image-offset 
+               image-extent)))
+
+(defmethod print-object ((obj copy-memory-to-image-indirect-info-khr) out)
+  (with-slots (next
+               src-copy-flags
+               copy-address-range
+               dst-image
+               dst-image-layout
+               image-subresources)
+      obj
+    (cl:format out "~i(~@<COPY-MEMORY-TO-IMAGE-INDIRECT-INFO-KHR~:@_:next ~s~:@_:src-copy-flags ~s~:@_:copy-address-range ~s~:@_:dst-image ~s~:@_:dst-image-layout ~s~:@_:image-subresources ~s~:>)"
+               next 
+               src-copy-flags 
+               copy-address-range 
+               dst-image 
+               dst-image-layout 
+               image-subresources)))
+
 (defmethod print-object ((obj image-resolve) out)
   (with-slots (src-subresource
                src-offset
@@ -717,11 +803,13 @@
 (defmethod print-object ((obj shader-module-create-info) out)
   (with-slots (next
                flags
+               code-size
                code)
       obj
-    (cl:format out "~i(~@<SHADER-MODULE-CREATE-INFO~:@_:next ~s~:@_:flags ~s~:@_:code ~s~:>)"
+    (cl:format out "~i(~@<SHADER-MODULE-CREATE-INFO~:@_:next ~s~:@_:flags ~s~:@_:code-size ~s~:@_:code ~s~:>)"
                next 
                flags 
+               code-size 
                code)))
 
 (defmethod print-object ((obj descriptor-set-layout-binding) out)
@@ -829,6 +917,26 @@
                layout 
                base-pipeline-handle 
                base-pipeline-index)))
+
+(defmethod print-object ((obj compute-pipeline-indirect-buffer-info-nv) out)
+  (with-slots (next
+               device-address
+               size
+               pipeline-device-address-capture-replay)
+      obj
+    (cl:format out "~i(~@<COMPUTE-PIPELINE-INDIRECT-BUFFER-INFO-NV~:@_:next ~s~:@_:device-address ~s~:@_:size ~s~:@_:pipeline-device-address-capture-replay ~s~:>)"
+               next 
+               device-address 
+               size 
+               pipeline-device-address-capture-replay)))
+
+(defmethod print-object ((obj pipeline-create-flags-2-create-info) out)
+  (with-slots (next
+               flags)
+      obj
+    (cl:format out "~i(~@<PIPELINE-CREATE-FLAGS-2-CREATE-INFO~:@_:next ~s~:@_:flags ~s~:>)"
+               next 
+               flags)))
 
 (defmethod print-object ((obj vertex-input-binding-description) out)
   (with-slots (binding
@@ -1100,6 +1208,62 @@
                device-id 
                pipeline-cache-uuid)))
 
+(defmethod print-object ((obj pipeline-cache-stage-validation-index-entry) out)
+  (with-slots (code-size
+               code-offset)
+      obj
+    (cl:format out "~i(~@<PIPELINE-CACHE-STAGE-VALIDATION-INDEX-ENTRY~:@_:code-size ~s~:@_:code-offset ~s~:>)"
+               code-size 
+               code-offset)))
+
+(defmethod print-object ((obj pipeline-cache-safety-critical-index-entry) out)
+  (with-slots (pipeline-identifier
+               pipeline-memory-size
+               json-size
+               json-offset
+               stage-index-count
+               stage-index-stride
+               stage-index-offset)
+      obj
+    (cl:format out "~i(~@<PIPELINE-CACHE-SAFETY-CRITICAL-INDEX-ENTRY~:@_:pipeline-identifier ~s~:@_:pipeline-memory-size ~s~:@_:json-size ~s~:@_:json-offset ~s~:@_:stage-index-count ~s~:@_:stage-index-stride ~s~:@_:stage-index-offset ~s~:>)"
+               pipeline-identifier 
+               pipeline-memory-size 
+               json-size 
+               json-offset 
+               stage-index-count 
+               stage-index-stride 
+               stage-index-offset)))
+
+(defmethod print-object ((obj pipeline-cache-header-version-safety-critical-one) out)
+  (with-slots (header-version-one
+               validation-version
+               implementation-data
+               pipeline-index-count
+               pipeline-index-stride
+               pipeline-index-offset)
+      obj
+    (cl:format out "~i(~@<PIPELINE-CACHE-HEADER-VERSION-SAFETY-CRITICAL-ONE~:@_:header-version-one ~s~:@_:validation-version ~s~:@_:implementation-data ~s~:@_:pipeline-index-count ~s~:@_:pipeline-index-stride ~s~:@_:pipeline-index-offset ~s~:>)"
+               header-version-one 
+               validation-version 
+               implementation-data 
+               pipeline-index-count 
+               pipeline-index-stride 
+               pipeline-index-offset)))
+
+(defmethod print-object ((obj pipeline-cache-header-version-data-graph-qcom) out)
+  (with-slots (header-size
+               header-version
+               cache-type
+               cache-version
+               toolchain-version)
+      obj
+    (cl:format out "~i(~@<PIPELINE-CACHE-HEADER-VERSION-DATA-GRAPH-QCOM~:@_:header-size ~s~:@_:header-version ~s~:@_:cache-type ~s~:@_:cache-version ~s~:@_:toolchain-version ~s~:>)"
+               header-size 
+               header-version 
+               cache-type 
+               cache-version 
+               toolchain-version)))
+
 (defmethod print-object ((obj push-constant-range) out)
   (with-slots (stage-flags
                offset
@@ -1109,6 +1273,82 @@
                stage-flags 
                offset 
                size)))
+
+(defmethod print-object ((obj pipeline-binary-create-info-khr) out)
+  (with-slots (next
+               keys-and-data-info
+               pipeline
+               pipeline-create-info)
+      obj
+    (cl:format out "~i(~@<PIPELINE-BINARY-CREATE-INFO-KHR~:@_:next ~s~:@_:keys-and-data-info ~s~:@_:pipeline ~s~:@_:pipeline-create-info ~s~:>)"
+               next 
+               keys-and-data-info 
+               pipeline 
+               pipeline-create-info)))
+
+(defmethod print-object ((obj pipeline-binary-handles-info-khr) out)
+  (with-slots (next
+               pipeline-binaries)
+      obj
+    (cl:format out "~i(~@<PIPELINE-BINARY-HANDLES-INFO-KHR~:@_:next ~s~:@_:pipeline-binaries ~s~:>)"
+               next 
+               pipeline-binaries)))
+
+(defmethod print-object ((obj pipeline-binary-data-khr) out)
+  (with-slots (data-size
+               data)
+      obj
+    (cl:format out "~i(~@<PIPELINE-BINARY-DATA-KHR~:@_:data-size ~s~:@_:data ~s~:>)"
+               data-size 
+               data)))
+
+(defmethod print-object ((obj pipeline-binary-keys-and-data-khr) out)
+  (with-slots (pipeline-binary-keys
+               pipeline-binary-data)
+      obj
+    (cl:format out "~i(~@<PIPELINE-BINARY-KEYS-AND-DATA-KHR~:@_:pipeline-binary-keys ~s~:@_:pipeline-binary-data ~s~:>)"
+               pipeline-binary-keys 
+               pipeline-binary-data)))
+
+(defmethod print-object ((obj pipeline-binary-key-khr) out)
+  (with-slots (next
+               key-size
+               key)
+      obj
+    (cl:format out "~i(~@<PIPELINE-BINARY-KEY-KHR~:@_:next ~s~:@_:key-size ~s~:@_:key ~s~:>)"
+               next 
+               key-size 
+               key)))
+
+(defmethod print-object ((obj pipeline-binary-info-khr) out)
+  (with-slots (next
+               pipeline-binaries)
+      obj
+    (cl:format out "~i(~@<PIPELINE-BINARY-INFO-KHR~:@_:next ~s~:@_:pipeline-binaries ~s~:>)"
+               next 
+               pipeline-binaries)))
+
+(defmethod print-object ((obj release-captured-pipeline-data-info-khr) out)
+  (with-slots (next
+               pipeline)
+      obj
+    (cl:format out "~i(~@<RELEASE-CAPTURED-PIPELINE-DATA-INFO-KHR~:@_:next ~s~:@_:pipeline ~s~:>)"
+               next 
+               pipeline)))
+
+(defmethod print-object ((obj pipeline-binary-data-info-khr) out)
+  (with-slots (next
+               pipeline-binary)
+      obj
+    (cl:format out "~i(~@<PIPELINE-BINARY-DATA-INFO-KHR~:@_:next ~s~:@_:pipeline-binary ~s~:>)"
+               next 
+               pipeline-binary)))
+
+(defmethod print-object ((obj pipeline-create-info-khr) out)
+  (with-slots (next)
+      obj
+    (cl:format out "~i(~@<PIPELINE-CREATE-INFO-KHR~:@_:next ~s~:>)"
+               next)))
 
 (defmethod print-object ((obj pipeline-layout-create-info) out)
   (with-slots (next
@@ -1904,6 +2144,14 @@
                alpha-mode 
                image-extent)))
 
+(defmethod print-object ((obj display-surface-stereo-create-info-nv) out)
+  (with-slots (next
+               stereo-type)
+      obj
+    (cl:format out "~i(~@<DISPLAY-SURFACE-STEREO-CREATE-INFO-NV~:@_:next ~s~:@_:stereo-type ~s~:>)"
+               next 
+               stereo-type)))
+
 (defmethod print-object ((obj display-present-info-khr) out)
   (with-slots (next
                src-rect
@@ -1970,6 +2218,18 @@
                next 
                flags 
                display 
+               surface)))
+
+(defmethod print-object ((obj ubm-surface-create-info-sec) out)
+  (with-slots (next
+               flags
+               device
+               surface)
+      obj
+    (cl:format out "~i(~@<UBM-SURFACE-CREATE-INFO-SEC~:@_:next ~s~:@_:flags ~s~:@_:device ~s~:@_:surface ~s~:>)"
+               next 
+               flags 
+               device 
                surface)))
 
 (defmethod print-object ((obj win32-surface-create-info-khr) out)
@@ -2140,6 +2400,42 @@
                enabled-validation-features 
                disabled-validation-features)))
 
+(defmethod print-object ((obj layer-settings-create-info-ext) out)
+  (with-slots (next
+               settings)
+      obj
+    (cl:format out "~i(~@<LAYER-SETTINGS-CREATE-INFO-EXT~:@_:next ~s~:@_:settings ~s~:>)"
+               next 
+               settings)))
+
+(defmethod print-object ((obj layer-setting-ext) out)
+  (with-slots (layer-name
+               setting-name
+               type
+               value-count
+               values)
+      obj
+    (cl:format out "~i(~@<LAYER-SETTING-EXT~:@_:layer-name ~s~:@_:setting-name ~s~:@_:type ~s~:@_:value-count ~s~:@_:values ~s~:>)"
+               layer-name 
+               setting-name 
+               type 
+               value-count 
+               values)))
+
+(defmethod print-object ((obj application-parameters-ext) out)
+  (with-slots (next
+               vendor-id
+               device-id
+               key
+               value)
+      obj
+    (cl:format out "~i(~@<APPLICATION-PARAMETERS-EXT~:@_:next ~s~:@_:vendor-id ~s~:@_:device-id ~s~:@_:key ~s~:@_:value ~s~:>)"
+               next 
+               vendor-id 
+               device-id 
+               key 
+               value)))
+
 (defmethod print-object ((obj pipeline-rasterization-state-rasterization-order-amd) out)
   (with-slots (next
                rasterization-order)
@@ -2260,6 +2556,52 @@
                attributes 
                dw-access)))
 
+(defmethod print-object ((obj export-memory-sci-buf-info-nv) out)
+  (with-slots (next
+               attributes)
+      obj
+    (cl:format out "~i(~@<EXPORT-MEMORY-SCI-BUF-INFO-NV~:@_:next ~s~:@_:attributes ~s~:>)"
+               next 
+               attributes)))
+
+(defmethod print-object ((obj import-memory-sci-buf-info-nv) out)
+  (with-slots (next
+               handle-type
+               handle)
+      obj
+    (cl:format out "~i(~@<IMPORT-MEMORY-SCI-BUF-INFO-NV~:@_:next ~s~:@_:handle-type ~s~:@_:handle ~s~:>)"
+               next 
+               handle-type 
+               handle)))
+
+(defmethod print-object ((obj memory-get-sci-buf-info-nv) out)
+  (with-slots (next
+               memory
+               handle-type)
+      obj
+    (cl:format out "~i(~@<MEMORY-GET-SCI-BUF-INFO-NV~:@_:next ~s~:@_:memory ~s~:@_:handle-type ~s~:>)"
+               next 
+               memory 
+               handle-type)))
+
+(defmethod print-object ((obj memory-sci-buf-properties-nv) out)
+  (with-slots (next
+               memory-type-bits)
+      obj
+    (cl:format out "~i(~@<MEMORY-SCI-BUF-PROPERTIES-NV~:@_:next ~s~:@_:memory-type-bits ~s~:>)"
+               next 
+               memory-type-bits)))
+
+(defmethod print-object ((obj physical-device-external-memory-sci-buf-features-nv) out)
+  (with-slots (next
+               sci-buf-import
+               sci-buf-export)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-EXTERNAL-MEMORY-SCI-BUF-FEATURES-NV~:@_:next ~s~:@_:sci-buf-import ~s~:@_:sci-buf-export ~s~:>)"
+               next 
+               sci-buf-import 
+               sci-buf-export)))
+
 (defmethod print-object ((obj win32-keyed-mutex-acquire-release-info-nv) out)
   (with-slots (next
                acquire-syncs
@@ -2284,27 +2626,69 @@
                next 
                device-generated-commands)))
 
-(defmethod print-object ((obj device-private-data-create-info-ext) out)
+(defmethod print-object ((obj push-constant-bank-info-nv) out)
+  (with-slots (next
+               bank)
+      obj
+    (cl:format out "~i(~@<PUSH-CONSTANT-BANK-INFO-NV~:@_:next ~s~:@_:bank ~s~:>)"
+               next 
+               bank)))
+
+(defmethod print-object ((obj physical-device-push-constant-bank-features-nv) out)
+  (with-slots (next
+               push-constant-bank)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-PUSH-CONSTANT-BANK-FEATURES-NV~:@_:next ~s~:@_:push-constant-bank ~s~:>)"
+               next 
+               push-constant-bank)))
+
+(defmethod print-object ((obj physical-device-push-constant-bank-properties-nv) out)
+  (with-slots (next
+               max-graphics-push-constant-banks
+               max-compute-push-constant-banks
+               max-graphics-push-data-banks
+               max-compute-push-data-banks)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-PUSH-CONSTANT-BANK-PROPERTIES-NV~:@_:next ~s~:@_:max-graphics-push-constant-banks ~s~:@_:max-compute-push-constant-banks ~s~:@_:max-graphics-push-data-banks ~s~:@_:max-compute-push-data-banks ~s~:>)"
+               next 
+               max-graphics-push-constant-banks 
+               max-compute-push-constant-banks 
+               max-graphics-push-data-banks 
+               max-compute-push-data-banks)))
+
+(defmethod print-object ((obj physical-device-device-generated-commands-compute-features-nv) out)
+  (with-slots (next
+               device-generated-compute
+               device-generated-compute-pipelines
+               device-generated-compute-capture-replay)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-DEVICE-GENERATED-COMMANDS-COMPUTE-FEATURES-NV~:@_:next ~s~:@_:device-generated-compute ~s~:@_:device-generated-compute-pipelines ~s~:@_:device-generated-compute-capture-replay ~s~:>)"
+               next 
+               device-generated-compute 
+               device-generated-compute-pipelines 
+               device-generated-compute-capture-replay)))
+
+(defmethod print-object ((obj device-private-data-create-info) out)
   (with-slots (next
                private-data-slot-request-count)
       obj
-    (cl:format out "~i(~@<DEVICE-PRIVATE-DATA-CREATE-INFO-EXT~:@_:next ~s~:@_:private-data-slot-request-count ~s~:>)"
+    (cl:format out "~i(~@<DEVICE-PRIVATE-DATA-CREATE-INFO~:@_:next ~s~:@_:private-data-slot-request-count ~s~:>)"
                next 
                private-data-slot-request-count)))
 
-(defmethod print-object ((obj private-data-slot-create-info-ext) out)
+(defmethod print-object ((obj private-data-slot-create-info) out)
   (with-slots (next
                flags)
       obj
-    (cl:format out "~i(~@<PRIVATE-DATA-SLOT-CREATE-INFO-EXT~:@_:next ~s~:@_:flags ~s~:>)"
+    (cl:format out "~i(~@<PRIVATE-DATA-SLOT-CREATE-INFO~:@_:next ~s~:@_:flags ~s~:>)"
                next 
                flags)))
 
-(defmethod print-object ((obj physical-device-private-data-features-ext) out)
+(defmethod print-object ((obj physical-device-private-data-features) out)
   (with-slots (next
                private-data)
       obj
-    (cl:format out "~i(~@<PHYSICAL-DEVICE-PRIVATE-DATA-FEATURES-EXT~:@_:next ~s~:@_:private-data ~s~:>)"
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-PRIVATE-DATA-FEATURES~:@_:next ~s~:@_:private-data ~s~:>)"
                next 
                private-data)))
 
@@ -2331,6 +2715,268 @@
                min-sequences-count-buffer-offset-alignment 
                min-sequences-index-buffer-offset-alignment 
                min-indirect-commands-buffer-offset-alignment)))
+
+(defmethod print-object ((obj physical-device-cluster-acceleration-structure-features-nv) out)
+  (with-slots (next
+               cluster-acceleration-structure)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-CLUSTER-ACCELERATION-STRUCTURE-FEATURES-NV~:@_:next ~s~:@_:cluster-acceleration-structure ~s~:>)"
+               next 
+               cluster-acceleration-structure)))
+
+(defmethod print-object ((obj physical-device-cluster-acceleration-structure-properties-nv) out)
+  (with-slots (next
+               max-vertices-per-cluster
+               max-triangles-per-cluster
+               cluster-scratch-byte-alignment
+               cluster-byte-alignment
+               cluster-template-byte-alignment
+               cluster-bottom-level-byte-alignment
+               cluster-template-bounds-byte-alignment
+               max-cluster-geometry-index)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-CLUSTER-ACCELERATION-STRUCTURE-PROPERTIES-NV~:@_:next ~s~:@_:max-vertices-per-cluster ~s~:@_:max-triangles-per-cluster ~s~:@_:cluster-scratch-byte-alignment ~s~:@_:cluster-byte-alignment ~s~:@_:cluster-template-byte-alignment ~s~:@_:cluster-bottom-level-byte-alignment ~s~:@_:cluster-template-bounds-byte-alignment ~s~:@_:max-cluster-geometry-index ~s~:>)"
+               next 
+               max-vertices-per-cluster 
+               max-triangles-per-cluster 
+               cluster-scratch-byte-alignment 
+               cluster-byte-alignment 
+               cluster-template-byte-alignment 
+               cluster-bottom-level-byte-alignment 
+               cluster-template-bounds-byte-alignment 
+               max-cluster-geometry-index)))
+
+(defmethod print-object ((obj strided-device-address-nv) out)
+  (with-slots (start-address
+               stride-in-bytes)
+      obj
+    (cl:format out "~i(~@<STRIDED-DEVICE-ADDRESS-NV~:@_:start-address ~s~:@_:stride-in-bytes ~s~:>)"
+               start-address 
+               stride-in-bytes)))
+
+(defmethod print-object ((obj ray-tracing-pipeline-cluster-acceleration-structure-create-info-nv) out)
+  (with-slots (next
+               allow-cluster-acceleration-structure)
+      obj
+    (cl:format out "~i(~@<RAY-TRACING-PIPELINE-CLUSTER-ACCELERATION-STRUCTURE-CREATE-INFO-NV~:@_:next ~s~:@_:allow-cluster-acceleration-structure ~s~:>)"
+               next 
+               allow-cluster-acceleration-structure)))
+
+(defmethod print-object ((obj cluster-acceleration-structure-geometry-index-and-geometry-flags-nv) out)
+  (with-slots (geometry-index
+               reserved
+               geometry-flags)
+      obj
+    (cl:format out "~i(~@<CLUSTER-ACCELERATION-STRUCTURE-GEOMETRY-INDEX-AND-GEOMETRY-FLAGS-NV~:@_:geometry-index ~s~:@_:reserved ~s~:@_:geometry-flags ~s~:>)"
+               geometry-index 
+               reserved 
+               geometry-flags)))
+
+(defmethod print-object ((obj cluster-acceleration-structure-move-objects-info-nv) out)
+  (with-slots (src-acceleration-structure)
+      obj
+    (cl:format out "~i(~@<CLUSTER-ACCELERATION-STRUCTURE-MOVE-OBJECTS-INFO-NV~:@_:src-acceleration-structure ~s~:>)"
+               src-acceleration-structure)))
+
+(defmethod print-object ((obj cluster-acceleration-structure-build-clusters-bottom-level-info-nv) out)
+  (with-slots (cluster-references-count
+               cluster-references-stride
+               cluster-references)
+      obj
+    (cl:format out "~i(~@<CLUSTER-ACCELERATION-STRUCTURE-BUILD-CLUSTERS-BOTTOM-LEVEL-INFO-NV~:@_:cluster-references-count ~s~:@_:cluster-references-stride ~s~:@_:cluster-references ~s~:>)"
+               cluster-references-count 
+               cluster-references-stride 
+               cluster-references)))
+
+(defmethod print-object ((obj cluster-acceleration-structure-get-template-indices-info-nv) out)
+  (with-slots (cluster-template-address)
+      obj
+    (cl:format out "~i(~@<CLUSTER-ACCELERATION-STRUCTURE-GET-TEMPLATE-INDICES-INFO-NV~:@_:cluster-template-address ~s~:>)"
+               cluster-template-address)))
+
+(defmethod print-object ((obj cluster-acceleration-structure-build-triangle-cluster-info-nv) out)
+  (with-slots (cluster-id
+               cluster-flags
+               triangle-count
+               vertex-count
+               position-truncate-bit-count
+               index-type
+               opacity-micromap-index-type
+               base-geometry-index-and-geometry-flags
+               index-buffer-stride
+               vertex-buffer-stride
+               geometry-index-and-flags-buffer-stride
+               opacity-micromap-index-buffer-stride
+               index-buffer
+               vertex-buffer
+               geometry-index-and-flags-buffer
+               opacity-micromap-array
+               opacity-micromap-index-buffer)
+      obj
+    (cl:format out "~i(~@<CLUSTER-ACCELERATION-STRUCTURE-BUILD-TRIANGLE-CLUSTER-INFO-NV~:@_:cluster-id ~s~:@_:cluster-flags ~s~:@_:triangle-count ~s~:@_:vertex-count ~s~:@_:position-truncate-bit-count ~s~:@_:index-type ~s~:@_:opacity-micromap-index-type ~s~:@_:base-geometry-index-and-geometry-flags ~s~:@_:index-buffer-stride ~s~:@_:vertex-buffer-stride ~s~:@_:geometry-index-and-flags-buffer-stride ~s~:@_:opacity-micromap-index-buffer-stride ~s~:@_:index-buffer ~s~:@_:vertex-buffer ~s~:@_:geometry-index-and-flags-buffer ~s~:@_:opacity-micromap-array ~s~:@_:opacity-micromap-index-buffer ~s~:>)"
+               cluster-id 
+               cluster-flags 
+               triangle-count 
+               vertex-count 
+               position-truncate-bit-count 
+               index-type 
+               opacity-micromap-index-type 
+               base-geometry-index-and-geometry-flags 
+               index-buffer-stride 
+               vertex-buffer-stride 
+               geometry-index-and-flags-buffer-stride 
+               opacity-micromap-index-buffer-stride 
+               index-buffer 
+               vertex-buffer 
+               geometry-index-and-flags-buffer 
+               opacity-micromap-array 
+               opacity-micromap-index-buffer)))
+
+(defmethod print-object ((obj cluster-acceleration-structure-build-triangle-cluster-template-info-nv) out)
+  (with-slots (cluster-id
+               cluster-flags
+               triangle-count
+               vertex-count
+               position-truncate-bit-count
+               index-type
+               opacity-micromap-index-type
+               base-geometry-index-and-geometry-flags
+               index-buffer-stride
+               vertex-buffer-stride
+               geometry-index-and-flags-buffer-stride
+               opacity-micromap-index-buffer-stride
+               index-buffer
+               vertex-buffer
+               geometry-index-and-flags-buffer
+               opacity-micromap-array
+               opacity-micromap-index-buffer
+               instantiation-bounding-box-limit)
+      obj
+    (cl:format out "~i(~@<CLUSTER-ACCELERATION-STRUCTURE-BUILD-TRIANGLE-CLUSTER-TEMPLATE-INFO-NV~:@_:cluster-id ~s~:@_:cluster-flags ~s~:@_:triangle-count ~s~:@_:vertex-count ~s~:@_:position-truncate-bit-count ~s~:@_:index-type ~s~:@_:opacity-micromap-index-type ~s~:@_:base-geometry-index-and-geometry-flags ~s~:@_:index-buffer-stride ~s~:@_:vertex-buffer-stride ~s~:@_:geometry-index-and-flags-buffer-stride ~s~:@_:opacity-micromap-index-buffer-stride ~s~:@_:index-buffer ~s~:@_:vertex-buffer ~s~:@_:geometry-index-and-flags-buffer ~s~:@_:opacity-micromap-array ~s~:@_:opacity-micromap-index-buffer ~s~:@_:instantiation-bounding-box-limit ~s~:>)"
+               cluster-id 
+               cluster-flags 
+               triangle-count 
+               vertex-count 
+               position-truncate-bit-count 
+               index-type 
+               opacity-micromap-index-type 
+               base-geometry-index-and-geometry-flags 
+               index-buffer-stride 
+               vertex-buffer-stride 
+               geometry-index-and-flags-buffer-stride 
+               opacity-micromap-index-buffer-stride 
+               index-buffer 
+               vertex-buffer 
+               geometry-index-and-flags-buffer 
+               opacity-micromap-array 
+               opacity-micromap-index-buffer 
+               instantiation-bounding-box-limit)))
+
+(defmethod print-object ((obj cluster-acceleration-structure-instantiate-cluster-info-nv) out)
+  (with-slots (cluster-id-offset
+               geometry-index-offset
+               reserved
+               cluster-template-address
+               vertex-buffer)
+      obj
+    (cl:format out "~i(~@<CLUSTER-ACCELERATION-STRUCTURE-INSTANTIATE-CLUSTER-INFO-NV~:@_:cluster-id-offset ~s~:@_:geometry-index-offset ~s~:@_:reserved ~s~:@_:cluster-template-address ~s~:@_:vertex-buffer ~s~:>)"
+               cluster-id-offset 
+               geometry-index-offset 
+               reserved 
+               cluster-template-address 
+               vertex-buffer)))
+
+(defmethod print-object ((obj cluster-acceleration-structure-clusters-bottom-level-input-nv) out)
+  (with-slots (next
+               max-total-cluster-count
+               max-cluster-count-per-acceleration-structure)
+      obj
+    (cl:format out "~i(~@<CLUSTER-ACCELERATION-STRUCTURE-CLUSTERS-BOTTOM-LEVEL-INPUT-NV~:@_:next ~s~:@_:max-total-cluster-count ~s~:@_:max-cluster-count-per-acceleration-structure ~s~:>)"
+               next 
+               max-total-cluster-count 
+               max-cluster-count-per-acceleration-structure)))
+
+(defmethod print-object ((obj cluster-acceleration-structure-triangle-cluster-input-nv) out)
+  (with-slots (next
+               vertex-format
+               max-geometry-index-value
+               max-cluster-unique-geometry-count
+               max-cluster-triangle-count
+               max-cluster-vertex-count
+               max-total-triangle-count
+               max-total-vertex-count
+               min-position-truncate-bit-count)
+      obj
+    (cl:format out "~i(~@<CLUSTER-ACCELERATION-STRUCTURE-TRIANGLE-CLUSTER-INPUT-NV~:@_:next ~s~:@_:vertex-format ~s~:@_:max-geometry-index-value ~s~:@_:max-cluster-unique-geometry-count ~s~:@_:max-cluster-triangle-count ~s~:@_:max-cluster-vertex-count ~s~:@_:max-total-triangle-count ~s~:@_:max-total-vertex-count ~s~:@_:min-position-truncate-bit-count ~s~:>)"
+               next 
+               vertex-format 
+               max-geometry-index-value 
+               max-cluster-unique-geometry-count 
+               max-cluster-triangle-count 
+               max-cluster-vertex-count 
+               max-total-triangle-count 
+               max-total-vertex-count 
+               min-position-truncate-bit-count)))
+
+(defmethod print-object ((obj cluster-acceleration-structure-move-objects-input-nv) out)
+  (with-slots (next
+               type
+               no-move-overlap
+               max-moved-bytes)
+      obj
+    (cl:format out "~i(~@<CLUSTER-ACCELERATION-STRUCTURE-MOVE-OBJECTS-INPUT-NV~:@_:next ~s~:@_:type ~s~:@_:no-move-overlap ~s~:@_:max-moved-bytes ~s~:>)"
+               next 
+               type 
+               no-move-overlap 
+               max-moved-bytes)))
+
+(defmethod print-object ((obj cluster-acceleration-structure-op-input-nv) out)
+  (with-slots (clusters-bottom-level
+               triangle-clusters
+               move-objects)
+      obj
+    (cl:format out "~i(~@<CLUSTER-ACCELERATION-STRUCTURE-OP-INPUT-NV~:@_:clusters-bottom-level ~s~:@_:triangle-clusters ~s~:@_:move-objects ~s~:>)"
+               clusters-bottom-level 
+               triangle-clusters 
+               move-objects)))
+
+(defmethod print-object ((obj cluster-acceleration-structure-input-info-nv) out)
+  (with-slots (next
+               max-acceleration-structure-count
+               flags
+               op-type
+               op-mode
+               op-input)
+      obj
+    (cl:format out "~i(~@<CLUSTER-ACCELERATION-STRUCTURE-INPUT-INFO-NV~:@_:next ~s~:@_:max-acceleration-structure-count ~s~:@_:flags ~s~:@_:op-type ~s~:@_:op-mode ~s~:@_:op-input ~s~:>)"
+               next 
+               max-acceleration-structure-count 
+               flags 
+               op-type 
+               op-mode 
+               op-input)))
+
+(defmethod print-object ((obj cluster-acceleration-structure-commands-info-nv) out)
+  (with-slots (next
+               input
+               dst-implicit-data
+               scratch-data
+               dst-addresses-array
+               dst-sizes-array
+               src-infos-array
+               src-infos-count
+               address-resolution-flags)
+      obj
+    (cl:format out "~i(~@<CLUSTER-ACCELERATION-STRUCTURE-COMMANDS-INFO-NV~:@_:next ~s~:@_:input ~s~:@_:dst-implicit-data ~s~:@_:scratch-data ~s~:@_:dst-addresses-array ~s~:@_:dst-sizes-array ~s~:@_:src-infos-array ~s~:@_:src-infos-count ~s~:@_:address-resolution-flags ~s~:>)"
+               next 
+               input 
+               dst-implicit-data 
+               scratch-data 
+               dst-addresses-array 
+               dst-sizes-array 
+               src-infos-array 
+               src-infos-count 
+               address-resolution-flags)))
 
 (defmethod print-object ((obj physical-device-multi-draw-properties-ext) out)
   (with-slots (next
@@ -2490,6 +3136,22 @@
                indirect-commands-layout 
                max-sequences-count)))
 
+(defmethod print-object ((obj pipeline-indirect-device-address-info-nv) out)
+  (with-slots (next
+               pipeline-bind-point
+               pipeline)
+      obj
+    (cl:format out "~i(~@<PIPELINE-INDIRECT-DEVICE-ADDRESS-INFO-NV~:@_:next ~s~:@_:pipeline-bind-point ~s~:@_:pipeline ~s~:>)"
+               next 
+               pipeline-bind-point 
+               pipeline)))
+
+(defmethod print-object ((obj bind-pipeline-indirect-command-nv) out)
+  (with-slots (pipeline-address)
+      obj
+    (cl:format out "~i(~@<BIND-PIPELINE-INDIRECT-COMMAND-NV~:@_:pipeline-address ~s~:>)"
+               pipeline-address)))
+
 (defmethod print-object ((obj physical-device-features-2) out)
   (with-slots (next
                features)
@@ -2578,11 +3240,11 @@
                usage 
                tiling)))
 
-(defmethod print-object ((obj physical-device-push-descriptor-properties-khr) out)
+(defmethod print-object ((obj physical-device-push-descriptor-properties) out)
   (with-slots (next
                max-push-descriptors)
       obj
-    (cl:format out "~i(~@<PHYSICAL-DEVICE-PUSH-DESCRIPTOR-PROPERTIES-KHR~:@_:next ~s~:@_:max-push-descriptors ~s~:>)"
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-PUSH-DESCRIPTOR-PROPERTIES~:@_:next ~s~:@_:max-push-descriptors ~s~:>)"
                next 
                max-push-descriptors)))
 
@@ -2848,6 +3510,34 @@
                release-syncs 
                release-keys)))
 
+(defmethod print-object ((obj import-memory-metal-handle-info-ext) out)
+  (with-slots (next
+               handle-type
+               handle)
+      obj
+    (cl:format out "~i(~@<IMPORT-MEMORY-METAL-HANDLE-INFO-EXT~:@_:next ~s~:@_:handle-type ~s~:@_:handle ~s~:>)"
+               next 
+               handle-type 
+               handle)))
+
+(defmethod print-object ((obj memory-metal-handle-properties-ext) out)
+  (with-slots (next
+               memory-type-bits)
+      obj
+    (cl:format out "~i(~@<MEMORY-METAL-HANDLE-PROPERTIES-EXT~:@_:next ~s~:@_:memory-type-bits ~s~:>)"
+               next 
+               memory-type-bits)))
+
+(defmethod print-object ((obj memory-get-metal-handle-info-ext) out)
+  (with-slots (next
+               memory
+               handle-type)
+      obj
+    (cl:format out "~i(~@<MEMORY-GET-METAL-HANDLE-INFO-EXT~:@_:next ~s~:@_:memory ~s~:@_:handle-type ~s~:>)"
+               next 
+               memory 
+               handle-type)))
+
 (defmethod print-object ((obj physical-device-external-semaphore-info) out)
   (with-slots (next
                handle-type)
@@ -3062,6 +3752,130 @@
                fence 
                handle-type)))
 
+(defmethod print-object ((obj export-fence-sci-sync-info-nv) out)
+  (with-slots (next
+               attributes)
+      obj
+    (cl:format out "~i(~@<EXPORT-FENCE-SCI-SYNC-INFO-NV~:@_:next ~s~:@_:attributes ~s~:>)"
+               next 
+               attributes)))
+
+(defmethod print-object ((obj import-fence-sci-sync-info-nv) out)
+  (with-slots (next
+               fence
+               handle-type
+               handle)
+      obj
+    (cl:format out "~i(~@<IMPORT-FENCE-SCI-SYNC-INFO-NV~:@_:next ~s~:@_:fence ~s~:@_:handle-type ~s~:@_:handle ~s~:>)"
+               next 
+               fence 
+               handle-type 
+               handle)))
+
+(defmethod print-object ((obj fence-get-sci-sync-info-nv) out)
+  (with-slots (next
+               fence
+               handle-type)
+      obj
+    (cl:format out "~i(~@<FENCE-GET-SCI-SYNC-INFO-NV~:@_:next ~s~:@_:fence ~s~:@_:handle-type ~s~:>)"
+               next 
+               fence 
+               handle-type)))
+
+(defmethod print-object ((obj export-semaphore-sci-sync-info-nv) out)
+  (with-slots (next
+               attributes)
+      obj
+    (cl:format out "~i(~@<EXPORT-SEMAPHORE-SCI-SYNC-INFO-NV~:@_:next ~s~:@_:attributes ~s~:>)"
+               next 
+               attributes)))
+
+(defmethod print-object ((obj import-semaphore-sci-sync-info-nv) out)
+  (with-slots (next
+               semaphore
+               handle-type
+               handle)
+      obj
+    (cl:format out "~i(~@<IMPORT-SEMAPHORE-SCI-SYNC-INFO-NV~:@_:next ~s~:@_:semaphore ~s~:@_:handle-type ~s~:@_:handle ~s~:>)"
+               next 
+               semaphore 
+               handle-type 
+               handle)))
+
+(defmethod print-object ((obj semaphore-get-sci-sync-info-nv) out)
+  (with-slots (next
+               semaphore
+               handle-type)
+      obj
+    (cl:format out "~i(~@<SEMAPHORE-GET-SCI-SYNC-INFO-NV~:@_:next ~s~:@_:semaphore ~s~:@_:handle-type ~s~:>)"
+               next 
+               semaphore 
+               handle-type)))
+
+(defmethod print-object ((obj sci-sync-attributes-info-nv) out)
+  (with-slots (next
+               client-type
+               primitive-type)
+      obj
+    (cl:format out "~i(~@<SCI-SYNC-ATTRIBUTES-INFO-NV~:@_:next ~s~:@_:client-type ~s~:@_:primitive-type ~s~:>)"
+               next 
+               client-type 
+               primitive-type)))
+
+(defmethod print-object ((obj physical-device-external-sci-sync-features-nv) out)
+  (with-slots (next
+               sci-sync-fence
+               sci-sync-semaphore
+               sci-sync-import
+               sci-sync-export)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-EXTERNAL-SCI-SYNC-FEATURES-NV~:@_:next ~s~:@_:sci-sync-fence ~s~:@_:sci-sync-semaphore ~s~:@_:sci-sync-import ~s~:@_:sci-sync-export ~s~:>)"
+               next 
+               sci-sync-fence 
+               sci-sync-semaphore 
+               sci-sync-import 
+               sci-sync-export)))
+
+(defmethod print-object ((obj physical-device-external-sci-sync-2-features-nv) out)
+  (with-slots (next
+               sci-sync-fence
+               sci-sync-semaphore-2
+               sci-sync-import
+               sci-sync-export)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-EXTERNAL-SCI-SYNC-2-FEATURES-NV~:@_:next ~s~:@_:sci-sync-fence ~s~:@_:sci-sync-semaphore-2 ~s~:@_:sci-sync-import ~s~:@_:sci-sync-export ~s~:>)"
+               next 
+               sci-sync-fence 
+               sci-sync-semaphore-2 
+               sci-sync-import 
+               sci-sync-export)))
+
+(defmethod print-object ((obj semaphore-sci-sync-pool-create-info-nv) out)
+  (with-slots (next
+               handle)
+      obj
+    (cl:format out "~i(~@<SEMAPHORE-SCI-SYNC-POOL-CREATE-INFO-NV~:@_:next ~s~:@_:handle ~s~:>)"
+               next 
+               handle)))
+
+(defmethod print-object ((obj semaphore-sci-sync-create-info-nv) out)
+  (with-slots (next
+               semaphore-pool
+               fence)
+      obj
+    (cl:format out "~i(~@<SEMAPHORE-SCI-SYNC-CREATE-INFO-NV~:@_:next ~s~:@_:semaphore-pool ~s~:@_:fence ~s~:>)"
+               next 
+               semaphore-pool 
+               fence)))
+
+(defmethod print-object ((obj device-semaphore-sci-sync-pool-reservation-create-info-nv) out)
+  (with-slots (next
+               semaphore-sci-sync-pool-request-count)
+      obj
+    (cl:format out "~i(~@<DEVICE-SEMAPHORE-SCI-SYNC-POOL-RESERVATION-CREATE-INFO-NV~:@_:next ~s~:@_:semaphore-sci-sync-pool-request-count ~s~:>)"
+               next 
+               semaphore-sci-sync-pool-request-count)))
+
 (defmethod print-object ((obj physical-device-multiview-features) out)
   (with-slots (next
                multiview
@@ -3158,13 +3972,11 @@
 
 (defmethod print-object ((obj physical-device-group-properties) out)
   (with-slots (next
-               physical-device-count
                physical-devices
                subset-allocation)
       obj
-    (cl:format out "~i(~@<PHYSICAL-DEVICE-GROUP-PROPERTIES~:@_:next ~s~:@_:physical-device-count ~s~:@_:physical-devices ~s~:@_:subset-allocation ~s~:>)"
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-GROUP-PROPERTIES~:@_:next ~s~:@_:physical-devices ~s~:@_:subset-allocation ~s~:>)"
                next 
-               physical-device-count 
                physical-devices 
                subset-allocation)))
 
@@ -3390,6 +4202,32 @@
                next 
                present-ids)))
 
+(defmethod print-object ((obj physical-device-present-id-2-features-khr) out)
+  (with-slots (next
+               present-id-2)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-PRESENT-ID-2-FEATURES-KHR~:@_:next ~s~:@_:present-id-2 ~s~:>)"
+               next 
+               present-id-2)))
+
+(defmethod print-object ((obj present-id-2-khr) out)
+  (with-slots (next
+               present-ids)
+      obj
+    (cl:format out "~i(~@<PRESENT-ID-2-KHR~:@_:next ~s~:@_:present-ids ~s~:>)"
+               next 
+               present-ids)))
+
+(defmethod print-object ((obj present-wait-2-info-khr) out)
+  (with-slots (next
+               present-id
+               timeout)
+      obj
+    (cl:format out "~i(~@<PRESENT-WAIT-2-INFO-KHR~:@_:next ~s~:@_:present-id ~s~:@_:timeout ~s~:>)"
+               next 
+               present-id 
+               timeout)))
+
 (defmethod print-object ((obj physical-device-present-wait-features-khr) out)
   (with-slots (next
                present-wait)
@@ -3397,6 +4235,144 @@
     (cl:format out "~i(~@<PHYSICAL-DEVICE-PRESENT-WAIT-FEATURES-KHR~:@_:next ~s~:@_:present-wait ~s~:>)"
                next 
                present-wait)))
+
+(defmethod print-object ((obj physical-device-present-wait-2-features-khr) out)
+  (with-slots (next
+               present-wait-2)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-PRESENT-WAIT-2-FEATURES-KHR~:@_:next ~s~:@_:present-wait-2 ~s~:>)"
+               next 
+               present-wait-2)))
+
+(defmethod print-object ((obj physical-device-present-timing-features-ext) out)
+  (with-slots (next
+               present-timing
+               present-at-absolute-time
+               present-at-relative-time)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-PRESENT-TIMING-FEATURES-EXT~:@_:next ~s~:@_:present-timing ~s~:@_:present-at-absolute-time ~s~:@_:present-at-relative-time ~s~:>)"
+               next 
+               present-timing 
+               present-at-absolute-time 
+               present-at-relative-time)))
+
+(defmethod print-object ((obj present-timing-surface-capabilities-ext) out)
+  (with-slots (next
+               present-timing-supported
+               present-at-absolute-time-supported
+               present-at-relative-time-supported
+               present-stage-queries)
+      obj
+    (cl:format out "~i(~@<PRESENT-TIMING-SURFACE-CAPABILITIES-EXT~:@_:next ~s~:@_:present-timing-supported ~s~:@_:present-at-absolute-time-supported ~s~:@_:present-at-relative-time-supported ~s~:@_:present-stage-queries ~s~:>)"
+               next 
+               present-timing-supported 
+               present-at-absolute-time-supported 
+               present-at-relative-time-supported 
+               present-stage-queries)))
+
+(defmethod print-object ((obj swapchain-timing-properties-ext) out)
+  (with-slots (next
+               refresh-duration
+               refresh-interval)
+      obj
+    (cl:format out "~i(~@<SWAPCHAIN-TIMING-PROPERTIES-EXT~:@_:next ~s~:@_:refresh-duration ~s~:@_:refresh-interval ~s~:>)"
+               next 
+               refresh-duration 
+               refresh-interval)))
+
+(defmethod print-object ((obj swapchain-time-domain-properties-ext) out)
+  (with-slots (next
+               time-domains
+               time-domain-ids)
+      obj
+    (cl:format out "~i(~@<SWAPCHAIN-TIME-DOMAIN-PROPERTIES-EXT~:@_:next ~s~:@_:time-domains ~s~:@_:time-domain-ids ~s~:>)"
+               next 
+               time-domains 
+               time-domain-ids)))
+
+(defmethod print-object ((obj present-stage-time-ext) out)
+  (with-slots (stage
+               time)
+      obj
+    (cl:format out "~i(~@<PRESENT-STAGE-TIME-EXT~:@_:stage ~s~:@_:time ~s~:>)"
+               stage 
+               time)))
+
+(defmethod print-object ((obj past-presentation-timing-info-ext) out)
+  (with-slots (next
+               flags
+               swapchain)
+      obj
+    (cl:format out "~i(~@<PAST-PRESENTATION-TIMING-INFO-EXT~:@_:next ~s~:@_:flags ~s~:@_:swapchain ~s~:>)"
+               next 
+               flags 
+               swapchain)))
+
+(defmethod print-object ((obj past-presentation-timing-properties-ext) out)
+  (with-slots (next
+               timing-properties-counter
+               time-domains-counter
+               presentation-timings)
+      obj
+    (cl:format out "~i(~@<PAST-PRESENTATION-TIMING-PROPERTIES-EXT~:@_:next ~s~:@_:timing-properties-counter ~s~:@_:time-domains-counter ~s~:@_:presentation-timings ~s~:>)"
+               next 
+               timing-properties-counter 
+               time-domains-counter 
+               presentation-timings)))
+
+(defmethod print-object ((obj past-presentation-timing-ext) out)
+  (with-slots (next
+               present-id
+               target-time
+               present-stages
+               time-domain
+               time-domain-id
+               report-complete)
+      obj
+    (cl:format out "~i(~@<PAST-PRESENTATION-TIMING-EXT~:@_:next ~s~:@_:present-id ~s~:@_:target-time ~s~:@_:present-stages ~s~:@_:time-domain ~s~:@_:time-domain-id ~s~:@_:report-complete ~s~:>)"
+               next 
+               present-id 
+               target-time 
+               present-stages 
+               time-domain 
+               time-domain-id 
+               report-complete)))
+
+(defmethod print-object ((obj present-timings-info-ext) out)
+  (with-slots (next
+               timing-infos)
+      obj
+    (cl:format out "~i(~@<PRESENT-TIMINGS-INFO-EXT~:@_:next ~s~:@_:timing-infos ~s~:>)"
+               next 
+               timing-infos)))
+
+(defmethod print-object ((obj present-timing-info-ext) out)
+  (with-slots (next
+               flags
+               target-time
+               time-domain-id
+               present-stage-queries
+               target-time-domain-present-stage)
+      obj
+    (cl:format out "~i(~@<PRESENT-TIMING-INFO-EXT~:@_:next ~s~:@_:flags ~s~:@_:target-time ~s~:@_:time-domain-id ~s~:@_:present-stage-queries ~s~:@_:target-time-domain-present-stage ~s~:>)"
+               next 
+               flags 
+               target-time 
+               time-domain-id 
+               present-stage-queries 
+               target-time-domain-present-stage)))
+
+(defmethod print-object ((obj swapchain-calibrated-timestamp-info-ext) out)
+  (with-slots (next
+               swapchain
+               present-stage
+               time-domain-id)
+      obj
+    (cl:format out "~i(~@<SWAPCHAIN-CALIBRATED-TIMESTAMP-INFO-EXT~:@_:next ~s~:@_:swapchain ~s~:@_:present-stage ~s~:@_:time-domain-id ~s~:>)"
+               next 
+               swapchain 
+               present-stage 
+               time-domain-id)))
 
 (defmethod print-object ((obj hdr-metadata-ext) out)
   (with-slots (next
@@ -3419,6 +4395,16 @@
                min-luminance 
                max-content-light-level 
                max-frame-average-light-level)))
+
+(defmethod print-object ((obj hdr-vivid-dynamic-metadata-huawei) out)
+  (with-slots (next
+               dynamic-metadata-size
+               dynamic-metadata)
+      obj
+    (cl:format out "~i(~@<HDR-VIVID-DYNAMIC-METADATA-HUAWEI~:@_:next ~s~:@_:dynamic-metadata-size ~s~:@_:dynamic-metadata ~s~:>)"
+               next 
+               dynamic-metadata-size 
+               dynamic-metadata)))
 
 (defmethod print-object ((obj display-native-hdr-surface-capabilities-amd) out)
   (with-slots (next
@@ -3638,6 +4624,14 @@
                next 
                display-mode-properties)))
 
+(defmethod print-object ((obj display-mode-stereo-properties-nv) out)
+  (with-slots (next
+               hdmi-3d-supported)
+      obj
+    (cl:format out "~i(~@<DISPLAY-MODE-STEREO-PROPERTIES-NV~:@_:next ~s~:@_:hdmi-3d-supported ~s~:>)"
+               next 
+               hdmi-3d-supported)))
+
 (defmethod print-object ((obj display-plane-info-2-khr) out)
   (with-slots (next
                mode
@@ -3661,6 +4655,22 @@
                shared-present-supported-usage-flags)
       obj
     (cl:format out "~i(~@<SHARED-PRESENT-SURFACE-CAPABILITIES-KHR~:@_:next ~s~:@_:shared-present-supported-usage-flags ~s~:>)"
+               next 
+               shared-present-supported-usage-flags)))
+
+(defmethod print-object ((obj swapchain-flags-surface-capabilities-ext) out)
+  (with-slots (next
+               swapchain-supported-flags)
+      obj
+    (cl:format out "~i(~@<SWAPCHAIN-FLAGS-SURFACE-CAPABILITIES-EXT~:@_:next ~s~:@_:swapchain-supported-flags ~s~:>)"
+               next 
+               swapchain-supported-flags)))
+
+(defmethod print-object ((obj shared-present-surface-capabilities-2-khr) out)
+  (with-slots (next
+               shared-present-supported-usage-flags)
+      obj
+    (cl:format out "~i(~@<SHARED-PRESENT-SURFACE-CAPABILITIES-2-KHR~:@_:next ~s~:@_:shared-present-supported-usage-flags ~s~:>)"
                next 
                shared-present-supported-usage-flags)))
 
@@ -3708,11 +4718,11 @@
                next 
                buffer)))
 
-(defmethod print-object ((obj device-buffer-memory-requirements-khr) out)
+(defmethod print-object ((obj device-buffer-memory-requirements) out)
   (with-slots (next
                create-info)
       obj
-    (cl:format out "~i(~@<DEVICE-BUFFER-MEMORY-REQUIREMENTS-KHR~:@_:next ~s~:@_:create-info ~s~:>)"
+    (cl:format out "~i(~@<DEVICE-BUFFER-MEMORY-REQUIREMENTS~:@_:next ~s~:@_:create-info ~s~:>)"
                next 
                create-info)))
 
@@ -3732,12 +4742,12 @@
                next 
                image)))
 
-(defmethod print-object ((obj device-image-memory-requirements-khr) out)
+(defmethod print-object ((obj device-image-memory-requirements) out)
   (with-slots (next
                create-info
                plane-aspect)
       obj
-    (cl:format out "~i(~@<DEVICE-IMAGE-MEMORY-REQUIREMENTS-KHR~:@_:next ~s~:@_:create-info ~s~:@_:plane-aspect ~s~:>)"
+    (cl:format out "~i(~@<DEVICE-IMAGE-MEMORY-REQUIREMENTS~:@_:next ~s~:@_:create-info ~s~:@_:plane-aspect ~s~:>)"
                next 
                create-info 
                plane-aspect)))
@@ -3793,6 +4803,24 @@
     (cl:format out "~i(~@<IMAGE-VIEW-USAGE-CREATE-INFO~:@_:next ~s~:@_:usage ~s~:>)"
                next 
                usage)))
+
+(defmethod print-object ((obj image-view-usage-2-create-info-khr) out)
+  (with-slots (next
+               usage)
+      obj
+    (cl:format out "~i(~@<IMAGE-VIEW-USAGE-2-CREATE-INFO-KHR~:@_:next ~s~:@_:usage ~s~:>)"
+               next 
+               usage)))
+
+(defmethod print-object ((obj image-view-sliced-create-info-ext) out)
+  (with-slots (next
+               slice-offset
+               slice-count)
+      obj
+    (cl:format out "~i(~@<IMAGE-VIEW-SLICED-CREATE-INFO-EXT~:@_:next ~s~:@_:slice-offset ~s~:@_:slice-count ~s~:>)"
+               next 
+               slice-offset 
+               slice-count)))
 
 (defmethod print-object ((obj pipeline-tessellation-domain-origin-state-create-info) out)
   (with-slots (next
@@ -4076,17 +5104,17 @@
                dst-premultiplied 
                blend-overlap)))
 
-(defmethod print-object ((obj physical-device-inline-uniform-block-features-ext) out)
+(defmethod print-object ((obj physical-device-inline-uniform-block-features) out)
   (with-slots (next
                inline-uniform-block
                descriptor-binding-inline-uniform-block-update-after-bind)
       obj
-    (cl:format out "~i(~@<PHYSICAL-DEVICE-INLINE-UNIFORM-BLOCK-FEATURES-EXT~:@_:next ~s~:@_:inline-uniform-block ~s~:@_:descriptor-binding-inline-uniform-block-update-after-bind ~s~:>)"
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-INLINE-UNIFORM-BLOCK-FEATURES~:@_:next ~s~:@_:inline-uniform-block ~s~:@_:descriptor-binding-inline-uniform-block-update-after-bind ~s~:>)"
                next 
                inline-uniform-block 
                descriptor-binding-inline-uniform-block-update-after-bind)))
 
-(defmethod print-object ((obj physical-device-inline-uniform-block-properties-ext) out)
+(defmethod print-object ((obj physical-device-inline-uniform-block-properties) out)
   (with-slots (next
                max-inline-uniform-block-size
                max-per-stage-descriptor-inline-uniform-blocks
@@ -4094,7 +5122,7 @@
                max-descriptor-set-inline-uniform-blocks
                max-descriptor-set-update-after-bind-inline-uniform-blocks)
       obj
-    (cl:format out "~i(~@<PHYSICAL-DEVICE-INLINE-UNIFORM-BLOCK-PROPERTIES-EXT~:@_:next ~s~:@_:max-inline-uniform-block-size ~s~:@_:max-per-stage-descriptor-inline-uniform-blocks ~s~:@_:max-per-stage-descriptor-update-after-bind-inline-uniform-blocks ~s~:@_:max-descriptor-set-inline-uniform-blocks ~s~:@_:max-descriptor-set-update-after-bind-inline-uniform-blocks ~s~:>)"
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-INLINE-UNIFORM-BLOCK-PROPERTIES~:@_:next ~s~:@_:max-inline-uniform-block-size ~s~:@_:max-per-stage-descriptor-inline-uniform-blocks ~s~:@_:max-per-stage-descriptor-update-after-bind-inline-uniform-blocks ~s~:@_:max-descriptor-set-inline-uniform-blocks ~s~:@_:max-descriptor-set-update-after-bind-inline-uniform-blocks ~s~:>)"
                next 
                max-inline-uniform-block-size 
                max-per-stage-descriptor-inline-uniform-blocks 
@@ -4102,21 +5130,21 @@
                max-descriptor-set-inline-uniform-blocks 
                max-descriptor-set-update-after-bind-inline-uniform-blocks)))
 
-(defmethod print-object ((obj write-descriptor-set-inline-uniform-block-ext) out)
+(defmethod print-object ((obj write-descriptor-set-inline-uniform-block) out)
   (with-slots (next
                data-size
                data)
       obj
-    (cl:format out "~i(~@<WRITE-DESCRIPTOR-SET-INLINE-UNIFORM-BLOCK-EXT~:@_:next ~s~:@_:data-size ~s~:@_:data ~s~:>)"
+    (cl:format out "~i(~@<WRITE-DESCRIPTOR-SET-INLINE-UNIFORM-BLOCK~:@_:next ~s~:@_:data-size ~s~:@_:data ~s~:>)"
                next 
                data-size 
                data)))
 
-(defmethod print-object ((obj descriptor-pool-inline-uniform-block-create-info-ext) out)
+(defmethod print-object ((obj descriptor-pool-inline-uniform-block-create-info) out)
   (with-slots (next
                max-inline-uniform-block-bindings)
       obj
-    (cl:format out "~i(~@<DESCRIPTOR-POOL-INLINE-UNIFORM-BLOCK-CREATE-INFO-EXT~:@_:next ~s~:@_:max-inline-uniform-block-bindings ~s~:>)"
+    (cl:format out "~i(~@<DESCRIPTOR-POOL-INLINE-UNIFORM-BLOCK-CREATE-INFO~:@_:next ~s~:@_:max-inline-uniform-block-bindings ~s~:>)"
                next 
                max-inline-uniform-block-bindings)))
 
@@ -4172,21 +5200,211 @@
                max-per-set-descriptors 
                max-memory-allocation-size)))
 
-(defmethod print-object ((obj physical-device-maintenance-4-features-khr) out)
+(defmethod print-object ((obj physical-device-maintenance-4-features) out)
   (with-slots (next
                maintenance-4)
       obj
-    (cl:format out "~i(~@<PHYSICAL-DEVICE-MAINTENANCE-4-FEATURES-KHR~:@_:next ~s~:@_:maintenance-4 ~s~:>)"
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-MAINTENANCE-4-FEATURES~:@_:next ~s~:@_:maintenance-4 ~s~:>)"
                next 
                maintenance-4)))
 
-(defmethod print-object ((obj physical-device-maintenance-4-properties-khr) out)
+(defmethod print-object ((obj physical-device-maintenance-4-properties) out)
   (with-slots (next
                max-buffer-size)
       obj
-    (cl:format out "~i(~@<PHYSICAL-DEVICE-MAINTENANCE-4-PROPERTIES-KHR~:@_:next ~s~:@_:max-buffer-size ~s~:>)"
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-MAINTENANCE-4-PROPERTIES~:@_:next ~s~:@_:max-buffer-size ~s~:>)"
                next 
                max-buffer-size)))
+
+(defmethod print-object ((obj physical-device-maintenance-5-features) out)
+  (with-slots (next
+               maintenance-5)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-MAINTENANCE-5-FEATURES~:@_:next ~s~:@_:maintenance-5 ~s~:>)"
+               next 
+               maintenance-5)))
+
+(defmethod print-object ((obj physical-device-maintenance-5-properties) out)
+  (with-slots (next
+               early-fragment-multisample-coverage-after-sample-counting
+               early-fragment-sample-mask-test-before-sample-counting
+               depth-stencil-swizzle-one-support
+               polygon-mode-point-size
+               non-strict-single-pixel-wide-lines-use-parallelogram
+               non-strict-wide-lines-use-parallelogram)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-MAINTENANCE-5-PROPERTIES~:@_:next ~s~:@_:early-fragment-multisample-coverage-after-sample-counting ~s~:@_:early-fragment-sample-mask-test-before-sample-counting ~s~:@_:depth-stencil-swizzle-one-support ~s~:@_:polygon-mode-point-size ~s~:@_:non-strict-single-pixel-wide-lines-use-parallelogram ~s~:@_:non-strict-wide-lines-use-parallelogram ~s~:>)"
+               next 
+               early-fragment-multisample-coverage-after-sample-counting 
+               early-fragment-sample-mask-test-before-sample-counting 
+               depth-stencil-swizzle-one-support 
+               polygon-mode-point-size 
+               non-strict-single-pixel-wide-lines-use-parallelogram 
+               non-strict-wide-lines-use-parallelogram)))
+
+(defmethod print-object ((obj physical-device-maintenance-6-features) out)
+  (with-slots (next
+               maintenance-6)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-MAINTENANCE-6-FEATURES~:@_:next ~s~:@_:maintenance-6 ~s~:>)"
+               next 
+               maintenance-6)))
+
+(defmethod print-object ((obj physical-device-maintenance-6-properties) out)
+  (with-slots (next
+               block-texel-view-compatible-multiple-layers
+               max-combined-image-sampler-descriptor-count
+               fragment-shading-rate-clamp-combiner-inputs)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-MAINTENANCE-6-PROPERTIES~:@_:next ~s~:@_:block-texel-view-compatible-multiple-layers ~s~:@_:max-combined-image-sampler-descriptor-count ~s~:@_:fragment-shading-rate-clamp-combiner-inputs ~s~:>)"
+               next 
+               block-texel-view-compatible-multiple-layers 
+               max-combined-image-sampler-descriptor-count 
+               fragment-shading-rate-clamp-combiner-inputs)))
+
+(defmethod print-object ((obj physical-device-maintenance-7-features-khr) out)
+  (with-slots (next
+               maintenance-7)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-MAINTENANCE-7-FEATURES-KHR~:@_:next ~s~:@_:maintenance-7 ~s~:>)"
+               next 
+               maintenance-7)))
+
+(defmethod print-object ((obj physical-device-maintenance-7-properties-khr) out)
+  (with-slots (next
+               robust-fragment-shading-rate-attachment-access
+               separate-depth-stencil-attachment-access
+               max-descriptor-set-total-uniform-buffers-dynamic
+               max-descriptor-set-total-storage-buffers-dynamic
+               max-descriptor-set-total-buffers-dynamic
+               max-descriptor-set-update-after-bind-total-uniform-buffers-dynamic
+               max-descriptor-set-update-after-bind-total-storage-buffers-dynamic
+               max-descriptor-set-update-after-bind-total-buffers-dynamic)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-MAINTENANCE-7-PROPERTIES-KHR~:@_:next ~s~:@_:robust-fragment-shading-rate-attachment-access ~s~:@_:separate-depth-stencil-attachment-access ~s~:@_:max-descriptor-set-total-uniform-buffers-dynamic ~s~:@_:max-descriptor-set-total-storage-buffers-dynamic ~s~:@_:max-descriptor-set-total-buffers-dynamic ~s~:@_:max-descriptor-set-update-after-bind-total-uniform-buffers-dynamic ~s~:@_:max-descriptor-set-update-after-bind-total-storage-buffers-dynamic ~s~:@_:max-descriptor-set-update-after-bind-total-buffers-dynamic ~s~:>)"
+               next 
+               robust-fragment-shading-rate-attachment-access 
+               separate-depth-stencil-attachment-access 
+               max-descriptor-set-total-uniform-buffers-dynamic 
+               max-descriptor-set-total-storage-buffers-dynamic 
+               max-descriptor-set-total-buffers-dynamic 
+               max-descriptor-set-update-after-bind-total-uniform-buffers-dynamic 
+               max-descriptor-set-update-after-bind-total-storage-buffers-dynamic 
+               max-descriptor-set-update-after-bind-total-buffers-dynamic)))
+
+(defmethod print-object ((obj physical-device-layered-api-properties-list-khr) out)
+  (with-slots (next
+               layered-apis)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-LAYERED-API-PROPERTIES-LIST-KHR~:@_:next ~s~:@_:layered-apis ~s~:>)"
+               next 
+               layered-apis)))
+
+(defmethod print-object ((obj physical-device-layered-api-properties-khr) out)
+  (with-slots (next
+               vendor-id
+               device-id
+               layered-a-p-i
+               device-name)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-LAYERED-API-PROPERTIES-KHR~:@_:next ~s~:@_:vendor-id ~s~:@_:device-id ~s~:@_:layered-a-p-i ~s~:@_:device-name ~s~:>)"
+               next 
+               vendor-id 
+               device-id 
+               layered-a-p-i 
+               device-name)))
+
+(defmethod print-object ((obj physical-device-layered-api-vulkan-properties-khr) out)
+  (with-slots (next
+               properties)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-LAYERED-API-VULKAN-PROPERTIES-KHR~:@_:next ~s~:@_:properties ~s~:>)"
+               next 
+               properties)))
+
+(defmethod print-object ((obj physical-device-maintenance-8-features-khr) out)
+  (with-slots (next
+               maintenance-8)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-MAINTENANCE-8-FEATURES-KHR~:@_:next ~s~:@_:maintenance-8 ~s~:>)"
+               next 
+               maintenance-8)))
+
+(defmethod print-object ((obj physical-device-maintenance-9-features-khr) out)
+  (with-slots (next
+               maintenance-9)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-MAINTENANCE-9-FEATURES-KHR~:@_:next ~s~:@_:maintenance-9 ~s~:>)"
+               next 
+               maintenance-9)))
+
+(defmethod print-object ((obj physical-device-maintenance-9-properties-khr) out)
+  (with-slots (next
+               image-2d-view-of-3d-sparse
+               default-vertex-attribute-value)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-MAINTENANCE-9-PROPERTIES-KHR~:@_:next ~s~:@_:image-2d-view-of-3d-sparse ~s~:@_:default-vertex-attribute-value ~s~:>)"
+               next 
+               image-2d-view-of-3d-sparse 
+               default-vertex-attribute-value)))
+
+(defmethod print-object ((obj physical-device-maintenance-1-1-features-khr) out)
+  (with-slots (next
+               maintenance-1-1)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-MAINTENANCE-1-1-FEATURES-KHR~:@_:next ~s~:@_:maintenance-1-1 ~s~:>)"
+               next 
+               maintenance-1-1)))
+
+(defmethod print-object ((obj physical-device-maintenance-1-0-properties-khr) out)
+  (with-slots (next
+               rgba-4-opaque-black-swizzled
+               resolve-srgb-format-applies-transfer-function
+               resolve-srgb-format-supports-transfer-function-control)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-MAINTENANCE-1-0-PROPERTIES-KHR~:@_:next ~s~:@_:rgba-4-opaque-black-swizzled ~s~:@_:resolve-srgb-format-applies-transfer-function ~s~:@_:resolve-srgb-format-supports-transfer-function-control ~s~:>)"
+               next 
+               rgba-4-opaque-black-swizzled 
+               resolve-srgb-format-applies-transfer-function 
+               resolve-srgb-format-supports-transfer-function-control)))
+
+(defmethod print-object ((obj physical-device-maintenance-1-0-features-khr) out)
+  (with-slots (next
+               maintenance-1-0)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-MAINTENANCE-1-0-FEATURES-KHR~:@_:next ~s~:@_:maintenance-1-0 ~s~:>)"
+               next 
+               maintenance-1-0)))
+
+(defmethod print-object ((obj queue-family-ownership-transfer-properties-khr) out)
+  (with-slots (next
+               optimal-image-transfer-to-queue-families)
+      obj
+    (cl:format out "~i(~@<QUEUE-FAMILY-OWNERSHIP-TRANSFER-PROPERTIES-KHR~:@_:next ~s~:@_:optimal-image-transfer-to-queue-families ~s~:>)"
+               next 
+               optimal-image-transfer-to-queue-families)))
+
+(defmethod print-object ((obj queue-family-optimal-image-transfer-granularity-properties-khr) out)
+  (with-slots (next
+               optimal-image-transfer-granularity)
+      obj
+    (cl:format out "~i(~@<QUEUE-FAMILY-OPTIMAL-IMAGE-TRANSFER-GRANULARITY-PROPERTIES-KHR~:@_:next ~s~:@_:optimal-image-transfer-granularity ~s~:>)"
+               next 
+               optimal-image-transfer-granularity)))
+
+(defmethod print-object ((obj rendering-area-info) out)
+  (with-slots (next
+               view-mask
+               color-attachment-formats
+               depth-attachment-format
+               stencil-attachment-format)
+      obj
+    (cl:format out "~i(~@<RENDERING-AREA-INFO~:@_:next ~s~:@_:view-mask ~s~:@_:color-attachment-formats ~s~:@_:depth-attachment-format ~s~:@_:stencil-attachment-format ~s~:>)"
+               next 
+               view-mask 
+               color-attachment-formats 
+               depth-attachment-format 
+               stencil-attachment-format)))
 
 (defmethod print-object ((obj descriptor-set-layout-support) out)
   (with-slots (next
@@ -4294,30 +5512,36 @@
                num-available-sgprs 
                compute-work-group-size)))
 
-(defmethod print-object ((obj device-queue-global-priority-create-info-ext) out)
+(defmethod print-object ((obj physical-device-elapsed-timer-query-features-qcom) out)
+  (with-slots (next
+               elapsed-timer-query)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-ELAPSED-TIMER-QUERY-FEATURES-QCOM~:@_:next ~s~:@_:elapsed-timer-query ~s~:>)"
+               next 
+               elapsed-timer-query)))
+
+(defmethod print-object ((obj device-queue-global-priority-create-info) out)
   (with-slots (next
                global-priority)
       obj
-    (cl:format out "~i(~@<DEVICE-QUEUE-GLOBAL-PRIORITY-CREATE-INFO-EXT~:@_:next ~s~:@_:global-priority ~s~:>)"
+    (cl:format out "~i(~@<DEVICE-QUEUE-GLOBAL-PRIORITY-CREATE-INFO~:@_:next ~s~:@_:global-priority ~s~:>)"
                next 
                global-priority)))
 
-(defmethod print-object ((obj physical-device-global-priority-query-features-ext) out)
+(defmethod print-object ((obj physical-device-global-priority-query-features) out)
   (with-slots (next
                global-priority-query)
       obj
-    (cl:format out "~i(~@<PHYSICAL-DEVICE-GLOBAL-PRIORITY-QUERY-FEATURES-EXT~:@_:next ~s~:@_:global-priority-query ~s~:>)"
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-GLOBAL-PRIORITY-QUERY-FEATURES~:@_:next ~s~:@_:global-priority-query ~s~:>)"
                next 
                global-priority-query)))
 
-(defmethod print-object ((obj queue-family-global-priority-properties-ext) out)
+(defmethod print-object ((obj queue-family-global-priority-properties) out)
   (with-slots (next
-               priority-count
                priorities)
       obj
-    (cl:format out "~i(~@<QUEUE-FAMILY-GLOBAL-PRIORITY-PROPERTIES-EXT~:@_:next ~s~:@_:priority-count ~s~:@_:priorities ~s~:>)"
+    (cl:format out "~i(~@<QUEUE-FAMILY-GLOBAL-PRIORITY-PROPERTIES~:@_:next ~s~:@_:priorities ~s~:>)"
                next 
-               priority-count 
                priorities)))
 
 (defmethod print-object ((obj debug-utils-object-name-info-ext) out)
@@ -4484,11 +5708,11 @@
                fully-covered-fragment-shader-input-variable 
                conservative-rasterization-post-depth-coverage)))
 
-(defmethod print-object ((obj calibrated-timestamp-info-ext) out)
+(defmethod print-object ((obj calibrated-timestamp-info-khr) out)
   (with-slots (next
                time-domain)
       obj
-    (cl:format out "~i(~@<CALIBRATED-TIMESTAMP-INFO-EXT~:@_:next ~s~:@_:time-domain ~s~:>)"
+    (cl:format out "~i(~@<CALIBRATED-TIMESTAMP-INFO-KHR~:@_:next ~s~:@_:time-domain ~s~:>)"
                next 
                time-domain)))
 
@@ -4838,19 +6062,19 @@
                semaphore 
                value)))
 
-(defmethod print-object ((obj vertex-input-binding-divisor-description-ext) out)
+(defmethod print-object ((obj vertex-input-binding-divisor-description) out)
   (with-slots (binding
                divisor)
       obj
-    (cl:format out "~i(~@<VERTEX-INPUT-BINDING-DIVISOR-DESCRIPTION-EXT~:@_:binding ~s~:@_:divisor ~s~:>)"
+    (cl:format out "~i(~@<VERTEX-INPUT-BINDING-DIVISOR-DESCRIPTION~:@_:binding ~s~:@_:divisor ~s~:>)"
                binding 
                divisor)))
 
-(defmethod print-object ((obj pipeline-vertex-input-divisor-state-create-info-ext) out)
+(defmethod print-object ((obj pipeline-vertex-input-divisor-state-create-info) out)
   (with-slots (next
                vertex-binding-divisors)
       obj
-    (cl:format out "~i(~@<PIPELINE-VERTEX-INPUT-DIVISOR-STATE-CREATE-INFO-EXT~:@_:next ~s~:@_:vertex-binding-divisors ~s~:>)"
+    (cl:format out "~i(~@<PIPELINE-VERTEX-INPUT-DIVISOR-STATE-CREATE-INFO~:@_:next ~s~:@_:vertex-binding-divisors ~s~:>)"
                next 
                vertex-binding-divisors)))
 
@@ -4861,6 +6085,16 @@
     (cl:format out "~i(~@<PHYSICAL-DEVICE-VERTEX-ATTRIBUTE-DIVISOR-PROPERTIES-EXT~:@_:next ~s~:@_:max-vertex-attrib-divisor ~s~:>)"
                next 
                max-vertex-attrib-divisor)))
+
+(defmethod print-object ((obj physical-device-vertex-attribute-divisor-properties) out)
+  (with-slots (next
+               max-vertex-attrib-divisor
+               supports-non-zero-first-instance)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-VERTEX-ATTRIBUTE-DIVISOR-PROPERTIES~:@_:next ~s~:@_:max-vertex-attrib-divisor ~s~:@_:supports-non-zero-first-instance ~s~:>)"
+               next 
+               max-vertex-attrib-divisor 
+               supports-non-zero-first-instance)))
 
 (defmethod print-object ((obj physical-device-p-c-i-bus-info-properties-ext) out)
   (with-slots (next
@@ -5052,12 +6286,12 @@
                shader-image-float-32-atomic-min-max 
                sparse-image-float-32-atomic-min-max)))
 
-(defmethod print-object ((obj physical-device-vertex-attribute-divisor-features-ext) out)
+(defmethod print-object ((obj physical-device-vertex-attribute-divisor-features) out)
   (with-slots (next
                vertex-attribute-instance-rate-divisor
                vertex-attribute-instance-rate-zero-divisor)
       obj
-    (cl:format out "~i(~@<PHYSICAL-DEVICE-VERTEX-ATTRIBUTE-DIVISOR-FEATURES-EXT~:@_:next ~s~:@_:vertex-attribute-instance-rate-divisor ~s~:@_:vertex-attribute-instance-rate-zero-divisor ~s~:>)"
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-VERTEX-ATTRIBUTE-DIVISOR-FEATURES~:@_:next ~s~:@_:vertex-attribute-instance-rate-divisor ~s~:@_:vertex-attribute-instance-rate-zero-divisor ~s~:>)"
                next 
                vertex-attribute-instance-rate-divisor 
                vertex-attribute-instance-rate-zero-divisor)))
@@ -5208,23 +6442,23 @@
                next 
                corner-sampled-image)))
 
-(defmethod print-object ((obj physical-device-compute-shader-derivatives-features-nv) out)
+(defmethod print-object ((obj physical-device-compute-shader-derivatives-features-khr) out)
   (with-slots (next
                compute-derivative-group-quads
                compute-derivative-group-linear)
       obj
-    (cl:format out "~i(~@<PHYSICAL-DEVICE-COMPUTE-SHADER-DERIVATIVES-FEATURES-NV~:@_:next ~s~:@_:compute-derivative-group-quads ~s~:@_:compute-derivative-group-linear ~s~:>)"
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-COMPUTE-SHADER-DERIVATIVES-FEATURES-KHR~:@_:next ~s~:@_:compute-derivative-group-quads ~s~:@_:compute-derivative-group-linear ~s~:>)"
                next 
                compute-derivative-group-quads 
                compute-derivative-group-linear)))
 
-(defmethod print-object ((obj physical-device-fragment-shader-barycentric-features-nv) out)
+(defmethod print-object ((obj physical-device-compute-shader-derivatives-properties-khr) out)
   (with-slots (next
-               fragment-shader-barycentric)
+               mesh-and-task-shader-derivatives)
       obj
-    (cl:format out "~i(~@<PHYSICAL-DEVICE-FRAGMENT-SHADER-BARYCENTRIC-FEATURES-NV~:@_:next ~s~:@_:fragment-shader-barycentric ~s~:>)"
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-COMPUTE-SHADER-DERIVATIVES-PROPERTIES-KHR~:@_:next ~s~:@_:mesh-and-task-shader-derivatives ~s~:>)"
                next 
-               fragment-shader-barycentric)))
+               mesh-and-task-shader-derivatives)))
 
 (defmethod print-object ((obj physical-device-shader-image-footprint-features-nv) out)
   (with-slots (next
@@ -5241,6 +6475,50 @@
     (cl:format out "~i(~@<PHYSICAL-DEVICE-DEDICATED-ALLOCATION-IMAGE-ALIASING-FEATURES-NV~:@_:next ~s~:@_:dedicated-allocation-image-aliasing ~s~:>)"
                next 
                dedicated-allocation-image-aliasing)))
+
+(defmethod print-object ((obj physical-device-copy-memory-indirect-features-khr) out)
+  (with-slots (next
+               indirect-memory-copy
+               indirect-memory-to-image-copy)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-COPY-MEMORY-INDIRECT-FEATURES-KHR~:@_:next ~s~:@_:indirect-memory-copy ~s~:@_:indirect-memory-to-image-copy ~s~:>)"
+               next 
+               indirect-memory-copy 
+               indirect-memory-to-image-copy)))
+
+(defmethod print-object ((obj physical-device-copy-memory-indirect-features-nv) out)
+  (with-slots (next
+               indirect-copy)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-COPY-MEMORY-INDIRECT-FEATURES-NV~:@_:next ~s~:@_:indirect-copy ~s~:>)"
+               next 
+               indirect-copy)))
+
+(defmethod print-object ((obj physical-device-copy-memory-indirect-properties-khr) out)
+  (with-slots (next
+               supported-queues)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-COPY-MEMORY-INDIRECT-PROPERTIES-KHR~:@_:next ~s~:@_:supported-queues ~s~:>)"
+               next 
+               supported-queues)))
+
+(defmethod print-object ((obj physical-device-memory-decompression-features-ext) out)
+  (with-slots (next
+               memory-decompression)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-MEMORY-DECOMPRESSION-FEATURES-EXT~:@_:next ~s~:@_:memory-decompression ~s~:>)"
+               next 
+               memory-decompression)))
+
+(defmethod print-object ((obj physical-device-memory-decompression-properties-ext) out)
+  (with-slots (next
+               decompression-methods
+               max-decompression-indirect-count)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-MEMORY-DECOMPRESSION-PROPERTIES-EXT~:@_:next ~s~:@_:decompression-methods ~s~:@_:max-decompression-indirect-count ~s~:>)"
+               next 
+               decompression-methods 
+               max-decompression-indirect-count)))
 
 (defmethod print-object ((obj shading-rate-palette-nv) out)
   (with-slots (shading-rate-palette-entries)
@@ -5367,6 +6645,94 @@
     (cl:format out "~i(~@<DRAW-MESH-TASKS-INDIRECT-COMMAND-NV~:@_:task-count ~s~:@_:first-task ~s~:>)"
                task-count 
                first-task)))
+
+(defmethod print-object ((obj physical-device-mesh-shader-features-ext) out)
+  (with-slots (next
+               task-shader
+               mesh-shader
+               multiview-mesh-shader
+               primitive-fragment-shading-rate-mesh-shader
+               mesh-shader-queries)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-MESH-SHADER-FEATURES-EXT~:@_:next ~s~:@_:task-shader ~s~:@_:mesh-shader ~s~:@_:multiview-mesh-shader ~s~:@_:primitive-fragment-shading-rate-mesh-shader ~s~:@_:mesh-shader-queries ~s~:>)"
+               next 
+               task-shader 
+               mesh-shader 
+               multiview-mesh-shader 
+               primitive-fragment-shading-rate-mesh-shader 
+               mesh-shader-queries)))
+
+(defmethod print-object ((obj physical-device-mesh-shader-properties-ext) out)
+  (with-slots (next
+               max-task-work-group-total-count
+               max-task-work-group-count
+               max-task-work-group-invocations
+               max-task-work-group-size
+               max-task-payload-size
+               max-task-shared-memory-size
+               max-task-payload-and-shared-memory-size
+               max-mesh-work-group-total-count
+               max-mesh-work-group-count
+               max-mesh-work-group-invocations
+               max-mesh-work-group-size
+               max-mesh-shared-memory-size
+               max-mesh-payload-and-shared-memory-size
+               max-mesh-output-memory-size
+               max-mesh-payload-and-output-memory-size
+               max-mesh-output-components
+               max-mesh-output-vertices
+               max-mesh-output-primitives
+               max-mesh-output-layers
+               max-mesh-multiview-view-count
+               mesh-output-per-vertex-granularity
+               mesh-output-per-primitive-granularity
+               max-preferred-task-work-group-invocations
+               max-preferred-mesh-work-group-invocations
+               prefers-local-invocation-vertex-output
+               prefers-local-invocation-primitive-output
+               prefers-compact-vertex-output
+               prefers-compact-primitive-output)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-MESH-SHADER-PROPERTIES-EXT~:@_:next ~s~:@_:max-task-work-group-total-count ~s~:@_:max-task-work-group-count ~s~:@_:max-task-work-group-invocations ~s~:@_:max-task-work-group-size ~s~:@_:max-task-payload-size ~s~:@_:max-task-shared-memory-size ~s~:@_:max-task-payload-and-shared-memory-size ~s~:@_:max-mesh-work-group-total-count ~s~:@_:max-mesh-work-group-count ~s~:@_:max-mesh-work-group-invocations ~s~:@_:max-mesh-work-group-size ~s~:@_:max-mesh-shared-memory-size ~s~:@_:max-mesh-payload-and-shared-memory-size ~s~:@_:max-mesh-output-memory-size ~s~:@_:max-mesh-payload-and-output-memory-size ~s~:@_:max-mesh-output-components ~s~:@_:max-mesh-output-vertices ~s~:@_:max-mesh-output-primitives ~s~:@_:max-mesh-output-layers ~s~:@_:max-mesh-multiview-view-count ~s~:@_:mesh-output-per-vertex-granularity ~s~:@_:mesh-output-per-primitive-granularity ~s~:@_:max-preferred-task-work-group-invocations ~s~:@_:max-preferred-mesh-work-group-invocations ~s~:@_:prefers-local-invocation-vertex-output ~s~:@_:prefers-local-invocation-primitive-output ~s~:@_:prefers-compact-vertex-output ~s~:@_:prefers-compact-primitive-output ~s~:>)"
+               next 
+               max-task-work-group-total-count 
+               max-task-work-group-count 
+               max-task-work-group-invocations 
+               max-task-work-group-size 
+               max-task-payload-size 
+               max-task-shared-memory-size 
+               max-task-payload-and-shared-memory-size 
+               max-mesh-work-group-total-count 
+               max-mesh-work-group-count 
+               max-mesh-work-group-invocations 
+               max-mesh-work-group-size 
+               max-mesh-shared-memory-size 
+               max-mesh-payload-and-shared-memory-size 
+               max-mesh-output-memory-size 
+               max-mesh-payload-and-output-memory-size 
+               max-mesh-output-components 
+               max-mesh-output-vertices 
+               max-mesh-output-primitives 
+               max-mesh-output-layers 
+               max-mesh-multiview-view-count 
+               mesh-output-per-vertex-granularity 
+               mesh-output-per-primitive-granularity 
+               max-preferred-task-work-group-invocations 
+               max-preferred-mesh-work-group-invocations 
+               prefers-local-invocation-vertex-output 
+               prefers-local-invocation-primitive-output 
+               prefers-compact-vertex-output 
+               prefers-compact-primitive-output)))
+
+(defmethod print-object ((obj draw-mesh-tasks-indirect-command-ext) out)
+  (with-slots (group-count-x
+               group-count-y
+               group-count-z)
+      obj
+    (cl:format out "~i(~@<DRAW-MESH-TASKS-INDIRECT-COMMAND-EXT~:@_:group-count-x ~s~:@_:group-count-y ~s~:@_:group-count-z ~s~:>)"
+               group-count-x 
+               group-count-y 
+               group-count-z)))
 
 (defmethod print-object ((obj ray-tracing-shader-group-create-info-nv) out)
   (with-slots (next
@@ -5700,6 +7066,48 @@
                height 
                depth)))
 
+(defmethod print-object ((obj trace-rays-indirect-command-2-khr) out)
+  (with-slots (raygen-shader-record-address
+               raygen-shader-record-size
+               miss-shader-binding-table-address
+               miss-shader-binding-table-size
+               miss-shader-binding-table-stride
+               hit-shader-binding-table-address
+               hit-shader-binding-table-size
+               hit-shader-binding-table-stride
+               callable-shader-binding-table-address
+               callable-shader-binding-table-size
+               callable-shader-binding-table-stride
+               width
+               height
+               depth)
+      obj
+    (cl:format out "~i(~@<TRACE-RAYS-INDIRECT-COMMAND-2-KHR~:@_:raygen-shader-record-address ~s~:@_:raygen-shader-record-size ~s~:@_:miss-shader-binding-table-address ~s~:@_:miss-shader-binding-table-size ~s~:@_:miss-shader-binding-table-stride ~s~:@_:hit-shader-binding-table-address ~s~:@_:hit-shader-binding-table-size ~s~:@_:hit-shader-binding-table-stride ~s~:@_:callable-shader-binding-table-address ~s~:@_:callable-shader-binding-table-size ~s~:@_:callable-shader-binding-table-stride ~s~:@_:width ~s~:@_:height ~s~:@_:depth ~s~:>)"
+               raygen-shader-record-address 
+               raygen-shader-record-size 
+               miss-shader-binding-table-address 
+               miss-shader-binding-table-size 
+               miss-shader-binding-table-stride 
+               hit-shader-binding-table-address 
+               hit-shader-binding-table-size 
+               hit-shader-binding-table-stride 
+               callable-shader-binding-table-address 
+               callable-shader-binding-table-size 
+               callable-shader-binding-table-stride 
+               width 
+               height 
+               depth)))
+
+(defmethod print-object ((obj physical-device-ray-tracing-maintenance-1-features-khr) out)
+  (with-slots (next
+               ray-tracing-maintenance-1
+               ray-tracing-pipeline-trace-rays-indirect-2)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-RAY-TRACING-MAINTENANCE-1-FEATURES-KHR~:@_:next ~s~:@_:ray-tracing-maintenance-1 ~s~:@_:ray-tracing-pipeline-trace-rays-indirect-2 ~s~:>)"
+               next 
+               ray-tracing-maintenance-1 
+               ray-tracing-pipeline-trace-rays-indirect-2)))
+
 (defmethod print-object ((obj drm-format-modifier-properties-list-ext) out)
   (with-slots (next
                drm-format-modifier-properties)
@@ -5764,6 +7172,14 @@
                next 
                stencil-usage)))
 
+(defmethod print-object ((obj image-stencil-usage-2-create-info-khr) out)
+  (with-slots (next
+               stencil-usage)
+      obj
+    (cl:format out "~i(~@<IMAGE-STENCIL-USAGE-2-CREATE-INFO-KHR~:@_:next ~s~:@_:stencil-usage ~s~:>)"
+               next 
+               stencil-usage)))
+
 (defmethod print-object ((obj device-memory-overallocation-create-info-amd) out)
   (with-slots (next
                overallocation-behavior)
@@ -5792,6 +7208,14 @@
                next 
                fragment-density-map-deferred)))
 
+(defmethod print-object ((obj physical-device-fragment-density-map-offset-features-ext) out)
+  (with-slots (next
+               fragment-density-map-offset)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-FRAGMENT-DENSITY-MAP-OFFSET-FEATURES-EXT~:@_:next ~s~:@_:fragment-density-map-offset ~s~:>)"
+               next 
+               fragment-density-map-offset)))
+
 (defmethod print-object ((obj physical-device-fragment-density-map-properties-ext) out)
   (with-slots (next
                min-fragment-density-texel-size
@@ -5818,6 +7242,14 @@
                max-subsampled-array-layers 
                max-descriptor-set-subsampled-samplers)))
 
+(defmethod print-object ((obj physical-device-fragment-density-map-offset-properties-ext) out)
+  (with-slots (next
+               fragment-density-offset-granularity)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-FRAGMENT-DENSITY-MAP-OFFSET-PROPERTIES-EXT~:@_:next ~s~:@_:fragment-density-offset-granularity ~s~:>)"
+               next 
+               fragment-density-offset-granularity)))
+
 (defmethod print-object ((obj render-pass-fragment-density-map-create-info-ext) out)
   (with-slots (next
                fragment-density-map-attachment)
@@ -5825,6 +7257,14 @@
     (cl:format out "~i(~@<RENDER-PASS-FRAGMENT-DENSITY-MAP-CREATE-INFO-EXT~:@_:next ~s~:@_:fragment-density-map-attachment ~s~:>)"
                next 
                fragment-density-map-attachment)))
+
+(defmethod print-object ((obj render-pass-fragment-density-map-offset-end-info-ext) out)
+  (with-slots (next
+               fragment-density-offsets)
+      obj
+    (cl:format out "~i(~@<RENDER-PASS-FRAGMENT-DENSITY-MAP-OFFSET-END-INFO-EXT~:@_:next ~s~:@_:fragment-density-offsets ~s~:>)"
+               next 
+               fragment-density-offsets)))
 
 (defmethod print-object ((obj physical-device-scalar-block-layout-features) out)
   (with-slots (next
@@ -6010,11 +7450,11 @@
                next 
                attachments)))
 
-(defmethod print-object ((obj physical-device-texture-compression-astc-h-d-r-features-ext) out)
+(defmethod print-object ((obj physical-device-texture-compression-astc-h-d-r-features) out)
   (with-slots (next
                texture-compression-astc_-h-d-r)
       obj
-    (cl:format out "~i(~@<PHYSICAL-DEVICE-TEXTURE-COMPRESSION-ASTC-H-D-R-FEATURES-EXT~:@_:next ~s~:@_:texture-compression-astc_-h-d-r ~s~:>)"
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-TEXTURE-COMPRESSION-ASTC-H-D-R-FEATURES~:@_:next ~s~:@_:texture-compression-astc_-h-d-r ~s~:>)"
                next 
                texture-compression-astc_-h-d-r)))
 
@@ -6096,20 +7536,20 @@
                next 
                frame-token)))
 
-(defmethod print-object ((obj pipeline-creation-feedback-ext) out)
+(defmethod print-object ((obj pipeline-creation-feedback) out)
   (with-slots (flags
                duration)
       obj
-    (cl:format out "~i(~@<PIPELINE-CREATION-FEEDBACK-EXT~:@_:flags ~s~:@_:duration ~s~:>)"
+    (cl:format out "~i(~@<PIPELINE-CREATION-FEEDBACK~:@_:flags ~s~:@_:duration ~s~:>)"
                flags 
                duration)))
 
-(defmethod print-object ((obj pipeline-creation-feedback-create-info-ext) out)
+(defmethod print-object ((obj pipeline-creation-feedback-create-info) out)
   (with-slots (next
                pipeline-creation-feedback
                pipeline-stage-creation-feedbacks)
       obj
-    (cl:format out "~i(~@<PIPELINE-CREATION-FEEDBACK-CREATE-INFO-EXT~:@_:next ~s~:@_:pipeline-creation-feedback ~s~:@_:pipeline-stage-creation-feedbacks ~s~:>)"
+    (cl:format out "~i(~@<PIPELINE-CREATION-FEEDBACK-CREATE-INFO~:@_:next ~s~:@_:pipeline-creation-feedback ~s~:@_:pipeline-stage-creation-feedbacks ~s~:>)"
                next 
                pipeline-creation-feedback 
                pipeline-stage-creation-feedbacks)))
@@ -6137,6 +7577,30 @@
     (cl:format out "~i(~@<SURFACE-CAPABILITIES-FULL-SCREEN-EXCLUSIVE-EXT~:@_:next ~s~:@_:full-screen-exclusive-supported ~s~:>)"
                next 
                full-screen-exclusive-supported)))
+
+(defmethod print-object ((obj physical-device-present-barrier-features-nv) out)
+  (with-slots (next
+               present-barrier)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-PRESENT-BARRIER-FEATURES-NV~:@_:next ~s~:@_:present-barrier ~s~:>)"
+               next 
+               present-barrier)))
+
+(defmethod print-object ((obj surface-capabilities-present-barrier-nv) out)
+  (with-slots (next
+               present-barrier-supported)
+      obj
+    (cl:format out "~i(~@<SURFACE-CAPABILITIES-PRESENT-BARRIER-NV~:@_:next ~s~:@_:present-barrier-supported ~s~:>)"
+               next 
+               present-barrier-supported)))
+
+(defmethod print-object ((obj swapchain-present-barrier-create-info-nv) out)
+  (with-slots (next
+               present-barrier-enable)
+      obj
+    (cl:format out "~i(~@<SWAPCHAIN-PRESENT-BARRIER-CREATE-INFO-NV~:@_:next ~s~:@_:present-barrier-enable ~s~:>)"
+               next 
+               present-barrier-enable)))
 
 (defmethod print-object ((obj physical-device-performance-query-features-khr) out)
   (with-slots (next
@@ -6227,6 +7691,14 @@
     (cl:format out "~i(~@<PERFORMANCE-QUERY-SUBMIT-INFO-KHR~:@_:next ~s~:@_:counter-pass-index ~s~:>)"
                next 
                counter-pass-index)))
+
+(defmethod print-object ((obj performance-query-reservation-info-khr) out)
+  (with-slots (next
+               max-performance-queries-per-pool)
+      obj
+    (cl:format out "~i(~@<PERFORMANCE-QUERY-RESERVATION-INFO-KHR~:@_:next ~s~:@_:max-performance-queries-per-pool ~s~:>)"
+               next 
+               max-performance-queries-per-pool)))
 
 (defmethod print-object ((obj headless-surface-create-info-ext) out)
   (with-slots (next
@@ -6360,11 +7832,11 @@
                shader-subgroup-clock 
                shader-device-clock)))
 
-(defmethod print-object ((obj physical-device-index-type-uint-8-features-ext) out)
+(defmethod print-object ((obj physical-device-index-type-uint-8-features) out)
   (with-slots (next
                index-type-uint-8)
       obj
-    (cl:format out "~i(~@<PHYSICAL-DEVICE-INDEX-TYPE-UINT-8-FEATURES-EXT~:@_:next ~s~:@_:index-type-uint-8 ~s~:>)"
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-INDEX-TYPE-UINT-8-FEATURES~:@_:next ~s~:@_:index-type-uint-8 ~s~:>)"
                next 
                index-type-uint-8)))
 
@@ -6516,11 +7988,11 @@
                data-size 
                data)))
 
-(defmethod print-object ((obj physical-device-shader-demote-to-helper-invocation-features-ext) out)
+(defmethod print-object ((obj physical-device-shader-demote-to-helper-invocation-features) out)
   (with-slots (next
                shader-demote-to-helper-invocation)
       obj
-    (cl:format out "~i(~@<PHYSICAL-DEVICE-SHADER-DEMOTE-TO-HELPER-INVOCATION-FEATURES-EXT~:@_:next ~s~:@_:shader-demote-to-helper-invocation ~s~:>)"
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SHADER-DEMOTE-TO-HELPER-INVOCATION-FEATURES~:@_:next ~s~:@_:shader-demote-to-helper-invocation ~s~:>)"
                next 
                shader-demote-to-helper-invocation)))
 
@@ -6532,49 +8004,49 @@
                next 
                texel-buffer-alignment)))
 
-(defmethod print-object ((obj physical-device-texel-buffer-alignment-properties-ext) out)
+(defmethod print-object ((obj physical-device-texel-buffer-alignment-properties) out)
   (with-slots (next
                storage-texel-buffer-offset-alignment-bytes
                storage-texel-buffer-offset-single-texel-alignment
                uniform-texel-buffer-offset-alignment-bytes
                uniform-texel-buffer-offset-single-texel-alignment)
       obj
-    (cl:format out "~i(~@<PHYSICAL-DEVICE-TEXEL-BUFFER-ALIGNMENT-PROPERTIES-EXT~:@_:next ~s~:@_:storage-texel-buffer-offset-alignment-bytes ~s~:@_:storage-texel-buffer-offset-single-texel-alignment ~s~:@_:uniform-texel-buffer-offset-alignment-bytes ~s~:@_:uniform-texel-buffer-offset-single-texel-alignment ~s~:>)"
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-TEXEL-BUFFER-ALIGNMENT-PROPERTIES~:@_:next ~s~:@_:storage-texel-buffer-offset-alignment-bytes ~s~:@_:storage-texel-buffer-offset-single-texel-alignment ~s~:@_:uniform-texel-buffer-offset-alignment-bytes ~s~:@_:uniform-texel-buffer-offset-single-texel-alignment ~s~:>)"
                next 
                storage-texel-buffer-offset-alignment-bytes 
                storage-texel-buffer-offset-single-texel-alignment 
                uniform-texel-buffer-offset-alignment-bytes 
                uniform-texel-buffer-offset-single-texel-alignment)))
 
-(defmethod print-object ((obj physical-device-subgroup-size-control-features-ext) out)
+(defmethod print-object ((obj physical-device-subgroup-size-control-features) out)
   (with-slots (next
                subgroup-size-control
                compute-full-subgroups)
       obj
-    (cl:format out "~i(~@<PHYSICAL-DEVICE-SUBGROUP-SIZE-CONTROL-FEATURES-EXT~:@_:next ~s~:@_:subgroup-size-control ~s~:@_:compute-full-subgroups ~s~:>)"
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SUBGROUP-SIZE-CONTROL-FEATURES~:@_:next ~s~:@_:subgroup-size-control ~s~:@_:compute-full-subgroups ~s~:>)"
                next 
                subgroup-size-control 
                compute-full-subgroups)))
 
-(defmethod print-object ((obj physical-device-subgroup-size-control-properties-ext) out)
+(defmethod print-object ((obj physical-device-subgroup-size-control-properties) out)
   (with-slots (next
                min-subgroup-size
                max-subgroup-size
                max-compute-workgroup-subgroups
                required-subgroup-size-stages)
       obj
-    (cl:format out "~i(~@<PHYSICAL-DEVICE-SUBGROUP-SIZE-CONTROL-PROPERTIES-EXT~:@_:next ~s~:@_:min-subgroup-size ~s~:@_:max-subgroup-size ~s~:@_:max-compute-workgroup-subgroups ~s~:@_:required-subgroup-size-stages ~s~:>)"
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SUBGROUP-SIZE-CONTROL-PROPERTIES~:@_:next ~s~:@_:min-subgroup-size ~s~:@_:max-subgroup-size ~s~:@_:max-compute-workgroup-subgroups ~s~:@_:required-subgroup-size-stages ~s~:>)"
                next 
                min-subgroup-size 
                max-subgroup-size 
                max-compute-workgroup-subgroups 
                required-subgroup-size-stages)))
 
-(defmethod print-object ((obj pipeline-shader-stage-required-subgroup-size-create-info-ext) out)
+(defmethod print-object ((obj pipeline-shader-stage-required-subgroup-size-create-info) out)
   (with-slots (next
                required-subgroup-size)
       obj
-    (cl:format out "~i(~@<PIPELINE-SHADER-STAGE-REQUIRED-SUBGROUP-SIZE-CREATE-INFO-EXT~:@_:next ~s~:@_:required-subgroup-size ~s~:>)"
+    (cl:format out "~i(~@<PIPELINE-SHADER-STAGE-REQUIRED-SUBGROUP-SIZE-CREATE-INFO~:@_:next ~s~:@_:required-subgroup-size ~s~:>)"
                next 
                required-subgroup-size)))
 
@@ -6596,6 +8068,20 @@
                next 
                max-subpass-shading-workgroup-size-aspect-ratio)))
 
+(defmethod print-object ((obj physical-device-cluster-culling-shader-properties-huawei) out)
+  (with-slots (next
+               max-work-group-count
+               max-work-group-size
+               max-output-cluster-count
+               indirect-buffer-offset-alignment)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-CLUSTER-CULLING-SHADER-PROPERTIES-HUAWEI~:@_:next ~s~:@_:max-work-group-count ~s~:@_:max-work-group-size ~s~:@_:max-output-cluster-count ~s~:@_:indirect-buffer-offset-alignment ~s~:>)"
+               next 
+               max-work-group-count 
+               max-work-group-size 
+               max-output-cluster-count 
+               indirect-buffer-offset-alignment)))
+
 (defmethod print-object ((obj memory-opaque-capture-address-allocate-info) out)
   (with-slots (next
                opaque-capture-address)
@@ -6612,7 +8098,7 @@
                next 
                memory)))
 
-(defmethod print-object ((obj physical-device-line-rasterization-features-ext) out)
+(defmethod print-object ((obj physical-device-line-rasterization-features) out)
   (with-slots (next
                rectangular-lines
                bresenham-lines
@@ -6621,7 +8107,7 @@
                stippled-bresenham-lines
                stippled-smooth-lines)
       obj
-    (cl:format out "~i(~@<PHYSICAL-DEVICE-LINE-RASTERIZATION-FEATURES-EXT~:@_:next ~s~:@_:rectangular-lines ~s~:@_:bresenham-lines ~s~:@_:smooth-lines ~s~:@_:stippled-rectangular-lines ~s~:@_:stippled-bresenham-lines ~s~:@_:stippled-smooth-lines ~s~:>)"
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-LINE-RASTERIZATION-FEATURES~:@_:next ~s~:@_:rectangular-lines ~s~:@_:bresenham-lines ~s~:@_:smooth-lines ~s~:@_:stippled-rectangular-lines ~s~:@_:stippled-bresenham-lines ~s~:@_:stippled-smooth-lines ~s~:>)"
                next 
                rectangular-lines 
                bresenham-lines 
@@ -6630,33 +8116,33 @@
                stippled-bresenham-lines 
                stippled-smooth-lines)))
 
-(defmethod print-object ((obj physical-device-line-rasterization-properties-ext) out)
+(defmethod print-object ((obj physical-device-line-rasterization-properties) out)
   (with-slots (next
                line-sub-pixel-precision-bits)
       obj
-    (cl:format out "~i(~@<PHYSICAL-DEVICE-LINE-RASTERIZATION-PROPERTIES-EXT~:@_:next ~s~:@_:line-sub-pixel-precision-bits ~s~:>)"
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-LINE-RASTERIZATION-PROPERTIES~:@_:next ~s~:@_:line-sub-pixel-precision-bits ~s~:>)"
                next 
                line-sub-pixel-precision-bits)))
 
-(defmethod print-object ((obj pipeline-rasterization-line-state-create-info-ext) out)
+(defmethod print-object ((obj pipeline-rasterization-line-state-create-info) out)
   (with-slots (next
                line-rasterization-mode
                stippled-line-enable
                line-stipple-factor
                line-stipple-pattern)
       obj
-    (cl:format out "~i(~@<PIPELINE-RASTERIZATION-LINE-STATE-CREATE-INFO-EXT~:@_:next ~s~:@_:line-rasterization-mode ~s~:@_:stippled-line-enable ~s~:@_:line-stipple-factor ~s~:@_:line-stipple-pattern ~s~:>)"
+    (cl:format out "~i(~@<PIPELINE-RASTERIZATION-LINE-STATE-CREATE-INFO~:@_:next ~s~:@_:line-rasterization-mode ~s~:@_:stippled-line-enable ~s~:@_:line-stipple-factor ~s~:@_:line-stipple-pattern ~s~:>)"
                next 
                line-rasterization-mode 
                stippled-line-enable 
                line-stipple-factor 
                line-stipple-pattern)))
 
-(defmethod print-object ((obj physical-device-pipeline-creation-cache-control-features-ext) out)
+(defmethod print-object ((obj physical-device-pipeline-creation-cache-control-features) out)
   (with-slots (next
                pipeline-creation-cache-control)
       obj
-    (cl:format out "~i(~@<PHYSICAL-DEVICE-PIPELINE-CREATION-CACHE-CONTROL-FEATURES-EXT~:@_:next ~s~:@_:pipeline-creation-cache-control ~s~:>)"
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-PIPELINE-CREATION-CACHE-CONTROL-FEATURES~:@_:next ~s~:@_:pipeline-creation-cache-control ~s~:>)"
                next 
                pipeline-creation-cache-control)))
 
@@ -6936,6 +8422,238 @@
                max-timeline-semaphore-value-difference 
                framebuffer-integer-color-sample-counts)))
 
+(defmethod print-object ((obj physical-device-vulkan-1-3-features) out)
+  (with-slots (next
+               robust-image-access
+               inline-uniform-block
+               descriptor-binding-inline-uniform-block-update-after-bind
+               pipeline-creation-cache-control
+               private-data
+               shader-demote-to-helper-invocation
+               shader-terminate-invocation
+               subgroup-size-control
+               compute-full-subgroups
+               synchronization-2
+               texture-compression-astc_-h-d-r
+               shader-zero-initialize-workgroup-memory
+               dynamic-rendering
+               shader-integer-dot-product
+               maintenance-4)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-VULKAN-1-3-FEATURES~:@_:next ~s~:@_:robust-image-access ~s~:@_:inline-uniform-block ~s~:@_:descriptor-binding-inline-uniform-block-update-after-bind ~s~:@_:pipeline-creation-cache-control ~s~:@_:private-data ~s~:@_:shader-demote-to-helper-invocation ~s~:@_:shader-terminate-invocation ~s~:@_:subgroup-size-control ~s~:@_:compute-full-subgroups ~s~:@_:synchronization-2 ~s~:@_:texture-compression-astc_-h-d-r ~s~:@_:shader-zero-initialize-workgroup-memory ~s~:@_:dynamic-rendering ~s~:@_:shader-integer-dot-product ~s~:@_:maintenance-4 ~s~:>)"
+               next 
+               robust-image-access 
+               inline-uniform-block 
+               descriptor-binding-inline-uniform-block-update-after-bind 
+               pipeline-creation-cache-control 
+               private-data 
+               shader-demote-to-helper-invocation 
+               shader-terminate-invocation 
+               subgroup-size-control 
+               compute-full-subgroups 
+               synchronization-2 
+               texture-compression-astc_-h-d-r 
+               shader-zero-initialize-workgroup-memory 
+               dynamic-rendering 
+               shader-integer-dot-product 
+               maintenance-4)))
+
+(defmethod print-object ((obj physical-device-vulkan-1-3-properties) out)
+  (with-slots (next
+               min-subgroup-size
+               max-subgroup-size
+               max-compute-workgroup-subgroups
+               required-subgroup-size-stages
+               max-inline-uniform-block-size
+               max-per-stage-descriptor-inline-uniform-blocks
+               max-per-stage-descriptor-update-after-bind-inline-uniform-blocks
+               max-descriptor-set-inline-uniform-blocks
+               max-descriptor-set-update-after-bind-inline-uniform-blocks
+               max-inline-uniform-total-size
+               integer-dot-product-8-bit-unsigned-accelerated
+               integer-dot-product-8-bit-signed-accelerated
+               integer-dot-product-8-bit-mixed-signedness-accelerated
+               integer-dot-product-4x-8-bit-packed-unsigned-accelerated
+               integer-dot-product-4x-8-bit-packed-signed-accelerated
+               integer-dot-product-4x-8-bit-packed-mixed-signedness-accelerated
+               integer-dot-product-16-bit-unsigned-accelerated
+               integer-dot-product-16-bit-signed-accelerated
+               integer-dot-product-16-bit-mixed-signedness-accelerated
+               integer-dot-product-32-bit-unsigned-accelerated
+               integer-dot-product-32-bit-signed-accelerated
+               integer-dot-product-32-bit-mixed-signedness-accelerated
+               integer-dot-product-64-bit-unsigned-accelerated
+               integer-dot-product-64-bit-signed-accelerated
+               integer-dot-product-64-bit-mixed-signedness-accelerated
+               integer-dot-product-accumulating-saturating-8-bit-unsigned-accelerated
+               integer-dot-product-accumulating-saturating-8-bit-signed-accelerated
+               integer-dot-product-accumulating-saturating-8-bit-mixed-signedness-accelerated
+               integer-dot-product-accumulating-saturating-4x-8-bit-packed-unsigned-accelerated
+               integer-dot-product-accumulating-saturating-4x-8-bit-packed-signed-accelerated
+               integer-dot-product-accumulating-saturating-4x-8-bit-packed-mixed-signedness-accelerated
+               integer-dot-product-accumulating-saturating-16-bit-unsigned-accelerated
+               integer-dot-product-accumulating-saturating-16-bit-signed-accelerated
+               integer-dot-product-accumulating-saturating-16-bit-mixed-signedness-accelerated
+               integer-dot-product-accumulating-saturating-32-bit-unsigned-accelerated
+               integer-dot-product-accumulating-saturating-32-bit-signed-accelerated
+               integer-dot-product-accumulating-saturating-32-bit-mixed-signedness-accelerated
+               integer-dot-product-accumulating-saturating-64-bit-unsigned-accelerated
+               integer-dot-product-accumulating-saturating-64-bit-signed-accelerated
+               integer-dot-product-accumulating-saturating-64-bit-mixed-signedness-accelerated
+               storage-texel-buffer-offset-alignment-bytes
+               storage-texel-buffer-offset-single-texel-alignment
+               uniform-texel-buffer-offset-alignment-bytes
+               uniform-texel-buffer-offset-single-texel-alignment
+               max-buffer-size)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-VULKAN-1-3-PROPERTIES~:@_:next ~s~:@_:min-subgroup-size ~s~:@_:max-subgroup-size ~s~:@_:max-compute-workgroup-subgroups ~s~:@_:required-subgroup-size-stages ~s~:@_:max-inline-uniform-block-size ~s~:@_:max-per-stage-descriptor-inline-uniform-blocks ~s~:@_:max-per-stage-descriptor-update-after-bind-inline-uniform-blocks ~s~:@_:max-descriptor-set-inline-uniform-blocks ~s~:@_:max-descriptor-set-update-after-bind-inline-uniform-blocks ~s~:@_:max-inline-uniform-total-size ~s~:@_:integer-dot-product-8-bit-unsigned-accelerated ~s~:@_:integer-dot-product-8-bit-signed-accelerated ~s~:@_:integer-dot-product-8-bit-mixed-signedness-accelerated ~s~:@_:integer-dot-product-4x-8-bit-packed-unsigned-accelerated ~s~:@_:integer-dot-product-4x-8-bit-packed-signed-accelerated ~s~:@_:integer-dot-product-4x-8-bit-packed-mixed-signedness-accelerated ~s~:@_:integer-dot-product-16-bit-unsigned-accelerated ~s~:@_:integer-dot-product-16-bit-signed-accelerated ~s~:@_:integer-dot-product-16-bit-mixed-signedness-accelerated ~s~:@_:integer-dot-product-32-bit-unsigned-accelerated ~s~:@_:integer-dot-product-32-bit-signed-accelerated ~s~:@_:integer-dot-product-32-bit-mixed-signedness-accelerated ~s~:@_:integer-dot-product-64-bit-unsigned-accelerated ~s~:@_:integer-dot-product-64-bit-signed-accelerated ~s~:@_:integer-dot-product-64-bit-mixed-signedness-accelerated ~s~:@_:integer-dot-product-accumulating-saturating-8-bit-unsigned-accelerated ~s~:@_:integer-dot-product-accumulating-saturating-8-bit-signed-accelerated ~s~:@_:integer-dot-product-accumulating-saturating-8-bit-mixed-signedness-accelerated ~s~:@_:integer-dot-product-accumulating-saturating-4x-8-bit-packed-unsigned-accelerated ~s~:@_:integer-dot-product-accumulating-saturating-4x-8-bit-packed-signed-accelerated ~s~:@_:integer-dot-product-accumulating-saturating-4x-8-bit-packed-mixed-signedness-accelerated ~s~:@_:integer-dot-product-accumulating-saturating-16-bit-unsigned-accelerated ~s~:@_:integer-dot-product-accumulating-saturating-16-bit-signed-accelerated ~s~:@_:integer-dot-product-accumulating-saturating-16-bit-mixed-signedness-accelerated ~s~:@_:integer-dot-product-accumulating-saturating-32-bit-unsigned-accelerated ~s~:@_:integer-dot-product-accumulating-saturating-32-bit-signed-accelerated ~s~:@_:integer-dot-product-accumulating-saturating-32-bit-mixed-signedness-accelerated ~s~:@_:integer-dot-product-accumulating-saturating-64-bit-unsigned-accelerated ~s~:@_:integer-dot-product-accumulating-saturating-64-bit-signed-accelerated ~s~:@_:integer-dot-product-accumulating-saturating-64-bit-mixed-signedness-accelerated ~s~:@_:storage-texel-buffer-offset-alignment-bytes ~s~:@_:storage-texel-buffer-offset-single-texel-alignment ~s~:@_:uniform-texel-buffer-offset-alignment-bytes ~s~:@_:uniform-texel-buffer-offset-single-texel-alignment ~s~:@_:max-buffer-size ~s~:>)"
+               next 
+               min-subgroup-size 
+               max-subgroup-size 
+               max-compute-workgroup-subgroups 
+               required-subgroup-size-stages 
+               max-inline-uniform-block-size 
+               max-per-stage-descriptor-inline-uniform-blocks 
+               max-per-stage-descriptor-update-after-bind-inline-uniform-blocks 
+               max-descriptor-set-inline-uniform-blocks 
+               max-descriptor-set-update-after-bind-inline-uniform-blocks 
+               max-inline-uniform-total-size 
+               integer-dot-product-8-bit-unsigned-accelerated 
+               integer-dot-product-8-bit-signed-accelerated 
+               integer-dot-product-8-bit-mixed-signedness-accelerated 
+               integer-dot-product-4x-8-bit-packed-unsigned-accelerated 
+               integer-dot-product-4x-8-bit-packed-signed-accelerated 
+               integer-dot-product-4x-8-bit-packed-mixed-signedness-accelerated 
+               integer-dot-product-16-bit-unsigned-accelerated 
+               integer-dot-product-16-bit-signed-accelerated 
+               integer-dot-product-16-bit-mixed-signedness-accelerated 
+               integer-dot-product-32-bit-unsigned-accelerated 
+               integer-dot-product-32-bit-signed-accelerated 
+               integer-dot-product-32-bit-mixed-signedness-accelerated 
+               integer-dot-product-64-bit-unsigned-accelerated 
+               integer-dot-product-64-bit-signed-accelerated 
+               integer-dot-product-64-bit-mixed-signedness-accelerated 
+               integer-dot-product-accumulating-saturating-8-bit-unsigned-accelerated 
+               integer-dot-product-accumulating-saturating-8-bit-signed-accelerated 
+               integer-dot-product-accumulating-saturating-8-bit-mixed-signedness-accelerated 
+               integer-dot-product-accumulating-saturating-4x-8-bit-packed-unsigned-accelerated 
+               integer-dot-product-accumulating-saturating-4x-8-bit-packed-signed-accelerated 
+               integer-dot-product-accumulating-saturating-4x-8-bit-packed-mixed-signedness-accelerated 
+               integer-dot-product-accumulating-saturating-16-bit-unsigned-accelerated 
+               integer-dot-product-accumulating-saturating-16-bit-signed-accelerated 
+               integer-dot-product-accumulating-saturating-16-bit-mixed-signedness-accelerated 
+               integer-dot-product-accumulating-saturating-32-bit-unsigned-accelerated 
+               integer-dot-product-accumulating-saturating-32-bit-signed-accelerated 
+               integer-dot-product-accumulating-saturating-32-bit-mixed-signedness-accelerated 
+               integer-dot-product-accumulating-saturating-64-bit-unsigned-accelerated 
+               integer-dot-product-accumulating-saturating-64-bit-signed-accelerated 
+               integer-dot-product-accumulating-saturating-64-bit-mixed-signedness-accelerated 
+               storage-texel-buffer-offset-alignment-bytes 
+               storage-texel-buffer-offset-single-texel-alignment 
+               uniform-texel-buffer-offset-alignment-bytes 
+               uniform-texel-buffer-offset-single-texel-alignment 
+               max-buffer-size)))
+
+(defmethod print-object ((obj physical-device-vulkan-1-4-features) out)
+  (with-slots (next
+               global-priority-query
+               shader-subgroup-rotate
+               shader-subgroup-rotate-clustered
+               shader-float-controls-2
+               shader-expect-assume
+               rectangular-lines
+               bresenham-lines
+               smooth-lines
+               stippled-rectangular-lines
+               stippled-bresenham-lines
+               stippled-smooth-lines
+               vertex-attribute-instance-rate-divisor
+               vertex-attribute-instance-rate-zero-divisor
+               index-type-uint-8
+               dynamic-rendering-local-read
+               maintenance-5
+               maintenance-6
+               pipeline-protected-access
+               pipeline-robustness
+               host-image-copy
+               push-descriptor)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-VULKAN-1-4-FEATURES~:@_:next ~s~:@_:global-priority-query ~s~:@_:shader-subgroup-rotate ~s~:@_:shader-subgroup-rotate-clustered ~s~:@_:shader-float-controls-2 ~s~:@_:shader-expect-assume ~s~:@_:rectangular-lines ~s~:@_:bresenham-lines ~s~:@_:smooth-lines ~s~:@_:stippled-rectangular-lines ~s~:@_:stippled-bresenham-lines ~s~:@_:stippled-smooth-lines ~s~:@_:vertex-attribute-instance-rate-divisor ~s~:@_:vertex-attribute-instance-rate-zero-divisor ~s~:@_:index-type-uint-8 ~s~:@_:dynamic-rendering-local-read ~s~:@_:maintenance-5 ~s~:@_:maintenance-6 ~s~:@_:pipeline-protected-access ~s~:@_:pipeline-robustness ~s~:@_:host-image-copy ~s~:@_:push-descriptor ~s~:>)"
+               next 
+               global-priority-query 
+               shader-subgroup-rotate 
+               shader-subgroup-rotate-clustered 
+               shader-float-controls-2 
+               shader-expect-assume 
+               rectangular-lines 
+               bresenham-lines 
+               smooth-lines 
+               stippled-rectangular-lines 
+               stippled-bresenham-lines 
+               stippled-smooth-lines 
+               vertex-attribute-instance-rate-divisor 
+               vertex-attribute-instance-rate-zero-divisor 
+               index-type-uint-8 
+               dynamic-rendering-local-read 
+               maintenance-5 
+               maintenance-6 
+               pipeline-protected-access 
+               pipeline-robustness 
+               host-image-copy 
+               push-descriptor)))
+
+(defmethod print-object ((obj physical-device-vulkan-1-4-properties) out)
+  (with-slots (next
+               line-sub-pixel-precision-bits
+               max-vertex-attrib-divisor
+               supports-non-zero-first-instance
+               max-push-descriptors
+               dynamic-rendering-local-read-depth-stencil-attachments
+               dynamic-rendering-local-read-multisampled-attachments
+               early-fragment-multisample-coverage-after-sample-counting
+               early-fragment-sample-mask-test-before-sample-counting
+               depth-stencil-swizzle-one-support
+               polygon-mode-point-size
+               non-strict-single-pixel-wide-lines-use-parallelogram
+               non-strict-wide-lines-use-parallelogram
+               block-texel-view-compatible-multiple-layers
+               max-combined-image-sampler-descriptor-count
+               fragment-shading-rate-clamp-combiner-inputs
+               default-robustness-storage-buffers
+               default-robustness-uniform-buffers
+               default-robustness-vertex-inputs
+               default-robustness-images
+               copy-src-layouts
+               copy-dst-layouts
+               optimal-tiling-layout-uuid
+               identical-memory-type-requirements)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-VULKAN-1-4-PROPERTIES~:@_:next ~s~:@_:line-sub-pixel-precision-bits ~s~:@_:max-vertex-attrib-divisor ~s~:@_:supports-non-zero-first-instance ~s~:@_:max-push-descriptors ~s~:@_:dynamic-rendering-local-read-depth-stencil-attachments ~s~:@_:dynamic-rendering-local-read-multisampled-attachments ~s~:@_:early-fragment-multisample-coverage-after-sample-counting ~s~:@_:early-fragment-sample-mask-test-before-sample-counting ~s~:@_:depth-stencil-swizzle-one-support ~s~:@_:polygon-mode-point-size ~s~:@_:non-strict-single-pixel-wide-lines-use-parallelogram ~s~:@_:non-strict-wide-lines-use-parallelogram ~s~:@_:block-texel-view-compatible-multiple-layers ~s~:@_:max-combined-image-sampler-descriptor-count ~s~:@_:fragment-shading-rate-clamp-combiner-inputs ~s~:@_:default-robustness-storage-buffers ~s~:@_:default-robustness-uniform-buffers ~s~:@_:default-robustness-vertex-inputs ~s~:@_:default-robustness-images ~s~:@_:copy-src-layouts ~s~:@_:copy-dst-layouts ~s~:@_:optimal-tiling-layout-uuid ~s~:@_:identical-memory-type-requirements ~s~:>)"
+               next 
+               line-sub-pixel-precision-bits 
+               max-vertex-attrib-divisor 
+               supports-non-zero-first-instance 
+               max-push-descriptors 
+               dynamic-rendering-local-read-depth-stencil-attachments 
+               dynamic-rendering-local-read-multisampled-attachments 
+               early-fragment-multisample-coverage-after-sample-counting 
+               early-fragment-sample-mask-test-before-sample-counting 
+               depth-stencil-swizzle-one-support 
+               polygon-mode-point-size 
+               non-strict-single-pixel-wide-lines-use-parallelogram 
+               non-strict-wide-lines-use-parallelogram 
+               block-texel-view-compatible-multiple-layers 
+               max-combined-image-sampler-descriptor-count 
+               fragment-shading-rate-clamp-combiner-inputs 
+               default-robustness-storage-buffers 
+               default-robustness-uniform-buffers 
+               default-robustness-vertex-inputs 
+               default-robustness-images 
+               copy-src-layouts 
+               copy-dst-layouts 
+               optimal-tiling-layout-uuid 
+               identical-memory-type-requirements)))
+
 (defmethod print-object ((obj pipeline-compiler-control-create-info-amd) out)
   (with-slots (next
                compiler-control-flags)
@@ -6952,7 +8670,157 @@
                next 
                device-coherent-memory)))
 
-(defmethod print-object ((obj physical-device-tool-properties-ext) out)
+(defmethod print-object ((obj gpa-perf-block-properties-amd) out)
+  (with-slots (block-type
+               flags
+               instance-count
+               max-event-id
+               max-global-only-counters
+               max-global-shared-counters
+               max-streaming-counters)
+      obj
+    (cl:format out "~i(~@<GPA-PERF-BLOCK-PROPERTIES-AMD~:@_:block-type ~s~:@_:flags ~s~:@_:instance-count ~s~:@_:max-event-id ~s~:@_:max-global-only-counters ~s~:@_:max-global-shared-counters ~s~:@_:max-streaming-counters ~s~:>)"
+               block-type 
+               flags 
+               instance-count 
+               max-event-id 
+               max-global-only-counters 
+               max-global-shared-counters 
+               max-streaming-counters)))
+
+(defmethod print-object ((obj physical-device-gpa-features-amd) out)
+  (with-slots (next
+               perf-counters
+               streaming-perf-counters
+               sq-thread-tracing
+               clock-modes)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-GPA-FEATURES-AMD~:@_:next ~s~:@_:perf-counters ~s~:@_:streaming-perf-counters ~s~:@_:sq-thread-tracing ~s~:@_:clock-modes ~s~:>)"
+               next 
+               perf-counters 
+               streaming-perf-counters 
+               sq-thread-tracing 
+               clock-modes)))
+
+(defmethod print-object ((obj physical-device-gpa-properties-amd) out)
+  (with-slots (next
+               flags
+               max-sqtt-se-buffer-size
+               shader-engine-count
+               perf-blocks)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-GPA-PROPERTIES-AMD~:@_:next ~s~:@_:flags ~s~:@_:max-sqtt-se-buffer-size ~s~:@_:shader-engine-count ~s~:@_:perf-blocks ~s~:>)"
+               next 
+               flags 
+               max-sqtt-se-buffer-size 
+               shader-engine-count 
+               perf-blocks)))
+
+(defmethod print-object ((obj physical-device-gpa-properties-2-amd) out)
+  (with-slots (next
+               revision-id)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-GPA-PROPERTIES-2-AMD~:@_:next ~s~:@_:revision-id ~s~:>)"
+               next 
+               revision-id)))
+
+(defmethod print-object ((obj gpa-perf-counter-amd) out)
+  (with-slots (block-type
+               block-instance
+               event-id)
+      obj
+    (cl:format out "~i(~@<GPA-PERF-COUNTER-AMD~:@_:block-type ~s~:@_:block-instance ~s~:@_:event-id ~s~:>)"
+               block-type 
+               block-instance 
+               event-id)))
+
+(defmethod print-object ((obj gpa-sample-begin-info-amd) out)
+  (with-slots (next
+               sample-type
+               sample-internal-operations
+               cache-flush-on-counter-collection
+               sq-shader-mask-enable
+               sq-shader-mask
+               perf-counters
+               streaming-perf-trace-sample-interval
+               perf-counter-device-memory-limit
+               sq-thread-trace-enable
+               sq-thread-trace-suppress-instruction-tokens
+               sq-thread-trace-device-memory-limit
+               timing-pre-sample
+               timing-post-sample)
+      obj
+    (cl:format out "~i(~@<GPA-SAMPLE-BEGIN-INFO-AMD~:@_:next ~s~:@_:sample-type ~s~:@_:sample-internal-operations ~s~:@_:cache-flush-on-counter-collection ~s~:@_:sq-shader-mask-enable ~s~:@_:sq-shader-mask ~s~:@_:perf-counters ~s~:@_:streaming-perf-trace-sample-interval ~s~:@_:perf-counter-device-memory-limit ~s~:@_:sq-thread-trace-enable ~s~:@_:sq-thread-trace-suppress-instruction-tokens ~s~:@_:sq-thread-trace-device-memory-limit ~s~:@_:timing-pre-sample ~s~:@_:timing-post-sample ~s~:>)"
+               next 
+               sample-type 
+               sample-internal-operations 
+               cache-flush-on-counter-collection 
+               sq-shader-mask-enable 
+               sq-shader-mask 
+               perf-counters 
+               streaming-perf-trace-sample-interval 
+               perf-counter-device-memory-limit 
+               sq-thread-trace-enable 
+               sq-thread-trace-suppress-instruction-tokens 
+               sq-thread-trace-device-memory-limit 
+               timing-pre-sample 
+               timing-post-sample)))
+
+(defmethod print-object ((obj gpa-device-clock-mode-info-amd) out)
+  (with-slots (next
+               clock-mode
+               memory-clock-ratio-to-peak
+               engine-clock-ratio-to-peak)
+      obj
+    (cl:format out "~i(~@<GPA-DEVICE-CLOCK-MODE-INFO-AMD~:@_:next ~s~:@_:clock-mode ~s~:@_:memory-clock-ratio-to-peak ~s~:@_:engine-clock-ratio-to-peak ~s~:>)"
+               next 
+               clock-mode 
+               memory-clock-ratio-to-peak 
+               engine-clock-ratio-to-peak)))
+
+(defmethod print-object ((obj gpa-device-get-clock-info-amd) out)
+  (with-slots (next
+               memory-clock-ratio-to-peak
+               engine-clock-ratio-to-peak
+               memory-clock-frequency
+               engine-clock-frequency)
+      obj
+    (cl:format out "~i(~@<GPA-DEVICE-GET-CLOCK-INFO-AMD~:@_:next ~s~:@_:memory-clock-ratio-to-peak ~s~:@_:engine-clock-ratio-to-peak ~s~:@_:memory-clock-frequency ~s~:@_:engine-clock-frequency ~s~:>)"
+               next 
+               memory-clock-ratio-to-peak 
+               engine-clock-ratio-to-peak 
+               memory-clock-frequency 
+               engine-clock-frequency)))
+
+(defmethod print-object ((obj gpa-session-create-info-amd) out)
+  (with-slots (next
+               secondary-copy-source)
+      obj
+    (cl:format out "~i(~@<GPA-SESSION-CREATE-INFO-AMD~:@_:next ~s~:@_:secondary-copy-source ~s~:>)"
+               next 
+               secondary-copy-source)))
+
+(defmethod print-object ((obj fault-data) out)
+  (with-slots (next
+               fault-level
+               fault-type)
+      obj
+    (cl:format out "~i(~@<FAULT-DATA~:@_:next ~s~:@_:fault-level ~s~:@_:fault-type ~s~:>)"
+               next 
+               fault-level 
+               fault-type)))
+
+(defmethod print-object ((obj fault-callback-info) out)
+  (with-slots (next
+               faults
+               pfn-fault-callback)
+      obj
+    (cl:format out "~i(~@<FAULT-CALLBACK-INFO~:@_:next ~s~:@_:faults ~s~:@_:pfn-fault-callback ~s~:>)"
+               next 
+               faults 
+               pfn-fault-callback)))
+
+(defmethod print-object ((obj physical-device-tool-properties) out)
   (with-slots (next
                name
                version
@@ -6960,7 +8828,7 @@
                description
                layer)
       obj
-    (cl:format out "~i(~@<PHYSICAL-DEVICE-TOOL-PROPERTIES-EXT~:@_:next ~s~:@_:name ~s~:@_:version ~s~:@_:purposes ~s~:@_:description ~s~:@_:layer ~s~:>)"
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-TOOL-PROPERTIES~:@_:next ~s~:@_:name ~s~:@_:version ~s~:@_:purposes ~s~:@_:description ~s~:@_:layer ~s~:>)"
                next 
                name 
                version 
@@ -7032,6 +8900,14 @@
                device-address 
                host-address)))
 
+(defmethod print-object ((obj device-or-host-address-const-amd-x) out)
+  (with-slots (device-address
+               host-address)
+      obj
+    (cl:format out "~i(~@<DEVICE-OR-HOST-ADDRESS-CONST-AMD-X~:@_:device-address ~s~:@_:host-address ~s~:>)"
+               device-address 
+               host-address)))
+
 (defmethod print-object ((obj acceleration-structure-geometry-triangles-data-khr) out)
   (with-slots (next
                vertex-format
@@ -7071,6 +8947,58 @@
                next 
                array-of-pointers 
                data)))
+
+(defmethod print-object ((obj acceleration-structure-geometry-linear-swept-spheres-data-nv) out)
+  (with-slots (next
+               vertex-format
+               vertex-data
+               vertex-stride
+               radius-format
+               radius-data
+               radius-stride
+               index-type
+               index-data
+               index-stride
+               indexing-mode
+               end-caps-mode)
+      obj
+    (cl:format out "~i(~@<ACCELERATION-STRUCTURE-GEOMETRY-LINEAR-SWEPT-SPHERES-DATA-NV~:@_:next ~s~:@_:vertex-format ~s~:@_:vertex-data ~s~:@_:vertex-stride ~s~:@_:radius-format ~s~:@_:radius-data ~s~:@_:radius-stride ~s~:@_:index-type ~s~:@_:index-data ~s~:@_:index-stride ~s~:@_:indexing-mode ~s~:@_:end-caps-mode ~s~:>)"
+               next 
+               vertex-format 
+               vertex-data 
+               vertex-stride 
+               radius-format 
+               radius-data 
+               radius-stride 
+               index-type 
+               index-data 
+               index-stride 
+               indexing-mode 
+               end-caps-mode)))
+
+(defmethod print-object ((obj acceleration-structure-geometry-spheres-data-nv) out)
+  (with-slots (next
+               vertex-format
+               vertex-data
+               vertex-stride
+               radius-format
+               radius-data
+               radius-stride
+               index-type
+               index-data
+               index-stride)
+      obj
+    (cl:format out "~i(~@<ACCELERATION-STRUCTURE-GEOMETRY-SPHERES-DATA-NV~:@_:next ~s~:@_:vertex-format ~s~:@_:vertex-data ~s~:@_:vertex-stride ~s~:@_:radius-format ~s~:@_:radius-data ~s~:@_:radius-stride ~s~:@_:index-type ~s~:@_:index-data ~s~:@_:index-stride ~s~:>)"
+               next 
+               vertex-format 
+               vertex-data 
+               vertex-stride 
+               radius-format 
+               radius-data 
+               radius-stride 
+               index-type 
+               index-data 
+               index-stride)))
 
 (defmethod print-object ((obj acceleration-structure-geometry-data-khr) out)
   (with-slots (triangles
@@ -7254,6 +9182,24 @@
                next 
                libraries)))
 
+(defmethod print-object ((obj refresh-object-khr) out)
+  (with-slots (object-type
+               object-handle
+               flags)
+      obj
+    (cl:format out "~i(~@<REFRESH-OBJECT-KHR~:@_:object-type ~s~:@_:object-handle ~s~:@_:flags ~s~:>)"
+               object-type 
+               object-handle 
+               flags)))
+
+(defmethod print-object ((obj refresh-object-list-khr) out)
+  (with-slots (next
+               objects)
+      obj
+    (cl:format out "~i(~@<REFRESH-OBJECT-LIST-KHR~:@_:next ~s~:@_:objects ~s~:>)"
+               next 
+               objects)))
+
 (defmethod print-object ((obj physical-device-extended-dynamic-state-features-ext) out)
   (with-slots (next
                extended-dynamic-state)
@@ -7273,6 +9219,120 @@
                extended-dynamic-state-2 
                extended-dynamic-state-2-logic-op 
                extended-dynamic-state-2-patch-control-points)))
+
+(defmethod print-object ((obj physical-device-extended-dynamic-state-3-features-ext) out)
+  (with-slots (next
+               extended-dynamic-state-3-tessellation-domain-origin
+               extended-dynamic-state-3-depth-clamp-enable
+               extended-dynamic-state-3-polygon-mode
+               extended-dynamic-state-3-rasterization-samples
+               extended-dynamic-state-3-sample-mask
+               extended-dynamic-state-3-alpha-to-coverage-enable
+               extended-dynamic-state-3-alpha-to-one-enable
+               extended-dynamic-state-3-logic-op-enable
+               extended-dynamic-state-3-color-blend-enable
+               extended-dynamic-state-3-color-blend-equation
+               extended-dynamic-state-3-color-write-mask
+               extended-dynamic-state-3-rasterization-stream
+               extended-dynamic-state-3-conservative-rasterization-mode
+               extended-dynamic-state-3-extra-primitive-overestimation-size
+               extended-dynamic-state-3-depth-clip-enable
+               extended-dynamic-state-3-sample-locations-enable
+               extended-dynamic-state-3-color-blend-advanced
+               extended-dynamic-state-3-provoking-vertex-mode
+               extended-dynamic-state-3-line-rasterization-mode
+               extended-dynamic-state-3-line-stipple-enable
+               extended-dynamic-state-3-depth-clip-negative-one-to-one
+               extended-dynamic-state-3-viewport-w-scaling-enable
+               extended-dynamic-state-3-viewport-swizzle
+               extended-dynamic-state-3-coverage-to-color-enable
+               extended-dynamic-state-3-coverage-to-color-location
+               extended-dynamic-state-3-coverage-modulation-mode
+               extended-dynamic-state-3-coverage-modulation-table-enable
+               extended-dynamic-state-3-coverage-modulation-table
+               extended-dynamic-state-3-coverage-reduction-mode
+               extended-dynamic-state-3-representative-fragment-test-enable
+               extended-dynamic-state-3-shading-rate-image-enable)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-EXTENDED-DYNAMIC-STATE-3-FEATURES-EXT~:@_:next ~s~:@_:extended-dynamic-state-3-tessellation-domain-origin ~s~:@_:extended-dynamic-state-3-depth-clamp-enable ~s~:@_:extended-dynamic-state-3-polygon-mode ~s~:@_:extended-dynamic-state-3-rasterization-samples ~s~:@_:extended-dynamic-state-3-sample-mask ~s~:@_:extended-dynamic-state-3-alpha-to-coverage-enable ~s~:@_:extended-dynamic-state-3-alpha-to-one-enable ~s~:@_:extended-dynamic-state-3-logic-op-enable ~s~:@_:extended-dynamic-state-3-color-blend-enable ~s~:@_:extended-dynamic-state-3-color-blend-equation ~s~:@_:extended-dynamic-state-3-color-write-mask ~s~:@_:extended-dynamic-state-3-rasterization-stream ~s~:@_:extended-dynamic-state-3-conservative-rasterization-mode ~s~:@_:extended-dynamic-state-3-extra-primitive-overestimation-size ~s~:@_:extended-dynamic-state-3-depth-clip-enable ~s~:@_:extended-dynamic-state-3-sample-locations-enable ~s~:@_:extended-dynamic-state-3-color-blend-advanced ~s~:@_:extended-dynamic-state-3-provoking-vertex-mode ~s~:@_:extended-dynamic-state-3-line-rasterization-mode ~s~:@_:extended-dynamic-state-3-line-stipple-enable ~s~:@_:extended-dynamic-state-3-depth-clip-negative-one-to-one ~s~:@_:extended-dynamic-state-3-viewport-w-scaling-enable ~s~:@_:extended-dynamic-state-3-viewport-swizzle ~s~:@_:extended-dynamic-state-3-coverage-to-color-enable ~s~:@_:extended-dynamic-state-3-coverage-to-color-location ~s~:@_:extended-dynamic-state-3-coverage-modulation-mode ~s~:@_:extended-dynamic-state-3-coverage-modulation-table-enable ~s~:@_:extended-dynamic-state-3-coverage-modulation-table ~s~:@_:extended-dynamic-state-3-coverage-reduction-mode ~s~:@_:extended-dynamic-state-3-representative-fragment-test-enable ~s~:@_:extended-dynamic-state-3-shading-rate-image-enable ~s~:>)"
+               next 
+               extended-dynamic-state-3-tessellation-domain-origin 
+               extended-dynamic-state-3-depth-clamp-enable 
+               extended-dynamic-state-3-polygon-mode 
+               extended-dynamic-state-3-rasterization-samples 
+               extended-dynamic-state-3-sample-mask 
+               extended-dynamic-state-3-alpha-to-coverage-enable 
+               extended-dynamic-state-3-alpha-to-one-enable 
+               extended-dynamic-state-3-logic-op-enable 
+               extended-dynamic-state-3-color-blend-enable 
+               extended-dynamic-state-3-color-blend-equation 
+               extended-dynamic-state-3-color-write-mask 
+               extended-dynamic-state-3-rasterization-stream 
+               extended-dynamic-state-3-conservative-rasterization-mode 
+               extended-dynamic-state-3-extra-primitive-overestimation-size 
+               extended-dynamic-state-3-depth-clip-enable 
+               extended-dynamic-state-3-sample-locations-enable 
+               extended-dynamic-state-3-color-blend-advanced 
+               extended-dynamic-state-3-provoking-vertex-mode 
+               extended-dynamic-state-3-line-rasterization-mode 
+               extended-dynamic-state-3-line-stipple-enable 
+               extended-dynamic-state-3-depth-clip-negative-one-to-one 
+               extended-dynamic-state-3-viewport-w-scaling-enable 
+               extended-dynamic-state-3-viewport-swizzle 
+               extended-dynamic-state-3-coverage-to-color-enable 
+               extended-dynamic-state-3-coverage-to-color-location 
+               extended-dynamic-state-3-coverage-modulation-mode 
+               extended-dynamic-state-3-coverage-modulation-table-enable 
+               extended-dynamic-state-3-coverage-modulation-table 
+               extended-dynamic-state-3-coverage-reduction-mode 
+               extended-dynamic-state-3-representative-fragment-test-enable 
+               extended-dynamic-state-3-shading-rate-image-enable)))
+
+(defmethod print-object ((obj physical-device-extended-dynamic-state-3-properties-ext) out)
+  (with-slots (next
+               dynamic-primitive-topology-unrestricted)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-EXTENDED-DYNAMIC-STATE-3-PROPERTIES-EXT~:@_:next ~s~:@_:dynamic-primitive-topology-unrestricted ~s~:>)"
+               next 
+               dynamic-primitive-topology-unrestricted)))
+
+(defmethod print-object ((obj physical-device-extended-flags-features-khr) out)
+  (with-slots (next
+               extended-flags)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-EXTENDED-FLAGS-FEATURES-KHR~:@_:next ~s~:@_:extended-flags ~s~:>)"
+               next 
+               extended-flags)))
+
+(defmethod print-object ((obj color-blend-equation-ext) out)
+  (with-slots (src-color-blend-factor
+               dst-color-blend-factor
+               color-blend-op
+               src-alpha-blend-factor
+               dst-alpha-blend-factor
+               alpha-blend-op)
+      obj
+    (cl:format out "~i(~@<COLOR-BLEND-EQUATION-EXT~:@_:src-color-blend-factor ~s~:@_:dst-color-blend-factor ~s~:@_:color-blend-op ~s~:@_:src-alpha-blend-factor ~s~:@_:dst-alpha-blend-factor ~s~:@_:alpha-blend-op ~s~:>)"
+               src-color-blend-factor 
+               dst-color-blend-factor 
+               color-blend-op 
+               src-alpha-blend-factor 
+               dst-alpha-blend-factor 
+               alpha-blend-op)))
+
+(defmethod print-object ((obj color-blend-advanced-ext) out)
+  (with-slots (advanced-blend-op
+               src-premultiplied
+               dst-premultiplied
+               blend-overlap
+               clamp-results)
+      obj
+    (cl:format out "~i(~@<COLOR-BLEND-ADVANCED-EXT~:@_:advanced-blend-op ~s~:@_:src-premultiplied ~s~:@_:dst-premultiplied ~s~:@_:blend-overlap ~s~:@_:clamp-results ~s~:>)"
+               advanced-blend-op 
+               src-premultiplied 
+               dst-premultiplied 
+               blend-overlap 
+               clamp-results)))
 
 (defmethod print-object ((obj render-pass-transform-begin-info-qcom) out)
   (with-slots (next
@@ -7300,6 +9360,122 @@
                transform 
                render-area)))
 
+(defmethod print-object ((obj physical-device-partitioned-acceleration-structure-features-nv) out)
+  (with-slots (next
+               partitioned-acceleration-structure)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-PARTITIONED-ACCELERATION-STRUCTURE-FEATURES-NV~:@_:next ~s~:@_:partitioned-acceleration-structure ~s~:>)"
+               next 
+               partitioned-acceleration-structure)))
+
+(defmethod print-object ((obj physical-device-partitioned-acceleration-structure-properties-nv) out)
+  (with-slots (next
+               max-partition-count)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-PARTITIONED-ACCELERATION-STRUCTURE-PROPERTIES-NV~:@_:next ~s~:@_:max-partition-count ~s~:>)"
+               next 
+               max-partition-count)))
+
+(defmethod print-object ((obj build-partitioned-acceleration-structure-indirect-command-nv) out)
+  (with-slots (op-type
+               arg-count
+               arg-data)
+      obj
+    (cl:format out "~i(~@<BUILD-PARTITIONED-ACCELERATION-STRUCTURE-INDIRECT-COMMAND-NV~:@_:op-type ~s~:@_:arg-count ~s~:@_:arg-data ~s~:>)"
+               op-type 
+               arg-count 
+               arg-data)))
+
+(defmethod print-object ((obj partitioned-acceleration-structure-flags-nv) out)
+  (with-slots (next
+               enable-partition-translation)
+      obj
+    (cl:format out "~i(~@<PARTITIONED-ACCELERATION-STRUCTURE-FLAGS-NV~:@_:next ~s~:@_:enable-partition-translation ~s~:>)"
+               next 
+               enable-partition-translation)))
+
+(defmethod print-object ((obj partitioned-acceleration-structure-write-instance-data-nv) out)
+  (with-slots (transform
+               explicit-aabb
+               instance-id
+               instance-mask
+               instance-contribution-to-hit-group-index
+               instance-flags
+               instance-index
+               partition-index
+               acceleration-structure)
+      obj
+    (cl:format out "~i(~@<PARTITIONED-ACCELERATION-STRUCTURE-WRITE-INSTANCE-DATA-NV~:@_:transform ~s~:@_:explicit-aabb ~s~:@_:instance-id ~s~:@_:instance-mask ~s~:@_:instance-contribution-to-hit-group-index ~s~:@_:instance-flags ~s~:@_:instance-index ~s~:@_:partition-index ~s~:@_:acceleration-structure ~s~:>)"
+               transform 
+               explicit-aabb 
+               instance-id 
+               instance-mask 
+               instance-contribution-to-hit-group-index 
+               instance-flags 
+               instance-index 
+               partition-index 
+               acceleration-structure)))
+
+(defmethod print-object ((obj partitioned-acceleration-structure-update-instance-data-nv) out)
+  (with-slots (instance-index
+               instance-contribution-to-hit-group-index
+               acceleration-structure)
+      obj
+    (cl:format out "~i(~@<PARTITIONED-ACCELERATION-STRUCTURE-UPDATE-INSTANCE-DATA-NV~:@_:instance-index ~s~:@_:instance-contribution-to-hit-group-index ~s~:@_:acceleration-structure ~s~:>)"
+               instance-index 
+               instance-contribution-to-hit-group-index 
+               acceleration-structure)))
+
+(defmethod print-object ((obj partitioned-acceleration-structure-write-partition-translation-data-nv) out)
+  (with-slots (partition-index
+               partition-translation)
+      obj
+    (cl:format out "~i(~@<PARTITIONED-ACCELERATION-STRUCTURE-WRITE-PARTITION-TRANSLATION-DATA-NV~:@_:partition-index ~s~:@_:partition-translation ~s~:>)"
+               partition-index 
+               partition-translation)))
+
+(defmethod print-object ((obj write-descriptor-set-partitioned-acceleration-structure-nv) out)
+  (with-slots (next
+               acceleration-structures)
+      obj
+    (cl:format out "~i(~@<WRITE-DESCRIPTOR-SET-PARTITIONED-ACCELERATION-STRUCTURE-NV~:@_:next ~s~:@_:acceleration-structures ~s~:>)"
+               next 
+               acceleration-structures)))
+
+(defmethod print-object ((obj partitioned-acceleration-structure-instances-input-nv) out)
+  (with-slots (next
+               flags
+               instance-count
+               max-instance-per-partition-count
+               partition-count
+               max-instance-in-global-partition-count)
+      obj
+    (cl:format out "~i(~@<PARTITIONED-ACCELERATION-STRUCTURE-INSTANCES-INPUT-NV~:@_:next ~s~:@_:flags ~s~:@_:instance-count ~s~:@_:max-instance-per-partition-count ~s~:@_:partition-count ~s~:@_:max-instance-in-global-partition-count ~s~:>)"
+               next 
+               flags 
+               instance-count 
+               max-instance-per-partition-count 
+               partition-count 
+               max-instance-in-global-partition-count)))
+
+(defmethod print-object ((obj build-partitioned-acceleration-structure-info-nv) out)
+  (with-slots (next
+               input
+               src-acceleration-structure-data
+               dst-acceleration-structure-data
+               scratch-data
+               src-infos
+               src-infos-count)
+      obj
+    (cl:format out "~i(~@<BUILD-PARTITIONED-ACCELERATION-STRUCTURE-INFO-NV~:@_:next ~s~:@_:input ~s~:@_:src-acceleration-structure-data ~s~:@_:dst-acceleration-structure-data ~s~:@_:scratch-data ~s~:@_:src-infos ~s~:@_:src-infos-count ~s~:>)"
+               next 
+               input 
+               src-acceleration-structure-data 
+               dst-acceleration-structure-data 
+               scratch-data 
+               src-infos 
+               src-infos-count)))
+
 (defmethod print-object ((obj physical-device-diagnostics-config-features-nv) out)
   (with-slots (next
                diagnostics-config)
@@ -7316,11 +9492,23 @@
                next 
                flags)))
 
-(defmethod print-object ((obj physical-device-zero-initialize-workgroup-memory-features-khr) out)
+(defmethod print-object ((obj pipeline-offline-create-info) out)
+  (with-slots (next
+               pipeline-identifier
+               match-control
+               pool-entry-size)
+      obj
+    (cl:format out "~i(~@<PIPELINE-OFFLINE-CREATE-INFO~:@_:next ~s~:@_:pipeline-identifier ~s~:@_:match-control ~s~:@_:pool-entry-size ~s~:>)"
+               next 
+               pipeline-identifier 
+               match-control 
+               pool-entry-size)))
+
+(defmethod print-object ((obj physical-device-zero-initialize-workgroup-memory-features) out)
   (with-slots (next
                shader-zero-initialize-workgroup-memory)
       obj
-    (cl:format out "~i(~@<PHYSICAL-DEVICE-ZERO-INITIALIZE-WORKGROUP-MEMORY-FEATURES-KHR~:@_:next ~s~:@_:shader-zero-initialize-workgroup-memory ~s~:>)"
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-ZERO-INITIALIZE-WORKGROUP-MEMORY-FEATURES~:@_:next ~s~:@_:shader-zero-initialize-workgroup-memory ~s~:>)"
                next 
                shader-zero-initialize-workgroup-memory)))
 
@@ -7332,33 +9520,33 @@
                next 
                shader-subgroup-uniform-control-flow)))
 
-(defmethod print-object ((obj physical-device-robustness-2-features-ext) out)
+(defmethod print-object ((obj physical-device-robustness-2-features-khr) out)
   (with-slots (next
                robust-buffer-access-2
                robust-image-access-2
                null-descriptor)
       obj
-    (cl:format out "~i(~@<PHYSICAL-DEVICE-ROBUSTNESS-2-FEATURES-EXT~:@_:next ~s~:@_:robust-buffer-access-2 ~s~:@_:robust-image-access-2 ~s~:@_:null-descriptor ~s~:>)"
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-ROBUSTNESS-2-FEATURES-KHR~:@_:next ~s~:@_:robust-buffer-access-2 ~s~:@_:robust-image-access-2 ~s~:@_:null-descriptor ~s~:>)"
                next 
                robust-buffer-access-2 
                robust-image-access-2 
                null-descriptor)))
 
-(defmethod print-object ((obj physical-device-robustness-2-properties-ext) out)
+(defmethod print-object ((obj physical-device-robustness-2-properties-khr) out)
   (with-slots (next
                robust-storage-buffer-access-size-alignment
                robust-uniform-buffer-access-size-alignment)
       obj
-    (cl:format out "~i(~@<PHYSICAL-DEVICE-ROBUSTNESS-2-PROPERTIES-EXT~:@_:next ~s~:@_:robust-storage-buffer-access-size-alignment ~s~:@_:robust-uniform-buffer-access-size-alignment ~s~:>)"
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-ROBUSTNESS-2-PROPERTIES-KHR~:@_:next ~s~:@_:robust-storage-buffer-access-size-alignment ~s~:@_:robust-uniform-buffer-access-size-alignment ~s~:>)"
                next 
                robust-storage-buffer-access-size-alignment 
                robust-uniform-buffer-access-size-alignment)))
 
-(defmethod print-object ((obj physical-device-image-robustness-features-ext) out)
+(defmethod print-object ((obj physical-device-image-robustness-features) out)
   (with-slots (next
                robust-image-access)
       obj
-    (cl:format out "~i(~@<PHYSICAL-DEVICE-IMAGE-ROBUSTNESS-FEATURES-EXT~:@_:next ~s~:@_:robust-image-access ~s~:>)"
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-IMAGE-ROBUSTNESS-FEATURES~:@_:next ~s~:@_:robust-image-access ~s~:>)"
                next 
                robust-image-access)))
 
@@ -7438,19 +9626,37 @@
                next 
                subpass-shading)))
 
-(defmethod print-object ((obj buffer-copy-2-khr) out)
+(defmethod print-object ((obj physical-device-cluster-culling-shader-features-huawei) out)
+  (with-slots (next
+               clusterculling-shader
+               multiview-cluster-culling-shader)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-CLUSTER-CULLING-SHADER-FEATURES-HUAWEI~:@_:next ~s~:@_:clusterculling-shader ~s~:@_:multiview-cluster-culling-shader ~s~:>)"
+               next 
+               clusterculling-shader 
+               multiview-cluster-culling-shader)))
+
+(defmethod print-object ((obj physical-device-cluster-culling-shader-vrs-features-huawei) out)
+  (with-slots (next
+               cluster-shading-rate)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-CLUSTER-CULLING-SHADER-VRS-FEATURES-HUAWEI~:@_:next ~s~:@_:cluster-shading-rate ~s~:>)"
+               next 
+               cluster-shading-rate)))
+
+(defmethod print-object ((obj buffer-copy-2) out)
   (with-slots (next
                src-offset
                dst-offset
                size)
       obj
-    (cl:format out "~i(~@<BUFFER-COPY-2-KHR~:@_:next ~s~:@_:src-offset ~s~:@_:dst-offset ~s~:@_:size ~s~:>)"
+    (cl:format out "~i(~@<BUFFER-COPY-2~:@_:next ~s~:@_:src-offset ~s~:@_:dst-offset ~s~:@_:size ~s~:>)"
                next 
                src-offset 
                dst-offset 
                size)))
 
-(defmethod print-object ((obj image-copy-2-khr) out)
+(defmethod print-object ((obj image-copy-2) out)
   (with-slots (next
                src-subresource
                src-offset
@@ -7458,7 +9664,7 @@
                dst-offset
                extent)
       obj
-    (cl:format out "~i(~@<IMAGE-COPY-2-KHR~:@_:next ~s~:@_:src-subresource ~s~:@_:src-offset ~s~:@_:dst-subresource ~s~:@_:dst-offset ~s~:@_:extent ~s~:>)"
+    (cl:format out "~i(~@<IMAGE-COPY-2~:@_:next ~s~:@_:src-subresource ~s~:@_:src-offset ~s~:@_:dst-subresource ~s~:@_:dst-offset ~s~:@_:extent ~s~:>)"
                next 
                src-subresource 
                src-offset 
@@ -7466,21 +9672,21 @@
                dst-offset 
                extent)))
 
-(defmethod print-object ((obj image-blit-2-khr) out)
+(defmethod print-object ((obj image-blit-2) out)
   (with-slots (next
                src-subresource
                src-offsets
                dst-subresource
                dst-offsets)
       obj
-    (cl:format out "~i(~@<IMAGE-BLIT-2-KHR~:@_:next ~s~:@_:src-subresource ~s~:@_:src-offsets ~s~:@_:dst-subresource ~s~:@_:dst-offsets ~s~:>)"
+    (cl:format out "~i(~@<IMAGE-BLIT-2~:@_:next ~s~:@_:src-subresource ~s~:@_:src-offsets ~s~:@_:dst-subresource ~s~:@_:dst-offsets ~s~:>)"
                next 
                src-subresource 
                src-offsets 
                dst-subresource 
                dst-offsets)))
 
-(defmethod print-object ((obj buffer-image-copy-2-khr) out)
+(defmethod print-object ((obj buffer-image-copy-2) out)
   (with-slots (next
                buffer-offset
                buffer-row-length
@@ -7489,7 +9695,7 @@
                image-offset
                image-extent)
       obj
-    (cl:format out "~i(~@<BUFFER-IMAGE-COPY-2-KHR~:@_:next ~s~:@_:buffer-offset ~s~:@_:buffer-row-length ~s~:@_:buffer-image-height ~s~:@_:image-subresource ~s~:@_:image-offset ~s~:@_:image-extent ~s~:>)"
+    (cl:format out "~i(~@<BUFFER-IMAGE-COPY-2~:@_:next ~s~:@_:buffer-offset ~s~:@_:buffer-row-length ~s~:@_:buffer-image-height ~s~:@_:image-subresource ~s~:@_:image-offset ~s~:@_:image-extent ~s~:>)"
                next 
                buffer-offset 
                buffer-row-length 
@@ -7498,7 +9704,7 @@
                image-offset 
                image-extent)))
 
-(defmethod print-object ((obj image-resolve-2-khr) out)
+(defmethod print-object ((obj image-resolve-2) out)
   (with-slots (next
                src-subresource
                src-offset
@@ -7506,7 +9712,7 @@
                dst-offset
                extent)
       obj
-    (cl:format out "~i(~@<IMAGE-RESOLVE-2-KHR~:@_:next ~s~:@_:src-subresource ~s~:@_:src-offset ~s~:@_:dst-subresource ~s~:@_:dst-offset ~s~:@_:extent ~s~:>)"
+    (cl:format out "~i(~@<IMAGE-RESOLVE-2~:@_:next ~s~:@_:src-subresource ~s~:@_:src-offset ~s~:@_:dst-subresource ~s~:@_:dst-offset ~s~:@_:extent ~s~:>)"
                next 
                src-subresource 
                src-offset 
@@ -7514,19 +9720,19 @@
                dst-offset 
                extent)))
 
-(defmethod print-object ((obj copy-buffer-info-2-khr) out)
+(defmethod print-object ((obj copy-buffer-info-2) out)
   (with-slots (next
                src-buffer
                dst-buffer
                regions)
       obj
-    (cl:format out "~i(~@<COPY-BUFFER-INFO-2-KHR~:@_:next ~s~:@_:src-buffer ~s~:@_:dst-buffer ~s~:@_:regions ~s~:>)"
+    (cl:format out "~i(~@<COPY-BUFFER-INFO-2~:@_:next ~s~:@_:src-buffer ~s~:@_:dst-buffer ~s~:@_:regions ~s~:>)"
                next 
                src-buffer 
                dst-buffer 
                regions)))
 
-(defmethod print-object ((obj copy-image-info-2-khr) out)
+(defmethod print-object ((obj copy-image-info-2) out)
   (with-slots (next
                src-image
                src-image-layout
@@ -7534,7 +9740,7 @@
                dst-image-layout
                regions)
       obj
-    (cl:format out "~i(~@<COPY-IMAGE-INFO-2-KHR~:@_:next ~s~:@_:src-image ~s~:@_:src-image-layout ~s~:@_:dst-image ~s~:@_:dst-image-layout ~s~:@_:regions ~s~:>)"
+    (cl:format out "~i(~@<COPY-IMAGE-INFO-2~:@_:next ~s~:@_:src-image ~s~:@_:src-image-layout ~s~:@_:dst-image ~s~:@_:dst-image-layout ~s~:@_:regions ~s~:>)"
                next 
                src-image 
                src-image-layout 
@@ -7542,7 +9748,7 @@
                dst-image-layout 
                regions)))
 
-(defmethod print-object ((obj blit-image-info-2-khr) out)
+(defmethod print-object ((obj blit-image-info-2) out)
   (with-slots (next
                src-image
                src-image-layout
@@ -7551,7 +9757,7 @@
                regions
                filter)
       obj
-    (cl:format out "~i(~@<BLIT-IMAGE-INFO-2-KHR~:@_:next ~s~:@_:src-image ~s~:@_:src-image-layout ~s~:@_:dst-image ~s~:@_:dst-image-layout ~s~:@_:regions ~s~:@_:filter ~s~:>)"
+    (cl:format out "~i(~@<BLIT-IMAGE-INFO-2~:@_:next ~s~:@_:src-image ~s~:@_:src-image-layout ~s~:@_:dst-image ~s~:@_:dst-image-layout ~s~:@_:regions ~s~:@_:filter ~s~:>)"
                next 
                src-image 
                src-image-layout 
@@ -7560,35 +9766,35 @@
                regions 
                filter)))
 
-(defmethod print-object ((obj copy-buffer-to-image-info-2-khr) out)
+(defmethod print-object ((obj copy-buffer-to-image-info-2) out)
   (with-slots (next
                src-buffer
                dst-image
                dst-image-layout
                regions)
       obj
-    (cl:format out "~i(~@<COPY-BUFFER-TO-IMAGE-INFO-2-KHR~:@_:next ~s~:@_:src-buffer ~s~:@_:dst-image ~s~:@_:dst-image-layout ~s~:@_:regions ~s~:>)"
+    (cl:format out "~i(~@<COPY-BUFFER-TO-IMAGE-INFO-2~:@_:next ~s~:@_:src-buffer ~s~:@_:dst-image ~s~:@_:dst-image-layout ~s~:@_:regions ~s~:>)"
                next 
                src-buffer 
                dst-image 
                dst-image-layout 
                regions)))
 
-(defmethod print-object ((obj copy-image-to-buffer-info-2-khr) out)
+(defmethod print-object ((obj copy-image-to-buffer-info-2) out)
   (with-slots (next
                src-image
                src-image-layout
                dst-buffer
                regions)
       obj
-    (cl:format out "~i(~@<COPY-IMAGE-TO-BUFFER-INFO-2-KHR~:@_:next ~s~:@_:src-image ~s~:@_:src-image-layout ~s~:@_:dst-buffer ~s~:@_:regions ~s~:>)"
+    (cl:format out "~i(~@<COPY-IMAGE-TO-BUFFER-INFO-2~:@_:next ~s~:@_:src-image ~s~:@_:src-image-layout ~s~:@_:dst-buffer ~s~:@_:regions ~s~:>)"
                next 
                src-image 
                src-image-layout 
                dst-buffer 
                regions)))
 
-(defmethod print-object ((obj resolve-image-info-2-khr) out)
+(defmethod print-object ((obj resolve-image-info-2) out)
   (with-slots (next
                src-image
                src-image-layout
@@ -7596,7 +9802,7 @@
                dst-image-layout
                regions)
       obj
-    (cl:format out "~i(~@<RESOLVE-IMAGE-INFO-2-KHR~:@_:next ~s~:@_:src-image ~s~:@_:src-image-layout ~s~:@_:dst-image ~s~:@_:dst-image-layout ~s~:@_:regions ~s~:>)"
+    (cl:format out "~i(~@<RESOLVE-IMAGE-INFO-2~:@_:next ~s~:@_:src-image ~s~:@_:src-image-layout ~s~:@_:dst-image ~s~:@_:dst-image-layout ~s~:@_:regions ~s~:>)"
                next 
                src-image 
                src-image-layout 
@@ -7696,11 +9902,11 @@
                sample-counts 
                fragment-size)))
 
-(defmethod print-object ((obj physical-device-shader-terminate-invocation-features-khr) out)
+(defmethod print-object ((obj physical-device-shader-terminate-invocation-features) out)
   (with-slots (next
                shader-terminate-invocation)
       obj
-    (cl:format out "~i(~@<PHYSICAL-DEVICE-SHADER-TERMINATE-INVOCATION-FEATURES-KHR~:@_:next ~s~:@_:shader-terminate-invocation ~s~:>)"
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SHADER-TERMINATE-INVOCATION-FEATURES~:@_:next ~s~:@_:shader-terminate-invocation ~s~:>)"
                next 
                shader-terminate-invocation)))
 
@@ -7748,27 +9954,401 @@
                update-scratch-size 
                build-scratch-size)))
 
-(defmethod print-object ((obj physical-device-mutable-descriptor-type-features-valve) out)
+(defmethod print-object ((obj physical-device-image-2d-view-of-3d-features-ext) out)
+  (with-slots (next
+               image-2d-view-of-3d
+               sampler-2d-view-of-3d)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-IMAGE-2D-VIEW-OF-3D-FEATURES-EXT~:@_:next ~s~:@_:image-2d-view-of-3d ~s~:@_:sampler-2d-view-of-3d ~s~:>)"
+               next 
+               image-2d-view-of-3d 
+               sampler-2d-view-of-3d)))
+
+(defmethod print-object ((obj physical-device-image-sliced-view-of-3d-features-ext) out)
+  (with-slots (next
+               image-sliced-view-of-3d)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-IMAGE-SLICED-VIEW-OF-3D-FEATURES-EXT~:@_:next ~s~:@_:image-sliced-view-of-3d ~s~:>)"
+               next 
+               image-sliced-view-of-3d)))
+
+(defmethod print-object ((obj physical-device-attachment-feedback-loop-dynamic-state-features-ext) out)
+  (with-slots (next
+               attachment-feedback-loop-dynamic-state)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-ATTACHMENT-FEEDBACK-LOOP-DYNAMIC-STATE-FEATURES-EXT~:@_:next ~s~:@_:attachment-feedback-loop-dynamic-state ~s~:>)"
+               next 
+               attachment-feedback-loop-dynamic-state)))
+
+(defmethod print-object ((obj physical-device-legacy-vertex-attributes-features-ext) out)
+  (with-slots (next
+               legacy-vertex-attributes)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-LEGACY-VERTEX-ATTRIBUTES-FEATURES-EXT~:@_:next ~s~:@_:legacy-vertex-attributes ~s~:>)"
+               next 
+               legacy-vertex-attributes)))
+
+(defmethod print-object ((obj physical-device-legacy-vertex-attributes-properties-ext) out)
+  (with-slots (next
+               native-unaligned-performance)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-LEGACY-VERTEX-ATTRIBUTES-PROPERTIES-EXT~:@_:next ~s~:@_:native-unaligned-performance ~s~:>)"
+               next 
+               native-unaligned-performance)))
+
+(defmethod print-object ((obj physical-device-mutable-descriptor-type-features-ext) out)
   (with-slots (next
                mutable-descriptor-type)
       obj
-    (cl:format out "~i(~@<PHYSICAL-DEVICE-MUTABLE-DESCRIPTOR-TYPE-FEATURES-VALVE~:@_:next ~s~:@_:mutable-descriptor-type ~s~:>)"
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-MUTABLE-DESCRIPTOR-TYPE-FEATURES-EXT~:@_:next ~s~:@_:mutable-descriptor-type ~s~:>)"
                next 
                mutable-descriptor-type)))
 
-(defmethod print-object ((obj mutable-descriptor-type-list-valve) out)
+(defmethod print-object ((obj mutable-descriptor-type-list-ext) out)
   (with-slots (descriptor-types)
       obj
-    (cl:format out "~i(~@<MUTABLE-DESCRIPTOR-TYPE-LIST-VALVE~:@_:descriptor-types ~s~:>)"
+    (cl:format out "~i(~@<MUTABLE-DESCRIPTOR-TYPE-LIST-EXT~:@_:descriptor-types ~s~:>)"
                descriptor-types)))
 
-(defmethod print-object ((obj mutable-descriptor-type-create-info-valve) out)
+(defmethod print-object ((obj mutable-descriptor-type-create-info-ext) out)
   (with-slots (next
                mutable-descriptor-type-lists)
       obj
-    (cl:format out "~i(~@<MUTABLE-DESCRIPTOR-TYPE-CREATE-INFO-VALVE~:@_:next ~s~:@_:mutable-descriptor-type-lists ~s~:>)"
+    (cl:format out "~i(~@<MUTABLE-DESCRIPTOR-TYPE-CREATE-INFO-EXT~:@_:next ~s~:@_:mutable-descriptor-type-lists ~s~:>)"
                next 
                mutable-descriptor-type-lists)))
+
+(defmethod print-object ((obj physical-device-depth-clip-control-features-ext) out)
+  (with-slots (next
+               depth-clip-control)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-DEPTH-CLIP-CONTROL-FEATURES-EXT~:@_:next ~s~:@_:depth-clip-control ~s~:>)"
+               next 
+               depth-clip-control)))
+
+(defmethod print-object ((obj physical-device-zero-initialize-device-memory-features-ext) out)
+  (with-slots (next
+               zero-initialize-device-memory)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-ZERO-INITIALIZE-DEVICE-MEMORY-FEATURES-EXT~:@_:next ~s~:@_:zero-initialize-device-memory ~s~:>)"
+               next 
+               zero-initialize-device-memory)))
+
+(defmethod print-object ((obj begin-custom-resolve-info-ext) out)
+  (with-slots (next)
+      obj
+    (cl:format out "~i(~@<BEGIN-CUSTOM-RESOLVE-INFO-EXT~:@_:next ~s~:>)"
+               next)))
+
+(defmethod print-object ((obj physical-device-custom-resolve-features-ext) out)
+  (with-slots (next
+               custom-resolve)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-CUSTOM-RESOLVE-FEATURES-EXT~:@_:next ~s~:@_:custom-resolve ~s~:>)"
+               next 
+               custom-resolve)))
+
+(defmethod print-object ((obj custom-resolve-create-info-ext) out)
+  (with-slots (next
+               custom-resolve
+               color-attachment-formats
+               depth-attachment-format
+               stencil-attachment-format)
+      obj
+    (cl:format out "~i(~@<CUSTOM-RESOLVE-CREATE-INFO-EXT~:@_:next ~s~:@_:custom-resolve ~s~:@_:color-attachment-formats ~s~:@_:depth-attachment-format ~s~:@_:stencil-attachment-format ~s~:>)"
+               next 
+               custom-resolve 
+               color-attachment-formats 
+               depth-attachment-format 
+               stencil-attachment-format)))
+
+(defmethod print-object ((obj physical-device-device-generated-commands-features-ext) out)
+  (with-slots (next
+               device-generated-commands
+               dynamic-generated-pipeline-layout)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-DEVICE-GENERATED-COMMANDS-FEATURES-EXT~:@_:next ~s~:@_:device-generated-commands ~s~:@_:dynamic-generated-pipeline-layout ~s~:>)"
+               next 
+               device-generated-commands 
+               dynamic-generated-pipeline-layout)))
+
+(defmethod print-object ((obj physical-device-device-generated-commands-properties-ext) out)
+  (with-slots (next
+               max-indirect-pipeline-count
+               max-indirect-shader-object-count
+               max-indirect-sequence-count
+               max-indirect-commands-token-count
+               max-indirect-commands-token-offset
+               max-indirect-commands-indirect-stride
+               supported-indirect-commands-input-modes
+               supported-indirect-commands-shader-stages
+               supported-indirect-commands-shader-stages-pipeline-binding
+               supported-indirect-commands-shader-stages-shader-binding
+               device-generated-commands-transform-feedback
+               device-generated-commands-multi-draw-indirect-count)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-DEVICE-GENERATED-COMMANDS-PROPERTIES-EXT~:@_:next ~s~:@_:max-indirect-pipeline-count ~s~:@_:max-indirect-shader-object-count ~s~:@_:max-indirect-sequence-count ~s~:@_:max-indirect-commands-token-count ~s~:@_:max-indirect-commands-token-offset ~s~:@_:max-indirect-commands-indirect-stride ~s~:@_:supported-indirect-commands-input-modes ~s~:@_:supported-indirect-commands-shader-stages ~s~:@_:supported-indirect-commands-shader-stages-pipeline-binding ~s~:@_:supported-indirect-commands-shader-stages-shader-binding ~s~:@_:device-generated-commands-transform-feedback ~s~:@_:device-generated-commands-multi-draw-indirect-count ~s~:>)"
+               next 
+               max-indirect-pipeline-count 
+               max-indirect-shader-object-count 
+               max-indirect-sequence-count 
+               max-indirect-commands-token-count 
+               max-indirect-commands-token-offset 
+               max-indirect-commands-indirect-stride 
+               supported-indirect-commands-input-modes 
+               supported-indirect-commands-shader-stages 
+               supported-indirect-commands-shader-stages-pipeline-binding 
+               supported-indirect-commands-shader-stages-shader-binding 
+               device-generated-commands-transform-feedback 
+               device-generated-commands-multi-draw-indirect-count)))
+
+(defmethod print-object ((obj generated-commands-pipeline-info-ext) out)
+  (with-slots (next
+               pipeline)
+      obj
+    (cl:format out "~i(~@<GENERATED-COMMANDS-PIPELINE-INFO-EXT~:@_:next ~s~:@_:pipeline ~s~:>)"
+               next 
+               pipeline)))
+
+(defmethod print-object ((obj generated-commands-shader-info-ext) out)
+  (with-slots (next
+               shaders)
+      obj
+    (cl:format out "~i(~@<GENERATED-COMMANDS-SHADER-INFO-EXT~:@_:next ~s~:@_:shaders ~s~:>)"
+               next 
+               shaders)))
+
+(defmethod print-object ((obj generated-commands-memory-requirements-info-ext) out)
+  (with-slots (next
+               indirect-execution-set
+               indirect-commands-layout
+               max-sequence-count
+               max-draw-count)
+      obj
+    (cl:format out "~i(~@<GENERATED-COMMANDS-MEMORY-REQUIREMENTS-INFO-EXT~:@_:next ~s~:@_:indirect-execution-set ~s~:@_:indirect-commands-layout ~s~:@_:max-sequence-count ~s~:@_:max-draw-count ~s~:>)"
+               next 
+               indirect-execution-set 
+               indirect-commands-layout 
+               max-sequence-count 
+               max-draw-count)))
+
+(defmethod print-object ((obj indirect-execution-set-pipeline-info-ext) out)
+  (with-slots (next
+               initial-pipeline
+               max-pipeline-count)
+      obj
+    (cl:format out "~i(~@<INDIRECT-EXECUTION-SET-PIPELINE-INFO-EXT~:@_:next ~s~:@_:initial-pipeline ~s~:@_:max-pipeline-count ~s~:>)"
+               next 
+               initial-pipeline 
+               max-pipeline-count)))
+
+(defmethod print-object ((obj indirect-execution-set-shader-layout-info-ext) out)
+  (with-slots (next
+               set-layouts)
+      obj
+    (cl:format out "~i(~@<INDIRECT-EXECUTION-SET-SHADER-LAYOUT-INFO-EXT~:@_:next ~s~:@_:set-layouts ~s~:>)"
+               next 
+               set-layouts)))
+
+(defmethod print-object ((obj indirect-execution-set-shader-info-ext) out)
+  (with-slots (next
+               initial-shaders
+               set-layout-infos
+               max-shader-count
+               push-constant-ranges)
+      obj
+    (cl:format out "~i(~@<INDIRECT-EXECUTION-SET-SHADER-INFO-EXT~:@_:next ~s~:@_:initial-shaders ~s~:@_:set-layout-infos ~s~:@_:max-shader-count ~s~:@_:push-constant-ranges ~s~:>)"
+               next 
+               initial-shaders 
+               set-layout-infos 
+               max-shader-count 
+               push-constant-ranges)))
+
+(defmethod print-object ((obj indirect-execution-set-info-ext) out)
+  (with-slots (pipeline-info
+               shader-info)
+      obj
+    (cl:format out "~i(~@<INDIRECT-EXECUTION-SET-INFO-EXT~:@_:pipeline-info ~s~:@_:shader-info ~s~:>)"
+               pipeline-info 
+               shader-info)))
+
+(defmethod print-object ((obj indirect-execution-set-create-info-ext) out)
+  (with-slots (next
+               type
+               info)
+      obj
+    (cl:format out "~i(~@<INDIRECT-EXECUTION-SET-CREATE-INFO-EXT~:@_:next ~s~:@_:type ~s~:@_:info ~s~:>)"
+               next 
+               type 
+               info)))
+
+(defmethod print-object ((obj generated-commands-info-ext) out)
+  (with-slots (next
+               shader-stages
+               indirect-execution-set
+               indirect-commands-layout
+               indirect-address
+               indirect-address-size
+               preprocess-address
+               preprocess-size
+               max-sequence-count
+               sequence-count-address
+               max-draw-count)
+      obj
+    (cl:format out "~i(~@<GENERATED-COMMANDS-INFO-EXT~:@_:next ~s~:@_:shader-stages ~s~:@_:indirect-execution-set ~s~:@_:indirect-commands-layout ~s~:@_:indirect-address ~s~:@_:indirect-address-size ~s~:@_:preprocess-address ~s~:@_:preprocess-size ~s~:@_:max-sequence-count ~s~:@_:sequence-count-address ~s~:@_:max-draw-count ~s~:>)"
+               next 
+               shader-stages 
+               indirect-execution-set 
+               indirect-commands-layout 
+               indirect-address 
+               indirect-address-size 
+               preprocess-address 
+               preprocess-size 
+               max-sequence-count 
+               sequence-count-address 
+               max-draw-count)))
+
+(defmethod print-object ((obj write-indirect-execution-set-pipeline-ext) out)
+  (with-slots (next
+               index
+               pipeline)
+      obj
+    (cl:format out "~i(~@<WRITE-INDIRECT-EXECUTION-SET-PIPELINE-EXT~:@_:next ~s~:@_:index ~s~:@_:pipeline ~s~:>)"
+               next 
+               index 
+               pipeline)))
+
+(defmethod print-object ((obj write-indirect-execution-set-shader-ext) out)
+  (with-slots (next
+               index
+               shader)
+      obj
+    (cl:format out "~i(~@<WRITE-INDIRECT-EXECUTION-SET-SHADER-EXT~:@_:next ~s~:@_:index ~s~:@_:shader ~s~:>)"
+               next 
+               index 
+               shader)))
+
+(defmethod print-object ((obj indirect-commands-layout-create-info-ext) out)
+  (with-slots (next
+               flags
+               shader-stages
+               indirect-stride
+               pipeline-layout
+               tokens)
+      obj
+    (cl:format out "~i(~@<INDIRECT-COMMANDS-LAYOUT-CREATE-INFO-EXT~:@_:next ~s~:@_:flags ~s~:@_:shader-stages ~s~:@_:indirect-stride ~s~:@_:pipeline-layout ~s~:@_:tokens ~s~:>)"
+               next 
+               flags 
+               shader-stages 
+               indirect-stride 
+               pipeline-layout 
+               tokens)))
+
+(defmethod print-object ((obj indirect-commands-layout-token-ext) out)
+  (with-slots (next
+               type
+               data
+               offset)
+      obj
+    (cl:format out "~i(~@<INDIRECT-COMMANDS-LAYOUT-TOKEN-EXT~:@_:next ~s~:@_:type ~s~:@_:data ~s~:@_:offset ~s~:>)"
+               next 
+               type 
+               data 
+               offset)))
+
+(defmethod print-object ((obj draw-indirect-count-indirect-command-ext) out)
+  (with-slots (buffer-address
+               stride
+               command-count)
+      obj
+    (cl:format out "~i(~@<DRAW-INDIRECT-COUNT-INDIRECT-COMMAND-EXT~:@_:buffer-address ~s~:@_:stride ~s~:@_:command-count ~s~:>)"
+               buffer-address 
+               stride 
+               command-count)))
+
+(defmethod print-object ((obj indirect-commands-vertex-buffer-token-ext) out)
+  (with-slots (vertex-binding-unit)
+      obj
+    (cl:format out "~i(~@<INDIRECT-COMMANDS-VERTEX-BUFFER-TOKEN-EXT~:@_:vertex-binding-unit ~s~:>)"
+               vertex-binding-unit)))
+
+(defmethod print-object ((obj bind-vertex-buffer-indirect-command-ext) out)
+  (with-slots (buffer-address
+               size
+               stride)
+      obj
+    (cl:format out "~i(~@<BIND-VERTEX-BUFFER-INDIRECT-COMMAND-EXT~:@_:buffer-address ~s~:@_:size ~s~:@_:stride ~s~:>)"
+               buffer-address 
+               size 
+               stride)))
+
+(defmethod print-object ((obj indirect-commands-index-buffer-token-ext) out)
+  (with-slots (mode)
+      obj
+    (cl:format out "~i(~@<INDIRECT-COMMANDS-INDEX-BUFFER-TOKEN-EXT~:@_:mode ~s~:>)"
+               mode)))
+
+(defmethod print-object ((obj bind-index-buffer-indirect-command-ext) out)
+  (with-slots (buffer-address
+               size
+               index-type)
+      obj
+    (cl:format out "~i(~@<BIND-INDEX-BUFFER-INDIRECT-COMMAND-EXT~:@_:buffer-address ~s~:@_:size ~s~:@_:index-type ~s~:>)"
+               buffer-address 
+               size 
+               index-type)))
+
+(defmethod print-object ((obj indirect-commands-push-constant-token-ext) out)
+  (with-slots (update-range)
+      obj
+    (cl:format out "~i(~@<INDIRECT-COMMANDS-PUSH-CONSTANT-TOKEN-EXT~:@_:update-range ~s~:>)"
+               update-range)))
+
+(defmethod print-object ((obj indirect-commands-execution-set-token-ext) out)
+  (with-slots (type
+               shader-stages)
+      obj
+    (cl:format out "~i(~@<INDIRECT-COMMANDS-EXECUTION-SET-TOKEN-EXT~:@_:type ~s~:@_:shader-stages ~s~:>)"
+               type 
+               shader-stages)))
+
+(defmethod print-object ((obj indirect-commands-token-data-ext) out)
+  (with-slots (push-constant
+               vertex-buffer
+               index-buffer
+               execution-set)
+      obj
+    (cl:format out "~i(~@<INDIRECT-COMMANDS-TOKEN-DATA-EXT~:@_:push-constant ~s~:@_:vertex-buffer ~s~:@_:index-buffer ~s~:@_:execution-set ~s~:>)"
+               push-constant 
+               vertex-buffer 
+               index-buffer 
+               execution-set)))
+
+(defmethod print-object ((obj pipeline-viewport-depth-clip-control-create-info-ext) out)
+  (with-slots (next
+               negative-one-to-one)
+      obj
+    (cl:format out "~i(~@<PIPELINE-VIEWPORT-DEPTH-CLIP-CONTROL-CREATE-INFO-EXT~:@_:next ~s~:@_:negative-one-to-one ~s~:>)"
+               next 
+               negative-one-to-one)))
+
+(defmethod print-object ((obj physical-device-depth-clamp-control-features-ext) out)
+  (with-slots (next
+               depth-clamp-control)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-DEPTH-CLAMP-CONTROL-FEATURES-EXT~:@_:next ~s~:@_:depth-clamp-control ~s~:>)"
+               next 
+               depth-clamp-control)))
+
+(defmethod print-object ((obj pipeline-viewport-depth-clamp-control-create-info-ext) out)
+  (with-slots (next
+               depth-clamp-mode
+               depth-clamp-range)
+      obj
+    (cl:format out "~i(~@<PIPELINE-VIEWPORT-DEPTH-CLAMP-CONTROL-CREATE-INFO-EXT~:@_:next ~s~:@_:depth-clamp-mode ~s~:@_:depth-clamp-range ~s~:>)"
+               next 
+               depth-clamp-mode 
+               depth-clamp-range)))
 
 (defmethod print-object ((obj physical-device-vertex-input-dynamic-state-features-ext) out)
   (with-slots (next
@@ -7785,6 +10365,14 @@
     (cl:format out "~i(~@<PHYSICAL-DEVICE-EXTERNAL-MEMORY-R-D-M-A-FEATURES-NV~:@_:next ~s~:@_:external-memory-r-d-m-a ~s~:>)"
                next 
                external-memory-r-d-m-a)))
+
+(defmethod print-object ((obj physical-device-shader-relaxed-extended-instruction-features-khr) out)
+  (with-slots (next
+               shader-relaxed-extended-instruction)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SHADER-RELAXED-EXTENDED-INSTRUCTION-FEATURES-KHR~:@_:next ~s~:@_:shader-relaxed-extended-instruction ~s~:>)"
+               next 
+               shader-relaxed-extended-instruction)))
 
 (defmethod print-object ((obj vertex-input-binding-description-2-ext) out)
   (with-slots (next
@@ -7830,21 +10418,21 @@
                next 
                color-write-enables)))
 
-(defmethod print-object ((obj memory-barrier-2-khr) out)
+(defmethod print-object ((obj memory-barrier-2) out)
   (with-slots (next
                src-stage-mask
                src-access-mask
                dst-stage-mask
                dst-access-mask)
       obj
-    (cl:format out "~i(~@<MEMORY-BARRIER-2-KHR~:@_:next ~s~:@_:src-stage-mask ~s~:@_:src-access-mask ~s~:@_:dst-stage-mask ~s~:@_:dst-access-mask ~s~:>)"
+    (cl:format out "~i(~@<MEMORY-BARRIER-2~:@_:next ~s~:@_:src-stage-mask ~s~:@_:src-access-mask ~s~:@_:dst-stage-mask ~s~:@_:dst-access-mask ~s~:>)"
                next 
                src-stage-mask 
                src-access-mask 
                dst-stage-mask 
                dst-access-mask)))
 
-(defmethod print-object ((obj image-memory-barrier-2-khr) out)
+(defmethod print-object ((obj image-memory-barrier-2) out)
   (with-slots (next
                src-stage-mask
                src-access-mask
@@ -7857,7 +10445,7 @@
                image
                subresource-range)
       obj
-    (cl:format out "~i(~@<IMAGE-MEMORY-BARRIER-2-KHR~:@_:next ~s~:@_:src-stage-mask ~s~:@_:src-access-mask ~s~:@_:dst-stage-mask ~s~:@_:dst-access-mask ~s~:@_:old-layout ~s~:@_:new-layout ~s~:@_:src-queue-family-index ~s~:@_:dst-queue-family-index ~s~:@_:image ~s~:@_:subresource-range ~s~:>)"
+    (cl:format out "~i(~@<IMAGE-MEMORY-BARRIER-2~:@_:next ~s~:@_:src-stage-mask ~s~:@_:src-access-mask ~s~:@_:dst-stage-mask ~s~:@_:dst-access-mask ~s~:@_:old-layout ~s~:@_:new-layout ~s~:@_:src-queue-family-index ~s~:@_:dst-queue-family-index ~s~:@_:image ~s~:@_:subresource-range ~s~:>)"
                next 
                src-stage-mask 
                src-access-mask 
@@ -7870,7 +10458,7 @@
                image 
                subresource-range)))
 
-(defmethod print-object ((obj buffer-memory-barrier-2-khr) out)
+(defmethod print-object ((obj buffer-memory-barrier-2) out)
   (with-slots (next
                src-stage-mask
                src-access-mask
@@ -7882,7 +10470,7 @@
                offset
                size)
       obj
-    (cl:format out "~i(~@<BUFFER-MEMORY-BARRIER-2-KHR~:@_:next ~s~:@_:src-stage-mask ~s~:@_:src-access-mask ~s~:@_:dst-stage-mask ~s~:@_:dst-access-mask ~s~:@_:src-queue-family-index ~s~:@_:dst-queue-family-index ~s~:@_:buffer ~s~:@_:offset ~s~:@_:size ~s~:>)"
+    (cl:format out "~i(~@<BUFFER-MEMORY-BARRIER-2~:@_:next ~s~:@_:src-stage-mask ~s~:@_:src-access-mask ~s~:@_:dst-stage-mask ~s~:@_:dst-access-mask ~s~:@_:src-queue-family-index ~s~:@_:dst-queue-family-index ~s~:@_:buffer ~s~:@_:offset ~s~:@_:size ~s~:>)"
                next 
                src-stage-mask 
                src-access-mask 
@@ -7894,52 +10482,62 @@
                offset 
                size)))
 
-(defmethod print-object ((obj dependency-info-khr) out)
+(defmethod print-object ((obj memory-barrier-access-flags-3-khr) out)
+  (with-slots (next
+               src-access-mask-3
+               dst-access-mask-3)
+      obj
+    (cl:format out "~i(~@<MEMORY-BARRIER-ACCESS-FLAGS-3-KHR~:@_:next ~s~:@_:src-access-mask-3 ~s~:@_:dst-access-mask-3 ~s~:>)"
+               next 
+               src-access-mask-3 
+               dst-access-mask-3)))
+
+(defmethod print-object ((obj dependency-info) out)
   (with-slots (next
                dependency-flags
                memory-barriers
                buffer-memory-barriers
                image-memory-barriers)
       obj
-    (cl:format out "~i(~@<DEPENDENCY-INFO-KHR~:@_:next ~s~:@_:dependency-flags ~s~:@_:memory-barriers ~s~:@_:buffer-memory-barriers ~s~:@_:image-memory-barriers ~s~:>)"
+    (cl:format out "~i(~@<DEPENDENCY-INFO~:@_:next ~s~:@_:dependency-flags ~s~:@_:memory-barriers ~s~:@_:buffer-memory-barriers ~s~:@_:image-memory-barriers ~s~:>)"
                next 
                dependency-flags 
                memory-barriers 
                buffer-memory-barriers 
                image-memory-barriers)))
 
-(defmethod print-object ((obj semaphore-submit-info-khr) out)
+(defmethod print-object ((obj semaphore-submit-info) out)
   (with-slots (next
                semaphore
                value
                stage-mask
                device-index)
       obj
-    (cl:format out "~i(~@<SEMAPHORE-SUBMIT-INFO-KHR~:@_:next ~s~:@_:semaphore ~s~:@_:value ~s~:@_:stage-mask ~s~:@_:device-index ~s~:>)"
+    (cl:format out "~i(~@<SEMAPHORE-SUBMIT-INFO~:@_:next ~s~:@_:semaphore ~s~:@_:value ~s~:@_:stage-mask ~s~:@_:device-index ~s~:>)"
                next 
                semaphore 
                value 
                stage-mask 
                device-index)))
 
-(defmethod print-object ((obj command-buffer-submit-info-khr) out)
+(defmethod print-object ((obj command-buffer-submit-info) out)
   (with-slots (next
                command-buffer
                device-mask)
       obj
-    (cl:format out "~i(~@<COMMAND-BUFFER-SUBMIT-INFO-KHR~:@_:next ~s~:@_:command-buffer ~s~:@_:device-mask ~s~:>)"
+    (cl:format out "~i(~@<COMMAND-BUFFER-SUBMIT-INFO~:@_:next ~s~:@_:command-buffer ~s~:@_:device-mask ~s~:>)"
                next 
                command-buffer 
                device-mask)))
 
-(defmethod print-object ((obj submit-info-2-khr) out)
+(defmethod print-object ((obj submit-info-2) out)
   (with-slots (next
                flags
                wait-semaphore-infos
                command-buffer-infos
                signal-semaphore-infos)
       obj
-    (cl:format out "~i(~@<SUBMIT-INFO-2-KHR~:@_:next ~s~:@_:flags ~s~:@_:wait-semaphore-infos ~s~:@_:command-buffer-infos ~s~:@_:signal-semaphore-infos ~s~:>)"
+    (cl:format out "~i(~@<SUBMIT-INFO-2~:@_:next ~s~:@_:flags ~s~:@_:wait-semaphore-infos ~s~:@_:command-buffer-infos ~s~:@_:signal-semaphore-infos ~s~:>)"
                next 
                flags 
                wait-semaphore-infos 
@@ -7964,58 +10562,524 @@
                stage 
                checkpoint-marker)))
 
-(defmethod print-object ((obj physical-device-synchronization-2-features-khr) out)
+(defmethod print-object ((obj physical-device-synchronization-2-features) out)
   (with-slots (next
                synchronization-2)
       obj
-    (cl:format out "~i(~@<PHYSICAL-DEVICE-SYNCHRONIZATION-2-FEATURES-KHR~:@_:next ~s~:@_:synchronization-2 ~s~:>)"
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SYNCHRONIZATION-2-FEATURES~:@_:next ~s~:@_:synchronization-2 ~s~:>)"
                next 
                synchronization-2)))
 
-(defmethod print-object ((obj video-queue-family-properties-2-khr) out)
+(defmethod print-object ((obj physical-device-unified-image-layouts-features-khr) out)
+  (with-slots (next
+               unified-image-layouts
+               unified-image-layouts-video)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-UNIFIED-IMAGE-LAYOUTS-FEATURES-KHR~:@_:next ~s~:@_:unified-image-layouts ~s~:@_:unified-image-layouts-video ~s~:>)"
+               next 
+               unified-image-layouts 
+               unified-image-layouts-video)))
+
+(defmethod print-object ((obj physical-device-host-image-copy-features) out)
+  (with-slots (next
+               host-image-copy)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-HOST-IMAGE-COPY-FEATURES~:@_:next ~s~:@_:host-image-copy ~s~:>)"
+               next 
+               host-image-copy)))
+
+(defmethod print-object ((obj physical-device-host-image-copy-properties) out)
+  (with-slots (next
+               copy-src-layouts
+               copy-dst-layouts
+               optimal-tiling-layout-uuid
+               identical-memory-type-requirements)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-HOST-IMAGE-COPY-PROPERTIES~:@_:next ~s~:@_:copy-src-layouts ~s~:@_:copy-dst-layouts ~s~:@_:optimal-tiling-layout-uuid ~s~:@_:identical-memory-type-requirements ~s~:>)"
+               next 
+               copy-src-layouts 
+               copy-dst-layouts 
+               optimal-tiling-layout-uuid 
+               identical-memory-type-requirements)))
+
+(defmethod print-object ((obj memory-to-image-copy) out)
+  (with-slots (next
+               host-pointer
+               memory-row-length
+               memory-image-height
+               image-subresource
+               image-offset
+               image-extent)
+      obj
+    (cl:format out "~i(~@<MEMORY-TO-IMAGE-COPY~:@_:next ~s~:@_:host-pointer ~s~:@_:memory-row-length ~s~:@_:memory-image-height ~s~:@_:image-subresource ~s~:@_:image-offset ~s~:@_:image-extent ~s~:>)"
+               next 
+               host-pointer 
+               memory-row-length 
+               memory-image-height 
+               image-subresource 
+               image-offset 
+               image-extent)))
+
+(defmethod print-object ((obj image-to-memory-copy) out)
+  (with-slots (next
+               host-pointer
+               memory-row-length
+               memory-image-height
+               image-subresource
+               image-offset
+               image-extent)
+      obj
+    (cl:format out "~i(~@<IMAGE-TO-MEMORY-COPY~:@_:next ~s~:@_:host-pointer ~s~:@_:memory-row-length ~s~:@_:memory-image-height ~s~:@_:image-subresource ~s~:@_:image-offset ~s~:@_:image-extent ~s~:>)"
+               next 
+               host-pointer 
+               memory-row-length 
+               memory-image-height 
+               image-subresource 
+               image-offset 
+               image-extent)))
+
+(defmethod print-object ((obj copy-memory-to-image-info) out)
+  (with-slots (next
+               flags
+               dst-image
+               dst-image-layout
+               regions)
+      obj
+    (cl:format out "~i(~@<COPY-MEMORY-TO-IMAGE-INFO~:@_:next ~s~:@_:flags ~s~:@_:dst-image ~s~:@_:dst-image-layout ~s~:@_:regions ~s~:>)"
+               next 
+               flags 
+               dst-image 
+               dst-image-layout 
+               regions)))
+
+(defmethod print-object ((obj copy-image-to-memory-info) out)
+  (with-slots (next
+               flags
+               src-image
+               src-image-layout
+               regions)
+      obj
+    (cl:format out "~i(~@<COPY-IMAGE-TO-MEMORY-INFO~:@_:next ~s~:@_:flags ~s~:@_:src-image ~s~:@_:src-image-layout ~s~:@_:regions ~s~:>)"
+               next 
+               flags 
+               src-image 
+               src-image-layout 
+               regions)))
+
+(defmethod print-object ((obj copy-image-to-image-info) out)
+  (with-slots (next
+               flags
+               src-image
+               src-image-layout
+               dst-image
+               dst-image-layout
+               regions)
+      obj
+    (cl:format out "~i(~@<COPY-IMAGE-TO-IMAGE-INFO~:@_:next ~s~:@_:flags ~s~:@_:src-image ~s~:@_:src-image-layout ~s~:@_:dst-image ~s~:@_:dst-image-layout ~s~:@_:regions ~s~:>)"
+               next 
+               flags 
+               src-image 
+               src-image-layout 
+               dst-image 
+               dst-image-layout 
+               regions)))
+
+(defmethod print-object ((obj host-image-layout-transition-info) out)
+  (with-slots (next
+               image
+               old-layout
+               new-layout
+               subresource-range)
+      obj
+    (cl:format out "~i(~@<HOST-IMAGE-LAYOUT-TRANSITION-INFO~:@_:next ~s~:@_:image ~s~:@_:old-layout ~s~:@_:new-layout ~s~:@_:subresource-range ~s~:>)"
+               next 
+               image 
+               old-layout 
+               new-layout 
+               subresource-range)))
+
+(defmethod print-object ((obj subresource-host-memcpy-size) out)
+  (with-slots (next
+               size)
+      obj
+    (cl:format out "~i(~@<SUBRESOURCE-HOST-MEMCPY-SIZE~:@_:next ~s~:@_:size ~s~:>)"
+               next 
+               size)))
+
+(defmethod print-object ((obj host-image-copy-device-performance-query) out)
+  (with-slots (next
+               optimal-device-access
+               identical-memory-layout)
+      obj
+    (cl:format out "~i(~@<HOST-IMAGE-COPY-DEVICE-PERFORMANCE-QUERY~:@_:next ~s~:@_:optimal-device-access ~s~:@_:identical-memory-layout ~s~:>)"
+               next 
+               optimal-device-access 
+               identical-memory-layout)))
+
+(defmethod print-object ((obj physical-device-vulkan-s-c-1-0-properties) out)
+  (with-slots (next
+               device-no-dynamic-host-allocations
+               device-destroy-frees-memory
+               command-pool-multiple-command-buffers-recording
+               command-pool-reset-command-buffer
+               command-buffer-simultaneous-use
+               secondary-command-buffer-null-or-imageless-framebuffer
+               recycle-descriptor-set-memory
+               recycle-pipeline-memory
+               max-render-pass-subpasses
+               max-render-pass-dependencies
+               max-subpass-input-attachments
+               max-subpass-preserve-attachments
+               max-framebuffer-attachments
+               max-descriptor-set-layout-bindings
+               max-query-fault-count
+               max-callback-fault-count
+               max-command-pool-command-buffers
+               max-command-buffer-size)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-VULKAN-S-C-1-0-PROPERTIES~:@_:next ~s~:@_:device-no-dynamic-host-allocations ~s~:@_:device-destroy-frees-memory ~s~:@_:command-pool-multiple-command-buffers-recording ~s~:@_:command-pool-reset-command-buffer ~s~:@_:command-buffer-simultaneous-use ~s~:@_:secondary-command-buffer-null-or-imageless-framebuffer ~s~:@_:recycle-descriptor-set-memory ~s~:@_:recycle-pipeline-memory ~s~:@_:max-render-pass-subpasses ~s~:@_:max-render-pass-dependencies ~s~:@_:max-subpass-input-attachments ~s~:@_:max-subpass-preserve-attachments ~s~:@_:max-framebuffer-attachments ~s~:@_:max-descriptor-set-layout-bindings ~s~:@_:max-query-fault-count ~s~:@_:max-callback-fault-count ~s~:@_:max-command-pool-command-buffers ~s~:@_:max-command-buffer-size ~s~:>)"
+               next 
+               device-no-dynamic-host-allocations 
+               device-destroy-frees-memory 
+               command-pool-multiple-command-buffers-recording 
+               command-pool-reset-command-buffer 
+               command-buffer-simultaneous-use 
+               secondary-command-buffer-null-or-imageless-framebuffer 
+               recycle-descriptor-set-memory 
+               recycle-pipeline-memory 
+               max-render-pass-subpasses 
+               max-render-pass-dependencies 
+               max-subpass-input-attachments 
+               max-subpass-preserve-attachments 
+               max-framebuffer-attachments 
+               max-descriptor-set-layout-bindings 
+               max-query-fault-count 
+               max-callback-fault-count 
+               max-command-pool-command-buffers 
+               max-command-buffer-size)))
+
+(defmethod print-object ((obj pipeline-pool-size) out)
+  (with-slots (next
+               pool-entry-size
+               pool-entry-count)
+      obj
+    (cl:format out "~i(~@<PIPELINE-POOL-SIZE~:@_:next ~s~:@_:pool-entry-size ~s~:@_:pool-entry-count ~s~:>)"
+               next 
+               pool-entry-size 
+               pool-entry-count)))
+
+(defmethod print-object ((obj device-object-reservation-create-info) out)
+  (with-slots (next
+               pipeline-cache-create-infos
+               pipeline-pool-sizes
+               semaphore-request-count
+               command-buffer-request-count
+               fence-request-count
+               device-memory-request-count
+               buffer-request-count
+               image-request-count
+               event-request-count
+               query-pool-request-count
+               buffer-view-request-count
+               image-view-request-count
+               layered-image-view-request-count
+               pipeline-cache-request-count
+               pipeline-layout-request-count
+               render-pass-request-count
+               graphics-pipeline-request-count
+               compute-pipeline-request-count
+               descriptor-set-layout-request-count
+               sampler-request-count
+               descriptor-pool-request-count
+               descriptor-set-request-count
+               framebuffer-request-count
+               command-pool-request-count
+               sampler-ycbcr-conversion-request-count
+               surface-request-count
+               swapchain-request-count
+               display-mode-request-count
+               subpass-description-request-count
+               attachment-description-request-count
+               descriptor-set-layout-binding-request-count
+               descriptor-set-layout-binding-limit
+               max-image-view-mip-levels
+               max-image-view-array-layers
+               max-layered-image-view-mip-levels
+               max-occlusion-queries-per-pool
+               max-pipeline-statistics-queries-per-pool
+               max-timestamp-queries-per-pool
+               max-immutable-samplers-per-descriptor-set-layout)
+      obj
+    (cl:format out "~i(~@<DEVICE-OBJECT-RESERVATION-CREATE-INFO~:@_:next ~s~:@_:pipeline-cache-create-infos ~s~:@_:pipeline-pool-sizes ~s~:@_:semaphore-request-count ~s~:@_:command-buffer-request-count ~s~:@_:fence-request-count ~s~:@_:device-memory-request-count ~s~:@_:buffer-request-count ~s~:@_:image-request-count ~s~:@_:event-request-count ~s~:@_:query-pool-request-count ~s~:@_:buffer-view-request-count ~s~:@_:image-view-request-count ~s~:@_:layered-image-view-request-count ~s~:@_:pipeline-cache-request-count ~s~:@_:pipeline-layout-request-count ~s~:@_:render-pass-request-count ~s~:@_:graphics-pipeline-request-count ~s~:@_:compute-pipeline-request-count ~s~:@_:descriptor-set-layout-request-count ~s~:@_:sampler-request-count ~s~:@_:descriptor-pool-request-count ~s~:@_:descriptor-set-request-count ~s~:@_:framebuffer-request-count ~s~:@_:command-pool-request-count ~s~:@_:sampler-ycbcr-conversion-request-count ~s~:@_:surface-request-count ~s~:@_:swapchain-request-count ~s~:@_:display-mode-request-count ~s~:@_:subpass-description-request-count ~s~:@_:attachment-description-request-count ~s~:@_:descriptor-set-layout-binding-request-count ~s~:@_:descriptor-set-layout-binding-limit ~s~:@_:max-image-view-mip-levels ~s~:@_:max-image-view-array-layers ~s~:@_:max-layered-image-view-mip-levels ~s~:@_:max-occlusion-queries-per-pool ~s~:@_:max-pipeline-statistics-queries-per-pool ~s~:@_:max-timestamp-queries-per-pool ~s~:@_:max-immutable-samplers-per-descriptor-set-layout ~s~:>)"
+               next 
+               pipeline-cache-create-infos 
+               pipeline-pool-sizes 
+               semaphore-request-count 
+               command-buffer-request-count 
+               fence-request-count 
+               device-memory-request-count 
+               buffer-request-count 
+               image-request-count 
+               event-request-count 
+               query-pool-request-count 
+               buffer-view-request-count 
+               image-view-request-count 
+               layered-image-view-request-count 
+               pipeline-cache-request-count 
+               pipeline-layout-request-count 
+               render-pass-request-count 
+               graphics-pipeline-request-count 
+               compute-pipeline-request-count 
+               descriptor-set-layout-request-count 
+               sampler-request-count 
+               descriptor-pool-request-count 
+               descriptor-set-request-count 
+               framebuffer-request-count 
+               command-pool-request-count 
+               sampler-ycbcr-conversion-request-count 
+               surface-request-count 
+               swapchain-request-count 
+               display-mode-request-count 
+               subpass-description-request-count 
+               attachment-description-request-count 
+               descriptor-set-layout-binding-request-count 
+               descriptor-set-layout-binding-limit 
+               max-image-view-mip-levels 
+               max-image-view-array-layers 
+               max-layered-image-view-mip-levels 
+               max-occlusion-queries-per-pool 
+               max-pipeline-statistics-queries-per-pool 
+               max-timestamp-queries-per-pool 
+               max-immutable-samplers-per-descriptor-set-layout)))
+
+(defmethod print-object ((obj command-pool-memory-reservation-create-info) out)
+  (with-slots (next
+               command-pool-reserved-size
+               command-pool-max-command-buffers)
+      obj
+    (cl:format out "~i(~@<COMMAND-POOL-MEMORY-RESERVATION-CREATE-INFO~:@_:next ~s~:@_:command-pool-reserved-size ~s~:@_:command-pool-max-command-buffers ~s~:>)"
+               next 
+               command-pool-reserved-size 
+               command-pool-max-command-buffers)))
+
+(defmethod print-object ((obj command-pool-memory-consumption) out)
+  (with-slots (next
+               command-pool-allocated
+               command-pool-reserved-size
+               command-buffer-allocated)
+      obj
+    (cl:format out "~i(~@<COMMAND-POOL-MEMORY-CONSUMPTION~:@_:next ~s~:@_:command-pool-allocated ~s~:@_:command-pool-reserved-size ~s~:@_:command-buffer-allocated ~s~:>)"
+               next 
+               command-pool-allocated 
+               command-pool-reserved-size 
+               command-buffer-allocated)))
+
+(defmethod print-object ((obj physical-device-vulkan-s-c-1-0-features) out)
+  (with-slots (next
+               shader-atomic-instructions)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-VULKAN-S-C-1-0-FEATURES~:@_:next ~s~:@_:shader-atomic-instructions ~s~:>)"
+               next 
+               shader-atomic-instructions)))
+
+(defmethod print-object ((obj physical-device-primitives-generated-query-features-ext) out)
+  (with-slots (next
+               primitives-generated-query
+               primitives-generated-query-with-rasterizer-discard
+               primitives-generated-query-with-non-zero-streams)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-PRIMITIVES-GENERATED-QUERY-FEATURES-EXT~:@_:next ~s~:@_:primitives-generated-query ~s~:@_:primitives-generated-query-with-rasterizer-discard ~s~:@_:primitives-generated-query-with-non-zero-streams ~s~:>)"
+               next 
+               primitives-generated-query 
+               primitives-generated-query-with-rasterizer-discard 
+               primitives-generated-query-with-non-zero-streams)))
+
+(defmethod print-object ((obj physical-device-legacy-dithering-features-ext) out)
+  (with-slots (next
+               legacy-dithering)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-LEGACY-DITHERING-FEATURES-EXT~:@_:next ~s~:@_:legacy-dithering ~s~:>)"
+               next 
+               legacy-dithering)))
+
+(defmethod print-object ((obj physical-device-multisampled-render-to-single-sampled-features-ext) out)
+  (with-slots (next
+               multisampled-render-to-single-sampled)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-MULTISAMPLED-RENDER-TO-SINGLE-SAMPLED-FEATURES-EXT~:@_:next ~s~:@_:multisampled-render-to-single-sampled ~s~:>)"
+               next 
+               multisampled-render-to-single-sampled)))
+
+(defmethod print-object ((obj surface-capabilities-present-id-2-khr) out)
+  (with-slots (next
+               present-id-2-supported)
+      obj
+    (cl:format out "~i(~@<SURFACE-CAPABILITIES-PRESENT-ID-2-KHR~:@_:next ~s~:@_:present-id-2-supported ~s~:>)"
+               next 
+               present-id-2-supported)))
+
+(defmethod print-object ((obj surface-capabilities-present-wait-2-khr) out)
+  (with-slots (next
+               present-wait-2-supported)
+      obj
+    (cl:format out "~i(~@<SURFACE-CAPABILITIES-PRESENT-WAIT-2-KHR~:@_:next ~s~:@_:present-wait-2-supported ~s~:>)"
+               next 
+               present-wait-2-supported)))
+
+(defmethod print-object ((obj subpass-resolve-performance-query-ext) out)
+  (with-slots (next
+               optimal)
+      obj
+    (cl:format out "~i(~@<SUBPASS-RESOLVE-PERFORMANCE-QUERY-EXT~:@_:next ~s~:@_:optimal ~s~:>)"
+               next 
+               optimal)))
+
+(defmethod print-object ((obj multisampled-render-to-single-sampled-info-ext) out)
+  (with-slots (next
+               multisampled-render-to-single-sampled-enable
+               rasterization-samples)
+      obj
+    (cl:format out "~i(~@<MULTISAMPLED-RENDER-TO-SINGLE-SAMPLED-INFO-EXT~:@_:next ~s~:@_:multisampled-render-to-single-sampled-enable ~s~:@_:rasterization-samples ~s~:>)"
+               next 
+               multisampled-render-to-single-sampled-enable 
+               rasterization-samples)))
+
+(defmethod print-object ((obj physical-device-multisampled-render-to-swapchain-features-ext) out)
+  (with-slots (next
+               multisampled-render-to-swapchain)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-MULTISAMPLED-RENDER-TO-SWAPCHAIN-FEATURES-EXT~:@_:next ~s~:@_:multisampled-render-to-swapchain ~s~:>)"
+               next 
+               multisampled-render-to-swapchain)))
+
+(defmethod print-object ((obj physical-device-pipeline-protected-access-features) out)
+  (with-slots (next
+               pipeline-protected-access)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-PIPELINE-PROTECTED-ACCESS-FEATURES~:@_:next ~s~:@_:pipeline-protected-access ~s~:>)"
+               next 
+               pipeline-protected-access)))
+
+(defmethod print-object ((obj queue-family-video-properties-khr) out)
   (with-slots (next
                video-codec-operations)
       obj
-    (cl:format out "~i(~@<VIDEO-QUEUE-FAMILY-PROPERTIES-2-KHR~:@_:next ~s~:@_:video-codec-operations ~s~:>)"
+    (cl:format out "~i(~@<QUEUE-FAMILY-VIDEO-PROPERTIES-KHR~:@_:next ~s~:@_:video-codec-operations ~s~:>)"
                next 
                video-codec-operations)))
 
-(defmethod print-object ((obj video-profiles-khr) out)
+(defmethod print-object ((obj queue-family-query-result-status-properties-khr) out)
   (with-slots (next
-               profile-count
+               query-result-status-support)
+      obj
+    (cl:format out "~i(~@<QUEUE-FAMILY-QUERY-RESULT-STATUS-PROPERTIES-KHR~:@_:next ~s~:@_:query-result-status-support ~s~:>)"
+               next 
+               query-result-status-support)))
+
+(defmethod print-object ((obj video-profile-list-info-khr) out)
+  (with-slots (next
                profiles)
       obj
-    (cl:format out "~i(~@<VIDEO-PROFILES-KHR~:@_:next ~s~:@_:profile-count ~s~:@_:profiles ~s~:>)"
+    (cl:format out "~i(~@<VIDEO-PROFILE-LIST-INFO-KHR~:@_:next ~s~:@_:profiles ~s~:>)"
                next 
-               profile-count 
                profiles)))
 
 (defmethod print-object ((obj physical-device-video-format-info-khr) out)
   (with-slots (next
-               image-usage
-               video-profiles)
+               image-usage)
       obj
-    (cl:format out "~i(~@<PHYSICAL-DEVICE-VIDEO-FORMAT-INFO-KHR~:@_:next ~s~:@_:image-usage ~s~:@_:video-profiles ~s~:>)"
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-VIDEO-FORMAT-INFO-KHR~:@_:next ~s~:@_:image-usage ~s~:>)"
                next 
-               image-usage 
-               video-profiles)))
+               image-usage)))
 
 (defmethod print-object ((obj video-format-properties-khr) out)
   (with-slots (next
-               format)
+               format
+               component-mapping
+               image-create-flags
+               image-type
+               image-tiling
+               image-usage-flags)
       obj
-    (cl:format out "~i(~@<VIDEO-FORMAT-PROPERTIES-KHR~:@_:next ~s~:@_:format ~s~:>)"
+    (cl:format out "~i(~@<VIDEO-FORMAT-PROPERTIES-KHR~:@_:next ~s~:@_:format ~s~:@_:component-mapping ~s~:@_:image-create-flags ~s~:@_:image-type ~s~:@_:image-tiling ~s~:@_:image-usage-flags ~s~:>)"
                next 
-               format)))
+               format 
+               component-mapping 
+               image-create-flags 
+               image-type 
+               image-tiling 
+               image-usage-flags)))
 
-(defmethod print-object ((obj video-profile-khr) out)
+(defmethod print-object ((obj video-encode-quantization-map-capabilities-khr) out)
+  (with-slots (next
+               max-quantization-map-extent)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-QUANTIZATION-MAP-CAPABILITIES-KHR~:@_:next ~s~:@_:max-quantization-map-extent ~s~:>)"
+               next 
+               max-quantization-map-extent)))
+
+(defmethod print-object ((obj video-encode-h264-quantization-map-capabilities-khr) out)
+  (with-slots (next
+               min-qp-delta
+               max-qp-delta)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-H264-QUANTIZATION-MAP-CAPABILITIES-KHR~:@_:next ~s~:@_:min-qp-delta ~s~:@_:max-qp-delta ~s~:>)"
+               next 
+               min-qp-delta 
+               max-qp-delta)))
+
+(defmethod print-object ((obj video-encode-h265-quantization-map-capabilities-khr) out)
+  (with-slots (next
+               min-qp-delta
+               max-qp-delta)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-H265-QUANTIZATION-MAP-CAPABILITIES-KHR~:@_:next ~s~:@_:min-qp-delta ~s~:@_:max-qp-delta ~s~:>)"
+               next 
+               min-qp-delta 
+               max-qp-delta)))
+
+(defmethod print-object ((obj video-encode-a-v-1-quantization-map-capabilities-khr) out)
+  (with-slots (next
+               min-q-index-delta
+               max-q-index-delta)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-A-V-1-QUANTIZATION-MAP-CAPABILITIES-KHR~:@_:next ~s~:@_:min-q-index-delta ~s~:@_:max-q-index-delta ~s~:>)"
+               next 
+               min-q-index-delta 
+               max-q-index-delta)))
+
+(defmethod print-object ((obj video-format-quantization-map-properties-khr) out)
+  (with-slots (next
+               quantization-map-texel-size)
+      obj
+    (cl:format out "~i(~@<VIDEO-FORMAT-QUANTIZATION-MAP-PROPERTIES-KHR~:@_:next ~s~:@_:quantization-map-texel-size ~s~:>)"
+               next 
+               quantization-map-texel-size)))
+
+(defmethod print-object ((obj video-format-h265-quantization-map-properties-khr) out)
+  (with-slots (next
+               compatible-ctb-sizes)
+      obj
+    (cl:format out "~i(~@<VIDEO-FORMAT-H265-QUANTIZATION-MAP-PROPERTIES-KHR~:@_:next ~s~:@_:compatible-ctb-sizes ~s~:>)"
+               next 
+               compatible-ctb-sizes)))
+
+(defmethod print-object ((obj video-format-a-v-1-quantization-map-properties-khr) out)
+  (with-slots (next
+               compatible-superblock-sizes)
+      obj
+    (cl:format out "~i(~@<VIDEO-FORMAT-A-V-1-QUANTIZATION-MAP-PROPERTIES-KHR~:@_:next ~s~:@_:compatible-superblock-sizes ~s~:>)"
+               next 
+               compatible-superblock-sizes)))
+
+(defmethod print-object ((obj video-profile-info-khr) out)
   (with-slots (next
                video-codec-operation
                chroma-subsampling
                luma-bit-depth
                chroma-bit-depth)
       obj
-    (cl:format out "~i(~@<VIDEO-PROFILE-KHR~:@_:next ~s~:@_:video-codec-operation ~s~:@_:chroma-subsampling ~s~:@_:luma-bit-depth ~s~:@_:chroma-bit-depth ~s~:>)"
+    (cl:format out "~i(~@<VIDEO-PROFILE-INFO-KHR~:@_:next ~s~:@_:video-codec-operation ~s~:@_:chroma-subsampling ~s~:@_:luma-bit-depth ~s~:@_:chroma-bit-depth ~s~:>)"
                next 
                video-codec-operation 
                chroma-subsampling 
@@ -8024,79 +11088,95 @@
 
 (defmethod print-object ((obj video-capabilities-khr) out)
   (with-slots (next
-               capability-flags
+               flags
                min-bitstream-buffer-offset-alignment
                min-bitstream-buffer-size-alignment
-               video-picture-extent-granularity
-               min-extent
-               max-extent
-               max-reference-pictures-slots-count
-               max-reference-pictures-active-count)
+               picture-access-granularity
+               min-coded-extent
+               max-coded-extent
+               max-dpb-slots
+               max-active-reference-pictures
+               std-header-version)
       obj
-    (cl:format out "~i(~@<VIDEO-CAPABILITIES-KHR~:@_:next ~s~:@_:capability-flags ~s~:@_:min-bitstream-buffer-offset-alignment ~s~:@_:min-bitstream-buffer-size-alignment ~s~:@_:video-picture-extent-granularity ~s~:@_:min-extent ~s~:@_:max-extent ~s~:@_:max-reference-pictures-slots-count ~s~:@_:max-reference-pictures-active-count ~s~:>)"
+    (cl:format out "~i(~@<VIDEO-CAPABILITIES-KHR~:@_:next ~s~:@_:flags ~s~:@_:min-bitstream-buffer-offset-alignment ~s~:@_:min-bitstream-buffer-size-alignment ~s~:@_:picture-access-granularity ~s~:@_:min-coded-extent ~s~:@_:max-coded-extent ~s~:@_:max-dpb-slots ~s~:@_:max-active-reference-pictures ~s~:@_:std-header-version ~s~:>)"
                next 
-               capability-flags 
+               flags 
                min-bitstream-buffer-offset-alignment 
                min-bitstream-buffer-size-alignment 
-               video-picture-extent-granularity 
-               min-extent 
-               max-extent 
-               max-reference-pictures-slots-count 
-               max-reference-pictures-active-count)))
+               picture-access-granularity 
+               min-coded-extent 
+               max-coded-extent 
+               max-dpb-slots 
+               max-active-reference-pictures 
+               std-header-version)))
 
-(defmethod print-object ((obj video-get-memory-properties-khr) out)
+(defmethod print-object ((obj video-session-memory-requirements-khr) out)
   (with-slots (next
                memory-bind-index
                memory-requirements)
       obj
-    (cl:format out "~i(~@<VIDEO-GET-MEMORY-PROPERTIES-KHR~:@_:next ~s~:@_:memory-bind-index ~s~:@_:memory-requirements ~s~:>)"
+    (cl:format out "~i(~@<VIDEO-SESSION-MEMORY-REQUIREMENTS-KHR~:@_:next ~s~:@_:memory-bind-index ~s~:@_:memory-requirements ~s~:>)"
                next 
                memory-bind-index 
                memory-requirements)))
 
-(defmethod print-object ((obj video-bind-memory-khr) out)
+(defmethod print-object ((obj bind-video-session-memory-info-khr) out)
   (with-slots (next
                memory-bind-index
                memory
                memory-offset
                memory-size)
       obj
-    (cl:format out "~i(~@<VIDEO-BIND-MEMORY-KHR~:@_:next ~s~:@_:memory-bind-index ~s~:@_:memory ~s~:@_:memory-offset ~s~:@_:memory-size ~s~:>)"
+    (cl:format out "~i(~@<BIND-VIDEO-SESSION-MEMORY-INFO-KHR~:@_:next ~s~:@_:memory-bind-index ~s~:@_:memory ~s~:@_:memory-offset ~s~:@_:memory-size ~s~:>)"
                next 
                memory-bind-index 
                memory 
                memory-offset 
                memory-size)))
 
-(defmethod print-object ((obj video-picture-resource-khr) out)
+(defmethod print-object ((obj video-picture-resource-info-khr) out)
   (with-slots (next
                coded-offset
                coded-extent
                base-array-layer
                image-view-binding)
       obj
-    (cl:format out "~i(~@<VIDEO-PICTURE-RESOURCE-KHR~:@_:next ~s~:@_:coded-offset ~s~:@_:coded-extent ~s~:@_:base-array-layer ~s~:@_:image-view-binding ~s~:>)"
+    (cl:format out "~i(~@<VIDEO-PICTURE-RESOURCE-INFO-KHR~:@_:next ~s~:@_:coded-offset ~s~:@_:coded-extent ~s~:@_:base-array-layer ~s~:@_:image-view-binding ~s~:>)"
                next 
                coded-offset 
                coded-extent 
                base-array-layer 
                image-view-binding)))
 
-(defmethod print-object ((obj video-reference-slot-khr) out)
+(defmethod print-object ((obj video-reference-slot-info-khr) out)
   (with-slots (next
                slot-index
                picture-resource)
       obj
-    (cl:format out "~i(~@<VIDEO-REFERENCE-SLOT-KHR~:@_:next ~s~:@_:slot-index ~s~:@_:picture-resource ~s~:>)"
+    (cl:format out "~i(~@<VIDEO-REFERENCE-SLOT-INFO-KHR~:@_:next ~s~:@_:slot-index ~s~:@_:picture-resource ~s~:>)"
                next 
                slot-index 
                picture-resource)))
 
+(defmethod print-object ((obj video-decode-capabilities-khr) out)
+  (with-slots (next
+               flags)
+      obj
+    (cl:format out "~i(~@<VIDEO-DECODE-CAPABILITIES-KHR~:@_:next ~s~:@_:flags ~s~:>)"
+               next 
+               flags)))
+
+(defmethod print-object ((obj video-decode-usage-info-khr) out)
+  (with-slots (next
+               video-usage-hints)
+      obj
+    (cl:format out "~i(~@<VIDEO-DECODE-USAGE-INFO-KHR~:@_:next ~s~:@_:video-usage-hints ~s~:>)"
+               next 
+               video-usage-hints)))
+
 (defmethod print-object ((obj video-decode-info-khr) out)
   (with-slots (next
                flags
-               coded-offset
-               coded-extent
                src-buffer
                src-buffer-offset
                src-buffer-range
@@ -8104,11 +11184,9 @@
                setup-reference-slot
                reference-slots)
       obj
-    (cl:format out "~i(~@<VIDEO-DECODE-INFO-KHR~:@_:next ~s~:@_:flags ~s~:@_:coded-offset ~s~:@_:coded-extent ~s~:@_:src-buffer ~s~:@_:src-buffer-offset ~s~:@_:src-buffer-range ~s~:@_:dst-picture-resource ~s~:@_:setup-reference-slot ~s~:@_:reference-slots ~s~:>)"
+    (cl:format out "~i(~@<VIDEO-DECODE-INFO-KHR~:@_:next ~s~:@_:flags ~s~:@_:src-buffer ~s~:@_:src-buffer-offset ~s~:@_:src-buffer-range ~s~:@_:dst-picture-resource ~s~:@_:setup-reference-slot ~s~:@_:reference-slots ~s~:>)"
                next 
                flags 
-               coded-offset 
-               coded-extent 
                src-buffer 
                src-buffer-offset 
                src-buffer-range 
@@ -8116,151 +11194,271 @@
                setup-reference-slot 
                reference-slots)))
 
-(defmethod print-object ((obj video-decode-h264-profile-ext) out)
+(defmethod print-object ((obj physical-device-video-maintenance-1-features-khr) out)
+  (with-slots (next
+               video-maintenance-1)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-VIDEO-MAINTENANCE-1-FEATURES-KHR~:@_:next ~s~:@_:video-maintenance-1 ~s~:>)"
+               next 
+               video-maintenance-1)))
+
+(defmethod print-object ((obj physical-device-video-maintenance-2-features-khr) out)
+  (with-slots (next
+               video-maintenance-2)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-VIDEO-MAINTENANCE-2-FEATURES-KHR~:@_:next ~s~:@_:video-maintenance-2 ~s~:>)"
+               next 
+               video-maintenance-2)))
+
+(defmethod print-object ((obj video-inline-query-info-khr) out)
+  (with-slots (next
+               query-pool
+               first-query
+               query-count)
+      obj
+    (cl:format out "~i(~@<VIDEO-INLINE-QUERY-INFO-KHR~:@_:next ~s~:@_:query-pool ~s~:@_:first-query ~s~:@_:query-count ~s~:>)"
+               next 
+               query-pool 
+               first-query 
+               query-count)))
+
+(defmethod print-object ((obj video-decode-h264-profile-info-khr) out)
   (with-slots (next
                std-profile-idc
                picture-layout)
       obj
-    (cl:format out "~i(~@<VIDEO-DECODE-H264-PROFILE-EXT~:@_:next ~s~:@_:std-profile-idc ~s~:@_:picture-layout ~s~:>)"
+    (cl:format out "~i(~@<VIDEO-DECODE-H264-PROFILE-INFO-KHR~:@_:next ~s~:@_:std-profile-idc ~s~:@_:picture-layout ~s~:>)"
                next 
                std-profile-idc 
                picture-layout)))
 
-(defmethod print-object ((obj video-decode-h264-capabilities-ext) out)
+(defmethod print-object ((obj video-decode-h264-capabilities-khr) out)
   (with-slots (next
-               max-level
-               field-offset-granularity
-               std-extension-version)
+               max-level-idc
+               field-offset-granularity)
       obj
-    (cl:format out "~i(~@<VIDEO-DECODE-H264-CAPABILITIES-EXT~:@_:next ~s~:@_:max-level ~s~:@_:field-offset-granularity ~s~:@_:std-extension-version ~s~:>)"
+    (cl:format out "~i(~@<VIDEO-DECODE-H264-CAPABILITIES-KHR~:@_:next ~s~:@_:max-level-idc ~s~:@_:field-offset-granularity ~s~:>)"
                next 
-               max-level 
-               field-offset-granularity 
-               std-extension-version)))
+               max-level-idc 
+               field-offset-granularity)))
 
-(defmethod print-object ((obj video-decode-h264-session-create-info-ext) out)
+(defmethod print-object ((obj video-decode-h264-session-parameters-add-info-khr) out)
   (with-slots (next
-               flags
-               std-extension-version)
+               std-s-p-ss
+               std-p-p-ss)
       obj
-    (cl:format out "~i(~@<VIDEO-DECODE-H264-SESSION-CREATE-INFO-EXT~:@_:next ~s~:@_:flags ~s~:@_:std-extension-version ~s~:>)"
+    (cl:format out "~i(~@<VIDEO-DECODE-H264-SESSION-PARAMETERS-ADD-INFO-KHR~:@_:next ~s~:@_:std-s-p-ss ~s~:@_:std-p-p-ss ~s~:>)"
                next 
-               flags 
-               std-extension-version)))
+               std-s-p-ss 
+               std-p-p-ss)))
 
-(defmethod print-object ((obj video-decode-h264-session-parameters-add-info-ext) out)
+(defmethod print-object ((obj video-decode-h264-session-parameters-create-info-khr) out)
   (with-slots (next
-               sps-std
-               pps-std)
-      obj
-    (cl:format out "~i(~@<VIDEO-DECODE-H264-SESSION-PARAMETERS-ADD-INFO-EXT~:@_:next ~s~:@_:sps-std ~s~:@_:pps-std ~s~:>)"
-               next 
-               sps-std 
-               pps-std)))
-
-(defmethod print-object ((obj video-decode-h264-session-parameters-create-info-ext) out)
-  (with-slots (next
-               max-sps-std-count
-               max-pps-std-count
+               max-std-s-p-s-count
+               max-std-p-p-s-count
                parameters-add-info)
       obj
-    (cl:format out "~i(~@<VIDEO-DECODE-H264-SESSION-PARAMETERS-CREATE-INFO-EXT~:@_:next ~s~:@_:max-sps-std-count ~s~:@_:max-pps-std-count ~s~:@_:parameters-add-info ~s~:>)"
+    (cl:format out "~i(~@<VIDEO-DECODE-H264-SESSION-PARAMETERS-CREATE-INFO-KHR~:@_:next ~s~:@_:max-std-s-p-s-count ~s~:@_:max-std-p-p-s-count ~s~:@_:parameters-add-info ~s~:>)"
                next 
-               max-sps-std-count 
-               max-pps-std-count 
+               max-std-s-p-s-count 
+               max-std-p-p-s-count 
                parameters-add-info)))
 
-(defmethod print-object ((obj video-decode-h264-picture-info-ext) out)
+(defmethod print-object ((obj video-decode-h264-inline-session-parameters-info-khr) out)
+  (with-slots (next
+               std-s-p-s
+               std-p-p-s)
+      obj
+    (cl:format out "~i(~@<VIDEO-DECODE-H264-INLINE-SESSION-PARAMETERS-INFO-KHR~:@_:next ~s~:@_:std-s-p-s ~s~:@_:std-p-p-s ~s~:>)"
+               next 
+               std-s-p-s 
+               std-p-p-s)))
+
+(defmethod print-object ((obj video-decode-h264-picture-info-khr) out)
   (with-slots (next
                std-picture-info
-               slices-data-offsets)
+               slice-offsets)
       obj
-    (cl:format out "~i(~@<VIDEO-DECODE-H264-PICTURE-INFO-EXT~:@_:next ~s~:@_:std-picture-info ~s~:@_:slices-data-offsets ~s~:>)"
+    (cl:format out "~i(~@<VIDEO-DECODE-H264-PICTURE-INFO-KHR~:@_:next ~s~:@_:std-picture-info ~s~:@_:slice-offsets ~s~:>)"
                next 
                std-picture-info 
-               slices-data-offsets)))
+               slice-offsets)))
 
-(defmethod print-object ((obj video-decode-h264-dpb-slot-info-ext) out)
+(defmethod print-object ((obj video-decode-h264-dpb-slot-info-khr) out)
   (with-slots (next
                std-reference-info)
       obj
-    (cl:format out "~i(~@<VIDEO-DECODE-H264-DPB-SLOT-INFO-EXT~:@_:next ~s~:@_:std-reference-info ~s~:>)"
+    (cl:format out "~i(~@<VIDEO-DECODE-H264-DPB-SLOT-INFO-KHR~:@_:next ~s~:@_:std-reference-info ~s~:>)"
                next 
                std-reference-info)))
 
-(defmethod print-object ((obj video-decode-h264-mvc-ext) out)
-  (with-slots (next
-               std-mvc)
-      obj
-    (cl:format out "~i(~@<VIDEO-DECODE-H264-MVC-EXT~:@_:next ~s~:@_:std-mvc ~s~:>)"
-               next 
-               std-mvc)))
-
-(defmethod print-object ((obj video-decode-h265-profile-ext) out)
+(defmethod print-object ((obj video-decode-h265-profile-info-khr) out)
   (with-slots (next
                std-profile-idc)
       obj
-    (cl:format out "~i(~@<VIDEO-DECODE-H265-PROFILE-EXT~:@_:next ~s~:@_:std-profile-idc ~s~:>)"
+    (cl:format out "~i(~@<VIDEO-DECODE-H265-PROFILE-INFO-KHR~:@_:next ~s~:@_:std-profile-idc ~s~:>)"
                next 
                std-profile-idc)))
 
-(defmethod print-object ((obj video-decode-h265-capabilities-ext) out)
+(defmethod print-object ((obj video-decode-h265-capabilities-khr) out)
   (with-slots (next
-               max-level
-               std-extension-version)
+               max-level-idc)
       obj
-    (cl:format out "~i(~@<VIDEO-DECODE-H265-CAPABILITIES-EXT~:@_:next ~s~:@_:max-level ~s~:@_:std-extension-version ~s~:>)"
+    (cl:format out "~i(~@<VIDEO-DECODE-H265-CAPABILITIES-KHR~:@_:next ~s~:@_:max-level-idc ~s~:>)"
                next 
-               max-level 
-               std-extension-version)))
+               max-level-idc)))
 
-(defmethod print-object ((obj video-decode-h265-session-create-info-ext) out)
+(defmethod print-object ((obj video-decode-h265-session-parameters-add-info-khr) out)
   (with-slots (next
-               flags
-               std-extension-version)
+               std-v-p-ss
+               std-s-p-ss
+               std-p-p-ss)
       obj
-    (cl:format out "~i(~@<VIDEO-DECODE-H265-SESSION-CREATE-INFO-EXT~:@_:next ~s~:@_:flags ~s~:@_:std-extension-version ~s~:>)"
+    (cl:format out "~i(~@<VIDEO-DECODE-H265-SESSION-PARAMETERS-ADD-INFO-KHR~:@_:next ~s~:@_:std-v-p-ss ~s~:@_:std-s-p-ss ~s~:@_:std-p-p-ss ~s~:>)"
                next 
-               flags 
-               std-extension-version)))
+               std-v-p-ss 
+               std-s-p-ss 
+               std-p-p-ss)))
 
-(defmethod print-object ((obj video-decode-h265-session-parameters-add-info-ext) out)
+(defmethod print-object ((obj video-decode-h265-session-parameters-create-info-khr) out)
   (with-slots (next
-               sps-std
-               pps-std)
-      obj
-    (cl:format out "~i(~@<VIDEO-DECODE-H265-SESSION-PARAMETERS-ADD-INFO-EXT~:@_:next ~s~:@_:sps-std ~s~:@_:pps-std ~s~:>)"
-               next 
-               sps-std 
-               pps-std)))
-
-(defmethod print-object ((obj video-decode-h265-session-parameters-create-info-ext) out)
-  (with-slots (next
-               max-sps-std-count
-               max-pps-std-count
+               max-std-v-p-s-count
+               max-std-s-p-s-count
+               max-std-p-p-s-count
                parameters-add-info)
       obj
-    (cl:format out "~i(~@<VIDEO-DECODE-H265-SESSION-PARAMETERS-CREATE-INFO-EXT~:@_:next ~s~:@_:max-sps-std-count ~s~:@_:max-pps-std-count ~s~:@_:parameters-add-info ~s~:>)"
+    (cl:format out "~i(~@<VIDEO-DECODE-H265-SESSION-PARAMETERS-CREATE-INFO-KHR~:@_:next ~s~:@_:max-std-v-p-s-count ~s~:@_:max-std-s-p-s-count ~s~:@_:max-std-p-p-s-count ~s~:@_:parameters-add-info ~s~:>)"
                next 
-               max-sps-std-count 
-               max-pps-std-count 
+               max-std-v-p-s-count 
+               max-std-s-p-s-count 
+               max-std-p-p-s-count 
                parameters-add-info)))
 
-(defmethod print-object ((obj video-decode-h265-picture-info-ext) out)
+(defmethod print-object ((obj video-decode-h265-inline-session-parameters-info-khr) out)
+  (with-slots (next
+               std-v-p-s
+               std-s-p-s
+               std-p-p-s)
+      obj
+    (cl:format out "~i(~@<VIDEO-DECODE-H265-INLINE-SESSION-PARAMETERS-INFO-KHR~:@_:next ~s~:@_:std-v-p-s ~s~:@_:std-s-p-s ~s~:@_:std-p-p-s ~s~:>)"
+               next 
+               std-v-p-s 
+               std-s-p-s 
+               std-p-p-s)))
+
+(defmethod print-object ((obj video-decode-h265-picture-info-khr) out)
   (with-slots (next
                std-picture-info
-               slices-data-offsets)
+               slice-segment-offsets)
       obj
-    (cl:format out "~i(~@<VIDEO-DECODE-H265-PICTURE-INFO-EXT~:@_:next ~s~:@_:std-picture-info ~s~:@_:slices-data-offsets ~s~:>)"
+    (cl:format out "~i(~@<VIDEO-DECODE-H265-PICTURE-INFO-KHR~:@_:next ~s~:@_:std-picture-info ~s~:@_:slice-segment-offsets ~s~:>)"
                next 
                std-picture-info 
-               slices-data-offsets)))
+               slice-segment-offsets)))
 
-(defmethod print-object ((obj video-decode-h265-dpb-slot-info-ext) out)
+(defmethod print-object ((obj video-decode-h265-dpb-slot-info-khr) out)
   (with-slots (next
                std-reference-info)
       obj
-    (cl:format out "~i(~@<VIDEO-DECODE-H265-DPB-SLOT-INFO-EXT~:@_:next ~s~:@_:std-reference-info ~s~:>)"
+    (cl:format out "~i(~@<VIDEO-DECODE-H265-DPB-SLOT-INFO-KHR~:@_:next ~s~:@_:std-reference-info ~s~:>)"
+               next 
+               std-reference-info)))
+
+(defmethod print-object ((obj physical-device-video-decode-v-p-9-features-khr) out)
+  (with-slots (next
+               video-decode-v-p-9)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-VIDEO-DECODE-V-P-9-FEATURES-KHR~:@_:next ~s~:@_:video-decode-v-p-9 ~s~:>)"
+               next 
+               video-decode-v-p-9)))
+
+(defmethod print-object ((obj video-decode-v-p-9-profile-info-khr) out)
+  (with-slots (next
+               std-profile)
+      obj
+    (cl:format out "~i(~@<VIDEO-DECODE-V-P-9-PROFILE-INFO-KHR~:@_:next ~s~:@_:std-profile ~s~:>)"
+               next 
+               std-profile)))
+
+(defmethod print-object ((obj video-decode-v-p-9-capabilities-khr) out)
+  (with-slots (next
+               max-level)
+      obj
+    (cl:format out "~i(~@<VIDEO-DECODE-V-P-9-CAPABILITIES-KHR~:@_:next ~s~:@_:max-level ~s~:>)"
+               next 
+               max-level)))
+
+(defmethod print-object ((obj video-decode-v-p-9-picture-info-khr) out)
+  (with-slots (next
+               std-picture-info
+               reference-name-slot-indices
+               uncompressed-header-offset
+               compressed-header-offset
+               tiles-offset)
+      obj
+    (cl:format out "~i(~@<VIDEO-DECODE-V-P-9-PICTURE-INFO-KHR~:@_:next ~s~:@_:std-picture-info ~s~:@_:reference-name-slot-indices ~s~:@_:uncompressed-header-offset ~s~:@_:compressed-header-offset ~s~:@_:tiles-offset ~s~:>)"
+               next 
+               std-picture-info 
+               reference-name-slot-indices 
+               uncompressed-header-offset 
+               compressed-header-offset 
+               tiles-offset)))
+
+(defmethod print-object ((obj video-decode-a-v-1-profile-info-khr) out)
+  (with-slots (next
+               std-profile
+               film-grain-support)
+      obj
+    (cl:format out "~i(~@<VIDEO-DECODE-A-V-1-PROFILE-INFO-KHR~:@_:next ~s~:@_:std-profile ~s~:@_:film-grain-support ~s~:>)"
+               next 
+               std-profile 
+               film-grain-support)))
+
+(defmethod print-object ((obj video-decode-a-v-1-capabilities-khr) out)
+  (with-slots (next
+               max-level)
+      obj
+    (cl:format out "~i(~@<VIDEO-DECODE-A-V-1-CAPABILITIES-KHR~:@_:next ~s~:@_:max-level ~s~:>)"
+               next 
+               max-level)))
+
+(defmethod print-object ((obj video-decode-a-v-1-session-parameters-create-info-khr) out)
+  (with-slots (next
+               std-sequence-header)
+      obj
+    (cl:format out "~i(~@<VIDEO-DECODE-A-V-1-SESSION-PARAMETERS-CREATE-INFO-KHR~:@_:next ~s~:@_:std-sequence-header ~s~:>)"
+               next 
+               std-sequence-header)))
+
+(defmethod print-object ((obj video-decode-a-v-1-inline-session-parameters-info-khr) out)
+  (with-slots (next
+               std-sequence-header)
+      obj
+    (cl:format out "~i(~@<VIDEO-DECODE-A-V-1-INLINE-SESSION-PARAMETERS-INFO-KHR~:@_:next ~s~:@_:std-sequence-header ~s~:>)"
+               next 
+               std-sequence-header)))
+
+(defmethod print-object ((obj video-decode-a-v-1-picture-info-khr) out)
+  (with-slots (next
+               std-picture-info
+               reference-name-slot-indices
+               frame-header-offset
+               tile-offsets
+               tile-sizes)
+      obj
+    (cl:format out "~i(~@<VIDEO-DECODE-A-V-1-PICTURE-INFO-KHR~:@_:next ~s~:@_:std-picture-info ~s~:@_:reference-name-slot-indices ~s~:@_:frame-header-offset ~s~:@_:tile-offsets ~s~:@_:tile-sizes ~s~:>)"
+               next 
+               std-picture-info 
+               reference-name-slot-indices 
+               frame-header-offset 
+               tile-offsets 
+               tile-sizes)))
+
+(defmethod print-object ((obj video-decode-a-v-1-dpb-slot-info-khr) out)
+  (with-slots (next
+               std-reference-info)
+      obj
+    (cl:format out "~i(~@<VIDEO-DECODE-A-V-1-DPB-SLOT-INFO-KHR~:@_:next ~s~:@_:std-reference-info ~s~:>)"
                next 
                std-reference-info)))
 
@@ -8271,28 +11469,32 @@
                video-profile
                picture-format
                max-coded-extent
-               reference-pictures-format
-               max-reference-pictures-slots-count
-               max-reference-pictures-active-count)
+               reference-picture-format
+               max-dpb-slots
+               max-active-reference-pictures
+               std-header-version)
       obj
-    (cl:format out "~i(~@<VIDEO-SESSION-CREATE-INFO-KHR~:@_:next ~s~:@_:queue-family-index ~s~:@_:flags ~s~:@_:video-profile ~s~:@_:picture-format ~s~:@_:max-coded-extent ~s~:@_:reference-pictures-format ~s~:@_:max-reference-pictures-slots-count ~s~:@_:max-reference-pictures-active-count ~s~:>)"
+    (cl:format out "~i(~@<VIDEO-SESSION-CREATE-INFO-KHR~:@_:next ~s~:@_:queue-family-index ~s~:@_:flags ~s~:@_:video-profile ~s~:@_:picture-format ~s~:@_:max-coded-extent ~s~:@_:reference-picture-format ~s~:@_:max-dpb-slots ~s~:@_:max-active-reference-pictures ~s~:@_:std-header-version ~s~:>)"
                next 
                queue-family-index 
                flags 
                video-profile 
                picture-format 
                max-coded-extent 
-               reference-pictures-format 
-               max-reference-pictures-slots-count 
-               max-reference-pictures-active-count)))
+               reference-picture-format 
+               max-dpb-slots 
+               max-active-reference-pictures 
+               std-header-version)))
 
 (defmethod print-object ((obj video-session-parameters-create-info-khr) out)
   (with-slots (next
+               flags
                video-session-parameters-template
                video-session)
       obj
-    (cl:format out "~i(~@<VIDEO-SESSION-PARAMETERS-CREATE-INFO-KHR~:@_:next ~s~:@_:video-session-parameters-template ~s~:@_:video-session ~s~:>)"
+    (cl:format out "~i(~@<VIDEO-SESSION-PARAMETERS-CREATE-INFO-KHR~:@_:next ~s~:@_:flags ~s~:@_:video-session-parameters-template ~s~:@_:video-session ~s~:>)"
                next 
+               flags 
                video-session-parameters-template 
                video-session)))
 
@@ -8304,18 +11506,32 @@
                next 
                update-sequence-count)))
 
+(defmethod print-object ((obj video-encode-session-parameters-get-info-khr) out)
+  (with-slots (next
+               video-session-parameters)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-SESSION-PARAMETERS-GET-INFO-KHR~:@_:next ~s~:@_:video-session-parameters ~s~:>)"
+               next 
+               video-session-parameters)))
+
+(defmethod print-object ((obj video-encode-session-parameters-feedback-info-khr) out)
+  (with-slots (next
+               has-overrides)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-SESSION-PARAMETERS-FEEDBACK-INFO-KHR~:@_:next ~s~:@_:has-overrides ~s~:>)"
+               next 
+               has-overrides)))
+
 (defmethod print-object ((obj video-begin-coding-info-khr) out)
   (with-slots (next
                flags
-               codec-quality-preset
                video-session
                video-session-parameters
                reference-slots)
       obj
-    (cl:format out "~i(~@<VIDEO-BEGIN-CODING-INFO-KHR~:@_:next ~s~:@_:flags ~s~:@_:codec-quality-preset ~s~:@_:video-session ~s~:@_:video-session-parameters ~s~:@_:reference-slots ~s~:>)"
+    (cl:format out "~i(~@<VIDEO-BEGIN-CODING-INFO-KHR~:@_:next ~s~:@_:flags ~s~:@_:video-session ~s~:@_:video-session-parameters ~s~:@_:reference-slots ~s~:>)"
                next 
                flags 
-               codec-quality-preset 
                video-session 
                video-session-parameters 
                reference-slots)))
@@ -8336,309 +11552,851 @@
                next 
                flags)))
 
+(defmethod print-object ((obj video-encode-usage-info-khr) out)
+  (with-slots (next
+               video-usage-hints
+               video-content-hints
+               tuning-mode)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-USAGE-INFO-KHR~:@_:next ~s~:@_:video-usage-hints ~s~:@_:video-content-hints ~s~:@_:tuning-mode ~s~:>)"
+               next 
+               video-usage-hints 
+               video-content-hints 
+               tuning-mode)))
+
 (defmethod print-object ((obj video-encode-info-khr) out)
   (with-slots (next
                flags
-               quality-level
-               coded-extent
-               dst-bitstream-buffer
-               dst-bitstream-buffer-offset
-               dst-bitstream-buffer-max-range
+               dst-buffer
+               dst-buffer-offset
+               dst-buffer-range
                src-picture-resource
                setup-reference-slot
-               reference-slots)
+               reference-slots
+               preceding-externally-encoded-bytes)
       obj
-    (cl:format out "~i(~@<VIDEO-ENCODE-INFO-KHR~:@_:next ~s~:@_:flags ~s~:@_:quality-level ~s~:@_:coded-extent ~s~:@_:dst-bitstream-buffer ~s~:@_:dst-bitstream-buffer-offset ~s~:@_:dst-bitstream-buffer-max-range ~s~:@_:src-picture-resource ~s~:@_:setup-reference-slot ~s~:@_:reference-slots ~s~:>)"
+    (cl:format out "~i(~@<VIDEO-ENCODE-INFO-KHR~:@_:next ~s~:@_:flags ~s~:@_:dst-buffer ~s~:@_:dst-buffer-offset ~s~:@_:dst-buffer-range ~s~:@_:src-picture-resource ~s~:@_:setup-reference-slot ~s~:@_:reference-slots ~s~:@_:preceding-externally-encoded-bytes ~s~:>)"
                next 
                flags 
-               quality-level 
-               coded-extent 
-               dst-bitstream-buffer 
-               dst-bitstream-buffer-offset 
-               dst-bitstream-buffer-max-range 
+               dst-buffer 
+               dst-buffer-offset 
+               dst-buffer-range 
                src-picture-resource 
                setup-reference-slot 
-               reference-slots)))
+               reference-slots 
+               preceding-externally-encoded-bytes)))
+
+(defmethod print-object ((obj video-encode-quantization-map-info-khr) out)
+  (with-slots (next
+               quantization-map
+               quantization-map-extent)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-QUANTIZATION-MAP-INFO-KHR~:@_:next ~s~:@_:quantization-map ~s~:@_:quantization-map-extent ~s~:>)"
+               next 
+               quantization-map 
+               quantization-map-extent)))
+
+(defmethod print-object ((obj video-encode-quantization-map-session-parameters-create-info-khr) out)
+  (with-slots (next
+               quantization-map-texel-size)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-QUANTIZATION-MAP-SESSION-PARAMETERS-CREATE-INFO-KHR~:@_:next ~s~:@_:quantization-map-texel-size ~s~:>)"
+               next 
+               quantization-map-texel-size)))
+
+(defmethod print-object ((obj physical-device-video-encode-quantization-map-features-khr) out)
+  (with-slots (next
+               video-encode-quantization-map)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-VIDEO-ENCODE-QUANTIZATION-MAP-FEATURES-KHR~:@_:next ~s~:@_:video-encode-quantization-map ~s~:>)"
+               next 
+               video-encode-quantization-map)))
+
+(defmethod print-object ((obj query-pool-video-encode-feedback-create-info-khr) out)
+  (with-slots (next
+               encode-feedback-flags)
+      obj
+    (cl:format out "~i(~@<QUERY-POOL-VIDEO-ENCODE-FEEDBACK-CREATE-INFO-KHR~:@_:next ~s~:@_:encode-feedback-flags ~s~:>)"
+               next 
+               encode-feedback-flags)))
+
+(defmethod print-object ((obj video-encode-quality-level-info-khr) out)
+  (with-slots (next
+               quality-level)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-QUALITY-LEVEL-INFO-KHR~:@_:next ~s~:@_:quality-level ~s~:>)"
+               next 
+               quality-level)))
+
+(defmethod print-object ((obj physical-device-video-encode-quality-level-info-khr) out)
+  (with-slots (next
+               video-profile
+               quality-level)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-VIDEO-ENCODE-QUALITY-LEVEL-INFO-KHR~:@_:next ~s~:@_:video-profile ~s~:@_:quality-level ~s~:>)"
+               next 
+               video-profile 
+               quality-level)))
+
+(defmethod print-object ((obj video-encode-quality-level-properties-khr) out)
+  (with-slots (next
+               preferred-rate-control-mode
+               preferred-rate-control-layer-count)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-QUALITY-LEVEL-PROPERTIES-KHR~:@_:next ~s~:@_:preferred-rate-control-mode ~s~:@_:preferred-rate-control-layer-count ~s~:>)"
+               next 
+               preferred-rate-control-mode 
+               preferred-rate-control-layer-count)))
 
 (defmethod print-object ((obj video-encode-rate-control-info-khr) out)
   (with-slots (next
                flags
                rate-control-mode
-               average-bitrate
-               peak-to-average-bitrate-ratio
-               frame-rate-numerator
-               frame-rate-denominator
-               virtual-buffer-size-in-ms)
+               layers
+               virtual-buffer-size-in-ms
+               initial-virtual-buffer-size-in-ms)
       obj
-    (cl:format out "~i(~@<VIDEO-ENCODE-RATE-CONTROL-INFO-KHR~:@_:next ~s~:@_:flags ~s~:@_:rate-control-mode ~s~:@_:average-bitrate ~s~:@_:peak-to-average-bitrate-ratio ~s~:@_:frame-rate-numerator ~s~:@_:frame-rate-denominator ~s~:@_:virtual-buffer-size-in-ms ~s~:>)"
+    (cl:format out "~i(~@<VIDEO-ENCODE-RATE-CONTROL-INFO-KHR~:@_:next ~s~:@_:flags ~s~:@_:rate-control-mode ~s~:@_:layers ~s~:@_:virtual-buffer-size-in-ms ~s~:@_:initial-virtual-buffer-size-in-ms ~s~:>)"
                next 
                flags 
                rate-control-mode 
+               layers 
+               virtual-buffer-size-in-ms 
+               initial-virtual-buffer-size-in-ms)))
+
+(defmethod print-object ((obj video-encode-rate-control-layer-info-khr) out)
+  (with-slots (next
+               average-bitrate
+               max-bitrate
+               frame-rate-numerator
+               frame-rate-denominator)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-RATE-CONTROL-LAYER-INFO-KHR~:@_:next ~s~:@_:average-bitrate ~s~:@_:max-bitrate ~s~:@_:frame-rate-numerator ~s~:@_:frame-rate-denominator ~s~:>)"
+               next 
                average-bitrate 
-               peak-to-average-bitrate-ratio 
+               max-bitrate 
                frame-rate-numerator 
-               frame-rate-denominator 
-               virtual-buffer-size-in-ms)))
+               frame-rate-denominator)))
 
-(defmethod print-object ((obj video-encode-h264-capabilities-ext) out)
+(defmethod print-object ((obj video-encode-capabilities-khr) out)
   (with-slots (next
                flags
-               input-mode-flags
-               output-mode-flags
-               min-picture-size-in-mbs
-               max-picture-size-in-mbs
-               input-image-data-alignment
-               max-num-l-0-reference-for-p
-               max-num-l-0-reference-for-b
-               max-num-l-1-reference
-               quality-level-count
-               std-extension-version)
+               rate-control-modes
+               max-rate-control-layers
+               max-bitrate
+               max-quality-levels
+               encode-input-picture-granularity
+               supported-encode-feedback-flags)
       obj
-    (cl:format out "~i(~@<VIDEO-ENCODE-H264-CAPABILITIES-EXT~:@_:next ~s~:@_:flags ~s~:@_:input-mode-flags ~s~:@_:output-mode-flags ~s~:@_:min-picture-size-in-mbs ~s~:@_:max-picture-size-in-mbs ~s~:@_:input-image-data-alignment ~s~:@_:max-num-l-0-reference-for-p ~s~:@_:max-num-l-0-reference-for-b ~s~:@_:max-num-l-1-reference ~s~:@_:quality-level-count ~s~:@_:std-extension-version ~s~:>)"
+    (cl:format out "~i(~@<VIDEO-ENCODE-CAPABILITIES-KHR~:@_:next ~s~:@_:flags ~s~:@_:rate-control-modes ~s~:@_:max-rate-control-layers ~s~:@_:max-bitrate ~s~:@_:max-quality-levels ~s~:@_:encode-input-picture-granularity ~s~:@_:supported-encode-feedback-flags ~s~:>)"
                next 
                flags 
-               input-mode-flags 
-               output-mode-flags 
-               min-picture-size-in-mbs 
-               max-picture-size-in-mbs 
-               input-image-data-alignment 
-               max-num-l-0-reference-for-p 
-               max-num-l-0-reference-for-b 
-               max-num-l-1-reference 
-               quality-level-count 
-               std-extension-version)))
+               rate-control-modes 
+               max-rate-control-layers 
+               max-bitrate 
+               max-quality-levels 
+               encode-input-picture-granularity 
+               supported-encode-feedback-flags)))
 
-(defmethod print-object ((obj video-encode-h264-session-create-info-ext) out)
+(defmethod print-object ((obj physical-device-video-encode-feedback-2-features-khr) out)
+  (with-slots (next
+               video-encode-feedback-2)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-VIDEO-ENCODE-FEEDBACK-2-FEATURES-KHR~:@_:next ~s~:@_:video-encode-feedback-2 ~s~:>)"
+               next 
+               video-encode-feedback-2)))
+
+(defmethod print-object ((obj video-encode-feedback-2-capabilities-khr) out)
+  (with-slots (next
+               max-per-partition-feedback-entries
+               supported-per-partition-encode-feedback-flags)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-FEEDBACK-2-CAPABILITIES-KHR~:@_:next ~s~:@_:max-per-partition-feedback-entries ~s~:@_:supported-per-partition-encode-feedback-flags ~s~:>)"
+               next 
+               max-per-partition-feedback-entries 
+               supported-per-partition-encode-feedback-flags)))
+
+(defmethod print-object ((obj query-pool-video-encode-per-partition-feedback-create-info-khr) out)
+  (with-slots (next
+               max-per-partition-feedback-entries
+               per-partition-encode-feedback-flags)
+      obj
+    (cl:format out "~i(~@<QUERY-POOL-VIDEO-ENCODE-PER-PARTITION-FEEDBACK-CREATE-INFO-KHR~:@_:next ~s~:@_:max-per-partition-feedback-entries ~s~:@_:per-partition-encode-feedback-flags ~s~:>)"
+               next 
+               max-per-partition-feedback-entries 
+               per-partition-encode-feedback-flags)))
+
+(defmethod print-object ((obj video-encode-h264-capabilities-khr) out)
   (with-slots (next
                flags
-               max-picture-size-in-mbs
-               std-extension-version)
-      obj
-    (cl:format out "~i(~@<VIDEO-ENCODE-H264-SESSION-CREATE-INFO-EXT~:@_:next ~s~:@_:flags ~s~:@_:max-picture-size-in-mbs ~s~:@_:std-extension-version ~s~:>)"
-               next 
-               flags 
-               max-picture-size-in-mbs 
-               std-extension-version)))
-
-(defmethod print-object ((obj video-encode-h264-session-parameters-add-info-ext) out)
-  (with-slots (next
-               sps-std
-               pps-std)
-      obj
-    (cl:format out "~i(~@<VIDEO-ENCODE-H264-SESSION-PARAMETERS-ADD-INFO-EXT~:@_:next ~s~:@_:sps-std ~s~:@_:pps-std ~s~:>)"
-               next 
-               sps-std 
-               pps-std)))
-
-(defmethod print-object ((obj video-encode-h264-session-parameters-create-info-ext) out)
-  (with-slots (next
-               max-sps-std-count
-               max-pps-std-count
-               parameters-add-info)
-      obj
-    (cl:format out "~i(~@<VIDEO-ENCODE-H264-SESSION-PARAMETERS-CREATE-INFO-EXT~:@_:next ~s~:@_:max-sps-std-count ~s~:@_:max-pps-std-count ~s~:@_:parameters-add-info ~s~:>)"
-               next 
-               max-sps-std-count 
-               max-pps-std-count 
-               parameters-add-info)))
-
-(defmethod print-object ((obj video-encode-h264-dpb-slot-info-ext) out)
-  (with-slots (next
-               slot-index
-               std-picture-info)
-      obj
-    (cl:format out "~i(~@<VIDEO-ENCODE-H264-DPB-SLOT-INFO-EXT~:@_:next ~s~:@_:slot-index ~s~:@_:std-picture-info ~s~:>)"
-               next 
-               slot-index 
-               std-picture-info)))
-
-(defmethod print-object ((obj video-encode-h264-vcl-frame-info-ext) out)
-  (with-slots (next
-               ref-default-final-list-0-entries
-               ref-default-final-list-1-entries
-               nalu-slice-entries
-               current-picture-info)
-      obj
-    (cl:format out "~i(~@<VIDEO-ENCODE-H264-VCL-FRAME-INFO-EXT~:@_:next ~s~:@_:ref-default-final-list-0-entries ~s~:@_:ref-default-final-list-1-entries ~s~:@_:nalu-slice-entries ~s~:@_:current-picture-info ~s~:>)"
-               next 
-               ref-default-final-list-0-entries 
-               ref-default-final-list-1-entries 
-               nalu-slice-entries 
-               current-picture-info)))
-
-(defmethod print-object ((obj video-encode-h264-emit-picture-parameters-ext) out)
-  (with-slots (next
-               sps-id
-               emit-sps-enable
-               pps-id-entries)
-      obj
-    (cl:format out "~i(~@<VIDEO-ENCODE-H264-EMIT-PICTURE-PARAMETERS-EXT~:@_:next ~s~:@_:sps-id ~s~:@_:emit-sps-enable ~s~:@_:pps-id-entries ~s~:>)"
-               next 
-               sps-id 
-               emit-sps-enable 
-               pps-id-entries)))
-
-(defmethod print-object ((obj video-encode-h264-profile-ext) out)
-  (with-slots (next
-               std-profile-idc)
-      obj
-    (cl:format out "~i(~@<VIDEO-ENCODE-H264-PROFILE-EXT~:@_:next ~s~:@_:std-profile-idc ~s~:>)"
-               next 
-               std-profile-idc)))
-
-(defmethod print-object ((obj video-encode-h264-nalu-slice-ext) out)
-  (with-slots (next
-               slice-header-std
-               mb-count
-               ref-final-list-0-entries
-               ref-final-list-1-entries
-               preceding-nalu-bytes
+               max-level-idc
+               max-slice-count
+               max-p-picture-l-0-reference-count
+               max-b-picture-l-0-reference-count
+               max-l-1-reference-count
+               max-temporal-layer-count
+               expect-dyadic-temporal-layer-pattern
                min-qp
-               max-qp)
+               max-qp
+               prefers-gop-remaining-frames
+               requires-gop-remaining-frames
+               std-syntax-flags)
       obj
-    (cl:format out "~i(~@<VIDEO-ENCODE-H264-NALU-SLICE-EXT~:@_:next ~s~:@_:slice-header-std ~s~:@_:mb-count ~s~:@_:ref-final-list-0-entries ~s~:@_:ref-final-list-1-entries ~s~:@_:preceding-nalu-bytes ~s~:@_:min-qp ~s~:@_:max-qp ~s~:>)"
+    (cl:format out "~i(~@<VIDEO-ENCODE-H264-CAPABILITIES-KHR~:@_:next ~s~:@_:flags ~s~:@_:max-level-idc ~s~:@_:max-slice-count ~s~:@_:max-p-picture-l-0-reference-count ~s~:@_:max-b-picture-l-0-reference-count ~s~:@_:max-l-1-reference-count ~s~:@_:max-temporal-layer-count ~s~:@_:expect-dyadic-temporal-layer-pattern ~s~:@_:min-qp ~s~:@_:max-qp ~s~:@_:prefers-gop-remaining-frames ~s~:@_:requires-gop-remaining-frames ~s~:@_:std-syntax-flags ~s~:>)"
                next 
-               slice-header-std 
-               mb-count 
-               ref-final-list-0-entries 
-               ref-final-list-1-entries 
-               preceding-nalu-bytes 
+               flags 
+               max-level-idc 
+               max-slice-count 
+               max-p-picture-l-0-reference-count 
+               max-b-picture-l-0-reference-count 
+               max-l-1-reference-count 
+               max-temporal-layer-count 
+               expect-dyadic-temporal-layer-pattern 
                min-qp 
-               max-qp)))
+               max-qp 
+               prefers-gop-remaining-frames 
+               requires-gop-remaining-frames 
+               std-syntax-flags)))
 
-(defmethod print-object ((obj video-encode-h265-capabilities-ext) out)
+(defmethod print-object ((obj video-encode-h264-quality-level-properties-khr) out)
   (with-slots (next
-               flags
-               input-mode-flags
-               output-mode-flags
-               ctb-sizes
-               input-image-data-alignment
-               max-num-l-0-reference-for-p
-               max-num-l-0-reference-for-b
-               max-num-l-1-reference
-               max-num-sub-layers
-               quality-level-count
-               std-extension-version)
+               preferred-rate-control-flags
+               preferred-gop-frame-count
+               preferred-idr-period
+               preferred-consecutive-b-frame-count
+               preferred-temporal-layer-count
+               preferred-constant-qp
+               preferred-max-l-0-reference-count
+               preferred-max-l-1-reference-count
+               preferred-std-entropy-coding-mode-flag)
       obj
-    (cl:format out "~i(~@<VIDEO-ENCODE-H265-CAPABILITIES-EXT~:@_:next ~s~:@_:flags ~s~:@_:input-mode-flags ~s~:@_:output-mode-flags ~s~:@_:ctb-sizes ~s~:@_:input-image-data-alignment ~s~:@_:max-num-l-0-reference-for-p ~s~:@_:max-num-l-0-reference-for-b ~s~:@_:max-num-l-1-reference ~s~:@_:max-num-sub-layers ~s~:@_:quality-level-count ~s~:@_:std-extension-version ~s~:>)"
+    (cl:format out "~i(~@<VIDEO-ENCODE-H264-QUALITY-LEVEL-PROPERTIES-KHR~:@_:next ~s~:@_:preferred-rate-control-flags ~s~:@_:preferred-gop-frame-count ~s~:@_:preferred-idr-period ~s~:@_:preferred-consecutive-b-frame-count ~s~:@_:preferred-temporal-layer-count ~s~:@_:preferred-constant-qp ~s~:@_:preferred-max-l-0-reference-count ~s~:@_:preferred-max-l-1-reference-count ~s~:@_:preferred-std-entropy-coding-mode-flag ~s~:>)"
                next 
-               flags 
-               input-mode-flags 
-               output-mode-flags 
-               ctb-sizes 
-               input-image-data-alignment 
-               max-num-l-0-reference-for-p 
-               max-num-l-0-reference-for-b 
-               max-num-l-1-reference 
-               max-num-sub-layers 
-               quality-level-count 
-               std-extension-version)))
+               preferred-rate-control-flags 
+               preferred-gop-frame-count 
+               preferred-idr-period 
+               preferred-consecutive-b-frame-count 
+               preferred-temporal-layer-count 
+               preferred-constant-qp 
+               preferred-max-l-0-reference-count 
+               preferred-max-l-1-reference-count 
+               preferred-std-entropy-coding-mode-flag)))
 
-(defmethod print-object ((obj video-encode-h265-session-create-info-ext) out)
+(defmethod print-object ((obj video-encode-h264-session-create-info-khr) out)
   (with-slots (next
-               flags
-               std-extension-version)
+               use-max-level-idc
+               max-level-idc)
       obj
-    (cl:format out "~i(~@<VIDEO-ENCODE-H265-SESSION-CREATE-INFO-EXT~:@_:next ~s~:@_:flags ~s~:@_:std-extension-version ~s~:>)"
+    (cl:format out "~i(~@<VIDEO-ENCODE-H264-SESSION-CREATE-INFO-KHR~:@_:next ~s~:@_:use-max-level-idc ~s~:@_:max-level-idc ~s~:>)"
                next 
-               flags 
-               std-extension-version)))
+               use-max-level-idc 
+               max-level-idc)))
 
-(defmethod print-object ((obj video-encode-h265-session-parameters-add-info-ext) out)
+(defmethod print-object ((obj video-encode-h264-session-parameters-add-info-khr) out)
   (with-slots (next
-               vps-std
-               sps-std
-               pps-std)
+               std-s-p-ss
+               std-p-p-ss)
       obj
-    (cl:format out "~i(~@<VIDEO-ENCODE-H265-SESSION-PARAMETERS-ADD-INFO-EXT~:@_:next ~s~:@_:vps-std ~s~:@_:sps-std ~s~:@_:pps-std ~s~:>)"
+    (cl:format out "~i(~@<VIDEO-ENCODE-H264-SESSION-PARAMETERS-ADD-INFO-KHR~:@_:next ~s~:@_:std-s-p-ss ~s~:@_:std-p-p-ss ~s~:>)"
                next 
-               vps-std 
-               sps-std 
-               pps-std)))
+               std-s-p-ss 
+               std-p-p-ss)))
 
-(defmethod print-object ((obj video-encode-h265-session-parameters-create-info-ext) out)
+(defmethod print-object ((obj video-encode-h264-session-parameters-create-info-khr) out)
   (with-slots (next
-               max-vps-std-count
-               max-sps-std-count
-               max-pps-std-count
+               max-std-s-p-s-count
+               max-std-p-p-s-count
                parameters-add-info)
       obj
-    (cl:format out "~i(~@<VIDEO-ENCODE-H265-SESSION-PARAMETERS-CREATE-INFO-EXT~:@_:next ~s~:@_:max-vps-std-count ~s~:@_:max-sps-std-count ~s~:@_:max-pps-std-count ~s~:@_:parameters-add-info ~s~:>)"
+    (cl:format out "~i(~@<VIDEO-ENCODE-H264-SESSION-PARAMETERS-CREATE-INFO-KHR~:@_:next ~s~:@_:max-std-s-p-s-count ~s~:@_:max-std-p-p-s-count ~s~:@_:parameters-add-info ~s~:>)"
                next 
-               max-vps-std-count 
-               max-sps-std-count 
-               max-pps-std-count 
+               max-std-s-p-s-count 
+               max-std-p-p-s-count 
                parameters-add-info)))
 
-(defmethod print-object ((obj video-encode-h265-vcl-frame-info-ext) out)
+(defmethod print-object ((obj video-encode-h264-session-parameters-get-info-khr) out)
   (with-slots (next
-               reference-final-lists
-               nalu-slice-entries
-               current-picture-info)
+               write-std-s-p-s
+               write-std-p-p-s
+               std-s-p-s-id
+               std-p-p-s-id)
       obj
-    (cl:format out "~i(~@<VIDEO-ENCODE-H265-VCL-FRAME-INFO-EXT~:@_:next ~s~:@_:reference-final-lists ~s~:@_:nalu-slice-entries ~s~:@_:current-picture-info ~s~:>)"
+    (cl:format out "~i(~@<VIDEO-ENCODE-H264-SESSION-PARAMETERS-GET-INFO-KHR~:@_:next ~s~:@_:write-std-s-p-s ~s~:@_:write-std-p-p-s ~s~:@_:std-s-p-s-id ~s~:@_:std-p-p-s-id ~s~:>)"
                next 
-               reference-final-lists 
-               nalu-slice-entries 
-               current-picture-info)))
+               write-std-s-p-s 
+               write-std-p-p-s 
+               std-s-p-s-id 
+               std-p-p-s-id)))
 
-(defmethod print-object ((obj video-encode-h265-emit-picture-parameters-ext) out)
+(defmethod print-object ((obj video-encode-h264-session-parameters-feedback-info-khr) out)
   (with-slots (next
-               vps-id
-               sps-id
-               emit-vps-enable
-               emit-sps-enable
-               pps-id-entries)
+               has-std-s-p-s-overrides
+               has-std-p-p-s-overrides)
       obj
-    (cl:format out "~i(~@<VIDEO-ENCODE-H265-EMIT-PICTURE-PARAMETERS-EXT~:@_:next ~s~:@_:vps-id ~s~:@_:sps-id ~s~:@_:emit-vps-enable ~s~:@_:emit-sps-enable ~s~:@_:pps-id-entries ~s~:>)"
+    (cl:format out "~i(~@<VIDEO-ENCODE-H264-SESSION-PARAMETERS-FEEDBACK-INFO-KHR~:@_:next ~s~:@_:has-std-s-p-s-overrides ~s~:@_:has-std-p-p-s-overrides ~s~:>)"
                next 
-               vps-id 
-               sps-id 
-               emit-vps-enable 
-               emit-sps-enable 
-               pps-id-entries)))
+               has-std-s-p-s-overrides 
+               has-std-p-p-s-overrides)))
 
-(defmethod print-object ((obj video-encode-h265-nalu-slice-ext) out)
+(defmethod print-object ((obj video-encode-h264-dpb-slot-info-khr) out)
   (with-slots (next
-               ctb-count
-               reference-final-lists
-               slice-header-std)
-      obj
-    (cl:format out "~i(~@<VIDEO-ENCODE-H265-NALU-SLICE-EXT~:@_:next ~s~:@_:ctb-count ~s~:@_:reference-final-lists ~s~:@_:slice-header-std ~s~:>)"
-               next 
-               ctb-count 
-               reference-final-lists 
-               slice-header-std)))
-
-(defmethod print-object ((obj video-encode-h265-profile-ext) out)
-  (with-slots (next
-               std-profile-idc)
-      obj
-    (cl:format out "~i(~@<VIDEO-ENCODE-H265-PROFILE-EXT~:@_:next ~s~:@_:std-profile-idc ~s~:>)"
-               next 
-               std-profile-idc)))
-
-(defmethod print-object ((obj video-encode-h265-dpb-slot-info-ext) out)
-  (with-slots (next
-               slot-index
                std-reference-info)
       obj
-    (cl:format out "~i(~@<VIDEO-ENCODE-H265-DPB-SLOT-INFO-EXT~:@_:next ~s~:@_:slot-index ~s~:@_:std-reference-info ~s~:>)"
+    (cl:format out "~i(~@<VIDEO-ENCODE-H264-DPB-SLOT-INFO-KHR~:@_:next ~s~:@_:std-reference-info ~s~:>)"
                next 
-               slot-index 
                std-reference-info)))
 
-(defmethod print-object ((obj video-encode-h265-reference-lists-ext) out)
+(defmethod print-object ((obj video-encode-h264-picture-info-khr) out)
   (with-slots (next
-               reference-list-0-entries
-               reference-list-1-entries
-               reference-modifications)
+               nalu-slice-entries
+               std-picture-info
+               generate-prefix-nalu)
       obj
-    (cl:format out "~i(~@<VIDEO-ENCODE-H265-REFERENCE-LISTS-EXT~:@_:next ~s~:@_:reference-list-0-entries ~s~:@_:reference-list-1-entries ~s~:@_:reference-modifications ~s~:>)"
+    (cl:format out "~i(~@<VIDEO-ENCODE-H264-PICTURE-INFO-KHR~:@_:next ~s~:@_:nalu-slice-entries ~s~:@_:std-picture-info ~s~:@_:generate-prefix-nalu ~s~:>)"
                next 
-               reference-list-0-entries 
-               reference-list-1-entries 
-               reference-modifications)))
+               nalu-slice-entries 
+               std-picture-info 
+               generate-prefix-nalu)))
+
+(defmethod print-object ((obj video-encode-h264-profile-info-khr) out)
+  (with-slots (next
+               std-profile-idc)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-H264-PROFILE-INFO-KHR~:@_:next ~s~:@_:std-profile-idc ~s~:>)"
+               next 
+               std-profile-idc)))
+
+(defmethod print-object ((obj video-encode-h264-nalu-slice-info-khr) out)
+  (with-slots (next
+               constant-qp
+               std-slice-header)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-H264-NALU-SLICE-INFO-KHR~:@_:next ~s~:@_:constant-qp ~s~:@_:std-slice-header ~s~:>)"
+               next 
+               constant-qp 
+               std-slice-header)))
+
+(defmethod print-object ((obj video-encode-h264-rate-control-info-khr) out)
+  (with-slots (next
+               flags
+               gop-frame-count
+               idr-period
+               consecutive-b-frame-count
+               temporal-layer-count)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-H264-RATE-CONTROL-INFO-KHR~:@_:next ~s~:@_:flags ~s~:@_:gop-frame-count ~s~:@_:idr-period ~s~:@_:consecutive-b-frame-count ~s~:@_:temporal-layer-count ~s~:>)"
+               next 
+               flags 
+               gop-frame-count 
+               idr-period 
+               consecutive-b-frame-count 
+               temporal-layer-count)))
+
+(defmethod print-object ((obj video-encode-h264-qp-khr) out)
+  (with-slots (qp-i
+               qp-p
+               qp-b)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-H264-QP-KHR~:@_:qp-i ~s~:@_:qp-p ~s~:@_:qp-b ~s~:>)"
+               qp-i 
+               qp-p 
+               qp-b)))
+
+(defmethod print-object ((obj video-encode-h264-frame-size-khr) out)
+  (with-slots (frame-i-size
+               frame-p-size
+               frame-b-size)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-H264-FRAME-SIZE-KHR~:@_:frame-i-size ~s~:@_:frame-p-size ~s~:@_:frame-b-size ~s~:>)"
+               frame-i-size 
+               frame-p-size 
+               frame-b-size)))
+
+(defmethod print-object ((obj video-encode-h264-gop-remaining-frame-info-khr) out)
+  (with-slots (next
+               use-gop-remaining-frames
+               gop-remaining-i
+               gop-remaining-p
+               gop-remaining-b)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-H264-GOP-REMAINING-FRAME-INFO-KHR~:@_:next ~s~:@_:use-gop-remaining-frames ~s~:@_:gop-remaining-i ~s~:@_:gop-remaining-p ~s~:@_:gop-remaining-b ~s~:>)"
+               next 
+               use-gop-remaining-frames 
+               gop-remaining-i 
+               gop-remaining-p 
+               gop-remaining-b)))
+
+(defmethod print-object ((obj video-encode-h264-rate-control-layer-info-khr) out)
+  (with-slots (next
+               use-min-qp
+               min-qp
+               use-max-qp
+               max-qp
+               use-max-frame-size
+               max-frame-size)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-H264-RATE-CONTROL-LAYER-INFO-KHR~:@_:next ~s~:@_:use-min-qp ~s~:@_:min-qp ~s~:@_:use-max-qp ~s~:@_:max-qp ~s~:@_:use-max-frame-size ~s~:@_:max-frame-size ~s~:>)"
+               next 
+               use-min-qp 
+               min-qp 
+               use-max-qp 
+               max-qp 
+               use-max-frame-size 
+               max-frame-size)))
+
+(defmethod print-object ((obj video-encode-h265-capabilities-khr) out)
+  (with-slots (next
+               flags
+               max-level-idc
+               max-slice-segment-count
+               max-tiles
+               ctb-sizes
+               transform-block-sizes
+               max-p-picture-l-0-reference-count
+               max-b-picture-l-0-reference-count
+               max-l-1-reference-count
+               max-sub-layer-count
+               expect-dyadic-temporal-sub-layer-pattern
+               min-qp
+               max-qp
+               prefers-gop-remaining-frames
+               requires-gop-remaining-frames
+               std-syntax-flags)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-H265-CAPABILITIES-KHR~:@_:next ~s~:@_:flags ~s~:@_:max-level-idc ~s~:@_:max-slice-segment-count ~s~:@_:max-tiles ~s~:@_:ctb-sizes ~s~:@_:transform-block-sizes ~s~:@_:max-p-picture-l-0-reference-count ~s~:@_:max-b-picture-l-0-reference-count ~s~:@_:max-l-1-reference-count ~s~:@_:max-sub-layer-count ~s~:@_:expect-dyadic-temporal-sub-layer-pattern ~s~:@_:min-qp ~s~:@_:max-qp ~s~:@_:prefers-gop-remaining-frames ~s~:@_:requires-gop-remaining-frames ~s~:@_:std-syntax-flags ~s~:>)"
+               next 
+               flags 
+               max-level-idc 
+               max-slice-segment-count 
+               max-tiles 
+               ctb-sizes 
+               transform-block-sizes 
+               max-p-picture-l-0-reference-count 
+               max-b-picture-l-0-reference-count 
+               max-l-1-reference-count 
+               max-sub-layer-count 
+               expect-dyadic-temporal-sub-layer-pattern 
+               min-qp 
+               max-qp 
+               prefers-gop-remaining-frames 
+               requires-gop-remaining-frames 
+               std-syntax-flags)))
+
+(defmethod print-object ((obj video-encode-h265-quality-level-properties-khr) out)
+  (with-slots (next
+               preferred-rate-control-flags
+               preferred-gop-frame-count
+               preferred-idr-period
+               preferred-consecutive-b-frame-count
+               preferred-sub-layer-count
+               preferred-constant-qp
+               preferred-max-l-0-reference-count
+               preferred-max-l-1-reference-count)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-H265-QUALITY-LEVEL-PROPERTIES-KHR~:@_:next ~s~:@_:preferred-rate-control-flags ~s~:@_:preferred-gop-frame-count ~s~:@_:preferred-idr-period ~s~:@_:preferred-consecutive-b-frame-count ~s~:@_:preferred-sub-layer-count ~s~:@_:preferred-constant-qp ~s~:@_:preferred-max-l-0-reference-count ~s~:@_:preferred-max-l-1-reference-count ~s~:>)"
+               next 
+               preferred-rate-control-flags 
+               preferred-gop-frame-count 
+               preferred-idr-period 
+               preferred-consecutive-b-frame-count 
+               preferred-sub-layer-count 
+               preferred-constant-qp 
+               preferred-max-l-0-reference-count 
+               preferred-max-l-1-reference-count)))
+
+(defmethod print-object ((obj video-encode-h265-session-create-info-khr) out)
+  (with-slots (next
+               use-max-level-idc
+               max-level-idc)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-H265-SESSION-CREATE-INFO-KHR~:@_:next ~s~:@_:use-max-level-idc ~s~:@_:max-level-idc ~s~:>)"
+               next 
+               use-max-level-idc 
+               max-level-idc)))
+
+(defmethod print-object ((obj video-encode-h265-session-parameters-add-info-khr) out)
+  (with-slots (next
+               std-v-p-ss
+               std-s-p-ss
+               std-p-p-ss)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-H265-SESSION-PARAMETERS-ADD-INFO-KHR~:@_:next ~s~:@_:std-v-p-ss ~s~:@_:std-s-p-ss ~s~:@_:std-p-p-ss ~s~:>)"
+               next 
+               std-v-p-ss 
+               std-s-p-ss 
+               std-p-p-ss)))
+
+(defmethod print-object ((obj video-encode-h265-session-parameters-create-info-khr) out)
+  (with-slots (next
+               max-std-v-p-s-count
+               max-std-s-p-s-count
+               max-std-p-p-s-count
+               parameters-add-info)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-H265-SESSION-PARAMETERS-CREATE-INFO-KHR~:@_:next ~s~:@_:max-std-v-p-s-count ~s~:@_:max-std-s-p-s-count ~s~:@_:max-std-p-p-s-count ~s~:@_:parameters-add-info ~s~:>)"
+               next 
+               max-std-v-p-s-count 
+               max-std-s-p-s-count 
+               max-std-p-p-s-count 
+               parameters-add-info)))
+
+(defmethod print-object ((obj video-encode-h265-session-parameters-get-info-khr) out)
+  (with-slots (next
+               write-std-v-p-s
+               write-std-s-p-s
+               write-std-p-p-s
+               std-v-p-s-id
+               std-s-p-s-id
+               std-p-p-s-id)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-H265-SESSION-PARAMETERS-GET-INFO-KHR~:@_:next ~s~:@_:write-std-v-p-s ~s~:@_:write-std-s-p-s ~s~:@_:write-std-p-p-s ~s~:@_:std-v-p-s-id ~s~:@_:std-s-p-s-id ~s~:@_:std-p-p-s-id ~s~:>)"
+               next 
+               write-std-v-p-s 
+               write-std-s-p-s 
+               write-std-p-p-s 
+               std-v-p-s-id 
+               std-s-p-s-id 
+               std-p-p-s-id)))
+
+(defmethod print-object ((obj video-encode-h265-session-parameters-feedback-info-khr) out)
+  (with-slots (next
+               has-std-v-p-s-overrides
+               has-std-s-p-s-overrides
+               has-std-p-p-s-overrides)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-H265-SESSION-PARAMETERS-FEEDBACK-INFO-KHR~:@_:next ~s~:@_:has-std-v-p-s-overrides ~s~:@_:has-std-s-p-s-overrides ~s~:@_:has-std-p-p-s-overrides ~s~:>)"
+               next 
+               has-std-v-p-s-overrides 
+               has-std-s-p-s-overrides 
+               has-std-p-p-s-overrides)))
+
+(defmethod print-object ((obj video-encode-h265-picture-info-khr) out)
+  (with-slots (next
+               nalu-slice-segment-entries
+               std-picture-info)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-H265-PICTURE-INFO-KHR~:@_:next ~s~:@_:nalu-slice-segment-entries ~s~:@_:std-picture-info ~s~:>)"
+               next 
+               nalu-slice-segment-entries 
+               std-picture-info)))
+
+(defmethod print-object ((obj video-encode-h265-nalu-slice-segment-info-khr) out)
+  (with-slots (next
+               constant-qp
+               std-slice-segment-header)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-H265-NALU-SLICE-SEGMENT-INFO-KHR~:@_:next ~s~:@_:constant-qp ~s~:@_:std-slice-segment-header ~s~:>)"
+               next 
+               constant-qp 
+               std-slice-segment-header)))
+
+(defmethod print-object ((obj video-encode-h265-rate-control-info-khr) out)
+  (with-slots (next
+               flags
+               gop-frame-count
+               idr-period
+               consecutive-b-frame-count
+               sub-layer-count)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-H265-RATE-CONTROL-INFO-KHR~:@_:next ~s~:@_:flags ~s~:@_:gop-frame-count ~s~:@_:idr-period ~s~:@_:consecutive-b-frame-count ~s~:@_:sub-layer-count ~s~:>)"
+               next 
+               flags 
+               gop-frame-count 
+               idr-period 
+               consecutive-b-frame-count 
+               sub-layer-count)))
+
+(defmethod print-object ((obj video-encode-h265-qp-khr) out)
+  (with-slots (qp-i
+               qp-p
+               qp-b)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-H265-QP-KHR~:@_:qp-i ~s~:@_:qp-p ~s~:@_:qp-b ~s~:>)"
+               qp-i 
+               qp-p 
+               qp-b)))
+
+(defmethod print-object ((obj video-encode-h265-frame-size-khr) out)
+  (with-slots (frame-i-size
+               frame-p-size
+               frame-b-size)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-H265-FRAME-SIZE-KHR~:@_:frame-i-size ~s~:@_:frame-p-size ~s~:@_:frame-b-size ~s~:>)"
+               frame-i-size 
+               frame-p-size 
+               frame-b-size)))
+
+(defmethod print-object ((obj video-encode-h265-gop-remaining-frame-info-khr) out)
+  (with-slots (next
+               use-gop-remaining-frames
+               gop-remaining-i
+               gop-remaining-p
+               gop-remaining-b)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-H265-GOP-REMAINING-FRAME-INFO-KHR~:@_:next ~s~:@_:use-gop-remaining-frames ~s~:@_:gop-remaining-i ~s~:@_:gop-remaining-p ~s~:@_:gop-remaining-b ~s~:>)"
+               next 
+               use-gop-remaining-frames 
+               gop-remaining-i 
+               gop-remaining-p 
+               gop-remaining-b)))
+
+(defmethod print-object ((obj video-encode-h265-rate-control-layer-info-khr) out)
+  (with-slots (next
+               use-min-qp
+               min-qp
+               use-max-qp
+               max-qp
+               use-max-frame-size
+               max-frame-size)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-H265-RATE-CONTROL-LAYER-INFO-KHR~:@_:next ~s~:@_:use-min-qp ~s~:@_:min-qp ~s~:@_:use-max-qp ~s~:@_:max-qp ~s~:@_:use-max-frame-size ~s~:@_:max-frame-size ~s~:>)"
+               next 
+               use-min-qp 
+               min-qp 
+               use-max-qp 
+               max-qp 
+               use-max-frame-size 
+               max-frame-size)))
+
+(defmethod print-object ((obj video-encode-h265-profile-info-khr) out)
+  (with-slots (next
+               std-profile-idc)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-H265-PROFILE-INFO-KHR~:@_:next ~s~:@_:std-profile-idc ~s~:>)"
+               next 
+               std-profile-idc)))
+
+(defmethod print-object ((obj video-encode-h265-dpb-slot-info-khr) out)
+  (with-slots (next
+               std-reference-info)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-H265-DPB-SLOT-INFO-KHR~:@_:next ~s~:@_:std-reference-info ~s~:>)"
+               next 
+               std-reference-info)))
+
+(defmethod print-object ((obj video-encode-a-v-1-capabilities-khr) out)
+  (with-slots (next
+               flags
+               max-level
+               coded-picture-alignment
+               max-tiles
+               min-tile-size
+               max-tile-size
+               superblock-sizes
+               max-single-reference-count
+               single-reference-name-mask
+               max-unidirectional-compound-reference-count
+               max-unidirectional-compound-group-1-reference-count
+               unidirectional-compound-reference-name-mask
+               max-bidirectional-compound-reference-count
+               max-bidirectional-compound-group-1-reference-count
+               max-bidirectional-compound-group-2-reference-count
+               bidirectional-compound-reference-name-mask
+               max-temporal-layer-count
+               max-spatial-layer-count
+               max-operating-points
+               min-q-index
+               max-q-index
+               prefers-gop-remaining-frames
+               requires-gop-remaining-frames
+               std-syntax-flags)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-A-V-1-CAPABILITIES-KHR~:@_:next ~s~:@_:flags ~s~:@_:max-level ~s~:@_:coded-picture-alignment ~s~:@_:max-tiles ~s~:@_:min-tile-size ~s~:@_:max-tile-size ~s~:@_:superblock-sizes ~s~:@_:max-single-reference-count ~s~:@_:single-reference-name-mask ~s~:@_:max-unidirectional-compound-reference-count ~s~:@_:max-unidirectional-compound-group-1-reference-count ~s~:@_:unidirectional-compound-reference-name-mask ~s~:@_:max-bidirectional-compound-reference-count ~s~:@_:max-bidirectional-compound-group-1-reference-count ~s~:@_:max-bidirectional-compound-group-2-reference-count ~s~:@_:bidirectional-compound-reference-name-mask ~s~:@_:max-temporal-layer-count ~s~:@_:max-spatial-layer-count ~s~:@_:max-operating-points ~s~:@_:min-q-index ~s~:@_:max-q-index ~s~:@_:prefers-gop-remaining-frames ~s~:@_:requires-gop-remaining-frames ~s~:@_:std-syntax-flags ~s~:>)"
+               next 
+               flags 
+               max-level 
+               coded-picture-alignment 
+               max-tiles 
+               min-tile-size 
+               max-tile-size 
+               superblock-sizes 
+               max-single-reference-count 
+               single-reference-name-mask 
+               max-unidirectional-compound-reference-count 
+               max-unidirectional-compound-group-1-reference-count 
+               unidirectional-compound-reference-name-mask 
+               max-bidirectional-compound-reference-count 
+               max-bidirectional-compound-group-1-reference-count 
+               max-bidirectional-compound-group-2-reference-count 
+               bidirectional-compound-reference-name-mask 
+               max-temporal-layer-count 
+               max-spatial-layer-count 
+               max-operating-points 
+               min-q-index 
+               max-q-index 
+               prefers-gop-remaining-frames 
+               requires-gop-remaining-frames 
+               std-syntax-flags)))
+
+(defmethod print-object ((obj video-encode-a-v-1-quality-level-properties-khr) out)
+  (with-slots (next
+               preferred-rate-control-flags
+               preferred-gop-frame-count
+               preferred-key-frame-period
+               preferred-consecutive-bipredictive-frame-count
+               preferred-temporal-layer-count
+               preferred-constant-q-index
+               preferred-max-single-reference-count
+               preferred-single-reference-name-mask
+               preferred-max-unidirectional-compound-reference-count
+               preferred-max-unidirectional-compound-group-1-reference-count
+               preferred-unidirectional-compound-reference-name-mask
+               preferred-max-bidirectional-compound-reference-count
+               preferred-max-bidirectional-compound-group-1-reference-count
+               preferred-max-bidirectional-compound-group-2-reference-count
+               preferred-bidirectional-compound-reference-name-mask)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-A-V-1-QUALITY-LEVEL-PROPERTIES-KHR~:@_:next ~s~:@_:preferred-rate-control-flags ~s~:@_:preferred-gop-frame-count ~s~:@_:preferred-key-frame-period ~s~:@_:preferred-consecutive-bipredictive-frame-count ~s~:@_:preferred-temporal-layer-count ~s~:@_:preferred-constant-q-index ~s~:@_:preferred-max-single-reference-count ~s~:@_:preferred-single-reference-name-mask ~s~:@_:preferred-max-unidirectional-compound-reference-count ~s~:@_:preferred-max-unidirectional-compound-group-1-reference-count ~s~:@_:preferred-unidirectional-compound-reference-name-mask ~s~:@_:preferred-max-bidirectional-compound-reference-count ~s~:@_:preferred-max-bidirectional-compound-group-1-reference-count ~s~:@_:preferred-max-bidirectional-compound-group-2-reference-count ~s~:@_:preferred-bidirectional-compound-reference-name-mask ~s~:>)"
+               next 
+               preferred-rate-control-flags 
+               preferred-gop-frame-count 
+               preferred-key-frame-period 
+               preferred-consecutive-bipredictive-frame-count 
+               preferred-temporal-layer-count 
+               preferred-constant-q-index 
+               preferred-max-single-reference-count 
+               preferred-single-reference-name-mask 
+               preferred-max-unidirectional-compound-reference-count 
+               preferred-max-unidirectional-compound-group-1-reference-count 
+               preferred-unidirectional-compound-reference-name-mask 
+               preferred-max-bidirectional-compound-reference-count 
+               preferred-max-bidirectional-compound-group-1-reference-count 
+               preferred-max-bidirectional-compound-group-2-reference-count 
+               preferred-bidirectional-compound-reference-name-mask)))
+
+(defmethod print-object ((obj physical-device-video-encode-a-v-1-features-khr) out)
+  (with-slots (next
+               video-encode-a-v-1)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-VIDEO-ENCODE-A-V-1-FEATURES-KHR~:@_:next ~s~:@_:video-encode-a-v-1 ~s~:>)"
+               next 
+               video-encode-a-v-1)))
+
+(defmethod print-object ((obj video-encode-a-v-1-session-create-info-khr) out)
+  (with-slots (next
+               use-max-level
+               max-level)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-A-V-1-SESSION-CREATE-INFO-KHR~:@_:next ~s~:@_:use-max-level ~s~:@_:max-level ~s~:>)"
+               next 
+               use-max-level 
+               max-level)))
+
+(defmethod print-object ((obj video-encode-a-v-1-session-parameters-create-info-khr) out)
+  (with-slots (next
+               std-sequence-header
+               std-decoder-model-info
+               std-operating-points)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-A-V-1-SESSION-PARAMETERS-CREATE-INFO-KHR~:@_:next ~s~:@_:std-sequence-header ~s~:@_:std-decoder-model-info ~s~:@_:std-operating-points ~s~:>)"
+               next 
+               std-sequence-header 
+               std-decoder-model-info 
+               std-operating-points)))
+
+(defmethod print-object ((obj video-encode-a-v-1-dpb-slot-info-khr) out)
+  (with-slots (next
+               std-reference-info)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-A-V-1-DPB-SLOT-INFO-KHR~:@_:next ~s~:@_:std-reference-info ~s~:>)"
+               next 
+               std-reference-info)))
+
+(defmethod print-object ((obj video-encode-a-v-1-picture-info-khr) out)
+  (with-slots (next
+               prediction-mode
+               rate-control-group
+               constant-q-index
+               std-picture-info
+               reference-name-slot-indices
+               primary-reference-cdf-only
+               generate-obu-extension-header)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-A-V-1-PICTURE-INFO-KHR~:@_:next ~s~:@_:prediction-mode ~s~:@_:rate-control-group ~s~:@_:constant-q-index ~s~:@_:std-picture-info ~s~:@_:reference-name-slot-indices ~s~:@_:primary-reference-cdf-only ~s~:@_:generate-obu-extension-header ~s~:>)"
+               next 
+               prediction-mode 
+               rate-control-group 
+               constant-q-index 
+               std-picture-info 
+               reference-name-slot-indices 
+               primary-reference-cdf-only 
+               generate-obu-extension-header)))
+
+(defmethod print-object ((obj video-encode-a-v-1-profile-info-khr) out)
+  (with-slots (next
+               std-profile)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-A-V-1-PROFILE-INFO-KHR~:@_:next ~s~:@_:std-profile ~s~:>)"
+               next 
+               std-profile)))
+
+(defmethod print-object ((obj video-encode-a-v-1-rate-control-info-khr) out)
+  (with-slots (next
+               flags
+               gop-frame-count
+               key-frame-period
+               consecutive-bipredictive-frame-count
+               temporal-layer-count)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-A-V-1-RATE-CONTROL-INFO-KHR~:@_:next ~s~:@_:flags ~s~:@_:gop-frame-count ~s~:@_:key-frame-period ~s~:@_:consecutive-bipredictive-frame-count ~s~:@_:temporal-layer-count ~s~:>)"
+               next 
+               flags 
+               gop-frame-count 
+               key-frame-period 
+               consecutive-bipredictive-frame-count 
+               temporal-layer-count)))
+
+(defmethod print-object ((obj video-encode-a-v-1-q-index-khr) out)
+  (with-slots (intra-q-index
+               predictive-q-index
+               bipredictive-q-index)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-A-V-1-Q-INDEX-KHR~:@_:intra-q-index ~s~:@_:predictive-q-index ~s~:@_:bipredictive-q-index ~s~:>)"
+               intra-q-index 
+               predictive-q-index 
+               bipredictive-q-index)))
+
+(defmethod print-object ((obj video-encode-a-v-1-frame-size-khr) out)
+  (with-slots (intra-frame-size
+               predictive-frame-size
+               bipredictive-frame-size)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-A-V-1-FRAME-SIZE-KHR~:@_:intra-frame-size ~s~:@_:predictive-frame-size ~s~:@_:bipredictive-frame-size ~s~:>)"
+               intra-frame-size 
+               predictive-frame-size 
+               bipredictive-frame-size)))
+
+(defmethod print-object ((obj video-encode-a-v-1-gop-remaining-frame-info-khr) out)
+  (with-slots (next
+               use-gop-remaining-frames
+               gop-remaining-intra
+               gop-remaining-predictive
+               gop-remaining-bipredictive)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-A-V-1-GOP-REMAINING-FRAME-INFO-KHR~:@_:next ~s~:@_:use-gop-remaining-frames ~s~:@_:gop-remaining-intra ~s~:@_:gop-remaining-predictive ~s~:@_:gop-remaining-bipredictive ~s~:>)"
+               next 
+               use-gop-remaining-frames 
+               gop-remaining-intra 
+               gop-remaining-predictive 
+               gop-remaining-bipredictive)))
+
+(defmethod print-object ((obj video-encode-a-v-1-rate-control-layer-info-khr) out)
+  (with-slots (next
+               use-min-q-index
+               min-q-index
+               use-max-q-index
+               max-q-index
+               use-max-frame-size
+               max-frame-size)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-A-V-1-RATE-CONTROL-LAYER-INFO-KHR~:@_:next ~s~:@_:use-min-q-index ~s~:@_:min-q-index ~s~:@_:use-max-q-index ~s~:@_:max-q-index ~s~:@_:use-max-frame-size ~s~:@_:max-frame-size ~s~:>)"
+               next 
+               use-min-q-index 
+               min-q-index 
+               use-max-q-index 
+               max-q-index 
+               use-max-frame-size 
+               max-frame-size)))
 
 (defmethod print-object ((obj physical-device-inherited-viewport-scissor-features-nv) out)
   (with-slots (next
@@ -8696,6 +12454,56 @@
                next 
                provoking-vertex-mode)))
 
+(defmethod print-object ((obj video-encode-intra-refresh-capabilities-khr) out)
+  (with-slots (next
+               intra-refresh-modes
+               max-intra-refresh-cycle-duration
+               max-intra-refresh-active-reference-pictures
+               partition-independent-intra-refresh-regions
+               non-rectangular-intra-refresh-regions)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-INTRA-REFRESH-CAPABILITIES-KHR~:@_:next ~s~:@_:intra-refresh-modes ~s~:@_:max-intra-refresh-cycle-duration ~s~:@_:max-intra-refresh-active-reference-pictures ~s~:@_:partition-independent-intra-refresh-regions ~s~:@_:non-rectangular-intra-refresh-regions ~s~:>)"
+               next 
+               intra-refresh-modes 
+               max-intra-refresh-cycle-duration 
+               max-intra-refresh-active-reference-pictures 
+               partition-independent-intra-refresh-regions 
+               non-rectangular-intra-refresh-regions)))
+
+(defmethod print-object ((obj video-encode-session-intra-refresh-create-info-khr) out)
+  (with-slots (next
+               intra-refresh-mode)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-SESSION-INTRA-REFRESH-CREATE-INFO-KHR~:@_:next ~s~:@_:intra-refresh-mode ~s~:>)"
+               next 
+               intra-refresh-mode)))
+
+(defmethod print-object ((obj video-encode-intra-refresh-info-khr) out)
+  (with-slots (next
+               intra-refresh-cycle-duration
+               intra-refresh-index)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-INTRA-REFRESH-INFO-KHR~:@_:next ~s~:@_:intra-refresh-cycle-duration ~s~:@_:intra-refresh-index ~s~:>)"
+               next 
+               intra-refresh-cycle-duration 
+               intra-refresh-index)))
+
+(defmethod print-object ((obj video-reference-intra-refresh-info-khr) out)
+  (with-slots (next
+               dirty-intra-refresh-regions)
+      obj
+    (cl:format out "~i(~@<VIDEO-REFERENCE-INTRA-REFRESH-INFO-KHR~:@_:next ~s~:@_:dirty-intra-refresh-regions ~s~:>)"
+               next 
+               dirty-intra-refresh-regions)))
+
+(defmethod print-object ((obj physical-device-video-encode-intra-refresh-features-khr) out)
+  (with-slots (next
+               video-encode-intra-refresh)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-VIDEO-ENCODE-INTRA-REFRESH-FEATURES-KHR~:@_:next ~s~:@_:video-encode-intra-refresh ~s~:>)"
+               next 
+               video-encode-intra-refresh)))
+
 (defmethod print-object ((obj cu-module-create-info-nvx) out)
   (with-slots (next
                data-size
@@ -8705,6 +12513,14 @@
                next 
                data-size 
                data)))
+
+(defmethod print-object ((obj cu-module-texturing-mode-create-info-nvx) out)
+  (with-slots (next
+               use-6-4bit-texturing)
+      obj
+    (cl:format out "~i(~@<CU-MODULE-TEXTURING-MODE-CREATE-INFO-NVX~:@_:next ~s~:@_:use-6-4bit-texturing ~s~:>)"
+               next 
+               use-6-4bit-texturing)))
 
 (defmethod print-object ((obj cu-function-create-info-nvx) out)
   (with-slots (next
@@ -8746,15 +12562,223 @@
                extra-count 
                extras)))
 
-(defmethod print-object ((obj physical-device-shader-integer-dot-product-features-khr) out)
+(defmethod print-object ((obj physical-device-descriptor-buffer-features-ext) out)
+  (with-slots (next
+               descriptor-buffer
+               descriptor-buffer-capture-replay
+               descriptor-buffer-image-layout-ignored
+               descriptor-buffer-push-descriptors)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-DESCRIPTOR-BUFFER-FEATURES-EXT~:@_:next ~s~:@_:descriptor-buffer ~s~:@_:descriptor-buffer-capture-replay ~s~:@_:descriptor-buffer-image-layout-ignored ~s~:@_:descriptor-buffer-push-descriptors ~s~:>)"
+               next 
+               descriptor-buffer 
+               descriptor-buffer-capture-replay 
+               descriptor-buffer-image-layout-ignored 
+               descriptor-buffer-push-descriptors)))
+
+(defmethod print-object ((obj physical-device-descriptor-buffer-properties-ext) out)
+  (with-slots (next
+               combined-image-sampler-descriptor-single-array
+               bufferless-push-descriptors
+               allow-sampler-image-view-post-submit-creation
+               descriptor-buffer-offset-alignment
+               max-descriptor-buffer-bindings
+               max-resource-descriptor-buffer-bindings
+               max-sampler-descriptor-buffer-bindings
+               max-embedded-immutable-sampler-bindings
+               max-embedded-immutable-samplers
+               buffer-capture-replay-descriptor-data-size
+               image-capture-replay-descriptor-data-size
+               image-view-capture-replay-descriptor-data-size
+               sampler-capture-replay-descriptor-data-size
+               acceleration-structure-capture-replay-descriptor-data-size
+               sampler-descriptor-size
+               combined-image-sampler-descriptor-size
+               sampled-image-descriptor-size
+               storage-image-descriptor-size
+               uniform-texel-buffer-descriptor-size
+               robust-uniform-texel-buffer-descriptor-size
+               storage-texel-buffer-descriptor-size
+               robust-storage-texel-buffer-descriptor-size
+               uniform-buffer-descriptor-size
+               robust-uniform-buffer-descriptor-size
+               storage-buffer-descriptor-size
+               robust-storage-buffer-descriptor-size
+               input-attachment-descriptor-size
+               acceleration-structure-descriptor-size
+               max-sampler-descriptor-buffer-range
+               max-resource-descriptor-buffer-range
+               sampler-descriptor-buffer-address-space-size
+               resource-descriptor-buffer-address-space-size
+               descriptor-buffer-address-space-size)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-DESCRIPTOR-BUFFER-PROPERTIES-EXT~:@_:next ~s~:@_:combined-image-sampler-descriptor-single-array ~s~:@_:bufferless-push-descriptors ~s~:@_:allow-sampler-image-view-post-submit-creation ~s~:@_:descriptor-buffer-offset-alignment ~s~:@_:max-descriptor-buffer-bindings ~s~:@_:max-resource-descriptor-buffer-bindings ~s~:@_:max-sampler-descriptor-buffer-bindings ~s~:@_:max-embedded-immutable-sampler-bindings ~s~:@_:max-embedded-immutable-samplers ~s~:@_:buffer-capture-replay-descriptor-data-size ~s~:@_:image-capture-replay-descriptor-data-size ~s~:@_:image-view-capture-replay-descriptor-data-size ~s~:@_:sampler-capture-replay-descriptor-data-size ~s~:@_:acceleration-structure-capture-replay-descriptor-data-size ~s~:@_:sampler-descriptor-size ~s~:@_:combined-image-sampler-descriptor-size ~s~:@_:sampled-image-descriptor-size ~s~:@_:storage-image-descriptor-size ~s~:@_:uniform-texel-buffer-descriptor-size ~s~:@_:robust-uniform-texel-buffer-descriptor-size ~s~:@_:storage-texel-buffer-descriptor-size ~s~:@_:robust-storage-texel-buffer-descriptor-size ~s~:@_:uniform-buffer-descriptor-size ~s~:@_:robust-uniform-buffer-descriptor-size ~s~:@_:storage-buffer-descriptor-size ~s~:@_:robust-storage-buffer-descriptor-size ~s~:@_:input-attachment-descriptor-size ~s~:@_:acceleration-structure-descriptor-size ~s~:@_:max-sampler-descriptor-buffer-range ~s~:@_:max-resource-descriptor-buffer-range ~s~:@_:sampler-descriptor-buffer-address-space-size ~s~:@_:resource-descriptor-buffer-address-space-size ~s~:@_:descriptor-buffer-address-space-size ~s~:>)"
+               next 
+               combined-image-sampler-descriptor-single-array 
+               bufferless-push-descriptors 
+               allow-sampler-image-view-post-submit-creation 
+               descriptor-buffer-offset-alignment 
+               max-descriptor-buffer-bindings 
+               max-resource-descriptor-buffer-bindings 
+               max-sampler-descriptor-buffer-bindings 
+               max-embedded-immutable-sampler-bindings 
+               max-embedded-immutable-samplers 
+               buffer-capture-replay-descriptor-data-size 
+               image-capture-replay-descriptor-data-size 
+               image-view-capture-replay-descriptor-data-size 
+               sampler-capture-replay-descriptor-data-size 
+               acceleration-structure-capture-replay-descriptor-data-size 
+               sampler-descriptor-size 
+               combined-image-sampler-descriptor-size 
+               sampled-image-descriptor-size 
+               storage-image-descriptor-size 
+               uniform-texel-buffer-descriptor-size 
+               robust-uniform-texel-buffer-descriptor-size 
+               storage-texel-buffer-descriptor-size 
+               robust-storage-texel-buffer-descriptor-size 
+               uniform-buffer-descriptor-size 
+               robust-uniform-buffer-descriptor-size 
+               storage-buffer-descriptor-size 
+               robust-storage-buffer-descriptor-size 
+               input-attachment-descriptor-size 
+               acceleration-structure-descriptor-size 
+               max-sampler-descriptor-buffer-range 
+               max-resource-descriptor-buffer-range 
+               sampler-descriptor-buffer-address-space-size 
+               resource-descriptor-buffer-address-space-size 
+               descriptor-buffer-address-space-size)))
+
+(defmethod print-object ((obj physical-device-descriptor-buffer-density-map-properties-ext) out)
+  (with-slots (next
+               combined-image-sampler-density-map-descriptor-size)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-DESCRIPTOR-BUFFER-DENSITY-MAP-PROPERTIES-EXT~:@_:next ~s~:@_:combined-image-sampler-density-map-descriptor-size ~s~:>)"
+               next 
+               combined-image-sampler-density-map-descriptor-size)))
+
+(defmethod print-object ((obj descriptor-address-info-ext) out)
+  (with-slots (next
+               address
+               range
+               format)
+      obj
+    (cl:format out "~i(~@<DESCRIPTOR-ADDRESS-INFO-EXT~:@_:next ~s~:@_:address ~s~:@_:range ~s~:@_:format ~s~:>)"
+               next 
+               address 
+               range 
+               format)))
+
+(defmethod print-object ((obj descriptor-buffer-binding-info-ext) out)
+  (with-slots (next
+               address
+               usage)
+      obj
+    (cl:format out "~i(~@<DESCRIPTOR-BUFFER-BINDING-INFO-EXT~:@_:next ~s~:@_:address ~s~:@_:usage ~s~:>)"
+               next 
+               address 
+               usage)))
+
+(defmethod print-object ((obj descriptor-buffer-binding-push-descriptor-buffer-handle-ext) out)
+  (with-slots (next
+               buffer)
+      obj
+    (cl:format out "~i(~@<DESCRIPTOR-BUFFER-BINDING-PUSH-DESCRIPTOR-BUFFER-HANDLE-EXT~:@_:next ~s~:@_:buffer ~s~:>)"
+               next 
+               buffer)))
+
+(defmethod print-object ((obj descriptor-data-ext) out)
+  (with-slots (sampler
+               combined-image-sampler
+               input-attachment-image
+               sampled-image
+               storage-image
+               uniform-texel-buffer
+               storage-texel-buffer
+               uniform-buffer
+               storage-buffer
+               acceleration-structure)
+      obj
+    (cl:format out "~i(~@<DESCRIPTOR-DATA-EXT~:@_:sampler ~s~:@_:combined-image-sampler ~s~:@_:input-attachment-image ~s~:@_:sampled-image ~s~:@_:storage-image ~s~:@_:uniform-texel-buffer ~s~:@_:storage-texel-buffer ~s~:@_:uniform-buffer ~s~:@_:storage-buffer ~s~:@_:acceleration-structure ~s~:>)"
+               sampler 
+               combined-image-sampler 
+               input-attachment-image 
+               sampled-image 
+               storage-image 
+               uniform-texel-buffer 
+               storage-texel-buffer 
+               uniform-buffer 
+               storage-buffer 
+               acceleration-structure)))
+
+(defmethod print-object ((obj descriptor-get-info-ext) out)
+  (with-slots (next
+               type
+               data)
+      obj
+    (cl:format out "~i(~@<DESCRIPTOR-GET-INFO-EXT~:@_:next ~s~:@_:type ~s~:@_:data ~s~:>)"
+               next 
+               type 
+               data)))
+
+(defmethod print-object ((obj buffer-capture-descriptor-data-info-ext) out)
+  (with-slots (next
+               buffer)
+      obj
+    (cl:format out "~i(~@<BUFFER-CAPTURE-DESCRIPTOR-DATA-INFO-EXT~:@_:next ~s~:@_:buffer ~s~:>)"
+               next 
+               buffer)))
+
+(defmethod print-object ((obj image-capture-descriptor-data-info-ext) out)
+  (with-slots (next
+               image)
+      obj
+    (cl:format out "~i(~@<IMAGE-CAPTURE-DESCRIPTOR-DATA-INFO-EXT~:@_:next ~s~:@_:image ~s~:>)"
+               next 
+               image)))
+
+(defmethod print-object ((obj image-view-capture-descriptor-data-info-ext) out)
+  (with-slots (next
+               image-view)
+      obj
+    (cl:format out "~i(~@<IMAGE-VIEW-CAPTURE-DESCRIPTOR-DATA-INFO-EXT~:@_:next ~s~:@_:image-view ~s~:>)"
+               next 
+               image-view)))
+
+(defmethod print-object ((obj sampler-capture-descriptor-data-info-ext) out)
+  (with-slots (next
+               sampler)
+      obj
+    (cl:format out "~i(~@<SAMPLER-CAPTURE-DESCRIPTOR-DATA-INFO-EXT~:@_:next ~s~:@_:sampler ~s~:>)"
+               next 
+               sampler)))
+
+(defmethod print-object ((obj acceleration-structure-capture-descriptor-data-info-ext) out)
+  (with-slots (next
+               acceleration-structure
+               acceleration-structure-nv)
+      obj
+    (cl:format out "~i(~@<ACCELERATION-STRUCTURE-CAPTURE-DESCRIPTOR-DATA-INFO-EXT~:@_:next ~s~:@_:acceleration-structure ~s~:@_:acceleration-structure-nv ~s~:>)"
+               next 
+               acceleration-structure 
+               acceleration-structure-nv)))
+
+(defmethod print-object ((obj opaque-capture-descriptor-data-create-info-ext) out)
+  (with-slots (next
+               opaque-capture-descriptor-data)
+      obj
+    (cl:format out "~i(~@<OPAQUE-CAPTURE-DESCRIPTOR-DATA-CREATE-INFO-EXT~:@_:next ~s~:@_:opaque-capture-descriptor-data ~s~:>)"
+               next 
+               opaque-capture-descriptor-data)))
+
+(defmethod print-object ((obj physical-device-shader-integer-dot-product-features) out)
   (with-slots (next
                shader-integer-dot-product)
       obj
-    (cl:format out "~i(~@<PHYSICAL-DEVICE-SHADER-INTEGER-DOT-PRODUCT-FEATURES-KHR~:@_:next ~s~:@_:shader-integer-dot-product ~s~:>)"
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SHADER-INTEGER-DOT-PRODUCT-FEATURES~:@_:next ~s~:@_:shader-integer-dot-product ~s~:>)"
                next 
                shader-integer-dot-product)))
 
-(defmethod print-object ((obj physical-device-shader-integer-dot-product-properties-khr) out)
+(defmethod print-object ((obj physical-device-shader-integer-dot-product-properties) out)
   (with-slots (next
                integer-dot-product-8-bit-unsigned-accelerated
                integer-dot-product-8-bit-signed-accelerated
@@ -8787,7 +12811,7 @@
                integer-dot-product-accumulating-saturating-64-bit-signed-accelerated
                integer-dot-product-accumulating-saturating-64-bit-mixed-signedness-accelerated)
       obj
-    (cl:format out "~i(~@<PHYSICAL-DEVICE-SHADER-INTEGER-DOT-PRODUCT-PROPERTIES-KHR~:@_:next ~s~:@_:integer-dot-product-8-bit-unsigned-accelerated ~s~:@_:integer-dot-product-8-bit-signed-accelerated ~s~:@_:integer-dot-product-8-bit-mixed-signedness-accelerated ~s~:@_:integer-dot-product-4x-8-bit-packed-unsigned-accelerated ~s~:@_:integer-dot-product-4x-8-bit-packed-signed-accelerated ~s~:@_:integer-dot-product-4x-8-bit-packed-mixed-signedness-accelerated ~s~:@_:integer-dot-product-16-bit-unsigned-accelerated ~s~:@_:integer-dot-product-16-bit-signed-accelerated ~s~:@_:integer-dot-product-16-bit-mixed-signedness-accelerated ~s~:@_:integer-dot-product-32-bit-unsigned-accelerated ~s~:@_:integer-dot-product-32-bit-signed-accelerated ~s~:@_:integer-dot-product-32-bit-mixed-signedness-accelerated ~s~:@_:integer-dot-product-64-bit-unsigned-accelerated ~s~:@_:integer-dot-product-64-bit-signed-accelerated ~s~:@_:integer-dot-product-64-bit-mixed-signedness-accelerated ~s~:@_:integer-dot-product-accumulating-saturating-8-bit-unsigned-accelerated ~s~:@_:integer-dot-product-accumulating-saturating-8-bit-signed-accelerated ~s~:@_:integer-dot-product-accumulating-saturating-8-bit-mixed-signedness-accelerated ~s~:@_:integer-dot-product-accumulating-saturating-4x-8-bit-packed-unsigned-accelerated ~s~:@_:integer-dot-product-accumulating-saturating-4x-8-bit-packed-signed-accelerated ~s~:@_:integer-dot-product-accumulating-saturating-4x-8-bit-packed-mixed-signedness-accelerated ~s~:@_:integer-dot-product-accumulating-saturating-16-bit-unsigned-accelerated ~s~:@_:integer-dot-product-accumulating-saturating-16-bit-signed-accelerated ~s~:@_:integer-dot-product-accumulating-saturating-16-bit-mixed-signedness-accelerated ~s~:@_:integer-dot-product-accumulating-saturating-32-bit-unsigned-accelerated ~s~:@_:integer-dot-product-accumulating-saturating-32-bit-signed-accelerated ~s~:@_:integer-dot-product-accumulating-saturating-32-bit-mixed-signedness-accelerated ~s~:@_:integer-dot-product-accumulating-saturating-64-bit-unsigned-accelerated ~s~:@_:integer-dot-product-accumulating-saturating-64-bit-signed-accelerated ~s~:@_:integer-dot-product-accumulating-saturating-64-bit-mixed-signedness-accelerated ~s~:>)"
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SHADER-INTEGER-DOT-PRODUCT-PROPERTIES~:@_:next ~s~:@_:integer-dot-product-8-bit-unsigned-accelerated ~s~:@_:integer-dot-product-8-bit-signed-accelerated ~s~:@_:integer-dot-product-8-bit-mixed-signedness-accelerated ~s~:@_:integer-dot-product-4x-8-bit-packed-unsigned-accelerated ~s~:@_:integer-dot-product-4x-8-bit-packed-signed-accelerated ~s~:@_:integer-dot-product-4x-8-bit-packed-mixed-signedness-accelerated ~s~:@_:integer-dot-product-16-bit-unsigned-accelerated ~s~:@_:integer-dot-product-16-bit-signed-accelerated ~s~:@_:integer-dot-product-16-bit-mixed-signedness-accelerated ~s~:@_:integer-dot-product-32-bit-unsigned-accelerated ~s~:@_:integer-dot-product-32-bit-signed-accelerated ~s~:@_:integer-dot-product-32-bit-mixed-signedness-accelerated ~s~:@_:integer-dot-product-64-bit-unsigned-accelerated ~s~:@_:integer-dot-product-64-bit-signed-accelerated ~s~:@_:integer-dot-product-64-bit-mixed-signedness-accelerated ~s~:@_:integer-dot-product-accumulating-saturating-8-bit-unsigned-accelerated ~s~:@_:integer-dot-product-accumulating-saturating-8-bit-signed-accelerated ~s~:@_:integer-dot-product-accumulating-saturating-8-bit-mixed-signedness-accelerated ~s~:@_:integer-dot-product-accumulating-saturating-4x-8-bit-packed-unsigned-accelerated ~s~:@_:integer-dot-product-accumulating-saturating-4x-8-bit-packed-signed-accelerated ~s~:@_:integer-dot-product-accumulating-saturating-4x-8-bit-packed-mixed-signedness-accelerated ~s~:@_:integer-dot-product-accumulating-saturating-16-bit-unsigned-accelerated ~s~:@_:integer-dot-product-accumulating-saturating-16-bit-signed-accelerated ~s~:@_:integer-dot-product-accumulating-saturating-16-bit-mixed-signedness-accelerated ~s~:@_:integer-dot-product-accumulating-saturating-32-bit-unsigned-accelerated ~s~:@_:integer-dot-product-accumulating-saturating-32-bit-signed-accelerated ~s~:@_:integer-dot-product-accumulating-saturating-32-bit-mixed-signedness-accelerated ~s~:@_:integer-dot-product-accumulating-saturating-64-bit-unsigned-accelerated ~s~:@_:integer-dot-product-accumulating-saturating-64-bit-signed-accelerated ~s~:@_:integer-dot-product-accumulating-saturating-64-bit-mixed-signedness-accelerated ~s~:>)"
                next 
                integer-dot-product-8-bit-unsigned-accelerated 
                integer-dot-product-8-bit-signed-accelerated 
@@ -8838,6 +12862,34 @@
                render-major 
                render-minor)))
 
+(defmethod print-object ((obj physical-device-fragment-shader-barycentric-features-khr) out)
+  (with-slots (next
+               fragment-shader-barycentric)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-FRAGMENT-SHADER-BARYCENTRIC-FEATURES-KHR~:@_:next ~s~:@_:fragment-shader-barycentric ~s~:>)"
+               next 
+               fragment-shader-barycentric)))
+
+(defmethod print-object ((obj physical-device-fragment-shader-barycentric-properties-khr) out)
+  (with-slots (next
+               tri-strip-vertex-order-independent-of-provoking-vertex)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-FRAGMENT-SHADER-BARYCENTRIC-PROPERTIES-KHR~:@_:next ~s~:@_:tri-strip-vertex-order-independent-of-provoking-vertex ~s~:>)"
+               next 
+               tri-strip-vertex-order-independent-of-provoking-vertex)))
+
+(defmethod print-object ((obj physical-device-shader-fma-features-khr) out)
+  (with-slots (next
+               shader-fma-float-16
+               shader-fma-float-32
+               shader-fma-float-64)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SHADER-FMA-FEATURES-KHR~:@_:next ~s~:@_:shader-fma-float-16 ~s~:@_:shader-fma-float-32 ~s~:@_:shader-fma-float-64 ~s~:>)"
+               next 
+               shader-fma-float-16 
+               shader-fma-float-32 
+               shader-fma-float-64)))
+
 (defmethod print-object ((obj physical-device-ray-tracing-motion-blur-features-nv) out)
   (with-slots (next
                ray-tracing-motion-blur
@@ -8847,6 +12899,24 @@
                next 
                ray-tracing-motion-blur 
                ray-tracing-motion-blur-pipeline-trace-rays-indirect)))
+
+(defmethod print-object ((obj physical-device-ray-tracing-validation-features-nv) out)
+  (with-slots (next
+               ray-tracing-validation)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-RAY-TRACING-VALIDATION-FEATURES-NV~:@_:next ~s~:@_:ray-tracing-validation ~s~:>)"
+               next 
+               ray-tracing-validation)))
+
+(defmethod print-object ((obj physical-device-ray-tracing-linear-swept-spheres-features-nv) out)
+  (with-slots (next
+               spheres
+               linear-swept-spheres)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-RAY-TRACING-LINEAR-SWEPT-SPHERES-FEATURES-NV~:@_:next ~s~:@_:spheres ~s~:@_:linear-swept-spheres ~s~:>)"
+               next 
+               spheres 
+               linear-swept-spheres)))
 
 (defmethod print-object ((obj acceleration-structure-geometry-motion-triangles-data-nv) out)
   (with-slots (next
@@ -9060,16 +13130,14 @@
                required-format-features
                flags
                sysmem-pixel-format
-               color-space-count
                color-spaces)
       obj
-    (cl:format out "~i(~@<IMAGE-FORMAT-CONSTRAINTS-INFO-FUCHSIA~:@_:next ~s~:@_:image-create-info ~s~:@_:required-format-features ~s~:@_:flags ~s~:@_:sysmem-pixel-format ~s~:@_:color-space-count ~s~:@_:color-spaces ~s~:>)"
+    (cl:format out "~i(~@<IMAGE-FORMAT-CONSTRAINTS-INFO-FUCHSIA~:@_:next ~s~:@_:image-create-info ~s~:@_:required-format-features ~s~:@_:flags ~s~:@_:sysmem-pixel-format ~s~:@_:color-spaces ~s~:>)"
                next 
                image-create-info 
                required-format-features 
                flags 
                sysmem-pixel-format 
-               color-space-count 
                color-spaces)))
 
 (defmethod print-object ((obj image-constraints-info-fuchsia) out)
@@ -9100,6 +13168,56 @@
                min-buffer-count-for-dedicated-slack 
                min-buffer-count-for-shared-slack)))
 
+(defmethod print-object ((obj cuda-module-create-info-nv) out)
+  (with-slots (next
+               data-size
+               data)
+      obj
+    (cl:format out "~i(~@<CUDA-MODULE-CREATE-INFO-NV~:@_:next ~s~:@_:data-size ~s~:@_:data ~s~:>)"
+               next 
+               data-size 
+               data)))
+
+(defmethod print-object ((obj cuda-function-create-info-nv) out)
+  (with-slots (next
+               module
+               name)
+      obj
+    (cl:format out "~i(~@<CUDA-FUNCTION-CREATE-INFO-NV~:@_:next ~s~:@_:module ~s~:@_:name ~s~:>)"
+               next 
+               module 
+               name)))
+
+(defmethod print-object ((obj cuda-launch-info-nv) out)
+  (with-slots (next
+               function-handle
+               grid-dim-x
+               grid-dim-y
+               grid-dim-z
+               block-dim-x
+               block-dim-y
+               block-dim-z
+               shared-mem-bytes
+               param-count
+               params
+               extra-count
+               extras)
+      obj
+    (cl:format out "~i(~@<CUDA-LAUNCH-INFO-NV~:@_:next ~s~:@_:function-handle ~s~:@_:grid-dim-x ~s~:@_:grid-dim-y ~s~:@_:grid-dim-z ~s~:@_:block-dim-x ~s~:@_:block-dim-y ~s~:@_:block-dim-z ~s~:@_:shared-mem-bytes ~s~:@_:param-count ~s~:@_:params ~s~:@_:extra-count ~s~:@_:extras ~s~:>)"
+               next 
+               function-handle 
+               grid-dim-x 
+               grid-dim-y 
+               grid-dim-z 
+               block-dim-x 
+               block-dim-y 
+               block-dim-z 
+               shared-mem-bytes 
+               param-count 
+               params 
+               extra-count 
+               extras)))
+
 (defmethod print-object ((obj physical-device-r-g-b-a-1-0-x-6-formats-features-ext) out)
   (with-slots (next
                format-rgba-1-0x-6-without-y-cb-cr-sampler)
@@ -9108,13 +13226,25 @@
                next 
                format-rgba-1-0x-6-without-y-cb-cr-sampler)))
 
-(defmethod print-object ((obj format-properties-3-khr) out)
+(defmethod print-object ((obj format-properties-3) out)
   (with-slots (next
                linear-tiling-features
                optimal-tiling-features
                buffer-features)
       obj
-    (cl:format out "~i(~@<FORMAT-PROPERTIES-3-KHR~:@_:next ~s~:@_:linear-tiling-features ~s~:@_:optimal-tiling-features ~s~:@_:buffer-features ~s~:>)"
+    (cl:format out "~i(~@<FORMAT-PROPERTIES-3~:@_:next ~s~:@_:linear-tiling-features ~s~:@_:optimal-tiling-features ~s~:@_:buffer-features ~s~:>)"
+               next 
+               linear-tiling-features 
+               optimal-tiling-features 
+               buffer-features)))
+
+(defmethod print-object ((obj format-properties-4-khr) out)
+  (with-slots (next
+               linear-tiling-features
+               optimal-tiling-features
+               buffer-features)
+      obj
+    (cl:format out "~i(~@<FORMAT-PROPERTIES-4-KHR~:@_:next ~s~:@_:linear-tiling-features ~s~:@_:optimal-tiling-features ~s~:@_:buffer-features ~s~:>)"
                next 
                linear-tiling-features 
                optimal-tiling-features 
@@ -9160,21 +13290,21 @@
                suggested-x-chroma-offset 
                suggested-y-chroma-offset)))
 
-(defmethod print-object ((obj pipeline-rendering-create-info-khr) out)
+(defmethod print-object ((obj pipeline-rendering-create-info) out)
   (with-slots (next
                view-mask
                color-attachment-formats
                depth-attachment-format
                stencil-attachment-format)
       obj
-    (cl:format out "~i(~@<PIPELINE-RENDERING-CREATE-INFO-KHR~:@_:next ~s~:@_:view-mask ~s~:@_:color-attachment-formats ~s~:@_:depth-attachment-format ~s~:@_:stencil-attachment-format ~s~:>)"
+    (cl:format out "~i(~@<PIPELINE-RENDERING-CREATE-INFO~:@_:next ~s~:@_:view-mask ~s~:@_:color-attachment-formats ~s~:@_:depth-attachment-format ~s~:@_:stencil-attachment-format ~s~:>)"
                next 
                view-mask 
                color-attachment-formats 
                depth-attachment-format 
                stencil-attachment-format)))
 
-(defmethod print-object ((obj rendering-info-khr) out)
+(defmethod print-object ((obj rendering-info) out)
   (with-slots (next
                flags
                render-area
@@ -9184,7 +13314,7 @@
                depth-attachment
                stencil-attachment)
       obj
-    (cl:format out "~i(~@<RENDERING-INFO-KHR~:@_:next ~s~:@_:flags ~s~:@_:render-area ~s~:@_:layer-count ~s~:@_:view-mask ~s~:@_:color-attachments ~s~:@_:depth-attachment ~s~:@_:stencil-attachment ~s~:>)"
+    (cl:format out "~i(~@<RENDERING-INFO~:@_:next ~s~:@_:flags ~s~:@_:render-area ~s~:@_:layer-count ~s~:@_:view-mask ~s~:@_:color-attachments ~s~:@_:depth-attachment ~s~:@_:stencil-attachment ~s~:>)"
                next 
                flags 
                render-area 
@@ -9194,7 +13324,13 @@
                depth-attachment 
                stencil-attachment)))
 
-(defmethod print-object ((obj rendering-attachment-info-khr) out)
+(defmethod print-object ((obj rendering-end-info-khr) out)
+  (with-slots (next)
+      obj
+    (cl:format out "~i(~@<RENDERING-END-INFO-KHR~:@_:next ~s~:>)"
+               next)))
+
+(defmethod print-object ((obj rendering-attachment-info) out)
   (with-slots (next
                image-view
                image-layout
@@ -9205,7 +13341,7 @@
                store-op
                clear-value)
       obj
-    (cl:format out "~i(~@<RENDERING-ATTACHMENT-INFO-KHR~:@_:next ~s~:@_:image-view ~s~:@_:image-layout ~s~:@_:resolve-mode ~s~:@_:resolve-image-view ~s~:@_:resolve-image-layout ~s~:@_:load-op ~s~:@_:store-op ~s~:@_:clear-value ~s~:>)"
+    (cl:format out "~i(~@<RENDERING-ATTACHMENT-INFO~:@_:next ~s~:@_:image-view ~s~:@_:image-layout ~s~:@_:resolve-mode ~s~:@_:resolve-image-view ~s~:@_:resolve-image-layout ~s~:@_:load-op ~s~:@_:store-op ~s~:@_:clear-value ~s~:>)"
                next 
                image-view 
                image-layout 
@@ -9238,15 +13374,15 @@
                image-view 
                image-layout)))
 
-(defmethod print-object ((obj physical-device-dynamic-rendering-features-khr) out)
+(defmethod print-object ((obj physical-device-dynamic-rendering-features) out)
   (with-slots (next
                dynamic-rendering)
       obj
-    (cl:format out "~i(~@<PHYSICAL-DEVICE-DYNAMIC-RENDERING-FEATURES-KHR~:@_:next ~s~:@_:dynamic-rendering ~s~:>)"
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-DYNAMIC-RENDERING-FEATURES~:@_:next ~s~:@_:dynamic-rendering ~s~:>)"
                next 
                dynamic-rendering)))
 
-(defmethod print-object ((obj command-buffer-inheritance-rendering-info-khr) out)
+(defmethod print-object ((obj command-buffer-inheritance-rendering-info) out)
   (with-slots (next
                flags
                view-mask
@@ -9255,7 +13391,7 @@
                stencil-attachment-format
                rasterization-samples)
       obj
-    (cl:format out "~i(~@<COMMAND-BUFFER-INHERITANCE-RENDERING-INFO-KHR~:@_:next ~s~:@_:flags ~s~:@_:view-mask ~s~:@_:color-attachment-formats ~s~:@_:depth-attachment-format ~s~:@_:stencil-attachment-format ~s~:@_:rasterization-samples ~s~:>)"
+    (cl:format out "~i(~@<COMMAND-BUFFER-INHERITANCE-RENDERING-INFO~:@_:next ~s~:@_:flags ~s~:@_:view-mask ~s~:@_:color-attachment-formats ~s~:@_:depth-attachment-format ~s~:@_:stencil-attachment-format ~s~:@_:rasterization-samples ~s~:>)"
                next 
                flags 
                view-mask 
@@ -9283,4 +13419,4604 @@
                next 
                per-view-attributes 
                per-view-attributes-position-x-only)))
+
+(defmethod print-object ((obj physical-device-image-view-min-lod-features-ext) out)
+  (with-slots (next
+               min-lod)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-IMAGE-VIEW-MIN-LOD-FEATURES-EXT~:@_:next ~s~:@_:min-lod ~s~:>)"
+               next 
+               min-lod)))
+
+(defmethod print-object ((obj image-view-min-lod-create-info-ext) out)
+  (with-slots (next
+               min-lod)
+      obj
+    (cl:format out "~i(~@<IMAGE-VIEW-MIN-LOD-CREATE-INFO-EXT~:@_:next ~s~:@_:min-lod ~s~:>)"
+               next 
+               min-lod)))
+
+(defmethod print-object ((obj physical-device-rasterization-order-attachment-access-features-ext) out)
+  (with-slots (next
+               rasterization-order-color-attachment-access
+               rasterization-order-depth-attachment-access
+               rasterization-order-stencil-attachment-access)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-RASTERIZATION-ORDER-ATTACHMENT-ACCESS-FEATURES-EXT~:@_:next ~s~:@_:rasterization-order-color-attachment-access ~s~:@_:rasterization-order-depth-attachment-access ~s~:@_:rasterization-order-stencil-attachment-access ~s~:>)"
+               next 
+               rasterization-order-color-attachment-access 
+               rasterization-order-depth-attachment-access 
+               rasterization-order-stencil-attachment-access)))
+
+(defmethod print-object ((obj physical-device-linear-color-attachment-features-nv) out)
+  (with-slots (next
+               linear-color-attachment)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-LINEAR-COLOR-ATTACHMENT-FEATURES-NV~:@_:next ~s~:@_:linear-color-attachment ~s~:>)"
+               next 
+               linear-color-attachment)))
+
+(defmethod print-object ((obj physical-device-graphics-pipeline-library-features-ext) out)
+  (with-slots (next
+               graphics-pipeline-library)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-GRAPHICS-PIPELINE-LIBRARY-FEATURES-EXT~:@_:next ~s~:@_:graphics-pipeline-library ~s~:>)"
+               next 
+               graphics-pipeline-library)))
+
+(defmethod print-object ((obj physical-device-pipeline-binary-features-khr) out)
+  (with-slots (next
+               pipeline-binaries)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-PIPELINE-BINARY-FEATURES-KHR~:@_:next ~s~:@_:pipeline-binaries ~s~:>)"
+               next 
+               pipeline-binaries)))
+
+(defmethod print-object ((obj device-pipeline-binary-internal-cache-control-khr) out)
+  (with-slots (next
+               disable-internal-cache)
+      obj
+    (cl:format out "~i(~@<DEVICE-PIPELINE-BINARY-INTERNAL-CACHE-CONTROL-KHR~:@_:next ~s~:@_:disable-internal-cache ~s~:>)"
+               next 
+               disable-internal-cache)))
+
+(defmethod print-object ((obj physical-device-pipeline-binary-properties-khr) out)
+  (with-slots (next
+               pipeline-binary-internal-cache
+               pipeline-binary-internal-cache-control
+               pipeline-binary-prefers-internal-cache
+               pipeline-binary-precompiled-internal-cache
+               pipeline-binary-compressed-data)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-PIPELINE-BINARY-PROPERTIES-KHR~:@_:next ~s~:@_:pipeline-binary-internal-cache ~s~:@_:pipeline-binary-internal-cache-control ~s~:@_:pipeline-binary-prefers-internal-cache ~s~:@_:pipeline-binary-precompiled-internal-cache ~s~:@_:pipeline-binary-compressed-data ~s~:>)"
+               next 
+               pipeline-binary-internal-cache 
+               pipeline-binary-internal-cache-control 
+               pipeline-binary-prefers-internal-cache 
+               pipeline-binary-precompiled-internal-cache 
+               pipeline-binary-compressed-data)))
+
+(defmethod print-object ((obj physical-device-graphics-pipeline-library-properties-ext) out)
+  (with-slots (next
+               graphics-pipeline-library-fast-linking
+               graphics-pipeline-library-independent-interpolation-decoration)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-GRAPHICS-PIPELINE-LIBRARY-PROPERTIES-EXT~:@_:next ~s~:@_:graphics-pipeline-library-fast-linking ~s~:@_:graphics-pipeline-library-independent-interpolation-decoration ~s~:>)"
+               next 
+               graphics-pipeline-library-fast-linking 
+               graphics-pipeline-library-independent-interpolation-decoration)))
+
+(defmethod print-object ((obj graphics-pipeline-library-create-info-ext) out)
+  (with-slots (next
+               flags)
+      obj
+    (cl:format out "~i(~@<GRAPHICS-PIPELINE-LIBRARY-CREATE-INFO-EXT~:@_:next ~s~:@_:flags ~s~:>)"
+               next 
+               flags)))
+
+(defmethod print-object ((obj physical-device-data-graph-neural-accelerator-statistics-features-arm) out)
+  (with-slots (next
+               data-graph-neural-accelerator-statistics)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-DATA-GRAPH-NEURAL-ACCELERATOR-STATISTICS-FEATURES-ARM~:@_:next ~s~:@_:data-graph-neural-accelerator-statistics ~s~:>)"
+               next 
+               data-graph-neural-accelerator-statistics)))
+
+(defmethod print-object ((obj data-graph-pipeline-neural-statistics-create-info-arm) out)
+  (with-slots (next
+               allow-neural-statistics)
+      obj
+    (cl:format out "~i(~@<DATA-GRAPH-PIPELINE-NEURAL-STATISTICS-CREATE-INFO-ARM~:@_:next ~s~:@_:allow-neural-statistics ~s~:>)"
+               next 
+               allow-neural-statistics)))
+
+(defmethod print-object ((obj data-graph-pipeline-session-neural-statistics-create-info-arm) out)
+  (with-slots (next
+               mode)
+      obj
+    (cl:format out "~i(~@<DATA-GRAPH-PIPELINE-SESSION-NEURAL-STATISTICS-CREATE-INFO-ARM~:@_:next ~s~:@_:mode ~s~:>)"
+               next 
+               mode)))
+
+(defmethod print-object ((obj tensor-explicit-tiling-format-properties-arm) out)
+  (with-slots (next
+               brick-16-tiling-tensor-features
+               brick-8-tiling-tensor-features
+               brick-4-tiling-tensor-features
+               block-u-tiling-tensor-features
+               block-u-6-4k-tiling-tensor-features)
+      obj
+    (cl:format out "~i(~@<TENSOR-EXPLICIT-TILING-FORMAT-PROPERTIES-ARM~:@_:next ~s~:@_:brick-16-tiling-tensor-features ~s~:@_:brick-8-tiling-tensor-features ~s~:@_:brick-4-tiling-tensor-features ~s~:@_:block-u-tiling-tensor-features ~s~:@_:block-u-6-4k-tiling-tensor-features ~s~:>)"
+               next 
+               brick-16-tiling-tensor-features 
+               brick-8-tiling-tensor-features 
+               brick-4-tiling-tensor-features 
+               block-u-tiling-tensor-features 
+               block-u-6-4k-tiling-tensor-features)))
+
+(defmethod print-object ((obj tensor-rolling-backing-create-info-arm) out)
+  (with-slots (next
+               wraps)
+      obj
+    (cl:format out "~i(~@<TENSOR-ROLLING-BACKING-CREATE-INFO-ARM~:@_:next ~s~:@_:wraps ~s~:>)"
+               next 
+               wraps)))
+
+(defmethod print-object ((obj physical-device-descriptor-set-host-mapping-features-valve) out)
+  (with-slots (next
+               descriptor-set-host-mapping)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-DESCRIPTOR-SET-HOST-MAPPING-FEATURES-VALVE~:@_:next ~s~:@_:descriptor-set-host-mapping ~s~:>)"
+               next 
+               descriptor-set-host-mapping)))
+
+(defmethod print-object ((obj descriptor-set-binding-reference-valve) out)
+  (with-slots (next
+               descriptor-set-layout
+               binding)
+      obj
+    (cl:format out "~i(~@<DESCRIPTOR-SET-BINDING-REFERENCE-VALVE~:@_:next ~s~:@_:descriptor-set-layout ~s~:@_:binding ~s~:>)"
+               next 
+               descriptor-set-layout 
+               binding)))
+
+(defmethod print-object ((obj descriptor-set-layout-host-mapping-info-valve) out)
+  (with-slots (next
+               descriptor-offset
+               descriptor-size)
+      obj
+    (cl:format out "~i(~@<DESCRIPTOR-SET-LAYOUT-HOST-MAPPING-INFO-VALVE~:@_:next ~s~:@_:descriptor-offset ~s~:@_:descriptor-size ~s~:>)"
+               next 
+               descriptor-offset 
+               descriptor-size)))
+
+(defmethod print-object ((obj physical-device-nested-command-buffer-features-ext) out)
+  (with-slots (next
+               nested-command-buffer
+               nested-command-buffer-rendering
+               nested-command-buffer-simultaneous-use)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-NESTED-COMMAND-BUFFER-FEATURES-EXT~:@_:next ~s~:@_:nested-command-buffer ~s~:@_:nested-command-buffer-rendering ~s~:@_:nested-command-buffer-simultaneous-use ~s~:>)"
+               next 
+               nested-command-buffer 
+               nested-command-buffer-rendering 
+               nested-command-buffer-simultaneous-use)))
+
+(defmethod print-object ((obj physical-device-nested-command-buffer-properties-ext) out)
+  (with-slots (next
+               max-command-buffer-nesting-level)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-NESTED-COMMAND-BUFFER-PROPERTIES-EXT~:@_:next ~s~:@_:max-command-buffer-nesting-level ~s~:>)"
+               next 
+               max-command-buffer-nesting-level)))
+
+(defmethod print-object ((obj physical-device-shader-module-identifier-features-ext) out)
+  (with-slots (next
+               shader-module-identifier)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SHADER-MODULE-IDENTIFIER-FEATURES-EXT~:@_:next ~s~:@_:shader-module-identifier ~s~:>)"
+               next 
+               shader-module-identifier)))
+
+(defmethod print-object ((obj physical-device-shader-module-identifier-properties-ext) out)
+  (with-slots (next
+               shader-module-identifier-algorithm-uuid)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SHADER-MODULE-IDENTIFIER-PROPERTIES-EXT~:@_:next ~s~:@_:shader-module-identifier-algorithm-uuid ~s~:>)"
+               next 
+               shader-module-identifier-algorithm-uuid)))
+
+(defmethod print-object ((obj pipeline-shader-stage-module-identifier-create-info-ext) out)
+  (with-slots (next
+               identifier)
+      obj
+    (cl:format out "~i(~@<PIPELINE-SHADER-STAGE-MODULE-IDENTIFIER-CREATE-INFO-EXT~:@_:next ~s~:@_:identifier ~s~:>)"
+               next 
+               identifier)))
+
+(defmethod print-object ((obj shader-module-identifier-ext) out)
+  (with-slots (next
+               identifier)
+      obj
+    (cl:format out "~i(~@<SHADER-MODULE-IDENTIFIER-EXT~:@_:next ~s~:@_:identifier ~s~:>)"
+               next 
+               identifier)))
+
+(defmethod print-object ((obj image-compression-control-ext) out)
+  (with-slots (next
+               flags
+               fixed-rate-flags)
+      obj
+    (cl:format out "~i(~@<IMAGE-COMPRESSION-CONTROL-EXT~:@_:next ~s~:@_:flags ~s~:@_:fixed-rate-flags ~s~:>)"
+               next 
+               flags 
+               fixed-rate-flags)))
+
+(defmethod print-object ((obj physical-device-image-compression-control-features-ext) out)
+  (with-slots (next
+               image-compression-control)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-IMAGE-COMPRESSION-CONTROL-FEATURES-EXT~:@_:next ~s~:@_:image-compression-control ~s~:>)"
+               next 
+               image-compression-control)))
+
+(defmethod print-object ((obj image-compression-properties-ext) out)
+  (with-slots (next
+               image-compression-flags
+               image-compression-fixed-rate-flags)
+      obj
+    (cl:format out "~i(~@<IMAGE-COMPRESSION-PROPERTIES-EXT~:@_:next ~s~:@_:image-compression-flags ~s~:@_:image-compression-fixed-rate-flags ~s~:>)"
+               next 
+               image-compression-flags 
+               image-compression-fixed-rate-flags)))
+
+(defmethod print-object ((obj physical-device-image-compression-control-swapchain-features-ext) out)
+  (with-slots (next
+               image-compression-control-swapchain)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-IMAGE-COMPRESSION-CONTROL-SWAPCHAIN-FEATURES-EXT~:@_:next ~s~:@_:image-compression-control-swapchain ~s~:>)"
+               next 
+               image-compression-control-swapchain)))
+
+(defmethod print-object ((obj image-subresource-2) out)
+  (with-slots (next
+               image-subresource)
+      obj
+    (cl:format out "~i(~@<IMAGE-SUBRESOURCE-2~:@_:next ~s~:@_:image-subresource ~s~:>)"
+               next 
+               image-subresource)))
+
+(defmethod print-object ((obj subresource-layout-2) out)
+  (with-slots (next
+               subresource-layout)
+      obj
+    (cl:format out "~i(~@<SUBRESOURCE-LAYOUT-2~:@_:next ~s~:@_:subresource-layout ~s~:>)"
+               next 
+               subresource-layout)))
+
+(defmethod print-object ((obj render-pass-creation-control-ext) out)
+  (with-slots (next
+               disallow-merging)
+      obj
+    (cl:format out "~i(~@<RENDER-PASS-CREATION-CONTROL-EXT~:@_:next ~s~:@_:disallow-merging ~s~:>)"
+               next 
+               disallow-merging)))
+
+(defmethod print-object ((obj render-pass-creation-feedback-info-ext) out)
+  (with-slots (post-merge-subpass-count)
+      obj
+    (cl:format out "~i(~@<RENDER-PASS-CREATION-FEEDBACK-INFO-EXT~:@_:post-merge-subpass-count ~s~:>)"
+               post-merge-subpass-count)))
+
+(defmethod print-object ((obj render-pass-creation-feedback-create-info-ext) out)
+  (with-slots (next
+               render-pass-feedback)
+      obj
+    (cl:format out "~i(~@<RENDER-PASS-CREATION-FEEDBACK-CREATE-INFO-EXT~:@_:next ~s~:@_:render-pass-feedback ~s~:>)"
+               next 
+               render-pass-feedback)))
+
+(defmethod print-object ((obj render-pass-subpass-feedback-info-ext) out)
+  (with-slots (subpass-merge-status
+               description
+               post-merge-index)
+      obj
+    (cl:format out "~i(~@<RENDER-PASS-SUBPASS-FEEDBACK-INFO-EXT~:@_:subpass-merge-status ~s~:@_:description ~s~:@_:post-merge-index ~s~:>)"
+               subpass-merge-status 
+               description 
+               post-merge-index)))
+
+(defmethod print-object ((obj render-pass-subpass-feedback-create-info-ext) out)
+  (with-slots (next
+               subpass-feedback)
+      obj
+    (cl:format out "~i(~@<RENDER-PASS-SUBPASS-FEEDBACK-CREATE-INFO-EXT~:@_:next ~s~:@_:subpass-feedback ~s~:>)"
+               next 
+               subpass-feedback)))
+
+(defmethod print-object ((obj physical-device-subpass-merge-feedback-features-ext) out)
+  (with-slots (next
+               subpass-merge-feedback)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SUBPASS-MERGE-FEEDBACK-FEATURES-EXT~:@_:next ~s~:@_:subpass-merge-feedback ~s~:>)"
+               next 
+               subpass-merge-feedback)))
+
+(defmethod print-object ((obj micromap-build-info-ext) out)
+  (with-slots (next
+               type
+               flags
+               mode
+               dst-micromap
+               usage-counts
+               p-usage-counts
+               data
+               scratch-data
+               triangle-array
+               triangle-array-stride)
+      obj
+    (cl:format out "~i(~@<MICROMAP-BUILD-INFO-EXT~:@_:next ~s~:@_:type ~s~:@_:flags ~s~:@_:mode ~s~:@_:dst-micromap ~s~:@_:usage-counts ~s~:@_:p-usage-counts ~s~:@_:data ~s~:@_:scratch-data ~s~:@_:triangle-array ~s~:@_:triangle-array-stride ~s~:>)"
+               next 
+               type 
+               flags 
+               mode 
+               dst-micromap 
+               usage-counts 
+               p-usage-counts 
+               data 
+               scratch-data 
+               triangle-array 
+               triangle-array-stride)))
+
+(defmethod print-object ((obj acceleration-structure-geometry-micromap-data-khr) out)
+  (with-slots (next
+               usage-counts
+               p-usage-counts
+               data
+               triangle-array
+               triangle-array-stride)
+      obj
+    (cl:format out "~i(~@<ACCELERATION-STRUCTURE-GEOMETRY-MICROMAP-DATA-KHR~:@_:next ~s~:@_:usage-counts ~s~:@_:p-usage-counts ~s~:@_:data ~s~:@_:triangle-array ~s~:@_:triangle-array-stride ~s~:>)"
+               next 
+               usage-counts 
+               p-usage-counts 
+               data 
+               triangle-array 
+               triangle-array-stride)))
+
+(defmethod print-object ((obj micromap-create-info-ext) out)
+  (with-slots (next
+               create-flags
+               buffer
+               offset
+               size
+               type
+               device-address)
+      obj
+    (cl:format out "~i(~@<MICROMAP-CREATE-INFO-EXT~:@_:next ~s~:@_:create-flags ~s~:@_:buffer ~s~:@_:offset ~s~:@_:size ~s~:@_:type ~s~:@_:device-address ~s~:>)"
+               next 
+               create-flags 
+               buffer 
+               offset 
+               size 
+               type 
+               device-address)))
+
+(defmethod print-object ((obj micromap-version-info-ext) out)
+  (with-slots (next
+               version-data)
+      obj
+    (cl:format out "~i(~@<MICROMAP-VERSION-INFO-EXT~:@_:next ~s~:@_:version-data ~s~:>)"
+               next 
+               version-data)))
+
+(defmethod print-object ((obj copy-micromap-info-ext) out)
+  (with-slots (next
+               src
+               dst
+               mode)
+      obj
+    (cl:format out "~i(~@<COPY-MICROMAP-INFO-EXT~:@_:next ~s~:@_:src ~s~:@_:dst ~s~:@_:mode ~s~:>)"
+               next 
+               src 
+               dst 
+               mode)))
+
+(defmethod print-object ((obj copy-micromap-to-memory-info-ext) out)
+  (with-slots (next
+               src
+               dst
+               mode)
+      obj
+    (cl:format out "~i(~@<COPY-MICROMAP-TO-MEMORY-INFO-EXT~:@_:next ~s~:@_:src ~s~:@_:dst ~s~:@_:mode ~s~:>)"
+               next 
+               src 
+               dst 
+               mode)))
+
+(defmethod print-object ((obj copy-memory-to-micromap-info-ext) out)
+  (with-slots (next
+               src
+               dst
+               mode)
+      obj
+    (cl:format out "~i(~@<COPY-MEMORY-TO-MICROMAP-INFO-EXT~:@_:next ~s~:@_:src ~s~:@_:dst ~s~:@_:mode ~s~:>)"
+               next 
+               src 
+               dst 
+               mode)))
+
+(defmethod print-object ((obj micromap-build-sizes-info-ext) out)
+  (with-slots (next
+               micromap-size
+               build-scratch-size
+               discardable)
+      obj
+    (cl:format out "~i(~@<MICROMAP-BUILD-SIZES-INFO-EXT~:@_:next ~s~:@_:micromap-size ~s~:@_:build-scratch-size ~s~:@_:discardable ~s~:>)"
+               next 
+               micromap-size 
+               build-scratch-size 
+               discardable)))
+
+(defmethod print-object ((obj micromap-usage-khr) out)
+  (with-slots (count
+               subdivision-level
+               format)
+      obj
+    (cl:format out "~i(~@<MICROMAP-USAGE-KHR~:@_:count ~s~:@_:subdivision-level ~s~:@_:format ~s~:>)"
+               count 
+               subdivision-level 
+               format)))
+
+(defmethod print-object ((obj micromap-usage-ext) out)
+  (with-slots (count
+               subdivision-level
+               format)
+      obj
+    (cl:format out "~i(~@<MICROMAP-USAGE-EXT~:@_:count ~s~:@_:subdivision-level ~s~:@_:format ~s~:>)"
+               count 
+               subdivision-level 
+               format)))
+
+(defmethod print-object ((obj micromap-triangle-khr) out)
+  (with-slots (data-offset
+               subdivision-level
+               format)
+      obj
+    (cl:format out "~i(~@<MICROMAP-TRIANGLE-KHR~:@_:data-offset ~s~:@_:subdivision-level ~s~:@_:format ~s~:>)"
+               data-offset 
+               subdivision-level 
+               format)))
+
+(defmethod print-object ((obj physical-device-opacity-micromap-features-khr) out)
+  (with-slots (next
+               micromap)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-OPACITY-MICROMAP-FEATURES-KHR~:@_:next ~s~:@_:micromap ~s~:>)"
+               next 
+               micromap)))
+
+(defmethod print-object ((obj physical-device-opacity-micromap-features-ext) out)
+  (with-slots (next
+               micromap
+               micromap-capture-replay
+               micromap-host-commands)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-OPACITY-MICROMAP-FEATURES-EXT~:@_:next ~s~:@_:micromap ~s~:@_:micromap-capture-replay ~s~:@_:micromap-host-commands ~s~:>)"
+               next 
+               micromap 
+               micromap-capture-replay 
+               micromap-host-commands)))
+
+(defmethod print-object ((obj physical-device-opacity-micromap-properties-khr) out)
+  (with-slots (next
+               max-opacity-2-state-subdivision-level
+               max-opacity-4-state-subdivision-level
+               max-opacity-lossy-4-state-subdivision-level
+               max-micromap-triangles)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-OPACITY-MICROMAP-PROPERTIES-KHR~:@_:next ~s~:@_:max-opacity-2-state-subdivision-level ~s~:@_:max-opacity-4-state-subdivision-level ~s~:@_:max-opacity-lossy-4-state-subdivision-level ~s~:@_:max-micromap-triangles ~s~:>)"
+               next 
+               max-opacity-2-state-subdivision-level 
+               max-opacity-4-state-subdivision-level 
+               max-opacity-lossy-4-state-subdivision-level 
+               max-micromap-triangles)))
+
+(defmethod print-object ((obj physical-device-opacity-micromap-properties-ext) out)
+  (with-slots (next
+               max-opacity-2-state-subdivision-level
+               max-opacity-4-state-subdivision-level)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-OPACITY-MICROMAP-PROPERTIES-EXT~:@_:next ~s~:@_:max-opacity-2-state-subdivision-level ~s~:@_:max-opacity-4-state-subdivision-level ~s~:>)"
+               next 
+               max-opacity-2-state-subdivision-level 
+               max-opacity-4-state-subdivision-level)))
+
+(defmethod print-object ((obj acceleration-structure-triangles-opacity-micromap-khr) out)
+  (with-slots (next
+               index-type
+               index-buffer
+               index-stride
+               base-triangle
+               micromap)
+      obj
+    (cl:format out "~i(~@<ACCELERATION-STRUCTURE-TRIANGLES-OPACITY-MICROMAP-KHR~:@_:next ~s~:@_:index-type ~s~:@_:index-buffer ~s~:@_:index-stride ~s~:@_:base-triangle ~s~:@_:micromap ~s~:>)"
+               next 
+               index-type 
+               index-buffer 
+               index-stride 
+               base-triangle 
+               micromap)))
+
+(defmethod print-object ((obj acceleration-structure-triangles-opacity-micromap-ext) out)
+  (with-slots (next
+               index-type
+               index-buffer
+               index-stride
+               base-triangle
+               usage-counts
+               p-usage-counts
+               micromap)
+      obj
+    (cl:format out "~i(~@<ACCELERATION-STRUCTURE-TRIANGLES-OPACITY-MICROMAP-EXT~:@_:next ~s~:@_:index-type ~s~:@_:index-buffer ~s~:@_:index-stride ~s~:@_:base-triangle ~s~:@_:usage-counts ~s~:@_:p-usage-counts ~s~:@_:micromap ~s~:>)"
+               next 
+               index-type 
+               index-buffer 
+               index-stride 
+               base-triangle 
+               usage-counts 
+               p-usage-counts 
+               micromap)))
+
+(defmethod print-object ((obj physical-device-displacement-micromap-features-nv) out)
+  (with-slots (next
+               displacement-micromap)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-DISPLACEMENT-MICROMAP-FEATURES-NV~:@_:next ~s~:@_:displacement-micromap ~s~:>)"
+               next 
+               displacement-micromap)))
+
+(defmethod print-object ((obj physical-device-displacement-micromap-properties-nv) out)
+  (with-slots (next
+               max-displacement-micromap-subdivision-level)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-DISPLACEMENT-MICROMAP-PROPERTIES-NV~:@_:next ~s~:@_:max-displacement-micromap-subdivision-level ~s~:>)"
+               next 
+               max-displacement-micromap-subdivision-level)))
+
+(defmethod print-object ((obj acceleration-structure-triangles-displacement-micromap-nv) out)
+  (with-slots (next
+               displacement-bias-and-scale-format
+               displacement-vector-format
+               displacement-bias-and-scale-buffer
+               displacement-bias-and-scale-stride
+               displacement-vector-buffer
+               displacement-vector-stride
+               displaced-micromap-primitive-flags
+               displaced-micromap-primitive-flags-stride
+               index-type
+               index-buffer
+               index-stride
+               base-triangle
+               usage-counts
+               p-usage-counts
+               micromap)
+      obj
+    (cl:format out "~i(~@<ACCELERATION-STRUCTURE-TRIANGLES-DISPLACEMENT-MICROMAP-NV~:@_:next ~s~:@_:displacement-bias-and-scale-format ~s~:@_:displacement-vector-format ~s~:@_:displacement-bias-and-scale-buffer ~s~:@_:displacement-bias-and-scale-stride ~s~:@_:displacement-vector-buffer ~s~:@_:displacement-vector-stride ~s~:@_:displaced-micromap-primitive-flags ~s~:@_:displaced-micromap-primitive-flags-stride ~s~:@_:index-type ~s~:@_:index-buffer ~s~:@_:index-stride ~s~:@_:base-triangle ~s~:@_:usage-counts ~s~:@_:p-usage-counts ~s~:@_:micromap ~s~:>)"
+               next 
+               displacement-bias-and-scale-format 
+               displacement-vector-format 
+               displacement-bias-and-scale-buffer 
+               displacement-bias-and-scale-stride 
+               displacement-vector-buffer 
+               displacement-vector-stride 
+               displaced-micromap-primitive-flags 
+               displaced-micromap-primitive-flags-stride 
+               index-type 
+               index-buffer 
+               index-stride 
+               base-triangle 
+               usage-counts 
+               p-usage-counts 
+               micromap)))
+
+(defmethod print-object ((obj pipeline-properties-identifier-ext) out)
+  (with-slots (next
+               pipeline-identifier)
+      obj
+    (cl:format out "~i(~@<PIPELINE-PROPERTIES-IDENTIFIER-EXT~:@_:next ~s~:@_:pipeline-identifier ~s~:>)"
+               next 
+               pipeline-identifier)))
+
+(defmethod print-object ((obj physical-device-pipeline-properties-features-ext) out)
+  (with-slots (next
+               pipeline-properties-identifier)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-PIPELINE-PROPERTIES-FEATURES-EXT~:@_:next ~s~:@_:pipeline-properties-identifier ~s~:>)"
+               next 
+               pipeline-properties-identifier)))
+
+(defmethod print-object ((obj physical-device-shader-early-and-late-fragment-tests-features-amd) out)
+  (with-slots (next
+               shader-early-and-late-fragment-tests)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SHADER-EARLY-AND-LATE-FRAGMENT-TESTS-FEATURES-AMD~:@_:next ~s~:@_:shader-early-and-late-fragment-tests ~s~:>)"
+               next 
+               shader-early-and-late-fragment-tests)))
+
+(defmethod print-object ((obj external-memory-acquire-unmodified-ext) out)
+  (with-slots (next
+               acquire-unmodified-memory)
+      obj
+    (cl:format out "~i(~@<EXTERNAL-MEMORY-ACQUIRE-UNMODIFIED-EXT~:@_:next ~s~:@_:acquire-unmodified-memory ~s~:>)"
+               next 
+               acquire-unmodified-memory)))
+
+(defmethod print-object ((obj export-metal-object-create-info-ext) out)
+  (with-slots (next
+               export-object-type)
+      obj
+    (cl:format out "~i(~@<EXPORT-METAL-OBJECT-CREATE-INFO-EXT~:@_:next ~s~:@_:export-object-type ~s~:>)"
+               next 
+               export-object-type)))
+
+(defmethod print-object ((obj export-metal-objects-info-ext) out)
+  (with-slots (next)
+      obj
+    (cl:format out "~i(~@<EXPORT-METAL-OBJECTS-INFO-EXT~:@_:next ~s~:>)"
+               next)))
+
+(defmethod print-object ((obj export-metal-device-info-ext) out)
+  (with-slots (next
+               mtl-device)
+      obj
+    (cl:format out "~i(~@<EXPORT-METAL-DEVICE-INFO-EXT~:@_:next ~s~:@_:mtl-device ~s~:>)"
+               next 
+               mtl-device)))
+
+(defmethod print-object ((obj export-metal-command-queue-info-ext) out)
+  (with-slots (next
+               queue
+               mtl-command-queue)
+      obj
+    (cl:format out "~i(~@<EXPORT-METAL-COMMAND-QUEUE-INFO-EXT~:@_:next ~s~:@_:queue ~s~:@_:mtl-command-queue ~s~:>)"
+               next 
+               queue 
+               mtl-command-queue)))
+
+(defmethod print-object ((obj export-metal-buffer-info-ext) out)
+  (with-slots (next
+               memory
+               mtl-buffer)
+      obj
+    (cl:format out "~i(~@<EXPORT-METAL-BUFFER-INFO-EXT~:@_:next ~s~:@_:memory ~s~:@_:mtl-buffer ~s~:>)"
+               next 
+               memory 
+               mtl-buffer)))
+
+(defmethod print-object ((obj import-metal-buffer-info-ext) out)
+  (with-slots (next
+               mtl-buffer)
+      obj
+    (cl:format out "~i(~@<IMPORT-METAL-BUFFER-INFO-EXT~:@_:next ~s~:@_:mtl-buffer ~s~:>)"
+               next 
+               mtl-buffer)))
+
+(defmethod print-object ((obj export-metal-texture-info-ext) out)
+  (with-slots (next
+               image
+               image-view
+               buffer-view
+               plane
+               mtl-texture)
+      obj
+    (cl:format out "~i(~@<EXPORT-METAL-TEXTURE-INFO-EXT~:@_:next ~s~:@_:image ~s~:@_:image-view ~s~:@_:buffer-view ~s~:@_:plane ~s~:@_:mtl-texture ~s~:>)"
+               next 
+               image 
+               image-view 
+               buffer-view 
+               plane 
+               mtl-texture)))
+
+(defmethod print-object ((obj import-metal-texture-info-ext) out)
+  (with-slots (next
+               plane
+               mtl-texture)
+      obj
+    (cl:format out "~i(~@<IMPORT-METAL-TEXTURE-INFO-EXT~:@_:next ~s~:@_:plane ~s~:@_:mtl-texture ~s~:>)"
+               next 
+               plane 
+               mtl-texture)))
+
+(defmethod print-object ((obj export-metal-i-o-surface-info-ext) out)
+  (with-slots (next
+               image
+               io-surface)
+      obj
+    (cl:format out "~i(~@<EXPORT-METAL-I-O-SURFACE-INFO-EXT~:@_:next ~s~:@_:image ~s~:@_:io-surface ~s~:>)"
+               next 
+               image 
+               io-surface)))
+
+(defmethod print-object ((obj import-metal-i-o-surface-info-ext) out)
+  (with-slots (next
+               io-surface)
+      obj
+    (cl:format out "~i(~@<IMPORT-METAL-I-O-SURFACE-INFO-EXT~:@_:next ~s~:@_:io-surface ~s~:>)"
+               next 
+               io-surface)))
+
+(defmethod print-object ((obj export-metal-shared-event-info-ext) out)
+  (with-slots (next
+               semaphore
+               event
+               mtl-shared-event)
+      obj
+    (cl:format out "~i(~@<EXPORT-METAL-SHARED-EVENT-INFO-EXT~:@_:next ~s~:@_:semaphore ~s~:@_:event ~s~:@_:mtl-shared-event ~s~:>)"
+               next 
+               semaphore 
+               event 
+               mtl-shared-event)))
+
+(defmethod print-object ((obj import-metal-shared-event-info-ext) out)
+  (with-slots (next
+               mtl-shared-event)
+      obj
+    (cl:format out "~i(~@<IMPORT-METAL-SHARED-EVENT-INFO-EXT~:@_:next ~s~:@_:mtl-shared-event ~s~:>)"
+               next 
+               mtl-shared-event)))
+
+(defmethod print-object ((obj physical-device-non-seamless-cube-map-features-ext) out)
+  (with-slots (next
+               non-seamless-cube-map)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-NON-SEAMLESS-CUBE-MAP-FEATURES-EXT~:@_:next ~s~:@_:non-seamless-cube-map ~s~:>)"
+               next 
+               non-seamless-cube-map)))
+
+(defmethod print-object ((obj physical-device-pipeline-robustness-features) out)
+  (with-slots (next
+               pipeline-robustness)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-PIPELINE-ROBUSTNESS-FEATURES~:@_:next ~s~:@_:pipeline-robustness ~s~:>)"
+               next 
+               pipeline-robustness)))
+
+(defmethod print-object ((obj pipeline-robustness-create-info) out)
+  (with-slots (next
+               storage-buffers
+               uniform-buffers
+               vertex-inputs
+               images)
+      obj
+    (cl:format out "~i(~@<PIPELINE-ROBUSTNESS-CREATE-INFO~:@_:next ~s~:@_:storage-buffers ~s~:@_:uniform-buffers ~s~:@_:vertex-inputs ~s~:@_:images ~s~:>)"
+               next 
+               storage-buffers 
+               uniform-buffers 
+               vertex-inputs 
+               images)))
+
+(defmethod print-object ((obj physical-device-pipeline-robustness-properties) out)
+  (with-slots (next
+               default-robustness-storage-buffers
+               default-robustness-uniform-buffers
+               default-robustness-vertex-inputs
+               default-robustness-images)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-PIPELINE-ROBUSTNESS-PROPERTIES~:@_:next ~s~:@_:default-robustness-storage-buffers ~s~:@_:default-robustness-uniform-buffers ~s~:@_:default-robustness-vertex-inputs ~s~:@_:default-robustness-images ~s~:>)"
+               next 
+               default-robustness-storage-buffers 
+               default-robustness-uniform-buffers 
+               default-robustness-vertex-inputs 
+               default-robustness-images)))
+
+(defmethod print-object ((obj image-view-sample-weight-create-info-qcom) out)
+  (with-slots (next
+               filter-center
+               filter-size
+               num-phases)
+      obj
+    (cl:format out "~i(~@<IMAGE-VIEW-SAMPLE-WEIGHT-CREATE-INFO-QCOM~:@_:next ~s~:@_:filter-center ~s~:@_:filter-size ~s~:@_:num-phases ~s~:>)"
+               next 
+               filter-center 
+               filter-size 
+               num-phases)))
+
+(defmethod print-object ((obj physical-device-shader-multiple-wait-queues-features-qcom) out)
+  (with-slots (next
+               shader-multiple-wait-queues)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SHADER-MULTIPLE-WAIT-QUEUES-FEATURES-QCOM~:@_:next ~s~:@_:shader-multiple-wait-queues ~s~:>)"
+               next 
+               shader-multiple-wait-queues)))
+
+(defmethod print-object ((obj physical-device-shader-multiple-wait-queues-properties-qcom) out)
+  (with-slots (next
+               max-shader-wait-queues)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SHADER-MULTIPLE-WAIT-QUEUES-PROPERTIES-QCOM~:@_:next ~s~:@_:max-shader-wait-queues ~s~:>)"
+               next 
+               max-shader-wait-queues)))
+
+(defmethod print-object ((obj physical-device-image-processing-features-qcom) out)
+  (with-slots (next
+               texture-sample-weighted
+               texture-box-filter
+               texture-block-match)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-IMAGE-PROCESSING-FEATURES-QCOM~:@_:next ~s~:@_:texture-sample-weighted ~s~:@_:texture-box-filter ~s~:@_:texture-block-match ~s~:>)"
+               next 
+               texture-sample-weighted 
+               texture-box-filter 
+               texture-block-match)))
+
+(defmethod print-object ((obj physical-device-image-processing-properties-qcom) out)
+  (with-slots (next
+               max-weight-filter-phases
+               max-weight-filter-dimension
+               max-block-match-region
+               max-box-filter-block-size)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-IMAGE-PROCESSING-PROPERTIES-QCOM~:@_:next ~s~:@_:max-weight-filter-phases ~s~:@_:max-weight-filter-dimension ~s~:@_:max-block-match-region ~s~:@_:max-box-filter-block-size ~s~:>)"
+               next 
+               max-weight-filter-phases 
+               max-weight-filter-dimension 
+               max-block-match-region 
+               max-box-filter-block-size)))
+
+(defmethod print-object ((obj physical-device-tile-properties-features-qcom) out)
+  (with-slots (next
+               tile-properties)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-TILE-PROPERTIES-FEATURES-QCOM~:@_:next ~s~:@_:tile-properties ~s~:>)"
+               next 
+               tile-properties)))
+
+(defmethod print-object ((obj tile-properties-qcom) out)
+  (with-slots (next
+               tile-size
+               apron-size
+               origin)
+      obj
+    (cl:format out "~i(~@<TILE-PROPERTIES-QCOM~:@_:next ~s~:@_:tile-size ~s~:@_:apron-size ~s~:@_:origin ~s~:>)"
+               next 
+               tile-size 
+               apron-size 
+               origin)))
+
+(defmethod print-object ((obj tile-memory-bind-info-qcom) out)
+  (with-slots (next
+               memory)
+      obj
+    (cl:format out "~i(~@<TILE-MEMORY-BIND-INFO-QCOM~:@_:next ~s~:@_:memory ~s~:>)"
+               next 
+               memory)))
+
+(defmethod print-object ((obj physical-device-amigo-profiling-features-sec) out)
+  (with-slots (next
+               amigo-profiling)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-AMIGO-PROFILING-FEATURES-SEC~:@_:next ~s~:@_:amigo-profiling ~s~:>)"
+               next 
+               amigo-profiling)))
+
+(defmethod print-object ((obj amigo-profiling-submit-info-sec) out)
+  (with-slots (next
+               first-draw-timestamp
+               swap-buffer-timestamp)
+      obj
+    (cl:format out "~i(~@<AMIGO-PROFILING-SUBMIT-INFO-SEC~:@_:next ~s~:@_:first-draw-timestamp ~s~:@_:swap-buffer-timestamp ~s~:>)"
+               next 
+               first-draw-timestamp 
+               swap-buffer-timestamp)))
+
+(defmethod print-object ((obj physical-device-attachment-feedback-loop-layout-features-ext) out)
+  (with-slots (next
+               attachment-feedback-loop-layout)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-ATTACHMENT-FEEDBACK-LOOP-LAYOUT-FEATURES-EXT~:@_:next ~s~:@_:attachment-feedback-loop-layout ~s~:>)"
+               next 
+               attachment-feedback-loop-layout)))
+
+(defmethod print-object ((obj attachment-feedback-loop-info-ext) out)
+  (with-slots (next
+               feedback-loop-enable)
+      obj
+    (cl:format out "~i(~@<ATTACHMENT-FEEDBACK-LOOP-INFO-EXT~:@_:next ~s~:@_:feedback-loop-enable ~s~:>)"
+               next 
+               feedback-loop-enable)))
+
+(defmethod print-object ((obj physical-device-address-binding-report-features-ext) out)
+  (with-slots (next
+               report-address-binding)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-ADDRESS-BINDING-REPORT-FEATURES-EXT~:@_:next ~s~:@_:report-address-binding ~s~:>)"
+               next 
+               report-address-binding)))
+
+(defmethod print-object ((obj rendering-attachment-flags-info-khr) out)
+  (with-slots (next
+               flags)
+      obj
+    (cl:format out "~i(~@<RENDERING-ATTACHMENT-FLAGS-INFO-KHR~:@_:next ~s~:@_:flags ~s~:>)"
+               next 
+               flags)))
+
+(defmethod print-object ((obj resolve-image-mode-info-khr) out)
+  (with-slots (next
+               flags
+               resolve-mode
+               stencil-resolve-mode)
+      obj
+    (cl:format out "~i(~@<RESOLVE-IMAGE-MODE-INFO-KHR~:@_:next ~s~:@_:flags ~s~:@_:resolve-mode ~s~:@_:stencil-resolve-mode ~s~:>)"
+               next 
+               flags 
+               resolve-mode 
+               stencil-resolve-mode)))
+
+(defmethod print-object ((obj device-address-binding-callback-data-ext) out)
+  (with-slots (next
+               flags
+               base-address
+               size
+               binding-type)
+      obj
+    (cl:format out "~i(~@<DEVICE-ADDRESS-BINDING-CALLBACK-DATA-EXT~:@_:next ~s~:@_:flags ~s~:@_:base-address ~s~:@_:size ~s~:@_:binding-type ~s~:>)"
+               next 
+               flags 
+               base-address 
+               size 
+               binding-type)))
+
+(defmethod print-object ((obj physical-device-optical-flow-features-nv) out)
+  (with-slots (next
+               optical-flow)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-OPTICAL-FLOW-FEATURES-NV~:@_:next ~s~:@_:optical-flow ~s~:>)"
+               next 
+               optical-flow)))
+
+(defmethod print-object ((obj physical-device-optical-flow-properties-nv) out)
+  (with-slots (next
+               supported-output-grid-sizes
+               supported-hint-grid-sizes
+               hint-supported
+               cost-supported
+               bidirectional-flow-supported
+               global-flow-supported
+               min-width
+               min-height
+               max-width
+               max-height
+               max-num-regions-of-interest)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-OPTICAL-FLOW-PROPERTIES-NV~:@_:next ~s~:@_:supported-output-grid-sizes ~s~:@_:supported-hint-grid-sizes ~s~:@_:hint-supported ~s~:@_:cost-supported ~s~:@_:bidirectional-flow-supported ~s~:@_:global-flow-supported ~s~:@_:min-width ~s~:@_:min-height ~s~:@_:max-width ~s~:@_:max-height ~s~:@_:max-num-regions-of-interest ~s~:>)"
+               next 
+               supported-output-grid-sizes 
+               supported-hint-grid-sizes 
+               hint-supported 
+               cost-supported 
+               bidirectional-flow-supported 
+               global-flow-supported 
+               min-width 
+               min-height 
+               max-width 
+               max-height 
+               max-num-regions-of-interest)))
+
+(defmethod print-object ((obj optical-flow-image-format-info-nv) out)
+  (with-slots (next
+               usage)
+      obj
+    (cl:format out "~i(~@<OPTICAL-FLOW-IMAGE-FORMAT-INFO-NV~:@_:next ~s~:@_:usage ~s~:>)"
+               next 
+               usage)))
+
+(defmethod print-object ((obj optical-flow-image-format-properties-nv) out)
+  (with-slots (next
+               format)
+      obj
+    (cl:format out "~i(~@<OPTICAL-FLOW-IMAGE-FORMAT-PROPERTIES-NV~:@_:next ~s~:@_:format ~s~:>)"
+               next 
+               format)))
+
+(defmethod print-object ((obj optical-flow-session-create-info-nv) out)
+  (with-slots (next
+               width
+               height
+               image-format
+               flow-vector-format
+               cost-format
+               output-grid-size
+               hint-grid-size
+               performance-level
+               flags)
+      obj
+    (cl:format out "~i(~@<OPTICAL-FLOW-SESSION-CREATE-INFO-NV~:@_:next ~s~:@_:width ~s~:@_:height ~s~:@_:image-format ~s~:@_:flow-vector-format ~s~:@_:cost-format ~s~:@_:output-grid-size ~s~:@_:hint-grid-size ~s~:@_:performance-level ~s~:@_:flags ~s~:>)"
+               next 
+               width 
+               height 
+               image-format 
+               flow-vector-format 
+               cost-format 
+               output-grid-size 
+               hint-grid-size 
+               performance-level 
+               flags)))
+
+(defmethod print-object ((obj optical-flow-session-create-private-data-info-nv) out)
+  (with-slots (next
+               id
+               size
+               private-data)
+      obj
+    (cl:format out "~i(~@<OPTICAL-FLOW-SESSION-CREATE-PRIVATE-DATA-INFO-NV~:@_:next ~s~:@_:id ~s~:@_:size ~s~:@_:private-data ~s~:>)"
+               next 
+               id 
+               size 
+               private-data)))
+
+(defmethod print-object ((obj optical-flow-execute-info-nv) out)
+  (with-slots (next
+               flags
+               regions)
+      obj
+    (cl:format out "~i(~@<OPTICAL-FLOW-EXECUTE-INFO-NV~:@_:next ~s~:@_:flags ~s~:@_:regions ~s~:>)"
+               next 
+               flags 
+               regions)))
+
+(defmethod print-object ((obj physical-device-fault-features-ext) out)
+  (with-slots (next
+               device-fault
+               device-fault-vendor-binary)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-FAULT-FEATURES-EXT~:@_:next ~s~:@_:device-fault ~s~:@_:device-fault-vendor-binary ~s~:>)"
+               next 
+               device-fault 
+               device-fault-vendor-binary)))
+
+(defmethod print-object ((obj device-fault-address-info-khr) out)
+  (with-slots (address-type
+               reported-address
+               address-precision)
+      obj
+    (cl:format out "~i(~@<DEVICE-FAULT-ADDRESS-INFO-KHR~:@_:address-type ~s~:@_:reported-address ~s~:@_:address-precision ~s~:>)"
+               address-type 
+               reported-address 
+               address-precision)))
+
+(defmethod print-object ((obj device-fault-vendor-info-khr) out)
+  (with-slots (description
+               vendor-fault-code
+               vendor-fault-data)
+      obj
+    (cl:format out "~i(~@<DEVICE-FAULT-VENDOR-INFO-KHR~:@_:description ~s~:@_:vendor-fault-code ~s~:@_:vendor-fault-data ~s~:>)"
+               description 
+               vendor-fault-code 
+               vendor-fault-data)))
+
+(defmethod print-object ((obj device-fault-info-khr) out)
+  (with-slots (next
+               flags
+               group-id
+               description
+               fault-address-info
+               instruction-address-info
+               vendor-info)
+      obj
+    (cl:format out "~i(~@<DEVICE-FAULT-INFO-KHR~:@_:next ~s~:@_:flags ~s~:@_:group-id ~s~:@_:description ~s~:@_:fault-address-info ~s~:@_:instruction-address-info ~s~:@_:vendor-info ~s~:>)"
+               next 
+               flags 
+               group-id 
+               description 
+               fault-address-info 
+               instruction-address-info 
+               vendor-info)))
+
+(defmethod print-object ((obj device-fault-debug-info-khr) out)
+  (with-slots (next
+               vendor-binary-size
+               vendor-binary-data)
+      obj
+    (cl:format out "~i(~@<DEVICE-FAULT-DEBUG-INFO-KHR~:@_:next ~s~:@_:vendor-binary-size ~s~:@_:vendor-binary-data ~s~:>)"
+               next 
+               vendor-binary-size 
+               vendor-binary-data)))
+
+(defmethod print-object ((obj device-fault-counts-ext) out)
+  (with-slots (next
+               address-info-count
+               vendor-info-count
+               vendor-binary-size)
+      obj
+    (cl:format out "~i(~@<DEVICE-FAULT-COUNTS-EXT~:@_:next ~s~:@_:address-info-count ~s~:@_:vendor-info-count ~s~:@_:vendor-binary-size ~s~:>)"
+               next 
+               address-info-count 
+               vendor-info-count 
+               vendor-binary-size)))
+
+(defmethod print-object ((obj device-fault-info-ext) out)
+  (with-slots (next
+               description
+               address-infos
+               vendor-infos
+               vendor-binary-data)
+      obj
+    (cl:format out "~i(~@<DEVICE-FAULT-INFO-EXT~:@_:next ~s~:@_:description ~s~:@_:address-infos ~s~:@_:vendor-infos ~s~:@_:vendor-binary-data ~s~:>)"
+               next 
+               description 
+               address-infos 
+               vendor-infos 
+               vendor-binary-data)))
+
+(defmethod print-object ((obj device-fault-vendor-binary-header-version-one-khr) out)
+  (with-slots (header-size
+               header-version
+               vendor-id
+               device-id
+               driver-version
+               pipeline-cache-uuid
+               application-name-offset
+               application-version
+               engine-name-offset
+               engine-version
+               api-version)
+      obj
+    (cl:format out "~i(~@<DEVICE-FAULT-VENDOR-BINARY-HEADER-VERSION-ONE-KHR~:@_:header-size ~s~:@_:header-version ~s~:@_:vendor-id ~s~:@_:device-id ~s~:@_:driver-version ~s~:@_:pipeline-cache-uuid ~s~:@_:application-name-offset ~s~:@_:application-version ~s~:@_:engine-name-offset ~s~:@_:engine-version ~s~:@_:api-version ~s~:>)"
+               header-size 
+               header-version 
+               vendor-id 
+               device-id 
+               driver-version 
+               pipeline-cache-uuid 
+               application-name-offset 
+               application-version 
+               engine-name-offset 
+               engine-version 
+               api-version)))
+
+(defmethod print-object ((obj physical-device-fault-features-khr) out)
+  (with-slots (next
+               device-fault
+               device-fault-vendor-binary
+               device-fault-report-masked
+               device-fault-device-lost-on-masked)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-FAULT-FEATURES-KHR~:@_:next ~s~:@_:device-fault ~s~:@_:device-fault-vendor-binary ~s~:@_:device-fault-report-masked ~s~:@_:device-fault-device-lost-on-masked ~s~:>)"
+               next 
+               device-fault 
+               device-fault-vendor-binary 
+               device-fault-report-masked 
+               device-fault-device-lost-on-masked)))
+
+(defmethod print-object ((obj physical-device-fault-properties-khr) out)
+  (with-slots (next
+               max-device-fault-count)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-FAULT-PROPERTIES-KHR~:@_:next ~s~:@_:max-device-fault-count ~s~:>)"
+               next 
+               max-device-fault-count)))
+
+(defmethod print-object ((obj physical-device-pipeline-library-group-handles-features-ext) out)
+  (with-slots (next
+               pipeline-library-group-handles)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-PIPELINE-LIBRARY-GROUP-HANDLES-FEATURES-EXT~:@_:next ~s~:@_:pipeline-library-group-handles ~s~:>)"
+               next 
+               pipeline-library-group-handles)))
+
+(defmethod print-object ((obj depth-bias-info-ext) out)
+  (with-slots (next
+               depth-bias-constant-factor
+               depth-bias-clamp
+               depth-bias-slope-factor)
+      obj
+    (cl:format out "~i(~@<DEPTH-BIAS-INFO-EXT~:@_:next ~s~:@_:depth-bias-constant-factor ~s~:@_:depth-bias-clamp ~s~:@_:depth-bias-slope-factor ~s~:>)"
+               next 
+               depth-bias-constant-factor 
+               depth-bias-clamp 
+               depth-bias-slope-factor)))
+
+(defmethod print-object ((obj depth-bias-representation-info-ext) out)
+  (with-slots (next
+               depth-bias-representation
+               depth-bias-exact)
+      obj
+    (cl:format out "~i(~@<DEPTH-BIAS-REPRESENTATION-INFO-EXT~:@_:next ~s~:@_:depth-bias-representation ~s~:@_:depth-bias-exact ~s~:>)"
+               next 
+               depth-bias-representation 
+               depth-bias-exact)))
+
+(defmethod print-object ((obj decompress-memory-region-nv) out)
+  (with-slots (src-address
+               dst-address
+               compressed-size
+               decompressed-size
+               decompression-method)
+      obj
+    (cl:format out "~i(~@<DECOMPRESS-MEMORY-REGION-NV~:@_:src-address ~s~:@_:dst-address ~s~:@_:compressed-size ~s~:@_:decompressed-size ~s~:@_:decompression-method ~s~:>)"
+               src-address 
+               dst-address 
+               compressed-size 
+               decompressed-size 
+               decompression-method)))
+
+(defmethod print-object ((obj decompress-memory-region-ext) out)
+  (with-slots (src-address
+               dst-address
+               compressed-size
+               decompressed-size)
+      obj
+    (cl:format out "~i(~@<DECOMPRESS-MEMORY-REGION-EXT~:@_:src-address ~s~:@_:dst-address ~s~:@_:compressed-size ~s~:@_:decompressed-size ~s~:>)"
+               src-address 
+               dst-address 
+               compressed-size 
+               decompressed-size)))
+
+(defmethod print-object ((obj decompress-memory-info-ext) out)
+  (with-slots (next
+               decompression-method
+               regions)
+      obj
+    (cl:format out "~i(~@<DECOMPRESS-MEMORY-INFO-EXT~:@_:next ~s~:@_:decompression-method ~s~:@_:regions ~s~:>)"
+               next 
+               decompression-method 
+               regions)))
+
+(defmethod print-object ((obj physical-device-shader-core-builtins-properties-arm) out)
+  (with-slots (next
+               shader-core-mask
+               shader-core-count
+               shader-warps-per-core)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SHADER-CORE-BUILTINS-PROPERTIES-ARM~:@_:next ~s~:@_:shader-core-mask ~s~:@_:shader-core-count ~s~:@_:shader-warps-per-core ~s~:>)"
+               next 
+               shader-core-mask 
+               shader-core-count 
+               shader-warps-per-core)))
+
+(defmethod print-object ((obj physical-device-shader-core-builtins-features-arm) out)
+  (with-slots (next
+               shader-core-builtins)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SHADER-CORE-BUILTINS-FEATURES-ARM~:@_:next ~s~:@_:shader-core-builtins ~s~:>)"
+               next 
+               shader-core-builtins)))
+
+(defmethod print-object ((obj frame-boundary-ext) out)
+  (with-slots (next
+               flags
+               frame-id
+               images
+               buffers
+               tag-name
+               tag-size
+               tag)
+      obj
+    (cl:format out "~i(~@<FRAME-BOUNDARY-EXT~:@_:next ~s~:@_:flags ~s~:@_:frame-id ~s~:@_:images ~s~:@_:buffers ~s~:@_:tag-name ~s~:@_:tag-size ~s~:@_:tag ~s~:>)"
+               next 
+               flags 
+               frame-id 
+               images 
+               buffers 
+               tag-name 
+               tag-size 
+               tag)))
+
+(defmethod print-object ((obj physical-device-frame-boundary-features-ext) out)
+  (with-slots (next
+               frame-boundary)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-FRAME-BOUNDARY-FEATURES-EXT~:@_:next ~s~:@_:frame-boundary ~s~:>)"
+               next 
+               frame-boundary)))
+
+(defmethod print-object ((obj physical-device-dynamic-rendering-unused-attachments-features-ext) out)
+  (with-slots (next
+               dynamic-rendering-unused-attachments)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-DYNAMIC-RENDERING-UNUSED-ATTACHMENTS-FEATURES-EXT~:@_:next ~s~:@_:dynamic-rendering-unused-attachments ~s~:>)"
+               next 
+               dynamic-rendering-unused-attachments)))
+
+(defmethod print-object ((obj physical-device-internally-synchronized-queues-features-khr) out)
+  (with-slots (next
+               internally-synchronized-queues)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-INTERNALLY-SYNCHRONIZED-QUEUES-FEATURES-KHR~:@_:next ~s~:@_:internally-synchronized-queues ~s~:>)"
+               next 
+               internally-synchronized-queues)))
+
+(defmethod print-object ((obj surface-present-mode-khr) out)
+  (with-slots (next
+               present-mode)
+      obj
+    (cl:format out "~i(~@<SURFACE-PRESENT-MODE-KHR~:@_:next ~s~:@_:present-mode ~s~:>)"
+               next 
+               present-mode)))
+
+(defmethod print-object ((obj surface-present-scaling-capabilities-khr) out)
+  (with-slots (next
+               supported-present-scaling
+               supported-present-gravity-x
+               supported-present-gravity-y
+               min-scaled-image-extent
+               max-scaled-image-extent)
+      obj
+    (cl:format out "~i(~@<SURFACE-PRESENT-SCALING-CAPABILITIES-KHR~:@_:next ~s~:@_:supported-present-scaling ~s~:@_:supported-present-gravity-x ~s~:@_:supported-present-gravity-y ~s~:@_:min-scaled-image-extent ~s~:@_:max-scaled-image-extent ~s~:>)"
+               next 
+               supported-present-scaling 
+               supported-present-gravity-x 
+               supported-present-gravity-y 
+               min-scaled-image-extent 
+               max-scaled-image-extent)))
+
+(defmethod print-object ((obj surface-present-mode-compatibility-khr) out)
+  (with-slots (next
+               present-modes)
+      obj
+    (cl:format out "~i(~@<SURFACE-PRESENT-MODE-COMPATIBILITY-KHR~:@_:next ~s~:@_:present-modes ~s~:>)"
+               next 
+               present-modes)))
+
+(defmethod print-object ((obj physical-device-swapchain-maintenance-1-features-khr) out)
+  (with-slots (next
+               swapchain-maintenance-1)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SWAPCHAIN-MAINTENANCE-1-FEATURES-KHR~:@_:next ~s~:@_:swapchain-maintenance-1 ~s~:>)"
+               next 
+               swapchain-maintenance-1)))
+
+(defmethod print-object ((obj swapchain-present-fence-info-khr) out)
+  (with-slots (next
+               fences)
+      obj
+    (cl:format out "~i(~@<SWAPCHAIN-PRESENT-FENCE-INFO-KHR~:@_:next ~s~:@_:fences ~s~:>)"
+               next 
+               fences)))
+
+(defmethod print-object ((obj swapchain-present-modes-create-info-khr) out)
+  (with-slots (next
+               present-modes)
+      obj
+    (cl:format out "~i(~@<SWAPCHAIN-PRESENT-MODES-CREATE-INFO-KHR~:@_:next ~s~:@_:present-modes ~s~:>)"
+               next 
+               present-modes)))
+
+(defmethod print-object ((obj swapchain-present-mode-info-khr) out)
+  (with-slots (next
+               present-modes)
+      obj
+    (cl:format out "~i(~@<SWAPCHAIN-PRESENT-MODE-INFO-KHR~:@_:next ~s~:@_:present-modes ~s~:>)"
+               next 
+               present-modes)))
+
+(defmethod print-object ((obj swapchain-present-scaling-create-info-khr) out)
+  (with-slots (next
+               scaling-behavior
+               present-gravity-x
+               present-gravity-y)
+      obj
+    (cl:format out "~i(~@<SWAPCHAIN-PRESENT-SCALING-CREATE-INFO-KHR~:@_:next ~s~:@_:scaling-behavior ~s~:@_:present-gravity-x ~s~:@_:present-gravity-y ~s~:>)"
+               next 
+               scaling-behavior 
+               present-gravity-x 
+               present-gravity-y)))
+
+(defmethod print-object ((obj release-swapchain-images-info-khr) out)
+  (with-slots (next
+               swapchain
+               image-indices)
+      obj
+    (cl:format out "~i(~@<RELEASE-SWAPCHAIN-IMAGES-INFO-KHR~:@_:next ~s~:@_:swapchain ~s~:@_:image-indices ~s~:>)"
+               next 
+               swapchain 
+               image-indices)))
+
+(defmethod print-object ((obj physical-device-depth-bias-control-features-ext) out)
+  (with-slots (next
+               depth-bias-control
+               least-representable-value-force-unorm-representation
+               float-representation
+               depth-bias-exact)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-DEPTH-BIAS-CONTROL-FEATURES-EXT~:@_:next ~s~:@_:depth-bias-control ~s~:@_:least-representable-value-force-unorm-representation ~s~:@_:float-representation ~s~:@_:depth-bias-exact ~s~:>)"
+               next 
+               depth-bias-control 
+               least-representable-value-force-unorm-representation 
+               float-representation 
+               depth-bias-exact)))
+
+(defmethod print-object ((obj physical-device-ray-tracing-invocation-reorder-features-ext) out)
+  (with-slots (next
+               ray-tracing-invocation-reorder)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-RAY-TRACING-INVOCATION-REORDER-FEATURES-EXT~:@_:next ~s~:@_:ray-tracing-invocation-reorder ~s~:>)"
+               next 
+               ray-tracing-invocation-reorder)))
+
+(defmethod print-object ((obj physical-device-ray-tracing-invocation-reorder-features-nv) out)
+  (with-slots (next
+               ray-tracing-invocation-reorder)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-RAY-TRACING-INVOCATION-REORDER-FEATURES-NV~:@_:next ~s~:@_:ray-tracing-invocation-reorder ~s~:>)"
+               next 
+               ray-tracing-invocation-reorder)))
+
+(defmethod print-object ((obj physical-device-ray-tracing-invocation-reorder-properties-ext) out)
+  (with-slots (next
+               ray-tracing-invocation-reorder-reordering-hint
+               max-shader-binding-table-record-index)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-RAY-TRACING-INVOCATION-REORDER-PROPERTIES-EXT~:@_:next ~s~:@_:ray-tracing-invocation-reorder-reordering-hint ~s~:@_:max-shader-binding-table-record-index ~s~:>)"
+               next 
+               ray-tracing-invocation-reorder-reordering-hint 
+               max-shader-binding-table-record-index)))
+
+(defmethod print-object ((obj physical-device-ray-tracing-invocation-reorder-properties-nv) out)
+  (with-slots (next
+               ray-tracing-invocation-reorder-reordering-hint)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-RAY-TRACING-INVOCATION-REORDER-PROPERTIES-NV~:@_:next ~s~:@_:ray-tracing-invocation-reorder-reordering-hint ~s~:>)"
+               next 
+               ray-tracing-invocation-reorder-reordering-hint)))
+
+(defmethod print-object ((obj physical-device-extended-sparse-address-space-features-nv) out)
+  (with-slots (next
+               extended-sparse-address-space)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-EXTENDED-SPARSE-ADDRESS-SPACE-FEATURES-NV~:@_:next ~s~:@_:extended-sparse-address-space ~s~:>)"
+               next 
+               extended-sparse-address-space)))
+
+(defmethod print-object ((obj physical-device-extended-sparse-address-space-properties-nv) out)
+  (with-slots (next
+               extended-sparse-address-space-size
+               extended-sparse-image-usage-flags
+               extended-sparse-buffer-usage-flags)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-EXTENDED-SPARSE-ADDRESS-SPACE-PROPERTIES-NV~:@_:next ~s~:@_:extended-sparse-address-space-size ~s~:@_:extended-sparse-image-usage-flags ~s~:@_:extended-sparse-buffer-usage-flags ~s~:>)"
+               next 
+               extended-sparse-address-space-size 
+               extended-sparse-image-usage-flags 
+               extended-sparse-buffer-usage-flags)))
+
+(defmethod print-object ((obj direct-driver-loading-info-lunarg) out)
+  (with-slots (next
+               flags
+               pfn-get-instance-proc-addr)
+      obj
+    (cl:format out "~i(~@<DIRECT-DRIVER-LOADING-INFO-LUNARG~:@_:next ~s~:@_:flags ~s~:@_:pfn-get-instance-proc-addr ~s~:>)"
+               next 
+               flags 
+               pfn-get-instance-proc-addr)))
+
+(defmethod print-object ((obj direct-driver-loading-list-lunarg) out)
+  (with-slots (next
+               mode
+               drivers)
+      obj
+    (cl:format out "~i(~@<DIRECT-DRIVER-LOADING-LIST-LUNARG~:@_:next ~s~:@_:mode ~s~:@_:drivers ~s~:>)"
+               next 
+               mode 
+               drivers)))
+
+(defmethod print-object ((obj physical-device-multiview-per-view-viewports-features-qcom) out)
+  (with-slots (next
+               multiview-per-view-viewports)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-MULTIVIEW-PER-VIEW-VIEWPORTS-FEATURES-QCOM~:@_:next ~s~:@_:multiview-per-view-viewports ~s~:>)"
+               next 
+               multiview-per-view-viewports)))
+
+(defmethod print-object ((obj physical-device-ray-tracing-position-fetch-features-khr) out)
+  (with-slots (next
+               ray-tracing-position-fetch)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-RAY-TRACING-POSITION-FETCH-FEATURES-KHR~:@_:next ~s~:@_:ray-tracing-position-fetch ~s~:>)"
+               next 
+               ray-tracing-position-fetch)))
+
+(defmethod print-object ((obj device-image-subresource-info) out)
+  (with-slots (next
+               create-info
+               subresource)
+      obj
+    (cl:format out "~i(~@<DEVICE-IMAGE-SUBRESOURCE-INFO~:@_:next ~s~:@_:create-info ~s~:@_:subresource ~s~:>)"
+               next 
+               create-info 
+               subresource)))
+
+(defmethod print-object ((obj physical-device-shader-core-properties-arm) out)
+  (with-slots (next
+               pixel-rate
+               texel-rate
+               fma-rate)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SHADER-CORE-PROPERTIES-ARM~:@_:next ~s~:@_:pixel-rate ~s~:@_:texel-rate ~s~:@_:fma-rate ~s~:>)"
+               next 
+               pixel-rate 
+               texel-rate 
+               fma-rate)))
+
+(defmethod print-object ((obj physical-device-multiview-per-view-render-areas-features-qcom) out)
+  (with-slots (next
+               multiview-per-view-render-areas)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-MULTIVIEW-PER-VIEW-RENDER-AREAS-FEATURES-QCOM~:@_:next ~s~:@_:multiview-per-view-render-areas ~s~:>)"
+               next 
+               multiview-per-view-render-areas)))
+
+(defmethod print-object ((obj multiview-per-view-render-areas-render-pass-begin-info-qcom) out)
+  (with-slots (next
+               per-view-render-areas)
+      obj
+    (cl:format out "~i(~@<MULTIVIEW-PER-VIEW-RENDER-AREAS-RENDER-PASS-BEGIN-INFO-QCOM~:@_:next ~s~:@_:per-view-render-areas ~s~:>)"
+               next 
+               per-view-render-areas)))
+
+(defmethod print-object ((obj query-low-latency-support-nv) out)
+  (with-slots (next
+               queried-low-latency-data)
+      obj
+    (cl:format out "~i(~@<QUERY-LOW-LATENCY-SUPPORT-NV~:@_:next ~s~:@_:queried-low-latency-data ~s~:>)"
+               next 
+               queried-low-latency-data)))
+
+(defmethod print-object ((obj memory-map-info) out)
+  (with-slots (next
+               flags
+               memory
+               offset
+               size)
+      obj
+    (cl:format out "~i(~@<MEMORY-MAP-INFO~:@_:next ~s~:@_:flags ~s~:@_:memory ~s~:@_:offset ~s~:@_:size ~s~:>)"
+               next 
+               flags 
+               memory 
+               offset 
+               size)))
+
+(defmethod print-object ((obj memory-unmap-info) out)
+  (with-slots (next
+               flags
+               memory)
+      obj
+    (cl:format out "~i(~@<MEMORY-UNMAP-INFO~:@_:next ~s~:@_:flags ~s~:@_:memory ~s~:>)"
+               next 
+               flags 
+               memory)))
+
+(defmethod print-object ((obj physical-device-shader-object-features-ext) out)
+  (with-slots (next
+               shader-object)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SHADER-OBJECT-FEATURES-EXT~:@_:next ~s~:@_:shader-object ~s~:>)"
+               next 
+               shader-object)))
+
+(defmethod print-object ((obj physical-device-shader-object-properties-ext) out)
+  (with-slots (next
+               shader-binary-uuid
+               shader-binary-version)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SHADER-OBJECT-PROPERTIES-EXT~:@_:next ~s~:@_:shader-binary-uuid ~s~:@_:shader-binary-version ~s~:>)"
+               next 
+               shader-binary-uuid 
+               shader-binary-version)))
+
+(defmethod print-object ((obj shader-create-info-ext) out)
+  (with-slots (next
+               flags
+               stage
+               next-stage
+               code-type
+               code-size
+               code
+               name
+               set-layouts
+               push-constant-ranges
+               specialization-info)
+      obj
+    (cl:format out "~i(~@<SHADER-CREATE-INFO-EXT~:@_:next ~s~:@_:flags ~s~:@_:stage ~s~:@_:next-stage ~s~:@_:code-type ~s~:@_:code-size ~s~:@_:code ~s~:@_:name ~s~:@_:set-layouts ~s~:@_:push-constant-ranges ~s~:@_:specialization-info ~s~:>)"
+               next 
+               flags 
+               stage 
+               next-stage 
+               code-type 
+               code-size 
+               code 
+               name 
+               set-layouts 
+               push-constant-ranges 
+               specialization-info)))
+
+(defmethod print-object ((obj physical-device-shader-tile-image-features-ext) out)
+  (with-slots (next
+               shader-tile-image-color-read-access
+               shader-tile-image-depth-read-access
+               shader-tile-image-stencil-read-access)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SHADER-TILE-IMAGE-FEATURES-EXT~:@_:next ~s~:@_:shader-tile-image-color-read-access ~s~:@_:shader-tile-image-depth-read-access ~s~:@_:shader-tile-image-stencil-read-access ~s~:>)"
+               next 
+               shader-tile-image-color-read-access 
+               shader-tile-image-depth-read-access 
+               shader-tile-image-stencil-read-access)))
+
+(defmethod print-object ((obj physical-device-shader-tile-image-properties-ext) out)
+  (with-slots (next
+               shader-tile-image-coherent-read-accelerated
+               shader-tile-image-read-sample-from-pixel-rate-invocation
+               shader-tile-image-read-from-helper-invocation)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SHADER-TILE-IMAGE-PROPERTIES-EXT~:@_:next ~s~:@_:shader-tile-image-coherent-read-accelerated ~s~:@_:shader-tile-image-read-sample-from-pixel-rate-invocation ~s~:@_:shader-tile-image-read-from-helper-invocation ~s~:>)"
+               next 
+               shader-tile-image-coherent-read-accelerated 
+               shader-tile-image-read-sample-from-pixel-rate-invocation 
+               shader-tile-image-read-from-helper-invocation)))
+
+(defmethod print-object ((obj import-screen-buffer-info-qnx) out)
+  (with-slots (next
+               buffer)
+      obj
+    (cl:format out "~i(~@<IMPORT-SCREEN-BUFFER-INFO-QNX~:@_:next ~s~:@_:buffer ~s~:>)"
+               next 
+               buffer)))
+
+(defmethod print-object ((obj screen-buffer-properties-qnx) out)
+  (with-slots (next
+               allocation-size
+               memory-type-bits)
+      obj
+    (cl:format out "~i(~@<SCREEN-BUFFER-PROPERTIES-QNX~:@_:next ~s~:@_:allocation-size ~s~:@_:memory-type-bits ~s~:>)"
+               next 
+               allocation-size 
+               memory-type-bits)))
+
+(defmethod print-object ((obj screen-buffer-format-properties-qnx) out)
+  (with-slots (next
+               format
+               external-format
+               screen-usage
+               format-features
+               sampler-ycbcr-conversion-components
+               suggested-ycbcr-model
+               suggested-ycbcr-range
+               suggested-x-chroma-offset
+               suggested-y-chroma-offset)
+      obj
+    (cl:format out "~i(~@<SCREEN-BUFFER-FORMAT-PROPERTIES-QNX~:@_:next ~s~:@_:format ~s~:@_:external-format ~s~:@_:screen-usage ~s~:@_:format-features ~s~:@_:sampler-ycbcr-conversion-components ~s~:@_:suggested-ycbcr-model ~s~:@_:suggested-ycbcr-range ~s~:@_:suggested-x-chroma-offset ~s~:@_:suggested-y-chroma-offset ~s~:>)"
+               next 
+               format 
+               external-format 
+               screen-usage 
+               format-features 
+               sampler-ycbcr-conversion-components 
+               suggested-ycbcr-model 
+               suggested-ycbcr-range 
+               suggested-x-chroma-offset 
+               suggested-y-chroma-offset)))
+
+(defmethod print-object ((obj external-format-qnx) out)
+  (with-slots (next
+               external-format)
+      obj
+    (cl:format out "~i(~@<EXTERNAL-FORMAT-QNX~:@_:next ~s~:@_:external-format ~s~:>)"
+               next 
+               external-format)))
+
+(defmethod print-object ((obj physical-device-external-memory-screen-buffer-features-qnx) out)
+  (with-slots (next
+               screen-buffer-import)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-EXTERNAL-MEMORY-SCREEN-BUFFER-FEATURES-QNX~:@_:next ~s~:@_:screen-buffer-import ~s~:>)"
+               next 
+               screen-buffer-import)))
+
+(defmethod print-object ((obj physical-device-cooperative-matrix-features-khr) out)
+  (with-slots (next
+               cooperative-matrix
+               cooperative-matrix-robust-buffer-access)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-COOPERATIVE-MATRIX-FEATURES-KHR~:@_:next ~s~:@_:cooperative-matrix ~s~:@_:cooperative-matrix-robust-buffer-access ~s~:>)"
+               next 
+               cooperative-matrix 
+               cooperative-matrix-robust-buffer-access)))
+
+(defmethod print-object ((obj cooperative-matrix-properties-khr) out)
+  (with-slots (next
+               m-size
+               n-size
+               k-size
+               a-type
+               b-type
+               c-type
+               result-type
+               saturating-accumulation
+               scope)
+      obj
+    (cl:format out "~i(~@<COOPERATIVE-MATRIX-PROPERTIES-KHR~:@_:next ~s~:@_:m-size ~s~:@_:n-size ~s~:@_:k-size ~s~:@_:a-type ~s~:@_:b-type ~s~:@_:c-type ~s~:@_:result-type ~s~:@_:saturating-accumulation ~s~:@_:scope ~s~:>)"
+               next 
+               m-size 
+               n-size 
+               k-size 
+               a-type 
+               b-type 
+               c-type 
+               result-type 
+               saturating-accumulation 
+               scope)))
+
+(defmethod print-object ((obj physical-device-cooperative-matrix-properties-khr) out)
+  (with-slots (next
+               cooperative-matrix-supported-stages)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-COOPERATIVE-MATRIX-PROPERTIES-KHR~:@_:next ~s~:@_:cooperative-matrix-supported-stages ~s~:>)"
+               next 
+               cooperative-matrix-supported-stages)))
+
+(defmethod print-object ((obj physical-device-cooperative-matrix-conversion-features-qcom) out)
+  (with-slots (next
+               cooperative-matrix-conversion)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-COOPERATIVE-MATRIX-CONVERSION-FEATURES-QCOM~:@_:next ~s~:@_:cooperative-matrix-conversion ~s~:>)"
+               next 
+               cooperative-matrix-conversion)))
+
+(defmethod print-object ((obj physical-device-shader-enqueue-properties-amd-x) out)
+  (with-slots (next
+               max-execution-graph-depth
+               max-execution-graph-shader-output-nodes
+               max-execution-graph-shader-payload-size
+               max-execution-graph-shader-payload-count
+               execution-graph-dispatch-address-alignment
+               max-execution-graph-workgroup-count
+               max-execution-graph-workgroups)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SHADER-ENQUEUE-PROPERTIES-AMD-X~:@_:next ~s~:@_:max-execution-graph-depth ~s~:@_:max-execution-graph-shader-output-nodes ~s~:@_:max-execution-graph-shader-payload-size ~s~:@_:max-execution-graph-shader-payload-count ~s~:@_:execution-graph-dispatch-address-alignment ~s~:@_:max-execution-graph-workgroup-count ~s~:@_:max-execution-graph-workgroups ~s~:>)"
+               next 
+               max-execution-graph-depth 
+               max-execution-graph-shader-output-nodes 
+               max-execution-graph-shader-payload-size 
+               max-execution-graph-shader-payload-count 
+               execution-graph-dispatch-address-alignment 
+               max-execution-graph-workgroup-count 
+               max-execution-graph-workgroups)))
+
+(defmethod print-object ((obj physical-device-shader-enqueue-features-amd-x) out)
+  (with-slots (next
+               shader-enqueue
+               shader-mesh-enqueue)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SHADER-ENQUEUE-FEATURES-AMD-X~:@_:next ~s~:@_:shader-enqueue ~s~:@_:shader-mesh-enqueue ~s~:>)"
+               next 
+               shader-enqueue 
+               shader-mesh-enqueue)))
+
+(defmethod print-object ((obj execution-graph-pipeline-create-info-amd-x) out)
+  (with-slots (next
+               flags
+               stages
+               library-info
+               layout
+               base-pipeline-handle
+               base-pipeline-index)
+      obj
+    (cl:format out "~i(~@<EXECUTION-GRAPH-PIPELINE-CREATE-INFO-AMD-X~:@_:next ~s~:@_:flags ~s~:@_:stages ~s~:@_:library-info ~s~:@_:layout ~s~:@_:base-pipeline-handle ~s~:@_:base-pipeline-index ~s~:>)"
+               next 
+               flags 
+               stages 
+               library-info 
+               layout 
+               base-pipeline-handle 
+               base-pipeline-index)))
+
+(defmethod print-object ((obj pipeline-shader-stage-node-create-info-amd-x) out)
+  (with-slots (next
+               name
+               index)
+      obj
+    (cl:format out "~i(~@<PIPELINE-SHADER-STAGE-NODE-CREATE-INFO-AMD-X~:@_:next ~s~:@_:name ~s~:@_:index ~s~:>)"
+               next 
+               name 
+               index)))
+
+(defmethod print-object ((obj execution-graph-pipeline-scratch-size-amd-x) out)
+  (with-slots (next
+               min-size
+               max-size
+               size-granularity)
+      obj
+    (cl:format out "~i(~@<EXECUTION-GRAPH-PIPELINE-SCRATCH-SIZE-AMD-X~:@_:next ~s~:@_:min-size ~s~:@_:max-size ~s~:@_:size-granularity ~s~:>)"
+               next 
+               min-size 
+               max-size 
+               size-granularity)))
+
+(defmethod print-object ((obj dispatch-graph-info-amd-x) out)
+  (with-slots (node-index
+               payload-count
+               payloads
+               payload-stride)
+      obj
+    (cl:format out "~i(~@<DISPATCH-GRAPH-INFO-AMD-X~:@_:node-index ~s~:@_:payload-count ~s~:@_:payloads ~s~:@_:payload-stride ~s~:>)"
+               node-index 
+               payload-count 
+               payloads 
+               payload-stride)))
+
+(defmethod print-object ((obj dispatch-graph-count-info-amd-x) out)
+  (with-slots (count
+               infos
+               stride)
+      obj
+    (cl:format out "~i(~@<DISPATCH-GRAPH-COUNT-INFO-AMD-X~:@_:count ~s~:@_:infos ~s~:@_:stride ~s~:>)"
+               count 
+               infos 
+               stride)))
+
+(defmethod print-object ((obj physical-device-anti-lag-features-amd) out)
+  (with-slots (next
+               anti-lag)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-ANTI-LAG-FEATURES-AMD~:@_:next ~s~:@_:anti-lag ~s~:>)"
+               next 
+               anti-lag)))
+
+(defmethod print-object ((obj anti-lag-data-amd) out)
+  (with-slots (next
+               mode
+               max-f-p-s
+               presentation-info)
+      obj
+    (cl:format out "~i(~@<ANTI-LAG-DATA-AMD~:@_:next ~s~:@_:mode ~s~:@_:max-f-p-s ~s~:@_:presentation-info ~s~:>)"
+               next 
+               mode 
+               max-f-p-s 
+               presentation-info)))
+
+(defmethod print-object ((obj anti-lag-presentation-info-amd) out)
+  (with-slots (next
+               stage
+               frame-index)
+      obj
+    (cl:format out "~i(~@<ANTI-LAG-PRESENTATION-INFO-AMD~:@_:next ~s~:@_:stage ~s~:@_:frame-index ~s~:>)"
+               next 
+               stage 
+               frame-index)))
+
+(defmethod print-object ((obj bind-memory-status) out)
+  (with-slots (next
+               result)
+      obj
+    (cl:format out "~i(~@<BIND-MEMORY-STATUS~:@_:next ~s~:@_:result ~s~:>)"
+               next 
+               result)))
+
+(defmethod print-object ((obj physical-device-tile-memory-heap-features-qcom) out)
+  (with-slots (next
+               tile-memory-heap)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-TILE-MEMORY-HEAP-FEATURES-QCOM~:@_:next ~s~:@_:tile-memory-heap ~s~:>)"
+               next 
+               tile-memory-heap)))
+
+(defmethod print-object ((obj physical-device-tile-memory-heap-properties-qcom) out)
+  (with-slots (next
+               queue-submit-boundary
+               tile-buffer-transfers)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-TILE-MEMORY-HEAP-PROPERTIES-QCOM~:@_:next ~s~:@_:queue-submit-boundary ~s~:@_:tile-buffer-transfers ~s~:>)"
+               next 
+               queue-submit-boundary 
+               tile-buffer-transfers)))
+
+(defmethod print-object ((obj tile-memory-size-info-qcom) out)
+  (with-slots (next
+               size)
+      obj
+    (cl:format out "~i(~@<TILE-MEMORY-SIZE-INFO-QCOM~:@_:next ~s~:@_:size ~s~:>)"
+               next 
+               size)))
+
+(defmethod print-object ((obj tile-memory-requirements-qcom) out)
+  (with-slots (next
+               size
+               alignment)
+      obj
+    (cl:format out "~i(~@<TILE-MEMORY-REQUIREMENTS-QCOM~:@_:next ~s~:@_:size ~s~:@_:alignment ~s~:>)"
+               next 
+               size 
+               alignment)))
+
+(defmethod print-object ((obj bind-descriptor-sets-info) out)
+  (with-slots (next
+               stage-flags
+               layout
+               first-set
+               descriptor-sets
+               dynamic-offsets)
+      obj
+    (cl:format out "~i(~@<BIND-DESCRIPTOR-SETS-INFO~:@_:next ~s~:@_:stage-flags ~s~:@_:layout ~s~:@_:first-set ~s~:@_:descriptor-sets ~s~:@_:dynamic-offsets ~s~:>)"
+               next 
+               stage-flags 
+               layout 
+               first-set 
+               descriptor-sets 
+               dynamic-offsets)))
+
+(defmethod print-object ((obj push-constants-info) out)
+  (with-slots (next
+               layout
+               stage-flags
+               offset
+               size
+               values)
+      obj
+    (cl:format out "~i(~@<PUSH-CONSTANTS-INFO~:@_:next ~s~:@_:layout ~s~:@_:stage-flags ~s~:@_:offset ~s~:@_:size ~s~:@_:values ~s~:>)"
+               next 
+               layout 
+               stage-flags 
+               offset 
+               size 
+               values)))
+
+(defmethod print-object ((obj push-descriptor-set-info) out)
+  (with-slots (next
+               stage-flags
+               layout
+               set
+               descriptor-writes)
+      obj
+    (cl:format out "~i(~@<PUSH-DESCRIPTOR-SET-INFO~:@_:next ~s~:@_:stage-flags ~s~:@_:layout ~s~:@_:set ~s~:@_:descriptor-writes ~s~:>)"
+               next 
+               stage-flags 
+               layout 
+               set 
+               descriptor-writes)))
+
+(defmethod print-object ((obj push-descriptor-set-with-template-info) out)
+  (with-slots (next
+               descriptor-update-template
+               layout
+               set
+               data)
+      obj
+    (cl:format out "~i(~@<PUSH-DESCRIPTOR-SET-WITH-TEMPLATE-INFO~:@_:next ~s~:@_:descriptor-update-template ~s~:@_:layout ~s~:@_:set ~s~:@_:data ~s~:>)"
+               next 
+               descriptor-update-template 
+               layout 
+               set 
+               data)))
+
+(defmethod print-object ((obj set-descriptor-buffer-offsets-info-ext) out)
+  (with-slots (next
+               stage-flags
+               layout
+               first-set
+               buffer-indices
+               offsets)
+      obj
+    (cl:format out "~i(~@<SET-DESCRIPTOR-BUFFER-OFFSETS-INFO-EXT~:@_:next ~s~:@_:stage-flags ~s~:@_:layout ~s~:@_:first-set ~s~:@_:buffer-indices ~s~:@_:offsets ~s~:>)"
+               next 
+               stage-flags 
+               layout 
+               first-set 
+               buffer-indices 
+               offsets)))
+
+(defmethod print-object ((obj bind-descriptor-buffer-embedded-samplers-info-ext) out)
+  (with-slots (next
+               stage-flags
+               layout
+               set)
+      obj
+    (cl:format out "~i(~@<BIND-DESCRIPTOR-BUFFER-EMBEDDED-SAMPLERS-INFO-EXT~:@_:next ~s~:@_:stage-flags ~s~:@_:layout ~s~:@_:set ~s~:>)"
+               next 
+               stage-flags 
+               layout 
+               set)))
+
+(defmethod print-object ((obj physical-device-cubic-clamp-features-qcom) out)
+  (with-slots (next
+               cubic-range-clamp)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-CUBIC-CLAMP-FEATURES-QCOM~:@_:next ~s~:@_:cubic-range-clamp ~s~:>)"
+               next 
+               cubic-range-clamp)))
+
+(defmethod print-object ((obj physical-device-ycbcr-degamma-features-qcom) out)
+  (with-slots (next
+               ycbcr-degamma)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-YCBCR-DEGAMMA-FEATURES-QCOM~:@_:next ~s~:@_:ycbcr-degamma ~s~:>)"
+               next 
+               ycbcr-degamma)))
+
+(defmethod print-object ((obj sampler-ycbcr-conversion-ycbcr-degamma-create-info-qcom) out)
+  (with-slots (next
+               enable-y-degamma
+               enable-cb-cr-degamma)
+      obj
+    (cl:format out "~i(~@<SAMPLER-YCBCR-CONVERSION-YCBCR-DEGAMMA-CREATE-INFO-QCOM~:@_:next ~s~:@_:enable-y-degamma ~s~:@_:enable-cb-cr-degamma ~s~:>)"
+               next 
+               enable-y-degamma 
+               enable-cb-cr-degamma)))
+
+(defmethod print-object ((obj physical-device-cubic-weights-features-qcom) out)
+  (with-slots (next
+               selectable-cubic-weights)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-CUBIC-WEIGHTS-FEATURES-QCOM~:@_:next ~s~:@_:selectable-cubic-weights ~s~:>)"
+               next 
+               selectable-cubic-weights)))
+
+(defmethod print-object ((obj sampler-cubic-weights-create-info-qcom) out)
+  (with-slots (next
+               cubic-weights)
+      obj
+    (cl:format out "~i(~@<SAMPLER-CUBIC-WEIGHTS-CREATE-INFO-QCOM~:@_:next ~s~:@_:cubic-weights ~s~:>)"
+               next 
+               cubic-weights)))
+
+(defmethod print-object ((obj blit-image-cubic-weights-info-qcom) out)
+  (with-slots (next
+               cubic-weights)
+      obj
+    (cl:format out "~i(~@<BLIT-IMAGE-CUBIC-WEIGHTS-INFO-QCOM~:@_:next ~s~:@_:cubic-weights ~s~:>)"
+               next 
+               cubic-weights)))
+
+(defmethod print-object ((obj physical-device-image-processing-2-features-qcom) out)
+  (with-slots (next
+               texture-block-match-2)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-IMAGE-PROCESSING-2-FEATURES-QCOM~:@_:next ~s~:@_:texture-block-match-2 ~s~:>)"
+               next 
+               texture-block-match-2)))
+
+(defmethod print-object ((obj physical-device-image-processing-2-properties-qcom) out)
+  (with-slots (next
+               max-block-match-window)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-IMAGE-PROCESSING-2-PROPERTIES-QCOM~:@_:next ~s~:@_:max-block-match-window ~s~:>)"
+               next 
+               max-block-match-window)))
+
+(defmethod print-object ((obj sampler-block-match-window-create-info-qcom) out)
+  (with-slots (next
+               window-extent
+               window-compare-mode)
+      obj
+    (cl:format out "~i(~@<SAMPLER-BLOCK-MATCH-WINDOW-CREATE-INFO-QCOM~:@_:next ~s~:@_:window-extent ~s~:@_:window-compare-mode ~s~:>)"
+               next 
+               window-extent 
+               window-compare-mode)))
+
+(defmethod print-object ((obj physical-device-image-processing-3-features-qcom) out)
+  (with-slots (next
+               image-gather-linear
+               image-gather-extended-modes
+               block-match-extended-clamp-to-edge)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-IMAGE-PROCESSING-3-FEATURES-QCOM~:@_:next ~s~:@_:image-gather-linear ~s~:@_:image-gather-extended-modes ~s~:@_:block-match-extended-clamp-to-edge ~s~:>)"
+               next 
+               image-gather-linear 
+               image-gather-extended-modes 
+               block-match-extended-clamp-to-edge)))
+
+(defmethod print-object ((obj physical-device-descriptor-pool-overallocation-features-nv) out)
+  (with-slots (next
+               descriptor-pool-overallocation)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-DESCRIPTOR-POOL-OVERALLOCATION-FEATURES-NV~:@_:next ~s~:@_:descriptor-pool-overallocation ~s~:>)"
+               next 
+               descriptor-pool-overallocation)))
+
+(defmethod print-object ((obj physical-device-layered-driver-properties-msft) out)
+  (with-slots (next
+               underlying-a-p-i)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-LAYERED-DRIVER-PROPERTIES-MSFT~:@_:next ~s~:@_:underlying-a-p-i ~s~:>)"
+               next 
+               underlying-a-p-i)))
+
+(defmethod print-object ((obj physical-device-per-stage-descriptor-set-features-nv) out)
+  (with-slots (next
+               per-stage-descriptor-set
+               dynamic-pipeline-layout)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-PER-STAGE-DESCRIPTOR-SET-FEATURES-NV~:@_:next ~s~:@_:per-stage-descriptor-set ~s~:@_:dynamic-pipeline-layout ~s~:>)"
+               next 
+               per-stage-descriptor-set 
+               dynamic-pipeline-layout)))
+
+(defmethod print-object ((obj physical-device-external-format-resolve-features-android) out)
+  (with-slots (next
+               external-format-resolve)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-EXTERNAL-FORMAT-RESOLVE-FEATURES-ANDROID~:@_:next ~s~:@_:external-format-resolve ~s~:>)"
+               next 
+               external-format-resolve)))
+
+(defmethod print-object ((obj physical-device-external-format-resolve-properties-android) out)
+  (with-slots (next
+               null-color-attachment-with-external-format-resolve
+               external-format-resolve-chroma-offset-x
+               external-format-resolve-chroma-offset-y)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-EXTERNAL-FORMAT-RESOLVE-PROPERTIES-ANDROID~:@_:next ~s~:@_:null-color-attachment-with-external-format-resolve ~s~:@_:external-format-resolve-chroma-offset-x ~s~:@_:external-format-resolve-chroma-offset-y ~s~:>)"
+               next 
+               null-color-attachment-with-external-format-resolve 
+               external-format-resolve-chroma-offset-x 
+               external-format-resolve-chroma-offset-y)))
+
+(defmethod print-object ((obj android-hardware-buffer-format-resolve-properties-android) out)
+  (with-slots (next
+               color-attachment-format)
+      obj
+    (cl:format out "~i(~@<ANDROID-HARDWARE-BUFFER-FORMAT-RESOLVE-PROPERTIES-ANDROID~:@_:next ~s~:@_:color-attachment-format ~s~:>)"
+               next 
+               color-attachment-format)))
+
+(defmethod print-object ((obj latency-sleep-mode-info-nv) out)
+  (with-slots (next
+               low-latency-mode
+               low-latency-boost
+               minimum-interval-us)
+      obj
+    (cl:format out "~i(~@<LATENCY-SLEEP-MODE-INFO-NV~:@_:next ~s~:@_:low-latency-mode ~s~:@_:low-latency-boost ~s~:@_:minimum-interval-us ~s~:>)"
+               next 
+               low-latency-mode 
+               low-latency-boost 
+               minimum-interval-us)))
+
+(defmethod print-object ((obj latency-sleep-info-nv) out)
+  (with-slots (next
+               signal-semaphore
+               value)
+      obj
+    (cl:format out "~i(~@<LATENCY-SLEEP-INFO-NV~:@_:next ~s~:@_:signal-semaphore ~s~:@_:value ~s~:>)"
+               next 
+               signal-semaphore 
+               value)))
+
+(defmethod print-object ((obj set-latency-marker-info-nv) out)
+  (with-slots (next
+               present-id
+               marker)
+      obj
+    (cl:format out "~i(~@<SET-LATENCY-MARKER-INFO-NV~:@_:next ~s~:@_:present-id ~s~:@_:marker ~s~:>)"
+               next 
+               present-id 
+               marker)))
+
+(defmethod print-object ((obj get-latency-marker-info-nv) out)
+  (with-slots (next
+               timings)
+      obj
+    (cl:format out "~i(~@<GET-LATENCY-MARKER-INFO-NV~:@_:next ~s~:@_:timings ~s~:>)"
+               next 
+               timings)))
+
+(defmethod print-object ((obj latency-timings-frame-report-nv) out)
+  (with-slots (next
+               present-id
+               input-sample-time-us
+               sim-start-time-us
+               sim-end-time-us
+               render-submit-start-time-us
+               render-submit-end-time-us
+               present-start-time-us
+               present-end-time-us
+               driver-start-time-us
+               driver-end-time-us
+               os-render-queue-start-time-us
+               os-render-queue-end-time-us
+               gpu-render-start-time-us
+               gpu-render-end-time-us)
+      obj
+    (cl:format out "~i(~@<LATENCY-TIMINGS-FRAME-REPORT-NV~:@_:next ~s~:@_:present-id ~s~:@_:input-sample-time-us ~s~:@_:sim-start-time-us ~s~:@_:sim-end-time-us ~s~:@_:render-submit-start-time-us ~s~:@_:render-submit-end-time-us ~s~:@_:present-start-time-us ~s~:@_:present-end-time-us ~s~:@_:driver-start-time-us ~s~:@_:driver-end-time-us ~s~:@_:os-render-queue-start-time-us ~s~:@_:os-render-queue-end-time-us ~s~:@_:gpu-render-start-time-us ~s~:@_:gpu-render-end-time-us ~s~:>)"
+               next 
+               present-id 
+               input-sample-time-us 
+               sim-start-time-us 
+               sim-end-time-us 
+               render-submit-start-time-us 
+               render-submit-end-time-us 
+               present-start-time-us 
+               present-end-time-us 
+               driver-start-time-us 
+               driver-end-time-us 
+               os-render-queue-start-time-us 
+               os-render-queue-end-time-us 
+               gpu-render-start-time-us 
+               gpu-render-end-time-us)))
+
+(defmethod print-object ((obj out-of-band-queue-type-info-nv) out)
+  (with-slots (next
+               queue-type)
+      obj
+    (cl:format out "~i(~@<OUT-OF-BAND-QUEUE-TYPE-INFO-NV~:@_:next ~s~:@_:queue-type ~s~:>)"
+               next 
+               queue-type)))
+
+(defmethod print-object ((obj latency-submission-present-id-nv) out)
+  (with-slots (next
+               present-id)
+      obj
+    (cl:format out "~i(~@<LATENCY-SUBMISSION-PRESENT-ID-NV~:@_:next ~s~:@_:present-id ~s~:>)"
+               next 
+               present-id)))
+
+(defmethod print-object ((obj swapchain-latency-create-info-nv) out)
+  (with-slots (next
+               latency-mode-enable)
+      obj
+    (cl:format out "~i(~@<SWAPCHAIN-LATENCY-CREATE-INFO-NV~:@_:next ~s~:@_:latency-mode-enable ~s~:>)"
+               next 
+               latency-mode-enable)))
+
+(defmethod print-object ((obj latency-surface-capabilities-nv) out)
+  (with-slots (next
+               present-modes)
+      obj
+    (cl:format out "~i(~@<LATENCY-SURFACE-CAPABILITIES-NV~:@_:next ~s~:@_:present-modes ~s~:>)"
+               next 
+               present-modes)))
+
+(defmethod print-object ((obj physical-device-cuda-kernel-launch-features-nv) out)
+  (with-slots (next
+               cuda-kernel-launch-features)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-CUDA-KERNEL-LAUNCH-FEATURES-NV~:@_:next ~s~:@_:cuda-kernel-launch-features ~s~:>)"
+               next 
+               cuda-kernel-launch-features)))
+
+(defmethod print-object ((obj physical-device-cuda-kernel-launch-properties-nv) out)
+  (with-slots (next
+               compute-capability-minor
+               compute-capability-major)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-CUDA-KERNEL-LAUNCH-PROPERTIES-NV~:@_:next ~s~:@_:compute-capability-minor ~s~:@_:compute-capability-major ~s~:>)"
+               next 
+               compute-capability-minor 
+               compute-capability-major)))
+
+(defmethod print-object ((obj device-queue-shader-core-control-create-info-arm) out)
+  (with-slots (next
+               shader-core-count)
+      obj
+    (cl:format out "~i(~@<DEVICE-QUEUE-SHADER-CORE-CONTROL-CREATE-INFO-ARM~:@_:next ~s~:@_:shader-core-count ~s~:>)"
+               next 
+               shader-core-count)))
+
+(defmethod print-object ((obj physical-device-scheduling-controls-features-arm) out)
+  (with-slots (next
+               scheduling-controls)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SCHEDULING-CONTROLS-FEATURES-ARM~:@_:next ~s~:@_:scheduling-controls ~s~:>)"
+               next 
+               scheduling-controls)))
+
+(defmethod print-object ((obj physical-device-scheduling-controls-properties-arm) out)
+  (with-slots (next
+               scheduling-controls-flags)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SCHEDULING-CONTROLS-PROPERTIES-ARM~:@_:next ~s~:@_:scheduling-controls-flags ~s~:>)"
+               next 
+               scheduling-controls-flags)))
+
+(defmethod print-object ((obj physical-device-scheduling-controls-dispatch-parameters-properties-arm) out)
+  (with-slots (next
+               scheduling-controls-max-warps-count
+               scheduling-controls-max-queued-batches-count
+               scheduling-controls-max-work-group-batch-size)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SCHEDULING-CONTROLS-DISPATCH-PARAMETERS-PROPERTIES-ARM~:@_:next ~s~:@_:scheduling-controls-max-warps-count ~s~:@_:scheduling-controls-max-queued-batches-count ~s~:@_:scheduling-controls-max-work-group-batch-size ~s~:>)"
+               next 
+               scheduling-controls-max-warps-count 
+               scheduling-controls-max-queued-batches-count 
+               scheduling-controls-max-work-group-batch-size)))
+
+(defmethod print-object ((obj dispatch-parameters-arm) out)
+  (with-slots (next
+               work-group-batch-size
+               max-queued-work-group-batches
+               max-warps-per-shader-core)
+      obj
+    (cl:format out "~i(~@<DISPATCH-PARAMETERS-ARM~:@_:next ~s~:@_:work-group-batch-size ~s~:@_:max-queued-work-group-batches ~s~:@_:max-warps-per-shader-core ~s~:>)"
+               next 
+               work-group-batch-size 
+               max-queued-work-group-batches 
+               max-warps-per-shader-core)))
+
+(defmethod print-object ((obj physical-device-relaxed-line-rasterization-features-img) out)
+  (with-slots (next
+               relaxed-line-rasterization)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-RELAXED-LINE-RASTERIZATION-FEATURES-IMG~:@_:next ~s~:@_:relaxed-line-rasterization ~s~:>)"
+               next 
+               relaxed-line-rasterization)))
+
+(defmethod print-object ((obj physical-device-render-pass-striped-features-arm) out)
+  (with-slots (next
+               render-pass-striped)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-RENDER-PASS-STRIPED-FEATURES-ARM~:@_:next ~s~:@_:render-pass-striped ~s~:>)"
+               next 
+               render-pass-striped)))
+
+(defmethod print-object ((obj physical-device-render-pass-striped-properties-arm) out)
+  (with-slots (next
+               render-pass-stripe-granularity
+               max-render-pass-stripes)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-RENDER-PASS-STRIPED-PROPERTIES-ARM~:@_:next ~s~:@_:render-pass-stripe-granularity ~s~:@_:max-render-pass-stripes ~s~:>)"
+               next 
+               render-pass-stripe-granularity 
+               max-render-pass-stripes)))
+
+(defmethod print-object ((obj render-pass-stripe-info-arm) out)
+  (with-slots (next
+               stripe-area)
+      obj
+    (cl:format out "~i(~@<RENDER-PASS-STRIPE-INFO-ARM~:@_:next ~s~:@_:stripe-area ~s~:>)"
+               next 
+               stripe-area)))
+
+(defmethod print-object ((obj render-pass-stripe-begin-info-arm) out)
+  (with-slots (next
+               stripe-infos)
+      obj
+    (cl:format out "~i(~@<RENDER-PASS-STRIPE-BEGIN-INFO-ARM~:@_:next ~s~:@_:stripe-infos ~s~:>)"
+               next 
+               stripe-infos)))
+
+(defmethod print-object ((obj render-pass-stripe-submit-info-arm) out)
+  (with-slots (next
+               stripe-semaphore-infos)
+      obj
+    (cl:format out "~i(~@<RENDER-PASS-STRIPE-SUBMIT-INFO-ARM~:@_:next ~s~:@_:stripe-semaphore-infos ~s~:>)"
+               next 
+               stripe-semaphore-infos)))
+
+(defmethod print-object ((obj physical-device-pipeline-opacity-micromap-features-arm) out)
+  (with-slots (next
+               pipeline-opacity-micromap)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-PIPELINE-OPACITY-MICROMAP-FEATURES-ARM~:@_:next ~s~:@_:pipeline-opacity-micromap ~s~:>)"
+               next 
+               pipeline-opacity-micromap)))
+
+(defmethod print-object ((obj physical-device-shader-maximal-reconvergence-features-khr) out)
+  (with-slots (next
+               shader-maximal-reconvergence)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SHADER-MAXIMAL-RECONVERGENCE-FEATURES-KHR~:@_:next ~s~:@_:shader-maximal-reconvergence ~s~:>)"
+               next 
+               shader-maximal-reconvergence)))
+
+(defmethod print-object ((obj physical-device-shader-subgroup-rotate-features) out)
+  (with-slots (next
+               shader-subgroup-rotate
+               shader-subgroup-rotate-clustered)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SHADER-SUBGROUP-ROTATE-FEATURES~:@_:next ~s~:@_:shader-subgroup-rotate ~s~:@_:shader-subgroup-rotate-clustered ~s~:>)"
+               next 
+               shader-subgroup-rotate 
+               shader-subgroup-rotate-clustered)))
+
+(defmethod print-object ((obj physical-device-shader-expect-assume-features) out)
+  (with-slots (next
+               shader-expect-assume)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SHADER-EXPECT-ASSUME-FEATURES~:@_:next ~s~:@_:shader-expect-assume ~s~:>)"
+               next 
+               shader-expect-assume)))
+
+(defmethod print-object ((obj physical-device-shader-float-controls-2-features) out)
+  (with-slots (next
+               shader-float-controls-2)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SHADER-FLOAT-CONTROLS-2-FEATURES~:@_:next ~s~:@_:shader-float-controls-2 ~s~:>)"
+               next 
+               shader-float-controls-2)))
+
+(defmethod print-object ((obj physical-device-dynamic-rendering-local-read-features) out)
+  (with-slots (next
+               dynamic-rendering-local-read)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-DYNAMIC-RENDERING-LOCAL-READ-FEATURES~:@_:next ~s~:@_:dynamic-rendering-local-read ~s~:>)"
+               next 
+               dynamic-rendering-local-read)))
+
+(defmethod print-object ((obj rendering-attachment-location-info) out)
+  (with-slots (next
+               color-attachment-locations)
+      obj
+    (cl:format out "~i(~@<RENDERING-ATTACHMENT-LOCATION-INFO~:@_:next ~s~:@_:color-attachment-locations ~s~:>)"
+               next 
+               color-attachment-locations)))
+
+(defmethod print-object ((obj rendering-input-attachment-index-info) out)
+  (with-slots (next
+               color-attachment-input-indices
+               depth-input-attachment-index
+               stencil-input-attachment-index)
+      obj
+    (cl:format out "~i(~@<RENDERING-INPUT-ATTACHMENT-INDEX-INFO~:@_:next ~s~:@_:color-attachment-input-indices ~s~:@_:depth-input-attachment-index ~s~:@_:stencil-input-attachment-index ~s~:>)"
+               next 
+               color-attachment-input-indices 
+               depth-input-attachment-index 
+               stencil-input-attachment-index)))
+
+(defmethod print-object ((obj physical-device-shader-quad-control-features-khr) out)
+  (with-slots (next
+               shader-quad-control)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SHADER-QUAD-CONTROL-FEATURES-KHR~:@_:next ~s~:@_:shader-quad-control ~s~:>)"
+               next 
+               shader-quad-control)))
+
+(defmethod print-object ((obj physical-device-shader-atomic-float-16-vector-features-nv) out)
+  (with-slots (next
+               shader-float-16-vector-atomics)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SHADER-ATOMIC-FLOAT-16-VECTOR-FEATURES-NV~:@_:next ~s~:@_:shader-float-16-vector-atomics ~s~:>)"
+               next 
+               shader-float-16-vector-atomics)))
+
+(defmethod print-object ((obj physical-device-map-memory-placed-features-ext) out)
+  (with-slots (next
+               memory-map-placed
+               memory-map-range-placed
+               memory-unmap-reserve)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-MAP-MEMORY-PLACED-FEATURES-EXT~:@_:next ~s~:@_:memory-map-placed ~s~:@_:memory-map-range-placed ~s~:@_:memory-unmap-reserve ~s~:>)"
+               next 
+               memory-map-placed 
+               memory-map-range-placed 
+               memory-unmap-reserve)))
+
+(defmethod print-object ((obj physical-device-map-memory-placed-properties-ext) out)
+  (with-slots (next
+               min-placed-memory-map-alignment)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-MAP-MEMORY-PLACED-PROPERTIES-EXT~:@_:next ~s~:@_:min-placed-memory-map-alignment ~s~:>)"
+               next 
+               min-placed-memory-map-alignment)))
+
+(defmethod print-object ((obj memory-map-placed-info-ext) out)
+  (with-slots (next
+               placed-address)
+      obj
+    (cl:format out "~i(~@<MEMORY-MAP-PLACED-INFO-EXT~:@_:next ~s~:@_:placed-address ~s~:>)"
+               next 
+               placed-address)))
+
+(defmethod print-object ((obj physical-device-shader-bfloat-16-features-khr) out)
+  (with-slots (next
+               shader-b-float-16-type
+               shader-b-float-16-dot-product
+               shader-b-float-16-cooperative-matrix)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SHADER-BFLOAT-16-FEATURES-KHR~:@_:next ~s~:@_:shader-b-float-16-type ~s~:@_:shader-b-float-16-dot-product ~s~:@_:shader-b-float-16-cooperative-matrix ~s~:>)"
+               next 
+               shader-b-float-16-type 
+               shader-b-float-16-dot-product 
+               shader-b-float-16-cooperative-matrix)))
+
+(defmethod print-object ((obj physical-device-raw-access-chains-features-nv) out)
+  (with-slots (next
+               shader-raw-access-chains)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-RAW-ACCESS-CHAINS-FEATURES-NV~:@_:next ~s~:@_:shader-raw-access-chains ~s~:>)"
+               next 
+               shader-raw-access-chains)))
+
+(defmethod print-object ((obj physical-device-command-buffer-inheritance-features-nv) out)
+  (with-slots (next
+               command-buffer-inheritance)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-COMMAND-BUFFER-INHERITANCE-FEATURES-NV~:@_:next ~s~:@_:command-buffer-inheritance ~s~:>)"
+               next 
+               command-buffer-inheritance)))
+
+(defmethod print-object ((obj physical-device-image-alignment-control-features-mesa) out)
+  (with-slots (next
+               image-alignment-control)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-IMAGE-ALIGNMENT-CONTROL-FEATURES-MESA~:@_:next ~s~:@_:image-alignment-control ~s~:>)"
+               next 
+               image-alignment-control)))
+
+(defmethod print-object ((obj physical-device-image-alignment-control-properties-mesa) out)
+  (with-slots (next
+               supported-image-alignment-mask)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-IMAGE-ALIGNMENT-CONTROL-PROPERTIES-MESA~:@_:next ~s~:@_:supported-image-alignment-mask ~s~:>)"
+               next 
+               supported-image-alignment-mask)))
+
+(defmethod print-object ((obj image-alignment-control-create-info-mesa) out)
+  (with-slots (next
+               maximum-requested-alignment)
+      obj
+    (cl:format out "~i(~@<IMAGE-ALIGNMENT-CONTROL-CREATE-INFO-MESA~:@_:next ~s~:@_:maximum-requested-alignment ~s~:>)"
+               next 
+               maximum-requested-alignment)))
+
+(defmethod print-object ((obj physical-device-shader-replicated-composites-features-ext) out)
+  (with-slots (next
+               shader-replicated-composites)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SHADER-REPLICATED-COMPOSITES-FEATURES-EXT~:@_:next ~s~:@_:shader-replicated-composites ~s~:>)"
+               next 
+               shader-replicated-composites)))
+
+(defmethod print-object ((obj physical-device-present-mode-fifo-latest-ready-features-khr) out)
+  (with-slots (next
+               present-mode-fifo-latest-ready)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-PRESENT-MODE-FIFO-LATEST-READY-FEATURES-KHR~:@_:next ~s~:@_:present-mode-fifo-latest-ready ~s~:>)"
+               next 
+               present-mode-fifo-latest-ready)))
+
+(defmethod print-object ((obj depth-clamp-range-ext) out)
+  (with-slots (min-depth-clamp
+               max-depth-clamp)
+      obj
+    (cl:format out "~i(~@<DEPTH-CLAMP-RANGE-EXT~:@_:min-depth-clamp ~s~:@_:max-depth-clamp ~s~:>)"
+               min-depth-clamp 
+               max-depth-clamp)))
+
+(defmethod print-object ((obj physical-device-cooperative-matrix-2-features-nv) out)
+  (with-slots (next
+               cooperative-matrix-workgroup-scope
+               cooperative-matrix-flexible-dimensions
+               cooperative-matrix-reductions
+               cooperative-matrix-conversions
+               cooperative-matrix-per-element-operations
+               cooperative-matrix-tensor-addressing
+               cooperative-matrix-block-loads)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-COOPERATIVE-MATRIX-2-FEATURES-NV~:@_:next ~s~:@_:cooperative-matrix-workgroup-scope ~s~:@_:cooperative-matrix-flexible-dimensions ~s~:@_:cooperative-matrix-reductions ~s~:@_:cooperative-matrix-conversions ~s~:@_:cooperative-matrix-per-element-operations ~s~:@_:cooperative-matrix-tensor-addressing ~s~:@_:cooperative-matrix-block-loads ~s~:>)"
+               next 
+               cooperative-matrix-workgroup-scope 
+               cooperative-matrix-flexible-dimensions 
+               cooperative-matrix-reductions 
+               cooperative-matrix-conversions 
+               cooperative-matrix-per-element-operations 
+               cooperative-matrix-tensor-addressing 
+               cooperative-matrix-block-loads)))
+
+(defmethod print-object ((obj physical-device-cooperative-matrix-2-properties-nv) out)
+  (with-slots (next
+               cooperative-matrix-workgroup-scope-max-workgroup-size
+               cooperative-matrix-flexible-dimensions-max-dimension
+               cooperative-matrix-workgroup-scope-reserved-shared-memory)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-COOPERATIVE-MATRIX-2-PROPERTIES-NV~:@_:next ~s~:@_:cooperative-matrix-workgroup-scope-max-workgroup-size ~s~:@_:cooperative-matrix-flexible-dimensions-max-dimension ~s~:@_:cooperative-matrix-workgroup-scope-reserved-shared-memory ~s~:>)"
+               next 
+               cooperative-matrix-workgroup-scope-max-workgroup-size 
+               cooperative-matrix-flexible-dimensions-max-dimension 
+               cooperative-matrix-workgroup-scope-reserved-shared-memory)))
+
+(defmethod print-object ((obj cooperative-matrix-flexible-dimensions-properties-nv) out)
+  (with-slots (next
+               m-granularity
+               n-granularity
+               k-granularity
+               a-type
+               b-type
+               c-type
+               result-type
+               saturating-accumulation
+               scope
+               workgroup-invocations)
+      obj
+    (cl:format out "~i(~@<COOPERATIVE-MATRIX-FLEXIBLE-DIMENSIONS-PROPERTIES-NV~:@_:next ~s~:@_:m-granularity ~s~:@_:n-granularity ~s~:@_:k-granularity ~s~:@_:a-type ~s~:@_:b-type ~s~:@_:c-type ~s~:@_:result-type ~s~:@_:saturating-accumulation ~s~:@_:scope ~s~:@_:workgroup-invocations ~s~:>)"
+               next 
+               m-granularity 
+               n-granularity 
+               k-granularity 
+               a-type 
+               b-type 
+               c-type 
+               result-type 
+               saturating-accumulation 
+               scope 
+               workgroup-invocations)))
+
+(defmethod print-object ((obj physical-device-cooperative-matrix-decode-vector-features-nv) out)
+  (with-slots (next
+               cooperative-matrix-decode-vector)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-COOPERATIVE-MATRIX-DECODE-VECTOR-FEATURES-NV~:@_:next ~s~:@_:cooperative-matrix-decode-vector ~s~:>)"
+               next 
+               cooperative-matrix-decode-vector)))
+
+(defmethod print-object ((obj physical-device-hdr-vivid-features-huawei) out)
+  (with-slots (next
+               hdr-vivid)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-HDR-VIVID-FEATURES-HUAWEI~:@_:next ~s~:@_:hdr-vivid ~s~:>)"
+               next 
+               hdr-vivid)))
+
+(defmethod print-object ((obj physical-device-vertex-attribute-robustness-features-ext) out)
+  (with-slots (next
+               vertex-attribute-robustness)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-VERTEX-ATTRIBUTE-ROBUSTNESS-FEATURES-EXT~:@_:next ~s~:@_:vertex-attribute-robustness ~s~:>)"
+               next 
+               vertex-attribute-robustness)))
+
+(defmethod print-object ((obj physical-device-dense-geometry-format-features-amd-x) out)
+  (with-slots (next
+               dense-geometry-format)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-DENSE-GEOMETRY-FORMAT-FEATURES-AMD-X~:@_:next ~s~:@_:dense-geometry-format ~s~:>)"
+               next 
+               dense-geometry-format)))
+
+(defmethod print-object ((obj acceleration-structure-dense-geometry-format-triangles-data-amd-x) out)
+  (with-slots (next
+               compressed-data
+               data-size
+               num-triangles
+               num-vertices
+               max-primitive-index
+               max-geometry-index
+               format)
+      obj
+    (cl:format out "~i(~@<ACCELERATION-STRUCTURE-DENSE-GEOMETRY-FORMAT-TRIANGLES-DATA-AMD-X~:@_:next ~s~:@_:compressed-data ~s~:@_:data-size ~s~:@_:num-triangles ~s~:@_:num-vertices ~s~:@_:max-primitive-index ~s~:@_:max-geometry-index ~s~:@_:format ~s~:>)"
+               next 
+               compressed-data 
+               data-size 
+               num-triangles 
+               num-vertices 
+               max-primitive-index 
+               max-geometry-index 
+               format)))
+
+(defmethod print-object ((obj physical-device-depth-clamp-zero-one-features-khr) out)
+  (with-slots (next
+               depth-clamp-zero-one)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-DEPTH-CLAMP-ZERO-ONE-FEATURES-KHR~:@_:next ~s~:@_:depth-clamp-zero-one ~s~:>)"
+               next 
+               depth-clamp-zero-one)))
+
+(defmethod print-object ((obj physical-device-cooperative-vector-features-nv) out)
+  (with-slots (next
+               cooperative-vector
+               cooperative-vector-training)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-COOPERATIVE-VECTOR-FEATURES-NV~:@_:next ~s~:@_:cooperative-vector ~s~:@_:cooperative-vector-training ~s~:>)"
+               next 
+               cooperative-vector 
+               cooperative-vector-training)))
+
+(defmethod print-object ((obj cooperative-vector-properties-nv) out)
+  (with-slots (next
+               input-type
+               input-interpretation
+               matrix-interpretation
+               bias-interpretation
+               result-type
+               transpose)
+      obj
+    (cl:format out "~i(~@<COOPERATIVE-VECTOR-PROPERTIES-NV~:@_:next ~s~:@_:input-type ~s~:@_:input-interpretation ~s~:@_:matrix-interpretation ~s~:@_:bias-interpretation ~s~:@_:result-type ~s~:@_:transpose ~s~:>)"
+               next 
+               input-type 
+               input-interpretation 
+               matrix-interpretation 
+               bias-interpretation 
+               result-type 
+               transpose)))
+
+(defmethod print-object ((obj physical-device-cooperative-vector-properties-nv) out)
+  (with-slots (next
+               cooperative-vector-supported-stages
+               cooperative-vector-training-float-16-accumulation
+               cooperative-vector-training-float-32-accumulation
+               max-cooperative-vector-components)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-COOPERATIVE-VECTOR-PROPERTIES-NV~:@_:next ~s~:@_:cooperative-vector-supported-stages ~s~:@_:cooperative-vector-training-float-16-accumulation ~s~:@_:cooperative-vector-training-float-32-accumulation ~s~:@_:max-cooperative-vector-components ~s~:>)"
+               next 
+               cooperative-vector-supported-stages 
+               cooperative-vector-training-float-16-accumulation 
+               cooperative-vector-training-float-32-accumulation 
+               max-cooperative-vector-components)))
+
+(defmethod print-object ((obj convert-cooperative-vector-matrix-info-nv) out)
+  (with-slots (next
+               src-size
+               src-data
+               dst-size
+               dst-data
+               src-component-type
+               dst-component-type
+               num-rows
+               num-columns
+               src-layout
+               src-stride
+               dst-layout
+               dst-stride)
+      obj
+    (cl:format out "~i(~@<CONVERT-COOPERATIVE-VECTOR-MATRIX-INFO-NV~:@_:next ~s~:@_:src-size ~s~:@_:src-data ~s~:@_:dst-size ~s~:@_:dst-data ~s~:@_:src-component-type ~s~:@_:dst-component-type ~s~:@_:num-rows ~s~:@_:num-columns ~s~:@_:src-layout ~s~:@_:src-stride ~s~:@_:dst-layout ~s~:@_:dst-stride ~s~:>)"
+               next 
+               src-size 
+               src-data 
+               dst-size 
+               dst-data 
+               src-component-type 
+               dst-component-type 
+               num-rows 
+               num-columns 
+               src-layout 
+               src-stride 
+               dst-layout 
+               dst-stride)))
+
+(defmethod print-object ((obj physical-device-tile-shading-features-qcom) out)
+  (with-slots (next
+               tile-shading
+               tile-shading-fragment-stage
+               tile-shading-color-attachments
+               tile-shading-depth-attachments
+               tile-shading-stencil-attachments
+               tile-shading-input-attachments
+               tile-shading-sampled-attachments
+               tile-shading-per-tile-draw
+               tile-shading-per-tile-dispatch
+               tile-shading-dispatch-tile
+               tile-shading-apron
+               tile-shading-anisotropic-apron
+               tile-shading-atomic-ops
+               tile-shading-image-processing)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-TILE-SHADING-FEATURES-QCOM~:@_:next ~s~:@_:tile-shading ~s~:@_:tile-shading-fragment-stage ~s~:@_:tile-shading-color-attachments ~s~:@_:tile-shading-depth-attachments ~s~:@_:tile-shading-stencil-attachments ~s~:@_:tile-shading-input-attachments ~s~:@_:tile-shading-sampled-attachments ~s~:@_:tile-shading-per-tile-draw ~s~:@_:tile-shading-per-tile-dispatch ~s~:@_:tile-shading-dispatch-tile ~s~:@_:tile-shading-apron ~s~:@_:tile-shading-anisotropic-apron ~s~:@_:tile-shading-atomic-ops ~s~:@_:tile-shading-image-processing ~s~:>)"
+               next 
+               tile-shading 
+               tile-shading-fragment-stage 
+               tile-shading-color-attachments 
+               tile-shading-depth-attachments 
+               tile-shading-stencil-attachments 
+               tile-shading-input-attachments 
+               tile-shading-sampled-attachments 
+               tile-shading-per-tile-draw 
+               tile-shading-per-tile-dispatch 
+               tile-shading-dispatch-tile 
+               tile-shading-apron 
+               tile-shading-anisotropic-apron 
+               tile-shading-atomic-ops 
+               tile-shading-image-processing)))
+
+(defmethod print-object ((obj physical-device-tile-shading-properties-qcom) out)
+  (with-slots (next
+               max-apron-size
+               prefer-non-coherent
+               tile-granularity
+               max-tile-shading-rate)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-TILE-SHADING-PROPERTIES-QCOM~:@_:next ~s~:@_:max-apron-size ~s~:@_:prefer-non-coherent ~s~:@_:tile-granularity ~s~:@_:max-tile-shading-rate ~s~:>)"
+               next 
+               max-apron-size 
+               prefer-non-coherent 
+               tile-granularity 
+               max-tile-shading-rate)))
+
+(defmethod print-object ((obj render-pass-tile-shading-create-info-qcom) out)
+  (with-slots (next
+               flags
+               tile-apron-size)
+      obj
+    (cl:format out "~i(~@<RENDER-PASS-TILE-SHADING-CREATE-INFO-QCOM~:@_:next ~s~:@_:flags ~s~:@_:tile-apron-size ~s~:>)"
+               next 
+               flags 
+               tile-apron-size)))
+
+(defmethod print-object ((obj per-tile-begin-info-qcom) out)
+  (with-slots (next)
+      obj
+    (cl:format out "~i(~@<PER-TILE-BEGIN-INFO-QCOM~:@_:next ~s~:>)"
+               next)))
+
+(defmethod print-object ((obj per-tile-end-info-qcom) out)
+  (with-slots (next)
+      obj
+    (cl:format out "~i(~@<PER-TILE-END-INFO-QCOM~:@_:next ~s~:>)"
+               next)))
+
+(defmethod print-object ((obj dispatch-tile-info-qcom) out)
+  (with-slots (next)
+      obj
+    (cl:format out "~i(~@<DISPATCH-TILE-INFO-QCOM~:@_:next ~s~:>)"
+               next)))
+
+(defmethod print-object ((obj physical-device-fragment-density-map-layered-properties-valve) out)
+  (with-slots (next
+               max-fragment-density-map-layers)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-FRAGMENT-DENSITY-MAP-LAYERED-PROPERTIES-VALVE~:@_:next ~s~:@_:max-fragment-density-map-layers ~s~:>)"
+               next 
+               max-fragment-density-map-layers)))
+
+(defmethod print-object ((obj physical-device-fragment-density-map-layered-features-valve) out)
+  (with-slots (next
+               fragment-density-map-layered)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-FRAGMENT-DENSITY-MAP-LAYERED-FEATURES-VALVE~:@_:next ~s~:@_:fragment-density-map-layered ~s~:>)"
+               next 
+               fragment-density-map-layered)))
+
+(defmethod print-object ((obj pipeline-fragment-density-map-layered-create-info-valve) out)
+  (with-slots (next
+               max-fragment-density-map-layers)
+      obj
+    (cl:format out "~i(~@<PIPELINE-FRAGMENT-DENSITY-MAP-LAYERED-CREATE-INFO-VALVE~:@_:next ~s~:@_:max-fragment-density-map-layers ~s~:>)"
+               next 
+               max-fragment-density-map-layers)))
+
+(defmethod print-object ((obj set-present-config-nv) out)
+  (with-slots (next
+               num-frames-per-batch
+               present-config-feedback)
+      obj
+    (cl:format out "~i(~@<SET-PRESENT-CONFIG-NV~:@_:next ~s~:@_:num-frames-per-batch ~s~:@_:present-config-feedback ~s~:>)"
+               next 
+               num-frames-per-batch 
+               present-config-feedback)))
+
+(defmethod print-object ((obj physical-device-present-metering-features-nv) out)
+  (with-slots (next
+               present-metering)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-PRESENT-METERING-FEATURES-NV~:@_:next ~s~:@_:present-metering ~s~:>)"
+               next 
+               present-metering)))
+
+(defmethod print-object ((obj external-compute-queue-device-create-info-nv) out)
+  (with-slots (next
+               reserved-external-queues)
+      obj
+    (cl:format out "~i(~@<EXTERNAL-COMPUTE-QUEUE-DEVICE-CREATE-INFO-NV~:@_:next ~s~:@_:reserved-external-queues ~s~:>)"
+               next 
+               reserved-external-queues)))
+
+(defmethod print-object ((obj external-compute-queue-create-info-nv) out)
+  (with-slots (next
+               preferred-queue)
+      obj
+    (cl:format out "~i(~@<EXTERNAL-COMPUTE-QUEUE-CREATE-INFO-NV~:@_:next ~s~:@_:preferred-queue ~s~:>)"
+               next 
+               preferred-queue)))
+
+(defmethod print-object ((obj external-compute-queue-data-params-nv) out)
+  (with-slots (next
+               device-index)
+      obj
+    (cl:format out "~i(~@<EXTERNAL-COMPUTE-QUEUE-DATA-PARAMS-NV~:@_:next ~s~:@_:device-index ~s~:>)"
+               next 
+               device-index)))
+
+(defmethod print-object ((obj physical-device-external-compute-queue-properties-nv) out)
+  (with-slots (next
+               external-data-size
+               max-external-queues)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-EXTERNAL-COMPUTE-QUEUE-PROPERTIES-NV~:@_:next ~s~:@_:external-data-size ~s~:@_:max-external-queues ~s~:>)"
+               next 
+               external-data-size 
+               max-external-queues)))
+
+(defmethod print-object ((obj physical-device-shader-uniform-buffer-unsized-array-features-ext) out)
+  (with-slots (next
+               shader-uniform-buffer-unsized-array)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SHADER-UNIFORM-BUFFER-UNSIZED-ARRAY-FEATURES-EXT~:@_:next ~s~:@_:shader-uniform-buffer-unsized-array ~s~:>)"
+               next 
+               shader-uniform-buffer-unsized-array)))
+
+(defmethod print-object ((obj physical-device-shader-mixed-float-dot-product-features-valve) out)
+  (with-slots (next
+               shader-mixed-float-dot-product-float-16-acc-float-32
+               shader-mixed-float-dot-product-float-16-acc-float-16
+               shader-mixed-float-dot-product-b-float-16-acc
+               shader-mixed-float-dot-product-float-8-acc-float-32)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SHADER-MIXED-FLOAT-DOT-PRODUCT-FEATURES-VALVE~:@_:next ~s~:@_:shader-mixed-float-dot-product-float-16-acc-float-32 ~s~:@_:shader-mixed-float-dot-product-float-16-acc-float-16 ~s~:@_:shader-mixed-float-dot-product-b-float-16-acc ~s~:@_:shader-mixed-float-dot-product-float-8-acc-float-32 ~s~:>)"
+               next 
+               shader-mixed-float-dot-product-float-16-acc-float-32 
+               shader-mixed-float-dot-product-float-16-acc-float-16 
+               shader-mixed-float-dot-product-b-float-16-acc 
+               shader-mixed-float-dot-product-float-8-acc-float-32)))
+
+(defmethod print-object ((obj physical-device-primitive-restart-index-features-ext) out)
+  (with-slots (next
+               primitive-restart-index)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-PRIMITIVE-RESTART-INDEX-FEATURES-EXT~:@_:next ~s~:@_:primitive-restart-index ~s~:>)"
+               next 
+               primitive-restart-index)))
+
+(defmethod print-object ((obj physical-device-format-pack-features-arm) out)
+  (with-slots (next
+               format-pack)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-FORMAT-PACK-FEATURES-ARM~:@_:next ~s~:@_:format-pack ~s~:>)"
+               next 
+               format-pack)))
+
+(defmethod print-object ((obj physical-device-throttle-hint-features-sec) out)
+  (with-slots (next
+               throttle-hint)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-THROTTLE-HINT-FEATURES-SEC~:@_:next ~s~:@_:throttle-hint ~s~:>)"
+               next 
+               throttle-hint)))
+
+(defmethod print-object ((obj throttle-hint-submit-info-sec) out)
+  (with-slots (next
+               throttle-hint)
+      obj
+    (cl:format out "~i(~@<THROTTLE-HINT-SUBMIT-INFO-SEC~:@_:next ~s~:@_:throttle-hint ~s~:>)"
+               next 
+               throttle-hint)))
+
+(defmethod print-object ((obj tensor-description-arm) out)
+  (with-slots (next
+               tiling
+               format
+               dimensions
+               strides
+               usage)
+      obj
+    (cl:format out "~i(~@<TENSOR-DESCRIPTION-ARM~:@_:next ~s~:@_:tiling ~s~:@_:format ~s~:@_:dimensions ~s~:@_:strides ~s~:@_:usage ~s~:>)"
+               next 
+               tiling 
+               format 
+               dimensions 
+               strides 
+               usage)))
+
+(defmethod print-object ((obj tensor-create-info-arm) out)
+  (with-slots (next
+               flags
+               description
+               sharing-mode
+               queue-family-indices)
+      obj
+    (cl:format out "~i(~@<TENSOR-CREATE-INFO-ARM~:@_:next ~s~:@_:flags ~s~:@_:description ~s~:@_:sharing-mode ~s~:@_:queue-family-indices ~s~:>)"
+               next 
+               flags 
+               description 
+               sharing-mode 
+               queue-family-indices)))
+
+(defmethod print-object ((obj tensor-view-create-info-arm) out)
+  (with-slots (next
+               flags
+               tensor
+               format)
+      obj
+    (cl:format out "~i(~@<TENSOR-VIEW-CREATE-INFO-ARM~:@_:next ~s~:@_:flags ~s~:@_:tensor ~s~:@_:format ~s~:>)"
+               next 
+               flags 
+               tensor 
+               format)))
+
+(defmethod print-object ((obj tensor-memory-requirements-info-arm) out)
+  (with-slots (next
+               tensor)
+      obj
+    (cl:format out "~i(~@<TENSOR-MEMORY-REQUIREMENTS-INFO-ARM~:@_:next ~s~:@_:tensor ~s~:>)"
+               next 
+               tensor)))
+
+(defmethod print-object ((obj bind-tensor-memory-info-arm) out)
+  (with-slots (next
+               tensor
+               memory
+               memory-offset)
+      obj
+    (cl:format out "~i(~@<BIND-TENSOR-MEMORY-INFO-ARM~:@_:next ~s~:@_:tensor ~s~:@_:memory ~s~:@_:memory-offset ~s~:>)"
+               next 
+               tensor 
+               memory 
+               memory-offset)))
+
+(defmethod print-object ((obj write-descriptor-set-tensor-arm) out)
+  (with-slots (next
+               tensor-views)
+      obj
+    (cl:format out "~i(~@<WRITE-DESCRIPTOR-SET-TENSOR-ARM~:@_:next ~s~:@_:tensor-views ~s~:>)"
+               next 
+               tensor-views)))
+
+(defmethod print-object ((obj tensor-format-properties-arm) out)
+  (with-slots (next
+               optimal-tiling-tensor-features
+               linear-tiling-tensor-features)
+      obj
+    (cl:format out "~i(~@<TENSOR-FORMAT-PROPERTIES-ARM~:@_:next ~s~:@_:optimal-tiling-tensor-features ~s~:@_:linear-tiling-tensor-features ~s~:>)"
+               next 
+               optimal-tiling-tensor-features 
+               linear-tiling-tensor-features)))
+
+(defmethod print-object ((obj physical-device-tensor-properties-arm) out)
+  (with-slots (next
+               max-tensor-dimension-count
+               max-tensor-elements
+               max-per-dimension-tensor-elements
+               max-tensor-stride
+               max-tensor-size
+               max-tensor-shader-access-array-length
+               max-tensor-shader-access-size
+               max-descriptor-set-storage-tensors
+               max-per-stage-descriptor-set-storage-tensors
+               max-descriptor-set-update-after-bind-storage-tensors
+               max-per-stage-descriptor-update-after-bind-storage-tensors
+               shader-storage-tensor-array-non-uniform-indexing-native
+               shader-tensor-supported-stages)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-TENSOR-PROPERTIES-ARM~:@_:next ~s~:@_:max-tensor-dimension-count ~s~:@_:max-tensor-elements ~s~:@_:max-per-dimension-tensor-elements ~s~:@_:max-tensor-stride ~s~:@_:max-tensor-size ~s~:@_:max-tensor-shader-access-array-length ~s~:@_:max-tensor-shader-access-size ~s~:@_:max-descriptor-set-storage-tensors ~s~:@_:max-per-stage-descriptor-set-storage-tensors ~s~:@_:max-descriptor-set-update-after-bind-storage-tensors ~s~:@_:max-per-stage-descriptor-update-after-bind-storage-tensors ~s~:@_:shader-storage-tensor-array-non-uniform-indexing-native ~s~:@_:shader-tensor-supported-stages ~s~:>)"
+               next 
+               max-tensor-dimension-count 
+               max-tensor-elements 
+               max-per-dimension-tensor-elements 
+               max-tensor-stride 
+               max-tensor-size 
+               max-tensor-shader-access-array-length 
+               max-tensor-shader-access-size 
+               max-descriptor-set-storage-tensors 
+               max-per-stage-descriptor-set-storage-tensors 
+               max-descriptor-set-update-after-bind-storage-tensors 
+               max-per-stage-descriptor-update-after-bind-storage-tensors 
+               shader-storage-tensor-array-non-uniform-indexing-native 
+               shader-tensor-supported-stages)))
+
+(defmethod print-object ((obj tensor-memory-barrier-arm) out)
+  (with-slots (next
+               src-stage-mask
+               src-access-mask
+               dst-stage-mask
+               dst-access-mask
+               src-queue-family-index
+               dst-queue-family-index
+               tensor)
+      obj
+    (cl:format out "~i(~@<TENSOR-MEMORY-BARRIER-ARM~:@_:next ~s~:@_:src-stage-mask ~s~:@_:src-access-mask ~s~:@_:dst-stage-mask ~s~:@_:dst-access-mask ~s~:@_:src-queue-family-index ~s~:@_:dst-queue-family-index ~s~:@_:tensor ~s~:>)"
+               next 
+               src-stage-mask 
+               src-access-mask 
+               dst-stage-mask 
+               dst-access-mask 
+               src-queue-family-index 
+               dst-queue-family-index 
+               tensor)))
+
+(defmethod print-object ((obj tensor-dependency-info-arm) out)
+  (with-slots (next
+               tensor-memory-barriers)
+      obj
+    (cl:format out "~i(~@<TENSOR-DEPENDENCY-INFO-ARM~:@_:next ~s~:@_:tensor-memory-barriers ~s~:>)"
+               next 
+               tensor-memory-barriers)))
+
+(defmethod print-object ((obj physical-device-tensor-features-arm) out)
+  (with-slots (next
+               tensor-non-packed
+               shader-tensor-access
+               shader-storage-tensor-array-dynamic-indexing
+               shader-storage-tensor-array-non-uniform-indexing
+               descriptor-binding-storage-tensor-update-after-bind
+               tensors)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-TENSOR-FEATURES-ARM~:@_:next ~s~:@_:tensor-non-packed ~s~:@_:shader-tensor-access ~s~:@_:shader-storage-tensor-array-dynamic-indexing ~s~:@_:shader-storage-tensor-array-non-uniform-indexing ~s~:@_:descriptor-binding-storage-tensor-update-after-bind ~s~:@_:tensors ~s~:>)"
+               next 
+               tensor-non-packed 
+               shader-tensor-access 
+               shader-storage-tensor-array-dynamic-indexing 
+               shader-storage-tensor-array-non-uniform-indexing 
+               descriptor-binding-storage-tensor-update-after-bind 
+               tensors)))
+
+(defmethod print-object ((obj device-tensor-memory-requirements-arm) out)
+  (with-slots (next
+               create-info)
+      obj
+    (cl:format out "~i(~@<DEVICE-TENSOR-MEMORY-REQUIREMENTS-ARM~:@_:next ~s~:@_:create-info ~s~:>)"
+               next 
+               create-info)))
+
+(defmethod print-object ((obj copy-tensor-info-arm) out)
+  (with-slots (next
+               src-tensor
+               dst-tensor
+               regions)
+      obj
+    (cl:format out "~i(~@<COPY-TENSOR-INFO-ARM~:@_:next ~s~:@_:src-tensor ~s~:@_:dst-tensor ~s~:@_:regions ~s~:>)"
+               next 
+               src-tensor 
+               dst-tensor 
+               regions)))
+
+(defmethod print-object ((obj tensor-copy-arm) out)
+  (with-slots (next
+               src-offset
+               dst-offset
+               extent)
+      obj
+    (cl:format out "~i(~@<TENSOR-COPY-ARM~:@_:next ~s~:@_:src-offset ~s~:@_:dst-offset ~s~:@_:extent ~s~:>)"
+               next 
+               src-offset 
+               dst-offset 
+               extent)))
+
+(defmethod print-object ((obj memory-dedicated-allocate-info-tensor-arm) out)
+  (with-slots (next
+               tensor)
+      obj
+    (cl:format out "~i(~@<MEMORY-DEDICATED-ALLOCATE-INFO-TENSOR-ARM~:@_:next ~s~:@_:tensor ~s~:>)"
+               next 
+               tensor)))
+
+(defmethod print-object ((obj physical-device-descriptor-buffer-tensor-properties-arm) out)
+  (with-slots (next
+               tensor-capture-replay-descriptor-data-size
+               tensor-view-capture-replay-descriptor-data-size
+               tensor-descriptor-size)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-DESCRIPTOR-BUFFER-TENSOR-PROPERTIES-ARM~:@_:next ~s~:@_:tensor-capture-replay-descriptor-data-size ~s~:@_:tensor-view-capture-replay-descriptor-data-size ~s~:@_:tensor-descriptor-size ~s~:>)"
+               next 
+               tensor-capture-replay-descriptor-data-size 
+               tensor-view-capture-replay-descriptor-data-size 
+               tensor-descriptor-size)))
+
+(defmethod print-object ((obj physical-device-descriptor-buffer-tensor-features-arm) out)
+  (with-slots (next
+               descriptor-buffer-tensor-descriptors)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-DESCRIPTOR-BUFFER-TENSOR-FEATURES-ARM~:@_:next ~s~:@_:descriptor-buffer-tensor-descriptors ~s~:>)"
+               next 
+               descriptor-buffer-tensor-descriptors)))
+
+(defmethod print-object ((obj tensor-capture-descriptor-data-info-arm) out)
+  (with-slots (next
+               tensor)
+      obj
+    (cl:format out "~i(~@<TENSOR-CAPTURE-DESCRIPTOR-DATA-INFO-ARM~:@_:next ~s~:@_:tensor ~s~:>)"
+               next 
+               tensor)))
+
+(defmethod print-object ((obj tensor-view-capture-descriptor-data-info-arm) out)
+  (with-slots (next
+               tensor-view)
+      obj
+    (cl:format out "~i(~@<TENSOR-VIEW-CAPTURE-DESCRIPTOR-DATA-INFO-ARM~:@_:next ~s~:@_:tensor-view ~s~:>)"
+               next 
+               tensor-view)))
+
+(defmethod print-object ((obj descriptor-get-tensor-info-arm) out)
+  (with-slots (next
+               tensor-view)
+      obj
+    (cl:format out "~i(~@<DESCRIPTOR-GET-TENSOR-INFO-ARM~:@_:next ~s~:@_:tensor-view ~s~:>)"
+               next 
+               tensor-view)))
+
+(defmethod print-object ((obj frame-boundary-tensors-arm) out)
+  (with-slots (next
+               tensors)
+      obj
+    (cl:format out "~i(~@<FRAME-BOUNDARY-TENSORS-ARM~:@_:next ~s~:@_:tensors ~s~:>)"
+               next 
+               tensors)))
+
+(defmethod print-object ((obj physical-device-external-tensor-info-arm) out)
+  (with-slots (next
+               flags
+               description
+               handle-type)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-EXTERNAL-TENSOR-INFO-ARM~:@_:next ~s~:@_:flags ~s~:@_:description ~s~:@_:handle-type ~s~:>)"
+               next 
+               flags 
+               description 
+               handle-type)))
+
+(defmethod print-object ((obj external-tensor-properties-arm) out)
+  (with-slots (next
+               external-memory-properties)
+      obj
+    (cl:format out "~i(~@<EXTERNAL-TENSOR-PROPERTIES-ARM~:@_:next ~s~:@_:external-memory-properties ~s~:>)"
+               next 
+               external-memory-properties)))
+
+(defmethod print-object ((obj external-memory-tensor-create-info-arm) out)
+  (with-slots (next
+               handle-types)
+      obj
+    (cl:format out "~i(~@<EXTERNAL-MEMORY-TENSOR-CREATE-INFO-ARM~:@_:next ~s~:@_:handle-types ~s~:>)"
+               next 
+               handle-types)))
+
+(defmethod print-object ((obj physical-device-shader-float-8-features-ext) out)
+  (with-slots (next
+               shader-float-8
+               shader-float-8-cooperative-matrix)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SHADER-FLOAT-8-FEATURES-EXT~:@_:next ~s~:@_:shader-float-8 ~s~:@_:shader-float-8-cooperative-matrix ~s~:>)"
+               next 
+               shader-float-8 
+               shader-float-8-cooperative-matrix)))
+
+(defmethod print-object ((obj surface-create-info-ohos) out)
+  (with-slots (next
+               flags
+               window)
+      obj
+    (cl:format out "~i(~@<SURFACE-CREATE-INFO-OHOS~:@_:next ~s~:@_:flags ~s~:@_:window ~s~:>)"
+               next 
+               flags 
+               window)))
+
+(defmethod print-object ((obj physical-device-data-graph-features-arm) out)
+  (with-slots (next
+               data-graph
+               data-graph-update-after-bind
+               data-graph-specialization-constants
+               data-graph-descriptor-buffer
+               data-graph-shader-module)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-DATA-GRAPH-FEATURES-ARM~:@_:next ~s~:@_:data-graph ~s~:@_:data-graph-update-after-bind ~s~:@_:data-graph-specialization-constants ~s~:@_:data-graph-descriptor-buffer ~s~:@_:data-graph-shader-module ~s~:>)"
+               next 
+               data-graph 
+               data-graph-update-after-bind 
+               data-graph-specialization-constants 
+               data-graph-descriptor-buffer 
+               data-graph-shader-module)))
+
+(defmethod print-object ((obj data-graph-pipeline-constant-tensor-semi-structured-sparsity-info-arm) out)
+  (with-slots (next
+               dimension
+               zero-count
+               group-size)
+      obj
+    (cl:format out "~i(~@<DATA-GRAPH-PIPELINE-CONSTANT-TENSOR-SEMI-STRUCTURED-SPARSITY-INFO-ARM~:@_:next ~s~:@_:dimension ~s~:@_:zero-count ~s~:@_:group-size ~s~:>)"
+               next 
+               dimension 
+               zero-count 
+               group-size)))
+
+(defmethod print-object ((obj data-graph-pipeline-constant-arm) out)
+  (with-slots (next
+               id
+               constant-data)
+      obj
+    (cl:format out "~i(~@<DATA-GRAPH-PIPELINE-CONSTANT-ARM~:@_:next ~s~:@_:id ~s~:@_:constant-data ~s~:>)"
+               next 
+               id 
+               constant-data)))
+
+(defmethod print-object ((obj data-graph-pipeline-resource-info-arm) out)
+  (with-slots (next
+               descriptor-set
+               binding
+               array-element)
+      obj
+    (cl:format out "~i(~@<DATA-GRAPH-PIPELINE-RESOURCE-INFO-ARM~:@_:next ~s~:@_:descriptor-set ~s~:@_:binding ~s~:@_:array-element ~s~:>)"
+               next 
+               descriptor-set 
+               binding 
+               array-element)))
+
+(defmethod print-object ((obj data-graph-pipeline-resource-info-image-layout-arm) out)
+  (with-slots (next
+               layout)
+      obj
+    (cl:format out "~i(~@<DATA-GRAPH-PIPELINE-RESOURCE-INFO-IMAGE-LAYOUT-ARM~:@_:next ~s~:@_:layout ~s~:>)"
+               next 
+               layout)))
+
+(defmethod print-object ((obj data-graph-pipeline-compiler-control-create-info-arm) out)
+  (with-slots (next
+               vendor-options)
+      obj
+    (cl:format out "~i(~@<DATA-GRAPH-PIPELINE-COMPILER-CONTROL-CREATE-INFO-ARM~:@_:next ~s~:@_:vendor-options ~s~:>)"
+               next 
+               vendor-options)))
+
+(defmethod print-object ((obj data-graph-pipeline-create-info-arm) out)
+  (with-slots (next
+               flags
+               layout
+               resource-infos)
+      obj
+    (cl:format out "~i(~@<DATA-GRAPH-PIPELINE-CREATE-INFO-ARM~:@_:next ~s~:@_:flags ~s~:@_:layout ~s~:@_:resource-infos ~s~:>)"
+               next 
+               flags 
+               layout 
+               resource-infos)))
+
+(defmethod print-object ((obj data-graph-pipeline-shader-module-create-info-arm) out)
+  (with-slots (next
+               module
+               name
+               specialization-info
+               constants)
+      obj
+    (cl:format out "~i(~@<DATA-GRAPH-PIPELINE-SHADER-MODULE-CREATE-INFO-ARM~:@_:next ~s~:@_:module ~s~:@_:name ~s~:@_:specialization-info ~s~:@_:constants ~s~:>)"
+               next 
+               module 
+               name 
+               specialization-info 
+               constants)))
+
+(defmethod print-object ((obj data-graph-pipeline-session-create-info-arm) out)
+  (with-slots (next
+               flags
+               data-graph-pipeline)
+      obj
+    (cl:format out "~i(~@<DATA-GRAPH-PIPELINE-SESSION-CREATE-INFO-ARM~:@_:next ~s~:@_:flags ~s~:@_:data-graph-pipeline ~s~:>)"
+               next 
+               flags 
+               data-graph-pipeline)))
+
+(defmethod print-object ((obj data-graph-pipeline-session-bind-point-requirements-info-arm) out)
+  (with-slots (next
+               session)
+      obj
+    (cl:format out "~i(~@<DATA-GRAPH-PIPELINE-SESSION-BIND-POINT-REQUIREMENTS-INFO-ARM~:@_:next ~s~:@_:session ~s~:>)"
+               next 
+               session)))
+
+(defmethod print-object ((obj data-graph-pipeline-session-bind-point-requirement-arm) out)
+  (with-slots (next
+               bind-point
+               bind-point-type
+               num-objects)
+      obj
+    (cl:format out "~i(~@<DATA-GRAPH-PIPELINE-SESSION-BIND-POINT-REQUIREMENT-ARM~:@_:next ~s~:@_:bind-point ~s~:@_:bind-point-type ~s~:@_:num-objects ~s~:>)"
+               next 
+               bind-point 
+               bind-point-type 
+               num-objects)))
+
+(defmethod print-object ((obj data-graph-pipeline-session-memory-requirements-info-arm) out)
+  (with-slots (next
+               session
+               bind-point
+               object-index)
+      obj
+    (cl:format out "~i(~@<DATA-GRAPH-PIPELINE-SESSION-MEMORY-REQUIREMENTS-INFO-ARM~:@_:next ~s~:@_:session ~s~:@_:bind-point ~s~:@_:object-index ~s~:>)"
+               next 
+               session 
+               bind-point 
+               object-index)))
+
+(defmethod print-object ((obj bind-data-graph-pipeline-session-memory-info-arm) out)
+  (with-slots (next
+               session
+               bind-point
+               object-index
+               memory
+               memory-offset)
+      obj
+    (cl:format out "~i(~@<BIND-DATA-GRAPH-PIPELINE-SESSION-MEMORY-INFO-ARM~:@_:next ~s~:@_:session ~s~:@_:bind-point ~s~:@_:object-index ~s~:@_:memory ~s~:@_:memory-offset ~s~:>)"
+               next 
+               session 
+               bind-point 
+               object-index 
+               memory 
+               memory-offset)))
+
+(defmethod print-object ((obj data-graph-pipeline-info-arm) out)
+  (with-slots (next
+               data-graph-pipeline)
+      obj
+    (cl:format out "~i(~@<DATA-GRAPH-PIPELINE-INFO-ARM~:@_:next ~s~:@_:data-graph-pipeline ~s~:>)"
+               next 
+               data-graph-pipeline)))
+
+(defmethod print-object ((obj data-graph-pipeline-property-query-result-arm) out)
+  (with-slots (next
+               property
+               is-text
+               data-size
+               data)
+      obj
+    (cl:format out "~i(~@<DATA-GRAPH-PIPELINE-PROPERTY-QUERY-RESULT-ARM~:@_:next ~s~:@_:property ~s~:@_:is-text ~s~:@_:data-size ~s~:@_:data ~s~:>)"
+               next 
+               property 
+               is-text 
+               data-size 
+               data)))
+
+(defmethod print-object ((obj data-graph-pipeline-identifier-create-info-arm) out)
+  (with-slots (next
+               identifier)
+      obj
+    (cl:format out "~i(~@<DATA-GRAPH-PIPELINE-IDENTIFIER-CREATE-INFO-ARM~:@_:next ~s~:@_:identifier ~s~:>)"
+               next 
+               identifier)))
+
+(defmethod print-object ((obj data-graph-pipeline-dispatch-info-arm) out)
+  (with-slots (next
+               flags)
+      obj
+    (cl:format out "~i(~@<DATA-GRAPH-PIPELINE-DISPATCH-INFO-ARM~:@_:next ~s~:@_:flags ~s~:>)"
+               next 
+               flags)))
+
+(defmethod print-object ((obj physical-device-data-graph-processing-engine-arm) out)
+  (with-slots (type
+               is-foreign)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-DATA-GRAPH-PROCESSING-ENGINE-ARM~:@_:type ~s~:@_:is-foreign ~s~:>)"
+               type 
+               is-foreign)))
+
+(defmethod print-object ((obj physical-device-data-graph-operation-support-arm) out)
+  (with-slots (operation-type
+               name
+               version)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-DATA-GRAPH-OPERATION-SUPPORT-ARM~:@_:operation-type ~s~:@_:name ~s~:@_:version ~s~:>)"
+               operation-type 
+               name 
+               version)))
+
+(defmethod print-object ((obj queue-family-data-graph-properties-arm) out)
+  (with-slots (next
+               engine
+               operation)
+      obj
+    (cl:format out "~i(~@<QUEUE-FAMILY-DATA-GRAPH-PROPERTIES-ARM~:@_:next ~s~:@_:engine ~s~:@_:operation ~s~:>)"
+               next 
+               engine 
+               operation)))
+
+(defmethod print-object ((obj physical-device-queue-family-data-graph-processing-engine-info-arm) out)
+  (with-slots (next
+               queue-family-index
+               engine-type)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-QUEUE-FAMILY-DATA-GRAPH-PROCESSING-ENGINE-INFO-ARM~:@_:next ~s~:@_:queue-family-index ~s~:@_:engine-type ~s~:>)"
+               next 
+               queue-family-index 
+               engine-type)))
+
+(defmethod print-object ((obj queue-family-data-graph-processing-engine-properties-arm) out)
+  (with-slots (next
+               foreign-semaphore-handle-types
+               foreign-memory-handle-types)
+      obj
+    (cl:format out "~i(~@<QUEUE-FAMILY-DATA-GRAPH-PROCESSING-ENGINE-PROPERTIES-ARM~:@_:next ~s~:@_:foreign-semaphore-handle-types ~s~:@_:foreign-memory-handle-types ~s~:>)"
+               next 
+               foreign-semaphore-handle-types 
+               foreign-memory-handle-types)))
+
+(defmethod print-object ((obj data-graph-processing-engine-create-info-arm) out)
+  (with-slots (next
+               processing-engines)
+      obj
+    (cl:format out "~i(~@<DATA-GRAPH-PROCESSING-ENGINE-CREATE-INFO-ARM~:@_:next ~s~:@_:processing-engines ~s~:>)"
+               next 
+               processing-engines)))
+
+(defmethod print-object ((obj physical-device-pipeline-cache-incremental-mode-features-sec) out)
+  (with-slots (next
+               pipeline-cache-incremental-mode)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-PIPELINE-CACHE-INCREMENTAL-MODE-FEATURES-SEC~:@_:next ~s~:@_:pipeline-cache-incremental-mode ~s~:>)"
+               next 
+               pipeline-cache-incremental-mode)))
+
+(defmethod print-object ((obj data-graph-pipeline-builtin-model-create-info-qcom) out)
+  (with-slots (next
+               operation)
+      obj
+    (cl:format out "~i(~@<DATA-GRAPH-PIPELINE-BUILTIN-MODEL-CREATE-INFO-QCOM~:@_:next ~s~:@_:operation ~s~:>)"
+               next 
+               operation)))
+
+(defmethod print-object ((obj physical-device-data-graph-model-features-qcom) out)
+  (with-slots (next
+               data-graph-model)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-DATA-GRAPH-MODEL-FEATURES-QCOM~:@_:next ~s~:@_:data-graph-model ~s~:>)"
+               next 
+               data-graph-model)))
+
+(defmethod print-object ((obj physical-device-shader-untyped-pointers-features-khr) out)
+  (with-slots (next
+               shader-untyped-pointers)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SHADER-UNTYPED-POINTERS-FEATURES-KHR~:@_:next ~s~:@_:shader-untyped-pointers ~s~:>)"
+               next 
+               shader-untyped-pointers)))
+
+(defmethod print-object ((obj physical-device-video-encode-rgb-conversion-features-valve) out)
+  (with-slots (next
+               video-encode-rgb-conversion)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-VIDEO-ENCODE-RGB-CONVERSION-FEATURES-VALVE~:@_:next ~s~:@_:video-encode-rgb-conversion ~s~:>)"
+               next 
+               video-encode-rgb-conversion)))
+
+(defmethod print-object ((obj video-encode-rgb-conversion-capabilities-valve) out)
+  (with-slots (next
+               rgb-models
+               rgb-ranges
+               x-chroma-offsets
+               y-chroma-offsets)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-RGB-CONVERSION-CAPABILITIES-VALVE~:@_:next ~s~:@_:rgb-models ~s~:@_:rgb-ranges ~s~:@_:x-chroma-offsets ~s~:@_:y-chroma-offsets ~s~:>)"
+               next 
+               rgb-models 
+               rgb-ranges 
+               x-chroma-offsets 
+               y-chroma-offsets)))
+
+(defmethod print-object ((obj video-encode-profile-rgb-conversion-info-valve) out)
+  (with-slots (next
+               perform-encode-rgb-conversion)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-PROFILE-RGB-CONVERSION-INFO-VALVE~:@_:next ~s~:@_:perform-encode-rgb-conversion ~s~:>)"
+               next 
+               perform-encode-rgb-conversion)))
+
+(defmethod print-object ((obj video-encode-session-rgb-conversion-create-info-valve) out)
+  (with-slots (next
+               rgb-model
+               rgb-range
+               x-chroma-offset
+               y-chroma-offset)
+      obj
+    (cl:format out "~i(~@<VIDEO-ENCODE-SESSION-RGB-CONVERSION-CREATE-INFO-VALVE~:@_:next ~s~:@_:rgb-model ~s~:@_:rgb-range ~s~:@_:x-chroma-offset ~s~:@_:y-chroma-offset ~s~:>)"
+               next 
+               rgb-model 
+               rgb-range 
+               x-chroma-offset 
+               y-chroma-offset)))
+
+(defmethod print-object ((obj physical-device-shader-64-bit-indexing-features-ext) out)
+  (with-slots (next
+               shader-64-bit-indexing)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SHADER-64-BIT-INDEXING-FEATURES-EXT~:@_:next ~s~:@_:shader-64-bit-indexing ~s~:>)"
+               next 
+               shader-64-bit-indexing)))
+
+(defmethod print-object ((obj native-buffer-usage-ohos) out)
+  (with-slots (next
+               ohos-native-buffer-usage)
+      obj
+    (cl:format out "~i(~@<NATIVE-BUFFER-USAGE-OHOS~:@_:next ~s~:@_:ohos-native-buffer-usage ~s~:>)"
+               next 
+               ohos-native-buffer-usage)))
+
+(defmethod print-object ((obj native-buffer-properties-ohos) out)
+  (with-slots (next
+               allocation-size
+               memory-type-bits)
+      obj
+    (cl:format out "~i(~@<NATIVE-BUFFER-PROPERTIES-OHOS~:@_:next ~s~:@_:allocation-size ~s~:@_:memory-type-bits ~s~:>)"
+               next 
+               allocation-size 
+               memory-type-bits)))
+
+(defmethod print-object ((obj native-buffer-format-properties-ohos) out)
+  (with-slots (next
+               format
+               external-format
+               format-features
+               sampler-ycbcr-conversion-components
+               suggested-ycbcr-model
+               suggested-ycbcr-range
+               suggested-x-chroma-offset
+               suggested-y-chroma-offset)
+      obj
+    (cl:format out "~i(~@<NATIVE-BUFFER-FORMAT-PROPERTIES-OHOS~:@_:next ~s~:@_:format ~s~:@_:external-format ~s~:@_:format-features ~s~:@_:sampler-ycbcr-conversion-components ~s~:@_:suggested-ycbcr-model ~s~:@_:suggested-ycbcr-range ~s~:@_:suggested-x-chroma-offset ~s~:@_:suggested-y-chroma-offset ~s~:>)"
+               next 
+               format 
+               external-format 
+               format-features 
+               sampler-ycbcr-conversion-components 
+               suggested-ycbcr-model 
+               suggested-ycbcr-range 
+               suggested-x-chroma-offset 
+               suggested-y-chroma-offset)))
+
+(defmethod print-object ((obj import-native-buffer-info-ohos) out)
+  (with-slots (next
+               buffer)
+      obj
+    (cl:format out "~i(~@<IMPORT-NATIVE-BUFFER-INFO-OHOS~:@_:next ~s~:@_:buffer ~s~:>)"
+               next 
+               buffer)))
+
+(defmethod print-object ((obj memory-get-native-buffer-info-ohos) out)
+  (with-slots (next
+               memory)
+      obj
+    (cl:format out "~i(~@<MEMORY-GET-NATIVE-BUFFER-INFO-OHOS~:@_:next ~s~:@_:memory ~s~:>)"
+               next 
+               memory)))
+
+(defmethod print-object ((obj external-format-ohos) out)
+  (with-slots (next
+               external-format)
+      obj
+    (cl:format out "~i(~@<EXTERNAL-FORMAT-OHOS~:@_:next ~s~:@_:external-format ~s~:>)"
+               next 
+               external-format)))
+
+(defmethod print-object ((obj perf-hint-info-qcom) out)
+  (with-slots (next
+               type
+               scale)
+      obj
+    (cl:format out "~i(~@<PERF-HINT-INFO-QCOM~:@_:next ~s~:@_:type ~s~:@_:scale ~s~:>)"
+               next 
+               type 
+               scale)))
+
+(defmethod print-object ((obj physical-device-queue-perf-hint-features-qcom) out)
+  (with-slots (next
+               queue-perf-hint)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-QUEUE-PERF-HINT-FEATURES-QCOM~:@_:next ~s~:@_:queue-perf-hint ~s~:>)"
+               next 
+               queue-perf-hint)))
+
+(defmethod print-object ((obj physical-device-queue-perf-hint-properties-qcom) out)
+  (with-slots (next
+               supported-queues)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-QUEUE-PERF-HINT-PROPERTIES-QCOM~:@_:next ~s~:@_:supported-queues ~s~:>)"
+               next 
+               supported-queues)))
+
+(defmethod print-object ((obj physical-device-performance-counters-by-region-features-arm) out)
+  (with-slots (next
+               performance-counters-by-region)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-PERFORMANCE-COUNTERS-BY-REGION-FEATURES-ARM~:@_:next ~s~:@_:performance-counters-by-region ~s~:>)"
+               next 
+               performance-counters-by-region)))
+
+(defmethod print-object ((obj physical-device-performance-counters-by-region-properties-arm) out)
+  (with-slots (next
+               max-per-region-performance-counters
+               performance-counter-region-size
+               row-stride-alignment
+               region-alignment
+               identity-transform-order)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-PERFORMANCE-COUNTERS-BY-REGION-PROPERTIES-ARM~:@_:next ~s~:@_:max-per-region-performance-counters ~s~:@_:performance-counter-region-size ~s~:@_:row-stride-alignment ~s~:@_:region-alignment ~s~:@_:identity-transform-order ~s~:>)"
+               next 
+               max-per-region-performance-counters 
+               performance-counter-region-size 
+               row-stride-alignment 
+               region-alignment 
+               identity-transform-order)))
+
+(defmethod print-object ((obj performance-counter-arm) out)
+  (with-slots (next
+               counter-id)
+      obj
+    (cl:format out "~i(~@<PERFORMANCE-COUNTER-ARM~:@_:next ~s~:@_:counter-id ~s~:>)"
+               next 
+               counter-id)))
+
+(defmethod print-object ((obj performance-counter-description-arm) out)
+  (with-slots (next
+               flags
+               name)
+      obj
+    (cl:format out "~i(~@<PERFORMANCE-COUNTER-DESCRIPTION-ARM~:@_:next ~s~:@_:flags ~s~:@_:name ~s~:>)"
+               next 
+               flags 
+               name)))
+
+(defmethod print-object ((obj render-pass-performance-counters-by-region-begin-info-arm) out)
+  (with-slots (next
+               counter-addresses
+               serialize-regions
+               counter-indices)
+      obj
+    (cl:format out "~i(~@<RENDER-PASS-PERFORMANCE-COUNTERS-BY-REGION-BEGIN-INFO-ARM~:@_:next ~s~:@_:counter-addresses ~s~:@_:serialize-regions ~s~:@_:counter-indices ~s~:>)"
+               next 
+               counter-addresses 
+               serialize-regions 
+               counter-indices)))
+
+(defmethod print-object ((obj compute-occupancy-priority-parameters-nv) out)
+  (with-slots (next
+               occupancy-priority
+               occupancy-throttling)
+      obj
+    (cl:format out "~i(~@<COMPUTE-OCCUPANCY-PRIORITY-PARAMETERS-NV~:@_:next ~s~:@_:occupancy-priority ~s~:@_:occupancy-throttling ~s~:>)"
+               next 
+               occupancy-priority 
+               occupancy-throttling)))
+
+(defmethod print-object ((obj physical-device-compute-occupancy-priority-features-nv) out)
+  (with-slots (next
+               compute-occupancy-priority)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-COMPUTE-OCCUPANCY-PRIORITY-FEATURES-NV~:@_:next ~s~:@_:compute-occupancy-priority ~s~:>)"
+               next 
+               compute-occupancy-priority)))
+
+(defmethod print-object ((obj physical-device-shader-long-vector-features-ext) out)
+  (with-slots (next
+               long-vector)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SHADER-LONG-VECTOR-FEATURES-EXT~:@_:next ~s~:@_:long-vector ~s~:>)"
+               next 
+               long-vector)))
+
+(defmethod print-object ((obj physical-device-shader-long-vector-properties-ext) out)
+  (with-slots (next
+               max-vector-components)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SHADER-LONG-VECTOR-PROPERTIES-EXT~:@_:next ~s~:@_:max-vector-components ~s~:>)"
+               next 
+               max-vector-components)))
+
+(defmethod print-object ((obj physical-device-texture-compression-astc-3d-features-ext) out)
+  (with-slots (next
+               texture-compression-astc_-3d)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-TEXTURE-COMPRESSION-ASTC-3D-FEATURES-EXT~:@_:next ~s~:@_:texture-compression-astc_-3d ~s~:>)"
+               next 
+               texture-compression-astc_-3d)))
+
+(defmethod print-object ((obj physical-device-shader-subgroup-partitioned-features-ext) out)
+  (with-slots (next
+               shader-subgroup-partitioned)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SHADER-SUBGROUP-PARTITIONED-FEATURES-EXT~:@_:next ~s~:@_:shader-subgroup-partitioned ~s~:>)"
+               next 
+               shader-subgroup-partitioned)))
+
+(defmethod print-object ((obj host-address-range-ext) out)
+  (with-slots (address
+               size)
+      obj
+    (cl:format out "~i(~@<HOST-ADDRESS-RANGE-EXT~:@_:address ~s~:@_:size ~s~:>)"
+               address 
+               size)))
+
+(defmethod print-object ((obj host-address-range-const-ext) out)
+  (with-slots (address
+               size)
+      obj
+    (cl:format out "~i(~@<HOST-ADDRESS-RANGE-CONST-EXT~:@_:address ~s~:@_:size ~s~:>)"
+               address 
+               size)))
+
+(defmethod print-object ((obj texel-buffer-descriptor-info-ext) out)
+  (with-slots (next
+               format
+               address-range)
+      obj
+    (cl:format out "~i(~@<TEXEL-BUFFER-DESCRIPTOR-INFO-EXT~:@_:next ~s~:@_:format ~s~:@_:address-range ~s~:>)"
+               next 
+               format 
+               address-range)))
+
+(defmethod print-object ((obj image-descriptor-info-ext) out)
+  (with-slots (next
+               view
+               layout)
+      obj
+    (cl:format out "~i(~@<IMAGE-DESCRIPTOR-INFO-EXT~:@_:next ~s~:@_:view ~s~:@_:layout ~s~:>)"
+               next 
+               view 
+               layout)))
+
+(defmethod print-object ((obj resource-descriptor-data-ext) out)
+  (with-slots (image
+               texel-buffer
+               address-range
+               tensor-arm)
+      obj
+    (cl:format out "~i(~@<RESOURCE-DESCRIPTOR-DATA-EXT~:@_:image ~s~:@_:texel-buffer ~s~:@_:address-range ~s~:@_:tensor-arm ~s~:>)"
+               image 
+               texel-buffer 
+               address-range 
+               tensor-arm)))
+
+(defmethod print-object ((obj resource-descriptor-info-ext) out)
+  (with-slots (next
+               type
+               data)
+      obj
+    (cl:format out "~i(~@<RESOURCE-DESCRIPTOR-INFO-EXT~:@_:next ~s~:@_:type ~s~:@_:data ~s~:>)"
+               next 
+               type 
+               data)))
+
+(defmethod print-object ((obj bind-heap-info-ext) out)
+  (with-slots (next
+               heap-range
+               reserved-range-offset
+               reserved-range-size)
+      obj
+    (cl:format out "~i(~@<BIND-HEAP-INFO-EXT~:@_:next ~s~:@_:heap-range ~s~:@_:reserved-range-offset ~s~:@_:reserved-range-size ~s~:>)"
+               next 
+               heap-range 
+               reserved-range-offset 
+               reserved-range-size)))
+
+(defmethod print-object ((obj push-data-info-ext) out)
+  (with-slots (next
+               offset
+               data)
+      obj
+    (cl:format out "~i(~@<PUSH-DATA-INFO-EXT~:@_:next ~s~:@_:offset ~s~:@_:data ~s~:>)"
+               next 
+               offset 
+               data)))
+
+(defmethod print-object ((obj descriptor-mapping-source-constant-offset-ext) out)
+  (with-slots (heap-offset
+               heap-array-stride
+               embedded-sampler
+               sampler-heap-offset
+               sampler-heap-array-stride)
+      obj
+    (cl:format out "~i(~@<DESCRIPTOR-MAPPING-SOURCE-CONSTANT-OFFSET-EXT~:@_:heap-offset ~s~:@_:heap-array-stride ~s~:@_:embedded-sampler ~s~:@_:sampler-heap-offset ~s~:@_:sampler-heap-array-stride ~s~:>)"
+               heap-offset 
+               heap-array-stride 
+               embedded-sampler 
+               sampler-heap-offset 
+               sampler-heap-array-stride)))
+
+(defmethod print-object ((obj descriptor-mapping-source-push-index-ext) out)
+  (with-slots (heap-offset
+               push-offset
+               heap-index-stride
+               heap-array-stride
+               embedded-sampler
+               use-combined-image-sampler-index
+               sampler-heap-offset
+               sampler-push-offset
+               sampler-heap-index-stride
+               sampler-heap-array-stride)
+      obj
+    (cl:format out "~i(~@<DESCRIPTOR-MAPPING-SOURCE-PUSH-INDEX-EXT~:@_:heap-offset ~s~:@_:push-offset ~s~:@_:heap-index-stride ~s~:@_:heap-array-stride ~s~:@_:embedded-sampler ~s~:@_:use-combined-image-sampler-index ~s~:@_:sampler-heap-offset ~s~:@_:sampler-push-offset ~s~:@_:sampler-heap-index-stride ~s~:@_:sampler-heap-array-stride ~s~:>)"
+               heap-offset 
+               push-offset 
+               heap-index-stride 
+               heap-array-stride 
+               embedded-sampler 
+               use-combined-image-sampler-index 
+               sampler-heap-offset 
+               sampler-push-offset 
+               sampler-heap-index-stride 
+               sampler-heap-array-stride)))
+
+(defmethod print-object ((obj descriptor-mapping-source-indirect-index-ext) out)
+  (with-slots (heap-offset
+               push-offset
+               address-offset
+               heap-index-stride
+               heap-array-stride
+               embedded-sampler
+               use-combined-image-sampler-index
+               sampler-heap-offset
+               sampler-push-offset
+               sampler-address-offset
+               sampler-heap-index-stride
+               sampler-heap-array-stride)
+      obj
+    (cl:format out "~i(~@<DESCRIPTOR-MAPPING-SOURCE-INDIRECT-INDEX-EXT~:@_:heap-offset ~s~:@_:push-offset ~s~:@_:address-offset ~s~:@_:heap-index-stride ~s~:@_:heap-array-stride ~s~:@_:embedded-sampler ~s~:@_:use-combined-image-sampler-index ~s~:@_:sampler-heap-offset ~s~:@_:sampler-push-offset ~s~:@_:sampler-address-offset ~s~:@_:sampler-heap-index-stride ~s~:@_:sampler-heap-array-stride ~s~:>)"
+               heap-offset 
+               push-offset 
+               address-offset 
+               heap-index-stride 
+               heap-array-stride 
+               embedded-sampler 
+               use-combined-image-sampler-index 
+               sampler-heap-offset 
+               sampler-push-offset 
+               sampler-address-offset 
+               sampler-heap-index-stride 
+               sampler-heap-array-stride)))
+
+(defmethod print-object ((obj descriptor-mapping-source-indirect-index-array-ext) out)
+  (with-slots (heap-offset
+               push-offset
+               address-offset
+               heap-index-stride
+               embedded-sampler
+               use-combined-image-sampler-index
+               sampler-heap-offset
+               sampler-push-offset
+               sampler-address-offset
+               sampler-heap-index-stride)
+      obj
+    (cl:format out "~i(~@<DESCRIPTOR-MAPPING-SOURCE-INDIRECT-INDEX-ARRAY-EXT~:@_:heap-offset ~s~:@_:push-offset ~s~:@_:address-offset ~s~:@_:heap-index-stride ~s~:@_:embedded-sampler ~s~:@_:use-combined-image-sampler-index ~s~:@_:sampler-heap-offset ~s~:@_:sampler-push-offset ~s~:@_:sampler-address-offset ~s~:@_:sampler-heap-index-stride ~s~:>)"
+               heap-offset 
+               push-offset 
+               address-offset 
+               heap-index-stride 
+               embedded-sampler 
+               use-combined-image-sampler-index 
+               sampler-heap-offset 
+               sampler-push-offset 
+               sampler-address-offset 
+               sampler-heap-index-stride)))
+
+(defmethod print-object ((obj descriptor-mapping-source-heap-data-ext) out)
+  (with-slots (heap-offset
+               push-offset)
+      obj
+    (cl:format out "~i(~@<DESCRIPTOR-MAPPING-SOURCE-HEAP-DATA-EXT~:@_:heap-offset ~s~:@_:push-offset ~s~:>)"
+               heap-offset 
+               push-offset)))
+
+(defmethod print-object ((obj descriptor-mapping-source-shader-record-index-ext) out)
+  (with-slots (heap-offset
+               shader-record-offset
+               heap-index-stride
+               heap-array-stride
+               embedded-sampler
+               use-combined-image-sampler-index
+               sampler-heap-offset
+               sampler-shader-record-offset
+               sampler-heap-index-stride
+               sampler-heap-array-stride)
+      obj
+    (cl:format out "~i(~@<DESCRIPTOR-MAPPING-SOURCE-SHADER-RECORD-INDEX-EXT~:@_:heap-offset ~s~:@_:shader-record-offset ~s~:@_:heap-index-stride ~s~:@_:heap-array-stride ~s~:@_:embedded-sampler ~s~:@_:use-combined-image-sampler-index ~s~:@_:sampler-heap-offset ~s~:@_:sampler-shader-record-offset ~s~:@_:sampler-heap-index-stride ~s~:@_:sampler-heap-array-stride ~s~:>)"
+               heap-offset 
+               shader-record-offset 
+               heap-index-stride 
+               heap-array-stride 
+               embedded-sampler 
+               use-combined-image-sampler-index 
+               sampler-heap-offset 
+               sampler-shader-record-offset 
+               sampler-heap-index-stride 
+               sampler-heap-array-stride)))
+
+(defmethod print-object ((obj descriptor-mapping-source-indirect-address-ext) out)
+  (with-slots (push-offset
+               address-offset)
+      obj
+    (cl:format out "~i(~@<DESCRIPTOR-MAPPING-SOURCE-INDIRECT-ADDRESS-EXT~:@_:push-offset ~s~:@_:address-offset ~s~:>)"
+               push-offset 
+               address-offset)))
+
+(defmethod print-object ((obj descriptor-mapping-source-data-ext) out)
+  (with-slots (constant-offset
+               push-index
+               indirect-index
+               indirect-index-array
+               heap-data
+               push-data-offset
+               push-address-offset
+               indirect-address
+               shader-record-index
+               shader-record-data-offset
+               shader-record-address-offset)
+      obj
+    (cl:format out "~i(~@<DESCRIPTOR-MAPPING-SOURCE-DATA-EXT~:@_:constant-offset ~s~:@_:push-index ~s~:@_:indirect-index ~s~:@_:indirect-index-array ~s~:@_:heap-data ~s~:@_:push-data-offset ~s~:@_:push-address-offset ~s~:@_:indirect-address ~s~:@_:shader-record-index ~s~:@_:shader-record-data-offset ~s~:@_:shader-record-address-offset ~s~:>)"
+               constant-offset 
+               push-index 
+               indirect-index 
+               indirect-index-array 
+               heap-data 
+               push-data-offset 
+               push-address-offset 
+               indirect-address 
+               shader-record-index 
+               shader-record-data-offset 
+               shader-record-address-offset)))
+
+(defmethod print-object ((obj descriptor-set-and-binding-mapping-ext) out)
+  (with-slots (next
+               descriptor-set
+               first-binding
+               binding-count
+               resource-mask
+               source
+               source-data)
+      obj
+    (cl:format out "~i(~@<DESCRIPTOR-SET-AND-BINDING-MAPPING-EXT~:@_:next ~s~:@_:descriptor-set ~s~:@_:first-binding ~s~:@_:binding-count ~s~:@_:resource-mask ~s~:@_:source ~s~:@_:source-data ~s~:>)"
+               next 
+               descriptor-set 
+               first-binding 
+               binding-count 
+               resource-mask 
+               source 
+               source-data)))
+
+(defmethod print-object ((obj shader-descriptor-set-and-binding-mapping-info-ext) out)
+  (with-slots (next
+               mappings)
+      obj
+    (cl:format out "~i(~@<SHADER-DESCRIPTOR-SET-AND-BINDING-MAPPING-INFO-EXT~:@_:next ~s~:@_:mappings ~s~:>)"
+               next 
+               mappings)))
+
+(defmethod print-object ((obj sampler-custom-border-color-index-create-info-ext) out)
+  (with-slots (next
+               index)
+      obj
+    (cl:format out "~i(~@<SAMPLER-CUSTOM-BORDER-COLOR-INDEX-CREATE-INFO-EXT~:@_:next ~s~:@_:index ~s~:>)"
+               next 
+               index)))
+
+(defmethod print-object ((obj opaque-capture-data-create-info-ext) out)
+  (with-slots (next
+               data)
+      obj
+    (cl:format out "~i(~@<OPAQUE-CAPTURE-DATA-CREATE-INFO-EXT~:@_:next ~s~:@_:data ~s~:>)"
+               next 
+               data)))
+
+(defmethod print-object ((obj indirect-commands-layout-push-data-token-nv) out)
+  (with-slots (next
+               push-data-offset
+               push-data-size)
+      obj
+    (cl:format out "~i(~@<INDIRECT-COMMANDS-LAYOUT-PUSH-DATA-TOKEN-NV~:@_:next ~s~:@_:push-data-offset ~s~:@_:push-data-size ~s~:>)"
+               next 
+               push-data-offset 
+               push-data-size)))
+
+(defmethod print-object ((obj subsampled-image-format-properties-ext) out)
+  (with-slots (next
+               subsampled-image-descriptor-count)
+      obj
+    (cl:format out "~i(~@<SUBSAMPLED-IMAGE-FORMAT-PROPERTIES-EXT~:@_:next ~s~:@_:subsampled-image-descriptor-count ~s~:>)"
+               next 
+               subsampled-image-descriptor-count)))
+
+(defmethod print-object ((obj physical-device-shader-split-barrier-features-ext) out)
+  (with-slots (next
+               shader-split-barrier)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SHADER-SPLIT-BARRIER-FEATURES-EXT~:@_:next ~s~:@_:shader-split-barrier ~s~:>)"
+               next 
+               shader-split-barrier)))
+
+(defmethod print-object ((obj physical-device-shader-split-barrier-properties-ext) out)
+  (with-slots (next
+               split-barrier-reserved-shared-memory)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SHADER-SPLIT-BARRIER-PROPERTIES-EXT~:@_:next ~s~:@_:split-barrier-reserved-shared-memory ~s~:>)"
+               next 
+               split-barrier-reserved-shared-memory)))
+
+(defmethod print-object ((obj physical-device-descriptor-heap-features-ext) out)
+  (with-slots (next
+               descriptor-heap
+               descriptor-heap-capture-replay)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-DESCRIPTOR-HEAP-FEATURES-EXT~:@_:next ~s~:@_:descriptor-heap ~s~:@_:descriptor-heap-capture-replay ~s~:>)"
+               next 
+               descriptor-heap 
+               descriptor-heap-capture-replay)))
+
+(defmethod print-object ((obj physical-device-descriptor-heap-properties-ext) out)
+  (with-slots (next
+               sampler-heap-alignment
+               resource-heap-alignment
+               max-sampler-heap-size
+               max-resource-heap-size
+               min-sampler-heap-reserved-range
+               min-sampler-heap-reserved-range-with-embedded
+               min-resource-heap-reserved-range
+               sampler-descriptor-size
+               image-descriptor-size
+               buffer-descriptor-size
+               sampler-descriptor-alignment
+               image-descriptor-alignment
+               buffer-descriptor-alignment
+               max-push-data-size
+               image-capture-replay-opaque-data-size
+               max-descriptor-heap-embedded-samplers
+               sampler-ycbcr-conversion-count
+               sparse-descriptor-heaps
+               protected-descriptor-heaps)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-DESCRIPTOR-HEAP-PROPERTIES-EXT~:@_:next ~s~:@_:sampler-heap-alignment ~s~:@_:resource-heap-alignment ~s~:@_:max-sampler-heap-size ~s~:@_:max-resource-heap-size ~s~:@_:min-sampler-heap-reserved-range ~s~:@_:min-sampler-heap-reserved-range-with-embedded ~s~:@_:min-resource-heap-reserved-range ~s~:@_:sampler-descriptor-size ~s~:@_:image-descriptor-size ~s~:@_:buffer-descriptor-size ~s~:@_:sampler-descriptor-alignment ~s~:@_:image-descriptor-alignment ~s~:@_:buffer-descriptor-alignment ~s~:@_:max-push-data-size ~s~:@_:image-capture-replay-opaque-data-size ~s~:@_:max-descriptor-heap-embedded-samplers ~s~:@_:sampler-ycbcr-conversion-count ~s~:@_:sparse-descriptor-heaps ~s~:@_:protected-descriptor-heaps ~s~:>)"
+               next 
+               sampler-heap-alignment 
+               resource-heap-alignment 
+               max-sampler-heap-size 
+               max-resource-heap-size 
+               min-sampler-heap-reserved-range 
+               min-sampler-heap-reserved-range-with-embedded 
+               min-resource-heap-reserved-range 
+               sampler-descriptor-size 
+               image-descriptor-size 
+               buffer-descriptor-size 
+               sampler-descriptor-alignment 
+               image-descriptor-alignment 
+               buffer-descriptor-alignment 
+               max-push-data-size 
+               image-capture-replay-opaque-data-size 
+               max-descriptor-heap-embedded-samplers 
+               sampler-ycbcr-conversion-count 
+               sparse-descriptor-heaps 
+               protected-descriptor-heaps)))
+
+(defmethod print-object ((obj command-buffer-inheritance-descriptor-heap-info-ext) out)
+  (with-slots (next
+               sampler-heap-bind-info
+               resource-heap-bind-info)
+      obj
+    (cl:format out "~i(~@<COMMAND-BUFFER-INHERITANCE-DESCRIPTOR-HEAP-INFO-EXT~:@_:next ~s~:@_:sampler-heap-bind-info ~s~:@_:resource-heap-bind-info ~s~:>)"
+               next 
+               sampler-heap-bind-info 
+               resource-heap-bind-info)))
+
+(defmethod print-object ((obj physical-device-descriptor-heap-tensor-properties-arm) out)
+  (with-slots (next
+               tensor-descriptor-size
+               tensor-descriptor-alignment
+               tensor-capture-replay-opaque-data-size)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-DESCRIPTOR-HEAP-TENSOR-PROPERTIES-ARM~:@_:next ~s~:@_:tensor-descriptor-size ~s~:@_:tensor-descriptor-alignment ~s~:@_:tensor-capture-replay-opaque-data-size ~s~:>)"
+               next 
+               tensor-descriptor-size 
+               tensor-descriptor-alignment 
+               tensor-capture-replay-opaque-data-size)))
+
+(defmethod print-object ((obj physical-device-shader-instrumentation-features-arm) out)
+  (with-slots (next
+               shader-instrumentation)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SHADER-INSTRUMENTATION-FEATURES-ARM~:@_:next ~s~:@_:shader-instrumentation ~s~:>)"
+               next 
+               shader-instrumentation)))
+
+(defmethod print-object ((obj physical-device-shader-instrumentation-properties-arm) out)
+  (with-slots (next
+               num-metrics
+               per-basic-block-granularity)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SHADER-INSTRUMENTATION-PROPERTIES-ARM~:@_:next ~s~:@_:num-metrics ~s~:@_:per-basic-block-granularity ~s~:>)"
+               next 
+               num-metrics 
+               per-basic-block-granularity)))
+
+(defmethod print-object ((obj shader-instrumentation-create-info-arm) out)
+  (with-slots (next)
+      obj
+    (cl:format out "~i(~@<SHADER-INSTRUMENTATION-CREATE-INFO-ARM~:@_:next ~s~:>)"
+               next)))
+
+(defmethod print-object ((obj shader-instrumentation-metric-description-arm) out)
+  (with-slots (next
+               name
+               description)
+      obj
+    (cl:format out "~i(~@<SHADER-INSTRUMENTATION-METRIC-DESCRIPTION-ARM~:@_:next ~s~:@_:name ~s~:@_:description ~s~:>)"
+               next 
+               name 
+               description)))
+
+(defmethod print-object ((obj shader-instrumentation-metric-data-header-arm) out)
+  (with-slots (result-index
+               result-sub-index
+               stages
+               basic-block-index)
+      obj
+    (cl:format out "~i(~@<SHADER-INSTRUMENTATION-METRIC-DATA-HEADER-ARM~:@_:result-index ~s~:@_:result-sub-index ~s~:@_:stages ~s~:@_:basic-block-index ~s~:>)"
+               result-index 
+               result-sub-index 
+               stages 
+               basic-block-index)))
+
+(defmethod print-object ((obj device-address-range-khr) out)
+  (with-slots (address
+               size)
+      obj
+    (cl:format out "~i(~@<DEVICE-ADDRESS-RANGE-KHR~:@_:address ~s~:@_:size ~s~:>)"
+               address 
+               size)))
+
+(defmethod print-object ((obj device-memory-copy-khr) out)
+  (with-slots (next
+               src-range
+               src-flags
+               dst-range
+               dst-flags)
+      obj
+    (cl:format out "~i(~@<DEVICE-MEMORY-COPY-KHR~:@_:next ~s~:@_:src-range ~s~:@_:src-flags ~s~:@_:dst-range ~s~:@_:dst-flags ~s~:>)"
+               next 
+               src-range 
+               src-flags 
+               dst-range 
+               dst-flags)))
+
+(defmethod print-object ((obj copy-device-memory-info-khr) out)
+  (with-slots (next
+               regions)
+      obj
+    (cl:format out "~i(~@<COPY-DEVICE-MEMORY-INFO-KHR~:@_:next ~s~:@_:regions ~s~:>)"
+               next 
+               regions)))
+
+(defmethod print-object ((obj device-memory-image-copy-khr) out)
+  (with-slots (next
+               address-range
+               address-flags
+               address-row-length
+               address-image-height
+               image-subresource
+               image-layout
+               image-offset
+               image-extent)
+      obj
+    (cl:format out "~i(~@<DEVICE-MEMORY-IMAGE-COPY-KHR~:@_:next ~s~:@_:address-range ~s~:@_:address-flags ~s~:@_:address-row-length ~s~:@_:address-image-height ~s~:@_:image-subresource ~s~:@_:image-layout ~s~:@_:image-offset ~s~:@_:image-extent ~s~:>)"
+               next 
+               address-range 
+               address-flags 
+               address-row-length 
+               address-image-height 
+               image-subresource 
+               image-layout 
+               image-offset 
+               image-extent)))
+
+(defmethod print-object ((obj copy-device-memory-image-info-khr) out)
+  (with-slots (next
+               image
+               regions)
+      obj
+    (cl:format out "~i(~@<COPY-DEVICE-MEMORY-IMAGE-INFO-KHR~:@_:next ~s~:@_:image ~s~:@_:regions ~s~:>)"
+               next 
+               image 
+               regions)))
+
+(defmethod print-object ((obj memory-range-barriers-info-khr) out)
+  (with-slots (next
+               memory-range-barriers)
+      obj
+    (cl:format out "~i(~@<MEMORY-RANGE-BARRIERS-INFO-KHR~:@_:next ~s~:@_:memory-range-barriers ~s~:>)"
+               next 
+               memory-range-barriers)))
+
+(defmethod print-object ((obj memory-range-barrier-khr) out)
+  (with-slots (next
+               src-stage-mask
+               src-access-mask
+               dst-stage-mask
+               dst-access-mask
+               src-queue-family-index
+               dst-queue-family-index
+               address-range
+               address-flags)
+      obj
+    (cl:format out "~i(~@<MEMORY-RANGE-BARRIER-KHR~:@_:next ~s~:@_:src-stage-mask ~s~:@_:src-access-mask ~s~:@_:dst-stage-mask ~s~:@_:dst-access-mask ~s~:@_:src-queue-family-index ~s~:@_:dst-queue-family-index ~s~:@_:address-range ~s~:@_:address-flags ~s~:>)"
+               next 
+               src-stage-mask 
+               src-access-mask 
+               dst-stage-mask 
+               dst-access-mask 
+               src-queue-family-index 
+               dst-queue-family-index 
+               address-range 
+               address-flags)))
+
+(defmethod print-object ((obj physical-device-device-address-commands-features-khr) out)
+  (with-slots (next
+               device-address-commands)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-DEVICE-ADDRESS-COMMANDS-FEATURES-KHR~:@_:next ~s~:@_:device-address-commands ~s~:>)"
+               next 
+               device-address-commands)))
+
+(defmethod print-object ((obj conditional-rendering-begin-info-2-ext) out)
+  (with-slots (next
+               address-range
+               address-flags
+               flags)
+      obj
+    (cl:format out "~i(~@<CONDITIONAL-RENDERING-BEGIN-INFO-2-EXT~:@_:next ~s~:@_:address-range ~s~:@_:address-flags ~s~:@_:flags ~s~:>)"
+               next 
+               address-range 
+               address-flags 
+               flags)))
+
+(defmethod print-object ((obj acceleration-structure-create-info-2-khr) out)
+  (with-slots (next
+               create-flags
+               address-range
+               address-flags
+               type)
+      obj
+    (cl:format out "~i(~@<ACCELERATION-STRUCTURE-CREATE-INFO-2-KHR~:@_:next ~s~:@_:create-flags ~s~:@_:address-range ~s~:@_:address-flags ~s~:@_:type ~s~:>)"
+               next 
+               create-flags 
+               address-range 
+               address-flags 
+               type)))
+
+(defmethod print-object ((obj bind-index-buffer-3-info-khr) out)
+  (with-slots (next
+               address-range
+               address-flags
+               index-type)
+      obj
+    (cl:format out "~i(~@<BIND-INDEX-BUFFER-3-INFO-KHR~:@_:next ~s~:@_:address-range ~s~:@_:address-flags ~s~:@_:index-type ~s~:>)"
+               next 
+               address-range 
+               address-flags 
+               index-type)))
+
+(defmethod print-object ((obj bind-vertex-buffer-3-info-khr) out)
+  (with-slots (next
+               set-stride
+               address-range
+               address-flags)
+      obj
+    (cl:format out "~i(~@<BIND-VERTEX-BUFFER-3-INFO-KHR~:@_:next ~s~:@_:set-stride ~s~:@_:address-range ~s~:@_:address-flags ~s~:>)"
+               next 
+               set-stride 
+               address-range 
+               address-flags)))
+
+(defmethod print-object ((obj draw-indirect-2-info-khr) out)
+  (with-slots (next
+               address-range
+               address-flags
+               draw-count)
+      obj
+    (cl:format out "~i(~@<DRAW-INDIRECT-2-INFO-KHR~:@_:next ~s~:@_:address-range ~s~:@_:address-flags ~s~:@_:draw-count ~s~:>)"
+               next 
+               address-range 
+               address-flags 
+               draw-count)))
+
+(defmethod print-object ((obj draw-indirect-count-2-info-khr) out)
+  (with-slots (next
+               address-range
+               address-flags
+               count-address-range
+               count-address-flags
+               max-draw-count)
+      obj
+    (cl:format out "~i(~@<DRAW-INDIRECT-COUNT-2-INFO-KHR~:@_:next ~s~:@_:address-range ~s~:@_:address-flags ~s~:@_:count-address-range ~s~:@_:count-address-flags ~s~:@_:max-draw-count ~s~:>)"
+               next 
+               address-range 
+               address-flags 
+               count-address-range 
+               count-address-flags 
+               max-draw-count)))
+
+(defmethod print-object ((obj dispatch-indirect-2-info-khr) out)
+  (with-slots (next
+               address-range
+               address-flags)
+      obj
+    (cl:format out "~i(~@<DISPATCH-INDIRECT-2-INFO-KHR~:@_:next ~s~:@_:address-range ~s~:@_:address-flags ~s~:>)"
+               next 
+               address-range 
+               address-flags)))
+
+(defmethod print-object ((obj bind-transform-feedback-buffer-2-info-ext) out)
+  (with-slots (next
+               address-range
+               address-flags)
+      obj
+    (cl:format out "~i(~@<BIND-TRANSFORM-FEEDBACK-BUFFER-2-INFO-EXT~:@_:next ~s~:@_:address-range ~s~:@_:address-flags ~s~:>)"
+               next 
+               address-range 
+               address-flags)))
+
+(defmethod print-object ((obj memory-marker-info-amd) out)
+  (with-slots (next
+               stage
+               dst-range
+               dst-flags
+               marker)
+      obj
+    (cl:format out "~i(~@<MEMORY-MARKER-INFO-AMD~:@_:next ~s~:@_:stage ~s~:@_:dst-range ~s~:@_:dst-flags ~s~:@_:marker ~s~:>)"
+               next 
+               stage 
+               dst-range 
+               dst-flags 
+               marker)))
+
+(defmethod print-object ((obj physical-device-shader-constant-data-features-khr) out)
+  (with-slots (next
+               shader-constant-data)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SHADER-CONSTANT-DATA-FEATURES-KHR~:@_:next ~s~:@_:shader-constant-data ~s~:>)"
+               next 
+               shader-constant-data)))
+
+(defmethod print-object ((obj physical-device-shader-abort-features-khr) out)
+  (with-slots (next
+               shader-abort)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SHADER-ABORT-FEATURES-KHR~:@_:next ~s~:@_:shader-abort ~s~:>)"
+               next 
+               shader-abort)))
+
+(defmethod print-object ((obj physical-device-shader-abort-properties-khr) out)
+  (with-slots (next
+               max-shader-abort-message-size)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SHADER-ABORT-PROPERTIES-KHR~:@_:next ~s~:@_:max-shader-abort-message-size ~s~:>)"
+               next 
+               max-shader-abort-message-size)))
+
+(defmethod print-object ((obj device-fault-shader-abort-message-info-khr) out)
+  (with-slots (next
+               message-data-size
+               message-data)
+      obj
+    (cl:format out "~i(~@<DEVICE-FAULT-SHADER-ABORT-MESSAGE-INFO-KHR~:@_:next ~s~:@_:message-data-size ~s~:@_:message-data ~s~:>)"
+               next 
+               message-data-size 
+               message-data)))
+
+(defmethod print-object ((obj data-graph-t-os-a-name-quality-arm) out)
+  (with-slots (name
+               quality-flags)
+      obj
+    (cl:format out "~i(~@<DATA-GRAPH-T-OS-A-NAME-QUALITY-ARM~:@_:name ~s~:@_:quality-flags ~s~:>)"
+               name 
+               quality-flags)))
+
+(defmethod print-object ((obj queue-family-data-graph-t-os-a-properties-arm) out)
+  (with-slots (next
+               profiles
+               extensions
+               level)
+      obj
+    (cl:format out "~i(~@<QUEUE-FAMILY-DATA-GRAPH-T-OS-A-PROPERTIES-ARM~:@_:next ~s~:@_:profiles ~s~:@_:extensions ~s~:@_:level ~s~:>)"
+               next 
+               profiles 
+               extensions 
+               level)))
+
+(defmethod print-object ((obj data-graph-pipeline-single-node-connection-arm) out)
+  (with-slots (next
+               set
+               binding
+               connection)
+      obj
+    (cl:format out "~i(~@<DATA-GRAPH-PIPELINE-SINGLE-NODE-CONNECTION-ARM~:@_:next ~s~:@_:set ~s~:@_:binding ~s~:@_:connection ~s~:>)"
+               next 
+               set 
+               binding 
+               connection)))
+
+(defmethod print-object ((obj physical-device-data-graph-optical-flow-features-arm) out)
+  (with-slots (next
+               data-graph-optical-flow)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-DATA-GRAPH-OPTICAL-FLOW-FEATURES-ARM~:@_:next ~s~:@_:data-graph-optical-flow ~s~:>)"
+               next 
+               data-graph-optical-flow)))
+
+(defmethod print-object ((obj queue-family-data-graph-optical-flow-properties-arm) out)
+  (with-slots (next
+               supported-output-grid-sizes
+               supported-hint-grid-sizes
+               hint-supported
+               cost-supported
+               min-width
+               min-height
+               max-width
+               max-height)
+      obj
+    (cl:format out "~i(~@<QUEUE-FAMILY-DATA-GRAPH-OPTICAL-FLOW-PROPERTIES-ARM~:@_:next ~s~:@_:supported-output-grid-sizes ~s~:@_:supported-hint-grid-sizes ~s~:@_:hint-supported ~s~:@_:cost-supported ~s~:@_:min-width ~s~:@_:min-height ~s~:@_:max-width ~s~:@_:max-height ~s~:>)"
+               next 
+               supported-output-grid-sizes 
+               supported-hint-grid-sizes 
+               hint-supported 
+               cost-supported 
+               min-width 
+               min-height 
+               max-width 
+               max-height)))
+
+(defmethod print-object ((obj data-graph-optical-flow-image-format-info-arm) out)
+  (with-slots (next
+               usage)
+      obj
+    (cl:format out "~i(~@<DATA-GRAPH-OPTICAL-FLOW-IMAGE-FORMAT-INFO-ARM~:@_:next ~s~:@_:usage ~s~:>)"
+               next 
+               usage)))
+
+(defmethod print-object ((obj data-graph-optical-flow-image-format-properties-arm) out)
+  (with-slots (next
+               format)
+      obj
+    (cl:format out "~i(~@<DATA-GRAPH-OPTICAL-FLOW-IMAGE-FORMAT-PROPERTIES-ARM~:@_:next ~s~:@_:format ~s~:>)"
+               next 
+               format)))
+
+(defmethod print-object ((obj data-graph-pipeline-single-node-create-info-arm) out)
+  (with-slots (next
+               node-type
+               connections)
+      obj
+    (cl:format out "~i(~@<DATA-GRAPH-PIPELINE-SINGLE-NODE-CREATE-INFO-ARM~:@_:next ~s~:@_:node-type ~s~:@_:connections ~s~:>)"
+               next 
+               node-type 
+               connections)))
+
+(defmethod print-object ((obj data-graph-pipeline-optical-flow-create-info-arm) out)
+  (with-slots (next
+               width
+               height
+               image-format
+               flow-vector-format
+               cost-format
+               output-grid-size
+               hint-grid-size
+               performance-level
+               flags)
+      obj
+    (cl:format out "~i(~@<DATA-GRAPH-PIPELINE-OPTICAL-FLOW-CREATE-INFO-ARM~:@_:next ~s~:@_:width ~s~:@_:height ~s~:@_:image-format ~s~:@_:flow-vector-format ~s~:@_:cost-format ~s~:@_:output-grid-size ~s~:@_:hint-grid-size ~s~:@_:performance-level ~s~:@_:flags ~s~:>)"
+               next 
+               width 
+               height 
+               image-format 
+               flow-vector-format 
+               cost-format 
+               output-grid-size 
+               hint-grid-size 
+               performance-level 
+               flags)))
+
+(defmethod print-object ((obj data-graph-pipeline-optical-flow-dispatch-info-arm) out)
+  (with-slots (next
+               flags
+               mean-flow-l-1-norm-hint)
+      obj
+    (cl:format out "~i(~@<DATA-GRAPH-PIPELINE-OPTICAL-FLOW-DISPATCH-INFO-ARM~:@_:next ~s~:@_:flags ~s~:@_:mean-flow-l-1-norm-hint ~s~:>)"
+               next 
+               flags 
+               mean-flow-l-1-norm-hint)))
+
+(defmethod print-object ((obj physical-device-image-tiling-control-features-ext) out)
+  (with-slots (next
+               image-tiling-control)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-IMAGE-TILING-CONTROL-FEATURES-EXT~:@_:next ~s~:@_:image-tiling-control ~s~:>)"
+               next 
+               image-tiling-control)))
+
+(defmethod print-object ((obj image-tiling-control-create-info-ext) out)
+  (with-slots (next
+               tiling-control)
+      obj
+    (cl:format out "~i(~@<IMAGE-TILING-CONTROL-CREATE-INFO-EXT~:@_:next ~s~:@_:tiling-control ~s~:>)"
+               next 
+               tiling-control)))
+
+(defmethod print-object ((obj physical-device-shader-o-c-p-microscaling-types-features-ext) out)
+  (with-slots (next
+               shader-float-4
+               shader-float-6
+               shader-float-8-unsigned-e-8-m-0
+               shader-m-x-int-8)
+      obj
+    (cl:format out "~i(~@<PHYSICAL-DEVICE-SHADER-O-C-P-MICROSCALING-TYPES-FEATURES-EXT~:@_:next ~s~:@_:shader-float-4 ~s~:@_:shader-float-6 ~s~:@_:shader-float-8-unsigned-e-8-m-0 ~s~:@_:shader-m-x-int-8 ~s~:>)"
+               next 
+               shader-float-4 
+               shader-float-6 
+               shader-float-8-unsigned-e-8-m-0 
+               shader-m-x-int-8)))
 

@@ -26,12 +26,20 @@ Enter the reproducible development environment:
 nix develop
 ```
 
-Then start `sbcl`, load the ASDF system, and open the ambient Vulkan window:
+Then start `sbcl --dynamic-space-size 6144`, load the ASDF system, and open the
+ambient Vulkan window:
 
 ```lisp
 (load #P"~/quicklisp/setup.lisp")
+(ql:quickload :sdl3)
+(asdf:clear-system :vk)
+(asdf:initialize-source-registry
+ `(:source-registry
+   (:tree ,(namestring (truename "vendor/vk/")))
+   :inherit-configuration))
+(asdf:load-asd (truename "vendor/vk/vk.asd"))
 (asdf:load-asd (truename "luv.asd"))
-(ql:quickload :luv)
+(asdf:load-system :luv)
 (luv:open-window)
 ```
 
@@ -53,8 +61,9 @@ is the original windowless loader/device check. Set `SDL_VIDEODRIVER=wayland`
 to require native Wayland rather than allowing SDL to choose another backend.
 
 Quicklisp supplies ordinary Lisp systems, including the dependencies of the
-locally installed `cl-sdl3`. Nix supplies SBCL, the large generated `vk`
-binding, native SDL/Vulkan libraries, and `vulkaninfo`.
+locally installed `cl-sdl3`. The Vulkan 1.4.358 `vk` binding is generated and
+vendored under `vendor/vk`; Nix supplies SBCL, native SDL/Vulkan libraries,
+and `vulkaninfo`.
 A Vulkan implementation/ICD still comes from the host graphics stack. If the
 probe cannot see a device, `vulkaninfo --summary` is the first diagnostic to
 try.

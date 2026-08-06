@@ -7,8 +7,17 @@
     (if configured-home
         (pathname (format nil "~A/" configured-home))
         (merge-pathnames #P"quicklisp/" (user-homedir-pathname))))))
+(ql:quickload :sdl3 :silent t)
+(asdf:clear-system :vk)
+(asdf:initialize-source-registry
+ `(:source-registry
+   (:tree ,(namestring
+            (merge-pathnames #P"vendor/vk/" *load-truename*)))
+   :inherit-configuration))
+(asdf:load-asd
+ (merge-pathnames #P"vendor/vk/vk.asd" *load-truename*))
 (asdf:load-asd (merge-pathnames #P"luv.asd" *load-truename*))
-(ql:quickload :luv :silent t)
+(asdf:load-system :luv)
 
 (defvar cl-user::*luv-slynk-port* nil)
 
