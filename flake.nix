@@ -28,8 +28,9 @@
             text = ''
               export MCP_PROJECT_ROOT="''${MCP_PROJECT_ROOT:-$PWD}"
               export LD_LIBRARY_PATH="${nativeLibraryPath}:''${LD_LIBRARY_PATH:-}"
+              quicklisp_home="''${QUICKLISP_HOME:-$HOME/quicklisp}"
               exec sbcl --dynamic-space-size 4096 --noinform --non-interactive \
-                --load /home/mbrock/quicklisp/setup.lisp \
+                --load "$quicklisp_home/setup.lisp" \
                 --eval '(let ((*standard-output* *error-output*) (*trace-output* *error-output*)) (ql:quickload :cl-mcp :silent t))' \
                 --eval '(cl-mcp:run :transport :stdio)'
             '';
@@ -38,8 +39,9 @@
             name = "luv-mcp-bridge";
             runtimeInputs = [ pkgs.python3 ];
             text = ''
+              quicklisp_home="''${QUICKLISP_HOME:-$HOME/quicklisp}"
               exec python3 \
-                /home/mbrock/quicklisp/local-projects/cl-mcp/scripts/stdio_tcp_bridge.py \
+                "$quicklisp_home/local-projects/cl-mcp/scripts/stdio_tcp_bridge.py" \
                 --host "''${LUV_MCP_HOST:-127.0.0.1}" \
                 --port "''${LUV_MCP_PORT:-12345}"
             '';

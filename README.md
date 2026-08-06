@@ -84,12 +84,12 @@ configuration is:
 ```toml
 [mcp_servers.cl-mcp]
 command = "nix"
-args = ["run", "path:/home/mbrock/luv#mcp"]
-cwd = "/home/mbrock/luv"
+args = ["run", ".#mcp"]
 ```
 
-Restart Codex or begin a new session after changing MCP configuration. If the
-checkout moves, update both absolute paths in `.codex/config.toml`.
+Restart Codex or begin a new session after changing MCP configuration. All
+repository paths are derived from the current checkout. Quicklisp defaults to
+`~/quicklisp`; set `QUICKLISP_HOME` if it lives elsewhere.
 
 Start the listener in SLY before starting Codex. The bridge is intentionally
 required, so a missing listener makes the setup failure obvious instead of
