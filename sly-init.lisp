@@ -12,7 +12,9 @@
 (asdf:initialize-source-registry
  `(:source-registry
    (:tree ,(namestring
-            (merge-pathnames #P"vendor/vk/" *load-truename*)))
+            (merge-pathnames
+             #P"vendor/vk/"
+             (uiop:pathname-directory-pathname *load-truename*))))
    :inherit-configuration))
 (asdf:load-asd
  (merge-pathnames #P"vendor/vk/vk.asd" *load-truename*))
