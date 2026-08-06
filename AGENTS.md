@@ -17,7 +17,32 @@ commit.
 
 # Live Lisp interaction
 
-Use `./sly eval 'FORM'` to evaluate code in the project SLY image. The Common
-Lisp client opens a fresh Slynk connection for every command; there is
-intentionally no persistent protocol client. Start the `luv` SLY implementation
-in Emacs first when the listener is not already running.
+Prefer `./sly` over `emacsclient` or a second SBCL when exploring, testing, or
+changing the running project. It talks directly to the durable SLY image, where
+the window and other live Lisp state already exist, but opens a fresh Slynk
+connection for each invocation so there is no persistent client to go stale.
+Start the `luv` SLY implementation in Emacs first if its listener is not up.
+
+Useful starting points:
+
+```sh
+./sly eval '(render-color 1.0 0.0 1.0)' --package LUV
+./sly inspect '*window*' --package LUV
+./sly describe render-color --package LUV
+./sly describe-package luv
+./sly describe-system luv
+./sly apropos color --package LUV
+./sly edit luv:render-color
+./sly xref uses render-color --package LUV
+```
+
+`describe`, `apropos`, and `edit` accept multiple names. `apropos` shows only
+external symbols by default; pass `--all` for internals. Failed evaluations
+print a backtrace and wait on stdin for a restart number or `a` to abort.
+`inspect` is interactive and keeps its one connection open while navigating
+the object (`?` lists its commands, `q` quits).
+
+The connection-free `./sly parinfer [CODE]` filter repairs common parenthesis
+mistakes using indentation. With no argument it reads multiline source from
+stdin, for example `./sly parinfer < unfinished.lisp`. It is intentionally a
+lossy heuristic, so inspect its output before replacing a file.
