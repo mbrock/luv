@@ -33,6 +33,9 @@
   (let* ((type-name (type-name type-info))
          (primitive-type (gethash type-name *vk-platform*))
          (vk-type (gethash type-name (types vk-spec)))
+         (external-required-p (and vk-type
+                                   (eq :requires (category vk-type))
+                                   (not primitive-type)))
          (fixed-type-name (let ((fixed-type (fix-type-name type-name (tags vk-spec))))
                             (cond
                               ((member (category vk-type) '(:struct :union))
@@ -40,18 +43,20 @@
                               ((member type-name *opaque-struct-types* :test #'string=)
                                (list :struct fixed-type))
                               (t fixed-type))))
-         (pointer-type  (if primitive-type
-                            primitive-type
-                            fixed-type-name)))
+         (pointer-type (cond
+                         (primitive-type primitive-type)
+                         (external-required-p :void)
+                         (t fixed-type-name))))
     (cond
       ;; not a pointer
       ((and (not (string= (postfix type-info) "*"))
             (not (string= (postfix type-info) "**"))
             (not (string= (postfix type-info) "* const*"))
             (not (string= (postfix type-info) "* const *")))
-       (if primitive-type
-           primitive-type
-           fixed-type-name))
+       (cond
+         (primitive-type primitive-type)
+         (external-required-p :pointer)
+         (t fixed-type-name)))
       ;; char* should map to a string
       ((and primitive-type
             (eq primitive-type :char)
@@ -112,6 +117,14 @@
         using (hash-value type)
         do (format out "~((defctype ~a ~s)~)~%~%"
                    (fix-type-name name (tags vk-spec)) type))
+  (loop for type in (sorted-elements (alexandria:hash-table-values (types vk-spec)))
+        when (and (eq :requires (category type))
+                  (not (gethash (name type) *vk-platform*))
+                  (not (gethash (name type) *misc-os-types*))
+                  (not (member (name type) *opaque-types* :test #'string=))
+                  (not (member (name type) *opaque-struct-types* :test #'string=)))
+        do (format out "~((defctype ~a :pointer)~)~%~%"
+                   (fix-type-name (name type) (tags vk-spec))))
   (loop for name in *opaque-struct-types*
         do (format out "~((defcstruct ~a)~)~%~%"
                    (fix-type-name name (tags vk-spec)))))
@@ -132,6 +145,19 @@
                                   "handle"))))
              (write-handle (name handle))
              (when (alias handle) (write-handle (alias handle))))))
+
+(defun fix-enum-value-name (enum-value values prefix tags)
+  (let* ((fixed-name (fix-bit-name (name enum-value) tags :prefix prefix))
+         (collisions (count fixed-name values
+                            :test #'string=
+                            :key (lambda (value)
+                                   (fix-bit-name (name value) tags :prefix prefix)))))
+    (if (> collisions 1)
+        (let ((tag (find-if (lambda (candidate)
+                              (alexandria:ends-with-subseq candidate (name enum-value)))
+                            tags)))
+          (format nil "~a-~a" fixed-name (or tag (number-value enum-value))))
+        fixed-name)))
 
 (defun write-bitfield (out bitmask-name bitmask vk-spec)
   (let* ((base-type (type-name bitmask))
@@ -156,7 +182,7 @@
     (loop for enum-value in bits
           for comment = (comment enum-value)
           do (format out "~%  (:~(~a~) #x~x)"
-                     (fix-bit-name (name enum-value) (tags vk-spec) :prefix prefix)
+                     (fix-enum-value-name enum-value bits prefix (tags vk-spec))
                      (number-value enum-value))
           when (string= (name last-bit) (name enum-value))
           do (format out ")")
@@ -194,12 +220,14 @@
       (setf prefix "VK_PIPELINE_CREATE_"))
     (loop for enum-value in values
           for comment = (comment enum-value)
-          for fixed-enum-value-name = (fix-bit-name (name enum-value)
-                                                    (tags vk-spec)
-                                                    :prefix (if (and (string= enum-name "VkPipelineCreateFlagBits")
-                                                                     (not (alexandria:starts-with-subseq prefix (name enum-value))))
-                                                                "VK_PIPELINE_"
-                                                                prefix))
+          for fixed-enum-value-name = (fix-enum-value-name
+                                       enum-value
+                                       values
+                                       (if (and (string= enum-name "VkPipelineCreateFlagBits")
+                                                (not (alexandria:starts-with-subseq prefix (name enum-value))))
+                                           "VK_PIPELINE_"
+                                           prefix)
+                                       (tags vk-spec))
           do (format out "~%  (:~(~a~) ~:[#x~x~;~d~])"
                      fixed-enum-value-name
                      (minusp (number-value enum-value)) (number-value enum-value))
@@ -219,9 +247,10 @@
 (defun write-enums (out vk-spec)
   (loop for enum in (sorted-elements (alexandria:hash-table-values (enums vk-spec)))
         for name = (name enum)
-        for alias = (alias enum)
+        for aliases = (reverse (alias enum))
         do (write-enum out name enum vk-spec)
-           (when alias (write-enum out alias enum vk-spec))))
+           (loop for alias in aliases
+                 do (write-enum out alias enum vk-spec))))
 
 (defun write-function-pointer-types (out vk-spec)
   ;; TODO: return type and argument types should be documented somewhere (need to be stored in func-pointer first...)
@@ -238,9 +267,10 @@
                     (setf (gethash struct-name dumped) t)
                     (loop for member-value in (members struct)
                           for member-type = (get-type-name member-value)
-                          when (and (gethash member-type (structures vk-spec))
-                                    (not (gethash (get-type-name member-value) dumped)))
-                          do (dump (gethash member-type (structures vk-spec)) member-type))
+                          for member-struct = (get-structure-type member-type vk-spec)
+                          when (and member-struct
+                                    (not (gethash member-type dumped)))
+                          do (dump member-struct member-type))
                     (let ((fixed-type-name (fix-type-name struct-name (tags vk-spec))))
                       (if (is-union-p struct)
                           (format out "(defcunion ~(~a~)" fixed-type-name)

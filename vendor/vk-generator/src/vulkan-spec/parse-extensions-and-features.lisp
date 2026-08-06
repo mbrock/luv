@@ -15,17 +15,19 @@
         (extends (xps (xpath:evaluate "@extends" node))))
     (if alias
         ;; readRequireEnumAlias
-        (when extends
+        (if extends
           (let ((enum (gethash extends (enums vk-spec))))
             (assert enum
                     () "feature extends unknown enum <~a>" extends)
             (multiple-value-bind (prefix postfix) (get-enum-pre-and-postfix extends (is-bitmask-p enum) (tags vk-spec))
               (let ((vk-hpp-name (create-enum-vk-hpp-name name prefix postfix (is-bitmask-p enum) tag)))
                 (when (alias enum)
-                  (multiple-value-bind (alias-prefix alias-postfix) (get-enum-pre-and-postfix (alias enum) (is-bitmask-p enum) (tags vk-spec))
+                  (multiple-value-bind (alias-prefix alias-postfix) (get-enum-pre-and-postfix (first (alias enum)) (is-bitmask-p enum) (tags vk-spec))
                     (when (alexandria:ends-with-subseq postfix name)
                       (setf vk-hpp-name (create-enum-vk-hpp-name name alias-prefix alias-postfix (is-bitmask-p enum) tag)))))
-                (add-enum-alias enum name alias vk-hpp-name)))))
+                (add-enum-alias enum name alias vk-hpp-name))))
+          (when (gethash alias (constants vk-spec))
+            (parse-enum-constant node vk-spec)))
         (let ((value-string (xps (xpath:evaluate "@value" node))))
           (if extends
               (let* ((enum (gethash extends (enums vk-spec)))
@@ -196,13 +198,21 @@
                            (assert (not (alias enum))
                                    () "trying to remove disabled enum <~a> which has alias <~a>" type-name (alias enum))
                            (remhash type-name (enums vk-spec))))
-                        ((eq (category type) :struct)
+                        ((member (category type) '(:struct :union))
                          (let ((struct (gethash type-name (structures vk-spec))))
                            (assert struct
                                    () "trying to remove unknown structure <~a>" type-name)
                            (assert (= (length (aliases struct)) 0)
                                    () "trying to remove disabled structure <~a> which has ~a aliases" type-name (length (aliases struct)))
                            (remhash type-name (structures vk-spec))))
+                        ((eq (category type) :basetype)
+                         (remhash type-name (base-types vk-spec)))
+                        ((eq (category type) :handle)
+                         (remhash type-name (handles vk-spec)))
+                        ((eq (category type) :funcpointer)
+                         (remhash type-name (func-pointers vk-spec)))
+                        ((eq (category type) :define)
+                         (remhash type-name (defines vk-spec)))
                         (t (error "trying to remove <~a> of unhandled type <~a>" type-name (category type)))))))))
           (let ((extension (make-instance 'extension
                                           :name name
@@ -255,12 +265,13 @@
 ;; see VulkanHppGenerator::readFeature
 (defun parse-features (vk.xml vk-spec)
   "TODO"
-  (xpath:do-node-set (node (xpath:evaluate "/registry/feature" vk.xml))
+  (xpath:do-node-set (node (xpath:evaluate "/registry/feature[contains(concat(',', @api, ','), ',vulkan,')]" vk.xml))
     (let* ((name (xps (xpath:evaluate "@name" node)))
            (feature-number (xps (xpath:evaluate "@number" node))))
-      (assert (string= name
-                       (concatenate 'string "VK_VERSION_" (substitute #\_ #\. feature-number)))
-              () "unexpected formatting of name <~a>" name)
+      (assert (alexandria:ends-with-subseq
+               (concatenate 'string "VERSION_" (substitute #\_ #\. feature-number))
+               name)
+              () "unexpected formatting of feature name <~a>" name)
       (assert (not (gethash name (features vk-spec)))
               () "already specified feature <~a>" name)
       (setf (gethash name (features vk-spec))
@@ -304,4 +315,3 @@
                   (setf require-data-empty-p nil)))))
           (unless require-data-empty-p
             (push require-data (require-data (gethash name (features vk-spec))))))))))
-

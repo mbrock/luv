@@ -61,6 +61,8 @@
 See +API-VERSION-1-0+
 See +API-VERSION-1-1+
 See +API-VERSION-1-2+
+See +API-VERSION-1-3+
+See +API-VERSION-1-4+
 See +HEADER-VERSION-COMPLETE+
 See MAKE-API-VERSION\")
 
@@ -73,6 +75,12 @@ See MAKE-API-VERSION\")
 (defconstant +api-version-1-2+ ~a
   \"Vulkan 1.2 version number\")
 
+(defconstant +api-version-1-3+ ~a
+  \"Vulkan 1.3 version number\")
+
+(defconstant +api-version-1-4+ ~a
+  \"Vulkan 1.4 version number\")
+
 (defconstant +header-version+ ~a
   \"The header version of the Vulkan API registry file VK was generated from.\")
 
@@ -82,8 +90,10 @@ See MAKE-API-VERSION\")
                            (make-api-version 0 1 0 0)
                            (make-api-version 0 1 1 0)
                            (make-api-version 0 1 2 0)
+                           (make-api-version 0 1 3 0)
+                           (make-api-version 0 1 4 0)
                            header-version
-                           (make-api-version 0 1 2 header-version)))))
+                           (make-api-version 0 1 4 header-version)))))
     (if dry-run
         (write-to-stream t)
         (with-open-file (out api-constants-file :direction :output :if-exists :supersede)
@@ -199,6 +209,8 @@ See MAKE-API-VERSION\")
     #:+api-version-1-0+
     #:+api-version-1-1+
     #:+api-version-1-2+
+    #:+api-version-1-3+
+    #:+api-version-1-4+
     #:+header-version+
     #:+header-version-complete+
 "
@@ -217,6 +229,20 @@ See MAKE-API-VERSION\")
            (loop for name being each hash-key of *misc-os-types*
                  do (format out "~%    #:~(~a~)"
                             (fix-type-name name (tags vk-spec))))
+           ;; Newer registries grow the set of types supplied by external
+           ;; platform and video headers.  Export those registry-driven names
+           ;; too; the static lists above only cover the older headers.
+           (loop for type in (sort (remove-if-not
+                                    (lambda (type)
+                                      (and (eq :requires (category type))
+                                           (not (gethash (name type) *vk-platform*))
+                                           (not (gethash (name type) *misc-os-types*))
+                                           (not (member (name type) *opaque-types* :test #'string=))
+                                           (not (member (name type) *opaque-struct-types* :test #'string=))))
+                                    (alexandria:hash-table-values (types vk-spec)))
+                                   #'string< :key #'name)
+                 do (format out "~%    #:~(~a~)"
+                            (fix-type-name (name type) (tags vk-spec))))
            (format out "~%")
            (loop for name in (sort (alexandria:hash-table-keys (constants vk-spec)) #'string<)
                  do (format out "~%    #:+~(~a~)+"
@@ -273,9 +299,11 @@ See MAKE-API-VERSION\")
   (:documentation \"Provides CLOS wrappers for all struct/unions and wrappers around all functions defined in the Vulkan API.\")
   (:use #:cl)
   (:shadow
+    #:count
     #:format
     #:set
     #:stream
+    #:time
     #:type
     #:values)
   (:import-from #:%vk
@@ -293,6 +321,8 @@ See MAKE-API-VERSION\")
     #:+api-version-1-0+
     #:+api-version-1-1+
     #:+api-version-1-2+
+    #:+api-version-1-3+
+    #:+api-version-1-4+
     #:+header-version+
     #:+header-version-complete+")
            (loop for name in (sort (alexandria:hash-table-keys (constants vk-spec)) #'string<)
@@ -325,6 +355,8 @@ See MAKE-API-VERSION\")
     #:+api-version-1-0+
     #:+api-version-1-1+
     #:+api-version-1-2+
+    #:+api-version-1-3+
+    #:+api-version-1-4+
     #:+header-version+
     #:+header-version-complete+")
            (format out "~%")

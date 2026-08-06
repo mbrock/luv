@@ -221,7 +221,8 @@
     "v1.2.195"
     "v1.2.196"
     "v1.2.197"
-    "v1.2.198")
+    "v1.2.198"
+    "v1.4.358")
   "A list of valid version tags in the Vulkan-Docs GitHub repository.
 
 See https://github.com/KhronosGroup/Vulkan-Docs/releases
@@ -238,7 +239,7 @@ See https://github.com/KhronosGroup/Vulkan-Docs
 "
   (let ((version-index (position version *versions* :test #'string=)))
     (unless version-index (format t "Unknown version: ~a, trying anyway ..." version))
-    (if (or (not version-index)
-            (< (position version *versions* :test #'string=) 91))
+    (if (and version-index
+             (< version-index 91))
         (make-pathname :directory '(:relative "src" "spec"))
         (make-pathname :directory '(:relative "xml")))))

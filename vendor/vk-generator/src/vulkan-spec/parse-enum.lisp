@@ -74,7 +74,8 @@
                  (upper-snake-to-pascal-case
                   (strip-postfix (strip-prefix name prefix) postfix)))))
     (when is-bitmask-p
-      (setf result (subseq result 0 (search "Bit" result))))
+      (when (alexandria:ends-with-subseq "Bit" result)
+        (setf result (subseq result 0 (- (length result) 3)))))
     (when (and (> (length tag) 0)
                (string= (upper-snake-to-pascal-case tag)
                         (subseq result 0 (- (length result) (length tag)))))
@@ -171,7 +172,7 @@ See ENUM
 See ENUM-VALUE
 See VULKAN-SPEC
 "
-  (xpath:do-node-set (node (xpath:evaluate "/registry/enums[@name=\"API Constants\"]/enum" vk.xml))
+  (xpath:do-node-set (node (xpath:evaluate "/registry/enums[@name=\"API Constants\"]/enum[not(@api) or contains(concat(',', @api, ','), ',vulkan,')]" vk.xml))
     (parse-enum-constant node vk-spec))
   (xpath:do-node-set (node (xpath:evaluate "/registry/enums[not(@name=\"API Constants\")]" vk.xml))
     (let* ((name (xps (xpath:evaluate "@name" node)))
@@ -203,8 +204,7 @@ See VULKAN-SPEC
       (when is-bitmask-p
         (assert (search "FlagBits" name)
                 () "enum <~a> does not contain <FlagBits> as substring"))
-      (xpath:do-node-set (enum-value-node (xpath:evaluate "enum" node))
+      (xpath:do-node-set (enum-value-node (xpath:evaluate "enum[not(@api) or contains(concat(',', @api, ','), ',vulkan,')]" node))
           (parse-enum-value enum-value-node enum vk-spec))
       (setf (enum-values enum)
             (remove-duplicates (reverse (enum-values enum)))))))
-

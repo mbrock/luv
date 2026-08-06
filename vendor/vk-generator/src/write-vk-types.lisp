@@ -27,8 +27,7 @@ Changes the \"PP-\"-prefix to \"P-\" for pointers to pointer arrays (e.g. ppGeom
 (defun get-count-member-names (struct)
   "Returns a list of all names of members in STRUCT which specify the number of elements within an array member of the same STRUCT."
   (loop for m in (members struct)
-        when (or (string= (name m) "codeSize") ;; codeSize is a special case where the len is actually codeSize/4
-                 (find-if (lambda (other)
+        when (find-if (lambda (other)
                             (and (string= (car (len other)) (name m))
                                  ;; the following are count members which have to be explicitly set
                                  ;; because the array member can be null, but the count can not
@@ -40,7 +39,7 @@ Changes the \"PP-\"-prefix to \"P-\" for pointers to pointer arrays (e.g. ppGeom
                                  (not (and (string= "VkPresentTimesInfoGOOGLE" (name struct))
                                            (string= "swapchainCount" (name m))))
                                  (not (string= (get-type-name other) "void")))) ;; we can't do anything for void pointer arrays, must be supplied by the user
-                          (members struct)))
+                          (members struct))
         collect (name m)))
 
 (defun fix-slot-type-for-documentation (member-data vk-spec)
@@ -339,7 +338,7 @@ Instances of this class are used as parameters of the following functions:~{~%Se
                                  (loop with ~a = (vk:next ~a)
                                        while ~a
                                        maximize (typecase ~a
-                                                  (vk:write-descriptor-set-inline-uniform-block-ext (vk:data-size ~a))
+                                                  (vk:write-descriptor-set-inline-uniform-block (vk:data-size ~a))
                                                   (vk:write-descriptor-set-acceleration-structure-khr (cl:length (vk:acceleration-structures ~a)))
                                                   (t 0))
                                        do (setf ~a (vk:next ~a)))"
@@ -665,9 +664,10 @@ Instances of this class are used as parameters of the following functions:~{~%Se
           (loop with value-str = (format nil "~:[~;,~]value" expand-p)
                 with ptr-str = (format nil "~:[~;,~]ptr" expand-p)
                 for m in (members struct)
-                do (format out "~%    ((slot-boundp ~a 'vk:~(~a~))" value-str (fix-type-name (name m) (tags vk-spec)))
+                for fixed-slot-name = (fix-slot-name (name m) (get-type-name m) vk-spec t)
+                do (format out "~%    ((slot-boundp ~a 'vk:~(~a~))" value-str fixed-slot-name)
                    (format out "~%     (cffi:lisp-array-to-foreign (vk:~(~a~) ~a) ~a '(:array ~(~s~) ~a)))"
-                           (fix-type-name (name m) (tags vk-spec))
+                           fixed-slot-name
                            value-str
                            ptr-str
                            (gethash (get-type-name m) *vk-platform*)
@@ -702,32 +702,44 @@ Instances of this class are used as parameters of the following functions:~{~%Se
                                                "string")
                                               ((gethash (get-type-name m) *vk-platform*)
                                                (format nil "~(~s~)" (gethash (get-type-name m) *vk-platform*)))
-                                              ((gethash (get-type-name m) (structures vk-spec))
+                                              ((structure-type-p (get-type-name m) vk-spec nil)
                                                (format nil "'(~:[:struct~;:union~] %vk:~(~a~))"
-                                                       (is-union-p (gethash (get-type-name m) (structures vk-spec)))
+                                                       (is-union-p (get-structure-type (get-type-name m) vk-spec))
                                                        (fix-type-name (get-type-name m) (tags vk-spec))))
+                                              ((handlep (get-type-name m) vk-spec)
+                                               nil)
                                               ((not primitive-p)
-                                               (error "Non-primitive member type <~a> not handled for union <~a>"
+                                              (error "Non-primitive member type <~a> not handled for union <~a>"
                                                       (get-type-name m)
                                                       struct)))
+                for fixed-slot-name = (fix-slot-name (name m) (get-type-name m) vk-spec t)
                 for i from 1 do
-                (format out "~%      ((slot-boundp ~a 'vk:~(~a~))" value-str (fix-type-name (name m) (tags vk-spec)))
+                (format out "~%      ((slot-boundp ~a 'vk:~(~a~))" value-str fixed-slot-name)
                 (cond
                   ((and (array-sizes m)
                         (gethash (get-type-name m) *vk-platform*))
                    (format out "~%       (cffi:lisp-array-to-foreign (vk:~(~a~) ~a) ~a '(:array ~(~s~) ~a)))"
-                           (fix-type-name (name m) (tags vk-spec))
+                           fixed-slot-name
                            value-str
                            ptr-str
                            (gethash (get-type-name m) *vk-platform*)
                            (first (array-sizes m))))
+                  ((handlep (get-type-name m) vk-spec)
+                   (format out "~%       (setf %vk:~(~a~)" (fix-type-name (name m) (tags vk-spec)))
+                   (format out "~%             (if (vk:~(~a~) ~a) (%~@[~a-~]dispatchable-handle (vk:~(~a~) ~a)) (cffi:null-pointer))))"
+                           fixed-slot-name
+                           value-str
+                           (when (non-dispatch-handle-p (get-handle (get-type-name m) vk-spec))
+                             "non")
+                           fixed-slot-name
+                           value-str))
                   (primitive-p
                    (format out "~%       (setf %vk:~(~a~)" (fix-type-name (name m) (tags vk-spec)))
-                   (format out "~%             (vk:~(~a~) ~a)))" (fix-type-name (name m) (tags vk-spec)) value-str))
+                   (format out "~%             (vk:~(~a~) ~a)))" fixed-slot-name value-str))
                   (t
                    (format out "~%       (setf %vk:~(~a~)" (fix-type-name (name m) (tags vk-spec)))
                    (format out "~%             (vk-alloc:foreign-allocate-and-fill ~(~a~)" member-type-specifier)
-                   (format out "~%                                                  (vk:~(~a~) ~a)" (fix-type-name (name m) (tags vk-spec)) value-str)
+                   (format out "~%                                                  (vk:~(~a~) ~a)" fixed-slot-name value-str)
                    (format out "~%                                                  ~a)))" ptr-str))))
           
           (format out "))")))

@@ -12,7 +12,8 @@
              (not (returned-only-p (get-structure-type type-name vk-spec))))
         ;; structs which aren't pointers need to be initialized during translation
         (format nil "(vk:make-~(~a~))"
-                (fix-type-name type-name (tags vk-spec)))
+                (fix-type-name (name (get-structure-type type-name vk-spec))
+                               (tags vk-spec)))
         (format nil "~(~s~)"
                 (cond
                   (array-member-p

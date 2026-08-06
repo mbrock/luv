@@ -55,6 +55,8 @@
         (type-info (parse-type-info node)))
     (assert (or (not len)
                 (string= len "null-terminated")
+                (every #'digit-char-p len)
+                (alexandria:starts-with-subseq "latexmath:" len)
                 (find-if (lambda (p)
                            (string= (name p) len))
                          params)
@@ -95,14 +97,16 @@
                                 (and (handlep (get-type-name p) vk-spec)
                                      (non-const-pointer-p (type-info p))))
                               params)))
-    (assert handle-arg
-            () "creator has no handle parameter <~a>" command)
-    (assert (or (not (string= (subseq (name command) 2 8) "Create"))
-                (string= "VkAllocationCallbacks"
-                         (get-type-name (elt params (- num-params 2)))))
-            () "unexpected second to last parameter for creator <~a>" (get-type-name (elt params (- num-params 2))))
-    (push (name command)
-          (create-commands (get-handle (get-type-name handle-arg) vk-spec)))))
+    ;; Some modern create commands return handles nested in an output
+    ;; structure, so they cannot participate in the direct-handle resource
+    ;; helpers built here.
+    (when handle-arg
+      (assert (or (not (string= (subseq (name command) 2 8) "Create"))
+                  (string= "VkAllocationCallbacks"
+                           (get-type-name (elt params (- num-params 2)))))
+              () "unexpected second to last parameter for creator <~a>" (get-type-name (elt params (- num-params 2))))
+      (push (name command)
+            (create-commands (get-handle (get-type-name handle-arg) vk-spec))))))
 
 (defun register-deleter (command vk-spec)
   "TODO"
@@ -142,7 +146,7 @@
 
 (defun parse-commands (vk.xml vk-spec)
   "TODO"
-  (xpath:do-node-set (node (xpath:evaluate "/registry/commands/command" vk.xml))
+  (xpath:do-node-set (node (xpath:evaluate "/registry/commands/command[not(@api) or contains(concat(',', @api, ','), ',vulkan,')]" vk.xml))
     (let ((alias (xps (xpath:evaluate "@alias" node))))
       (if alias
           (let ((name (xps (xpath:evaluate "@name" node)))
@@ -165,7 +169,7 @@
                                          :return-type return-type
                                          :success-codes success-codes
                                          :error-codes error-codes)))
-            (xpath:do-node-set (param-node (xpath:evaluate "param" node))
+            (xpath:do-node-set (param-node (xpath:evaluate "param[not(@api) or contains(concat(',', @api, ','), ',vulkan,')]" node))
               (push (parse-command-param param-node (params command) vk-spec)
                     (params command)))
             (setf (params command) (reverse (params command)))

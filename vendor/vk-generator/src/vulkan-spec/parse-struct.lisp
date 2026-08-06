@@ -74,8 +74,13 @@
               () "member attribute <len> holds unknown number of data: ~a" (length (len member-data)))
       (let* ((first-len (first (len member-data)))
              (len-member (find-if (lambda (m) (string= first-len (name m)))
-                                  (members structure))))
+                                  (members structure)))
+             (forward-len-member-p
+               (xpath:all-nodes
+                (xpath:evaluate (format nil "../member/name[text()=~s]" first-len)
+                                node))))
         (assert (or len-member
+                    forward-len-member-p
                     (find first-len *ignore-lens* :test #'string=)
                     (string= first-len "latexmath:[\\textrm{codeSize} \\over 4]")
                     (string= first-len "latexmath:[\\lceil{\\mathit{rasterizationSamples} \\over 32}\\rceil]"))
@@ -139,7 +144,7 @@
                                :allow-duplicate-p allow-duplicate-p
                                :returned-only-p returned-only-p
                                :is-union-p is-union-p))
-          (xpath:do-node-set (member-node (xpath:evaluate "member" node))
+          (xpath:do-node-set (member-node (xpath:evaluate "member[not(@api) or contains(concat(',', @api, ','), ',vulkan,')]" node))
             (push (parse-struct-member member-node
                                        (gethash name (structures vk-spec))
                                        vk-spec)

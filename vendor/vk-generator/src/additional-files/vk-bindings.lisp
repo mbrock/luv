@@ -5,7 +5,7 @@
 
 (in-package :vk)
 
-(eval-when (:compile-toplevel)
+(eval-when (:compile-toplevel :load-toplevel :execute)
   (defun process-args (args optional-p &optional (extension-p nil))
     "Splits ARGS into a list of argument names and a list of types which can be used for type declarations.
 If OPTIONAL-P is truthy NULL is appended to each type declaration."
