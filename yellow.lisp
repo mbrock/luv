@@ -1,20 +1,21 @@
 (in-package #:luv)
 
-(defun graphics-present-queue-family (physical-device surface)
-  "Find one queue family that can both clear and present SURFACE."
+(defun graphics-present-queue-family ()
+  "Find one queue family that can both clear and present `*surface*'."
   (or (loop for properties in
-              (vk:get-physical-device-queue-family-properties physical-device)
+              (vk:get-physical-device-queue-family-properties *physical-device*)
             for index from 0
             when (and (member :graphics (vk:queue-flags properties))
                       (vk:get-physical-device-surface-support-khr
-                       physical-device index surface))
+                       *physical-device* index *surface*))
               return index)
       (error "No Vulkan queue family supports both graphics and presentation.")))
 
-(defun preferred-surface-format (physical-device surface)
+(defun preferred-surface-format ()
   "Choose a familiar sRGB swapchain format, falling back to the first one."
   (let ((formats
-          (vk:get-physical-device-surface-formats-khr physical-device surface)))
+          (vk:get-physical-device-surface-formats-khr
+           *physical-device* *surface*)))
     (or (find-if (lambda (surface-format)
                    (and (eq :b8g8r8a8-srgb (vk:format surface-format))
                         (eq :srgb-nonlinear-khr
@@ -26,13 +27,13 @@
 (defun clamp-to-range (value minimum maximum)
   (max minimum (min value maximum)))
 
-(defun swapchain-extent (window capabilities)
+(defun swapchain-extent (capabilities)
   "Choose the configured surface extent, or clamp SDL's pixel size to its range."
   (let ((current (vk:current-extent capabilities)))
     (if (/= #xffffffff (vk:width current))
         current
         (multiple-value-bind (success width height)
-            (sdl3:get-window-size-in-pixels window)
+            (sdl3:get-window-size-in-pixels *window*)
           (unless success
             (error "SDL could not report the window's pixel size: ~A"
                    (sdl3:get-error)))
@@ -54,17 +55,16 @@
         (min desired maximum)
         desired)))
 
-(defun yellow-swapchain-create-info
-    (window physical-device surface surface-format)
+(defun yellow-swapchain-create-info (surface-format)
   (let* ((capabilities
            (vk:get-physical-device-surface-capabilities-khr
-            physical-device surface))
-         (extent (swapchain-extent window capabilities)))
+            *physical-device* *surface*))
+         (extent (swapchain-extent capabilities)))
     (unless (member :transfer-dst (vk:supported-usage-flags capabilities))
       (error "The Vulkan surface cannot be cleared as a transfer destination."))
     (values
      (vk:make-swapchain-create-info-khr
-      :surface surface
+      :surface *surface*
       :min-image-count (desired-swapchain-image-count capabilities)
       :image-format (vk:format surface-format)
       :image-color-space (vk:color-space surface-format)
@@ -146,13 +146,12 @@
       (when (and deadline (>= (get-internal-real-time) deadline))
         (return)))))
 
-(defun present-yellow
-    (window physical-device surface &key duration (stream *standard-output*))
+(defun present-yellow (&key duration (stream *standard-output*))
   "Create a device and swapchain, present yellow once, then run the event loop."
   (let* ((queue-family
-           (graphics-present-queue-family physical-device surface))
+           (graphics-present-queue-family))
          (surface-format
-           (preferred-surface-format physical-device surface))
+           (preferred-surface-format))
          (device-create-info
            (vk:make-device-create-info
             :queue-create-infos
@@ -161,10 +160,9 @@
                    :queue-priorities (list 1.0)))
             :enabled-extension-names
             (list vk:+khr-swapchain-extension-name+))))
-    (vk-utils:with-device (device physical-device device-create-info)
+    (vk-utils:with-device (device *physical-device* device-create-info)
       (multiple-value-bind (swapchain-create-info extent)
-          (yellow-swapchain-create-info
-           window physical-device surface surface-format)
+          (yellow-swapchain-create-info surface-format)
         (vk-utils:with-swapchain-khr
             (swapchain device swapchain-create-info)
           (let* ((queue (vk:get-device-queue device queue-family 0))
@@ -227,6 +225,7 @@ draws only once; swapchain recreation on resize comes later."
                 "luv — Vulkan yellow" width height '(:vulkan :resizable))))
          (when (cffi:null-pointer-p window)
            (error "SDL window creation failed: ~A" (sdl3:get-error)))
+         (setf *window* window)
          (unwind-protect
               (let* ((extensions (sdl-vulkan-instance-extensions))
                      (instance-create-info
@@ -241,23 +240,27 @@ draws only once; swapchain recreation on resize comes later."
                         :enabled-extension-names extensions)))
                 (vk-utils:with-instance (instance instance-create-info)
                   (multiple-value-bind (raw-surface surface)
-                      (create-sdl-vulkan-surface window instance)
+                      (create-sdl-vulkan-surface *window* instance)
+                    (setf *surface* surface)
                     (unwind-protect
-                         (let ((physical-device
-                                 (first
-                                  (vk:enumerate-physical-devices instance))))
-                           (unless physical-device
+                         (progn
+                           (setf *physical-device*
+                                 (first (vk:enumerate-physical-devices instance)))
+                           (unless *physical-device*
                              (error "Vulkan found no physical devices."))
                            (format stream "SDL video driver: ~A~%"
                                    (sdl3:get-current-video-driver))
-                           (present-yellow
-                            window physical-device surface
-                            :duration duration :stream stream))
-                      (sdl3:vulkan-destroy-surface
-                       (vk:raw-handle instance)
-                       raw-surface
-                       (cffi:null-pointer))))))
-           (sdl3:destroy-window window)))
+                           (present-yellow :duration duration :stream stream))
+                      (setf *physical-device* nil)
+                      (unwind-protect
+                           (sdl3:vulkan-destroy-surface
+                            (vk:raw-handle instance)
+                            raw-surface
+                            (cffi:null-pointer))
+                        (setf *surface* nil))))))
+           (unwind-protect
+                (sdl3:destroy-window *window*)
+             (setf *window* nil))))
     (sdl3:quit))
   (values))
 

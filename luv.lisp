@@ -14,12 +14,24 @@
 
 (defpackage #:luv
   (:use #:cl)
-  (:export #:probe
+  (:export #:*window*
+           #:*physical-device*
+           #:*surface*
+           #:probe
            #:surface-probe
            #:yellow-window
            #:main))
 
 (in-package #:luv)
+
+(defvar *window* nil
+  "The SDL window currently active in luv, or NIL outside a rendering session.")
+
+(defvar *physical-device* nil
+  "The Vulkan physical device currently active in luv, or NIL.")
+
+(defvar *surface* nil
+  "The Vulkan presentation surface currently active in luv, or NIL.")
 
 (cffi:defctype raw-vk-surface-khr
   #.(if (= 8 (cffi:foreign-type-size :pointer))
