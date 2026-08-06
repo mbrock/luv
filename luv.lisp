@@ -15,10 +15,18 @@
 (defpackage #:luv
   (:use #:cl)
   (:export #:*window*
+           #:*instance*
            #:*physical-device*
            #:*surface*
+           #:*device*
+           #:*swapchain*
+           #:*queue*
            #:probe
            #:surface-probe
+           #:open-window
+           #:close-window
+           #:window-open-p
+           #:render-color
            #:yellow-window
            #:main))
 
@@ -27,16 +35,47 @@
 (defvar *window* nil
   "The SDL window currently active in luv, or NIL outside a rendering session.")
 
+(defvar *instance* nil
+  "The Vulkan instance currently active in luv, or NIL.")
+
 (defvar *physical-device* nil
   "The Vulkan physical device currently active in luv, or NIL.")
 
 (defvar *surface* nil
   "The Vulkan presentation surface currently active in luv, or NIL.")
 
+(defvar *device* nil
+  "The logical Vulkan device currently active in luv, or NIL.")
+
+(defvar *swapchain* nil
+  "The Vulkan swapchain currently active in luv, or NIL.")
+
+(defvar *queue* nil
+  "The Vulkan graphics/presentation queue currently active in luv, or NIL.")
+
+(defvar *swapchain-images* nil)
+(defvar *queue-family* nil)
+(defvar *surface-format* nil)
+(defvar *swapchain-extent* nil)
+(defvar *window-thread* nil)
+(defvar *window-close-requested* nil)
+(defvar *window-context-ready* nil)
+(defvar *window-startup-error* nil)
+(defvar *render-lock* (sb-thread:make-mutex :name "luv render lock"))
+
 (cffi:defctype raw-vk-surface-khr
   #.(if (= 8 (cffi:foreign-type-size :pointer))
         :pointer
         :uint64))
+
+;; This vk release models successful non-zero VkResult values as CONDITIONs,
+;; then passes their classes to WARN even though they are not WARNINGs.  Return
+;; the result keyword directly, as the generated high-level wrappers expect.
+(defmethod cffi:translate-from-foreign :around
+    ((value integer) (type %vk::checked-result))
+  (if (plusp value)
+      (cffi:foreign-enum-keyword '%vk:result value)
+      (call-next-method)))
 
 (defun format-api-version (version)
   "Render a packed Vulkan API VERSION without its variant field."

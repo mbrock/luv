@@ -26,26 +26,31 @@ Enter the reproducible development environment:
 nix develop
 ```
 
-Then load the ASDF system and open the yellow Vulkan window:
+Then start `sbcl`, load the ASDF system, and open the ambient Vulkan window:
 
-```sh
-sbcl --non-interactive \
-  --load ~/quicklisp/setup.lisp \
-  --eval '(asdf:load-asd (truename "luv.asd"))' \
-  --eval '(ql:quickload :luv :silent t)' \
-  --eval '(luv:main)'
+```lisp
+(load #P"~/quicklisp/setup.lisp")
+(asdf:load-asd (truename "luv.asd"))
+(ql:quickload :luv)
+(luv:open-window)
 ```
 
-This creates an SDL Vulkan window and swapchain, clears one acquired image to
-yellow, presents it, and dispatches SDL events until the window is closed. Set
-`SDL_VIDEODRIVER=wayland` to require native Wayland rather than allowing SDL to
-choose another available backend.
+`open-window` returns after presenting yellow while a background context thread
+keeps the SDL window, Vulkan instance, device, surface, queue, and swapchain
+alive. Rendering is then ordinary REPL interaction:
 
-For interactive hacking, start `sbcl`, load Quicklisp and `luv`, then call
-`(luv:yellow-window)`. `(luv:surface-probe)` performs the same native-window
-setup without creating a device or swapchain, and the original windowless
-loader/device check remains available as `(luv:probe)`. A timed smoke test can
-use `(luv:yellow-window :duration 2)`.
+```lisp
+(luv:render-color 1.0 0.0 1.0) ; magenta
+(luv:render-color 0.0 1.0 1.0) ; cyan
+(luv:close-window)
+```
+
+The live handles are exported as specials such as `luv:*window*`,
+`luv:*instance*`, `luv:*device*`, and `luv:*swapchain*`. `luv:yellow-window`
+remains as an alias for `luv:open-window`. `(luv:surface-probe)` performs the
+native-window setup without creating a device or swapchain, and `(luv:probe)`
+is the original windowless loader/device check. Set `SDL_VIDEODRIVER=wayland`
+to require native Wayland rather than allowing SDL to choose another backend.
 
 Quicklisp supplies ordinary Lisp systems, including `cl-mcp` and the
 dependencies of the locally installed `cl-sdl3`. Nix supplies SBCL, the large

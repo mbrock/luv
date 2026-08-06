@@ -106,8 +106,8 @@
      :subresource-range range))
    src-stage dst-stage))
 
-(defun record-yellow-clear (command-buffer image)
-  "Record a one-shot command buffer that makes IMAGE solid yellow."
+(defun record-color-clear (command-buffer image color)
+  "Record a one-shot command buffer that clears IMAGE to COLOR."
   (let ((range (color-subresource-range)))
     (vk:begin-command-buffer
      command-buffer
@@ -119,7 +119,7 @@
      (list :top-of-pipe) (list :transfer))
     (vk:cmd-clear-color-image
      command-buffer image :transfer-dst-optimal
-     (vk:make-clear-color-value :float-32 #(1.0 1.0 0.0 1.0))
+     (vk:make-clear-color-value :float-32 color)
      (list range))
     (transition-swapchain-image
      command-buffer image range
@@ -138,6 +138,8 @@
                (+ (get-internal-real-time)
                   (* duration internal-time-units-per-second)))))
     (loop
+      (when *window-close-requested*
+        (return))
       (multiple-value-bind (event event-type)
           (sdl3:wait-event-timeout* 50)
         (declare (ignore event))
@@ -146,8 +148,59 @@
       (when (and deadline (>= (get-internal-real-time) deadline))
         (return)))))
 
-(defun present-yellow (&key duration (stream *standard-output*))
-  "Create a device and swapchain, present yellow once, then run the event loop."
+(defun active-context-p ()
+  (and *window* *instance* *physical-device* *surface*
+       *device* *swapchain* *queue*))
+
+(defun render-color (red green blue &optional (alpha 1.0))
+  "Clear the ambient swapchain to RED, GREEN, BLUE, and ALPHA, then present it."
+  (sb-thread:with-mutex (*render-lock*)
+    (unless (active-context-p)
+      (error "No luv window is open. Call LUV:OPEN-WINDOW first."))
+    (let ((color
+            (map 'vector
+                 (lambda (component) (coerce component 'single-float))
+                 (list red green blue alpha)))
+          (pool-create-info
+            (vk:make-command-pool-create-info
+             :queue-family-index *queue-family*)))
+      (vk-utils:with-command-pool
+          (command-pool *device* pool-create-info)
+        (vk-utils:with-command-buffers
+            (command-buffers *device*
+             (vk:make-command-buffer-allocate-info
+              :command-pool command-pool
+              :level :primary
+              :command-buffer-count 1))
+          (vk-utils:with-semaphore
+              (image-ready *device* (vk:make-semaphore-create-info))
+            (vk-utils:with-semaphore
+                (render-done *device* (vk:make-semaphore-create-info))
+              (let* ((image-index
+                       (vk:acquire-next-image-khr
+                        *device* *swapchain* #xffffffffffffffff image-ready))
+                     (command-buffer (first command-buffers)))
+                (record-color-clear
+                 command-buffer (nth image-index *swapchain-images*) color)
+                (vk:queue-submit
+                 *queue*
+                 (list
+                  (vk:make-submit-info
+                   :wait-semaphores (list image-ready)
+                   :wait-dst-stage-mask (list :transfer)
+                   :command-buffers (list command-buffer)
+                   :signal-semaphores (list render-done))))
+                (vk:queue-present-khr
+                 *queue*
+                 (vk:make-present-info-khr
+                  :wait-semaphores (list render-done)
+                  :swapchains (list *swapchain*)
+                  :image-indices (list image-index)))
+                (vk:queue-wait-idle *queue*)))))))
+    (values red green blue alpha)))
+
+(defun run-window-context (&key duration (stream *standard-output*))
+  "Own the logical device and swapchain until the ambient window closes."
   (let* ((queue-family
            (graphics-present-queue-family))
          (surface-format
@@ -161,62 +214,43 @@
             :enabled-extension-names
             (list vk:+khr-swapchain-extension-name+))))
     (vk-utils:with-device (device *physical-device* device-create-info)
-      (multiple-value-bind (swapchain-create-info extent)
-          (yellow-swapchain-create-info surface-format)
-        (vk-utils:with-swapchain-khr
-            (swapchain device swapchain-create-info)
-          (let* ((queue (vk:get-device-queue device queue-family 0))
-                 (images (vk:get-swapchain-images-khr device swapchain))
-                 (pool-create-info
-                   (vk:make-command-pool-create-info
-                    :queue-family-index queue-family)))
-            (vk-utils:with-command-pool
-                (command-pool device pool-create-info)
-              (vk-utils:with-command-buffers
-                  (command-buffers device
-                   (vk:make-command-buffer-allocate-info
-                    :command-pool command-pool
-                    :level :primary
-                    :command-buffer-count 1))
-                (vk-utils:with-semaphore
-                    (image-ready device (vk:make-semaphore-create-info))
-                  (vk-utils:with-semaphore
-                      (render-done device (vk:make-semaphore-create-info))
-                    (let* ((image-index
-                             (vk:acquire-next-image-khr
-                              device swapchain #xffffffffffffffff image-ready))
-                           (command-buffer (first command-buffers)))
-                      (record-yellow-clear
-                       command-buffer (nth image-index images))
-                      (vk:queue-submit
-                       queue
-                       (list
-                        (vk:make-submit-info
-                         :wait-semaphores (list image-ready)
-                         :wait-dst-stage-mask (list :transfer)
-                         :command-buffers (list command-buffer)
-                         :signal-semaphores (list render-done))))
-                      (vk:queue-present-khr
-                       queue
-                       (vk:make-present-info-khr
-                        :wait-semaphores (list render-done)
-                        :swapchains (list swapchain)
-                        :image-indices (list image-index)))
-                      (vk:queue-wait-idle queue)
+      (setf *device* device
+            *queue-family* queue-family
+            *surface-format* surface-format)
+      (unwind-protect
+           (multiple-value-bind (swapchain-create-info extent)
+               (yellow-swapchain-create-info surface-format)
+             (vk-utils:with-swapchain-khr
+                 (swapchain device swapchain-create-info)
+               (setf *swapchain* swapchain
+                     *queue* (vk:get-device-queue device queue-family 0)
+                     *swapchain-images*
+                     (vk:get-swapchain-images-khr device swapchain)
+                     *swapchain-extent* extent)
+               (unwind-protect
+                    (progn
+                      (render-color 1.0 1.0 0.0)
+                      (setf *window-context-ready* t)
                       (format stream
-                              "Yellow Vulkan window: ~Dx~D, ~A, queue family ~D.~%"
+                              "Luv window: ~Dx~D, ~A, queue family ~D.~%"
                               (vk:width extent) (vk:height extent)
                               (vk:format surface-format) queue-family)
-                      (format stream "Close the window to return to Lisp.~%")
-                      (wait-for-window-close duration))))))))))))
+                      (format stream
+                              "Try (luv:render-color 1.0 0.0 1.0), or close the window.~%")
+                      (wait-for-window-close duration))
+                 (sb-thread:with-mutex (*render-lock*)
+                   (setf *swapchain* nil
+                         *queue* nil
+                         *swapchain-images* nil
+                         *swapchain-extent* nil)))))
+        (sb-thread:with-mutex (*render-lock*)
+          (setf *device* nil
+                *queue-family* nil
+                *surface-format* nil))))))
 
-(defun yellow-window
+(defun run-window
     (&key (width 800) (height 600) duration (stream *standard-output*))
-  "Open a native SDL Vulkan window and keep a yellow swapchain image visible.
-
-When DURATION is NIL, run until the window is closed. A numeric duration is
-useful for automated smoke tests. This first presentation spike intentionally
-draws only once; swapchain recreation on resize comes later."
+  "Own the SDL/Vulkan context and event loop on the window thread."
   (unless (sdl3:init :video)
     (error "SDL video initialization failed: ~A" (sdl3:get-error)))
   (unwind-protect
@@ -239,6 +273,7 @@ draws only once; swapchain recreation on resize comes later."
                          :api-version vk:+api-version-1-0+)
                         :enabled-extension-names extensions)))
                 (vk-utils:with-instance (instance instance-create-info)
+                  (setf *instance* instance)
                   (multiple-value-bind (raw-surface surface)
                       (create-sdl-vulkan-surface *window* instance)
                     (setf *surface* surface)
@@ -250,7 +285,8 @@ draws only once; swapchain recreation on resize comes later."
                              (error "Vulkan found no physical devices."))
                            (format stream "SDL video driver: ~A~%"
                                    (sdl3:get-current-video-driver))
-                           (present-yellow :duration duration :stream stream))
+                           (run-window-context
+                            :duration duration :stream stream))
                       (setf *physical-device* nil)
                       (unwind-protect
                            (sdl3:vulkan-destroy-surface
@@ -258,12 +294,68 @@ draws only once; swapchain recreation on resize comes later."
                             raw-surface
                             (cffi:null-pointer))
                         (setf *surface* nil))))))
+              (setf *instance* nil))
            (unwind-protect
                 (sdl3:destroy-window *window*)
-             (setf *window* nil))))
+             (setf *window* nil)))
     (sdl3:quit))
   (values))
 
+(defun window-open-p ()
+  "Return true while luv's ambient window context is ready for rendering."
+  (and *window-context-ready*
+       *window-thread*
+       (sb-thread:thread-alive-p *window-thread*)
+       (active-context-p)))
+
+(defun window-thread-main (arguments)
+  (handler-case
+      (apply #'run-window arguments)
+    (error (condition)
+      (setf *window-startup-error* condition)))
+  (setf *window-context-ready* nil))
+
+(defun open-window
+    (&key (width 800) (height 600) duration (stream *standard-output*))
+  "Open an ambient SDL/Vulkan context, present yellow, and return its window."
+  (when (and *window-thread* (sb-thread:thread-alive-p *window-thread*))
+    (error "A luv window is already open."))
+  (setf *window-close-requested* nil
+        *window-context-ready* nil
+        *window-startup-error* nil)
+  (let ((arguments
+          (list :width width :height height
+                :duration duration :stream stream)))
+    (setf *window-thread*
+          (sb-thread:make-thread
+           (lambda () (window-thread-main arguments))
+           :name "luv window context")))
+  (loop repeat 3000
+        when (window-open-p)
+          return *window*
+        when *window-startup-error*
+          do (error *window-startup-error*)
+        unless (sb-thread:thread-alive-p *window-thread*)
+          do (error "The luv window thread stopped during startup.")
+        do (sleep 0.01)
+        finally (error "Timed out while opening the luv window.")))
+
+(defun close-window ()
+  "Ask the ambient window to close, wait for teardown, and return no values."
+  (let ((thread *window-thread*))
+    (when (and thread (sb-thread:thread-alive-p thread))
+      (setf *window-close-requested* t)
+      (unless (eq thread sb-thread:*current-thread*)
+        (sb-thread:join-thread thread)))
+    (setf *window-thread* nil
+          *window-close-requested* nil
+          *window-context-ready* nil))
+  (values))
+
+(defun yellow-window (&rest arguments)
+  "Compatibility entry point for `open-window'."
+  (apply #'open-window arguments))
+
 (defun main ()
-  "Open the yellow SDL-backed Vulkan window until it is closed."
-  (yellow-window))
+  "Open the ambient SDL-backed Vulkan window and return immediately."
+  (open-window))
