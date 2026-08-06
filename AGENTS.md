@@ -17,7 +17,7 @@ commit.
 
 # Live Lisp interaction
 
-Use `./luv eval 'FORM'` to evaluate code in the project SLY image. The Common
+Use `./sly eval 'FORM'` to evaluate code in the project SLY image. The Common
 Lisp client opens a fresh Slynk connection for every command; there is
 intentionally no persistent protocol client. Start the `luv` SLY implementation
 in Emacs first when the listener is not already running.

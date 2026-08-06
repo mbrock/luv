@@ -69,13 +69,13 @@ accept the directory-local variables, then run `M-x sly`. If another Lisp is
 already connected, use `M-- M-x sly` and choose `luv`.
 
 The SLY command loads `sly-init.lisp`, which loads `:luv` and starts a durable
-Slynk listener on `127.0.0.1:4005`. The executable `./luv` is a small Common
+Slynk listener on `127.0.0.1:4005`. The executable `./sly` is a small Common
 Lisp Slynk client:
 
 ```sh
-./luv eval '(+ 1 1)'
-./luv eval '(render-color 1.0 0.0 1.0)' --package LUV
-./luv eval '(list *window* *device* *swapchain*)' --package LUV
+./sly eval '(+ 1 1)'
+./sly eval '(render-color 1.0 0.0 1.0)' --package LUV
+./sly eval '(list *window* *device* *swapchain*)' --package LUV
 ```
 
 Each invocation opens a new TCP connection, sends one `:emacs-rex`, waits for

@@ -16,7 +16,7 @@
   (let ((port (parse-integer (or (uiop:getenv "LUV_SLYNK_PORT") "4005"))))
     ;; This file loads before SLY has sent SBCL its Slynk bootstrap form. Wait
     ;; for that form to finish, then open a durable listener for short-lived
-    ;; ./luv clients alongside Emacs's own one-shot connection.
+    ;; ./sly clients alongside Emacs's own one-shot connection.
     (setf cl-user::*luv-slynk-port* :starting)
     (sb-thread:make-thread
      (lambda ()
