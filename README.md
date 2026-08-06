@@ -79,6 +79,16 @@ Lisp Slynk client:
 ./sly inspect '(list *window* *device* *swapchain*)' --package LUV
 ```
 
+The project-local SLY launcher establishes SBCL's `(debug 3)` compiler policy
+before loading the project, and `luv.asd` applies the same policy specifically
+while compiling its source files even outside that launcher. Besides richer
+locations, locals, stepping, and backtraces, this raises SBCL's derived
+`STORE-SOURCE-FORM` policy to `3`, which embeds function source forms in
+compiled FASLs. Consequently tools can recover bodies with
+`function-lambda-expression` instead of seeing only an opaque compiled
+function. This intentionally trades some compile time, code size, and
+optimization freedom for a more inspectable hacking image.
+
 Each invocation opens a new TCP connection, sends one `:emacs-rex`, waits for
 its `:return`, and disconnects. There is no long-lived client or bridge to go
 stale. If evaluation enters the debugger, the client prints the available

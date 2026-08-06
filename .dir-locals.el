@@ -8,5 +8,6 @@
                      "--command" "sbcl"
                      "--dynamic-space-size" "4096"
                      "--noinform"
+                     "--eval" "(proclaim '(optimize (debug 3)))"
                      "--load" ,bootstrap))))
             (setq-local sly-default-lisp 'luv))))))
