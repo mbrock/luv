@@ -76,6 +76,7 @@ Lisp Slynk client:
 ./sly eval '(+ 1 1)'
 ./sly eval '(render-color 1.0 0.0 1.0)' --package LUV
 ./sly eval '(list *window* *device* *swapchain*)' --package LUV
+./sly inspect '(list *window* *device* *swapchain*)' --package LUV
 ```
 
 Each invocation opens a new TCP connection, sends one `:emacs-rex`, waits for
@@ -87,3 +88,11 @@ can ask follow-up questions on stdin too. The client honors `~/.sly-secret`
 when present. Override the endpoint with `LUV_SLYNK_HOST` and
 `LUV_SLYNK_PORT`; the latter must match the value in the SLY process
 environment.
+
+`sly inspect` keeps its connection open and uses Slynk's real object inspector,
+so numbered values can be expanded without serializing or re-evaluating them.
+Enter a value number to inspect it, `l`/`n` to move through inspector history,
+`g` to refresh, `v` for verbose printing, `aNUMBER` to invoke an inspector
+action, `>` to fetch all remaining parts, or `e FORM` to evaluate with `*`
+bound to the current object. Enter `?` for the command summary and `q` to close
+the inspector and release its connection-scoped state.

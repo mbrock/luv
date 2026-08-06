@@ -78,6 +78,11 @@
           "(:emacs-rex (slynk:eval-and-grab-output ~S) ~S t 1)"
           code package))
 
+(defun inspector-request (operation package &rest arguments)
+  (format nil
+          "(:emacs-rex (slynk:eval-for-inspector nil nil '~A~{ ~S~}) ~S t 1)"
+          operation arguments package))
+
 (defun debugger-abort-request (thread package request-id)
   (format nil
           "(:emacs-rex (slynk:throw-to-toplevel) ~S ~S ~D)"
@@ -193,12 +198,138 @@
           (terpri)))
       (write-line value))))
 
-(defun usage (&optional (stream *standard-output*))
-  (format stream "Usage: ./sly eval CODE [--package PACKAGE]~%"))
+(defun call-inspector (stream package operation &rest arguments)
+  (write-packet stream
+                (apply #'inspector-request operation package arguments))
+  (read-eval-return stream package))
 
-(defun parse-eval-arguments (arguments)
+(defun print-inspector-ispec (ispec)
+  (etypecase ispec
+    (string (write-string ispec))
+    (cons
+     (case (first ispec)
+       (:value
+        (destructuring-bind (kind label id) ispec
+          (declare (ignore kind))
+          (format t "[~D] ~A" id label)))
+       (:label
+        (write-string (second ispec)))
+       (:action
+        (destructuring-bind (kind label id) ispec
+          (declare (ignore kind))
+          (format t "[a~D] ~A" id label)))))))
+
+(defun print-inspector (state)
+  (format t "~&~A~%--------------------~%" (getf state :title))
+  (destructuring-bind (ispecs length start end) (getf state :content)
+    (declare (ignore start))
+    (mapc #'print-inspector-ispec ispecs)
+    (when (< end length)
+      (format t "~&… more inspector parts~%")))
+  (fresh-line)
+  (force-output))
+
+(defun join-inspector-chunks (first second)
+  (destructuring-bind (ispecs-1 length-1 start-1 end-1) first
+    (declare (ignore length-1))
+    (destructuring-bind (ispecs-2 length-2 start-2 end-2) second
+      (unless (= end-1 start-2)
+        (error "Non-contiguous inspector chunks: ~D and ~D" end-1 start-2))
+      (list (append ispecs-1 ispecs-2) length-2 start-1 end-2))))
+
+(defun fetch-all-inspector-parts (stream package state)
+  (destructuring-bind (ispecs length start end) (getf state :content)
+    (declare (ignore ispecs start))
+    (if (< end length)
+        (let ((copy (copy-list state)))
+          (setf (getf copy :content)
+                (join-inspector-chunks
+                 (getf state :content)
+                 (call-inspector stream package "slynk:inspector-range"
+                                 end most-positive-fixnum)))
+          copy)
+        state)))
+
+(defun inspector-help ()
+  (format t "Commands: NUMBER inspect value, l back, n forward, g refresh,~%")
+  (format t "          v verbose, > fetch all, aNUMBER run action,~%")
+  (format t "          e FORM evaluate with *=object, q quit~%"))
+
+(defun parse-number (string &optional (start 0))
+  (when (< start (length string))
+    (multiple-value-bind (number end)
+        (parse-integer string :start start :junk-allowed t)
+      (and number (= end (length string)) number))))
+
+(defun run-inspector (code package)
+  (with-slynk-connection (stream)
+    (let ((secret (sly-secret)))
+      (when secret
+        (write-packet stream secret)))
+    (let ((state (call-inspector stream package "slynk:init-inspector" code)))
+      (loop
+        (print-inspector state)
+        (format t "Inspect (? for help): ")
+        (force-output)
+        (let* ((line (read-line *standard-input* nil nil))
+               (command (and line
+                             (string-trim '(#\Space #\Tab) line))))
+          (cond
+            ((or (null command)
+                 (member command '("q" "quit") :test #'string-equal))
+             (return))
+            ((string= command "?")
+             (inspector-help))
+            ((member command '("l" "back") :test #'string-equal)
+             (let ((previous
+                     (call-inspector stream package "slynk:inspector-pop")))
+               (if previous
+                   (setf state previous)
+                   (format t "No previous object.~%"))))
+            ((member command '("n" "next") :test #'string-equal)
+             (let ((next
+                     (call-inspector stream package "slynk:inspector-next")))
+               (if next
+                   (setf state next)
+                   (format t "No next object.~%"))))
+            ((member command '("g" "refresh") :test #'string-equal)
+             (setf state
+                   (call-inspector stream package "slynk:inspector-reinspect")))
+            ((member command '("v" "verbose") :test #'string-equal)
+             (setf state
+                   (call-inspector stream package
+                                   "slynk:inspector-toggle-verbose")))
+            ((string= command ">")
+             (setf state (fetch-all-inspector-parts stream package state)))
+            ((and (> (length command) 2)
+                  (char-equal (char command 0) #\e)
+                  (char= (char command 1) #\Space))
+             (format t "~A~%"
+                     (call-inspector stream package "slynk:inspector-eval"
+                                     (subseq command 2))))
+            ((and (> (length command) 1)
+                  (char-equal (char command 0) #\a)
+                  (parse-number command 1))
+             (let ((new-state
+                     (call-inspector
+                      stream package "slynk::inspector-call-nth-action"
+                      (parse-number command 1))))
+               (when new-state
+                 (setf state new-state))))
+            ((parse-number command)
+             (setf state
+                   (call-inspector stream package "slynk:inspect-nth-part"
+                                   (parse-number command))))
+            (t
+             (format t "Unknown inspector command. Enter ? for help.~%"))))))))
+
+(defun usage (&optional (stream *standard-output*))
+  (format stream "Usage: ./sly eval CODE [--package PACKAGE]~%")
+  (format stream "       ./sly inspect CODE [--package PACKAGE]~%"))
+
+(defun parse-code-arguments (command arguments)
   (unless arguments
-    (error "eval requires Common Lisp source code"))
+    (error "~A requires Common Lisp source code" command))
   (let ((code (pop arguments))
         (package "CL-USER"))
     (loop while arguments
@@ -221,8 +352,14 @@
        (usage)
        0)
       ((string= command "eval")
-       (multiple-value-bind (code package) (parse-eval-arguments arguments)
+       (multiple-value-bind (code package)
+           (parse-code-arguments command arguments)
          (evaluate code package))
+       0)
+      ((string= command "inspect")
+       (multiple-value-bind (code package)
+           (parse-code-arguments command arguments)
+         (run-inspector code package))
        0)
       (t
        (error "Unknown command: ~A" command)))))
