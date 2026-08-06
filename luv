@@ -1,0 +1,144 @@
+#!/usr/bin/env -S sbcl --script
+
+(defpackage #:luv-client
+  (:use #:cl))
+
+(in-package #:luv-client)
+
+(require :sb-bsd-sockets)
+
+(defparameter *host* (or (sb-ext:posix-getenv "LUV_SLYNK_HOST") "127.0.0.1"))
+(defparameter *port*
+  (parse-integer (or (sb-ext:posix-getenv "LUV_SLYNK_PORT") "4005")))
+
+(defun string-octets (string)
+  (sb-ext:string-to-octets string :external-format :utf-8))
+
+(defun octets-string (octets)
+  (sb-ext:octets-to-string octets :external-format :utf-8))
+
+(defun read-exactly (stream length)
+  (let ((octets (make-array length :element-type '(unsigned-byte 8))))
+    (loop with position = 0
+          while (< position length)
+          for end = (read-sequence octets stream :start position)
+          when (= end position)
+            do (error "Slynk closed the connection")
+          do (setf position end))
+    octets))
+
+(defun write-packet (stream payload)
+  (let ((octets (string-octets payload)))
+    (when (> (length octets) #xffffff)
+      (error "Slynk packet exceeds its 24-bit length limit"))
+    (write-sequence
+     (sb-ext:string-to-octets
+      (format nil "~6,'0X" (length octets))
+      :external-format :ascii)
+     stream)
+    (write-sequence octets stream)
+    (force-output stream)))
+
+(defun read-packet (stream)
+  (let* ((header (sb-ext:octets-to-string
+                  (read-exactly stream 6)
+                  :external-format :ascii))
+         (length (parse-integer header :radix 16)))
+    (octets-string (read-exactly stream length))))
+
+(defun sly-secret ()
+  (with-open-file (stream (merge-pathnames #P".sly-secret"
+                                            (user-homedir-pathname))
+                          :if-does-not-exist nil)
+    (and stream (read-line stream nil ""))))
+
+(defun host-address (host)
+  (sb-bsd-sockets:host-ent-address
+   (sb-bsd-sockets:get-host-by-name host)))
+
+(defmacro with-slynk-connection ((stream) &body body)
+  `(let ((socket (make-instance 'sb-bsd-sockets:inet-socket
+                                :type :stream :protocol :tcp)))
+     (unwind-protect
+          (progn
+            (sb-bsd-sockets:socket-connect
+             socket (host-address *host*) *port*)
+            (let ((,stream
+                    (sb-bsd-sockets:socket-make-stream
+                     socket :input t :output t
+                     :element-type '(unsigned-byte 8)
+                     :buffering :none)))
+              (unwind-protect
+                   (progn ,@body)
+                (close ,stream))))
+       (ignore-errors (sb-bsd-sockets:socket-close socket)))))
+
+(defun eval-request (code package)
+  (format nil
+          "(:emacs-rex (slynk:eval-and-grab-output ~S) ~S t 1)"
+          code package))
+
+(defun read-eval-return (stream)
+  (loop
+    for payload = (read-packet stream)
+    for message = (let ((*read-eval* nil)) (read-from-string payload))
+    when (and (consp message)
+              (eq (first message) :return)
+              (eql (third message) 1))
+      do (destructuring-bind (status value) (second message)
+           (ecase status
+             (:ok (return value))
+             (:abort (error "Slynk aborted evaluation: ~A" value))))))
+
+(defun evaluate (code package)
+  (with-slynk-connection (stream)
+    (let ((secret (sly-secret)))
+      (when secret
+        (write-packet stream secret)))
+    (write-packet stream (eval-request code package))
+    (destructuring-bind (output value) (read-eval-return stream)
+      (unless (zerop (length output))
+        (write-string output)
+        (unless (char= (char output (1- (length output))) #\Newline)
+          (terpri)))
+      (write-line value))))
+
+(defun usage (&optional (stream *standard-output*))
+  (format stream "Usage: ./luv eval CODE [--package PACKAGE]~%"))
+
+(defun parse-eval-arguments (arguments)
+  (unless arguments
+    (error "eval requires Common Lisp source code"))
+  (let ((code (pop arguments))
+        (package "CL-USER"))
+    (loop while arguments
+          for option = (pop arguments)
+          do (cond
+               ((string= option "--package")
+                (unless arguments
+                  (error "--package requires a package name"))
+                (setf package (pop arguments)))
+               (t (error "Unknown option: ~A" option))))
+    (values code package)))
+
+(defun main (arguments)
+  (unless arguments
+    (usage *error-output*)
+    (return-from main 2))
+  (let ((command (pop arguments)))
+    (cond
+      ((member command '("-h" "--help") :test #'string=)
+       (usage)
+       0)
+      ((string= command "eval")
+       (multiple-value-bind (code package) (parse-eval-arguments arguments)
+         (evaluate code package))
+       0)
+      (t
+       (error "Unknown command: ~A" command)))))
+
+(handler-case
+    (sb-ext:exit :code (main (cdr sb-ext:*posix-argv*)))
+  (error (condition)
+    (format *error-output* "luv: ~A~%" condition)
+    (sb-ext:exit :code 1)))

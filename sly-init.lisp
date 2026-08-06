@@ -8,10 +8,31 @@
         (pathname (format nil "~A/" configured-home))
         (merge-pathnames #P"quicklisp/" (user-homedir-pathname))))))
 (asdf:load-asd (merge-pathnames #P"luv.asd" *load-truename*))
-(ql:quickload :luv/mcp :silent t)
+(ql:quickload :luv :silent t)
 
-(let ((configured-port (uiop:getenv "LUV_MCP_PORT")))
-  (luv/mcp:start
-   :port (if configured-port
-             (parse-integer configured-port)
-             luv/mcp:*default-port*)))
+(defvar cl-user::*luv-slynk-port* nil)
+
+(unless cl-user::*luv-slynk-port*
+  (let ((port (parse-integer (or (uiop:getenv "LUV_SLYNK_PORT") "4005"))))
+    ;; This file loads before SLY has sent SBCL its Slynk bootstrap form. Wait
+    ;; for that form to finish, then open a durable listener for short-lived
+    ;; ./luv clients alongside Emacs's own one-shot connection.
+    (setf cl-user::*luv-slynk-port* :starting)
+    (sb-thread:make-thread
+     (lambda ()
+       (loop for package = (find-package "SLYNK")
+             for create-server =
+               (and package (find-symbol "CREATE-SERVER" package))
+             when (and create-server (fboundp create-server))
+               do (handler-case
+                      (setf cl-user::*luv-slynk-port*
+                            (funcall create-server
+                                     :port port :dont-close t))
+                    (error (condition)
+                      (setf cl-user::*luv-slynk-port* nil)
+                      (format *error-output*
+                              "Could not start luv Slynk listener: ~A~%"
+                              condition)))
+                  (return)
+             do (sleep 0.05)))
+     :name "luv Slynk listener bootstrap")))

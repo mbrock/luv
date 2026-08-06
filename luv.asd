@@ -7,9 +7,3 @@
   :serial t
   :components ((:file "luv")
                (:file "yellow")))
-
-(asdf:defsystem #:luv/mcp
-  :description "A shared-image cl-mcp server for hacking on luv from SLY and Codex."
-  :depends-on (#:cl-mcp)
-  :serial t
-  :components ((:file "mcp")))

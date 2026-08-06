@@ -14,3 +14,10 @@ but do not turn every commit into a heavyweight verification or review cycle.
 Use a short commit message that describes the iteration. Preserve unrelated
 user changes, and never rewrite or discard existing work just to make a clean
 commit.
+
+# Live Lisp interaction
+
+Use `./luv eval 'FORM'` to evaluate code in the project SLY image. The Common
+Lisp client opens a fresh Slynk connection for every command; there is
+intentionally no persistent protocol client. Start the `luv` SLY implementation
+in Emacs first when the listener is not already running.

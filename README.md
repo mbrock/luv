@@ -52,55 +52,34 @@ native-window setup without creating a device or swapchain, and `(luv:probe)`
 is the original windowless loader/device check. Set `SDL_VIDEODRIVER=wayland`
 to require native Wayland rather than allowing SDL to choose another backend.
 
-Quicklisp supplies ordinary Lisp systems, including `cl-mcp` and the
-dependencies of the locally installed `cl-sdl3`. Nix supplies SBCL, the large
-generated `vk` binding, native SDL/Vulkan/OpenSSL libraries, and `vulkaninfo`.
+Quicklisp supplies ordinary Lisp systems, including the dependencies of the
+locally installed `cl-sdl3`. Nix supplies SBCL, the large generated `vk`
+binding, native SDL/Vulkan libraries, and `vulkaninfo`.
 A Vulkan implementation/ICD still comes from the host graphics stack. If the
 probe cannot see a device, `vulkaninfo --summary` is the first diagnostic to
 try.
 
-## Lisp-aware MCP server
-
-[`cl-ai-project/cl-mcp`](https://github.com/cl-ai-project/cl-mcp) is installed
-as a Quicklisp local project. The preferred workflow runs its TCP server inside
-the same Lisp image as SLY, with the worker pool explicitly disabled.
+## SLY and the one-shot client
 
 This repository's `.dir-locals.el` gives SLY a `luv` implementation that starts
 SBCL through `nix develop`. This does not Nix-package the Lisp dependencies;
-Quicklisp still supplies those. It only ensures OpenSSL, SDL, Vulkan, and the
-other native libraries are in the process environment before SBCL starts. Let
-Emacs accept the directory-local variables, then run `M-x sly`. If another Lisp
-is already connected, use `M-- M-x sly` and choose `luv`.
+Quicklisp still supplies those. It only ensures SDL, Vulkan, and the other
+native libraries are in the process environment before SBCL starts. Let Emacs
+accept the directory-local variables, then run `M-x sly`. If another Lisp is
+already connected, use `M-- M-x sly` and choose `luv`.
 
-The SLY command loads `sly-init.lisp`, which sets up Quicklisp, loads
-`:luv/mcp`, and starts the MCP listener automatically. No REPL incantation is
-needed.
+The SLY command loads `sly-init.lisp`, which loads `:luv` and starts a durable
+Slynk listener on `127.0.0.1:4005`. The executable `./luv` is a small Common
+Lisp Slynk client:
 
-This leaves the SLY REPL usable while a background listener runs on
-`127.0.0.1:12345`. Because `:worker-pool nil` is passed explicitly, Codex MCP
-evaluations, definitions, loaded systems, and objects inhabit that exact Lisp
-process. Check it with `(luv/mcp:status)` and stop only the listener with
-`(luv/mcp:stop)`.
-
-The repository's `.codex/config.toml` runs `nix run .#mcp`, which is now a thin
-stdio-to-TCP bridge rather than another Lisp process. Its effective
-configuration is:
-
-```toml
-[mcp_servers.cl-mcp]
-command = "nix"
-args = ["run", ".#mcp"]
+```sh
+./luv eval '(+ 1 1)'
+./luv eval '(render-color 1.0 0.0 1.0)' --package LUV
+./luv eval '(list *window* *device* *swapchain*)' --package LUV
 ```
 
-Restart Codex or begin a new session after changing MCP configuration. All
-repository paths are derived from the current checkout. Quicklisp defaults to
-`~/quicklisp`; set `QUICKLISP_HOME` if it lives elsewhere.
-
-Start the listener in SLY before starting Codex. The bridge is intentionally
-required, so a missing listener makes the setup failure obvious instead of
-silently creating an unrelated Lisp image. Port overrides must agree on both
-sides: `(luv/mcp:start :port 23456)` and `LUV_MCP_PORT=23456` for Codex.
-
-For debugging or sessions where no SLY image is available, the old isolated
-stdio launcher remains available as `nix run .#mcp-stdio`. It is not used by
-the project Codex configuration.
+Each invocation opens a new TCP connection, sends one `:emacs-rex`, waits for
+its `:return`, and disconnects. There is no long-lived client or bridge to go
+stale. The client honors `~/.sly-secret` when present. Override the endpoint
+with `LUV_SLYNK_HOST` and `LUV_SLYNK_PORT`; the latter must match the value in
+the SLY process environment.
