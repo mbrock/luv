@@ -117,7 +117,10 @@ Live-image discovery uses the same package convention:
 one invocation. Symbol names may be package-qualified directly, so
 `sly edit luv:render-color` and `sly edit RENDER-COLOR --package LUV` are
 equivalent. `describe-package` reports the live package's nicknames, use-list,
-exports, and internal-symbol count. `describe-system` accepts only ASDF systems
+used-by list, shadowing symbols, and internal-symbol count. Every export gets
+one line with its definition kinds (function, macro, variable, type, and so
+on), arglist when available, and the first documentation line. Unbound exports
+are retained as plain symbols. `describe-system` accepts only ASDF systems
 already loaded in the image and reports the live system object, including its
 source file, version, metadata, dependencies, components, and operation state.
 Both commands accept multiple names. `apropos` searches external symbols by

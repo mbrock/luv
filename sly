@@ -338,27 +338,113 @@
               (char= (char string (1- (length string))) #\Newline))
     (terpri)))
 
-(defun evaluate-output-on (stream code &optional (package "CL-USER"))
+(defun evaluate-captured-output-on (stream code &optional (package "CL-USER"))
   (write-packet stream (eval-request code package))
   (destructuring-bind (output value) (read-eval-return stream package)
     (declare (ignore value))
-    (write-result-string output)))
+    output))
+
+(defun evaluate-output-on (stream code &optional (package "CL-USER"))
+  (write-result-string (evaluate-captured-output-on stream code package)))
+
+(defun package-description-form (name)
+  (format nil
+          "(let ((package (or (find-package ~S)
+                              (find-package (string-upcase ~S)))))
+             (unless package
+               (error \"No such package: ~~A\" ~S))
+             (write
+              (list
+              :name (package-name package)
+              :nicknames (package-nicknames package)
+              :documentation (documentation package t)
+              :uses (mapcar #'package-name (package-use-list package))
+              :used-by (mapcar #'package-name (package-used-by-list package))
+              :shadowing (mapcar #'symbol-name
+                                 (package-shadowing-symbols package))
+              :internal-count
+              (loop for symbol being the symbols of package
+                    count (eq (nth-value
+                               1 (find-symbol (symbol-name symbol) package))
+                              :internal))
+              :exports
+              (sort (loop for symbol being the external-symbols of package
+                          collect (symbol-name symbol))
+                    #'string<))
+              :stream *standard-output* :readably t :length nil :level nil))"
+          name name name))
+
+(defun first-line (string)
+  (let ((newline (position #\Newline string)))
+    (subseq string 0 newline)))
+
+(defun print-name-list (label names)
+  (format t "~A: " label)
+  (if names
+      (format t "~{~A~^, ~}~%" names)
+      (format t "(none)~%")))
+
+(defun package-export-kinds (detail)
+  (or (loop for (property value) on detail by #'cddr
+            when (and value
+                      (not (member property
+                                   '(:designator :bounds :flex-score
+                                     :arglist))))
+              collect (string-downcase (property-label property)))
+      '("symbol")))
+
+(defun package-export-documentation (detail)
+  (loop for (property value) on detail by #'cddr
+        when (and (stringp value)
+                  (not (member property '(:designator :arglist))))
+          return (first-line value)))
+
+(defun print-package-export (package name detail)
+  (let ((arglist (and detail (getf detail :arglist)))
+        (documentation (and detail
+                            (package-export-documentation detail))))
+    (format t "  ~A:~A [~{~A~^, ~}]~@[ ~A~]~@[ — ~A~]~%"
+            package name (package-export-kinds detail)
+            arglist documentation)))
+
+(defun print-package-description (description details)
+  (let ((name (getf description :name))
+        (exports (getf description :exports)))
+    (format t "Package ~A~%" name)
+    (print-name-list "Nicknames" (getf description :nicknames))
+    (print-name-list "Uses" (getf description :uses))
+    (print-name-list "Used by" (getf description :used-by))
+    (print-name-list "Shadowing" (getf description :shadowing))
+    (when (getf description :documentation)
+      (format t "Documentation: ~A~%"
+              (first-line (getf description :documentation))))
+    (format t "Internal symbols: ~D~%" (getf description :internal-count))
+    (format t "Exports (~D):~%" (length exports))
+    (dolist (export exports)
+      (print-package-export
+       name export
+       (find export details :test #'string=
+             :key (lambda (detail)
+                    (first (getf detail :designator))))))))
 
 (defun run-describe-packages (names)
   (with-slynk-connection (stream)
     (authenticate stream)
-    (loop for name in names
+    (loop for requested-name in names
           for firstp = t then nil
           unless firstp do (terpri)
-          do (evaluate-output-on
-              stream
-              (format nil
-                      "(let ((package (or (find-package ~S)
-                                          (find-package (string-upcase ~S)))))
-                         (unless package
-                           (error \"No such package: ~~A\" ~S))
-                         (describe package))"
-                      name name name)))))
+          do (let* ((description
+                      (let ((*read-eval* nil))
+                        (read-from-string
+                         (evaluate-captured-output-on
+                          stream (package-description-form requested-name)))))
+                    (name (getf description :name))
+                    (details
+                      (call-query-on
+                       stream "CL-USER"
+                       "slynk-apropos:apropos-list-for-emacs"
+                       "" t nil name)))
+               (print-package-description description details)))))
 
 (defun run-describe-systems (names)
   (with-slynk-connection (stream)
