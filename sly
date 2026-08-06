@@ -78,28 +78,93 @@
           "(:emacs-rex (slynk:eval-and-grab-output ~S) ~S t 1)"
           code package))
 
-(defun debugger-abort-request (thread package)
+(defun debugger-abort-request (thread package request-id)
   (format nil
-          "(:emacs-rex (slynk:throw-to-toplevel) ~S ~S 2)"
-          package thread))
+          "(:emacs-rex (slynk:throw-to-toplevel) ~S ~S ~D)"
+          package thread request-id))
+
+(defun debugger-restart-request (thread level restart package request-id)
+  (format nil
+          "(:emacs-rex (slynk:invoke-nth-restart-for-emacs ~D ~D) ~S ~S ~D)"
+          level restart package thread request-id))
+
+(defun emacs-return-request (thread tag value)
+  (format nil "(:emacs-return ~S ~S ~S)" thread tag value))
+
+(defun print-debugger (condition restarts)
+  (format *error-output* "~&~A~@[~%~A~]~%"
+          (first condition) (second condition))
+  (loop for (name description) in restarts
+        for index from 0
+        do (format *error-output* "  ~D: ~A~@[ — ~A~]~%"
+                   index name description))
+  (format *error-output* "  a: abort evaluation~%"))
+
+(defun choose-restart (condition restarts)
+  (loop
+    (print-debugger condition restarts)
+    (format *error-output* "Restart: ")
+    (force-output *error-output*)
+    (let ((choice (read-line *standard-input* nil nil)))
+      (unless choice
+        (format *error-output* "~&No input; aborting evaluation.~%")
+        (return nil))
+      (cond
+        ((member choice '("a" "abort" "q" "quit") :test #'string-equal)
+         (return nil))
+        (t
+         (let ((index (parse-integer choice :junk-allowed t)))
+           (if (and index
+                    (<= 0 index)
+                    (< index (length restarts)))
+               (return index)
+               (format *error-output* "Please enter a restart number or a.~%"))))))))
 
 (defun read-eval-return (stream package)
-  (let (debug-description)
+  (let ((next-request-id 2))
     (loop
       for payload = (read-packet stream)
       for message = (let ((*read-eval* nil)) (read-from-string payload))
       do (cond
            ((and (consp message)
                  (eq (first message) :debug))
-            ;; A normal SLY client would open its interactive debugger here.
-            ;; Retain its useful condition text, then unwind because this
-            ;; one-shot client has nobody to choose a restart interactively.
-            (let ((condition (fourth message)))
-              (setf debug-description
-                    (format nil "~A~@[~%~A~]"
-                            (first condition) (second condition))))
-            (write-packet stream
-                          (debugger-abort-request (second message) package)))
+            (destructuring-bind
+                (kind thread level condition restarts &rest ignored) message
+              (declare (ignore kind ignored))
+              (let ((restart (choose-restart condition restarts)))
+                (write-packet
+                 stream
+                 (if restart
+                     (debugger-restart-request
+                      thread level restart package next-request-id)
+                     (debugger-abort-request thread package next-request-id)))
+                (incf next-request-id))))
+           ((and (consp message)
+                 (eq (first message) :read-from-minibuffer))
+            (destructuring-bind (kind thread tag prompt initial-value) message
+              (declare (ignore kind))
+              (format *error-output* "~A" prompt)
+              (when initial-value
+                (format *error-output* " [~A]" initial-value))
+              (force-output *error-output*)
+              (write-packet
+               stream
+               (emacs-return-request
+                thread tag (read-line *standard-input* nil nil)))))
+           ((and (consp message)
+                 (eq (first message) :y-or-n-p))
+            (destructuring-bind (kind thread tag question) message
+              (declare (ignore kind))
+              (format *error-output* "~A [y/N] " question)
+              (force-output *error-output*)
+              (let ((answer (read-line *standard-input* nil nil)))
+                (write-packet
+                 stream
+                 (emacs-return-request
+                  thread tag
+                  (and answer
+                       (not (null (member answer '("y" "yes")
+                                          :test #'string-equal)))))))))
            ((and (consp message)
                  (eq (first message) :return)
                  (eql (third message) 1))
@@ -107,8 +172,7 @@
               (ecase status
                 (:ok (return value))
                 (:abort
-                 (error "Remote evaluation failed: ~A"
-                        (or debug-description value))))))))))
+                 (error "Remote evaluation aborted~@[: ~A~]" value)))))))))
 
 (defun evaluate (code package)
   (with-slynk-connection (stream)
