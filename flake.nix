@@ -22,8 +22,8 @@
           # Nixpkgs' vk package handles its unusually large generated binding;
           # ordinary Lisp dependencies, including cl-mcp, stay in Quicklisp.
           lisp = pkgs.sbcl.withPackages (lispPackages: [ lispPackages.vk ]);
-          mcp = pkgs.writeShellApplication {
-            name = "luv-mcp";
+          mcpStdio = pkgs.writeShellApplication {
+            name = "luv-mcp-stdio";
             runtimeInputs = [ lisp ];
             text = ''
               export MCP_PROJECT_ROOT="''${MCP_PROJECT_ROOT:-$PWD}"
@@ -34,8 +34,18 @@
                 --eval '(cl-mcp:run :transport :stdio)'
             '';
           };
+          mcpBridge = pkgs.writeShellApplication {
+            name = "luv-mcp-bridge";
+            runtimeInputs = [ pkgs.python3 ];
+            text = ''
+              exec python3 \
+                /home/mbrock/quicklisp/local-projects/cl-mcp/scripts/stdio_tcp_bridge.py \
+                --host "''${LUV_MCP_HOST:-127.0.0.1}" \
+                --port "''${LUV_MCP_PORT:-12345}"
+            '';
+          };
         in
-        { inherit pkgs lisp mcp nativeLibraryPath; };
+        { inherit pkgs lisp mcpBridge mcpStdio nativeLibraryPath; };
     in
     {
       devShells = forAllSystems (system:
@@ -56,8 +66,9 @@
       packages = forAllSystems (system:
         let env = environmentFor system;
         in {
-          mcp = env.mcp;
-          default = env.mcp;
+          mcp = env.mcpBridge;
+          mcp-stdio = env.mcpStdio;
+          default = env.mcpBridge;
         });
 
       apps = forAllSystems (system:
@@ -65,11 +76,15 @@
         in {
           mcp = {
             type = "app";
-            program = "${env.mcp}/bin/luv-mcp";
+            program = "${env.mcpBridge}/bin/luv-mcp-bridge";
+          };
+          mcp-stdio = {
+            type = "app";
+            program = "${env.mcpStdio}/bin/luv-mcp-stdio";
           };
           default = {
             type = "app";
-            program = "${env.mcp}/bin/luv-mcp";
+            program = "${env.mcpBridge}/bin/luv-mcp-bridge";
           };
         });
     };

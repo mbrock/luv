@@ -2,7 +2,6 @@
 command = "nix"
 args = ["run", "path:/home/mbrock/luv#mcp"]
 cwd = "/home/mbrock/luv"
-env = { CL_MCP_WORKER_POOL_WARMUP = "0" }
 startup_timeout_sec = 120
 tool_timeout_sec = 120
 required = true

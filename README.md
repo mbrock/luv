@@ -57,15 +57,33 @@ try.
 ## Lisp-aware MCP server
 
 [`cl-ai-project/cl-mcp`](https://github.com/cl-ai-project/cl-mcp) is installed
-as a Quicklisp local project. The flake only wraps it with the native libraries
-needed on NixOS. Start its stdio server from the project root with:
+as a Quicklisp local project. The preferred workflow runs its TCP server inside
+the same Lisp image as SLY, with the worker pool explicitly disabled.
 
-```sh
-nix run .#mcp
+This repository's `.dir-locals.el` gives SLY a `luv` implementation that starts
+SBCL through `nix develop`. This does not Nix-package the Lisp dependencies;
+Quicklisp still supplies those. It only ensures OpenSSL, SDL, Vulkan, and the
+other native libraries are in the process environment before SBCL starts. Let
+Emacs accept the directory-local variables, then run `M-x sly`. If another Lisp
+is already connected, use `M-- M-x sly` and choose `luv`.
+
+In the resulting SLY REPL, evaluate:
+
+```lisp
+(asdf:load-asd #P"/home/mbrock/luv/luv.asd")
+(ql:quickload :luv/mcp)
+(luv/mcp:start)
 ```
 
-The repository's `.codex/config.toml` configures this server automatically for
-Codex when the project is trusted. Its effective configuration is:
+This leaves the SLY REPL usable while a background listener runs on
+`127.0.0.1:12345`. Because `:worker-pool nil` is passed explicitly, Codex MCP
+evaluations, definitions, loaded systems, and objects inhabit that exact Lisp
+process. Check it with `(luv/mcp:status)` and stop only the listener with
+`(luv/mcp:stop)`.
+
+The repository's `.codex/config.toml` runs `nix run .#mcp`, which is now a thin
+stdio-to-TCP bridge rather than another Lisp process. Its effective
+configuration is:
 
 ```toml
 [mcp_servers.cl-mcp]
@@ -77,7 +95,11 @@ cwd = "/home/mbrock/luv"
 Restart Codex or begin a new session after changing MCP configuration. If the
 checkout moves, update both absolute paths in `.codex/config.toml`.
 
-The server defaults to isolated worker processes. This is useful while calling
-Vulkan through CFFI because a crashed worker can be replaced. Set
-`MCP_NO_WORKER_POOL=1` only when you specifically want evaluation to happen in
-the server's own Lisp image.
+Start the listener in SLY before starting Codex. The bridge is intentionally
+required, so a missing listener makes the setup failure obvious instead of
+silently creating an unrelated Lisp image. Port overrides must agree on both
+sides: `(luv/mcp:start :port 23456)` and `LUV_MCP_PORT=23456` for Codex.
+
+For debugging or sessions where no SLY image is available, the old isolated
+stdio launcher remains available as `nix run .#mcp-stdio`. It is not used by
+the project Codex configuration.
