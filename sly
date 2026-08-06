@@ -78,6 +78,10 @@
           "(:emacs-rex (slynk:eval-and-grab-output ~S) ~S t 1)"
           code package))
 
+(defun query-request (operation package &rest arguments)
+  (format nil "(:emacs-rex (~A~{ ~S~}) ~S t 1)"
+          operation arguments package))
+
 (defun inspector-request (operation package &rest arguments)
   (format nil
           "(:emacs-rex (slynk:eval-for-inspector nil nil '~A~{ ~S~}) ~S t 1)"
@@ -185,11 +189,23 @@
                 (:abort
                  (error "Remote evaluation aborted~@[: ~A~]" value)))))))))
 
+(defun authenticate (stream)
+  (let ((secret (sly-secret)))
+    (when secret
+      (write-packet stream secret))))
+
+(defun call-query-on (stream package operation &rest arguments)
+  (write-packet stream (apply #'query-request operation package arguments))
+  (read-eval-return stream package))
+
+(defun call-query (package operation &rest arguments)
+  (with-slynk-connection (stream)
+    (authenticate stream)
+    (apply #'call-query-on stream package operation arguments)))
+
 (defun evaluate (code package)
   (with-slynk-connection (stream)
-    (let ((secret (sly-secret)))
-      (when secret
-        (write-packet stream secret)))
+    (authenticate stream)
     (write-packet stream (eval-request code package))
     (destructuring-bind (output value) (read-eval-return stream package)
       (unless (zerop (length output))
@@ -263,9 +279,7 @@
 
 (defun run-inspector (code package)
   (with-slynk-connection (stream)
-    (let ((secret (sly-secret)))
-      (when secret
-        (write-packet stream secret)))
+    (authenticate stream)
     (let ((state (call-inspector stream package "slynk:init-inspector" code)))
       (loop
         (print-inspector state)
@@ -323,9 +337,156 @@
             (t
              (format t "Unknown inspector command. Enter ? for help.~%"))))))))
 
+(defun write-result-string (string)
+  (write-string string)
+  (unless (or (zerop (length string))
+              (char= (char string (1- (length string))) #\Newline))
+    (terpri)))
+
+(defun run-describe (name package functionp)
+  (write-result-string
+   (call-query package
+               (if functionp
+                   "slynk:describe-function"
+                   "slynk:describe-symbol")
+               name)))
+
+(defun apropos-designator (designator)
+  (destructuring-bind (name package externalp) designator
+    (if package
+        (format nil "~A~A~A" package (if externalp ":" "::") name)
+        name)))
+
+(defun property-label (property)
+  (string-capitalize
+   (substitute #\Space #\- (symbol-name property))))
+
+(defun print-apropos-result (result)
+  (format t "~A~%" (apropos-designator (getf result :designator)))
+  (loop for (property value) on result by #'cddr
+        unless (member property '(:designator :bounds :flex-score))
+          do (format t "  ~A: ~A~%" (property-label property)
+                     (if (eq value :not-documented)
+                         "(not documented)"
+                         value))))
+
+(defun run-apropos (pattern package external-only case-sensitive)
+  (let ((results
+          (call-query (or package "CL-USER")
+                      "slynk-apropos:apropos-list-for-emacs"
+                      pattern external-only case-sensitive package)))
+    (if results
+        (mapc #'print-apropos-result results)
+        (format t "No apropos matches for ~S.~%" pattern))))
+
+(defparameter *xref-types*
+  '(("calls" . :calls)
+    ("calls-who" . :calls-who)
+    ("references" . :references)
+    ("binds" . :binds)
+    ("sets" . :sets)
+    ("macroexpands" . :macroexpands)
+    ("specializes" . :specializes)
+    ("callers" . :callers)
+    ("callees" . :callees)))
+
+(defparameter *xref-use-types*
+  '(:calls :macroexpands :binds :references :sets :specializes))
+
+(defun location-component (location kind)
+  (second (find kind (rest location) :key #'first)))
+
+(defun file-line-and-column (file position)
+  (when (and (integerp position) (plusp position))
+    (ignore-errors
+      (with-open-file (stream file)
+        (loop with line = 1
+              with column = 1
+              repeat (1- position)
+              for character = (read-char stream nil nil)
+              while character
+              if (char= character #\Newline)
+                do (setf line (1+ line) column 1)
+              else
+                do (incf column)
+              finally (return (values line column)))))))
+
+(defun format-location (location)
+  (if (and (consp location) (eq (first location) :location))
+      (let ((file (location-component location :file))
+            (buffer (location-component location :buffer))
+            (position (location-component location :position)))
+        (cond
+          (file
+           (multiple-value-bind (line column)
+               (file-line-and-column file position)
+             (if line
+                 (format nil "~A:~D:~D" file line column)
+                 (format nil "~A~@[@~D~]" file position))))
+          (buffer
+           (format nil "buffer ~A~@[@~D~]" buffer position))
+          (t (format nil "~S" location))))
+      (format nil "~S" location)))
+
+(defun first-snippet-line (location)
+  (let ((snippet (and (consp location)
+                      (location-component location :snippet))))
+    (when snippet
+      (let* ((trimmed
+               (string-trim '(#\Space #\Tab #\Newline #\Return) snippet))
+             (newline (position #\Newline trimmed)))
+        (subseq trimmed 0 newline)))))
+
+(defun print-xref (xref)
+  (destructuring-bind (name location) xref
+    (format t "~A~%  ~A~%" name (format-location location))
+    (let ((snippet (first-snippet-line location)))
+      (when (and snippet (plusp (length snippet)))
+        (format t "  ~A~%" snippet)))))
+
+(defun print-xrefs (results)
+  (cond
+    ((eq results :not-implemented)
+     nil)
+    (results
+     (mapc #'print-xref results)
+     t)))
+
+(defun run-xref (type name package)
+  (with-slynk-connection (stream)
+    (authenticate stream)
+    (if (string-equal type "uses")
+        (let ((found nil))
+          (dolist (xref-type *xref-use-types*)
+            (let ((results
+                    (call-query-on stream package "slynk:xref"
+                                   xref-type name)))
+              (when (and (not (eq results :not-implemented)) results)
+                (setf found t)
+                (format t "~&~A:~%" (property-label xref-type))
+                (print-xrefs results))))
+          (unless found
+            (format t "No xrefs for ~A.~%" name)))
+        (let* ((entry (assoc type *xref-types* :test #'string-equal))
+               (results
+                 (call-query-on stream package "slynk:xref"
+                                (cdr entry) name)))
+          (cond
+            ((eq results :not-implemented)
+             (format t "Xref type ~A is not implemented by this Lisp.~%" type))
+            ((null results)
+             (format t "No ~A xrefs for ~A.~%" type name))
+            (t (print-xrefs results)))))))
+
 (defun usage (&optional (stream *standard-output*))
   (format stream "Usage: ./sly eval CODE [--package PACKAGE]~%")
-  (format stream "       ./sly inspect CODE [--package PACKAGE]~%"))
+  (format stream "       ./sly inspect CODE [--package PACKAGE]~%")
+  (format stream "       ./sly describe NAME [--function] [--package PACKAGE]~%")
+  (format stream "       ./sly apropos PATTERN [--package PACKAGE] [--external-only]~%")
+  (format stream "                            [--case-sensitive]~%")
+  (format stream "       ./sly xref TYPE NAME [--package PACKAGE]~%")
+  (format stream "~%Xref types: calls, calls-who, references, binds, sets,~%")
+  (format stream "            macroexpands, specializes, callers, callees, uses~%"))
 
 (defun parse-code-arguments (command arguments)
   (unless arguments
@@ -341,6 +502,64 @@
                 (setf package (pop arguments)))
                (t (error "Unknown option: ~A" option))))
     (values code package)))
+
+(defun parse-describe-arguments (arguments)
+  (unless arguments
+    (error "describe requires a symbol name"))
+  (let ((name (pop arguments))
+        (package "CL-USER")
+        (functionp nil))
+    (loop while arguments
+          for option = (pop arguments)
+          do (cond
+               ((string= option "--package")
+                (unless arguments
+                  (error "--package requires a package name"))
+                (setf package (pop arguments)))
+               ((string= option "--function")
+                (setf functionp t))
+               (t (error "Unknown describe option: ~A" option))))
+    (values name package functionp)))
+
+(defun parse-apropos-arguments (arguments)
+  (unless arguments
+    (error "apropos requires a search pattern"))
+  (let ((pattern (pop arguments))
+        (package nil)
+        (external-only nil)
+        (case-sensitive nil))
+    (loop while arguments
+          for option = (pop arguments)
+          do (cond
+               ((string= option "--package")
+                (unless arguments
+                  (error "--package requires a package name"))
+                (setf package (pop arguments)))
+               ((string= option "--external-only")
+                (setf external-only t))
+               ((string= option "--case-sensitive")
+                (setf case-sensitive t))
+               (t (error "Unknown apropos option: ~A" option))))
+    (values pattern package external-only case-sensitive)))
+
+(defun parse-xref-arguments (arguments)
+  (unless (cdr arguments)
+    (error "xref requires a type and symbol name"))
+  (let ((type (pop arguments))
+        (name (pop arguments))
+        (package "CL-USER"))
+    (unless (or (string-equal type "uses")
+                (assoc type *xref-types* :test #'string-equal))
+      (error "Unknown xref type: ~A" type))
+    (loop while arguments
+          for option = (pop arguments)
+          do (cond
+               ((string= option "--package")
+                (unless arguments
+                  (error "--package requires a package name"))
+                (setf package (pop arguments)))
+               (t (error "Unknown xref option: ~A" option))))
+    (values type name package)))
 
 (defun main (arguments)
   (unless arguments
@@ -360,6 +579,21 @@
        (multiple-value-bind (code package)
            (parse-code-arguments command arguments)
          (run-inspector code package))
+       0)
+      ((string= command "describe")
+       (multiple-value-bind (name package functionp)
+           (parse-describe-arguments arguments)
+         (run-describe name package functionp))
+       0)
+      ((string= command "apropos")
+       (multiple-value-bind (pattern package external-only case-sensitive)
+           (parse-apropos-arguments arguments)
+         (run-apropos pattern package external-only case-sensitive))
+       0)
+      ((string= command "xref")
+       (multiple-value-bind (type name package)
+           (parse-xref-arguments arguments)
+         (run-xref type name package))
        0)
       (t
        (error "Unknown command: ~A" command)))))

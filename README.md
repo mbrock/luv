@@ -96,3 +96,20 @@ Enter a value number to inspect it, `l`/`n` to move through inspector history,
 action, `>` to fetch all remaining parts, or `e FORM` to evaluate with `*`
 bound to the current object. Enter `?` for the command summary and `q` to close
 the inspector and release its connection-scoped state.
+
+Live-image discovery uses the same package convention:
+
+```sh
+./sly describe RENDER-COLOR --package LUV
+./sly describe RENDER-COLOR --function --package LUV
+./sly apropos COLOR --package LUV
+./sly xref calls RENDER-COLOR --package LUV
+./sly xref uses '*WINDOW*' --package LUV
+```
+
+`apropos` searches internal and external symbols by default; add
+`--external-only` or `--case-sensitive` to narrow it. Xref types are `calls`,
+`calls-who`, `references`, `binds`, `sets`, `macroexpands`, `specializes`,
+`callers`, and `callees`. The aggregate `uses` query runs all of SLY's ordinary
+use-site queries and groups the nonempty results. File-backed xrefs are printed
+as `file:line:column` with their first source-snippet line.
