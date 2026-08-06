@@ -100,16 +100,21 @@ the inspector and release its connection-scoped state.
 Live-image discovery uses the same package convention:
 
 ```sh
-./sly describe RENDER-COLOR --package LUV
+./sly describe RENDER-COLOR OPEN-WINDOW --package LUV
 ./sly describe RENDER-COLOR --function --package LUV
-./sly apropos COLOR --package LUV
+./sly apropos COLOR WINDOW --package LUV
+./sly apropos RUN-WINDOW-CONTEXT --package LUV --all
+./sly edit RENDER-COLOR OPEN-WINDOW --package LUV
 ./sly xref calls RENDER-COLOR --package LUV
 ./sly xref uses '*WINDOW*' --package LUV
 ```
 
-`apropos` searches internal and external symbols by default; add
-`--external-only` or `--case-sensitive` to narrow it. Xref types are `calls`,
-`calls-who`, `references`, `binds`, `sets`, `macroexpands`, `specializes`,
-`callers`, and `callees`. The aggregate `uses` query runs all of SLY's ordinary
-use-site queries and groups the nonempty results. File-backed xrefs are printed
-as `file:line:column` with their first source-snippet line.
+`describe`, `apropos`, `edit`, and `xref` accept multiple names or patterns in
+one invocation. `apropos` searches external symbols by default, like SLY's
+usual Apropos command; add `--all` to include internal symbols or
+`--case-sensitive` to narrow the match. `edit` is the terminal equivalent of
+SLY's `M-.` definition lookup. Xref types are `calls`, `calls-who`,
+`references`, `binds`, `sets`, `macroexpands`, `specializes`, `callers`, and
+`callees`. The aggregate `uses` query runs all of SLY's ordinary use-site
+queries and groups the nonempty results. File-backed definitions and xrefs are
+printed as `file:line:column` with their first source-snippet line.
