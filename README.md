@@ -67,13 +67,9 @@ other native libraries are in the process environment before SBCL starts. Let
 Emacs accept the directory-local variables, then run `M-x sly`. If another Lisp
 is already connected, use `M-- M-x sly` and choose `luv`.
 
-In the resulting SLY REPL, evaluate:
-
-```lisp
-(asdf:load-asd #P"/home/mbrock/luv/luv.asd")
-(ql:quickload :luv/mcp)
-(luv/mcp:start)
-```
+The SLY command loads `sly-init.lisp`, which sets up Quicklisp, loads
+`:luv/mcp`, and starts the MCP listener automatically. No REPL incantation is
+needed.
 
 This leaves the SLY REPL usable while a background listener runs on
 `127.0.0.1:12345`. Because `:worker-pool nil` is passed explicitly, Codex MCP
