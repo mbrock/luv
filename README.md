@@ -102,6 +102,8 @@ Live-image discovery uses the same package convention:
 ```sh
 ./sly describe RENDER-COLOR OPEN-WINDOW --package LUV
 ./sly describe RENDER-COLOR --function --package LUV
+./sly describe-package luv
+./sly describe-system luv
 ./sly apropos COLOR WINDOW --package LUV
 ./sly apropos RUN-WINDOW-CONTEXT --package LUV --all
 ./sly edit luv:render-color
@@ -114,10 +116,14 @@ Live-image discovery uses the same package convention:
 `describe`, `apropos`, `edit`, and `xref` accept multiple names or patterns in
 one invocation. Symbol names may be package-qualified directly, so
 `sly edit luv:render-color` and `sly edit RENDER-COLOR --package LUV` are
-equivalent. `apropos` searches external symbols by default, like SLY's usual
-Apropos command; add `--all` to include internal symbols or `--case-sensitive`
-to narrow the match. `edit` is the terminal equivalent of SLY's `M-.`
-definition lookup. Xref types are `calls`, `calls-who`,
+equivalent. `describe-package` reports the live package's nicknames, use-list,
+exports, and internal-symbol count. `describe-system` accepts only ASDF systems
+already loaded in the image and reports the live system object, including its
+source file, version, metadata, dependencies, components, and operation state.
+Both commands accept multiple names. `apropos` searches external symbols by
+default, like SLY's usual Apropos command; add `--all` to include internal
+symbols or `--case-sensitive` to narrow the match. `edit` is the terminal
+equivalent of SLY's `M-.` definition lookup. Xref types are `calls`, `calls-who`,
 `references`, `binds`, `sets`, `macroexpands`, `specializes`, `callers`, and
 `callees`. The aggregate `uses` query runs all of SLY's ordinary use-site
 queries and groups the nonempty results. File-backed definitions and xrefs are

@@ -338,6 +338,44 @@
               (char= (char string (1- (length string))) #\Newline))
     (terpri)))
 
+(defun evaluate-output-on (stream code &optional (package "CL-USER"))
+  (write-packet stream (eval-request code package))
+  (destructuring-bind (output value) (read-eval-return stream package)
+    (declare (ignore value))
+    (write-result-string output)))
+
+(defun run-describe-packages (names)
+  (with-slynk-connection (stream)
+    (authenticate stream)
+    (loop for name in names
+          for firstp = t then nil
+          unless firstp do (terpri)
+          do (evaluate-output-on
+              stream
+              (format nil
+                      "(let ((package (or (find-package ~S)
+                                          (find-package (string-upcase ~S)))))
+                         (unless package
+                           (error \"No such package: ~~A\" ~S))
+                         (describe package))"
+                      name name name)))))
+
+(defun run-describe-systems (names)
+  (with-slynk-connection (stream)
+    (authenticate stream)
+    (loop for name in names
+          for firstp = t then nil
+          unless firstp do (terpri)
+          do (evaluate-output-on
+              stream
+              (format nil
+                      "(let ((name (string-downcase ~S)))
+                         (unless (member name (asdf:already-loaded-systems)
+                                         :test #'string=)
+                           (error \"ASDF system ~~S is not loaded.\" name))
+                         (describe (asdf:find-system name)))"
+                      name)))))
+
 (defun run-describe (names package functionp)
   (with-slynk-connection (stream)
     (authenticate stream)
@@ -516,6 +554,8 @@
   (format stream "Usage: ./sly eval CODE [--package PACKAGE]~%")
   (format stream "       ./sly inspect CODE [--package PACKAGE]~%")
   (format stream "       ./sly describe NAME... [--function] [--package PACKAGE]~%")
+  (format stream "       ./sly describe-package PACKAGE...~%")
+  (format stream "       ./sly describe-system SYSTEM...~%")
   (format stream "       ./sly apropos PATTERN... [--package PACKAGE] [--all]~%")
   (format stream "                               [--case-sensitive]~%")
   (format stream "       ./sly edit NAME... [--package PACKAGE]~%")
@@ -537,6 +577,11 @@
                 (setf package (pop arguments)))
                (t (error "Unknown option: ~A" option))))
     (values code package)))
+
+(defun parse-names (command arguments)
+  (unless arguments
+    (error "~A requires at least one name" command))
+  arguments)
 
 (defun parse-describe-arguments (arguments)
   (unless arguments
@@ -656,6 +701,12 @@
        (multiple-value-bind (names package functionp)
            (parse-describe-arguments arguments)
          (run-describe names package functionp))
+       0)
+      ((string= command "describe-package")
+       (run-describe-packages (parse-names command arguments))
+       0)
+      ((string= command "describe-system")
+       (run-describe-systems (parse-names command arguments))
        0)
       ((string= command "apropos")
        (multiple-value-bind (patterns package external-only case-sensitive)
