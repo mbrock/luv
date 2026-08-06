@@ -81,8 +81,9 @@ Lisp Slynk client:
 Each invocation opens a new TCP connection, sends one `:emacs-rex`, waits for
 its `:return`, and disconnects. There is no long-lived client or bridge to go
 stale. If evaluation enters the debugger, the client prints the available
-restarts and waits for a restart number on stdin; `a`, `abort`, `q`, or EOF
-aborts the evaluation. Interactive restarts can ask follow-up questions on
-stdin too. The client honors `~/.sly-secret` when present. Override the
-endpoint with `LUV_SLYNK_HOST` and `LUV_SLYNK_PORT`; the latter must match the
-value in the SLY process environment.
+restarts and the initial Slynk backtrace, then waits for a restart number on
+stdin; `a`, `abort`, `q`, or EOF aborts the evaluation. Interactive restarts
+can ask follow-up questions on stdin too. The client honors `~/.sly-secret`
+when present. Override the endpoint with `LUV_SLYNK_HOST` and
+`LUV_SLYNK_PORT`; the latter must match the value in the SLY process
+environment.

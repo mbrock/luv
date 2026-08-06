@@ -91,18 +91,23 @@
 (defun emacs-return-request (thread tag value)
   (format nil "(:emacs-return ~S ~S ~S)" thread tag value))
 
-(defun print-debugger (condition restarts)
+(defun print-debugger (condition restarts frames)
   (format *error-output* "~&~A~@[~%~A~]~%"
           (first condition) (second condition))
   (loop for (name description) in restarts
         for index from 0
         do (format *error-output* "  ~D: ~A~@[ — ~A~]~%"
                    index name description))
-  (format *error-output* "  a: abort evaluation~%"))
+  (format *error-output* "  a: abort evaluation~%")
+  (when frames
+    (format *error-output* "~%Backtrace:~%")
+    (loop for frame in frames
+          do (format *error-output* "  ~D: ~A~%"
+                     (first frame) (second frame)))))
 
-(defun choose-restart (condition restarts)
+(defun choose-restart (condition restarts frames)
+  (print-debugger condition restarts frames)
   (loop
-    (print-debugger condition restarts)
     (format *error-output* "Restart: ")
     (force-output *error-output*)
     (let ((choice (read-line *standard-input* nil nil)))
@@ -129,9 +134,10 @@
            ((and (consp message)
                  (eq (first message) :debug))
             (destructuring-bind
-                (kind thread level condition restarts &rest ignored) message
+                (kind thread level condition restarts frames &rest ignored)
+                message
               (declare (ignore kind ignored))
-              (let ((restart (choose-restart condition restarts)))
+              (let ((restart (choose-restart condition restarts frames)))
                 (write-packet
                  stream
                  (if restart
