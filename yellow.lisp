@@ -138,8 +138,18 @@
                (+ (get-internal-real-time)
                   (* duration internal-time-units-per-second)))))
     (loop
+      (process-render-requests)
       (when *window-close-requested*
         (return))
+      #+darwin
+      (multiple-value-bind (event event-type)
+          (sdl3:poll-event*)
+        (declare (ignore event))
+        (when (closing-event-p event-type)
+          (return)))
+      #+darwin
+      (sleep 0.01)
+      #-darwin
       (multiple-value-bind (event event-type)
           (sdl3:wait-event-timeout* 50)
         (declare (ignore event))
@@ -152,12 +162,12 @@
   (and *window* *instance* *physical-device* *surface*
        *device* *swapchain* *queue*))
 
-(defun render-color (red green blue &optional (alpha 1.0))
-  "Clear the ambient swapchain to RED, GREEN, BLUE, and ALPHA, then present it."
-  (sb-thread:with-mutex (*render-lock*)
-    (unless (active-context-p)
-      (error "No luv window is open. Call LUV:OPEN-WINDOW first."))
-    (let ((color
+(defun %render-color (red green blue alpha)
+  (with-native-graphics-environment
+    (sb-thread:with-mutex (*render-lock*)
+      (unless (active-context-p)
+        (error "No luv window is open. Call LUV:OPEN-WINDOW first."))
+      (let ((color
             (map 'vector
                  (lambda (component) (coerce component 'single-float))
                  (list red green blue alpha)))
@@ -196,8 +206,57 @@
                   :wait-semaphores (list render-done)
                   :swapchains (list *swapchain*)
                   :image-indices (list image-index)))
-                (vk:queue-wait-idle *queue*)))))))
+                  (vk:queue-wait-idle *queue*)))))))
+      (values red green blue alpha))))
+
+(defun submit-render-request (red green blue alpha)
+  "Ask the native window thread to render, then return its result."
+  (unless (active-context-p)
+    (error "No luv window is open. Call LUV:OPEN-WINDOW first."))
+  (let ((request (make-render-request
+                  :red red :green green :blue blue :alpha alpha)))
+    (sb-thread:with-mutex (*render-request-lock*)
+      (setf *render-requests* (nconc *render-requests* (list request))))
+    (sb-thread:wait-on-semaphore (render-request-completion request))
+    (when (render-request-error request)
+      (error (render-request-error request)))
     (values red green blue alpha)))
+
+(defun finish-render-request (request error)
+  (setf (render-request-error request) error)
+  (sb-thread:signal-semaphore (render-request-completion request)))
+
+(defun take-render-requests ()
+  (sb-thread:with-mutex (*render-request-lock*)
+    (prog1 *render-requests*
+      (setf *render-requests* nil))))
+
+(defun process-render-requests ()
+  "Render every request currently waiting for the native window thread."
+  (dolist (request (take-render-requests))
+    (handler-case
+        (progn
+          (%render-color
+           (render-request-red request)
+           (render-request-green request)
+           (render-request-blue request)
+           (render-request-alpha request))
+          (finish-render-request request nil))
+      (error (condition)
+        (finish-render-request request condition)))))
+
+(defun fail-pending-render-requests (condition)
+  (dolist (request (take-render-requests))
+    (finish-render-request request condition)))
+
+(defun render-color (red green blue &optional (alpha 1.0))
+  "Clear the ambient swapchain to RED, GREEN, BLUE, and ALPHA, then present it."
+  #+darwin
+  (if (trivial-main-thread:main-thread-p)
+      (%render-color red green blue alpha)
+      (submit-render-request red green blue alpha))
+  #-darwin
+  (%render-color red green blue alpha))
 
 (defun run-window-context (&key duration (stream *standard-output*))
   "Own the logical device and swapchain until the ambient window closes."
@@ -229,7 +288,7 @@
                      *swapchain-extent* extent)
                (unwind-protect
                     (progn
-                      (render-color 1.0 1.0 0.0)
+                      (%render-color 1.0 1.0 0.0 1.0)
                       (setf *window-context-ready* t)
                       (format stream
                               "Luv window: ~Dx~D, ~A, queue family ~D.~%"
@@ -239,6 +298,11 @@
                               "Try (luv:render-color 1.0 0.0 1.0), or close the window.~%")
                       (wait-for-window-close duration))
                  (sb-thread:with-mutex (*render-lock*)
+                   (fail-pending-render-requests
+                    (make-condition
+                     'simple-error
+                     :format-control
+                     "The luv window closed before rendering."))
                    (setf *swapchain* nil
                          *queue* nil
                          *swapchain-images* nil
@@ -251,9 +315,10 @@
 (defun run-window
     (&key (width 800) (height 600) duration (stream *standard-output*))
   "Own the SDL/Vulkan context and event loop on the window thread."
-  (unless (sdl3:init :video)
-    (error "SDL video initialization failed: ~A" (sdl3:get-error)))
-  (unwind-protect
+  (with-native-graphics-environment
+    (unless (sdl3:init :video)
+      (error "SDL video initialization failed: ~A" (sdl3:get-error)))
+    (unwind-protect
        (let ((window
                (sdl3:create-window
                 "luv — Vulkan yellow" width height '(:vulkan :resizable))))
@@ -263,15 +328,7 @@
          (unwind-protect
               (let* ((extensions (sdl-vulkan-instance-extensions))
                      (instance-create-info
-                       (vk:make-instance-create-info
-                        :application-info
-                        (vk:make-application-info
-                         :application-name "luv"
-                         :application-version (vk:make-version 0 0 1)
-                         :engine-name "luv"
-                         :engine-version (vk:make-version 0 0 1)
-                         :api-version vk:+api-version-1-0+)
-                        :enabled-extension-names extensions)))
+                       (luv-instance-create-info "luv window" extensions)))
                 (vk-utils:with-instance (instance instance-create-info)
                   (setf *instance* instance)
                   (multiple-value-bind (raw-surface surface)
@@ -298,44 +355,68 @@
            (unwind-protect
                 (sdl3:destroy-window *window*)
              (setf *window* nil)))
-    (sdl3:quit))
+      (sdl3:quit)))
   (values))
 
 (defun window-open-p ()
   "Return true while luv's ambient window context is ready for rendering."
   (and *window-context-ready*
-       *window-thread*
-       (sb-thread:thread-alive-p *window-thread*)
+       *window-context-running*
        (active-context-p)))
 
 (defun window-thread-main (arguments)
-  (handler-case
-      (apply #'run-window arguments)
-    (error (condition)
-      (setf *window-startup-error* condition)))
-  (setf *window-context-ready* nil))
+  (unwind-protect
+       (handler-case
+           (apply #'run-window arguments)
+         (error (condition)
+           (setf *window-startup-error* condition)))
+    (setf *window-context-ready* nil
+          *window-context-running* nil)))
+
+(defun start-window-context (arguments)
+  "Start the platform-owned window context and remember its owner thread."
+  #+darwin
+  (progn
+    (setf *window-thread* (trivial-main-thread:main-thread))
+    ;; Always dispatch from a worker. If OPEN-WINDOW itself was called on
+    ;; thread zero, trivial-main-thread can then move its continuation aside
+    ;; before giving Cocoa the real process main thread.
+    (sb-thread:make-thread
+     (lambda ()
+       (trivial-main-thread:call-in-main-thread
+        (lambda () (window-thread-main arguments))))
+     :name "luv Cocoa main-thread dispatcher"))
+  #-darwin
+  (setf *window-thread*
+        (sb-thread:make-thread
+         (lambda () (window-thread-main arguments))
+         :name "luv window context")))
+
+(defun wait-for-window-context-stop ()
+  (loop repeat 3000
+        unless *window-context-running* do (return)
+        do (sleep 0.01)
+        finally (error "Timed out while closing the luv window.")))
 
 (defun open-window
     (&key (width 800) (height 600) duration (stream *standard-output*))
   "Open an ambient SDL/Vulkan context, present yellow, and return its window."
-  (when (and *window-thread* (sb-thread:thread-alive-p *window-thread*))
+  (when *window-context-running*
     (error "A luv window is already open."))
   (setf *window-close-requested* nil
         *window-context-ready* nil
-        *window-startup-error* nil)
+        *window-startup-error* nil
+        *window-context-running* t)
   (let ((arguments
           (list :width width :height height
                 :duration duration :stream stream)))
-    (setf *window-thread*
-          (sb-thread:make-thread
-           (lambda () (window-thread-main arguments))
-           :name "luv window context")))
+    (start-window-context arguments))
   (loop repeat 3000
         when (window-open-p)
           return *window*
         when *window-startup-error*
           do (error *window-startup-error*)
-        unless (sb-thread:thread-alive-p *window-thread*)
+        unless *window-context-running*
           do (error "The luv window thread stopped during startup.")
         do (sleep 0.01)
         finally (error "Timed out while opening the luv window.")))
@@ -343,13 +424,20 @@
 (defun close-window ()
   "Ask the ambient window to close, wait for teardown, and return no values."
   (let ((thread *window-thread*))
-    (when (and thread (sb-thread:thread-alive-p thread))
+    (declare (ignorable thread))
+    (when *window-context-running*
       (setf *window-close-requested* t)
-      (unless (eq thread sb-thread:*current-thread*)
-        (sb-thread:join-thread thread)))
+      #-darwin
+      (when (and thread
+                 (sb-thread:thread-alive-p thread)
+                 (not (eq thread sb-thread:*current-thread*)))
+        (sb-thread:join-thread thread))
+      #+darwin
+      (wait-for-window-context-stop))
     (setf *window-thread* nil
           *window-close-requested* nil
-          *window-context-ready* nil))
+          *window-context-ready* nil
+          *window-context-running* nil))
   (values))
 
 (defun yellow-window (&rest arguments)

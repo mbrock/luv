@@ -7,7 +7,7 @@
     (if configured-home
         (pathname (format nil "~A/" configured-home))
         (merge-pathnames #P"quicklisp/" (user-homedir-pathname))))))
-(ql:quickload :sdl3 :silent t)
+(ql:quickload '(:sdl3 :rove) :silent t)
 (asdf:clear-system :vk)
 (asdf:initialize-source-registry
  `(:source-registry

@@ -136,11 +136,20 @@
                (return index)
                (format *error-output* "Please enter a restart number or a.~%"))))))))
 
+(defun new-features-packet-p (payload)
+  ;; Slynk sends implementation feature symbols before the return value. Some
+  ;; are qualified by packages that do not exist in this tiny standalone
+  ;; client, and the feature list is informational here, so do not READ it.
+  (let ((prefix "(:new-features"))
+    (and (<= (length prefix) (length payload))
+         (string-equal prefix payload :end2 (length prefix)))))
+
 (defun read-eval-return (stream package)
   (let ((next-request-id 2))
     (loop
       for payload = (read-packet stream)
-      for message = (let ((*read-eval* nil)) (read-from-string payload))
+      for message = (unless (new-features-packet-p payload)
+                      (let ((*read-eval* nil)) (read-from-string payload)))
       do (cond
            ((and (consp message)
                  (eq (first message) :debug))

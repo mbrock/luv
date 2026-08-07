@@ -13,7 +13,11 @@
                             :policy '(optimize (debug 3)))
       (funcall thunk)))
   :depends-on (#:sdl3
-               #:vk)
+               #:vk
+               #+darwin
+               #:float-features
+               #+darwin
+               #:trivial-main-thread)
   :serial t
   :components ((:file "luv")
                (:file "yellow")))

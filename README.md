@@ -31,7 +31,7 @@ ambient Vulkan window:
 
 ```lisp
 (load #P"~/quicklisp/setup.lisp")
-(ql:quickload :sdl3)
+(ql:quickload '(:sdl3 :rove))
 (asdf:clear-system :vk)
 (asdf:initialize-source-registry
  `(:source-registry
@@ -64,9 +64,16 @@ Quicklisp supplies ordinary Lisp systems, including the dependencies of the
 locally installed `cl-sdl3`. The Vulkan 1.4.358 `vk` binding is generated and
 vendored under `vendor/vk`; Nix supplies SBCL, native SDL/Vulkan libraries,
 and `vulkaninfo`.
-A Vulkan implementation/ICD still comes from the host graphics stack. If the
-probe cannot see a device, `vulkaninfo --summary` is the first diagnostic to
-try.
+A Vulkan implementation/ICD still comes from the host graphics stack. On
+Apple Silicon, the development shell supplies MoltenVK and points the Vulkan
+loader at it; the same code also accepts KosmicKrisp when its SDK driver is
+selected. If the probe cannot see a device, `vulkaninfo --summary` is the first
+diagnostic to try.
+
+On macOS, SDL and the Vulkan context run on the process main thread as Cocoa
+requires. `open-window` still returns to the SLY evaluation thread, so
+`render-color` and `close-window` retain the same live REPL interface as on
+Linux.
 
 ## SLY and the one-shot client
 

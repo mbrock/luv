@@ -61,7 +61,33 @@
 (defvar *window-close-requested* nil)
 (defvar *window-context-ready* nil)
 (defvar *window-startup-error* nil)
+(defvar *window-context-running* nil)
 (defvar *render-lock* (sb-thread:make-mutex :name "luv render lock"))
+(defvar *render-request-lock*
+  (sb-thread:make-mutex :name "luv render request lock"))
+(defvar *render-requests* nil)
+
+(defstruct render-request
+  red
+  green
+  blue
+  alpha
+  (completion (sb-thread:make-semaphore :count 0) :read-only t)
+  error)
+
+(defmacro with-native-graphics-environment (&body body)
+  "Run BODY with the floating-point environment expected by native drivers."
+  #+darwin
+  `(float-features:with-float-traps-masked t ,@body)
+  #-darwin
+  `(progn ,@body))
+
+(defun call-on-native-window-thread (function)
+  "Call FUNCTION on the thread required by the native window system."
+  #+darwin
+  (trivial-main-thread:call-in-main-thread function :blocking t)
+  #-darwin
+  (funcall function))
 
 (cffi:defctype raw-vk-surface-khr
   #.(if (= 8 (cffi:foreign-type-size :pointer))
@@ -93,37 +119,58 @@
           :vendor-id (vk:vendor-id properties)
           :device-id (vk:device-id properties))))
 
+(defun available-instance-extension-names ()
+  "Return the Vulkan instance extensions advertised by the active loader."
+  (mapcar #'vk:extension-name
+          (vk:enumerate-instance-extension-properties)))
+
+(defun luv-instance-create-info (application-name extensions)
+  "Create instance info for APPLICATION-NAME and the requested EXTENSIONS.
+
+Enable portability enumeration only when the active loader advertises it.
+MoltenVK needs it, while native drivers and KosmicKrisp do not."
+  (let* ((available (available-instance-extension-names))
+         (portability-extension
+           vk:+khr-portability-enumeration-extension-name+)
+         (portability-p
+           (member portability-extension available :test #'string=)))
+    (vk:make-instance-create-info
+     :flags (and portability-p (list :enumerate-portability))
+     :application-info
+     (vk:make-application-info
+      :application-name application-name
+      :application-version (vk:make-version 0 0 1)
+      :engine-name "luv"
+      :engine-version (vk:make-version 0 0 1)
+      :api-version vk:+api-version-1-0+)
+     :enabled-extension-names
+     (if portability-p
+         (adjoin portability-extension extensions :test #'string=)
+         extensions))))
+
 (defun probe (&optional (stream *standard-output*))
   "Load Vulkan, create an instance, and report the visible physical devices.
 
 The returned property list is also convenient for experimentation at the
 REPL.  The Vulkan instance is destroyed before this function returns."
-  (let ((loader-version (vk:enumerate-instance-version))
-        (create-info
-          (vk:make-instance-create-info
-           :application-info
-           (vk:make-application-info
-            :application-name "luv"
-            :application-version (vk:make-version 0 0 1)
-            :engine-name "luv"
-            :engine-version (vk:make-version 0 0 1)
-            ;; Request only the baseline API for this loader smoke test.
-            :api-version vk:+api-version-1-0+))))
-    (vk-utils:with-instance (instance create-info)
-      (let ((devices (mapcar #'physical-device-info
-                             (vk:enumerate-physical-devices instance))))
-        (format stream "Vulkan loader API: ~A~%"
-                (format-api-version loader-version))
-        (format stream "Physical devices: ~D~%" (length devices))
-        (loop for device in devices
-              for index from 0
-              do (format stream "  [~D] ~A (~A, API ~A)~%"
-                         index
-                         (getf device :name)
-                         (getf device :type)
-                         (getf device :api-version)))
-        (list :loader-api-version (format-api-version loader-version)
-              :physical-devices devices)))))
+  (with-native-graphics-environment
+    (let ((loader-version (vk:enumerate-instance-version))
+          (create-info (luv-instance-create-info "luv" nil)))
+      (vk-utils:with-instance (instance create-info)
+        (let ((devices (mapcar #'physical-device-info
+                               (vk:enumerate-physical-devices instance))))
+          (format stream "Vulkan loader API: ~A~%"
+                  (format-api-version loader-version))
+          (format stream "Physical devices: ~D~%" (length devices))
+          (loop for device in devices
+                for index from 0
+                do (format stream "  [~D] ~A (~A, API ~A)~%"
+                           index
+                           (getf device :name)
+                           (getf device :type)
+                           (getf device :api-version)))
+          (list :loader-api-version (format-api-version loader-version)
+                :physical-devices devices))))))
 
 (defun sdl-vulkan-instance-extensions ()
   "Return the Vulkan instance extensions required by SDL's video backend."
@@ -162,15 +209,16 @@ REPL.  The Vulkan instance is destroyed before this function returns."
     (let ((raw-surface (cffi:mem-ref surface-out 'raw-vk-surface-khr)))
       (values raw-surface (vk:make-surface-khr-wrapper raw-surface)))))
 
-(defun surface-probe (&optional (stream *standard-output*))
+(defun %surface-probe (stream)
   "Create an SDL window and report the Vulkan surface visible through it.
 
-SDL owns the native windowing details (Wayland on this machine); luv keeps
-using vk directly for Vulkan objects and queries.  The window, surface, and
-instance are all destroyed before this function returns."
-  (unless (sdl3:init :video)
-    (error "SDL video initialization failed: ~A" (sdl3:get-error)))
-  (unwind-protect
+SDL owns the native windowing details (Wayland or Cocoa); luv keeps using vk
+directly for Vulkan objects and queries.  The window, surface, and instance
+are all destroyed before this function returns."
+  (with-native-graphics-environment
+    (unless (sdl3:init :video)
+      (error "SDL video initialization failed: ~A" (sdl3:get-error)))
+    (unwind-protect
        (let ((window (sdl3:create-window
                       "luv Vulkan surface probe" 800 600
                       '(:vulkan :resizable :hidden))))
@@ -179,15 +227,8 @@ instance are all destroyed before this function returns."
          (unwind-protect
               (let* ((extensions (sdl-vulkan-instance-extensions))
                      (create-info
-                       (vk:make-instance-create-info
-                        :application-info
-                        (vk:make-application-info
-                         :application-name "luv"
-                         :application-version (vk:make-version 0 0 1)
-                         :engine-name "luv"
-                         :engine-version (vk:make-version 0 0 1)
-                         :api-version vk:+api-version-1-0+)
-                        :enabled-extension-names extensions)))
+                       (luv-instance-create-info
+                        "luv surface probe" extensions)))
                 (vk-utils:with-instance (instance create-info)
                   (multiple-value-bind (raw-surface surface)
                       (create-sdl-vulkan-surface window instance)
@@ -253,4 +294,8 @@ instance are all destroyed before this function returns."
                        raw-surface
                        (cffi:null-pointer))))))
            (sdl3:destroy-window window)))
-    (sdl3:quit)))
+      (sdl3:quit))))
+
+(defun surface-probe (&optional (stream *standard-output*))
+  "Run the native-window Vulkan surface probe on its required UI thread."
+  (call-on-native-window-thread (lambda () (%surface-probe stream))))
