@@ -11,7 +11,8 @@
            #:open-headless
            #:close-window
            #:window-open-p
-           #:render-color))
+           #:render-color
+           #:capture-color))
 
 (in-package #:luv)
 
@@ -242,7 +243,10 @@
       :image-color-space (vk:color-space surface-format)
       :image-extent extent
       :image-array-layers 1
-      :image-usage (list :transfer-dst)
+      :image-usage
+      (if (member :transfer-src (vk:supported-usage-flags capabilities))
+          (list :transfer-dst :transfer-src)
+          (list :transfer-dst))
       :image-sharing-mode :exclusive
       :pre-transform (vk:current-transform capabilities)
       :composite-alpha
@@ -278,7 +282,31 @@
      :subresource-range range))
    src-stage dst-stage))
 
-(defun record-color-clear (command-buffer image color)
+(defun copy-region-for-extent (extent)
+  (vk:make-buffer-image-copy
+   :image-subresource
+   (vk:make-image-subresource-layers
+    :aspect-mask (list :color)
+    :mip-level 0
+    :base-array-layer 0
+    :layer-count 1)
+   :image-extent
+   (vk:make-extent-3d
+    :width (vk:width extent)
+    :height (vk:height extent)
+    :depth 1)))
+
+(defun host-read-buffer-barrier (buffer size)
+  (vk:make-buffer-memory-barrier
+   :src-access-mask (list :transfer-write)
+   :dst-access-mask (list :host-read)
+   :src-queue-family-index vk:+queue-family-ignored+
+   :dst-queue-family-index vk:+queue-family-ignored+
+   :buffer buffer
+   :size size))
+
+(defun record-color-clear
+    (command-buffer image color &key copy-buffer copy-size copy-extent)
   (let ((range (color-subresource-range)))
     (vk:begin-command-buffer
      command-buffer
@@ -292,11 +320,31 @@
      command-buffer image :transfer-dst-optimal
      (vk:make-clear-color-value :float-32 color)
      (list range))
-    (transition-swapchain-image
-     command-buffer image range
-     :transfer-dst-optimal :present-src-khr
-     (list :transfer-write) nil
-     (list :transfer) (list :bottom-of-pipe))
+    (if copy-buffer
+        (progn
+          (transition-swapchain-image
+           command-buffer image range
+           :transfer-dst-optimal :transfer-src-optimal
+           (list :transfer-write) (list :transfer-read)
+           (list :transfer) (list :transfer))
+          (vk:cmd-copy-image-to-buffer
+           command-buffer image :transfer-src-optimal copy-buffer
+           (list (copy-region-for-extent copy-extent)))
+          (vk:cmd-pipeline-barrier
+           command-buffer nil
+           (list (host-read-buffer-barrier copy-buffer copy-size))
+           nil
+           (list :transfer) (list :host))
+          (transition-swapchain-image
+           command-buffer image range
+           :transfer-src-optimal :present-src-khr
+           (list :transfer-read) nil
+           (list :transfer) (list :bottom-of-pipe)))
+        (transition-swapchain-image
+         command-buffer image range
+         :transfer-dst-optimal :present-src-khr
+         (list :transfer-write) nil
+         (list :transfer) (list :bottom-of-pipe)))
     (vk:end-command-buffer command-buffer)))
 
 (defun active-context-p ()
@@ -348,6 +396,165 @@
                   :image-indices (list image-index)))
                 (vk:queue-wait-idle *queue*)))))))
     (values red green blue alpha)))
+
+(defun compatible-memory-type-p (memory-type-bits index)
+  (not (zerop (logand memory-type-bits (ash 1 index)))))
+
+(defun find-host-visible-memory-type (memory-requirements)
+  (cffi:with-foreign-object
+      (memory-properties '(:struct %vk:physical-device-memory-properties))
+    (%vk:get-physical-device-memory-properties
+     (vk:raw-handle *physical-device*)
+     memory-properties)
+    (let ((memory-type-count
+            (cffi:foreign-slot-value
+             memory-properties
+             '(:struct %vk:physical-device-memory-properties)
+             '%vk:memory-type-count))
+          (memory-types
+            (cffi:foreign-slot-pointer
+             memory-properties
+             '(:struct %vk:physical-device-memory-properties)
+             '%vk:memory-types)))
+      (or (loop for index below memory-type-count
+                for memory-type =
+                   (cffi:mem-aptr memory-types '(:struct %vk:memory-type) index)
+                for flags =
+                   (cffi:foreign-slot-value
+                    memory-type
+                    '(:struct %vk:memory-type)
+                    '%vk:property-flags)
+                when (and (compatible-memory-type-p
+                           (vk:memory-type-bits memory-requirements)
+                           index)
+                          (member :host-visible flags)
+                          (member :host-coherent flags))
+                  return index)
+          (error "No host-visible, host-coherent memory type can receive the capture.")))))
+
+(defun write-byte-string (string stream)
+  (loop for character across string
+        do (write-byte (char-code character) stream)))
+
+(defun write-swapchain-ppm (pathname mapped-data width height format)
+  (with-open-file (stream pathname
+                          :direction :output
+                          :if-exists :supersede
+                          :if-does-not-exist :create
+                          :element-type '(unsigned-byte 8))
+    (write-byte-string (format nil "P6~%~D ~D~%255~%" width height) stream)
+    (loop for pixel below (* width height)
+          for offset = (* pixel 4)
+          do (ecase format
+               ((:b8g8r8a8-srgb :b8g8r8a8-unorm)
+                (write-byte (cffi:mem-aref mapped-data :uint8 (+ offset 2))
+                            stream)
+                (write-byte (cffi:mem-aref mapped-data :uint8 (+ offset 1))
+                            stream)
+                (write-byte (cffi:mem-aref mapped-data :uint8 offset)
+                            stream))
+               ((:r8g8b8a8-srgb :r8g8b8a8-unorm)
+                (write-byte (cffi:mem-aref mapped-data :uint8 offset)
+                            stream)
+                (write-byte (cffi:mem-aref mapped-data :uint8 (+ offset 1))
+                            stream)
+                (write-byte (cffi:mem-aref mapped-data :uint8 (+ offset 2))
+                            stream))))))
+
+(defun capture-current-image (pathname red green blue alpha)
+  (unless (active-context-p)
+    (error "No luv headless context is open. Call LUV:OPEN-HEADLESS first."))
+  (unless (member :transfer-src
+                  (vk:supported-usage-flags
+                   (vk:get-physical-device-surface-capabilities-khr
+                    *physical-device* *surface*)))
+    (error "The headless surface does not support transfer-source captures."))
+  (let* ((width (vk:width *swapchain-extent*))
+         (height (vk:height *swapchain-extent*))
+         (buffer-size (* width height 4))
+         (format (vk:format *surface-format*))
+         (color
+           (map 'vector
+                (lambda (component) (coerce component 'single-float))
+                (list red green blue alpha)))
+         (buffer-create-info
+           (vk:make-buffer-create-info
+            :size buffer-size
+            :usage (list :transfer-dst)
+            :sharing-mode :exclusive))
+         (pool-create-info
+           (vk:make-command-pool-create-info
+            :queue-family-index *queue-family*)))
+    (vk-utils:with-buffer (buffer *device* buffer-create-info)
+      (let* ((requirements
+               (vk:get-buffer-memory-requirements *device* buffer))
+             (memory-create-info
+               (vk:make-memory-allocate-info
+                :allocation-size (vk:size requirements)
+                :memory-type-index
+                (find-host-visible-memory-type requirements))))
+        (vk-utils:with-memory (memory *device* memory-create-info)
+          (vk:bind-buffer-memory *device* buffer memory 0)
+          (vk-utils:with-command-pool
+              (command-pool *device* pool-create-info)
+            (vk-utils:with-command-buffers
+                (command-buffers *device*
+                 (vk:make-command-buffer-allocate-info
+                  :command-pool command-pool
+                  :level :primary
+                  :command-buffer-count 1))
+              (vk-utils:with-semaphore
+                  (image-ready *device* (vk:make-semaphore-create-info))
+                (vk-utils:with-semaphore
+                    (render-done *device* (vk:make-semaphore-create-info))
+                  (let* ((image-index
+                           (vk:acquire-next-image-khr
+                            *device* *swapchain* #xffffffffffffffff
+                            image-ready))
+                         (command-buffer (first command-buffers)))
+                    (record-color-clear
+                     command-buffer
+                     (nth image-index *swapchain-images*)
+                     color
+                     :copy-buffer buffer
+                     :copy-size buffer-size
+                     :copy-extent *swapchain-extent*)
+                    (vk:queue-submit
+                     *queue*
+                     (list
+                      (vk:make-submit-info
+                       :wait-semaphores (list image-ready)
+                       :wait-dst-stage-mask (list :transfer)
+                       :command-buffers (list command-buffer)
+                       :signal-semaphores (list render-done))))
+                    (vk:queue-present-khr
+                     *queue*
+                     (vk:make-present-info-khr
+                      :wait-semaphores (list render-done)
+                      :swapchains (list *swapchain*)
+                      :image-indices (list image-index)))
+                    (vk:queue-wait-idle *queue*)
+                    (cffi:with-foreign-object (mapped-data :pointer)
+                      (vk:map-memory *device* memory 0 buffer-size mapped-data)
+                      (unwind-protect
+                           (write-swapchain-ppm
+                            pathname
+                            (cffi:mem-ref mapped-data :pointer)
+                            width height format)
+                        (vk:unmap-memory *device* memory))))))))))))
+  pathname)
+
+(defun %capture-color (pathname red green blue alpha)
+  (sb-thread:with-mutex (*render-lock*)
+    (capture-current-image pathname red green blue alpha)))
+
+(defun capture-color
+    (pathname red green blue &optional (alpha 1.0))
+  "Render a color into the headless swapchain and write a binary PPM capture."
+  (if (eq *context-thread* sb-thread:*current-thread*)
+      (%capture-color pathname red green blue alpha)
+      (sb-thread:with-mutex (*render-lock*)
+        (capture-current-image pathname red green blue alpha))))
 
 (defun finish-render-request (request error)
   (setf (render-request-error request) error)

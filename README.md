@@ -43,8 +43,13 @@ a real `VK_EXT_headless_surface` swapchain without SDL or a display server:
 (luv:headless-probe)
 (luv:open-headless :width 320 :height 240)
 (luv:render-color 0.2 0.4 1.0)
+(luv:capture-color #P"capture.ppm" 0.2 0.4 1.0)
 (luv:close-window)
 ```
+
+`capture-color` renders into the current headless swapchain image, copies that
+surface image back to host memory, and writes a binary PPM. Convert it with
+`pnmtopng capture.ppm > capture.png` if your viewer does not open PPM files.
 
 The ordinary `:luv` system still owns the SDL-backed native window path:
 
