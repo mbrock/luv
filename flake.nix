@@ -17,6 +17,7 @@
           nativeLibraryPath = nixpkgs.lib.makeLibraryPath (
             [
               pkgs.libffi
+              pkgs.mesa
               pkgs.sdl3
               pkgs.sdl3-image
               pkgs.sdl3-mixer
@@ -26,14 +27,20 @@
               pkgs.moltenvk
             ]
           );
+          lavapipeIcd =
+            {
+              x86_64-linux = "lvp_icd.x86_64.json";
+              aarch64-linux = "lvp_icd.aarch64.json";
+            }.${system} or null;
           # The generated vk binding is vendored in this repository. Keep its
           # ordinary dependencies available without installing Nixpkgs' vk.
           lisp = pkgs.sbcl.withPackages (lispPackages: [
             lispPackages.alexandria
             lispPackages.cffi
+            lispPackages.rove
           ]);
         in
-        { inherit pkgs lisp nativeLibraryPath; };
+        { inherit pkgs lisp nativeLibraryPath lavapipeIcd; };
     in
     {
       devShells = forAllSystems (system:
@@ -43,14 +50,20 @@
             packages = [
               env.lisp
               env.pkgs.libffi
+              env.pkgs.mesa
               env.pkgs.python3
               env.pkgs.pkg-config
               env.pkgs.sdl3
               env.pkgs.vulkan-tools
             ];
             LD_LIBRARY_PATH = env.nativeLibraryPath;
-            VK_DRIVER_FILES = env.pkgs.lib.optionalString env.pkgs.stdenv.isDarwin
-              "${env.pkgs.moltenvk}/share/vulkan/icd.d/MoltenVK_icd.json";
+            VK_DRIVER_FILES =
+              if env.pkgs.stdenv.isDarwin then
+                "${env.pkgs.moltenvk}/share/vulkan/icd.d/MoltenVK_icd.json"
+              else if env.lavapipeIcd != null then
+                "${env.pkgs.mesa}/share/vulkan/icd.d/${env.lavapipeIcd}"
+              else
+                "";
           };
         });
     };

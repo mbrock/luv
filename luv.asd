@@ -21,3 +21,18 @@
   :serial t
   :components ((:file "luv")
                (:file "yellow")))
+
+(asdf:defsystem #:luv/headless
+  :description "Headless Vulkan-only entry points for luv."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  #+sbcl
+  :around-compile
+  #+sbcl
+  (lambda (thunk)
+    (with-compilation-unit (:override t
+                            :policy '(optimize (debug 3)))
+      (funcall thunk)))
+  :depends-on (#:vk)
+  :serial t
+  :components ((:file "headless")))

@@ -23,6 +23,8 @@
            #:*queue*
            #:probe
            #:surface-probe
+           #:headless-probe
+           #:open-headless
            #:open-window
            #:close-window
            #:window-open-p
@@ -57,6 +59,7 @@
 (defvar *queue-family* nil)
 (defvar *surface-format* nil)
 (defvar *swapchain-extent* nil)
+(defvar *headless-extent* nil)
 (defvar *window-thread* nil)
 (defvar *window-close-requested* nil)
 (defvar *window-context-ready* nil)
@@ -183,6 +186,16 @@ REPL.  The Vulkan instance is destroyed before this function returns."
             collect (cffi:foreign-string-to-lisp
                      (cffi:mem-aref names :pointer index))))))
 
+(defun headless-vulkan-instance-extensions ()
+  "Return the instance extensions required for a real Vulkan headless surface."
+  (let ((extensions (list vk:+khr-surface-extension-name+
+                          vk:+ext-headless-surface-extension-name+)))
+    (dolist (extension extensions)
+      (unless (member extension (available-instance-extension-names)
+                      :test #'string=)
+        (error "The Vulkan loader does not advertise ~A." extension)))
+    extensions))
+
 (defun surface-capabilities-info (capabilities)
   "Return the immediately useful parts of Vulkan surface CAPABILITIES."
   (let* ((extent (vk:current-extent capabilities))
@@ -299,3 +312,63 @@ are all destroyed before this function returns."
 (defun surface-probe (&optional (stream *standard-output*))
   "Run the native-window Vulkan surface probe on its required UI thread."
   (call-on-native-window-thread (lambda () (%surface-probe stream))))
+
+(defun headless-probe (&optional (stream *standard-output*))
+  "Create a VK_EXT_headless_surface surface and report its Vulkan support."
+  (with-native-graphics-environment
+    (let* ((extensions (headless-vulkan-instance-extensions))
+           (create-info
+             (luv-instance-create-info "luv headless probe" extensions)))
+      (vk-utils:with-instance (instance create-info)
+        (vk-utils:with-headless-surface-ext
+            (surface instance (vk:make-headless-surface-create-info-ext))
+          (let* ((device (first (vk:enumerate-physical-devices instance)))
+                 (capabilities
+                   (and device
+                        (vk:get-physical-device-surface-capabilities-khr
+                         device surface)))
+                 (formats
+                   (and device
+                        (vk:get-physical-device-surface-formats-khr
+                         device surface)))
+                 (present-modes
+                   (and device
+                        (vk:get-physical-device-surface-present-modes-khr
+                         device surface)))
+                 (present-queues
+                   (and device
+                        (loop for index below
+                                (length
+                                 (vk:get-physical-device-queue-family-properties
+                                  device))
+                              when (vk:get-physical-device-surface-support-khr
+                                    device index surface)
+                                collect index)))
+                 (result
+                   (list
+                    :instance-extensions extensions
+                    :device (and device (physical-device-info device))
+                    :capabilities
+                    (and capabilities
+                         (surface-capabilities-info capabilities))
+                    :formats
+                    (mapcar (lambda (surface-format)
+                              (list (vk:format surface-format)
+                                    (vk:color-space surface-format)))
+                            formats)
+                    :present-modes present-modes
+                    :present-queue-families present-queues)))
+            (format stream "Headless Vulkan extensions: ~{~A~^, ~}~%"
+                    extensions)
+            (format stream "Physical device: ~A~%"
+                    (getf (getf result :device) :name))
+            (let ((extent
+                    (getf (getf result :capabilities) :current-extent)))
+              (if (eq extent :variable)
+                  (format stream "Surface extent: chosen by swapchain~%")
+                  (format stream "Surface extent: ~{~D~^x~}~%" extent)))
+            (format stream "Surface formats: ~D; present modes: ~{~A~^, ~}~%"
+                    (length formats) present-modes)
+            (format stream "Present-capable queue families: ~{~D~^, ~}~%"
+                    present-queues)
+            result))))))

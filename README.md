@@ -26,6 +26,28 @@ Enter the reproducible development environment:
 nix develop
 ```
 
+On a headless Linux server, the shell points the Vulkan loader at Mesa's
+Lavapipe software ICD. That is enough to load the Vulkan-only system and create
+a real `VK_EXT_headless_surface` swapchain without SDL or a display server:
+
+```lisp
+(asdf:clear-system :vk)
+(asdf:initialize-source-registry
+ `(:source-registry
+   (:tree ,(namestring (truename "vendor/vk/")))
+   :inherit-configuration))
+(asdf:load-asd (truename "vendor/vk/vk.asd"))
+(asdf:load-asd (truename "luv.asd"))
+(asdf:load-system :luv/headless)
+(luv:probe)
+(luv:headless-probe)
+(luv:open-headless :width 320 :height 240)
+(luv:render-color 0.2 0.4 1.0)
+(luv:close-window)
+```
+
+The ordinary `:luv` system still owns the SDL-backed native window path:
+
 Then start `sbcl --dynamic-space-size 6144`, load the ASDF system, and open the
 ambient Vulkan window:
 

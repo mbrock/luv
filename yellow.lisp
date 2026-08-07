@@ -32,20 +32,25 @@
   (let ((current (vk:current-extent capabilities)))
     (if (/= #xffffffff (vk:width current))
         current
-        (multiple-value-bind (success width height)
-            (sdl3:get-window-size-in-pixels *window*)
-          (unless success
-            (error "SDL could not report the window's pixel size: ~A"
-                   (sdl3:get-error)))
-          (let ((minimum (vk:min-image-extent capabilities))
-                (maximum (vk:max-image-extent capabilities)))
-            (vk:make-extent-2d
-             :width (clamp-to-range width
-                                    (vk:width minimum)
-                                    (vk:width maximum))
-             :height (clamp-to-range height
-                                     (vk:height minimum)
-                                     (vk:height maximum))))))))
+        (let ((minimum (vk:min-image-extent capabilities))
+              (maximum (vk:max-image-extent capabilities)))
+          (flet ((clamped-extent (width height)
+                   (vk:make-extent-2d
+                    :width (clamp-to-range width
+                                           (vk:width minimum)
+                                           (vk:width maximum))
+                    :height (clamp-to-range height
+                                            (vk:height minimum)
+                                            (vk:height maximum)))))
+            (if *window*
+                (multiple-value-bind (success width height)
+                    (sdl3:get-window-size-in-pixels *window*)
+                  (unless success
+                    (error "SDL could not report the window's pixel size: ~A"
+                           (sdl3:get-error)))
+                  (clamped-extent width height))
+                (clamped-extent (vk:width *headless-extent*)
+                                (vk:height *headless-extent*))))))))
 
 (defun desired-swapchain-image-count (capabilities)
   "Request one more image than the surface minimum, respecting a finite maximum."
@@ -158,8 +163,23 @@
       (when (and deadline (>= (get-internal-real-time) deadline))
         (return)))))
 
+(defun wait-for-headless-close (&optional duration)
+  "Service queued renders without relying on an SDL event source."
+  (let ((deadline
+          (and duration
+               (+ (get-internal-real-time)
+                  (* duration internal-time-units-per-second)))))
+    (loop
+      (process-render-requests)
+      (when *window-close-requested*
+        (return))
+      (sleep 0.01)
+      (when (and deadline (>= (get-internal-real-time) deadline))
+        (return)))))
+
 (defun active-context-p ()
-  (and *window* *instance* *physical-device* *surface*
+  (and (or *window* *headless-extent*)
+       *instance* *physical-device* *surface*
        *device* *swapchain* *queue*))
 
 (defun %render-color (red green blue alpha)
@@ -291,12 +311,15 @@
                       (%render-color 1.0 1.0 0.0 1.0)
                       (setf *window-context-ready* t)
                       (format stream
-                              "Luv window: ~Dx~D, ~A, queue family ~D.~%"
+                              "Luv ~A: ~Dx~D, ~A, queue family ~D.~%"
+                              (if *window* "window" "headless surface")
                               (vk:width extent) (vk:height extent)
                               (vk:format surface-format) queue-family)
                       (format stream
-                              "Try (luv:render-color 1.0 0.0 1.0), or close the window.~%")
-                      (wait-for-window-close duration))
+                              "Try (luv:render-color 1.0 0.0 1.0), or close the context.~%")
+                      (if *window*
+                          (wait-for-window-close duration)
+                          (wait-for-headless-close duration)))
                  (sb-thread:with-mutex (*render-lock*)
                    (fail-pending-render-requests
                     (make-condition
@@ -310,7 +333,8 @@
         (sb-thread:with-mutex (*render-lock*)
           (setf *device* nil
                 *queue-family* nil
-                *surface-format* nil))))))
+                *surface-format* nil
+                *headless-extent* nil))))))
 
 (defun run-window
     (&key (width 800) (height 600) duration (stream *standard-output*))
@@ -358,6 +382,33 @@
       (sdl3:quit)))
   (values))
 
+(defun run-headless
+    (&key (width 800) (height 600) duration (stream *standard-output*))
+  "Own a VK_EXT_headless_surface context without creating an SDL window."
+  (with-native-graphics-environment
+    (let* ((extensions (headless-vulkan-instance-extensions))
+           (instance-create-info
+             (luv-instance-create-info "luv headless" extensions)))
+      (vk-utils:with-instance (instance instance-create-info)
+        (setf *instance* instance)
+        (unwind-protect
+             (vk-utils:with-headless-surface-ext
+                 (surface instance (vk:make-headless-surface-create-info-ext))
+               (setf *surface* surface
+                     *headless-extent*
+                     (vk:make-extent-2d :width width :height height))
+               (unwind-protect
+                    (progn
+                      (setf *physical-device*
+                            (first (vk:enumerate-physical-devices instance)))
+                      (unless *physical-device*
+                        (error "Vulkan found no physical devices."))
+                      (run-window-context :duration duration :stream stream))
+                 (setf *physical-device* nil
+                       *surface* nil)))
+          (setf *instance* nil)))))
+  (values))
+
 (defun window-open-p ()
   "Return true while luv's ambient window context is ready for rendering."
   (and *window-context-ready*
@@ -368,6 +419,15 @@
   (unwind-protect
        (handler-case
            (apply #'run-window arguments)
+         (error (condition)
+           (setf *window-startup-error* condition)))
+    (setf *window-context-ready* nil
+          *window-context-running* nil)))
+
+(defun headless-thread-main (arguments)
+  (unwind-protect
+       (handler-case
+           (apply #'run-headless arguments)
          (error (condition)
            (setf *window-startup-error* condition)))
     (setf *window-context-ready* nil
@@ -420,6 +480,41 @@
           do (error "The luv window thread stopped during startup.")
         do (sleep 0.01)
         finally (error "Timed out while opening the luv window.")))
+
+(defun open-headless
+    (&key (width 800) (height 600) duration (stream *standard-output*))
+  "Open an ambient headless Vulkan context, present yellow, and return T."
+  (when *window-context-running*
+    (error "A luv context is already open."))
+  (setf *window-close-requested* nil
+        *window-context-ready* nil
+        *window-startup-error* nil
+        *window-context-running* t)
+  (let ((arguments
+          (list :width width :height height
+                :duration duration :stream stream)))
+    #+darwin
+    (progn
+      (setf *window-thread* (trivial-main-thread:main-thread))
+      (sb-thread:make-thread
+       (lambda ()
+         (trivial-main-thread:call-in-main-thread
+          (lambda () (headless-thread-main arguments))))
+       :name "luv Cocoa headless dispatcher"))
+    #-darwin
+    (setf *window-thread*
+          (sb-thread:make-thread
+           (lambda () (headless-thread-main arguments))
+           :name "luv headless context")))
+  (loop repeat 3000
+        when (window-open-p)
+          return t
+        when *window-startup-error*
+          do (error *window-startup-error*)
+        unless *window-context-running*
+          do (error "The luv headless context stopped during startup.")
+        do (sleep 0.01)
+        finally (error "Timed out while opening the luv headless context.")))
 
 (defun close-window ()
   "Ask the ambient window to close, wait for teardown, and return no values."
