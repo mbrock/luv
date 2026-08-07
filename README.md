@@ -104,6 +104,24 @@ Linux.
 
 ## SLY and the one-shot client
 
+The server-friendly workflow does not need Emacs. Inside `nix develop`,
+`./sly` can start a durable Slynk image by itself, loaded with `:luv/headless`:
+
+```sh
+./sly start
+./sly eval '(probe)' --package LUV
+./sly eval '(headless-probe)' --package LUV
+./sly eval '(open-headless :width 160 :height 100)' --package LUV
+./sly eval '(capture-color #P"capture.ppm" 0.2 0.4 1.0)' --package LUV
+./sly eval '(close-window)' --package LUV
+./sly stop
+```
+
+Normal Slynk-backed commands auto-start the server if it is not already
+listening. `./sly status` reports the pid/socket state, and `./sly log` prints
+the server log tail. The connection-free `./sly parinfer` command still works
+without starting anything.
+
 This repository's `.dir-locals.el` gives SLY a `luv` implementation that starts
 SBCL through `nix develop`. This does not Nix-package the Lisp dependencies;
 Quicklisp still supplies those. It only ensures SDL, Vulkan, and the other
@@ -111,9 +129,9 @@ native libraries are in the process environment before SBCL starts. Let Emacs
 accept the directory-local variables, then run `M-x sly`. If another Lisp is
 already connected, use `M-- M-x sly` and choose `luv`.
 
-The SLY command loads `sly-init.lisp`, which loads `:luv` and starts a durable
-Slynk listener on `127.0.0.1:4005`. The executable `./sly` is a small Common
-Lisp Slynk client:
+The Emacs SLY command loads `sly-init.lisp`, which loads `:luv` and starts a
+durable Slynk listener on `127.0.0.1:4005`. The executable `./sly` is a small
+Common Lisp Slynk client:
 
 ```sh
 ./sly eval '(+ 1 1)'

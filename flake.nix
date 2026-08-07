@@ -39,8 +39,10 @@
             lispPackages.cffi
             lispPackages.rove
           ]);
+          slyRoot =
+            "${pkgs.emacsPackages.sly}/share/emacs/site-lisp/elpa/${pkgs.emacsPackages.sly.pname}-${pkgs.emacsPackages.sly.version}";
         in
-        { inherit pkgs lisp nativeLibraryPath lavapipeIcd; };
+        { inherit pkgs lisp nativeLibraryPath lavapipeIcd slyRoot; };
     in
     {
       devShells = forAllSystems (system:
@@ -64,6 +66,7 @@
                 "${env.pkgs.mesa}/share/vulkan/icd.d/${env.lavapipeIcd}"
               else
                 "";
+            LUV_SLYNK_DIR = "${env.slyRoot}/slynk";
           };
         });
     };

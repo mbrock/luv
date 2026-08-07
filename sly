@@ -12,6 +12,13 @@
 (defparameter *host* (or (sb-ext:posix-getenv "LUV_SLYNK_HOST") "127.0.0.1"))
 (defparameter *port*
   (parse-integer (or (sb-ext:posix-getenv "LUV_SLYNK_PORT") "4005")))
+(defparameter *project-root*
+  (make-pathname :name nil :type nil :defaults *load-truename*))
+(defparameter *server-pid-path*
+  (merge-pathnames #P".sly-server.pid" *project-root*))
+(defparameter *server-log-path*
+  (merge-pathnames #P".sly-server.log" *project-root*))
+(defparameter *server-start-timeout* 120)
 
 (defun string-octets (string)
   (sb-ext:string-to-octets string :external-format :utf-8))
@@ -57,6 +64,131 @@
 (defun host-address (host)
   (sb-bsd-sockets:host-ent-address
    (sb-bsd-sockets:get-host-by-name host)))
+
+(defun connection-available-p ()
+  (let ((socket (make-instance 'sb-bsd-sockets:inet-socket
+                               :type :stream :protocol :tcp)))
+    (unwind-protect
+         (handler-case
+             (progn
+               (sb-bsd-sockets:socket-connect
+                socket (host-address *host*) *port*)
+               t)
+           (error () nil))
+      (ignore-errors (sb-bsd-sockets:socket-close socket)))))
+
+(defun shell-quote (string)
+  (with-output-to-string (output)
+    (write-char #\' output)
+    (loop for character across string
+          do (if (char= character #\')
+                 (write-string "'\\''" output)
+                 (write-char character output)))
+    (write-char #\' output)))
+
+(defun run-shell (command)
+  (let ((process
+          (sb-ext:run-program
+           "/bin/sh" (list "-c" command)
+           :search nil
+           :output nil
+           :error nil
+           :wait t)))
+    (sb-ext:process-exit-code process)))
+
+(defun pid-file-pid ()
+  (with-open-file (stream *server-pid-path* :if-does-not-exist nil)
+    (and stream
+         (parse-integer (string-trim '(#\Space #\Tab #\Newline #\Return)
+                                     (read-line stream nil ""))
+                        :junk-allowed t))))
+
+(defun pid-alive-p (pid)
+  (and pid
+       (zerop
+        (run-shell
+         (format nil "kill -0 ~D >/dev/null 2>&1" pid)))))
+
+(defun remove-stale-pid-file ()
+  (let ((pid (pid-file-pid)))
+    (unless (pid-alive-p pid)
+      (ignore-errors (delete-file *server-pid-path*)))))
+
+(defun print-server-log-tail (&optional (lines 80))
+  (when (probe-file *server-log-path*)
+    (format *error-output* "~&--- ~A tail ---~%" *server-log-path*)
+    (run-shell
+     (format nil "tail -n ~D ~A >&2"
+             lines
+             (shell-quote (namestring *server-log-path*))))))
+
+(defun start-server (&key quiet)
+  (cond
+    ((connection-available-p)
+     (unless quiet
+       (format t "luv Slynk is already listening on ~A:~D.~%" *host* *port*))
+     t)
+    (t
+     (remove-stale-pid-file)
+     (let* ((server-path (merge-pathnames #P"sly-server.lisp" *project-root*))
+            (command
+              (format nil
+                      "(cd ~A && exec sbcl --noinform --disable-debugger --load ~A) > ~A 2>&1 & echo $! > ~A"
+                      (shell-quote (namestring *project-root*))
+                      (shell-quote (namestring server-path))
+                      (shell-quote (namestring *server-log-path*))
+                      (shell-quote (namestring *server-pid-path*)))))
+       (unless (probe-file server-path)
+         (error "Missing server bootstrap: ~A" server-path))
+       (unless (zerop (run-shell command))
+         (error "Could not spawn luv Slynk server"))
+       (loop repeat (* 10 *server-start-timeout*)
+             when (connection-available-p)
+               do (progn
+                    (unless quiet
+                      (format t "luv Slynk is listening on ~A:~D.~%"
+                              *host* *port*))
+                    (return-from start-server t))
+             unless (pid-alive-p (pid-file-pid))
+               do (progn
+                    (print-server-log-tail)
+                    (error "luv Slynk server exited during startup"))
+             do (sleep 0.1))
+       (print-server-log-tail)
+       (error "Timed out waiting for luv Slynk on ~A:~D" *host* *port*)))))
+
+(defun ensure-server ()
+  (unless (connection-available-p)
+    (start-server :quiet t)))
+
+(defun stop-server ()
+  (let ((pid (pid-file-pid)))
+    (cond
+      ((not (pid-alive-p pid))
+       (ignore-errors (delete-file *server-pid-path*))
+       (format t "luv Slynk is not running.~%"))
+      (t
+       (run-shell (format nil "kill ~D >/dev/null 2>&1" pid))
+       (loop repeat 100
+             unless (pid-alive-p pid)
+               do (progn
+                    (ignore-errors (delete-file *server-pid-path*))
+                    (format t "Stopped luv Slynk pid ~D.~%" pid)
+                    (return-from stop-server t))
+             do (sleep 0.1))
+       (error "Timed out stopping luv Slynk pid ~D" pid)))))
+
+(defun server-status ()
+  (let ((pid (pid-file-pid)))
+    (cond
+      ((connection-available-p)
+       (format t "luv Slynk is listening on ~A:~D~@[ (pid ~D)~].~%"
+               *host* *port* pid))
+      ((pid-alive-p pid)
+       (format t "luv Slynk pid ~D exists, but ~A:~D is not accepting connections.~%"
+               pid *host* *port*))
+      (t
+       (format t "luv Slynk is not running.~%")))))
 
 (defmacro with-slynk-connection ((stream) &body body)
   `(let ((socket (make-instance 'sb-bsd-sockets:inet-socket
@@ -648,7 +780,8 @@
         (terpri)))))
 
 (defun usage (&optional (stream *standard-output*))
-  (format stream "Usage: ./sly eval CODE [--package PACKAGE]~%")
+  (format stream "Usage: ./sly start|stop|status|log~%")
+  (format stream "       ./sly eval CODE [--package PACKAGE]~%")
   (format stream "       ./sly parinfer [CODE]~%")
   (format stream "       ./sly inspect CODE [--package PACKAGE]~%")
   (format stream "       ./sly describe NAME... [--function] [--package PACKAGE]~%")
@@ -800,7 +933,28 @@
       ((member command '("-h" "--help") :test #'string=)
        (usage)
        0)
+      ((string= command "start")
+       (when arguments
+         (error "start does not accept arguments"))
+       (start-server)
+       0)
+      ((string= command "stop")
+       (when arguments
+         (error "stop does not accept arguments"))
+       (stop-server)
+       0)
+      ((string= command "status")
+       (when arguments
+         (error "status does not accept arguments"))
+       (server-status)
+       0)
+      ((string= command "log")
+       (when arguments
+         (error "log does not accept arguments"))
+       (print-server-log-tail)
+       0)
       ((string= command "eval")
+       (ensure-server)
        (multiple-value-bind (code package)
            (parse-code-arguments command arguments)
          (evaluate code package))
@@ -809,32 +963,39 @@
        (run-parinfer arguments)
        0)
       ((string= command "inspect")
+       (ensure-server)
        (multiple-value-bind (code package)
            (parse-code-arguments command arguments)
          (run-inspector code package))
        0)
       ((string= command "describe")
+       (ensure-server)
        (multiple-value-bind (names package functionp)
            (parse-describe-arguments arguments)
          (run-describe names package functionp))
        0)
       ((string= command "describe-package")
+       (ensure-server)
        (run-describe-packages (parse-names command arguments))
        0)
       ((string= command "describe-system")
+       (ensure-server)
        (run-describe-systems (parse-names command arguments))
        0)
       ((string= command "apropos")
+       (ensure-server)
        (multiple-value-bind (patterns package external-only case-sensitive)
            (parse-apropos-arguments arguments)
          (run-apropos patterns package external-only case-sensitive))
        0)
       ((member command '("edit" "definition") :test #'string=)
+       (ensure-server)
        (multiple-value-bind (names package)
            (parse-edit-arguments arguments)
          (run-edit names package))
        0)
       ((string= command "xref")
+       (ensure-server)
        (multiple-value-bind (type names package)
            (parse-xref-arguments arguments)
          (run-xref type names package))
