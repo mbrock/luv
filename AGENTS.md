@@ -3,11 +3,13 @@
 This is a fast-moving experimental project. Optimize for iteration speed,
 playful hacking, and frequent save points rather than ceremony.
 
-After finishing a coherent round of work, commit the changes by default. Treat
-`git commit` like **File → Save** for the project: a commit does not imply that
-the work is polished, exhaustively reviewed, or ready for release. Small,
-imperfect, exploratory commits are welcome and preferable to leaving work
-uncommitted where it can be forgotten.
+After finishing a coherent round of work, commit the changes by default and
+push them to `origin main` unless we are explicitly on a branch adventure.
+Treat `git commit` plus `git push origin main` like **File → Save** for the
+project: a pushed commit does not imply that the work is polished, exhaustively
+reviewed, or ready for release. Small, imperfect, exploratory commits are
+welcome and preferable to leaving work uncommitted or unpushed where it can be
+forgotten.
 
 Before committing, do the checks that are quick and relevant to the change,
 but do not turn every commit into a heavyweight verification or review cycle.
