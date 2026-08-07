@@ -133,6 +133,55 @@
      (list :transfer) (list :bottom-of-pipe))
     (vk:end-command-buffer command-buffer)))
 
+(defun render-color-vector (red green blue alpha)
+  (map 'vector
+       (lambda (component) (coerce component 'single-float))
+       (list red green blue alpha)))
+
+(defun submit-color-clear (command-buffer image-ready render-done image-index color)
+  "Clear the acquired swapchain image and present it on `*queue*'."
+  (record-color-clear
+   command-buffer (nth image-index *swapchain-images*) color)
+  (vk:queue-submit
+   *queue*
+   (list
+    (vk:make-submit-info
+     :wait-semaphores (list image-ready)
+     :wait-dst-stage-mask (list :transfer)
+     :command-buffers (list command-buffer)
+     :signal-semaphores (list render-done))))
+  (vk:queue-present-khr
+   *queue*
+   (vk:make-present-info-khr
+    :wait-semaphores (list render-done)
+    :swapchains (list *swapchain*)
+    :image-indices (list image-index)))
+  (vk:queue-wait-idle *queue*))
+
+(defun render-color-into-active-swapchain (red green blue alpha)
+  (let ((color (render-color-vector red green blue alpha))
+        (pool-create-info
+          (vk:make-command-pool-create-info
+           :queue-family-index *queue-family*)))
+    (vk-utils:with-command-pool
+        (command-pool *device* pool-create-info)
+      (vk-utils:with-command-buffers
+          (command-buffers *device*
+           (vk:make-command-buffer-allocate-info
+            :command-pool command-pool
+            :level :primary
+            :command-buffer-count 1))
+        (vk-utils:with-semaphore
+            (image-ready *device* (vk:make-semaphore-create-info))
+          (vk-utils:with-semaphore
+              (render-done *device* (vk:make-semaphore-create-info))
+            (let ((image-index
+                    (vk:acquire-next-image-khr
+                     *device* *swapchain* #xffffffffffffffff image-ready)))
+              (submit-color-clear
+               (first command-buffers)
+               image-ready render-done image-index color))))))))
+
 (defun closing-event-p (event-type)
   (member event-type '(:quit :window-close-requested)))
 
@@ -187,46 +236,7 @@
     (sb-thread:with-mutex (*render-lock*)
       (unless (active-context-p)
         (error "No luv window is open. Call LUV:OPEN-WINDOW first."))
-      (let ((color
-            (map 'vector
-                 (lambda (component) (coerce component 'single-float))
-                 (list red green blue alpha)))
-          (pool-create-info
-            (vk:make-command-pool-create-info
-             :queue-family-index *queue-family*)))
-      (vk-utils:with-command-pool
-          (command-pool *device* pool-create-info)
-        (vk-utils:with-command-buffers
-            (command-buffers *device*
-             (vk:make-command-buffer-allocate-info
-              :command-pool command-pool
-              :level :primary
-              :command-buffer-count 1))
-          (vk-utils:with-semaphore
-              (image-ready *device* (vk:make-semaphore-create-info))
-            (vk-utils:with-semaphore
-                (render-done *device* (vk:make-semaphore-create-info))
-              (let* ((image-index
-                       (vk:acquire-next-image-khr
-                        *device* *swapchain* #xffffffffffffffff image-ready))
-                     (command-buffer (first command-buffers)))
-                (record-color-clear
-                 command-buffer (nth image-index *swapchain-images*) color)
-                (vk:queue-submit
-                 *queue*
-                 (list
-                  (vk:make-submit-info
-                   :wait-semaphores (list image-ready)
-                   :wait-dst-stage-mask (list :transfer)
-                   :command-buffers (list command-buffer)
-                   :signal-semaphores (list render-done))))
-                (vk:queue-present-khr
-                 *queue*
-                 (vk:make-present-info-khr
-                  :wait-semaphores (list render-done)
-                  :swapchains (list *swapchain*)
-                  :image-indices (list image-index)))
-                  (vk:queue-wait-idle *queue*)))))))
+      (render-color-into-active-swapchain red green blue alpha)
       (values red green blue alpha))))
 
 (defun submit-render-request (red green blue alpha)
@@ -278,6 +288,70 @@
   #-darwin
   (%render-color red green blue alpha))
 
+(defun make-logical-device-create-info (queue-family)
+  (vk:make-device-create-info
+   :queue-create-infos
+   (list (vk:make-device-queue-create-info
+          :queue-family-index queue-family
+          :queue-priorities (list 1.0)))
+   :enabled-extension-names
+   (list vk:+khr-swapchain-extension-name+)))
+
+(defun bind-device-context (device queue-family surface-format)
+  (setf *device* device
+        *queue-family* queue-family
+        *surface-format* surface-format))
+
+(defun clear-device-context ()
+  (setf *device* nil
+        *queue-family* nil
+        *surface-format* nil
+        *headless-extent* nil))
+
+(defun bind-swapchain-context (device swapchain queue-family extent)
+  (setf *swapchain* swapchain
+        *queue* (vk:get-device-queue device queue-family 0)
+        *swapchain-images* (vk:get-swapchain-images-khr device swapchain)
+        *swapchain-extent* extent))
+
+(defun clear-swapchain-context ()
+  (setf *swapchain* nil
+        *queue* nil
+        *swapchain-images* nil
+        *swapchain-extent* nil))
+
+(defun context-kind-name ()
+  (if *window* "window" "headless surface"))
+
+(defun announce-ready-context (stream surface-format queue-family extent)
+  (format stream
+          "Luv ~A: ~Dx~D, ~A, queue family ~D.~%"
+          (context-kind-name)
+          (vk:width extent) (vk:height extent)
+          (vk:format surface-format) queue-family)
+  (format stream
+          "Try (luv:render-color 1.0 0.0 1.0), or close the context.~%"))
+
+(defun wait-for-context-close (duration)
+  (if *window*
+      (wait-for-window-close duration)
+      (wait-for-headless-close duration)))
+
+(defun fail-and-clear-swapchain-context ()
+  (sb-thread:with-mutex (*render-lock*)
+    (fail-pending-render-requests
+     (make-condition
+      'simple-error
+      :format-control
+      "The luv window closed before rendering."))
+    (clear-swapchain-context)))
+
+(defun run-ready-swapchain (stream surface-format queue-family extent duration)
+  (%render-color 1.0 1.0 0.0 1.0)
+  (setf *window-context-ready* t)
+  (announce-ready-context stream surface-format queue-family extent)
+  (wait-for-context-close duration))
+
 (defun run-window-context (&key duration (stream *standard-output*))
   "Own the logical device and swapchain until the ambient window closes."
   (let* ((queue-family
@@ -285,128 +359,114 @@
          (surface-format
            (preferred-surface-format))
          (device-create-info
-           (vk:make-device-create-info
-            :queue-create-infos
-            (list (vk:make-device-queue-create-info
-                   :queue-family-index queue-family
-                   :queue-priorities (list 1.0)))
-            :enabled-extension-names
-            (list vk:+khr-swapchain-extension-name+))))
+           (make-logical-device-create-info queue-family)))
     (vk-utils:with-device (device *physical-device* device-create-info)
-      (setf *device* device
-            *queue-family* queue-family
-            *surface-format* surface-format)
+      (bind-device-context device queue-family surface-format)
       (unwind-protect
            (multiple-value-bind (swapchain-create-info extent)
                (yellow-swapchain-create-info surface-format)
              (vk-utils:with-swapchain-khr
                  (swapchain device swapchain-create-info)
-               (setf *swapchain* swapchain
-                     *queue* (vk:get-device-queue device queue-family 0)
-                     *swapchain-images*
-                     (vk:get-swapchain-images-khr device swapchain)
-                     *swapchain-extent* extent)
+               (bind-swapchain-context device swapchain queue-family extent)
                (unwind-protect
-                    (progn
-                      (%render-color 1.0 1.0 0.0 1.0)
-                      (setf *window-context-ready* t)
-                      (format stream
-                              "Luv ~A: ~Dx~D, ~A, queue family ~D.~%"
-                              (if *window* "window" "headless surface")
-                              (vk:width extent) (vk:height extent)
-                              (vk:format surface-format) queue-family)
-                      (format stream
-                              "Try (luv:render-color 1.0 0.0 1.0), or close the context.~%")
-                      (if *window*
-                          (wait-for-window-close duration)
-                          (wait-for-headless-close duration)))
-                 (sb-thread:with-mutex (*render-lock*)
-                   (fail-pending-render-requests
-                    (make-condition
-                     'simple-error
-                     :format-control
-                     "The luv window closed before rendering."))
-                   (setf *swapchain* nil
-                         *queue* nil
-                         *swapchain-images* nil
-                         *swapchain-extent* nil)))))
+                    (run-ready-swapchain
+                     stream surface-format queue-family extent duration)
+                 (fail-and-clear-swapchain-context))))
         (sb-thread:with-mutex (*render-lock*)
-          (setf *device* nil
-                *queue-family* nil
-                *surface-format* nil
-                *headless-extent* nil))))))
+          (clear-device-context))))))
+
+;; These owner macros keep SDL/Vulkan lifetime edges visible without burying
+;; the window and headless paths under nested teardown scaffolding.
+(defmacro with-sdl-video (&body body)
+  `(progn
+     (unless (sdl3:init :video)
+       (error "SDL video initialization failed: ~A" (sdl3:get-error)))
+     (unwind-protect
+          (progn ,@body)
+       (sdl3:quit))))
+
+(defmacro with-sdl-window ((window width height) &body body)
+  `(let ((,window
+           (sdl3:create-window
+            "luv — Vulkan yellow" ,width ,height '(:vulkan :resizable))))
+     (when (cffi:null-pointer-p ,window)
+       (error "SDL window creation failed: ~A" (sdl3:get-error)))
+     (setf *window* ,window)
+     (unwind-protect
+          (progn ,@body)
+       (unwind-protect
+            (sdl3:destroy-window *window*)
+         (setf *window* nil)))))
+
+(defmacro with-vulkan-instance ((instance application-name extensions)
+                                &body body)
+  `(let ((instance-create-info
+           (luv-instance-create-info ,application-name ,extensions)))
+     (vk-utils:with-instance (,instance instance-create-info)
+       (setf *instance* ,instance)
+       (unwind-protect
+            (progn ,@body)
+         (setf *instance* nil)))))
+
+(defmacro with-sdl-vulkan-surface ((raw-surface surface window instance)
+                                   &body body)
+  `(multiple-value-bind (,raw-surface ,surface)
+       (create-sdl-vulkan-surface ,window ,instance)
+     (setf *surface* ,surface)
+     (unwind-protect
+          (progn ,@body)
+       (unwind-protect
+            (sdl3:vulkan-destroy-surface
+             (vk:raw-handle ,instance) ,raw-surface (cffi:null-pointer))
+         (setf *surface* nil)))))
+
+(defmacro with-headless-vulkan-surface ((surface instance width height)
+                                        &body body)
+  `(vk-utils:with-headless-surface-ext
+       (,surface ,instance (vk:make-headless-surface-create-info-ext))
+     (setf *surface* ,surface
+           *headless-extent*
+           (vk:make-extent-2d :width ,width :height ,height))
+     (unwind-protect
+          (progn ,@body)
+       (setf *surface* nil))))
+
+(defun select-physical-device (instance)
+  (or (first (vk:enumerate-physical-devices instance))
+      (error "Vulkan found no physical devices.")))
+
+(defmacro with-selected-physical-device ((instance) &body body)
+  `(progn
+     (setf *physical-device* (select-physical-device ,instance))
+     (unwind-protect
+          (progn ,@body)
+       (setf *physical-device* nil))))
 
 (defun run-window
     (&key (width 800) (height 600) duration (stream *standard-output*))
   "Own the SDL/Vulkan context and event loop on the window thread."
   (with-native-graphics-environment
-    (unless (sdl3:init :video)
-      (error "SDL video initialization failed: ~A" (sdl3:get-error)))
-    (unwind-protect
-       (let ((window
-               (sdl3:create-window
-                "luv — Vulkan yellow" width height '(:vulkan :resizable))))
-         (when (cffi:null-pointer-p window)
-           (error "SDL window creation failed: ~A" (sdl3:get-error)))
-         (setf *window* window)
-         (unwind-protect
-              (let* ((extensions (sdl-vulkan-instance-extensions))
-                     (instance-create-info
-                       (luv-instance-create-info "luv window" extensions)))
-                (vk-utils:with-instance (instance instance-create-info)
-                  (setf *instance* instance)
-                  (multiple-value-bind (raw-surface surface)
-                      (create-sdl-vulkan-surface *window* instance)
-                    (setf *surface* surface)
-                    (unwind-protect
-                         (progn
-                           (setf *physical-device*
-                                 (first (vk:enumerate-physical-devices instance)))
-                           (unless *physical-device*
-                             (error "Vulkan found no physical devices."))
-                           (format stream "SDL video driver: ~A~%"
-                                   (sdl3:get-current-video-driver))
-                           (run-window-context
-                            :duration duration :stream stream))
-                      (setf *physical-device* nil)
-                      (unwind-protect
-                           (sdl3:vulkan-destroy-surface
-                            (vk:raw-handle instance)
-                            raw-surface
-                            (cffi:null-pointer))
-                        (setf *surface* nil))))))
-              (setf *instance* nil))
-           (unwind-protect
-                (sdl3:destroy-window *window*)
-             (setf *window* nil)))
-      (sdl3:quit)))
+    (with-sdl-video
+      (with-sdl-window (window width height)
+        (let ((extensions (sdl-vulkan-instance-extensions)))
+          (with-vulkan-instance (instance "luv window" extensions)
+            (with-sdl-vulkan-surface (raw-surface surface *window* instance)
+              (with-selected-physical-device (instance)
+                (format stream "SDL video driver: ~A~%"
+                        (sdl3:get-current-video-driver))
+                (run-window-context
+                 :duration duration :stream stream))))))))
   (values))
 
 (defun run-headless
     (&key (width 800) (height 600) duration (stream *standard-output*))
   "Own a VK_EXT_headless_surface context without creating an SDL window."
   (with-native-graphics-environment
-    (let* ((extensions (headless-vulkan-instance-extensions))
-           (instance-create-info
-             (luv-instance-create-info "luv headless" extensions)))
-      (vk-utils:with-instance (instance instance-create-info)
-        (setf *instance* instance)
-        (unwind-protect
-             (vk-utils:with-headless-surface-ext
-                 (surface instance (vk:make-headless-surface-create-info-ext))
-               (setf *surface* surface
-                     *headless-extent*
-                     (vk:make-extent-2d :width width :height height))
-               (unwind-protect
-                    (progn
-                      (setf *physical-device*
-                            (first (vk:enumerate-physical-devices instance)))
-                      (unless *physical-device*
-                        (error "Vulkan found no physical devices."))
-                      (run-window-context :duration duration :stream stream))
-                 (setf *physical-device* nil
-                       *surface* nil)))
-          (setf *instance* nil)))))
+    (let ((extensions (headless-vulkan-instance-extensions)))
+      (with-vulkan-instance (instance "luv headless" extensions)
+        (with-headless-vulkan-surface (surface instance width height)
+          (with-selected-physical-device (instance)
+            (run-window-context :duration duration :stream stream))))))
   (values))
 
 (defun window-open-p ()
@@ -458,63 +518,63 @@
         do (sleep 0.01)
         finally (error "Timed out while closing the luv window.")))
 
-(defun open-window
-    (&key (width 800) (height 600) duration (stream *standard-output*))
-  "Open an ambient SDL/Vulkan context, present yellow, and return its window."
+(defun initialize-context-startup (already-open-error)
   (when *window-context-running*
-    (error "A luv window is already open."))
+    (error already-open-error))
   (setf *window-close-requested* nil
         *window-context-ready* nil
         *window-startup-error* nil
-        *window-context-running* t)
-  (let ((arguments
-          (list :width width :height height
-                :duration duration :stream stream)))
-    (start-window-context arguments))
+        *window-context-running* t))
+
+(defun context-arguments (width height duration stream)
+  (list :width width :height height
+        :duration duration :stream stream))
+
+(defun wait-for-context-startup (success-value stopped-error timeout-error)
   (loop repeat 3000
         when (window-open-p)
-          return *window*
+          return success-value
         when *window-startup-error*
           do (error *window-startup-error*)
         unless *window-context-running*
-          do (error "The luv window thread stopped during startup.")
+          do (error stopped-error)
         do (sleep 0.01)
-        finally (error "Timed out while opening the luv window.")))
+        finally (error timeout-error)))
+
+(defun start-headless-context (arguments)
+  #+darwin
+  (progn
+    (setf *window-thread* (trivial-main-thread:main-thread))
+    (sb-thread:make-thread
+     (lambda ()
+       (trivial-main-thread:call-in-main-thread
+        (lambda () (headless-thread-main arguments))))
+     :name "luv Cocoa headless dispatcher"))
+  #-darwin
+  (setf *window-thread*
+        (sb-thread:make-thread
+         (lambda () (headless-thread-main arguments))
+         :name "luv headless context")))
+
+(defun open-window
+    (&key (width 800) (height 600) duration (stream *standard-output*))
+  "Open an ambient SDL/Vulkan context, present yellow, and return its window."
+  (initialize-context-startup "A luv window is already open.")
+  (start-window-context (context-arguments width height duration stream))
+  (wait-for-context-startup
+   *window*
+   "The luv window thread stopped during startup."
+   "Timed out while opening the luv window."))
 
 (defun open-headless
     (&key (width 800) (height 600) duration (stream *standard-output*))
   "Open an ambient headless Vulkan context, present yellow, and return T."
-  (when *window-context-running*
-    (error "A luv context is already open."))
-  (setf *window-close-requested* nil
-        *window-context-ready* nil
-        *window-startup-error* nil
-        *window-context-running* t)
-  (let ((arguments
-          (list :width width :height height
-                :duration duration :stream stream)))
-    #+darwin
-    (progn
-      (setf *window-thread* (trivial-main-thread:main-thread))
-      (sb-thread:make-thread
-       (lambda ()
-         (trivial-main-thread:call-in-main-thread
-          (lambda () (headless-thread-main arguments))))
-       :name "luv Cocoa headless dispatcher"))
-    #-darwin
-    (setf *window-thread*
-          (sb-thread:make-thread
-           (lambda () (headless-thread-main arguments))
-           :name "luv headless context")))
-  (loop repeat 3000
-        when (window-open-p)
-          return t
-        when *window-startup-error*
-          do (error *window-startup-error*)
-        unless *window-context-running*
-          do (error "The luv headless context stopped during startup.")
-        do (sleep 0.01)
-        finally (error "Timed out while opening the luv headless context.")))
+  (initialize-context-startup "A luv context is already open.")
+  (start-headless-context (context-arguments width height duration stream))
+  (wait-for-context-startup
+   t
+   "The luv headless context stopped during startup."
+   "Timed out while opening the luv headless context."))
 
 (defun close-window ()
   "Ask the ambient window to close, wait for teardown, and return no values."
