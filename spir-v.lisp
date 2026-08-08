@@ -6,8 +6,8 @@
 ;;;   (%x load %float %pointer)
 ;;;   (return)
 ;;;
-;;; The instruction and enumerant tables are explicit subsets of the SPIR-V
-;;; grammar.  Growing this file follows actual shader needs rather than
+;;; The instruction classes and enumerant table are explicit subsets of the
+;;; SPIR-V grammar.  Growing this file follows actual shader needs rather than
 ;;; importing the entire registry into the Lisp image.
 
 (in-package #:luv.spir-v)
@@ -32,20 +32,83 @@
              (spir-v-error-details condition)))))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  (defstruct instruction
-    opcode
-    result
-    operands)
+  ;; One-time migration from the short-lived structure-definition registry.
+  ;; No user-held occurrences existed yet: the old instances were definitions
+  ;; in *INSTRUCTIONS*, so retiring that class binding loses no shader IR.
+  (let ((old-class (find-class 'instruction nil)))
+    (when (and old-class
+               (not (typep old-class 'closer-mop:standard-class)))
+      (setf (find-class 'instruction) nil)
+      (when (boundp '*instructions*)
+        (makunbound '*instructions*))
+      (dolist (name '(make-instruction copy-instruction instruction-p
+                      instruction-opcode instruction-result
+                      instruction-operands encode-instruction))
+        (when (fboundp name)
+          (fmakunbound name))))))
 
-  (defvar *instructions* nil)
-  (defvar *enumerants* nil)
-  ;; These variables used to hold alists; make source re-evaluation migrate a
-  ;; durable image instead of requiring a restart.
-  (unless (hash-table-p *instructions*)
-    (setf *instructions* (make-hash-table :test #'equal)))
-  (unless (hash-table-p *enumerants*)
-    (setf *enumerants* (make-hash-table :test #'equal)))
+(defclass instruction-class (closer-mop:standard-class)
+  ((opcode
+    :initform nil
+    :accessor instruction-class-opcode)
+   (result-convention
+    :initform :none
+    :accessor instruction-class-result-convention)
+   (lambda-list
+    :initform nil
+    :accessor instruction-class-lambda-list)
+   (operand-specs
+    :initform nil
+    :accessor instruction-class-operand-specs)))
 
+(defmethod closer-mop:validate-superclass
+    ((class instruction-class) (superclass closer-mop:standard-class))
+  (declare (ignore class superclass))
+  t)
+
+(defclass instruction ()
+  ((result-id
+    :initarg :result-id
+    :initform nil
+    :reader instruction-result-id)
+   (result-type
+    :initarg :result-type
+    :initform nil
+    :reader instruction-result-type))
+  (:metaclass instruction-class))
+
+(defclass typed-unary-instruction (instruction)
+  ((value :initarg :value))
+  (:metaclass instruction-class))
+
+(defclass typed-binary-arithmetic-instruction (instruction)
+  ((left :initarg :left)
+   (right :initarg :right))
+  (:metaclass instruction-class))
+
+(defgeneric instruction-name (instruction-or-class))
+(defgeneric instruction-opcode (instruction-or-class))
+(defgeneric instruction-result-convention (instruction-or-class))
+
+(defmethod instruction-name ((class instruction-class))
+  (class-name class))
+
+(defmethod instruction-name ((instruction instruction))
+  (instruction-name (class-of instruction)))
+
+(defmethod instruction-opcode ((class instruction-class))
+  (instruction-class-opcode class))
+
+(defmethod instruction-opcode ((instruction instruction))
+  (instruction-opcode (class-of instruction)))
+
+(defmethod instruction-result-convention ((class instruction-class))
+  (instruction-class-result-convention class))
+
+(defmethod instruction-result-convention ((instruction instruction))
+  (instruction-result-convention (class-of instruction)))
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
   (defun registry-key (name)
     (string-upcase (symbol-name name)))
 
@@ -63,41 +126,55 @@
            (error "Bad operands for SPIR-V instruction ~S." name))
          types))))
 
-  (defun register-instruction (name lambda-list opcode result types)
+  (defun instruction-operand-names (lambda-list)
+    (remove '&rest lambda-list))
+
+  (defun configure-instruction-class
+      (class name lambda-list opcode result types)
     (unless (typep opcode '(unsigned-byte 16))
       (error "Bad opcode for SPIR-V instruction ~S: ~S." name opcode))
     (unless (member result '(:none :id :typed))
       (error "Bad result convention for SPIR-V instruction ~S: ~S."
              name result))
-    (setf (gethash (registry-key name) *instructions*)
-          (make-instruction
-           :opcode opcode
-           :result result
-           :operands
-           (instruction-operand-specs name lambda-list types))))
-
-  (defun register-enumeration (name entries)
-    (let ((values (make-hash-table :test #'equal)))
-      (dolist (entry entries)
-        (destructuring-bind (enumerant value) entry
-          (setf (gethash (registry-key enumerant) values) value)))
-      (setf (gethash (registry-key name) *enumerants*) values))))
+    (setf (instruction-class-opcode class) opcode
+          (instruction-class-result-convention class) result
+          (instruction-class-lambda-list class) lambda-list
+          (instruction-class-operand-specs class)
+          (instruction-operand-specs name lambda-list types))
+    class))
 
 (defmacro define-instruction (name lambda-list &rest options)
-  "Define and register one instruction in luv's SPIR-V backend vocabulary."
+  "Define one instruction class in luv's SPIR-V backend vocabulary."
   (let ((opcode nil)
         (result :none)
-        (types nil))
+        (types nil)
+        (superclasses '(instruction))
+        (inherited-operands-p nil))
     (dolist (option options)
       (case (first option)
         (:opcode (setf opcode (second option)))
         (:result (setf result (second option)))
         (:operands (setf types (rest option)))
+        (:superclasses (setf superclasses (rest option)))
+        (:inherited-operands (setf inherited-operands-p t))
         (otherwise (error "Unknown DEFINE-INSTRUCTION option ~S." option))))
     (unless opcode
       (error "SPIR-V instruction ~S has no opcode." name))
-    `(eval-when (:compile-toplevel :load-toplevel :execute)
-       (register-instruction ',name ',lambda-list ,opcode ,result ',types))))
+    (let ((slots
+            (unless inherited-operands-p
+              (loop for operand in (instruction-operand-names lambda-list)
+                    collect
+                    `(,operand
+                      :initarg ,(intern (symbol-name operand) :keyword))))))
+      `(progn
+         (defclass ,name ,superclasses
+           ,slots
+           (:metaclass instruction-class))
+         (eval-when (:load-toplevel :execute)
+           (configure-instruction-class
+            (find-class ',name) ',name ',lambda-list
+            ,opcode ,result ',types))
+         ',name))))
 
 (defmacro define-enumeration (name &body entries)
   `(eval-when (:compile-toplevel :load-toplevel :execute)
@@ -109,7 +186,9 @@
              collect `(define-instruction ,name (value)
                         (:opcode ,opcode)
                         (:result :typed)
-                        (:operands :id)))))
+                        (:operands :id)
+                        (:superclasses typed-unary-instruction)
+                        (:inherited-operands)))))
 
 (defmacro define-typed-binary-instructions (&body definitions)
   `(progn
@@ -117,11 +196,14 @@
              collect `(define-instruction ,name (left right)
                         (:opcode ,opcode)
                         (:result :typed)
-                        (:operands :id :id)))))
+                        (:operands :id :id)
+                        (:superclasses
+                         typed-binary-arithmetic-instruction)
+                        (:inherited-operands)))))
 
 ;;; Like SBCL's backend instruction files, this is executable treaty text:
-;;; definitions register themselves, and repetitive instruction families get
-;;; a local definer instead of being expanded by hand.
+;;; definitions create their own IR classes, and repetitive instruction
+;;; families get a local definer instead of being expanded by hand.
 
 (define-instruction capability (capability)
   (:opcode 17)
@@ -189,6 +271,18 @@
 (define-instruction label () (:opcode 248) (:result :id))
 (define-instruction return () (:opcode 253))
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defvar *enumerants* nil)
+  (unless (hash-table-p *enumerants*)
+    (setf *enumerants* (make-hash-table :test #'equal)))
+
+  (defun register-enumeration (name entries)
+    (let ((values (make-hash-table :test #'equal)))
+      (dolist (entry entries)
+        (destructuring-bind (enumerant value) entry
+          (setf (gethash (registry-key enumerant) values) value)))
+      (setf (gethash (registry-key name) *enumerants*) values))))
+
 (define-enumeration capability (shader 1))
 (define-enumeration addressing-model (logical 0))
 (define-enumeration memory-model (glsl-450 1))
@@ -211,9 +305,17 @@
   (and (symbolp left) (symbolp right)
        (string-equal (symbol-name left) (symbol-name right))))
 
-(defun instruction-for (name)
-  (and (symbolp name)
-       (gethash (registry-key name) *instructions*)))
+(defun instruction-class-p (class)
+  (typep class 'instruction-class))
+
+(defun instruction-class-for (name)
+  (when (symbolp name)
+    (let* ((direct (find-class name nil))
+           (local-symbol
+             (find-symbol (symbol-name name) (find-package '#:luv.spir-v)))
+           (local (and local-symbol (find-class local-symbol nil))))
+      (cond ((instruction-class-p direct) direct)
+            ((instruction-class-p local) local)))))
 
 (defun enumerant-value (kind name form)
   (let ((kind-values
@@ -230,33 +332,120 @@
 (defun split-instruction-form (form)
   (unless (and (consp form) (symbolp (first form)))
     (error 'spir-v-error :form form :reason :malformed-instruction))
-  (cond ((instruction-for (first form))
-         (values nil (first form) (rest form)))
-        ((and (rest form) (instruction-for (second form)))
-         (values (first form) (second form) (cddr form)))
+  (cond ((instruction-class-for (first form))
+         (values nil (instruction-class-for (first form)) (rest form)))
+        ((and (rest form) (instruction-class-for (second form)))
+         (values (first form)
+                 (instruction-class-for (second form))
+                 (cddr form)))
         (t
          (error 'spir-v-error :form form :reason :unknown-instruction))))
 
-(defun collect-result-ids (forms)
+(defun instruction-instance-initargs (class values form)
+  (let* ((lambda-list (instruction-class-lambda-list class))
+         (rest-position (position '&rest lambda-list))
+         (required
+           (if rest-position
+               (subseq lambda-list 0 rest-position)
+               lambda-list))
+         (remaining (copy-list values))
+         (initargs nil))
+    (dolist (name required)
+      (unless remaining
+        (error 'spir-v-error :form form :reason :missing-operand
+               :details name))
+      (setf initargs
+            (nconc initargs
+                   (list (intern (symbol-name name) :keyword)
+                         (pop remaining)))))
+    (if rest-position
+        (let ((name (elt lambda-list (1+ rest-position))))
+          (setf initargs
+                (nconc initargs
+                       (list (intern (symbol-name name) :keyword)
+                             remaining))))
+        (when remaining
+          (error 'spir-v-error :form form :reason :extra-operands
+                 :details remaining)))
+    initargs))
+
+(defun parse-instruction (form)
+  "Parse one surface FORM into an inspectable instruction occurrence."
+  (multiple-value-bind (result-id class operands)
+      (split-instruction-form form)
+    (let ((result-convention (instruction-result-convention class))
+          (result-type nil))
+      (when (and result-id (eq result-convention :none))
+        (error 'spir-v-error :form form :reason :unexpected-result))
+      (when (and (null result-id) (not (eq result-convention :none)))
+        (error 'spir-v-error :form form :reason :missing-result))
+      (when (eq result-convention :typed)
+        (unless operands
+          (error 'spir-v-error :form form :reason :missing-result-type))
+        (setf result-type (pop operands)))
+      (apply #'make-instance class
+             :result-id result-id
+             :result-type result-type
+             (instruction-instance-initargs class operands form)))))
+
+(defun parse-module (forms)
+  "Parse surface FORMS into a vector of instruction occurrences."
+  (map 'vector
+       (lambda (form)
+         (if (typep form 'instruction) form (parse-instruction form)))
+       forms))
+
+(defun instruction-operand-values (instruction)
+  (let* ((class (class-of instruction))
+         (lambda-list (instruction-class-lambda-list class))
+         (values nil))
+    (loop while lambda-list
+          for name = (pop lambda-list)
+          do (if (eq name '&rest)
+                 (cl:return
+                   (nconc (nreverse values)
+                          (copy-list
+                           (slot-value instruction (pop lambda-list)))))
+                 (push (slot-value instruction name) values))
+          finally (cl:return (nreverse values)))))
+
+(defgeneric instruction-form (instruction))
+
+(defmethod instruction-form ((instruction instruction))
+  "Return the canonical s-expression surface form for INSTRUCTION."
+  (let ((name (instruction-name instruction))
+        (operands (instruction-operand-values instruction)))
+    (ecase (instruction-result-convention instruction)
+      (:none (list* name operands))
+      (:id (list* (instruction-result-id instruction) name operands))
+      (:typed
+       (list* (instruction-result-id instruction)
+              name
+              (instruction-result-type instruction)
+              operands)))))
+
+(defmethod print-object ((instruction instruction) stream)
+  (print-unreadable-object (instruction stream :type t :identity t)
+    (handler-case
+        (prin1 (instruction-form instruction) stream)
+      (unbound-slot ()
+        (write-string "uninitialized" stream)))))
+
+(defun collect-result-ids (instructions)
   (let ((ids (make-hash-table :test #'eq))
         (next-id 1))
-    (dolist (form forms)
-      (multiple-value-bind (result-name operation operands)
-          (split-instruction-form form)
-        (declare (ignore operands))
-        (let ((instruction (instruction-for operation)))
-          (when (and result-name
-                     (eq :none (instruction-result instruction)))
-            (error 'spir-v-error :form form :reason :unexpected-result))
-          (when (and (null result-name)
-                     (not (eq :none (instruction-result instruction))))
-            (error 'spir-v-error :form form :reason :missing-result))
-          (when result-name
-            (when (gethash result-name ids)
-              (error 'spir-v-error :form form :reason :duplicate-result
-                     :details result-name))
-            (setf (gethash result-name ids) next-id)
-            (incf next-id)))))
+    (map nil
+         (lambda (instruction)
+           (let ((result-id (instruction-result-id instruction)))
+             (when result-id
+               (when (gethash result-id ids)
+                 (error 'spir-v-error
+                        :form (instruction-form instruction)
+                        :reason :duplicate-result
+                        :details result-id))
+               (setf (gethash result-id ids) next-id)
+               (incf next-id))))
+         instructions)
     (values ids next-id)))
 
 (defun id-word (name ids form)
@@ -339,45 +528,51 @@
              :details values))
     words))
 
-(defun encode-instruction (form ids)
-  (multiple-value-bind (result-name operation source-operands)
-      (split-instruction-form form)
-    (let* ((instruction (instruction-for operation))
-           (result-style (instruction-result instruction))
-           (operands source-operands)
-           (prefix
-             (ecase result-style
-               (:none nil)
-               (:id (list (id-word result-name ids form)))
-               (:typed
-                (unless operands
-                  (error 'spir-v-error :form form
-                         :reason :missing-result-type))
-                (list (id-word (pop operands) ids form)
-                      (id-word result-name ids form)))))
-           (operand-words
-             (encode-operands (copy-list (instruction-operands instruction))
-                              operands ids form))
-           (words (nconc prefix operand-words))
-           (word-count (1+ (length words))))
-      (cons (logior (ash word-count 16) (instruction-opcode instruction))
-            words))))
+(defgeneric encode-instruction (instruction ids))
+
+(defmethod encode-instruction ((instruction instruction) ids)
+  (let* ((class (class-of instruction))
+         (form (instruction-form instruction))
+         (result-style (instruction-result-convention instruction))
+         (operands (instruction-operand-values instruction))
+         (prefix
+           (ecase result-style
+             (:none nil)
+             (:id
+              (list (id-word (instruction-result-id instruction)
+                             ids form)))
+             (:typed
+              (list (id-word (instruction-result-type instruction)
+                             ids form)
+                    (id-word (instruction-result-id instruction)
+                             ids form)))))
+         (operand-words
+           (encode-operands
+            (copy-list (instruction-class-operand-specs class))
+            operands ids form))
+         (words (nconc prefix operand-words))
+         (word-count (1+ (length words))))
+    (cons (logior (ash word-count 16) (instruction-opcode instruction))
+          words)))
 
 (defun assemble (forms &key (version #x00010000) (generator 0))
-  "Assemble FORMS into a vector of SPIR-V 32-bit words.
+  "Assemble surface FORMS or instruction occurrences into SPIR-V words.
 
 This assembler intentionally recognizes only the vocabulary declared in
-*INSTRUCTIONS* and *ENUMERANTS*.  Result symbols may be referenced before their
-definitions."
-  (multiple-value-bind (ids bound) (collect-result-ids forms)
-    (let ((words (make-array 64 :element-type '(unsigned-byte 32)
-                                :adjustable t :fill-pointer 0)))
-      (dolist (word (list #x07230203 version generator bound 0))
-        (vector-push-extend word words))
-      (dolist (form forms)
-        (dolist (word (encode-instruction form ids))
-          (vector-push-extend word words)))
-      words)))
+instruction classes and *ENUMERANTS*. Result symbols may be referenced before
+their definitions."
+  (let ((instructions (parse-module forms)))
+    (multiple-value-bind (ids bound) (collect-result-ids instructions)
+      (let ((words (make-array 64 :element-type '(unsigned-byte 32)
+                                  :adjustable t :fill-pointer 0)))
+        (dolist (word (list #x07230203 version generator bound 0))
+          (vector-push-extend word words))
+        (map nil
+             (lambda (instruction)
+               (dolist (word (encode-instruction instruction ids))
+                 (vector-push-extend word words)))
+             instructions)
+        words))))
 
 (defun write-spir-v (words pathname)
   "Write SPIR-V WORDS to PATHNAME in its defined little-endian byte order."

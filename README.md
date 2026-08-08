@@ -82,6 +82,11 @@ definitions; result IDs lead their instruction. Its backend vocabulary is
 declared with `spv:define-instruction` and `spv:define-enumeration`, with small
 family definers for repeated instruction shapes:
 
+Each instruction definition is a CLOS class whose `spv:instruction-class`
+metaclass owns its opcode, result convention, and operand encoding. Parsing a
+form constructs an instance with named operand slots, so a module can be
+inspected and changed as ordinary live Lisp objects before assembly.
+
 ```lisp
 (asdf:load-system :luv/spir-v)
 (spv:assemble

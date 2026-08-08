@@ -9,7 +9,8 @@
   :description "A small s-expression SPIR-V assembler for luv shaders."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on (#:cffi)
+  :depends-on (#:cffi
+               #:closer-mop)
   :serial t
   :components ((:file "spir-v-package")
                (:file "spir-v")))
