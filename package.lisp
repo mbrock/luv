@@ -5,6 +5,24 @@
            #:+swapchain-extension-name+
            #:vulkan-call-error
            #:vulkan-call-error-result
+           #:vulkan-trace
+           #:vulkan-trace-event
+           #:start-vulkan-trace
+           #:stop-vulkan-trace
+           #:current-vulkan-trace
+           #:vulkan-trace-events
+           #:vulkan-trace-presentation-intervals
+           #:vulkan-trace-event-sequence
+           #:vulkan-trace-event-timestamp
+           #:vulkan-trace-event-duration
+           #:vulkan-trace-event-thread
+           #:vulkan-trace-event-foreign-name
+           #:vulkan-trace-event-lisp-name
+           #:vulkan-trace-event-arguments
+           #:vulkan-trace-event-values
+           #:vulkan-trace-event-status
+           #:vulkan-trace-event-condition
+           #:vulkan-function-description
            #:make-version
            #:enumerate-instance-extension-names
            #:create-instance

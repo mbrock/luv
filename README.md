@@ -6,9 +6,9 @@ SDL supplies the native Cocoa or Wayland window.  The binding grows only when
 the higher-level API needs another Vulkan capability.
 
 The owned layer uses CFFI's translating types, enums, and bitfields directly.
-`defvkstruct`, `define-enumerator`, and `define-creator` keep the Vulkan treaty
-text explicit while naming its recurring allocation, checking, and count/fetch
-patterns once.
+`defvkfun`, `defvkstruct`, `define-enumerator`, and `define-creator` keep the
+Vulkan treaty text explicit while naming its recurring call, allocation,
+checking, and count/fetch patterns once.
 
 ## GPU API
 
@@ -32,6 +32,23 @@ and primary command buffer:
     (when encoder (luv:destroy encoder))
     (luv:destroy device)))
 ```
+
+Every host-to-Vulkan call crosses the same `defvkfun` boundary.  It can record
+structured call occurrences—including named argument snapshots, returned
+values, thread, timing, and signaled conditions—without changing individual
+bindings:
+
+```lisp
+(lvk:start-vulkan-trace)
+;; Interact with or render a few frames here.
+(defparameter *vulkan-trace* (lvk:stop-vulkan-trace))
+(lvk:vulkan-trace-presentation-intervals *vulkan-trace*)
+```
+
+Presentation intervals contain the calls after one `vkQueuePresentKHR`
+through the next one.  Pass `:include-prefix t` to include the partial interval
+from trace startup through its first presentation.  This is a host API and
+command-recording trace, not a measurement of when the GPU executes commands.
 
 Submission currently waits for the Vulkan queue to become idle. This keeps
 the initial ownership rules honest; presentation work can replace the wait
