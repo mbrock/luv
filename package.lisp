@@ -163,4 +163,10 @@
            #:open-canvas
            #:present-canvas-frame
            #:render-canvas-color
+           #:clear-color-demo
+           #:demo-canvas
+           #:demo-context
+           #:demo-speed
+           #:start-clear-color-demo
+           #:stop-clear-color-demo
            #:close-canvas))

@@ -138,6 +138,17 @@ Cadence clocks skip elapsed frames rather than replaying them after a slow
 frame or debugger visit.  SDL user events wake cross-thread requests, and
 canvas startup and shutdown use completion semaphores rather than polling.
 
+For a tiny end-to-end animated demo:
+
+```lisp
+(defparameter *demo* (luv:start-clear-color-demo))
+;; The returned demo, canvas, context, and clock remain live and inspectable.
+(luv:stop-clear-color-demo *demo*)
+```
+
+Try `:speed 0.25` or `:frames-per-second 30` when starting it to change the
+color-cycle rate or cadence.
+
 ## One-time Lisp setup
 
 `cl-sdl3` is not in Quicklisp, so install it as a local project:
