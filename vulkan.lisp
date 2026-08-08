@@ -35,6 +35,15 @@
   (:memory-allocate-info 5)
   (:semaphore-create-info 9)
   (:image-create-info 14)
+  (:image-view-create-info 15)
+  (:shader-module-create-info 16)
+  (:pipeline-shader-stage-create-info 18)
+  (:compute-pipeline-create-info 29)
+  (:pipeline-layout-create-info 30)
+  (:descriptor-set-layout-create-info 32)
+  (:descriptor-pool-create-info 33)
+  (:descriptor-set-allocate-info 34)
+  (:write-descriptor-set 35)
   (:command-pool-create-info 39)
   (:command-buffer-allocate-info 40)
   (:command-buffer-begin-info 42)
@@ -63,12 +72,28 @@
 
 (cffi:defcenum (image-layout :uint32)
   (:undefined 0)
+  (:general 1)
   (:transfer-src-optimal 6)
   (:transfer-dst-optimal 7)
   (:present-src-khr 1000001002))
 
 (cffi:defcenum (sample-count :uint32)
   (:1 1))
+
+(cffi:defcenum (image-view-type :uint32)
+  (:1d 0)
+  (:2d 1)
+  (:3d 2))
+
+(cffi:defcenum (component-swizzle :uint32)
+  (:identity 0))
+
+(cffi:defcenum (descriptor-type :uint32)
+  (:storage-image 3))
+
+(cffi:defcenum (pipeline-bind-point :uint32)
+  (:graphics 0)
+  (:compute 1))
 
 (cffi:defcenum (command-buffer-level :uint32)
   (:primary 0)
@@ -111,7 +136,11 @@
 
 (cffi:defbitfield (image-usage-flags :uint32)
   (:transfer-src #x1)
-  (:transfer-dst #x2))
+  (:transfer-dst #x2)
+  (:storage #x8))
+
+(cffi:defbitfield (shader-stage-flags :uint32)
+  (:compute #x20))
 
 (cffi:defbitfield (memory-property-flags :uint32)
   (:device-local #x1)
@@ -137,11 +166,14 @@
   (:stencil #x4))
 
 (cffi:defbitfield (access-flags :uint32)
+  (:shader-read #x20)
+  (:shader-write #x40)
   (:transfer-read #x800)
   (:transfer-write #x1000))
 
 (cffi:defbitfield (pipeline-stage-flags :uint32)
   (:top-of-pipe #x1)
+  (:compute-shader #x800)
   (:transfer #x1000)
   (:bottom-of-pipe #x2000))
 
@@ -326,6 +358,94 @@
   (level-count :uint32)
   (base-array-layer :uint32)
   (layer-count :uint32))
+
+(defvkstruct component-mapping ()
+  (r component-swizzle)
+  (g component-swizzle)
+  (b component-swizzle)
+  (a component-swizzle))
+
+(defvkstruct image-view-create-info (:s-type :image-view-create-info)
+  (flags :uint32)
+  (image :pointer)
+  (view-type image-view-type)
+  (format format)
+  (components (:struct component-mapping))
+  (subresource-range (:struct image-subresource-range)))
+
+(defvkstruct shader-module-create-info (:s-type :shader-module-create-info)
+  (flags :uint32)
+  (code-size :size)
+  (p-code :pointer))
+
+(defvkstruct pipeline-shader-stage-create-info
+    (:s-type :pipeline-shader-stage-create-info)
+  (flags :uint32)
+  (stage shader-stage-flags)
+  (module :pointer)
+  (p-name :pointer)
+  (p-specialization-info :pointer))
+
+(defvkstruct compute-pipeline-create-info
+    (:s-type :compute-pipeline-create-info)
+  (flags :uint32)
+  (stage (:struct pipeline-shader-stage-create-info))
+  (layout :pointer)
+  (base-pipeline-handle :pointer)
+  (base-pipeline-index :int32))
+
+(defvkstruct pipeline-layout-create-info
+    (:s-type :pipeline-layout-create-info)
+  (flags :uint32)
+  (set-layout-count :uint32)
+  (p-set-layouts :pointer)
+  (push-constant-range-count :uint32)
+  (p-push-constant-ranges :pointer))
+
+(defvkstruct descriptor-set-layout-binding ()
+  (binding :uint32)
+  (descriptor-type descriptor-type)
+  (descriptor-count :uint32)
+  (stage-flags shader-stage-flags)
+  (p-immutable-samplers :pointer))
+
+(defvkstruct descriptor-set-layout-create-info
+    (:s-type :descriptor-set-layout-create-info)
+  (flags :uint32)
+  (binding-count :uint32)
+  (p-bindings :pointer))
+
+(defvkstruct descriptor-pool-size ()
+  (type descriptor-type)
+  (descriptor-count :uint32))
+
+(defvkstruct descriptor-pool-create-info
+    (:s-type :descriptor-pool-create-info)
+  (flags :uint32)
+  (max-sets :uint32)
+  (pool-size-count :uint32)
+  (p-pool-sizes :pointer))
+
+(defvkstruct descriptor-set-allocate-info
+    (:s-type :descriptor-set-allocate-info)
+  (descriptor-pool :pointer)
+  (descriptor-set-count :uint32)
+  (p-set-layouts :pointer))
+
+(defvkstruct descriptor-image-info ()
+  (sampler :pointer)
+  (image-view :pointer)
+  (image-layout image-layout))
+
+(defvkstruct write-descriptor-set (:s-type :write-descriptor-set)
+  (dst-set :pointer)
+  (dst-binding :uint32)
+  (dst-array-element :uint32)
+  (descriptor-count :uint32)
+  (descriptor-type descriptor-type)
+  (p-image-info :pointer)
+  (p-buffer-info :pointer)
+  (p-texel-buffer-view :pointer))
 
 (defvkstruct image-memory-barrier (:s-type :image-memory-barrier)
   (src-access-mask access-flags)
@@ -617,6 +737,114 @@
   (memory :pointer)
   (offset :uint64))
 
+(cffi:defcfun ("vkCreateImageView" %create-image-view
+               :library vulkan-loader)
+    checked-result
+  (device :pointer)
+  (create-info :pointer)
+  (allocator :pointer)
+  (view :pointer))
+
+(cffi:defcfun ("vkDestroyImageView" %destroy-image-view
+               :library vulkan-loader)
+    :void
+  (device :pointer)
+  (view :pointer)
+  (allocator :pointer))
+
+(cffi:defcfun ("vkCreateShaderModule" %create-shader-module
+               :library vulkan-loader)
+    checked-result
+  (device :pointer)
+  (create-info :pointer)
+  (allocator :pointer)
+  (shader-module :pointer))
+
+(cffi:defcfun ("vkDestroyShaderModule" %destroy-shader-module
+               :library vulkan-loader)
+    :void
+  (device :pointer)
+  (shader-module :pointer)
+  (allocator :pointer))
+
+(cffi:defcfun ("vkCreateDescriptorSetLayout" %create-descriptor-set-layout
+               :library vulkan-loader)
+    checked-result
+  (device :pointer)
+  (create-info :pointer)
+  (allocator :pointer)
+  (layout :pointer))
+
+(cffi:defcfun ("vkDestroyDescriptorSetLayout" %destroy-descriptor-set-layout
+               :library vulkan-loader)
+    :void
+  (device :pointer)
+  (layout :pointer)
+  (allocator :pointer))
+
+(cffi:defcfun ("vkCreatePipelineLayout" %create-pipeline-layout
+               :library vulkan-loader)
+    checked-result
+  (device :pointer)
+  (create-info :pointer)
+  (allocator :pointer)
+  (layout :pointer))
+
+(cffi:defcfun ("vkDestroyPipelineLayout" %destroy-pipeline-layout
+               :library vulkan-loader)
+    :void
+  (device :pointer)
+  (layout :pointer)
+  (allocator :pointer))
+
+(cffi:defcfun ("vkCreateComputePipelines" %create-compute-pipelines
+               :library vulkan-loader)
+    checked-result
+  (device :pointer)
+  (pipeline-cache :pointer)
+  (create-info-count :uint32)
+  (create-infos :pointer)
+  (allocator :pointer)
+  (pipelines :pointer))
+
+(cffi:defcfun ("vkDestroyPipeline" %destroy-pipeline
+               :library vulkan-loader)
+    :void
+  (device :pointer)
+  (pipeline :pointer)
+  (allocator :pointer))
+
+(cffi:defcfun ("vkCreateDescriptorPool" %create-descriptor-pool
+               :library vulkan-loader)
+    checked-result
+  (device :pointer)
+  (create-info :pointer)
+  (allocator :pointer)
+  (pool :pointer))
+
+(cffi:defcfun ("vkDestroyDescriptorPool" %destroy-descriptor-pool
+               :library vulkan-loader)
+    :void
+  (device :pointer)
+  (pool :pointer)
+  (allocator :pointer))
+
+(cffi:defcfun ("vkAllocateDescriptorSets" %allocate-descriptor-sets
+               :library vulkan-loader)
+    checked-result
+  (device :pointer)
+  (allocate-info :pointer)
+  (sets :pointer))
+
+(cffi:defcfun ("vkUpdateDescriptorSets" %update-descriptor-sets
+               :library vulkan-loader)
+    :void
+  (device :pointer)
+  (write-count :uint32)
+  (writes :pointer)
+  (copy-count :uint32)
+  (copies :pointer))
+
 (cffi:defcfun ("vkCreateCommandPool" %create-command-pool
                :library vulkan-loader)
     checked-result
@@ -683,6 +911,32 @@
   (destination-layout image-layout)
   (region-count :uint32)
   (regions :pointer))
+
+(cffi:defcfun ("vkCmdBindPipeline" %cmd-bind-pipeline
+               :library vulkan-loader)
+    :void
+  (command-buffer :pointer)
+  (bind-point pipeline-bind-point)
+  (pipeline :pointer))
+
+(cffi:defcfun ("vkCmdBindDescriptorSets" %cmd-bind-descriptor-sets
+               :library vulkan-loader)
+    :void
+  (command-buffer :pointer)
+  (bind-point pipeline-bind-point)
+  (layout :pointer)
+  (first-set :uint32)
+  (set-count :uint32)
+  (sets :pointer)
+  (dynamic-offset-count :uint32)
+  (dynamic-offsets :pointer))
+
+(cffi:defcfun ("vkCmdDispatch" %cmd-dispatch :library vulkan-loader)
+    :void
+  (command-buffer :pointer)
+  (group-count-x :uint32)
+  (group-count-y :uint32)
+  (group-count-z :uint32))
 
 (cffi:defcfun ("vkQueueSubmit" %queue-submit :library vulkan-loader)
     checked-result
@@ -870,6 +1124,42 @@
   (%allocate-memory device allocate-info (cffi:null-pointer))
   :checked t
   :operation :allocate-memory)
+
+(define-creator create-image-view-handle (device create-info)
+  (%create-image-view device create-info (cffi:null-pointer))
+  :checked t
+  :operation :create-image-view)
+
+(define-creator create-shader-module-handle (device create-info)
+  (%create-shader-module device create-info (cffi:null-pointer))
+  :checked t
+  :operation :create-shader-module)
+
+(define-creator create-descriptor-set-layout-handle (device create-info)
+  (%create-descriptor-set-layout device create-info (cffi:null-pointer))
+  :checked t
+  :operation :create-descriptor-set-layout)
+
+(define-creator create-pipeline-layout-handle (device create-info)
+  (%create-pipeline-layout device create-info (cffi:null-pointer))
+  :checked t
+  :operation :create-pipeline-layout)
+
+(define-creator create-compute-pipeline-handle (device create-info)
+  (%create-compute-pipelines device (cffi:null-pointer) 1 create-info
+                             (cffi:null-pointer))
+  :checked t
+  :operation :create-compute-pipeline)
+
+(define-creator create-descriptor-pool-handle (device create-info)
+  (%create-descriptor-pool device create-info (cffi:null-pointer))
+  :checked t
+  :operation :create-descriptor-pool)
+
+(define-creator allocate-descriptor-set-handle (device allocate-info)
+  (%allocate-descriptor-sets device allocate-info)
+  :checked t
+  :operation :allocate-descriptor-set)
 
 (define-creator create-command-pool-handle (device create-info)
   (%create-command-pool device create-info (cffi:null-pointer))
@@ -1099,6 +1389,134 @@
     (%bind-image-memory device image memory offset))
   (values))
 
+(defun create-image-view (device image format &key (view-type :2d))
+  (with-vk (create-info image-view-create-info
+            :flags 0
+            :image image
+            :view-type view-type
+            :format format)
+    (fill-vk
+     (cffi:foreign-slot-pointer
+      create-info '(:struct image-view-create-info) 'components)
+     'component-mapping
+     :r :identity :g :identity :b :identity :a :identity)
+    (fill-color-subresource-range
+     (cffi:foreign-slot-pointer
+      create-info '(:struct image-view-create-info) 'subresource-range))
+    (create-image-view-handle device create-info)))
+
+(defun destroy-image-view (device view)
+  (%destroy-image-view device view (cffi:null-pointer))
+  (values))
+
+(defun create-shader-module (device words)
+  (with-foreign-array (code :uint32 words)
+    (with-vk (create-info shader-module-create-info
+              :flags 0
+              :code-size (* 4 (length words))
+              :p-code code)
+      (create-shader-module-handle device create-info))))
+
+(defun destroy-shader-module (device shader-module)
+  (%destroy-shader-module device shader-module (cffi:null-pointer))
+  (values))
+
+(defun create-storage-image-descriptor-set-layout (device &key (binding 0))
+  (with-vk (layout-binding descriptor-set-layout-binding
+            :binding binding
+            :descriptor-type :storage-image
+            :descriptor-count 1
+            :stage-flags '(:compute)
+            :p-immutable-samplers (cffi:null-pointer))
+    (with-vk (create-info descriptor-set-layout-create-info
+              :flags 0
+              :binding-count 1
+              :p-bindings layout-binding)
+      (create-descriptor-set-layout-handle device create-info))))
+
+(defun destroy-descriptor-set-layout (device layout)
+  (%destroy-descriptor-set-layout device layout (cffi:null-pointer))
+  (values))
+
+(defun create-pipeline-layout (device set-layouts)
+  (with-foreign-array (layouts :pointer set-layouts)
+    (with-vk (create-info pipeline-layout-create-info
+              :flags 0
+              :set-layout-count (length set-layouts)
+              :p-set-layouts layouts
+              :push-constant-range-count 0
+              :p-push-constant-ranges (cffi:null-pointer))
+      (create-pipeline-layout-handle device create-info))))
+
+(defun destroy-pipeline-layout (device layout)
+  (%destroy-pipeline-layout device layout (cffi:null-pointer))
+  (values))
+
+(defun create-compute-pipeline
+    (device shader-module layout &key (entry-point "main"))
+  (cffi:with-foreign-string (entry-point-pointer entry-point)
+    (with-vk (create-info compute-pipeline-create-info
+              :flags 0
+              :layout layout
+              :base-pipeline-handle (cffi:null-pointer)
+              :base-pipeline-index -1)
+      (fill-vk
+       (cffi:foreign-slot-pointer
+        create-info '(:struct compute-pipeline-create-info) 'stage)
+       'pipeline-shader-stage-create-info
+       :flags 0
+       :stage '(:compute)
+       :module shader-module
+       :p-name entry-point-pointer
+       :p-specialization-info (cffi:null-pointer))
+      (create-compute-pipeline-handle device create-info))))
+
+(defun destroy-pipeline (device pipeline)
+  (%destroy-pipeline device pipeline (cffi:null-pointer))
+  (values))
+
+(defun create-storage-image-descriptor-pool (device &key (max-sets 1))
+  (with-vk (pool-size descriptor-pool-size
+            :type :storage-image
+            :descriptor-count max-sets)
+    (with-vk (create-info descriptor-pool-create-info
+              :flags 0
+              :max-sets max-sets
+              :pool-size-count 1
+              :p-pool-sizes pool-size)
+      (create-descriptor-pool-handle device create-info))))
+
+(defun destroy-descriptor-pool (device pool)
+  (%destroy-descriptor-pool device pool (cffi:null-pointer))
+  (values))
+
+(defun allocate-descriptor-set (device pool layout)
+  (with-foreign-array (layouts :pointer (vector layout))
+    (with-vk (allocate-info descriptor-set-allocate-info
+              :descriptor-pool pool
+              :descriptor-set-count 1
+              :p-set-layouts layouts)
+      (allocate-descriptor-set-handle device allocate-info))))
+
+(defun update-storage-image-descriptor
+    (device descriptor-set image-view &key (binding 0))
+  (with-vk (image-info descriptor-image-info
+            :sampler (cffi:null-pointer)
+            :image-view image-view
+            :image-layout :general)
+    (with-vk (write write-descriptor-set
+              :dst-set descriptor-set
+              :dst-binding binding
+              :dst-array-element 0
+              :descriptor-count 1
+              :descriptor-type :storage-image
+              :p-image-info image-info
+              :p-buffer-info (cffi:null-pointer)
+              :p-texel-buffer-view (cffi:null-pointer))
+      (%update-descriptor-sets
+       device 1 write 0 (cffi:null-pointer))))
+  (values))
+
 (defun create-command-pool (device queue-family-index &key flags)
   (with-vk (create-info command-pool-create-info
             :flags flags
@@ -1198,6 +1616,22 @@
     (%cmd-copy-image
      command-buffer source source-layout destination destination-layout
      1 region))
+  (values))
+
+(defun cmd-bind-compute-pipeline (command-buffer pipeline)
+  (%cmd-bind-pipeline command-buffer :compute pipeline)
+  (values))
+
+(defun cmd-bind-compute-descriptor-set
+    (command-buffer pipeline-layout descriptor-set)
+  (with-foreign-array (sets :pointer (vector descriptor-set))
+    (%cmd-bind-descriptor-sets
+     command-buffer :compute pipeline-layout 0 1 sets
+     0 (cffi:null-pointer)))
+  (values))
+
+(defun cmd-dispatch (command-buffer x y &optional (z 1))
+  (%cmd-dispatch command-buffer x y z)
   (values))
 
 (defun submit-command-buffers

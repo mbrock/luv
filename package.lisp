@@ -32,6 +32,20 @@
            #:allocate-memory
            #:free-memory
            #:bind-image-memory
+           #:create-image-view
+           #:destroy-image-view
+           #:create-shader-module
+           #:destroy-shader-module
+           #:create-storage-image-descriptor-set-layout
+           #:destroy-descriptor-set-layout
+           #:create-pipeline-layout
+           #:destroy-pipeline-layout
+           #:create-compute-pipeline
+           #:destroy-pipeline
+           #:create-storage-image-descriptor-pool
+           #:destroy-descriptor-pool
+           #:allocate-descriptor-set
+           #:update-storage-image-descriptor
            #:create-command-pool
            #:destroy-command-pool
            #:allocate-command-buffer
@@ -40,6 +54,9 @@
            #:cmd-transition-image
            #:cmd-clear-color-image
            #:cmd-copy-image
+           #:cmd-bind-compute-pipeline
+           #:cmd-bind-compute-descriptor-set
+           #:cmd-dispatch
            #:submit-command-buffers
            #:submit-command-buffer
            #:queue-wait-idle
