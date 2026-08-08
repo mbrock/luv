@@ -69,6 +69,7 @@
         (values (canvas-width canvas) (canvas-height canvas)))))
 
 (defun sdl-canvas-native-thread-p (canvas)
+  #+darwin
   (declare (ignore canvas))
   #+darwin
   (trivial-main-thread:main-thread-p)
