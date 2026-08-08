@@ -381,6 +381,26 @@
                :reason :no-compatible-memory
                :details memory-requirements))))
 
+(defun find-vulkan-upload-memory-type (device memory-requirements)
+  (let ((memory-types
+          (lvk:physical-device-memory-types
+           (vulkan-device-physical-device device)))
+        (memory-type-bits
+          (lvk:buffer-memory-requirements-memory-type-bits
+           memory-requirements)))
+    (or (loop for memory-type in memory-types
+              for index from 0
+              for flags = (lvk:physical-memory-type-flags memory-type)
+              when (and (compatible-vulkan-memory-type-p
+                         memory-type-bits index)
+                        (member :host-visible flags)
+                        (member :host-coherent flags))
+                return index)
+        (error 'vulkan-gpu-error
+               :operation :write-texture
+               :reason :no-compatible-memory
+               :details memory-requirements))))
+
 (defmethod request-gpu-device
     ((provider vulkan-gpu-provider) &optional descriptor)
   "Create an owned Vulkan instance, logical device, and graphics queue."
@@ -857,6 +877,170 @@
        (first (gpu-texture-size source))
        (second (gpu-texture-size source)))))
   encoder)
+
+(defun reject-texture-write (destination reason &optional details)
+  (error 'gpu-request-error
+         :operation :write-texture
+         :descriptor destination
+         :reason reason
+         :details details))
+
+(defun texture-write-components (value expected-length destination reason)
+  (let ((components
+          (typecase value
+            (list value)
+            (vector (coerce value 'list))
+            (otherwise nil))))
+    (unless (and (member (length components) expected-length)
+                 (every (lambda (component)
+                          (typep component '(unsigned-byte 32)))
+                        components))
+      (reject-texture-write destination reason value))
+    components))
+
+(defun check-vulkan-texture-write (queue destination data data-layout size)
+  (unless (typep destination 'texture-copy)
+    (reject-texture-write destination :invalid-texture-copy destination))
+  (unless (typep data-layout 'texture-data-layout)
+    (reject-texture-write destination :invalid-data-layout data-layout))
+  (let* ((texture (texture-copy-texture destination))
+         (origin
+           (texture-write-components
+            (texture-copy-origin destination) '(2 3) destination
+            :invalid-origin))
+         (extent
+           (texture-write-components
+            size '(2 3) destination :invalid-write-size)))
+    (when (= 2 (length origin))
+      (setf origin (append origin '(0))))
+    (when (= 2 (length extent))
+      (setf extent (append extent '(1))))
+    (unless (and (typep texture 'vulkan-gpu-texture)
+                 (= 0 (texture-copy-mip-level destination))
+                 (eq :all (texture-copy-aspect destination))
+                 (= 0 (third origin))
+                 (= 1 (third extent)))
+      (reject-texture-write destination :unsupported-texture-copy destination))
+    (ensure-live-vulkan-object queue :write-texture)
+    (ensure-vulkan-object-device
+     texture (vulkan-texture-device texture) (vulkan-queue-device queue)
+     :write-texture)
+    (unless (member :copy-dst (gpu-texture-usage texture))
+      (error 'gpu-usage-error
+             :object texture :operation :write-texture
+             :required-usage :copy-dst
+             :actual-usage (gpu-texture-usage texture)))
+    (unless (member (gpu-texture-format texture)
+                    '(:rgba8-unorm :rgba8-unorm-srgb
+                      :bgra8-unorm :bgra8-unorm-srgb))
+      (reject-texture-write
+       destination :unsupported-texture-format
+       (gpu-texture-format texture)))
+    (unless (and (plusp (first extent)) (plusp (second extent))
+                 (<= (+ (first origin) (first extent))
+                     (first (gpu-texture-size texture)))
+                 (<= (+ (second origin) (second extent))
+                     (second (gpu-texture-size texture))))
+      (reject-texture-write destination :write-out-of-bounds
+                            (list :origin origin :size extent)))
+    (unless (and (arrayp data)
+                 (= 2 (array-rank data))
+                 (nth-value 0
+                   (subtypep (array-element-type data)
+                             '(unsigned-byte 32)))
+                 (>= (array-dimension data 0) (second extent))
+                 (>= (array-dimension data 1) (first extent)))
+      (reject-texture-write destination :unsupported-texture-data data))
+    (let* ((width (first extent))
+           (height (second extent))
+           (offset (texture-data-layout-offset data-layout))
+           (bytes-per-row
+             (or (texture-data-layout-bytes-per-row data-layout)
+                 (* width 4)))
+           (rows-per-image
+             (or (texture-data-layout-rows-per-image data-layout) height)))
+      (unless (and (typep offset '(unsigned-byte 64))
+                   (zerop (mod offset 4))
+                   (typep bytes-per-row '(unsigned-byte 32))
+                   (>= bytes-per-row (* width 4))
+                   (zerop (mod bytes-per-row 4))
+                   (typep rows-per-image '(unsigned-byte 32))
+                   (>= rows-per-image height))
+        (reject-texture-write destination :invalid-data-layout data-layout))
+      (values texture origin extent offset bytes-per-row rows-per-image))))
+
+(defun copy-texture-words-to-mapped-memory
+    (data pointer width height offset bytes-per-row)
+  (dotimes (row height)
+    (let ((destination
+            (cffi:inc-pointer pointer (+ offset (* row bytes-per-row)))))
+      (dotimes (column width)
+        (setf (cffi:mem-aref destination :uint32 column)
+              (row-major-aref
+               data (+ (* row (array-dimension data 1)) column)))))))
+
+(defmethod write-texture
+    ((queue vulkan-gpu-queue) destination data data-layout size)
+  (with-vulkan-gpu-driver-environment
+    (multiple-value-bind
+          (texture origin extent offset bytes-per-row rows-per-image)
+        (check-vulkan-texture-write
+         queue destination data data-layout size)
+      (declare (ignore rows-per-image))
+      (let* ((device (vulkan-queue-device queue))
+             (native-device (vulkan-handle device))
+             (width (first extent))
+             (height (second extent))
+             (data-size (+ offset (* (1- height) bytes-per-row)
+                           (* width 4)))
+             (buffer nil)
+             (memory nil)
+             (mapped nil)
+             (encoder nil)
+             (commands nil))
+        (unwind-protect
+             (progn
+               (setf buffer
+                     (lvk:create-buffer
+                      native-device data-size '(:transfer-src)))
+               (let* ((requirements
+                        (lvk:get-buffer-memory-requirements
+                         native-device buffer))
+                      (memory-type
+                        (find-vulkan-upload-memory-type device requirements)))
+                 (setf memory
+                       (lvk:allocate-memory
+                        native-device
+                        (lvk:buffer-memory-requirements-size requirements)
+                        memory-type))
+                 (lvk:bind-buffer-memory native-device buffer memory)
+                 (setf mapped (lvk:map-memory native-device memory data-size))
+                 (copy-texture-words-to-mapped-memory
+                  data mapped width height offset bytes-per-row)
+                 (lvk:unmap-memory native-device memory)
+                 (setf mapped nil))
+               (setf encoder
+                     (create device (make-command-encoder-descriptor)))
+               (ensure-vulkan-texture-for-command
+                encoder texture destination :copy-dst)
+               (transition-vulkan-texture
+                encoder texture :transfer-dst-optimal)
+               (lvk:cmd-copy-buffer-to-image
+                (vulkan-command-encoder-command-buffer encoder)
+                buffer (vulkan-handle texture) :transfer-dst-optimal
+                width height
+                :buffer-offset offset
+                :buffer-row-length (/ bytes-per-row 4)
+                :buffer-image-height height
+                :x (first origin) :y (second origin))
+               (setf commands (finish encoder))
+               (submit queue commands)
+               texture)
+          (when commands (destroy commands))
+          (when encoder (destroy encoder))
+          (when mapped (lvk:unmap-memory native-device memory))
+          (when buffer (lvk:destroy-buffer native-device buffer))
+          (when memory (lvk:free-memory native-device memory)))))))
 
 (defmethod begin-compute-pass
     ((encoder vulkan-gpu-command-encoder) &optional descriptor)

@@ -18,7 +18,9 @@ TARGET is initially a native canvas.  It is intentionally not part of the
 mirror's identity: a later target may be a texture presented on a 3D quad."))
 
 (defclass luv-raster-mirror (luv-mirror mcclim-render:image-mirror-mixin)
-  ()
+  ((texture
+    :initform nil
+    :accessor mirror-texture))
   (:documentation
    "A luv mirror retaining McCLIM's CPU raster image for later upload."))
 
@@ -44,6 +46,95 @@ mirror's identity: a later target may be a texture presented on a 3D quad."))
                                :target target)))
     (mcclim-render::%set-image-region mirror region)
     mirror))
+
+(defun raster-mirror-image-size (mirror)
+  (let ((image (mcclim-render:image-mirror-image mirror)))
+    (list (pattern-width image) (pattern-height image))))
+
+(defun ensure-raster-mirror-context (mirror size)
+  (let* ((target (mirror-target mirror))
+         (context
+           (or (mirror-context mirror)
+               (setf (mirror-context mirror)
+                     (luv:make-canvas-context target luv:*gpu-provider*)))))
+    (unless (equal size (luv:canvas-extent context))
+      (luv:configure-canvas-context
+       context
+       (luv:make-canvas-configuration
+        :device (luv:context-device context)
+        :format (luv:canvas-format context)
+        :usage '(:copy-dst))))
+    context))
+
+(defun ensure-raster-mirror-texture (mirror context size)
+  (let ((texture (mirror-texture mirror))
+        (format (luv:canvas-format context)))
+    (unless (and texture
+                 (equal (luv:gpu-texture-size texture)
+                        (append size '(1)))
+                 (eq (luv:gpu-texture-format texture) format))
+      (let ((replacement
+              (luv:create
+               (luv:context-device context)
+               (luv:make-texture-descriptor
+                :label "McCLIM raster upload"
+                :size size
+                :usage '(:copy-src :copy-dst)
+                :dimensions :2d
+                :format format))))
+        (when texture
+          (luv:destroy texture))
+        (setf (mirror-texture mirror) replacement)))
+    (mirror-texture mirror)))
+
+(defmethod present-mirror ((mirror luv-raster-mirror))
+  "Upload and present MIRROR when McCLIM has marked its image dirty."
+  (let ((target (mirror-target mirror)))
+    (when (and (eq :open (luv:canvas-state target))
+               (not (region-equal
+                     (mcclim-render:image-dirty-region mirror)
+                     +nowhere+)))
+      ;; Acquire the image lock on the native thread.  Acquiring it before
+      ;; dispatch would deadlock against native callbacks that draw.
+      (luv:request-canvas-frame
+       target
+       (lambda (timestamp)
+         (declare (ignore timestamp))
+         (mcclim-render:with-image-locked (mirror)
+           (unless (region-equal
+                    (mcclim-render:image-dirty-region mirror)
+                    +nowhere+)
+             (let* ((image (mcclim-render:image-mirror-image mirror))
+                    (pixels (pattern-array image))
+                    (size (raster-mirror-image-size mirror))
+                    (context (ensure-raster-mirror-context mirror size))
+                    (texture
+                      (ensure-raster-mirror-texture
+                       mirror context size)))
+               (luv:write-texture
+                (luv:device-queue (luv:context-device context))
+                (luv:make-texture-copy :texture texture)
+                pixels
+                (luv:make-texture-data-layout
+                 :bytes-per-row (* 4 (first size))
+                 :rows-per-image (second size))
+                size)
+               (luv:present-canvas-frame
+                context
+                (lambda (surface encoder)
+                  (luv:encode
+                   encoder
+                   (luv:make-gpu-copy-texture-command
+                    :source texture :destination surface))))
+               (setf (mcclim-render:image-dirty-region mirror)
+                     +nowhere+))))))))
+  mirror)
+
+(defmethod release-mirror-presentation ((mirror luv-raster-mirror))
+  (alexandria:when-let ((texture (mirror-texture mirror)))
+    (luv:destroy texture)
+    (setf (mirror-texture mirror) nil))
+  mirror)
 
 (defmethod realize-mirror ((port luv-port) (sheet mirrored-sheet-mixin))
   (with-bounding-rectangle* (x y :width width :height height) sheet
@@ -86,8 +177,10 @@ mirror's identity: a later target may be a texture presented on a 3D quad."))
   (let ((mirror (sheet-direct-mirror sheet)))
     (when mirror
       (let ((target (mirror-target mirror)))
+        (release-mirror-presentation mirror)
         (when (member (luv:canvas-state target) '(:opening :open))
-          (luv:close-canvas target)))
+          (luv:close-canvas target))
+        (setf (mirror-context mirror) nil))
       (setf (port-mirrors port)
             (delete mirror (port-mirrors port))))))
 

@@ -29,9 +29,19 @@
            #:image-memory-requirements-alignment
            #:image-memory-requirements-memory-type-bits
            #:get-image-memory-requirements
+           #:create-buffer
+           #:destroy-buffer
+           #:buffer-memory-requirements
+           #:buffer-memory-requirements-size
+           #:buffer-memory-requirements-alignment
+           #:buffer-memory-requirements-memory-type-bits
+           #:get-buffer-memory-requirements
            #:allocate-memory
            #:free-memory
            #:bind-image-memory
+           #:bind-buffer-memory
+           #:map-memory
+           #:unmap-memory
            #:create-image-view
            #:destroy-image-view
            #:create-shader-module
@@ -54,6 +64,7 @@
            #:cmd-transition-image
            #:cmd-clear-color-image
            #:cmd-copy-image
+           #:cmd-copy-buffer-to-image
            #:cmd-bind-compute-pipeline
            #:cmd-bind-compute-descriptor-set
            #:cmd-dispatch
@@ -132,6 +143,7 @@
            #:encode
            #:finish
            #:submit
+           #:write-texture
            #:destroy
            #:begin-compute-pass
            #:end-pass
@@ -140,6 +152,15 @@
            #:dispatch-workgroups
            #:make-device-descriptor
            #:make-texture-descriptor
+           #:make-texture-copy
+           #:texture-copy-texture
+           #:texture-copy-mip-level
+           #:texture-copy-origin
+           #:texture-copy-aspect
+           #:make-texture-data-layout
+           #:texture-data-layout-offset
+           #:texture-data-layout-bytes-per-row
+           #:texture-data-layout-rows-per-image
            #:make-texture-view-descriptor
            #:make-shader-module-descriptor
            #:make-bind-group-layout-descriptor

@@ -29,6 +29,18 @@
   (:documentation
    "A CPU raster medium whose image will be uploaded to a luv target."))
 
+(defgeneric present-mirror (mirror)
+  (:documentation "Synchronize MIRROR's pending output with its target."))
+
+(defgeneric release-mirror-presentation (mirror)
+  (:documentation "Release renderer-specific resources retained by MIRROR."))
+
+(defmethod present-mirror ((mirror t))
+  mirror)
+
+(defmethod release-mirror-presentation ((mirror t))
+  mirror)
+
 (defclass luv-graft (graft)
   ((dpi
     :initarg :dpi
@@ -104,18 +116,32 @@ with delivery of translated luv events."
            (loop do (sleep 3600))))))
 
 (defmethod make-medium ((port luv-raster-port) sheet)
-  ;; MCCLIM-RENDER gives us a useful, inspectable CPU image immediately.  The
-  ;; missing next step is presenting dirty portions of that image through the
-  ;; mirror's luv target.
+  ;; MCCLIM-RENDER gives us a useful, inspectable CPU image.  Finish/force
+  ;; output synchronizes its dirty contents with the mirror's GPU texture.
   (make-instance 'luv-raster-medium :port port :sheet sheet))
 
 (defmethod port-force-output ((port luv-port))
   (declare (ignore port))
   nil)
 
+(defmethod port-force-output ((port luv-raster-port))
+  (dolist (mirror (port-mirrors port))
+    (present-mirror mirror))
+  nil)
+
+(defmethod medium-finish-output :before ((medium luv-raster-medium))
+  (alexandria:when-let ((mirror (medium-drawable medium)))
+    (present-mirror mirror)))
+
+(defmethod medium-force-output :before ((medium luv-raster-medium))
+  (alexandria:when-let ((mirror (medium-drawable medium)))
+    (present-mirror mirror)))
+
 (defmethod destroy-port :before ((port luv-port))
   (dolist (mirror (copy-list (port-mirrors port)))
     (let ((target (mirror-target mirror)))
+      (release-mirror-presentation mirror)
       (when (member (luv:canvas-state target) '(:opening :open))
-        (luv:close-canvas target))))
+        (luv:close-canvas target))
+      (setf (mirror-context mirror) nil)))
   (setf (port-mirrors port) nil))

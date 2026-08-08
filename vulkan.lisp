@@ -33,6 +33,7 @@
   (:device-create-info 3)
   (:submit-info 4)
   (:memory-allocate-info 5)
+  (:buffer-create-info 12)
   (:semaphore-create-info 9)
   (:image-create-info 14)
   (:image-view-create-info 15)
@@ -138,6 +139,10 @@
   (:transfer-src #x1)
   (:transfer-dst #x2)
   (:storage #x8))
+
+(cffi:defbitfield (buffer-usage-flags :uint32)
+  (:transfer-src #x1)
+  (:transfer-dst #x2))
 
 (cffi:defbitfield (shader-stage-flags :uint32)
   (:compute #x20))
@@ -326,6 +331,14 @@
   (alignment :uint64)
   (memory-type-bits :uint32))
 
+(defvkstruct buffer-create-info (:s-type :buffer-create-info)
+  (flags :uint32)
+  (size :uint64)
+  (usage buffer-usage-flags)
+  (sharing-mode sharing-mode)
+  (queue-family-index-count :uint32)
+  (p-queue-family-indices :pointer))
+
 (defvkstruct image-create-info (:s-type :image-create-info)
   (flags :uint32)
   (image-type image-type)
@@ -463,6 +476,14 @@
   (dst-subresource (:struct image-subresource-layers))
   (dst-offset (:struct offset-3d))
   (extent (:struct extent-3d)))
+
+(defvkstruct buffer-image-copy ()
+  (buffer-offset :uint64)
+  (buffer-row-length :uint32)
+  (buffer-image-height :uint32)
+  (image-subresource (:struct image-subresource-layers))
+  (image-offset (:struct offset-3d))
+  (image-extent (:struct extent-3d)))
 
 (defvkstruct command-pool-create-info (:s-type :command-pool-create-info)
   (flags command-pool-create-flags)
@@ -717,6 +738,27 @@
   (image :pointer)
   (requirements :pointer))
 
+(cffi:defcfun ("vkCreateBuffer" %create-buffer :library vulkan-loader)
+    checked-result
+  (device :pointer)
+  (create-info :pointer)
+  (allocator :pointer)
+  (buffer :pointer))
+
+(cffi:defcfun ("vkDestroyBuffer" %destroy-buffer :library vulkan-loader)
+    :void
+  (device :pointer)
+  (buffer :pointer)
+  (allocator :pointer))
+
+(cffi:defcfun ("vkGetBufferMemoryRequirements"
+               %get-buffer-memory-requirements
+               :library vulkan-loader)
+    :void
+  (device :pointer)
+  (buffer :pointer)
+  (requirements :pointer))
+
 (cffi:defcfun ("vkAllocateMemory" %allocate-memory :library vulkan-loader)
     checked-result
   (device :pointer)
@@ -736,6 +778,27 @@
   (image :pointer)
   (memory :pointer)
   (offset :uint64))
+
+(cffi:defcfun ("vkBindBufferMemory" %bind-buffer-memory :library vulkan-loader)
+    checked-result
+  (device :pointer)
+  (buffer :pointer)
+  (memory :pointer)
+  (offset :uint64))
+
+(cffi:defcfun ("vkMapMemory" %map-memory :library vulkan-loader)
+    checked-result
+  (device :pointer)
+  (memory :pointer)
+  (offset :uint64)
+  (size :uint64)
+  (flags :uint32)
+  (data :pointer))
+
+(cffi:defcfun ("vkUnmapMemory" %unmap-memory :library vulkan-loader)
+    :void
+  (device :pointer)
+  (memory :pointer))
 
 (cffi:defcfun ("vkCreateImageView" %create-image-view
                :library vulkan-loader)
@@ -908,6 +971,16 @@
   (source :pointer)
   (source-layout image-layout)
   (destination :pointer)
+  (destination-layout image-layout)
+  (region-count :uint32)
+  (regions :pointer))
+
+(cffi:defcfun ("vkCmdCopyBufferToImage" %cmd-copy-buffer-to-image
+               :library vulkan-loader)
+    :void
+  (command-buffer :pointer)
+  (source-buffer :pointer)
+  (destination-image :pointer)
   (destination-layout image-layout)
   (region-count :uint32)
   (regions :pointer))
@@ -1120,6 +1193,11 @@
   :checked t
   :operation :create-image)
 
+(define-creator create-buffer-handle (device create-info)
+  (%create-buffer device create-info (cffi:null-pointer))
+  :checked t
+  :operation :create-buffer)
+
 (define-creator allocate-memory-handle (device allocate-info)
   (%allocate-memory device allocate-info (cffi:null-pointer))
   :checked t
@@ -1192,6 +1270,11 @@
   (heap-index 0 :type (unsigned-byte 32)))
 
 (defstruct image-memory-requirements
+  (size 0 :type (unsigned-byte 64))
+  (alignment 0 :type (unsigned-byte 64))
+  (memory-type-bits 0 :type (unsigned-byte 32)))
+
+(defstruct buffer-memory-requirements
   (size 0 :type (unsigned-byte 64))
   (alignment 0 :type (unsigned-byte 64))
   (memory-type-bits 0 :type (unsigned-byte 32)))
@@ -1374,6 +1457,32 @@
        :alignment alignment
        :memory-type-bits memory-type-bits))))
 
+(defun create-buffer (device size usage)
+  (with-vk (create-info buffer-create-info
+            :flags 0
+            :size size
+            :usage usage
+            :sharing-mode :exclusive
+            :queue-family-index-count 0
+            :p-queue-family-indices (cffi:null-pointer))
+    (create-buffer-handle device create-info)))
+
+(defun destroy-buffer (device buffer)
+  (%destroy-buffer device buffer (cffi:null-pointer))
+  (values))
+
+(defun get-buffer-memory-requirements (device buffer)
+  (cffi:with-foreign-object (requirements '(:struct memory-requirements))
+    (clear-foreign-object requirements '(:struct memory-requirements))
+    (%get-buffer-memory-requirements device buffer requirements)
+    (cffi:with-foreign-slots
+        ((size alignment memory-type-bits)
+         requirements (:struct memory-requirements))
+      (make-buffer-memory-requirements
+       :size size
+       :alignment alignment
+       :memory-type-bits memory-type-bits))))
+
 (defun allocate-memory (device size memory-type-index)
   (with-vk (allocate-info memory-allocate-info
             :allocation-size size
@@ -1387,6 +1496,21 @@
 (defun bind-image-memory (device image memory &optional (offset 0))
   (with-vulkan-results (:bind-image-memory)
     (%bind-image-memory device image memory offset))
+  (values))
+
+(defun bind-buffer-memory (device buffer memory &optional (offset 0))
+  (with-vulkan-results (:bind-buffer-memory)
+    (%bind-buffer-memory device buffer memory offset))
+  (values))
+
+(defun map-memory (device memory size &optional (offset 0))
+  (cffi:with-foreign-object (data :pointer)
+    (with-vulkan-results (:map-memory)
+      (%map-memory device memory offset size 0 data))
+    (cffi:mem-ref data :pointer)))
+
+(defun unmap-memory (device memory)
+  (%unmap-memory device memory)
   (values))
 
 (defun create-image-view (device image format &key (view-type :2d))
@@ -1616,6 +1740,29 @@
     (%cmd-copy-image
      command-buffer source source-layout destination destination-layout
      1 region))
+  (values))
+
+(defun cmd-copy-buffer-to-image
+    (command-buffer buffer image layout width height
+     &key (buffer-offset 0) (buffer-row-length 0)
+          (buffer-image-height 0) (x 0) (y 0) (depth 1))
+  (with-vk (region buffer-image-copy
+            :buffer-offset buffer-offset
+            :buffer-row-length buffer-row-length
+            :buffer-image-height buffer-image-height)
+    (fill-color-subresource-layers
+     (cffi:foreign-slot-pointer
+      region '(:struct buffer-image-copy) 'image-subresource))
+    (fill-vk
+     (cffi:foreign-slot-pointer
+      region '(:struct buffer-image-copy) 'image-offset)
+     'offset-3d :x x :y y :z 0)
+    (fill-vk
+     (cffi:foreign-slot-pointer
+      region '(:struct buffer-image-copy) 'image-extent)
+     'extent-3d :width width :height height :depth depth)
+    (%cmd-copy-buffer-to-image
+     command-buffer buffer image layout 1 region))
   (values))
 
 (defun cmd-bind-compute-pipeline (command-buffer pipeline)

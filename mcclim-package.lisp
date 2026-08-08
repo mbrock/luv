@@ -23,7 +23,10 @@
            #:luv-raster-medium
            #:mirror-sheet
            #:mirror-target
+           #:mirror-context
+           #:mirror-texture
            #:port-mirrors
+           #:present-mirror
            #:lab-sheet
            #:lab-sheet-image
            #:open-lab-sheet

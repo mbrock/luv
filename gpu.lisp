@@ -175,6 +175,14 @@ sequence."))
 (defgeneric submit (queue work)
   (:documentation "Submit some command buffers to the QUEUE."))
 
+(defgeneric write-texture (queue destination data data-layout size)
+  (:documentation
+   "Write CPU DATA into a texture through QUEUE.
+
+DESTINATION is a TEXTURE-COPY, DATA-LAYOUT describes the source bytes, and
+SIZE is a two- or three-component extent.  This is the small synchronous
+counterpart of WebGPU's GPUQueue.writeTexture."))
+
 (defgeneric destroy (handle)
   (:documentation "Destroy the GPU object denoted by HANDLE."))
 
@@ -203,6 +211,17 @@ sequence."))
 
 (defstruct (texture-view-descriptor (:include gpu-descriptor))
   texture)
+
+(defstruct texture-copy
+  texture
+  (mip-level 0)
+  (origin '(0 0 0))
+  (aspect :all))
+
+(defstruct texture-data-layout
+  (offset 0)
+  bytes-per-row
+  rows-per-image)
 
 (defstruct (bind-group-layout-descriptor (:include gpu-descriptor))
   entries)

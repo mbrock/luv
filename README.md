@@ -217,15 +217,16 @@ target is a luv canvas:
 The mirror does not equate a CLIM sheet with a native window.  It owns a
 relationship between a sheet and a presentation target.  Today that target is
 an SDL canvas; later it may be a texture displayed on a quad in a luv scene.
-McCLIM already rasterizes drawing into an inspectable image, but the image is
-not uploaded or presented yet, and native input is not translated into CLIM
+McCLIM rasterizes drawing into an inspectable image. Finishing medium output
+uploads that image through `GPUQueue.writeTexture`-shaped machinery and copies
+it to the mirror's canvas surface. Native input is not translated into CLIM
 events yet.
 
 The small backend laboratory avoids loading the full examples collection:
 
 ```lisp
 (defparameter *sheet* (luv.mcclim:open-lab-sheet))
-;; Inspect the raster image while the upload path is still being built.
+;; The same raster image that was uploaded remains inspectable.
 (luv.mcclim:lab-sheet-image *sheet*)
 (luv.mcclim:close-lab-sheet *sheet*)
 ```
