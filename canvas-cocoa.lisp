@@ -12,9 +12,18 @@
   (receiver :pointer)
   (selector :pointer))
 
+(cffi:defcfun ("objc_msgSend" %objc-send-boolean) :bool
+  (receiver :pointer)
+  (selector :pointer))
+
 (cffi:defcfun ("objc_msgSend" %objc-send-void) :void
   (receiver :pointer)
   (selector :pointer))
+
+(cffi:defcfun ("objc_msgSend" %objc-send-void-boolean) :void
+  (receiver :pointer)
+  (selector :pointer)
+  (argument :bool))
 
 (cffi:defcfun ("objc_msgSend" %objc-send-policy) :bool
   (receiver :pointer)
@@ -48,11 +57,22 @@
                                +cocoa-activation-policy-regular+))
 
 (defmethod activate-sdl-canvas-host :after ((canvas sdl-canvas))
-  (declare (ignore canvas))
-  ;; ACTIVATE is cooperative on current macOS.  SDL_RaiseWindow, performed by
-  ;; the primary method, separately requests that this particular window be
-  ;; made key and frontmost.
-  (%objc-send-void (cocoa-application) (%objc-selector "activate")))
+  ;; There is no cooperating foreground application to yield activation when
+  ;; a Slynk worker opens a window.  This is an explicit user request, so use
+  ;; the same forceful activation that SDL uses for command-line Cocoa apps.
+  ;; A process transitioning out of background-only policy needs a few Cocoa
+  ;; event turns before Launch Services will honor activation, so pump briefly
+  ;; instead of leaving a regular-but-background window in another Stage.
+  (let ((application (cocoa-application)))
+    (loop repeat 20
+          until (%objc-send-boolean application (%objc-selector "isActive"))
+          do (%objc-send-void-boolean
+              application (%objc-selector "activateIgnoringOtherApps:") t)
+             (sdl3:pump-events)
+             (sleep 0.01))
+    ;; The primary method already requested this before activation; repeat it
+    ;; now that the application can actually make the window key.
+    (sdl3:raise-window (sdl-canvas-window canvas))))
 
 (defmethod deactivate-sdl-canvas-host ((canvas sdl-canvas))
   (declare (ignore canvas))
