@@ -11,6 +11,86 @@
 
 (in-package #:luv)
 
+(define-condition gpu-error (error)
+  ((operation
+    :initarg :operation
+    :initform nil
+    :reader gpu-error-operation))
+  (:documentation "Base condition for errors exposed by the luv GPU API."))
+
+(define-condition gpu-request-error (gpu-error)
+  ((descriptor
+    :initarg :descriptor
+    :reader gpu-request-error-descriptor)
+   (reason
+    :initarg :reason
+    :reader gpu-request-error-reason)
+   (details
+    :initarg :details
+    :initform nil
+    :reader gpu-request-error-details))
+  (:report
+   (lambda (condition stream)
+     (case (gpu-request-error-reason condition)
+       (:invalid-descriptor
+        (format stream "Expected a GPU descriptor, got ~S."
+                (gpu-request-error-details condition)))
+       (:unsupported-features
+        (format stream "Required GPU features are not implemented yet: ~S"
+                (gpu-request-error-details condition)))
+       (:unsupported-limits
+        (format stream "Required GPU limits are not implemented yet: ~S"
+                (gpu-request-error-details condition)))
+       (otherwise
+        (format stream "GPU request failed~@[ during ~S~]: ~S~@[ (~S)~]"
+                (gpu-error-operation condition)
+                (gpu-request-error-reason condition)
+                (gpu-request-error-details condition)))))))
+
+(define-condition gpu-object-error (gpu-error)
+  ((object
+    :initarg :object
+    :reader gpu-object-error-object))
+  (:documentation "Base condition for an operation rejected by a GPU object."))
+
+(define-condition gpu-object-destroyed-error (gpu-object-error) ()
+  (:report
+   (lambda (condition stream)
+     (format stream "~S has already been destroyed~@[ during ~S~]."
+             (gpu-object-error-object condition)
+             (gpu-error-operation condition)))))
+
+(define-condition gpu-invalid-state-error (gpu-object-error)
+  ((state
+    :initarg :state
+    :reader gpu-invalid-state-error-state)
+   (expected-state
+    :initarg :expected-state
+    :reader gpu-invalid-state-error-expected-state))
+  (:report
+   (lambda (condition stream)
+     (format stream
+             "Cannot perform ~S on ~S in state ~S; expected ~S."
+             (gpu-error-operation condition)
+             (gpu-object-error-object condition)
+             (gpu-invalid-state-error-state condition)
+             (gpu-invalid-state-error-expected-state condition)))))
+
+(define-condition gpu-device-mismatch-error (gpu-object-error)
+  ((expected-device
+    :initarg :expected-device
+    :reader gpu-device-mismatch-error-expected-device)
+   (actual-device
+    :initarg :actual-device
+    :reader gpu-device-mismatch-error-actual-device))
+  (:report
+   (lambda (condition stream)
+     (format stream "~S belongs to ~S, not the device ~S required by ~S."
+             (gpu-object-error-object condition)
+             (gpu-device-mismatch-error-actual-device condition)
+             (gpu-device-mismatch-error-expected-device condition)
+             (gpu-error-operation condition)))))
+
 (defclass gpu-provider () ()
   (:documentation "Instances of GPU-PROVIDER subclasses are platform-specific
 factories for requesting GPU-DEVICE instances."))

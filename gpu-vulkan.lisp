@@ -7,6 +7,29 @@
   #-darwin
   `(progn ,@body))
 
+(define-condition vulkan-gpu-error (gpu-error)
+  ((reason
+    :initarg :reason
+    :reader vulkan-gpu-error-reason)
+   (details
+    :initarg :details
+    :initform nil
+    :reader vulkan-gpu-error-details))
+  (:report
+   (lambda (condition stream)
+     (case (vulkan-gpu-error-reason condition)
+       (:no-physical-device
+        (format stream "Vulkan found no physical devices."))
+       (:no-graphics-queue
+        (format stream
+                "The Vulkan physical device ~S exposes no graphics queue."
+                (vulkan-gpu-error-details condition)))
+       (otherwise
+        (format stream "Vulkan GPU operation ~S failed: ~S~@[ (~S)~]"
+                (gpu-error-operation condition)
+                (vulkan-gpu-error-reason condition)
+                (vulkan-gpu-error-details condition)))))))
+
 (defun vulkan-gpu-instance-create-info (application-name)
   "Create a portable, presentation-independent Vulkan instance description."
   (let* ((available
@@ -92,9 +115,11 @@
     :initform :ready
     :accessor vulkan-command-buffer-state)))
 
-(defun ensure-live-vulkan-object (object)
+(defun ensure-live-vulkan-object (object operation)
   (when (vulkan-object-destroyed-p object)
-    (error "~S has already been destroyed." object))
+    (error 'gpu-object-destroyed-error
+           :object object
+           :operation operation))
   object)
 
 (defun first-vulkan-graphics-queue-family (physical-device)
@@ -105,18 +130,31 @@
             when (and (plusp (vk:queue-count properties))
                       (member :graphics (vk:queue-flags properties)))
               return index)
-      (error "The Vulkan physical device exposes no graphics queue.")))
+      (error 'vulkan-gpu-error
+             :operation :request-device
+             :reason :no-graphics-queue
+             :details physical-device)))
 
 (defun check-vulkan-device-descriptor (descriptor)
   "Reject WebGPU requirements the initial Vulkan backend cannot honor yet."
   (unless (typep descriptor 'device-descriptor)
-    (error "Expected a DEVICE-DESCRIPTOR, got ~S." descriptor))
+    (error 'gpu-request-error
+           :operation :request-device
+           :descriptor descriptor
+           :reason :invalid-descriptor
+           :details descriptor))
   (when (device-descriptor-required-features descriptor)
-    (error "Required GPU features are not implemented yet: ~S"
-           (device-descriptor-required-features descriptor)))
+    (error 'gpu-request-error
+           :operation :request-device
+           :descriptor descriptor
+           :reason :unsupported-features
+           :details (device-descriptor-required-features descriptor)))
   (when (device-descriptor-required-limits descriptor)
-    (error "Required GPU limits are not implemented yet: ~S"
-           (device-descriptor-required-limits descriptor))))
+    (error 'gpu-request-error
+           :operation :request-device
+           :descriptor descriptor
+           :reason :unsupported-limits
+           :details (device-descriptor-required-limits descriptor))))
 
 (defun make-vulkan-device-create-info (queue-family)
   (vk:make-device-create-info
@@ -142,7 +180,9 @@
                        (vulkan-provider-application-name provider))))
                (let* ((physical-device
                         (or (first (vk:enumerate-physical-devices instance))
-                            (error "Vulkan found no physical devices.")))
+                            (error 'vulkan-gpu-error
+                                   :operation :request-device
+                                   :reason :no-physical-device)))
                       (queue-family
                         (first-vulkan-graphics-queue-family physical-device)))
                  (setf native-device
@@ -175,14 +215,14 @@
               (vk:destroy-instance instance))))))))
 
 (defmethod device-queue ((device vulkan-gpu-device))
-  (ensure-live-vulkan-object device)
+  (ensure-live-vulkan-object device :device-queue)
   (vulkan-device-queue device))
 
 (defmethod create
     ((device vulkan-gpu-device) (descriptor command-encoder-descriptor))
   "Allocate and begin one Vulkan primary command buffer."
   (with-vulkan-gpu-driver-environment
-    (ensure-live-vulkan-object device)
+    (ensure-live-vulkan-object device :create-command-encoder)
     (let ((command-pool nil)
           (completed-p nil))
       (unwind-protect
@@ -218,12 +258,15 @@
 (defmethod finish ((encoder vulkan-gpu-command-encoder))
   (with-vulkan-gpu-driver-environment
     (unless (eq :recording (vulkan-command-encoder-state encoder))
-      (error "Cannot finish a Vulkan command encoder in state ~S."
-             (vulkan-command-encoder-state encoder)))
+      (error 'gpu-invalid-state-error
+             :object encoder
+             :operation :finish
+             :state (vulkan-command-encoder-state encoder)
+             :expected-state :recording))
     (let ((device (vulkan-command-encoder-device encoder))
           (command-buffer (vulkan-command-encoder-command-buffer encoder))
           (command-pool (vulkan-command-encoder-command-pool encoder)))
-      (ensure-live-vulkan-object device)
+      (ensure-live-vulkan-object device :finish)
       (vk:end-command-buffer command-buffer)
       (setf (vulkan-command-encoder-state encoder) :finished
             (vulkan-command-encoder-command-pool encoder) nil)
@@ -235,13 +278,20 @@
        :command-pool command-pool))))
 
 (defun check-vulkan-command-buffer-for-submit (queue command-buffer)
-  (ensure-live-vulkan-object command-buffer)
+  (ensure-live-vulkan-object command-buffer :submit)
   (unless (eq (vulkan-queue-device queue)
               (vulkan-command-buffer-device command-buffer))
-    (error "The Vulkan command buffer belongs to a different device."))
+    (error 'gpu-device-mismatch-error
+           :object command-buffer
+           :operation :submit
+           :expected-device (vulkan-queue-device queue)
+           :actual-device (vulkan-command-buffer-device command-buffer)))
   (unless (eq :ready (vulkan-command-buffer-state command-buffer))
-    (error "Cannot submit a Vulkan command buffer in state ~S."
-           (vulkan-command-buffer-state command-buffer))))
+    (error 'gpu-invalid-state-error
+           :object command-buffer
+           :operation :submit
+           :state (vulkan-command-buffer-state command-buffer)
+           :expected-state :ready)))
 
 (defmethod submit
     ((queue vulkan-gpu-queue) (command-buffer vulkan-gpu-command-buffer))
@@ -254,7 +304,7 @@ The initial backend waits for the queue so command-buffer ownership remains
 simple.  A later in-flight frame implementation can replace this wait with
 fences while preserving the public submission operation."
   (with-vulkan-gpu-driver-environment
-    (ensure-live-vulkan-object queue)
+    (ensure-live-vulkan-object queue :submit)
     (loop for command-buffer across command-buffers
           do (check-vulkan-command-buffer-for-submit queue command-buffer))
     (when (plusp (length command-buffers))

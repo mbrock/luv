@@ -1,6 +1,24 @@
 (defpackage #:luv
   (:use #:cl)
   (:export #:*gpu-provider*
+           #:gpu-error
+           #:gpu-error-operation
+           #:gpu-request-error
+           #:gpu-request-error-descriptor
+           #:gpu-request-error-reason
+           #:gpu-request-error-details
+           #:gpu-object-error
+           #:gpu-object-error-object
+           #:gpu-object-destroyed-error
+           #:gpu-invalid-state-error
+           #:gpu-invalid-state-error-state
+           #:gpu-invalid-state-error-expected-state
+           #:gpu-device-mismatch-error
+           #:gpu-device-mismatch-error-expected-device
+           #:gpu-device-mismatch-error-actual-device
+           #:vulkan-gpu-error
+           #:vulkan-gpu-error-reason
+           #:vulkan-gpu-error-details
            #:*window*
            #:*instance*
            #:*physical-device*
