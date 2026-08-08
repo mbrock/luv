@@ -1713,12 +1713,14 @@ lowering later without changing this queue-level operation."
 (defun submit-vulkan-command-buffers
     (queue command-buffers &key (wait-semaphores #())
                                 (wait-stages #())
-                                (signal-semaphores #()))
-  "Submit one WebGPU-style batch and synchronously establish its completion.
+                                (signal-semaphores #())
+                                completion-fence
+                                (wait-for-completion t))
+  "Submit one WebGPU-style batch and establish its scheduled texture layouts.
 
-The initial backend waits for the queue so command-buffer ownership remains
-simple.  A later in-flight frame implementation can replace this wait with
-fences while preserving the public submission operation."
+The public SUBMIT operation remains synchronous.  Canvas frame slots pass a
+COMPLETION-FENCE and disable WAIT-FOR-COMPLETION, retaining their command
+buffers and native resources until that fence signals."
   (with-vulkan-gpu-driver-environment
     (ensure-live-vulkan-object queue :submit)
     (loop for command-buffer across command-buffers
@@ -1731,14 +1733,16 @@ fences while preserving the public submission operation."
          (map 'vector #'vulkan-handle command-buffers)
          :wait-semaphores wait-semaphores
          :wait-stages wait-stages
-         :signal-semaphores signal-semaphores)
-        (lvk:queue-wait-idle (vulkan-handle queue))
+         :signal-semaphores signal-semaphores
+         :fence completion-fence)
         (loop for command-buffer across command-buffers
               do (setf (vulkan-command-buffer-state command-buffer)
                        :submitted))
         (maphash (lambda (texture layout)
                    (setf (vulkan-texture-layout texture) layout))
-                 texture-layouts))))
+                 texture-layouts)
+        (when wait-for-completion
+          (lvk:queue-wait-idle (vulkan-handle queue))))))
   (values))
 
 (defmethod submit ((queue vulkan-gpu-queue) (command-buffers vector))

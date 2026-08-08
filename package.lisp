@@ -170,6 +170,10 @@ nothing else does."))
            #:get-swapchain-images
            #:create-semaphore
            #:destroy-semaphore
+           #:create-fence
+           #:destroy-fence
+           #:wait-for-fence
+           #:reset-fence
            #:acquire-next-image
            #:present))
 

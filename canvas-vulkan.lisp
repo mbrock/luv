@@ -36,12 +36,15 @@
    (format
     :initform nil
     :accessor canvas-format)
-   (image-ready
-    :initform nil
-    :accessor vulkan-canvas-image-ready)
    (render-done
-    :initform nil
+    :initform #()
     :accessor vulkan-canvas-render-done)
+   (frame-slots
+    :initform #()
+    :accessor vulkan-canvas-frame-slots)
+   (next-frame-slot
+    :initform 0
+    :accessor vulkan-canvas-next-frame-slot)
    (current-texture
     :initform nil
     :accessor vulkan-canvas-current-texture)
@@ -51,6 +54,87 @@
 
 (defmethod context-device ((context vulkan-canvas-context))
   (canvas-device context))
+
+(defclass vulkan-canvas-frame-slot ()
+  ((fence
+    :initarg :fence
+    :reader vulkan-frame-slot-fence)
+   (image-ready
+    :initarg :image-ready
+    :reader vulkan-frame-slot-image-ready)
+   (commands
+    :initform nil
+    :accessor vulkan-frame-slot-commands)))
+
+(defun make-vulkan-canvas-frame-slot (native-device)
+  (let ((fence nil)
+        (image-ready nil)
+        (completed-p nil))
+    (unwind-protect
+         (let ((slot nil))
+           (setf fence (lvk:create-fence native-device :signaled t)
+                 image-ready (lvk:create-semaphore native-device)
+                 slot
+                 (make-instance
+                  'vulkan-canvas-frame-slot
+                  :fence fence :image-ready image-ready)
+                 completed-p t)
+           slot)
+      (unless completed-p
+        (when image-ready
+          (lvk:destroy-semaphore native-device image-ready))
+        (when fence
+          (lvk:destroy-fence native-device fence))))))
+
+(defun make-vulkan-canvas-frame-slots (native-device count)
+  (let ((slots (make-array count :initial-element nil))
+        (completed-p nil))
+    (unwind-protect
+         (progn
+           (dotimes (index count)
+             (setf (aref slots index)
+                   (make-vulkan-canvas-frame-slot native-device)))
+           (setf completed-p t)
+           slots)
+      (unless completed-p
+        (loop for slot across slots
+              when slot
+                do (lvk:destroy-semaphore
+                    native-device (vulkan-frame-slot-image-ready slot))
+                   (lvk:destroy-fence
+                    native-device (vulkan-frame-slot-fence slot)))))))
+
+(defun make-vulkan-semaphores (native-device count)
+  (let ((semaphores (make-array count :initial-element nil))
+        (completed-p nil))
+    (unwind-protect
+         (progn
+           (dotimes (index count)
+             (setf (aref semaphores index)
+                   (lvk:create-semaphore native-device)))
+           (setf completed-p t)
+           semaphores)
+      (unless completed-p
+        (loop for semaphore across semaphores
+              when semaphore
+                do (lvk:destroy-semaphore native-device semaphore))))))
+
+(defun destroy-vulkan-canvas-frame-slot (native-device slot)
+  (when (vulkan-frame-slot-commands slot)
+    (destroy (vulkan-frame-slot-commands slot))
+    (setf (vulkan-frame-slot-commands slot) nil))
+  (lvk:destroy-semaphore
+   native-device (vulkan-frame-slot-image-ready slot))
+  (lvk:destroy-fence native-device (vulkan-frame-slot-fence slot))
+  (values))
+
+(defun recycle-vulkan-canvas-frame-slot (native-device slot)
+  (when (vulkan-frame-slot-commands slot)
+    (lvk:wait-for-fence native-device (vulkan-frame-slot-fence slot))
+    (destroy (vulkan-frame-slot-commands slot))
+    (setf (vulkan-frame-slot-commands slot) nil))
+  (lvk:reset-fence native-device (vulkan-frame-slot-fence slot))
+  slot)
 
 (defun sdl-canvas-vulkan-instance-extensions (canvas provider)
   (declare (ignore canvas provider))
@@ -215,8 +299,8 @@
                          capabilities))))
            (swapchain nil)
            (textures #())
-           (image-ready nil)
-           (render-done nil)
+           (frame-slots #())
+           (render-done #())
            (completed-p nil))
       (unless (member :transfer-dst
                       (lvk:presentation-capabilities-usage capabilities))
@@ -243,14 +327,18 @@
                            (context-device context) image extent
                            gpu-format vk-format))
                         (lvk:get-swapchain-images native-device swapchain))
-                   image-ready (lvk:create-semaphore native-device)
-                   render-done (lvk:create-semaphore native-device))
+                   frame-slots
+                   (make-vulkan-canvas-frame-slots
+                    native-device (min 2 (length textures)))
+                   render-done
+                   (make-vulkan-semaphores native-device (length textures)))
              (setf (vulkan-canvas-swapchain context) swapchain
                    (vulkan-canvas-textures context) textures
                    (canvas-extent context) extent
                    (canvas-format context) gpu-format
-                   (vulkan-canvas-image-ready context) image-ready
                    (vulkan-canvas-render-done context) render-done
+                   (vulkan-canvas-frame-slots context) frame-slots
+                   (vulkan-canvas-next-frame-slot context) 0
                    (canvas-context-configuration context)
                    (make-canvas-configuration
                     :device (context-device context)
@@ -260,10 +348,12 @@
                    completed-p t)
              context)
         (unless completed-p
-          (when render-done
-            (lvk:destroy-semaphore native-device render-done))
-          (when image-ready
-            (lvk:destroy-semaphore native-device image-ready))
+          (loop for semaphore across render-done
+                when semaphore
+                  do (lvk:destroy-semaphore native-device semaphore))
+          (loop for slot across frame-slots
+                when slot
+                  do (destroy-vulkan-canvas-frame-slot native-device slot))
           (loop for texture across textures do (destroy texture))
           (when swapchain
             (lvk:destroy-swapchain native-device swapchain)))))))
@@ -275,21 +365,20 @@
     (with-vulkan-gpu-driver-environment
       (let ((native-device (vulkan-handle (context-device context))))
         (lvk:device-wait-idle native-device)
+        (loop for slot across (vulkan-canvas-frame-slots context)
+              do (destroy-vulkan-canvas-frame-slot native-device slot))
         (loop for texture across (vulkan-canvas-textures context)
               do (destroy texture))
-        (when (vulkan-canvas-image-ready context)
-          (lvk:destroy-semaphore
-           native-device (vulkan-canvas-image-ready context)))
-        (when (vulkan-canvas-render-done context)
-          (lvk:destroy-semaphore
-           native-device (vulkan-canvas-render-done context)))
+        (loop for semaphore across (vulkan-canvas-render-done context)
+              do (lvk:destroy-semaphore native-device semaphore))
         (when (vulkan-canvas-swapchain context)
           (lvk:destroy-swapchain
            native-device (vulkan-canvas-swapchain context)))))
     (setf (vulkan-canvas-swapchain context) nil
           (vulkan-canvas-textures context) #()
-          (vulkan-canvas-image-ready context) nil
-          (vulkan-canvas-render-done context) nil
+          (vulkan-canvas-render-done context) #()
+          (vulkan-canvas-frame-slots context) #()
+          (vulkan-canvas-next-frame-slot context) 0
           (vulkan-canvas-current-texture context) nil
           (canvas-context-configuration context) nil
           (canvas-extent context) nil
@@ -397,15 +486,21 @@
 (defun call-with-vulkan-canvas-frame (context function)
   (ensure-vulkan-canvas-state context :frame :configured)
   (let* ((device (context-device context))
+         (native-device (vulkan-handle device))
          (queue (device-queue device))
+         (slot-index (vulkan-canvas-next-frame-slot context))
+         (slot (aref (vulkan-canvas-frame-slots context) slot-index))
          (encoder nil)
          (commands nil))
+    (recycle-vulkan-canvas-frame-slot native-device slot)
     (multiple-value-bind (image-index acquire-result)
         (lvk:acquire-next-image
-         (vulkan-handle device) (vulkan-canvas-swapchain context)
-         (vulkan-canvas-image-ready context))
+         native-device (vulkan-canvas-swapchain context)
+         (vulkan-frame-slot-image-ready slot))
       (declare (ignore acquire-result))
-      (let ((texture (aref (vulkan-canvas-textures context) image-index)))
+      (let ((texture (aref (vulkan-canvas-textures context) image-index))
+            (render-done
+              (aref (vulkan-canvas-render-done context) image-index)))
         (unwind-protect
              (progn
                (setf encoder
@@ -418,16 +513,22 @@
                (submit-vulkan-command-buffers
                 queue (vector commands)
                 :wait-semaphores
-                (vector (vulkan-canvas-image-ready context))
+                (vector (vulkan-frame-slot-image-ready slot))
                 :wait-stages (vector '(:transfer))
                 :signal-semaphores
-                (vector (vulkan-canvas-render-done context)))
+                (vector render-done)
+                :completion-fence (vulkan-frame-slot-fence slot)
+                :wait-for-completion nil)
+               (setf (vulkan-frame-slot-commands slot) commands
+                     commands nil)
                (lvk:present
                 (vulkan-handle queue)
                 (vulkan-canvas-swapchain context) image-index
                 :wait-semaphores
-                (vector (vulkan-canvas-render-done context)))
-               (lvk:queue-wait-idle (vulkan-handle queue))
+                (vector render-done))
+               (setf (vulkan-canvas-next-frame-slot context)
+                     (mod (1+ slot-index)
+                          (length (vulkan-canvas-frame-slots context))))
                texture)
           (setf (vulkan-canvas-current-texture context) nil
                 (canvas-context-state context) :configured)

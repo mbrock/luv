@@ -33,6 +33,7 @@
   (:device-create-info 3)
   (:submit-info 4)
   (:memory-allocate-info 5)
+  (:fence-create-info 8)
   (:buffer-create-info 12)
   (:semaphore-create-info 9)
   (:image-create-info 14)
@@ -244,6 +245,9 @@
   (:transient #x1)
   (:reset-command-buffer #x2)
   (:protected #x4))
+
+(cffi:defbitfield (fence-create-flags :uint32)
+  (:signaled #x1))
 
 (cffi:defbitfield (command-buffer-usage-flags :uint32)
   (:one-time-submit #x1)
@@ -781,6 +785,9 @@
 
 (defvkstruct semaphore-create-info (:s-type :semaphore-create-info)
   (flags :uint32))
+
+(defvkstruct fence-create-info (:s-type :fence-create-info)
+  (flags fence-create-flags))
 
 (defvkstruct surface-capabilities ()
   (min-image-count :uint32)
@@ -1553,6 +1560,33 @@ the beginning of TRACE through its first presentation."
   (semaphore :pointer)
   (allocator :pointer))
 
+(defvkfun "vkCreateFence"
+    checked-result
+  (device :pointer)
+  (create-info :pointer)
+  (allocator :pointer)
+  (fence :pointer))
+
+(defvkfun "vkDestroyFence"
+    :void
+  (device :pointer)
+  (fence :pointer)
+  (allocator :pointer))
+
+(defvkfun "vkWaitForFences"
+    checked-result
+  (device :pointer)
+  (fence-count :uint32)
+  (fences :pointer)
+  (wait-all :uint32)
+  (timeout :uint64))
+
+(defvkfun "vkResetFences"
+    checked-result
+  (device :pointer)
+  (fence-count :uint32)
+  (fences :pointer))
+
 (defvkfun "vkAcquireNextImageKHR"
     checked-result
   (device :pointer)
@@ -1735,6 +1769,11 @@ the beginning of TRACE through its first presentation."
   (vk:create-semaphore device create-info (cffi:null-pointer))
   :checked t
   :operation :create-semaphore)
+
+(define-creator create-fence-handle (device create-info)
+  (vk:create-fence device create-info (cffi:null-pointer))
+  :checked t
+  :operation :create-fence)
 
 ;;; Public, Lisp-shaped operations.
 
@@ -2550,7 +2589,7 @@ the beginning of TRACE through its first presentation."
 
 (defun submit-command-buffers
     (queue buffers &key (wait-semaphores #()) (wait-stages #())
-                        (signal-semaphores #()))
+                        (signal-semaphores #()) fence)
   (unless (= (length wait-semaphores) (length wait-stages))
     (error "Each wait semaphore needs one destination stage."))
   (with-foreign-array (command-buffers :pointer buffers)
@@ -2566,7 +2605,8 @@ the beginning of TRACE through its first presentation."
                     :signal-semaphore-count (length signal-semaphores)
                     :p-signal-semaphores signals)
             (with-vulkan-results (:queue-submit)
-              (vk:queue-submit queue 1 submit (cffi:null-pointer))))))))
+              (vk:queue-submit
+               queue 1 submit (or fence (cffi:null-pointer)))))))))
   (values))
 
 (defun submit-command-buffer (queue command-buffer)
@@ -2676,6 +2716,28 @@ the beginning of TRACE through its first presentation."
 
 (defun destroy-semaphore (device semaphore)
   (vk:destroy-semaphore device semaphore (cffi:null-pointer))
+  (values))
+
+(defun create-fence (device &key signaled)
+  (with-vk (create-info fence-create-info
+            :flags (if signaled '(:signaled) nil))
+    (create-fence-handle device create-info)))
+
+(defun destroy-fence (device fence)
+  (vk:destroy-fence device fence (cffi:null-pointer))
+  (values))
+
+(defun wait-for-fence
+    (device fence &key (timeout #xffffffffffffffff))
+  (with-foreign-array (fences :pointer (vector fence))
+    (with-vulkan-results (:wait-for-fence)
+      (vk:wait-for-fences device 1 fences 1 timeout)))
+  (values))
+
+(defun reset-fence (device fence)
+  (with-foreign-array (fences :pointer (vector fence))
+    (with-vulkan-results (:reset-fence)
+      (vk:reset-fences device 1 fences)))
   (values))
 
 (defun acquire-next-image
