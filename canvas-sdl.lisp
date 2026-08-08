@@ -27,12 +27,21 @@
    (startup-error
     :initform nil
     :accessor sdl-canvas-startup-error)
+   (startup-completion
+    :initform (sb-thread:make-semaphore :count 0)
+    :accessor sdl-canvas-startup-completion)
+   (shutdown-completion
+    :initform (sb-thread:make-semaphore :count 0)
+    :accessor sdl-canvas-shutdown-completion)
    (close-requested-p
     :initform nil
     :accessor sdl-canvas-close-requested-p)
    (thread
     :initform nil
     :accessor sdl-canvas-thread)
+   (wake-event-type
+    :initform nil
+    :accessor sdl-canvas-wake-event-type)
    (request-lock
     :initform (sb-thread:make-mutex :name "luv SDL canvas request lock")
     :reader sdl-canvas-request-lock)
@@ -53,9 +62,11 @@
   #-darwin
   `(progn ,@body))
 
-(defun make-sdl-canvas (&key (title "luv canvas") (width 800) (height 600))
+(defun make-sdl-canvas (&key (title "luv canvas") (width 800) (height 600)
+                          (clock (make-demand-clock)))
   "Construct an unrealized SDL canvas."
-  (make-instance 'sdl-canvas :title title :width width :height height))
+  (make-instance 'sdl-canvas :title title :width width :height height
+                              :clock clock))
 
 (defmethod canvas-size ((canvas sdl-canvas))
   (let ((window (sdl-canvas-window canvas)))
@@ -96,6 +107,21 @@
     (setf (sdl-canvas-request-error request) condition)
     (sb-thread:signal-semaphore (sdl-canvas-request-completion request))))
 
+(defun wake-sdl-canvas (canvas)
+  "Wake CANVAS's native SDL event loop after cross-thread work arrives."
+  (let ((event-type (sdl-canvas-wake-event-type canvas)))
+    (when event-type
+      (cffi:with-foreign-object (event '(:union sdl3:event))
+        (dotimes (index (cffi:foreign-type-size '(:union sdl3:event)))
+          (setf (cffi:mem-aref event :uint8 index) 0))
+        (setf (cffi:mem-ref event :uint32) event-type)
+        (sdl3:push-event event)))))
+
+(defmethod (setf canvas-clock) :after (clock (canvas sdl-canvas))
+  (when (typep clock 'cadence-clock)
+    (setf (cadence-clock-next-frame-time clock) nil))
+  (wake-sdl-canvas canvas))
+
 (defun call-on-sdl-canvas-thread (canvas function)
   "Call FUNCTION synchronously on CANVAS's native event thread."
   (when (sdl-canvas-native-thread-p canvas)
@@ -109,6 +135,7 @@
     (sb-thread:with-mutex ((sdl-canvas-request-lock canvas))
       (setf (sdl-canvas-requests canvas)
             (nconc (sdl-canvas-requests canvas) (list request))))
+    (wake-sdl-canvas canvas)
     (sb-thread:wait-on-semaphore (sdl-canvas-request-completion request))
     (when (sdl-canvas-request-error request)
       (error (sdl-canvas-request-error request)))
@@ -122,14 +149,49 @@
               (/ (get-internal-real-time)
                  (coerce internal-time-units-per-second 'double-float))))))
 
+(defun canvas-timestamp ()
+  (/ (get-internal-real-time)
+     (coerce internal-time-units-per-second 'double-float)))
+
+(defun handle-sdl-canvas-event (canvas event-type)
+  (when (or (= event-type
+               (cffi:foreign-enum-value 'sdl3::event-type :quit))
+            (= event-type
+               (cffi:foreign-enum-value 'sdl3::event-type
+                                        :window-close-requested)))
+    (setf (sdl-canvas-close-requested-p canvas) t)))
+
+(defun poll-sdl-canvas-event-type ()
+  ;; cl-sdl3's event-unmarshal quite reasonably uses its static EVENT-TYPE
+  ;; enum, but SDL_RegisterEvents returns values not present in that enum.
+  ;; The host loop only needs the raw tag.
+  (cffi:with-foreign-object (event '(:union sdl3:event))
+    (when (sdl3:poll-event event)
+      (cffi:mem-ref event :uint32))))
+
+(defun drain-sdl-canvas-events (canvas)
+  (loop for event-type = (poll-sdl-canvas-event-type)
+        while event-type
+        do (handle-sdl-canvas-event canvas event-type)))
+
+(defun wait-for-sdl-canvas-event (canvas timeout)
+  (cffi:with-foreign-object (event '(:union sdl3:event))
+    (when (if timeout
+              (sdl3:wait-event-timeout event timeout)
+              (sdl3:wait-event event))
+      (handle-sdl-canvas-event canvas (cffi:mem-ref event :uint32))
+      (drain-sdl-canvas-events canvas))))
+
 (defun sdl-canvas-event-loop (canvas)
   (loop until (sdl-canvas-close-requested-p canvas)
         do (process-sdl-canvas-requests canvas)
-           (multiple-value-bind (event event-type) (sdl3:poll-event*)
-             (declare (ignore event))
-             (when (member event-type '(:quit :window-close-requested))
-               (setf (sdl-canvas-close-requested-p canvas) t)))
-           (sleep 0.005)))
+           (let ((timestamp (canvas-timestamp)))
+             (service-canvas-clock (canvas-clock canvas) canvas timestamp)
+             (unless (sdl-canvas-close-requested-p canvas)
+               (wait-for-sdl-canvas-event
+                canvas
+                (clock-wait-timeout (canvas-clock canvas)
+                                    (canvas-timestamp)))))))
 
 (defun run-sdl-canvas (canvas)
   (with-sdl-native-environment
@@ -139,6 +201,11 @@
                (unless (sdl3:init :video)
                  (error "SDL video initialization failed: ~A"
                         (sdl3:get-error)))
+               (let ((wake-event-type (sdl3:register-events 1)))
+                 (when (zerop wake-event-type)
+                   (error "SDL user event registration failed: ~A"
+                          (sdl3:get-error)))
+                 (setf (sdl-canvas-wake-event-type canvas) wake-event-type))
                (let ((window
                        (sdl3:create-window
                         (canvas-title canvas)
@@ -148,9 +215,14 @@
                    (error "SDL window creation failed: ~A" (sdl3:get-error)))
                  (setf (sdl-canvas-window canvas) window
                        (canvas-state canvas) :open)
+                 (sb-thread:signal-semaphore
+                  (sdl-canvas-startup-completion canvas))
                  (sdl-canvas-event-loop canvas)))
            (error (condition)
-             (setf (sdl-canvas-startup-error canvas) condition)))
+             (setf (sdl-canvas-startup-error canvas) condition)
+             (when (eq :opening (canvas-state canvas))
+               (sb-thread:signal-semaphore
+                (sdl-canvas-startup-completion canvas)))))
       (setf (canvas-state canvas) :closing)
       (when (canvas-context canvas)
         (handler-case
@@ -163,11 +235,14 @@
         (sdl3:destroy-window (sdl-canvas-window canvas))
         (setf (sdl-canvas-window canvas) nil))
       (sdl3:quit)
+      (setf (sdl-canvas-wake-event-type canvas) nil)
       (fail-sdl-canvas-requests
        canvas
        (make-condition 'canvas-error :canvas canvas
                        :operation :frame :reason :canvas-closed))
-      (setf (canvas-state canvas) :closed))))
+      (setf (canvas-state canvas) :closed)
+      (sb-thread:signal-semaphore
+       (sdl-canvas-shutdown-completion canvas)))))
 
 (defun start-sdl-canvas-thread (canvas)
   #+darwin
@@ -191,27 +266,25 @@
            :state (canvas-state canvas) :expected-state '(:new :closed)))
   (setf (canvas-state canvas) :opening
         (sdl-canvas-startup-error canvas) nil
-        (sdl-canvas-close-requested-p canvas) nil)
+        (sdl-canvas-close-requested-p canvas) nil
+        (sdl-canvas-startup-completion canvas)
+        (sb-thread:make-semaphore :count 0)
+        (sdl-canvas-shutdown-completion canvas)
+        (sb-thread:make-semaphore :count 0))
   (start-sdl-canvas-thread canvas)
-  (loop repeat 6000
-        when (eq :open (canvas-state canvas)) do (return canvas)
-        when (sdl-canvas-startup-error canvas)
-          do (error (sdl-canvas-startup-error canvas))
-        when (eq :closed (canvas-state canvas))
-          do (error 'canvas-error :canvas canvas :operation :open
-                    :reason :closed-during-startup)
-        do (sleep 0.005)
-        finally (error 'canvas-error :canvas canvas :operation :open
-                       :reason :startup-timeout)))
+  (sb-thread:wait-on-semaphore (sdl-canvas-startup-completion canvas))
+  (cond ((sdl-canvas-startup-error canvas)
+         (error (sdl-canvas-startup-error canvas)))
+        ((eq :open (canvas-state canvas)) canvas)
+        (t
+         (error 'canvas-error :canvas canvas :operation :open
+                :reason :closed-during-startup))))
 
 (defmethod close-canvas ((canvas sdl-canvas))
   (when (member (canvas-state canvas) '(:opening :open))
     (setf (sdl-canvas-close-requested-p canvas) t)
+    (wake-sdl-canvas canvas)
     (unless (sdl-canvas-native-thread-p canvas)
-      (loop repeat 6000
-            when (eq :closed (canvas-state canvas)) do (return)
-            do (sleep 0.005)
-            finally
-               (error 'canvas-error :canvas canvas :operation :close
-                      :reason :shutdown-timeout))))
+      (sb-thread:wait-on-semaphore
+       (sdl-canvas-shutdown-completion canvas))))
   (values))

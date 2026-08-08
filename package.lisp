@@ -115,6 +115,15 @@
            #:make-gpu-clear-texture-command
            #:make-gpu-copy-texture-command
            #:vulkan-gpu-provider
+           #:canvas-clock
+           #:demand-clock
+           #:cadence-clock
+           #:make-demand-clock
+           #:make-cadence-clock
+           #:clock-frames-per-second
+           #:clock-frame-function
+           #:clock-wait-timeout
+           #:service-canvas-clock
            #:canvas
            #:canvas-context
            #:context-canvas

@@ -45,8 +45,83 @@
              (canvas-state-error-state condition)
              (canvas-state-error-expected-state condition)))))
 
-(defclass canvas () ()
+(defclass canvas-clock () ()
+  (:documentation "A policy object deciding when a canvas should run frames."))
+
+(defclass demand-clock (canvas-clock) ()
+  (:documentation "A clock whose frames happen only when explicitly requested."))
+
+(defclass cadence-clock (canvas-clock)
+  ((frames-per-second
+    :initarg :frames-per-second
+    :initform 60
+    :reader clock-frames-per-second)
+   (frame-function
+    :initarg :frame-function
+    :reader clock-frame-function)
+   (next-frame-time
+    :initform nil
+    :accessor cadence-clock-next-frame-time))
+  (:documentation "A clock which calls a frame function at a regular cadence."))
+
+(defmethod initialize-instance :after ((clock cadence-clock) &key)
+  (unless (and (realp (clock-frames-per-second clock))
+               (plusp (clock-frames-per-second clock)))
+    (error "FRAMES-PER-SECOND must be a positive real number."))
+  (unless (functionp (clock-frame-function clock))
+    (error "FRAME-FUNCTION must be a function.")))
+
+(defun make-demand-clock ()
+  "Construct a clock for explicitly requested frames."
+  (make-instance 'demand-clock))
+
+(defun make-cadence-clock (frame-function &key (frames-per-second 60))
+  "Construct a clock which calls FRAME-FUNCTION with canvas and timestamp."
+  (make-instance 'cadence-clock
+                 :frame-function frame-function
+                 :frames-per-second frames-per-second))
+
+(defgeneric clock-wait-timeout (clock timestamp)
+  (:documentation
+   "Return milliseconds until CLOCK is due, or NIL to wait indefinitely."))
+
+(defgeneric service-canvas-clock (clock canvas timestamp)
+  (:documentation "Run any frame CLOCK has made due at TIMESTAMP."))
+
+(defmethod clock-wait-timeout ((clock demand-clock) timestamp)
+  (declare (ignore clock timestamp))
+  nil)
+
+(defmethod service-canvas-clock ((clock demand-clock) canvas timestamp)
+  (declare (ignore clock canvas timestamp))
+  nil)
+
+(defmethod clock-wait-timeout ((clock cadence-clock) timestamp)
+  (let ((next (cadence-clock-next-frame-time clock)))
+    (if (or (null next) (<= next timestamp))
+        0
+        (ceiling (* 1000 (- next timestamp))))))
+
+(defmethod service-canvas-clock ((clock cadence-clock) canvas timestamp)
+  (let ((next (cadence-clock-next-frame-time clock)))
+    (when (or (null next) (<= next timestamp))
+      ;; Deliberately do not accumulate missed frames.  A cadence is a pacing
+      ;; policy, not a demand to replay time spent in a debugger.
+      (setf (cadence-clock-next-frame-time clock)
+            (+ timestamp (/ 1.0d0 (clock-frames-per-second clock))))
+      (funcall (clock-frame-function clock) canvas timestamp))))
+
+(defclass canvas ()
+  ((clock
+    :initarg :clock
+    :initform (make-demand-clock)
+    :accessor canvas-clock))
   (:documentation "A native destination with a lifetime and frame clock."))
+
+(defmethod (setf canvas-clock) :before (clock (canvas canvas))
+  (declare (ignore canvas))
+  (unless (typep clock 'canvas-clock)
+    (error 'type-error :datum clock :expected-type 'canvas-clock)))
 
 (defclass canvas-context () ()
   (:documentation "A GPU presentation relationship configured for a canvas."))

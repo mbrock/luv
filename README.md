@@ -117,6 +117,27 @@ thread.  Calls from SLY workers are sent to the canvas thread and wait for the
 frame.  `request-canvas-frame` owns that native scheduling step;
 `call-with-canvas-frame` owns texture acquisition and presentation.
 
+Every canvas has a clock policy.  The default `demand-clock` sleeps in SDL
+until an OS event or explicit frame request wakes it.  A `cadence-clock` gives
+the same canvas a regular frame phase; clocks can be replaced while the window
+is open:
+
+```lisp
+(setf (luv:canvas-clock *canvas*)
+      (luv:make-cadence-clock
+       (lambda (canvas timestamp)
+         (declare (ignore canvas timestamp))
+         (luv:render-canvas-color *context* 0.1 0.2 0.4))
+       :frames-per-second 60))
+
+;; Return to explicit REPL-driven frames.
+(setf (luv:canvas-clock *canvas*) (luv:make-demand-clock))
+```
+
+Cadence clocks skip elapsed frames rather than replaying them after a slow
+frame or debugger visit.  SDL user events wake cross-thread requests, and
+canvas startup and shutdown use completion semaphores rather than polling.
+
 ## One-time Lisp setup
 
 `cl-sdl3` is not in Quicklisp, so install it as a local project:
