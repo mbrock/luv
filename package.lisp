@@ -116,6 +116,13 @@
            #:gpu-texture-usage
            #:gpu-texture-dimensions
            #:gpu-texture-format
+           #:gpu-texture-view
+           #:gpu-texture-view-texture
+           #:gpu-shader-module
+           #:gpu-bind-group-layout
+           #:gpu-bind-group
+           #:gpu-compute-pipeline
+           #:gpu-compute-pass-encoder
            #:gpu-command-encoder
            #:gpu-command-buffer
            #:gpu-object-label
@@ -126,8 +133,18 @@
            #:finish
            #:submit
            #:destroy
+           #:begin-compute-pass
+           #:end-pass
+           #:set-pipeline
+           #:set-bind-group
+           #:dispatch-workgroups
            #:make-device-descriptor
            #:make-texture-descriptor
+           #:make-texture-view-descriptor
+           #:make-shader-module-descriptor
+           #:make-bind-group-layout-descriptor
+           #:make-bind-group-descriptor
+           #:make-compute-pipeline-descriptor
            #:make-command-encoder-descriptor
            #:make-gpu-clear-texture-command
            #:make-gpu-copy-texture-command
@@ -186,4 +203,7 @@
            #:demo-speed
            #:start-clear-color-demo
            #:stop-clear-color-demo
+           #:compute-gradient-demo
+           #:start-compute-gradient-demo
+           #:stop-compute-gradient-demo
            #:close-canvas))

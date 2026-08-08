@@ -136,7 +136,10 @@ factories for requesting GPU-DEVICE instances."))
    (format
     :initarg :format
     :reader gpu-texture-format)))
-(defclass gpu-texture-view (gpu-object) ())
+(defclass gpu-texture-view (gpu-object)
+  ((texture
+    :initarg :texture
+    :reader gpu-texture-view-texture)))
 
 (defclass gpu-command-buffer (gpu-object) ())
 
@@ -183,6 +186,9 @@ sequence."))
 (defgeneric begin-render-pass (encoder descriptor))
 (defgeneric begin-compute-pass (encoder &optional descriptor))
 (defgeneric end-pass (pass-encoder))
+(defgeneric set-pipeline (pass-encoder pipeline))
+(defgeneric set-bind-group (pass-encoder index bind-group))
+(defgeneric dispatch-workgroups (pass-encoder x &optional y z))
 
 (defstruct gpu-descriptor (label nil))
 
@@ -196,19 +202,19 @@ sequence."))
   size usage dimensions format)
 
 (defstruct (texture-view-descriptor (:include gpu-descriptor))
-  )
+  texture)
 
 (defstruct (bind-group-layout-descriptor (:include gpu-descriptor))
   entries)
 
 (defstruct (bind-group-descriptor (:include gpu-descriptor))
-  layout entries resource)
+  layout entries)
 
 (defstruct (render-pipeline-descriptor (:include gpu-descriptor))
   layout vertex fragment)
 
 (defstruct (compute-pipeline-descriptor (:include gpu-descriptor))
-  layout module)
+  layout module (entry-point "main"))
 
 (defstruct (command-encoder-descriptor (:include gpu-descriptor)))
 

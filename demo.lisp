@@ -68,3 +68,112 @@ object with STOP-CLEAR-COLOR-DEMO."
       (setf (canvas-clock canvas) (make-demand-clock)))
     (close-canvas canvas))
   (values))
+
+(defclass compute-gradient-demo ()
+  ((canvas :initarg :canvas :reader demo-canvas)
+   (context :initarg :context :reader demo-context)
+   (texture :initarg :texture :reader compute-demo-texture)
+   (view :initarg :view :reader compute-demo-view)
+   (module :initarg :module :reader compute-demo-module)
+   (layout :initarg :layout :reader compute-demo-layout)
+   (pipeline :initarg :pipeline :reader compute-demo-pipeline)
+   (bind-group :initarg :bind-group :reader compute-demo-bind-group))
+  (:documentation
+   "A compute shader writing an intermediate texture copied to a canvas."))
+
+(defun render-compute-gradient-demo (demo)
+  (let* ((context (demo-context demo))
+         (extent (canvas-extent context)))
+    (present-canvas-frame
+     context
+     (lambda (surface-texture encoder)
+       (let ((pass (begin-compute-pass encoder)))
+         (set-pipeline pass (compute-demo-pipeline demo))
+         (set-bind-group pass 0 (compute-demo-bind-group demo))
+         (dispatch-workgroups
+          pass
+          (ceiling (first extent) 8)
+          (ceiling (second extent) 8))
+         (end-pass pass))
+       (encode
+        encoder
+        (make-gpu-copy-texture-command
+         :source (compute-demo-texture demo)
+         :destination surface-texture))))))
+
+(defun start-compute-gradient-demo (&key
+                                      (title "luv s-expression compute shader")
+                                      (width 800)
+                                      (height 600))
+  "Open a canvas filled by an s-expression SPIR-V compute shader."
+  (let ((canvas (make-sdl-canvas :title title :width width :height height))
+        (context nil)
+        (resources nil)
+        (completed-p nil))
+    (open-canvas canvas)
+    (unwind-protect
+         (progn
+           (setf context (make-canvas-context canvas *gpu-provider*))
+           (let* ((device (context-device context))
+                  (extent (canvas-extent context))
+                  (texture
+                    (create
+                     device
+                     (make-texture-descriptor
+                      :label "compute gradient"
+                      :size extent :dimensions :2d :format :rgba8-unorm
+                      :usage '(:storage-binding :copy-src))))
+                  (view
+                    (create device
+                            (make-texture-view-descriptor :texture texture)))
+                  (module
+                    (create
+                     device
+                     (make-shader-module-descriptor
+                      :code (spv:gradient-compute-shader
+                             :width (first extent)
+                             :height (second extent)))))
+                  (layout
+                    (create
+                     device
+                     (make-bind-group-layout-descriptor
+                      :entries '((:binding 0 :type :storage-texture)))))
+                  (pipeline
+                    (create
+                     device
+                     (make-compute-pipeline-descriptor
+                      :layout layout :module module)))
+                  (bind-group
+                    (create
+                     device
+                     (make-bind-group-descriptor
+                      :layout layout
+                      :entries `((:binding 0 :resource ,view)))))
+                  (demo
+                    (make-instance
+                     'compute-gradient-demo
+                     :canvas canvas :context context :texture texture
+                     :view view :module module :layout layout
+                     :pipeline pipeline :bind-group bind-group)))
+             (setf resources
+                   (list bind-group pipeline layout module view texture))
+             (render-compute-gradient-demo demo)
+             (setf completed-p t)
+             demo))
+      (unless completed-p
+        (dolist (resource resources)
+          (ignore-errors (destroy resource)))
+        (close-canvas canvas)))))
+
+(defun stop-compute-gradient-demo (demo)
+  "Destroy DEMO's compute resources and close its canvas."
+  (dolist (resource
+            (list (compute-demo-bind-group demo)
+                  (compute-demo-pipeline demo)
+                  (compute-demo-layout demo)
+                  (compute-demo-module demo)
+                  (compute-demo-view demo)
+                  (compute-demo-texture demo)))
+    (destroy resource))
+  (close-canvas (demo-canvas demo))
+  (values))

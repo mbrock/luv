@@ -39,6 +39,7 @@
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on (#:luv/gpu
+               #:luv/spir-v
                #:sdl3
                #+darwin
                #:trivial-main-thread)

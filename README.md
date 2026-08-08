@@ -99,6 +99,15 @@ which maps `GlobalInvocationId.xy` to an RGBA8 storage-image gradient. It is
 assembled directly from readable forms in `spir-v.lisp`; no GLSL compiler or
 generated registry binding is involved.
 
+The complete compute-to-canvas path is a live one-liner:
+
+```lisp
+(defparameter *compute-demo* (luv:start-compute-gradient-demo))
+;; The shader dispatches into an RGBA8 storage texture, then copies it into
+;; the acquired surface texture for presentation.
+(luv:stop-compute-gradient-demo *compute-demo*)
+```
+
 ## Canvas
 
 `:luv/canvas` adds the small native counterpart to WebGPU's canvas context
