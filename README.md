@@ -74,6 +74,31 @@ reuse the same texture and layout tracking later:
     (luv:destroy device)))
 ```
 
+## SPIR-V from s-expressions
+
+`:luv/spir-v` is a small assembler whose vocabulary grows with shaders luv
+actually runs. IDs are ordinary Lisp symbols and may be referenced before
+definitions; result IDs lead their instruction:
+
+```lisp
+(asdf:load-system :luv/spir-v)
+(spv:assemble
+ '((capability shader)
+   (memory-model logical glsl-450)
+   (%void type-void)
+   (%function-type type-function %void)
+   ;; ...
+   (%main function %void none %function-type)
+   (%entry label)
+   (return)
+   (function-end)))
+```
+
+`spv:gradient-compute-shader` produces a complete Vulkan 1.0 compute module
+which maps `GlobalInvocationId.xy` to an RGBA8 storage-image gradient. It is
+assembled directly from readable forms in `spir-v.lisp`; no GLSL compiler or
+generated registry binding is involved.
+
 ## Canvas
 
 `:luv/canvas` adds the small native counterpart to WebGPU's canvas context
