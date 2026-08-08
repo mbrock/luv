@@ -1,19 +1,3 @@
-(defpackage #:luv
-  (:use #:cl)
-  (:export #:*instance*
-           #:*physical-device*
-           #:*surface*
-           #:*device*
-           #:*swapchain*
-           #:*queue*
-           #:probe
-           #:headless-probe
-           #:open-headless
-           #:close-window
-           #:window-open-p
-           #:render-color
-           #:capture-color))
-
 (in-package #:luv)
 
 (defvar *instance* nil)

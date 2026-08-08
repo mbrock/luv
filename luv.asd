@@ -12,7 +12,8 @@
     (with-compilation-unit (:override t
                             :policy '(optimize (debug 3)))
       (funcall thunk)))
-  :depends-on (#:sdl3
+  :depends-on (#:luv/gpu
+               #:sdl3
                #:vk
                #+darwin
                #:float-features
@@ -20,7 +21,27 @@
                #:trivial-main-thread)
   :serial t
   :components ((:file "luv")
-               (:file "yellow")))
+               (:file "yellow")
+               (:file "canvas")))
+
+(asdf:defsystem #:luv/gpu
+  :description "The WebGPU-shaped luv API and Vulkan backend."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  #+sbcl
+  :around-compile
+  #+sbcl
+  (lambda (thunk)
+    (with-compilation-unit (:override t
+                            :policy '(optimize (debug 3)))
+      (funcall thunk)))
+  :depends-on (#:vk
+               #+darwin
+               #:float-features)
+  :serial t
+  :components ((:file "package")
+               (:file "gpu")
+               (:file "gpu-vulkan")))
 
 (asdf:defsystem #:luv/headless
   :description "Headless Vulkan-only entry points for luv."
@@ -35,4 +56,5 @@
       (funcall thunk)))
   :depends-on (#:vk)
   :serial t
-  :components ((:file "headless")))
+  :components ((:file "package")
+               (:file "headless")))

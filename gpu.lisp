@@ -18,8 +18,10 @@ factories for requesting GPU-DEVICE instances."))
 (defvar *gpu-provider* nil
   "If you're lucky, someone has bound this to a working GPU-PROVIDER.")
 
-(defclass gpu-object () 
-  (label)
+(defclass gpu-object ()
+  ((label :initarg :label
+          :initform nil
+          :accessor gpu-object-label))
   (:documentation "Base class for instantiated GPU resources."))
 
 (defclass gpu-device (gpu-object) ())
@@ -45,6 +47,9 @@ factories for requesting GPU-DEVICE instances."))
 (defclass gpu-shader-module (gpu-object) ())
 
 (defgeneric request-gpu-device (provider &optional descriptor))
+
+(defgeneric device-queue (device)
+  (:documentation "Return the default queue belonging to DEVICE."))
 
 (defgeneric create (device descriptor)
   (:documentation "Asks the DEVICE for a handle to newly created instance

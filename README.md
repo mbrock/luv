@@ -6,6 +6,38 @@ Lisp. The initial spike uses
 and [`aiffc/cl-sdl3`](https://github.com/aiffc/cl-sdl3) to let SDL own the
 native Wayland window while luv owns the Vulkan instance and surface queries.
 
+The vendored `vk` binding and generator are an in-tree hard fork rather than
+an opaque compatibility boundary. They have already been updated to Vulkan
+1.4, and luv can change their generated API when a better Common Lisp shape
+emerges.
+
+## Second spike GPU API
+
+The independently loadable `:luv/gpu` system is the beginning of a
+WebGPU-shaped API implemented by the Vulkan backend. Its first vertical slice
+owns a Vulkan instance, logical device, default graphics queue, command pool,
+and primary command buffer:
+
+```lisp
+(asdf:load-system :luv/gpu)
+(let ((device (luv:request-gpu-device luv:*gpu-provider*))
+      (encoder nil)
+      (commands nil))
+  (unwind-protect
+       (progn
+         (setf encoder
+               (luv:create device (luv:make-command-encoder-descriptor))
+               commands (luv:finish encoder))
+         (luv:submit (luv:device-queue device) (vector commands)))
+    (when commands (luv:destroy commands))
+    (when encoder (luv:destroy encoder))
+    (luv:destroy device)))
+```
+
+Submission currently waits for the Vulkan queue to become idle. This keeps
+the initial ownership rules honest; presentation work can replace the wait
+with tracked in-flight frames without changing the public operation.
+
 ## One-time Lisp setup
 
 `cl-sdl3` is not in Quicklisp, so install it as a local project:

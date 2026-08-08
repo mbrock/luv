@@ -12,26 +12,6 @@
 ;;
 ;; -- mikael
 
-(defpackage #:luv
-  (:use #:cl)
-  (:export #:*window*
-           #:*instance*
-           #:*physical-device*
-           #:*surface*
-           #:*device*
-           #:*swapchain*
-           #:*queue*
-           #:probe
-           #:surface-probe
-           #:headless-probe
-           #:open-headless
-           #:open-window
-           #:close-window
-           #:window-open-p
-           #:render-color
-           #:yellow-window
-           #:main))
-
 (in-package #:luv)
 
 (defvar *window* nil
