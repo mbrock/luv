@@ -27,11 +27,6 @@
               pkgs.moltenvk
             ]
           );
-          lavapipeIcd =
-            {
-              x86_64-linux = "lvp_icd.x86_64.json";
-              aarch64-linux = "lvp_icd.aarch64.json";
-            }.${system} or null;
           # Keep the owned CFFI binding and development tools available to SBCL.
           lisp = pkgs.sbcl.withPackages (lispPackages: [
             lispPackages.alexandria
@@ -41,13 +36,13 @@
           slyRoot =
             "${pkgs.emacsPackages.sly}/share/emacs/site-lisp/elpa/${pkgs.emacsPackages.sly.pname}-${pkgs.emacsPackages.sly.version}";
         in
-        { inherit pkgs lisp nativeLibraryPath lavapipeIcd slyRoot; };
+        { inherit pkgs lisp nativeLibraryPath slyRoot; };
     in
     {
       devShells = forAllSystems (system:
         let env = environmentFor system;
         in {
-          default = env.pkgs.mkShell {
+          default = env.pkgs.mkShell ({
             packages = [
               env.lisp
               env.pkgs.libffi
@@ -58,15 +53,11 @@
               env.pkgs.vulkan-tools
             ];
             LD_LIBRARY_PATH = env.nativeLibraryPath;
-            VK_DRIVER_FILES =
-              if env.pkgs.stdenv.isDarwin then
-                "${env.pkgs.moltenvk}/share/vulkan/icd.d/MoltenVK_icd.json"
-              else if env.lavapipeIcd != null then
-                "${env.pkgs.mesa}/share/vulkan/icd.d/${env.lavapipeIcd}"
-              else
-                "";
             LUV_SLYNK_DIR = "${env.slyRoot}/slynk";
-          };
+          } // nixpkgs.lib.optionalAttrs env.pkgs.stdenv.isDarwin {
+            VK_DRIVER_FILES =
+              "${env.pkgs.moltenvk}/share/vulkan/icd.d/MoltenVK_icd.json";
+          });
         });
     };
 }

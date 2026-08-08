@@ -388,7 +388,11 @@ load either the complete atelier or its SDL-free GPU core:
 Nix supplies SBCL, SDL, the Vulkan loader and tools, and MoltenVK on Apple
 Silicon.  A native Vulkan implementation still comes from the host graphics
 stack.  Set `SDL_VIDEODRIVER=wayland` when you want to require Wayland rather
-than allowing SDL to choose another video backend.
+than allowing SDL to choose another video backend.  On Linux, the development
+shell leaves Vulkan driver discovery to the host so a hardware ICD can be used.
+To test explicitly with Nix's software renderer instead, set `VK_DRIVER_FILES`
+to the appropriate `lvp_icd.*.json` under the Nix Mesa package's
+`share/vulkan/icd.d` directory.
 
 ## SLY and the one-shot client
 
