@@ -2,8 +2,6 @@
   (:nicknames #:lvk)
   (:use #:cl)
   (:export #:+portability-enumeration-extension-name+
-           #:+instance-create-enumerate-portability-bit+
-           #:+queue-graphics-bit+
            #:vulkan-call-error
            #:vulkan-call-error-result
            #:make-version

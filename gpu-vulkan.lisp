@@ -43,8 +43,8 @@
            (member portability-extension available :test #'string=)))
     (values (and portability-p (list portability-extension))
             (if portability-p
-                lvk:+instance-create-enumerate-portability-bit+
-                0))))
+                '(:enumerate-portability)
+                nil))))
 
 (defclass vulkan-gpu-provider (gpu-provider)
   ((application-name
@@ -164,8 +164,7 @@
               (lvk:physical-device-queue-families physical-device)
             for index from 0
             when (and (plusp (lvk:queue-family-count properties))
-                      (logtest lvk:+queue-graphics-bit+
-                               (lvk:queue-family-flags properties)))
+                      (member :graphics (lvk:queue-family-flags properties)))
               return index)
       (error 'vulkan-gpu-error
              :operation :request-device

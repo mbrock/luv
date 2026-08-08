@@ -17,6 +17,11 @@ physical-device, logical-device, and queue ownership already use this layer.
 Textures and commands temporarily retain clearly named legacy `vk` handle
 wrappers while their declarations move across incrementally.
 
+The owned layer uses CFFI's translating types, enums, and bitfields directly.
+`defvkstruct`, `define-enumerator`, and `define-creator` keep the Vulkan treaty
+text explicit while naming its recurring allocation, checking, and count/fetch
+patterns once.
+
 ## Second spike GPU API
 
 The independently loadable `:luv/gpu` system is the beginning of a
