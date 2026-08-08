@@ -101,10 +101,16 @@ inspected and changed as ordinary live Lisp objects before assembly.
    (function-end)))
 ```
 
-`spv:gradient-compute-shader` produces a complete Vulkan 1.0 compute module
-which maps `GlobalInvocationId.xy` to an RGBA8 storage-image gradient. It is
-assembled directly from readable forms in `spir-v.lisp`; no GLSL compiler or
-generated registry binding is involved.
+`shader.lisp` adds a deliberately higher-level, live representation:
+`spv:spir-v-module` objects contain entry points, execution modes, function
+definitions, and basic blocks.  `spv:lower-spir-v` erases that structure into
+the instruction instances understood by `spv:assemble`; the literal assembler
+in `spir-v.lisp` remains a small and independent bottom layer.
+
+`spv:gradient-compute-module` constructs the demo in that structured IR, and
+`spv:gradient-compute-shader` lowers and assembles it into a complete Vulkan
+1.0 module. It maps `GlobalInvocationId.xy` to an RGBA8 storage-image gradient
+without a GLSL compiler or generated registry binding.
 
 The complete compute-to-canvas path is a live one-liner:
 

@@ -13,7 +13,8 @@
                #:closer-mop)
   :serial t
   :components ((:file "spir-v-package")
-               (:file "spir-v")))
+               (:file "spir-v")
+               (:file "shader")))
 
 (asdf:defsystem #:luv/gpu
   :description "The WebGPU-shaped luv API and Vulkan backend."

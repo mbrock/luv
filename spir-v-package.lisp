@@ -20,4 +20,38 @@
            #:parse-module
            #:assemble
            #:write-spir-v
+           #:spir-v-module
+           #:spir-v-module-version
+           #:spir-v-module-generator
+           #:spir-v-module-capabilities
+           #:spir-v-module-addressing-model
+           #:spir-v-module-memory-model
+           #:spir-v-module-entry-points
+           #:spir-v-module-execution-modes
+           #:spir-v-module-debug-instructions
+           #:spir-v-module-annotations
+           #:spir-v-module-global-declarations
+           #:spir-v-module-function-definitions
+           #:spir-v-entry-point
+           #:spir-v-entry-point-execution-model
+           #:spir-v-entry-point-function
+           #:spir-v-entry-point-name
+           #:spir-v-entry-point-interfaces
+           #:spir-v-execution-mode
+           #:spir-v-execution-mode-function
+           #:spir-v-execution-mode-name
+           #:spir-v-execution-mode-literals
+           #:spir-v-function-definition
+           #:spir-v-function-result-id
+           #:spir-v-function-return-type
+           #:spir-v-function-control
+           #:spir-v-function-type
+           #:spir-v-function-parameters
+           #:spir-v-function-basic-blocks
+           #:spir-v-basic-block
+           #:spir-v-basic-block-label
+           #:spir-v-basic-block-instructions
+           #:lower-spir-v
+           #:assemble-spir-v-module
+           #:gradient-compute-module
            #:gradient-compute-shader))
