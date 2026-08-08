@@ -9,6 +9,8 @@
 (defparameter +portability-enumeration-extension-name+
   "VK_KHR_portability_enumeration")
 
+(defparameter +swapchain-extension-name+ "VK_KHR_swapchain")
+
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (cffi:define-foreign-library vulkan-loader
     (:darwin (:or "libvulkan.1.dylib" "libvulkan.dylib"))
@@ -21,7 +23,8 @@
 
 (cffi:defcenum (result :int32)
   (:success 0)
-  (:incomplete 5))
+  (:incomplete 5)
+  (:suboptimal-khr 1000001003))
 
 (cffi:defcenum (structure-type :uint32)
   (:application-info 0)
@@ -30,18 +33,21 @@
   (:device-create-info 3)
   (:submit-info 4)
   (:memory-allocate-info 5)
+  (:semaphore-create-info 9)
   (:image-create-info 14)
   (:command-pool-create-info 39)
   (:command-buffer-allocate-info 40)
   (:command-buffer-begin-info 42)
-  (:image-memory-barrier 45))
+  (:image-memory-barrier 45)
+  (:swapchain-create-info-khr 1000001000)
+  (:present-info-khr 1000001001))
 
 (cffi:defcenum (image-type :uint32)
   (:1d 0)
   (:2d 1)
   (:3d 2))
 
-(cffi:defcenum (format :uint32)
+(cffi:defcenum (format :uint32 :allow-undeclared-values t)
   (:r8g8b8a8-unorm 37)
   (:r8g8b8a8-srgb 43)
   (:b8g8r8a8-unorm 44)
@@ -58,7 +64,8 @@
 (cffi:defcenum (image-layout :uint32)
   (:undefined 0)
   (:transfer-src-optimal 6)
-  (:transfer-dst-optimal 7))
+  (:transfer-dst-optimal 7)
+  (:present-src-khr 1000001002))
 
 (cffi:defcenum (sample-count :uint32)
   (:1 1))
@@ -66,6 +73,32 @@
 (cffi:defcenum (command-buffer-level :uint32)
   (:primary 0)
   (:secondary 1))
+
+(cffi:defcenum (color-space :uint32 :allow-undeclared-values t)
+  (:srgb-nonlinear-khr 0))
+
+(cffi:defcenum (present-mode :uint32 :allow-undeclared-values t)
+  (:immediate-khr 0)
+  (:mailbox-khr 1)
+  (:fifo-khr 2)
+  (:fifo-relaxed-khr 3))
+
+(cffi:defcenum (surface-transform :uint32)
+  (:identity #x1)
+  (:rotate-90 #x2)
+  (:rotate-180 #x4)
+  (:rotate-270 #x8)
+  (:horizontal-mirror #x10)
+  (:horizontal-mirror-rotate-90 #x20)
+  (:horizontal-mirror-rotate-180 #x40)
+  (:horizontal-mirror-rotate-270 #x80)
+  (:inherit #x100))
+
+(cffi:defcenum (composite-alpha :uint32)
+  (:opaque #x1)
+  (:pre-multiplied #x2)
+  (:post-multiplied #x4)
+  (:inherit #x8))
 
 (cffi:defbitfield (instance-create-flags :uint32)
   (:enumerate-portability #x1))
@@ -113,6 +146,23 @@
 
 (cffi:defbitfield (dependency-flags :uint32)
   (:by-region #x1))
+
+(cffi:defbitfield (surface-transform-flags :uint32)
+  (:identity #x1)
+  (:rotate-90 #x2)
+  (:rotate-180 #x4)
+  (:rotate-270 #x8)
+  (:horizontal-mirror #x10)
+  (:horizontal-mirror-rotate-90 #x20)
+  (:horizontal-mirror-rotate-180 #x40)
+  (:horizontal-mirror-rotate-270 #x80)
+  (:inherit #x100))
+
+(cffi:defbitfield (composite-alpha-flags :uint32)
+  (:opaque #x1)
+  (:pre-multiplied #x2)
+  (:post-multiplied #x4)
+  (:inherit #x8))
 
 (defconstant +queue-family-ignored+ #xffffffff)
 
@@ -193,6 +243,10 @@
   (width :uint32)
   (height :uint32)
   (depth :uint32))
+
+(defvkstruct extent-2d ()
+  (width :uint32)
+  (height :uint32))
 
 (defvkstruct queue-family-properties ()
   (queue-flags queue-flags)
@@ -317,6 +371,51 @@
   (signal-semaphore-count :uint32)
   (p-signal-semaphores :pointer))
 
+(defvkstruct semaphore-create-info (:s-type :semaphore-create-info)
+  (flags :uint32))
+
+(defvkstruct surface-capabilities ()
+  (min-image-count :uint32)
+  (max-image-count :uint32)
+  (current-extent (:struct extent-2d))
+  (min-image-extent (:struct extent-2d))
+  (max-image-extent (:struct extent-2d))
+  (max-image-array-layers :uint32)
+  (supported-transforms surface-transform-flags)
+  (current-transform surface-transform)
+  (supported-composite-alpha composite-alpha-flags)
+  (supported-usage-flags image-usage-flags))
+
+(defvkstruct surface-format ()
+  (format format)
+  (color-space color-space))
+
+(defvkstruct swapchain-create-info (:s-type :swapchain-create-info-khr)
+  (flags :uint32)
+  (surface :pointer)
+  (min-image-count :uint32)
+  (image-format format)
+  (image-color-space color-space)
+  (image-extent (:struct extent-2d))
+  (image-array-layers :uint32)
+  (image-usage image-usage-flags)
+  (image-sharing-mode sharing-mode)
+  (queue-family-index-count :uint32)
+  (p-queue-family-indices :pointer)
+  (pre-transform surface-transform)
+  (composite-alpha composite-alpha)
+  (present-mode present-mode)
+  (clipped :uint32)
+  (old-swapchain :pointer))
+
+(defvkstruct present-info (:s-type :present-info-khr)
+  (wait-semaphore-count :uint32)
+  (p-wait-semaphores :pointer)
+  (swapchain-count :uint32)
+  (p-swapchains :pointer)
+  (p-image-indices :pointer)
+  (p-results :pointer))
+
 (defun clear-foreign-object (pointer type &optional (count 1))
   (loop for index below (* count (cffi:foreign-type-size type))
         do (setf (cffi:mem-aref pointer :uint8 index) 0))
@@ -394,6 +493,20 @@
                   (with-translated-values ,(rest bindings) ,@body)
                (cffi:free-converted-object
                 ,variable ',type ,parameter)))))))
+
+(defmacro with-foreign-array ((pointer type values) &body body)
+  (let ((items (gensym "ITEMS"))
+        (index (gensym "INDEX"))
+        (item (gensym "ITEM")))
+    `(let ((,items ,values))
+       (if (zerop (length ,items))
+           (let ((,pointer (cffi:null-pointer)))
+             ,@body)
+           (cffi:with-foreign-object (,pointer ',type (length ,items))
+             (loop for ,index below (length ,items)
+                   for ,item = (elt ,items ,index)
+                   do (setf (cffi:mem-aref ,pointer ',type ,index) ,item))
+             ,@body)))))
 
 ;;; Raw calls.  Their declarations now express translation and checking.
 
@@ -581,6 +694,95 @@
     checked-result
   (queue :pointer))
 
+(cffi:defcfun ("vkGetPhysicalDeviceSurfaceSupportKHR"
+               %get-physical-device-surface-support
+               :library vulkan-loader)
+    checked-result
+  (physical-device :pointer)
+  (queue-family-index :uint32)
+  (surface :pointer)
+  (supported :pointer))
+
+(cffi:defcfun ("vkGetPhysicalDeviceSurfaceCapabilitiesKHR"
+               %get-physical-device-surface-capabilities
+               :library vulkan-loader)
+    checked-result
+  (physical-device :pointer)
+  (surface :pointer)
+  (capabilities :pointer))
+
+(cffi:defcfun ("vkGetPhysicalDeviceSurfaceFormatsKHR"
+               %get-physical-device-surface-formats
+               :library vulkan-loader)
+    checked-result
+  (physical-device :pointer)
+  (surface :pointer)
+  (format-count :pointer)
+  (formats :pointer))
+
+(cffi:defcfun ("vkGetPhysicalDeviceSurfacePresentModesKHR"
+               %get-physical-device-surface-present-modes
+               :library vulkan-loader)
+    checked-result
+  (physical-device :pointer)
+  (surface :pointer)
+  (mode-count :pointer)
+  (modes :pointer))
+
+(cffi:defcfun ("vkCreateSwapchainKHR" %create-swapchain
+               :library vulkan-loader)
+    checked-result
+  (device :pointer)
+  (create-info :pointer)
+  (allocator :pointer)
+  (swapchain :pointer))
+
+(cffi:defcfun ("vkDestroySwapchainKHR" %destroy-swapchain
+               :library vulkan-loader)
+    :void
+  (device :pointer)
+  (swapchain :pointer)
+  (allocator :pointer))
+
+(cffi:defcfun ("vkGetSwapchainImagesKHR" %get-swapchain-images
+               :library vulkan-loader)
+    checked-result
+  (device :pointer)
+  (swapchain :pointer)
+  (image-count :pointer)
+  (images :pointer))
+
+(cffi:defcfun ("vkCreateSemaphore" %create-semaphore
+               :library vulkan-loader)
+    checked-result
+  (device :pointer)
+  (create-info :pointer)
+  (allocator :pointer)
+  (semaphore :pointer))
+
+(cffi:defcfun ("vkDestroySemaphore" %destroy-semaphore
+               :library vulkan-loader)
+    :void
+  (device :pointer)
+  (semaphore :pointer)
+  (allocator :pointer))
+
+(cffi:defcfun ("vkAcquireNextImageKHR" %acquire-next-image
+               :library vulkan-loader)
+    checked-result
+  (device :pointer)
+  (swapchain :pointer)
+  (timeout :uint64)
+  (semaphore :pointer)
+  (fence :pointer)
+  (image-index :pointer))
+
+(cffi:defcfun ("vkQueuePresentKHR" %queue-present
+               :library vulkan-loader)
+    checked-result
+  (queue :pointer)
+  (present-info :pointer))
+
 ;;; The three ordinary Vulkan call shapes used so far.
 
 (defmacro define-enumerator
@@ -678,6 +880,16 @@
   :checked t
   :operation :allocate-command-buffer)
 
+(define-creator create-swapchain-handle (device create-info)
+  (%create-swapchain device create-info (cffi:null-pointer))
+  :checked t
+  :operation :create-swapchain)
+
+(define-creator create-semaphore-handle (device create-info)
+  (%create-semaphore device create-info (cffi:null-pointer))
+  :checked t
+  :operation :create-semaphore)
+
 ;;; Public, Lisp-shaped operations.
 
 (defstruct queue-family
@@ -692,6 +904,20 @@
   (size 0 :type (unsigned-byte 64))
   (alignment 0 :type (unsigned-byte 64))
   (memory-type-bits 0 :type (unsigned-byte 32)))
+
+(defstruct presentation-capabilities
+  (min-image-count 0 :type (unsigned-byte 32))
+  (max-image-count 0 :type (unsigned-byte 32))
+  current-extent
+  min-image-extent
+  max-image-extent
+  current-transform
+  (composite-alpha nil :type list)
+  (usage nil :type list))
+
+(defstruct presentation-format
+  format
+  color-space)
 
 (defun make-version (major minor patch)
   (logior (ash major 22) (ash minor 12) patch))
@@ -757,24 +983,27 @@
                      :flags queue-flags
                      :count queue-count))))))))
 
-(defun create-device (physical-device family-index)
-  (cffi:with-foreign-object (queue-priority :float)
-    (setf (cffi:mem-ref queue-priority :float) 1.0)
-    (with-vk (queue-info device-queue-create-info
-              :flags 0
-              :queue-family-index family-index
-              :queue-count 1
-              :p-queue-priorities queue-priority)
-      (with-vk (create-info device-create-info
+(defun create-device
+    (physical-device family-index &key enabled-extension-names)
+  (with-translated-values
+      ((extension-names enabled-extension-names string-list))
+    (cffi:with-foreign-object (queue-priority :float)
+      (setf (cffi:mem-ref queue-priority :float) 1.0)
+      (with-vk (queue-info device-queue-create-info
                 :flags 0
-                :queue-create-info-count 1
-                :p-queue-create-infos queue-info
-                :enabled-layer-count 0
-                :pp-enabled-layer-names (cffi:null-pointer)
-                :enabled-extension-count 0
-                :pp-enabled-extension-names (cffi:null-pointer)
-                :p-enabled-features (cffi:null-pointer))
-        (create-device-handle physical-device create-info)))))
+                :queue-family-index family-index
+                :queue-count 1
+                :p-queue-priorities queue-priority)
+        (with-vk (create-info device-create-info
+                  :flags 0
+                  :queue-create-info-count 1
+                  :p-queue-create-infos queue-info
+                  :enabled-layer-count 0
+                  :pp-enabled-layer-names (cffi:null-pointer)
+                  :enabled-extension-count (length enabled-extension-names)
+                  :pp-enabled-extension-names extension-names
+                  :p-enabled-features (cffi:null-pointer))
+          (create-device-handle physical-device create-info))))))
 
 (defun destroy-device (device)
   (%destroy-device device (cffi:null-pointer))
@@ -970,22 +1199,25 @@
      1 region))
   (values))
 
-(defun submit-command-buffers (queue buffers)
-  (cffi:with-foreign-object (command-buffers :pointer (length buffers))
-    (loop for command-buffer across buffers
-          for index from 0
-          do (setf (cffi:mem-aref command-buffers :pointer index)
-                   command-buffer))
-    (with-vk (submit submit-info
-              :wait-semaphore-count 0
-              :p-wait-semaphores (cffi:null-pointer)
-              :p-wait-dst-stage-mask (cffi:null-pointer)
-              :command-buffer-count (length buffers)
-              :p-command-buffers command-buffers
-              :signal-semaphore-count 0
-              :p-signal-semaphores (cffi:null-pointer))
-      (with-vulkan-results (:queue-submit)
-        (%queue-submit queue 1 submit (cffi:null-pointer)))))
+(defun submit-command-buffers
+    (queue buffers &key (wait-semaphores #()) (wait-stages #())
+                        (signal-semaphores #()))
+  (unless (= (length wait-semaphores) (length wait-stages))
+    (error "Each wait semaphore needs one destination stage."))
+  (with-foreign-array (command-buffers :pointer buffers)
+    (with-foreign-array (waits :pointer wait-semaphores)
+      (with-foreign-array (stages pipeline-stage-flags wait-stages)
+        (with-foreign-array (signals :pointer signal-semaphores)
+          (with-vk (submit submit-info
+                    :wait-semaphore-count (length wait-semaphores)
+                    :p-wait-semaphores waits
+                    :p-wait-dst-stage-mask stages
+                    :command-buffer-count (length buffers)
+                    :p-command-buffers command-buffers
+                    :signal-semaphore-count (length signal-semaphores)
+                    :p-signal-semaphores signals)
+            (with-vulkan-results (:queue-submit)
+              (%queue-submit queue 1 submit (cffi:null-pointer))))))))
   (values))
 
 (defun submit-command-buffer (queue command-buffer)
@@ -995,3 +1227,128 @@
   (with-vulkan-results (:queue-wait-idle)
     (%queue-wait-idle queue))
   (values))
+
+(defun surface-supported-p (physical-device queue-family-index surface)
+  (cffi:with-foreign-object (supported :uint32)
+    (setf (cffi:mem-ref supported :uint32) 0)
+    (with-vulkan-results (:get-physical-device-surface-support)
+      (%get-physical-device-surface-support
+       physical-device queue-family-index surface supported))
+    (not (zerop (cffi:mem-ref supported :uint32)))))
+
+(defun read-extent-2d (pointer)
+  (cffi:with-foreign-slots
+      ((width height) pointer (:struct extent-2d))
+    (list width height)))
+
+(defun get-surface-capabilities (physical-device surface)
+  (cffi:with-foreign-object (capabilities '(:struct surface-capabilities))
+    (clear-foreign-object capabilities '(:struct surface-capabilities))
+    (with-vulkan-results (:get-physical-device-surface-capabilities)
+      (%get-physical-device-surface-capabilities
+       physical-device surface capabilities))
+    (cffi:with-foreign-slots
+        ((min-image-count max-image-count current-transform
+          supported-composite-alpha supported-usage-flags)
+         capabilities (:struct surface-capabilities))
+      (make-presentation-capabilities
+       :min-image-count min-image-count
+       :max-image-count max-image-count
+       :current-extent
+       (read-extent-2d
+        (cffi:foreign-slot-pointer
+         capabilities '(:struct surface-capabilities) 'current-extent))
+       :min-image-extent
+       (read-extent-2d
+        (cffi:foreign-slot-pointer
+         capabilities '(:struct surface-capabilities) 'min-image-extent))
+       :max-image-extent
+       (read-extent-2d
+        (cffi:foreign-slot-pointer
+         capabilities '(:struct surface-capabilities) 'max-image-extent))
+       :current-transform current-transform
+       :composite-alpha supported-composite-alpha
+       :usage supported-usage-flags))))
+
+(defun extract-surface-format (formats index)
+  (let ((format
+          (cffi:mem-aptr formats '(:struct surface-format) index)))
+    (cffi:with-foreign-slots
+        ((format color-space) format (:struct surface-format))
+      (make-presentation-format :format format :color-space color-space))))
+
+(define-enumerator get-surface-formats (physical-device surface)
+  (%get-physical-device-surface-formats physical-device surface)
+  :element (:struct surface-format)
+  :extractor extract-surface-format)
+
+(define-enumerator get-surface-present-modes (physical-device surface)
+  (%get-physical-device-surface-present-modes physical-device surface)
+  :element present-mode)
+
+(define-enumerator get-swapchain-images (device swapchain)
+  (%get-swapchain-images device swapchain)
+  :element :pointer)
+
+(defun create-swapchain
+    (device surface format color-space extent
+     &key min-image-count (usage '(:transfer-dst))
+       (pre-transform :identity) (composite-alpha :opaque)
+       (present-mode :fifo-khr) old-swapchain)
+  (with-vk (create-info swapchain-create-info
+            :flags 0
+            :surface surface
+            :min-image-count min-image-count
+            :image-format format
+            :image-color-space color-space
+            :image-array-layers 1
+            :image-usage usage
+            :image-sharing-mode :exclusive
+            :queue-family-index-count 0
+            :p-queue-family-indices (cffi:null-pointer)
+            :pre-transform pre-transform
+            :composite-alpha composite-alpha
+            :present-mode present-mode
+            :clipped 1
+            :old-swapchain (or old-swapchain (cffi:null-pointer)))
+    (fill-vk
+     (cffi:foreign-slot-pointer
+      create-info '(:struct swapchain-create-info) 'image-extent)
+     'extent-2d :width (first extent) :height (second extent))
+    (create-swapchain-handle device create-info)))
+
+(defun destroy-swapchain (device swapchain)
+  (%destroy-swapchain device swapchain (cffi:null-pointer))
+  (values))
+
+(defun create-semaphore (device)
+  (with-vk (create-info semaphore-create-info :flags 0)
+    (create-semaphore-handle device create-info)))
+
+(defun destroy-semaphore (device semaphore)
+  (%destroy-semaphore device semaphore (cffi:null-pointer))
+  (values))
+
+(defun acquire-next-image
+    (device swapchain semaphore &key (timeout #xffffffffffffffff))
+  (cffi:with-foreign-object (index :uint32)
+    (let ((result
+            (with-vulkan-results
+                (:acquire-next-image :success :suboptimal-khr)
+              (%acquire-next-image
+               device swapchain timeout semaphore (cffi:null-pointer) index))))
+      (values (cffi:mem-ref index :uint32) result))))
+
+(defun present (queue swapchain image-index &key (wait-semaphores #()))
+  (with-foreign-array (waits :pointer wait-semaphores)
+    (with-foreign-array (swapchains :pointer (vector swapchain))
+      (with-foreign-array (indices :uint32 (vector image-index))
+        (with-vk (present-info present-info
+                  :wait-semaphore-count (length wait-semaphores)
+                  :p-wait-semaphores waits
+                  :swapchain-count 1
+                  :p-swapchains swapchains
+                  :p-image-indices indices
+                  :p-results (cffi:null-pointer))
+          (with-vulkan-results (:present :success :suboptimal-khr)
+            (%queue-present queue present-info)))))))

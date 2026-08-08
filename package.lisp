@@ -2,6 +2,7 @@
   (:nicknames #:lvk)
   (:use #:cl)
   (:export #:+portability-enumeration-extension-name+
+           #:+swapchain-extension-name+
            #:vulkan-call-error
            #:vulkan-call-error-result
            #:make-version
@@ -41,7 +42,30 @@
            #:cmd-copy-image
            #:submit-command-buffers
            #:submit-command-buffer
-           #:queue-wait-idle))
+           #:queue-wait-idle
+           #:surface-supported-p
+           #:presentation-capabilities
+           #:presentation-capabilities-min-image-count
+           #:presentation-capabilities-max-image-count
+           #:presentation-capabilities-current-extent
+           #:presentation-capabilities-min-image-extent
+           #:presentation-capabilities-max-image-extent
+           #:presentation-capabilities-current-transform
+           #:presentation-capabilities-composite-alpha
+           #:presentation-capabilities-usage
+           #:get-surface-capabilities
+           #:presentation-format
+           #:presentation-format-format
+           #:presentation-format-color-space
+           #:get-surface-formats
+           #:get-surface-present-modes
+           #:create-swapchain
+           #:destroy-swapchain
+           #:get-swapchain-images
+           #:create-semaphore
+           #:destroy-semaphore
+           #:acquire-next-image
+           #:present))
 
 (defpackage #:luv
   (:use #:cl)
