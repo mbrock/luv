@@ -62,6 +62,32 @@
   #-darwin
   `(progn ,@body))
 
+(defgeneric prepare-sdl-canvas-host (canvas)
+  (:documentation "Prepare the native application host before SDL_Init."))
+
+(defgeneric activate-sdl-canvas-host (canvas)
+  (:documentation "Show and activate CANVAS after its SDL window exists."))
+
+(defgeneric deactivate-sdl-canvas-host (canvas)
+  (:documentation "Release CANVAS's native application presence after SDL_Quit."))
+
+(defmethod prepare-sdl-canvas-host ((canvas canvas))
+  (declare (ignore canvas))
+  (unless (sdl3:set-app-metadata "luv" "0.0.1" "com.mbrock.luv")
+    (error "SDL application metadata failed: ~A" (sdl3:get-error))))
+
+(defmethod activate-sdl-canvas-host ((canvas sdl-canvas))
+  (let ((window (sdl-canvas-window canvas)))
+    (unless (sdl3:show-window window)
+      (error "SDL window show failed: ~A" (sdl3:get-error)))
+    ;; Raising is a request to the window manager and may legitimately be
+    ;; denied by focus-stealing policy, so it is not an open failure.
+    (sdl3:raise-window window)))
+
+(defmethod deactivate-sdl-canvas-host ((canvas canvas))
+  (declare (ignore canvas))
+  nil)
+
 (defun make-sdl-canvas (&key (title "luv canvas") (width 800) (height 600)
                           (clock (make-demand-clock)))
   "Construct an unrealized SDL canvas."
@@ -195,54 +221,64 @@
 
 (defun run-sdl-canvas (canvas)
   (with-sdl-native-environment
-    (unwind-protect
-         (handler-case
-             (progn
-               (unless (sdl3:init :video)
-                 (error "SDL video initialization failed: ~A"
-                        (sdl3:get-error)))
-               (let ((wake-event-type (sdl3:register-events 1)))
-                 (when (zerop wake-event-type)
-                   (error "SDL user event registration failed: ~A"
+    (let ((sdl-initialized-p nil))
+      (unwind-protect
+           (handler-case
+               (progn
+                 (prepare-sdl-canvas-host canvas)
+                 (unless (sdl3:init :video)
+                   (error "SDL video initialization failed: ~A"
                           (sdl3:get-error)))
-                 (setf (sdl-canvas-wake-event-type canvas) wake-event-type))
-               (let ((window
-                       (sdl3:create-window
-                        (canvas-title canvas)
-                        (canvas-width canvas) (canvas-height canvas)
-                        '(:vulkan :resizable))))
-                 (when (cffi:null-pointer-p window)
-                   (error "SDL window creation failed: ~A" (sdl3:get-error)))
-                 (setf (sdl-canvas-window canvas) window
-                       (canvas-state canvas) :open)
+                 (setf sdl-initialized-p t)
+                 (let ((wake-event-type (sdl3:register-events 1)))
+                   (when (zerop wake-event-type)
+                     (error "SDL user event registration failed: ~A"
+                            (sdl3:get-error)))
+                   (setf (sdl-canvas-wake-event-type canvas) wake-event-type))
+                 (let ((window
+                         (sdl3:create-window
+                          (canvas-title canvas)
+                          (canvas-width canvas) (canvas-height canvas)
+                          '(:vulkan :resizable :hidden))))
+                   (when (cffi:null-pointer-p window)
+                     (error "SDL window creation failed: ~A" (sdl3:get-error)))
+                   (setf (sdl-canvas-window canvas) window)
+                   (activate-sdl-canvas-host canvas)
+                   (setf (canvas-state canvas) :open)
+                   (sb-thread:signal-semaphore
+                    (sdl-canvas-startup-completion canvas))
+                   (sdl-canvas-event-loop canvas)))
+             (error (condition)
+               (setf (sdl-canvas-startup-error canvas) condition)
+               (when (eq :opening (canvas-state canvas))
                  (sb-thread:signal-semaphore
-                  (sdl-canvas-startup-completion canvas))
-                 (sdl-canvas-event-loop canvas)))
-           (error (condition)
-             (setf (sdl-canvas-startup-error canvas) condition)
-             (when (eq :opening (canvas-state canvas))
-               (sb-thread:signal-semaphore
-                (sdl-canvas-startup-completion canvas)))))
-      (setf (canvas-state canvas) :closing)
-      (when (canvas-context canvas)
-        (handler-case
-            (destroy-canvas-context (canvas-context canvas))
-          (error (condition)
-            (unless (sdl-canvas-startup-error canvas)
-              (setf (sdl-canvas-startup-error canvas) condition))))
-        (setf (canvas-context canvas) nil))
-      (when (sdl-canvas-window canvas)
-        (sdl3:destroy-window (sdl-canvas-window canvas))
-        (setf (sdl-canvas-window canvas) nil))
-      (sdl3:quit)
-      (setf (sdl-canvas-wake-event-type canvas) nil)
-      (fail-sdl-canvas-requests
-       canvas
-       (make-condition 'canvas-error :canvas canvas
-                       :operation :frame :reason :canvas-closed))
-      (setf (canvas-state canvas) :closed)
-      (sb-thread:signal-semaphore
-       (sdl-canvas-shutdown-completion canvas)))))
+                  (sdl-canvas-startup-completion canvas)))))
+        (setf (canvas-state canvas) :closing)
+        (when (canvas-context canvas)
+          (handler-case
+              (destroy-canvas-context (canvas-context canvas))
+            (error (condition)
+              (unless (sdl-canvas-startup-error canvas)
+                (setf (sdl-canvas-startup-error canvas) condition))))
+          (setf (canvas-context canvas) nil))
+        (when (sdl-canvas-window canvas)
+          (sdl3:destroy-window (sdl-canvas-window canvas))
+          (setf (sdl-canvas-window canvas) nil))
+        (when sdl-initialized-p
+          (sdl3:quit)
+          (handler-case
+              (deactivate-sdl-canvas-host canvas)
+            (error (condition)
+              (unless (sdl-canvas-startup-error canvas)
+                (setf (sdl-canvas-startup-error canvas) condition)))))
+        (setf (sdl-canvas-wake-event-type canvas) nil)
+        (fail-sdl-canvas-requests
+         canvas
+         (make-condition 'canvas-error :canvas canvas
+                         :operation :frame :reason :canvas-closed))
+        (setf (canvas-state canvas) :closed)
+        (sb-thread:signal-semaphore
+         (sdl-canvas-shutdown-completion canvas))))))
 
 (defun start-sdl-canvas-thread (canvas)
   #+darwin

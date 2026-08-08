@@ -35,5 +35,7 @@
   :serial t
   :components ((:file "canvas")
                (:file "canvas-sdl")
+               #+darwin
+               (:file "canvas-cocoa")
                (:file "canvas-vulkan")
                (:file "demo")))

@@ -117,6 +117,12 @@ thread.  Calls from SLY workers are sent to the canvas thread and wait for the
 frame.  `request-canvas-frame` owns that native scheduling step;
 `call-with-canvas-frame` owns texture acquisition and presentation.
 
+Because the Cocoa process is a durable Lisp rather than a disposable game
+executable, its application policy follows its windows: opening the first SDL
+canvas activates and raises a regular macOS application, while closing it
+returns the process to background-only status.  Thus closing a canvas removes its
+Dock and Stage Manager presence without terminating the SLY image.
+
 Every canvas has a clock policy.  The default `demand-clock` sleeps in SDL
 until an OS event or explicit frame request wakes it.  A `cadence-clock` gives
 the same canvas a regular frame phase; clocks can be replaced while the window
