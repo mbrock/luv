@@ -52,7 +52,9 @@
                #+darwin
                #:trivial-main-thread)
   :serial t
-  :components ((:file "canvas")))
+  :components ((:file "canvas")
+               (:file "canvas-sdl")
+               (:file "canvas-vulkan")))
 
 (asdf:defsystem #:luv/headless
   :description "Headless Vulkan-only entry points for luv."

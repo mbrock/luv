@@ -89,24 +89,33 @@ reuse the same texture and layout tracking later:
 ## Second spike canvas
 
 `:luv/canvas` adds the small native counterpart to WebGPU's canvas context
-without making SDL a dependency of the offscreen `:luv/gpu` system.  The
-context owns the SDL window, surface-compatible device and queue, swapchain,
-and acquire/present synchronization.  `get-current-texture` is valid only
-inside a frame callback; the returned swapchain texture is borrowed from the
-context rather than destroyed as an ordinary owned image.
+without making SDL a dependency of the offscreen `:luv/gpu` system.  Its CLOS
+protocol separates the two sides hidden by a browser: a canvas owns its native
+lifetime, size, event source, and frame clock; a canvas context owns the GPU
+presentation relationship.  The SDL canvas and Vulkan context meet through a
+method specialized on both concrete implementations.
+
+`get-current-texture` is valid only inside a frame callback; the returned
+swapchain texture is borrowed from the context rather than destroyed as an
+ordinary owned image.
 
 ```lisp
 (asdf:load-system :luv/canvas)
 (defparameter *canvas*
-  (luv:open-canvas :title "luv second spike" :width 800 :height 600))
+  (luv:make-sdl-canvas
+   :title "luv second spike" :width 800 :height 600))
+(luv:open-canvas *canvas*)
 
-(luv:render-canvas-color *canvas* 0.15 0.35 0.95)
+(defparameter *context*
+  (luv:make-canvas-context *canvas* luv:*gpu-provider*))
+
+(luv:render-canvas-color *context* 0.15 0.35 0.95)
 
 (luv:present-canvas-frame
- *canvas*
+ *context*
  (lambda (texture encoder)
    (assert (eq texture
-               (luv:get-current-texture (luv:canvas-context *canvas*))))
+               (luv:get-current-texture *context*)))
    (luv:encode
     encoder
     (luv:make-gpu-clear-texture-command
@@ -115,10 +124,10 @@ context rather than destroyed as an ordinary owned image.
 (luv:close-canvas *canvas*)
 ```
 
-On Cocoa, the context's event loop and frame callbacks run on the process main
-thread.  Calls from SLY workers are sent to that thread and wait for the frame,
-so the public interaction stays as small as the browser canvas model while SDL
-and Vulkan lifetime rules remain inside the context.
+On Cocoa, the canvas's event loop and frame callbacks run on the process main
+thread.  Calls from SLY workers are sent to the canvas thread and wait for the
+frame.  `request-canvas-frame` owns that native scheduling step;
+`call-with-canvas-frame` owns texture acquisition and presentation.
 
 ## One-time Lisp setup
 

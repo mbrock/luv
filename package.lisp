@@ -136,20 +136,39 @@
            #:canvas
            #:canvas-context
            #:context-canvas
+           #:context-device
            #:canvas-error
            #:canvas-error-canvas
+           #:canvas-error-operation
            #:canvas-error-reason
            #:canvas-error-details
+           #:canvas-state-error
+           #:canvas-state-error-state
+           #:canvas-state-error-expected-state
+           #:canvas-configuration
+           #:make-canvas-configuration
+           #:canvas-configuration-device
+           #:canvas-configuration-format
+           #:canvas-configuration-usage
            #:get-current-texture
            #:sdl-canvas
+           #:make-sdl-canvas
            #:vulkan-canvas-context
            #:canvas-title
            #:canvas-width
            #:canvas-height
+           #:canvas-size
+           #:request-canvas-frame
+           #:make-canvas-context
+           #:configure-canvas-context
+           #:unconfigure-canvas-context
+           #:destroy-canvas-context
+           #:call-with-canvas-frame
            #:canvas-device
            #:canvas-extent
            #:canvas-format
            #:canvas-state
+           #:canvas-context-state
            #:open-canvas
            #:present-canvas-frame
            #:render-canvas-color
