@@ -110,6 +110,7 @@ nothing else does."))
            #:destroy-shader-module
            #:create-storage-image-descriptor-set-layout
            #:create-sampled-image-sampler-descriptor-set-layout
+           #:create-sampled-image-sampler-uniform-descriptor-set-layout
            #:destroy-descriptor-set-layout
            #:create-pipeline-layout
            #:destroy-pipeline-layout
@@ -124,10 +125,12 @@ nothing else does."))
            #:destroy-framebuffer
            #:create-storage-image-descriptor-pool
            #:create-sampled-image-sampler-descriptor-pool
+           #:create-sampled-image-sampler-uniform-descriptor-pool
            #:destroy-descriptor-pool
            #:allocate-descriptor-set
            #:update-storage-image-descriptor
            #:update-sampled-image-sampler-descriptors
+           #:update-sampled-image-sampler-uniform-descriptors
            #:create-command-pool
            #:destroy-command-pool
            #:allocate-command-buffer
@@ -204,6 +207,9 @@ nothing else does."))
            #:gpu-provider
            #:gpu-device
            #:gpu-queue
+           #:gpu-buffer
+           #:gpu-buffer-size
+           #:gpu-buffer-usage
            #:gpu-texture
            #:gpu-texture-size
            #:gpu-texture-usage
@@ -243,6 +249,7 @@ nothing else does."))
            #:enqueue
            #:finish
            #:submit
+           #:write-buffer
            #:write-texture
            #:destroy
            #:begin-compute-pass
@@ -253,6 +260,7 @@ nothing else does."))
            #:dispatch-workgroups
            #:draw
            #:make-device-descriptor
+           #:make-buffer-descriptor
            #:make-texture-descriptor
            #:make-texture-copy
            #:texture-copy-texture

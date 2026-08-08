@@ -226,6 +226,11 @@
   (:opcode 71)
   (:operands :id (:enum decoration) :literal))
 
+(define-instruction member-decorate
+    (target member decoration &rest literals)
+  (:opcode 72)
+  (:operands :id :literal (:enum decoration) :literal))
+
 (define-instruction type-void () (:opcode 19) (:result :id))
 (define-instruction type-int (width signedness)
   (:opcode 21) (:result :id) (:operands :literal :literal))
@@ -242,6 +247,8 @@
 (define-instruction type-sampler () (:opcode 26) (:result :id))
 (define-instruction type-sampled-image (image-type)
   (:opcode 27) (:result :id) (:operands :id))
+(define-instruction type-struct (&rest member-types)
+  (:opcode 30) (:result :id) (:operands :id))
 (define-instruction type-pointer (storage-class type)
   (:opcode 32) (:result :id) (:operands (:enum storage-class) :id))
 (define-instruction type-function (return-type &rest parameter-types)
@@ -253,6 +260,8 @@
   (:opcode 59) (:result :typed) (:operands (:enum storage-class)))
 (define-instruction store (pointer object)
   (:opcode 62) (:operands :id :id))
+(define-instruction access-chain (base &rest indexes)
+  (:opcode 65) (:result :typed) (:operands :id :id))
 (define-typed-unary-instructions
   (load 61)
   (convert-u-to-f 112))
@@ -310,10 +319,12 @@
   (origin-upper-left 7)
   (local-size 17))
 (define-enumeration decoration
+  (block 2)
   (built-in 11)
   (location 30)
   (binding 33)
-  (descriptor-set 34))
+  (descriptor-set 34)
+  (offset 35))
 (define-enumeration built-in
   (position 0)
   (global-invocation-id 28)
@@ -326,6 +337,7 @@
 (define-enumeration storage-class
   (uniform-constant 0)
   (input 1)
+  (uniform 2)
   (output 3)
   (function 7))
 (define-enumeration function-control (none 0))

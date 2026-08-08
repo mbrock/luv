@@ -7,6 +7,14 @@
 
 (in-package #:luv.mcclim)
 
+(defclass spinning-compositor-frame-state ()
+  ((buffer
+    :initarg :buffer
+    :reader spinning-frame-state-buffer)
+   (bind-group
+    :initarg :bind-group
+    :reader spinning-frame-state-bind-group)))
+
 (defclass spinning-texture-compositor ()
   ((speed
     :initarg :speed
@@ -48,14 +56,13 @@
    (pipeline
     :initform nil
     :accessor spinning-compositor-pipeline)
-   (bind-group
-    :initform nil
-    :accessor spinning-compositor-bind-group)))
+   (frame-states
+    :initform (make-hash-table :test #'eq)
+    :reader spinning-compositor-frame-states)))
 
 (defun spinning-compositor-resources (compositor)
   (remove nil
-          (list (spinning-compositor-bind-group compositor)
-                (spinning-compositor-pipeline compositor)
+          (list (spinning-compositor-pipeline compositor)
                 (spinning-compositor-layout compositor)
                 (spinning-compositor-fragment-module compositor)
                 (spinning-compositor-vertex-module compositor)
@@ -65,6 +72,13 @@
                 (spinning-compositor-output compositor))))
 
 (defun clear-spinning-compositor-resources (compositor)
+  (maphash
+   (lambda (surface state)
+     (declare (ignore surface))
+     (luv:destroy (spinning-frame-state-bind-group state))
+     (luv:destroy (spinning-frame-state-buffer state)))
+   (spinning-compositor-frame-states compositor))
+  (clrhash (spinning-compositor-frame-states compositor))
   (dolist (resource (spinning-compositor-resources compositor))
     (luv:destroy resource))
   (setf (spinning-compositor-device compositor) nil
@@ -77,8 +91,7 @@
         (spinning-compositor-vertex-module compositor) nil
         (spinning-compositor-fragment-module compositor) nil
         (spinning-compositor-layout compositor) nil
-        (spinning-compositor-pipeline compositor) nil
-        (spinning-compositor-bind-group compositor) nil)
+        (spinning-compositor-pipeline compositor) nil)
   compositor)
 
 (defmethod release-raster-mirror-compositor
@@ -133,7 +146,8 @@
                        (luv:make-bind-group-layout-descriptor
                         :label "sampled McCLIM texture layout"
                         :entries '((:binding 0 :type :texture)
-                                   (:binding 1 :type :sampler)))))
+                                   (:binding 1 :type :sampler)
+                                   (:binding 2 :type :uniform-buffer)))))
                     (pipeline
                       (create-resource
                        (luv:make-render-pipeline-descriptor
@@ -144,14 +158,7 @@
                         :fragment `(:module ,fragment-module
                                     :entry-point "main"
                                     :targets ((:format ,format)))
-                        :primitive '(:topology :triangle-strip))))
-                    (bind-group
-                      (create-resource
-                       (luv:make-bind-group-descriptor
-                        :label "sampled McCLIM raster"
-                        :layout layout
-                        :entries `((:binding 0 :resource ,source-view)
-                                   (:binding 1 :resource ,sampler))))))
+                        :primitive '(:topology :triangle-strip)))))
                (setf (spinning-compositor-device compositor) device
                      (spinning-compositor-source compositor) source
                      (spinning-compositor-size compositor) size
@@ -165,57 +172,66 @@
                      fragment-module
                      (spinning-compositor-layout compositor) layout
                      (spinning-compositor-pipeline compositor) pipeline
-                     (spinning-compositor-bind-group compositor) bind-group
                      completed-p t)))
           (unless completed-p
             (dolist (resource created)
               (ignore-errors (luv:destroy resource))))))))
   compositor)
 
-(defun linear-to-srgb (value)
-  (if (<= value 0.0031308)
-      (* 12.92 value)
-      (- (* 1.055 (expt value (/ 1.0 2.4))) 0.055)))
+(defun ensure-spinning-compositor-frame-state (compositor surface)
+  ;; A swapchain image is only acquired again after its previous presentation,
+  ;; so its matching uniform buffer is no longer being read by the GPU.
+  (or (gethash surface (spinning-compositor-frame-states compositor))
+      (let* ((device (spinning-compositor-device compositor))
+             (buffer nil)
+             (bind-group nil)
+             (completed-p nil))
+        (unwind-protect
+             (progn
+               (setf buffer
+                     (luv:create
+                      device
+                      (luv:make-buffer-descriptor
+                       :label "spinning McCLIM uniform state"
+                       :size 16 :usage '(:uniform)))
+                     bind-group
+                     (luv:create
+                      device
+                      (luv:make-bind-group-descriptor
+                       :label "sampled McCLIM raster and uniform state"
+                       :layout (spinning-compositor-layout compositor)
+                       :entries
+                       `((:binding 0
+                          :resource
+                          ,(spinning-compositor-source-view compositor))
+                         (:binding 1
+                          :resource ,(spinning-compositor-sampler compositor))
+                         (:binding 2 :resource ,buffer)))))
+               (let ((state
+                       (make-instance
+                        'spinning-compositor-frame-state
+                        :buffer buffer :bind-group bind-group)))
+                 (setf (gethash surface
+                                (spinning-compositor-frame-states compositor))
+                       state
+                       completed-p t)
+                 state))
+          (unless completed-p
+            (when bind-group (luv:destroy bind-group))
+            (when buffer (luv:destroy buffer)))))))
 
-(defun normalized-animation-byte (value srgb-p)
-  (let ((normalized (/ (+ value 1.0) 2.0)))
-    (max 0
-         (min 255
-              (round (* 255 (if srgb-p
-                                (linear-to-srgb normalized)
-                                normalized)))))))
-
-(defun pack-spinning-state-texel (format sine cosine)
-  (let* ((srgb-p (member format '(:rgba8-unorm-srgb :bgra8-unorm-srgb)))
-         (s (normalized-animation-byte sine srgb-p))
-         (c (normalized-animation-byte cosine srgb-p)))
-    (ecase format
-      ((:rgba8-unorm :rgba8-unorm-srgb)
-       (logior s (ash c 8) (ash #xff 24)))
-      ((:bgra8-unorm :bgra8-unorm-srgb)
-       (logior (ash c 8) (ash s 16) (ash #xff 24))))))
-
-(defun make-spinning-compositor-state-command
-    (compositor context source timestamp)
+(defun spinning-compositor-state (compositor timestamp)
   (unless (spinning-compositor-start-time compositor)
     (setf (spinning-compositor-start-time compositor) timestamp))
-  (let* ((phase (* 2 pi (spinning-compositor-speed compositor)
-                   (- timestamp
-                      (spinning-compositor-start-time compositor))))
-         (pixel
-           (make-array
-            '(1 1) :element-type '(unsigned-byte 32)
-            :initial-element
-            (pack-spinning-state-texel
-             (luv:gpu-texture-format source) (sin phase) (cos phase)))))
-    (declare (ignore context))
-    (luv:make-gpu-write-texture-command
-     :destination
-     (luv:make-texture-copy :texture source :origin '(0 0 0))
-     :data pixel
-     :data-layout
-     (luv:make-texture-data-layout :bytes-per-row 4 :rows-per-image 1)
-     :size '(1 1))))
+  (let ((phase (* 2 pi (spinning-compositor-speed compositor)
+                  (- timestamp
+                     (spinning-compositor-start-time compositor)))))
+    (make-array
+     4 :element-type 'single-float
+     :initial-contents
+     (list (coerce (sin phase) 'single-float)
+           (coerce (cos phase) 'single-float)
+           0.0f0 0.0f0))))
 
 (defun render-spinning-mirror-frame (mirror timestamp)
   (let ((context (mirror-context mirror))
@@ -224,41 +240,42 @@
     (when (and context source (typep compositor 'spinning-texture-compositor)
                (eq :open (luv:canvas-state (mirror-target mirror))))
       (ensure-spinning-compositor-resources compositor context source)
-      (let ((state-command
-              (make-spinning-compositor-state-command
-               compositor context source timestamp)))
-        (luv:enqueue
-         (luv:device-queue (luv:context-device context))
-         state-command)
+      (let ((state (spinning-compositor-state compositor timestamp)))
         (luv:present-canvas-frame
          context
          (lambda (surface encoder)
-           (let ((pass
-                 (luv:begin-render-pass
-                  encoder
-                  (luv:make-render-pass-descriptor
-                   :label "McCLIM offscreen pass"
-                   :color-attachments
-                   `((:view ,(spinning-compositor-output-view compositor)
-                      :load-op :clear :store-op :store
-                      :clear-value #(0.025 0.025 0.04 1.0)))))))
-             (luv:encode
-              pass
-              (luv:make-gpu-set-pipeline-command
-               :pipeline (spinning-compositor-pipeline compositor)))
-             (luv:encode
-              pass
-              (luv:make-gpu-set-bind-group-command
-               :index 0
-               :bind-group (spinning-compositor-bind-group compositor)))
-             (luv:encode
-              pass (luv:make-gpu-draw-command :vertex-count 4))
-             (luv:end-pass pass))
+           (let ((frame-state
+                   (ensure-spinning-compositor-frame-state
+                    compositor surface)))
+             (luv:write-buffer
+              (spinning-frame-state-buffer frame-state) state)
+             (let ((pass
+                     (luv:begin-render-pass
+                      encoder
+                      (luv:make-render-pass-descriptor
+                       :label "McCLIM offscreen pass"
+                       :color-attachments
+                       `((:view ,(spinning-compositor-output-view compositor)
+                          :load-op :clear :store-op :store
+                          :clear-value #(0.025 0.025 0.04 1.0)))))))
+               (luv:encode
+                pass
+                (luv:make-gpu-set-pipeline-command
+                 :pipeline (spinning-compositor-pipeline compositor)))
+               (luv:encode
+                pass
+                (luv:make-gpu-set-bind-group-command
+                 :index 0
+                 :bind-group
+                 (spinning-frame-state-bind-group frame-state)))
+               (luv:encode
+                pass (luv:make-gpu-draw-command :vertex-count 4))
+               (luv:end-pass pass))
            (luv:encode
             encoder
             (luv:make-gpu-copy-texture-command
              :source (spinning-compositor-output compositor)
-             :destination surface)))))))
+             :destination surface))))))))
   mirror)
 
 (defmethod present-raster-mirror-texture

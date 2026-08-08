@@ -103,6 +103,11 @@ private buffer-to-image copy submission.  Vulkan 1.4's optional host image
 copy facility may provide a more direct lowering later; neither choice leaks
 into the GPU API.
 
+The first concrete `gpu-buffer` slice is deliberately narrower: a
+host-visible, coherent `(:uniform)` buffer remains mapped for its lifetime,
+and `write-buffer` copies a one-dimensional single-float array into it.  Bind
+groups may combine one such buffer with a sampled texture and sampler.
+
 The next slice owns 2D textures and records explicit clear and copy commands.
 Clearing is deliberately a transfer command for now; render-pass clears can
 reuse the same texture and layout tracking later:
@@ -326,10 +331,12 @@ s-expression SPIR-V IR:
 (luv.mcclim:close-widget-lab *spinning-widgets*)
 ```
 
-For this intentionally tiny slice, one source texel carries the animation
-sine/cosine instead of introducing uniform buffers. Pointer events still use
-the flat sheet coordinates; inverse-projecting them through the quad is the
-next part of making transformed CLIM sheets fully interactive.
+The animation sine/cosine live in a 16-byte uniform block.  The compositor
+keeps one persistently mapped buffer and bind group per swapchain image, so a
+host update never races a preceding frame and requires no upload submission.
+Pointer events still use the flat sheet coordinates; inverse-projecting them
+through the quad is the next part of making transformed CLIM sheets fully
+interactive.
 
 The optional Listener component runs McCLIM's real Listener reader and frame
 top level on that second regime:

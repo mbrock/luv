@@ -108,7 +108,8 @@
   (:sampler 0)
   (:combined-image-sampler 1)
   (:sampled-image 2)
-  (:storage-image 3))
+  (:storage-image 3)
+  (:uniform-buffer 6))
 
 (cffi:defcenum (filter :uint32)
   (:nearest 0)
@@ -219,7 +220,8 @@
 
 (cffi:defbitfield (buffer-usage-flags :uint32)
   (:transfer-src #x1)
-  (:transfer-dst #x2))
+  (:transfer-dst #x2)
+  (:uniform #x10))
 
 (cffi:defbitfield (shader-stage-flags :uint32)
   (:vertex #x1)
@@ -660,6 +662,11 @@
   (sampler :pointer)
   (image-view :pointer)
   (image-layout image-layout))
+
+(defvkstruct descriptor-buffer-info ()
+  (buffer :pointer)
+  (offset :uint64)
+  (range :uint64))
 
 (defvkstruct write-descriptor-set (:s-type :write-descriptor-set)
   (dst-set :pointer)
@@ -2094,6 +2101,33 @@ the beginning of TRACE through its first presentation."
               :flags 0 :binding-count 2 :p-bindings bindings)
       (create-descriptor-set-layout-handle device create-info))))
 
+(defun create-sampled-image-sampler-uniform-descriptor-set-layout
+    (device &key (texture-binding 0) (sampler-binding 1)
+                 (uniform-binding 2))
+  (cffi:with-foreign-object
+      (bindings '(:struct descriptor-set-layout-binding) 3)
+    (fill-vk
+     (cffi:mem-aptr bindings '(:struct descriptor-set-layout-binding) 0)
+     'descriptor-set-layout-binding
+     :binding texture-binding :descriptor-type :sampled-image
+     :descriptor-count 1 :stage-flags '(:fragment)
+     :p-immutable-samplers (cffi:null-pointer))
+    (fill-vk
+     (cffi:mem-aptr bindings '(:struct descriptor-set-layout-binding) 1)
+     'descriptor-set-layout-binding
+     :binding sampler-binding :descriptor-type :sampler
+     :descriptor-count 1 :stage-flags '(:fragment)
+     :p-immutable-samplers (cffi:null-pointer))
+    (fill-vk
+     (cffi:mem-aptr bindings '(:struct descriptor-set-layout-binding) 2)
+     'descriptor-set-layout-binding
+     :binding uniform-binding :descriptor-type :uniform-buffer
+     :descriptor-count 1 :stage-flags '(:vertex)
+     :p-immutable-samplers (cffi:null-pointer))
+    (with-vk (create-info descriptor-set-layout-create-info
+              :flags 0 :binding-count 3 :p-bindings bindings)
+      (create-descriptor-set-layout-handle device create-info))))
+
 (defun destroy-descriptor-set-layout (device layout)
   (vk:destroy-descriptor-set-layout device layout (cffi:null-pointer))
   (values))
@@ -2310,6 +2344,27 @@ the beginning of TRACE through its first presentation."
               :pool-size-count 2 :p-pool-sizes pool-sizes)
       (create-descriptor-pool-handle device create-info))))
 
+(defun create-sampled-image-sampler-uniform-descriptor-pool
+    (device &key (max-sets 1))
+  (cffi:with-foreign-object
+      (pool-sizes '(:struct descriptor-pool-size) 3)
+    (fill-vk
+     (cffi:mem-aptr pool-sizes '(:struct descriptor-pool-size) 0)
+     'descriptor-pool-size
+     :type :sampled-image :descriptor-count max-sets)
+    (fill-vk
+     (cffi:mem-aptr pool-sizes '(:struct descriptor-pool-size) 1)
+     'descriptor-pool-size
+     :type :sampler :descriptor-count max-sets)
+    (fill-vk
+     (cffi:mem-aptr pool-sizes '(:struct descriptor-pool-size) 2)
+     'descriptor-pool-size
+     :type :uniform-buffer :descriptor-count max-sets)
+    (with-vk (create-info descriptor-pool-create-info
+              :flags 0 :max-sets max-sets
+              :pool-size-count 3 :p-pool-sizes pool-sizes)
+      (create-descriptor-pool-handle device create-info))))
+
 (defun destroy-descriptor-pool (device pool)
   (vk:destroy-descriptor-pool device pool (cffi:null-pointer))
   (values))
@@ -2377,6 +2432,56 @@ the beginning of TRACE through its first presentation."
        :p-buffer-info (cffi:null-pointer)
        :p-texel-buffer-view (cffi:null-pointer))
       (vk:update-descriptor-sets device 2 writes 0 (cffi:null-pointer))))
+  (values))
+
+(defun update-sampled-image-sampler-uniform-descriptors
+    (device descriptor-set image-view sampler buffer buffer-size
+     &key (texture-binding 0) (sampler-binding 1) (uniform-binding 2))
+  (cffi:with-foreign-object
+      (image-infos '(:struct descriptor-image-info) 2)
+    (fill-vk
+     (cffi:mem-aptr image-infos '(:struct descriptor-image-info) 0)
+     'descriptor-image-info
+     :sampler (cffi:null-pointer) :image-view image-view
+     :image-layout :shader-read-only-optimal)
+    (fill-vk
+     (cffi:mem-aptr image-infos '(:struct descriptor-image-info) 1)
+     'descriptor-image-info
+     :sampler sampler :image-view (cffi:null-pointer)
+     :image-layout :undefined)
+    (with-vk (buffer-info descriptor-buffer-info
+              :buffer buffer :offset 0 :range buffer-size)
+      (cffi:with-foreign-object
+          (writes '(:struct write-descriptor-set) 3)
+        (fill-vk
+         (cffi:mem-aptr writes '(:struct write-descriptor-set) 0)
+         'write-descriptor-set
+         :dst-set descriptor-set :dst-binding texture-binding
+         :dst-array-element 0 :descriptor-count 1
+         :descriptor-type :sampled-image :p-image-info image-infos
+         :p-buffer-info (cffi:null-pointer)
+         :p-texel-buffer-view (cffi:null-pointer))
+        (fill-vk
+         (cffi:mem-aptr writes '(:struct write-descriptor-set) 1)
+         'write-descriptor-set
+         :dst-set descriptor-set :dst-binding sampler-binding
+         :dst-array-element 0 :descriptor-count 1
+         :descriptor-type :sampler
+         :p-image-info
+         (cffi:mem-aptr image-infos '(:struct descriptor-image-info) 1)
+         :p-buffer-info (cffi:null-pointer)
+         :p-texel-buffer-view (cffi:null-pointer))
+        (fill-vk
+         (cffi:mem-aptr writes '(:struct write-descriptor-set) 2)
+         'write-descriptor-set
+         :dst-set descriptor-set :dst-binding uniform-binding
+         :dst-array-element 0 :descriptor-count 1
+         :descriptor-type :uniform-buffer
+         :p-image-info (cffi:null-pointer)
+         :p-buffer-info buffer-info
+         :p-texel-buffer-view (cffi:null-pointer))
+        (vk:update-descriptor-sets
+         device 3 writes 0 (cffi:null-pointer)))))
   (values))
 
 (defun create-command-pool (device queue-family-index &key flags)

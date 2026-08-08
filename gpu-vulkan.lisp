@@ -88,6 +88,17 @@
     :initarg :family
     :reader vulkan-queue-family)))
 
+(defclass vulkan-gpu-buffer (gpu-buffer vulkan-gpu-object)
+  ((device
+    :initarg :device
+    :reader vulkan-buffer-device)
+   (memory
+    :initarg :memory
+    :reader vulkan-buffer-memory)
+   (mapped
+    :initarg :mapped
+    :reader vulkan-buffer-mapped)))
+
 (defclass vulkan-gpu-texture (gpu-texture vulkan-gpu-object)
   ((device
     :initarg :device
@@ -178,6 +189,10 @@
     :initarg :sampler
     :initform nil
     :reader vulkan-bind-group-sampler)
+   (buffer
+    :initarg :buffer
+    :initform nil
+    :reader vulkan-bind-group-buffer)
    (descriptor-pool
     :initarg :descriptor-pool
     :reader vulkan-bind-group-descriptor-pool)))
@@ -447,7 +462,8 @@
                :reason :no-compatible-memory
                :details memory-requirements))))
 
-(defun find-vulkan-upload-memory-type (device memory-requirements)
+(defun find-vulkan-upload-memory-type
+    (device memory-requirements &optional (operation :write-texture))
   (let ((memory-types
           (lvk:physical-device-memory-types
            (vulkan-device-physical-device device)))
@@ -463,7 +479,7 @@
                         (member :host-coherent flags))
                 return index)
         (error 'vulkan-gpu-error
-               :operation :write-texture
+               :operation operation
                :reason :no-compatible-memory
                :details memory-requirements))))
 
@@ -508,6 +524,73 @@
 (defmethod device-queue ((device vulkan-gpu-device))
   (ensure-live-vulkan-object device :device-queue)
   (vulkan-device-queue device))
+
+(defmethod create
+    ((device vulkan-gpu-device) (descriptor buffer-descriptor))
+  "Create one persistently mapped, host-coherent uniform buffer."
+  (with-vulkan-gpu-driver-environment
+    (ensure-live-vulkan-object device :create-buffer)
+    (let ((size (buffer-descriptor-size descriptor))
+          (usage (buffer-descriptor-usage descriptor)))
+      (unless (and (typep size '(unsigned-byte 64)) (plusp size))
+        (reject-gpu-request descriptor :invalid-buffer-size size))
+      (unless (equal usage '(:uniform))
+        (reject-gpu-request descriptor :unsupported-buffer-usage usage))
+      (let ((native-device (vulkan-handle device))
+            (buffer nil)
+            (memory nil)
+            (mapped nil)
+            (completed-p nil))
+        (unwind-protect
+             (progn
+               (setf buffer (lvk:create-buffer native-device size usage))
+               (let* ((requirements
+                        (lvk:get-buffer-memory-requirements
+                         native-device buffer))
+                      (memory-type
+                        (find-vulkan-upload-memory-type
+                         device requirements :create-buffer)))
+                 (setf memory
+                       (lvk:allocate-memory
+                        native-device
+                        (lvk:buffer-memory-requirements-size requirements)
+                        memory-type))
+                 (lvk:bind-buffer-memory native-device buffer memory)
+                 (setf mapped (lvk:map-memory native-device memory size)))
+               (let ((object
+                       (make-instance
+                        'vulkan-gpu-buffer
+                        :label (gpu-descriptor-label descriptor)
+                        :size size :usage usage :handle buffer
+                        :device device :memory memory :mapped mapped)))
+                 (setf completed-p t)
+                 object))
+          (unless completed-p
+            (when mapped (lvk:unmap-memory native-device memory))
+            (when buffer (lvk:destroy-buffer native-device buffer))
+            (when memory (lvk:free-memory native-device memory))))))))
+
+(defmethod write-buffer
+    ((buffer vulkan-gpu-buffer) data &key (offset 0))
+  "Copy a one-dimensional single-float array into mapped coherent memory."
+  (with-vulkan-gpu-driver-environment
+    (ensure-live-vulkan-object buffer :write-buffer)
+    (unless (and (arrayp data) (= 1 (array-rank data))
+                 (nth-value 0
+                   (subtypep (array-element-type data) 'single-float)))
+      (reject-gpu-request buffer :unsupported-buffer-data data))
+    (unless (and (typep offset '(unsigned-byte 64))
+                 (zerop (mod offset 4))
+                 (<= (+ offset (* 4 (length data)))
+                     (gpu-buffer-size buffer)))
+      (reject-gpu-request buffer :buffer-write-out-of-bounds
+                          (list :offset offset :length (* 4 (length data)))))
+    (let ((destination
+            (cffi:inc-pointer (vulkan-buffer-mapped buffer) offset)))
+      (dotimes (index (length data))
+        (setf (cffi:mem-aref destination :float index)
+              (aref data index)))))
+  buffer)
 
 (defmethod create
     ((device vulkan-gpu-device) (descriptor texture-descriptor))
@@ -651,16 +734,21 @@
          (texture (find :texture entries :key (lambda (entry)
                                                 (getf entry :type))))
          (sampler (find :sampler entries :key (lambda (entry)
-                                                (getf entry :type)))))
-    (unless (and (listp entries) (= 2 (length entries))
+                                                (getf entry :type))))
+         (uniform (find :uniform-buffer entries :key (lambda (entry)
+                                                       (getf entry :type))))
+         (bindings (mapcar (lambda (entry) (getf entry :binding)) entries)))
+    (unless (and (listp entries) (member (length entries) '(2 3))
                  texture sampler
+                 (if (= 3 (length entries)) uniform (null uniform))
                  (every (lambda (entry)
                           (typep (getf entry :binding)
                                  '(unsigned-byte 32)))
                         entries)
-                 (/= (getf texture :binding) (getf sampler :binding)))
+                 (= (length bindings)
+                    (length (remove-duplicates bindings))))
       (reject-gpu-request descriptor :unsupported-bind-group-layout entries))
-    (values entries texture sampler)))
+    (values entries texture sampler uniform)))
 
 (defmethod create
     ((device vulkan-gpu-device)
@@ -680,16 +768,22 @@
                      (vulkan-handle device) :binding binding)
             :device device :binding binding :entries entries)))
         (t
-         (multiple-value-bind (entries texture sampler)
+         (multiple-value-bind (entries texture sampler uniform)
              (sampled-texture-sampler-layout-entries descriptor)
            (make-instance
             'vulkan-gpu-bind-group-layout
             :label (gpu-descriptor-label descriptor)
             :handle
-            (lvk:create-sampled-image-sampler-descriptor-set-layout
-             (vulkan-handle device)
-             :texture-binding (getf texture :binding)
-             :sampler-binding (getf sampler :binding))
+            (if uniform
+                (lvk:create-sampled-image-sampler-uniform-descriptor-set-layout
+                 (vulkan-handle device)
+                 :texture-binding (getf texture :binding)
+                 :sampler-binding (getf sampler :binding)
+                 :uniform-binding (getf uniform :binding))
+                (lvk:create-sampled-image-sampler-descriptor-set-layout
+                 (vulkan-handle device)
+                 :texture-binding (getf texture :binding)
+                 :sampler-binding (getf sampler :binding)))
             :device device :entries entries)))))))
 
 (defmethod create
@@ -821,19 +915,31 @@
                                :key (lambda (entry) (getf entry :type))))
          (sampler-layout (find :sampler layout-entries
                                :key (lambda (entry) (getf entry :type))))
+         (uniform-layout (find :uniform-buffer layout-entries
+                               :key (lambda (entry) (getf entry :type))))
          (texture-entry
            (find (getf texture-layout :binding) entries
                  :key (lambda (entry) (getf entry :binding))))
          (sampler-entry
            (find (getf sampler-layout :binding) entries
-                 :key (lambda (entry) (getf entry :binding)))))
-    (unless (and (= 2 (length entries)) texture-entry sampler-entry
+                 :key (lambda (entry) (getf entry :binding))))
+         (uniform-entry
+           (and uniform-layout
+                (find (getf uniform-layout :binding) entries
+                      :key (lambda (entry) (getf entry :binding))))))
+    (unless (and (= (length layout-entries) (length entries))
+                 texture-entry sampler-entry
+                 (if uniform-layout uniform-entry (null uniform-entry))
                  (typep (getf texture-entry :resource)
                         'vulkan-gpu-texture-view)
                  (typep (getf sampler-entry :resource)
-                        'vulkan-gpu-sampler))
+                        'vulkan-gpu-sampler)
+                 (or (null uniform-entry)
+                     (typep (getf uniform-entry :resource)
+                            'vulkan-gpu-buffer)))
       (reject-gpu-request descriptor :unsupported-bind-group entries))
-    (values texture-entry sampler-entry texture-layout sampler-layout)))
+    (values texture-entry sampler-entry uniform-entry
+            texture-layout sampler-layout uniform-layout)))
 
 (defmethod create
     ((device vulkan-gpu-device) (descriptor bind-group-descriptor))
@@ -877,10 +983,13 @@
                   (lvk:destroy-descriptor-pool
                    (vulkan-handle device) pool)))))
           (multiple-value-bind
-                (texture-entry sampler-entry texture-layout sampler-layout)
+                (texture-entry sampler-entry uniform-entry
+                 texture-layout sampler-layout uniform-layout)
               (sampled-texture-sampler-bind-group-entries descriptor layout)
             (let* ((view (getf texture-entry :resource))
                    (sampler (getf sampler-entry :resource))
+                   (buffer (and uniform-entry
+                                (getf uniform-entry :resource)))
                    (texture (gpu-texture-view-texture view)))
               (ensure-vulkan-object-device
                view (vulkan-texture-view-device view) device
@@ -888,14 +997,26 @@
               (ensure-vulkan-object-device
                sampler (vulkan-sampler-device sampler) device
                :create-bind-group)
+              (when buffer
+                (ensure-vulkan-object-device
+                 buffer (vulkan-buffer-device buffer) device
+                 :create-bind-group)
+                (unless (member :uniform (gpu-buffer-usage buffer))
+                  (error 'gpu-usage-error
+                         :object buffer :operation :create-bind-group
+                         :required-usage :uniform
+                         :actual-usage (gpu-buffer-usage buffer))))
               (unless (member :texture-binding (gpu-texture-usage texture))
                 (error 'gpu-usage-error
                        :object texture :operation :create-bind-group
                        :required-usage :texture-binding
                        :actual-usage (gpu-texture-usage texture)))
               (let ((pool
-                      (lvk:create-sampled-image-sampler-descriptor-pool
-                       (vulkan-handle device)))
+                      (if buffer
+                          (lvk:create-sampled-image-sampler-uniform-descriptor-pool
+                           (vulkan-handle device))
+                          (lvk:create-sampled-image-sampler-descriptor-pool
+                           (vulkan-handle device))))
                     (set nil) (completed-p nil))
                 (unwind-protect
                      (progn
@@ -903,17 +1024,25 @@
                              (lvk:allocate-descriptor-set
                               (vulkan-handle device) pool
                               (vulkan-handle layout)))
-                       (lvk:update-sampled-image-sampler-descriptors
-                        (vulkan-handle device) set
-                        (vulkan-handle view) (vulkan-handle sampler)
-                        :texture-binding (getf texture-layout :binding)
-                        :sampler-binding (getf sampler-layout :binding))
+                       (if buffer
+                           (lvk:update-sampled-image-sampler-uniform-descriptors
+                            (vulkan-handle device) set
+                            (vulkan-handle view) (vulkan-handle sampler)
+                            (vulkan-handle buffer) (gpu-buffer-size buffer)
+                            :texture-binding (getf texture-layout :binding)
+                            :sampler-binding (getf sampler-layout :binding)
+                            :uniform-binding (getf uniform-layout :binding))
+                           (lvk:update-sampled-image-sampler-descriptors
+                            (vulkan-handle device) set
+                            (vulkan-handle view) (vulkan-handle sampler)
+                            :texture-binding (getf texture-layout :binding)
+                            :sampler-binding (getf sampler-layout :binding)))
                        (setf completed-p t)
                        (make-instance
                         'vulkan-gpu-bind-group
                         :label (gpu-descriptor-label descriptor)
                         :handle set :device device :layout layout
-                        :texture-view view :sampler sampler
+                        :texture-view view :sampler sampler :buffer buffer
                         :descriptor-pool pool))
                   (unless completed-p
                     (lvk:destroy-descriptor-pool
@@ -1450,6 +1579,11 @@ lowering later without changing this queue-level operation."
       (unless (eq (vulkan-bind-group-layout bind-group)
                   (vulkan-render-pipeline-bind-group-layout pipeline))
         (reject-gpu-request bind-group :incompatible-pipeline-layout pipeline))
+      (when (vulkan-bind-group-buffer bind-group)
+        (ensure-vulkan-object-device
+         (vulkan-bind-group-buffer bind-group)
+         (vulkan-buffer-device (vulkan-bind-group-buffer bind-group))
+         device :set-bind-group))
       (let ((texture
               (gpu-texture-view-texture
                (vulkan-bind-group-texture-view bind-group))))
@@ -1575,6 +1709,11 @@ lowering later without changing this queue-level operation."
       (unless (eq (vulkan-bind-group-layout bind-group)
                   (vulkan-compute-pipeline-bind-group-layout pipeline))
         (reject-gpu-request bind-group :incompatible-pipeline-layout pipeline))
+      (when (vulkan-bind-group-buffer bind-group)
+        (ensure-vulkan-object-device
+         (vulkan-bind-group-buffer bind-group)
+         (vulkan-buffer-device (vulkan-bind-group-buffer bind-group))
+         device :set-bind-group))
       (let ((texture
               (gpu-texture-view-texture
                (vulkan-bind-group-texture-view bind-group))))
@@ -1838,6 +1977,18 @@ buffers and native resources until that fence signals."
           (lvk:destroy-sampler
            (vulkan-handle device) (vulkan-handle sampler))))
       (setf (vulkan-object-destroyed-p sampler) t)))
+  (values))
+
+(defmethod destroy ((buffer vulkan-gpu-buffer))
+  (with-vulkan-gpu-driver-environment
+    (unless (vulkan-object-destroyed-p buffer)
+      (let ((device (vulkan-buffer-device buffer)))
+        (unless (vulkan-object-destroyed-p device)
+          (let ((native-device (vulkan-handle device)))
+            (lvk:unmap-memory native-device (vulkan-buffer-memory buffer))
+            (lvk:destroy-buffer native-device (vulkan-handle buffer))
+            (lvk:free-memory native-device (vulkan-buffer-memory buffer)))))
+      (setf (vulkan-object-destroyed-p buffer) t)))
   (values))
 
 (defmethod destroy ((layout vulkan-gpu-bind-group-layout))

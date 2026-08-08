@@ -122,7 +122,13 @@ factories for requesting GPU-DEVICE instances."))
 (defclass gpu-device (gpu-object) ())
 
 (defclass gpu-queue (gpu-object) ())
-(defclass gpu-buffer (gpu-object) ())
+(defclass gpu-buffer (gpu-object)
+  ((size
+    :initarg :size
+    :reader gpu-buffer-size)
+   (usage
+    :initarg :usage
+    :reader gpu-buffer-usage)))
 (defclass gpu-texture (gpu-object)
   ((size
     :initarg :size
@@ -180,6 +186,9 @@ of some object fulfilling the DESCRIPTOR."))
 
 (defgeneric submit (queue work)
   (:documentation "Submit some command buffers to the QUEUE."))
+
+(defgeneric write-buffer (buffer data &key offset)
+  (:documentation "Copy host DATA into BUFFER starting at byte OFFSET."))
 
 (defgeneric destroy (handle)
   (:documentation "Destroy the GPU object denoted by HANDLE."))

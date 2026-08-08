@@ -275,10 +275,7 @@
 (defun spinning-texture-vertex-module ()
   "Make a vertex shader for a vertexless, perspective-spinning texture quad.
 
-The first source texel doubles as a tiny live parameter block: red and green
-contain sine and cosine remapped to 0..1.  This keeps the initial rendering
-slice focused on textures, samplers, and render passes; a uniform-buffer
-vocabulary can replace the trick later without changing the pass topology."
+Binding 2 is a uniform block whose first vector contains sine and cosine."
   (make-instance
    'spir-v-module
    :entry-points
@@ -290,24 +287,22 @@ vocabulary can replace the trick later without changing the pass topology."
    '((decorate %vertex-index built-in (enum built-in vertex-index))
      (decorate %position built-in (enum built-in position))
      (decorate %uv-output location 0)
-     (decorate %source-texture descriptor-set 0)
-     (decorate %source-texture binding 0)
-     (decorate %source-sampler descriptor-set 0)
-     (decorate %source-sampler binding 1))
+     (decorate %spin-state-block block)
+     (member-decorate %spin-state-block 0 offset 0)
+     (decorate %spin-state-buffer descriptor-set 0)
+     (decorate %spin-state-buffer binding 2))
    :global-declarations
    '((%void type-void)
      (%uint type-int 32 0)
      (%float type-float 32)
      (%vec2 type-vector %float 2)
      (%vec4 type-vector %float 4)
-     (%image type-image %float 2d 0 0 0 1 unknown)
-     (%sampler type-sampler)
-     (%sampled-image type-sampled-image %image)
+     (%spin-state-block type-struct %vec4)
      (%vertex-index-pointer type-pointer input %uint)
      (%position-pointer type-pointer output %vec4)
      (%uv-output-pointer type-pointer output %vec2)
-     (%image-pointer type-pointer uniform-constant %image)
-     (%sampler-pointer type-pointer uniform-constant %sampler)
+     (%spin-state-block-pointer type-pointer uniform %spin-state-block)
+     (%spin-state-value-pointer type-pointer uniform %vec4)
      (%function-type type-function %void)
      (%zero-u constant %uint 0)
      (%one-u constant %uint 1)
@@ -323,8 +318,7 @@ vocabulary can replace the trick later without changing the pass topology."
      (%vertex-index variable %vertex-index-pointer input)
      (%position variable %position-pointer output)
      (%uv-output variable %uv-output-pointer output)
-     (%source-texture variable %image-pointer uniform-constant)
-     (%source-sampler variable %sampler-pointer uniform-constant))
+     (%spin-state-buffer variable %spin-state-block-pointer uniform))
    :function-definitions
    (list
     (make-instance
@@ -343,18 +337,12 @@ vocabulary can replace the trick later without changing the pass topology."
          (%yf convert-u-to-f %float %y-bit)
          (%uv composite-construct %vec2 %xf %yf)
          (store %uv-output %uv)
-         (%texture load %image %source-texture)
-         (%sampler-value load %sampler %source-sampler)
-         (%sampled sampled-image %sampled-image %texture %sampler-value)
-         (%zero-uv composite-construct %vec2 %zero %zero)
-         (%state image-sample-explicit-lod
-                 %vec4 %sampled %zero-uv lod %zero)
-         (%state-r composite-extract %float %state 0)
-         (%state-g composite-extract %float %state 1)
-         (%sine-twice f-mul %float %state-r %two)
-         (%cosine-twice f-mul %float %state-g %two)
-         (%sine f-sub %float %sine-twice %one)
-         (%cosine f-sub %float %cosine-twice %one)
+         (%state-pointer access-chain
+                         %spin-state-value-pointer
+                         %spin-state-buffer %zero-u)
+         (%state load %vec4 %state-pointer)
+         (%sine composite-extract %float %state 0)
+         (%cosine composite-extract %float %state 1)
          (%x-twice f-mul %float %xf %two)
          (%center-x f-sub %float %x-twice %one)
          (%y-twice f-mul %float %yf %two)
