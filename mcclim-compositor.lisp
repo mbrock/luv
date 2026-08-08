@@ -227,12 +227,12 @@
       (let ((state-command
               (make-spinning-compositor-state-command
                compositor context source timestamp)))
+        (luv:enqueue
+         (luv:device-queue (luv:context-device context))
+         state-command)
         (luv:present-canvas-frame
          context
          (lambda (surface encoder)
-           ;; Upload, sample, render, and copy are one inspectable command
-           ;; sequence and one Vulkan submission.
-           (luv:encode encoder state-command)
            (let ((pass
                  (luv:begin-render-pass
                   encoder

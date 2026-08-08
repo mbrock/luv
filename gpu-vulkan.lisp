@@ -1230,10 +1230,8 @@
               (row-major-aref
                data (+ (* row (array-dimension data 1)) column)))))))
 
-(defmethod encode
-    ((encoder vulkan-gpu-command-encoder)
-     (command gpu-write-texture-command))
-  "Record one CPU texture upload and retain its staging allocation."
+(defun record-vulkan-texture-write (encoder command)
+  "Lower one queue texture write through a private Vulkan command encoder."
   (with-vulkan-gpu-driver-environment
     (ensure-vulkan-command-encoder-state encoder :encode)
     (ensure-no-active-vulkan-pass encoder :encode)
@@ -1297,11 +1295,16 @@
             (when memory (lvk:free-memory native-device memory)))))))
   encoder)
 
-(defmethod encode
+(defmethod enqueue
     ((queue vulkan-gpu-queue) (command gpu-write-texture-command))
-  "Execute one upload command immediately through a private encoder."
+  "Issue one WebGPU queue write using Vulkan's portable staging path.
+
+The host data is copied into coherent staging memory before returning.  The
+staging buffer is retained by the private command buffer until submission has
+completed.  Vulkan 1.4 host image copies may provide a more direct optional
+lowering later without changing this queue-level operation."
   (with-vulkan-gpu-driver-environment
-    (ensure-live-vulkan-object queue :encode)
+    (ensure-live-vulkan-object queue :enqueue)
     (let ((encoder nil)
           (commands nil))
       (unwind-protect
@@ -1309,7 +1312,7 @@
              (setf encoder
                    (create (vulkan-queue-device queue)
                            (make-command-encoder-descriptor)))
-             (encode encoder command)
+             (record-vulkan-texture-write encoder command)
              (setf commands (finish encoder))
              (submit queue commands)
              queue)

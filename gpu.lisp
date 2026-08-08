@@ -144,9 +144,12 @@ factories for requesting GPU-DEVICE instances."))
 
 (defclass gpu-command-buffer (gpu-object) ())
 
-(defclass gpu-command-encoder (gpu-object) ())
-(defclass gpu-render-pass-encoder (gpu-command-encoder) ())
-(defclass gpu-compute-pass-encoder (gpu-command-encoder) ())
+(defclass gpu-encoder (gpu-object) ()
+  (:documentation "Abstract receiver for recorded GPU commands."))
+
+(defclass gpu-command-encoder (gpu-encoder) ())
+(defclass gpu-render-pass-encoder (gpu-encoder) ())
+(defclass gpu-compute-pass-encoder (gpu-encoder) ())
 
 (defclass gpu-bind-group (gpu-object) ())
 (defclass gpu-bind-group-layout (gpu-object) ())
@@ -166,11 +169,11 @@ factories for requesting GPU-DEVICE instances."))
   (:documentation "Asks the DEVICE for a handle to newly created instance
 of some object fulfilling the DESCRIPTOR."))
 
-(defgeneric encode (target command)
-  (:documentation "Ask TARGET to interpret an inspectable GPU COMMAND.
+(defgeneric encode (encoder command)
+  (:documentation "Record an inspectable GPU COMMAND onto ENCODER."))
 
-TARGET is normally a command or pass encoder. A queue may accept immediate
-commands such as texture uploads by privately encoding and submitting them."))
+(defgeneric enqueue (queue command)
+  (:documentation "Issue a queue-scoped GPU COMMAND onto QUEUE."))
 
 (defgeneric finish (encoder)
   (:documentation "Asks the ENCODER to seal its work sequence."))
@@ -245,25 +248,36 @@ commands such as texture uploads by privately encoding and submitting them."))
 
 (defstruct gpu-command)
 
-(defstruct (gpu-draw-command (:include gpu-command))
+(defstruct (gpu-queue-command (:include gpu-command)))
+
+(defstruct (gpu-command-encoder-command (:include gpu-command)))
+
+(defstruct (gpu-pass-command (:include gpu-command)))
+
+(defstruct (gpu-render-pass-command (:include gpu-pass-command)))
+
+(defstruct (gpu-compute-pass-command (:include gpu-pass-command)))
+
+(defstruct (gpu-draw-command (:include gpu-render-pass-command))
   vertex-count
   (instance-count 1)
   (first-vertex 0)
   (first-instance 0))
 
-(defstruct (gpu-set-pipeline-command (:include gpu-command))
+(defstruct (gpu-set-pipeline-command (:include gpu-pass-command))
   pipeline)
 
-(defstruct (gpu-set-bind-group-command (:include gpu-command))
+(defstruct (gpu-set-bind-group-command (:include gpu-pass-command))
   (index 0)
   bind-group)
 
-(defstruct (gpu-dispatch-workgroups-command (:include gpu-command))
+(defstruct (gpu-dispatch-workgroups-command
+            (:include gpu-compute-pass-command))
   x
   (y 1)
   (z 1))
 
-(defstruct (gpu-set-viewport-command (:include gpu-command))
+(defstruct (gpu-set-viewport-command (:include gpu-render-pass-command))
   x
   y
   width
@@ -271,23 +285,41 @@ commands such as texture uploads by privately encoding and submitting them."))
   min-depth
   max-depth)
 
-(defstruct (gpu-clear-texture-command (:include gpu-command))
+(defstruct (gpu-clear-texture-command
+            (:include gpu-command-encoder-command))
   texture
   color)
 
-(defstruct (gpu-copy-texture-command (:include gpu-command))
+(defstruct (gpu-copy-texture-command
+            (:include gpu-command-encoder-command))
   source
   destination)
 
-(defstruct (gpu-write-texture-command (:include gpu-command))
+(defstruct (gpu-write-texture-command (:include gpu-queue-command))
   destination
   data
   data-layout
   size)
 
+(defmethod encode ((encoder gpu-encoder) (command gpu-command))
+  (error 'gpu-request-error
+         :operation :encode
+         :descriptor command
+         :reason :unsupported-command-for-encoder
+         :details (list :encoder (class-name (class-of encoder))
+                        :command (type-of command))))
+
+(defmethod enqueue ((queue gpu-queue) (command gpu-queue-command))
+  (error 'gpu-request-error
+         :operation :enqueue
+         :descriptor command
+         :reason :unsupported-queue-command
+         :details (list :queue (class-name (class-of queue))
+                        :command (type-of command))))
+
 ;;; These WebGPU-flavored verbs are intentionally just REPL conveniences.
-;;; Command objects are the protocol: backends specialize ENCODE on both the
-;;; receiving encoder and the inspectable command occurrence.
+;;; Command objects are the protocol: backends specialize ENCODE for recorded
+;;; encoder commands and ENQUEUE for immediate queue commands.
 
 (defun set-pipeline (pass-encoder pipeline)
   (encode pass-encoder
@@ -310,8 +342,8 @@ commands such as texture uploads by privately encoding and submitting them."))
            :first-vertex first-vertex :first-instance first-instance)))
 
 (defun write-texture (queue destination data data-layout size)
-  "Immediately encode and submit one inspectable texture-upload command."
-  (encode queue
-          (make-gpu-write-texture-command
-           :destination destination :data data
-           :data-layout data-layout :size size)))
+  "Issue one WebGPU-style convenience upload onto QUEUE."
+  (enqueue queue
+           (make-gpu-write-texture-command
+            :destination destination :data data
+            :data-layout data-layout :size size)))

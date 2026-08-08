@@ -37,10 +37,14 @@ Submission currently waits for the Vulkan queue to become idle. This keeps
 the initial ownership rules honest; presentation work can replace the wait
 with tracked in-flight frames without changing the public operation.
 
-GPU work is represented by inspectable command structures. `encode` uses
-double dispatch on the receiving command/pass encoder and the command type;
-the WebGPU-flavored verbs are only convenient constructors around that
-protocol:
+GPU work is represented by inspectable command structures.  Command,
+render-pass, and compute-pass encoders are sibling subclasses of the abstract
+`gpu-encoder`; a pass encoder is not itself a command encoder.  Commands have
+matching scope types such as `gpu-command-encoder-command`,
+`gpu-render-pass-command`, and `gpu-compute-pass-command`.  `encode` therefore
+means exactly one thing: record a command on an encoder of the appropriate
+scope.  The WebGPU-flavored verbs are convenient constructors around that
+double-dispatch protocol:
 
 ```lisp
 (luv:encode
@@ -48,10 +52,14 @@ protocol:
  (luv:make-gpu-draw-command :vertex-count 4))
 ```
 
-Texture uploads use the same protocol. Encoding a
-`gpu-write-texture-command` into an existing command encoder retains its
-staging allocation through submission, while `write-texture` encodes and
-submits one such command immediately for REPL convenience.
+Texture uploads deliberately occupy a different scope.  WebGPU's
+`GPUQueue.writeTexture` is a queue convenience operation, represented here by
+`gpu-write-texture-command` under `gpu-queue-command` and issued by `enqueue`.
+The `write-texture` function is constructor sugar for that pair.
+The Vulkan backend currently lowers it to a coherent staging buffer and a
+private buffer-to-image copy submission.  Vulkan 1.4's optional host image
+copy facility may provide a more direct lowering later; neither choice leaks
+into the GPU API.
 
 The next slice owns 2D textures and records explicit clear and copy commands.
 Clearing is deliberately a transfer command for now; render-pass clears can

@@ -151,11 +151,17 @@
            #:gpu-bind-group
            #:gpu-compute-pipeline
            #:gpu-render-pipeline
+           #:gpu-encoder
            #:gpu-render-pass-encoder
            #:gpu-compute-pass-encoder
            #:gpu-command-encoder
            #:gpu-command-buffer
            #:gpu-command
+           #:gpu-queue-command
+           #:gpu-command-encoder-command
+           #:gpu-pass-command
+           #:gpu-render-pass-command
+           #:gpu-compute-pass-command
            #:gpu-draw-command
            #:gpu-set-pipeline-command
            #:gpu-set-bind-group-command
@@ -168,6 +174,7 @@
            #:device-queue
            #:create
            #:encode
+           #:enqueue
            #:finish
            #:submit
            #:write-texture
