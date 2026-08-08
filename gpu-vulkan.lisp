@@ -34,26 +34,17 @@
                 (vulkan-gpu-error-reason condition)
                 (vulkan-gpu-error-details condition)))))))
 
-(defun vulkan-gpu-instance-create-info (application-name)
-  "Create a portable, presentation-independent Vulkan instance description."
-  (let* ((available
-           (mapcar #'vk:extension-name
-                   (vk:enumerate-instance-extension-properties)))
+(defun vulkan-gpu-instance-options ()
+  "Return the extensions and flags for a portable Vulkan instance."
+  (let* ((available (lvk:enumerate-instance-extension-names))
          (portability-extension
-           vk:+khr-portability-enumeration-extension-name+)
+           lvk:+portability-enumeration-extension-name+)
          (portability-p
            (member portability-extension available :test #'string=)))
-    (vk:make-instance-create-info
-     :flags (and portability-p (list :enumerate-portability))
-     :application-info
-     (vk:make-application-info
-      :application-name application-name
-      :application-version (vk:make-version 0 0 1)
-      :engine-name "luv"
-      :engine-version (vk:make-version 0 0 1)
-      :api-version vk:+api-version-1-0+)
-     :enabled-extension-names
-     (and portability-p (list portability-extension)))))
+    (values (and portability-p (list portability-extension))
+            (if portability-p
+                lvk:+instance-create-enumerate-portability-bit+
+                0))))
 
 (defclass vulkan-gpu-provider (gpu-provider)
   ((application-name
@@ -79,6 +70,12 @@
    (physical-device
     :initarg :physical-device
     :reader vulkan-device-physical-device)
+   (legacy-vk-handle
+    :initarg :legacy-vk-handle
+    :reader vulkan-device-legacy-vk-handle)
+   (legacy-vk-physical-device
+    :initarg :legacy-vk-physical-device
+    :reader vulkan-device-legacy-vk-physical-device)
    (queue-family
     :initarg :queue-family
     :reader vulkan-device-queue-family)
@@ -92,7 +89,10 @@
     :reader vulkan-queue-device)
    (family
     :initarg :family
-    :reader vulkan-queue-family)))
+    :reader vulkan-queue-family)
+   (legacy-vk-handle
+    :initarg :legacy-vk-handle
+    :reader vulkan-queue-legacy-vk-handle)))
 
 (defclass vulkan-gpu-texture (gpu-texture vulkan-gpu-object)
   ((device
@@ -161,10 +161,11 @@
 (defun first-vulkan-graphics-queue-family (physical-device)
   "Return the first graphics-capable queue family exposed by PHYSICAL-DEVICE."
   (or (loop for properties in
-              (vk:get-physical-device-queue-family-properties physical-device)
+              (lvk:physical-device-queue-families physical-device)
             for index from 0
-            when (and (plusp (vk:queue-count properties))
-                      (member :graphics (vk:queue-flags properties)))
+            when (and (plusp (lvk:queue-family-count properties))
+                      (logtest lvk:+queue-graphics-bit+
+                               (lvk:queue-family-flags properties)))
               return index)
       (error 'vulkan-gpu-error
              :operation :request-device
@@ -191,13 +192,6 @@
            :descriptor descriptor
            :reason :unsupported-limits
            :details (device-descriptor-required-limits descriptor))))
-
-(defun make-vulkan-device-create-info (queue-family)
-  (vk:make-device-create-info
-   :queue-create-infos
-   (list (vk:make-device-queue-create-info
-          :queue-family-index queue-family
-          :queue-priorities (list 1.0)))))
 
 (defun reject-gpu-request (descriptor reason &optional details)
   (error 'gpu-request-error
@@ -261,7 +255,7 @@
   (let ((memory-types
           (vk:memory-types
            (vk:get-physical-device-memory-properties
-            (vulkan-device-physical-device device))))
+            (vulkan-device-legacy-vk-physical-device device))))
         (memory-type-bits (vk:memory-type-bits memory-requirements)))
     (or (loop for memory-type in memory-types
               for index from 0
@@ -289,46 +283,55 @@
             (native-device nil)
             (completed-p nil))
         (unwind-protect
-             (progn
+             (multiple-value-bind (extensions flags)
+                 (vulkan-gpu-instance-options)
                (setf instance
-                     (vk:create-instance
-                      (vulkan-gpu-instance-create-info
-                       (vulkan-provider-application-name provider))))
+                     (lvk:create-instance
+                      :application-name
+                      (vulkan-provider-application-name provider)
+                      :flags flags
+                      :enabled-extension-names extensions))
                (let* ((physical-device
-                        (or (first (vk:enumerate-physical-devices instance))
+                        (or (first
+                             (lvk:enumerate-physical-devices instance))
                             (error 'vulkan-gpu-error
                                    :operation :request-device
                                    :reason :no-physical-device)))
                       (queue-family
                         (first-vulkan-graphics-queue-family physical-device)))
                  (setf native-device
-                       (vk:create-device
-                        physical-device
-                        (make-vulkan-device-create-info queue-family)))
-                 (let* ((device
+                       (lvk:create-device physical-device queue-family))
+                 (let* ((native-queue
+                          (lvk:get-device-queue native-device queue-family))
+                        (device
                           (make-instance
                            'vulkan-gpu-device
                            :label (gpu-descriptor-label descriptor)
                            :handle native-device
                            :instance instance
                            :physical-device physical-device
+                           :legacy-vk-handle
+                           (vk:make-device-wrapper native-device)
+                           :legacy-vk-physical-device
+                           (vk:make-physical-device-wrapper physical-device)
                            :queue-family queue-family))
                         (queue
                           (make-instance
                            'vulkan-gpu-queue
                            :label "default queue"
-                           :handle (vk:get-device-queue
-                                    native-device queue-family 0)
+                           :handle native-queue
                            :device device
-                           :family queue-family)))
+                           :family queue-family
+                           :legacy-vk-handle
+                           (vk:make-queue-wrapper native-queue))))
                    (setf (vulkan-device-queue device) queue
                          completed-p t)
                    device)))
           (unless completed-p
             (when native-device
-              (vk:destroy-device native-device))
+              (lvk:destroy-device native-device))
             (when instance
-              (vk:destroy-instance instance))))))))
+              (lvk:destroy-instance instance))))))))
 
 (defmethod device-queue ((device vulkan-gpu-device))
   (ensure-live-vulkan-object device :device-queue)
@@ -346,7 +349,7 @@
     (let* ((size (normalize-vulkan-texture-size descriptor))
            (usages (normalize-vulkan-texture-usage descriptor))
            (format (vulkan-texture-format descriptor))
-           (native-device (vulkan-handle device))
+           (native-device (vulkan-device-legacy-vk-handle device))
            (image nil)
            (memory nil)
            (completed-p nil))
@@ -411,14 +414,14 @@
            (progn
              (setf command-pool
                    (vk:create-command-pool
-                    (vulkan-handle device)
+                    (vulkan-device-legacy-vk-handle device)
                     (vk:make-command-pool-create-info
                      :flags (list :transient)
                      :queue-family-index (vulkan-device-queue-family device))))
              (let ((command-buffer
                      (first
                       (vk:allocate-command-buffers
-                       (vulkan-handle device)
+                       (vulkan-device-legacy-vk-handle device)
                        (vk:make-command-buffer-allocate-info
                         :command-pool command-pool
                         :level :primary
@@ -435,7 +438,7 @@
         (unless completed-p
           (when command-pool
             (vk:destroy-command-pool
-             (vulkan-handle device) command-pool)))))))
+             (vulkan-device-legacy-vk-handle device) command-pool)))))))
 
 (defun ensure-vulkan-command-encoder-state (encoder operation)
   (unless (eq :recording (vulkan-command-encoder-state encoder))
@@ -716,13 +719,13 @@ fences while preserving the public submission operation."
             (vulkan-submitted-texture-layouts command-buffers)))
       (when (plusp (length command-buffers))
         (vk:queue-submit
-         (vulkan-handle queue)
+         (vulkan-queue-legacy-vk-handle queue)
          (list
           (vk:make-submit-info
            :command-buffers
            (loop for command-buffer across command-buffers
                  collect (vulkan-handle command-buffer)))))
-        (vk:queue-wait-idle (vulkan-handle queue))
+        (vk:queue-wait-idle (vulkan-queue-legacy-vk-handle queue))
         (loop for command-buffer across command-buffers
               do (setf (vulkan-command-buffer-state command-buffer)
                        :submitted))
@@ -738,7 +741,8 @@ fences while preserving the public submission operation."
             (command-pool (vulkan-command-encoder-command-pool encoder)))
         (when (and command-pool
                    (not (vulkan-object-destroyed-p device)))
-          (vk:destroy-command-pool (vulkan-handle device) command-pool)))
+          (vk:destroy-command-pool
+           (vulkan-device-legacy-vk-handle device) command-pool)))
       (setf (vulkan-command-encoder-command-pool encoder) nil)))
   (setf (vulkan-command-encoder-state encoder) :destroyed)
   (values))
@@ -749,7 +753,7 @@ fences while preserving the public submission operation."
       (let ((device (vulkan-command-buffer-device command-buffer)))
         (unless (vulkan-object-destroyed-p device)
           (vk:destroy-command-pool
-           (vulkan-handle device)
+           (vulkan-device-legacy-vk-handle device)
            (vulkan-command-buffer-command-pool command-buffer))))
       (setf (vulkan-object-destroyed-p command-buffer) t
             (vulkan-command-buffer-state command-buffer) :destroyed)))
@@ -760,9 +764,12 @@ fences while preserving the public submission operation."
     (unless (vulkan-object-destroyed-p texture)
       (let ((device (vulkan-texture-device texture)))
         (unless (vulkan-object-destroyed-p device)
-          (vk:destroy-image (vulkan-handle device) (vulkan-handle texture))
+          (vk:destroy-image
+           (vulkan-device-legacy-vk-handle device)
+           (vulkan-handle texture))
           (vk:free-memory
-           (vulkan-handle device) (vulkan-texture-memory texture))))
+           (vulkan-device-legacy-vk-handle device)
+           (vulkan-texture-memory texture))))
       (setf (vulkan-object-destroyed-p texture) t)))
   (values))
 
@@ -771,10 +778,10 @@ fences while preserving the public submission operation."
     (unless (vulkan-object-destroyed-p device)
       (let ((queue (vulkan-device-queue device)))
         (unwind-protect
-             (vk:device-wait-idle (vulkan-handle device))
+             (lvk:device-wait-idle (vulkan-handle device))
           (unwind-protect
-               (vk:destroy-device (vulkan-handle device))
-            (vk:destroy-instance (vulkan-device-instance device))
+               (lvk:destroy-device (vulkan-handle device))
+            (lvk:destroy-instance (vulkan-device-instance device))
             (setf (vulkan-object-destroyed-p device) t)
             (when queue
               (setf (vulkan-object-destroyed-p queue) t)))))))

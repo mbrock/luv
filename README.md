@@ -11,6 +11,12 @@ an opaque compatibility boundary. They have already been updated to Vulkan
 1.4, and luv can change their generated API when a better Common Lisp shape
 emerges.
 
+The second spike is now replacing that broad generated binding with the
+deliberately incomplete, hand-owned CFFI layer in `vulkan.lisp`. Instance,
+physical-device, logical-device, and queue ownership already use this layer.
+Textures and commands temporarily retain clearly named legacy `vk` handle
+wrappers while their declarations move across incrementally.
+
 ## Second spike GPU API
 
 The independently loadable `:luv/gpu` system is the beginning of a

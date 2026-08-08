@@ -41,6 +41,7 @@
   :serial t
   :components ((:file "package")
                (:file "gpu")
+               (:file "vulkan")
                (:file "gpu-vulkan")))
 
 (asdf:defsystem #:luv/headless
