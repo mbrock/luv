@@ -32,8 +32,7 @@
               x86_64-linux = "lvp_icd.x86_64.json";
               aarch64-linux = "lvp_icd.aarch64.json";
             }.${system} or null;
-          # The generated vk binding is vendored in this repository. Keep its
-          # ordinary dependencies available without installing Nixpkgs' vk.
+          # Keep the owned CFFI binding and development tools available to SBCL.
           lisp = pkgs.sbcl.withPackages (lispPackages: [
             lispPackages.alexandria
             lispPackages.cffi

@@ -16,15 +16,22 @@
          (uiop:pathname-directory-pathname *load-truename*))
        (slynk-root (required-directory "LUV_SLYNK_DIR"))
        (port (parse-integer (getenv-or "LUV_SLYNK_PORT" "4005"))))
+  (load
+   (merge-pathnames
+    #P"setup.lisp"
+    (let ((configured-home (uiop:getenv "QUICKLISP_HOME")))
+      (if configured-home
+          (pathname (format nil "~A/" configured-home))
+          (merge-pathnames #P"quicklisp/" (user-homedir-pathname))))))
+  (uiop:symbol-call :ql :quickload '(:sdl3) :silent t)
   (asdf:initialize-source-registry
    `(:source-registry
      (:tree ,(namestring slynk-root))
-     (:tree ,(namestring (merge-pathnames #P"vendor/vk/" project-root)))
      :inherit-configuration))
   (asdf:load-asd (merge-pathnames #P"slynk.asd" slynk-root))
   (asdf:load-asd (merge-pathnames #P"luv.asd" project-root))
   (asdf:load-system :slynk)
-  (asdf:load-system :luv/headless)
+  (asdf:load-system :luv)
   (format t "~&Starting luv Slynk on 127.0.0.1:~D.~%" port)
   (funcall (find-symbol "CREATE-SERVER" "SLYNK")
            :interface "127.0.0.1"

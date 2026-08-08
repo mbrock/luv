@@ -28,14 +28,16 @@ Start the `luv` SLY implementation in Emacs first if its listener is not up.
 Useful starting points:
 
 ```sh
-./sly eval '(render-color 1.0 0.0 1.0)' --package LUV
-./sly inspect '*window*' --package LUV
-./sly describe render-color --package LUV
+./sly eval '(defparameter *canvas* (open-canvas (make-sdl-canvas)))' --package LUV
+./sly eval '(defparameter *context* (make-canvas-context *canvas* *gpu-provider*))' --package LUV
+./sly eval '(render-canvas-color *context* 1.0 0.0 1.0)' --package LUV
+./sly inspect '*context*' --package LUV
+./sly describe render-canvas-color --package LUV
 ./sly describe-package luv
 ./sly describe-system luv
 ./sly apropos color --package LUV
-./sly edit luv:render-color
-./sly xref uses render-color --package LUV
+./sly edit luv:render-canvas-color
+./sly xref uses render-canvas-color --package LUV
 ```
 
 `describe`, `apropos`, and `edit` accept multiple names. `apropos` shows only

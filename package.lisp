@@ -91,24 +91,6 @@
            #:vulkan-gpu-error
            #:vulkan-gpu-error-reason
            #:vulkan-gpu-error-details
-           #:*window*
-           #:*instance*
-           #:*physical-device*
-           #:*surface*
-           #:*device*
-           #:*swapchain*
-           #:*queue*
-           #:probe
-           #:surface-probe
-           #:headless-probe
-           #:open-headless
-           #:open-window
-           #:close-window
-           #:window-open-p
-           #:render-color
-           #:capture-color
-           #:yellow-window
-           #:main
            #:gpu-provider
            #:gpu-device
            #:gpu-queue

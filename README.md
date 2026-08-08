@@ -1,28 +1,16 @@
 # luv
 
-`luv` is an experimental atelier for hacking on Vulkan graphics with Common
-Lisp. The initial spike uses
-[`JolifantoBambla/vk`](https://github.com/JolifantoBambla/vk) to load Vulkan,
-and [`aiffc/cl-sdl3`](https://github.com/aiffc/cl-sdl3) to let SDL own the
-native Wayland window while luv owns the Vulkan instance and surface queries.
-
-The vendored `vk` binding and generator are an in-tree hard fork rather than
-an opaque compatibility boundary. They have already been updated to Vulkan
-1.4, and luv can change their generated API when a better Common Lisp shape
-emerges.
-
-The second spike replaces that broad generated binding with the deliberately
-incomplete, hand-owned CFFI layer in `vulkan.lisp`. Its GPU system now owns the
-instance, device, queue, texture memory, command recording, and submission
-surface directly. The original window and headless spikes still use `vk` while
-their useful pieces move across incrementally.
+`luv` is an experimental Common Lisp GPU atelier.  Its WebGPU-shaped API is
+implemented by a deliberately incomplete, hand-owned CFFI Vulkan layer, while
+SDL supplies the native Cocoa or Wayland window.  The binding grows only when
+the higher-level API needs another Vulkan capability.
 
 The owned layer uses CFFI's translating types, enums, and bitfields directly.
 `defvkstruct`, `define-enumerator`, and `define-creator` keep the Vulkan treaty
 text explicit while naming its recurring allocation, checking, and count/fetch
 patterns once.
 
-## Second spike GPU API
+## GPU API
 
 The independently loadable `:luv/gpu` system is the beginning of a
 WebGPU-shaped API implemented by the Vulkan backend. Its first vertical slice
@@ -86,7 +74,7 @@ reuse the same texture and layout tracking later:
     (luv:destroy device)))
 ```
 
-## Second spike canvas
+## Canvas
 
 `:luv/canvas` adds the small native counterpart to WebGPU's canvas context
 without making SDL a dependency of the offscreen `:luv/gpu` system.  Its CLOS
@@ -141,102 +129,33 @@ git clone https://github.com/aiffc/cl-sdl3 \
 Its ordinary Lisp dependencies are fetched by Quicklisp when `luv` is loaded.
 Nix supplies SDL3, its companion native libraries, libffi, Vulkan, and SBCL.
 
-## Run the probe
+## Run
 
-Enter the reproducible development environment:
-
-```sh
-nix develop
-```
-
-On a headless Linux server, the shell points the Vulkan loader at Mesa's
-Lavapipe software ICD. That is enough to load the Vulkan-only system and create
-a real `VK_EXT_headless_surface` swapchain without SDL or a display server:
+Enter the reproducible environment with `nix develop`, load `luv.asd`, and
+load either the complete atelier or its SDL-free GPU core:
 
 ```lisp
-(asdf:clear-system :vk)
-(asdf:initialize-source-registry
- `(:source-registry
-   (:tree ,(namestring (truename "vendor/vk/")))
-   :inherit-configuration))
-(asdf:load-asd (truename "vendor/vk/vk.asd"))
 (asdf:load-asd (truename "luv.asd"))
-(asdf:load-system :luv/headless)
-(luv:probe)
-(luv:headless-probe)
-(luv:open-headless :width 320 :height 240)
-(luv:render-color 0.2 0.4 1.0)
-(luv:capture-color #P"capture.ppm" 0.2 0.4 1.0)
-(luv:close-window)
+(asdf:load-system :luv)       ; GPU plus native canvas
+;; (asdf:load-system :luv/gpu) ; GPU core only
 ```
 
-`capture-color` renders into the current headless swapchain image, copies that
-surface image back to host memory, and writes a binary PPM. Convert it with
-`pnmtopng capture.ppm > capture.png` if your viewer does not open PPM files.
-
-The ordinary `:luv` system still owns the SDL-backed native window path:
-
-Then start `sbcl --dynamic-space-size 6144`, load the ASDF system, and open the
-ambient Vulkan window:
-
-```lisp
-(load #P"~/quicklisp/setup.lisp")
-(ql:quickload '(:sdl3 :rove))
-(asdf:clear-system :vk)
-(asdf:initialize-source-registry
- `(:source-registry
-   (:tree ,(namestring (truename "vendor/vk/")))
-   :inherit-configuration))
-(asdf:load-asd (truename "vendor/vk/vk.asd"))
-(asdf:load-asd (truename "luv.asd"))
-(asdf:load-system :luv)
-(luv:open-window)
-```
-
-`open-window` returns after presenting yellow while a background context thread
-keeps the SDL window, Vulkan instance, device, surface, queue, and swapchain
-alive. Rendering is then ordinary REPL interaction:
-
-```lisp
-(luv:render-color 1.0 0.0 1.0) ; magenta
-(luv:render-color 0.0 1.0 1.0) ; cyan
-(luv:close-window)
-```
-
-The live handles are exported as specials such as `luv:*window*`,
-`luv:*instance*`, `luv:*device*`, and `luv:*swapchain*`. `luv:yellow-window`
-remains as an alias for `luv:open-window`. `(luv:surface-probe)` performs the
-native-window setup without creating a device or swapchain, and `(luv:probe)`
-is the original windowless loader/device check. Set `SDL_VIDEODRIVER=wayland`
-to require native Wayland rather than allowing SDL to choose another backend.
-
-Quicklisp supplies ordinary Lisp systems, including the dependencies of the
-locally installed `cl-sdl3`. The Vulkan 1.4.358 `vk` binding is generated and
-vendored under `vendor/vk`; Nix supplies SBCL, native SDL/Vulkan libraries,
-and `vulkaninfo`.
-A Vulkan implementation/ICD still comes from the host graphics stack. On
-Apple Silicon, the development shell supplies MoltenVK and points the Vulkan
-loader at it; the same code also accepts KosmicKrisp when its SDK driver is
-selected. If the probe cannot see a device, `vulkaninfo --summary` is the first
-diagnostic to try.
-
-On macOS, SDL and the Vulkan context run on the process main thread as Cocoa
-requires. `open-window` still returns to the SLY evaluation thread, so
-`render-color` and `close-window` retain the same live REPL interface as on
-Linux.
+Nix supplies SBCL, SDL, the Vulkan loader and tools, and MoltenVK on Apple
+Silicon.  A native Vulkan implementation still comes from the host graphics
+stack.  Set `SDL_VIDEODRIVER=wayland` when you want to require Wayland rather
+than allowing SDL to choose another video backend.
 
 ## SLY and the one-shot client
 
 The server-friendly workflow does not need Emacs. Inside `nix develop`,
-`./sly` can start a durable Slynk image by itself, loaded with `:luv/headless`:
+`./sly` can start a durable Slynk image loaded with `:luv`:
 
 ```sh
 ./sly start
-./sly eval '(probe)' --package LUV
-./sly eval '(headless-probe)' --package LUV
-./sly eval '(open-headless :width 160 :height 100)' --package LUV
-./sly eval '(capture-color #P"capture.ppm" 0.2 0.4 1.0)' --package LUV
-./sly eval '(close-window)' --package LUV
+./sly eval '(defparameter *canvas* (open-canvas (make-sdl-canvas)))' --package LUV
+./sly eval '(defparameter *context* (make-canvas-context *canvas* *gpu-provider*))' --package LUV
+./sly eval '(render-canvas-color *context* 0.7 0.1 1.0)' --package LUV
+./sly eval '(close-canvas *canvas*)' --package LUV
 ./sly stop
 ```
 
@@ -258,15 +177,15 @@ Common Lisp Slynk client:
 
 ```sh
 ./sly eval '(+ 1 1)'
-./sly eval '(render-color 1.0 0.0 1.0)' --package LUV
-./sly eval '(list *window* *device* *swapchain*)' --package LUV
-./sly inspect '(list *window* *device* *swapchain*)' --package LUV
+./sly eval '(render-canvas-color *context* 1.0 0.0 1.0)' --package LUV
+./sly eval '(list (canvas-state *canvas*) (canvas-context-state *context*))' --package LUV
+./sly inspect '*context*' --package LUV
 ```
 
 The project-local SLY launcher establishes SBCL's `(debug 3)` compiler policy
-before loading the project, and `luv.asd` applies the same policy specifically
-while compiling its source files even outside that launcher. Besides richer
-locations, locals, stepping, and backtraces, this raises SBCL's derived
+before loading the project, and the GPU system applies the same policy when
+compiled independently. Besides richer locations, locals, stepping, and
+backtraces, this raises SBCL's derived
 `STORE-SOURCE-FORM` policy to `3`, which embeds function source forms in
 compiled FASLs. Consequently tools can recover bodies with
 `function-lambda-expression` instead of seeing only an opaque compiled
@@ -294,23 +213,24 @@ the inspector and release its connection-scoped state.
 Live-image discovery uses the same package convention:
 
 ```sh
-./sly describe RENDER-COLOR OPEN-WINDOW --package LUV
-./sly describe RENDER-COLOR --function --package LUV
+./sly describe RENDER-CANVAS-COLOR OPEN-CANVAS --package LUV
+./sly describe RENDER-CANVAS-COLOR --function --package LUV
 ./sly describe-package luv
 ./sly describe-system luv
-./sly apropos COLOR WINDOW --package LUV
-./sly apropos RUN-WINDOW-CONTEXT --package LUV --all
-./sly edit luv:render-color
-./sly edit RENDER-COLOR --package LUV # equivalent
-./sly edit luv:render-color luv:open-window
-./sly xref calls RENDER-COLOR --package LUV
-./sly xref uses '*WINDOW*' --package LUV
+./sly apropos COLOR CANVAS --package LUV
+./sly apropos VULKAN-CANVAS --package LUV --all
+./sly edit luv:render-canvas-color
+./sly edit RENDER-CANVAS-COLOR --package LUV # equivalent
+./sly edit luv:render-canvas-color luv:open-canvas
+./sly xref calls RENDER-CANVAS-COLOR --package LUV
+./sly xref uses MAKE-CANVAS-CONTEXT --package LUV
 ```
 
 `describe`, `apropos`, `edit`, and `xref` accept multiple names or patterns in
 one invocation. Symbol names may be package-qualified directly, so
-`sly edit luv:render-color` and `sly edit RENDER-COLOR --package LUV` are
-equivalent. `describe-package` reports the live package's nicknames, use-list,
+`sly edit luv:render-canvas-color` and
+`sly edit RENDER-CANVAS-COLOR --package LUV` are equivalent.
+`describe-package` reports the live package's nicknames, use-list,
 used-by list, shadowing symbols, and internal-symbol count. Every export gets
 one line with its definition kinds (function, macro, variable, type, and so
 on), arglist when available, and the first documentation line. Unbound exports

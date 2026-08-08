@@ -8,16 +8,6 @@
         (pathname (format nil "~A/" configured-home))
         (merge-pathnames #P"quicklisp/" (user-homedir-pathname))))))
 (ql:quickload '(:sdl3 :rove) :silent t)
-(asdf:clear-system :vk)
-(asdf:initialize-source-registry
- `(:source-registry
-   (:tree ,(namestring
-            (merge-pathnames
-             #P"vendor/vk/"
-             (uiop:pathname-directory-pathname *load-truename*))))
-   :inherit-configuration))
-(asdf:load-asd
- (merge-pathnames #P"vendor/vk/vk.asd" *load-truename*))
 (asdf:load-asd (merge-pathnames #P"luv.asd" *load-truename*))
 (asdf:load-system :luv)
 

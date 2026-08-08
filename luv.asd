@@ -2,26 +2,7 @@
   :description "An experimental Common Lisp atelier for Vulkan."
   :version "0.0.1"
   :author "Mikael Brockman"
-  #+sbcl
-  :around-compile
-  #+sbcl
-  (lambda (thunk)
-    ;; ASDF already establishes a compilation unit, so use OVERRIDE to make
-    ;; this nested project policy effective. DEBUG 3 retains source forms in
-    ;; compiled FASLs as well as richer debugger metadata.
-    (with-compilation-unit (:override t
-                            :policy '(optimize (debug 3)))
-      (funcall thunk)))
-  :depends-on (#:luv/canvas
-               #:sdl3
-               #:vk
-               #+darwin
-               #:float-features
-               #+darwin
-               #:trivial-main-thread)
-  :serial t
-  :components ((:file "luv")
-               (:file "yellow")))
+  :depends-on (#:luv/canvas))
 
 (asdf:defsystem #:luv/gpu
   :description "The WebGPU-shaped luv API and Vulkan backend."
@@ -55,19 +36,3 @@
   :components ((:file "canvas")
                (:file "canvas-sdl")
                (:file "canvas-vulkan")))
-
-(asdf:defsystem #:luv/headless
-  :description "Headless Vulkan-only entry points for luv."
-  :version "0.0.1"
-  :author "Mikael Brockman"
-  #+sbcl
-  :around-compile
-  #+sbcl
-  (lambda (thunk)
-    (with-compilation-unit (:override t
-                            :policy '(optimize (debug 3)))
-      (funcall thunk)))
-  :depends-on (#:vk)
-  :serial t
-  :components ((:file "package")
-               (:file "headless")))
