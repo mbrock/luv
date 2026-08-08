@@ -7,6 +7,18 @@
   :homepage "https://jolifantobambla.github.io/vk/"
   :bug-tracker "https://github.com/JolifantoBambla/vk/issues"
   :source-control (:git "https://github.com/JolifantoBambla/vk.git")
+  #+sbcl
+  :around-compile
+  #+sbcl
+  (lambda (thunk)
+    ;; The generated binding consists of a few very large, heavily expanded
+    ;; files.  Keep its compiler metadata lean even when VK is compiled while
+    ;; loading a DEBUG 3 client such as LUV/GPU.
+    (with-compilation-unit (:override t
+                            :policy '(optimize (debug 1)
+                                               (speed 2)
+                                               (safety 1)))
+      (funcall thunk)))
   :depends-on (cffi alexandria)
   :components
   ((:module "src"
@@ -42,4 +54,3 @@
   :components ((:module "test"
                 :components ((:file "translators"))))
   :perform (test-op :after (op c) (uiop:symbol-call :rove :run c)))
-
