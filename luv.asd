@@ -33,6 +33,7 @@
                #:float-features)
   :serial t
   :components ((:file "package")
+               (:file "invocation")
                (:file "gpu")
                (:file "vulkan")
                (:file "gpu-vulkan")))

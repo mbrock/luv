@@ -33,11 +33,14 @@ and primary command buffer:
     (luv:destroy device)))
 ```
 
-Every host-to-Vulkan call is reified.  `defvkfun` defines each entry point as
-a class in the `VK` package—`vkCreateImage` becomes `vk:create-image`—whose
-instances are invocations carrying the arguments in slots, and calling
-`(vk:create-image ...)` hands one such invocation to the FFI object in
-`lvk:*vulkan-ffi*` through the `lvk:invoke-vulkan` generic function.  The
+Every host-to-Vulkan call is reified through the general invocation protocol
+in `invocation.lisp`, which does for calls what the condition system does for
+situations and is meant to be adopted by the next API worth reifying.
+`defvkfun` defines each entry point as a class in the `VK` package—
+`vkCreateImage` becomes `vk:create-image`—whose instances are invocations
+carrying the arguments in slots, and calling `(vk:create-image ...)` hands
+one such invocation to the FFI object in `lvk:*vulkan-ffi*` through the
+`lvk:invoke` generic function.  The
 plain FFI crosses straight into the driver; subclasses observe or replace
 crossings with ordinary methods, specialized on one entry point by class, on
 the `lvk:vulkan-command` family of `vkCmd*` calls, or on everything.  The

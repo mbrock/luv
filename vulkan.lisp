@@ -916,54 +916,24 @@
                    do (setf (cffi:mem-aref ,pointer ',type ,index) ,item))
              ,@body)))))
 
-;;; The FFI protocol.  Every foreign entry point is a class whose instances
-;;; are invocations: the arguments live in slots, INVOKE-VULKAN performs the
-;;; crossing, and the FFI object bound to *VULKAN-FFI* decides what a
-;;; crossing means.  Tracing, validation, and mocking are methods, not modes.
+;;; The Vulkan face of the invocation protocol (invocation.lisp).  Every
+;;; foreign entry point is a class whose instances are invocations: the
+;;; arguments live in slots, INVOKE performs the crossing, and the FFI
+;;; object bound to *VULKAN-FFI* decides what a crossing means.  Tracing,
+;;; validation, and mocking are methods, not modes.
 
-(defclass vulkan-function-class (closer-mop:standard-class)
+(defclass vulkan-function-class (invocation-class)
   ((foreign-name
     :initform nil
     :accessor vulkan-function-foreign-name)
    (return-type
     :initform nil
-    :accessor vulkan-function-return-type)
-   (argument-specs
-    :initform nil
-    :accessor vulkan-function-argument-specs)))
+    :accessor vulkan-function-return-type)))
 
-(defmethod closer-mop:validate-superclass
-    ((class vulkan-function-class) (superclass closer-mop:standard-class))
-  (declare (ignore class superclass))
-  t)
-
-(defclass vulkan-invocation ()
-  ((sequence
-    :initform nil
-    :accessor invocation-sequence)
-   (timestamp
-    :initform nil
-    :accessor invocation-timestamp)
-   (duration
-    :initform nil
-    :accessor invocation-duration)
-   (thread
-    :initform nil
-    :accessor invocation-thread)
-   (values
-    :initform nil
-    :accessor invocation-values)
-   (status
-    :initform nil
-    :accessor invocation-status)
-   (condition
-    :initform nil
-    :accessor invocation-condition))
+(defclass vulkan-invocation (invocation)
+  ()
   (:metaclass vulkan-function-class)
-  (:documentation
-   "One call across the Vulkan boundary, reified.  The concrete class names
-the entry point, its direct slots carry the arguments, and the slots here
-are bookkeeping filled in by a recording FFI."))
+  (:documentation "One call across the Vulkan boundary, reified."))
 
 (defclass vulkan-command (vulkan-invocation)
   ()
@@ -971,40 +941,24 @@ are bookkeeping filled in by a recording FFI."))
   (:documentation
    "Invocations of vkCmd* entry points, which record into command buffers."))
 
-(defun invocation-lisp-name (invocation)
-  (class-name (class-of invocation)))
-
 (defun invocation-foreign-name (invocation)
   (vulkan-function-foreign-name (class-of invocation)))
-
-(defun invocation-arguments (invocation)
-  "Return INVOCATION's arguments as a list of (NAME VALUE) pairs."
-  (loop for (name nil) in (vulkan-function-argument-specs
-                           (class-of invocation))
-        collect (list name
-                      (if (slot-boundp invocation name)
-                          (slot-value invocation name)
-                          :unbound))))
 
 (defmethod print-object ((invocation vulkan-invocation) stream)
   (print-unreadable-object (invocation stream :type nil :identity nil)
     (format stream "~A~@[ #~D~]"
             (or (invocation-foreign-name invocation)
-                (invocation-lisp-name invocation))
+                (invocation-name invocation))
             (invocation-sequence invocation))))
 
-(defclass vulkan-ffi ()
+(defclass vulkan-ffi (invoker)
   ()
   (:documentation
-   "The plain FFI: INVOKE-VULKAN crosses straight into the driver."))
+   "The plain FFI: INVOKE crosses straight into the driver."))
 
 (defvar *vulkan-ffi* (make-instance 'vulkan-ffi)
   "The FFI object every Vulkan invocation passes through.  Rebind or SETF
 it to an FFI subclass instance to trace, check, or mock the boundary.")
-
-(defgeneric invoke-vulkan (ffi invocation)
-  (:documentation
-   "Perform INVOCATION's crossing into Vulkan according to FFI."))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defun vulkan-lisp-name (foreign-name)
@@ -1030,7 +984,7 @@ it to an FFI subclass instance to trace, check, or mock the boundary.")
       (class foreign-name return-type argument-specs)
     (setf (vulkan-function-foreign-name class) foreign-name
           (vulkan-function-return-type class) return-type
-          (vulkan-function-argument-specs class) argument-specs)
+          (invocation-class-arguments class) argument-specs)
     class))
 
 (defun vulkan-function-description (name)
@@ -1039,7 +993,7 @@ it to an FFI subclass instance to trace, check, or mock the boundary.")
     (when (typep class 'vulkan-function-class)
       (list :foreign-name (vulkan-function-foreign-name class)
             :return-type (vulkan-function-return-type class)
-            :arguments (vulkan-function-argument-specs class)))))
+            :arguments (invocation-class-arguments class)))))
 
 (defmacro defvkfun (foreign-name return-type &body arguments)
   "Define a Vulkan entry point as a class of invocations plus its protocol.
@@ -1047,8 +1001,8 @@ it to an FFI subclass instance to trace, check, or mock the boundary.")
 FOREIGN-NAME becomes a symbol in the LUV.VK package (vkCreateImage becomes
 VK:CREATE-IMAGE) naming three things at once: the invocation class whose
 slots are the arguments, the function that makes an invocation and hands it
-to *VULKAN-FFI*, and the INVOKE-VULKAN primary method that performs the
-actual foreign call."
+to *VULKAN-FFI*, and the INVOKE primary method that performs the actual
+foreign call."
   (let* ((lisp-name (vulkan-lisp-name foreign-name))
          (raw-name (intern (format nil "%~A" lisp-name) '#:luv.vulkan))
          (argument-names (mapcar #'first arguments))
@@ -1070,11 +1024,11 @@ actual foreign call."
        (eval-when (:load-toplevel :execute)
          (configure-vulkan-function-class
           (find-class ',lisp-name) ,foreign-name ',return-type ',arguments))
-       (defmethod invoke-vulkan ((ffi vulkan-ffi) (call ,lisp-name))
+       (defmethod invoke ((ffi vulkan-ffi) (call ,lisp-name))
          (with-slots ,argument-names call
            (,raw-name ,@argument-names)))
        (defun ,lisp-name ,argument-names
-         (invoke-vulkan
+         (invoke
           *vulkan-ffi*
           (make-instance ',lisp-name
                          ,@(loop for name in argument-names
@@ -1083,72 +1037,45 @@ actual foreign call."
                                        name)))))
        ',lisp-name)))
 
-;;; Structured tracing is one FFI subclass wrapping the crossing.
+;;; Structured tracing is the general TRACING-INVOKER mixin applied to the
+;;; Vulkan FFI, plus Vulkan-shaped ways of starting, scoping, and reading
+;;; a trace.
 
-(defstruct (vulkan-trace
-             (:constructor %make-vulkan-trace)
-             (:conc-name %vulkan-trace-))
-  (started-at 0.0d0)
-  stopped-at
-  (next-sequence 0)
-  (events (make-array 0 :adjustable t :fill-pointer 0))
-  #+sb-thread
-  (lock (sb-thread:make-mutex :name "luv Vulkan trace")))
-
-(defun vulkan-trace-now ()
-  (/ (get-internal-real-time)
-     (coerce internal-time-units-per-second 'double-float)))
-
-(defmacro with-vulkan-trace-lock ((trace) &body body)
-  #+sb-thread
-  `(sb-thread:with-mutex ((%vulkan-trace-lock ,trace)) ,@body)
-  #-sb-thread
-  `(progn ,@body))
-
-(defclass tracing-ffi (vulkan-ffi)
-  ((trace
-    :initarg :trace
-    :reader tracing-ffi-trace))
+(defclass tracing-ffi (tracing-invoker vulkan-ffi)
+  ()
   (:documentation
    "An FFI that performs each crossing and retains the invocation, with
-timing and results, in a VULKAN-TRACE."))
+timing and results, in an INVOCATION-TRACE."))
 
 (defun start-vulkan-trace ()
   "Start a process-wide structured trace of calls crossing into Vulkan."
   (when (typep *vulkan-ffi* 'tracing-ffi)
     (error "A Vulkan trace is already active."))
-  (let ((trace (%make-vulkan-trace :started-at (vulkan-trace-now))))
+  (let ((trace (make-invocation-trace)))
     (setf *vulkan-ffi* (make-instance 'tracing-ffi :trace trace))
     trace))
 
 (defun stop-vulkan-trace ()
   "Stop and return the active Vulkan trace, or NIL when none is active."
   (when (typep *vulkan-ffi* 'tracing-ffi)
-    (let ((trace (tracing-ffi-trace *vulkan-ffi*)))
-      (setf (%vulkan-trace-stopped-at trace) (vulkan-trace-now)
-            *vulkan-ffi* (make-instance 'vulkan-ffi))
-      trace)))
+    (let ((trace (tracing-invoker-trace *vulkan-ffi*)))
+      (setf *vulkan-ffi* (make-instance 'vulkan-ffi))
+      (stop-invocation-trace trace))))
 
 (defun current-vulkan-trace ()
   "Return the trace *VULKAN-FFI* is recording into, if any."
   (when (typep *vulkan-ffi* 'tracing-ffi)
-    (tracing-ffi-trace *vulkan-ffi*)))
+    (tracing-invoker-trace *vulkan-ffi*)))
 
 (defmacro with-vulkan-trace ((trace) &body body)
   "Run BODY with this thread's Vulkan calls recorded into a fresh trace.
 
 Binds *VULKAN-FFI* for BODY's dynamic extent and binds TRACE to the
-VULKAN-TRACE being recorded; the trace is stopped when BODY exits."
-  `(let* ((,trace (%make-vulkan-trace :started-at (vulkan-trace-now)))
+INVOCATION-TRACE being recorded; the trace is stopped when BODY exits."
+  `(let* ((,trace (make-invocation-trace))
           (*vulkan-ffi* (make-instance 'tracing-ffi :trace ,trace)))
      (unwind-protect (progn ,@body)
-       (setf (%vulkan-trace-stopped-at ,trace) (vulkan-trace-now)))))
-
-(defun vulkan-trace-events (trace)
-  "Return TRACE's invocations in call-start order as a fresh list."
-  (with-vulkan-trace-lock (trace)
-    (sort (coerce (copy-seq (%vulkan-trace-events trace)) 'list)
-          #'< :key #'invocation-sequence)))
+       (stop-invocation-trace ,trace))))
 
 (defun vulkan-trace-presentation-intervals (trace &key include-prefix)
   "Return completed event intervals between vkQueuePresentKHR calls.
@@ -1159,7 +1086,7 @@ the beginning of TRACE through its first presentation."
   (let ((interval nil)
         (intervals nil)
         (saw-presentation nil))
-    (dolist (event (vulkan-trace-events trace) (nreverse intervals))
+    (dolist (event (invocation-trace-events trace) (nreverse intervals))
       (push event interval)
       (when (string= "vkQueuePresentKHR"
                      (invocation-foreign-name event))
@@ -1167,79 +1094,6 @@ the beginning of TRACE through its first presentation."
           (push (nreverse interval) intervals))
         (setf interval nil
               saw-presentation t)))))
-
-(defun snapshot-vulkan-trace-value (value &optional (depth 0))
-  "Copy VALUE into durable, printable trace data without retaining C memory."
-  (cond
-    ((cffi:pointerp value)
-     (list :pointer (cffi:pointer-address value)))
-    ((or (null value) (symbolp value) (numberp value) (characterp value))
-     value)
-    ((stringp value) (copy-seq value))
-    ((>= depth 6) (list :object (type-of value)))
-    ((consp value)
-     (cons (snapshot-vulkan-trace-value (car value) (1+ depth))
-           (snapshot-vulkan-trace-value (cdr value) (1+ depth))))
-    ((vectorp value)
-     (map 'vector
-          (lambda (item)
-            (snapshot-vulkan-trace-value item (1+ depth)))
-          value))
-    (t
-     (list :object (type-of value)
-           (handler-case (princ-to-string value)
-             (error () "<unprintable>"))))))
-
-(defun vulkan-trace-thread-name ()
-  #+sb-thread
-  (or (sb-thread:thread-name sb-thread:*current-thread*) "unnamed thread")
-  #-sb-thread
-  "single thread")
-
-(defun reserve-vulkan-trace-sequence (trace)
-  (with-vulkan-trace-lock (trace)
-    (prog1 (%vulkan-trace-next-sequence trace)
-      (incf (%vulkan-trace-next-sequence trace)))))
-
-(defun record-vulkan-trace-event (trace event)
-  (with-vulkan-trace-lock (trace)
-    (vector-push-extend event (%vulkan-trace-events trace)))
-  event)
-
-(defun snapshot-invocation-arguments (invocation)
-  "Make INVOCATION durable by snapshotting its argument slots in place."
-  (loop for (name nil) in (vulkan-function-argument-specs
-                           (class-of invocation))
-        when (slot-boundp invocation name)
-          do (setf (slot-value invocation name)
-                   (snapshot-vulkan-trace-value
-                    (slot-value invocation name)))))
-
-(defmethod invoke-vulkan :around ((ffi tracing-ffi) (call vulkan-invocation))
-  (let ((trace (tracing-ffi-trace ffi))
-        (started-at (vulkan-trace-now)))
-    (setf (invocation-sequence call) (reserve-vulkan-trace-sequence trace)
-          (invocation-timestamp call) (- started-at
-                                         (%vulkan-trace-started-at trace))
-          (invocation-thread call) (vulkan-trace-thread-name)
-          (invocation-status call) :signaled)
-    (handler-bind
-        ((error
-           (lambda (condition)
-             (setf (invocation-condition call)
-                   (list :type (type-of condition)
-                         :message
-                         (handler-case (princ-to-string condition)
-                           (error () "<unprintable condition>")))))))
-      (unwind-protect
-           (let ((results (multiple-value-list (call-next-method))))
-             (setf (invocation-status call) :returned
-                   (invocation-values call)
-                   (mapcar #'snapshot-vulkan-trace-value results))
-             (values-list results))
-        (setf (invocation-duration call) (- (vulkan-trace-now) started-at))
-        (snapshot-invocation-arguments call)
-        (record-vulkan-trace-event trace call)))))
 
 ;;; Raw calls.  DEFVKFUN preserves the CFFI declaration while making the
 ;;; complete host-to-driver boundary available as structured Lisp data.

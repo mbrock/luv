@@ -1,3 +1,32 @@
+(defpackage #:luv.invocation
+  (:use #:cl)
+  (:documentation
+   "A general protocol for reifying the calls of an API as objects, the
+way the condition system reifies situations.  Each entry point is a class
+of invocations; INVOKE dispatches on both the invoker and the invocation.")
+  (:export #:invocation-class
+           #:invocation-class-arguments
+           #:invocation
+           #:invocation-name
+           #:invocation-arguments
+           #:invocation-sequence
+           #:invocation-timestamp
+           #:invocation-duration
+           #:invocation-thread
+           #:invocation-values
+           #:invocation-status
+           #:invocation-condition
+           #:invoker
+           #:invoke
+           #:snapshot-invocation-value
+           #:snapshot-invocation-arguments
+           #:invocation-trace
+           #:make-invocation-trace
+           #:stop-invocation-trace
+           #:invocation-trace-events
+           #:tracing-invoker
+           #:tracing-invoker-trace))
+
 (defpackage #:luv.vk
   (:nicknames #:vk)
   (:use)
@@ -9,14 +38,14 @@ nothing else does."))
 
 (defpackage #:luv.vulkan
   (:nicknames #:lvk)
-  (:use #:cl)
+  (:use #:cl #:luv.invocation)
   (:export #:+portability-enumeration-extension-name+
            #:+swapchain-extension-name+
            #:vulkan-call-error
            #:vulkan-call-error-result
            #:vulkan-ffi
            #:*vulkan-ffi*
-           #:invoke-vulkan
+           #:invoke
            #:tracing-ffi
            #:vulkan-invocation
            #:vulkan-command
@@ -24,18 +53,18 @@ nothing else does."))
            #:invocation-timestamp
            #:invocation-duration
            #:invocation-thread
-           #:invocation-lisp-name
+           #:invocation-name
            #:invocation-foreign-name
            #:invocation-arguments
            #:invocation-values
            #:invocation-status
            #:invocation-condition
-           #:vulkan-trace
+           #:invocation-trace
+           #:invocation-trace-events
            #:start-vulkan-trace
            #:stop-vulkan-trace
            #:current-vulkan-trace
            #:with-vulkan-trace
-           #:vulkan-trace-events
            #:vulkan-trace-presentation-intervals
            #:vulkan-function-description
            #:make-version
