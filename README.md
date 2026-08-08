@@ -365,10 +365,11 @@ top level on that second regime:
 ```
 
 The `mcluv` program packages that Listener and the luv backend into an SBCL
-executable. Build and run it inside the development environment:
+executable. Build it from the checkout, then run it inside the development
+environment:
 
 ```sh
-nix develop -c sbcl --script build-mcluv.lisp
+make mcluv
 nix develop -c ./mcluv
 ```
 
