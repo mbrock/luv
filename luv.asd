@@ -63,4 +63,5 @@
   :components ((:file "mcclim-package")
                (:file "mcclim-port")
                (:file "mcclim-mirror")
-               (:file "mcclim-lab")))
+               (:file "mcclim-lab")
+               (:file "mcclim-widget-lab")))

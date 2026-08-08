@@ -279,33 +279,114 @@
   (/ (get-internal-real-time)
      (coerce internal-time-units-per-second 'double-float)))
 
-(defun handle-sdl-canvas-event (canvas event-type)
-  (when (or (= event-type
-               (cffi:foreign-enum-value 'sdl3::event-type :quit))
-            (= event-type
-               (cffi:foreign-enum-value 'sdl3::event-type
-                                        :window-close-requested)))
-    (setf (sdl-canvas-close-requested-p canvas) t)))
+(defun sdl-canvas-window-event-p (canvas event)
+  (= (sdl3:%window-id event)
+     (sdl3:get-window-id (sdl-canvas-window canvas))))
 
-(defun poll-sdl-canvas-event-type ()
-  ;; cl-sdl3's event-unmarshal quite reasonably uses its static EVENT-TYPE
-  ;; enum, but SDL_RegisterEvents returns values not present in that enum.
-  ;; The host loop only needs the raw tag.
+(defun sdl-mouse-button-name (button)
+  (case button
+    (1 :left)
+    (2 :middle)
+    (3 :right)
+    (4 :x1)
+    (5 :x2)))
+
+(defun dispatch-sdl-pointer-motion (canvas event class)
+  (when (sdl-canvas-window-event-p canvas event)
+    (dispatch-canvas-event
+     canvas
+     (make-instance class
+                    :timestamp (sdl3:%timestamp event)
+                    :x (sdl3:%x event)
+                    :y (sdl3:%y event)))))
+
+(defun dispatch-sdl-pointer-button (canvas event class)
+  (when (sdl-canvas-window-event-p canvas event)
+    (let ((button (sdl-mouse-button-name (sdl3:%button event))))
+      (when button
+        (dispatch-canvas-event
+         canvas
+         (make-instance class
+                        :timestamp (sdl3:%timestamp event)
+                        :x (sdl3:%x event)
+                        :y (sdl3:%y event)
+                        :button button
+                        :clicks (sdl3:%clicks event)))))))
+
+(defun dispatch-sdl-pointer-boundary (canvas event class)
+  (when (sdl-canvas-window-event-p canvas event)
+    (multiple-value-bind (buttons x y) (sdl3:get-mouse-state)
+      (declare (ignore buttons))
+      (dispatch-canvas-event
+       canvas
+       (make-instance class
+                      :timestamp (sdl3:%timestamp event)
+                      :x x :y y)))))
+
+(defun handle-sdl-canvas-event (canvas event event-type)
+  ;; Keep the raw event tag: SDL_RegisterEvents may return a value absent from
+  ;; cl-sdl3's static enum. Decode only the native events we understand.
+  (cond
+    ((= event-type (cffi:foreign-enum-value 'sdl3::event-type :quit))
+     (setf (sdl-canvas-close-requested-p canvas) t))
+    ((member event-type
+             (list
+              (cffi:foreign-enum-value 'sdl3::event-type
+                                       :window-close-requested)
+              (cffi:foreign-enum-value 'sdl3::event-type
+                                       :window-mouse-enter)
+              (cffi:foreign-enum-value 'sdl3::event-type
+                                       :window-mouse-leave)))
+     (let ((window-event
+             (cffi:mem-ref event '(:struct sdl3:window-event))))
+       (when (sdl-canvas-window-event-p canvas window-event)
+         (cond
+           ((= event-type
+               (cffi:foreign-enum-value 'sdl3::event-type
+                                        :window-close-requested))
+            (setf (sdl-canvas-close-requested-p canvas) t))
+           ((= event-type
+               (cffi:foreign-enum-value 'sdl3::event-type
+                                        :window-mouse-enter))
+            (dispatch-sdl-pointer-boundary
+             canvas window-event 'canvas-pointer-enter-event))
+           (t
+            (dispatch-sdl-pointer-boundary
+             canvas window-event 'canvas-pointer-exit-event))))))
+    ((= event-type
+        (cffi:foreign-enum-value 'sdl3::event-type :mouse-motion))
+     (dispatch-sdl-pointer-motion
+      canvas
+      (cffi:mem-ref event '(:struct sdl3:mouse-motion-event))
+      'canvas-pointer-motion-event))
+    ((= event-type
+        (cffi:foreign-enum-value 'sdl3::event-type :mouse-button-down))
+     (dispatch-sdl-pointer-button
+      canvas
+      (cffi:mem-ref event '(:struct sdl3:mouse-button-event))
+      'canvas-pointer-button-press-event))
+    ((= event-type
+        (cffi:foreign-enum-value 'sdl3::event-type :mouse-button-up))
+     (dispatch-sdl-pointer-button
+      canvas
+      (cffi:mem-ref event '(:struct sdl3:mouse-button-event))
+      'canvas-pointer-button-release-event))))
+
+(defun poll-sdl-canvas-event (canvas)
   (cffi:with-foreign-object (event '(:union sdl3:event))
     (when (sdl3:poll-event event)
-      (cffi:mem-ref event :uint32))))
+      (handle-sdl-canvas-event canvas event (cffi:mem-ref event :uint32))
+      t)))
 
 (defun drain-sdl-canvas-events (canvas)
-  (loop for event-type = (poll-sdl-canvas-event-type)
-        while event-type
-        do (handle-sdl-canvas-event canvas event-type)))
+  (loop while (poll-sdl-canvas-event canvas)))
 
 (defun wait-for-sdl-canvas-event (canvas timeout)
   (cffi:with-foreign-object (event '(:union sdl3:event))
     (when (if timeout
               (sdl3:wait-event-timeout event timeout)
               (sdl3:wait-event event))
-      (handle-sdl-canvas-event canvas (cffi:mem-ref event :uint32))
+      (handle-sdl-canvas-event canvas event (cffi:mem-ref event :uint32))
       (drain-sdl-canvas-events canvas))))
 
 (defun sdl-canvas-event-loop (canvas)

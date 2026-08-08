@@ -171,6 +171,21 @@
            #:make-gpu-copy-texture-command
            #:vulkan-gpu-provider
            #:canvas-clock
+           #:canvas-event-handler
+           #:canvas-event
+           #:canvas-event-timestamp
+           #:canvas-pointer-event
+           #:canvas-pointer-event-x
+           #:canvas-pointer-event-y
+           #:canvas-pointer-motion-event
+           #:canvas-pointer-enter-event
+           #:canvas-pointer-exit-event
+           #:canvas-pointer-button-event
+           #:canvas-pointer-event-button
+           #:canvas-pointer-event-clicks
+           #:canvas-pointer-button-press-event
+           #:canvas-pointer-button-release-event
+           #:handle-canvas-event
            #:demand-clock
            #:cadence-clock
            #:make-demand-clock

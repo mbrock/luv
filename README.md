@@ -219,8 +219,14 @@ relationship between a sheet and a presentation target.  Today that target is
 an SDL canvas; later it may be a texture displayed on a quad in a luv scene.
 McCLIM rasterizes drawing into an inspectable image. Finishing medium output
 uploads that image through `GPUQueue.writeTexture`-shaped machinery and copies
-it to the mirror's canvas surface. Native input is not translated into CLIM
-events yet.
+it to the mirror's canvas surface.
+
+SDL mouse motion, window enter/leave, and button events are translated first
+into renderer-independent canvas event objects. The McCLIM mirror then turns
+those into CLIM pointer events, lets McCLIM find the innermost sheet, and drains
+the frame event queue on luv's canvas thread. Gadget callbacks and their
+repaints therefore happen at the native event-loop boundary without a second
+McCLIM top-level process.
 
 The small backend laboratory avoids loading the full examples collection:
 
@@ -229,6 +235,15 @@ The small backend laboratory avoids loading the full examples collection:
 ;; The same raster image that was uploaded remains inspectable.
 (luv.mcclim:lab-sheet-image *sheet*)
 (luv.mcclim:close-lab-sheet *sheet*)
+```
+
+There is also a small real-gadget proof with a push button and toggle:
+
+```lisp
+(defparameter *widgets* (luv.mcclim:open-widget-lab))
+(luv.mcclim:widget-lab-click-count *widgets*)
+(luv.mcclim:widget-lab-toggle-value *widgets*)
+(luv.mcclim:close-widget-lab *widgets*)
 ```
 
 This experiment follows current McCLIM Git `master`, rather than a Quicklisp

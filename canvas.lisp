@@ -115,7 +115,11 @@
   ((clock
     :initarg :clock
     :initform (make-demand-clock)
-    :accessor canvas-clock))
+    :accessor canvas-clock)
+   (event-handler
+    :initarg :event-handler
+    :initform nil
+    :accessor canvas-event-handler))
   (:documentation "A native destination with a lifetime and frame clock."))
 
 (defmethod (setf canvas-clock) :before (clock (canvas canvas))
@@ -125,6 +129,45 @@
 
 (defclass canvas-context () ()
   (:documentation "A GPU presentation relationship configured for a canvas."))
+
+;;; Portable input vocabulary. Native backends translate into these objects;
+;;; consumers never need to know the SDL event ABI.
+
+(defclass canvas-event-handler () ()
+  (:documentation "Protocol class for objects receiving canvas events."))
+
+(defclass canvas-event ()
+  ((timestamp
+    :initarg :timestamp
+    :reader canvas-event-timestamp)))
+
+(defclass canvas-pointer-event (canvas-event)
+  ((x :initarg :x :reader canvas-pointer-event-x)
+   (y :initarg :y :reader canvas-pointer-event-y)))
+
+(defclass canvas-pointer-motion-event (canvas-pointer-event) ())
+(defclass canvas-pointer-enter-event (canvas-pointer-motion-event) ())
+(defclass canvas-pointer-exit-event (canvas-pointer-motion-event) ())
+
+(defclass canvas-pointer-button-event (canvas-pointer-event)
+  ((button :initarg :button :reader canvas-pointer-event-button)
+   (clicks :initarg :clicks :initform 1 :reader canvas-pointer-event-clicks)))
+
+(defclass canvas-pointer-button-press-event (canvas-pointer-button-event) ())
+(defclass canvas-pointer-button-release-event (canvas-pointer-button-event) ())
+
+(defgeneric handle-canvas-event (handler canvas event)
+  (:documentation "Deliver portable EVENT from CANVAS to HANDLER."))
+
+(defmethod handle-canvas-event ((handler null) (canvas canvas) event)
+  (declare (ignore handler canvas event))
+  nil)
+
+(defmethod handle-canvas-event ((handler function) (canvas canvas) event)
+  (funcall handler canvas event))
+
+(defun dispatch-canvas-event (canvas event)
+  (handle-canvas-event (canvas-event-handler canvas) canvas event))
 
 (defstruct canvas-configuration
   "The small portable portion of a canvas presentation configuration."

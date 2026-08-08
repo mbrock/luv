@@ -1,6 +1,6 @@
 (in-package #:luv.mcclim)
 
-(defclass luv-mirror ()
+(defclass luv-mirror (luv:canvas-event-handler)
   ((sheet
     :initarg :sheet
     :reader mirror-sheet)
@@ -46,6 +46,92 @@ mirror's identity: a later target may be a texture presented on a 3D quad."))
                                :target target)))
     (mcclim-render::%set-image-region mirror region)
     mirror))
+
+(defun canvas-button-to-clim-button (button)
+  (ecase button
+    (:left +pointer-left-button+)
+    (:middle +pointer-middle-button+)
+    (:right +pointer-right-button+)))
+
+(defun update-luv-pointer-position (pointer canvas event)
+  (multiple-value-bind (canvas-x canvas-y) (luv:canvas-position canvas)
+    (setf (luv-pointer-x pointer)
+          (+ (or canvas-x 0) (luv:canvas-pointer-event-x event))
+          (luv-pointer-y pointer)
+          (+ (or canvas-y 0) (luv:canvas-pointer-event-y event)))))
+
+(defun drain-luv-frame-events (sheet)
+  "Handle every McCLIM event queued while dispatching native input.
+
+Luv's canvas thread is the event loop for this backend, so there is no
+separate RUN-FRAME-TOP-LEVEL process waiting on the frame queue."
+  (let ((queue (climi::frame-event-queue (pane-frame sheet))))
+    (loop for event = (climi::queue-read-no-hang queue)
+          while event
+          do (handle-event (event-sheet event) event))))
+
+(defun distribute-canvas-pointer-event (mirror canvas event class
+                                        &key button)
+  (let* ((sheet (mirror-sheet mirror))
+         (port (port sheet))
+         (pointer (ensure-luv-port-pointer port)))
+    (update-luv-pointer-position pointer canvas event)
+    (distribute-event
+     port
+     (apply #'make-instance class
+            :sheet sheet
+            :pointer pointer
+            :x (luv:canvas-pointer-event-x event)
+            :y (luv:canvas-pointer-event-y event)
+            :timestamp (luv:canvas-event-timestamp event)
+            (when button (list :button button))))
+    (drain-luv-frame-events sheet)
+    (present-mirror mirror)))
+
+(defmethod luv:handle-canvas-event
+    ((mirror luv-mirror) canvas (event luv:canvas-pointer-motion-event))
+  (distribute-canvas-pointer-event
+   mirror canvas event 'pointer-motion-event))
+
+(defmethod luv:handle-canvas-event
+    ((mirror luv-mirror) canvas (event luv:canvas-pointer-enter-event))
+  (distribute-canvas-pointer-event
+   mirror canvas event 'pointer-enter-event))
+
+(defmethod luv:handle-canvas-event
+    ((mirror luv-mirror) canvas (event luv:canvas-pointer-exit-event))
+  (distribute-canvas-pointer-event
+   mirror canvas event 'pointer-exit-event))
+
+(defmethod luv:handle-canvas-event
+    ((mirror luv-mirror) canvas
+     (event luv:canvas-pointer-button-press-event))
+  (when (member (luv:canvas-pointer-event-button event)
+                '(:left :middle :right))
+    (let* ((port (port (mirror-sheet mirror)))
+           (pointer (ensure-luv-port-pointer port))
+           (button
+             (canvas-button-to-clim-button
+              (luv:canvas-pointer-event-button event))))
+      (setf (luv-pointer-button-state pointer)
+            (logior (luv-pointer-button-state pointer) button))
+      (distribute-canvas-pointer-event
+       mirror canvas event 'pointer-button-press-event :button button))))
+
+(defmethod luv:handle-canvas-event
+    ((mirror luv-mirror) canvas
+     (event luv:canvas-pointer-button-release-event))
+  (when (member (luv:canvas-pointer-event-button event)
+                '(:left :middle :right))
+    (let* ((port (port (mirror-sheet mirror)))
+           (pointer (ensure-luv-port-pointer port))
+           (button
+             (canvas-button-to-clim-button
+              (luv:canvas-pointer-event-button event))))
+      (setf (luv-pointer-button-state pointer)
+            (logandc2 (luv-pointer-button-state pointer) button))
+      (distribute-canvas-pointer-event
+       mirror canvas event 'pointer-button-release-event :button button))))
 
 (defun raster-mirror-image-size (mirror)
   (let ((image (mcclim-render:image-mirror-image mirror)))
@@ -149,6 +235,7 @@ mirror's identity: a later target may be a texture presented on a 3D quad."))
                                     (max 1 (ceiling width))
                                     (max 1 (ceiling height))))
            (mirror (make-luv-mirror port sheet canvas region)))
+      (setf (luv:canvas-event-handler canvas) mirror)
       (handler-case
           (progn
             (luv:open-canvas canvas)
@@ -178,6 +265,7 @@ mirror's identity: a later target may be a texture presented on a 3D quad."))
     (when mirror
       (let ((target (mirror-target mirror)))
         (release-mirror-presentation mirror)
+        (setf (luv:canvas-event-handler target) nil)
         (when (member (luv:canvas-state target) '(:opening :open))
           (luv:close-canvas target))
         (setf (mirror-context mirror) nil))
@@ -187,7 +275,17 @@ mirror's identity: a later target may be a texture presented on a 3D quad."))
 (defmethod enable-mirror ((port luv-port) (sheet mirrored-sheet-mixin))
   (declare (ignore port))
   (alexandria:when-let ((mirror (sheet-direct-mirror sheet)))
-    (luv:show-canvas (mirror-target mirror))))
+    (let ((target (mirror-target mirror)))
+      (luv:show-canvas target)
+      ;; There is no separate McCLIM top-level loop to provoke the first
+      ;; exposure. Paint and present before OPEN-WIDGET-LAB returns instead
+      ;; of waiting for the first pointer event to dirty a gadget.
+      (luv:request-canvas-frame
+       target
+       (lambda (timestamp)
+         (declare (ignore timestamp))
+         (repaint-sheet sheet +everywhere+)
+         (present-mirror mirror))))))
 
 (defmethod disable-mirror ((port luv-port) (sheet mirrored-sheet-mixin))
   (declare (ignore port))

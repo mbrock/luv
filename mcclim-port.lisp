@@ -29,6 +29,27 @@
   (:documentation
    "A CPU raster medium whose image will be uploaded to a luv target."))
 
+(defclass luv-pointer (standard-pointer)
+  ((x :initform 0 :accessor luv-pointer-x)
+   (y :initform 0 :accessor luv-pointer-y)
+   (button-state
+    :initform 0
+    :accessor luv-pointer-button-state))
+  (:documentation "McCLIM pointer state cached from portable canvas events."))
+
+(defmethod pointer-position ((pointer luv-pointer))
+  (values (luv-pointer-x pointer) (luv-pointer-y pointer)))
+
+(defmethod pointer-button-state ((pointer luv-pointer))
+  (luv-pointer-button-state pointer))
+
+(defun ensure-luv-port-pointer (port)
+  (let ((pointer (port-pointer port)))
+    (if (typep pointer 'luv-pointer)
+        pointer
+        (setf (port-pointer port)
+              (make-instance 'luv-pointer :port port)))))
+
 (defgeneric present-mirror (mirror)
   (:documentation "Synchronize MIRROR's pending output with its target."))
 
@@ -54,9 +75,7 @@
   (values 'luv-raster-port 'identity))
 
 (defmethod initialize-instance :after ((port luv-port) &key)
-  (unless (port-pointer port)
-    (setf (port-pointer port)
-          (make-instance 'standard-pointer :port port))))
+  (ensure-luv-port-pointer port))
 
 (defmethod print-object ((port luv-port) stream)
   (print-unreadable-object (port stream :type t :identity t)
@@ -141,6 +160,7 @@ with delivery of translated luv events."
   (dolist (mirror (copy-list (port-mirrors port)))
     (let ((target (mirror-target mirror)))
       (release-mirror-presentation mirror)
+      (setf (luv:canvas-event-handler target) nil)
       (when (member (luv:canvas-state target) '(:opening :open))
         (luv:close-canvas target))
       (setf (mirror-context mirror) nil)))

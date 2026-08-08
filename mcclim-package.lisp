@@ -21,6 +21,7 @@
            #:luv-mirror
            #:luv-raster-mirror
            #:luv-raster-medium
+           #:luv-pointer
            #:mirror-sheet
            #:mirror-target
            #:mirror-context
@@ -30,6 +31,11 @@
            #:lab-sheet
            #:lab-sheet-image
            #:open-lab-sheet
-           #:close-lab-sheet))
+           #:close-lab-sheet
+           #:widget-lab
+           #:widget-lab-click-count
+           #:widget-lab-toggle-value
+           #:open-widget-lab
+           #:close-widget-lab))
 
 (in-package #:luv.mcclim)
