@@ -52,3 +52,14 @@
                (:file "canvas-cocoa")
                (:file "canvas-vulkan")
                (:file "demo")))
+
+(asdf:defsystem #:luv/mcclim
+  :description "An experimental McCLIM backend presented by luv."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on (#:luv/canvas
+               #:mcclim-render)
+  :serial t
+  :components ((:file "mcclim-package")
+               (:file "mcclim-port")
+               (:file "mcclim-mirror")))

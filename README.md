@@ -202,6 +202,32 @@ For a tiny end-to-end animated demo:
 Try `:speed 0.25` or `:frames-per-second 30` when starting it to change the
 color-cycle rate or cadence.
 
+## McCLIM
+
+`:luv/mcclim` is an optional McCLIM backend in its first deliberately small
+form.  It defines a `:luv` port, a graft, a CPU raster medium based on
+`mcclim-render`, and mirrors whose first presentation target is a luv canvas:
+
+```lisp
+(asdf:load-system :luv/mcclim)
+(setf clim:*default-server-path* '(:luv))
+```
+
+The mirror does not equate a CLIM sheet with a native window.  It owns a
+relationship between a sheet and a presentation target.  Today that target is
+an SDL canvas; later it may be a texture displayed on a quad in a luv scene.
+McCLIM already rasterizes drawing into an inspectable image, but the image is
+not uploaded or presented yet, and native input is not translated into CLIM
+events yet.
+
+This experiment follows current McCLIM Git `master`, rather than a Quicklisp
+release. Install it as a local project before loading `:luv/mcclim`:
+
+```sh
+git clone https://codeberg.org/McCLIM/McCLIM.git \
+  ~/quicklisp/local-projects/mcclim
+```
+
 ## One-time Lisp setup
 
 `cl-sdl3` is not in Quicklisp, so install it as a local project:
