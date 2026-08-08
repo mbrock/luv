@@ -358,7 +358,10 @@ vocabulary can replace the trick later without changing the pass topology."
          (%x-twice f-mul %float %xf %two)
          (%center-x f-sub %float %x-twice %one)
          (%y-twice f-mul %float %yf %two)
-         (%center-y f-sub %float %one %y-twice)
+         ;; A positive-height Vulkan viewport maps NDC -1 to its top edge.
+         ;; Keep UV zero at that same top edge so the uploaded CLIM raster
+         ;; remains upright.
+         (%center-y f-sub %float %y-twice %one)
          (%scaled-x f-mul %float %center-x %scale)
          (%rotated-x f-mul %float %scaled-x %cosine)
          (%orbit-x f-mul %float %sine %orbit)
