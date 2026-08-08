@@ -88,12 +88,19 @@ object with STOP-CLEAR-COLOR-DEMO."
      context
      (lambda (surface-texture encoder)
        (let ((pass (begin-compute-pass encoder)))
-         (set-pipeline pass (compute-demo-pipeline demo))
-         (set-bind-group pass 0 (compute-demo-bind-group demo))
-         (dispatch-workgroups
+         (encode
           pass
-          (ceiling (first extent) 8)
-          (ceiling (second extent) 8))
+          (make-gpu-set-pipeline-command
+           :pipeline (compute-demo-pipeline demo)))
+         (encode
+          pass
+          (make-gpu-set-bind-group-command
+           :index 0 :bind-group (compute-demo-bind-group demo)))
+         (encode
+          pass
+          (make-gpu-dispatch-workgroups-command
+           :x (ceiling (first extent) 8)
+           :y (ceiling (second extent) 8)))
          (end-pass pass))
        (encode
         encoder

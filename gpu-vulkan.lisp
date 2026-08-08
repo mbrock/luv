@@ -1144,12 +1144,16 @@
       (reject-texture-write destination reason value))
     components))
 
-(defun check-vulkan-texture-write (queue destination data data-layout size)
-  (unless (typep destination 'texture-copy)
-    (reject-texture-write destination :invalid-texture-copy destination))
-  (unless (typep data-layout 'texture-data-layout)
-    (reject-texture-write destination :invalid-data-layout data-layout))
-  (let* ((texture (texture-copy-texture destination))
+(defun check-vulkan-texture-write (device command)
+  (let ((destination (gpu-write-texture-command-destination command))
+        (data (gpu-write-texture-command-data command))
+        (data-layout (gpu-write-texture-command-data-layout command))
+        (size (gpu-write-texture-command-size command)))
+    (unless (typep destination 'texture-copy)
+      (reject-texture-write destination :invalid-texture-copy destination))
+    (unless (typep data-layout 'texture-data-layout)
+      (reject-texture-write destination :invalid-data-layout data-layout))
+    (let* ((texture (texture-copy-texture destination))
          (origin
            (texture-write-components
             (texture-copy-origin destination) '(2 3) destination
@@ -1167,9 +1171,9 @@
                  (= 0 (third origin))
                  (= 1 (third extent)))
       (reject-texture-write destination :unsupported-texture-copy destination))
-    (ensure-live-vulkan-object queue :write-texture)
+    (ensure-live-vulkan-object device :write-texture)
     (ensure-vulkan-object-device
-     texture (vulkan-texture-device texture) (vulkan-queue-device queue)
+     texture (vulkan-texture-device texture) device
      :write-texture)
     (unless (member :copy-dst (gpu-texture-usage texture))
       (error 'gpu-usage-error
@@ -1213,7 +1217,8 @@
                    (typep rows-per-image '(unsigned-byte 32))
                    (>= rows-per-image height))
         (reject-texture-write destination :invalid-data-layout data-layout))
-      (values texture origin extent offset bytes-per-row rows-per-image))))
+        (values texture origin extent offset bytes-per-row rows-per-image
+                data destination)))))
 
 (defun copy-texture-words-to-mapped-memory
     (data pointer width height offset bytes-per-row)
@@ -1225,15 +1230,20 @@
               (row-major-aref
                data (+ (* row (array-dimension data 1)) column)))))))
 
-(defmethod write-texture
-    ((queue vulkan-gpu-queue) destination data data-layout size)
+(defmethod encode
+    ((encoder vulkan-gpu-command-encoder)
+     (command gpu-write-texture-command))
+  "Record one CPU texture upload and retain its staging allocation."
   (with-vulkan-gpu-driver-environment
+    (ensure-vulkan-command-encoder-state encoder :encode)
+    (ensure-no-active-vulkan-pass encoder :encode)
     (multiple-value-bind
-          (texture origin extent offset bytes-per-row rows-per-image)
+          (texture origin extent offset bytes-per-row rows-per-image
+                   data destination)
         (check-vulkan-texture-write
-         queue destination data data-layout size)
-      (declare (ignore rows-per-image))
-      (let* ((device (vulkan-queue-device queue))
+         (vulkan-command-encoder-device encoder) command)
+      (declare (ignore rows-per-image destination))
+      (let* ((device (vulkan-command-encoder-device encoder))
              (native-device (vulkan-handle device))
              (width (first extent))
              (height (second extent))
@@ -1242,8 +1252,7 @@
              (buffer nil)
              (memory nil)
              (mapped nil)
-             (encoder nil)
-             (commands nil))
+             (retained-p nil))
         (unwind-protect
              (progn
                (setf buffer
@@ -1265,10 +1274,8 @@
                   data mapped width height offset bytes-per-row)
                  (lvk:unmap-memory native-device memory)
                  (setf mapped nil))
-               (setf encoder
-                     (create device (make-command-encoder-descriptor)))
                (ensure-vulkan-texture-for-command
-                encoder texture destination :copy-dst)
+                encoder texture command :copy-dst)
                (transition-vulkan-texture
                 encoder texture :transfer-dst-optimal)
                (lvk:cmd-copy-buffer-to-image
@@ -1279,14 +1286,35 @@
                 :buffer-row-length (/ bytes-per-row 4)
                 :buffer-image-height height
                 :x (first origin) :y (second origin))
-               (setf commands (finish encoder))
-               (submit queue commands)
-               texture)
-          (when commands (destroy commands))
-          (when encoder (destroy encoder))
+               (push (list :upload-buffer buffer memory)
+                     (vulkan-command-encoder-native-resources encoder))
+               (setf retained-p t
+                     buffer nil
+                     memory nil))
           (when mapped (lvk:unmap-memory native-device memory))
-          (when buffer (lvk:destroy-buffer native-device buffer))
-          (when memory (lvk:free-memory native-device memory)))))))
+          (unless retained-p
+            (when buffer (lvk:destroy-buffer native-device buffer))
+            (when memory (lvk:free-memory native-device memory)))))))
+  encoder)
+
+(defmethod encode
+    ((queue vulkan-gpu-queue) (command gpu-write-texture-command))
+  "Execute one upload command immediately through a private encoder."
+  (with-vulkan-gpu-driver-environment
+    (ensure-live-vulkan-object queue :encode)
+    (let ((encoder nil)
+          (commands nil))
+      (unwind-protect
+           (progn
+             (setf encoder
+                   (create (vulkan-queue-device queue)
+                           (make-command-encoder-descriptor)))
+             (encode encoder command)
+             (setf commands (finish encoder))
+             (submit queue commands)
+             queue)
+        (when commands (destroy commands))
+        (when encoder (destroy encoder))))))
 
 (defun normalize-render-pass-color (descriptor color)
   (let ((components
@@ -1342,7 +1370,7 @@
                (lvk:cmd-set-viewport-and-scissor
                 (vulkan-command-encoder-command-buffer encoder)
                 (first size) (second size))
-               (push framebuffer
+               (push (list :framebuffer framebuffer)
                      (vulkan-command-encoder-native-resources encoder))
                (let ((pass
                        (make-instance
@@ -1370,13 +1398,16 @@
              :state :detached :expected-state :active)))
   pass)
 
-(defmethod set-pipeline
+(defmethod encode
     ((pass vulkan-gpu-render-pass-encoder)
-     (pipeline vulkan-gpu-render-pipeline))
+     (command gpu-set-pipeline-command))
   (with-vulkan-gpu-driver-environment
     (ensure-vulkan-render-pass-state pass :set-pipeline)
-    (let* ((encoder (vulkan-render-pass-command-encoder pass))
+    (let* ((pipeline (gpu-set-pipeline-command-pipeline command))
+           (encoder (vulkan-render-pass-command-encoder pass))
            (device (vulkan-command-encoder-device encoder)))
+      (unless (typep pipeline 'vulkan-gpu-render-pipeline)
+        (reject-gpu-request command :incompatible-render-pipeline pipeline))
       (ensure-vulkan-object-device
        pipeline (vulkan-render-pipeline-device pipeline) device
        :set-pipeline)
@@ -1392,14 +1423,18 @@
       (setf (vulkan-render-pass-pipeline pass) pipeline)))
   pass)
 
-(defmethod set-bind-group
-    ((pass vulkan-gpu-render-pass-encoder) index
-     (bind-group vulkan-gpu-bind-group))
+(defmethod encode
+    ((pass vulkan-gpu-render-pass-encoder)
+     (command gpu-set-bind-group-command))
   (with-vulkan-gpu-driver-environment
     (ensure-vulkan-render-pass-state pass :set-bind-group)
-    (unless (zerop index)
-      (reject-gpu-request bind-group :unsupported-bind-group-index index))
-    (let* ((encoder (vulkan-render-pass-command-encoder pass))
+    (let ((index (gpu-set-bind-group-command-index command))
+          (bind-group (gpu-set-bind-group-command-bind-group command)))
+      (unless (zerop index)
+        (reject-gpu-request command :unsupported-bind-group-index index))
+      (unless (typep bind-group 'vulkan-gpu-bind-group)
+        (reject-gpu-request command :incompatible-bind-group bind-group))
+      (let* ((encoder (vulkan-render-pass-command-encoder pass))
            (device (vulkan-command-encoder-device encoder))
            (pipeline (or (vulkan-render-pass-pipeline pass)
                          (error 'gpu-invalid-state-error
@@ -1423,12 +1458,12 @@
        (vulkan-command-encoder-command-buffer encoder)
        (vulkan-render-pipeline-layout pipeline)
        (vulkan-handle bind-group))
-      (setf (vulkan-render-pass-bind-group pass) bind-group)))
+        (setf (vulkan-render-pass-bind-group pass) bind-group))))
   pass)
 
-(defmethod draw
-    ((pass vulkan-gpu-render-pass-encoder) vertex-count
-     &optional (instance-count 1) (first-vertex 0) (first-instance 0))
+(defmethod encode
+    ((pass vulkan-gpu-render-pass-encoder)
+     (command gpu-draw-command))
   (with-vulkan-gpu-driver-environment
     (ensure-vulkan-render-pass-state pass :draw)
     (unless (and (vulkan-render-pass-pipeline pass)
@@ -1437,16 +1472,20 @@
              :object pass :operation :draw
              :state :incomplete-bindings
              :expected-state :pipeline-and-bind-group-bound))
-    (unless (every (lambda (value) (typep value '(unsigned-byte 32)))
-                   (list vertex-count instance-count
-                         first-vertex first-instance))
-      (reject-gpu-request
-       pass :invalid-draw-arguments
-       (list vertex-count instance-count first-vertex first-instance)))
-    (lvk:cmd-draw
-     (vulkan-command-encoder-command-buffer
-      (vulkan-render-pass-command-encoder pass))
-     vertex-count instance-count first-vertex first-instance))
+    (let ((vertex-count (gpu-draw-command-vertex-count command))
+          (instance-count (gpu-draw-command-instance-count command))
+          (first-vertex (gpu-draw-command-first-vertex command))
+          (first-instance (gpu-draw-command-first-instance command)))
+      (unless (every (lambda (value) (typep value '(unsigned-byte 32)))
+                     (list vertex-count instance-count
+                           first-vertex first-instance))
+        (reject-gpu-request
+         command :invalid-draw-arguments
+         (list vertex-count instance-count first-vertex first-instance)))
+      (lvk:cmd-draw
+       (vulkan-command-encoder-command-buffer
+        (vulkan-render-pass-command-encoder pass))
+       vertex-count instance-count first-vertex first-instance)))
   pass)
 
 (defmethod end-pass ((pass vulkan-gpu-render-pass-encoder))
@@ -1489,13 +1528,16 @@
              :expected-state :active)))
   pass)
 
-(defmethod set-pipeline
+(defmethod encode
     ((pass vulkan-gpu-compute-pass-encoder)
-     (pipeline vulkan-gpu-compute-pipeline))
+     (command gpu-set-pipeline-command))
   (with-vulkan-gpu-driver-environment
     (ensure-vulkan-compute-pass-state pass :set-pipeline)
-    (let* ((encoder (vulkan-compute-pass-command-encoder pass))
+    (let* ((pipeline (gpu-set-pipeline-command-pipeline command))
+           (encoder (vulkan-compute-pass-command-encoder pass))
            (device (vulkan-command-encoder-device encoder)))
+      (unless (typep pipeline 'vulkan-gpu-compute-pipeline)
+        (reject-gpu-request command :incompatible-compute-pipeline pipeline))
       (ensure-vulkan-object-device
        pipeline (vulkan-compute-pipeline-device pipeline) device
        :set-pipeline)
@@ -1505,14 +1547,18 @@
       (setf (vulkan-compute-pass-pipeline pass) pipeline)))
   pass)
 
-(defmethod set-bind-group
-    ((pass vulkan-gpu-compute-pass-encoder) index
-     (bind-group vulkan-gpu-bind-group))
+(defmethod encode
+    ((pass vulkan-gpu-compute-pass-encoder)
+     (command gpu-set-bind-group-command))
   (with-vulkan-gpu-driver-environment
     (ensure-vulkan-compute-pass-state pass :set-bind-group)
-    (unless (zerop index)
-      (reject-gpu-request bind-group :unsupported-bind-group-index index))
-    (let* ((encoder (vulkan-compute-pass-command-encoder pass))
+    (let ((index (gpu-set-bind-group-command-index command))
+          (bind-group (gpu-set-bind-group-command-bind-group command)))
+      (unless (zerop index)
+        (reject-gpu-request command :unsupported-bind-group-index index))
+      (unless (typep bind-group 'vulkan-gpu-bind-group)
+        (reject-gpu-request command :incompatible-bind-group bind-group))
+      (let* ((encoder (vulkan-compute-pass-command-encoder pass))
            (device (vulkan-command-encoder-device encoder))
            (pipeline (or (vulkan-compute-pass-pipeline pass)
                          (error 'gpu-invalid-state-error
@@ -1536,11 +1582,12 @@
        (vulkan-command-encoder-command-buffer encoder)
        (vulkan-compute-pipeline-layout pipeline)
        (vulkan-handle bind-group))
-      (setf (vulkan-compute-pass-bind-group pass) bind-group)))
+        (setf (vulkan-compute-pass-bind-group pass) bind-group))))
   pass)
 
-(defmethod dispatch-workgroups
-    ((pass vulkan-gpu-compute-pass-encoder) x &optional (y 1) (z 1))
+(defmethod encode
+    ((pass vulkan-gpu-compute-pass-encoder)
+     (command gpu-dispatch-workgroups-command))
   (with-vulkan-gpu-driver-environment
     (ensure-vulkan-compute-pass-state pass :dispatch-workgroups)
     (unless (and (vulkan-compute-pass-pipeline pass)
@@ -1550,14 +1597,17 @@
              :operation :dispatch-workgroups
              :state :incomplete-bindings
              :expected-state :pipeline-and-bind-group-bound))
-    (unless (every (lambda (value)
-                     (typep value '(unsigned-byte 32)))
-                   (list x y z))
-      (reject-gpu-request pass :invalid-workgroup-count (list x y z)))
-    (lvk:cmd-dispatch
-     (vulkan-command-encoder-command-buffer
-      (vulkan-compute-pass-command-encoder pass))
-     x y z))
+    (let ((x (gpu-dispatch-workgroups-command-x command))
+          (y (gpu-dispatch-workgroups-command-y command))
+          (z (gpu-dispatch-workgroups-command-z command)))
+      (unless (every (lambda (value)
+                       (typep value '(unsigned-byte 32)))
+                     (list x y z))
+        (reject-gpu-request command :invalid-workgroup-count (list x y z)))
+      (lvk:cmd-dispatch
+       (vulkan-command-encoder-command-buffer
+        (vulkan-compute-pass-command-encoder pass))
+       x y z)))
   pass)
 
 (defmethod end-pass ((pass vulkan-gpu-compute-pass-encoder))
@@ -1692,6 +1742,21 @@ fences while preserving the public submission operation."
   "Submit one WebGPU-style batch and synchronously establish its completion."
   (submit-vulkan-command-buffers queue command-buffers))
 
+(defun destroy-vulkan-command-native-resource (device resource)
+  (ecase (first resource)
+    (:framebuffer
+     (lvk:destroy-framebuffer (vulkan-handle device) (second resource)))
+    (:upload-buffer
+     (lvk:destroy-buffer (vulkan-handle device) (second resource))
+     (lvk:free-memory (vulkan-handle device) (third resource))))
+  (values))
+
+(defun destroy-vulkan-command-native-resources (device resources)
+  (unless (vulkan-object-destroyed-p device)
+    (dolist (resource resources)
+      (destroy-vulkan-command-native-resource device resource)))
+  (values))
+
 (defmethod destroy ((encoder vulkan-gpu-command-encoder))
   (with-vulkan-gpu-driver-environment
     (when (eq :recording (vulkan-command-encoder-state encoder))
@@ -1701,11 +1766,8 @@ fences while preserving the public submission operation."
                    (not (vulkan-object-destroyed-p device)))
           (lvk:destroy-command-pool
            (vulkan-handle device) command-pool))
-        (dolist (framebuffer
-                  (vulkan-command-encoder-native-resources encoder))
-          (unless (vulkan-object-destroyed-p device)
-            (lvk:destroy-framebuffer
-             (vulkan-handle device) framebuffer)))
+        (destroy-vulkan-command-native-resources
+         device (vulkan-command-encoder-native-resources encoder))
         (setf (vulkan-command-encoder-native-resources encoder) nil)
         (setf (vulkan-command-encoder-command-pool encoder) nil)))
     (setf (vulkan-command-encoder-state encoder) :destroyed))
@@ -1719,10 +1781,8 @@ fences while preserving the public submission operation."
           (lvk:destroy-command-pool
            (vulkan-handle device)
            (vulkan-command-buffer-command-pool command-buffer))
-          (dolist (framebuffer
-                    (vulkan-command-buffer-native-resources command-buffer))
-            (lvk:destroy-framebuffer
-             (vulkan-handle device) framebuffer))))
+          (destroy-vulkan-command-native-resources
+           device (vulkan-command-buffer-native-resources command-buffer))))
       (setf (vulkan-object-destroyed-p command-buffer) t
             (vulkan-command-buffer-state command-buffer) :destroyed)))
   (values))

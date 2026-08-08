@@ -155,6 +155,14 @@
            #:gpu-compute-pass-encoder
            #:gpu-command-encoder
            #:gpu-command-buffer
+           #:gpu-command
+           #:gpu-draw-command
+           #:gpu-set-pipeline-command
+           #:gpu-set-bind-group-command
+           #:gpu-dispatch-workgroups-command
+           #:gpu-clear-texture-command
+           #:gpu-copy-texture-command
+           #:gpu-write-texture-command
            #:gpu-object-label
            #:request-gpu-device
            #:device-queue
@@ -193,6 +201,11 @@
            #:make-command-encoder-descriptor
            #:make-gpu-clear-texture-command
            #:make-gpu-copy-texture-command
+           #:make-gpu-write-texture-command
+           #:make-gpu-set-pipeline-command
+           #:make-gpu-set-bind-group-command
+           #:make-gpu-dispatch-workgroups-command
+           #:make-gpu-draw-command
            #:vulkan-gpu-provider
            #:canvas-clock
            #:canvas-event-handler

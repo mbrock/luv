@@ -307,14 +307,16 @@ Conventional RUN-FRAME-TOP-LEVEL frames consume their own queues instead."
                     (texture
                       (ensure-raster-mirror-texture
                        mirror context size)))
-               (luv:write-texture
+               (luv:encode
                 (luv:device-queue (luv:context-device context))
-                (luv:make-texture-copy :texture texture)
-                pixels
-                (luv:make-texture-data-layout
-                 :bytes-per-row (* 4 (first size))
-                 :rows-per-image (second size))
-                size)
+                (luv:make-gpu-write-texture-command
+                 :destination (luv:make-texture-copy :texture texture)
+                 :data pixels
+                 :data-layout
+                 (luv:make-texture-data-layout
+                  :bytes-per-row (* 4 (first size))
+                  :rows-per-image (second size))
+                 :size size))
                (present-raster-mirror-texture
                 mirror context texture (mirror-compositor mirror))
                (setf (mcclim-render:image-dirty-region mirror)

@@ -166,23 +166,17 @@ factories for requesting GPU-DEVICE instances."))
   (:documentation "Asks the DEVICE for a handle to newly created instance
 of some object fulfilling the DESCRIPTOR."))
 
-(defgeneric encode (encoder command)
-  (:documentation "Asks the ENCODER to append the COMMAND to its work
-sequence."))
+(defgeneric encode (target command)
+  (:documentation "Ask TARGET to interpret an inspectable GPU COMMAND.
+
+TARGET is normally a command or pass encoder. A queue may accept immediate
+commands such as texture uploads by privately encoding and submitting them."))
 
 (defgeneric finish (encoder)
   (:documentation "Asks the ENCODER to seal its work sequence."))
 
 (defgeneric submit (queue work)
   (:documentation "Submit some command buffers to the QUEUE."))
-
-(defgeneric write-texture (queue destination data data-layout size)
-  (:documentation
-   "Write CPU DATA into a texture through QUEUE.
-
-DESTINATION is a TEXTURE-COPY, DATA-LAYOUT describes the source bytes, and
-SIZE is a two- or three-component extent.  This is the small synchronous
-counterpart of WebGPU's GPUQueue.writeTexture."))
 
 (defgeneric destroy (handle)
   (:documentation "Destroy the GPU object denoted by HANDLE."))
@@ -195,11 +189,6 @@ counterpart of WebGPU's GPUQueue.writeTexture."))
 (defgeneric begin-render-pass (encoder descriptor))
 (defgeneric begin-compute-pass (encoder &optional descriptor))
 (defgeneric end-pass (pass-encoder))
-(defgeneric set-pipeline (pass-encoder pipeline))
-(defgeneric set-bind-group (pass-encoder index bind-group))
-(defgeneric dispatch-workgroups (pass-encoder x &optional y z))
-(defgeneric draw (pass-encoder vertex-count
-                  &optional instance-count first-vertex first-instance))
 
 (defstruct gpu-descriptor (label nil))
 
@@ -258,9 +247,21 @@ counterpart of WebGPU's GPUQueue.writeTexture."))
 
 (defstruct (gpu-draw-command (:include gpu-command))
   vertex-count
-  instance-count
-  first-vertex
-  first-instance)
+  (instance-count 1)
+  (first-vertex 0)
+  (first-instance 0))
+
+(defstruct (gpu-set-pipeline-command (:include gpu-command))
+  pipeline)
+
+(defstruct (gpu-set-bind-group-command (:include gpu-command))
+  (index 0)
+  bind-group)
+
+(defstruct (gpu-dispatch-workgroups-command (:include gpu-command))
+  x
+  (y 1)
+  (z 1))
 
 (defstruct (gpu-set-viewport-command (:include gpu-command))
   x
@@ -277,3 +278,40 @@ counterpart of WebGPU's GPUQueue.writeTexture."))
 (defstruct (gpu-copy-texture-command (:include gpu-command))
   source
   destination)
+
+(defstruct (gpu-write-texture-command (:include gpu-command))
+  destination
+  data
+  data-layout
+  size)
+
+;;; These WebGPU-flavored verbs are intentionally just REPL conveniences.
+;;; Command objects are the protocol: backends specialize ENCODE on both the
+;;; receiving encoder and the inspectable command occurrence.
+
+(defun set-pipeline (pass-encoder pipeline)
+  (encode pass-encoder
+          (make-gpu-set-pipeline-command :pipeline pipeline)))
+
+(defun set-bind-group (pass-encoder index bind-group)
+  (encode pass-encoder
+          (make-gpu-set-bind-group-command
+           :index index :bind-group bind-group)))
+
+(defun dispatch-workgroups (pass-encoder x &optional (y 1) (z 1))
+  (encode pass-encoder
+          (make-gpu-dispatch-workgroups-command :x x :y y :z z)))
+
+(defun draw (pass-encoder vertex-count
+             &optional (instance-count 1) (first-vertex 0) (first-instance 0))
+  (encode pass-encoder
+          (make-gpu-draw-command
+           :vertex-count vertex-count :instance-count instance-count
+           :first-vertex first-vertex :first-instance first-instance)))
+
+(defun write-texture (queue destination data data-layout size)
+  "Immediately encode and submit one inspectable texture-upload command."
+  (encode queue
+          (make-gpu-write-texture-command
+           :destination destination :data data
+           :data-layout data-layout :size size)))

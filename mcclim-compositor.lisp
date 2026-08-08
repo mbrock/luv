@@ -195,7 +195,7 @@
       ((:bgra8-unorm :bgra8-unorm-srgb)
        (logior (ash c 8) (ash s 16) (ash #xff 24))))))
 
-(defun update-spinning-compositor-state
+(defun make-spinning-compositor-state-command
     (compositor context source timestamp)
   (unless (spinning-compositor-start-time compositor)
     (setf (spinning-compositor-start-time compositor) timestamp))
@@ -208,12 +208,14 @@
             :initial-element
             (pack-spinning-state-texel
              (luv:gpu-texture-format source) (sin phase) (cos phase)))))
-    (luv:write-texture
-     (luv:device-queue (luv:context-device context))
+    (declare (ignore context))
+    (luv:make-gpu-write-texture-command
+     :destination
      (luv:make-texture-copy :texture source :origin '(0 0 0))
-     pixel
+     :data pixel
+     :data-layout
      (luv:make-texture-data-layout :bytes-per-row 4 :rows-per-image 1)
-     '(1 1))))
+     :size '(1 1))))
 
 (defun render-spinning-mirror-frame (mirror timestamp)
   (let ((context (mirror-context mirror))
@@ -222,11 +224,16 @@
     (when (and context source (typep compositor 'spinning-texture-compositor)
                (eq :open (luv:canvas-state (mirror-target mirror))))
       (ensure-spinning-compositor-resources compositor context source)
-      (update-spinning-compositor-state compositor context source timestamp)
-      (luv:present-canvas-frame
-       context
-       (lambda (surface encoder)
-         (let ((pass
+      (let ((state-command
+              (make-spinning-compositor-state-command
+               compositor context source timestamp)))
+        (luv:present-canvas-frame
+         context
+         (lambda (surface encoder)
+           ;; Upload, sample, render, and copy are one inspectable command
+           ;; sequence and one Vulkan submission.
+           (luv:encode encoder state-command)
+           (let ((pass
                  (luv:begin-render-pass
                   encoder
                   (luv:make-render-pass-descriptor
@@ -235,17 +242,23 @@
                    `((:view ,(spinning-compositor-output-view compositor)
                       :load-op :clear :store-op :store
                       :clear-value #(0.025 0.025 0.04 1.0)))))))
-           (luv:set-pipeline pass
-                             (spinning-compositor-pipeline compositor))
-           (luv:set-bind-group pass 0
-                               (spinning-compositor-bind-group compositor))
-           (luv:draw pass 4)
-           (luv:end-pass pass))
-         (luv:encode
-          encoder
-          (luv:make-gpu-copy-texture-command
-           :source (spinning-compositor-output compositor)
-           :destination surface))))))
+             (luv:encode
+              pass
+              (luv:make-gpu-set-pipeline-command
+               :pipeline (spinning-compositor-pipeline compositor)))
+             (luv:encode
+              pass
+              (luv:make-gpu-set-bind-group-command
+               :index 0
+               :bind-group (spinning-compositor-bind-group compositor)))
+             (luv:encode
+              pass (luv:make-gpu-draw-command :vertex-count 4))
+             (luv:end-pass pass))
+           (luv:encode
+            encoder
+            (luv:make-gpu-copy-texture-command
+             :source (spinning-compositor-output compositor)
+             :destination surface)))))))
   mirror)
 
 (defmethod present-raster-mirror-texture

@@ -37,6 +37,22 @@ Submission currently waits for the Vulkan queue to become idle. This keeps
 the initial ownership rules honest; presentation work can replace the wait
 with tracked in-flight frames without changing the public operation.
 
+GPU work is represented by inspectable command structures. `encode` uses
+double dispatch on the receiving command/pass encoder and the command type;
+the WebGPU-flavored verbs are only convenient constructors around that
+protocol:
+
+```lisp
+(luv:encode
+ pass
+ (luv:make-gpu-draw-command :vertex-count 4))
+```
+
+Texture uploads use the same protocol. Encoding a
+`gpu-write-texture-command` into an existing command encoder retains its
+staging allocation through submission, while `write-texture` encodes and
+submits one such command immediately for REPL convenience.
+
 The next slice owns 2D textures and records explicit clear and copy commands.
 Clearing is deliberately a transfer command for now; render-pass clears can
 reuse the same texture and layout tracking later:
@@ -218,8 +234,8 @@ The mirror does not equate a CLIM sheet with a native window.  It owns a
 relationship between a sheet and a presentation target.  Today that target is
 an SDL canvas; later it may be a texture displayed on a quad in a luv scene.
 McCLIM rasterizes drawing into an inspectable image. Finishing medium output
-uploads that image through `GPUQueue.writeTexture`-shaped machinery and copies
-it to the mirror's canvas surface.
+uploads that image as a GPU command and copies it to the mirror's canvas
+surface.
 
 SDL pointer, keyboard, focus, and close events are translated first into
 renderer-independent canvas event objects. The McCLIM mirror then turns those
