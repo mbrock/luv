@@ -142,7 +142,8 @@
 
 (cffi:defbitfield (pipeline-stage-flags :uint32)
   (:top-of-pipe #x1)
-  (:transfer #x1000))
+  (:transfer #x1000)
+  (:bottom-of-pipe #x2000))
 
 (cffi:defbitfield (dependency-flags :uint32)
   (:by-region #x1))

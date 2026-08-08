@@ -91,7 +91,12 @@
     :reader vulkan-texture-device)
    (memory
     :initarg :memory
+    :initform nil
     :reader vulkan-texture-memory)
+   (owned-p
+    :initarg :owned-p
+    :initform t
+    :reader vulkan-texture-owned-p)
    (vk-format
     :initarg :vk-format
     :reader vulkan-texture-vk-format)
@@ -161,6 +166,53 @@
              :operation :request-device
              :reason :no-graphics-queue
              :details physical-device)))
+
+(defun make-vulkan-gpu-device
+    (instance physical-device queue-family descriptor
+     &key enabled-extension-names)
+  "Create GPU wrappers for an already selected Vulkan device and queue."
+  (let ((native-device
+          (lvk:create-device
+           physical-device queue-family
+           :enabled-extension-names enabled-extension-names)))
+    (handler-case
+        (let* ((native-queue
+                 (lvk:get-device-queue native-device queue-family))
+               (device
+                 (make-instance
+                  'vulkan-gpu-device
+                  :label (gpu-descriptor-label descriptor)
+                  :handle native-device
+                  :instance instance
+                  :physical-device physical-device
+                  :queue-family queue-family))
+               (queue
+                 (make-instance
+                  'vulkan-gpu-queue
+                  :label "default queue"
+                  :handle native-queue
+                  :device device
+                  :family queue-family)))
+          (setf (vulkan-device-queue device) queue)
+          device)
+      (error (condition)
+        (lvk:destroy-device native-device)
+        (error condition)))))
+
+(defun make-borrowed-vulkan-texture
+    (device image size format vk-format &key (usage '(:copy-dst)))
+  "Wrap an externally owned Vulkan IMAGE as a GPU texture."
+  (make-instance
+   'vulkan-gpu-texture
+   :label "borrowed swapchain texture"
+   :size (list (first size) (second size) 1)
+   :usage usage
+   :dimensions :2d
+   :format format
+   :handle image
+   :device device
+   :vk-format vk-format
+   :owned-p nil))
 
 (defun check-vulkan-device-descriptor (descriptor)
   "Reject WebGPU requirements the initial Vulkan backend cannot honor yet."
@@ -290,26 +342,10 @@
                                    :reason :no-physical-device)))
                       (queue-family
                         (first-vulkan-graphics-queue-family physical-device)))
-                 (setf native-device
-                       (lvk:create-device physical-device queue-family))
-                 (let* ((native-queue
-                          (lvk:get-device-queue native-device queue-family))
-                        (device
-                          (make-instance
-                           'vulkan-gpu-device
-                           :label (gpu-descriptor-label descriptor)
-                           :handle native-device
-                           :instance instance
-                           :physical-device physical-device
-                           :queue-family queue-family))
-                        (queue
-                          (make-instance
-                           'vulkan-gpu-queue
-                           :label "default queue"
-                           :handle native-queue
-                           :device device
-                           :family queue-family)))
-                   (setf (vulkan-device-queue device) queue
+                 (let ((device
+                         (make-vulkan-gpu-device
+                          instance physical-device queue-family descriptor)))
+                   (setf native-device (vulkan-handle device)
                          completed-p t)
                    device)))
           (unless completed-p
@@ -450,7 +486,9 @@
     (:transfer-src-optimal
      (values (list :transfer-read) (list :transfer)))
     (:transfer-dst-optimal
-     (values (list :transfer-write) (list :transfer)))))
+     (values (list :transfer-write) (list :transfer)))
+    (:present-src-khr
+     (values nil (list :bottom-of-pipe)))))
 
 (defun vulkan-encoder-texture-layout (encoder texture)
   (multiple-value-bind (layout present-p)
@@ -646,7 +684,10 @@
     ((queue vulkan-gpu-queue) (command-buffer vulkan-gpu-command-buffer))
   (submit queue (vector command-buffer)))
 
-(defmethod submit ((queue vulkan-gpu-queue) (command-buffers vector))
+(defun submit-vulkan-command-buffers
+    (queue command-buffers &key (wait-semaphores #())
+                                (wait-stages #())
+                                (signal-semaphores #()))
   "Submit one WebGPU-style batch and synchronously establish its completion.
 
 The initial backend waits for the queue so command-buffer ownership remains
@@ -661,7 +702,10 @@ fences while preserving the public submission operation."
       (when (plusp (length command-buffers))
         (lvk:submit-command-buffers
          (vulkan-handle queue)
-         (map 'vector #'vulkan-handle command-buffers))
+         (map 'vector #'vulkan-handle command-buffers)
+         :wait-semaphores wait-semaphores
+         :wait-stages wait-stages
+         :signal-semaphores signal-semaphores)
         (lvk:queue-wait-idle (vulkan-handle queue))
         (loop for command-buffer across command-buffers
               do (setf (vulkan-command-buffer-state command-buffer)
@@ -670,6 +714,10 @@ fences while preserving the public submission operation."
                    (setf (vulkan-texture-layout texture) layout))
                  texture-layouts))))
   (values))
+
+(defmethod submit ((queue vulkan-gpu-queue) (command-buffers vector))
+  "Submit one WebGPU-style batch and synchronously establish its completion."
+  (submit-vulkan-command-buffers queue command-buffers))
 
 (defmethod destroy ((encoder vulkan-gpu-command-encoder))
   (with-vulkan-gpu-driver-environment
@@ -700,13 +748,11 @@ fences while preserving the public submission operation."
   (with-vulkan-gpu-driver-environment
     (unless (vulkan-object-destroyed-p texture)
       (let ((device (vulkan-texture-device texture)))
-        (unless (vulkan-object-destroyed-p device)
-          (lvk:destroy-image
-           (vulkan-handle device)
-           (vulkan-handle texture))
+        (when (and (vulkan-texture-owned-p texture)
+                   (not (vulkan-object-destroyed-p device)))
+          (lvk:destroy-image (vulkan-handle device) (vulkan-handle texture))
           (lvk:free-memory
-           (vulkan-handle device)
-           (vulkan-texture-memory texture))))
+           (vulkan-handle device) (vulkan-texture-memory texture))))
       (setf (vulkan-object-destroyed-p texture) t)))
   (values))
 

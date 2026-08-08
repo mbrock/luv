@@ -135,5 +135,22 @@
            #:vulkan-gpu-provider
            #:canvas
            #:canvas-context
+           #:context-canvas
+           #:canvas-error
+           #:canvas-error-canvas
+           #:canvas-error-reason
+           #:canvas-error-details
            #:get-current-texture
-           #:sdl-canvas))
+           #:sdl-canvas
+           #:vulkan-canvas-context
+           #:canvas-title
+           #:canvas-width
+           #:canvas-height
+           #:canvas-device
+           #:canvas-extent
+           #:canvas-format
+           #:canvas-state
+           #:open-canvas
+           #:present-canvas-frame
+           #:render-canvas-color
+           #:close-canvas))

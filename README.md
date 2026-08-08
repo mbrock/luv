@@ -86,6 +86,40 @@ reuse the same texture and layout tracking later:
     (luv:destroy device)))
 ```
 
+## Second spike canvas
+
+`:luv/canvas` adds the small native counterpart to WebGPU's canvas context
+without making SDL a dependency of the offscreen `:luv/gpu` system.  The
+context owns the SDL window, surface-compatible device and queue, swapchain,
+and acquire/present synchronization.  `get-current-texture` is valid only
+inside a frame callback; the returned swapchain texture is borrowed from the
+context rather than destroyed as an ordinary owned image.
+
+```lisp
+(asdf:load-system :luv/canvas)
+(defparameter *canvas*
+  (luv:open-canvas :title "luv second spike" :width 800 :height 600))
+
+(luv:render-canvas-color *canvas* 0.15 0.35 0.95)
+
+(luv:present-canvas-frame
+ *canvas*
+ (lambda (texture encoder)
+   (assert (eq texture
+               (luv:get-current-texture (luv:canvas-context *canvas*))))
+   (luv:encode
+    encoder
+    (luv:make-gpu-clear-texture-command
+     :texture texture :color #(0.7 0.1 1.0 1.0)))))
+
+(luv:close-canvas *canvas*)
+```
+
+On Cocoa, the context's event loop and frame callbacks run on the process main
+thread.  Calls from SLY workers are sent to that thread and wait for the frame,
+so the public interaction stays as small as the browser canvas model while SDL
+and Vulkan lifetime rules remain inside the context.
+
 ## One-time Lisp setup
 
 `cl-sdl3` is not in Quicklisp, so install it as a local project:
