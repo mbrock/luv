@@ -140,6 +140,7 @@ factories for requesting GPU-DEVICE instances."))
   ((texture
     :initarg :texture
     :reader gpu-texture-view-texture)))
+(defclass gpu-sampler (gpu-object) ())
 
 (defclass gpu-command-buffer (gpu-object) ())
 
@@ -197,6 +198,8 @@ counterpart of WebGPU's GPUQueue.writeTexture."))
 (defgeneric set-pipeline (pass-encoder pipeline))
 (defgeneric set-bind-group (pass-encoder index bind-group))
 (defgeneric dispatch-workgroups (pass-encoder x &optional y z))
+(defgeneric draw (pass-encoder vertex-count
+                  &optional instance-count first-vertex first-instance))
 
 (defstruct gpu-descriptor (label nil))
 
@@ -211,6 +214,14 @@ counterpart of WebGPU's GPUQueue.writeTexture."))
 
 (defstruct (texture-view-descriptor (:include gpu-descriptor))
   texture)
+
+(defstruct (sampler-descriptor (:include gpu-descriptor))
+  (address-mode-u :clamp-to-edge)
+  (address-mode-v :clamp-to-edge)
+  (address-mode-w :clamp-to-edge)
+  (mag-filter :linear)
+  (min-filter :linear)
+  (mipmap-filter :nearest))
 
 (defstruct texture-copy
   texture
@@ -230,7 +241,10 @@ counterpart of WebGPU's GPUQueue.writeTexture."))
   layout entries)
 
 (defstruct (render-pipeline-descriptor (:include gpu-descriptor))
-  layout vertex fragment)
+  layout vertex fragment (primitive '(:topology :triangle-list)))
+
+(defstruct (render-pass-descriptor (:include gpu-descriptor))
+  color-attachments)
 
 (defstruct (compute-pipeline-descriptor (:include gpu-descriptor))
   layout module (entry-point "main"))
@@ -249,7 +263,7 @@ counterpart of WebGPU's GPUQueue.writeTexture."))
   first-instance)
 
 (defstruct (gpu-set-viewport-command (:include gpu-command))
-  x 
+  x
   y
   width
   height

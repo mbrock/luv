@@ -271,3 +271,165 @@
   "Assemble the structured RGBA8 gradient compute shader."
   (assemble-spir-v-module
    (gradient-compute-module :width width :height height)))
+
+(defun spinning-texture-vertex-module ()
+  "Make a vertex shader for a vertexless, perspective-spinning texture quad.
+
+The first source texel doubles as a tiny live parameter block: red and green
+contain sine and cosine remapped to 0..1.  This keeps the initial rendering
+slice focused on textures, samplers, and render passes; a uniform-buffer
+vocabulary can replace the trick later without changing the pass topology."
+  (make-instance
+   'spir-v-module
+   :entry-points
+   (list (make-instance
+          'spir-v-entry-point :execution-model 'vertex
+          :function '%main
+          :interfaces '(%vertex-index %position %uv-output)))
+   :annotations
+   '((decorate %vertex-index built-in (enum built-in vertex-index))
+     (decorate %position built-in (enum built-in position))
+     (decorate %uv-output location 0)
+     (decorate %source-texture descriptor-set 0)
+     (decorate %source-texture binding 0)
+     (decorate %source-sampler descriptor-set 0)
+     (decorate %source-sampler binding 1))
+   :global-declarations
+   '((%void type-void)
+     (%uint type-int 32 0)
+     (%float type-float 32)
+     (%vec2 type-vector %float 2)
+     (%vec4 type-vector %float 4)
+     (%image type-image %float 2d 0 0 0 1 unknown)
+     (%sampler type-sampler)
+     (%sampled-image type-sampled-image %image)
+     (%vertex-index-pointer type-pointer input %uint)
+     (%position-pointer type-pointer output %vec4)
+     (%uv-output-pointer type-pointer output %vec2)
+     (%image-pointer type-pointer uniform-constant %image)
+     (%sampler-pointer type-pointer uniform-constant %sampler)
+     (%function-type type-function %void)
+     (%zero-u constant %uint 0)
+     (%one-u constant %uint 1)
+     (%zero constant %float 0.0)
+     (%one constant %float 1.0)
+     (%two constant %float 2.0)
+     (%scale constant %float 0.82)
+     (%orbit constant %float 0.12)
+     (%depth-base constant %float 0.45)
+     (%depth-scale constant %float 0.22)
+     (%base-w constant %float 1.18)
+     (%perspective-scale constant %float 0.48)
+     (%vertex-index variable %vertex-index-pointer input)
+     (%position variable %position-pointer output)
+     (%uv-output variable %uv-output-pointer output)
+     (%source-texture variable %image-pointer uniform-constant)
+     (%source-sampler variable %sampler-pointer uniform-constant))
+   :function-definitions
+   (list
+    (make-instance
+     'spir-v-function-definition
+     :result-id '%main :return-type '%void
+     :function-type '%function-type
+     :basic-blocks
+     (list
+      (make-instance
+       'spir-v-basic-block :label '%entry
+       :instructions
+       '((%vertex load %uint %vertex-index)
+         (%x-bit bitwise-and %uint %vertex %one-u)
+         (%y-bit shift-right-logical %uint %vertex %one-u)
+         (%xf convert-u-to-f %float %x-bit)
+         (%yf convert-u-to-f %float %y-bit)
+         (%uv composite-construct %vec2 %xf %yf)
+         (store %uv-output %uv)
+         (%texture load %image %source-texture)
+         (%sampler-value load %sampler %source-sampler)
+         (%sampled sampled-image %sampled-image %texture %sampler-value)
+         (%zero-uv composite-construct %vec2 %zero %zero)
+         (%state image-sample-explicit-lod
+                 %vec4 %sampled %zero-uv lod %zero)
+         (%state-r composite-extract %float %state 0)
+         (%state-g composite-extract %float %state 1)
+         (%sine-twice f-mul %float %state-r %two)
+         (%cosine-twice f-mul %float %state-g %two)
+         (%sine f-sub %float %sine-twice %one)
+         (%cosine f-sub %float %cosine-twice %one)
+         (%x-twice f-mul %float %xf %two)
+         (%center-x f-sub %float %x-twice %one)
+         (%y-twice f-mul %float %yf %two)
+         (%center-y f-sub %float %one %y-twice)
+         (%scaled-x f-mul %float %center-x %scale)
+         (%rotated-x f-mul %float %scaled-x %cosine)
+         (%orbit-x f-mul %float %sine %orbit)
+         (%clip-x f-add %float %rotated-x %orbit-x)
+         (%clip-y f-mul %float %center-y %scale)
+         (%depth-x f-mul %float %center-x %sine)
+         (%depth-offset f-mul %float %depth-x %depth-scale)
+         (%clip-z f-add %float %depth-base %depth-offset)
+         (%perspective f-mul %float %depth-x %perspective-scale)
+         (%clip-w f-add %float %base-w %perspective)
+         (%clip-position composite-construct
+                         %vec4 %clip-x %clip-y %clip-z %clip-w)
+         (store %position %clip-position)
+         (return))))))))
+
+(defun spinning-texture-fragment-module ()
+  "Make the fragment half of the spinning sampled-texture pipeline."
+  (make-instance
+   'spir-v-module
+   :entry-points
+   (list (make-instance
+          'spir-v-entry-point :execution-model 'fragment
+          :function '%main :interfaces '(%uv-input %color-output)))
+   :execution-modes
+   (list (make-instance 'spir-v-execution-mode
+                        :function '%main :name 'origin-upper-left))
+   :annotations
+   '((decorate %uv-input location 0)
+     (decorate %color-output location 0)
+     (decorate %source-texture descriptor-set 0)
+     (decorate %source-texture binding 0)
+     (decorate %source-sampler descriptor-set 0)
+     (decorate %source-sampler binding 1))
+   :global-declarations
+   '((%void type-void)
+     (%float type-float 32)
+     (%vec2 type-vector %float 2)
+     (%vec4 type-vector %float 4)
+     (%image type-image %float 2d 0 0 0 1 unknown)
+     (%sampler type-sampler)
+     (%sampled-image type-sampled-image %image)
+     (%uv-input-pointer type-pointer input %vec2)
+     (%color-output-pointer type-pointer output %vec4)
+     (%image-pointer type-pointer uniform-constant %image)
+     (%sampler-pointer type-pointer uniform-constant %sampler)
+     (%function-type type-function %void)
+     (%uv-input variable %uv-input-pointer input)
+     (%color-output variable %color-output-pointer output)
+     (%source-texture variable %image-pointer uniform-constant)
+     (%source-sampler variable %sampler-pointer uniform-constant))
+   :function-definitions
+   (list
+    (make-instance
+     'spir-v-function-definition
+     :result-id '%main :return-type '%void
+     :function-type '%function-type
+     :basic-blocks
+     (list
+      (make-instance
+       'spir-v-basic-block :label '%entry
+       :instructions
+       '((%uv load %vec2 %uv-input)
+         (%texture load %image %source-texture)
+         (%sampler-value load %sampler %source-sampler)
+         (%sampled sampled-image %sampled-image %texture %sampler-value)
+         (%color image-sample-implicit-lod %vec4 %sampled %uv)
+         (store %color-output %color)
+         (return))))))))
+
+(defun spinning-texture-vertex-shader ()
+  (assemble-spir-v-module (spinning-texture-vertex-module)))
+
+(defun spinning-texture-fragment-shader ()
+  (assemble-spir-v-module (spinning-texture-fragment-module)))

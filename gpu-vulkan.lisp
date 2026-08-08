@@ -75,7 +75,10 @@
     :reader vulkan-device-queue-family)
    (queue
     :initform nil
-    :accessor vulkan-device-queue)))
+    :accessor vulkan-device-queue)
+   (render-passes
+    :initform (make-hash-table :test #'eq)
+    :reader vulkan-device-render-passes)))
 
 (defclass vulkan-gpu-queue (gpu-queue vulkan-gpu-object)
   ((device
@@ -114,6 +117,11 @@
     :initarg :device
     :reader vulkan-shader-module-device)))
 
+(defclass vulkan-gpu-sampler (gpu-sampler vulkan-gpu-object)
+  ((device
+    :initarg :device
+    :reader vulkan-sampler-device)))
+
 (defclass vulkan-gpu-bind-group-layout
     (gpu-bind-group-layout vulkan-gpu-object)
   ((device
@@ -121,7 +129,12 @@
     :reader vulkan-bind-group-layout-device)
    (binding
     :initarg :binding
-    :reader vulkan-bind-group-layout-binding)))
+    :initform nil
+    :reader vulkan-bind-group-layout-binding)
+   (entries
+    :initarg :entries
+    :initform nil
+    :reader vulkan-bind-group-layout-entries)))
 
 (defclass vulkan-gpu-compute-pipeline
     (gpu-compute-pipeline vulkan-gpu-object)
@@ -135,6 +148,21 @@
     :initarg :pipeline-layout
     :reader vulkan-compute-pipeline-layout)))
 
+(defclass vulkan-gpu-render-pipeline
+    (gpu-render-pipeline vulkan-gpu-object)
+  ((device
+    :initarg :device
+    :reader vulkan-render-pipeline-device)
+   (layout
+    :initarg :layout
+    :reader vulkan-render-pipeline-bind-group-layout)
+   (pipeline-layout
+    :initarg :pipeline-layout
+    :reader vulkan-render-pipeline-layout)
+   (render-pass
+    :initarg :render-pass
+    :reader vulkan-render-pipeline-render-pass)))
+
 (defclass vulkan-gpu-bind-group (gpu-bind-group vulkan-gpu-object)
   ((device
     :initarg :device
@@ -144,7 +172,12 @@
     :reader vulkan-bind-group-layout)
    (texture-view
     :initarg :texture-view
+    :initform nil
     :reader vulkan-bind-group-texture-view)
+   (sampler
+    :initarg :sampler
+    :initform nil
+    :reader vulkan-bind-group-sampler)
    (descriptor-pool
     :initarg :descriptor-pool
     :reader vulkan-bind-group-descriptor-pool)))
@@ -168,6 +201,9 @@
    (textures
     :initform (make-hash-table :test #'eq)
     :reader vulkan-command-encoder-textures)
+   (native-resources
+    :initform nil
+    :accessor vulkan-command-encoder-native-resources)
    (active-pass
     :initform nil
     :accessor vulkan-command-encoder-active-pass)
@@ -189,6 +225,26 @@
     :initform :recording
     :accessor vulkan-compute-pass-state)))
 
+(defclass vulkan-gpu-render-pass-encoder (gpu-render-pass-encoder)
+  ((encoder
+    :initarg :encoder
+    :reader vulkan-render-pass-command-encoder)
+   (framebuffer
+    :initarg :framebuffer
+    :reader vulkan-render-pass-framebuffer)
+   (target
+    :initarg :target
+    :reader vulkan-render-pass-target)
+   (pipeline
+    :initform nil
+    :accessor vulkan-render-pass-pipeline)
+   (bind-group
+    :initform nil
+    :accessor vulkan-render-pass-bind-group)
+   (state
+    :initform :recording
+    :accessor vulkan-render-pass-state)))
+
 (defclass vulkan-gpu-command-buffer (gpu-command-buffer vulkan-gpu-object)
   ((device
     :initarg :device
@@ -205,6 +261,10 @@
    (textures
     :initarg :textures
     :reader vulkan-command-buffer-textures)
+   (native-resources
+    :initarg :native-resources
+    :initform nil
+    :reader vulkan-command-buffer-native-resources)
    (state
     :initform :ready
     :accessor vulkan-command-buffer-state)))
@@ -332,26 +392,32 @@
     (unless (and usages
                  (every (lambda (value)
                           (member value
-                                  '(:copy-src :copy-dst :storage-binding)))
+                                  '(:copy-src :copy-dst :storage-binding
+                                    :texture-binding :render-attachment)))
                         usages))
       (reject-gpu-request descriptor :unsupported-texture-usage usage))
     (remove-duplicates usages)))
 
-(defun vulkan-texture-format (descriptor)
-  (or (cdr (assoc (texture-descriptor-format descriptor)
+(defun vulkan-gpu-format (format descriptor)
+  (or (cdr (assoc format
                   '((:rgba8-unorm . :r8g8b8a8-unorm)
                     (:rgba8-unorm-srgb . :r8g8b8a8-srgb)
                     (:bgra8-unorm . :b8g8r8a8-unorm)
                     (:bgra8-unorm-srgb . :b8g8r8a8-srgb))))
       (reject-gpu-request
        descriptor :unsupported-texture-format
-       (texture-descriptor-format descriptor))))
+       format)))
+
+(defun vulkan-texture-format (descriptor)
+  (vulkan-gpu-format (texture-descriptor-format descriptor) descriptor))
 
 (defun vulkan-image-usage (usages)
   (mapcar (lambda (usage)
             (ecase usage
               (:copy-src :transfer-src)
               (:copy-dst :transfer-dst)
+              (:texture-binding :sampled)
+              (:render-attachment :color-attachment)
               (:storage-binding :storage)))
           usages))
 
@@ -536,6 +602,24 @@
        :texture texture))))
 
 (defmethod create
+    ((device vulkan-gpu-device) (descriptor sampler-descriptor))
+  (with-vulkan-gpu-driver-environment
+    (ensure-live-vulkan-object device :create-sampler)
+    (make-instance
+     'vulkan-gpu-sampler
+     :label (gpu-descriptor-label descriptor)
+     :handle
+     (lvk:create-sampler
+      (vulkan-handle device)
+      :mag-filter (sampler-descriptor-mag-filter descriptor)
+      :min-filter (sampler-descriptor-min-filter descriptor)
+      :mipmap-mode (sampler-descriptor-mipmap-filter descriptor)
+      :address-mode-u (sampler-descriptor-address-mode-u descriptor)
+      :address-mode-v (sampler-descriptor-address-mode-v descriptor)
+      :address-mode-w (sampler-descriptor-address-mode-w descriptor))
+     :device device)))
+
+(defmethod create
     ((device vulkan-gpu-device) (descriptor shader-module-descriptor))
   (with-vulkan-gpu-driver-environment
     (ensure-live-vulkan-object device :create-shader-module)
@@ -562,20 +646,51 @@
       (reject-gpu-request descriptor :unsupported-bind-group-layout entries))
     (first entries)))
 
+(defun sampled-texture-sampler-layout-entries (descriptor)
+  (let* ((entries (bind-group-layout-descriptor-entries descriptor))
+         (texture (find :texture entries :key (lambda (entry)
+                                                (getf entry :type))))
+         (sampler (find :sampler entries :key (lambda (entry)
+                                                (getf entry :type)))))
+    (unless (and (listp entries) (= 2 (length entries))
+                 texture sampler
+                 (every (lambda (entry)
+                          (typep (getf entry :binding)
+                                 '(unsigned-byte 32)))
+                        entries)
+                 (/= (getf texture :binding) (getf sampler :binding)))
+      (reject-gpu-request descriptor :unsupported-bind-group-layout entries))
+    (values entries texture sampler)))
+
 (defmethod create
     ((device vulkan-gpu-device)
      (descriptor bind-group-layout-descriptor))
   (with-vulkan-gpu-driver-environment
     (ensure-live-vulkan-object device :create-bind-group-layout)
-    (let* ((entry (storage-texture-layout-entry descriptor))
-           (binding (getf entry :binding)))
-      (make-instance
-       'vulkan-gpu-bind-group-layout
-       :label (gpu-descriptor-label descriptor)
-       :handle (lvk:create-storage-image-descriptor-set-layout
-                (vulkan-handle device) :binding binding)
-       :device device
-       :binding binding))))
+    (let ((entries (bind-group-layout-descriptor-entries descriptor)))
+      (cond
+        ((and (= 1 (length entries))
+              (eq :storage-texture (getf (first entries) :type)))
+         (let* ((entry (storage-texture-layout-entry descriptor))
+                (binding (getf entry :binding)))
+           (make-instance
+            'vulkan-gpu-bind-group-layout
+            :label (gpu-descriptor-label descriptor)
+            :handle (lvk:create-storage-image-descriptor-set-layout
+                     (vulkan-handle device) :binding binding)
+            :device device :binding binding :entries entries)))
+        (t
+         (multiple-value-bind (entries texture sampler)
+             (sampled-texture-sampler-layout-entries descriptor)
+           (make-instance
+            'vulkan-gpu-bind-group-layout
+            :label (gpu-descriptor-label descriptor)
+            :handle
+            (lvk:create-sampled-image-sampler-descriptor-set-layout
+             (vulkan-handle device)
+             :texture-binding (getf texture :binding)
+             :sampler-binding (getf sampler :binding))
+            :device device :entries entries)))))))
 
 (defmethod create
     ((device vulkan-gpu-device) (descriptor compute-pipeline-descriptor))
@@ -621,6 +736,73 @@
             (lvk:destroy-pipeline-layout
              (vulkan-handle device) pipeline-layout)))))))
 
+(defun vulkan-render-pass-for-format (device gpu-format descriptor)
+  (or (gethash gpu-format (vulkan-device-render-passes device))
+      (setf (gethash gpu-format (vulkan-device-render-passes device))
+            (lvk:create-color-render-pass
+             (vulkan-handle device)
+             (vulkan-gpu-format gpu-format descriptor)))))
+
+(defmethod create
+    ((device vulkan-gpu-device) (descriptor render-pipeline-descriptor))
+  (with-vulkan-gpu-driver-environment
+    (ensure-live-vulkan-object device :create-render-pipeline)
+    (let* ((layout (render-pipeline-descriptor-layout descriptor))
+           (vertex (render-pipeline-descriptor-vertex descriptor))
+           (fragment (render-pipeline-descriptor-fragment descriptor))
+           (vertex-module (getf vertex :module))
+           (fragment-module (getf fragment :module))
+           (targets (getf fragment :targets))
+           (format (getf (first targets) :format))
+           (topology
+             (or (getf (render-pipeline-descriptor-primitive descriptor)
+                       :topology)
+                 :triangle-list)))
+      (unless (and (typep layout 'vulkan-gpu-bind-group-layout)
+                   (typep vertex-module 'vulkan-gpu-shader-module)
+                   (typep fragment-module 'vulkan-gpu-shader-module)
+                   (= 1 (length targets))
+                   format
+                   (member topology '(:triangle-list :triangle-strip)))
+        (reject-gpu-request descriptor :unsupported-render-pipeline))
+      (dolist (object (list layout vertex-module fragment-module))
+        (ensure-vulkan-object-device
+         object
+         (etypecase object
+           (vulkan-gpu-bind-group-layout
+            (vulkan-bind-group-layout-device object))
+           (vulkan-gpu-shader-module
+            (vulkan-shader-module-device object)))
+         device :create-render-pipeline))
+      (let* ((render-pass
+               (vulkan-render-pass-for-format device format descriptor))
+             (pipeline-layout
+               (lvk:create-pipeline-layout
+                (vulkan-handle device) (vector (vulkan-handle layout))))
+             (pipeline nil)
+             (completed-p nil))
+        (unwind-protect
+             (progn
+               (setf pipeline
+                     (lvk:create-graphics-pipeline
+                      (vulkan-handle device)
+                      (vulkan-handle vertex-module)
+                      (vulkan-handle fragment-module)
+                      pipeline-layout render-pass
+                      :vertex-entry-point (or (getf vertex :entry-point) "main")
+                      :fragment-entry-point
+                      (or (getf fragment :entry-point) "main")
+                      :topology topology)
+                     completed-p t)
+               (make-instance
+                'vulkan-gpu-render-pipeline
+                :label (gpu-descriptor-label descriptor)
+                :handle pipeline :device device :layout layout
+                :pipeline-layout pipeline-layout :render-pass render-pass))
+          (unless completed-p
+            (lvk:destroy-pipeline-layout
+             (vulkan-handle device) pipeline-layout)))))))
+
 (defun storage-texture-bind-group-entry (descriptor layout)
   (let ((entries (bind-group-descriptor-entries descriptor)))
     (unless (and (listp entries) (= 1 (length entries))
@@ -632,6 +814,27 @@
       (reject-gpu-request descriptor :unsupported-bind-group entries))
     (first entries)))
 
+(defun sampled-texture-sampler-bind-group-entries (descriptor layout)
+  (let* ((entries (bind-group-descriptor-entries descriptor))
+         (layout-entries (vulkan-bind-group-layout-entries layout))
+         (texture-layout (find :texture layout-entries
+                               :key (lambda (entry) (getf entry :type))))
+         (sampler-layout (find :sampler layout-entries
+                               :key (lambda (entry) (getf entry :type))))
+         (texture-entry
+           (find (getf texture-layout :binding) entries
+                 :key (lambda (entry) (getf entry :binding))))
+         (sampler-entry
+           (find (getf sampler-layout :binding) entries
+                 :key (lambda (entry) (getf entry :binding)))))
+    (unless (and (= 2 (length entries)) texture-entry sampler-entry
+                 (typep (getf texture-entry :resource)
+                        'vulkan-gpu-texture-view)
+                 (typep (getf sampler-entry :resource)
+                        'vulkan-gpu-sampler))
+      (reject-gpu-request descriptor :unsupported-bind-group entries))
+    (values texture-entry sampler-entry texture-layout sampler-layout)))
+
 (defmethod create
     ((device vulkan-gpu-device) (descriptor bind-group-descriptor))
   (with-vulkan-gpu-driver-environment
@@ -642,42 +845,79 @@
       (ensure-vulkan-object-device
        layout (vulkan-bind-group-layout-device layout) device
        :create-bind-group)
-      (let* ((entry (storage-texture-bind-group-entry descriptor layout))
-             (view (getf entry :resource))
-             (texture (gpu-texture-view-texture view)))
-        (ensure-vulkan-object-device
-         view (vulkan-texture-view-device view) device :create-bind-group)
-        (unless (member :storage-binding (gpu-texture-usage texture))
-          (error 'gpu-usage-error
-                 :object texture
-                 :operation :create-bind-group
-                 :required-usage :storage-binding
-                 :actual-usage (gpu-texture-usage texture)))
-        (let ((pool
-                (lvk:create-storage-image-descriptor-pool
-                 (vulkan-handle device)))
-              (set nil)
-              (completed-p nil))
-          (unwind-protect
-               (progn
-                 (setf set
-                       (lvk:allocate-descriptor-set
-                        (vulkan-handle device) pool (vulkan-handle layout)))
-                 (lvk:update-storage-image-descriptor
-                  (vulkan-handle device) set (vulkan-handle view)
-                  :binding (vulkan-bind-group-layout-binding layout))
-                 (setf completed-p t)
-                 (make-instance
-                  'vulkan-gpu-bind-group
-                  :label (gpu-descriptor-label descriptor)
-                  :handle set
-                  :device device
-                  :layout layout
-                  :texture-view view
-                  :descriptor-pool pool))
-            (unless completed-p
-              (lvk:destroy-descriptor-pool
-               (vulkan-handle device) pool))))))))
+      (if (vulkan-bind-group-layout-binding layout)
+          (let* ((entry (storage-texture-bind-group-entry descriptor layout))
+                 (view (getf entry :resource))
+                 (texture (gpu-texture-view-texture view)))
+            (ensure-vulkan-object-device
+             view (vulkan-texture-view-device view) device :create-bind-group)
+            (unless (member :storage-binding (gpu-texture-usage texture))
+              (error 'gpu-usage-error
+                     :object texture :operation :create-bind-group
+                     :required-usage :storage-binding
+                     :actual-usage (gpu-texture-usage texture)))
+            (let ((pool (lvk:create-storage-image-descriptor-pool
+                         (vulkan-handle device)))
+                  (set nil) (completed-p nil))
+              (unwind-protect
+                   (progn
+                     (setf set (lvk:allocate-descriptor-set
+                                (vulkan-handle device) pool
+                                (vulkan-handle layout)))
+                     (lvk:update-storage-image-descriptor
+                      (vulkan-handle device) set (vulkan-handle view)
+                      :binding (vulkan-bind-group-layout-binding layout))
+                     (setf completed-p t)
+                     (make-instance
+                      'vulkan-gpu-bind-group
+                      :label (gpu-descriptor-label descriptor)
+                      :handle set :device device :layout layout
+                      :texture-view view :descriptor-pool pool))
+                (unless completed-p
+                  (lvk:destroy-descriptor-pool
+                   (vulkan-handle device) pool)))))
+          (multiple-value-bind
+                (texture-entry sampler-entry texture-layout sampler-layout)
+              (sampled-texture-sampler-bind-group-entries descriptor layout)
+            (let* ((view (getf texture-entry :resource))
+                   (sampler (getf sampler-entry :resource))
+                   (texture (gpu-texture-view-texture view)))
+              (ensure-vulkan-object-device
+               view (vulkan-texture-view-device view) device
+               :create-bind-group)
+              (ensure-vulkan-object-device
+               sampler (vulkan-sampler-device sampler) device
+               :create-bind-group)
+              (unless (member :texture-binding (gpu-texture-usage texture))
+                (error 'gpu-usage-error
+                       :object texture :operation :create-bind-group
+                       :required-usage :texture-binding
+                       :actual-usage (gpu-texture-usage texture)))
+              (let ((pool
+                      (lvk:create-sampled-image-sampler-descriptor-pool
+                       (vulkan-handle device)))
+                    (set nil) (completed-p nil))
+                (unwind-protect
+                     (progn
+                       (setf set
+                             (lvk:allocate-descriptor-set
+                              (vulkan-handle device) pool
+                              (vulkan-handle layout)))
+                       (lvk:update-sampled-image-sampler-descriptors
+                        (vulkan-handle device) set
+                        (vulkan-handle view) (vulkan-handle sampler)
+                        :texture-binding (getf texture-layout :binding)
+                        :sampler-binding (getf sampler-layout :binding))
+                       (setf completed-p t)
+                       (make-instance
+                        'vulkan-gpu-bind-group
+                        :label (gpu-descriptor-label descriptor)
+                        :handle set :device device :layout layout
+                        :texture-view view :sampler sampler
+                        :descriptor-pool pool))
+                  (unless completed-p
+                    (lvk:destroy-descriptor-pool
+                     (vulkan-handle device) pool))))))))))
 
 (defmethod create
     ((device vulkan-gpu-device) (descriptor command-encoder-descriptor))
@@ -753,6 +993,12 @@
     (:general
      (values (list :shader-read :shader-write)
              (list :compute-shader)))
+    (:shader-read-only-optimal
+     (values (list :shader-read)
+             (list :vertex-shader :fragment-shader)))
+    (:color-attachment-optimal
+     (values (list :color-attachment-read :color-attachment-write)
+             (list :color-attachment-output)))
     (:transfer-src-optimal
      (values (list :transfer-read) (list :transfer)))
     (:transfer-dst-optimal
@@ -1042,6 +1288,177 @@
           (when buffer (lvk:destroy-buffer native-device buffer))
           (when memory (lvk:free-memory native-device memory)))))))
 
+(defun normalize-render-pass-color (descriptor color)
+  (let ((components
+          (typecase color
+            (list color)
+            (vector (coerce color 'list))
+            (otherwise nil))))
+    (unless (and (= 4 (length components)) (every #'realp components))
+      (reject-gpu-request descriptor :invalid-clear-color color))
+    (map 'vector (lambda (value) (coerce value 'single-float)) components)))
+
+(defmethod begin-render-pass
+    ((encoder vulkan-gpu-command-encoder)
+     (descriptor render-pass-descriptor))
+  (with-vulkan-gpu-driver-environment
+    (ensure-vulkan-command-encoder-state encoder :begin-render-pass)
+    (ensure-no-active-vulkan-pass encoder :begin-render-pass)
+    (let* ((attachments (render-pass-descriptor-color-attachments descriptor))
+           (attachment (and (= 1 (length attachments)) (first attachments)))
+           (view (and attachment (getf attachment :view)))
+           (target (and (typep view 'vulkan-gpu-texture-view)
+                        (gpu-texture-view-texture view)))
+           (clear-color
+             (normalize-render-pass-color
+              descriptor (or (getf attachment :clear-value) #(0 0 0 1)))))
+      (unless (and attachment target
+                   (eq :clear (getf attachment :load-op))
+                   (eq :store (getf attachment :store-op)))
+        (reject-gpu-request descriptor :unsupported-render-pass))
+      (let* ((device (vulkan-command-encoder-device encoder))
+             (size (gpu-texture-size target))
+             (render-pass
+               (vulkan-render-pass-for-format
+                device (gpu-texture-format target) descriptor))
+             (framebuffer nil)
+             (completed-p nil))
+        (ensure-vulkan-object-device
+         view (vulkan-texture-view-device view) device :begin-render-pass)
+        (ensure-vulkan-texture-for-command
+         encoder target descriptor :render-attachment)
+        (transition-vulkan-texture
+         encoder target :color-attachment-optimal)
+        (unwind-protect
+             (progn
+               (setf framebuffer
+                     (lvk:create-framebuffer
+                      (vulkan-handle device) render-pass
+                      (vulkan-handle view) (first size) (second size)))
+               (lvk:cmd-begin-color-render-pass
+                (vulkan-command-encoder-command-buffer encoder)
+                render-pass framebuffer (first size) (second size)
+                clear-color)
+               (lvk:cmd-set-viewport-and-scissor
+                (vulkan-command-encoder-command-buffer encoder)
+                (first size) (second size))
+               (push framebuffer
+                     (vulkan-command-encoder-native-resources encoder))
+               (let ((pass
+                       (make-instance
+                        'vulkan-gpu-render-pass-encoder
+                        :encoder encoder :framebuffer framebuffer
+                        :target target)))
+                 (setf (vulkan-command-encoder-active-pass encoder) pass
+                       completed-p t)
+                 pass))
+          (unless completed-p
+            (when framebuffer
+              (lvk:destroy-framebuffer
+               (vulkan-handle device) framebuffer))))))))
+
+(defun ensure-vulkan-render-pass-state (pass operation)
+  (unless (eq :recording (vulkan-render-pass-state pass))
+    (error 'gpu-invalid-state-error
+           :object pass :operation operation
+           :state (vulkan-render-pass-state pass)
+           :expected-state :recording))
+  (let ((encoder (vulkan-render-pass-command-encoder pass)))
+    (unless (eq pass (vulkan-command-encoder-active-pass encoder))
+      (error 'gpu-invalid-state-error
+             :object pass :operation operation
+             :state :detached :expected-state :active)))
+  pass)
+
+(defmethod set-pipeline
+    ((pass vulkan-gpu-render-pass-encoder)
+     (pipeline vulkan-gpu-render-pipeline))
+  (with-vulkan-gpu-driver-environment
+    (ensure-vulkan-render-pass-state pass :set-pipeline)
+    (let* ((encoder (vulkan-render-pass-command-encoder pass))
+           (device (vulkan-command-encoder-device encoder)))
+      (ensure-vulkan-object-device
+       pipeline (vulkan-render-pipeline-device pipeline) device
+       :set-pipeline)
+      (unless (eq (vulkan-render-pipeline-render-pass pipeline)
+                  (vulkan-render-pass-for-format
+                   device (gpu-texture-format
+                           (vulkan-render-pass-target pass))
+                   pass))
+        (reject-gpu-request pipeline :incompatible-render-pass pass))
+      (lvk:cmd-bind-graphics-pipeline
+       (vulkan-command-encoder-command-buffer encoder)
+       (vulkan-handle pipeline))
+      (setf (vulkan-render-pass-pipeline pass) pipeline)))
+  pass)
+
+(defmethod set-bind-group
+    ((pass vulkan-gpu-render-pass-encoder) index
+     (bind-group vulkan-gpu-bind-group))
+  (with-vulkan-gpu-driver-environment
+    (ensure-vulkan-render-pass-state pass :set-bind-group)
+    (unless (zerop index)
+      (reject-gpu-request bind-group :unsupported-bind-group-index index))
+    (let* ((encoder (vulkan-render-pass-command-encoder pass))
+           (device (vulkan-command-encoder-device encoder))
+           (pipeline (or (vulkan-render-pass-pipeline pass)
+                         (error 'gpu-invalid-state-error
+                                :object pass :operation :set-bind-group
+                                :state :no-pipeline
+                                :expected-state :pipeline-bound))))
+      (ensure-vulkan-object-device
+       bind-group (vulkan-bind-group-device bind-group) device
+       :set-bind-group)
+      (unless (eq (vulkan-bind-group-layout bind-group)
+                  (vulkan-render-pipeline-bind-group-layout pipeline))
+        (reject-gpu-request bind-group :incompatible-pipeline-layout pipeline))
+      (let ((texture
+              (gpu-texture-view-texture
+               (vulkan-bind-group-texture-view bind-group))))
+        (ensure-vulkan-texture-for-command
+         encoder texture pass :texture-binding)
+        (transition-vulkan-texture
+         encoder texture :shader-read-only-optimal))
+      (lvk:cmd-bind-graphics-descriptor-set
+       (vulkan-command-encoder-command-buffer encoder)
+       (vulkan-render-pipeline-layout pipeline)
+       (vulkan-handle bind-group))
+      (setf (vulkan-render-pass-bind-group pass) bind-group)))
+  pass)
+
+(defmethod draw
+    ((pass vulkan-gpu-render-pass-encoder) vertex-count
+     &optional (instance-count 1) (first-vertex 0) (first-instance 0))
+  (with-vulkan-gpu-driver-environment
+    (ensure-vulkan-render-pass-state pass :draw)
+    (unless (and (vulkan-render-pass-pipeline pass)
+                 (vulkan-render-pass-bind-group pass))
+      (error 'gpu-invalid-state-error
+             :object pass :operation :draw
+             :state :incomplete-bindings
+             :expected-state :pipeline-and-bind-group-bound))
+    (unless (every (lambda (value) (typep value '(unsigned-byte 32)))
+                   (list vertex-count instance-count
+                         first-vertex first-instance))
+      (reject-gpu-request
+       pass :invalid-draw-arguments
+       (list vertex-count instance-count first-vertex first-instance)))
+    (lvk:cmd-draw
+     (vulkan-command-encoder-command-buffer
+      (vulkan-render-pass-command-encoder pass))
+     vertex-count instance-count first-vertex first-instance))
+  pass)
+
+(defmethod end-pass ((pass vulkan-gpu-render-pass-encoder))
+  (with-vulkan-gpu-driver-environment
+    (ensure-vulkan-render-pass-state pass :end-pass)
+    (let ((encoder (vulkan-render-pass-command-encoder pass)))
+      (lvk:cmd-end-render-pass
+       (vulkan-command-encoder-command-buffer encoder))
+      (setf (vulkan-command-encoder-active-pass encoder) nil
+            (vulkan-render-pass-state pass) :ended)))
+  (values))
+
 (defmethod begin-compute-pass
     ((encoder vulkan-gpu-command-encoder) &optional descriptor)
   (with-vulkan-gpu-driver-environment
@@ -1180,7 +1597,10 @@
        :final-texture-layouts
        (hash-table-alist (vulkan-command-encoder-texture-layouts encoder))
        :textures
-       (hash-table-keys (vulkan-command-encoder-textures encoder))))))
+       (hash-table-keys (vulkan-command-encoder-textures encoder))
+       :native-resources
+       (prog1 (vulkan-command-encoder-native-resources encoder)
+         (setf (vulkan-command-encoder-native-resources encoder) nil))))))
 
 (defun check-vulkan-command-buffer-for-submit (queue command-buffer)
   (ensure-live-vulkan-object command-buffer :submit)
@@ -1280,9 +1700,15 @@ fences while preserving the public submission operation."
         (when (and command-pool
                    (not (vulkan-object-destroyed-p device)))
           (lvk:destroy-command-pool
-           (vulkan-handle device) command-pool)))
-      (setf (vulkan-command-encoder-command-pool encoder) nil)))
-  (setf (vulkan-command-encoder-state encoder) :destroyed)
+           (vulkan-handle device) command-pool))
+        (dolist (framebuffer
+                  (vulkan-command-encoder-native-resources encoder))
+          (unless (vulkan-object-destroyed-p device)
+            (lvk:destroy-framebuffer
+             (vulkan-handle device) framebuffer)))
+        (setf (vulkan-command-encoder-native-resources encoder) nil)
+        (setf (vulkan-command-encoder-command-pool encoder) nil)))
+    (setf (vulkan-command-encoder-state encoder) :destroyed))
   (values))
 
 (defmethod destroy ((command-buffer vulkan-gpu-command-buffer))
@@ -1292,7 +1718,11 @@ fences while preserving the public submission operation."
         (unless (vulkan-object-destroyed-p device)
           (lvk:destroy-command-pool
            (vulkan-handle device)
-           (vulkan-command-buffer-command-pool command-buffer))))
+           (vulkan-command-buffer-command-pool command-buffer))
+          (dolist (framebuffer
+                    (vulkan-command-buffer-native-resources command-buffer))
+            (lvk:destroy-framebuffer
+             (vulkan-handle device) framebuffer))))
       (setf (vulkan-object-destroyed-p command-buffer) t
             (vulkan-command-buffer-state command-buffer) :destroyed)))
   (values))
@@ -1319,6 +1749,28 @@ fences while preserving the public submission operation."
            (vulkan-handle device)
            (vulkan-compute-pipeline-layout pipeline))))
       (setf (vulkan-object-destroyed-p pipeline) t)))
+  (values))
+
+(defmethod destroy ((pipeline vulkan-gpu-render-pipeline))
+  (with-vulkan-gpu-driver-environment
+    (unless (vulkan-object-destroyed-p pipeline)
+      (let ((device (vulkan-render-pipeline-device pipeline)))
+        (unless (vulkan-object-destroyed-p device)
+          (lvk:destroy-pipeline
+           (vulkan-handle device) (vulkan-handle pipeline))
+          (lvk:destroy-pipeline-layout
+           (vulkan-handle device) (vulkan-render-pipeline-layout pipeline))))
+      (setf (vulkan-object-destroyed-p pipeline) t)))
+  (values))
+
+(defmethod destroy ((sampler vulkan-gpu-sampler))
+  (with-vulkan-gpu-driver-environment
+    (unless (vulkan-object-destroyed-p sampler)
+      (let ((device (vulkan-sampler-device sampler)))
+        (unless (vulkan-object-destroyed-p device)
+          (lvk:destroy-sampler
+           (vulkan-handle device) (vulkan-handle sampler))))
+      (setf (vulkan-object-destroyed-p sampler) t)))
   (values))
 
 (defmethod destroy ((layout vulkan-gpu-bind-group-layout))
@@ -1368,7 +1820,15 @@ fences while preserving the public submission operation."
     (unless (vulkan-object-destroyed-p device)
       (let ((queue (vulkan-device-queue device)))
         (unwind-protect
-             (lvk:device-wait-idle (vulkan-handle device))
+             (progn
+               (lvk:device-wait-idle (vulkan-handle device))
+               (maphash
+                (lambda (format render-pass)
+                  (declare (ignore format))
+                  (lvk:destroy-render-pass
+                   (vulkan-handle device) render-pass))
+                (vulkan-device-render-passes device))
+               (clrhash (vulkan-device-render-passes device)))
           (unwind-protect
                (lvk:destroy-device (vulkan-handle device))
             (lvk:destroy-instance (vulkan-device-instance device))

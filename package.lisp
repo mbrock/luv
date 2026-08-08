@@ -47,15 +47,25 @@
            #:create-shader-module
            #:destroy-shader-module
            #:create-storage-image-descriptor-set-layout
+           #:create-sampled-image-sampler-descriptor-set-layout
            #:destroy-descriptor-set-layout
            #:create-pipeline-layout
            #:destroy-pipeline-layout
            #:create-compute-pipeline
+           #:create-graphics-pipeline
            #:destroy-pipeline
+           #:create-sampler
+           #:destroy-sampler
+           #:create-color-render-pass
+           #:destroy-render-pass
+           #:create-framebuffer
+           #:destroy-framebuffer
            #:create-storage-image-descriptor-pool
+           #:create-sampled-image-sampler-descriptor-pool
            #:destroy-descriptor-pool
            #:allocate-descriptor-set
            #:update-storage-image-descriptor
+           #:update-sampled-image-sampler-descriptors
            #:create-command-pool
            #:destroy-command-pool
            #:allocate-command-buffer
@@ -66,8 +76,14 @@
            #:cmd-copy-image
            #:cmd-copy-buffer-to-image
            #:cmd-bind-compute-pipeline
+           #:cmd-bind-graphics-pipeline
            #:cmd-bind-compute-descriptor-set
+           #:cmd-bind-graphics-descriptor-set
            #:cmd-dispatch
+           #:cmd-begin-color-render-pass
+           #:cmd-set-viewport-and-scissor
+           #:cmd-end-render-pass
+           #:cmd-draw
            #:submit-command-buffers
            #:submit-command-buffer
            #:queue-wait-idle
@@ -129,10 +145,13 @@
            #:gpu-texture-format
            #:gpu-texture-view
            #:gpu-texture-view-texture
+           #:gpu-sampler
            #:gpu-shader-module
            #:gpu-bind-group-layout
            #:gpu-bind-group
            #:gpu-compute-pipeline
+           #:gpu-render-pipeline
+           #:gpu-render-pass-encoder
            #:gpu-compute-pass-encoder
            #:gpu-command-encoder
            #:gpu-command-buffer
@@ -146,10 +165,12 @@
            #:write-texture
            #:destroy
            #:begin-compute-pass
+           #:begin-render-pass
            #:end-pass
            #:set-pipeline
            #:set-bind-group
            #:dispatch-workgroups
+           #:draw
            #:make-device-descriptor
            #:make-texture-descriptor
            #:make-texture-copy
@@ -162,10 +183,13 @@
            #:texture-data-layout-bytes-per-row
            #:texture-data-layout-rows-per-image
            #:make-texture-view-descriptor
+           #:make-sampler-descriptor
            #:make-shader-module-descriptor
            #:make-bind-group-layout-descriptor
            #:make-bind-group-descriptor
            #:make-compute-pipeline-descriptor
+           #:make-render-pipeline-descriptor
+           #:make-render-pass-descriptor
            #:make-command-encoder-descriptor
            #:make-gpu-clear-texture-command
            #:make-gpu-copy-texture-command

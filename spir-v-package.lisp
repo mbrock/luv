@@ -54,4 +54,8 @@
            #:lower-spir-v
            #:assemble-spir-v-module
            #:gradient-compute-module
-           #:gradient-compute-shader))
+           #:gradient-compute-shader
+           #:spinning-texture-vertex-module
+           #:spinning-texture-fragment-module
+           #:spinning-texture-vertex-shader
+           #:spinning-texture-fragment-shader))

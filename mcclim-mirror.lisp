@@ -20,7 +20,10 @@ mirror's identity: a later target may be a texture presented on a 3D quad."))
 (defclass luv-raster-mirror (luv-mirror mcclim-render:image-mirror-mixin)
   ((texture
     :initform nil
-    :accessor mirror-texture))
+    :accessor mirror-texture)
+   (compositor
+    :initform nil
+    :accessor mirror-compositor))
   (:documentation
    "A luv mirror retaining McCLIM's CPU raster image for later upload."))
 
@@ -248,13 +251,37 @@ Conventional RUN-FRAME-TOP-LEVEL frames consume their own queues instead."
                (luv:make-texture-descriptor
                 :label "McCLIM raster upload"
                 :size size
-                :usage '(:copy-src :copy-dst)
+                :usage '(:copy-src :copy-dst :texture-binding)
                 :dimensions :2d
                 :format format))))
         (when texture
+          ;; A compositor may retain a view and descriptor for the old image.
+          ;; Release those dependents before destroying their source.
+          (release-raster-mirror-compositor (mirror-compositor mirror))
           (luv:destroy texture))
         (setf (mirror-texture mirror) replacement)))
     (mirror-texture mirror)))
+
+(defgeneric present-raster-mirror-texture
+    (mirror context texture compositor)
+  (:documentation
+   "Present an uploaded McCLIM TEXTURE through an optional COMPOSITOR."))
+
+(defmethod present-raster-mirror-texture
+    ((mirror luv-raster-mirror) context texture (compositor null))
+  (declare (ignore mirror))
+  (luv:present-canvas-frame
+   context
+   (lambda (surface encoder)
+     (luv:encode
+      encoder
+      (luv:make-gpu-copy-texture-command
+       :source texture :destination surface)))))
+
+(defgeneric release-raster-mirror-compositor (compositor))
+
+(defmethod release-raster-mirror-compositor ((compositor null))
+  (values))
 
 (defmethod present-mirror ((mirror luv-raster-mirror))
   "Upload and present MIRROR when McCLIM has marked its image dirty."
@@ -288,18 +315,16 @@ Conventional RUN-FRAME-TOP-LEVEL frames consume their own queues instead."
                  :bytes-per-row (* 4 (first size))
                  :rows-per-image (second size))
                 size)
-               (luv:present-canvas-frame
-                context
-                (lambda (surface encoder)
-                  (luv:encode
-                   encoder
-                   (luv:make-gpu-copy-texture-command
-                    :source texture :destination surface))))
+               (present-raster-mirror-texture
+                mirror context texture (mirror-compositor mirror))
                (setf (mcclim-render:image-dirty-region mirror)
                      +nowhere+))))))))
   mirror)
 
 (defmethod release-mirror-presentation ((mirror luv-raster-mirror))
+  (release-raster-mirror-compositor (mirror-compositor mirror))
+  (setf (mirror-compositor mirror) nil
+        (luv:canvas-clock (mirror-target mirror)) (luv:make-demand-clock))
   (alexandria:when-let ((texture (mirror-texture mirror)))
     (luv:destroy texture)
     (setf (mirror-texture mirror) nil))

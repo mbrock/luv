@@ -246,6 +246,22 @@ There is also a small real-gadget proof with a push button and toggle:
 (luv.mcclim:close-widget-lab *widgets*)
 ```
 
+The first compositing proof keeps that McCLIM raster as a sampled texture,
+draws a vertexless perspective quad into an offscreen render attachment, and
+copies the result to the canvas.  Both shader stages come from the
+s-expression SPIR-V IR:
+
+```lisp
+(defparameter *spinning-widgets*
+  (luv.mcclim:open-spinning-widget-lab :speed 0.08))
+(luv.mcclim:close-widget-lab *spinning-widgets*)
+```
+
+For this intentionally tiny slice, one source texel carries the animation
+sine/cosine instead of introducing uniform buffers. Pointer events still use
+the flat sheet coordinates; inverse-projecting them through the quad is the
+next part of making transformed CLIM sheets fully interactive.
+
 The optional Listener component runs McCLIM's real Listener reader and frame
 top level on that second regime:
 

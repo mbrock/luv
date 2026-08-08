@@ -64,7 +64,8 @@
                (:file "mcclim-port")
                (:file "mcclim-mirror")
                (:file "mcclim-lab")
-               (:file "mcclim-widget-lab")))
+               (:file "mcclim-widget-lab")
+               (:file "mcclim-compositor")))
 
 (asdf:defsystem #:luv/mcclim/listener
   :description "The McCLIM Listener running on luv."

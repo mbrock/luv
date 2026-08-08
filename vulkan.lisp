@@ -39,15 +39,27 @@
   (:image-view-create-info 15)
   (:shader-module-create-info 16)
   (:pipeline-shader-stage-create-info 18)
+  (:pipeline-vertex-input-state-create-info 19)
+  (:pipeline-input-assembly-state-create-info 20)
+  (:pipeline-viewport-state-create-info 22)
+  (:pipeline-rasterization-state-create-info 23)
+  (:pipeline-multisample-state-create-info 24)
+  (:pipeline-color-blend-state-create-info 26)
+  (:pipeline-dynamic-state-create-info 27)
+  (:graphics-pipeline-create-info 28)
   (:compute-pipeline-create-info 29)
   (:pipeline-layout-create-info 30)
+  (:sampler-create-info 31)
   (:descriptor-set-layout-create-info 32)
   (:descriptor-pool-create-info 33)
   (:descriptor-set-allocate-info 34)
   (:write-descriptor-set 35)
+  (:framebuffer-create-info 37)
+  (:render-pass-create-info 38)
   (:command-pool-create-info 39)
   (:command-buffer-allocate-info 40)
   (:command-buffer-begin-info 42)
+  (:render-pass-begin-info 43)
   (:image-memory-barrier 45)
   (:swapchain-create-info-khr 1000001000)
   (:present-info-khr 1000001001))
@@ -74,6 +86,8 @@
 (cffi:defcenum (image-layout :uint32)
   (:undefined 0)
   (:general 1)
+  (:color-attachment-optimal 2)
+  (:shader-read-only-optimal 5)
   (:transfer-src-optimal 6)
   (:transfer-dst-optimal 7)
   (:present-src-khr 1000001002))
@@ -90,7 +104,67 @@
   (:identity 0))
 
 (cffi:defcenum (descriptor-type :uint32)
+  (:sampler 0)
+  (:combined-image-sampler 1)
+  (:sampled-image 2)
   (:storage-image 3))
+
+(cffi:defcenum (filter :uint32)
+  (:nearest 0)
+  (:linear 1))
+
+(cffi:defcenum (sampler-mipmap-mode :uint32)
+  (:nearest 0)
+  (:linear 1))
+
+(cffi:defcenum (sampler-address-mode :uint32)
+  (:repeat 0)
+  (:mirrored-repeat 1)
+  (:clamp-to-edge 2))
+
+(cffi:defcenum (compare-op :uint32)
+  (:never 0)
+  (:always 7))
+
+(cffi:defcenum (border-color :uint32)
+  (:float-transparent-black 0))
+
+(cffi:defcenum (primitive-topology :uint32)
+  (:triangle-list 3)
+  (:triangle-strip 4))
+
+(cffi:defcenum (polygon-mode :uint32)
+  (:fill 0))
+
+(cffi:defcenum (front-face :uint32)
+  (:counter-clockwise 1)
+  (:clockwise 0))
+
+(cffi:defcenum (blend-factor :uint32)
+  (:zero 0)
+  (:one 1))
+
+(cffi:defcenum (blend-op :uint32)
+  (:add 0))
+
+(cffi:defcenum (logic-op :uint32)
+  (:copy 3))
+
+(cffi:defcenum (attachment-load-op :uint32)
+  (:load 0)
+  (:clear 1)
+  (:dont-care 2))
+
+(cffi:defcenum (attachment-store-op :uint32)
+  (:store 0)
+  (:dont-care 1))
+
+(cffi:defcenum (subpass-contents :uint32)
+  (:inline 0))
+
+(cffi:defcenum (dynamic-state :uint32)
+  (:viewport 0)
+  (:scissor 1))
 
 (cffi:defcenum (pipeline-bind-point :uint32)
   (:graphics 0)
@@ -138,14 +212,25 @@
 (cffi:defbitfield (image-usage-flags :uint32)
   (:transfer-src #x1)
   (:transfer-dst #x2)
-  (:storage #x8))
+  (:sampled #x4)
+  (:storage #x8)
+  (:color-attachment #x10))
 
 (cffi:defbitfield (buffer-usage-flags :uint32)
   (:transfer-src #x1)
   (:transfer-dst #x2))
 
 (cffi:defbitfield (shader-stage-flags :uint32)
+  (:vertex #x1)
+  (:fragment #x10)
   (:compute #x20))
+
+(cffi:defbitfield (cull-mode-flags :uint32)
+  (:front #x1)
+  (:back #x2))
+
+(cffi:defbitfield (color-component-flags :uint32)
+  (:r #x1) (:g #x2) (:b #x4) (:a #x8))
 
 (cffi:defbitfield (memory-property-flags :uint32)
   (:device-local #x1)
@@ -171,6 +256,8 @@
   (:stencil #x4))
 
 (cffi:defbitfield (access-flags :uint32)
+  (:color-attachment-read #x80)
+  (:color-attachment-write #x100)
   (:shader-read #x20)
   (:shader-write #x40)
   (:transfer-read #x800)
@@ -178,6 +265,9 @@
 
 (cffi:defbitfield (pipeline-stage-flags :uint32)
   (:top-of-pipe #x1)
+  (:vertex-shader #x8)
+  (:fragment-shader #x80)
+  (:color-attachment-output #x400)
   (:compute-shader #x800)
   (:transfer #x1000)
   (:bottom-of-pipe #x2000))
@@ -285,6 +375,14 @@
 (defvkstruct extent-2d ()
   (width :uint32)
   (height :uint32))
+
+(defvkstruct offset-2d ()
+  (x :int32)
+  (y :int32))
+
+(defvkstruct rect-2d ()
+  (offset (:struct offset-2d))
+  (extent (:struct extent-2d)))
 
 (defvkstruct queue-family-properties ()
   (queue-flags queue-flags)
@@ -407,6 +505,97 @@
   (base-pipeline-handle :pointer)
   (base-pipeline-index :int32))
 
+(defvkstruct pipeline-vertex-input-state-create-info
+    (:s-type :pipeline-vertex-input-state-create-info)
+  (flags :uint32)
+  (vertex-binding-description-count :uint32)
+  (p-vertex-binding-descriptions :pointer)
+  (vertex-attribute-description-count :uint32)
+  (p-vertex-attribute-descriptions :pointer))
+
+(defvkstruct pipeline-input-assembly-state-create-info
+    (:s-type :pipeline-input-assembly-state-create-info)
+  (flags :uint32)
+  (topology primitive-topology)
+  (primitive-restart-enable :uint32))
+
+(defvkstruct pipeline-viewport-state-create-info
+    (:s-type :pipeline-viewport-state-create-info)
+  (flags :uint32)
+  (viewport-count :uint32)
+  (p-viewports :pointer)
+  (scissor-count :uint32)
+  (p-scissors :pointer))
+
+(defvkstruct pipeline-rasterization-state-create-info
+    (:s-type :pipeline-rasterization-state-create-info)
+  (flags :uint32)
+  (depth-clamp-enable :uint32)
+  (rasterizer-discard-enable :uint32)
+  (polygon-mode polygon-mode)
+  (cull-mode cull-mode-flags)
+  (front-face front-face)
+  (depth-bias-enable :uint32)
+  (depth-bias-constant-factor :float)
+  (depth-bias-clamp :float)
+  (depth-bias-slope-factor :float)
+  (line-width :float))
+
+(defvkstruct pipeline-multisample-state-create-info
+    (:s-type :pipeline-multisample-state-create-info)
+  (flags :uint32)
+  (rasterization-samples sample-count)
+  (sample-shading-enable :uint32)
+  (min-sample-shading :float)
+  (p-sample-mask :pointer)
+  (alpha-to-coverage-enable :uint32)
+  (alpha-to-one-enable :uint32))
+
+(defvkstruct pipeline-color-blend-attachment-state ()
+  (blend-enable :uint32)
+  (src-color-blend-factor blend-factor)
+  (dst-color-blend-factor blend-factor)
+  (color-blend-op blend-op)
+  (src-alpha-blend-factor blend-factor)
+  (dst-alpha-blend-factor blend-factor)
+  (alpha-blend-op blend-op)
+  (color-write-mask color-component-flags))
+
+(defvkstruct pipeline-color-blend-state-create-info
+    (:s-type :pipeline-color-blend-state-create-info)
+  (flags :uint32)
+  (logic-op-enable :uint32)
+  (logic-op logic-op)
+  (attachment-count :uint32)
+  (p-attachments :pointer)
+  (blend-constants (:array :float 4)))
+
+(defvkstruct pipeline-dynamic-state-create-info
+    (:s-type :pipeline-dynamic-state-create-info)
+  (flags :uint32)
+  (dynamic-state-count :uint32)
+  (p-dynamic-states :pointer))
+
+(defvkstruct graphics-pipeline-create-info
+    (:s-type :graphics-pipeline-create-info)
+  (flags :uint32)
+  (stage-count :uint32)
+  (p-stages :pointer)
+  (p-vertex-input-state :pointer)
+  (p-input-assembly-state :pointer)
+  (p-tessellation-state :pointer)
+  (p-viewport-state :pointer)
+  (p-rasterization-state :pointer)
+  (p-multisample-state :pointer)
+  (p-depth-stencil-state :pointer)
+  (p-color-blend-state :pointer)
+  (p-dynamic-state :pointer)
+  (layout :pointer)
+  (render-pass :pointer)
+  (subpass :uint32)
+  (base-pipeline-handle :pointer)
+  (base-pipeline-index :int32))
+
 (defvkstruct pipeline-layout-create-info
     (:s-type :pipeline-layout-create-info)
   (flags :uint32)
@@ -414,6 +603,24 @@
   (p-set-layouts :pointer)
   (push-constant-range-count :uint32)
   (p-push-constant-ranges :pointer))
+
+(defvkstruct sampler-create-info (:s-type :sampler-create-info)
+  (flags :uint32)
+  (mag-filter filter)
+  (min-filter filter)
+  (mipmap-mode sampler-mipmap-mode)
+  (address-mode-u sampler-address-mode)
+  (address-mode-v sampler-address-mode)
+  (address-mode-w sampler-address-mode)
+  (mip-lod-bias :float)
+  (anisotropy-enable :uint32)
+  (max-anisotropy :float)
+  (compare-enable :uint32)
+  (compare-op compare-op)
+  (min-lod :float)
+  (max-lod :float)
+  (border-color border-color)
+  (unnormalized-coordinates :uint32))
 
 (defvkstruct descriptor-set-layout-binding ()
   (binding :uint32)
@@ -460,6 +667,55 @@
   (p-buffer-info :pointer)
   (p-texel-buffer-view :pointer))
 
+(defvkstruct attachment-description ()
+  (flags :uint32)
+  (format format)
+  (samples sample-count)
+  (load-op attachment-load-op)
+  (store-op attachment-store-op)
+  (stencil-load-op attachment-load-op)
+  (stencil-store-op attachment-store-op)
+  (initial-layout image-layout)
+  (final-layout image-layout))
+
+(defvkstruct attachment-reference ()
+  (attachment :uint32)
+  (layout image-layout))
+
+(defvkstruct subpass-description ()
+  (flags :uint32)
+  (pipeline-bind-point pipeline-bind-point)
+  (input-attachment-count :uint32)
+  (p-input-attachments :pointer)
+  (color-attachment-count :uint32)
+  (p-color-attachments :pointer)
+  (p-resolve-attachments :pointer)
+  (p-depth-stencil-attachment :pointer)
+  (preserve-attachment-count :uint32)
+  (p-preserve-attachments :pointer))
+
+(defvkstruct render-pass-create-info (:s-type :render-pass-create-info)
+  (flags :uint32)
+  (attachment-count :uint32)
+  (p-attachments :pointer)
+  (subpass-count :uint32)
+  (p-subpasses :pointer)
+  (dependency-count :uint32)
+  (p-dependencies :pointer))
+
+(defvkstruct framebuffer-create-info (:s-type :framebuffer-create-info)
+  (flags :uint32)
+  (render-pass :pointer)
+  (attachment-count :uint32)
+  (p-attachments :pointer)
+  (width :uint32)
+  (height :uint32)
+  (layers :uint32))
+
+(defvkstruct viewport ()
+  (x :float) (y :float) (width :float) (height :float)
+  (min-depth :float) (max-depth :float))
+
 (defvkstruct image-memory-barrier (:s-type :image-memory-barrier)
   (src-access-mask access-flags)
   (dst-access-mask access-flags)
@@ -503,6 +759,16 @@
   (float-32 (:array :float 4))
   (int-32 (:array :int32 4))
   (uint-32 (:array :uint32 4)))
+
+(cffi:defcunion clear-value
+  (color (:union clear-color-value)))
+
+(defvkstruct render-pass-begin-info (:s-type :render-pass-begin-info)
+  (render-pass :pointer)
+  (framebuffer :pointer)
+  (render-area (:struct rect-2d))
+  (clear-value-count :uint32)
+  (p-clear-values :pointer))
 
 (defvkstruct submit-info (:s-type :submit-info)
   (wait-semaphore-count :uint32)
@@ -870,12 +1136,53 @@
   (allocator :pointer)
   (pipelines :pointer))
 
+(cffi:defcfun ("vkCreateGraphicsPipelines" %create-graphics-pipelines
+               :library vulkan-loader)
+    checked-result
+  (device :pointer)
+  (pipeline-cache :pointer)
+  (create-info-count :uint32)
+  (create-infos :pointer)
+  (allocator :pointer)
+  (pipelines :pointer))
+
 (cffi:defcfun ("vkDestroyPipeline" %destroy-pipeline
                :library vulkan-loader)
     :void
   (device :pointer)
   (pipeline :pointer)
   (allocator :pointer))
+
+(cffi:defcfun ("vkCreateSampler" %create-sampler :library vulkan-loader)
+    checked-result
+  (device :pointer) (create-info :pointer) (allocator :pointer)
+  (sampler :pointer))
+
+(cffi:defcfun ("vkDestroySampler" %destroy-sampler :library vulkan-loader)
+    :void
+  (device :pointer) (sampler :pointer) (allocator :pointer))
+
+(cffi:defcfun ("vkCreateRenderPass" %create-render-pass
+               :library vulkan-loader)
+    checked-result
+  (device :pointer) (create-info :pointer) (allocator :pointer)
+  (render-pass :pointer))
+
+(cffi:defcfun ("vkDestroyRenderPass" %destroy-render-pass
+               :library vulkan-loader)
+    :void
+  (device :pointer) (render-pass :pointer) (allocator :pointer))
+
+(cffi:defcfun ("vkCreateFramebuffer" %create-framebuffer
+               :library vulkan-loader)
+    checked-result
+  (device :pointer) (create-info :pointer) (allocator :pointer)
+  (framebuffer :pointer))
+
+(cffi:defcfun ("vkDestroyFramebuffer" %destroy-framebuffer
+               :library vulkan-loader)
+    :void
+  (device :pointer) (framebuffer :pointer) (allocator :pointer))
 
 (cffi:defcfun ("vkCreateDescriptorPool" %create-descriptor-pool
                :library vulkan-loader)
@@ -1010,6 +1317,35 @@
   (group-count-x :uint32)
   (group-count-y :uint32)
   (group-count-z :uint32))
+
+(cffi:defcfun ("vkCmdBeginRenderPass" %cmd-begin-render-pass
+               :library vulkan-loader)
+    :void
+  (command-buffer :pointer) (begin-info :pointer)
+  (contents subpass-contents))
+
+(cffi:defcfun ("vkCmdEndRenderPass" %cmd-end-render-pass
+               :library vulkan-loader)
+    :void
+  (command-buffer :pointer))
+
+(cffi:defcfun ("vkCmdSetViewport" %cmd-set-viewport
+               :library vulkan-loader)
+    :void
+  (command-buffer :pointer) (first-viewport :uint32)
+  (viewport-count :uint32) (viewports :pointer))
+
+(cffi:defcfun ("vkCmdSetScissor" %cmd-set-scissor
+               :library vulkan-loader)
+    :void
+  (command-buffer :pointer) (first-scissor :uint32)
+  (scissor-count :uint32) (scissors :pointer))
+
+(cffi:defcfun ("vkCmdDraw" %cmd-draw :library vulkan-loader)
+    :void
+  (command-buffer :pointer) (vertex-count :uint32)
+  (instance-count :uint32) (first-vertex :uint32)
+  (first-instance :uint32))
 
 (cffi:defcfun ("vkQueueSubmit" %queue-submit :library vulkan-loader)
     checked-result
@@ -1228,6 +1564,27 @@
                              (cffi:null-pointer))
   :checked t
   :operation :create-compute-pipeline)
+
+(define-creator create-graphics-pipeline-handle (device create-info)
+  (%create-graphics-pipelines device (cffi:null-pointer) 1 create-info
+                              (cffi:null-pointer))
+  :checked t
+  :operation :create-graphics-pipeline)
+
+(define-creator create-sampler-handle (device create-info)
+  (%create-sampler device create-info (cffi:null-pointer))
+  :checked t
+  :operation :create-sampler)
+
+(define-creator create-render-pass-handle (device create-info)
+  (%create-render-pass device create-info (cffi:null-pointer))
+  :checked t
+  :operation :create-render-pass)
+
+(define-creator create-framebuffer-handle (device create-info)
+  (%create-framebuffer device create-info (cffi:null-pointer))
+  :checked t
+  :operation :create-framebuffer)
 
 (define-creator create-descriptor-pool-handle (device create-info)
   (%create-descriptor-pool device create-info (cffi:null-pointer))
@@ -1558,6 +1915,26 @@
               :p-bindings layout-binding)
       (create-descriptor-set-layout-handle device create-info))))
 
+(defun create-sampled-image-sampler-descriptor-set-layout
+    (device &key (texture-binding 0) (sampler-binding 1))
+  (cffi:with-foreign-object
+      (bindings '(:struct descriptor-set-layout-binding) 2)
+    (fill-vk
+     (cffi:mem-aptr bindings '(:struct descriptor-set-layout-binding) 0)
+     'descriptor-set-layout-binding
+     :binding texture-binding :descriptor-type :sampled-image
+     :descriptor-count 1 :stage-flags '(:vertex :fragment)
+     :p-immutable-samplers (cffi:null-pointer))
+    (fill-vk
+     (cffi:mem-aptr bindings '(:struct descriptor-set-layout-binding) 1)
+     'descriptor-set-layout-binding
+     :binding sampler-binding :descriptor-type :sampler
+     :descriptor-count 1 :stage-flags '(:vertex :fragment)
+     :p-immutable-samplers (cffi:null-pointer))
+    (with-vk (create-info descriptor-set-layout-create-info
+              :flags 0 :binding-count 2 :p-bindings bindings)
+      (create-descriptor-set-layout-handle device create-info))))
+
 (defun destroy-descriptor-set-layout (device layout)
   (%destroy-descriptor-set-layout device layout (cffi:null-pointer))
   (values))
@@ -1595,6 +1972,153 @@
        :p-specialization-info (cffi:null-pointer))
       (create-compute-pipeline-handle device create-info))))
 
+(defun create-sampler
+    (device &key (mag-filter :linear) (min-filter :linear)
+                 (mipmap-mode :nearest)
+                 (address-mode-u :clamp-to-edge)
+                 (address-mode-v :clamp-to-edge)
+                 (address-mode-w :clamp-to-edge))
+  (with-vk (create-info sampler-create-info
+            :flags 0
+            :mag-filter mag-filter :min-filter min-filter
+            :mipmap-mode mipmap-mode
+            :address-mode-u address-mode-u
+            :address-mode-v address-mode-v
+            :address-mode-w address-mode-w
+            :mip-lod-bias 0.0
+            :anisotropy-enable 0 :max-anisotropy 1.0
+            :compare-enable 0 :compare-op :always
+            :min-lod 0.0 :max-lod 0.0
+            :border-color :float-transparent-black
+            :unnormalized-coordinates 0)
+    (create-sampler-handle device create-info)))
+
+(defun destroy-sampler (device sampler)
+  (%destroy-sampler device sampler (cffi:null-pointer))
+  (values))
+
+(defun create-color-render-pass (device format)
+  (with-vk (attachment attachment-description
+            :flags 0 :format format :samples :1
+            :load-op :clear :store-op :store
+            :stencil-load-op :dont-care :stencil-store-op :dont-care
+            :initial-layout :color-attachment-optimal
+            :final-layout :color-attachment-optimal)
+    (with-vk (reference attachment-reference
+              :attachment 0 :layout :color-attachment-optimal)
+      (with-vk (subpass subpass-description
+                :flags 0 :pipeline-bind-point :graphics
+                :input-attachment-count 0
+                :p-input-attachments (cffi:null-pointer)
+                :color-attachment-count 1
+                :p-color-attachments reference
+                :p-resolve-attachments (cffi:null-pointer)
+                :p-depth-stencil-attachment (cffi:null-pointer)
+                :preserve-attachment-count 0
+                :p-preserve-attachments (cffi:null-pointer))
+        (with-vk (create-info render-pass-create-info
+                  :flags 0 :attachment-count 1 :p-attachments attachment
+                  :subpass-count 1 :p-subpasses subpass
+                  :dependency-count 0
+                  :p-dependencies (cffi:null-pointer))
+          (create-render-pass-handle device create-info))))))
+
+(defun destroy-render-pass (device render-pass)
+  (%destroy-render-pass device render-pass (cffi:null-pointer))
+  (values))
+
+(defun create-framebuffer (device render-pass image-view width height)
+  (with-foreign-array (attachments :pointer (vector image-view))
+    (with-vk (create-info framebuffer-create-info
+              :flags 0 :render-pass render-pass
+              :attachment-count 1 :p-attachments attachments
+              :width width :height height :layers 1)
+      (create-framebuffer-handle device create-info))))
+
+(defun destroy-framebuffer (device framebuffer)
+  (%destroy-framebuffer device framebuffer (cffi:null-pointer))
+  (values))
+
+(defun create-graphics-pipeline
+    (device vertex-module fragment-module layout render-pass
+     &key (vertex-entry-point "main") (fragment-entry-point "main")
+          (topology :triangle-strip))
+  (cffi:with-foreign-string (vertex-name vertex-entry-point)
+    (cffi:with-foreign-string (fragment-name fragment-entry-point)
+      (cffi:with-foreign-object
+          (stages '(:struct pipeline-shader-stage-create-info) 2)
+        (fill-vk
+         (cffi:mem-aptr stages '(:struct pipeline-shader-stage-create-info) 0)
+         'pipeline-shader-stage-create-info
+         :flags 0 :stage '(:vertex) :module vertex-module
+         :p-name vertex-name :p-specialization-info (cffi:null-pointer))
+        (fill-vk
+         (cffi:mem-aptr stages '(:struct pipeline-shader-stage-create-info) 1)
+         'pipeline-shader-stage-create-info
+         :flags 0 :stage '(:fragment) :module fragment-module
+         :p-name fragment-name :p-specialization-info (cffi:null-pointer))
+        (with-vk (vertex-input pipeline-vertex-input-state-create-info
+                  :flags 0
+                  :vertex-binding-description-count 0
+                  :p-vertex-binding-descriptions (cffi:null-pointer)
+                  :vertex-attribute-description-count 0
+                  :p-vertex-attribute-descriptions (cffi:null-pointer))
+          (with-vk (input-assembly pipeline-input-assembly-state-create-info
+                    :flags 0 :topology topology
+                    :primitive-restart-enable 0)
+            (with-vk (viewport-state pipeline-viewport-state-create-info
+                      :flags 0 :viewport-count 1
+                      :p-viewports (cffi:null-pointer)
+                      :scissor-count 1 :p-scissors (cffi:null-pointer))
+              (with-vk (rasterization pipeline-rasterization-state-create-info
+                        :flags 0 :depth-clamp-enable 0
+                        :rasterizer-discard-enable 0 :polygon-mode :fill
+                        :cull-mode nil :front-face :counter-clockwise
+                        :depth-bias-enable 0 :depth-bias-constant-factor 0.0
+                        :depth-bias-clamp 0.0 :depth-bias-slope-factor 0.0
+                        :line-width 1.0)
+                (with-vk (multisample pipeline-multisample-state-create-info
+                          :flags 0 :rasterization-samples :1
+                          :sample-shading-enable 0 :min-sample-shading 0.0
+                          :p-sample-mask (cffi:null-pointer)
+                          :alpha-to-coverage-enable 0 :alpha-to-one-enable 0)
+                  (with-vk (blend-attachment
+                            pipeline-color-blend-attachment-state
+                            :blend-enable 0
+                            :src-color-blend-factor :one
+                            :dst-color-blend-factor :zero
+                            :color-blend-op :add
+                            :src-alpha-blend-factor :one
+                            :dst-alpha-blend-factor :zero
+                            :alpha-blend-op :add
+                            :color-write-mask '(:r :g :b :a))
+                    (with-vk (blend pipeline-color-blend-state-create-info
+                              :flags 0 :logic-op-enable 0 :logic-op :copy
+                              :attachment-count 1
+                              :p-attachments blend-attachment)
+                      (with-foreign-array
+                          (dynamic-states dynamic-state
+                                          #(:viewport :scissor))
+                        (with-vk (dynamic pipeline-dynamic-state-create-info
+                                  :flags 0 :dynamic-state-count 2
+                                  :p-dynamic-states dynamic-states)
+                          (with-vk (create-info graphics-pipeline-create-info
+                                    :flags 0 :stage-count 2 :p-stages stages
+                                    :p-vertex-input-state vertex-input
+                                    :p-input-assembly-state input-assembly
+                                    :p-tessellation-state (cffi:null-pointer)
+                                    :p-viewport-state viewport-state
+                                    :p-rasterization-state rasterization
+                                    :p-multisample-state multisample
+                                    :p-depth-stencil-state (cffi:null-pointer)
+                                    :p-color-blend-state blend
+                                    :p-dynamic-state dynamic :layout layout
+                                    :render-pass render-pass :subpass 0
+                                    :base-pipeline-handle (cffi:null-pointer)
+                                    :base-pipeline-index -1)
+                            (create-graphics-pipeline-handle
+                             device create-info)))))))))))))))
+
 (defun destroy-pipeline (device pipeline)
   (%destroy-pipeline device pipeline (cffi:null-pointer))
   (values))
@@ -1608,6 +2132,23 @@
               :max-sets max-sets
               :pool-size-count 1
               :p-pool-sizes pool-size)
+      (create-descriptor-pool-handle device create-info))))
+
+(defun create-sampled-image-sampler-descriptor-pool
+    (device &key (max-sets 1))
+  (cffi:with-foreign-object
+      (pool-sizes '(:struct descriptor-pool-size) 2)
+    (fill-vk
+     (cffi:mem-aptr pool-sizes '(:struct descriptor-pool-size) 0)
+     'descriptor-pool-size
+     :type :sampled-image :descriptor-count max-sets)
+    (fill-vk
+     (cffi:mem-aptr pool-sizes '(:struct descriptor-pool-size) 1)
+     'descriptor-pool-size
+     :type :sampler :descriptor-count max-sets)
+    (with-vk (create-info descriptor-pool-create-info
+              :flags 0 :max-sets max-sets
+              :pool-size-count 2 :p-pool-sizes pool-sizes)
       (create-descriptor-pool-handle device create-info))))
 
 (defun destroy-descriptor-pool (device pool)
@@ -1639,6 +2180,44 @@
               :p-texel-buffer-view (cffi:null-pointer))
       (%update-descriptor-sets
        device 1 write 0 (cffi:null-pointer))))
+  (values))
+
+(defun update-sampled-image-sampler-descriptors
+    (device descriptor-set image-view sampler
+     &key (texture-binding 0) (sampler-binding 1))
+  (cffi:with-foreign-object
+      (image-infos '(:struct descriptor-image-info) 2)
+    (fill-vk
+     (cffi:mem-aptr image-infos '(:struct descriptor-image-info) 0)
+     'descriptor-image-info
+     :sampler (cffi:null-pointer) :image-view image-view
+     :image-layout :shader-read-only-optimal)
+    (fill-vk
+     (cffi:mem-aptr image-infos '(:struct descriptor-image-info) 1)
+     'descriptor-image-info
+     :sampler sampler :image-view (cffi:null-pointer)
+     :image-layout :undefined)
+    (cffi:with-foreign-object
+        (writes '(:struct write-descriptor-set) 2)
+      (fill-vk
+       (cffi:mem-aptr writes '(:struct write-descriptor-set) 0)
+       'write-descriptor-set
+       :dst-set descriptor-set :dst-binding texture-binding
+       :dst-array-element 0 :descriptor-count 1
+       :descriptor-type :sampled-image :p-image-info image-infos
+       :p-buffer-info (cffi:null-pointer)
+       :p-texel-buffer-view (cffi:null-pointer))
+      (fill-vk
+       (cffi:mem-aptr writes '(:struct write-descriptor-set) 1)
+       'write-descriptor-set
+       :dst-set descriptor-set :dst-binding sampler-binding
+       :dst-array-element 0 :descriptor-count 1
+       :descriptor-type :sampler
+       :p-image-info
+       (cffi:mem-aptr image-infos '(:struct descriptor-image-info) 1)
+       :p-buffer-info (cffi:null-pointer)
+       :p-texel-buffer-view (cffi:null-pointer))
+      (%update-descriptor-sets device 2 writes 0 (cffi:null-pointer))))
   (values))
 
 (defun create-command-pool (device queue-family-index &key flags)
@@ -1769,6 +2348,10 @@
   (%cmd-bind-pipeline command-buffer :compute pipeline)
   (values))
 
+(defun cmd-bind-graphics-pipeline (command-buffer pipeline)
+  (%cmd-bind-pipeline command-buffer :graphics pipeline)
+  (values))
+
 (defun cmd-bind-compute-descriptor-set
     (command-buffer pipeline-layout descriptor-set)
   (with-foreign-array (sets :pointer (vector descriptor-set))
@@ -1777,8 +2360,72 @@
      0 (cffi:null-pointer)))
   (values))
 
+(defun cmd-bind-graphics-descriptor-set
+    (command-buffer pipeline-layout descriptor-set)
+  (with-foreign-array (sets :pointer (vector descriptor-set))
+    (%cmd-bind-descriptor-sets
+     command-buffer :graphics pipeline-layout 0 1 sets
+     0 (cffi:null-pointer)))
+  (values))
+
 (defun cmd-dispatch (command-buffer x y &optional (z 1))
   (%cmd-dispatch command-buffer x y z)
+  (values))
+
+(defun cmd-begin-color-render-pass
+    (command-buffer render-pass framebuffer width height clear-color)
+  (cffi:with-foreign-object (clear '(:union clear-value))
+    (clear-foreign-object clear '(:union clear-value))
+    (let* ((color
+             (cffi:foreign-slot-pointer
+              clear '(:union clear-value) 'color))
+           (components
+             (cffi:foreign-slot-pointer
+              color '(:union clear-color-value) 'float-32)))
+      (loop for component across clear-color
+            for index below 4
+            do (setf (cffi:mem-aref components :float index) component)))
+    (with-vk (begin-info render-pass-begin-info
+              :render-pass render-pass :framebuffer framebuffer
+              :clear-value-count 1 :p-clear-values clear)
+      (let ((area
+              (cffi:foreign-slot-pointer
+               begin-info '(:struct render-pass-begin-info) 'render-area)))
+        (fill-vk
+         (cffi:foreign-slot-pointer area '(:struct rect-2d) 'offset)
+         'offset-2d :x 0 :y 0)
+        (fill-vk
+         (cffi:foreign-slot-pointer area '(:struct rect-2d) 'extent)
+         'extent-2d :width width :height height))
+      (%cmd-begin-render-pass command-buffer begin-info :inline)))
+  (values))
+
+(defun cmd-set-viewport-and-scissor (command-buffer width height)
+  (with-vk (viewport viewport
+            :x 0.0 :y 0.0
+            :width (coerce width 'single-float)
+            :height (coerce height 'single-float)
+            :min-depth 0.0 :max-depth 1.0)
+    (%cmd-set-viewport command-buffer 0 1 viewport))
+  (with-vk (scissor rect-2d)
+    (fill-vk
+     (cffi:foreign-slot-pointer scissor '(:struct rect-2d) 'offset)
+     'offset-2d :x 0 :y 0)
+    (fill-vk
+     (cffi:foreign-slot-pointer scissor '(:struct rect-2d) 'extent)
+     'extent-2d :width width :height height)
+    (%cmd-set-scissor command-buffer 0 1 scissor))
+  (values))
+
+(defun cmd-end-render-pass (command-buffer)
+  (%cmd-end-render-pass command-buffer)
+  (values))
+
+(defun cmd-draw
+    (command-buffer vertex-count &optional (instance-count 1)
+                                        (first-vertex 0) (first-instance 0))
+  (%cmd-draw command-buffer vertex-count instance-count
+             first-vertex first-instance)
   (values))
 
 (defun submit-command-buffers

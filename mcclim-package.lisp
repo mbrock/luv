@@ -26,6 +26,7 @@
            #:mirror-target
            #:mirror-context
            #:mirror-texture
+           #:mirror-compositor
            #:port-mirrors
            #:present-mirror
            #:lab-sheet
@@ -37,6 +38,10 @@
            #:widget-lab-toggle-value
            #:open-widget-lab
            #:close-widget-lab
+           #:spinning-texture-compositor
+           #:enable-spinning-mirror
+           #:disable-spinning-mirror
+           #:open-spinning-widget-lab
            #:open-listener))
 
 (in-package #:luv.mcclim)
