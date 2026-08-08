@@ -364,6 +364,16 @@ top level on that second regime:
   (defparameter *listener* frame))
 ```
 
+The `mcluv` program packages that Listener and the luv backend into an SBCL
+executable. Build and run it inside the development environment:
+
+```sh
+nix develop -c sbcl --script build-mcluv.lisp
+nix develop -c ./mcluv
+```
+
+Closing the Listener frame ends its McCLIM process and then exits `mcluv`.
+
 Its menu bar is temporarily disabled: McCLIM menus are separate popup frames,
 while luv's current Cocoa SDL host owns only one native canvas at a time. The
 Listener panes, input editor, evaluator, presentations, and keyboard gestures

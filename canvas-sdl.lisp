@@ -240,9 +240,12 @@
   (check-type x integer)
   (check-type y integer)
   (when (eq :open (canvas-state canvas))
-    (call-sdl-canvas-window-operation
-     canvas :move
-     (lambda (window) (sdl3:set-window-position window x y))))
+    (call-on-sdl-canvas-thread
+     canvas
+     (lambda ()
+       ;; Top-level placement is only a request: Wayland and some other
+       ;; window managers are entitled to reject it.
+       (sdl3:set-window-position (sdl-canvas-window canvas) x y))))
   (setf (sdl-canvas-x canvas) x
         (sdl-canvas-y canvas) y)
   canvas)
@@ -514,11 +517,11 @@
                      (error "SDL window creation failed: ~A" (sdl3:get-error)))
                    (setf (sdl-canvas-window canvas) window)
                    (when (and (sdl-canvas-x canvas) (sdl-canvas-y canvas))
-                     (unless (sdl3:set-window-position
-                              window
-                              (sdl-canvas-x canvas) (sdl-canvas-y canvas))
-                       (error "SDL window positioning failed: ~A"
-                              (sdl3:get-error))))
+                     ;; Wayland and some other window managers deliberately
+                     ;; deny applications control over top-level placement.
+                     (sdl3:set-window-position
+                      window
+                      (sdl-canvas-x canvas) (sdl-canvas-y canvas)))
                    (activate-sdl-canvas-host canvas)
                    (setf (canvas-state canvas) :open)
                    (sb-thread:signal-semaphore
