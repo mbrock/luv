@@ -916,20 +916,174 @@
                    do (setf (cffi:mem-aref ,pointer ',type ,index) ,item))
              ,@body)))))
 
-;;; Structured tracing at the actual CFFI boundary.
+;;; The FFI protocol.  Every foreign entry point is a class whose instances
+;;; are invocations: the arguments live in slots, INVOKE-VULKAN performs the
+;;; crossing, and the FFI object bound to *VULKAN-FFI* decides what a
+;;; crossing means.  Tracing, validation, and mocking are methods, not modes.
 
-(defstruct (vulkan-trace-event
-             (:constructor %make-vulkan-trace-event))
-  sequence
-  timestamp
-  duration
-  thread
-  foreign-name
-  lisp-name
-  arguments
-  values
-  status
-  condition)
+(defclass vulkan-function-class (closer-mop:standard-class)
+  ((foreign-name
+    :initform nil
+    :accessor vulkan-function-foreign-name)
+   (return-type
+    :initform nil
+    :accessor vulkan-function-return-type)
+   (argument-specs
+    :initform nil
+    :accessor vulkan-function-argument-specs)))
+
+(defmethod closer-mop:validate-superclass
+    ((class vulkan-function-class) (superclass closer-mop:standard-class))
+  (declare (ignore class superclass))
+  t)
+
+(defclass vulkan-invocation ()
+  ((sequence
+    :initform nil
+    :accessor invocation-sequence)
+   (timestamp
+    :initform nil
+    :accessor invocation-timestamp)
+   (duration
+    :initform nil
+    :accessor invocation-duration)
+   (thread
+    :initform nil
+    :accessor invocation-thread)
+   (values
+    :initform nil
+    :accessor invocation-values)
+   (status
+    :initform nil
+    :accessor invocation-status)
+   (condition
+    :initform nil
+    :accessor invocation-condition))
+  (:metaclass vulkan-function-class)
+  (:documentation
+   "One call across the Vulkan boundary, reified.  The concrete class names
+the entry point, its direct slots carry the arguments, and the slots here
+are bookkeeping filled in by a recording FFI."))
+
+(defclass vulkan-command (vulkan-invocation)
+  ()
+  (:metaclass vulkan-function-class)
+  (:documentation
+   "Invocations of vkCmd* entry points, which record into command buffers."))
+
+(defun invocation-lisp-name (invocation)
+  (class-name (class-of invocation)))
+
+(defun invocation-foreign-name (invocation)
+  (vulkan-function-foreign-name (class-of invocation)))
+
+(defun invocation-arguments (invocation)
+  "Return INVOCATION's arguments as a list of (NAME VALUE) pairs."
+  (loop for (name nil) in (vulkan-function-argument-specs
+                           (class-of invocation))
+        collect (list name
+                      (if (slot-boundp invocation name)
+                          (slot-value invocation name)
+                          :unbound))))
+
+(defmethod print-object ((invocation vulkan-invocation) stream)
+  (print-unreadable-object (invocation stream :type nil :identity nil)
+    (format stream "~A~@[ #~D~]"
+            (or (invocation-foreign-name invocation)
+                (invocation-lisp-name invocation))
+            (invocation-sequence invocation))))
+
+(defclass vulkan-ffi ()
+  ()
+  (:documentation
+   "The plain FFI: INVOKE-VULKAN crosses straight into the driver."))
+
+(defvar *vulkan-ffi* (make-instance 'vulkan-ffi)
+  "The FFI object every Vulkan invocation passes through.  Rebind or SETF
+it to an FFI subclass instance to trace, check, or mock the boundary.")
+
+(defgeneric invoke-vulkan (ffi invocation)
+  (:documentation
+   "Perform INVOCATION's crossing into Vulkan according to FFI."))
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun vulkan-lisp-name (foreign-name)
+    "Intern and export vkCamelCase FOREIGN-NAME as LUV.VK:CAMEL-CASE."
+    (let ((base
+            (with-output-to-string (out)
+              (loop for index from 2 below (length foreign-name)
+                    for char = (char foreign-name index)
+                    do (when (and (> index 2)
+                                  (upper-case-p char)
+                                  (or (lower-case-p
+                                       (char foreign-name (1- index)))
+                                      (and (< (1+ index) (length foreign-name))
+                                           (lower-case-p
+                                            (char foreign-name (1+ index))))))
+                         (write-char #\- out))
+                       (write-char (char-upcase char) out)))))
+      (let ((symbol (intern base '#:luv.vk)))
+        (export symbol '#:luv.vk)
+        symbol)))
+
+  (defun configure-vulkan-function-class
+      (class foreign-name return-type argument-specs)
+    (setf (vulkan-function-foreign-name class) foreign-name
+          (vulkan-function-return-type class) return-type
+          (vulkan-function-argument-specs class) argument-specs)
+    class))
+
+(defun vulkan-function-description (name)
+  "Return definition metadata retained by DEFVKFUN for the VK class NAME."
+  (let ((class (find-class name nil)))
+    (when (typep class 'vulkan-function-class)
+      (list :foreign-name (vulkan-function-foreign-name class)
+            :return-type (vulkan-function-return-type class)
+            :arguments (vulkan-function-argument-specs class)))))
+
+(defmacro defvkfun (foreign-name return-type &body arguments)
+  "Define a Vulkan entry point as a class of invocations plus its protocol.
+
+FOREIGN-NAME becomes a symbol in the LUV.VK package (vkCreateImage becomes
+VK:CREATE-IMAGE) naming three things at once: the invocation class whose
+slots are the arguments, the function that makes an invocation and hands it
+to *VULKAN-FFI*, and the INVOKE-VULKAN primary method that performs the
+actual foreign call."
+  (let* ((lisp-name (vulkan-lisp-name foreign-name))
+         (raw-name (intern (format nil "%~A" lisp-name) '#:luv.vulkan))
+         (argument-names (mapcar #'first arguments))
+         (superclass (if (and (> (length foreign-name) 5)
+                              (string= "vkCmd" foreign-name :end2 5))
+                         'vulkan-command
+                         'vulkan-invocation)))
+    `(progn
+       (eval-when (:compile-toplevel :load-toplevel :execute)
+         (export ',lisp-name '#:luv.vk))
+       (cffi:defcfun (,foreign-name ,raw-name :library vulkan-loader)
+           ,return-type
+         ,@arguments)
+       (defclass ,lisp-name (,superclass)
+         ,(loop for name in argument-names
+                collect
+                `(,name :initarg ,(intern (symbol-name name) :keyword)))
+         (:metaclass vulkan-function-class))
+       (eval-when (:load-toplevel :execute)
+         (configure-vulkan-function-class
+          (find-class ',lisp-name) ,foreign-name ',return-type ',arguments))
+       (defmethod invoke-vulkan ((ffi vulkan-ffi) (call ,lisp-name))
+         (with-slots ,argument-names call
+           (,raw-name ,@argument-names)))
+       (defun ,lisp-name ,argument-names
+         (invoke-vulkan
+          *vulkan-ffi*
+          (make-instance ',lisp-name
+                         ,@(loop for name in argument-names
+                                 append
+                                 (list (intern (symbol-name name) :keyword)
+                                       name)))))
+       ',lisp-name)))
+
+;;; Structured tracing is one FFI subclass wrapping the crossing.
 
 (defstruct (vulkan-trace
              (:constructor %make-vulkan-trace)
@@ -941,12 +1095,6 @@
   #+sb-thread
   (lock (sb-thread:make-mutex :name "luv Vulkan trace")))
 
-(defvar *vulkan-trace* nil
-  "The process-wide Vulkan call recorder, or NIL when tracing is disabled.")
-
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  (defvar *vulkan-function-descriptions* (make-hash-table)))
-
 (defun vulkan-trace-now ()
   (/ (get-internal-real-time)
      (coerce internal-time-units-per-second 'double-float)))
@@ -957,29 +1105,50 @@
   #-sb-thread
   `(progn ,@body))
 
+(defclass tracing-ffi (vulkan-ffi)
+  ((trace
+    :initarg :trace
+    :reader tracing-ffi-trace))
+  (:documentation
+   "An FFI that performs each crossing and retains the invocation, with
+timing and results, in a VULKAN-TRACE."))
+
 (defun start-vulkan-trace ()
   "Start a process-wide structured trace of calls crossing into Vulkan."
-  (when *vulkan-trace*
+  (when (typep *vulkan-ffi* 'tracing-ffi)
     (error "A Vulkan trace is already active."))
-  (setf *vulkan-trace*
-        (%make-vulkan-trace :started-at (vulkan-trace-now))))
+  (let ((trace (%make-vulkan-trace :started-at (vulkan-trace-now))))
+    (setf *vulkan-ffi* (make-instance 'tracing-ffi :trace trace))
+    trace))
 
 (defun stop-vulkan-trace ()
   "Stop and return the active Vulkan trace, or NIL when none is active."
-  (when *vulkan-trace*
-    (setf (%vulkan-trace-stopped-at *vulkan-trace*) (vulkan-trace-now)))
-  (prog1 *vulkan-trace*
-    (setf *vulkan-trace* nil)))
+  (when (typep *vulkan-ffi* 'tracing-ffi)
+    (let ((trace (tracing-ffi-trace *vulkan-ffi*)))
+      (setf (%vulkan-trace-stopped-at trace) (vulkan-trace-now)
+            *vulkan-ffi* (make-instance 'vulkan-ffi))
+      trace)))
 
 (defun current-vulkan-trace ()
-  "Return the active process-wide Vulkan trace, if any."
-  *vulkan-trace*)
+  "Return the trace *VULKAN-FFI* is recording into, if any."
+  (when (typep *vulkan-ffi* 'tracing-ffi)
+    (tracing-ffi-trace *vulkan-ffi*)))
+
+(defmacro with-vulkan-trace ((trace) &body body)
+  "Run BODY with this thread's Vulkan calls recorded into a fresh trace.
+
+Binds *VULKAN-FFI* for BODY's dynamic extent and binds TRACE to the
+VULKAN-TRACE being recorded; the trace is stopped when BODY exits."
+  `(let* ((,trace (%make-vulkan-trace :started-at (vulkan-trace-now)))
+          (*vulkan-ffi* (make-instance 'tracing-ffi :trace ,trace)))
+     (unwind-protect (progn ,@body)
+       (setf (%vulkan-trace-stopped-at ,trace) (vulkan-trace-now)))))
 
 (defun vulkan-trace-events (trace)
-  "Return TRACE's events in call-start order as a fresh list."
+  "Return TRACE's invocations in call-start order as a fresh list."
   (with-vulkan-trace-lock (trace)
     (sort (coerce (copy-seq (%vulkan-trace-events trace)) 'list)
-          #'< :key #'vulkan-trace-event-sequence)))
+          #'< :key #'invocation-sequence)))
 
 (defun vulkan-trace-presentation-intervals (trace &key include-prefix)
   "Return completed event intervals between vkQueuePresentKHR calls.
@@ -993,15 +1162,11 @@ the beginning of TRACE through its first presentation."
     (dolist (event (vulkan-trace-events trace) (nreverse intervals))
       (push event interval)
       (when (string= "vkQueuePresentKHR"
-                     (vulkan-trace-event-foreign-name event))
+                     (invocation-foreign-name event))
         (when (or saw-presentation include-prefix)
           (push (nreverse interval) intervals))
         (setf interval nil
               saw-presentation t)))))
-
-(defun vulkan-function-description (name)
-  "Return definition metadata retained by DEFVKFUN for NAME."
-  (gethash name *vulkan-function-descriptions*))
 
 (defun snapshot-vulkan-trace-value (value &optional (depth 0))
   "Copy VALUE into durable, printable trace data without retaining C memory."
@@ -1041,212 +1206,167 @@ the beginning of TRACE through its first presentation."
     (vector-push-extend event (%vulkan-trace-events trace)))
   event)
 
-(defun call-with-vulkan-trace
-    (trace foreign-name lisp-name arguments function)
-  (let* ((sequence (reserve-vulkan-trace-sequence trace))
-         (started-at (vulkan-trace-now))
-         (arguments
-           (mapcar (lambda (argument)
-                     (list (first argument)
-                           (snapshot-vulkan-trace-value (second argument))))
-                   arguments))
-         (returned-values nil)
-         (status :signaled)
-         (signaled-condition nil))
+(defun snapshot-invocation-arguments (invocation)
+  "Make INVOCATION durable by snapshotting its argument slots in place."
+  (loop for (name nil) in (vulkan-function-argument-specs
+                           (class-of invocation))
+        when (slot-boundp invocation name)
+          do (setf (slot-value invocation name)
+                   (snapshot-vulkan-trace-value
+                    (slot-value invocation name)))))
+
+(defmethod invoke-vulkan :around ((ffi tracing-ffi) (call vulkan-invocation))
+  (let ((trace (tracing-ffi-trace ffi))
+        (started-at (vulkan-trace-now)))
+    (setf (invocation-sequence call) (reserve-vulkan-trace-sequence trace)
+          (invocation-timestamp call) (- started-at
+                                         (%vulkan-trace-started-at trace))
+          (invocation-thread call) (vulkan-trace-thread-name)
+          (invocation-status call) :signaled)
     (handler-bind
         ((error
            (lambda (condition)
-             (setf signaled-condition
+             (setf (invocation-condition call)
                    (list :type (type-of condition)
                          :message
                          (handler-case (princ-to-string condition)
                            (error () "<unprintable condition>")))))))
       (unwind-protect
-           (progn
-             (setf returned-values (multiple-value-list (funcall function))
-                   status :returned)
-             (values-list returned-values))
-        (let ((finished-at (vulkan-trace-now)))
-          (record-vulkan-trace-event
-           trace
-           (%make-vulkan-trace-event
-            :sequence sequence
-            :timestamp (- started-at (%vulkan-trace-started-at trace))
-            :duration (- finished-at started-at)
-            :thread (vulkan-trace-thread-name)
-            :foreign-name foreign-name
-            :lisp-name lisp-name
-            :arguments arguments
-            :values
-            (mapcar #'snapshot-vulkan-trace-value returned-values)
-            :status status
-            :condition signaled-condition)))))))
-
-(defmacro defvkfun (name-and-options return-type &body arguments)
-  "Define a Vulkan foreign entry point with an optional structured trace edge."
-  (destructuring-bind (foreign-name lisp-name &rest options) name-and-options
-    (let ((raw-name
-            (intern (format nil "%%~A" (symbol-name lisp-name))
-                    (symbol-package lisp-name)))
-          (argument-names (mapcar #'first arguments)))
-      `(progn
-         (cffi:defcfun (,foreign-name ,raw-name ,@options)
-             ,return-type
-           ,@arguments)
-         (eval-when (:compile-toplevel :load-toplevel :execute)
-           (setf (gethash ',lisp-name *vulkan-function-descriptions*)
-                 ',(list :foreign-name foreign-name
-                         :return-type return-type
-                         :arguments arguments)))
-         (defun ,lisp-name ,argument-names
-           (let ((trace *vulkan-trace*))
-             (if trace
-                 (call-with-vulkan-trace
-                  trace ,foreign-name ',lisp-name
-                  (list ,@(mapcar
-                           (lambda (name) `(list ',name ,name))
-                           argument-names))
-                  (lambda () (,raw-name ,@argument-names)))
-                 (,raw-name ,@argument-names))))))))
+           (let ((results (multiple-value-list (call-next-method))))
+             (setf (invocation-status call) :returned
+                   (invocation-values call)
+                   (mapcar #'snapshot-vulkan-trace-value results))
+             (values-list results))
+        (setf (invocation-duration call) (- (vulkan-trace-now) started-at))
+        (snapshot-invocation-arguments call)
+        (record-vulkan-trace-event trace call)))))
 
 ;;; Raw calls.  DEFVKFUN preserves the CFFI declaration while making the
 ;;; complete host-to-driver boundary available as structured Lisp data.
 
-(defvkfun ("vkEnumerateInstanceExtensionProperties"
-               %enumerate-instance-extension-properties
-               :library vulkan-loader)
+(defvkfun "vkEnumerateInstanceExtensionProperties"
     checked-result
   (layer-name :pointer)
   (property-count :pointer)
   (properties :pointer))
 
-(defvkfun ("vkCreateInstance" %create-instance :library vulkan-loader)
+(defvkfun "vkCreateInstance"
     checked-result
   (create-info :pointer)
   (allocator :pointer)
   (instance :pointer))
 
-(defvkfun ("vkDestroyInstance" %destroy-instance :library vulkan-loader)
+(defvkfun "vkDestroyInstance"
     :void
   (instance :pointer)
   (allocator :pointer))
 
-(defvkfun ("vkEnumeratePhysicalDevices"
-               %enumerate-physical-devices
-               :library vulkan-loader)
+(defvkfun "vkEnumeratePhysicalDevices"
     checked-result
   (instance :pointer)
   (device-count :pointer)
   (devices :pointer))
 
-(defvkfun ("vkGetPhysicalDeviceQueueFamilyProperties"
-               %get-physical-device-queue-family-properties
-               :library vulkan-loader)
+(defvkfun "vkGetPhysicalDeviceQueueFamilyProperties"
     :void
   (physical-device :pointer)
   (property-count :pointer)
   (properties :pointer))
 
-(defvkfun ("vkCreateDevice" %create-device :library vulkan-loader)
+(defvkfun "vkCreateDevice"
     checked-result
   (physical-device :pointer)
   (create-info :pointer)
   (allocator :pointer)
   (device :pointer))
 
-(defvkfun ("vkDestroyDevice" %destroy-device :library vulkan-loader)
+(defvkfun "vkDestroyDevice"
     :void
   (device :pointer)
   (allocator :pointer))
 
-(defvkfun ("vkGetDeviceQueue" %get-device-queue :library vulkan-loader)
+(defvkfun "vkGetDeviceQueue"
     :void
   (device :pointer)
   (queue-family-index :uint32)
   (queue-index :uint32)
   (queue :pointer))
 
-(defvkfun ("vkDeviceWaitIdle" %device-wait-idle :library vulkan-loader)
+(defvkfun "vkDeviceWaitIdle"
     checked-result
   (device :pointer))
 
-(defvkfun ("vkGetPhysicalDeviceMemoryProperties"
-               %get-physical-device-memory-properties
-               :library vulkan-loader)
+(defvkfun "vkGetPhysicalDeviceMemoryProperties"
     :void
   (physical-device :pointer)
   (properties :pointer))
 
-(defvkfun ("vkCreateImage" %create-image :library vulkan-loader)
+(defvkfun "vkCreateImage"
     checked-result
   (device :pointer)
   (create-info :pointer)
   (allocator :pointer)
   (image :pointer))
 
-(defvkfun ("vkDestroyImage" %destroy-image :library vulkan-loader)
+(defvkfun "vkDestroyImage"
     :void
   (device :pointer)
   (image :pointer)
   (allocator :pointer))
 
-(defvkfun ("vkGetImageMemoryRequirements"
-               %get-image-memory-requirements
-               :library vulkan-loader)
+(defvkfun "vkGetImageMemoryRequirements"
     :void
   (device :pointer)
   (image :pointer)
   (requirements :pointer))
 
-(defvkfun ("vkCreateBuffer" %create-buffer :library vulkan-loader)
+(defvkfun "vkCreateBuffer"
     checked-result
   (device :pointer)
   (create-info :pointer)
   (allocator :pointer)
   (buffer :pointer))
 
-(defvkfun ("vkDestroyBuffer" %destroy-buffer :library vulkan-loader)
+(defvkfun "vkDestroyBuffer"
     :void
   (device :pointer)
   (buffer :pointer)
   (allocator :pointer))
 
-(defvkfun ("vkGetBufferMemoryRequirements"
-               %get-buffer-memory-requirements
-               :library vulkan-loader)
+(defvkfun "vkGetBufferMemoryRequirements"
     :void
   (device :pointer)
   (buffer :pointer)
   (requirements :pointer))
 
-(defvkfun ("vkAllocateMemory" %allocate-memory :library vulkan-loader)
+(defvkfun "vkAllocateMemory"
     checked-result
   (device :pointer)
   (allocate-info :pointer)
   (allocator :pointer)
   (memory :pointer))
 
-(defvkfun ("vkFreeMemory" %free-memory :library vulkan-loader)
+(defvkfun "vkFreeMemory"
     :void
   (device :pointer)
   (memory :pointer)
   (allocator :pointer))
 
-(defvkfun ("vkBindImageMemory" %bind-image-memory :library vulkan-loader)
+(defvkfun "vkBindImageMemory"
     checked-result
   (device :pointer)
   (image :pointer)
   (memory :pointer)
   (offset :uint64))
 
-(defvkfun ("vkBindBufferMemory" %bind-buffer-memory :library vulkan-loader)
+(defvkfun "vkBindBufferMemory"
     checked-result
   (device :pointer)
   (buffer :pointer)
   (memory :pointer)
   (offset :uint64))
 
-(defvkfun ("vkMapMemory" %map-memory :library vulkan-loader)
+(defvkfun "vkMapMemory"
     checked-result
   (device :pointer)
   (memory :pointer)
@@ -1255,73 +1375,64 @@ the beginning of TRACE through its first presentation."
   (flags :uint32)
   (data :pointer))
 
-(defvkfun ("vkUnmapMemory" %unmap-memory :library vulkan-loader)
+(defvkfun "vkUnmapMemory"
     :void
   (device :pointer)
   (memory :pointer))
 
-(defvkfun ("vkCreateImageView" %create-image-view
-               :library vulkan-loader)
+(defvkfun "vkCreateImageView"
     checked-result
   (device :pointer)
   (create-info :pointer)
   (allocator :pointer)
   (view :pointer))
 
-(defvkfun ("vkDestroyImageView" %destroy-image-view
-               :library vulkan-loader)
+(defvkfun "vkDestroyImageView"
     :void
   (device :pointer)
   (view :pointer)
   (allocator :pointer))
 
-(defvkfun ("vkCreateShaderModule" %create-shader-module
-               :library vulkan-loader)
+(defvkfun "vkCreateShaderModule"
     checked-result
   (device :pointer)
   (create-info :pointer)
   (allocator :pointer)
   (shader-module :pointer))
 
-(defvkfun ("vkDestroyShaderModule" %destroy-shader-module
-               :library vulkan-loader)
+(defvkfun "vkDestroyShaderModule"
     :void
   (device :pointer)
   (shader-module :pointer)
   (allocator :pointer))
 
-(defvkfun ("vkCreateDescriptorSetLayout" %create-descriptor-set-layout
-               :library vulkan-loader)
+(defvkfun "vkCreateDescriptorSetLayout"
     checked-result
   (device :pointer)
   (create-info :pointer)
   (allocator :pointer)
   (layout :pointer))
 
-(defvkfun ("vkDestroyDescriptorSetLayout" %destroy-descriptor-set-layout
-               :library vulkan-loader)
+(defvkfun "vkDestroyDescriptorSetLayout"
     :void
   (device :pointer)
   (layout :pointer)
   (allocator :pointer))
 
-(defvkfun ("vkCreatePipelineLayout" %create-pipeline-layout
-               :library vulkan-loader)
+(defvkfun "vkCreatePipelineLayout"
     checked-result
   (device :pointer)
   (create-info :pointer)
   (allocator :pointer)
   (layout :pointer))
 
-(defvkfun ("vkDestroyPipelineLayout" %destroy-pipeline-layout
-               :library vulkan-loader)
+(defvkfun "vkDestroyPipelineLayout"
     :void
   (device :pointer)
   (layout :pointer)
   (allocator :pointer))
 
-(defvkfun ("vkCreateComputePipelines" %create-compute-pipelines
-               :library vulkan-loader)
+(defvkfun "vkCreateComputePipelines"
     checked-result
   (device :pointer)
   (pipeline-cache :pointer)
@@ -1330,8 +1441,7 @@ the beginning of TRACE through its first presentation."
   (allocator :pointer)
   (pipelines :pointer))
 
-(defvkfun ("vkCreateGraphicsPipelines" %create-graphics-pipelines
-               :library vulkan-loader)
+(defvkfun "vkCreateGraphicsPipelines"
     checked-result
   (device :pointer)
   (pipeline-cache :pointer)
@@ -1340,68 +1450,59 @@ the beginning of TRACE through its first presentation."
   (allocator :pointer)
   (pipelines :pointer))
 
-(defvkfun ("vkDestroyPipeline" %destroy-pipeline
-               :library vulkan-loader)
+(defvkfun "vkDestroyPipeline"
     :void
   (device :pointer)
   (pipeline :pointer)
   (allocator :pointer))
 
-(defvkfun ("vkCreateSampler" %create-sampler :library vulkan-loader)
+(defvkfun "vkCreateSampler"
     checked-result
   (device :pointer) (create-info :pointer) (allocator :pointer)
   (sampler :pointer))
 
-(defvkfun ("vkDestroySampler" %destroy-sampler :library vulkan-loader)
+(defvkfun "vkDestroySampler"
     :void
   (device :pointer) (sampler :pointer) (allocator :pointer))
 
-(defvkfun ("vkCreateRenderPass" %create-render-pass
-               :library vulkan-loader)
+(defvkfun "vkCreateRenderPass"
     checked-result
   (device :pointer) (create-info :pointer) (allocator :pointer)
   (render-pass :pointer))
 
-(defvkfun ("vkDestroyRenderPass" %destroy-render-pass
-               :library vulkan-loader)
+(defvkfun "vkDestroyRenderPass"
     :void
   (device :pointer) (render-pass :pointer) (allocator :pointer))
 
-(defvkfun ("vkCreateFramebuffer" %create-framebuffer
-               :library vulkan-loader)
+(defvkfun "vkCreateFramebuffer"
     checked-result
   (device :pointer) (create-info :pointer) (allocator :pointer)
   (framebuffer :pointer))
 
-(defvkfun ("vkDestroyFramebuffer" %destroy-framebuffer
-               :library vulkan-loader)
+(defvkfun "vkDestroyFramebuffer"
     :void
   (device :pointer) (framebuffer :pointer) (allocator :pointer))
 
-(defvkfun ("vkCreateDescriptorPool" %create-descriptor-pool
-               :library vulkan-loader)
+(defvkfun "vkCreateDescriptorPool"
     checked-result
   (device :pointer)
   (create-info :pointer)
   (allocator :pointer)
   (pool :pointer))
 
-(defvkfun ("vkDestroyDescriptorPool" %destroy-descriptor-pool
-               :library vulkan-loader)
+(defvkfun "vkDestroyDescriptorPool"
     :void
   (device :pointer)
   (pool :pointer)
   (allocator :pointer))
 
-(defvkfun ("vkAllocateDescriptorSets" %allocate-descriptor-sets
-               :library vulkan-loader)
+(defvkfun "vkAllocateDescriptorSets"
     checked-result
   (device :pointer)
   (allocate-info :pointer)
   (sets :pointer))
 
-(defvkfun ("vkUpdateDescriptorSets" %update-descriptor-sets
-               :library vulkan-loader)
+(defvkfun "vkUpdateDescriptorSets"
     :void
   (device :pointer)
   (write-count :uint32)
@@ -1409,41 +1510,35 @@ the beginning of TRACE through its first presentation."
   (copy-count :uint32)
   (copies :pointer))
 
-(defvkfun ("vkCreateCommandPool" %create-command-pool
-               :library vulkan-loader)
+(defvkfun "vkCreateCommandPool"
     checked-result
   (device :pointer)
   (create-info :pointer)
   (allocator :pointer)
   (command-pool :pointer))
 
-(defvkfun ("vkDestroyCommandPool" %destroy-command-pool
-               :library vulkan-loader)
+(defvkfun "vkDestroyCommandPool"
     :void
   (device :pointer)
   (command-pool :pointer)
   (allocator :pointer))
 
-(defvkfun ("vkAllocateCommandBuffers" %allocate-command-buffers
-               :library vulkan-loader)
+(defvkfun "vkAllocateCommandBuffers"
     checked-result
   (device :pointer)
   (allocate-info :pointer)
   (command-buffers :pointer))
 
-(defvkfun ("vkBeginCommandBuffer" %begin-command-buffer
-               :library vulkan-loader)
+(defvkfun "vkBeginCommandBuffer"
     checked-result
   (command-buffer :pointer)
   (begin-info :pointer))
 
-(defvkfun ("vkEndCommandBuffer" %end-command-buffer
-               :library vulkan-loader)
+(defvkfun "vkEndCommandBuffer"
     checked-result
   (command-buffer :pointer))
 
-(defvkfun ("vkCmdPipelineBarrier" %cmd-pipeline-barrier
-               :library vulkan-loader)
+(defvkfun "vkCmdPipelineBarrier"
     :void
   (command-buffer :pointer)
   (src-stage-mask pipeline-stage-flags)
@@ -1456,8 +1551,7 @@ the beginning of TRACE through its first presentation."
   (image-memory-barrier-count :uint32)
   (image-memory-barriers :pointer))
 
-(defvkfun ("vkCmdClearColorImage" %cmd-clear-color-image
-               :library vulkan-loader)
+(defvkfun "vkCmdClearColorImage"
     :void
   (command-buffer :pointer)
   (image :pointer)
@@ -1466,7 +1560,7 @@ the beginning of TRACE through its first presentation."
   (range-count :uint32)
   (ranges :pointer))
 
-(defvkfun ("vkCmdCopyImage" %cmd-copy-image :library vulkan-loader)
+(defvkfun "vkCmdCopyImage"
     :void
   (command-buffer :pointer)
   (source :pointer)
@@ -1476,8 +1570,7 @@ the beginning of TRACE through its first presentation."
   (region-count :uint32)
   (regions :pointer))
 
-(defvkfun ("vkCmdCopyBufferToImage" %cmd-copy-buffer-to-image
-               :library vulkan-loader)
+(defvkfun "vkCmdCopyBufferToImage"
     :void
   (command-buffer :pointer)
   (source-buffer :pointer)
@@ -1486,15 +1579,13 @@ the beginning of TRACE through its first presentation."
   (region-count :uint32)
   (regions :pointer))
 
-(defvkfun ("vkCmdBindPipeline" %cmd-bind-pipeline
-               :library vulkan-loader)
+(defvkfun "vkCmdBindPipeline"
     :void
   (command-buffer :pointer)
   (bind-point pipeline-bind-point)
   (pipeline :pointer))
 
-(defvkfun ("vkCmdBindDescriptorSets" %cmd-bind-descriptor-sets
-               :library vulkan-loader)
+(defvkfun "vkCmdBindDescriptorSets"
     :void
   (command-buffer :pointer)
   (bind-point pipeline-bind-point)
@@ -1505,128 +1596,110 @@ the beginning of TRACE through its first presentation."
   (dynamic-offset-count :uint32)
   (dynamic-offsets :pointer))
 
-(defvkfun ("vkCmdDispatch" %cmd-dispatch :library vulkan-loader)
+(defvkfun "vkCmdDispatch"
     :void
   (command-buffer :pointer)
   (group-count-x :uint32)
   (group-count-y :uint32)
   (group-count-z :uint32))
 
-(defvkfun ("vkCmdBeginRenderPass" %cmd-begin-render-pass
-               :library vulkan-loader)
+(defvkfun "vkCmdBeginRenderPass"
     :void
   (command-buffer :pointer) (begin-info :pointer)
   (contents subpass-contents))
 
-(defvkfun ("vkCmdEndRenderPass" %cmd-end-render-pass
-               :library vulkan-loader)
+(defvkfun "vkCmdEndRenderPass"
     :void
   (command-buffer :pointer))
 
-(defvkfun ("vkCmdSetViewport" %cmd-set-viewport
-               :library vulkan-loader)
+(defvkfun "vkCmdSetViewport"
     :void
   (command-buffer :pointer) (first-viewport :uint32)
   (viewport-count :uint32) (viewports :pointer))
 
-(defvkfun ("vkCmdSetScissor" %cmd-set-scissor
-               :library vulkan-loader)
+(defvkfun "vkCmdSetScissor"
     :void
   (command-buffer :pointer) (first-scissor :uint32)
   (scissor-count :uint32) (scissors :pointer))
 
-(defvkfun ("vkCmdDraw" %cmd-draw :library vulkan-loader)
+(defvkfun "vkCmdDraw"
     :void
   (command-buffer :pointer) (vertex-count :uint32)
   (instance-count :uint32) (first-vertex :uint32)
   (first-instance :uint32))
 
-(defvkfun ("vkQueueSubmit" %queue-submit :library vulkan-loader)
+(defvkfun "vkQueueSubmit"
     checked-result
   (queue :pointer)
   (submit-count :uint32)
   (submits :pointer)
   (fence :pointer))
 
-(defvkfun ("vkQueueWaitIdle" %queue-wait-idle :library vulkan-loader)
+(defvkfun "vkQueueWaitIdle"
     checked-result
   (queue :pointer))
 
-(defvkfun ("vkGetPhysicalDeviceSurfaceSupportKHR"
-               %get-physical-device-surface-support
-               :library vulkan-loader)
+(defvkfun "vkGetPhysicalDeviceSurfaceSupportKHR"
     checked-result
   (physical-device :pointer)
   (queue-family-index :uint32)
   (surface :pointer)
   (supported :pointer))
 
-(defvkfun ("vkGetPhysicalDeviceSurfaceCapabilitiesKHR"
-               %get-physical-device-surface-capabilities
-               :library vulkan-loader)
+(defvkfun "vkGetPhysicalDeviceSurfaceCapabilitiesKHR"
     checked-result
   (physical-device :pointer)
   (surface :pointer)
   (capabilities :pointer))
 
-(defvkfun ("vkGetPhysicalDeviceSurfaceFormatsKHR"
-               %get-physical-device-surface-formats
-               :library vulkan-loader)
+(defvkfun "vkGetPhysicalDeviceSurfaceFormatsKHR"
     checked-result
   (physical-device :pointer)
   (surface :pointer)
   (format-count :pointer)
   (formats :pointer))
 
-(defvkfun ("vkGetPhysicalDeviceSurfacePresentModesKHR"
-               %get-physical-device-surface-present-modes
-               :library vulkan-loader)
+(defvkfun "vkGetPhysicalDeviceSurfacePresentModesKHR"
     checked-result
   (physical-device :pointer)
   (surface :pointer)
   (mode-count :pointer)
   (modes :pointer))
 
-(defvkfun ("vkCreateSwapchainKHR" %create-swapchain
-               :library vulkan-loader)
+(defvkfun "vkCreateSwapchainKHR"
     checked-result
   (device :pointer)
   (create-info :pointer)
   (allocator :pointer)
   (swapchain :pointer))
 
-(defvkfun ("vkDestroySwapchainKHR" %destroy-swapchain
-               :library vulkan-loader)
+(defvkfun "vkDestroySwapchainKHR"
     :void
   (device :pointer)
   (swapchain :pointer)
   (allocator :pointer))
 
-(defvkfun ("vkGetSwapchainImagesKHR" %get-swapchain-images
-               :library vulkan-loader)
+(defvkfun "vkGetSwapchainImagesKHR"
     checked-result
   (device :pointer)
   (swapchain :pointer)
   (image-count :pointer)
   (images :pointer))
 
-(defvkfun ("vkCreateSemaphore" %create-semaphore
-               :library vulkan-loader)
+(defvkfun "vkCreateSemaphore"
     checked-result
   (device :pointer)
   (create-info :pointer)
   (allocator :pointer)
   (semaphore :pointer))
 
-(defvkfun ("vkDestroySemaphore" %destroy-semaphore
-               :library vulkan-loader)
+(defvkfun "vkDestroySemaphore"
     :void
   (device :pointer)
   (semaphore :pointer)
   (allocator :pointer))
 
-(defvkfun ("vkAcquireNextImageKHR" %acquire-next-image
-               :library vulkan-loader)
+(defvkfun "vkAcquireNextImageKHR"
     checked-result
   (device :pointer)
   (swapchain :pointer)
@@ -1635,8 +1708,7 @@ the beginning of TRACE through its first presentation."
   (fence :pointer)
   (image-index :pointer))
 
-(defvkfun ("vkQueuePresentKHR" %queue-present
-               :library vulkan-loader)
+(defvkfun "vkQueuePresentKHR"
     checked-result
   (queue :pointer)
   (present-info :pointer))
@@ -1695,118 +1767,118 @@ the beginning of TRACE through its first presentation."
       property '(:struct extension-properties) 'extension-name))))
 
 (define-enumerator enumerate-instance-extension-names ()
-  (%enumerate-instance-extension-properties (cffi:null-pointer))
+  (vk:enumerate-instance-extension-properties (cffi:null-pointer))
   :element (:struct extension-properties)
   :extractor extension-property-name
   :operation :enumerate-instance-extension-properties)
 
 (define-enumerator enumerate-physical-devices (instance)
-  (%enumerate-physical-devices instance)
+  (vk:enumerate-physical-devices instance)
   :element :pointer)
 
 (define-creator create-instance-handle (create-info)
-  (%create-instance create-info (cffi:null-pointer))
+  (vk:create-instance create-info (cffi:null-pointer))
   :checked t
   :operation :create-instance)
 
 (define-creator create-device-handle (physical-device create-info)
-  (%create-device physical-device create-info (cffi:null-pointer))
+  (vk:create-device physical-device create-info (cffi:null-pointer))
   :checked t
   :operation :create-device)
 
 (define-creator get-device-queue-handle
     (device queue-family-index queue-index)
-  (%get-device-queue device queue-family-index queue-index))
+  (vk:get-device-queue device queue-family-index queue-index))
 
 (define-creator create-image-handle (device create-info)
-  (%create-image device create-info (cffi:null-pointer))
+  (vk:create-image device create-info (cffi:null-pointer))
   :checked t
   :operation :create-image)
 
 (define-creator create-buffer-handle (device create-info)
-  (%create-buffer device create-info (cffi:null-pointer))
+  (vk:create-buffer device create-info (cffi:null-pointer))
   :checked t
   :operation :create-buffer)
 
 (define-creator allocate-memory-handle (device allocate-info)
-  (%allocate-memory device allocate-info (cffi:null-pointer))
+  (vk:allocate-memory device allocate-info (cffi:null-pointer))
   :checked t
   :operation :allocate-memory)
 
 (define-creator create-image-view-handle (device create-info)
-  (%create-image-view device create-info (cffi:null-pointer))
+  (vk:create-image-view device create-info (cffi:null-pointer))
   :checked t
   :operation :create-image-view)
 
 (define-creator create-shader-module-handle (device create-info)
-  (%create-shader-module device create-info (cffi:null-pointer))
+  (vk:create-shader-module device create-info (cffi:null-pointer))
   :checked t
   :operation :create-shader-module)
 
 (define-creator create-descriptor-set-layout-handle (device create-info)
-  (%create-descriptor-set-layout device create-info (cffi:null-pointer))
+  (vk:create-descriptor-set-layout device create-info (cffi:null-pointer))
   :checked t
   :operation :create-descriptor-set-layout)
 
 (define-creator create-pipeline-layout-handle (device create-info)
-  (%create-pipeline-layout device create-info (cffi:null-pointer))
+  (vk:create-pipeline-layout device create-info (cffi:null-pointer))
   :checked t
   :operation :create-pipeline-layout)
 
 (define-creator create-compute-pipeline-handle (device create-info)
-  (%create-compute-pipelines device (cffi:null-pointer) 1 create-info
+  (vk:create-compute-pipelines device (cffi:null-pointer) 1 create-info
                              (cffi:null-pointer))
   :checked t
   :operation :create-compute-pipeline)
 
 (define-creator create-graphics-pipeline-handle (device create-info)
-  (%create-graphics-pipelines device (cffi:null-pointer) 1 create-info
+  (vk:create-graphics-pipelines device (cffi:null-pointer) 1 create-info
                               (cffi:null-pointer))
   :checked t
   :operation :create-graphics-pipeline)
 
 (define-creator create-sampler-handle (device create-info)
-  (%create-sampler device create-info (cffi:null-pointer))
+  (vk:create-sampler device create-info (cffi:null-pointer))
   :checked t
   :operation :create-sampler)
 
 (define-creator create-render-pass-handle (device create-info)
-  (%create-render-pass device create-info (cffi:null-pointer))
+  (vk:create-render-pass device create-info (cffi:null-pointer))
   :checked t
   :operation :create-render-pass)
 
 (define-creator create-framebuffer-handle (device create-info)
-  (%create-framebuffer device create-info (cffi:null-pointer))
+  (vk:create-framebuffer device create-info (cffi:null-pointer))
   :checked t
   :operation :create-framebuffer)
 
 (define-creator create-descriptor-pool-handle (device create-info)
-  (%create-descriptor-pool device create-info (cffi:null-pointer))
+  (vk:create-descriptor-pool device create-info (cffi:null-pointer))
   :checked t
   :operation :create-descriptor-pool)
 
 (define-creator allocate-descriptor-set-handle (device allocate-info)
-  (%allocate-descriptor-sets device allocate-info)
+  (vk:allocate-descriptor-sets device allocate-info)
   :checked t
   :operation :allocate-descriptor-set)
 
 (define-creator create-command-pool-handle (device create-info)
-  (%create-command-pool device create-info (cffi:null-pointer))
+  (vk:create-command-pool device create-info (cffi:null-pointer))
   :checked t
   :operation :create-command-pool)
 
 (define-creator allocate-command-buffer-handle (device allocate-info)
-  (%allocate-command-buffers device allocate-info)
+  (vk:allocate-command-buffers device allocate-info)
   :checked t
   :operation :allocate-command-buffer)
 
 (define-creator create-swapchain-handle (device create-info)
-  (%create-swapchain device create-info (cffi:null-pointer))
+  (vk:create-swapchain-khr device create-info (cffi:null-pointer))
   :checked t
   :operation :create-swapchain)
 
 (define-creator create-semaphore-handle (device create-info)
-  (%create-semaphore device create-info (cffi:null-pointer))
+  (vk:create-semaphore device create-info (cffi:null-pointer))
   :checked t
   :operation :create-semaphore)
 
@@ -1877,13 +1949,13 @@ the beginning of TRACE through its first presentation."
         (create-instance-handle create-info)))))
 
 (defun destroy-instance (instance)
-  (%destroy-instance instance (cffi:null-pointer))
+  (vk:destroy-instance instance (cffi:null-pointer))
   (values))
 
 (defun physical-device-queue-families (physical-device)
   (cffi:with-foreign-object (count :uint32)
     (setf (cffi:mem-ref count :uint32) 0)
-    (%get-physical-device-queue-family-properties
+    (vk:get-physical-device-queue-family-properties
      physical-device count (cffi:null-pointer))
     (let ((capacity (cffi:mem-ref count :uint32)))
       (if (zerop capacity)
@@ -1892,7 +1964,7 @@ the beginning of TRACE through its first presentation."
               (properties '(:struct queue-family-properties) capacity)
             (clear-foreign-object
              properties '(:struct queue-family-properties) capacity)
-            (%get-physical-device-queue-family-properties
+            (vk:get-physical-device-queue-family-properties
              physical-device count properties)
             (loop for index below
                     (min capacity (cffi:mem-ref count :uint32))
@@ -1931,7 +2003,7 @@ the beginning of TRACE through its first presentation."
           (create-device-handle physical-device create-info))))))
 
 (defun destroy-device (device)
-  (%destroy-device device (cffi:null-pointer))
+  (vk:destroy-device device (cffi:null-pointer))
   (values))
 
 (defun get-device-queue (device queue-family-index &optional (queue-index 0))
@@ -1939,7 +2011,7 @@ the beginning of TRACE through its first presentation."
 
 (defun device-wait-idle (device)
   (with-vulkan-results (:device-wait-idle)
-    (%device-wait-idle device))
+    (vk:device-wait-idle device))
   (values))
 
 (defun physical-device-memory-types (physical-device)
@@ -1947,7 +2019,7 @@ the beginning of TRACE through its first presentation."
       (properties '(:struct physical-device-memory-properties))
     (clear-foreign-object properties
                           '(:struct physical-device-memory-properties))
-    (%get-physical-device-memory-properties physical-device properties)
+    (vk:get-physical-device-memory-properties physical-device properties)
     (let ((count
             (cffi:foreign-slot-value
              properties '(:struct physical-device-memory-properties)
@@ -1993,13 +2065,13 @@ the beginning of TRACE through its first presentation."
     (create-image-handle device create-info)))
 
 (defun destroy-image (device image)
-  (%destroy-image device image (cffi:null-pointer))
+  (vk:destroy-image device image (cffi:null-pointer))
   (values))
 
 (defun get-image-memory-requirements (device image)
   (cffi:with-foreign-object (requirements '(:struct memory-requirements))
     (clear-foreign-object requirements '(:struct memory-requirements))
-    (%get-image-memory-requirements device image requirements)
+    (vk:get-image-memory-requirements device image requirements)
     (cffi:with-foreign-slots
         ((size alignment memory-type-bits)
          requirements (:struct memory-requirements))
@@ -2019,13 +2091,13 @@ the beginning of TRACE through its first presentation."
     (create-buffer-handle device create-info)))
 
 (defun destroy-buffer (device buffer)
-  (%destroy-buffer device buffer (cffi:null-pointer))
+  (vk:destroy-buffer device buffer (cffi:null-pointer))
   (values))
 
 (defun get-buffer-memory-requirements (device buffer)
   (cffi:with-foreign-object (requirements '(:struct memory-requirements))
     (clear-foreign-object requirements '(:struct memory-requirements))
-    (%get-buffer-memory-requirements device buffer requirements)
+    (vk:get-buffer-memory-requirements device buffer requirements)
     (cffi:with-foreign-slots
         ((size alignment memory-type-bits)
          requirements (:struct memory-requirements))
@@ -2041,27 +2113,27 @@ the beginning of TRACE through its first presentation."
     (allocate-memory-handle device allocate-info)))
 
 (defun free-memory (device memory)
-  (%free-memory device memory (cffi:null-pointer))
+  (vk:free-memory device memory (cffi:null-pointer))
   (values))
 
 (defun bind-image-memory (device image memory &optional (offset 0))
   (with-vulkan-results (:bind-image-memory)
-    (%bind-image-memory device image memory offset))
+    (vk:bind-image-memory device image memory offset))
   (values))
 
 (defun bind-buffer-memory (device buffer memory &optional (offset 0))
   (with-vulkan-results (:bind-buffer-memory)
-    (%bind-buffer-memory device buffer memory offset))
+    (vk:bind-buffer-memory device buffer memory offset))
   (values))
 
 (defun map-memory (device memory size &optional (offset 0))
   (cffi:with-foreign-object (data :pointer)
     (with-vulkan-results (:map-memory)
-      (%map-memory device memory offset size 0 data))
+      (vk:map-memory device memory offset size 0 data))
     (cffi:mem-ref data :pointer)))
 
 (defun unmap-memory (device memory)
-  (%unmap-memory device memory)
+  (vk:unmap-memory device memory)
   (values))
 
 (defun create-image-view (device image format &key (view-type :2d))
@@ -2081,7 +2153,7 @@ the beginning of TRACE through its first presentation."
     (create-image-view-handle device create-info)))
 
 (defun destroy-image-view (device view)
-  (%destroy-image-view device view (cffi:null-pointer))
+  (vk:destroy-image-view device view (cffi:null-pointer))
   (values))
 
 (defun create-shader-module (device words)
@@ -2093,7 +2165,7 @@ the beginning of TRACE through its first presentation."
       (create-shader-module-handle device create-info))))
 
 (defun destroy-shader-module (device shader-module)
-  (%destroy-shader-module device shader-module (cffi:null-pointer))
+  (vk:destroy-shader-module device shader-module (cffi:null-pointer))
   (values))
 
 (defun create-storage-image-descriptor-set-layout (device &key (binding 0))
@@ -2130,7 +2202,7 @@ the beginning of TRACE through its first presentation."
       (create-descriptor-set-layout-handle device create-info))))
 
 (defun destroy-descriptor-set-layout (device layout)
-  (%destroy-descriptor-set-layout device layout (cffi:null-pointer))
+  (vk:destroy-descriptor-set-layout device layout (cffi:null-pointer))
   (values))
 
 (defun create-pipeline-layout (device set-layouts)
@@ -2144,7 +2216,7 @@ the beginning of TRACE through its first presentation."
       (create-pipeline-layout-handle device create-info))))
 
 (defun destroy-pipeline-layout (device layout)
-  (%destroy-pipeline-layout device layout (cffi:null-pointer))
+  (vk:destroy-pipeline-layout device layout (cffi:null-pointer))
   (values))
 
 (defun create-compute-pipeline
@@ -2188,7 +2260,7 @@ the beginning of TRACE through its first presentation."
     (create-sampler-handle device create-info)))
 
 (defun destroy-sampler (device sampler)
-  (%destroy-sampler device sampler (cffi:null-pointer))
+  (vk:destroy-sampler device sampler (cffi:null-pointer))
   (values))
 
 (defun create-color-render-pass (device format)
@@ -2218,7 +2290,7 @@ the beginning of TRACE through its first presentation."
           (create-render-pass-handle device create-info))))))
 
 (defun destroy-render-pass (device render-pass)
-  (%destroy-render-pass device render-pass (cffi:null-pointer))
+  (vk:destroy-render-pass device render-pass (cffi:null-pointer))
   (values))
 
 (defun create-framebuffer (device render-pass image-view width height)
@@ -2230,7 +2302,7 @@ the beginning of TRACE through its first presentation."
       (create-framebuffer-handle device create-info))))
 
 (defun destroy-framebuffer (device framebuffer)
-  (%destroy-framebuffer device framebuffer (cffi:null-pointer))
+  (vk:destroy-framebuffer device framebuffer (cffi:null-pointer))
   (values))
 
 (defun create-graphics-pipeline
@@ -2314,7 +2386,7 @@ the beginning of TRACE through its first presentation."
                              device create-info)))))))))))))))
 
 (defun destroy-pipeline (device pipeline)
-  (%destroy-pipeline device pipeline (cffi:null-pointer))
+  (vk:destroy-pipeline device pipeline (cffi:null-pointer))
   (values))
 
 (defun create-storage-image-descriptor-pool (device &key (max-sets 1))
@@ -2346,7 +2418,7 @@ the beginning of TRACE through its first presentation."
       (create-descriptor-pool-handle device create-info))))
 
 (defun destroy-descriptor-pool (device pool)
-  (%destroy-descriptor-pool device pool (cffi:null-pointer))
+  (vk:destroy-descriptor-pool device pool (cffi:null-pointer))
   (values))
 
 (defun allocate-descriptor-set (device pool layout)
@@ -2372,7 +2444,7 @@ the beginning of TRACE through its first presentation."
               :p-image-info image-info
               :p-buffer-info (cffi:null-pointer)
               :p-texel-buffer-view (cffi:null-pointer))
-      (%update-descriptor-sets
+      (vk:update-descriptor-sets
        device 1 write 0 (cffi:null-pointer))))
   (values))
 
@@ -2411,7 +2483,7 @@ the beginning of TRACE through its first presentation."
        (cffi:mem-aptr image-infos '(:struct descriptor-image-info) 1)
        :p-buffer-info (cffi:null-pointer)
        :p-texel-buffer-view (cffi:null-pointer))
-      (%update-descriptor-sets device 2 writes 0 (cffi:null-pointer))))
+      (vk:update-descriptor-sets device 2 writes 0 (cffi:null-pointer))))
   (values))
 
 (defun create-command-pool (device queue-family-index &key flags)
@@ -2421,7 +2493,7 @@ the beginning of TRACE through its first presentation."
     (create-command-pool-handle device create-info)))
 
 (defun destroy-command-pool (device command-pool)
-  (%destroy-command-pool device command-pool (cffi:null-pointer))
+  (vk:destroy-command-pool device command-pool (cffi:null-pointer))
   (values))
 
 (defun allocate-command-buffer
@@ -2437,12 +2509,12 @@ the beginning of TRACE through its first presentation."
             :flags flags
             :p-inheritance-info (cffi:null-pointer))
     (with-vulkan-results (:begin-command-buffer)
-      (%begin-command-buffer command-buffer begin-info)))
+      (vk:begin-command-buffer command-buffer begin-info)))
   command-buffer)
 
 (defun end-command-buffer (command-buffer)
   (with-vulkan-results (:end-command-buffer)
-    (%end-command-buffer command-buffer))
+    (vk:end-command-buffer command-buffer))
   command-buffer)
 
 (defun fill-color-subresource-range (range)
@@ -2467,7 +2539,7 @@ the beginning of TRACE through its first presentation."
     (fill-color-subresource-range
      (cffi:foreign-slot-pointer
       barrier '(:struct image-memory-barrier) 'subresource-range))
-    (%cmd-pipeline-barrier
+    (vk:cmd-pipeline-barrier
      command-buffer src-stage dst-stage nil
      0 (cffi:null-pointer)
      0 (cffi:null-pointer)
@@ -2485,7 +2557,7 @@ the beginning of TRACE through its first presentation."
         (loop for component across color
               for index from 0 below 4
               do (setf (cffi:mem-aref components :float index) component)))
-      (%cmd-clear-color-image
+      (vk:cmd-clear-color-image
        command-buffer image layout foreign-color 1 range)))
   (values))
 
@@ -2510,7 +2582,7 @@ the beginning of TRACE through its first presentation."
     (fill-vk
      (cffi:foreign-slot-pointer region '(:struct image-copy) 'extent)
      'extent-3d :width width :height height :depth depth)
-    (%cmd-copy-image
+    (vk:cmd-copy-image
      command-buffer source source-layout destination destination-layout
      1 region))
   (values))
@@ -2534,22 +2606,22 @@ the beginning of TRACE through its first presentation."
      (cffi:foreign-slot-pointer
       region '(:struct buffer-image-copy) 'image-extent)
      'extent-3d :width width :height height :depth depth)
-    (%cmd-copy-buffer-to-image
+    (vk:cmd-copy-buffer-to-image
      command-buffer buffer image layout 1 region))
   (values))
 
 (defun cmd-bind-compute-pipeline (command-buffer pipeline)
-  (%cmd-bind-pipeline command-buffer :compute pipeline)
+  (vk:cmd-bind-pipeline command-buffer :compute pipeline)
   (values))
 
 (defun cmd-bind-graphics-pipeline (command-buffer pipeline)
-  (%cmd-bind-pipeline command-buffer :graphics pipeline)
+  (vk:cmd-bind-pipeline command-buffer :graphics pipeline)
   (values))
 
 (defun cmd-bind-compute-descriptor-set
     (command-buffer pipeline-layout descriptor-set)
   (with-foreign-array (sets :pointer (vector descriptor-set))
-    (%cmd-bind-descriptor-sets
+    (vk:cmd-bind-descriptor-sets
      command-buffer :compute pipeline-layout 0 1 sets
      0 (cffi:null-pointer)))
   (values))
@@ -2557,13 +2629,13 @@ the beginning of TRACE through its first presentation."
 (defun cmd-bind-graphics-descriptor-set
     (command-buffer pipeline-layout descriptor-set)
   (with-foreign-array (sets :pointer (vector descriptor-set))
-    (%cmd-bind-descriptor-sets
+    (vk:cmd-bind-descriptor-sets
      command-buffer :graphics pipeline-layout 0 1 sets
      0 (cffi:null-pointer)))
   (values))
 
 (defun cmd-dispatch (command-buffer x y &optional (z 1))
-  (%cmd-dispatch command-buffer x y z)
+  (vk:cmd-dispatch command-buffer x y z)
   (values))
 
 (defun cmd-begin-color-render-pass
@@ -2591,7 +2663,7 @@ the beginning of TRACE through its first presentation."
         (fill-vk
          (cffi:foreign-slot-pointer area '(:struct rect-2d) 'extent)
          'extent-2d :width width :height height))
-      (%cmd-begin-render-pass command-buffer begin-info :inline)))
+      (vk:cmd-begin-render-pass command-buffer begin-info :inline)))
   (values))
 
 (defun cmd-set-viewport-and-scissor (command-buffer width height)
@@ -2600,7 +2672,7 @@ the beginning of TRACE through its first presentation."
             :width (coerce width 'single-float)
             :height (coerce height 'single-float)
             :min-depth 0.0 :max-depth 1.0)
-    (%cmd-set-viewport command-buffer 0 1 viewport))
+    (vk:cmd-set-viewport command-buffer 0 1 viewport))
   (with-vk (scissor rect-2d)
     (fill-vk
      (cffi:foreign-slot-pointer scissor '(:struct rect-2d) 'offset)
@@ -2608,17 +2680,17 @@ the beginning of TRACE through its first presentation."
     (fill-vk
      (cffi:foreign-slot-pointer scissor '(:struct rect-2d) 'extent)
      'extent-2d :width width :height height)
-    (%cmd-set-scissor command-buffer 0 1 scissor))
+    (vk:cmd-set-scissor command-buffer 0 1 scissor))
   (values))
 
 (defun cmd-end-render-pass (command-buffer)
-  (%cmd-end-render-pass command-buffer)
+  (vk:cmd-end-render-pass command-buffer)
   (values))
 
 (defun cmd-draw
     (command-buffer vertex-count &optional (instance-count 1)
                                         (first-vertex 0) (first-instance 0))
-  (%cmd-draw command-buffer vertex-count instance-count
+  (vk:cmd-draw command-buffer vertex-count instance-count
              first-vertex first-instance)
   (values))
 
@@ -2640,7 +2712,7 @@ the beginning of TRACE through its first presentation."
                     :signal-semaphore-count (length signal-semaphores)
                     :p-signal-semaphores signals)
             (with-vulkan-results (:queue-submit)
-              (%queue-submit queue 1 submit (cffi:null-pointer))))))))
+              (vk:queue-submit queue 1 submit (cffi:null-pointer))))))))
   (values))
 
 (defun submit-command-buffer (queue command-buffer)
@@ -2648,14 +2720,14 @@ the beginning of TRACE through its first presentation."
 
 (defun queue-wait-idle (queue)
   (with-vulkan-results (:queue-wait-idle)
-    (%queue-wait-idle queue))
+    (vk:queue-wait-idle queue))
   (values))
 
 (defun surface-supported-p (physical-device queue-family-index surface)
   (cffi:with-foreign-object (supported :uint32)
     (setf (cffi:mem-ref supported :uint32) 0)
     (with-vulkan-results (:get-physical-device-surface-support)
-      (%get-physical-device-surface-support
+      (vk:get-physical-device-surface-support-khr
        physical-device queue-family-index surface supported))
     (not (zerop (cffi:mem-ref supported :uint32)))))
 
@@ -2668,7 +2740,7 @@ the beginning of TRACE through its first presentation."
   (cffi:with-foreign-object (capabilities '(:struct surface-capabilities))
     (clear-foreign-object capabilities '(:struct surface-capabilities))
     (with-vulkan-results (:get-physical-device-surface-capabilities)
-      (%get-physical-device-surface-capabilities
+      (vk:get-physical-device-surface-capabilities-khr
        physical-device surface capabilities))
     (cffi:with-foreign-slots
         ((min-image-count max-image-count current-transform
@@ -2701,16 +2773,16 @@ the beginning of TRACE through its first presentation."
       (make-presentation-format :format format :color-space color-space))))
 
 (define-enumerator get-surface-formats (physical-device surface)
-  (%get-physical-device-surface-formats physical-device surface)
+  (vk:get-physical-device-surface-formats-khr physical-device surface)
   :element (:struct surface-format)
   :extractor extract-surface-format)
 
 (define-enumerator get-surface-present-modes (physical-device surface)
-  (%get-physical-device-surface-present-modes physical-device surface)
+  (vk:get-physical-device-surface-present-modes-khr physical-device surface)
   :element present-mode)
 
 (define-enumerator get-swapchain-images (device swapchain)
-  (%get-swapchain-images device swapchain)
+  (vk:get-swapchain-images-khr device swapchain)
   :element :pointer)
 
 (defun create-swapchain
@@ -2741,7 +2813,7 @@ the beginning of TRACE through its first presentation."
     (create-swapchain-handle device create-info)))
 
 (defun destroy-swapchain (device swapchain)
-  (%destroy-swapchain device swapchain (cffi:null-pointer))
+  (vk:destroy-swapchain-khr device swapchain (cffi:null-pointer))
   (values))
 
 (defun create-semaphore (device)
@@ -2749,7 +2821,7 @@ the beginning of TRACE through its first presentation."
     (create-semaphore-handle device create-info)))
 
 (defun destroy-semaphore (device semaphore)
-  (%destroy-semaphore device semaphore (cffi:null-pointer))
+  (vk:destroy-semaphore device semaphore (cffi:null-pointer))
   (values))
 
 (defun acquire-next-image
@@ -2758,7 +2830,7 @@ the beginning of TRACE through its first presentation."
     (let ((result
             (with-vulkan-results
                 (:acquire-next-image :success :suboptimal-khr)
-              (%acquire-next-image
+              (vk:acquire-next-image-khr
                device swapchain timeout semaphore (cffi:null-pointer) index))))
       (values (cffi:mem-ref index :uint32) result))))
 
@@ -2774,4 +2846,4 @@ the beginning of TRACE through its first presentation."
                   :p-image-indices indices
                   :p-results (cffi:null-pointer))
           (with-vulkan-results (:present :success :suboptimal-khr)
-            (%queue-present queue present-info)))))))
+            (vk:queue-present-khr queue present-info)))))))

@@ -28,6 +28,7 @@
                             :policy '(optimize (debug 3)))
       (funcall thunk)))
   :depends-on (#:cffi
+               #:closer-mop
                #+darwin
                #:float-features)
   :serial t

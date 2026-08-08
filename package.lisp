@@ -1,3 +1,12 @@
+(defpackage #:luv.vk
+  (:nicknames #:vk)
+  (:use)
+  (:documentation
+   "The Vulkan entry points luv speaks, one external symbol per foreign
+function.  Each symbol names both the class of that function's invocations
+and the function that performs one.  DEFVKFUN interns and exports here;
+nothing else does."))
+
 (defpackage #:luv.vulkan
   (:nicknames #:lvk)
   (:use #:cl)
@@ -5,23 +14,29 @@
            #:+swapchain-extension-name+
            #:vulkan-call-error
            #:vulkan-call-error-result
+           #:vulkan-ffi
+           #:*vulkan-ffi*
+           #:invoke-vulkan
+           #:tracing-ffi
+           #:vulkan-invocation
+           #:vulkan-command
+           #:invocation-sequence
+           #:invocation-timestamp
+           #:invocation-duration
+           #:invocation-thread
+           #:invocation-lisp-name
+           #:invocation-foreign-name
+           #:invocation-arguments
+           #:invocation-values
+           #:invocation-status
+           #:invocation-condition
            #:vulkan-trace
-           #:vulkan-trace-event
            #:start-vulkan-trace
            #:stop-vulkan-trace
            #:current-vulkan-trace
+           #:with-vulkan-trace
            #:vulkan-trace-events
            #:vulkan-trace-presentation-intervals
-           #:vulkan-trace-event-sequence
-           #:vulkan-trace-event-timestamp
-           #:vulkan-trace-event-duration
-           #:vulkan-trace-event-thread
-           #:vulkan-trace-event-foreign-name
-           #:vulkan-trace-event-lisp-name
-           #:vulkan-trace-event-arguments
-           #:vulkan-trace-event-values
-           #:vulkan-trace-event-status
-           #:vulkan-trace-event-condition
            #:vulkan-function-description
            #:make-version
            #:enumerate-instance-extension-names

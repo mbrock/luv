@@ -33,10 +33,28 @@ and primary command buffer:
     (luv:destroy device)))
 ```
 
-Every host-to-Vulkan call crosses the same `defvkfun` boundary.  It can record
-structured call occurrences—including named argument snapshots, returned
-values, thread, timing, and signaled conditions—without changing individual
-bindings:
+Every host-to-Vulkan call is reified.  `defvkfun` defines each entry point as
+a class in the `VK` package—`vkCreateImage` becomes `vk:create-image`—whose
+instances are invocations carrying the arguments in slots, and calling
+`(vk:create-image ...)` hands one such invocation to the FFI object in
+`lvk:*vulkan-ffi*` through the `lvk:invoke-vulkan` generic function.  The
+plain FFI crosses straight into the driver; subclasses observe or replace
+crossings with ordinary methods, specialized on one entry point by class, on
+the `lvk:vulkan-command` family of `vkCmd*` calls, or on everything.  The
+`vkCamelCaseKHR` treaty names live on in the class metadata, and
+`do-external-symbols` over `VK` enumerates the whole owned binding.
+
+Tracing is one such subclass: it retains each invocation—with named argument
+snapshots, returned values, thread, timing, and signaled conditions—in a
+trace.  Record this thread's calls for a dynamic extent:
+
+```lisp
+(lvk:with-vulkan-trace (trace)
+  ;; Interact with or render a few frames here.
+  (lvk:vulkan-trace-presentation-intervals trace))
+```
+
+or record process-wide across threads:
 
 ```lisp
 (lvk:start-vulkan-trace)
