@@ -300,7 +300,7 @@ form.  It defines a renderer-independent port and mirror substrate, plus a
 target is a luv canvas:
 
 ```lisp
-(asdf:load-system :luv/mcclim)
+(ql:quickload :luv/mcclim)
 (setf clim:*default-server-path* '(:luv))
 ```
 
@@ -358,7 +358,7 @@ The optional Listener component runs McCLIM's real Listener reader and frame
 top level on that second regime:
 
 ```lisp
-(asdf:load-system :luv/mcclim/listener)
+(ql:quickload :luv/mcclim/listener)
 (multiple-value-bind (process frame) (luv.mcclim:open-listener)
   (defparameter *listener-process* process)
   (defparameter *listener* frame))
@@ -370,13 +370,11 @@ Listener panes, input editor, evaluator, presentations, and keyboard gestures
 otherwise run unchanged. A shared multi-canvas SDL host is the next step for
 native menus and dialogs.
 
-This experiment follows current McCLIM Git `master`, rather than a Quicklisp
-release. Install it as a local project before loading `:luv/mcclim`:
-
-```sh
-git clone https://codeberg.org/McCLIM/McCLIM.git \
-  ~/quicklisp/local-projects/mcclim
-```
+This experiment follows McCLIM's Git `master`, rather than Quicklisp's McCLIM
+snapshot. The Nix flake supplies a locked upstream checkout to ASDF through
+`CL_SOURCE_REGISTRY`. `ql:quickload` still fetches McCLIM's ordinary transitive
+Lisp dependencies, such as `cluffer`; luv declares only its direct dependency
+on `mcclim-render`.
 
 ## One-time Lisp setup
 

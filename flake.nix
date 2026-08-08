@@ -2,8 +2,12 @@
   description = "luv — a Common Lisp Vulkan atelier";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  inputs.mcclim = {
+    url = "git+https://codeberg.org/McCLIM/McCLIM.git?ref=master";
+    flake = false;
+  };
 
-  outputs = { nixpkgs, ... }:
+  outputs = { nixpkgs, mcclim, ... }:
     let
       systems = [
         "x86_64-linux"
@@ -54,6 +58,7 @@
             ];
             LD_LIBRARY_PATH = env.nativeLibraryPath;
             LUV_SLYNK_DIR = "${env.slyRoot}/slynk";
+            CL_SOURCE_REGISTRY = "${mcclim}//";
           } // nixpkgs.lib.optionalAttrs env.pkgs.stdenv.isDarwin {
             VK_DRIVER_FILES =
               "${env.pkgs.moltenvk}/share/vulkan/icd.d/MoltenVK_icd.json";
