@@ -1,6 +1,6 @@
 (in-package #:luv.mcclim)
 
-(defclass luv-port (mcclim-render:render-port-mixin)
+(defclass luv-port (basic-port)
   ((mirrors
     :initform nil
     :accessor port-mirrors)
@@ -17,9 +17,14 @@
     :initform 96
     :reader port-graft-dpi))
   (:documentation
-   "A McCLIM display connection whose presentation targets are owned by luv."))
+   "Renderer-independent McCLIM display connection owned by luv."))
 
-(defclass luv-medium (mcclim-render:render-medium-mixin basic-medium)
+(defclass luv-raster-port (luv-port mcclim-render:render-port-mixin)
+  ()
+  (:documentation
+   "A luv port whose media rasterize into MCCLIM-RENDER images."))
+
+(defclass luv-raster-medium (mcclim-render:render-medium-mixin basic-medium)
   ()
   (:documentation
    "A CPU raster medium whose image will be uploaded to a luv target."))
@@ -31,7 +36,10 @@
   (:documentation "The root of the McCLIM sheet hierarchy on a LUV-PORT."))
 
 (defmethod find-port-type ((type (eql :luv)))
-  (values 'luv-port 'identity))
+  (values 'luv-raster-port 'identity))
+
+(defmethod find-port-type ((type (eql :luv-raster)))
+  (values 'luv-raster-port 'identity))
 
 (defmethod initialize-instance :after ((port luv-port) &key)
   (unless (port-pointer port)
@@ -95,11 +103,11 @@ with delivery of translated luv events."
            ;; quiescent until it is interrupted or real event delivery exists.
            (loop do (sleep 3600))))))
 
-(defmethod make-medium ((port luv-port) sheet)
+(defmethod make-medium ((port luv-raster-port) sheet)
   ;; MCCLIM-RENDER gives us a useful, inspectable CPU image immediately.  The
   ;; missing next step is presenting dirty portions of that image through the
   ;; mirror's luv target.
-  (make-instance 'luv-medium :port port :sheet sheet))
+  (make-instance 'luv-raster-medium :port port :sheet sheet))
 
 (defmethod port-force-output ((port luv-port))
   (declare (ignore port))

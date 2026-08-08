@@ -183,6 +183,15 @@
            #:canvas-width
            #:canvas-height
            #:canvas-size
+           #:canvas-position
+           #:canvas-visible-p
+           #:show-canvas
+           #:hide-canvas
+           #:move-canvas
+           #:resize-canvas
+           #:raise-canvas
+           #:minimize-canvas
+           #:restore-canvas
            #:request-canvas-frame
            #:make-canvas-context
            #:configure-canvas-context

@@ -62,4 +62,5 @@
   :serial t
   :components ((:file "mcclim-package")
                (:file "mcclim-port")
-               (:file "mcclim-mirror")))
+               (:file "mcclim-mirror")
+               (:file "mcclim-lab")))

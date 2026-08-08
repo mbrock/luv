@@ -52,9 +52,9 @@
     (error "SDL Cocoa background-app hint failed: ~A" (sdl3:get-error))))
 
 (defmethod activate-sdl-canvas-host :before ((canvas sdl-canvas))
-  (declare (ignore canvas))
-  (set-cocoa-activation-policy (cocoa-application)
-                               +cocoa-activation-policy-regular+))
+  (when (canvas-visible-p canvas)
+    (set-cocoa-activation-policy (cocoa-application)
+                                 +cocoa-activation-policy-regular+)))
 
 (defmethod activate-sdl-canvas-host :after ((canvas sdl-canvas))
   ;; There is no cooperating foreground application to yield activation when
@@ -63,16 +63,17 @@
   ;; A process transitioning out of background-only policy needs a few Cocoa
   ;; event turns before Launch Services will honor activation, so pump briefly
   ;; instead of leaving a regular-but-background window in another Stage.
-  (let ((application (cocoa-application)))
-    (loop repeat 20
-          until (%objc-send-boolean application (%objc-selector "isActive"))
-          do (%objc-send-void-boolean
-              application (%objc-selector "activateIgnoringOtherApps:") t)
-             (sdl3:pump-events)
-             (sleep 0.01))
-    ;; The primary method already requested this before activation; repeat it
-    ;; now that the application can actually make the window key.
-    (sdl3:raise-window (sdl-canvas-window canvas))))
+  (when (canvas-visible-p canvas)
+    (let ((application (cocoa-application)))
+      (loop repeat 20
+            until (%objc-send-boolean application (%objc-selector "isActive"))
+            do (%objc-send-void-boolean
+                application (%objc-selector "activateIgnoringOtherApps:") t)
+               (sdl3:pump-events)
+               (sleep 0.01))
+      ;; The primary method already requested this before activation; repeat it
+      ;; now that the application can actually make the window key.
+      (sdl3:raise-window (sdl-canvas-window canvas)))))
 
 (defmethod deactivate-sdl-canvas-host ((canvas sdl-canvas))
   (declare (ignore canvas))

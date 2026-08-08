@@ -6,15 +6,27 @@
   ((title
     :initarg :title
     :initform "luv canvas"
-    :reader canvas-title)
+    :accessor canvas-title)
    (width
     :initarg :width
     :initform 800
-    :reader canvas-width)
+    :accessor canvas-width)
    (height
     :initarg :height
     :initform 600
-    :reader canvas-height)
+    :accessor canvas-height)
+   (x
+    :initarg :x
+    :initform nil
+    :accessor sdl-canvas-x)
+   (y
+    :initarg :y
+    :initform nil
+    :accessor sdl-canvas-y)
+   (visible-p
+    :initarg :visible-p
+    :initform t
+    :accessor canvas-visible-p)
    (window
     :initform nil
     :accessor sdl-canvas-window)
@@ -77,33 +89,36 @@
     (error "SDL application metadata failed: ~A" (sdl3:get-error))))
 
 (defmethod activate-sdl-canvas-host ((canvas sdl-canvas))
-  (let ((window (sdl-canvas-window canvas)))
-    (unless (sdl3:show-window window)
-      (error "SDL window show failed: ~A" (sdl3:get-error)))
-    ;; Raising is a request to the window manager and may legitimately be
-    ;; denied by focus-stealing policy, so it is not an open failure.
-    (sdl3:raise-window window)))
+  (when (canvas-visible-p canvas)
+    (let ((window (sdl-canvas-window canvas)))
+      (unless (sdl3:show-window window)
+        (error "SDL window show failed: ~A" (sdl3:get-error)))
+      ;; Raising is a request to the window manager and may legitimately be
+      ;; denied by focus-stealing policy, so it is not an open failure.
+      (sdl3:raise-window window))))
 
 (defmethod deactivate-sdl-canvas-host ((canvas canvas))
   (declare (ignore canvas))
   nil)
 
 (defun make-sdl-canvas (&key (title "luv canvas") (width 800) (height 600)
-                          (clock (make-demand-clock)))
+                          x y (visible-p t) (clock (make-demand-clock)))
   "Construct an unrealized SDL canvas."
   (make-instance 'sdl-canvas :title title :width width :height height
-                              :clock clock))
+                              :x x :y y :visible-p visible-p :clock clock))
 
 (defmethod canvas-size ((canvas sdl-canvas))
-  (let ((window (sdl-canvas-window canvas)))
-    (if window
-        (multiple-value-bind (success width height)
-            (sdl3:get-window-size-in-pixels window)
-          (unless success
-            (error 'canvas-error :canvas canvas :operation :size
-                   :reason :native-size-failed :details (sdl3:get-error)))
-          (values width height))
-        (values (canvas-width canvas) (canvas-height canvas)))))
+  (if (eq :open (canvas-state canvas))
+      (call-on-sdl-canvas-thread
+       canvas
+       (lambda ()
+         (multiple-value-bind (success width height)
+             (sdl3:get-window-size-in-pixels (sdl-canvas-window canvas))
+           (unless success
+             (error 'canvas-error :canvas canvas :operation :size
+                    :reason :native-size-failed :details (sdl3:get-error)))
+           (values width height))))
+      (values (canvas-width canvas) (canvas-height canvas))))
 
 (defun sdl-canvas-native-thread-p (canvas)
   #+darwin
@@ -166,6 +181,91 @@
     (when (sdl-canvas-request-error request)
       (error (sdl-canvas-request-error request)))
     (values-list (sdl-canvas-request-values request))))
+
+(defun call-sdl-canvas-window-operation (canvas operation function)
+  (unless (eq :open (canvas-state canvas))
+    (error 'canvas-state-error
+           :canvas canvas :operation operation :reason :invalid-state
+           :state (canvas-state canvas) :expected-state :open))
+  (call-on-sdl-canvas-thread
+   canvas
+   (lambda ()
+     (unless (funcall function (sdl-canvas-window canvas))
+       (error 'canvas-error :canvas canvas :operation operation
+              :reason :native-window-operation-failed
+              :details (sdl3:get-error)))))
+  canvas)
+
+(defmethod (setf canvas-title) (title (canvas sdl-canvas))
+  (check-type title string)
+  (when (eq :open (canvas-state canvas))
+    (call-sdl-canvas-window-operation
+     canvas :set-title
+     (lambda (window) (sdl3:set-window-title window title))))
+  (setf (slot-value canvas 'title) title))
+
+(defmethod canvas-position ((canvas sdl-canvas))
+  (if (eq :open (canvas-state canvas))
+      (call-on-sdl-canvas-thread
+       canvas
+       (lambda ()
+         (multiple-value-bind (success x y)
+             (sdl3:get-window-position (sdl-canvas-window canvas))
+           (unless success
+             (error 'canvas-error :canvas canvas :operation :position
+                    :reason :native-position-failed :details (sdl3:get-error)))
+           (values x y))))
+      (values (sdl-canvas-x canvas) (sdl-canvas-y canvas))))
+
+(defmethod show-canvas ((canvas sdl-canvas))
+  (let ((was-visible-p (canvas-visible-p canvas)))
+    (setf (canvas-visible-p canvas) t)
+    (when (eq :open (canvas-state canvas))
+      (handler-case
+          (call-on-sdl-canvas-thread
+           canvas
+           (lambda () (activate-sdl-canvas-host canvas)))
+        (error (condition)
+          (setf (canvas-visible-p canvas) was-visible-p)
+          (error condition)))))
+  canvas)
+
+(defmethod hide-canvas ((canvas sdl-canvas))
+  (when (eq :open (canvas-state canvas))
+    (call-sdl-canvas-window-operation canvas :hide #'sdl3:hide-window))
+  (setf (canvas-visible-p canvas) nil)
+  canvas)
+
+(defmethod move-canvas ((canvas sdl-canvas) x y)
+  (check-type x integer)
+  (check-type y integer)
+  (when (eq :open (canvas-state canvas))
+    (call-sdl-canvas-window-operation
+     canvas :move
+     (lambda (window) (sdl3:set-window-position window x y))))
+  (setf (sdl-canvas-x canvas) x
+        (sdl-canvas-y canvas) y)
+  canvas)
+
+(defmethod resize-canvas ((canvas sdl-canvas) width height)
+  (check-type width (integer 1))
+  (check-type height (integer 1))
+  (when (eq :open (canvas-state canvas))
+    (call-sdl-canvas-window-operation
+     canvas :resize
+     (lambda (window) (sdl3:set-window-size window width height))))
+  (setf (canvas-width canvas) width
+        (canvas-height canvas) height)
+  canvas)
+
+(defmethod raise-canvas ((canvas sdl-canvas))
+  (call-sdl-canvas-window-operation canvas :raise #'sdl3:raise-window))
+
+(defmethod minimize-canvas ((canvas sdl-canvas))
+  (call-sdl-canvas-window-operation canvas :minimize #'sdl3:minimize-window))
+
+(defmethod restore-canvas ((canvas sdl-canvas))
+  (call-sdl-canvas-window-operation canvas :restore #'sdl3:restore-window))
 
 (defmethod request-canvas-frame ((canvas sdl-canvas) function)
   (call-on-sdl-canvas-thread
@@ -243,6 +343,12 @@
                    (when (cffi:null-pointer-p window)
                      (error "SDL window creation failed: ~A" (sdl3:get-error)))
                    (setf (sdl-canvas-window canvas) window)
+                   (when (and (sdl-canvas-x canvas) (sdl-canvas-y canvas))
+                     (unless (sdl3:set-window-position
+                              window
+                              (sdl-canvas-x canvas) (sdl-canvas-y canvas))
+                       (error "SDL window positioning failed: ~A"
+                              (sdl3:get-error))))
                    (activate-sdl-canvas-host canvas)
                    (setf (canvas-state canvas) :open)
                    (sb-thread:signal-semaphore

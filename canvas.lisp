@@ -140,8 +140,38 @@
 (defgeneric close-canvas (canvas)
   (:documentation "Close CANVAS and all presentation contexts attached to it."))
 
+(defgeneric canvas-title (canvas)
+  (:documentation "Return CANVAS's native title."))
+
 (defgeneric canvas-size (canvas)
   (:documentation "Return CANVAS's drawable width and height as two values."))
+
+(defgeneric canvas-position (canvas)
+  (:documentation "Return CANVAS's native x and y position as two values."))
+
+(defgeneric canvas-visible-p (canvas)
+  (:documentation "Return whether CANVAS is intended to be visible."))
+
+(defgeneric show-canvas (canvas)
+  (:documentation "Make an open CANVAS visible."))
+
+(defgeneric hide-canvas (canvas)
+  (:documentation "Hide CANVAS without destroying its native resources."))
+
+(defgeneric move-canvas (canvas x y)
+  (:documentation "Move CANVAS to native position X, Y."))
+
+(defgeneric resize-canvas (canvas width height)
+  (:documentation "Resize CANVAS to WIDTH by HEIGHT logical units."))
+
+(defgeneric raise-canvas (canvas)
+  (:documentation "Request that the native host raise CANVAS."))
+
+(defgeneric minimize-canvas (canvas)
+  (:documentation "Request that the native host minimize CANVAS."))
+
+(defgeneric restore-canvas (canvas)
+  (:documentation "Restore a minimized or maximized CANVAS."))
 
 (defgeneric canvas-state (canvas)
   (:documentation "Return the native lifecycle state of CANVAS."))
