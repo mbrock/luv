@@ -101,6 +101,13 @@
   (declare (ignore canvas))
   nil)
 
+;; cl-sdl3's KEYCODE enum is currently incomplete (and mistypes ]), while SDL
+;; keycodes are Unicode values by design. Keep the raw integer at this boundary.
+(cffi:defcfun ("SDL_GetKeyFromScancode" raw-sdl-key-from-scancode) :uint32
+  (scancode sdl3::scancode)
+  (modstate sdl3::keymod)
+  (key-event :bool))
+
 (defun make-sdl-canvas (&key (title "luv canvas") (width 800) (height 600)
                           x y (visible-p t) (clock (make-demand-clock)))
   "Construct an unrealized SDL canvas."
@@ -299,6 +306,9 @@
   (= (sdl3:%window-id event)
      (sdl3:get-window-id (sdl-canvas-window canvas))))
 
+(defun sdl-canvas-window-id-p (canvas window-id)
+  (= window-id (sdl3:get-window-id (sdl-canvas-window canvas))))
+
 (defun sdl-mouse-button-name (button)
   (case button
     (1 :left)
@@ -353,7 +363,16 @@
     (:comma (intern "," "KEYWORD"))
     (:period (intern "." "KEYWORD"))
     (:slash (intern "/" "KEYWORD"))
+    (:lctrl :control-left)
+    (:lshift :shift-left)
+    (:lalt :alt-left)
+    (:lgui :super-left)
+    (:rctrl :control-right)
+    (:rshift :shift-right)
+    (:ralt :alt-right)
+    (:rgui :super-right)
     (:capslock :caps-lock)
+    (:printscreen :print-screen)
     (:scrolllock :scroll-lock)
     (:numlockclear :num-lock)
     (:pageup :page-up)
@@ -371,28 +390,36 @@
                   (and (present-p :lalt :ralt :alt) :meta)
                   (and (present-p :lgui :rgui :gui) :super)))))
 
-(defun sdl-key-character (keycode)
-  "Return the character represented by SDL's layout-resolved KEYCODE."
-  (let ((code (etypecase keycode
-                (integer keycode)
-                (symbol
-                 (cffi:foreign-enum-value 'sdl3::keycode keycode)))))
+(defun sdl-key-character (scancode modifiers)
+  "Return SCANCODE's character under SDL's current layout and MODIFIERS."
+  (let ((code (raw-sdl-key-from-scancode scancode modifiers nil)))
     (when (or (member code '(8 9 13 27 127))
-              (<= 32 code 126))
+              (<= 32 code (1- char-code-limit)))
       (code-char code))))
 
 (defun dispatch-sdl-key (canvas event class)
-  (when (sdl-canvas-window-event-p canvas event)
-    (let ((key-name (sdl-scancode-key-name (sdl3:%scancode event))))
-      (unless (eq key-name :unknown)
-        (dispatch-canvas-event
-         canvas
-         (make-instance class
-                        :timestamp (sdl3:%timestamp event)
-                        :key-name key-name
-                        :modifiers (sdl-key-modifiers (sdl3:%mod event))
-                        :character (sdl-key-character (sdl3:%key event))
-                        :repeat-p (sdl3:%repeat event)))))))
+  ;; Read fields directly from SDL_Event. Materializing cl-sdl3's
+  ;; KEYBOARD-EVENT would translate its KEY slot through the broken enum even
+  ;; though luv intentionally derives characters from SCANCODE and MOD.
+  (let* ((type '(:struct sdl3:keyboard-event))
+         (window-id (cffi:foreign-slot-value event type 'sdl3::%window-id)))
+    (when (sdl-canvas-window-id-p canvas window-id)
+      (let* ((scancode
+               (cffi:foreign-slot-value event type 'sdl3::%scancode))
+             (modifiers (cffi:foreign-slot-value event type 'sdl3::%mod))
+             (key-name (sdl-scancode-key-name scancode)))
+        (unless (eq key-name :unknown)
+          (dispatch-canvas-event
+           canvas
+           (make-instance class
+                          :timestamp
+                          (cffi:foreign-slot-value event type 'sdl3::%timestamp)
+                          :key-name key-name
+                          :modifiers (sdl-key-modifiers modifiers)
+                          :character (sdl-key-character scancode modifiers)
+                          :repeat-p
+                          (cffi:foreign-slot-value
+                           event type 'sdl3::%repeat))))))))
 
 (defun dispatch-sdl-window-event (canvas event class)
   (when (sdl-canvas-window-event-p canvas event)
@@ -490,15 +517,11 @@
     ((= event-type
         (cffi:foreign-enum-value 'sdl3::event-type :key-down))
      (dispatch-sdl-key
-      canvas
-      (cffi:mem-ref event '(:struct sdl3:keyboard-event))
-      'canvas-key-press-event))
+      canvas event 'canvas-key-press-event))
     ((= event-type
         (cffi:foreign-enum-value 'sdl3::event-type :key-up))
      (dispatch-sdl-key
-      canvas
-      (cffi:mem-ref event '(:struct sdl3:keyboard-event))
-      'canvas-key-release-event))
+      canvas event 'canvas-key-release-event))
     ((= event-type
         (cffi:foreign-enum-value 'sdl3::event-type :mouse-motion))
      (dispatch-sdl-pointer-motion
