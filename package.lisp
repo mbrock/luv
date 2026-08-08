@@ -41,6 +41,7 @@ nothing else does."))
   (:use #:cl #:luv.invocation)
   (:export #:+portability-enumeration-extension-name+
            #:+swapchain-extension-name+
+           #:+debug-utils-extension-name+
            #:vulkan-call-error
            #:vulkan-call-error-result
            #:vulkan-ffi
@@ -71,6 +72,16 @@ nothing else does."))
            #:enumerate-instance-extension-names
            #:create-instance
            #:destroy-instance
+           #:debug-message
+           #:debug-message-severity
+           #:debug-message-types
+           #:debug-message-id-name
+           #:debug-message-id-number
+           #:debug-message-text
+           #:debug-messenger
+           #:debug-messenger-destroyed-p
+           #:install-debug-messenger
+           #:destroy-debug-messenger
            #:enumerate-physical-devices
            #:queue-family
            #:queue-family-flags
@@ -288,6 +299,12 @@ nothing else does."))
            #:make-gpu-dispatch-workgroups-command
            #:make-gpu-draw-command
            #:vulkan-gpu-provider
+           #:vulkan-provider-application-name
+           #:vulkan-provider-debug-callback
+           #:vulkan-provider-debug-severities
+           #:vulkan-provider-debug-types
+           #:vulkan-device-instance-extension-names
+           #:vulkan-device-debug-messenger
            #:canvas-clock
            #:canvas-event-handler
            #:canvas-event

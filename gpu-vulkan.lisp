@@ -35,13 +35,17 @@
                 (vulkan-gpu-error-details condition)))))))
 
 (defun portable-vulkan-gpu-instance-options ()
-  "Return the extensions and flags for a portable Vulkan instance."
+  "Return optional extensions and flags useful to luv's Vulkan instance."
   (let* ((available (lvk:enumerate-instance-extension-names))
          (portability-extension
            lvk:+portability-enumeration-extension-name+)
+         (debug-utils-extension lvk:+debug-utils-extension-name+)
          (portability-p
-           (member portability-extension available :test #'string=)))
-    (values (and portability-p (list portability-extension))
+           (member portability-extension available :test #'string=))
+         (debug-utils-p
+           (member debug-utils-extension available :test #'string=)))
+    (values (append (and portability-p (list portability-extension))
+                    (and debug-utils-p (list debug-utils-extension)))
             (if portability-p
                 '(:enumerate-portability)
                 nil))))
@@ -50,7 +54,19 @@
   ((application-name
     :initarg :application-name
     :initform "luv gpu"
-    :reader vulkan-provider-application-name)))
+    :reader vulkan-provider-application-name)
+   (debug-callback
+    :initarg :debug-callback
+    :initform nil
+    :reader vulkan-provider-debug-callback)
+   (debug-severities
+    :initarg :debug-severities
+    :initform '(:warning :error)
+    :reader vulkan-provider-debug-severities)
+   (debug-types
+    :initarg :debug-types
+    :initform '(:general :validation :performance)
+    :reader vulkan-provider-debug-types)))
 
 (defgeneric vulkan-provider-instance-options (provider)
   (:documentation "Return Vulkan instance extensions and flags for PROVIDER."))
@@ -85,6 +101,10 @@
     :initarg :instance-extension-names
     :initform nil
     :reader vulkan-device-instance-extension-names)
+   (debug-messenger
+    :initarg :debug-messenger
+    :initform nil
+    :reader vulkan-device-debug-messenger)
    (device-extension-names
     :initarg :device-extension-names
     :initform nil
@@ -329,7 +349,7 @@
 
 (defun make-vulkan-gpu-device
     (instance physical-device queue-family descriptor
-     &key instance-extension-names enabled-extension-names)
+     &key debug-messenger instance-extension-names enabled-extension-names)
   "Create GPU wrappers for an already selected Vulkan device and queue."
   (let ((native-device
           (lvk:create-device
@@ -344,6 +364,7 @@
                   :label (gpu-descriptor-label descriptor)
                   :handle native-device
                   :instance instance
+                  :debug-messenger debug-messenger
                   :instance-extension-names instance-extension-names
                   :device-extension-names enabled-extension-names
                   :physical-device physical-device
@@ -514,6 +535,7 @@
     (let ((descriptor (or descriptor (make-device-descriptor))))
       (check-vulkan-device-descriptor descriptor)
       (let ((instance nil)
+            (debug-messenger nil)
             (native-device nil)
             (completed-p nil))
         (unwind-protect
@@ -525,6 +547,19 @@
                       (vulkan-provider-application-name provider)
                       :flags flags
                       :enabled-extension-names extensions))
+               (when (vulkan-provider-debug-callback provider)
+                 (unless (member lvk:+debug-utils-extension-name+
+                                 extensions :test #'string=)
+                   (error 'vulkan-gpu-error
+                          :operation :request-device
+                          :reason :missing-debug-utils-extension))
+                 (setf debug-messenger
+                       (lvk:install-debug-messenger
+                        instance
+                        (vulkan-provider-debug-callback provider)
+                        :severities
+                        (vulkan-provider-debug-severities provider)
+                        :types (vulkan-provider-debug-types provider))))
                (let* ((physical-device
                         (or (first
                              (lvk:enumerate-physical-devices instance))
@@ -536,6 +571,7 @@
                  (let ((device
                          (make-vulkan-gpu-device
                           instance physical-device queue-family descriptor
+                          :debug-messenger debug-messenger
                           :instance-extension-names extensions
                           :enabled-extension-names
                           (vulkan-gpu-device-extension-names provider))))
@@ -543,10 +579,14 @@
                          completed-p t)
                    device)))
           (unless completed-p
-            (when native-device
-              (lvk:destroy-device native-device))
-            (when instance
-              (lvk:destroy-instance instance))))))))
+            (unwind-protect
+                 (when native-device
+                   (lvk:destroy-device native-device))
+              (unwind-protect
+                   (when debug-messenger
+                     (lvk:destroy-debug-messenger debug-messenger))
+                (when instance
+                  (lvk:destroy-instance instance))))))))))
 
 (defmethod device-queue ((device vulkan-gpu-device))
   (ensure-live-vulkan-object device :device-queue)
@@ -2076,8 +2116,12 @@ buffers and native resources until that fence signals."
                (clrhash (vulkan-device-render-passes device)))
           (unwind-protect
                (lvk:destroy-device (vulkan-handle device))
-            (lvk:destroy-instance (vulkan-device-instance device))
-            (setf (vulkan-object-destroyed-p device) t)
-            (when queue
-              (setf (vulkan-object-destroyed-p queue) t)))))))
+            (unwind-protect
+                 (when (vulkan-device-debug-messenger device)
+                   (lvk:destroy-debug-messenger
+                    (vulkan-device-debug-messenger device)))
+              (lvk:destroy-instance (vulkan-device-instance device))
+              (setf (vulkan-object-destroyed-p device) t)
+              (when queue
+                (setf (vulkan-object-destroyed-p queue) t))))))))
   (values))

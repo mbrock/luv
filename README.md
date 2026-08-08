@@ -246,6 +246,35 @@ needed.  A device requested earlier remains useful for offscreen work, but
 canvas configuration will reject it because its instance lacks SDL's surface
 extensions.
 
+When the driver exposes `VK_EXT_debug_utils`, the Vulkan provider enables it.
+Give a provider a `:debug-callback` to install a messenger for the lifetime of
+each requested device:
+
+```lisp
+(defparameter *debug-provider*
+  (make-instance
+   'luv:vulkan-gpu-provider
+   :debug-callback
+   (lambda (message)
+     (format *debug-io* "~&[~{~A~^, ~}] ~A~%"
+             (lvk:debug-message-types message)
+             (lvk:debug-message-text message)))))
+
+(defparameter *device* (luv:request-gpu-device *debug-provider*))
+```
+
+The default filter accepts `:warning` and `:error` severities and the
+`:general`, `:validation`, and `:performance` message types; customize those
+with the provider's `:debug-severities` and `:debug-types` initargs.  The
+callback can run on a driver thread and must not retain foreign pointers (the
+message passed to it contains copied Lisp strings).  Callback errors are
+reported and stopped at the foreign boundary.  Debug utils transports
+messages but does not itself enable a validation layer.
+
+At the lower-level Vulkan boundary, `lvk:install-debug-messenger` and
+`lvk:destroy-debug-messenger` manage the same instance-scoped lifetime
+directly.  Destroy the messenger before its Vulkan instance.
+
 On Cocoa, the canvas's event loop and frame callbacks run on the process main
 thread.  Calls from SLY workers are sent to the canvas thread and wait for the
 frame.  `request-canvas-frame` owns that native scheduling step;

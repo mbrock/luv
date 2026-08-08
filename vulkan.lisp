@@ -11,6 +11,8 @@
 
 (defparameter +swapchain-extension-name+ "VK_KHR_swapchain")
 
+(defparameter +debug-utils-extension-name+ "VK_EXT_debug_utils")
+
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (cffi:define-foreign-library vulkan-loader
     (:darwin (:or "libvulkan.1.dylib" "libvulkan.dylib"))
@@ -63,7 +65,9 @@
   (:render-pass-begin-info 43)
   (:image-memory-barrier 45)
   (:swapchain-create-info-khr 1000001000)
-  (:present-info-khr 1000001001))
+  (:present-info-khr 1000001001)
+  (:debug-utils-messenger-callback-data-ext 1000128003)
+  (:debug-utils-messenger-create-info-ext 1000128004))
 
 (cffi:defcenum (image-type :uint32)
   (:1d 0)
@@ -204,6 +208,18 @@
 
 (cffi:defbitfield (instance-create-flags :uint32)
   (:enumerate-portability #x1))
+
+(cffi:defbitfield (debug-utils-message-severity-flags :uint32)
+  (:verbose #x1)
+  (:info #x10)
+  (:warning #x100)
+  (:error #x1000))
+
+(cffi:defbitfield (debug-utils-message-type-flags :uint32)
+  (:general #x1)
+  (:validation #x2)
+  (:performance #x4)
+  (:device-address-binding #x8))
 
 (cffi:defbitfield (queue-flags :uint32)
   (:graphics #x1)
@@ -372,6 +388,27 @@
   (pp-enabled-layer-names :pointer)
   (enabled-extension-count :uint32)
   (pp-enabled-extension-names :pointer))
+
+(defvkstruct debug-utils-messenger-create-info-ext
+    (:s-type :debug-utils-messenger-create-info-ext)
+  (flags :uint32)
+  (message-severity debug-utils-message-severity-flags)
+  (message-type debug-utils-message-type-flags)
+  (pfn-user-callback :pointer)
+  (p-user-data :pointer))
+
+(defvkstruct debug-utils-messenger-callback-data-ext
+    (:s-type :debug-utils-messenger-callback-data-ext)
+  (flags :uint32)
+  (p-message-id-name :pointer)
+  (message-id-number :int32)
+  (p-message :pointer)
+  (queue-label-count :uint32)
+  (p-queue-labels :pointer)
+  (command-buffer-label-count :uint32)
+  (p-command-buffer-labels :pointer)
+  (object-count :uint32)
+  (p-objects :pointer))
 
 (defvkstruct extent-3d ()
   (width :uint32)
@@ -1051,6 +1088,39 @@ foreign call."
                                        name)))))
        ',lisp-name)))
 
+(defmacro defvkproc (foreign-name return-type &body arguments)
+  "Define an instance extension command resolved through vkGetInstanceProcAddr."
+  (let* ((lisp-name (vulkan-lisp-name foreign-name))
+         (argument-names (mapcar #'first arguments)))
+    `(progn
+       (eval-when (:compile-toplevel :load-toplevel :execute)
+         (export ',lisp-name '#:luv.vk))
+       (defclass ,lisp-name (vulkan-invocation)
+         ,(loop for name in argument-names
+                collect
+                `(,name :initarg ,(intern (symbol-name name) :keyword)))
+         (:metaclass vulkan-function-class))
+       (eval-when (:load-toplevel :execute)
+         (configure-vulkan-function-class
+          (find-class ',lisp-name) ,foreign-name ',return-type ',arguments))
+       (defmethod invoke ((ffi vulkan-ffi) (call ,lisp-name))
+         (declare (ignore ffi))
+         (with-slots ,argument-names call
+           (cffi:foreign-funcall-pointer
+            (instance-procedure ,(first argument-names) ,foreign-name)
+            ()
+            ,@(loop for (name type) in arguments append (list type name))
+            ,return-type)))
+       (defun ,lisp-name ,argument-names
+         (invoke
+          *vulkan-ffi*
+          (make-instance ',lisp-name
+                         ,@(loop for name in argument-names
+                                 append
+                                 (list (intern (symbol-name name) :keyword)
+                                       name)))))
+       ',lisp-name)))
+
 ;;; Structured tracing is the general TRACING-INVOKER mixin applied to the
 ;;; Vulkan FFI, plus Vulkan-shaped ways of starting, scoping, and reading
 ;;; a trace.
@@ -1127,6 +1197,24 @@ the beginning of TRACE through its first presentation."
 (defvkfun "vkDestroyInstance"
     :void
   (instance :pointer)
+  (allocator :pointer))
+
+(defvkfun "vkGetInstanceProcAddr"
+    :pointer
+  (instance :pointer)
+  (name :string))
+
+(defvkproc "vkCreateDebugUtilsMessengerEXT"
+    checked-result
+  (instance :pointer)
+  (create-info :pointer)
+  (allocator :pointer)
+  (messenger :pointer))
+
+(defvkproc "vkDestroyDebugUtilsMessengerEXT"
+    :void
+  (instance :pointer)
+  (messenger :pointer)
   (allocator :pointer))
 
 (defvkfun "vkEnumeratePhysicalDevices"
@@ -1850,6 +1938,114 @@ the beginning of TRACE through its first presentation."
 
 (defun destroy-instance (instance)
   (vk:destroy-instance instance (cffi:null-pointer))
+  (values))
+
+(defstruct (debug-message (:constructor %make-debug-message))
+  severity
+  types
+  id-name
+  id-number
+  text)
+
+(defstruct (debug-messenger (:constructor %make-debug-messenger))
+  instance
+  handle
+  user-data
+  (destroyed-p nil))
+
+(defvar *debug-messenger-callbacks* (make-hash-table :test #'eql)
+  "Callbacks keyed by the address passed through VkDebugUtils user data.")
+
+(defun nullable-foreign-string (pointer)
+  (unless (cffi:null-pointer-p pointer)
+    (cffi:foreign-string-to-lisp pointer)))
+
+(cffi:defcallback dispatch-debug-utils-message :uint32
+    ((severity debug-utils-message-severity-flags)
+     (types debug-utils-message-type-flags)
+     (callback-data :pointer)
+     (user-data :pointer))
+  ;; Never unwind through a Vulkan driver.  Callback failures are reported and
+  ;; Vulkan is always told not to abort the call which produced the message.
+  (handler-case
+      (let ((callback
+              (gethash (cffi:pointer-address user-data)
+                       *debug-messenger-callbacks*)))
+        (when callback
+          (cffi:with-foreign-slots
+              ((p-message-id-name message-id-number p-message)
+               callback-data
+               (:struct debug-utils-messenger-callback-data-ext))
+            (funcall callback
+                     (%make-debug-message
+                      :severity severity
+                      :types types
+                      :id-name (nullable-foreign-string p-message-id-name)
+                      :id-number message-id-number
+                      :text (nullable-foreign-string p-message))))))
+    (serious-condition (condition)
+      (ignore-errors
+        (format *error-output*
+                "~&Vulkan debug callback failed: ~A~%" condition))))
+  0)
+
+(defun instance-procedure (instance name)
+  (let ((procedure (vk:get-instance-proc-addr instance name)))
+    (when (cffi:null-pointer-p procedure)
+      (error "Vulkan instance procedure ~A is unavailable." name))
+    procedure))
+
+(defun install-debug-messenger
+    (instance callback
+     &key
+       (severities '(:warning :error))
+       (types '(:general :validation :performance)))
+  "Install CALLBACK for INSTANCE and return an owned DEBUG-MESSENGER.
+
+CALLBACK receives one DEBUG-MESSAGE.  VK_EXT_debug_utils must have been
+enabled when INSTANCE was created.  Keep the returned messenger alive and
+destroy it before destroying INSTANCE."
+  (check-type callback (or function symbol))
+  (let ((user-data (cffi:foreign-alloc :uint8))
+        (handle nil)
+        (completed-p nil))
+    (setf (gethash (cffi:pointer-address user-data)
+                   *debug-messenger-callbacks*)
+          callback)
+    (unwind-protect
+         (with-vk (create-info debug-utils-messenger-create-info-ext
+                   :flags 0
+                   :message-severity severities
+                   :message-type types
+                   :pfn-user-callback
+                   (cffi:callback dispatch-debug-utils-message)
+                   :p-user-data user-data)
+           (cffi:with-foreign-object (output :pointer)
+             (setf (cffi:mem-ref output :pointer) (cffi:null-pointer))
+             (with-vulkan-results (:create-debug-utils-messenger-ext)
+               (vk:create-debug-utils-messenger-ext
+                instance create-info (cffi:null-pointer) output))
+             (setf handle (cffi:mem-ref output :pointer)
+                   completed-p t)
+             (%make-debug-messenger
+              :instance instance :handle handle :user-data user-data)))
+      (unless completed-p
+        (remhash (cffi:pointer-address user-data)
+                 *debug-messenger-callbacks*)
+        (cffi:foreign-free user-data)))))
+
+(defun destroy-debug-messenger (messenger)
+  "Destroy MESSENGER and release its Lisp callback.  Safe to call twice."
+  (unless (debug-messenger-destroyed-p messenger)
+    (unwind-protect
+         (vk:destroy-debug-utils-messenger-ext
+          (debug-messenger-instance messenger)
+          (debug-messenger-handle messenger)
+          (cffi:null-pointer))
+      (remhash (cffi:pointer-address (debug-messenger-user-data messenger))
+               *debug-messenger-callbacks*)
+      (cffi:foreign-free (debug-messenger-user-data messenger))
+      (setf (debug-messenger-destroyed-p messenger) t)))
   (values))
 
 (defun physical-device-queue-families (physical-device)
