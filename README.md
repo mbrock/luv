@@ -38,6 +38,43 @@ Submission currently waits for the Vulkan queue to become idle. This keeps
 the initial ownership rules honest; presentation work can replace the wait
 with tracked in-flight frames without changing the public operation.
 
+The next slice owns 2D textures and records explicit clear and copy commands.
+Clearing is deliberately a transfer command for now; render-pass clears can
+reuse the same texture and layout tracking later:
+
+```lisp
+(let* ((device (luv:request-gpu-device luv:*gpu-provider*))
+       (source (luv:create
+                device
+                (luv:make-texture-descriptor
+                 :size '(8 8) :dimensions :2d :format :rgba8-unorm
+                 :usage '(:copy-src :copy-dst))))
+       (destination (luv:create
+                     device
+                     (luv:make-texture-descriptor
+                      :size '(8 8) :dimensions :2d :format :rgba8-unorm
+                      :usage '(:copy-src :copy-dst))))
+       (encoder (luv:create device (luv:make-command-encoder-descriptor)))
+       (commands nil))
+  (unwind-protect
+       (progn
+         (luv:encode
+          encoder
+          (luv:make-gpu-clear-texture-command
+           :texture source :color #(0.25 0.5 0.75 1.0)))
+         (luv:encode
+          encoder
+          (luv:make-gpu-copy-texture-command
+           :source source :destination destination))
+         (setf commands (luv:finish encoder))
+         (luv:submit (luv:device-queue device) (vector commands)))
+    (when commands (luv:destroy commands))
+    (luv:destroy encoder)
+    (luv:destroy destination)
+    (luv:destroy source)
+    (luv:destroy device)))
+```
+
 ## One-time Lisp setup
 
 `cl-sdl3` is not in Quicklisp, so install it as a local project:

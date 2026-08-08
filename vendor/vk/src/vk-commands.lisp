@@ -6,6 +6,9 @@ SPDX-License-Identifier: Apache-2.0 OR MIT
 
 (in-package :vk)
 
+#+sbcl
+(declaim (sb-ext:muffle-conditions sb-int:type-warning))
+
 
 (defvkfun (create-instance
            %vk:create-instance

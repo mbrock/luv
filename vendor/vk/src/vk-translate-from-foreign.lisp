@@ -289,8 +289,8 @@ SPDX-License-Identifier: Apache-2.0 OR MIT
        ptr
        (:struct %vk:physical-device-memory-properties))
     (make-instance 'vk:physical-device-memory-properties
-                   :memory-types (loop for i from 0 below %vk:memory-type-count collect (cffi:mem-aref %vk:memory-types '(:struct %vk:memory-type) i))
-                   :memory-heaps (loop for i from 0 below %vk:memory-heap-count collect (cffi:mem-aref %vk:memory-heaps '(:struct %vk:memory-heap) i)))))
+                   :memory-types (loop for i from 0 below %vk:memory-type-count collect (cffi:mem-aref (cffi:foreign-slot-pointer ptr '(:struct %vk:physical-device-memory-properties) '%vk:memory-types) '(:struct %vk:memory-type) i))
+                   :memory-heaps (loop for i from 0 below %vk:memory-heap-count collect (cffi:mem-aref (cffi:foreign-slot-pointer ptr '(:struct %vk:physical-device-memory-properties) '%vk:memory-heaps) '(:struct %vk:memory-heap) i)))))
 
 (defmethod cffi:translate-from-foreign (ptr (type %vk:c-memory-allocate-info))
   (cffi:with-foreign-slots
@@ -22272,4 +22272,3 @@ SPDX-License-Identifier: Apache-2.0 OR MIT
                    :shader-float-6 %vk:shader-float-6
                    :shader-float-8-unsigned-e-8-m-0 %vk:shader-float-8-unsigned-e-8-m-0
                    :shader-m-x-int-8 %vk:shader-m-x-int-8)))
-

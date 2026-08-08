@@ -16,6 +16,9 @@
            #:gpu-device-mismatch-error
            #:gpu-device-mismatch-error-expected-device
            #:gpu-device-mismatch-error-actual-device
+           #:gpu-usage-error
+           #:gpu-usage-error-required-usage
+           #:gpu-usage-error-actual-usage
            #:vulkan-gpu-error
            #:vulkan-gpu-error-reason
            #:vulkan-gpu-error-details
@@ -40,17 +43,26 @@
            #:gpu-provider
            #:gpu-device
            #:gpu-queue
+           #:gpu-texture
+           #:gpu-texture-size
+           #:gpu-texture-usage
+           #:gpu-texture-dimensions
+           #:gpu-texture-format
            #:gpu-command-encoder
            #:gpu-command-buffer
            #:gpu-object-label
            #:request-gpu-device
            #:device-queue
            #:create
+           #:encode
            #:finish
            #:submit
            #:destroy
            #:make-device-descriptor
+           #:make-texture-descriptor
            #:make-command-encoder-descriptor
+           #:make-gpu-clear-texture-command
+           #:make-gpu-copy-texture-command
            #:vulkan-gpu-provider
            #:canvas
            #:canvas-context

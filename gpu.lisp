@@ -91,6 +91,21 @@
              (gpu-device-mismatch-error-expected-device condition)
              (gpu-error-operation condition)))))
 
+(define-condition gpu-usage-error (gpu-object-error)
+  ((required-usage
+    :initarg :required-usage
+    :reader gpu-usage-error-required-usage)
+   (actual-usage
+    :initarg :actual-usage
+    :reader gpu-usage-error-actual-usage))
+  (:report
+   (lambda (condition stream)
+     (format stream "~S requires usage ~S for ~S, but was created with ~S."
+             (gpu-object-error-object condition)
+             (gpu-usage-error-required-usage condition)
+             (gpu-error-operation condition)
+             (gpu-usage-error-actual-usage condition)))))
+
 (defclass gpu-provider () ()
   (:documentation "Instances of GPU-PROVIDER subclasses are platform-specific
 factories for requesting GPU-DEVICE instances."))
@@ -108,7 +123,19 @@ factories for requesting GPU-DEVICE instances."))
 
 (defclass gpu-queue (gpu-object) ())
 (defclass gpu-buffer (gpu-object) ())
-(defclass gpu-texture (gpu-object) ())
+(defclass gpu-texture (gpu-object)
+  ((size
+    :initarg :size
+    :reader gpu-texture-size)
+   (usage
+    :initarg :usage
+    :reader gpu-texture-usage)
+   (dimensions
+    :initarg :dimensions
+    :reader gpu-texture-dimensions)
+   (format
+    :initarg :format
+    :reader gpu-texture-format)))
 (defclass gpu-texture-view (gpu-object) ())
 
 (defclass gpu-command-buffer (gpu-object) ())
@@ -203,3 +230,11 @@ sequence."))
   height
   min-depth
   max-depth)
+
+(defstruct (gpu-clear-texture-command (:include gpu-command))
+  texture
+  color)
+
+(defstruct (gpu-copy-texture-command (:include gpu-command))
+  source
+  destination)

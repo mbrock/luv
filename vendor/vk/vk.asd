@@ -15,9 +15,10 @@
     ;; files.  Keep its compiler metadata lean even when VK is compiled while
     ;; loading a DEBUG 3 client such as LUV/GPU.
     (with-compilation-unit (:override t
-                            :policy '(optimize (debug 1)
-                                               (speed 2)
-                                               (safety 1)))
+                            :policy '(optimize (debug 0)
+                                               (speed 0)
+                                               (safety 1)
+                                               (compilation-speed 3)))
       (funcall thunk)))
   :depends-on (cffi alexandria)
   :components

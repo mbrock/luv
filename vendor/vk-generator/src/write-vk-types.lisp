@@ -416,12 +416,19 @@ Instances of this class are used as parameters of the following functions:~{~%Se
             (find-if (lambda (count-member)
                        (string= (car (len member-data)) count-member))
                      count-member-names))
-       (format nil "~((loop for i from 0 below %vk:~a collect (cffi:mem-aref %vk:~a '(:struct %vk:~a) i))~)"
+       (format nil "~((loop for i from 0 below %vk:~a collect (cffi:mem-aref ~a '(:struct %vk:~a) i))~)"
                (let ((count-member (find-if (lambda (m)
                                               (string= (car (len member-data)) (name m)))
                                             (members struct))))
                  (fix-type-name (name count-member) (tags vk-spec)))
-               (fix-type-name (name member-data) (tags vk-spec))
+               (if (array-sizes member-data)
+                   (format nil
+                           "~((cffi:foreign-slot-pointer ~:[~;,~]ptr '(:struct %vk:~a) '%vk:~a)~)"
+                           macro-p
+                           (fix-type-name (name struct) (tags vk-spec))
+                           (fix-type-name (name member-data) (tags vk-spec)))
+                   (format nil "~(%vk:~a~)"
+                           (fix-type-name (name member-data) (tags vk-spec))))
                (fix-type-name (get-type-name member-data) (tags vk-spec))))
 
       ;; lists of strings and primitive values
