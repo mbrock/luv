@@ -161,35 +161,6 @@
   (unless (connection-available-p)
     (start-server :quiet t)))
 
-(defun stop-server ()
-  (let ((pid (pid-file-pid)))
-    (cond
-      ((not (pid-alive-p pid))
-       (ignore-errors (delete-file *server-pid-path*))
-       (format t "luv Slynk is not running.~%"))
-      (t
-       (run-shell (format nil "kill ~D >/dev/null 2>&1" pid))
-       (loop repeat 100
-             unless (pid-alive-p pid)
-               do (progn
-                    (ignore-errors (delete-file *server-pid-path*))
-                    (format t "Stopped luv Slynk pid ~D.~%" pid)
-                    (return-from stop-server t))
-             do (sleep 0.1))
-       (error "Timed out stopping luv Slynk pid ~D" pid)))))
-
-(defun server-status ()
-  (let ((pid (pid-file-pid)))
-    (cond
-      ((connection-available-p)
-       (format t "luv Slynk is listening on ~A:~D~@[ (pid ~D)~].~%"
-               *host* *port* pid))
-      ((pid-alive-p pid)
-       (format t "luv Slynk pid ~D exists, but ~A:~D is not accepting connections.~%"
-               pid *host* *port*))
-      (t
-       (format t "luv Slynk is not running.~%")))))
-
 (defmacro with-slynk-connection ((stream) &body body)
   `(let ((socket (make-instance 'sb-bsd-sockets:inet-socket
                                 :type :stream :protocol :tcp)))
@@ -486,6 +457,69 @@
   (destructuring-bind (output value) (read-eval-return stream package)
     (declare (ignore value))
     output))
+
+(defun listener-process-id ()
+  (when (connection-available-p)
+    (handler-case
+        (with-slynk-connection (stream)
+          (authenticate stream)
+          (parse-integer
+           (string-trim
+            '(#\Space #\Tab #\Newline #\Return)
+            (evaluate-captured-output-on
+             stream "(princ (sb-posix:getpid))"))))
+      (error () nil))))
+
+(defun stop-server ()
+  (let ((connection-p (connection-available-p))
+        (pid (pid-file-pid))
+        (listener-pid (listener-process-id)))
+    (cond
+      ((and listener-pid (not (eql pid listener-pid)))
+       (ignore-errors (delete-file *server-pid-path*))
+       (format t
+               "luv Slynk pid ~D is owned by Emacs or another process; leaving it running.~%"
+               listener-pid))
+      ((and connection-p (null listener-pid))
+       (format t
+               "luv Slynk is listening on ~A:~D, but its owner could not be identified; leaving it running.~%"
+               *host* *port*))
+      ((not (pid-alive-p pid))
+       (ignore-errors (delete-file *server-pid-path*))
+       (format t "luv Slynk is not running.~%"))
+      (t
+       (run-shell (format nil "kill ~D >/dev/null 2>&1" pid))
+       (loop repeat 100
+             unless (pid-alive-p pid)
+               do (progn
+                    (ignore-errors (delete-file *server-pid-path*))
+                    (format t "Stopped luv Slynk pid ~D.~%" pid)
+                    (return-from stop-server t))
+             do (sleep 0.1))
+       (error "Timed out stopping luv Slynk pid ~D" pid)))))
+
+(defun server-status ()
+  (let ((connection-p (connection-available-p))
+        (pid (pid-file-pid))
+        (listener-pid (listener-process-id)))
+    (cond
+      (listener-pid
+       (unless (eql pid listener-pid)
+         (ignore-errors (delete-file *server-pid-path*)))
+       (format t "luv Slynk is listening on ~A:~D (pid ~D, ~A).~%"
+               *host* *port* listener-pid
+               (if (eql pid listener-pid)
+                   "managed by ./sly"
+                   "Emacs/external")))
+      (connection-p
+       (format t "luv Slynk is listening on ~A:~D (owner unavailable).~%"
+               *host* *port*))
+      ((pid-alive-p pid)
+       (format t "luv Slynk pid ~D exists, but ~A:~D is not accepting connections.~%"
+               pid *host* *port*))
+      (t
+       (ignore-errors (delete-file *server-pid-path*))
+       (format t "luv Slynk is not running.~%")))))
 
 (defun evaluate-output-on (stream code &optional (package "CL-USER"))
   (write-result-string (evaluate-captured-output-on stream code package)))
