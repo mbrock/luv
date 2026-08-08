@@ -30,7 +30,18 @@
            #:get-image-memory-requirements
            #:allocate-memory
            #:free-memory
-           #:bind-image-memory))
+           #:bind-image-memory
+           #:create-command-pool
+           #:destroy-command-pool
+           #:allocate-command-buffer
+           #:begin-command-buffer
+           #:end-command-buffer
+           #:cmd-transition-image
+           #:cmd-clear-color-image
+           #:cmd-copy-image
+           #:submit-command-buffers
+           #:submit-command-buffer
+           #:queue-wait-idle))
 
 (defpackage #:luv
   (:use #:cl)

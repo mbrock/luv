@@ -28,8 +28,13 @@
   (:instance-create-info 1)
   (:device-queue-create-info 2)
   (:device-create-info 3)
+  (:submit-info 4)
   (:memory-allocate-info 5)
-  (:image-create-info 14))
+  (:image-create-info 14)
+  (:command-pool-create-info 39)
+  (:command-buffer-allocate-info 40)
+  (:command-buffer-begin-info 42)
+  (:image-memory-barrier 45))
 
 (cffi:defcenum (image-type :uint32)
   (:1d 0)
@@ -58,6 +63,10 @@
 (cffi:defcenum (sample-count :uint32)
   (:1 1))
 
+(cffi:defcenum (command-buffer-level :uint32)
+  (:primary 0)
+  (:secondary 1))
+
 (cffi:defbitfield (instance-create-flags :uint32)
   (:enumerate-portability #x1))
 
@@ -78,6 +87,34 @@
   (:host-cached #x8)
   (:lazily-allocated #x10)
   (:protected #x20))
+
+(cffi:defbitfield (command-pool-create-flags :uint32)
+  (:transient #x1)
+  (:reset-command-buffer #x2)
+  (:protected #x4))
+
+(cffi:defbitfield (command-buffer-usage-flags :uint32)
+  (:one-time-submit #x1)
+  (:render-pass-continue #x2)
+  (:simultaneous-use #x4))
+
+(cffi:defbitfield (image-aspect-flags :uint32)
+  (:color #x1)
+  (:depth #x2)
+  (:stencil #x4))
+
+(cffi:defbitfield (access-flags :uint32)
+  (:transfer-read #x800)
+  (:transfer-write #x1000))
+
+(cffi:defbitfield (pipeline-stage-flags :uint32)
+  (:top-of-pipe #x1)
+  (:transfer #x1000))
+
+(cffi:defbitfield (dependency-flags :uint32)
+  (:by-region #x1))
+
+(defconstant +queue-family-ignored+ #xffffffff)
 
 ;;; Conditions and result translation.
 
@@ -216,6 +253,69 @@
   (queue-family-index-count :uint32)
   (p-queue-family-indices :pointer)
   (initial-layout image-layout))
+
+(defvkstruct offset-3d ()
+  (x :int32)
+  (y :int32)
+  (z :int32))
+
+(defvkstruct image-subresource-layers ()
+  (aspect-mask image-aspect-flags)
+  (mip-level :uint32)
+  (base-array-layer :uint32)
+  (layer-count :uint32))
+
+(defvkstruct image-subresource-range ()
+  (aspect-mask image-aspect-flags)
+  (base-mip-level :uint32)
+  (level-count :uint32)
+  (base-array-layer :uint32)
+  (layer-count :uint32))
+
+(defvkstruct image-memory-barrier (:s-type :image-memory-barrier)
+  (src-access-mask access-flags)
+  (dst-access-mask access-flags)
+  (old-layout image-layout)
+  (new-layout image-layout)
+  (src-queue-family-index :uint32)
+  (dst-queue-family-index :uint32)
+  (image :pointer)
+  (subresource-range (:struct image-subresource-range)))
+
+(defvkstruct image-copy ()
+  (src-subresource (:struct image-subresource-layers))
+  (src-offset (:struct offset-3d))
+  (dst-subresource (:struct image-subresource-layers))
+  (dst-offset (:struct offset-3d))
+  (extent (:struct extent-3d)))
+
+(defvkstruct command-pool-create-info (:s-type :command-pool-create-info)
+  (flags command-pool-create-flags)
+  (queue-family-index :uint32))
+
+(defvkstruct command-buffer-allocate-info
+    (:s-type :command-buffer-allocate-info)
+  (command-pool :pointer)
+  (level command-buffer-level)
+  (command-buffer-count :uint32))
+
+(defvkstruct command-buffer-begin-info (:s-type :command-buffer-begin-info)
+  (flags command-buffer-usage-flags)
+  (p-inheritance-info :pointer))
+
+(cffi:defcunion clear-color-value
+  (float-32 (:array :float 4))
+  (int-32 (:array :int32 4))
+  (uint-32 (:array :uint32 4)))
+
+(defvkstruct submit-info (:s-type :submit-info)
+  (wait-semaphore-count :uint32)
+  (p-wait-semaphores :pointer)
+  (p-wait-dst-stage-mask :pointer)
+  (command-buffer-count :uint32)
+  (p-command-buffers :pointer)
+  (signal-semaphore-count :uint32)
+  (p-signal-semaphores :pointer))
 
 (defun clear-foreign-object (pointer type &optional (count 1))
   (loop for index below (* count (cffi:foreign-type-size type))
@@ -403,6 +503,84 @@
   (memory :pointer)
   (offset :uint64))
 
+(cffi:defcfun ("vkCreateCommandPool" %create-command-pool
+               :library vulkan-loader)
+    checked-result
+  (device :pointer)
+  (create-info :pointer)
+  (allocator :pointer)
+  (command-pool :pointer))
+
+(cffi:defcfun ("vkDestroyCommandPool" %destroy-command-pool
+               :library vulkan-loader)
+    :void
+  (device :pointer)
+  (command-pool :pointer)
+  (allocator :pointer))
+
+(cffi:defcfun ("vkAllocateCommandBuffers" %allocate-command-buffers
+               :library vulkan-loader)
+    checked-result
+  (device :pointer)
+  (allocate-info :pointer)
+  (command-buffers :pointer))
+
+(cffi:defcfun ("vkBeginCommandBuffer" %begin-command-buffer
+               :library vulkan-loader)
+    checked-result
+  (command-buffer :pointer)
+  (begin-info :pointer))
+
+(cffi:defcfun ("vkEndCommandBuffer" %end-command-buffer
+               :library vulkan-loader)
+    checked-result
+  (command-buffer :pointer))
+
+(cffi:defcfun ("vkCmdPipelineBarrier" %cmd-pipeline-barrier
+               :library vulkan-loader)
+    :void
+  (command-buffer :pointer)
+  (src-stage-mask pipeline-stage-flags)
+  (dst-stage-mask pipeline-stage-flags)
+  (dependencies dependency-flags)
+  (memory-barrier-count :uint32)
+  (memory-barriers :pointer)
+  (buffer-memory-barrier-count :uint32)
+  (buffer-memory-barriers :pointer)
+  (image-memory-barrier-count :uint32)
+  (image-memory-barriers :pointer))
+
+(cffi:defcfun ("vkCmdClearColorImage" %cmd-clear-color-image
+               :library vulkan-loader)
+    :void
+  (command-buffer :pointer)
+  (image :pointer)
+  (layout image-layout)
+  (color :pointer)
+  (range-count :uint32)
+  (ranges :pointer))
+
+(cffi:defcfun ("vkCmdCopyImage" %cmd-copy-image :library vulkan-loader)
+    :void
+  (command-buffer :pointer)
+  (source :pointer)
+  (source-layout image-layout)
+  (destination :pointer)
+  (destination-layout image-layout)
+  (region-count :uint32)
+  (regions :pointer))
+
+(cffi:defcfun ("vkQueueSubmit" %queue-submit :library vulkan-loader)
+    checked-result
+  (queue :pointer)
+  (submit-count :uint32)
+  (submits :pointer)
+  (fence :pointer))
+
+(cffi:defcfun ("vkQueueWaitIdle" %queue-wait-idle :library vulkan-loader)
+    checked-result
+  (queue :pointer))
+
 ;;; The three ordinary Vulkan call shapes used so far.
 
 (defmacro define-enumerator
@@ -489,6 +667,16 @@
   (%allocate-memory device allocate-info (cffi:null-pointer))
   :checked t
   :operation :allocate-memory)
+
+(define-creator create-command-pool-handle (device create-info)
+  (%create-command-pool device create-info (cffi:null-pointer))
+  :checked t
+  :operation :create-command-pool)
+
+(define-creator allocate-command-buffer-handle (device allocate-info)
+  (%allocate-command-buffers device allocate-info)
+  :checked t
+  :operation :allocate-command-buffer)
 
 ;;; Public, Lisp-shaped operations.
 
@@ -679,4 +867,131 @@
 (defun bind-image-memory (device image memory &optional (offset 0))
   (with-vulkan-results (:bind-image-memory)
     (%bind-image-memory device image memory offset))
+  (values))
+
+(defun create-command-pool (device queue-family-index &key flags)
+  (with-vk (create-info command-pool-create-info
+            :flags flags
+            :queue-family-index queue-family-index)
+    (create-command-pool-handle device create-info)))
+
+(defun destroy-command-pool (device command-pool)
+  (%destroy-command-pool device command-pool (cffi:null-pointer))
+  (values))
+
+(defun allocate-command-buffer
+    (device command-pool &key (level :primary))
+  (with-vk (allocate-info command-buffer-allocate-info
+            :command-pool command-pool
+            :level level
+            :command-buffer-count 1)
+    (allocate-command-buffer-handle device allocate-info)))
+
+(defun begin-command-buffer (command-buffer &key flags)
+  (with-vk (begin-info command-buffer-begin-info
+            :flags flags
+            :p-inheritance-info (cffi:null-pointer))
+    (with-vulkan-results (:begin-command-buffer)
+      (%begin-command-buffer command-buffer begin-info)))
+  command-buffer)
+
+(defun end-command-buffer (command-buffer)
+  (with-vulkan-results (:end-command-buffer)
+    (%end-command-buffer command-buffer))
+  command-buffer)
+
+(defun fill-color-subresource-range (range)
+  (fill-vk range 'image-subresource-range
+           :aspect-mask '(:color)
+           :base-mip-level 0
+           :level-count 1
+           :base-array-layer 0
+           :layer-count 1))
+
+(defun cmd-transition-image
+    (command-buffer image old-layout new-layout
+     src-access dst-access src-stage dst-stage)
+  (with-vk (barrier image-memory-barrier
+            :src-access-mask src-access
+            :dst-access-mask dst-access
+            :old-layout old-layout
+            :new-layout new-layout
+            :src-queue-family-index +queue-family-ignored+
+            :dst-queue-family-index +queue-family-ignored+
+            :image image)
+    (fill-color-subresource-range
+     (cffi:foreign-slot-pointer
+      barrier '(:struct image-memory-barrier) 'subresource-range))
+    (%cmd-pipeline-barrier
+     command-buffer src-stage dst-stage nil
+     0 (cffi:null-pointer)
+     0 (cffi:null-pointer)
+     1 barrier))
+  (values))
+
+(defun cmd-clear-color-image (command-buffer image layout color)
+  (with-vk (range image-subresource-range)
+    (fill-color-subresource-range range)
+    (cffi:with-foreign-object (foreign-color '(:union clear-color-value))
+      (clear-foreign-object foreign-color '(:union clear-color-value))
+      (let ((components
+              (cffi:foreign-slot-pointer
+               foreign-color '(:union clear-color-value) 'float-32)))
+        (loop for component across color
+              for index from 0 below 4
+              do (setf (cffi:mem-aref components :float index) component)))
+      (%cmd-clear-color-image
+       command-buffer image layout foreign-color 1 range)))
+  (values))
+
+(defun fill-color-subresource-layers (layers)
+  (fill-vk layers 'image-subresource-layers
+           :aspect-mask '(:color)
+           :mip-level 0
+           :base-array-layer 0
+           :layer-count 1))
+
+(defun cmd-copy-image
+    (command-buffer source source-layout destination destination-layout
+     width height &optional (depth 1))
+  (with-vk (region image-copy)
+    (dolist (slot '(src-subresource dst-subresource))
+      (fill-color-subresource-layers
+       (cffi:foreign-slot-pointer region '(:struct image-copy) slot)))
+    (dolist (slot '(src-offset dst-offset))
+      (fill-vk
+       (cffi:foreign-slot-pointer region '(:struct image-copy) slot)
+       'offset-3d :x 0 :y 0 :z 0))
+    (fill-vk
+     (cffi:foreign-slot-pointer region '(:struct image-copy) 'extent)
+     'extent-3d :width width :height height :depth depth)
+    (%cmd-copy-image
+     command-buffer source source-layout destination destination-layout
+     1 region))
+  (values))
+
+(defun submit-command-buffers (queue buffers)
+  (cffi:with-foreign-object (command-buffers :pointer (length buffers))
+    (loop for command-buffer across buffers
+          for index from 0
+          do (setf (cffi:mem-aref command-buffers :pointer index)
+                   command-buffer))
+    (with-vk (submit submit-info
+              :wait-semaphore-count 0
+              :p-wait-semaphores (cffi:null-pointer)
+              :p-wait-dst-stage-mask (cffi:null-pointer)
+              :command-buffer-count (length buffers)
+              :p-command-buffers command-buffers
+              :signal-semaphore-count 0
+              :p-signal-semaphores (cffi:null-pointer))
+      (with-vulkan-results (:queue-submit)
+        (%queue-submit queue 1 submit (cffi:null-pointer)))))
+  (values))
+
+(defun submit-command-buffer (queue command-buffer)
+  (submit-command-buffers queue (vector command-buffer)))
+
+(defun queue-wait-idle (queue)
+  (with-vulkan-results (:queue-wait-idle)
+    (%queue-wait-idle queue))
   (values))

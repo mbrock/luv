@@ -35,7 +35,7 @@
     (with-compilation-unit (:override t
                             :policy '(optimize (debug 3)))
       (funcall thunk)))
-  :depends-on (#:vk
+  :depends-on (#:cffi
                #+darwin
                #:float-features)
   :serial t

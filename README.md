@@ -11,11 +11,11 @@ an opaque compatibility boundary. They have already been updated to Vulkan
 1.4, and luv can change their generated API when a better Common Lisp shape
 emerges.
 
-The second spike is now replacing that broad generated binding with the
-deliberately incomplete, hand-owned CFFI layer in `vulkan.lisp`. Instance,
-physical-device, logical-device, and queue ownership already use this layer.
-Textures and commands temporarily retain clearly named legacy `vk` handle
-wrappers while their declarations move across incrementally.
+The second spike replaces that broad generated binding with the deliberately
+incomplete, hand-owned CFFI layer in `vulkan.lisp`. Its GPU system now owns the
+instance, device, queue, texture memory, command recording, and submission
+surface directly. The original window and headless spikes still use `vk` while
+their useful pieces move across incrementally.
 
 The owned layer uses CFFI's translating types, enums, and bitfields directly.
 `defvkstruct`, `define-enumerator`, and `define-creator` keep the Vulkan treaty

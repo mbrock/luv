@@ -70,9 +70,6 @@
    (physical-device
     :initarg :physical-device
     :reader vulkan-device-physical-device)
-   (legacy-vk-handle
-    :initarg :legacy-vk-handle
-    :reader vulkan-device-legacy-vk-handle)
    (queue-family
     :initarg :queue-family
     :reader vulkan-device-queue-family)
@@ -86,18 +83,12 @@
     :reader vulkan-queue-device)
    (family
     :initarg :family
-    :reader vulkan-queue-family)
-   (legacy-vk-handle
-    :initarg :legacy-vk-handle
-    :reader vulkan-queue-legacy-vk-handle)))
+    :reader vulkan-queue-family)))
 
 (defclass vulkan-gpu-texture (gpu-texture vulkan-gpu-object)
   ((device
     :initarg :device
     :reader vulkan-texture-device)
-   (legacy-vk-handle
-    :initarg :legacy-vk-handle
-    :reader vulkan-texture-legacy-vk-handle)
    (memory
     :initarg :memory
     :reader vulkan-texture-memory)
@@ -310,8 +301,6 @@
                            :handle native-device
                            :instance instance
                            :physical-device physical-device
-                           :legacy-vk-handle
-                           (vk:make-device-wrapper native-device)
                            :queue-family queue-family))
                         (queue
                           (make-instance
@@ -319,9 +308,7 @@
                            :label "default queue"
                            :handle native-queue
                            :device device
-                           :family queue-family
-                           :legacy-vk-handle
-                           (vk:make-queue-wrapper native-queue))))
+                           :family queue-family)))
                    (setf (vulkan-device-queue device) queue
                          completed-p t)
                    device)))
@@ -387,7 +374,6 @@
                         :format (texture-descriptor-format descriptor)
                         :handle image
                         :device device
-                        :legacy-vk-handle (vk:make-image-wrapper image)
                         :memory memory
                         :vk-format format)))
                  (setf completed-p t)
@@ -408,21 +394,14 @@
       (unwind-protect
            (progn
              (setf command-pool
-                   (vk:create-command-pool
-                    (vulkan-device-legacy-vk-handle device)
-                    (vk:make-command-pool-create-info
-                     :flags (list :transient)
-                     :queue-family-index (vulkan-device-queue-family device))))
+                   (lvk:create-command-pool
+                    (vulkan-handle device)
+                    (vulkan-device-queue-family device)
+                    :flags '(:transient)))
              (let ((command-buffer
-                     (first
-                      (vk:allocate-command-buffers
-                       (vulkan-device-legacy-vk-handle device)
-                       (vk:make-command-buffer-allocate-info
-                        :command-pool command-pool
-                        :level :primary
-                        :command-buffer-count 1)))))
-               (vk:begin-command-buffer
-                command-buffer (vk:make-command-buffer-begin-info))
+                     (lvk:allocate-command-buffer
+                      (vulkan-handle device) command-pool)))
+               (lvk:begin-command-buffer command-buffer)
                (setf completed-p t)
                (make-instance
                 'vulkan-gpu-command-encoder
@@ -432,8 +411,8 @@
                 :command-buffer command-buffer)))
         (unless completed-p
           (when command-pool
-            (vk:destroy-command-pool
-             (vulkan-device-legacy-vk-handle device) command-pool)))))))
+            (lvk:destroy-command-pool
+             (vulkan-handle device) command-pool)))))))
 
 (defun ensure-vulkan-command-encoder-state (encoder operation)
   (unless (eq :recording (vulkan-command-encoder-state encoder))
@@ -463,14 +442,6 @@
            :actual-usage (gpu-texture-usage texture)))
   (setf (gethash texture (vulkan-command-encoder-textures encoder)) t)
   texture)
-
-(defun vulkan-texture-subresource-range ()
-  (vk:make-image-subresource-range
-   :aspect-mask (list :color)
-   :base-mip-level 0
-   :level-count 1
-   :base-array-layer 0
-   :layer-count 1))
 
 (defun vulkan-layout-access-and-stage (layout)
   (ecase layout
@@ -503,20 +474,11 @@
           (vulkan-layout-access-and-stage old-layout)
         (multiple-value-bind (dst-access dst-stage)
             (vulkan-layout-access-and-stage new-layout)
-          (vk:cmd-pipeline-barrier
+          (lvk:cmd-transition-image
            (vulkan-command-encoder-command-buffer encoder)
-           nil nil
-           (list
-            (vk:make-image-memory-barrier
-             :src-access-mask src-access
-             :dst-access-mask dst-access
-             :old-layout old-layout
-             :new-layout new-layout
-             :src-queue-family-index vk:+queue-family-ignored+
-             :dst-queue-family-index vk:+queue-family-ignored+
-             :image (vulkan-texture-legacy-vk-handle texture)
-             :subresource-range (vulkan-texture-subresource-range)))
-           src-stage dst-stage)))
+           (vulkan-handle texture)
+           old-layout new-layout
+           src-access dst-access src-stage dst-stage)))
       (setf (gethash texture
                      (vulkan-command-encoder-texture-layouts encoder))
             new-layout)))
@@ -549,12 +511,11 @@
              command
              :copy-dst)))
       (transition-vulkan-texture encoder texture :transfer-dst-optimal)
-      (vk:cmd-clear-color-image
+      (lvk:cmd-clear-color-image
        (vulkan-command-encoder-command-buffer encoder)
-       (vulkan-texture-legacy-vk-handle texture)
+       (vulkan-handle texture)
        :transfer-dst-optimal
-       (vk:make-clear-color-value :float-32 color)
-       (list (vulkan-texture-subresource-range)))))
+       color)))
   encoder)
 
 (defun ensure-compatible-vulkan-copy (command source destination)
@@ -570,22 +531,6 @@
            :destination-size (gpu-texture-size destination)
            :source-format (gpu-texture-format source)
            :destination-format (gpu-texture-format destination)))))
-
-(defun vulkan-texture-copy-region (texture)
-  (let ((size (gpu-texture-size texture))
-        (layers
-          (vk:make-image-subresource-layers
-           :aspect-mask (list :color)
-           :mip-level 0
-           :base-array-layer 0
-           :layer-count 1)))
-    (vk:make-image-copy
-     :src-subresource layers
-     :dst-subresource layers
-     :extent (vk:make-extent-3d
-              :width (first size)
-              :height (second size)
-              :depth 1))))
 
 (defmethod encode
     ((encoder vulkan-gpu-command-encoder)
@@ -607,11 +552,12 @@
       (ensure-compatible-vulkan-copy command source destination)
       (transition-vulkan-texture encoder source :transfer-src-optimal)
       (transition-vulkan-texture encoder destination :transfer-dst-optimal)
-      (vk:cmd-copy-image
+      (lvk:cmd-copy-image
        (vulkan-command-encoder-command-buffer encoder)
-       (vulkan-texture-legacy-vk-handle source) :transfer-src-optimal
-       (vulkan-texture-legacy-vk-handle destination) :transfer-dst-optimal
-       (list (vulkan-texture-copy-region source)))))
+       (vulkan-handle source) :transfer-src-optimal
+       (vulkan-handle destination) :transfer-dst-optimal
+       (first (gpu-texture-size source))
+       (second (gpu-texture-size source)))))
   encoder)
 
 (defun hash-table-alist (table)
@@ -628,7 +574,7 @@
           (command-buffer (vulkan-command-encoder-command-buffer encoder))
           (command-pool (vulkan-command-encoder-command-pool encoder)))
       (ensure-live-vulkan-object device :finish)
-      (vk:end-command-buffer command-buffer)
+      (lvk:end-command-buffer command-buffer)
       (setf (vulkan-command-encoder-state encoder) :finished
             (vulkan-command-encoder-command-pool encoder) nil)
       (make-instance
@@ -713,14 +659,10 @@ fences while preserving the public submission operation."
     (let ((texture-layouts
             (vulkan-submitted-texture-layouts command-buffers)))
       (when (plusp (length command-buffers))
-        (vk:queue-submit
-         (vulkan-queue-legacy-vk-handle queue)
-         (list
-          (vk:make-submit-info
-           :command-buffers
-           (loop for command-buffer across command-buffers
-                 collect (vulkan-handle command-buffer)))))
-        (vk:queue-wait-idle (vulkan-queue-legacy-vk-handle queue))
+        (lvk:submit-command-buffers
+         (vulkan-handle queue)
+         (map 'vector #'vulkan-handle command-buffers))
+        (lvk:queue-wait-idle (vulkan-handle queue))
         (loop for command-buffer across command-buffers
               do (setf (vulkan-command-buffer-state command-buffer)
                        :submitted))
@@ -736,8 +678,8 @@ fences while preserving the public submission operation."
             (command-pool (vulkan-command-encoder-command-pool encoder)))
         (when (and command-pool
                    (not (vulkan-object-destroyed-p device)))
-          (vk:destroy-command-pool
-           (vulkan-device-legacy-vk-handle device) command-pool)))
+          (lvk:destroy-command-pool
+           (vulkan-handle device) command-pool)))
       (setf (vulkan-command-encoder-command-pool encoder) nil)))
   (setf (vulkan-command-encoder-state encoder) :destroyed)
   (values))
@@ -747,8 +689,8 @@ fences while preserving the public submission operation."
     (unless (vulkan-object-destroyed-p command-buffer)
       (let ((device (vulkan-command-buffer-device command-buffer)))
         (unless (vulkan-object-destroyed-p device)
-          (vk:destroy-command-pool
-           (vulkan-device-legacy-vk-handle device)
+          (lvk:destroy-command-pool
+           (vulkan-handle device)
            (vulkan-command-buffer-command-pool command-buffer))))
       (setf (vulkan-object-destroyed-p command-buffer) t
             (vulkan-command-buffer-state command-buffer) :destroyed)))
