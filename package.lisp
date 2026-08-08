@@ -13,10 +13,24 @@
            #:queue-family-flags
            #:queue-family-count
            #:physical-device-queue-families
+           #:physical-memory-type
+           #:physical-memory-type-flags
+           #:physical-memory-type-heap-index
+           #:physical-device-memory-types
            #:create-device
            #:destroy-device
            #:get-device-queue
-           #:device-wait-idle))
+           #:device-wait-idle
+           #:create-image
+           #:destroy-image
+           #:image-memory-requirements
+           #:image-memory-requirements-size
+           #:image-memory-requirements-alignment
+           #:image-memory-requirements-memory-type-bits
+           #:get-image-memory-requirements
+           #:allocate-memory
+           #:free-memory
+           #:bind-image-memory))
 
 (defpackage #:luv
   (:use #:cl)

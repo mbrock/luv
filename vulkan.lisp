@@ -27,7 +27,36 @@
   (:application-info 0)
   (:instance-create-info 1)
   (:device-queue-create-info 2)
-  (:device-create-info 3))
+  (:device-create-info 3)
+  (:memory-allocate-info 5)
+  (:image-create-info 14))
+
+(cffi:defcenum (image-type :uint32)
+  (:1d 0)
+  (:2d 1)
+  (:3d 2))
+
+(cffi:defcenum (format :uint32)
+  (:r8g8b8a8-unorm 37)
+  (:r8g8b8a8-srgb 43)
+  (:b8g8r8a8-unorm 44)
+  (:b8g8r8a8-srgb 50))
+
+(cffi:defcenum (image-tiling :uint32)
+  (:optimal 0)
+  (:linear 1))
+
+(cffi:defcenum (sharing-mode :uint32)
+  (:exclusive 0)
+  (:concurrent 1))
+
+(cffi:defcenum (image-layout :uint32)
+  (:undefined 0)
+  (:transfer-src-optimal 6)
+  (:transfer-dst-optimal 7))
+
+(cffi:defcenum (sample-count :uint32)
+  (:1 1))
 
 (cffi:defbitfield (instance-create-flags :uint32)
   (:enumerate-portability #x1))
@@ -37,6 +66,18 @@
   (:compute #x2)
   (:transfer #x4)
   (:sparse-binding #x8))
+
+(cffi:defbitfield (image-usage-flags :uint32)
+  (:transfer-src #x1)
+  (:transfer-dst #x2))
+
+(cffi:defbitfield (memory-property-flags :uint32)
+  (:device-local #x1)
+  (:host-visible #x2)
+  (:host-coherent #x4)
+  (:host-cached #x8)
+  (:lazily-allocated #x10)
+  (:protected #x20))
 
 ;;; Conditions and result translation.
 
@@ -137,6 +178,44 @@
   (enabled-extension-count :uint32)
   (pp-enabled-extension-names :pointer)
   (p-enabled-features :pointer))
+
+(defvkstruct memory-type ()
+  (property-flags memory-property-flags)
+  (heap-index :uint32))
+
+(defvkstruct memory-heap ()
+  (size :uint64)
+  (flags :uint32))
+
+(defvkstruct physical-device-memory-properties ()
+  (memory-type-count :uint32)
+  (memory-types (:array (:struct memory-type) 32))
+  (memory-heap-count :uint32)
+  (memory-heaps (:array (:struct memory-heap) 16)))
+
+(defvkstruct memory-allocate-info (:s-type :memory-allocate-info)
+  (allocation-size :uint64)
+  (memory-type-index :uint32))
+
+(defvkstruct memory-requirements ()
+  (size :uint64)
+  (alignment :uint64)
+  (memory-type-bits :uint32))
+
+(defvkstruct image-create-info (:s-type :image-create-info)
+  (flags :uint32)
+  (image-type image-type)
+  (format format)
+  (extent (:struct extent-3d))
+  (mip-levels :uint32)
+  (array-layers :uint32)
+  (samples sample-count)
+  (tiling image-tiling)
+  (usage image-usage-flags)
+  (sharing-mode sharing-mode)
+  (queue-family-index-count :uint32)
+  (p-queue-family-indices :pointer)
+  (initial-layout image-layout))
 
 (defun clear-foreign-object (pointer type &optional (count 1))
   (loop for index below (* count (cffi:foreign-type-size type))
@@ -276,6 +355,54 @@
     checked-result
   (device :pointer))
 
+(cffi:defcfun ("vkGetPhysicalDeviceMemoryProperties"
+               %get-physical-device-memory-properties
+               :library vulkan-loader)
+    :void
+  (physical-device :pointer)
+  (properties :pointer))
+
+(cffi:defcfun ("vkCreateImage" %create-image :library vulkan-loader)
+    checked-result
+  (device :pointer)
+  (create-info :pointer)
+  (allocator :pointer)
+  (image :pointer))
+
+(cffi:defcfun ("vkDestroyImage" %destroy-image :library vulkan-loader)
+    :void
+  (device :pointer)
+  (image :pointer)
+  (allocator :pointer))
+
+(cffi:defcfun ("vkGetImageMemoryRequirements"
+               %get-image-memory-requirements
+               :library vulkan-loader)
+    :void
+  (device :pointer)
+  (image :pointer)
+  (requirements :pointer))
+
+(cffi:defcfun ("vkAllocateMemory" %allocate-memory :library vulkan-loader)
+    checked-result
+  (device :pointer)
+  (allocate-info :pointer)
+  (allocator :pointer)
+  (memory :pointer))
+
+(cffi:defcfun ("vkFreeMemory" %free-memory :library vulkan-loader)
+    :void
+  (device :pointer)
+  (memory :pointer)
+  (allocator :pointer))
+
+(cffi:defcfun ("vkBindImageMemory" %bind-image-memory :library vulkan-loader)
+    checked-result
+  (device :pointer)
+  (image :pointer)
+  (memory :pointer)
+  (offset :uint64))
+
 ;;; The three ordinary Vulkan call shapes used so far.
 
 (defmacro define-enumerator
@@ -353,11 +480,30 @@
     (device queue-family-index queue-index)
   (%get-device-queue device queue-family-index queue-index))
 
+(define-creator create-image-handle (device create-info)
+  (%create-image device create-info (cffi:null-pointer))
+  :checked t
+  :operation :create-image)
+
+(define-creator allocate-memory-handle (device allocate-info)
+  (%allocate-memory device allocate-info (cffi:null-pointer))
+  :checked t
+  :operation :allocate-memory)
+
 ;;; Public, Lisp-shaped operations.
 
 (defstruct queue-family
   (flags nil :type list)
   (count 0 :type (unsigned-byte 32)))
+
+(defstruct physical-memory-type
+  (flags nil :type list)
+  (heap-index 0 :type (unsigned-byte 32)))
+
+(defstruct image-memory-requirements
+  (size 0 :type (unsigned-byte 64))
+  (alignment 0 :type (unsigned-byte 64))
+  (memory-type-bits 0 :type (unsigned-byte 32)))
 
 (defun make-version (major minor patch)
   (logior (ash major 22) (ash minor 12) patch))
@@ -452,4 +598,85 @@
 (defun device-wait-idle (device)
   (with-vulkan-results (:device-wait-idle)
     (%device-wait-idle device))
+  (values))
+
+(defun physical-device-memory-types (physical-device)
+  (cffi:with-foreign-object
+      (properties '(:struct physical-device-memory-properties))
+    (clear-foreign-object properties
+                          '(:struct physical-device-memory-properties))
+    (%get-physical-device-memory-properties physical-device properties)
+    (let ((count
+            (cffi:foreign-slot-value
+             properties '(:struct physical-device-memory-properties)
+             'memory-type-count))
+          (types
+            (cffi:foreign-slot-pointer
+             properties '(:struct physical-device-memory-properties)
+             'memory-types)))
+      (loop for index below count
+            for memory-type =
+              (cffi:mem-aptr types '(:struct memory-type) index)
+            collect
+            (cffi:with-foreign-slots
+                ((property-flags heap-index)
+                 memory-type (:struct memory-type))
+              (make-physical-memory-type
+               :flags property-flags
+               :heap-index heap-index))))))
+
+(defun create-image
+    (device &key type format width height (depth 1) usage
+                 (mip-levels 1) (array-layers 1) (samples :1)
+                 (tiling :optimal) (sharing-mode :exclusive)
+                 (initial-layout :undefined))
+  (with-vk (create-info image-create-info
+            :flags 0
+            :image-type type
+            :format format
+            :mip-levels mip-levels
+            :array-layers array-layers
+            :samples samples
+            :tiling tiling
+            :usage usage
+            :sharing-mode sharing-mode
+            :queue-family-index-count 0
+            :p-queue-family-indices (cffi:null-pointer)
+            :initial-layout initial-layout)
+    (fill-vk
+     (cffi:foreign-slot-pointer
+      create-info '(:struct image-create-info) 'extent)
+     'extent-3d
+     :width width :height height :depth depth)
+    (create-image-handle device create-info)))
+
+(defun destroy-image (device image)
+  (%destroy-image device image (cffi:null-pointer))
+  (values))
+
+(defun get-image-memory-requirements (device image)
+  (cffi:with-foreign-object (requirements '(:struct memory-requirements))
+    (clear-foreign-object requirements '(:struct memory-requirements))
+    (%get-image-memory-requirements device image requirements)
+    (cffi:with-foreign-slots
+        ((size alignment memory-type-bits)
+         requirements (:struct memory-requirements))
+      (make-image-memory-requirements
+       :size size
+       :alignment alignment
+       :memory-type-bits memory-type-bits))))
+
+(defun allocate-memory (device size memory-type-index)
+  (with-vk (allocate-info memory-allocate-info
+            :allocation-size size
+            :memory-type-index memory-type-index)
+    (allocate-memory-handle device allocate-info)))
+
+(defun free-memory (device memory)
+  (%free-memory device memory (cffi:null-pointer))
+  (values))
+
+(defun bind-image-memory (device image memory &optional (offset 0))
+  (with-vulkan-results (:bind-image-memory)
+    (%bind-image-memory device image memory offset))
   (values))

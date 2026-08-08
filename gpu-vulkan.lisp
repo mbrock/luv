@@ -73,9 +73,6 @@
    (legacy-vk-handle
     :initarg :legacy-vk-handle
     :reader vulkan-device-legacy-vk-handle)
-   (legacy-vk-physical-device
-    :initarg :legacy-vk-physical-device
-    :reader vulkan-device-legacy-vk-physical-device)
    (queue-family
     :initarg :queue-family
     :reader vulkan-device-queue-family)
@@ -98,6 +95,9 @@
   ((device
     :initarg :device
     :reader vulkan-texture-device)
+   (legacy-vk-handle
+    :initarg :legacy-vk-handle
+    :reader vulkan-texture-legacy-vk-handle)
    (memory
     :initarg :memory
     :reader vulkan-texture-memory)
@@ -252,16 +252,17 @@
 
 (defun find-vulkan-texture-memory-type (device memory-requirements)
   (let ((memory-types
-          (vk:memory-types
-           (vk:get-physical-device-memory-properties
-            (vulkan-device-legacy-vk-physical-device device))))
-        (memory-type-bits (vk:memory-type-bits memory-requirements)))
+          (lvk:physical-device-memory-types
+           (vulkan-device-physical-device device)))
+        (memory-type-bits
+          (lvk:image-memory-requirements-memory-type-bits
+           memory-requirements)))
     (or (loop for memory-type in memory-types
               for index from 0
               when (and (compatible-vulkan-memory-type-p
-                         memory-type-bits index)
+                        memory-type-bits index)
                         (member :device-local
-                                (vk:property-flags memory-type)))
+                                (lvk:physical-memory-type-flags memory-type)))
                 return index)
         (loop for memory-type in memory-types
               for index from 0
@@ -311,8 +312,6 @@
                            :physical-device physical-device
                            :legacy-vk-handle
                            (vk:make-device-wrapper native-device)
-                           :legacy-vk-physical-device
-                           (vk:make-physical-device-wrapper physical-device)
                            :queue-family queue-family))
                         (queue
                           (make-instance
@@ -348,40 +347,36 @@
     (let* ((size (normalize-vulkan-texture-size descriptor))
            (usages (normalize-vulkan-texture-usage descriptor))
            (format (vulkan-texture-format descriptor))
-           (native-device (vulkan-device-legacy-vk-handle device))
+           (native-device (vulkan-handle device))
            (image nil)
            (memory nil)
            (completed-p nil))
       (unwind-protect
            (progn
              (setf image
-                   (vk:create-image
+                   (lvk:create-image
                     native-device
-                    (vk:make-image-create-info
-                     :image-type :2d
+                    :type :2d
                      :format format
-                     :extent (vk:make-extent-3d
-                              :width (first size)
-                              :height (second size)
-                              :depth 1)
+                     :width (first size)
+                     :height (second size)
                      :mip-levels 1
                      :array-layers 1
                      :samples :1
                      :tiling :optimal
                      :usage (vulkan-image-usage usages)
                      :sharing-mode :exclusive
-                     :initial-layout :undefined)))
+                     :initial-layout :undefined))
              (let* ((requirements
-                      (vk:get-image-memory-requirements native-device image))
+                      (lvk:get-image-memory-requirements native-device image))
                     (memory-type
                       (find-vulkan-texture-memory-type device requirements)))
                (setf memory
-                     (vk:allocate-memory
+                     (lvk:allocate-memory
                       native-device
-                      (vk:make-memory-allocate-info
-                       :allocation-size (vk:size requirements)
-                       :memory-type-index memory-type)))
-               (vk:bind-image-memory native-device image memory 0)
+                      (lvk:image-memory-requirements-size requirements)
+                      memory-type))
+               (lvk:bind-image-memory native-device image memory)
                (let ((texture
                        (make-instance
                         'vulkan-gpu-texture
@@ -392,15 +387,16 @@
                         :format (texture-descriptor-format descriptor)
                         :handle image
                         :device device
+                        :legacy-vk-handle (vk:make-image-wrapper image)
                         :memory memory
                         :vk-format format)))
                  (setf completed-p t)
                  texture)))
         (unless completed-p
           (when image
-            (vk:destroy-image native-device image))
+            (lvk:destroy-image native-device image))
           (when memory
-            (vk:free-memory native-device memory)))))))
+            (lvk:free-memory native-device memory)))))))
 
 (defmethod create
     ((device vulkan-gpu-device) (descriptor command-encoder-descriptor))
@@ -518,7 +514,7 @@
              :new-layout new-layout
              :src-queue-family-index vk:+queue-family-ignored+
              :dst-queue-family-index vk:+queue-family-ignored+
-             :image (vulkan-handle texture)
+             :image (vulkan-texture-legacy-vk-handle texture)
              :subresource-range (vulkan-texture-subresource-range)))
            src-stage dst-stage)))
       (setf (gethash texture
@@ -555,7 +551,7 @@
       (transition-vulkan-texture encoder texture :transfer-dst-optimal)
       (vk:cmd-clear-color-image
        (vulkan-command-encoder-command-buffer encoder)
-       (vulkan-handle texture)
+       (vulkan-texture-legacy-vk-handle texture)
        :transfer-dst-optimal
        (vk:make-clear-color-value :float-32 color)
        (list (vulkan-texture-subresource-range)))))
@@ -613,8 +609,8 @@
       (transition-vulkan-texture encoder destination :transfer-dst-optimal)
       (vk:cmd-copy-image
        (vulkan-command-encoder-command-buffer encoder)
-       (vulkan-handle source) :transfer-src-optimal
-       (vulkan-handle destination) :transfer-dst-optimal
+       (vulkan-texture-legacy-vk-handle source) :transfer-src-optimal
+       (vulkan-texture-legacy-vk-handle destination) :transfer-dst-optimal
        (list (vulkan-texture-copy-region source)))))
   encoder)
 
@@ -763,11 +759,11 @@ fences while preserving the public submission operation."
     (unless (vulkan-object-destroyed-p texture)
       (let ((device (vulkan-texture-device texture)))
         (unless (vulkan-object-destroyed-p device)
-          (vk:destroy-image
-           (vulkan-device-legacy-vk-handle device)
+          (lvk:destroy-image
+           (vulkan-handle device)
            (vulkan-handle texture))
-          (vk:free-memory
-           (vulkan-device-legacy-vk-handle device)
+          (lvk:free-memory
+           (vulkan-handle device)
            (vulkan-texture-memory texture))))
       (setf (vulkan-object-destroyed-p texture) t)))
   (values))
