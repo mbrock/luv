@@ -81,8 +81,8 @@ Conventional RUN-FRAME-TOP-LEVEL frames consume their own queues instead."
   (let* ((sheet (mirror-sheet mirror))
          (frame (pane-frame sheet)))
     (unless (climi::frame-process frame)
-      (drain-luv-frame-events sheet))
-    (present-mirror mirror)))
+      (drain-luv-frame-events sheet)
+      (present-mirror mirror))))
 
 (defun distribute-canvas-pointer-event (mirror canvas event class
                                         &key button)
@@ -202,6 +202,44 @@ Conventional RUN-FRAME-TOP-LEVEL frames consume their own queues instead."
                     :timestamp (luv:canvas-event-timestamp event)))
     (service-luv-frame-events mirror)))
 
+(defun make-mirror-configuration-event (mirror width height timestamp)
+  (let ((sheet (mirror-sheet mirror)))
+    ;; SDL resize events contain dimensions but not an origin. Preserve the
+    ;; native origin McCLIM already knows when constructing its region.
+    (with-bounding-rectangle* (x y) (climi::sheet-mirror-geometry sheet)
+      (make-instance
+       'window-configuration-event
+       :sheet sheet :timestamp timestamp
+       :region (make-bounding-rectangle x y (+ x width) (+ y height))))))
+
+(defmethod luv:handle-canvas-event
+    ((mirror luv-mirror) canvas (event luv:canvas-window-resized-event))
+  (declare (ignore canvas))
+  (let ((sheet (mirror-sheet mirror))
+        (width (luv:canvas-window-event-width event))
+        (height (luv:canvas-window-event-height event)))
+    (distribute-event
+     (port sheet)
+     (make-mirror-configuration-event
+      mirror width height
+      (luv:canvas-event-timestamp event)))
+    (service-luv-frame-events mirror)))
+
+(defmethod luv:handle-canvas-event
+    ((mirror luv-raster-mirror) canvas
+     (event luv:canvas-window-pixel-size-changed-event))
+  (declare (ignore canvas))
+  ;; Configuration events are placed ahead of repaint events by McCLIM, so a
+  ;; logical resize is laid out before we redraw for the new pixel extent.
+  (let ((sheet (mirror-sheet mirror)))
+    (distribute-event
+     (port sheet)
+     (make-instance 'window-repaint-event
+                    :sheet sheet
+                    :timestamp (luv:canvas-event-timestamp event)
+                    :region +everywhere+))
+    (service-luv-frame-events mirror)))
+
 (defmethod luv:handle-canvas-event
     ((mirror luv-mirror) canvas
      (event luv:canvas-window-focus-lost-event))
@@ -227,7 +265,7 @@ Conventional RUN-FRAME-TOP-LEVEL frames consume their own queues instead."
   (let ((image (mcclim-render:image-mirror-image mirror)))
     (list (pattern-width image) (pattern-height image))))
 
-(defun ensure-raster-mirror-context (mirror size)
+(defun ensure-raster-mirror-context (mirror)
   (let* ((target (mirror-target mirror))
          (device
            (or (mirror-device mirror)
@@ -239,13 +277,14 @@ Conventional RUN-FRAME-TOP-LEVEL frames consume their own queues instead."
                      (luv:make-canvas-context
                       target luv:*gpu-provider*
                       (luv:make-canvas-configuration :device device))))))
-    (unless (equal size (luv:canvas-extent context))
-      (luv:configure-canvas-context
-       context
-       (luv:make-canvas-configuration
-        :device (luv:context-device context)
-        :format (luv:canvas-format context)
-        :usage '(:copy-dst))))
+    (multiple-value-bind (width height) (luv:canvas-size target)
+      (unless (equal (list width height) (luv:canvas-extent context))
+        (luv:configure-canvas-context
+         context
+         (luv:make-canvas-configuration
+          :device (luv:context-device context)
+          :format (luv:canvas-format context)
+          :usage '(:copy-dst)))))
     context))
 
 (defun release-mirror-device (mirror)
@@ -301,7 +340,8 @@ Conventional RUN-FRAME-TOP-LEVEL frames consume their own queues instead."
 
 (defmethod present-mirror ((mirror luv-raster-mirror))
   "Upload and present MIRROR when McCLIM has marked its image dirty."
-  (let ((target (mirror-target mirror)))
+  (let ((target (mirror-target mirror))
+        (deferred-size nil))
     (when (and (eq :open (luv:canvas-state target))
                (not (region-equal
                      (mcclim-render:image-dirty-region mirror)
@@ -317,24 +357,43 @@ Conventional RUN-FRAME-TOP-LEVEL frames consume their own queues instead."
                     (mcclim-render:image-dirty-region mirror)
                     +nowhere+)
              (let* ((image (mcclim-render:image-mirror-image mirror))
-                    (pixels (pattern-array image))
                     (size (raster-mirror-image-size mirror))
-                    (context (ensure-raster-mirror-context mirror size))
-                    (texture
-                      (ensure-raster-mirror-texture
-                       mirror context size)))
-               (luv:write-texture
-                (luv:device-queue (luv:context-device context))
-                (luv:make-texture-copy :texture texture)
-                pixels
-                (luv:make-texture-data-layout
-                 :bytes-per-row (* 4 (first size))
-                 :rows-per-image (second size))
-                size)
-               (present-raster-mirror-texture
-                mirror context texture (mirror-compositor mirror))
-               (setf (mcclim-render:image-dirty-region mirror)
-                     +nowhere+))))))))
+                    (context (ensure-raster-mirror-context mirror)))
+               (if (not (equal size (luv:canvas-extent context)))
+                   ;; Swapchain creation is sometimes the first point where a
+                   ;; Wayland compositor reveals its assigned size. Leave the
+                   ;; raster dirty and let McCLIM lay it out before presenting.
+                   (setf deferred-size (luv:canvas-extent context))
+                   (let ((texture
+                           (ensure-raster-mirror-texture
+                            mirror context size)))
+                     (luv:write-texture
+                      (luv:device-queue (luv:context-device context))
+                      (luv:make-texture-copy :texture texture)
+                      (pattern-array image)
+                      (luv:make-texture-data-layout
+                       :bytes-per-row (* 4 (first size))
+                       :rows-per-image (second size))
+                      size)
+                     (present-raster-mirror-texture
+                      mirror context texture (mirror-compositor mirror))
+                     (setf (mcclim-render:image-dirty-region mirror)
+                           +nowhere+)))))))))
+    (when deferred-size
+      (destructuring-bind (width height) deferred-size
+        (setf (luv:canvas-width target) width
+              (luv:canvas-height target) height)
+        (let ((sheet (mirror-sheet mirror)))
+          (distribute-event
+           (port sheet)
+           (make-mirror-configuration-event mirror width height 0))
+          (distribute-event
+           (port sheet)
+           (make-instance 'window-repaint-event
+                          :sheet sheet :timestamp 0 :region +everywhere+))
+          (unless (climi::frame-process (pane-frame sheet))
+            (drain-luv-frame-events sheet)
+            (present-mirror mirror))))))
   mirror)
 
 (defmethod release-mirror-presentation ((mirror luv-raster-mirror))
@@ -368,7 +427,17 @@ Conventional RUN-FRAME-TOP-LEVEL frames consume their own queues instead."
             ;; initialization needs it sooner: without a native region the
             ;; render medium clips every drawing operation to NOWHERE.
             (setf (sheet-direct-mirror sheet) mirror)
-            (climi::update-mirror-geometry sheet)
+            ;; Synchronize McCLIM with whatever logical geometry is observable
+            ;; now. Presentation performs a second reconciliation if Wayland
+            ;; reveals the compositor-assigned extent only at swapchain time.
+            (multiple-value-bind (actual-width actual-height)
+                (luv:canvas-logical-size canvas)
+              (setf (luv:canvas-width canvas) actual-width
+                    (luv:canvas-height canvas) actual-height)
+              (handle-event
+               sheet
+               (make-mirror-configuration-event
+                mirror actual-width actual-height 0)))
             (push mirror (port-mirrors port))
             mirror)
         (error (condition)

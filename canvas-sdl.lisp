@@ -120,6 +120,19 @@
            (values width height))))
       (values (canvas-width canvas) (canvas-height canvas))))
 
+(defmethod canvas-logical-size ((canvas sdl-canvas))
+  (if (eq :open (canvas-state canvas))
+      (call-on-sdl-canvas-thread
+       canvas
+       (lambda ()
+         (multiple-value-bind (success width height)
+             (sdl3:get-window-size (sdl-canvas-window canvas))
+           (unless success
+             (error 'canvas-error :canvas canvas :operation :logical-size
+                    :reason :native-size-failed :details (sdl3:get-error)))
+           (values width height))))
+      (values (canvas-width canvas) (canvas-height canvas))))
+
 (defun sdl-canvas-native-thread-p (canvas)
   #+darwin
   (declare (ignore canvas))
@@ -387,6 +400,27 @@
      canvas
      (make-instance class :timestamp (sdl3:%timestamp event)))))
 
+(defun dispatch-sdl-window-size-event (canvas event class)
+  (when (sdl-canvas-window-event-p canvas event)
+    (dispatch-canvas-event
+     canvas
+     (make-instance class
+                    :timestamp (sdl3:%timestamp event)
+                    :width (sdl3:%data-1 event)
+                    :height (sdl3:%data-2 event)))))
+
+(defun synchronize-sdl-canvas-logical-size (canvas timestamp)
+  "Publish SDL's current logical size when it changed without RESIZED first."
+  (multiple-value-bind (width height) (canvas-logical-size canvas)
+    (unless (and (= width (canvas-width canvas))
+                 (= height (canvas-height canvas)))
+      (setf (canvas-width canvas) width
+            (canvas-height canvas) height)
+      (dispatch-canvas-event
+       canvas
+       (make-instance 'canvas-window-resized-event
+                      :timestamp timestamp :width width :height height)))))
+
 (defun handle-sdl-canvas-event (canvas event event-type)
   ;; Keep the raw event tag: SDL_RegisterEvents may return a value absent from
   ;; cl-sdl3's static enum. Decode only the native events we understand.
@@ -397,6 +431,10 @@
              (list
               (cffi:foreign-enum-value 'sdl3::event-type
                                        :window-close-requested)
+              (cffi:foreign-enum-value 'sdl3::event-type
+                                       :window-resized)
+              (cffi:foreign-enum-value 'sdl3::event-type
+                                       :window-pixel-size-changed)
               (cffi:foreign-enum-value 'sdl3::event-type
                                        :window-mouse-enter)
               (cffi:foreign-enum-value 'sdl3::event-type
@@ -415,6 +453,22 @@
             (dispatch-sdl-window-event
              canvas window-event 'canvas-window-close-request-event)
             (setf (sdl-canvas-close-requested-p canvas) t))
+           ((= event-type
+               (cffi:foreign-enum-value 'sdl3::event-type
+                                        :window-resized))
+            (setf (canvas-width canvas) (sdl3:%data-1 window-event)
+                  (canvas-height canvas) (sdl3:%data-2 window-event))
+            (dispatch-sdl-window-size-event
+             canvas window-event 'canvas-window-resized-event))
+           ((= event-type
+               (cffi:foreign-enum-value 'sdl3::event-type
+                                        :window-pixel-size-changed))
+            ;; Wayland may report the new pixel extent before the corresponding
+            ;; logical resize. Querying here keeps layout ahead of repaint.
+            (synchronize-sdl-canvas-logical-size
+             canvas (sdl3:%timestamp window-event))
+            (dispatch-sdl-window-size-event
+             canvas window-event 'canvas-window-pixel-size-changed-event))
            ((= event-type
                (cffi:foreign-enum-value 'sdl3::event-type
                                         :window-mouse-enter))

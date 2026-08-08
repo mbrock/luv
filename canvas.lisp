@@ -179,6 +179,12 @@
 (defclass canvas-key-release-event (canvas-key-event) ())
 
 (defclass canvas-window-event (canvas-event) ())
+(defclass canvas-window-size-event (canvas-window-event)
+  ((width :initarg :width :reader canvas-window-event-width)
+   (height :initarg :height :reader canvas-window-event-height)))
+(defclass canvas-window-resized-event (canvas-window-size-event) ())
+(defclass canvas-window-pixel-size-changed-event
+    (canvas-window-size-event) ())
 (defclass canvas-window-focus-gained-event (canvas-window-event) ())
 (defclass canvas-window-focus-lost-event (canvas-window-event) ())
 (defclass canvas-window-close-request-event (canvas-window-event) ())
@@ -215,6 +221,9 @@
 
 (defgeneric canvas-size (canvas)
   (:documentation "Return CANVAS's drawable width and height as two values."))
+
+(defgeneric canvas-logical-size (canvas)
+  (:documentation "Return CANVAS's logical width and height as two values."))
 
 (defgeneric canvas-position (canvas)
   (:documentation "Return CANVAS's native x and y position as two values."))

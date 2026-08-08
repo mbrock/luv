@@ -311,6 +311,11 @@ nothing else does."))
            #:canvas-key-press-event
            #:canvas-key-release-event
            #:canvas-window-event
+           #:canvas-window-size-event
+           #:canvas-window-event-width
+           #:canvas-window-event-height
+           #:canvas-window-resized-event
+           #:canvas-window-pixel-size-changed-event
            #:canvas-window-focus-gained-event
            #:canvas-window-focus-lost-event
            #:canvas-window-close-request-event
@@ -348,6 +353,7 @@ nothing else does."))
            #:canvas-width
            #:canvas-height
            #:canvas-size
+           #:canvas-logical-size
            #:canvas-position
            #:canvas-visible-p
            #:show-canvas
