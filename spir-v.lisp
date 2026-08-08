@@ -31,127 +31,197 @@
              (spir-v-error-reason condition)
              (spir-v-error-details condition)))))
 
-(defstruct instruction
-  opcode
-  result
-  operands)
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defstruct instruction
+    opcode
+    result
+    operands)
 
-(defparameter *instructions*
-  `((capability . ,(make-instruction
-                    :opcode 17 :result :none
-                    :operands '((:enum capability))))
-    (memory-model . ,(make-instruction
-                      :opcode 14 :result :none
-                      :operands '((:enum addressing-model)
-                                  (:enum memory-model))))
-    (entry-point . ,(make-instruction
-                     :opcode 15 :result :none
-                     :operands '((:enum execution-model) :id :string
-                                 (:rest :id))))
-    (execution-mode . ,(make-instruction
-                        :opcode 16 :result :none
-                        :operands '(:id (:enum execution-mode)
-                                    (:rest :literal))))
-    (decorate . ,(make-instruction
-                  :opcode 71 :result :none
-                  :operands '(:id (:enum decoration) (:rest :literal))))
-    (type-void . ,(make-instruction :opcode 19 :result :id))
-    (type-int . ,(make-instruction
-                  :opcode 21 :result :id
-                  :operands '(:literal :literal)))
-    (type-float . ,(make-instruction
-                    :opcode 22 :result :id
-                    :operands '(:literal)))
-    (type-vector . ,(make-instruction
-                     :opcode 23 :result :id
-                     :operands '(:id :literal)))
-    (type-image . ,(make-instruction
-                    :opcode 25 :result :id
-                    :operands '(:id (:enum dim) :literal :literal :literal
-                                :literal (:enum image-format))))
-    (type-pointer . ,(make-instruction
-                      :opcode 32 :result :id
-                      :operands '((:enum storage-class) :id)))
-    (type-function . ,(make-instruction
-                       :opcode 33 :result :id
-                       :operands '(:id (:rest :id))))
-    (constant . ,(make-instruction
-                  :opcode 43 :result :typed
-                  :operands '(:literal)))
-    (variable . ,(make-instruction
-                  :opcode 59 :result :typed
-                  :operands '((:enum storage-class))))
-    (load . ,(make-instruction
-              :opcode 61 :result :typed :operands '(:id)))
-    (vector-shuffle . ,(make-instruction
-                        :opcode 79 :result :typed
-                        :operands '(:id :id (:rest :literal))))
-    (composite-construct . ,(make-instruction
-                             :opcode 80 :result :typed
-                             :operands '((:rest :id))))
-    (composite-extract . ,(make-instruction
-                           :opcode 81 :result :typed
-                           :operands '(:id (:rest :literal))))
-    (image-write . ,(make-instruction
-                     :opcode 99 :result :none
-                     :operands '(:id :id :id)))
-    (convert-u-to-f . ,(make-instruction
-                        :opcode 112 :result :typed :operands '(:id)))
-    (f-mul . ,(make-instruction
-               :opcode 133 :result :typed :operands '(:id :id)))
-    (f-add . ,(make-instruction
-               :opcode 129 :result :typed :operands '(:id :id)))
-    (f-div . ,(make-instruction
-               :opcode 136 :result :typed :operands '(:id :id)))
-    (function . ,(make-instruction
-                  :opcode 54 :result :typed
-                  :operands '((:enum function-control) :id)))
-    (function-end . ,(make-instruction :opcode 56 :result :none))
-    (label . ,(make-instruction :opcode 248 :result :id))
-    (return . ,(make-instruction :opcode 253 :result :none))))
+  (defvar *instructions* nil)
+  (defvar *enumerants* nil)
+  ;; These variables used to hold alists; make source re-evaluation migrate a
+  ;; durable image instead of requiring a restart.
+  (unless (hash-table-p *instructions*)
+    (setf *instructions* (make-hash-table :test #'equal)))
+  (unless (hash-table-p *enumerants*)
+    (setf *enumerants* (make-hash-table :test #'equal)))
 
-(defparameter *enumerants*
-  '((capability
-     (shader . 1))
-    (addressing-model
-     (logical . 0))
-    (memory-model
-     (glsl-450 . 1))
-    (execution-model
-     (gl-compute . 5))
-    (execution-mode
-     (local-size . 17))
-    (decoration
-     (built-in . 11)
-     (binding . 33)
-     (descriptor-set . 34))
-    (built-in
-     (global-invocation-id . 28))
-    (dim
-     (2d . 1))
-    (image-format
-     (rgba8 . 4))
-    (storage-class
-     (uniform-constant . 0)
-     (input . 1)
-     (function . 7))
-    (function-control
-     (none . 0))))
+  (defun registry-key (name)
+    (string-upcase (symbol-name name)))
+
+  (defun instruction-operand-specs (name lambda-list types)
+    (let ((rest-position (position '&rest lambda-list)))
+      (cond
+        (rest-position
+         (unless (and (= (+ rest-position 2) (length lambda-list))
+                      (= (1+ rest-position) (length types)))
+           (error "Bad operands for SPIR-V instruction ~S." name))
+         (append (subseq types 0 rest-position)
+                 (list (list :rest (elt types rest-position)))))
+        (t
+         (unless (= (length lambda-list) (length types))
+           (error "Bad operands for SPIR-V instruction ~S." name))
+         types))))
+
+  (defun register-instruction (name lambda-list opcode result types)
+    (unless (typep opcode '(unsigned-byte 16))
+      (error "Bad opcode for SPIR-V instruction ~S: ~S." name opcode))
+    (unless (member result '(:none :id :typed))
+      (error "Bad result convention for SPIR-V instruction ~S: ~S."
+             name result))
+    (setf (gethash (registry-key name) *instructions*)
+          (make-instruction
+           :opcode opcode
+           :result result
+           :operands
+           (instruction-operand-specs name lambda-list types))))
+
+  (defun register-enumeration (name entries)
+    (let ((values (make-hash-table :test #'equal)))
+      (dolist (entry entries)
+        (destructuring-bind (enumerant value) entry
+          (setf (gethash (registry-key enumerant) values) value)))
+      (setf (gethash (registry-key name) *enumerants*) values))))
+
+(defmacro define-instruction (name lambda-list &rest options)
+  "Define and register one instruction in luv's SPIR-V backend vocabulary."
+  (let ((opcode nil)
+        (result :none)
+        (types nil))
+    (dolist (option options)
+      (case (first option)
+        (:opcode (setf opcode (second option)))
+        (:result (setf result (second option)))
+        (:operands (setf types (rest option)))
+        (otherwise (error "Unknown DEFINE-INSTRUCTION option ~S." option))))
+    (unless opcode
+      (error "SPIR-V instruction ~S has no opcode." name))
+    `(eval-when (:compile-toplevel :load-toplevel :execute)
+       (register-instruction ',name ',lambda-list ,opcode ,result ',types))))
+
+(defmacro define-enumeration (name &body entries)
+  `(eval-when (:compile-toplevel :load-toplevel :execute)
+     (register-enumeration ',name ',entries)))
+
+(defmacro define-typed-unary-instructions (&body definitions)
+  `(progn
+     ,@(loop for (name opcode) in definitions
+             collect `(define-instruction ,name (value)
+                        (:opcode ,opcode)
+                        (:result :typed)
+                        (:operands :id)))))
+
+(defmacro define-typed-binary-instructions (&body definitions)
+  `(progn
+     ,@(loop for (name opcode) in definitions
+             collect `(define-instruction ,name (left right)
+                        (:opcode ,opcode)
+                        (:result :typed)
+                        (:operands :id :id)))))
+
+;;; Like SBCL's backend instruction files, this is executable treaty text:
+;;; definitions register themselves, and repetitive instruction families get
+;;; a local definer instead of being expanded by hand.
+
+(define-instruction capability (capability)
+  (:opcode 17)
+  (:operands (:enum capability)))
+
+(define-instruction memory-model (addressing-model memory-model)
+  (:opcode 14)
+  (:operands (:enum addressing-model) (:enum memory-model)))
+
+(define-instruction entry-point
+    (execution-model entry-point name &rest interface)
+  (:opcode 15)
+  (:operands (:enum execution-model) :id :string :id))
+
+(define-instruction execution-mode (entry-point mode &rest literals)
+  (:opcode 16)
+  (:operands :id (:enum execution-mode) :literal))
+
+(define-instruction decorate (target decoration &rest literals)
+  (:opcode 71)
+  (:operands :id (:enum decoration) :literal))
+
+(define-instruction type-void () (:opcode 19) (:result :id))
+(define-instruction type-int (width signedness)
+  (:opcode 21) (:result :id) (:operands :literal :literal))
+(define-instruction type-float (width)
+  (:opcode 22) (:result :id) (:operands :literal))
+(define-instruction type-vector (component count)
+  (:opcode 23) (:result :id) (:operands :id :literal))
+(define-instruction type-image
+    (sampled-type dim depth arrayed multisampled sampled format)
+  (:opcode 25)
+  (:result :id)
+  (:operands :id (:enum dim) :literal :literal :literal :literal
+             (:enum image-format)))
+(define-instruction type-pointer (storage-class type)
+  (:opcode 32) (:result :id) (:operands (:enum storage-class) :id))
+(define-instruction type-function (return-type &rest parameter-types)
+  (:opcode 33) (:result :id) (:operands :id :id))
+
+(define-instruction constant (value)
+  (:opcode 43) (:result :typed) (:operands :literal))
+(define-instruction variable (storage-class)
+  (:opcode 59) (:result :typed) (:operands (:enum storage-class)))
+(define-typed-unary-instructions
+  (load 61)
+  (convert-u-to-f 112))
+(define-instruction vector-shuffle (left right &rest components)
+  (:opcode 79) (:result :typed) (:operands :id :id :literal))
+(define-instruction composite-construct (&rest constituents)
+  (:opcode 80) (:result :typed) (:operands :id))
+(define-instruction composite-extract (composite &rest indices)
+  (:opcode 81) (:result :typed) (:operands :id :literal))
+(define-instruction image-write (image coordinate texel)
+  (:opcode 99) (:operands :id :id :id))
+(define-typed-binary-instructions
+  (f-add 129)
+  (f-mul 133)
+  (f-div 136))
+(define-instruction function (control function-type)
+  (:opcode 54)
+  (:result :typed)
+  (:operands (:enum function-control) :id))
+(define-instruction function-end () (:opcode 56))
+(define-instruction label () (:opcode 248) (:result :id))
+(define-instruction return () (:opcode 253))
+
+(define-enumeration capability (shader 1))
+(define-enumeration addressing-model (logical 0))
+(define-enumeration memory-model (glsl-450 1))
+(define-enumeration execution-model (gl-compute 5))
+(define-enumeration execution-mode (local-size 17))
+(define-enumeration decoration
+  (built-in 11)
+  (binding 33)
+  (descriptor-set 34))
+(define-enumeration built-in (global-invocation-id 28))
+(define-enumeration dim (2d 1))
+(define-enumeration image-format (rgba8 4))
+(define-enumeration storage-class
+  (uniform-constant 0)
+  (input 1)
+  (function 7))
+(define-enumeration function-control (none 0))
 
 (defun same-name-p (left right)
   (and (symbolp left) (symbolp right)
        (string-equal (symbol-name left) (symbol-name right))))
 
-(defun named-value (name alist)
-  (let ((pair (find name alist :key #'car :test #'same-name-p)))
-    (values (cdr pair) (not (null pair)))))
-
 (defun instruction-for (name)
-  (named-value name *instructions*))
+  (and (symbolp name)
+       (gethash (registry-key name) *instructions*)))
 
 (defun enumerant-value (kind name form)
-  (let ((kind-values (named-value kind *enumerants*)))
-    (multiple-value-bind (value found-p) (named-value name kind-values)
+  (let ((kind-values
+          (and (symbolp kind)
+               (gethash (registry-key kind) *enumerants*))))
+    (multiple-value-bind (value found-p)
+        (and kind-values (symbolp name)
+             (gethash (registry-key name) kind-values))
       (if found-p
           value
           (error 'spir-v-error :form form :reason :unknown-enumerant

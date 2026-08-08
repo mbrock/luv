@@ -78,7 +78,9 @@ reuse the same texture and layout tracking later:
 
 `:luv/spir-v` is a small assembler whose vocabulary grows with shaders luv
 actually runs. IDs are ordinary Lisp symbols and may be referenced before
-definitions; result IDs lead their instruction:
+definitions; result IDs lead their instruction. Its backend vocabulary is
+declared with `spv:define-instruction` and `spv:define-enumeration`, with small
+family definers for repeated instruction shapes:
 
 ```lisp
 (asdf:load-system :luv/spir-v)

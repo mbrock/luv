@@ -5,6 +5,8 @@
            #:spir-v-error-form
            #:spir-v-error-reason
            #:spir-v-error-details
+           #:define-instruction
+           #:define-enumeration
            #:assemble
            #:write-spir-v
            #:gradient-compute-shader))
