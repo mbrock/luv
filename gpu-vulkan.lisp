@@ -34,7 +34,7 @@
                 (vulkan-gpu-error-reason condition)
                 (vulkan-gpu-error-details condition)))))))
 
-(defun vulkan-gpu-instance-options ()
+(defun portable-vulkan-gpu-instance-options ()
   "Return the extensions and flags for a portable Vulkan instance."
   (let* ((available (lvk:enumerate-instance-extension-names))
          (portability-extension
@@ -52,6 +52,20 @@
     :initform "luv gpu"
     :reader vulkan-provider-application-name)))
 
+(defgeneric vulkan-provider-instance-options (provider)
+  (:documentation "Return Vulkan instance extensions and flags for PROVIDER."))
+
+(defmethod vulkan-provider-instance-options ((provider vulkan-gpu-provider))
+  (declare (ignore provider))
+  (portable-vulkan-gpu-instance-options))
+
+(defgeneric vulkan-gpu-device-extension-names (provider)
+  (:documentation "Return device extensions enabled by PROVIDER."))
+
+(defmethod vulkan-gpu-device-extension-names ((provider vulkan-gpu-provider))
+  (declare (ignore provider))
+  nil)
+
 (unless *gpu-provider*
   (setf *gpu-provider* (make-instance 'vulkan-gpu-provider)))
 
@@ -67,6 +81,14 @@
   ((instance
     :initarg :instance
     :reader vulkan-device-instance)
+   (instance-extension-names
+    :initarg :instance-extension-names
+    :initform nil
+    :reader vulkan-device-instance-extension-names)
+   (device-extension-names
+    :initarg :device-extension-names
+    :initform nil
+    :reader vulkan-device-extension-names)
    (physical-device
     :initarg :physical-device
     :reader vulkan-device-physical-device)
@@ -307,7 +329,7 @@
 
 (defun make-vulkan-gpu-device
     (instance physical-device queue-family descriptor
-     &key enabled-extension-names)
+     &key instance-extension-names enabled-extension-names)
   "Create GPU wrappers for an already selected Vulkan device and queue."
   (let ((native-device
           (lvk:create-device
@@ -322,6 +344,8 @@
                   :label (gpu-descriptor-label descriptor)
                   :handle native-device
                   :instance instance
+                  :instance-extension-names instance-extension-names
+                  :device-extension-names enabled-extension-names
                   :physical-device physical-device
                   :queue-family queue-family))
                (queue
@@ -494,7 +518,7 @@
             (completed-p nil))
         (unwind-protect
              (multiple-value-bind (extensions flags)
-                 (vulkan-gpu-instance-options)
+                 (vulkan-provider-instance-options provider)
                (setf instance
                      (lvk:create-instance
                       :application-name
@@ -511,7 +535,10 @@
                         (first-vulkan-graphics-queue-family physical-device)))
                  (let ((device
                          (make-vulkan-gpu-device
-                          instance physical-device queue-family descriptor)))
+                          instance physical-device queue-family descriptor
+                          :instance-extension-names extensions
+                          :enabled-extension-names
+                          (vulkan-gpu-device-extension-names provider))))
                    (setf native-device (vulkan-handle device)
                          completed-p t)
                    device)))

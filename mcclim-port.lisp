@@ -169,5 +169,6 @@ events.  This quiet fallback remains for single-process queue users."
       (setf (luv:canvas-event-handler target) nil)
       (when (member (luv:canvas-state target) '(:opening :open))
         (luv:close-canvas target))
+      (release-mirror-device mirror)
       (setf (mirror-context mirror) nil)))
   (setf (port-mirrors port) nil))

@@ -6,6 +6,9 @@
   ((canvas
     :initarg :canvas
     :reader demo-canvas)
+   (device
+    :initarg :device
+    :reader demo-device)
    (context
     :initarg :context
     :reader demo-context)
@@ -42,12 +45,22 @@
 
 SPEED is the number of complete color cycles per second.  Stop the returned
 object with STOP-CLEAR-COLOR-DEMO."
-  (let ((canvas (make-sdl-canvas :title title :width width :height height)))
+  (let ((canvas (make-sdl-canvas :title title :width width :height height))
+        (device nil))
     (open-canvas canvas)
     (handler-case
-        (let* ((context (make-canvas-context canvas *gpu-provider*))
+        (progn
+          (setf device
+                (request-gpu-device
+                 *gpu-provider*
+                 (make-device-descriptor :label title)))
+          (let* ((context
+                 (make-canvas-context
+                  canvas *gpu-provider*
+                  (make-canvas-configuration :device device)))
                (demo (make-instance 'clear-color-demo
                                     :canvas canvas
+                                    :device device
                                     :context context
                                     :speed speed)))
           (setf (canvas-clock canvas)
@@ -56,9 +69,11 @@ object with STOP-CLEAR-COLOR-DEMO."
                    (declare (ignore native-canvas))
                    (render-clear-color-demo-frame demo timestamp))
                  :frames-per-second frames-per-second))
-          demo)
+            demo))
       (error (condition)
         (close-canvas canvas)
+        (when device
+          (destroy device))
         (error condition)))))
 
 (defun stop-clear-color-demo (demo)
@@ -66,11 +81,13 @@ object with STOP-CLEAR-COLOR-DEMO."
   (let ((canvas (demo-canvas demo)))
     (when (eq :open (canvas-state canvas))
       (setf (canvas-clock canvas) (make-demand-clock)))
-    (close-canvas canvas))
+    (close-canvas canvas)
+    (destroy (demo-device demo)))
   (values))
 
 (defclass compute-gradient-demo ()
   ((canvas :initarg :canvas :reader demo-canvas)
+   (device :initarg :device :reader demo-device)
    (context :initarg :context :reader demo-context)
    (texture :initarg :texture :reader compute-demo-texture)
    (view :initarg :view :reader compute-demo-view)
@@ -114,15 +131,22 @@ object with STOP-CLEAR-COLOR-DEMO."
                                       (height 600))
   "Open a canvas filled by an s-expression SPIR-V compute shader."
   (let ((canvas (make-sdl-canvas :title title :width width :height height))
+        (device nil)
         (context nil)
         (resources nil)
         (completed-p nil))
     (open-canvas canvas)
     (unwind-protect
          (progn
-           (setf context (make-canvas-context canvas *gpu-provider*))
-           (let* ((device (context-device context))
-                  (extent (canvas-extent context))
+           (setf device
+                 (request-gpu-device
+                  *gpu-provider*
+                  (make-device-descriptor :label title))
+                 context
+                 (make-canvas-context
+                  canvas *gpu-provider*
+                  (make-canvas-configuration :device device)))
+           (let* ((extent (canvas-extent context))
                   (texture
                     (create
                      device
@@ -159,7 +183,8 @@ object with STOP-CLEAR-COLOR-DEMO."
                   (demo
                     (make-instance
                      'compute-gradient-demo
-                     :canvas canvas :context context :texture texture
+                     :canvas canvas :device device :context context
+                     :texture texture
                      :view view :module module :layout layout
                      :pipeline pipeline :bind-group bind-group)))
              (setf resources
@@ -170,7 +195,9 @@ object with STOP-CLEAR-COLOR-DEMO."
       (unless completed-p
         (dolist (resource resources)
           (ignore-errors (destroy resource)))
-        (close-canvas canvas)))))
+        (close-canvas canvas)
+        (when device
+          (destroy device))))))
 
 (defun stop-compute-gradient-demo (demo)
   "Destroy DEMO's compute resources and close its canvas."
@@ -183,4 +210,5 @@ object with STOP-CLEAR-COLOR-DEMO."
                   (compute-demo-texture demo)))
     (destroy resource))
   (close-canvas (demo-canvas demo))
+  (destroy (demo-device demo))
   (values))

@@ -10,7 +10,11 @@
    (context
     :initarg :context
     :initform nil
-    :accessor mirror-context))
+    :accessor mirror-context)
+   (device
+    :initarg :device
+    :initform nil
+    :accessor mirror-device))
   (:documentation
    "A McCLIM sheet's relationship with a luv presentation target.
 
@@ -225,10 +229,16 @@ Conventional RUN-FRAME-TOP-LEVEL frames consume their own queues instead."
 
 (defun ensure-raster-mirror-context (mirror size)
   (let* ((target (mirror-target mirror))
+         (device
+           (or (mirror-device mirror)
+               (setf (mirror-device mirror)
+                     (luv:request-gpu-device luv:*gpu-provider*))))
          (context
            (or (mirror-context mirror)
                (setf (mirror-context mirror)
-                     (luv:make-canvas-context target luv:*gpu-provider*)))))
+                     (luv:make-canvas-context
+                      target luv:*gpu-provider*
+                      (luv:make-canvas-configuration :device device))))))
     (unless (equal size (luv:canvas-extent context))
       (luv:configure-canvas-context
        context
@@ -237,6 +247,12 @@ Conventional RUN-FRAME-TOP-LEVEL frames consume their own queues instead."
         :format (luv:canvas-format context)
         :usage '(:copy-dst))))
     context))
+
+(defun release-mirror-device (mirror)
+  (alexandria:when-let ((device (mirror-device mirror)))
+    (luv:destroy device)
+    (setf (mirror-device mirror) nil))
+  mirror)
 
 (defun ensure-raster-mirror-texture (mirror context size)
   (let ((texture (mirror-texture mirror))
@@ -376,6 +392,7 @@ Conventional RUN-FRAME-TOP-LEVEL frames consume their own queues instead."
         (setf (luv:canvas-event-handler target) nil)
         (when (member (luv:canvas-state target) '(:opening :open))
           (luv:close-canvas target))
+        (release-mirror-device mirror)
         (setf (mirror-context mirror) nil))
       (setf (port-mirrors port)
             (delete mirror (port-mirrors port))))))

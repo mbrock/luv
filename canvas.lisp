@@ -260,13 +260,15 @@ function's values.  The protocol leaves room for a real frame scheduler."))
 
 (defgeneric make-canvas-context (canvas gpu-provider &optional configuration)
   (:documentation
-   "Create a GPU presentation relationship between CANVAS and GPU-PROVIDER."))
+   "Create a GPU presentation relationship between CANVAS and GPU-PROVIDER.
+When CONFIGURATION is omitted, return the context unconfigured."))
 
 (defgeneric context-canvas (context)
   (:documentation "Return the native canvas presented by CONTEXT."))
 
 (defgeneric context-device (context)
-  (:documentation "Return the GPU device used by CONTEXT."))
+  (:documentation
+   "Return the GPU device used by CONTEXT, or NIL before first configuration."))
 
 (defgeneric configure-canvas-context (context configuration)
   (:documentation "Configure or reconfigure CONTEXT for presentation."))

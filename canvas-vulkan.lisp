@@ -11,16 +11,20 @@
     :reader vulkan-canvas-provider)
    (instance
     :initarg :instance
-    :reader vulkan-canvas-instance)
+    :initform nil
+    :accessor vulkan-canvas-instance)
    (physical-device
     :initarg :physical-device
-    :reader vulkan-canvas-physical-device)
+    :initform nil
+    :accessor vulkan-canvas-physical-device)
    (device
     :initarg :device
-    :reader canvas-device)
+    :initform nil
+    :accessor canvas-device)
    (surface
     :initarg :surface
-    :reader vulkan-canvas-surface)
+    :initform nil
+    :accessor vulkan-canvas-surface)
    (configuration
     :initform nil
     :accessor canvas-context-configuration)
@@ -136,8 +140,7 @@
   (lvk:reset-fence native-device (vulkan-frame-slot-fence slot))
   slot)
 
-(defun sdl-canvas-vulkan-instance-extensions (canvas provider)
-  (declare (ignore canvas provider))
+(defun sdl-vulkan-instance-extensions ()
   (cffi:with-foreign-object (count :uint32)
     (let ((names (sdl3:vulkan-get-instance-extensions count)))
       (when (cffi:null-pointer-p names)
@@ -146,6 +149,29 @@
       (loop for index below (cffi:mem-ref count :uint32)
             collect (cffi:foreign-string-to-lisp
                      (cffi:mem-aref names :pointer index))))))
+
+(defun sdl-vulkan-presentation-ready-p ()
+  (member :video (sdl3:was-init :video)))
+
+(defmethod vulkan-provider-instance-options :around
+    ((provider vulkan-gpu-provider))
+  (multiple-value-bind (extensions flags) (call-next-method)
+    (values (if (sdl-vulkan-presentation-ready-p)
+                (remove-duplicates
+                 (append (sdl-vulkan-instance-extensions) extensions)
+                 :test #'string=)
+                extensions)
+            flags)))
+
+(defmethod vulkan-gpu-device-extension-names :around
+    ((provider vulkan-gpu-provider))
+  (declare (ignore provider))
+  (let ((extensions (call-next-method)))
+    (if (sdl-vulkan-presentation-ready-p)
+        (remove-duplicates
+         (cons lvk:+swapchain-extension-name+ extensions)
+         :test #'string=)
+        extensions)))
 
 (defun create-sdl-vulkan-canvas-surface (canvas provider instance)
   (declare (ignore provider))
@@ -162,20 +188,65 @@
   (sdl3:vulkan-destroy-surface instance surface (cffi:null-pointer))
   (values))
 
-(defun canvas-physical-device-and-queue-family (instance surface canvas)
-  (or (loop for physical-device in (lvk:enumerate-physical-devices instance)
-            do (loop for properties in
-                       (lvk:physical-device-queue-families physical-device)
-                     for index from 0
-                     when (and (plusp (lvk:queue-family-count properties))
-                               (member :graphics
-                                       (lvk:queue-family-flags properties))
-                               (lvk:surface-supported-p
-                                physical-device index surface))
-                       do (return-from canvas-physical-device-and-queue-family
-                            (values physical-device index))))
-      (error 'canvas-error :canvas canvas :operation :make-context
-             :reason :no-presentation-queue)))
+(defun bind-vulkan-canvas-device (context device)
+  "Attach unconfigured CONTEXT to DEVICE and create its native SDL surface."
+  (unless (typep device 'vulkan-gpu-device)
+    (error 'canvas-error :canvas (context-canvas context)
+           :operation :configure :reason :unsupported-device
+           :details device))
+  (ensure-live-vulkan-object device :configure-canvas)
+  (let ((bound-device (context-device context)))
+    (when (and bound-device (not (eq bound-device device)))
+      (error 'canvas-error :canvas (context-canvas context)
+             :operation :configure :reason :device-mismatch
+             :details device)))
+  (unless (context-device context)
+    (let* ((required-instance-extensions (sdl-vulkan-instance-extensions))
+           (missing-instance-extensions
+             (set-difference
+              required-instance-extensions
+              (vulkan-device-instance-extension-names device)
+              :test #'string=)))
+      (when missing-instance-extensions
+        (error 'canvas-error :canvas (context-canvas context)
+               :operation :configure :reason :missing-instance-extensions
+               :details missing-instance-extensions)))
+    (unless (member lvk:+swapchain-extension-name+
+                    (vulkan-device-extension-names device)
+                    :test #'string=)
+      (error 'canvas-error :canvas (context-canvas context)
+             :operation :configure :reason :missing-swapchain-extension
+             :details lvk:+swapchain-extension-name+))
+    (let* ((instance (vulkan-device-instance device))
+           (physical-device (vulkan-device-physical-device device))
+           (queue-family (vulkan-device-queue-family device))
+           (surface nil)
+           (completed-p nil))
+      (unwind-protect
+           (progn
+             (setf surface
+                   (create-sdl-vulkan-canvas-surface
+                    (context-canvas context)
+                    (vulkan-canvas-provider context)
+                    instance))
+             (unless (lvk:surface-supported-p
+                      physical-device queue-family surface)
+               (error 'canvas-error :canvas (context-canvas context)
+                      :operation :configure
+                      :reason :device-cannot-present-to-surface
+                      :details device))
+             (setf (vulkan-canvas-instance context) instance
+                   (vulkan-canvas-physical-device context) physical-device
+                   (canvas-device context) device
+                   (vulkan-canvas-surface context) surface
+                   completed-p t))
+        (unless completed-p
+          (when surface
+            (destroy-sdl-vulkan-canvas-surface
+             (context-canvas context)
+             (vulkan-canvas-provider context)
+             instance surface))))))
+  context)
 
 (defun gpu-canvas-format-to-vulkan (format)
   (or (cdr (assoc format
@@ -258,21 +329,19 @@
            :state (canvas-context-state context)
            :expected-state expected-state)))
 
-(defmethod configure-canvas-context
-    ((context vulkan-canvas-context) configuration)
+(defun configure-vulkan-canvas-context (context configuration)
   (unless (typep configuration 'canvas-configuration)
     (error 'canvas-error :canvas (context-canvas context)
            :operation :configure :reason :invalid-configuration
            :details configuration))
-  (when (eq :configured (canvas-context-state context))
-    (unconfigure-canvas-context context))
-  (ensure-vulkan-canvas-state context :configure :unconfigured)
   (let ((configured-device (canvas-configuration-device configuration)))
-    (when (and configured-device
-               (not (eq configured-device (context-device context))))
+    (unless configured-device
       (error 'canvas-error :canvas (context-canvas context)
-             :operation :configure :reason :device-mismatch
-             :details configured-device)))
+             :operation :configure :reason :device-required))
+    (when (eq :configured (canvas-context-state context))
+      (unconfigure-canvas-context context))
+    (ensure-vulkan-canvas-state context :configure :unconfigured)
+    (bind-vulkan-canvas-device context configured-device))
   (unless (equal '(:copy-dst) (canvas-configuration-usage configuration))
     (error 'canvas-error :canvas (context-canvas context)
            :operation :configure :reason :unsupported-usage
@@ -358,6 +427,13 @@
           (when swapchain
             (lvk:destroy-swapchain native-device swapchain)))))))
 
+(defmethod configure-canvas-context
+    ((context vulkan-canvas-context) configuration)
+  (call-on-sdl-canvas-thread
+   (context-canvas context)
+   (lambda ()
+     (configure-vulkan-canvas-context context configuration))))
+
 (defmethod unconfigure-canvas-context ((context vulkan-canvas-context))
   (when (eq :in-frame (canvas-context-state context))
     (ensure-vulkan-canvas-state context :unconfigure :configured))
@@ -389,13 +465,14 @@
 (defmethod destroy-canvas-context ((context vulkan-canvas-context))
   (unless (eq :destroyed (canvas-context-state context))
     (unconfigure-canvas-context context)
-    (destroy-sdl-vulkan-canvas-surface
-     (context-canvas context)
-     (vulkan-canvas-provider context)
-     (vulkan-canvas-instance context)
-     (vulkan-canvas-surface context))
-    (destroy (context-device context))
-    (setf (canvas-context-state context) :destroyed)
+    (when (vulkan-canvas-surface context)
+      (destroy-sdl-vulkan-canvas-surface
+       (context-canvas context)
+       (vulkan-canvas-provider context)
+       (vulkan-canvas-instance context)
+       (vulkan-canvas-surface context)))
+    (setf (vulkan-canvas-surface context) nil
+          (canvas-context-state context) :destroyed)
     (when (eq context (canvas-context (context-canvas context)))
       (setf (canvas-context (context-canvas context)) nil)))
   (values))
@@ -406,75 +483,21 @@
   (when (canvas-context canvas)
     (error 'canvas-error :canvas canvas :operation :make-context
            :reason :context-already-exists))
-  (let ((requested
-          (or configuration (make-canvas-configuration))))
-    (when (canvas-configuration-device requested)
-      (error 'canvas-error :canvas canvas :operation :make-context
-             :reason :external-device-not-supported
-             :details (canvas-configuration-device requested)))
-    (call-on-sdl-canvas-thread
-     canvas
-     (lambda ()
-       (with-vulkan-gpu-driver-environment
-         (let ((instance nil)
-               (surface nil)
-               (device nil)
-               (context nil)
-               (completed-p nil))
-           (unwind-protect
-                (progn
-                  (multiple-value-bind (portable-extensions flags)
-                      (vulkan-gpu-instance-options)
-                    (setf instance
-                          (lvk:create-instance
-                           :application-name (canvas-title canvas)
-                           :flags flags
-                           :enabled-extension-names
-                           (remove-duplicates
-                            (append
-                             (sdl-canvas-vulkan-instance-extensions
-                              canvas provider)
-                             portable-extensions)
-                            :test #'string=))))
-                  (setf surface
-                        (create-sdl-vulkan-canvas-surface
-                         canvas provider instance))
-                  (multiple-value-bind (physical-device queue-family)
-                      (canvas-physical-device-and-queue-family
-                       instance surface canvas)
-                    (setf device
-                          (make-vulkan-gpu-device
-                           instance physical-device queue-family
-                           (make-device-descriptor :label (canvas-title canvas))
-                           :enabled-extension-names
-                           (list lvk:+swapchain-extension-name+))
-                          context
-                          (make-instance
-                           'vulkan-canvas-context
-                           :canvas canvas :provider provider
-                           :instance instance :surface surface
-                           :physical-device physical-device :device device)
-                          (canvas-context canvas) context)
-                    (configure-canvas-context
-                     context
-                     (make-canvas-configuration
-                      :device device
-                      :format (canvas-configuration-format requested)
-                      :usage (canvas-configuration-usage requested)))
-                    (setf completed-p t)
-                    context))
-             (unless completed-p
-               (setf (canvas-context canvas) nil)
-               (cond
-                 (context
-                  (ignore-errors (destroy-canvas-context context)))
-                 (t
-                  (when surface
-                    (destroy-sdl-vulkan-canvas-surface
-                     canvas provider instance surface))
-                  (if device
-                      (destroy device)
-                      (when instance (lvk:destroy-instance instance)))))))))))))
+  (call-on-sdl-canvas-thread
+   canvas
+   (lambda ()
+     (let ((context
+             (make-instance 'vulkan-canvas-context
+                            :canvas canvas :provider provider)))
+       (setf (canvas-context canvas) context)
+       (handler-case
+           (progn
+             (when configuration
+               (configure-canvas-context context configuration))
+             context)
+         (error (condition)
+           (ignore-errors (destroy-canvas-context context))
+           (error condition)))))))
 
 (defmethod get-current-texture ((context vulkan-canvas-context))
   (or (vulkan-canvas-current-texture context)

@@ -212,8 +212,13 @@ ordinary owned image.
    :title "luv second spike" :width 800 :height 600))
 (luv:open-canvas *canvas*)
 
+(defparameter *device*
+  (luv:request-gpu-device luv:*gpu-provider*))
+
 (defparameter *context*
-  (luv:make-canvas-context *canvas* luv:*gpu-provider*))
+  (luv:make-canvas-context
+   *canvas* luv:*gpu-provider*
+   (luv:make-canvas-configuration :device *device*)))
 
 (luv:render-canvas-color *context* 0.15 0.35 0.95)
 
@@ -228,7 +233,18 @@ ordinary owned image.
      :texture texture :color #(0.7 0.1 1.0 1.0)))))
 
 (luv:close-canvas *canvas*)
+(luv:destroy *device*)
 ```
+
+Device acquisition is independent of canvas context creation.  A context does
+not own its configured device: destroy or close every context using a device
+before destroying the device itself.  The Vulkan provider loaded with the SDL
+canvas integration requests the SDL surface extensions and swapchain support;
+configuration then verifies that the chosen queue can present to this canvas.
+Request the device after opening an SDL Vulkan canvas when presentation is
+needed.  A device requested earlier remains useful for offscreen work, but
+canvas configuration will reject it because its instance lacks SDL's surface
+extensions.
 
 On Cocoa, the canvas's event loop and frame callbacks run on the process main
 thread.  Calls from SLY workers are sent to the canvas thread and wait for the
@@ -402,9 +418,11 @@ The server-friendly workflow does not need Emacs. Inside `nix develop`,
 ```sh
 ./sly start
 ./sly eval '(defparameter *canvas* (open-canvas (make-sdl-canvas)))' --package LUV
-./sly eval '(defparameter *context* (make-canvas-context *canvas* *gpu-provider*))' --package LUV
+./sly eval '(defparameter *device* (request-gpu-device *gpu-provider*))' --package LUV
+./sly eval '(defparameter *context* (make-canvas-context *canvas* *gpu-provider* (make-canvas-configuration :device *device*)))' --package LUV
 ./sly eval '(render-canvas-color *context* 0.7 0.1 1.0)' --package LUV
 ./sly eval '(close-canvas *canvas*)' --package LUV
+./sly eval '(destroy *device*)' --package LUV
 ./sly stop
 ```
 

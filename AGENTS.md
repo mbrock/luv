@@ -29,7 +29,8 @@ Useful starting points:
 
 ```sh
 ./sly eval '(defparameter *canvas* (open-canvas (make-sdl-canvas)))' --package LUV
-./sly eval '(defparameter *context* (make-canvas-context *canvas* *gpu-provider*))' --package LUV
+./sly eval '(defparameter *device* (request-gpu-device *gpu-provider*))' --package LUV
+./sly eval '(defparameter *context* (make-canvas-context *canvas* *gpu-provider* (make-canvas-configuration :device *device*)))' --package LUV
 ./sly eval '(render-canvas-color *context* 1.0 0.0 1.0)' --package LUV
 ./sly inspect '*context*' --package LUV
 ./sly describe render-canvas-color --package LUV
