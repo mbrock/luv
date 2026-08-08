@@ -221,12 +221,12 @@ McCLIM rasterizes drawing into an inspectable image. Finishing medium output
 uploads that image through `GPUQueue.writeTexture`-shaped machinery and copies
 it to the mirror's canvas surface.
 
-SDL mouse motion, window enter/leave, and button events are translated first
-into renderer-independent canvas event objects. The McCLIM mirror then turns
-those into CLIM pointer events, lets McCLIM find the innermost sheet, and drains
-the frame event queue on luv's canvas thread. Gadget callbacks and their
-repaints therefore happen at the native event-loop boundary without a second
-McCLIM top-level process.
+SDL pointer, keyboard, focus, and close events are translated first into
+renderer-independent canvas event objects. The McCLIM mirror then turns those
+into CLIM events. Callback-only gadget demos drain their frame queues on luv's
+canvas thread; conventional applications retain their own
+`run-frame-top-level` process and consume the same translated events from
+McCLIM's concurrent queue.
 
 The small backend laboratory avoids loading the full examples collection:
 
@@ -245,6 +245,22 @@ There is also a small real-gadget proof with a push button and toggle:
 (luv.mcclim:widget-lab-toggle-value *widgets*)
 (luv.mcclim:close-widget-lab *widgets*)
 ```
+
+The optional Listener component runs McCLIM's real Listener reader and frame
+top level on that second regime:
+
+```lisp
+(asdf:load-system :luv/mcclim/listener)
+(multiple-value-bind (process frame) (luv.mcclim:open-listener)
+  (defparameter *listener-process* process)
+  (defparameter *listener* frame))
+```
+
+Its menu bar is temporarily disabled: McCLIM menus are separate popup frames,
+while luv's current Cocoa SDL host owns only one native canvas at a time. The
+Listener panes, input editor, evaluator, presentations, and keyboard gestures
+otherwise run unchanged. A shared multi-canvas SDL host is the next step for
+native menus and dialogs.
 
 This experiment follows current McCLIM Git `master`, rather than a Quicklisp
 release. Install it as a local project before loading `:luv/mcclim`:

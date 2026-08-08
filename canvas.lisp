@@ -156,6 +156,33 @@
 (defclass canvas-pointer-button-press-event (canvas-pointer-button-event) ())
 (defclass canvas-pointer-button-release-event (canvas-pointer-button-event) ())
 
+(defclass canvas-key-event (canvas-event)
+  ((key-name
+    :initarg :key-name
+    :reader canvas-key-event-key-name)
+   (modifiers
+    :initarg :modifiers
+    :initform nil
+    :reader canvas-key-event-modifiers)
+   (character
+    :initarg :character
+    :initform nil
+    :reader canvas-key-event-character)
+   (repeat-p
+    :initarg :repeat-p
+    :initform nil
+    :reader canvas-key-event-repeat-p))
+  (:documentation
+   "A portable physical-key event with logical modifier names."))
+
+(defclass canvas-key-press-event (canvas-key-event) ())
+(defclass canvas-key-release-event (canvas-key-event) ())
+
+(defclass canvas-window-event (canvas-event) ())
+(defclass canvas-window-focus-gained-event (canvas-window-event) ())
+(defclass canvas-window-focus-lost-event (canvas-window-event) ())
+(defclass canvas-window-close-request-event (canvas-window-event) ())
+
 (defgeneric handle-canvas-event (handler canvas event)
   (:documentation "Deliver portable EVENT from CANVAS to HANDLER."))
 

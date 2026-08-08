@@ -61,14 +61,21 @@ mirror's identity: a later target may be a texture presented on a 3D quad."))
           (+ (or canvas-y 0) (luv:canvas-pointer-event-y event)))))
 
 (defun drain-luv-frame-events (sheet)
-  "Handle every McCLIM event queued while dispatching native input.
+  "Handle events for a callback-only frame while dispatching native input.
 
-Luv's canvas thread is the event loop for this backend, so there is no
-separate RUN-FRAME-TOP-LEVEL process waiting on the frame queue."
+Conventional RUN-FRAME-TOP-LEVEL frames consume their own queues instead."
   (let ((queue (climi::frame-event-queue (pane-frame sheet))))
     (loop for event = (climi::queue-read-no-hang queue)
           while event
           do (handle-event (event-sheet event) event))))
+
+(defun service-luv-frame-events (mirror)
+  "Service callback-only frames without stealing a real frame loop's queue."
+  (let* ((sheet (mirror-sheet mirror))
+         (frame (pane-frame sheet)))
+    (unless (climi::frame-process frame)
+      (drain-luv-frame-events sheet))
+    (present-mirror mirror)))
 
 (defun distribute-canvas-pointer-event (mirror canvas event class
                                         &key button)
@@ -85,8 +92,7 @@ separate RUN-FRAME-TOP-LEVEL process waiting on the frame queue."
             :y (luv:canvas-pointer-event-y event)
             :timestamp (luv:canvas-event-timestamp event)
             (when button (list :button button))))
-    (drain-luv-frame-events sheet)
-    (present-mirror mirror)))
+    (service-luv-frame-events mirror)))
 
 (defmethod luv:handle-canvas-event
     ((mirror luv-mirror) canvas (event luv:canvas-pointer-motion-event))
@@ -132,6 +138,83 @@ separate RUN-FRAME-TOP-LEVEL process waiting on the frame queue."
             (logandc2 (luv-pointer-button-state pointer) button))
       (distribute-canvas-pointer-event
        mirror canvas event 'pointer-button-release-event :button button))))
+
+(defun canvas-modifiers-to-clim-state (modifiers)
+  (reduce #'logior
+          (mapcar (lambda (modifier)
+                    (ecase modifier
+                      (:shift +shift-key+)
+                      (:control +control-key+)
+                      (:meta +meta-key+)
+                      (:super +super-key+)))
+                  modifiers)
+          :initial-value 0))
+
+(defun distribute-canvas-key-event (mirror event class)
+  (let* ((sheet (mirror-sheet mirror))
+         (port (port sheet))
+         (pointer (ensure-luv-port-pointer port))
+         (modifier-state
+           (canvas-modifiers-to-clim-state
+            (luv:canvas-key-event-modifiers event))))
+    (setf (luv-port-modifier-state port) modifier-state)
+    (multiple-value-bind (x y)
+        (climi::sheet-pointer-position sheet pointer)
+      (distribute-event
+       port
+       (apply #'make-instance class
+              :sheet sheet
+              :x x :y y
+              :timestamp (luv:canvas-event-timestamp event)
+              :modifier-state modifier-state
+              :key-name (luv:canvas-key-event-key-name event)
+              (when (luv:canvas-key-event-character event)
+                (list :key-character
+                      (luv:canvas-key-event-character event))))))
+    (service-luv-frame-events mirror)))
+
+(defmethod luv:handle-canvas-event
+    ((mirror luv-mirror) canvas (event luv:canvas-key-press-event))
+  (declare (ignore canvas))
+  (distribute-canvas-key-event mirror event 'key-press-event))
+
+(defmethod luv:handle-canvas-event
+    ((mirror luv-mirror) canvas (event luv:canvas-key-release-event))
+  (declare (ignore canvas))
+  (distribute-canvas-key-event mirror event 'key-release-event))
+
+(defmethod luv:handle-canvas-event
+    ((mirror luv-mirror) canvas
+     (event luv:canvas-window-focus-gained-event))
+  (declare (ignore canvas))
+  (let ((sheet (mirror-sheet mirror)))
+    (distribute-event
+     (port sheet)
+     (make-instance 'window-manager-focus-event
+                    :sheet sheet
+                    :timestamp (luv:canvas-event-timestamp event)))
+    (service-luv-frame-events mirror)))
+
+(defmethod luv:handle-canvas-event
+    ((mirror luv-mirror) canvas
+     (event luv:canvas-window-focus-lost-event))
+  (declare (ignore mirror canvas event))
+  nil)
+
+(defmethod luv:handle-canvas-event
+    ((mirror luv-mirror) canvas
+     (event luv:canvas-window-close-request-event))
+  (declare (ignore canvas))
+  (let* ((sheet (mirror-sheet mirror))
+         (frame (pane-frame sheet)))
+    ;; Callback-only demos are torn down by the canvas itself.  A conventional
+    ;; frame top level needs the CLIM delete event so its unwind protocol runs.
+    (when (climi::frame-process frame)
+      (distribute-event
+       (port sheet)
+       (make-instance 'window-manager-delete-event
+                      :sheet sheet
+                      :timestamp (luv:canvas-event-timestamp event))))))
 
 (defun raster-mirror-image-size (mirror)
   (let ((image (mcclim-render:image-mirror-image mirror)))

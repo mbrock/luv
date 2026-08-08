@@ -65,3 +65,11 @@
                (:file "mcclim-mirror")
                (:file "mcclim-lab")
                (:file "mcclim-widget-lab")))
+
+(asdf:defsystem #:luv/mcclim/listener
+  :description "The McCLIM Listener running on luv."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on (#:luv/mcclim
+               #:clim-listener)
+  :components ((:file "mcclim-listener")))

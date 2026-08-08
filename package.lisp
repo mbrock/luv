@@ -185,6 +185,17 @@
            #:canvas-pointer-event-clicks
            #:canvas-pointer-button-press-event
            #:canvas-pointer-button-release-event
+           #:canvas-key-event
+           #:canvas-key-event-key-name
+           #:canvas-key-event-modifiers
+           #:canvas-key-event-character
+           #:canvas-key-event-repeat-p
+           #:canvas-key-press-event
+           #:canvas-key-release-event
+           #:canvas-window-event
+           #:canvas-window-focus-gained-event
+           #:canvas-window-focus-lost-event
+           #:canvas-window-close-request-event
            #:handle-canvas-event
            #:demand-clock
            #:cadence-clock

@@ -4,6 +4,9 @@
   ((mirrors
     :initform nil
     :accessor port-mirrors)
+   (modifier-state
+    :initform 0
+    :accessor luv-port-modifier-state)
    (graft-width
     :initarg :graft-width
     :initform 1920
@@ -42,6 +45,9 @@
 
 (defmethod pointer-button-state ((pointer luv-pointer))
   (luv-pointer-button-state pointer))
+
+(defmethod port-modifier-state ((port luv-port))
+  (luv-port-modifier-state port))
 
 (defun ensure-luv-port-pointer (port)
   (let ((pointer (port-pointer port)))
@@ -115,8 +121,8 @@
                                &key wait-function timeout)
   "Wait cooperatively until McCLIM has another reason to run.
 
-The canvas event bridge will replace this deliberately quiet starting point
-with delivery of translated luv events."
+Concurrent McCLIM sheet queues are woken directly when luv appends translated
+events.  This quiet fallback remains for single-process queue users."
   (declare (ignore port))
   (labels ((ready-p () (and wait-function (funcall wait-function))))
     (when (ready-p)

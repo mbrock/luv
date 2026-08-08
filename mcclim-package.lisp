@@ -36,6 +36,7 @@
            #:widget-lab-click-count
            #:widget-lab-toggle-value
            #:open-widget-lab
-           #:close-widget-lab))
+           #:close-widget-lab
+           #:open-listener))
 
 (in-package #:luv.mcclim)
