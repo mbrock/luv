@@ -1,0 +1,171 @@
+#+title: Resource lifetimes and reclamation
+#+startup: overview
+
+* One resource has several lifetimes
+:PROPERTIES:
+:ID: L8R2WF
+:END:
+
+It is misleading to ask only whether a GPU buffer is “alive.”  At least five
+overlapping lifetimes may matter:
+
+1. The *language handle* is reachable by application code.
+2. The *logical API object* is in a state that permits new operations.
+3. A *recorded dependency* may be retained by an unfinished command encoder or
+   command buffer.
+4. A *submitted dependency* must remain usable by work the GPU may still
+   execute.
+5. The *physical resource* is native memory and a Vulkan, Metal, or other
+   backend object that can finally be released.
+
+These layers do not end together.  Garbage collection concerns the first.
+=destroy= primarily changes the second.  Command tracking owns the third and
+fourth.  Backend destruction ends the fifth only after the implementation has
+a completion proof.
+
+This distinction is one of the central things a WebGPU-shaped API buys its
+caller and demands from its implementation.
+
+* Destroy is logically immediate and physically conditional
+:PROPERTIES:
+:ID: D3H7VK
+:END:
+
+WebGPU buffer destruction changes the buffer's internal state to =destroyed=,
+unmaps it, and prevents further operations.  The specification separately
+notes that the implementation can reclaim the GPU memory *once all previously
+submitted operations using it are complete*.  Thus =destroy()= is not a wait
+and not necessarily a native =vkDestroyBuffer= at that instant.
+
+This split is forced by the lower layer.  Vulkan's
+[[https://docs.vulkan.org/refpages/latest/refpages/source/vkDestroyBuffer.html][=vkDestroyBuffer= valid-usage rule]] says that all submitted commands referring
+to the buffer, directly or through a view, must have completed.  A WebGPU implementation accepting
+=destroy()= while older work is in flight must therefore make the public
+handle unusable now while retaining enough hidden ownership to destroy the
+native object later.
+
+This is not an incidental garbage-collector problem.  It is a cross-timeline
+ownership transfer:
+
+#+begin_example
+application owns usable handle
+        |
+        | encode / submit
+        v
+submission owns a dependency ---- GPU may use it
+        |
+        | destroy() meanwhile
+        v
+public object is destroyed; hidden native resource remains
+        |
+        | completion proof
+        v
+backend may destroy object and free allocation
+#+end_example
+
+The WebGPU text is at [[https://www.w3.org/TR/webgpu/#buffer-destruction][buffer destruction]].
+
+* Completion can be represented as a frontier
+:PROPERTIES:
+:ID: P6Q4MT
+:END:
+
+If submissions on one queue are ordered and numbered monotonically, the
+implementation can represent completed work by a frontier:
+
+#+begin_example
+submission:  41   42   43   44   45
+             done done done |---- pending ----|
+completion frontier = 43
+#+end_example
+
+Anything retained only through submission 43 can now be retired.  Resources
+last used by 44 or 45 cannot.  A Vulkan timeline semaphore naturally carries
+such a value; a pool of ordinary fences can be made to present the same
+abstraction.
+
+The WebGPU API does not require this data structure.  Its ordered queue and
+completion operations make it a useful implementation strategy.  It replaces
+repeated “wait for the whole device to become idle” proofs with a finer proof
+about a prefix of submitted work.
+
+Queue completion is publicly visible through
+[[https://www.w3.org/TR/webgpu/#dom-gpuqueue-onsubmittedworkdone][=GPUQueue.onSubmittedWorkDone()=]].
+Internal reclamation can use the same completion information without exposing
+every fence or submission index to the application.
+
+* Mapping is an ownership phase
+:PROPERTIES:
+:ID: M9C2JA
+:END:
+
+WebGPU does not treat mapping as “return a pointer and let the programmer
+synchronize it.”  =mapAsync= waits until previously enqueued uses of the
+buffer have completed.  Once mapped, the buffer becomes unavailable to GPU
+queue operations until =unmap=.
+
+The state machine establishes exclusive host access and gives the
+implementation room to use direct mapping, a copy, cache maintenance, or
+process transfer while preserving the same API.  It also makes mapping another
+consumer of submission-completion information: a pending map can become ready
+when the last submission using that particular buffer completes, rather than
+only when the entire queue is idle.
+
+See the specification's [[https://www.w3.org/TR/webgpu/#buffer-mapping][buffer mapping]] section.  The relationship to the
+completion frontier #P6Q4MT is structural, not merely a convenience of one
+implementation.
+
+* wgpu is one concrete implementation study
+:PROPERTIES:
+:ID: G5X8BN
+:END:
+
+The local =/Users/mbrock/src/wgpu= checkout at commit
+=390f05b69acb1efc3855ab0b380838fe9f09260b= illustrates one current answer.
+It is evidence about wgpu, not a requirement of WebGPU and not automatically a
+design for luv.
+
+In that snapshot:
+
+- Each successful submission receives an increasing =SubmissionIndex=.
+- An =ActiveSubmission= retains in-flight encoders.  Their trackers retain the
+  resources used by their command buffers, and the encoders themselves own the
+  native command-buffer allocation pools.
+- Mapping requests are attached to the most recent active submission that
+  contains the buffer, or become ready immediately when none does.
+- Buffer or texture destruction first “snatches” the raw backend object out of
+  the publicly usable resource.  A =DestroyedBuffer= or =DestroyedTexture=
+  wrapper is attached as a temporary resource to the last submission using it.
+- When device maintenance observes completion, it drains completed active
+  submissions.  Dropping their tracked resources and temporary destroyed
+  wrappers eventually calls the backend's physical destruction operations.
+- The Vulkan backend implements the monotonically valued device fence using a
+  timeline semaphore where available or a recyclable pool of =VkFence=
+  objects.
+
+Useful pinned source readings are
+[[https://github.com/gfx-rs/wgpu/blob/390f05b69acb1efc3855ab0b380838fe9f09260b/wgpu-core/src/device/life.rs][=wgpu-core/src/device/life.rs=]],
+[[https://github.com/gfx-rs/wgpu/blob/390f05b69acb1efc3855ab0b380838fe9f09260b/wgpu-core/src/resource.rs][=wgpu-core/src/resource.rs=]],
+[[https://github.com/gfx-rs/wgpu/blob/390f05b69acb1efc3855ab0b380838fe9f09260b/wgpu-core/src/device/queue.rs][=wgpu-core/src/device/queue.rs=]], and
+[[https://github.com/gfx-rs/wgpu/blob/390f05b69acb1efc3855ab0b380838fe9f09260b/wgpu-hal/src/vulkan/mod.rs][the Vulkan fence implementation]].
+
+* This is not reclamation “at the end of a frame”
+:PROPERTIES:
+:ID: E7N3KP
+:END:
+
+WebGPU has presentation frames, but general resource reclamation is not keyed
+to a frame boundary.  A buffer can be used by compute work with no presented
+frame; a frame can involve several submissions; and a resource can remain in
+use across many frames.  The meaningful boundary is completion of the last
+submission that may use the resource.
+
+The increasing submission index resembles an epoch, but calling the whole
+mechanism “epoch-based reclamation” imports expectations from concurrent CPU
+algorithms that may not fit.  It is clearer to say *submission-indexed deferred
+destruction* or *completion-frontier reclamation* and then describe the actual
+ownership.
+
+Frame slots #F7Q2KM are a bounded way to associate reusable presentation
+resources with completion proofs.  They are related to this model, but they
+are neither a WebGPU API feature nor wgpu's general resource-lifetime unit.

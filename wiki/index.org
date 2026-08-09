@@ -1,0 +1,79 @@
+#+title: The luv GPU wiki
+#+startup: overview
+
+* A workshop, not an authority
+:PROPERTIES:
+:ID: H7QK3M
+:END:
+
+This wiki is a place to develop an understanding of GPU programming, API
+design, and implementation.  Its first subject is the shape of WebGPU and the
+work hidden beneath that shape, because those are useful things to think with
+while luv grows a small hardware abstraction layer.
+
+Neither resemblance to WebGPU nor presence in the current luv implementation
+makes something correct.  WebGPU is a landmark: we want to understand the
+problems its design addresses and the consequences of its answers.  Luv may
+adopt, simplify, alter, or reject those answers.  Likewise, current luv code is
+a live experiment.  It can supply observations and case studies, but must not
+be used as ground truth to justify itself.
+
+The pages try to keep three voices distinct:
+
+- *WebGPU semantics* describe an externally observable contract.
+- *Implementation consequences* explain work some implementation must do to
+  uphold that contract.  A particular mechanism is usually not mandated.
+- *Questions for luv* are invitations, not decisions already made.
+
+Claims about intention deserve special care.  The specification is good
+evidence for the contract and some rationale, but a historical claim about why
+the working group chose a design may require proposals, issues, meeting notes,
+or mailing-list archaeology.  An attractive retrospective explanation is not
+automatically a historical fact.
+
+* String figures
+:PROPERTIES:
+:ID: F2N8VX
+:END:
+
+An addressable piece of discourse is a *figure*.  For now a figure is an Org
+heading with a stable six-character =ID= property.  Files gather figures by
+subject; they do not provide their identities.  A figure can move, acquire a
+better title, or be substantially revised while its identifier remains the
+same.
+
+A plain mention such as #D3H7VK passes a figure into another passage.  Org's
+standard =[[id:D3H7VK]]= form is also available when a clickable link is more
+useful than the light notation.  We can derive lookup, outgoing links,
+backlinks, dangling references, and code-to-discourse links from these
+mentions; any such index should be disposable rather than another source of
+truth.
+
+Common Lisp gives us an especially cheap future notation.  A =WIKI= package
+could export figure symbols, allowing source to mention ='wiki:D3H7VK= without
+a reader macro.  We should first let real uses teach us whether a symbol means
+only a stable reference, a resolvable object, source metadata, or something
+else.  Comments and docstrings containing =#D3H7VK= already participate in the
+discourse without changing Lisp semantics.
+
+* Paths into the initial material
+:PROPERTIES:
+:ID: S9D4KC
+:END:
+
+The following are starting paths rather than a table of settled doctrine.
+
+- [[file:webgpu-shape.org][Why WebGPU has this shape]] begins with the API as a portable contract over
+  asynchronous execution.
+- [[file:resource-lifetimes.org][Resource lifetimes and reclamation]] separates public object state from
+  physical GPU lifetime and follows destruction, mapping, and completion.
+- [[file:commands-and-usage.org][Commands, usage, and hidden synchronization]] asks what command recording
+  and usage declarations buy an implementation.
+- [[file:frame-slots.org][Frame slots as a luv case study]] revisits a recent implementation change
+  without promoting it into doctrine.
+
+A useful first crossing is from the timeline distinction #T4V8QM to the five
+different senses of lifetime in #L8R2WF, then to the frame-slot episode
+#R3V8HC.  That path explains why “the Lisp object is no longer wanted,” “the
+API object is destroyed,” and “Vulkan may free the allocation” are not the
+same event.

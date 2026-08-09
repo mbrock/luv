@@ -10,6 +10,13 @@ The owned layer uses CFFI's translating types, enums, and bitfields directly.
 Vulkan treaty text explicit while naming its recurring call, allocation,
 checking, and count/fetch patterns once.
 
+## Wiki
+
+The [GPU wiki](wiki/index.org) is where luv develops its understanding of GPU
+APIs and implementation mechanisms.  It treats WebGPU as a particularly useful
+landmark rather than a standard that luv has already adopted, and treats the
+current luv code as experimental evidence rather than settled design.
+
 ## GPU API
 
 The independently loadable `:luv/gpu` system is the beginning of a

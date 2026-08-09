@@ -1,0 +1,104 @@
+#+title: Frame slots as a luv case study
+#+startup: overview
+
+* The frame-slot episode
+:PROPERTIES:
+:ID: R3V8HC
+:END:
+
+On 8 August 2026, commit
+[[https://github.com/mbrock/luv/commit/dfbf3fc05a71f2225e79dd58962cd7f63b48e670][=dfbf3fc=]] replaced a queue-wide idle wait in Vulkan canvas presentation with
+two rotating frame slots and completion fences.  The immediate problem was
+allowing CPU recording of a new presentation frame to overlap execution of an
+earlier one.
+
+Before that change, =vkQueueWaitIdle= did more than slow the loop down.  It was
+also the proof that command pools, command buffers, framebuffers, staging
+resources, and related native objects from the submission were no longer in
+use.  Removing the wait without replacing that proof would have made their
+destruction or reuse unsafe.
+
+The slot change became more intelligible after studying the broader lifetime
+model #L8R2WF: asynchronous submission creates an interval during which the
+application has moved on but the implementation must retain everything the GPU
+may still touch.  That understanding arrived after the practical change,
+which is exactly the kind of event this wiki should help make less accidental.
+
+This is a retrospective interpretation, not evidence that the current design
+is ideal.
+
+* What a current luv frame slot means
+:PROPERTIES:
+:ID: F7Q2KM
+:END:
+
+In the current canvas Vulkan path, each of two slots owns:
+
+- a fence signaled by its render submission;
+- an image-acquisition semaphore;
+- the submitted =gpu-command-buffer= and therefore its native command
+  resources.
+
+Before reusing a slot, luv waits for that slot's fence.  Only then does it
+destroy the previous command-buffer resources and reset the fence.  The
+submitted commands are transferred into the slot after submission, so an
+=unwind-protect= in the calling frame does not destroy them prematurely.
+
+Render-finished semaphores are indexed separately by acquired swapchain image.
+This is a reminder that “frame,” “CPU frame slot,” “queue submission,” and
+“swapchain image” are overlapping but non-identical lifetimes.
+
+The relevant current definitions are
+[[file:../canvas-vulkan.lisp::(defclass vulkan-canvas-frame-slot][=vulkan-canvas-frame-slot=]],
+[[file:../canvas-vulkan.lisp::(defun recycle-vulkan-canvas-frame-slot][=recycle-vulkan-canvas-frame-slot=]], and
+[[file:../canvas-vulkan.lisp::(defun call-with-vulkan-canvas-frame][=call-with-vulkan-canvas-frame=]].
+
+* What the slots do not establish
+:PROPERTIES:
+:ID: N5D9AX
+:END:
+
+The two slots establish a bounded reuse protocol for one presentation path.
+They do not yet constitute a general luv resource-lifetime system.
+
+In particular, they do not by themselves answer:
+
+- how an arbitrary buffer destroyed after submission remains physically alive;
+- how non-presentation compute or copy submissions are tracked;
+- whether several submissions belonging to one conceptual frame share a
+  retirement point;
+- how =mapAsync=-like host access would wait only for uses of one buffer;
+- whether completed resources are reclaimed without waiting to revisit a
+  particular frame slot;
+- how device loss retires or abandons in-flight ownership.
+
+Current public =submit= remains synchronous and waits for queue idle, so it
+sidesteps many of these questions at a substantial concurrency cost.  The
+canvas path is a special asynchronous path.  Both facts are provisional.
+
+This is why frame slots must not be confused with completion-frontier
+reclamation #P6Q4MT or described as a WebGPU frame-end mechanism #E7N3KP.
+
+* Questions exposed by the experiment
+:PROPERTIES:
+:ID: J4C6WP
+:END:
+
+The experiment gives us better questions for the next design round:
+
+- Should luv have a general submission object or monotonically increasing
+  submission index?
+- Should a submitted command buffer transfer ownership into the queue until a
+  completion frontier passes it?
+- Can presentation frame slots become clients of that general mechanism rather
+  than a second lifetime system?
+- Which resources should be pooled and reset after completion, and which
+  should simply be dropped?
+- Should ordinary Lisp =destroy= mean logical invalidation with physical
+  destruction deferred automatically?
+- How much of this remains invisible behind a deliberately small synchronous
+  API, and what useful asynchronous operations should be public?
+
+The wgpu mechanism #G5X8BN is one worked example.  It is valuable because it
+makes the ownership transfers concrete, not because luv ought to reproduce its
+types or complexity.
