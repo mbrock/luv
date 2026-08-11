@@ -114,8 +114,8 @@ The following are starting paths rather than a table of settled doctrine.
   sparse/dense storage, solver-set, contact, constraint-coloring, determinism,
   and event mechanisms behind that landmark.
 - [[file:sb-simd.org][Field notes on sb-simd]] studies the generated SIMD vocabulary, scalar
-  mirrors, dispatch model, and the important empirical fact that the current
-  macOS arm64 SBCL has no usable Lisp-level SIMD backend.
+  mirrors, and dispatch model, then records the new project invariant: luv's
+  pinned SBCL supplies native SIMD on arm64/NEON and x86-64.
 
 A useful first crossing is from the timeline distinction #T4V8QM to the five
 different senses of lifetime in #L8R2WF, then to the frame-slot episode

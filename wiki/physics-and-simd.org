@@ -118,41 +118,40 @@ non-consing, over specialized arrays it borrowed from bundles.  Bodies never
 become tiny dispatching objects because bodies never appear in the loop at
 all — only columns do.
 
-On the SIMD half, the sb-simd study forced honesty (#L2W6KT): the archived
-library has no arm64 backend, and SBCL 2.5.10 offers no Lisp-level SIMD on
-this machine.  That finding is already dated — SBCL 2.6.7 added arm64
-=simd-pack= and an sb-simd NEON instruction set (#W9K4DN) — so the tier
-list gains a rung.  In order of adoption:
+The first sb-simd study forced honesty (#L2W6KT): the archived library and
+the machine's old SBCL 2.5.10 had no arm64 Lisp-level SIMD.  That is now
+history, not a deployment constraint.  Luv pins and supplies SBCL 2.6.7;
+=sb-simd= is part of the project environment on both arm64 and x86-64, and
+the live arm64 image has executed =f32.4= arithmetic as a NEON =FADD=
+(#W9K4DN).  The implementation order can therefore be simpler:
 
-1. *Declared scalar Lisp*, written in sb-simd's naming discipline
-   (=f32-add= over =f32vec= columns, unrolled accumulators, explicit
-   tails).  SBCL's arm64 backend produces respectable scalar code, and for
-   the body counts the little block world implies, this tier may be the
-   permanent answer.
-2. *sb-simd NEON* on SBCL 2.6.7 or later: 128-bit =f32.4= and =f64.2=
-   lanes under the same dotted naming, which is exactly Box3D's chosen
-   width (#T3C8FV).  A kernel written at tier 1 in the naming discipline
-   upgrades almost mechanically.  Unverified here until the image is
-   upgraded; the empirical section of the sb-simd page describes the older
-   world.
-3. *A small foreign path* for a proven-hot kernel: Accelerate where one of
-   its operations fits, or a narrow C/NEON shim otherwise, with the Lisp
-   definition kept as its oracle in sb-simd's scalar-mirror style
-   (#E8M3JC).
-4. *The GPU*, which luv already programs through its own SPIR-V assembler —
-   the natural home for wide regular work like broad-phase refits or mass
-   meshing, at the price of crossing the completion frontier (#T9K4RC).
-5. *x86-64 images*, now mainly interesting for the 256-bit AVX widths that
-   NEON does not offer.
+1. *A declared scalar reference kernel* remains the executable
+   specification, tail implementation, and debugging path.  It is not a
+   substitute forced on one of luv's supported CPU architectures.
+2. *A common native four-float path* uses 128-bit =f32.4=: NEON on arm64 and
+   SSE-family instructions on x86-64.  This is exactly Box3D's chosen width
+   (#T3C8FV), so four-wide constraint batches can be a real design target
+   without making the physics layout architecture-specific.
+3. *Optional wider x86-64 paths* may use AVX or AVX-512 when runtime
+   instruction-set availability and measurement justify them.  They are
+   specializations of the same phase, not a reason to make a separate kind
+   of image or change the logical bundle schema.
+4. *The GPU*, which luv already programs through its own SPIR-V assembler,
+   remains a possible home for sufficiently wide regular work, at the price
+   of crossing the completion frontier (#T9K4RC).
+5. *A foreign kernel* is now an escape hatch only for a measured limitation
+   in SBCL or sb-simd, not the expected route to NEON.  The Lisp definition
+   remains its oracle in sb-simd's scalar-mirror style (#E8M3JC).
 
 The design consequence is the same at every tier, and this is the point:
-what a kernel needs is not an instruction set but a *layout contract* —
+what a kernel needs is not merely an instruction set but a *layout contract* —
 struct-of-arrays columns and, if constraints are ever packed four-wide, the
 coloring disjointness invariant that makes gather/scatter safe (#T3C8FV).
-Layout is portable; lanes are not.  Luv should buy the layout with the
-architecture and treat every tier above scalar as a swappable backend for
-the same columns, chosen per phase the way =instruction-set-case= chooses
-per CPU (#C3F7XM).
+The shared 128-bit width makes the first wide layout portable across luv's
+CPU targets even though the emitted instructions differ.  Generic functions
+can select the phase once; =instruction-set-case= can select the best native
+kernel for the current CPU without exposing that choice to bodies, contacts,
+or bundle schemas (#C3F7XM).
 
 * The smallest solver worth building
 :PROPERTIES:

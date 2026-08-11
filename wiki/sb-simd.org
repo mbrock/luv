@@ -14,15 +14,15 @@ files are the package definitions and the scalar fallback definitions) and
 its texinfo manual, which became the "SIMD Programming" chapter of the SBCL
 manual.
 
-The study has an unusual empirical component.  The luv development machine
-runs Homebrew SBCL 2.5.10 on macOS arm64, and part of the question was simply
-whether any of this library exists there.  The short answer, developed in
-#L2W6KT: no — and the details of *how* it fails are themselves informative.
+The study has an unusual empirical component.  It began while the luv
+development machine still ran Homebrew SBCL 2.5.10 on macOS arm64, when part
+of the question was simply whether any of this library existed there.  The
+historical answer, developed in #L2W6KT, was no.  Luv now supplies its own
+SBCL 2.6.7, so #W9K4DN and #P6N4SV record the present project reality.
 
 As with the Box3D notes, sb-simd is a landmark, not an authority.  It is the
 most serious public answer to "what should SIMD programming in Common Lisp
-feel like," and several of its ideas transfer even to a machine where none of
-its instructions run.
+feel like," and several of its ideas transfer beyond any one instruction set.
 
 * The library is a database that generates itself
 :PROPERTIES:
@@ -93,7 +93,7 @@ synthesized by sign-flipping around the signed ones.  Some fake VOPs call
 x86-64-only SBCL internals at read time — which is one of the reasons the
 library cannot even load elsewhere, as the next figure shows.
 
-* On arm64 the answer is no, in three instructive ways
+* Before SBCL 2.6.7, arm64 was absent in three instructive ways
 :PROPERTIES:
 :ID: L2W6KT
 :END:
@@ -154,10 +154,10 @@ right, and recently.  Checked against the SBCL repository and NEWS on
   VOPs — the gap-filling tradition of #C3F7XM continues on the new
   architecture.  The 256-bit types remain x86-64-only, which makes NEON's
   width exactly the four lanes Box3D standardized on (#T3C8FV).
-- Homebrew already ships 2.6.7.  The machine's 2.5.10 predates it, so the
-  empirical failures of #L2W6KT describe the old world; after an SBCL
-  upgrade the first two options of that figure collapse into "load the
-  contrib."
+- Luv no longer depends on the host package manager for this transition.
+  Its flake builds SBCL 2.6.7 and its launchers enter that environment, so
+  the empirical failures of #L2W6KT describe a preserved historical probe,
+  not the current development image.
 
 Two figures on this page are thereby dated, and deliberately left standing
 with this correction beside them: the archive study was accurate about its
@@ -167,13 +167,43 @@ absorbed a second architecture largely by adding instruction-set files,
 which is the strongest evidence yet for the pattern #E8M3JC recommends
 borrowing.
 
-* What a kernel looks like when it does work
+* Luv now treats SIMD availability as a project invariant
+:PROPERTIES:
+:ID: P6N4SV
+:END:
+
+The flake pins the toolchain rather than accepting whichever =sbcl= appears
+first on the host =PATH=.  It exposes SBCL 2.6.7 and the Lisp environment for
+=aarch64-darwin=, =aarch64-linux=, and =x86_64-linux=; =./sly= and
+=scripts/luv= enter that environment themselves.  For the two CPU
+architectures luv supports, =(require :sb-simd)= is therefore a project
+assumption rather than an optional local upgrade.
+
+The arm64 path has been checked in the actual durable SLY image, not merely
+in flake evaluation: the image reports SBCL 2.6.7 on ARM64, provides the
+=SB-SIMD-NEON= package, computes four-lane =f32.4= addition correctly, and
+disassembles the typed addition to =FADD V0.4S, V0.4S, V1.4S=.  The x86-64
+side uses sb-simd's established x86 instruction-set family from the same
+SBCL source.  The guarantee is that the contrib, pack substrate, and native
+128-bit path exist; optional AVX, AVX2, and AVX-512 use must still be chosen
+by runtime capability dispatch.
+
+This changes the engineering default.  A first numerical atelier can be
+written directly as paired scalar and four-wide Lisp kernels.  A foreign
+NEON shim is no longer preparatory work, and a CLOS generic function can
+select the numerical phase once while the phase uses sb-simd operations over
+borrowed specialized arrays.  Scalar mirrors and tails remain essential for
+testing and odd element counts, not because ARM64 lacks a backend.
+
+* What a kernel looks like
 :PROPERTIES:
 :ID: V4R8DP
 :END:
 
-The canonical example, a four-way unrolled AVX dot product, condenses the
-whole programming model:
+The manual's canonical example, a four-way unrolled AVX dot product,
+condenses the whole programming model.  The analogous four-float =f32.4=
+shape is now directly available through the NEON package on arm64; the
+programming pattern survives even where the element count differs:
 
 #+begin_src lisp
 (do ((index 0 (+ index 16))
@@ -224,7 +254,7 @@ part of the observable contract, which is exactly the stance a deterministic
 luv simulation would have to take before its first parallel or wide kernel —
 retrofitting it means re-deriving every reduction in the codebase.
 
-* What sb-simd teaches even where it cannot run
+* What sb-simd teaches now that it can run here
 :PROPERTIES:
 :ID: E8M3JC
 :END:
@@ -233,8 +263,8 @@ Ideas worth carrying into luv independent of instruction sets:
 
 - The =X.Y= *naming discipline* — element type and width as one lexical
   token, operations suffixed onto it — makes wide code readable and makes
-  the scalar/wide relationship mechanical.  A luv math layer could adopt it
-  today with purely scalar implementations.
+  the scalar/wide relationship mechanical.  A luv math layer can use that
+  relationship directly for paired scalar and native implementations.
 - The *record-driven generation* pattern: describe operations as data, then
   generate definitions, declarations, and accessors by iterating the
   database.  Luv already lives this pattern in its s-expression SPIR-V
@@ -256,6 +286,7 @@ Ideas worth carrying into luv independent of instruction sets:
 What should *not* be imitated is the assumption that wide arithmetic is
 where a small simulation's time goes.  Box3D — a mature, profile-driven
 engine — vectorizes exactly one loop (#T3C8FV).  The prerequisite it built
-first was a data layout with a disjointness invariant.  Layout is portable;
-instruction sets are not — though #W9K4DN shows the portable layout
-argument aging better than the instruction-set pessimism did.
+first was a data layout with a disjointness invariant.  The four-wide layout
+is now shared by luv's arm64 and x86-64 targets even though their instruction
+encodings differ.  Wider paths remain optional; the layout and its
+disjointness proof still come first.

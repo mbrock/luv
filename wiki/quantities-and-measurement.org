@@ -21,9 +21,10 @@ number.  Several independent questions are involved:
 
 Keeping those questions separate is more useful than choosing one elaborate
 "unit type."  It lets a logical field retain strong meaning while its values
-occupy plain specialized arrays suitable for wide kernels such as SB-SIMD
-where that backend exists.  It also explains why the domain/bundle design in
-#L7C4GM is relevant to quantities rather than an unrelated storage concern.
+occupy plain specialized arrays suitable for SB-SIMD kernels.  Luv's pinned
+SBCL now makes that a supported CPU path on both arm64/NEON and x86-64 rather
+than a hypothetical backend.  It also explains why the domain/bundle design
+in #L7C4GM is relevant to quantities rather than an unrelated storage concern.
 
 The principal source material is Moppe's
 [[file:../../src/moppe/docs/units.md][units guide]] and

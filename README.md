@@ -34,8 +34,9 @@ helpers and `SPV` for the SPIR-V pieces.
 ## Quick Start
 
 The flake pins nixpkgs and provides the project's SBCL 2.6.7, including
-arm64/NEON `sb-simd` support, alongside SDL3, Vulkan tools, MoltenVK on macOS,
-Mesa/lavapipe for offscreen Linux captures, and the pinned local Lisp projects:
+`sb-simd` on both arm64/NEON and x86-64, alongside SDL3, Vulkan tools,
+MoltenVK on macOS, Mesa/lavapipe for offscreen Linux captures, and the pinned
+local Lisp projects:
 
 ```sh
 nix develop

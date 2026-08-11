@@ -425,7 +425,7 @@ gates sleep, contact recycling, and continuous collision alike.
 :ID: T3C8FV
 :END:
 
-Worth recording precisely, since luv is about to think about SIMD in Lisp
+Worth recording precisely, since luv can now experiment with SIMD in Lisp
 (see the [[file:sb-simd.org][sb-simd field notes]]): Box3D's SIMD is one abstraction header
 (=src/simd.h=) defining =b3FloatW= as SSE2, NEON, or a scalar struct of four
 floats, always width four.  On top of it sit wide vector and symmetric-matrix
