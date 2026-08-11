@@ -463,6 +463,7 @@
             (lambda (surface-texture encoder)
               (encode-cube-world-frame
                demo surface-texture encoder :readback-buffer buffer)))
+           (ensure-directories-exist pathname)
            (write-rgba-png
             pathname (read-buffer buffer)
             (first extent) (second extent) (canvas-format context)))
@@ -533,6 +534,7 @@
                                 (title "luv little block world — click, look, fly")
                                 (width 960) (height 640)
                                 (frames-per-second 60)
+                                (visible-p t)
                                 (world (make-little-block-world))
                                 (mesher (make-instance
                                          'exposed-face-mesher))
@@ -540,8 +542,13 @@
   "Open a little CPU-meshed block world.
 
 Click to capture the pointer, look with the mouse, fly with WASD, rise with
-Space, descend with either Shift key, and press Escape to release the pointer."
-  (let ((canvas (make-sdl-canvas :title title :width width :height height))
+Space, descend with either Shift key, and press Escape to release the pointer.
+
+Pass :VISIBLE-P NIL to keep the SDL window hidden while still exercising the
+real SDL/Vulkan surface and swapchain path.  Pass :FRAMES-PER-SECOND NIL for a
+capture-only demand clock."
+  (let ((canvas (make-sdl-canvas :title title :width width :height height
+                                 :visible-p visible-p))
         (device nil) (context nil) (resources nil) (completed-p nil))
     (open-canvas canvas)
     (unwind-protect
@@ -643,11 +650,13 @@ Space, descend with either Shift key, and press Escape to release the pointer."
              (write-buffer vertex-buffer (block-mesh-vertices mesh))
              (setf (canvas-event-handler canvas) demo
                    (canvas-clock canvas)
-                   (make-cadence-clock
-                    (lambda (native-canvas timestamp)
-                      (declare (ignore native-canvas))
-                      (render-cube-world-frame demo timestamp))
-                    :frames-per-second frames-per-second)
+                   (if frames-per-second
+                       (make-cadence-clock
+                        (lambda (native-canvas timestamp)
+                          (declare (ignore native-canvas))
+                          (render-cube-world-frame demo timestamp))
+                        :frames-per-second frames-per-second)
+                       (make-demand-clock))
                    completed-p t)
                demo)))
       (unless completed-p
@@ -678,3 +687,64 @@ Space, descend with either Shift key, and press Escape to release the pointer."
     (close-canvas canvas))
   (destroy (cube-world-demo-device demo))
   (values))
+
+(defun hidden-cube-world-frame-pathname (directory index)
+  (merge-pathnames
+   (format nil "block-world-~3,'0D.png" index)
+   (uiop:ensure-directory-pathname directory)))
+
+(defun capture-hidden-cube-world-screenshot
+    (pathname &key
+                (title "luv hidden block world")
+                (width 960) (height 640)
+                (world (make-little-block-world))
+                (mesher (make-instance 'exposed-face-mesher))
+                (camera (make-instance 'fly-camera)))
+  "Open a hidden SDL/Vulkan canvas, render one block-world frame, and save it."
+  (let ((demo nil))
+    (unwind-protect
+         (progn
+           (setf demo
+                 (start-cube-world-demo
+                  :title title :width width :height height
+                  :frames-per-second nil :visible-p nil
+                  :world world :mesher mesher :camera camera))
+           (capture-cube-world-screenshot demo pathname))
+      (when demo
+        (stop-cube-world-demo demo)))))
+
+(defun capture-hidden-cube-world-frames
+    (directory &key
+                 (count 6)
+                 (title "luv hidden block world")
+                 (width 960) (height 640)
+                 (yaw-step 0.35)
+                 (world (make-little-block-world))
+                 (mesher (make-instance 'exposed-face-mesher))
+                 (camera (make-instance 'fly-camera)))
+  "Capture COUNT hidden block-world frames into DIRECTORY.
+
+Each frame reuses one hidden SDL/Vulkan canvas and advances CAMERA's yaw by
+YAW-STEP, returning the pathnames that were written."
+  (check-type count (integer 1))
+  (check-type yaw-step real)
+  (let ((directory (uiop:ensure-directory-pathname directory))
+        (demo nil)
+        (initial-yaw (camera-yaw camera)))
+    (ensure-directories-exist directory)
+    (unwind-protect
+         (progn
+           (setf demo
+                 (start-cube-world-demo
+                  :title title :width width :height height
+                  :frames-per-second nil :visible-p nil
+                  :world world :mesher mesher :camera camera))
+           (loop for index below count
+                 for pathname =
+                 (hidden-cube-world-frame-pathname directory index)
+                 do (setf (camera-yaw camera)
+                          (+ initial-yaw (* yaw-step index)))
+                    (capture-cube-world-screenshot demo pathname)
+                 collect pathname))
+      (when demo
+        (stop-cube-world-demo demo)))))

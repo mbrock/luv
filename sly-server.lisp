@@ -16,14 +16,6 @@
          (uiop:pathname-directory-pathname *load-truename*))
        (slynk-root (required-directory "LUV_SLYNK_DIR"))
        (port (parse-integer (getenv-or "LUV_SLYNK_PORT" "4005"))))
-  (load
-   (merge-pathnames
-    #P"setup.lisp"
-    (let ((configured-home (uiop:getenv "QUICKLISP_HOME")))
-      (if configured-home
-          (pathname (format nil "~A/" configured-home))
-          (merge-pathnames #P"quicklisp/" (user-homedir-pathname))))))
-  (uiop:symbol-call :ql :quickload '(:sdl3) :silent t)
   (asdf:initialize-source-registry
    `(:source-registry
      (:tree ,(namestring slynk-root))

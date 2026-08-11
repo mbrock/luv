@@ -130,7 +130,8 @@
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on (#:luv/canvas
-               #:luv/spir-v)
+               #:luv/spir-v
+               #:uiop)
   :serial t
   :components ((:module "examples"
                 :components ((:file "demo")

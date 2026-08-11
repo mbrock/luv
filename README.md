@@ -379,11 +379,33 @@ vertex and fragment stages remain structured s-expression SPIR-V modules.
 (luv:stop-cube-world-demo *cube-world*)
 ```
 
-Screenshot capture does not depend on the window system.  It records a real
+Screenshot capture does not depend on a visible window.  It records a real
 Vulkan image-to-buffer copy from the rendered color attachment, waits through
 the queue completion frontier, reads the mapped buffer, and writes PNG bytes
-directly from Lisp.  This makes visual iteration available from SLY even when
-the native window belongs to an awkward macOS host process.
+directly from Lisp.  The first headless-ish workflow is the same SDL canvas
+path with the native window kept hidden:
+
+```lisp
+(luv:capture-hidden-cube-world-screenshot
+ #P"/tmp/luv-block-world.png")
+
+(luv:capture-hidden-cube-world-frames
+ #P"/tmp/luv-block-world-frames/" :count 6)
+```
+
+From a fresh shell, the same path is scriptable:
+
+```sh
+nix develop -c sbcl --script scripts/capture-hidden-block-world.lisp /tmp/luv-block-world.png
+nix develop -c sbcl --script scripts/capture-hidden-block-world.lisp /tmp/luv-block-world-frames/ 6
+```
+
+The script uses `SDL_VIDEODRIVER=offscreen` automatically when neither
+`DISPLAY` nor `WAYLAND_DISPLAY` is present, and the Nix shell points that mode
+at Mesa lavapipe so captures work through a CPU Vulkan device.  A desktop
+session can keep its normal driver and the window still stays hidden.
+`SDL_VIDEODRIVER=dummy` is not enough for this path because SDL cannot create
+Vulkan windows on that driver.
 
 ## McCLIM
 

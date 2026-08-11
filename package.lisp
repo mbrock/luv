@@ -446,6 +446,8 @@ nothing else does."))
            #:start-cube-world-demo
            #:stop-cube-world-demo
            #:capture-cube-world-screenshot
+           #:capture-hidden-cube-world-screenshot
+           #:capture-hidden-cube-world-frames
            #:request-canvas-frame
            #:make-canvas-context
            #:configure-canvas-context

@@ -1,5 +1,22 @@
 {
   "nodes": {
+    "cl-sdl3": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1776397102,
+        "narHash": "sha256-hhTzmQuEWhSQL9oFKiO8ICgGNOpymfCwO9SJ0jDDBY8=",
+        "ref": "refs/heads/main",
+        "rev": "47c90b54715aba23752b70d382a3eb310172cd34",
+        "revCount": 78,
+        "type": "git",
+        "url": "https://github.com/aiffc/cl-sdl3.git"
+      },
+      "original": {
+        "rev": "47c90b54715aba23752b70d382a3eb310172cd34",
+        "type": "git",
+        "url": "https://github.com/aiffc/cl-sdl3.git"
+      }
+    },
     "mcclim": {
       "flake": false,
       "locked": {
@@ -35,6 +52,7 @@
     },
     "root": {
       "inputs": {
+        "cl-sdl3": "cl-sdl3",
         "mcclim": "mcclim",
         "nixpkgs": "nixpkgs"
       }

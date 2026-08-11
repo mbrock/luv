@@ -6,8 +6,12 @@
     url = "git+https://codeberg.org/McCLIM/McCLIM.git?ref=master";
     flake = false;
   };
+  inputs.cl-sdl3 = {
+    url = "git+https://github.com/aiffc/cl-sdl3.git?rev=47c90b54715aba23752b70d382a3eb310172cd34";
+    flake = false;
+  };
 
-  outputs = { nixpkgs, mcclim, ... }:
+  outputs = { nixpkgs, mcclim, cl-sdl3, ... }:
     let
       systems = [
         "x86_64-linux"
@@ -35,7 +39,13 @@
           lisp = pkgs.sbcl.withPackages (lispPackages: [
             lispPackages.alexandria
             lispPackages.cffi
+            lispPackages.cffi-libffi
+            lispPackages.closer-mop
+            lispPackages.defclass-std
             lispPackages.rove
+          ] ++ nixpkgs.lib.optionals pkgs.stdenv.isDarwin [
+            lispPackages.float-features
+            lispPackages.trivial-main-thread
           ]);
           slyRoot =
             "${pkgs.emacsPackages.sly}/share/emacs/site-lisp/elpa/${pkgs.emacsPackages.sly.pname}-${pkgs.emacsPackages.sly.version}";
@@ -44,7 +54,12 @@
     in
     {
       devShells = forAllSystems (system:
-        let env = environmentFor system;
+        let
+          env = environmentFor system;
+          lavapipeIcd =
+            if system == "x86_64-linux" then "lvp_icd.x86_64.json"
+            else if system == "aarch64-linux" then "lvp_icd.aarch64.json"
+            else null;
         in {
           default = env.pkgs.mkShell ({
             packages = [
@@ -58,7 +73,10 @@
             ];
             LD_LIBRARY_PATH = env.nativeLibraryPath;
             LUV_SLYNK_DIR = "${env.slyRoot}/slynk";
-            CL_SOURCE_REGISTRY = "${mcclim}//";
+            CL_SOURCE_REGISTRY = "${mcclim}//:${cl-sdl3}//";
+          } // nixpkgs.lib.optionalAttrs (lavapipeIcd != null) {
+            LUV_LAVAPIPE_ICD =
+              "${env.pkgs.mesa}/share/vulkan/icd.d/${lavapipeIcd}";
           } // nixpkgs.lib.optionalAttrs env.pkgs.stdenv.isDarwin {
             VK_DRIVER_FILES =
               "${env.pkgs.moltenvk}/share/vulkan/icd.d/MoltenVK_icd.json";
