@@ -24,6 +24,8 @@ The ASDF systems are the useful map:
 :luv/canvas/vulkan    Vulkan swapchain presentation for SDL canvases
 :luv/canvas           SDL canvas presentation for the GPU API
 :luv/world            coordinate spaces, chunk domains, resident block data
+:luv/spir-v           literal SPIR-V plus typed mathematical shader expressions
+:luv/spir-v/tests     expression typing, provenance, and lowering tests
 :luv/examples         demos, PNG capture, and the block world
 :luv/tests            renderer-independent model tests
 :luv/examples/tests   generation, cross-chunk meshing, and edit tests
@@ -109,6 +111,10 @@ of durable image.
 (defparameter *world* (luv:start-cube-world-demo))
 (luv:capture-cube-world-screenshot *world* #P"/tmp/luv-block-world.png")
 (luv:stop-cube-world-demo *world*)
+
+(asdf:load-system :luv/mcclim)
+(defparameter *shader-lab* (luv.mcclim:open-shader-lab))
+(luv.mcclim:close-shader-lab *shader-lab*)
 ```
 
 Click the block-world window once to capture the pointer. Walk with WASD and

@@ -229,6 +229,7 @@
                (:file "mcclim-mirror")
                (:file "mcclim-lab")
                (:file "mcclim-widget-lab")
+               (:file "mcclim-shader-lab")
                (:file "mcclim-compositor")))
 
 (asdf:defsystem #:luv/mcclim/listener

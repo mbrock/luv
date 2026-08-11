@@ -86,6 +86,9 @@ The following are starting paths rather than a table of settled doctrine.
 - [[file:luv-vulkan-hal.org][Field notes on the current Vulkan HAL]] maps the actual layers, local
   ownership decisions, missing lifetime proofs, and open design questions in
   the present code.
+- [[file:mathematical-shaders.org][Mathematical shaders as live Lisp objects]] records the typed expression
+  language above the literal SPIR-V assembler, its deterministic CLOS
+  lowering, and the McCLIM presentation browser connecting source to SSA.
 - [[file:completion-frontier.org][The queue frontier and modern-capabilities decision]] records the adoption
   of Vulkan 1.4, timeline semaphores, and a per-queue completion frontier
   that captures command dependencies, defers destruction, and makes public

@@ -38,6 +38,11 @@
            #:widget-lab-toggle-value
            #:open-widget-lab
            #:close-widget-lab
+           #:shader-lab
+           #:shader-lab-lowering
+           #:shader-lab-selection
+           #:open-shader-lab
+           #:close-shader-lab
            #:spinning-texture-compositor
            #:enable-spinning-mirror
            #:disable-spinning-mirror

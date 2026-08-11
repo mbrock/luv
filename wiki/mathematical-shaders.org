@@ -1,0 +1,174 @@
+#+title: Mathematical shaders as live Lisp objects
+#+startup: overview
+
+* Source mathematics and machine form are different views
+:PROPERTIES:
+:ID: S4H8DR
+:END:
+
+Luv has two shader languages with deliberately different jobs.  The literal
+language in [[file:../spir-v.lisp][=spir-v.lisp=]] names every result id and every SPIR-V instruction.  It
+is a good machine form, an assembler input, and a debugging view.  It is a bad
+place to state that illumination is ambient light plus a sun contribution or
+that fog linearly combines lit albedo with sky colour.
+
+The expression language in [[file:../shader-expression.lisp][=shader-expression.lisp=]] states those relationships directly.  It
+does not replace the literal layer.  It lowers into the existing
+=spir-v-module=, =spir-v-function-definition=, =spir-v-basic-block=, and
+=instruction= objects, after which the same =lower-spir-v= and =assemble=
+paths emit the binary.
+
+#+begin_example
+typed shader specification
+  declarations + let* bindings + expressions
+                     |
+                     | compile-shader-specification
+                     v
+shader-lowering -- provenance maps -- expression <-> instruction
+                     |
+                     v
+spir-v-module -- function -- basic block -- CLOS instruction occurrences
+                     |
+                     | lower-spir-v / assemble
+                     v
+                 SPIR-V words
+#+end_example
+
+This separation preserves the assembler as an inspectable truth rather than
+hiding it behind a string-generating compiler.  It also makes the source and
+machine views objects that McCLIM can present and relate.
+
+* The block material is the first real client
+:PROPERTIES:
+:ID: B9M2FX
+:END:
+
+The fragment shader used by the playable block world lives in
+[[file:../block-fragment-shader.lisp][=block-fragment-shader.lisp=]].  Its complete material calculation is ordinary
+Lisp-shaped source:
+
+#+begin_src lisp
+(define-shader block-world-fragment-specification
+    (:stage :fragment
+     :inputs ((uv-shade-input :vec3 :location 0)
+              (normal-input :vec3 :location 1)
+              (fog-input :vec4 :location 2))
+     :outputs ((color-output :vec4 :location 0))
+     :resources ((block-atlas :texture-2d :set 0 :binding 0)
+                 (block-sampler :sampler :set 0 :binding 1)))
+  (let* ((uv-shade uv-shade-input)
+         (uv (swizzle uv-shade :xy))
+         (ao (swizzle uv-shade :z))
+         (normal normal-input)
+         (sun (vec3 0.30 0.86 0.40))
+         (hemisphere (* (+ (dot normal sun) 1.0) 0.5))
+         (illumination (+ 0.42 (* hemisphere 0.58)))
+         (light (* illumination ao))
+         (albedo (swizzle (sample block-atlas block-sampler uv) :rgb))
+         (fog-state fog-input)
+         (sky (swizzle fog-state :rgb))
+         (fog (swizzle fog-state :w))
+         (lit (* albedo light))
+         (fogged (mix sky lit fog))
+         (rgba (vec4 fogged 1.0)))
+    (set-output color-output rgba)))
+#+end_src
+
+The public renderer API did not change.  =block-world-fragment-module= still
+returns a structured SPIR-V module and =block-world-fragment-shader= still
+returns assembled words.  =block-world-fragment-lowering= exposes the richer
+result when a tool wants provenance.
+
+The migrated shader emits vector operations, including
+=OpVectorTimesScalar=, rather than manually extracting and recombining every
+colour component.  Both block shaders are checked by =spirv-val= through
+=make shader-validate=.  The first migration also rendered the exact same
+smoke PNG hash before and after lowering, so the language change did not
+quietly alter the visible game.
+
+* Expressions, declarations, and bindings are objects
+:PROPERTIES:
+:ID: C6E3LA
+:END:
+
+A =shader-specification= owns interface declarations, resources, ordered
+=shader-binding= objects, and output assignments.  Every literal, reference,
+and call is a =shader-expression= with:
+
+- an inferred =shader-type=;
+- its original source form;
+- expression-specific operands or target;
+- and, for a =let*= value, its lexical result name.
+
+The parser understands float scalars, =vec2=/=vec3=/=vec4=, component
+swizzles, arithmetic, =dot=, =sample=, and =mix=.  Type inference rejects an
+unknown name, an out-of-range swizzle, an invalid product, a mismatched output,
+or a malformed resource declaration as a =shader-language-error= carrying the
+source form, reason, and details.
+
+=let*= is semantic.  Lowering evaluates bindings in source order, interns
+types and constants deterministically, preserves useful lexical names in
+result ids, and emits instruction *instances* into a CLOS basic block.  A
+=shader-lowering= retains two EQ maps:
+
+- expression object to the instruction occurrences it caused; and
+- instruction occurrence to the source expressions that explain it.
+
+Those maps are intentionally occurrence-based.  “This multiply in this basic
+block came from this expression object” is more useful for a live tool than a
+global table saying that the =f-mul= opcode exists.
+
+* McCLIM presents the relationship
+:PROPERTIES:
+:ID: P7V5CK
+:END:
+
+[[file:../mcclim-shader-lab.lisp][=mcclim-shader-lab.lisp=]] defines a real application frame on luv's McCLIM
+backend.  Its left pane renders declarations and nested mathematical
+expressions.  Its right pane renders CLOS functions, basic blocks, and literal
+SSA instruction forms.  Expressions, instructions, and blocks are distinct
+McCLIM presentation types.
+
+Selecting an expression highlights its associated instructions.  Selecting
+an instruction follows the reverse provenance map back to an expression.
+The detail pane reports the source form, inferred type, and association count.
+The presentation objects are the compiler objects themselves; there is no
+parallel UI tree whose identities can drift.
+
+In the durable SLY image:
+
+#+begin_src lisp
+(asdf:load-system :luv/mcclim)
+
+(defparameter *shader-lab*
+  (luv.mcclim:open-shader-lab))
+
+(luv.mcclim:close-shader-lab *shader-lab*)
+#+end_src
+
+The first live block-material frame contains 46 expression presentations, 34
+instruction presentations (including the module constants), and one
+basic-block presentation.  Invoking the
+same commands used by the select gesture in either direction returns to the
+=(* albedo light)= expression and forces both panes to redisplay.
+
+* What this does not decide
+:PROPERTIES:
+:ID: F2Q9WU
+:END:
+
+This is a coherent first language, not a commitment to grow a second Common
+Lisp inside Common Lisp.  Control flow, user functions, matrices, integer and
+boolean types, storage buffers, derivative operations, and stage-specific
+validation should arrive only with shaders that require them.
+
+The useful constraints for the next experiments are already visible:
+
+- source expressions remain CLOS objects with source provenance;
+- lexical Lisp order remains observable in the lowered block;
+- SPIR-V instructions and basic blocks remain the literal backend objects;
+- lowering errors name the mathematical source form;
+- tools consume the same expression and instruction occurrences as the
+  compiler; and
+- a shader change is not accepted on pretty source alone: assemble it,
+  validate it, and run the real renderer.

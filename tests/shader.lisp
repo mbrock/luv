@@ -63,6 +63,63 @@
                         :test #'eq))
               instructions))))
 
+(deftest constants-and-reused-loads-retain-occurrence-provenance
+  (let* ((specification
+           (spv:parse-shader-specification
+            'reuse-input
+            '(:stage :fragment
+              :inputs ((value :float :location 0))
+              :outputs ((color :float :location 0)))
+            '((let* ((twice (+ value value)))
+                (set-output color twice)))))
+         (lowering (spv:compile-shader-specification specification))
+         (call (spv:shader-binding-expression
+                (binding-named 'twice specification)))
+         (references (spv:shader-call-operands call))
+         (left-instructions
+           (gethash (first references)
+                    (spv:shader-lowering-expression-instructions lowering)))
+         (right-instructions
+           (gethash (second references)
+                    (spv:shader-lowering-expression-instructions lowering)))
+         (block-specification (spv:block-world-fragment-specification))
+         (sun (binding-named 'sun block-specification))
+         (block-lowering (spv:block-world-fragment-lowering))
+         (literal (first (spv:shader-call-operands
+                          (spv:shader-binding-expression sun))))
+         (constant-instructions
+           (gethash literal
+                    (spv:shader-lowering-expression-instructions
+                     block-lowering))))
+    (ok (= (length left-instructions) 1))
+    (ok (eq (first left-instructions) (first right-instructions)))
+    (ok (= (length constant-instructions) 1))
+    (ok (string-equal
+         (symbol-name
+          (spv:instruction-name (first constant-instructions)))
+         "constant"))))
+
+(deftest vector-scalar-division-lowers-through-a-reciprocal
+  (let* ((specification
+           (spv:parse-shader-specification
+            'vector-division
+            '(:stage :fragment
+              :inputs ((value :vec3 :location 0)
+                       (scale :float :location 1))
+              :outputs ((color :vec3 :location 0)))
+            '((let* ((quotient (/ value scale)))
+                (set-output color quotient)))))
+         (instructions
+           (spv:lower-spir-v
+            (spv:shader-lowering-module
+             (spv:compile-shader-specification specification))))
+         (names (mapcar (lambda (instruction)
+                          (symbol-name (spv:instruction-name instruction)))
+                        instructions)))
+    (ok (find "F-DIV" names :test #'string=))
+    (ok (find "VECTOR-TIMES-SCALAR" names :test #'string=))
+    (ok (> (length (spv:assemble-shader-specification specification)) 5))))
+
 (deftest shader-lowering-is-deterministic-and-assemblable
   (flet ((forms ()
            (mapcar #'spv:instruction-form

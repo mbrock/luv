@@ -586,6 +586,10 @@
                  :accessor context-variable-ids)
    (loaded-values :initform (make-hash-table :test #'eq)
                   :accessor context-loaded-values)
+   (loaded-instructions :initform (make-hash-table :test #'eq)
+                        :accessor context-loaded-instructions)
+   (constant-instructions :initform (make-hash-table :test #'equal)
+                          :accessor context-constant-instructions)
    (expression-values :initform (make-hash-table :test #'eq)
                       :accessor context-expression-values)
    (expression-instructions :initform (make-hash-table :test #'eq)
@@ -686,16 +690,32 @@
 (defun shader-constant-name (value)
   (format nil "FLOAT-~A" value))
 
-(defun ensure-shader-constant (context value)
+(defun ensure-shader-constant (context value &optional expression)
   (let* ((value (coerce value 'single-float))
          (key (list :float value)))
-    (or (gethash key (context-constant-ids context))
-        (let ((id (reserve-shader-id context (shader-constant-name value))))
-          (setf (gethash key (context-constant-ids context)) id)
-          (append-context-form
-           'constant-declarations context
-           (list id 'constant (ensure-shader-type-id context :float) value))
-          id))))
+    (multiple-value-bind (id found-p)
+        (gethash key (context-constant-ids context))
+      (if found-p
+          (progn
+            (when expression
+              (associate-shader-instruction
+               context expression
+               (gethash key (context-constant-instructions context))))
+            id)
+          (let* ((id (reserve-shader-id context
+                                        (shader-constant-name value)))
+                 (instruction
+                   (parse-instruction
+                    (list id 'constant
+                          (ensure-shader-type-id context :float) value))))
+            (setf (gethash key (context-constant-ids context)) id
+                  (gethash key (context-constant-instructions context))
+                  instruction)
+            (append-context-form
+             'constant-declarations context instruction)
+            (when expression
+              (associate-shader-instruction context expression instruction))
+            id)))))
 
 (defun ensure-sampled-image-type-id (context)
   (let* ((key :sampled-image)
@@ -796,14 +816,25 @@
          (alias-shader-expression context expression source)
          value))
       (shader-variable-declaration
-       (or (gethash target (context-loaded-values context))
-           (let* ((type (shader-declaration-type target))
-                  (value
-                    (emit-value-instruction
-                     context expression type 'load
-                     (list (gethash target (context-variable-ids context))))))
-             (setf (gethash target (context-loaded-values context)) value)
-             value))))))
+       (multiple-value-bind (value found-p)
+           (gethash target (context-loaded-values context))
+         (if found-p
+             (progn
+               (associate-shader-instruction
+                context expression
+                (gethash target (context-loaded-instructions context)))
+               value)
+             (let* ((type (shader-declaration-type target))
+                    (value
+                      (emit-value-instruction
+                       context expression type 'load
+                       (list (gethash target
+                                      (context-variable-ids context)))))
+                    (instruction (car (last (context-instructions context)))))
+               (setf (gethash target (context-loaded-values context)) value
+                     (gethash target (context-loaded-instructions context))
+                     instruction)
+               value)))))))
 
 (defun emit-binary-arithmetic
     (context expression operator result-type left-id left-type right-id right-type)
@@ -833,6 +864,27 @@
         (emit-value-instruction
          context expression (shader-expression-type expression) 'f-negate
          (list (lower-shader-expression context (first operands))))))
+    (when (and (eq operator :/)
+               (shader-vector-type-p
+                (shader-expression-type (first operands)))
+               (shader-float-type-p
+                (shader-expression-type (second operands))))
+      (let* ((vector (first operands))
+             (scalar (second operands))
+             (vector-id (lower-shader-expression context vector))
+             (scalar-id (lower-shader-expression context scalar))
+             (float-type (find-shader-type :float))
+             (reciprocal-id (fresh-shader-id context 'reciprocal)))
+        (emit-shader-instruction
+         context expression
+         (list reciprocal-id 'f-div
+               (ensure-shader-type-id context float-type)
+               (ensure-shader-constant context 1.0) scalar-id))
+        (return-from lower-arithmetic-call
+          (emit-binary-arithmetic
+           context expression :* (shader-expression-type vector)
+           vector-id (shader-expression-type vector)
+           reciprocal-id float-type))))
     (let* ((first (first operands))
            (value (lower-shader-expression context first))
            (value-type (shader-expression-type first)))
@@ -927,7 +979,9 @@
       (setf (gethash expression (context-expression-values context))
             (etypecase expression
               (shader-literal
-               (ensure-shader-constant context (shader-literal-value expression)))
+               (ensure-shader-constant context
+                                       (shader-literal-value expression)
+                                       expression))
               (shader-reference (lower-shader-reference context expression))
               (shader-call (lower-shader-call context expression))))))
 
