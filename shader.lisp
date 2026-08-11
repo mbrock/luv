@@ -426,21 +426,24 @@ Binding 2 is a uniform block whose first vector contains sine and cosine."
   (assemble-spir-v-module (spinning-texture-fragment-module)))
 
 (defun block-world-vertex-module ()
-  "Make the vertex shader for interleaved position/color block vertices."
+  "Make the vertex shader for textured, lit block vertices."
   (make-instance
    'spir-v-module
    :entry-points
    (list (make-instance
           'spir-v-entry-point :execution-model 'vertex
           :function '%main
-          :interfaces '(%world-position %vertex-color
-                        %position %color-output %fog-output)))
+          :interfaces '(%world-position %uv-shade %normal
+                        %position %uv-shade-output %normal-output
+                        %fog-output)))
    :annotations
    '((decorate %world-position location 0)
-     (decorate %vertex-color location 1)
+     (decorate %uv-shade location 1)
+     (decorate %normal location 2)
      (decorate %position built-in (enum built-in position))
-     (decorate %color-output location 0)
-     (decorate %fog-output location 1)
+     (decorate %uv-shade-output location 0)
+     (decorate %normal-output location 1)
+     (decorate %fog-output location 2)
      (decorate %camera-block block)
      (member-decorate %camera-block 0 offset 0)
      (member-decorate %camera-block 1 offset 16)
@@ -449,7 +452,7 @@ Binding 2 is a uniform block whose first vector contains sine and cosine."
      (member-decorate %camera-block 4 offset 64)
      (member-decorate %camera-block 5 offset 80)
      (decorate %camera-buffer descriptor-set 0)
-     (decorate %camera-buffer binding 0))
+     (decorate %camera-buffer binding 2))
    :global-declarations
    '((%void type-void)
      (%uint type-int 32 0)
@@ -471,9 +474,11 @@ Binding 2 is a uniform block whose first vector contains sine and cosine."
      (%five-u constant %uint 5)
      (%one constant %float 1.0)
      (%world-position variable %input-vec3-pointer input)
-     (%vertex-color variable %input-vec3-pointer input)
+     (%uv-shade variable %input-vec3-pointer input)
+     (%normal variable %input-vec3-pointer input)
      (%position variable %output-vec4-pointer output)
-     (%color-output variable %output-vec3-pointer output)
+     (%uv-shade-output variable %output-vec3-pointer output)
+     (%normal-output variable %output-vec3-pointer output)
      (%fog-output variable %output-vec4-pointer output)
      (%camera-buffer variable %camera-block-pointer uniform))
    :function-definitions
@@ -488,8 +493,10 @@ Binding 2 is a uniform block whose first vector contains sine and cosine."
        'spir-v-basic-block :label '%entry
        :instructions
        '((%world load %vec3 %world-position)
-         (%color load %vec3 %vertex-color)
-         (store %color-output %color)
+         (%uv-shade-value load %vec3 %uv-shade)
+         (%normal-value load %vec3 %normal)
+         (store %uv-shade-output %uv-shade-value)
+         (store %normal-output %normal-value)
          (%camera-pointer access-chain
                           %uniform-vec4-pointer %camera-buffer %zero-u)
          (%right-pointer access-chain
@@ -518,7 +525,8 @@ Binding 2 is a uniform block whose first vector contains sine and cosine."
          (%view-z dot %float %relative %forward)
          (%inverse-far composite-extract %float %fog-state 3)
          (%fog-distance f-mul %float %view-z %inverse-far)
-         (%fog-factor f-sub %float %one %fog-distance)
+         (%fog-distance-squared f-mul %float %fog-distance %fog-distance)
+         (%fog-factor f-sub %float %one %fog-distance-squared)
          (%sky-red composite-extract %float %fog-state 0)
          (%sky-green composite-extract %float %fog-state 1)
          (%sky-blue composite-extract %float %fog-state 2)
@@ -541,34 +549,55 @@ Binding 2 is a uniform block whose first vector contains sine and cosine."
          (return))))))))
 
 (defun block-world-fragment-module ()
-  "Make the untextured fragment shader for shaded block-face colors."
+  "Sample block albedo and apply ambient, directional, AO, and distance fog."
   (make-instance
    'spir-v-module
    :entry-points
    (list (make-instance
           'spir-v-entry-point :execution-model 'fragment
           :function '%main
-          :interfaces '(%color-input %fog-input %color-output)))
+          :interfaces '(%uv-shade-input %normal-input %fog-input
+                        %color-output)))
    :execution-modes
    (list (make-instance 'spir-v-execution-mode
                         :function '%main :name 'origin-upper-left))
    :annotations
-   '((decorate %color-input location 0)
-     (decorate %fog-input location 1)
-     (decorate %color-output location 0))
+   '((decorate %uv-shade-input location 0)
+     (decorate %normal-input location 1)
+     (decorate %fog-input location 2)
+     (decorate %color-output location 0)
+     (decorate %block-atlas descriptor-set 0)
+     (decorate %block-atlas binding 0)
+     (decorate %block-sampler descriptor-set 0)
+     (decorate %block-sampler binding 1))
    :global-declarations
    '((%void type-void)
      (%float type-float 32)
+     (%vec2 type-vector %float 2)
      (%vec3 type-vector %float 3)
      (%vec4 type-vector %float 4)
+     (%image type-image %float 2d 0 0 0 1 unknown)
+     (%sampler type-sampler)
+     (%sampled-image type-sampled-image %image)
      (%input-vec3-pointer type-pointer input %vec3)
      (%input-vec4-pointer type-pointer input %vec4)
      (%output-vec4-pointer type-pointer output %vec4)
+     (%image-pointer type-pointer uniform-constant %image)
+     (%sampler-pointer type-pointer uniform-constant %sampler)
      (%function-type type-function %void)
      (%one constant %float 1.0)
-     (%color-input variable %input-vec3-pointer input)
+     (%half constant %float 0.5)
+     (%ambient constant %float 0.42)
+     (%sun-strength constant %float 0.58)
+     (%sun-x constant %float 0.30)
+     (%sun-y constant %float 0.86)
+     (%sun-z constant %float 0.40)
+     (%uv-shade-input variable %input-vec3-pointer input)
+     (%normal-input variable %input-vec3-pointer input)
      (%fog-input variable %input-vec4-pointer input)
-     (%color-output variable %output-vec4-pointer output))
+     (%color-output variable %output-vec4-pointer output)
+     (%block-atlas variable %image-pointer uniform-constant)
+     (%block-sampler variable %sampler-pointer uniform-constant))
    :function-definitions
    (list
     (make-instance
@@ -580,19 +609,36 @@ Binding 2 is a uniform block whose first vector contains sine and cosine."
       (make-instance
        'spir-v-basic-block :label '%entry
        :instructions
-       '((%color load %vec3 %color-input)
+       '((%uv-shade load %vec3 %uv-shade-input)
+         (%uv vector-shuffle %vec2 %uv-shade %uv-shade 0 1)
+         (%ao composite-extract %float %uv-shade 2)
+         (%normal load %vec3 %normal-input)
+         (%sun composite-construct %vec3 %sun-x %sun-y %sun-z)
+         (%sun-dot dot %float %normal %sun)
+         (%shifted-sun f-add %float %sun-dot %one)
+         (%hemisphere f-mul %float %shifted-sun %half)
+         (%directional f-mul %float %hemisphere %sun-strength)
+         (%illumination f-add %float %ambient %directional)
+         (%light f-mul %float %illumination %ao)
+         (%texture load %image %block-atlas)
+         (%sampler-value load %sampler %block-sampler)
+         (%sampled sampled-image %sampled-image %texture %sampler-value)
+         (%albedo image-sample-implicit-lod %vec4 %sampled %uv)
          (%fog-state load %vec4 %fog-input)
          (%sky-red composite-extract %float %fog-state 0)
          (%sky-green composite-extract %float %fog-state 1)
          (%sky-blue composite-extract %float %fog-state 2)
          (%fog composite-extract %float %fog-state 3)
          (%sky-mix f-sub %float %one %fog)
-         (%red composite-extract %float %color 0)
-         (%green composite-extract %float %color 1)
-         (%blue composite-extract %float %color 2)
-         (%fogged-red f-mul %float %red %fog)
-         (%fogged-green f-mul %float %green %fog)
-         (%fogged-blue f-mul %float %blue %fog)
+         (%red composite-extract %float %albedo 0)
+         (%green composite-extract %float %albedo 1)
+         (%blue composite-extract %float %albedo 2)
+         (%lit-red f-mul %float %red %light)
+         (%lit-green f-mul %float %green %light)
+         (%lit-blue f-mul %float %blue %light)
+         (%fogged-red f-mul %float %lit-red %fog)
+         (%fogged-green f-mul %float %lit-green %fog)
+         (%fogged-blue f-mul %float %lit-blue %fog)
          (%sky-red-part f-mul %float %sky-red %sky-mix)
          (%sky-green-part f-mul %float %sky-green %sky-mix)
          (%sky-blue-part f-mul %float %sky-blue %sky-mix)

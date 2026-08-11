@@ -53,6 +53,27 @@
     (ok (eq (block-at world 2 14 2) luv::*stone-block*))
     (ok (= (block-edit-overlay-count (little-world-source-edits source)) 2))))
 
+(deftest block-atlas-and-mesh-vertices-carry-material-readings
+  (let ((atlas (make-block-texture-atlas)))
+    (ok (equal (array-dimensions atlas) '(16 112)))
+    (ok (subtypep (array-element-type atlas) '(unsigned-byte 32)))
+    (ok (= (ldb (byte 8 24) (aref atlas 8 8)) 255))
+    (ok (/= (aref atlas 8 8) (aref atlas 8 (+ 8 (* 3 16))))))
+  (flet ((face (name)
+           (find name luv::*block-faces* :key #'block-face-name)))
+    (ok (= (block-face-tile luv::*grass-block* (face :top)) 0))
+    (ok (= (block-face-tile luv::*grass-block* (face :front)) 1))
+    (ok (= (block-face-tile luv::*grass-block* (face :bottom)) 2))
+    (ok (= (block-face-tile luv::*wood-block* (face :top)) 5)))
+  (let ((world (make-block-world :chunk-width 2
+                                 :chunk-height 2
+                                 :chunk-depth 2)))
+    (ensure-world-chunk world 0 0 0)
+    (setf (block-at world 0 0 0) luv::*stone-block*)
+    (let ((mesh (mesh-block-world (make-instance 'exposed-face-mesher) world)))
+      (ok (= (length (block-mesh-vertices mesh))
+             (* 9 (block-mesh-vertex-count mesh)))))))
+
 (deftest meshing-and-editing-cross-a-chunk-boundary
   (let ((world (make-block-world :chunk-width 2
                                  :chunk-height 2

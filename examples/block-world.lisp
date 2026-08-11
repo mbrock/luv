@@ -4,16 +4,15 @@
 
 ;;; Blocks and faces are ordinary CLOS objects so the interesting semantic
 ;;; choices stay inspectable and redefinable at the REPL.  The result of
-;;; meshing is deliberately mundane: interleaved XYZ/RGB single floats.
+;;; meshing is deliberately mundane: interleaved position, UV/AO, and normal
+;;; triples of single floats.
 
 (defclass block-kind ()
   ((name :initarg :name :reader block-kind-name)
-   (color :initarg :color :reader block-kind-color)))
-
-(defclass grass-block-kind (block-kind) ())
+   (face-tiles :initarg :face-tiles :reader block-kind-face-tiles)))
 
 (defgeneric block-solid-p (block))
-(defgeneric block-face-color (block face))
+(defgeneric block-face-tile (block face))
 
 (defmethod block-solid-p ((block null)) nil)
 (defmethod block-solid-p ((block block-kind)) t)
@@ -21,55 +20,104 @@
 (defclass block-face ()
   ((name :initarg :name :reader block-face-name)
    (neighbor :initarg :neighbor :reader block-face-neighbor)
-   (corners :initarg :corners :reader block-face-corners)
-   (shade :initarg :shade :reader block-face-shade)))
+   (corners :initarg :corners :reader block-face-corners)))
 
-(defun make-block-face (name neighbor corners shade)
+(defun make-block-face (name neighbor corners)
   (make-instance 'block-face :name name :neighbor neighbor
-                              :corners corners :shade shade))
+                              :corners corners))
 
 (defparameter *block-faces*
   (list
    (make-block-face :left '(-1 0 0)
-                    '((0 0 0) (0 0 1) (0 1 1) (0 1 0)) 0.72)
+                    '((0 0 0) (0 0 1) (0 1 1) (0 1 0)))
    (make-block-face :right '(1 0 0)
-                    '((1 0 1) (1 0 0) (1 1 0) (1 1 1)) 0.84)
+                    '((1 0 1) (1 0 0) (1 1 0) (1 1 1)))
    (make-block-face :bottom '(0 -1 0)
-                    '((0 0 1) (0 0 0) (1 0 0) (1 0 1)) 0.55)
+                    '((0 0 1) (0 0 0) (1 0 0) (1 0 1)))
    (make-block-face :top '(0 1 0)
-                    '((0 1 0) (0 1 1) (1 1 1) (1 1 0)) 1.0)
+                    '((0 1 0) (0 1 1) (1 1 1) (1 1 0)))
    (make-block-face :back '(0 0 -1)
-                    '((1 0 0) (0 0 0) (0 1 0) (1 1 0)) 0.66)
+                    '((1 0 0) (0 0 0) (0 1 0) (1 1 0)))
    (make-block-face :front '(0 0 1)
-                    '((0 0 1) (1 0 1) (1 1 1) (0 1 1)) 0.9)))
+                    '((0 0 1) (1 0 1) (1 1 1) (0 1 1)))))
 
-(defmethod block-face-color ((block block-kind) (face block-face))
-  (map 'vector
-       (lambda (component)
-         (coerce (* component (block-face-shade face)) 'single-float))
-       (block-kind-color block)))
-
-(defmethod block-face-color ((block grass-block-kind) (face block-face))
-  (let ((color (case (block-face-name face)
-                 (:top #(0.34 0.72 0.24))
-                 (:bottom #(0.42 0.25 0.12))
-                 (otherwise #(0.40 0.58 0.20)))))
-    (map 'vector
-         (lambda (component)
-           (coerce (* component (block-face-shade face)) 'single-float))
-         color)))
+(defmethod block-face-tile ((block block-kind) (face block-face))
+  (let ((tiles (block-kind-face-tiles block)))
+    (or (getf tiles (block-face-name face))
+        (and (member (block-face-name face) '(:left :right :back :front))
+             (getf tiles :side))
+        (getf tiles :all)
+        (error "No texture tile for ~S face ~S."
+               (block-kind-name block) (block-face-name face)))))
 
 (defparameter *grass-block*
-  (make-instance 'grass-block-kind :name :grass
-                                   :color #(0.34 0.72 0.24)))
+  (make-instance 'block-kind :name :grass
+                             :face-tiles '(:top 0 :side 1 :bottom 2)))
 (defparameter *dirt-block*
-  (make-instance 'block-kind :name :dirt :color #(0.50 0.31 0.16)))
+  (make-instance 'block-kind :name :dirt
+                             :face-tiles '(:all 2)))
 (defparameter *stone-block*
-  (make-instance 'block-kind :name :stone :color #(0.52 0.55 0.58)))
+  (make-instance 'block-kind :name :stone
+                             :face-tiles '(:all 3)))
 (defparameter *wood-block*
-  (make-instance 'block-kind :name :wood :color #(0.48 0.31 0.13)))
+  (make-instance 'block-kind :name :wood
+                             :face-tiles '(:top 5 :bottom 5 :side 4)))
 (defparameter *leaf-block*
-  (make-instance 'block-kind :name :leaves :color #(0.20 0.56 0.23)))
+  (make-instance 'block-kind :name :leaves
+                             :face-tiles '(:all 6)))
+
+(defconstant +block-atlas-tile-size+ 16)
+(defconstant +block-atlas-tile-count+ 7)
+
+(defun block-atlas-byte (value)
+  (max 0 (min 255 (round value))))
+
+(defun pack-block-atlas-rgba (red green blue)
+  (logior (block-atlas-byte red)
+          (ash (block-atlas-byte green) 8)
+          (ash (block-atlas-byte blue) 16)
+          #xff000000))
+
+(defun block-atlas-variation (x y salt)
+  (- (mod (+ (* x 17) (* y 31) (* salt 43) (* x y 7)) 25) 12))
+
+(defun block-atlas-pixel (tile x y)
+  (labels ((pixel (red green blue &optional (variation 0))
+             (pack-block-atlas-rgba (+ red variation)
+                                    (+ green variation)
+                                    (+ blue variation))))
+    (let ((variation (block-atlas-variation x y tile)))
+      (case tile
+        (0 (pixel 91 171 68 variation))
+        (1 (if (< y 4)
+               (pixel 86 158 61 variation)
+               (pixel 123 82 48 (round variation 2))))
+        (2 (pixel 126 84 49 variation))
+        (3 (pixel 126 132 136
+                  (+ (round variation 2)
+                     (if (zerop (mod (+ (* x 3) (* y 5)) 19)) 20 0))))
+        (4 (pixel 116 76 39
+                  (+ (round variation 3)
+                     (if (zerop (mod x 5)) 18 0))))
+        (5 (let* ((dx (- x 7.5))
+                  (dy (- y 7.5))
+                  (ring (mod (floor (+ (* dx dx) (* dy dy))) 18)))
+             (pixel 133 91 49 (- ring 9))))
+        (6 (pixel 51 132 58
+                  (+ variation (if (evenp (+ x y)) 8 -8))))
+        (otherwise (error "Unknown block atlas tile ~D." tile))))))
+
+(defun make-block-texture-atlas ()
+  "Return the little world's horizontal RGBA8 atlas as packed pixel words."
+  (let* ((width (* +block-atlas-tile-size+ +block-atlas-tile-count+))
+         (pixels (make-array (list +block-atlas-tile-size+ width)
+                             :element-type '(unsigned-byte 32))))
+    (dotimes (y +block-atlas-tile-size+)
+      (dotimes (tile +block-atlas-tile-count+)
+        (dotimes (x +block-atlas-tile-size+)
+          (setf (aref pixels y (+ x (* tile +block-atlas-tile-size+)))
+                (block-atlas-pixel tile x y)))))
+    pixels))
 
 (defclass little-world-source ()
   ((seed :initarg :seed :initform 121 :reader little-world-source-seed)
@@ -284,11 +332,14 @@
 (defgeneric mesh-block-chunk (mesher world chunk))
 (defgeneric emit-block-face (mesher world vertices block face x y z))
 
-(defun push-block-vertex (vertices position color)
+(defun push-block-vertex (vertices position uv shade normal)
   (dolist (component position)
     (vector-push-extend (coerce component 'single-float) vertices))
-  (loop for component across color
-        do (vector-push-extend component vertices)))
+  (loop for component across uv
+        do (vector-push-extend component vertices))
+  (vector-push-extend (coerce shade 'single-float) vertices)
+  (dolist (component normal)
+    (vector-push-extend (coerce component 'single-float) vertices)))
 
 (defun block-color-variation (x y z)
   (+ 0.93 (* 0.07 (/ (mod (+ (* x 17) (* y 31) (* z 13)) 7) 6.0))))
@@ -330,25 +381,39 @@
             (- 1.0 (* 0.14 (count t (list first-side second-side
                                            corner-block)))))))))
 
+(defun block-face-local-uv (face corner)
+  (case (block-face-name face)
+    ((:top :bottom) (values (first corner) (third corner)))
+    ((:front :back) (values (first corner) (- 1 (second corner))))
+    ((:left :right) (values (third corner) (- 1 (second corner))))
+    (otherwise (error "Unknown block face ~S." (block-face-name face)))))
+
+(defun block-face-atlas-uv (block face corner)
+  (multiple-value-bind (local-u local-v) (block-face-local-uv face corner)
+    (let* ((tile (block-face-tile block face))
+           (size +block-atlas-tile-size+)
+           (width (* size +block-atlas-tile-count+))
+           ;; Half-texel insets make bilinear bleed impossible even if a
+           ;; caller swaps the intentionally nearest-filtered sampler.
+           (u (/ (+ (* tile size) 0.5 (* local-u (1- size))) width))
+           (v (/ (+ 0.5 (* local-v (1- size))) size)))
+      (vector (coerce u 'single-float) (coerce v 'single-float)))))
+
 (defmethod emit-block-face
     ((mesher exposed-face-mesher) (world block-world) vertices
      (block block-kind)
      (face block-face) x y z)
   (let* ((corners (block-face-corners face))
-         (base-color (block-face-color block face))
          (variation (block-color-variation x y z)))
     (dolist (index '(0 1 2 0 2 3))
       (let* ((corner (nth index corners))
              (shade (* variation
                        (block-face-corner-occlusion
                         mesher world face corner x y z)))
-             (color (map 'vector
-                         (lambda (component)
-                           (coerce (* component shade) 'single-float))
-                         base-color)))
+             (uv (block-face-atlas-uv block face corner)))
         (destructuring-bind (cx cy cz) corner
           (push-block-vertex vertices (list (+ x cx) (+ y cy) (+ z cz))
-                             color))))
+                             uv shade (block-face-neighbor face)))))
     vertices))
 
 (defmethod mesh-block-chunk
@@ -474,7 +539,7 @@
 (defmethod camera-uniform-data ((camera fly-camera) width height)
   (multiple-value-bind (right up forward) (camera-basis camera)
     (let* ((near 0.1)
-           (far 100.0)
+           (far 180.0)
            (focal (/ (tan (/ (* 70.0 (/ pi 180.0)) 2.0))))
            (aspect (/ (coerce width 'single-float) height))
            (projection
@@ -527,6 +592,11 @@
    (camera :initarg :camera :reader cube-world-demo-camera)
    (selected-block :initarg :selected-block :initform *stone-block*
                    :accessor cube-world-demo-selected-block)
+   (atlas-texture :initarg :atlas-texture
+                  :reader cube-world-demo-atlas-texture)
+   (atlas-view :initarg :atlas-view :reader cube-world-demo-atlas-view)
+   (atlas-sampler :initarg :atlas-sampler
+                  :reader cube-world-demo-atlas-sampler)
    (color-texture :initarg :color-texture
                   :reader cube-world-demo-color-texture)
    (color-view :initarg :color-view :reader cube-world-demo-color-view)
@@ -720,7 +790,12 @@ still owns their last use."
                       (make-bind-group-descriptor
                        :label "block world frame bindings"
                        :layout (cube-world-demo-layout demo)
-                       :entries `((:binding 0 :resource ,buffer)))))
+                       :entries
+                       `((:binding 0
+                          :resource ,(cube-world-demo-atlas-view demo))
+                         (:binding 1
+                          :resource ,(cube-world-demo-atlas-sampler demo))
+                         (:binding 2 :resource ,buffer)))))
                (remember-cube-world-resource demo buffer)
                (remember-cube-world-resource demo bind-group)
                (let ((state
@@ -945,6 +1020,30 @@ capture-only demand clock."
                     (keep
                      (create device (make-texture-view-descriptor
                                      :texture depth-texture))))
+                  (atlas-width
+                    (* +block-atlas-tile-size+ +block-atlas-tile-count+))
+                  (atlas-height +block-atlas-tile-size+)
+                  (atlas-data (make-block-texture-atlas))
+                  (atlas-texture
+                    (keep
+                     (create
+                      device
+                      (make-texture-descriptor
+                       :label "block world texture atlas"
+                       :size (list atlas-width atlas-height)
+                       :dimensions :2d :format :rgba8-unorm-srgb
+                       :usage '(:copy-dst :texture-binding)))))
+                  (atlas-view
+                    (keep
+                     (create device (make-texture-view-descriptor
+                                     :texture atlas-texture))))
+                  (atlas-sampler
+                    (keep
+                     (create device (make-sampler-descriptor
+                                     :label "block world nearest sampler"
+                                     :mag-filter :nearest
+                                     :min-filter :nearest
+                                     :mipmap-filter :nearest))))
                   (vertex-module
                     (keep
                      (create device (make-shader-module-descriptor
@@ -961,7 +1060,9 @@ capture-only demand clock."
                       device
                       (make-bind-group-layout-descriptor
                        :label "block world layout"
-                       :entries '((:binding 0 :type :uniform-buffer))))))
+                       :entries '((:binding 0 :type :texture)
+                                  (:binding 1 :type :sampler)
+                                  (:binding 2 :type :uniform-buffer))))))
                   (pipeline
                     (keep
                      (create
@@ -971,11 +1072,13 @@ capture-only demand clock."
                        :layout layout
                        :vertex
                        `(:module ,vertex-module
-                         :buffers ((:array-stride 24
+                         :buffers ((:array-stride 36
                                     :attributes
                                     ((:shader-location 0 :offset 0
                                       :format :float32x3)
                                      (:shader-location 1 :offset 12
+                                      :format :float32x3)
+                                     (:shader-location 2 :offset 24
                                       :format :float32x3)))))
                        :fragment
                        `(:module ,fragment-module
@@ -990,10 +1093,20 @@ capture-only demand clock."
                      :canvas canvas :device device :context context
                      :world world :mesher mesher
                      :camera camera
+                     :atlas-texture atlas-texture :atlas-view atlas-view
+                     :atlas-sampler atlas-sampler
                      :color-texture color-texture :color-view color-view
                      :depth-texture depth-texture :depth-view depth-view
                      :layout layout :pipeline pipeline
                      :resources resources)))
+             (write-texture
+              (device-queue device)
+              (make-texture-copy :texture atlas-texture)
+              atlas-data
+              (make-texture-data-layout
+               :bytes-per-row (* atlas-width 4)
+               :rows-per-image atlas-height)
+              (list atlas-width atlas-height))
              (setf demo new-demo)
              (refresh-cube-world-mesh demo)
              (setf (canvas-event-handler canvas) demo

@@ -454,13 +454,13 @@ nothing else does."))
            #:map-chunk-blocks
            #:block-kind
            #:block-kind-name
+           #:block-kind-face-tiles
            #:block-solid-p
-           #:block-face-color
+           #:block-face-tile
            #:block-face
            #:block-face-name
            #:block-face-neighbor
            #:block-face-corners
-           #:block-face-shade
            #:block-world
            #:block-world-space
            #:block-world-source
@@ -511,6 +511,7 @@ nothing else does."))
            #:mesh-block-chunk
            #:chunk-mesh-dependency-stamp
            #:emit-block-face
+           #:make-block-texture-atlas
            #:fly-camera
            #:camera-x
            #:camera-y
@@ -531,6 +532,9 @@ nothing else does."))
            #:cube-world-chunk-product-mesh
            #:cube-world-demo-camera
            #:cube-world-demo-selected-block
+           #:cube-world-demo-atlas-texture
+           #:cube-world-demo-atlas-view
+           #:cube-world-demo-atlas-sampler
            #:cube-world-demo-meshed-world-revision
            #:cube-world-demo-target
            #:edit-cube-world-block

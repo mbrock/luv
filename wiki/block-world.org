@@ -41,10 +41,12 @@ The current implementation is split between the renderer-independent model in
   from generated content and replays them after chunk rematerialization;
 - an =exposed-face-mesher= walks resident chunks on the CPU and emits only
   faces beside empty sites, under an explicit absent-neighbor policy;
-- ordinary Lisp computes directional face shade, deterministic colour
-  variation, and corner ambient occlusion;
-- structured s-expression SPIR-V transforms the interleaved position/colour
-  vertices and adds distance fog;
+- each block kind selects faces from a small procedurally authored sRGB
+  texture atlas; mesh vertices carry texture coordinates, corner ambient
+  occlusion, and geometric face normals rather than baked colours;
+- structured s-expression SPIR-V transforms those interleaved vertices,
+  samples the atlas, applies ambient plus directional sun lighting, and fades
+  distant terrain into the sky;
 - a lattice DDA ray stops distinctly at a hit, a resident miss, or absent
   terrain; left and right clicks remove and place blocks through that query;
 - a fly camera, depth buffer, per-frame uniform buffers, relative pointer
@@ -245,9 +247,11 @@ experience:
 3. *Walk into another chunk.*  The 81-chunk materialization, cross-boundary
    mesh proof, and chunk-owned render products are done.  Dynamic residency
    and eviction remain.
-4. *Let it glow.*  Introduce block-content and lighting as the first genuinely
-   distinct fields.  Add one emissive block and a small CPU light propagation
-   rule.
+4. *Let it glow.*  The first visual-material pass is done: block-face atlas
+   selection, procedural texels, geometric normals, corner occlusion, ambient
+   and directional light, and longer distance fog all run through the real
+   Vulkan path.  A block-content light field, one emissive block, and a small
+   CPU propagation rule remain deliberately separate work.
 5. *Collide with it.*  Derive a chunk collision representation and connect it
    to the separate body/constraint domains described by #Y5H8KC.
 6. *Let the world arrive.*  Deterministic staged generation and sparse edit
