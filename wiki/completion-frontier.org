@@ -1,0 +1,101 @@
+#+title: The queue frontier and modern-capabilities decision
+#+startup: overview
+
+* Luv assumes modern Vulkan
+:PROPERTIES:
+:ID: Q2W7HD
+:END:
+
+On 11 August 2026 luv raised its requested Vulkan API version to 1.4 and
+adopted timeline semaphores and synchronization2 as the only synchronization
+vocabulary it speaks.  The legacy alternatives were removed rather than kept
+as fallbacks: the =VkFence= vocabulary, =vkQueueSubmit=, and the parallel
+wait-stage arrays of =VkSubmitInfo= are gone from the owned binding.
+
+The reasoning is a stance, not an accident: luv assumes modern capabilities
+until there is a reason not to.  Timeline semaphores are mandatory core
+since Vulkan 1.2 and synchronization2 since 1.3, so on any 1.3+ device there
+is no conformant configuration in which the fallback would run.  Carrying a
+fence-pool tier would be legacy-support complexity with no user.  The local
+development environment (MoltenVK 1.4.1 via nix, advertising Vulkan 1.4.350
+at instance and device level) was verified before committing to this.
+
+Two consequences worth remembering:
+
+- Device creation now chains
+  =VkPhysicalDeviceTimelineSemaphoreFeatures= and
+  =VkPhysicalDeviceSynchronization2Features= and will fail loudly on a
+  driver that cannot honor them.  There is deliberately no negotiation.
+- The 1.4 demand also makes dynamic rendering and host image copies
+  available unconditionally.  Neither is used yet; both could delete
+  machinery (the render-pass/framebuffer cache, the texture-upload staging
+  path) in later rounds.
+
+* One queue, one timeline, one frontier
+:PROPERTIES:
+:ID: T9K4RC
+:END:
+
+The Vulkan GPU queue now owns a timeline semaphore and a monotonically
+increasing submission counter.  Every submission passes through
+=vkQueueSubmit2= and signals the timeline with a fresh index; the semaphore
+counter read back from the device *is* the completion frontier of #P6Q4MT.
+Public =submit= still blocks, but it now waits for its own submission index
+rather than calling =vkQueueWaitIdle=: the proof shrank from "the whole
+queue is idle" to "the prefix ending at my submission is complete," which
+no longer serializes against unrelated in-flight work such as canvas
+frames.
+
+Each submission also pushes a record — index plus the submitted command
+buffers — onto a queue-owned list of live submissions.  A maintenance step
+runs after each submit and retires every record the frontier has passed.
+Retirement currently only drops the queue's references; explicit
+destruction still belongs to the caller.  The record is thus the seed of a
+submission-owned resource set, not yet the owner.
+
+The relevant definitions are
+[[file:../gpu-vulkan.lisp::(defun vulkan-queue-completed-frontier][=vulkan-queue-completed-frontier=]],
+[[file:../gpu-vulkan.lisp::(defun maintain-vulkan-queue][=maintain-vulkan-queue=]],
+[[file:../gpu-vulkan.lisp::(defun wait-for-vulkan-submission][=wait-for-vulkan-submission=]], and
+[[file:../gpu-vulkan.lisp::(defun submit-vulkan-command-buffers][=submit-vulkan-command-buffers=]].
+
+* Frame slots became frontier clients
+:PROPERTIES:
+:ID: M6P8XW
+:END:
+
+The canvas frame slots of #F7Q2KM no longer own fences.  A slot records the
+submission index of its frame; recycling waits for the queue frontier to
+reach that index and then destroys the retained command buffer.  The
+image-acquisition and render-done binary semaphores remain, because
+swapchain acquisition and presentation still speak binary semaphores —
+presentation pacing and lifetime proof are different jobs, and only the
+second one moved to the frontier.
+
+This answers one question from #J4C6WP as hoped: presentation slots are now
+clients of the general mechanism rather than a second lifetime system.
+
+* What the frontier does not yet establish
+:PROPERTIES:
+:ID: V3N7QJ
+:END:
+
+The frontier is a completion oracle, not yet an ownership system.  The gaps
+named by #S8R5JV remain open:
+
+- A finished command buffer still does not retain the pipelines, bind
+  groups, texture views, samplers, or uniform buffers its commands
+  reference.  Complete transitive capture at encode time is the next step.
+- Submission records do not own destruction.  Explicit =destroy= remains
+  immediate (#G6C2TX); the logical/physical split of #D3H7VK needs a
+  last-use index per resource and a deferred-destroy path attached to the
+  owning record.
+- Queue submission state is unlocked.  The SDL canvas thread and the REPL
+  can both submit; the counter, the record list, and the texture layout
+  slots need either a lock or a stated single-thread discipline.
+- Nothing maps or reads back yet, so the frontier has no =mapAsync=-like
+  client.
+
+Once capture and deferred destroy exist, the synchronous wait in public
+=submit= stops being load-bearing and can become an explicit choice rather
+than a safety requirement.

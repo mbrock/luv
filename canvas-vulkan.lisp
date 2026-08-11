@@ -60,35 +60,21 @@
   (canvas-device context))
 
 (defclass vulkan-canvas-frame-slot ()
-  ((fence
-    :initarg :fence
-    :reader vulkan-frame-slot-fence)
-   (image-ready
+  ((image-ready
     :initarg :image-ready
     :reader vulkan-frame-slot-image-ready)
+   (submission-index
+    :initform nil
+    :accessor vulkan-frame-slot-submission-index
+    :documentation "Queue submission index of this slot's frame in flight.")
    (commands
     :initform nil
     :accessor vulkan-frame-slot-commands)))
 
 (defun make-vulkan-canvas-frame-slot (native-device)
-  (let ((fence nil)
-        (image-ready nil)
-        (completed-p nil))
-    (unwind-protect
-         (let ((slot nil))
-           (setf fence (lvk:create-fence native-device :signaled t)
-                 image-ready (lvk:create-semaphore native-device)
-                 slot
-                 (make-instance
-                  'vulkan-canvas-frame-slot
-                  :fence fence :image-ready image-ready)
-                 completed-p t)
-           slot)
-      (unless completed-p
-        (when image-ready
-          (lvk:destroy-semaphore native-device image-ready))
-        (when fence
-          (lvk:destroy-fence native-device fence))))))
+  (make-instance
+   'vulkan-canvas-frame-slot
+   :image-ready (lvk:create-semaphore native-device)))
 
 (defun make-vulkan-canvas-frame-slots (native-device count)
   (let ((slots (make-array count :initial-element nil))
@@ -104,9 +90,7 @@
         (loop for slot across slots
               when slot
                 do (lvk:destroy-semaphore
-                    native-device (vulkan-frame-slot-image-ready slot))
-                   (lvk:destroy-fence
-                    native-device (vulkan-frame-slot-fence slot)))))))
+                    native-device (vulkan-frame-slot-image-ready slot)))))))
 
 (defun make-vulkan-semaphores (native-device count)
   (let ((semaphores (make-array count :initial-element nil))
@@ -129,15 +113,16 @@
     (setf (vulkan-frame-slot-commands slot) nil))
   (lvk:destroy-semaphore
    native-device (vulkan-frame-slot-image-ready slot))
-  (lvk:destroy-fence native-device (vulkan-frame-slot-fence slot))
   (values))
 
-(defun recycle-vulkan-canvas-frame-slot (native-device slot)
+(defun recycle-vulkan-canvas-frame-slot (queue slot)
+  "Wait for SLOT's frame to pass the queue frontier, then release it."
   (when (vulkan-frame-slot-commands slot)
-    (lvk:wait-for-fence native-device (vulkan-frame-slot-fence slot))
+    (wait-for-vulkan-submission
+     queue (vulkan-frame-slot-submission-index slot))
     (destroy (vulkan-frame-slot-commands slot))
-    (setf (vulkan-frame-slot-commands slot) nil))
-  (lvk:reset-fence native-device (vulkan-frame-slot-fence slot))
+    (setf (vulkan-frame-slot-commands slot) nil
+          (vulkan-frame-slot-submission-index slot) nil))
   slot)
 
 (defun sdl-vulkan-instance-extensions ()
@@ -515,7 +500,7 @@
          (slot (aref (vulkan-canvas-frame-slots context) slot-index))
          (encoder nil)
          (commands nil))
-    (recycle-vulkan-canvas-frame-slot native-device slot)
+    (recycle-vulkan-canvas-frame-slot queue slot)
     (multiple-value-bind (image-index acquire-result)
         (lvk:acquire-next-image
          native-device (vulkan-canvas-swapchain context)
@@ -533,17 +518,20 @@
                (funcall function texture encoder)
                (transition-vulkan-texture encoder texture :present-src-khr)
                (setf commands (finish encoder))
-               (submit-vulkan-command-buffers
-                queue (vector commands)
-                :wait-semaphores
-                (vector (vulkan-frame-slot-image-ready slot))
-                :wait-stages (vector '(:transfer))
-                :signal-semaphores
-                (vector render-done)
-                :completion-fence (vulkan-frame-slot-fence slot)
-                :wait-for-completion nil)
-               (setf (vulkan-frame-slot-commands slot) commands
-                     commands nil)
+               (let ((submission-index
+                       (submit-vulkan-command-buffers
+                        queue (vector commands)
+                        :wait-semaphores
+                        (vector
+                         (list (vulkan-frame-slot-image-ready slot)
+                               '(:transfer)))
+                        :signal-semaphores
+                        (vector (list render-done '(:all-commands)))
+                        :wait-for-completion nil)))
+                 (setf (vulkan-frame-slot-commands slot) commands
+                       (vulkan-frame-slot-submission-index slot)
+                       submission-index
+                       commands nil))
                (lvk:present
                 (vulkan-handle queue)
                 (vulkan-canvas-swapchain context) image-index

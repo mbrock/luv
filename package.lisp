@@ -183,11 +183,10 @@ nothing else does."))
            #:destroy-swapchain
            #:get-swapchain-images
            #:create-semaphore
+           #:create-timeline-semaphore
            #:destroy-semaphore
-           #:create-fence
-           #:destroy-fence
-           #:wait-for-fence
-           #:reset-fence
+           #:semaphore-counter-value
+           #:wait-semaphore-value
            #:acquire-next-image
            #:present))
 

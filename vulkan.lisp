@@ -33,9 +33,7 @@
   (:instance-create-info 1)
   (:device-queue-create-info 2)
   (:device-create-info 3)
-  (:submit-info 4)
   (:memory-allocate-info 5)
-  (:fence-create-info 8)
   (:buffer-create-info 12)
   (:semaphore-create-info 9)
   (:image-create-info 14)
@@ -64,6 +62,13 @@
   (:command-buffer-begin-info 42)
   (:render-pass-begin-info 43)
   (:image-memory-barrier 45)
+  (:physical-device-timeline-semaphore-features 1000207000)
+  (:semaphore-type-create-info 1000207002)
+  (:semaphore-wait-info 1000207004)
+  (:submit-info-2 1000314004)
+  (:semaphore-submit-info 1000314005)
+  (:command-buffer-submit-info 1000314006)
+  (:physical-device-synchronization-2-features 1000314007)
   (:swapchain-create-info-khr 1000001000)
   (:present-info-khr 1000001001)
   (:debug-utils-messenger-callback-data-ext 1000128003)
@@ -264,8 +269,9 @@
   (:reset-command-buffer #x2)
   (:protected #x4))
 
-(cffi:defbitfield (fence-create-flags :uint32)
-  (:signaled #x1))
+(cffi:defcenum (semaphore-type :uint32)
+  (:binary 0)
+  (:timeline 1))
 
 (cffi:defbitfield (command-buffer-usage-flags :uint32)
   (:one-time-submit #x1)
@@ -293,6 +299,18 @@
   (:compute-shader #x800)
   (:transfer #x1000)
   (:bottom-of-pipe #x2000))
+
+;; Synchronization2 stage masks are 64 bits wide.  The stages luv uses all
+;; keep their Vulkan 1.0 bit positions.
+(cffi:defbitfield (pipeline-stage-flags-2 :uint64)
+  (:top-of-pipe #x1)
+  (:vertex-shader #x8)
+  (:fragment-shader #x80)
+  (:color-attachment-output #x400)
+  (:compute-shader #x800)
+  (:transfer #x1000)
+  (:bottom-of-pipe #x2000)
+  (:all-commands #x10000))
 
 (cffi:defbitfield (dependency-flags :uint32)
   (:by-region #x1))
@@ -818,20 +836,45 @@
   (clear-value-count :uint32)
   (p-clear-values :pointer))
 
-(defvkstruct submit-info (:s-type :submit-info)
-  (wait-semaphore-count :uint32)
-  (p-wait-semaphores :pointer)
-  (p-wait-dst-stage-mask :pointer)
-  (command-buffer-count :uint32)
-  (p-command-buffers :pointer)
-  (signal-semaphore-count :uint32)
-  (p-signal-semaphores :pointer))
+(defvkstruct semaphore-submit-info (:s-type :semaphore-submit-info)
+  (semaphore :pointer)
+  (value :uint64)
+  (stage-mask pipeline-stage-flags-2)
+  (device-index :uint32))
+
+(defvkstruct command-buffer-submit-info (:s-type :command-buffer-submit-info)
+  (command-buffer :pointer)
+  (device-mask :uint32))
+
+(defvkstruct submit-info-2 (:s-type :submit-info-2)
+  (flags :uint32)
+  (wait-semaphore-info-count :uint32)
+  (p-wait-semaphore-infos :pointer)
+  (command-buffer-info-count :uint32)
+  (p-command-buffer-infos :pointer)
+  (signal-semaphore-info-count :uint32)
+  (p-signal-semaphore-infos :pointer))
 
 (defvkstruct semaphore-create-info (:s-type :semaphore-create-info)
   (flags :uint32))
 
-(defvkstruct fence-create-info (:s-type :fence-create-info)
-  (flags fence-create-flags))
+(defvkstruct semaphore-type-create-info (:s-type :semaphore-type-create-info)
+  (semaphore-type semaphore-type)
+  (initial-value :uint64))
+
+(defvkstruct semaphore-wait-info (:s-type :semaphore-wait-info)
+  (flags :uint32)
+  (semaphore-count :uint32)
+  (p-semaphores :pointer)
+  (p-values :pointer))
+
+(defvkstruct physical-device-timeline-semaphore-features
+    (:s-type :physical-device-timeline-semaphore-features)
+  (timeline-semaphore :uint32))
+
+(defvkstruct physical-device-synchronization-2-features
+    (:s-type :physical-device-synchronization-2-features)
+  (synchronization-2 :uint32))
 
 (defvkstruct surface-capabilities ()
   (min-image-count :uint32)
@@ -1584,7 +1627,7 @@ the beginning of TRACE through its first presentation."
   (instance-count :uint32) (first-vertex :uint32)
   (first-instance :uint32))
 
-(defvkfun "vkQueueSubmit"
+(defvkfun "vkQueueSubmit2"
     checked-result
   (queue :pointer)
   (submit-count :uint32)
@@ -1655,32 +1698,17 @@ the beginning of TRACE through its first presentation."
   (semaphore :pointer)
   (allocator :pointer))
 
-(defvkfun "vkCreateFence"
+(defvkfun "vkGetSemaphoreCounterValue"
     checked-result
   (device :pointer)
-  (create-info :pointer)
-  (allocator :pointer)
-  (fence :pointer))
+  (semaphore :pointer)
+  (value :pointer))
 
-(defvkfun "vkDestroyFence"
-    :void
-  (device :pointer)
-  (fence :pointer)
-  (allocator :pointer))
-
-(defvkfun "vkWaitForFences"
+(defvkfun "vkWaitSemaphores"
     checked-result
   (device :pointer)
-  (fence-count :uint32)
-  (fences :pointer)
-  (wait-all :uint32)
+  (wait-info :pointer)
   (timeout :uint64))
-
-(defvkfun "vkResetFences"
-    checked-result
-  (device :pointer)
-  (fence-count :uint32)
-  (fences :pointer))
 
 (defvkfun "vkAcquireNextImageKHR"
     checked-result
@@ -1865,11 +1893,6 @@ the beginning of TRACE through its first presentation."
   :checked t
   :operation :create-semaphore)
 
-(define-creator create-fence-handle (device create-info)
-  (vk:create-fence device create-info (cffi:null-pointer))
-  :checked t
-  :operation :create-fence)
-
 ;;; Public, Lisp-shaped operations.
 
 (defstruct queue-family
@@ -1914,7 +1937,9 @@ the beginning of TRACE through its first presentation."
         (make-version 0 0 1))
        (engine-name "luv")
        ((:engine-version engine-version-value) (make-version 0 0 1))
-       ((:api-version api-version-value) (make-version 1 0 0))
+       ;; Luv assumes modern Vulkan.  Timeline semaphores and
+       ;; synchronization2 are mandatory core features at this version.
+       ((:api-version api-version-value) (make-version 1 4 0))
        flags
        enabled-extension-names)
   (with-translated-values
@@ -2087,16 +2112,24 @@ destroy it before destroying INSTANCE."
                 :queue-family-index family-index
                 :queue-count 1
                 :p-queue-priorities queue-priority)
-        (with-vk (create-info device-create-info
-                  :flags 0
-                  :queue-create-info-count 1
-                  :p-queue-create-infos queue-info
-                  :enabled-layer-count 0
-                  :pp-enabled-layer-names (cffi:null-pointer)
-                  :enabled-extension-count (length enabled-extension-names)
-                  :pp-enabled-extension-names extension-names
-                  :p-enabled-features (cffi:null-pointer))
-          (create-device-handle physical-device create-info))))))
+        (with-vk (timeline-features
+                  physical-device-timeline-semaphore-features
+                  :timeline-semaphore 1)
+          (with-vk (synchronization-features
+                    physical-device-synchronization-2-features
+                    :p-next timeline-features
+                    :synchronization-2 1)
+            (with-vk (create-info device-create-info
+                      :p-next synchronization-features
+                      :flags 0
+                      :queue-create-info-count 1
+                      :p-queue-create-infos queue-info
+                      :enabled-layer-count 0
+                      :pp-enabled-layer-names (cffi:null-pointer)
+                      :enabled-extension-count (length enabled-extension-names)
+                      :pp-enabled-extension-names extension-names
+                      :p-enabled-features (cffi:null-pointer))
+              (create-device-handle physical-device create-info))))))))
 
 (defun destroy-device (device)
   (vk:destroy-device device (cffi:null-pointer))
@@ -2888,26 +2921,57 @@ destroy it before destroying INSTANCE."
              first-vertex first-instance)
   (values))
 
+(defun fill-semaphore-submit-infos (pointer entries)
+  "Fill POINTER, an array of VkSemaphoreSubmitInfo, from ENTRIES.
+
+Each entry is a list (SEMAPHORE STAGES &optional VALUE).  STAGES is a
+PIPELINE-STAGE-FLAGS-2 keyword list.  VALUE is meaningful only when
+SEMAPHORE is a timeline semaphore."
+  (loop for index below (length entries)
+        for entry = (elt entries index)
+        do (destructuring-bind (semaphore stages &optional (value 0)) entry
+             (fill-vk
+              (cffi:mem-aptr pointer '(:struct semaphore-submit-info) index)
+              'semaphore-submit-info
+              :semaphore semaphore
+              :value value
+              :stage-mask stages
+              :device-index 0)))
+  pointer)
+
 (defun submit-command-buffers
-    (queue buffers &key (wait-semaphores #()) (wait-stages #())
-                        (signal-semaphores #()) fence)
-  (unless (= (length wait-semaphores) (length wait-stages))
-    (error "Each wait semaphore needs one destination stage."))
-  (with-foreign-array (command-buffers :pointer buffers)
-    (with-foreign-array (waits :pointer wait-semaphores)
-      (with-foreign-array (stages pipeline-stage-flags wait-stages)
-        (with-foreign-array (signals :pointer signal-semaphores)
-          (with-vk (submit submit-info
-                    :wait-semaphore-count (length wait-semaphores)
-                    :p-wait-semaphores waits
-                    :p-wait-dst-stage-mask stages
-                    :command-buffer-count (length buffers)
-                    :p-command-buffers command-buffers
-                    :signal-semaphore-count (length signal-semaphores)
-                    :p-signal-semaphores signals)
-            (with-vulkan-results (:queue-submit)
-              (vk:queue-submit
-               queue 1 submit (or fence (cffi:null-pointer)))))))))
+    (queue buffers &key (wait-semaphores #()) (signal-semaphores #()))
+  "Submit BUFFERS through vkQueueSubmit2.
+
+WAIT-SEMAPHORES and SIGNAL-SEMAPHORES are sequences of semaphore submit
+entries as understood by FILL-SEMAPHORE-SUBMIT-INFOS."
+  (let ((buffer-count (length buffers))
+        (wait-count (length wait-semaphores))
+        (signal-count (length signal-semaphores)))
+    (cffi:with-foreign-objects
+        ((buffer-infos '(:struct command-buffer-submit-info)
+                       (max buffer-count 1))
+         (wait-infos '(:struct semaphore-submit-info) (max wait-count 1))
+         (signal-infos '(:struct semaphore-submit-info) (max signal-count 1)))
+      (loop for index below buffer-count
+            do (fill-vk
+                (cffi:mem-aptr
+                 buffer-infos '(:struct command-buffer-submit-info) index)
+                'command-buffer-submit-info
+                :command-buffer (elt buffers index)
+                :device-mask 0))
+      (fill-semaphore-submit-infos wait-infos wait-semaphores)
+      (fill-semaphore-submit-infos signal-infos signal-semaphores)
+      (with-vk (submit submit-info-2
+                :flags 0
+                :wait-semaphore-info-count wait-count
+                :p-wait-semaphore-infos wait-infos
+                :command-buffer-info-count buffer-count
+                :p-command-buffer-infos buffer-infos
+                :signal-semaphore-info-count signal-count
+                :p-signal-semaphore-infos signal-infos)
+        (with-vulkan-results (:queue-submit-2)
+          (vk:queue-submit2 queue 1 submit (cffi:null-pointer))))))
   (values))
 
 (defun submit-command-buffer (queue command-buffer)
@@ -3015,30 +3079,40 @@ destroy it before destroying INSTANCE."
   (with-vk (create-info semaphore-create-info :flags 0)
     (create-semaphore-handle device create-info)))
 
+(defun create-timeline-semaphore (device &key (initial-value 0))
+  "Create a timeline semaphore whose 64-bit counter starts at INITIAL-VALUE."
+  (with-vk (type-info semaphore-type-create-info
+            :semaphore-type :timeline
+            :initial-value initial-value)
+    (with-vk (create-info semaphore-create-info
+              :p-next type-info
+              :flags 0)
+      (create-semaphore-handle device create-info))))
+
 (defun destroy-semaphore (device semaphore)
   (vk:destroy-semaphore device semaphore (cffi:null-pointer))
   (values))
 
-(defun create-fence (device &key signaled)
-  (with-vk (create-info fence-create-info
-            :flags (if signaled '(:signaled) nil))
-    (create-fence-handle device create-info)))
+(defun semaphore-counter-value (device semaphore)
+  "Return the current 64-bit counter of a timeline SEMAPHORE."
+  (cffi:with-foreign-object (value :uint64)
+    (with-vulkan-results (:get-semaphore-counter-value)
+      (vk:get-semaphore-counter-value device semaphore value))
+    (cffi:mem-ref value :uint64)))
 
-(defun destroy-fence (device fence)
-  (vk:destroy-fence device fence (cffi:null-pointer))
-  (values))
-
-(defun wait-for-fence
-    (device fence &key (timeout #xffffffffffffffff))
-  (with-foreign-array (fences :pointer (vector fence))
-    (with-vulkan-results (:wait-for-fence)
-      (vk:wait-for-fences device 1 fences 1 timeout)))
-  (values))
-
-(defun reset-fence (device fence)
-  (with-foreign-array (fences :pointer (vector fence))
-    (with-vulkan-results (:reset-fence)
-      (vk:reset-fences device 1 fences)))
+(defun wait-semaphore-value
+    (device semaphore value &key (timeout #xffffffffffffffff))
+  "Block until timeline SEMAPHORE's counter reaches at least VALUE."
+  (with-foreign-array (semaphores :pointer (vector semaphore))
+    (cffi:with-foreign-object (values :uint64)
+      (setf (cffi:mem-ref values :uint64) value)
+      (with-vk (wait-info semaphore-wait-info
+                :flags 0
+                :semaphore-count 1
+                :p-semaphores semaphores
+                :p-values values)
+        (with-vulkan-results (:wait-semaphores)
+          (vk:wait-semaphores device wait-info timeout)))))
   (values))
 
 (defun acquire-next-image

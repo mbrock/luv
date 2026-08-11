@@ -128,7 +128,24 @@
     :reader vulkan-queue-device)
    (family
     :initarg :family
-    :reader vulkan-queue-family)))
+    :reader vulkan-queue-family)
+   (timeline
+    :initarg :timeline
+    :reader vulkan-queue-timeline
+    :documentation "Timeline semaphore signaled with each submission index.")
+   (submission-counter
+    :initform 0
+    :accessor vulkan-queue-submission-counter)
+   (live-submissions
+    :initform '()
+    :accessor vulkan-queue-live-submissions
+    :documentation "Submission records not yet passed by the frontier,
+oldest first.")))
+
+(defstruct vulkan-gpu-submission
+  "One queue submission awaiting completion, retaining what the GPU may use."
+  (index 0 :type (unsigned-byte 64))
+  (command-buffers #() :type vector))
 
 (defclass vulkan-gpu-buffer (gpu-buffer vulkan-gpu-object)
   ((device
@@ -354,7 +371,8 @@
   (let ((native-device
           (lvk:create-device
            physical-device queue-family
-           :enabled-extension-names enabled-extension-names)))
+           :enabled-extension-names enabled-extension-names))
+        (timeline nil))
     (handler-case
         (let* ((native-queue
                  (lvk:get-device-queue native-device queue-family))
@@ -370,15 +388,21 @@
                   :physical-device physical-device
                   :queue-family queue-family))
                (queue
-                 (make-instance
-                  'vulkan-gpu-queue
-                  :label "default queue"
-                  :handle native-queue
-                  :device device
-                  :family queue-family)))
+                 (progn
+                   (setf timeline
+                         (lvk:create-timeline-semaphore native-device))
+                   (make-instance
+                    'vulkan-gpu-queue
+                    :label "default queue"
+                    :handle native-queue
+                    :device device
+                    :family queue-family
+                    :timeline timeline))))
           (setf (vulkan-device-queue device) queue)
           device)
       (error (condition)
+        (when timeline
+          (lvk:destroy-semaphore native-device timeline))
         (lvk:destroy-device native-device)
         (error condition)))))
 
@@ -1916,17 +1940,46 @@ lowering later without changing this queue-level operation."
     ((queue vulkan-gpu-queue) (command-buffer vulkan-gpu-command-buffer))
   (submit queue (vector command-buffer)))
 
+(defun vulkan-queue-completed-frontier (queue)
+  "Return the index of the newest submission the GPU has fully completed."
+  (lvk:semaphore-counter-value
+   (vulkan-handle (vulkan-queue-device queue))
+   (vulkan-queue-timeline queue)))
+
+(defun wait-for-vulkan-submission (queue index)
+  "Block until QUEUE's completion frontier reaches INDEX."
+  (lvk:wait-semaphore-value
+   (vulkan-handle (vulkan-queue-device queue))
+   (vulkan-queue-timeline queue)
+   index)
+  (values))
+
+(defun maintain-vulkan-queue (queue)
+  "Retire live submissions the completion frontier has passed.
+
+Retirement currently only releases the queue's references to the retained
+command buffers; their explicit destruction still belongs to the caller.
+Deferred destruction will move that ownership here."
+  (let ((frontier (vulkan-queue-completed-frontier queue)))
+    (loop while (and (vulkan-queue-live-submissions queue)
+                     (<= (vulkan-gpu-submission-index
+                          (first (vulkan-queue-live-submissions queue)))
+                         frontier))
+          do (pop (vulkan-queue-live-submissions queue)))
+    frontier))
+
 (defun submit-vulkan-command-buffers
     (queue command-buffers &key (wait-semaphores #())
-                                (wait-stages #())
                                 (signal-semaphores #())
-                                completion-fence
                                 (wait-for-completion t))
-  "Submit one WebGPU-style batch and establish its scheduled texture layouts.
+  "Submit one WebGPU-style batch and track it on the queue's frontier.
 
-The public SUBMIT operation remains synchronous.  Canvas frame slots pass a
-COMPLETION-FENCE and disable WAIT-FOR-COMPLETION, retaining their command
-buffers and native resources until that fence signals."
+WAIT-SEMAPHORES and SIGNAL-SEMAPHORES are LVK semaphore submit entries of
+the form (SEMAPHORE STAGES &optional VALUE).  Every submission additionally
+signals the queue's timeline semaphore with a fresh submission index, which
+is returned.  The public SUBMIT keeps WAIT-FOR-COMPLETION and thus stays
+synchronous, but it now waits only for its own submission rather than for
+the whole queue to become idle."
   (with-vulkan-gpu-driver-environment
     (ensure-live-vulkan-object queue :submit)
     (loop for command-buffer across command-buffers
@@ -1934,22 +1987,33 @@ buffers and native resources until that fence signals."
     (let ((texture-layouts
             (vulkan-submitted-texture-layouts command-buffers)))
       (when (plusp (length command-buffers))
-        (lvk:submit-command-buffers
-         (vulkan-handle queue)
-         (map 'vector #'vulkan-handle command-buffers)
-         :wait-semaphores wait-semaphores
-         :wait-stages wait-stages
-         :signal-semaphores signal-semaphores
-         :fence completion-fence)
-        (loop for command-buffer across command-buffers
-              do (setf (vulkan-command-buffer-state command-buffer)
-                       :submitted))
-        (maphash (lambda (texture layout)
-                   (setf (vulkan-texture-layout texture) layout))
-                 texture-layouts)
-        (when wait-for-completion
-          (lvk:queue-wait-idle (vulkan-handle queue))))))
-  (values))
+        (let ((index (1+ (vulkan-queue-submission-counter queue))))
+          (lvk:submit-command-buffers
+           (vulkan-handle queue)
+           (map 'vector #'vulkan-handle command-buffers)
+           :wait-semaphores wait-semaphores
+           :signal-semaphores
+           (concatenate
+            'vector signal-semaphores
+            (vector (list (vulkan-queue-timeline queue)
+                          '(:all-commands)
+                          index))))
+          (setf (vulkan-queue-submission-counter queue) index)
+          (loop for command-buffer across command-buffers
+                do (setf (vulkan-command-buffer-state command-buffer)
+                         :submitted))
+          (maphash (lambda (texture layout)
+                     (setf (vulkan-texture-layout texture) layout))
+                   texture-layouts)
+          (setf (vulkan-queue-live-submissions queue)
+                (nconc (vulkan-queue-live-submissions queue)
+                       (list (make-vulkan-gpu-submission
+                              :index index
+                              :command-buffers command-buffers))))
+          (when wait-for-completion
+            (wait-for-vulkan-submission queue index))
+          (maintain-vulkan-queue queue)
+          index)))))
 
 (defmethod submit ((queue vulkan-gpu-queue) (command-buffers vector))
   "Submit one WebGPU-style batch and synchronously establish its completion."
@@ -2107,6 +2171,10 @@ buffers and native resources until that fence signals."
         (unwind-protect
              (progn
                (lvk:device-wait-idle (vulkan-handle device))
+               (when queue
+                 (setf (vulkan-queue-live-submissions queue) '())
+                 (lvk:destroy-semaphore
+                  (vulkan-handle device) (vulkan-queue-timeline queue)))
                (maphash
                 (lambda (format render-pass)
                   (declare (ignore format))

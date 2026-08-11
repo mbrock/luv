@@ -32,7 +32,11 @@ is ideal.
 :ID: F7Q2KM
 :END:
 
-In the current canvas Vulkan path, each of two slots owns:
+This section describes the slots as introduced by =dfbf3fc=.  Since then
+the per-slot fences were replaced by the queue completion frontier; see
+#M6P8XW for the current arrangement.
+
+In that snapshot of the canvas Vulkan path, each of two slots owns:
 
 - a fence signaled by its render submission;
 - an image-acquisition semaphore;
