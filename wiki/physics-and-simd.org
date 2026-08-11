@@ -118,25 +118,32 @@ non-consing, over specialized arrays it borrowed from bundles.  Bodies never
 become tiny dispatching objects because bodies never appear in the loop at
 all — only columns do.
 
-On the SIMD half, the sb-simd study forces honesty (#L2W6KT): on the
-current arm64 machine there is no Lisp-level SIMD to feed, and sb-simd has no
-arm64 backend.  The realistic execution tiers for kernels, in order of
-adoption:
+On the SIMD half, the sb-simd study forced honesty (#L2W6KT): the archived
+library has no arm64 backend, and SBCL 2.5.10 offers no Lisp-level SIMD on
+this machine.  That finding is already dated — SBCL 2.6.7 added arm64
+=simd-pack= and an sb-simd NEON instruction set (#W9K4DN) — so the tier
+list gains a rung.  In order of adoption:
 
 1. *Declared scalar Lisp*, written in sb-simd's naming discipline
    (=f32-add= over =f32vec= columns, unrolled accumulators, explicit
    tails).  SBCL's arm64 backend produces respectable scalar code, and for
    the body counts the little block world implies, this tier may be the
    permanent answer.
-2. *A small foreign path* for a proven-hot kernel: Accelerate where one of
+2. *sb-simd NEON* on SBCL 2.6.7 or later: 128-bit =f32.4= and =f64.2=
+   lanes under the same dotted naming, which is exactly Box3D's chosen
+   width (#T3C8FV).  A kernel written at tier 1 in the naming discipline
+   upgrades almost mechanically.  Unverified here until the image is
+   upgraded; the empirical section of the sb-simd page describes the older
+   world.
+3. *A small foreign path* for a proven-hot kernel: Accelerate where one of
    its operations fits, or a narrow C/NEON shim otherwise, with the Lisp
    definition kept as its oracle in sb-simd's scalar-mirror style
    (#E8M3JC).
-3. *The GPU*, which luv already programs through its own SPIR-V assembler —
+4. *The GPU*, which luv already programs through its own SPIR-V assembler —
    the natural home for wide regular work like broad-phase refits or mass
    meshing, at the price of crossing the completion frontier (#T9K4RC).
-4. *x86-64 images*, where sb-simd's supported instruction-set packages
-   genuinely light up.
+5. *x86-64 images*, now mainly interesting for the 256-bit AVX widths that
+   NEON does not offer.
 
 The design consequence is the same at every tier, and this is the point:
 what a kernel needs is not an instruction set but a *layout contract* —

@@ -120,14 +120,52 @@ operation signals =missing-instruction=; every pack type degenerates to =T=.
 The graceful-degradation path was real in intent but never exercised off
 x86-64, and what it delivers is nothing beyond plain declared Common Lisp.
 
-There is no NEON anywhere in the tree, and with the project archived, none
-is coming from this codebase.  The honest summary for luv: on this machine,
-Lisp-level SIMD does not exist, and the nearest paths to wide arithmetic are
-scalar SBCL code (whose arm64 backend generates respectable scalar
-floating-point code), a small foreign shim (Accelerate is the lowest-friction
-option on macOS), running x86-64 SBCL under Rosetta (SSE-era sets only), or
-the GPU luv already programs.  #R9M4PV weighs these for the physics
-experiment.
+There is no NEON anywhere in the archived tree.  At SBCL 2.5.10 the honest
+summary was therefore: on this machine, Lisp-level SIMD does not exist, and
+the nearest paths to wide arithmetic are scalar SBCL code, a small foreign
+shim, x86-64 SBCL under Rosetta, or the GPU luv already programs.  #R9M4PV
+weighs these for the physics experiment — but the summary aged fast: the
+successor tree overturned it within a year of the archive (#W9K4DN).
+
+* The story changed in SBCL 2.6.7
+:PROPERTIES:
+:ID: W9K4DN
+:END:
+
+A hunch that "someone has surely done arm64 SIMD by now" turned out to be
+right, and recently.  Checked against the SBCL repository and NEWS on
+2026-08-11:
+
+- SBCL 2.6.7 (released 2026-07-28) announces: "the SB-SIMD contrib now
+  supports ARM64.  (Thanks to Sylvia Harrington)" — alongside AVX-512
+  support on x86-64 and further SIMD instruction work credited to Arthur
+  Miller.
+- The substrate came first: Harrington's commit "arm64: Implement
+  SIMD-PACK" adds =src/compiler/arm64/simd-pack.lisp=, and the build now
+  enables =:sb-simd-pack= on arm64.  The user-facing backend follows as two
+  new instruction sets in the contrib: =:arm64= (immediate constants, in
+  the role =:x86-64= plays) and =:neon=, availability-tested and included
+  the same way the x86-64 sets are.
+- The NEON set is the full 128-bit menu: =f32.4=, =f64.2=, and all integer
+  packs from =u8.16= to =s64.2=, with broadcasts, typed arefs and SAP
+  references, arithmetic, min/max, square root, mask-returning comparisons,
+  horizontal and pairwise reductions, zips, unzips, transposes, and lane
+  extract/insert.  Missing comparison directions are synthesized as fake
+  VOPs — the gap-filling tradition of #C3F7XM continues on the new
+  architecture.  The 256-bit types remain x86-64-only, which makes NEON's
+  width exactly the four lanes Box3D standardized on (#T3C8FV).
+- Homebrew already ships 2.6.7.  The machine's 2.5.10 predates it, so the
+  empirical failures of #L2W6KT describe the old world; after an SBCL
+  upgrade the first two options of that figure collapse into "load the
+  contrib."
+
+Two figures on this page are thereby dated, and deliberately left standing
+with this correction beside them: the archive study was accurate about its
+object and wrong as a forecast.  A landmark studied at a commit stays still;
+its successors do not.  What has not changed: the record-driven design
+absorbed a second architecture largely by adding instruction-set files,
+which is the strongest evidence yet for the pattern #E8M3JC recommends
+borrowing.
 
 * What a kernel looks like when it does work
 :PROPERTIES:
@@ -219,5 +257,5 @@ What should *not* be imitated is the assumption that wide arithmetic is
 where a small simulation's time goes.  Box3D — a mature, profile-driven
 engine — vectorizes exactly one loop (#T3C8FV).  The prerequisite it built
 first was a data layout with a disjointness invariant.  Layout is portable;
-instruction sets are not; on this machine, layout is also the only part
-available.
+instruction sets are not — though #W9K4DN shows the portable layout
+argument aging better than the instruction-set pessimism did.
