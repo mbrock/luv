@@ -2,13 +2,23 @@
   :description "An experimental Common Lisp atelier for Vulkan."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on (#:luv/examples))
+  :depends-on (#:luv/examples)
+  :in-order-to ((asdf:test-op (asdf:test-op #:luv/tests))))
 
 (asdf:defsystem #:luv/packages
   :description "Package definitions for luv's public and internal names."
   :version "0.0.1"
   :author "Mikael Brockman"
   :components ((:file "package")))
+
+(asdf:defsystem #:luv/world
+  :description "Finite chunk domains and the resident block-world model."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on (#:luv/packages)
+  :components ((:module "world"
+                :components ((:file "block-world"))))
+  :in-order-to ((asdf:test-op (asdf:test-op #:luv/tests))))
 
 (asdf:defsystem #:luv/invocation
   :description "A small protocol for reifying API calls as invocations."
@@ -129,7 +139,8 @@
   :description "Interactive demos and exploratory applications built on luv."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on (#:luv/canvas
+  :depends-on (#:luv/world
+               #:luv/canvas
                #:luv/spir-v
                #:uiop)
   :serial t
@@ -137,6 +148,21 @@
                 :components ((:file "demo")
                              (:file "png")
                              (:file "block-world")))))
+
+(asdf:defsystem #:luv/tests
+  :description "Executable claims about luv's renderer-independent models."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on (#:luv/world
+               #:rove)
+  :components ((:module "tests"
+                :components ((:file "world"))))
+  :perform (asdf:test-op (operation component)
+             (declare (ignore operation component))
+             (unless (uiop:symbol-call
+                      '#:rove '#:run-suite
+                      (uiop:symbol-call '#:rove '#:find-suite '#:luv/tests))
+               (error "luv tests failed"))))
 
 (asdf:defsystem #:luv/tools
   :description "One-shot command-line tools for luv development."

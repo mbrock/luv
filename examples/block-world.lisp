@@ -71,42 +71,12 @@
 (defparameter *leaf-block*
   (make-instance 'block-kind :name :leaves :color #(0.20 0.56 0.23)))
 
-(defclass block-world ()
-  ((width :initarg :width :reader block-world-width)
-   (height :initarg :height :reader block-world-height)
-   (depth :initarg :depth :reader block-world-depth)
-   (blocks :initarg :blocks :reader block-world-blocks)))
-
-(defun make-block-world (width height depth)
-  (unless (and (every #'plusp (list width height depth))
-               (every #'integerp (list width height depth)))
-    (error "Block-world dimensions must be positive integers."))
-  (make-instance
-   'block-world :width width :height height :depth depth
-   :blocks (make-array (list width height depth) :initial-element nil)))
-
-(defgeneric block-at (world x y z))
-(defgeneric (setf block-at) (block world x y z))
-
-(defun block-coordinate-in-bounds-p (world x y z)
-  (and (<= 0 x) (< x (block-world-width world))
-       (<= 0 y) (< y (block-world-height world))
-       (<= 0 z) (< z (block-world-depth world))))
-
-(defmethod block-at ((world block-world) x y z)
-  (when (block-coordinate-in-bounds-p world x y z)
-    (aref (block-world-blocks world) x y z)))
-
-(defmethod (setf block-at) (block (world block-world) x y z)
-  (unless (block-coordinate-in-bounds-p world x y z)
-    (error "Block coordinate (~D ~D ~D) is outside ~Dx~Dx~D."
-           x y z (block-world-width world) (block-world-height world)
-           (block-world-depth world)))
-  (setf (aref (block-world-blocks world) x y z) block))
-
 (defun make-little-block-world (&key (width 16) (height 8) (depth 16))
   "Make a tiny rolling field with rocks and one extremely blocky tree."
-  (let ((world (make-block-world width height depth)))
+  (let ((world (make-block-world :chunk-width width
+                                 :chunk-height height
+                                 :chunk-depth depth)))
+    (ensure-world-chunk world 0 0 0)
     (dotimes (x width)
       (dotimes (z depth)
         (let ((surface
@@ -122,7 +92,7 @@
     ;; A few readable landmarks make motion and scale apparent immediately.
     (loop for (x y z) in '((2 3 4) (3 3 4) (3 4 4)
                            (12 3 10) (12 4 10) (11 3 10))
-          when (block-coordinate-in-bounds-p world x y z)
+          when (and (< x width) (< y height) (< z depth))
             do (setf (block-at world x y z) *stone-block*))
     (let ((tree-x (min 9 (- width 2)))
           (tree-z (min 7 (- depth 2))))
@@ -136,7 +106,11 @@
     world))
 
 (defclass block-mesher () ())
-(defclass exposed-face-mesher (block-mesher) ())
+(defclass exposed-face-mesher (block-mesher)
+  ((absent-neighbor-policy
+    :initarg :absent-neighbor-policy
+    :initform :air
+    :reader exposed-face-mesher-absent-neighbor-policy)))
 
 (defclass block-mesh ()
   ((vertices :initarg :vertices :reader block-mesh-vertices)
@@ -155,7 +129,18 @@
 (defun block-color-variation (x y z)
   (+ 0.93 (* 0.07 (/ (mod (+ (* x 17) (* y 31) (* z 13)) 7) 6.0))))
 
-(defun block-face-corner-occlusion (world face corner x y z)
+(defun mesher-block-at (mesher world x y z)
+  (multiple-value-bind (block status) (block-at world x y z)
+    (ecase status
+      (:resident block)
+      (:absent
+       (ecase (exposed-face-mesher-absent-neighbor-policy mesher)
+         (:air nil)
+         (:solid *stone-block*)
+         (:error
+          (error "Meshing reached absent terrain at (~D ~D ~D)." x y z)))))))
+
+(defun block-face-corner-occlusion (mesher world face corner x y z)
   (let* ((normal (block-face-neighbor face))
          (axes (loop for component in normal
                      for axis from 0
@@ -169,9 +154,10 @@
                  (incf (nth first-axis offset) first-step)
                  (incf (nth second-axis offset) second-step)
                  (block-solid-p
-                  (block-at world (+ x (first offset))
-                                  (+ y (second offset))
-                                  (+ z (third offset)))))))
+                  (mesher-block-at mesher world
+                                   (+ x (first offset))
+                                   (+ y (second offset))
+                                   (+ z (third offset)))))))
       (let* ((first-side (occupied-p first-sign 0))
              (second-side (occupied-p 0 second-sign))
              (corner-block (occupied-p first-sign second-sign)))
@@ -184,7 +170,6 @@
     ((mesher exposed-face-mesher) (world block-world) vertices
      (block block-kind)
      (face block-face) x y z)
-  (declare (ignore mesher))
   (let* ((corners (block-face-corners face))
          (base-color (block-face-color block face))
          (variation (block-color-variation x y z)))
@@ -192,7 +177,7 @@
       (let* ((corner (nth index corners))
              (shade (* variation
                        (block-face-corner-occlusion
-                        world face corner x y z)))
+                        mesher world face corner x y z)))
              (color (map 'vector
                          (lambda (component)
                            (coerce (* component shade) 'single-float))
@@ -207,17 +192,22 @@
   (let ((vertices (make-array 0 :element-type 'single-float
                                 :adjustable t :fill-pointer 0))
         (face-count 0))
-    (dotimes (x (block-world-width world))
-      (dotimes (y (block-world-height world))
-        (dotimes (z (block-world-depth world))
-          (let ((block (block-at world x y z)))
-            (when (block-solid-p block)
-              (dolist (face *block-faces*)
-                (destructuring-bind (dx dy dz) (block-face-neighbor face)
-                  (unless (block-solid-p
-                           (block-at world (+ x dx) (+ y dy) (+ z dz)))
-                    (emit-block-face mesher world vertices block face x y z)
-                    (incf face-count)))))))))
+    (dolist (chunk (resident-world-chunks world))
+      (let ((origin (chunk-domain-origin (block-chunk-domain chunk))))
+        (map-chunk-blocks
+         (lambda (block local-x local-y local-z)
+           (when (block-solid-p block)
+             (let ((x (+ (world-coordinate-x origin) local-x))
+                   (y (+ (world-coordinate-y origin) local-y))
+                   (z (+ (world-coordinate-z origin) local-z)))
+               (dolist (face *block-faces*)
+                 (destructuring-bind (dx dy dz) (block-face-neighbor face)
+                   (unless (block-solid-p
+                            (mesher-block-at mesher world
+                                             (+ x dx) (+ y dy) (+ z dz)))
+                     (emit-block-face mesher world vertices block face x y z)
+                     (incf face-count)))))))
+         chunk)))
     (make-instance 'block-mesh :vertices vertices
                                :vertex-count (* face-count 6)
                                :face-count face-count)))

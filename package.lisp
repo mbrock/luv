@@ -404,6 +404,53 @@ nothing else does."))
            #:minimize-canvas
            #:restore-canvas
            #:write-rgba-png
+           #:world-coordinate
+           #:make-world-coordinate
+           #:world-coordinate-x
+           #:world-coordinate-y
+           #:world-coordinate-z
+           #:chunk-coordinate
+           #:make-chunk-coordinate
+           #:chunk-coordinate-x
+           #:chunk-coordinate-y
+           #:chunk-coordinate-z
+           #:local-coordinate
+           #:make-local-coordinate
+           #:local-coordinate-x
+           #:local-coordinate-y
+           #:local-coordinate-z
+           #:chunk-shape
+           #:make-chunk-shape
+           #:chunk-shape-width
+           #:chunk-shape-height
+           #:chunk-shape-depth
+           #:voxel-space
+           #:make-voxel-space
+           #:voxel-space-id
+           #:voxel-space-chunk-shape
+           #:voxel-space-cell-extent
+           #:world-coordinate-cell-origin
+           #:world-coordinate-chunk-and-local
+           #:chunk-local-world-coordinate
+           #:chunk-domain
+           #:make-chunk-domain
+           #:chunk-domain-space
+           #:chunk-domain-coordinate
+           #:chunk-domain-cardinality
+           #:chunk-domain-origin
+           #:chunk-domain-local-coordinate-p
+           #:chunk-domain-offset
+           #:chunk-domain-local-coordinate
+           #:block-content-column
+           #:block-content-column-palette
+           #:block-content-column-indices
+           #:block-chunk
+           #:make-block-chunk
+           #:block-chunk-domain
+           #:block-chunk-content
+           #:block-chunk-revision
+           #:chunk-block-at
+           #:map-chunk-blocks
            #:block-kind
            #:block-kind-name
            #:block-solid-p
@@ -414,10 +461,14 @@ nothing else does."))
            #:block-face-corners
            #:block-face-shade
            #:block-world
-           #:block-world-width
-           #:block-world-height
-           #:block-world-depth
+           #:block-world-space
+           #:block-world-residency-revision
            #:make-block-world
+           #:world-chunk-at
+           #:ensure-world-chunk
+           #:remove-world-chunk
+           #:resident-world-chunks
+           #:chunk-not-resident
            #:make-little-block-world
            #:block-at
            #:block-mesher

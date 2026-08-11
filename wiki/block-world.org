@@ -22,13 +22,20 @@ reproduce Minecraft's implementation or close off stranger worlds.
 :ID: P3L8YX
 :END:
 
-The current implementation in
-[[file:../examples/block-world.lisp::(defclass block-world][=examples/block-world.lisp=]] is one deliberately small, eager world:
+The current implementation is split between the renderer-independent model in
+[[file:../world/block-world.lisp][=world/block-world.lisp=]] and the deliberately small visual proof in
+[[file:../examples/block-world.lisp][=examples/block-world.lisp=]]:
 
-- a finite three-dimensional Common Lisp array contains shared =block-kind=
-  objects or =nil=;
-- an =exposed-face-mesher= walks every occupied site on the CPU and emits only
-  faces beside empty sites;
+- a =voxel-space= records a fixed chunk shape and explicit physical cell
+  extent;
+- distinct world, chunk, and local coordinate values are related by checked
+  Euclidean decomposition, including at negative coordinates;
+- each resident =block-chunk= owns a finite =chunk-domain= and one dense
+  palette-indexed block-content column;
+- a =block-world= owns the resident chunk set and distinguishes resident air
+  from an absent chunk;
+- an =exposed-face-mesher= walks resident chunks on the CPU and emits only
+  faces beside empty sites, under an explicit absent-neighbor policy;
 - ordinary Lisp computes directional face shade, deterministic colour
   variation, and corner ambient occlusion;
 - structured s-expression SPIR-V transforms the interleaved position/colour
@@ -52,8 +59,39 @@ The whole slice remains live and inspectable:
 #+end_src
 
 This implementation is evidence that the renderer and lifecycle are ready for
-game-shaped work.  Its array and mesh are not claims about the final world
-model.
+game-shaped work.  The resident model is a first substrate, not a claim that
+residency, generation, edits, lighting, or derived products have become one
+finished system.
+
+* Landmarks from working voxel engines
+:PROPERTIES:
+:ID: V4K8LN
+:END:
+
+Several established engines converge on the same boundaries without sharing
+one representation:
+
+- Luanti's [[https://docs.luanti.org/for-engine-devs/basic-data-structures/][basic data structures]] distinguish an =air= node from =ignore=,
+  which means unloaded or ungenerated.  A 16-cubed MapBlock serializes node
+  type and parameter data in bulk while metadata, timers, objects, and the
+  client mesh remain separate concerns.
+- Voxel Tools' [[https://voxel-tools.readthedocs.io/en/latest/overview/][overview]] and [[https://voxel-tools.readthedocs.io/en/latest/streams/][streaming model]] use independently represented
+  channels, commonly in 16-cubed blocks.  Uniform channels need no dense
+  allocation, and streams load and save blocks independently from deterministic
+  generators.
+- Veloren's [[https://docs.veloren.net/veloren_common/volumes/chunk/struct.Chunk.html][generic Chunk]] divides storage into small groups; a missing group is
+  implicitly the chunk's default voxel, while occupied groups use compact
+  indices into voxel values.  It can therefore remain sparse without making
+  the public voxel value itself a storage address.
+- Minecraft Bedrock's official [[https://learn.microsoft.com/en-us/minecraft/creator/documents/world-generation?view=minecraft-bedrock-stable][world-generation overview]] describes generation as
+  staged construction from a seed: terrain, biomes, structures, features,
+  lighting, and final updates.  That is evidence for treating generation as a
+  source of materializations rather than as the chunk container itself.
+
+The shared lesson is not “all voxel worlds use 16-cubed arrays.”  It is that
+coordinate spaces, resident bulk values, missingness, exceptional metadata,
+generation, and derived render products are different things.  Compression
+can then vary behind the logical field interface.
 
 * A world is not necessarily its finest materialization
 :PROPERTIES:
@@ -117,11 +155,11 @@ every cell.  #C9L2WA develops this distinction.
 :ID: K5T2VF
 :END:
 
-The existing =block-kind= instances already behave like palette entries: many
-sites share one object that owns colour and generic behaviour.  A future
-chunk could preserve that model while storing compact palette indices rather
-than Lisp object references at every site.  =block-at= would continue to
-return the semantic object after decoding its representation.
+The existing =block-kind= instances behave like palette entries: many sites
+share one object that owns colour and generic behaviour.  A chunk now stores
+compact unsigned 16-bit indices into a chunk-local vector of those semantic
+objects.  =block-at= returns the object after decoding, while a whole-column
+algorithm can inspect or borrow the contiguous index array.
 
 A useful distinction is:
 

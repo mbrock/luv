@@ -294,7 +294,9 @@ to physics and possible wide backends.
   hierarchy; or
 - which physics data structure will emerge from the separate design work.
 
-The first useful proof is intentionally boring: store the current world in a
-finite domain plus one palette-backed block-content column, preserve
-=block-at= and the rendered screenshot, then let a genuinely new light field
-earn the reusable abstraction.
+The first useful proof is now present: the current world occupies a finite
+domain plus one palette-backed block-content column, =block-at= remains
+semantic, and the existing renderer consumes the new resident world.  The
+next field should still be earned by an operation: a genuine lighting
+experiment can show whether a small shared bundle abstraction is clearer than
+two concrete sibling columns.

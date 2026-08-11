@@ -1,0 +1,401 @@
+;;; Discrete world coordinates, finite chunk domains, and resident block data.
+
+(in-package #:luv)
+
+;;; Coordinate values are deliberately distinct even though all three are
+;;; represented by integer triples.  World and chunk coordinates may be
+;;; negative; local coordinates are checked by a particular chunk domain.
+
+(defstruct (world-coordinate
+             (:constructor %make-world-coordinate (x y z)))
+  (x 0 :type integer :read-only t)
+  (y 0 :type integer :read-only t)
+  (z 0 :type integer :read-only t))
+
+(defun make-world-coordinate (x y z)
+  (check-type x integer)
+  (check-type y integer)
+  (check-type z integer)
+  (%make-world-coordinate x y z))
+
+(defstruct (chunk-coordinate
+             (:constructor %make-chunk-coordinate (x y z)))
+  (x 0 :type integer :read-only t)
+  (y 0 :type integer :read-only t)
+  (z 0 :type integer :read-only t))
+
+(defun make-chunk-coordinate (x y z)
+  (check-type x integer)
+  (check-type y integer)
+  (check-type z integer)
+  (%make-chunk-coordinate x y z))
+
+(defstruct (local-coordinate
+             (:constructor %make-local-coordinate (x y z)))
+  (x 0 :type integer :read-only t)
+  (y 0 :type integer :read-only t)
+  (z 0 :type integer :read-only t))
+
+(defun make-local-coordinate (x y z)
+  (check-type x integer)
+  (check-type y integer)
+  (check-type z integer)
+  (%make-local-coordinate x y z))
+
+(defstruct (chunk-shape
+             (:constructor %make-chunk-shape (width height depth)))
+  (width 16 :type (integer 1) :read-only t)
+  (height 16 :type (integer 1) :read-only t)
+  (depth 16 :type (integer 1) :read-only t))
+
+(defun make-chunk-shape (&key (width 16) (height 16) (depth 16))
+  (dolist (dimension (list width height depth))
+    (check-type dimension (integer 1)))
+  (%make-chunk-shape width height depth))
+
+(defun normalize-cell-extent (extent)
+  (let ((components
+          (etypecase extent
+            (real (list extent extent extent))
+            (sequence
+             (unless (= (length extent) 3)
+               (error "A voxel cell extent needs exactly three components."))
+             (coerce extent 'list)))))
+    (unless (every (lambda (component)
+                     (and (realp component) (plusp component)))
+                   components)
+      (error "Voxel cell extents must be positive real numbers: ~S" extent))
+    (map 'vector (lambda (component) (coerce component 'double-float))
+         components)))
+
+(defclass voxel-space ()
+  ((id :initarg :id :reader voxel-space-id)
+   (chunk-shape :initarg :chunk-shape :reader voxel-space-chunk-shape)
+   (cell-extent :initarg :cell-extent :reader voxel-space-cell-extent)))
+
+(defun make-voxel-space (&key (id (gensym "VOXEL-SPACE-"))
+                              (chunk-shape (make-chunk-shape))
+                              (cell-extent 1d0))
+  (check-type chunk-shape chunk-shape)
+  (make-instance 'voxel-space
+                 :id id
+                 :chunk-shape chunk-shape
+                 :cell-extent (normalize-cell-extent cell-extent)))
+
+(defun world-coordinate-cell-origin (space coordinate)
+  "Map a discrete cell coordinate through SPACE's explicit metric extent."
+  (check-type space voxel-space)
+  (check-type coordinate world-coordinate)
+  (let ((extent (voxel-space-cell-extent space)))
+    (vector (* (world-coordinate-x coordinate) (aref extent 0))
+            (* (world-coordinate-y coordinate) (aref extent 1))
+            (* (world-coordinate-z coordinate) (aref extent 2)))))
+
+(defun world-coordinate-chunk-and-local (space coordinate)
+  "Decompose COORDINATE by Euclidean division in SPACE.
+
+The local result is always non-negative, including for negative world
+coordinates."
+  (check-type space voxel-space)
+  (check-type coordinate world-coordinate)
+  (let ((shape (voxel-space-chunk-shape space)))
+    (multiple-value-bind (chunk-x local-x)
+        (floor (world-coordinate-x coordinate) (chunk-shape-width shape))
+      (multiple-value-bind (chunk-y local-y)
+          (floor (world-coordinate-y coordinate) (chunk-shape-height shape))
+        (multiple-value-bind (chunk-z local-z)
+            (floor (world-coordinate-z coordinate) (chunk-shape-depth shape))
+          (values (make-chunk-coordinate chunk-x chunk-y chunk-z)
+                  (make-local-coordinate local-x local-y local-z)))))))
+
+(defun chunk-local-world-coordinate (space chunk local)
+  (check-type space voxel-space)
+  (check-type chunk chunk-coordinate)
+  (check-type local local-coordinate)
+  (let ((shape (voxel-space-chunk-shape space)))
+    (unless (and (< (local-coordinate-x local) (chunk-shape-width shape))
+                 (< (local-coordinate-y local) (chunk-shape-height shape))
+                 (< (local-coordinate-z local) (chunk-shape-depth shape))
+                 (not (minusp (local-coordinate-x local)))
+                 (not (minusp (local-coordinate-y local)))
+                 (not (minusp (local-coordinate-z local))))
+      (error "Local coordinate ~S is outside chunk shape ~S." local shape))
+    (make-world-coordinate
+     (+ (* (chunk-coordinate-x chunk) (chunk-shape-width shape))
+        (local-coordinate-x local))
+     (+ (* (chunk-coordinate-y chunk) (chunk-shape-height shape))
+        (local-coordinate-y local))
+     (+ (* (chunk-coordinate-z chunk) (chunk-shape-depth shape))
+        (local-coordinate-z local)))))
+
+;;; A chunk domain gives one resident materialization a stable site identity
+;;; and owns the checked local-coordinate <-> dense-offset correspondence.
+;;; X is the contiguous axis: x + width * (y + height * z).
+
+(defclass chunk-domain ()
+  ((space :initarg :space :reader chunk-domain-space)
+   (coordinate :initarg :coordinate :reader chunk-domain-coordinate)))
+
+(defun make-chunk-domain (space coordinate)
+  (check-type space voxel-space)
+  (check-type coordinate chunk-coordinate)
+  (make-instance 'chunk-domain :space space :coordinate coordinate))
+
+(defun chunk-domain-cardinality (domain)
+  (check-type domain chunk-domain)
+  (let ((shape (voxel-space-chunk-shape (chunk-domain-space domain))))
+    (* (chunk-shape-width shape)
+       (chunk-shape-height shape)
+       (chunk-shape-depth shape))))
+
+(defun chunk-domain-origin (domain)
+  (chunk-local-world-coordinate
+   (chunk-domain-space domain)
+   (chunk-domain-coordinate domain)
+   (make-local-coordinate 0 0 0)))
+
+(defun chunk-domain-local-coordinate-p (domain local)
+  (check-type domain chunk-domain)
+  (check-type local local-coordinate)
+  (let ((shape (voxel-space-chunk-shape (chunk-domain-space domain))))
+    (and (<= 0 (local-coordinate-x local))
+         (< (local-coordinate-x local) (chunk-shape-width shape))
+         (<= 0 (local-coordinate-y local))
+         (< (local-coordinate-y local) (chunk-shape-height shape))
+         (<= 0 (local-coordinate-z local))
+         (< (local-coordinate-z local) (chunk-shape-depth shape)))))
+
+(defun chunk-domain-offset (domain local)
+  (unless (chunk-domain-local-coordinate-p domain local)
+    (error "Local coordinate ~S is outside domain ~S." local domain))
+  (let ((shape (voxel-space-chunk-shape (chunk-domain-space domain))))
+    (+ (local-coordinate-x local)
+       (* (chunk-shape-width shape)
+          (+ (local-coordinate-y local)
+             (* (chunk-shape-height shape)
+                (local-coordinate-z local)))))))
+
+(defun chunk-domain-local-coordinate (domain offset)
+  (check-type domain chunk-domain)
+  (check-type offset (integer 0))
+  (unless (< offset (chunk-domain-cardinality domain))
+    (error "Offset ~D is outside domain ~S." offset domain))
+  (let* ((shape (voxel-space-chunk-shape (chunk-domain-space domain)))
+         (width (chunk-shape-width shape))
+         (height (chunk-shape-height shape)))
+    (multiple-value-bind (z remainder) (floor offset (* width height))
+      (multiple-value-bind (y x) (floor remainder width)
+        (make-local-coordinate x y z)))))
+
+;;; Block content is a narrow semantic field.  The public value is a shared
+;;; Lisp object (or NIL for air); the physical column is a dense u16 palette
+;;; index.  Other fields and sparse block entities intentionally live outside
+;;; this column.
+
+(defclass block-content-column ()
+  ((palette :initarg :palette :reader block-content-column-palette)
+   (indices :initarg :indices :reader block-content-column-indices)))
+
+(defun make-block-content-column (cardinality)
+  (make-instance
+   'block-content-column
+   :palette (make-array 1 :adjustable t :fill-pointer 1
+                          :initial-element nil)
+   :indices (make-array cardinality :element-type '(unsigned-byte 16)
+                                   :initial-element 0)))
+
+(defun block-content-at-offset (column offset)
+  (aref (block-content-column-palette column)
+        (aref (block-content-column-indices column) offset)))
+
+(defun ensure-block-content-palette-index (column block)
+  (or (position block (block-content-column-palette column) :test #'eq)
+      (let ((next-index (length (block-content-column-palette column))))
+        (unless (<= next-index #xffff)
+          (error "A block-content palette cannot contain more than 65536 states."))
+        (vector-push-extend block (block-content-column-palette column))
+        next-index)))
+
+(defun set-block-content-at-offset (column offset block)
+  (let* ((indices (block-content-column-indices column))
+         (new-index (ensure-block-content-palette-index column block))
+         (old-index (aref indices offset)))
+    (unless (= old-index new-index)
+      (setf (aref indices offset) new-index)
+      t)))
+
+(defclass block-chunk ()
+  ((domain :initarg :domain :reader block-chunk-domain)
+   (content :initarg :content :reader block-chunk-content)
+   (revision :initform 0 :reader block-chunk-revision)))
+
+(defun make-block-chunk (domain)
+  (check-type domain chunk-domain)
+  (make-instance 'block-chunk
+                 :domain domain
+                 :content (make-block-content-column
+                           (chunk-domain-cardinality domain))))
+
+(defun chunk-block-at (chunk x y z)
+  (check-type chunk block-chunk)
+  (block-content-at-offset
+   (block-chunk-content chunk)
+   (chunk-domain-offset (block-chunk-domain chunk)
+                        (make-local-coordinate x y z))))
+
+(defun (setf chunk-block-at) (block chunk x y z)
+  (check-type chunk block-chunk)
+  (when (set-block-content-at-offset
+         (block-chunk-content chunk)
+         (chunk-domain-offset (block-chunk-domain chunk)
+                              (make-local-coordinate x y z))
+         block)
+    (incf (slot-value chunk 'revision)))
+  block)
+
+(defun map-chunk-blocks (function chunk)
+  "Call FUNCTION with BLOCK, local X, Y, and Z for every site in CHUNK."
+  (check-type chunk block-chunk)
+  (let* ((domain (block-chunk-domain chunk))
+         (shape (voxel-space-chunk-shape (chunk-domain-space domain)))
+         (column (block-chunk-content chunk))
+         (palette (block-content-column-palette column))
+         (indices (block-content-column-indices column))
+         (offset 0))
+    (dotimes (z (chunk-shape-depth shape))
+      (dotimes (y (chunk-shape-height shape))
+        (dotimes (x (chunk-shape-width shape))
+          (funcall function (aref palette (aref indices offset)) x y z)
+          (incf offset)))))
+  chunk)
+
+;;; A block world is the resident environment, not the complete world
+;;; description.  Its residency revision changes only when chunks enter or
+;;; leave; each chunk has its own content revision.
+
+(define-condition chunk-not-resident (error)
+  ((world-coordinate :initarg :world-coordinate
+                     :reader chunk-not-resident-world-coordinate)
+   (chunk-coordinate :initarg :chunk-coordinate
+                     :reader chunk-not-resident-chunk-coordinate))
+  (:report
+   (lambda (condition stream)
+     (format stream "No chunk is resident for world coordinate ~S (chunk ~S)."
+             (chunk-not-resident-world-coordinate condition)
+             (chunk-not-resident-chunk-coordinate condition)))))
+
+(defclass block-world ()
+  ((space :initarg :space :reader block-world-space)
+   (chunks :initform (make-hash-table :test #'equal)
+           :reader block-world-chunks)
+   (residency-revision :initform 0
+                       :reader block-world-residency-revision)))
+
+(defun make-block-world (&key (id (gensym "BLOCK-WORLD-"))
+                              (chunk-width 16)
+                              (chunk-height 16)
+                              (chunk-depth 16)
+                              (cell-extent 1d0))
+  (make-instance
+   'block-world
+   :space (make-voxel-space
+           :id id
+           :chunk-shape (make-chunk-shape :width chunk-width
+                                          :height chunk-height
+                                          :depth chunk-depth)
+           :cell-extent cell-extent)))
+
+(defun chunk-key (x y z)
+  (check-type x integer)
+  (check-type y integer)
+  (check-type z integer)
+  (list x y z))
+
+(defun world-chunk-at (world x y z)
+  "Return the resident chunk at chunk coordinate X,Y,Z and whether it exists."
+  (check-type world block-world)
+  (gethash (chunk-key x y z) (block-world-chunks world)))
+
+(defun ensure-world-chunk (world x y z)
+  "Return the resident chunk at X,Y,Z, creating an all-air chunk if absent."
+  (multiple-value-bind (chunk present-p) (world-chunk-at world x y z)
+    (if present-p
+        chunk
+        (let* ((coordinate (make-chunk-coordinate x y z))
+               (domain (make-chunk-domain (block-world-space world) coordinate))
+               (new-chunk (make-block-chunk domain)))
+          (setf (gethash (chunk-key x y z) (block-world-chunks world))
+                new-chunk)
+          (incf (slot-value world 'residency-revision))
+          new-chunk))))
+
+(defun remove-world-chunk (world x y z)
+  "Remove a resident chunk.  Return the chunk and whether it was present."
+  (multiple-value-bind (chunk present-p)
+      (gethash (chunk-key x y z) (block-world-chunks world))
+    (when present-p
+      (remhash (chunk-key x y z) (block-world-chunks world))
+      (incf (slot-value world 'residency-revision)))
+    (values chunk present-p)))
+
+(defun resident-world-chunks (world)
+  "Return resident chunks in deterministic chunk-coordinate order."
+  (check-type world block-world)
+  (sort (loop for chunk being the hash-values of (block-world-chunks world)
+              collect chunk)
+        (lambda (left right)
+          (let ((a (chunk-domain-coordinate (block-chunk-domain left)))
+                (b (chunk-domain-coordinate (block-chunk-domain right))))
+            (or (< (chunk-coordinate-x a) (chunk-coordinate-x b))
+                (and (= (chunk-coordinate-x a) (chunk-coordinate-x b))
+                     (or (< (chunk-coordinate-y a) (chunk-coordinate-y b))
+                         (and (= (chunk-coordinate-y a) (chunk-coordinate-y b))
+                              (< (chunk-coordinate-z a)
+                                 (chunk-coordinate-z b))))))))))
+
+(defgeneric block-at (world x y z)
+  (:documentation
+   "Return BLOCK and :RESIDENT, or NIL and :ABSENT when its chunk is absent."))
+
+(defgeneric (setf block-at) (block world x y z))
+
+(defun locate-world-coordinate (world x y z)
+  (let ((coordinate (make-world-coordinate x y z)))
+    (multiple-value-bind (chunk-coordinate local-coordinate)
+        (world-coordinate-chunk-and-local (block-world-space world) coordinate)
+      (values coordinate chunk-coordinate local-coordinate))))
+
+(defmethod block-at ((world block-world) x y z)
+  (multiple-value-bind (world-coordinate chunk-coordinate local-coordinate)
+      (locate-world-coordinate world x y z)
+    (declare (ignore world-coordinate))
+    (multiple-value-bind (chunk present-p)
+        (world-chunk-at world
+                        (chunk-coordinate-x chunk-coordinate)
+                        (chunk-coordinate-y chunk-coordinate)
+                        (chunk-coordinate-z chunk-coordinate))
+      (if present-p
+          (values (chunk-block-at chunk
+                                  (local-coordinate-x local-coordinate)
+                                  (local-coordinate-y local-coordinate)
+                                  (local-coordinate-z local-coordinate))
+                  :resident)
+          (values nil :absent)))))
+
+(defmethod (setf block-at) (block (world block-world) x y z)
+  (multiple-value-bind (world-coordinate chunk-coordinate local-coordinate)
+      (locate-world-coordinate world x y z)
+    (multiple-value-bind (chunk present-p)
+        (world-chunk-at world
+                        (chunk-coordinate-x chunk-coordinate)
+                        (chunk-coordinate-y chunk-coordinate)
+                        (chunk-coordinate-z chunk-coordinate))
+      (unless present-p
+        (error 'chunk-not-resident
+               :world-coordinate world-coordinate
+               :chunk-coordinate chunk-coordinate))
+      (setf (chunk-block-at chunk
+                            (local-coordinate-x local-coordinate)
+                            (local-coordinate-y local-coordinate)
+                            (local-coordinate-z local-coordinate))
+            block))))

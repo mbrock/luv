@@ -23,7 +23,9 @@ The ASDF systems are the useful map:
 :luv/canvas/sdl       SDL window host and event translation
 :luv/canvas/vulkan    Vulkan swapchain presentation for SDL canvases
 :luv/canvas           SDL canvas presentation for the GPU API
+:luv/world            coordinate spaces, chunk domains, resident block data
 :luv/examples         demos, PNG capture, and the block world
+:luv/tests            renderer-independent model tests
 :luv/mcclim           experimental McCLIM backend on luv canvases
 :luv/tools            one-shot command-line tools
 ```
@@ -56,6 +58,13 @@ host system:
 ```sh
 scripts/luv eval '(luv:make-little-block-world)'
 scripts/luv block-world /tmp/luv-block-world.png
+```
+
+The world model can be loaded and tested without SDL or Vulkan:
+
+```lisp
+(asdf:load-system :luv/world)
+(asdf:test-system :luv/world)
 ```
 
 ## Live Workflow
