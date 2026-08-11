@@ -3,7 +3,8 @@
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on (#:luv/examples)
-  :in-order-to ((asdf:test-op (asdf:test-op #:luv/tests))))
+  :in-order-to ((asdf:test-op (asdf:test-op #:luv/tests)
+                              (asdf:test-op #:luv/examples/tests))))
 
 (asdf:defsystem #:luv/packages
   :description "Package definitions for luv's public and internal names."
@@ -147,7 +148,8 @@
   :components ((:module "examples"
                 :components ((:file "demo")
                              (:file "png")
-                             (:file "block-world")))))
+                             (:file "block-world"))))
+  :in-order-to ((asdf:test-op (asdf:test-op #:luv/examples/tests))))
 
 (asdf:defsystem #:luv/tests
   :description "Executable claims about luv's renderer-independent models."
@@ -163,6 +165,22 @@
                       '#:rove '#:run-suite
                       (uiop:symbol-call '#:rove '#:find-suite '#:luv/tests))
                (error "luv tests failed"))))
+
+(asdf:defsystem #:luv/examples/tests
+  :description "Tests for the visible block-world slice above the core model."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on (#:luv/examples
+               #:rove)
+  :components ((:module "tests"
+                :components ((:file "block-world"))))
+  :perform (asdf:test-op (operation component)
+             (declare (ignore operation component))
+             (unless (uiop:symbol-call
+                      '#:rove '#:run-suite
+                      (uiop:symbol-call
+                       '#:rove '#:find-suite '#:luv/examples/tests))
+               (error "luv example tests failed"))))
 
 (asdf:defsystem #:luv/tools
   :description "One-shot command-line tools for luv development."

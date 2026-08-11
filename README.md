@@ -26,6 +26,7 @@ The ASDF systems are the useful map:
 :luv/world            coordinate spaces, chunk domains, resident block data
 :luv/examples         demos, PNG capture, and the block world
 :luv/tests            renderer-independent model tests
+:luv/examples/tests   generation, cross-chunk meshing, and edit tests
 :luv/mcclim           experimental McCLIM backend on luv canvases
 :luv/tools            one-shot command-line tools
 ```
@@ -65,6 +66,7 @@ The world model can be loaded and tested without SDL or Vulkan:
 ```lisp
 (asdf:load-system :luv/world)
 (asdf:test-system :luv/world)
+(asdf:test-system :luv/examples)
 ```
 
 ## Live Workflow
@@ -98,6 +100,10 @@ of durable image.
 (luv:capture-cube-world-screenshot *world* #P"/tmp/luv-block-world.png")
 (luv:stop-cube-world-demo *world*)
 ```
+
+Click the block-world window once to capture the pointer. Fly with WASD,
+Space, and Shift; left click removes the block at the centre of the view,
+right click places stone beside it, and Escape releases the pointer.
 
 The hidden screenshot path is useful in CI-ish or server-ish environments:
 

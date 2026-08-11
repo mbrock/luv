@@ -71,38 +71,106 @@
 (defparameter *leaf-block*
   (make-instance 'block-kind :name :leaves :color #(0.20 0.56 0.23)))
 
-(defun make-little-block-world (&key (width 16) (height 8) (depth 16))
-  "Make a tiny rolling field with rocks and one extremely blocky tree."
-  (let ((world (make-block-world :chunk-width width
-                                 :chunk-height height
-                                 :chunk-depth depth)))
-    (ensure-world-chunk world 0 0 0)
-    (dotimes (x width)
-      (dotimes (z depth)
-        (let ((surface
-                (max 1
-                     (min (- height 3)
-                          (+ 2 (round (+ (* 0.55 (sin (* x 0.62)))
-                                         (* 0.45 (cos (* z 0.47))))))))))
+(defclass little-world-source ()
+  ((seed :initarg :seed :initform 121 :reader little-world-source-seed)))
+
+(defun little-world-hash (source x z &optional (salt 0))
+  "A stable coordinate hash used only to place discrete terrain features."
+  (let ((value
+          (logand #xffffffff
+                  (+ (little-world-source-seed source)
+                     (* x 374761393) (* z 668265263) (* salt 2246822519)))))
+    (setf value (logand #xffffffff
+                        (* (logxor value (ash value -13)) 1274126177)))
+    (logand #xffffffff (logxor value (ash value -16)))))
+
+(defun little-world-surface-height (source x z height)
+  (let* ((phase (/ (mod (little-world-source-seed source) 97) 17.0d0))
+         (reading (+ 4.0d0
+                     (* 1.35d0 (sin (+ phase (* x 0.15d0))))
+                     (* 1.05d0 (cos (- (* z 0.13d0) phase)))
+                     (* 0.65d0 (sin (* (+ x z) 0.075d0))))))
+    (max 2 (min (- height 6) (round reading)))))
+
+(defun materialize-little-world-chunk (source world chunk-x chunk-z)
+  "Materialize one deterministic terrain chunk at vertical layer zero."
+  (check-type source little-world-source)
+  (let* ((chunk (ensure-world-chunk world chunk-x 0 chunk-z))
+         (shape (voxel-space-chunk-shape (block-world-space world)))
+         (width (chunk-shape-width shape))
+         (height (chunk-shape-height shape))
+         (depth (chunk-shape-depth shape))
+         (origin (chunk-domain-origin (block-chunk-domain chunk))))
+    (dotimes (local-z depth)
+      (dotimes (local-x width)
+        (let* ((x (+ (world-coordinate-x origin) local-x))
+               (z (+ (world-coordinate-z origin) local-z))
+               (surface (little-world-surface-height source x z height)))
           (dotimes (y (1+ surface))
             (setf (block-at world x y z)
                   (cond ((= y surface) *grass-block*)
-                        ((zerop y) *stone-block*)
+                        ((or (zerop y) (< y (- surface 2))) *stone-block*)
                         (t *dirt-block*)))))))
-    ;; A few readable landmarks make motion and scale apparent immediately.
-    (loop for (x y z) in '((2 3 4) (3 3 4) (3 4 4)
-                           (12 3 10) (12 4 10) (11 3 10))
-          when (and (< x width) (< y height) (< z depth))
-            do (setf (block-at world x y z) *stone-block*))
-    (let ((tree-x (min 9 (- width 2)))
-          (tree-z (min 7 (- depth 2))))
-      (when (and (> tree-x 1) (> tree-z 1) (> height 7))
-        (loop for y from 3 to 5
+    chunk))
+
+(defun populate-little-world-chunk (source world chunk-x chunk-z)
+  "Place deterministic, sparse landmarks after neighboring terrain exists."
+  (let* ((shape (voxel-space-chunk-shape (block-world-space world)))
+         (width (chunk-shape-width shape))
+         (height (chunk-shape-height shape))
+         (depth (chunk-shape-depth shape))
+         (origin-x (* chunk-x width))
+         (origin-z (* chunk-z depth))
+         (hash (little-world-hash source chunk-x chunk-z))
+         (rock-x (+ origin-x 2 (mod hash (- width 4))))
+         (rock-z (+ origin-z 2 (mod (ash hash -8) (- depth 4))))
+         (rock-y (1+ (little-world-surface-height
+                      source rock-x rock-z height))))
+    (setf (block-at world rock-x rock-y rock-z) *stone-block*)
+    (when (zerop (mod hash 2))
+      (setf (block-at world (1+ rock-x) rock-y rock-z) *stone-block*))
+    (when (< (mod (ash hash -16) 5) 3)
+      (let* ((tree-x (+ origin-x 3 (mod (ash hash -3) (- width 6))))
+             (tree-z (+ origin-z 3 (mod (ash hash -11) (- depth 6))))
+             (surface (little-world-surface-height
+                       source tree-x tree-z height))
+             (crown (+ surface 4)))
+        (loop for y from (1+ surface) below crown
               do (setf (block-at world tree-x y tree-z) *wood-block*))
         (loop for x from (1- tree-x) to (1+ tree-x)
               do (loop for z from (1- tree-z) to (1+ tree-z)
-                       do (setf (block-at world x 6 z) *leaf-block*)))
-        (setf (block-at world tree-x 7 tree-z) *leaf-block*)))
+                       do (setf (block-at world x crown z) *leaf-block*)))
+        (setf (block-at world tree-x (1+ crown) tree-z) *leaf-block*)))))
+
+(defun make-little-block-world (&key (chunk-radius 1)
+                                     (chunk-width 16)
+                                     (chunk-height 16)
+                                     (chunk-depth 16)
+                                     (seed 121))
+  "Make a deterministic square of resident terrain chunks and landmarks."
+  (check-type chunk-radius (integer 0))
+  (check-type chunk-width (integer 8))
+  (check-type chunk-height (integer 8))
+  (check-type chunk-depth (integer 8))
+  (let* ((source (make-instance 'little-world-source :seed seed))
+         (world (make-block-world :id (list :little-world seed)
+                                  :chunk-width chunk-width
+                                  :chunk-height chunk-height
+                                  :chunk-depth chunk-depth
+                                  :source source)))
+    ;; Residency is established first so terrain and later features may cross
+    ;; chunk boundaries without ever pretending that absent terrain is air.
+    (loop for chunk-x from (- chunk-radius) to chunk-radius
+          do (loop for chunk-z from (- chunk-radius) to chunk-radius
+                   do (ensure-world-chunk world chunk-x 0 chunk-z)))
+    (loop for chunk-x from (- chunk-radius) to chunk-radius
+          do (loop for chunk-z from (- chunk-radius) to chunk-radius
+                   do (materialize-little-world-chunk
+                       source world chunk-x chunk-z)))
+    (loop for chunk-x from (- chunk-radius) to chunk-radius
+          do (loop for chunk-z from (- chunk-radius) to chunk-radius
+                   do (populate-little-world-chunk
+                       source world chunk-x chunk-z)))
     world))
 
 (defclass block-mesher () ())
@@ -217,10 +285,10 @@
 
 (defclass fly-camera ()
   ((x :initarg :x :initform 8.0 :accessor camera-x)
-   (y :initarg :y :initform 5.0 :accessor camera-y)
-   (z :initarg :z :initform -5.0 :accessor camera-z)
+   (y :initarg :y :initform 8.0 :accessor camera-y)
+   (z :initarg :z :initform -6.0 :accessor camera-z)
    (yaw :initarg :yaw :initform 0.0 :accessor camera-yaw)
-   (pitch :initarg :pitch :initform -0.12 :accessor camera-pitch)
+   (pitch :initarg :pitch :initform -0.28 :accessor camera-pitch)
    (speed :initarg :speed :initform 6.0 :accessor camera-speed)
    (sensitivity :initarg :sensitivity :initform 0.0025
                 :accessor camera-sensitivity)))
@@ -325,9 +393,16 @@
    (device :initarg :device :reader cube-world-demo-device)
    (context :initarg :context :reader cube-world-demo-context)
    (world :initarg :world :reader cube-world-demo-world)
-   (mesh :initarg :mesh :reader cube-world-demo-mesh)
+   (mesher :initarg :mesher :reader cube-world-demo-mesher)
+   (mesh :initarg :mesh :accessor cube-world-demo-mesh)
+   (meshed-world-revision
+    :initarg :meshed-world-revision
+    :accessor cube-world-demo-meshed-world-revision)
    (camera :initarg :camera :reader cube-world-demo-camera)
-   (vertex-buffer :initarg :vertex-buffer :reader cube-world-demo-vertex-buffer)
+   (selected-block :initarg :selected-block :initform *stone-block*
+                   :accessor cube-world-demo-selected-block)
+   (vertex-buffer :initarg :vertex-buffer
+                  :accessor cube-world-demo-vertex-buffer)
    (color-texture :initarg :color-texture
                   :reader cube-world-demo-color-texture)
    (color-view :initarg :color-view :reader cube-world-demo-color-view)
@@ -350,6 +425,75 @@
 (defun remember-cube-world-resource (demo resource)
   (push resource (cube-world-demo-resources demo))
   resource)
+
+(defun refresh-cube-world-mesh (demo)
+  "Publish a fresh mesh and vertex buffer when DEMO's world has changed.
+
+Previously published buffers remain owned by DEMO until teardown because a
+submitted frame may still refer to them."
+  (let* ((world (cube-world-demo-world demo))
+         (revision (block-world-revision world)))
+    (unless (= revision (cube-world-demo-meshed-world-revision demo))
+      (let ((buffer nil) (completed-p nil))
+        (unwind-protect
+             (let* ((mesh (mesh-block-world
+                           (cube-world-demo-mesher demo) world))
+                    (vertices (block-mesh-vertices mesh)))
+               (setf buffer
+                     (create
+                      (cube-world-demo-device demo)
+                      (make-buffer-descriptor
+                       :label (format nil "block world vertices revision ~D"
+                                      revision)
+                       :size (max 4 (* 4 (length vertices)))
+                       :usage '(:vertex))))
+               (write-buffer buffer vertices)
+               (remember-cube-world-resource demo buffer)
+               (setf (cube-world-demo-vertex-buffer demo) buffer
+                     (cube-world-demo-mesh demo) mesh
+                     (cube-world-demo-meshed-world-revision demo) revision
+                     completed-p t))
+          (unless completed-p
+            (when buffer (destroy buffer)))))))
+  (cube-world-demo-mesh demo))
+
+(defun cube-world-demo-target (demo &key (max-distance 8d0))
+  "Raycast from DEMO's camera through resident block terrain."
+  (let ((camera (cube-world-demo-camera demo)))
+    (multiple-value-bind (right up forward) (camera-basis camera)
+      (declare (ignore right up))
+      (raycast-block-world
+       (cube-world-demo-world demo)
+       (vector (camera-x camera) (camera-y camera) (camera-z camera))
+       forward #'block-solid-p :max-distance max-distance))))
+
+(defun edit-cube-world-block (demo action)
+  "Apply ACTION (:REMOVE or :PLACE) along DEMO's centre view ray."
+  (multiple-value-bind (hit status) (cube-world-demo-target demo)
+    (unless hit
+      (return-from edit-cube-world-block (values nil status)))
+    (let* ((world (cube-world-demo-world demo))
+           (coordinate
+             (ecase action
+               (:remove (block-ray-hit-coordinate hit))
+               (:place (block-ray-hit-adjacent-coordinate hit)))))
+      (unless coordinate
+        (return-from edit-cube-world-block (values nil :blocked)))
+      (let ((x (world-coordinate-x coordinate))
+            (y (world-coordinate-y coordinate))
+            (z (world-coordinate-z coordinate)))
+        (multiple-value-bind (old-block residency) (block-at world x y z)
+          (unless (eq residency :resident)
+            (return-from edit-cube-world-block (values nil :absent)))
+          (ecase action
+            (:remove
+             (setf (block-at world x y z) nil))
+            (:place
+             (when old-block
+               (return-from edit-cube-world-block (values nil :blocked)))
+             (setf (block-at world x y z)
+                   (cube-world-demo-selected-block demo))))
+          (values coordinate :edited))))))
 
 (defun cube-world-frame-state (demo surface-texture)
   (or (gethash surface-texture (cube-world-demo-frame-states demo))
@@ -386,6 +530,7 @@
 
 (defun encode-cube-world-frame
     (demo surface-texture encoder &key readback-buffer)
+  (refresh-cube-world-mesh demo)
   (let* ((extent (canvas-extent (cube-world-demo-context demo)))
          (frame (cube-world-frame-state demo surface-texture)))
     (write-buffer
@@ -478,10 +623,16 @@
 
 (defmethod handle-canvas-event
     ((demo cube-world-demo) canvas (event canvas-pointer-button-press-event))
-  (when (and (eq :left (canvas-pointer-event-button event))
-             (not (cube-world-demo-pointer-captured-p demo)))
-    (set-canvas-relative-pointer-mode canvas t)
-    (setf (cube-world-demo-pointer-captured-p demo) t))
+  (let ((button (canvas-pointer-event-button event)))
+    (cond
+      ((not (cube-world-demo-pointer-captured-p demo))
+       (when (eq button :left)
+         (set-canvas-relative-pointer-mode canvas t)
+         (setf (cube-world-demo-pointer-captured-p demo) t)))
+      ((eq button :left)
+       (edit-cube-world-block demo :remove))
+      ((eq button :right)
+       (edit-cube-world-block demo :place))))
   nil)
 
 (defmethod handle-canvas-event
@@ -532,7 +683,9 @@
   "Open a little CPU-meshed block world.
 
 Click to capture the pointer, look with the mouse, fly with WASD, rise with
-Space, descend with either Shift key, and press Escape to release the pointer.
+Space, and descend with either Shift key.  Once captured, left click removes
+the block at the centre of view and right click places the selected block.
+Press Escape to release the pointer.
 
 Pass :VISIBLE-P NIL to keep the SDL window hidden while still exercising the
 real SDL/Vulkan surface and swapchain path.  Pass :FRAMES-PER-SECOND NIL for a
@@ -631,7 +784,9 @@ capture-only demand clock."
                     (make-instance
                      'cube-world-demo
                      :canvas canvas :device device :context context
-                     :world world :mesh mesh :camera camera
+                     :world world :mesher mesher :mesh mesh
+                     :meshed-world-revision (block-world-revision world)
+                     :camera camera
                      :vertex-buffer vertex-buffer
                      :color-texture color-texture :color-view color-view
                      :depth-texture depth-texture :depth-view depth-view

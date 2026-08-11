@@ -33,15 +33,20 @@ The current implementation is split between the renderer-independent model in
 - each resident =block-chunk= owns a finite =chunk-domain= and one dense
   palette-indexed block-content column;
 - a =block-world= owns the resident chunk set and distinguishes resident air
-  from an absent chunk;
+  from an absent chunk, while chunk and world revisions make changes explicit;
+- a seeded =little-world-source= deterministically materializes a three by
+  three square of 16-cubed terrain chunks, then populates sparse rocks and
+  trees after the whole neighborhood is resident;
 - an =exposed-face-mesher= walks resident chunks on the CPU and emits only
   faces beside empty sites, under an explicit absent-neighbor policy;
 - ordinary Lisp computes directional face shade, deterministic colour
   variation, and corner ambient occlusion;
 - structured s-expression SPIR-V transforms the interleaved position/colour
   vertices and adds distance fog;
-- a fly camera, depth buffer, per-frame uniform buffers, and relative pointer
-  input make the result inhabitable; and
+- a lattice DDA ray stops distinctly at a hit, a resident miss, or absent
+  terrain; left and right clicks remove and place blocks through that query;
+- a fly camera, depth buffer, per-frame uniform buffers, relative pointer
+  input, and revision-driven remeshing make the result inhabitable; and
 - renderer-native image readback writes a PNG without screen automation.
 
 The whole slice remains live and inspectable:
@@ -62,6 +67,51 @@ This implementation is evidence that the renderer and lifecycle are ready for
 game-shaped work.  The resident model is a first substrate, not a claim that
 residency, generation, edits, lighting, or derived products have become one
 finished system.
+
+* What the first extension establishes
+:PROPERTIES:
+:ID: E7N4ZS
+:END:
+
+The visible example now starts with nine resident chunks rather than one
+handwritten block array.  Chunk residency is established first; continuous
+height terrain is materialized second; features are populated third.  The
+seed and world coordinates are the inputs, so materializing the same region
+twice is idempotent and two worlds with the same seed agree site for site.
+
+This is already a useful separation of concerns:
+
+#+begin_example
+little-world-source + seed
+          |
+          v
+resident chunk domains -- dense palette-index fields
+          |                         |
+          | edits                   | chunk revisions
+          v                         v
+monotonic world revision ------> derived world mesh
+#+end_example
+
+A resident chunk notifies its owning world when its content actually changes,
+including through the lower-level =chunk-block-at= writer.  Assigning the same
+value is a no-op.  The renderer compares the world revision with the revision
+of its mesh, constructs a fresh CPU mesh and GPU vertex buffer, then publishes
+the pair together.  Older GPU buffers remain owned until demo teardown, so a
+submitted frame is never invalidated by an edit.
+
+The deliberate limitation is that one changed block currently rebuilds the
+whole resident-world mesh.  That is a correctness scaffold, not the desired
+large-world endpoint.  The next derived representation should be owned per
+chunk, carry the source chunk revision plus the neighboring boundary revisions
+on which its exposed faces depend, and retire old GPU buffers at the queue
+completion frontier.  Likewise, bulk materialization currently advances the
+world revision once per changed site; a later materialization transaction can
+coalesce notification without changing the meaning of revisions.
+
+The tests keep these layers visible.  =:luv/world= exercises coordinates,
+domains, palette storage, revisions, residency, and ray traversal without SDL
+or Vulkan.  =:luv/examples= adds deterministic generation, cross-chunk face
+culling, and camera-directed remove/place behavior.
 
 * Landmarks from working voxel engines
 :PROPERTIES:
@@ -122,8 +172,8 @@ coverage, or an approximation error.  There need not be a one-to-one coarse
 "block object."  What remains stable is that a finite domain identifies sites
 and semantic fields have values over those sites.
 
-The eager current world is then one complete materialization of a particularly
-small description, not the definition of worldhood.
+The eager current resident set is then one finite materialization of a
+particularly small description, not the definition of worldhood.
 
 * Things with identity and values at sites
 :PROPERTIES:
@@ -182,15 +232,16 @@ readings may deserve separate fields when algorithms actually consume them.
 The order below is meant to keep each architectural proof attached to a new
 experience:
 
-1. *Look around a little world.*  This is the current checkpoint.
-2. *Touch it.*  Select, remove, and place blocks; rebuild the affected mesh;
-   make edits visible to the REPL and renderer.
-3. *Let it glow.*  Introduce block-content and lighting as the first genuinely
+1. *Look around a little world.*  Done: the camera inhabits generated terrain.
+2. *Touch it.*  Done as a first correctness pass: ray traversal selects,
+   removes, and places blocks, and revisions make the edit visible to the
+   renderer.
+3. *Walk into another chunk.*  The first nine-chunk materialization and
+   cross-boundary mesh proof are done.  Dynamic residency, eviction, and
+   chunk-owned derived products remain.
+4. *Let it glow.*  Introduce block-content and lighting as the first genuinely
    distinct fields.  Add one emissive block and a small CPU light propagation
    rule.
-4. *Walk into another chunk.*  Materialize several finite regions, remesh
-   across their boundaries, and make residency visible rather than pretending
-   the world is always complete.
 5. *Collide with it.*  Derive a chunk collision representation and connect it
    to the separate body/constraint domains described by #Y5H8KC.
 6. *Let the world arrive.*  Generate chunks from a deterministic source, layer

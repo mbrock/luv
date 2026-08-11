@@ -462,6 +462,8 @@ nothing else does."))
            #:block-face-shade
            #:block-world
            #:block-world-space
+           #:block-world-source
+           #:block-world-revision
            #:block-world-residency-revision
            #:make-block-world
            #:world-chunk-at
@@ -469,6 +471,15 @@ nothing else does."))
            #:remove-world-chunk
            #:resident-world-chunks
            #:chunk-not-resident
+           #:block-ray-hit
+           #:block-ray-hit-coordinate
+           #:block-ray-hit-adjacent-coordinate
+           #:block-ray-hit-block
+           #:block-ray-hit-distance
+           #:raycast-block-world
+           #:little-world-source
+           #:little-world-source-seed
+           #:materialize-little-world-chunk
            #:make-little-block-world
            #:block-at
            #:block-mesher
@@ -493,6 +504,11 @@ nothing else does."))
            #:cube-world-demo-world
            #:cube-world-demo-mesh
            #:cube-world-demo-camera
+           #:cube-world-demo-selected-block
+           #:cube-world-demo-meshed-world-revision
+           #:cube-world-demo-target
+           #:edit-cube-world-block
+           #:refresh-cube-world-mesh
            #:cube-world-demo-running-p
            #:start-cube-world-demo
            #:stop-cube-world-demo

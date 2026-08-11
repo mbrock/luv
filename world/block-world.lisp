@@ -227,12 +227,16 @@ coordinates."
 (defclass block-chunk ()
   ((domain :initarg :domain :reader block-chunk-domain)
    (content :initarg :content :reader block-chunk-content)
+   (change-hook :initarg :change-hook :initform nil)
    (revision :initform 0 :reader block-chunk-revision)))
 
-(defun make-block-chunk (domain)
+(defun make-block-chunk (domain &key change-hook)
   (check-type domain chunk-domain)
+  (unless (or (null change-hook) (functionp change-hook))
+    (error "A block chunk change hook must be a function or NIL."))
   (make-instance 'block-chunk
                  :domain domain
+                 :change-hook change-hook
                  :content (make-block-content-column
                            (chunk-domain-cardinality domain))))
 
@@ -250,7 +254,10 @@ coordinates."
          (chunk-domain-offset (block-chunk-domain chunk)
                               (make-local-coordinate x y z))
          block)
-    (incf (slot-value chunk 'revision)))
+    (incf (slot-value chunk 'revision))
+    (let ((change-hook (slot-value chunk 'change-hook)))
+      (when change-hook
+        (funcall change-hook chunk))))
   block)
 
 (defun map-chunk-blocks (function chunk)
@@ -271,7 +278,8 @@ coordinates."
 
 ;;; A block world is the resident environment, not the complete world
 ;;; description.  Its residency revision changes only when chunks enter or
-;;; leave; each chunk has its own content revision.
+;;; leave; its general revision includes residency and content changes; and
+;;; each chunk has its own content revision.
 
 (define-condition chunk-not-resident (error)
   ((world-coordinate :initarg :world-coordinate
@@ -286,8 +294,10 @@ coordinates."
 
 (defclass block-world ()
   ((space :initarg :space :reader block-world-space)
+   (source :initarg :source :initform nil :reader block-world-source)
    (chunks :initform (make-hash-table :test #'equal)
            :reader block-world-chunks)
+   (revision :initform 0 :reader block-world-revision)
    (residency-revision :initform 0
                        :reader block-world-residency-revision)))
 
@@ -295,9 +305,11 @@ coordinates."
                               (chunk-width 16)
                               (chunk-height 16)
                               (chunk-depth 16)
-                              (cell-extent 1d0))
+                              (cell-extent 1d0)
+                              source)
   (make-instance
    'block-world
+   :source source
    :space (make-voxel-space
            :id id
            :chunk-shape (make-chunk-shape :width chunk-width
@@ -323,10 +335,17 @@ coordinates."
         chunk
         (let* ((coordinate (make-chunk-coordinate x y z))
                (domain (make-chunk-domain (block-world-space world) coordinate))
-               (new-chunk (make-block-chunk domain)))
+               (new-chunk
+                 (make-block-chunk
+                  domain
+                  :change-hook
+                  (lambda (changed-chunk)
+                    (declare (ignore changed-chunk))
+                    (incf (slot-value world 'revision))))))
           (setf (gethash (chunk-key x y z) (block-world-chunks world))
                 new-chunk)
           (incf (slot-value world 'residency-revision))
+          (incf (slot-value world 'revision))
           new-chunk))))
 
 (defun remove-world-chunk (world x y z)
@@ -334,8 +353,12 @@ coordinates."
   (multiple-value-bind (chunk present-p)
       (gethash (chunk-key x y z) (block-world-chunks world))
     (when present-p
+      ;; A removed chunk may outlive its residency in an inspector or cache,
+      ;; but it no longer owns the right to invalidate this world.
+      (setf (slot-value chunk 'change-hook) nil)
       (remhash (chunk-key x y z) (block-world-chunks world))
-      (incf (slot-value world 'residency-revision)))
+      (incf (slot-value world 'residency-revision))
+      (incf (slot-value world 'revision)))
     (values chunk present-p)))
 
 (defun resident-world-chunks (world)
@@ -399,3 +422,105 @@ coordinates."
                             (local-coordinate-y local-coordinate)
                             (local-coordinate-z local-coordinate))
             block))))
+
+;;; Ray traversal is expressed in continuous lattice coordinates: integer
+;;; planes are cell boundaries, independently of the physical cell extent.
+;;; The traversal stops at absent terrain rather than silently seeing air.
+
+(defstruct (block-ray-hit
+             (:constructor %make-block-ray-hit
+                 (coordinate adjacent-coordinate block distance)))
+  (coordinate nil :type world-coordinate :read-only t)
+  (adjacent-coordinate nil :type (or null world-coordinate) :read-only t)
+  (block nil :read-only t)
+  (distance 0d0 :type double-float :read-only t))
+
+(defun ray-component (sequence index)
+  (unless (and (typep sequence 'sequence) (= (length sequence) 3))
+    (error "A block-world ray needs a three-component sequence: ~S" sequence))
+  (let ((component (elt sequence index)))
+    (check-type component real)
+    (coerce component 'double-float)))
+
+(defun raycast-block-world
+    (world origin direction occupied-p &key (max-distance 8d0))
+  "Trace a ray through WORLD's resident lattice.
+
+Return a BLOCK-RAY-HIT and :HIT, NIL and :ABSENT when traversal reaches a
+non-resident chunk, or NIL and :MISS.  ORIGIN and DIRECTION are
+three-component sequences in continuous cell coordinates."
+  (check-type world block-world)
+  (check-type max-distance (real 0))
+  (unless (functionp occupied-p)
+    (error "OCCUPIED-P must be a function."))
+  (let* ((origin-x (ray-component origin 0))
+         (origin-y (ray-component origin 1))
+         (origin-z (ray-component origin 2))
+         (raw-x (ray-component direction 0))
+         (raw-y (ray-component direction 1))
+         (raw-z (ray-component direction 2))
+         (magnitude (sqrt (+ (* raw-x raw-x)
+                             (* raw-y raw-y)
+                             (* raw-z raw-z)))))
+    (unless (plusp magnitude)
+      (error "A block-world ray direction must be non-zero."))
+    (let* ((direction-x (/ raw-x magnitude))
+           (direction-y (/ raw-y magnitude))
+           (direction-z (/ raw-z magnitude))
+           (cell-x (floor origin-x))
+           (cell-y (floor origin-y))
+           (cell-z (floor origin-z))
+           (step-x (cond ((plusp direction-x) 1)
+                         ((minusp direction-x) -1)
+                         (t 0)))
+           (step-y (cond ((plusp direction-y) 1)
+                         ((minusp direction-y) -1)
+                         (t 0)))
+           (step-z (cond ((plusp direction-z) 1)
+                         ((minusp direction-z) -1)
+                         (t 0)))
+           (infinity most-positive-double-float)
+           (delta-x (if (zerop step-x) infinity (abs (/ direction-x))))
+           (delta-y (if (zerop step-y) infinity (abs (/ direction-y))))
+           (delta-z (if (zerop step-z) infinity (abs (/ direction-z))))
+           (boundary-x (if (plusp step-x) (1+ cell-x) cell-x))
+           (boundary-y (if (plusp step-y) (1+ cell-y) cell-y))
+           (boundary-z (if (plusp step-z) (1+ cell-z) cell-z))
+           (next-x (if (zerop step-x)
+                       infinity
+                       (/ (- boundary-x origin-x) direction-x)))
+           (next-y (if (zerop step-y)
+                       infinity
+                       (/ (- boundary-y origin-y) direction-y)))
+           (next-z (if (zerop step-z)
+                       infinity
+                       (/ (- boundary-z origin-z) direction-z)))
+           (distance 0d0)
+           (adjacent nil))
+      (loop
+        (multiple-value-bind (block status)
+            (block-at world cell-x cell-y cell-z)
+          (when (eq status :absent)
+            (return (values nil :absent)))
+          (when (funcall occupied-p block)
+            (return
+              (values
+               (%make-block-ray-hit
+                (make-world-coordinate cell-x cell-y cell-z)
+                adjacent block (coerce distance 'double-float))
+               :hit))))
+        (let ((next-distance (min next-x next-y next-z)))
+          (when (> next-distance max-distance)
+            (return (values nil :miss)))
+          (setf adjacent (make-world-coordinate cell-x cell-y cell-z)
+                distance next-distance)
+          (cond
+            ((and (<= next-x next-y) (<= next-x next-z))
+             (incf cell-x step-x)
+             (incf next-x delta-x))
+            ((and (<= next-y next-x) (<= next-y next-z))
+             (incf cell-y step-y)
+             (incf next-y delta-y))
+            (t
+             (incf cell-z step-z)
+             (incf next-z delta-z))))))))
