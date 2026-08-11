@@ -65,9 +65,23 @@
 (defparameter *leaf-block*
   (make-instance 'block-kind :name :leaves
                              :face-tiles '(:all 6)))
+(defparameter *sand-block*
+  (make-instance 'block-kind :name :sand
+                             :face-tiles '(:all 7)))
+(defparameter *snow-block*
+  (make-instance 'block-kind :name :snow
+                             :face-tiles '(:top 8 :side 8 :bottom 2)))
+
+(defparameter *placeable-block-kinds*
+  (list *grass-block* *dirt-block* *stone-block* *wood-block*
+        *leaf-block* *sand-block* *snow-block*))
+
+(defun placeable-block-kinds ()
+  "Return the numbered material palette used by luvcraft and its tools."
+  (copy-list *placeable-block-kinds*))
 
 (defconstant +block-atlas-tile-size+ 16)
-(defconstant +block-atlas-tile-count+ 7)
+(defconstant +block-atlas-tile-count+ 9)
 
 (defun block-atlas-byte (value)
   (max 0 (min 255 (round value))))
@@ -105,6 +119,12 @@
              (pixel 133 91 49 (- ring 9))))
         (6 (pixel 51 132 58
                   (+ variation (if (evenp (+ x y)) 8 -8))))
+        (7 (pixel 205 185 128
+                  (+ (round variation 2)
+                     (if (zerop (mod (+ x (* y 3)) 13)) 13 0))))
+        (8 (pixel 226 238 242
+                  (+ (round variation 3)
+                     (if (zerop (mod (+ (* x 5) (* y 7)) 23)) 14 0))))
         (otherwise (error "Unknown block atlas tile ~D." tile))))))
 
 (defun make-block-texture-atlas ()
@@ -165,11 +185,25 @@
 
 (defun little-world-surface-height (source x z height)
   (let ((reading
-          (+ 5.0d0
-             (* 2.8d0 (little-world-value-noise source x z 64 0))
-             (* 1.4d0 (little-world-value-noise source x z 28 1))
-             (* 0.65d0 (little-world-value-noise source x z 11 2)))))
-    (max 2 (min (- height 6) (round reading)))))
+          (+ 5.5d0
+             (* 3.2d0 (little-world-value-noise source x z 64 0))
+             (* 1.7d0 (little-world-value-noise source x z 28 1))
+             (* 0.8d0 (little-world-value-noise source x z 11 2)))))
+    (max 2 (min (- height 4) (round reading)))))
+
+(defun little-world-surface-material (source x z surface height)
+  "Choose a visible biome material from height, moisture, and local slope."
+  (let* ((moisture (little-world-value-noise source x z 52 17))
+         (slope
+           (loop for (dx dz) in '((-1 0) (1 0) (0 -1) (0 1))
+                 maximize
+                 (abs (- surface
+                         (little-world-surface-height
+                          source (+ x dx) (+ z dz) height))))))
+    (cond ((>= surface 9) *snow-block*)
+          ((or (<= surface 3) (< moisture -0.48d0)) *sand-block*)
+          ((>= slope 2) *stone-block*)
+          (t *grass-block*))))
 
 (defgeneric materialize-block-world-chunk
     (source world chunk-x chunk-y chunk-z))
@@ -193,11 +227,15 @@
         (dotimes (local-x width)
           (let* ((x (+ (world-coordinate-x origin) local-x))
                  (z (+ (world-coordinate-z origin) local-z))
-                 (surface (little-world-surface-height source x z height)))
+                 (surface (little-world-surface-height source x z height))
+                 (surface-material
+                   (little-world-surface-material
+                    source x z surface height)))
             (dotimes (y (1+ surface))
               (setf (block-at world x y z)
-                    (cond ((= y surface) *grass-block*)
+                    (cond ((= y surface) surface-material)
                           ((or (zerop y) (< y (- surface 2))) *stone-block*)
+                          ((eq surface-material *sand-block*) *sand-block*)
                           (t *dirt-block*)))))))
       chunk)))
 
@@ -233,13 +271,29 @@
                (tree-z (+ origin-z 3 (mod (ash hash -11) (- depth 6))))
                (surface (little-world-surface-height
                          source tree-x tree-z height))
-               (crown (+ surface 4)))
-          (loop for y from (1+ surface) below crown
-                do (setf (block-at world tree-x y tree-z) *wood-block*))
-          (loop for x from (1- tree-x) to (1+ tree-x)
-                do (loop for z from (1- tree-z) to (1+ tree-z)
-                         do (setf (block-at world x crown z) *leaf-block*)))
-          (setf (block-at world tree-x (1+ crown) tree-z) *leaf-block*))))))
+               (surface-material
+                 (little-world-surface-material
+                  source tree-x tree-z surface height))
+               (trunk-height (+ 3 (mod (ash hash -23) 2)))
+               (crown (+ surface trunk-height)))
+          (when (and (eq surface-material *grass-block*)
+                     (< (+ crown 2) height))
+            (loop for y from (1+ surface) to crown
+                  do (setf (block-at world tree-x y tree-z) *wood-block*))
+            ;; A broad, clipped lower crown and a small bright upper crown
+            ;; make silhouettes much less like identical green boxes.
+            (loop for x from (- tree-x 2) to (+ tree-x 2) do
+              (loop for z from (- tree-z 2) to (+ tree-z 2)
+                    when (<= (+ (abs (- x tree-x))
+                                (abs (- z tree-z)))
+                             3)
+                      do (setf (block-at world x crown z) *leaf-block*)))
+            (loop for x from (1- tree-x) to (1+ tree-x) do
+              (loop for z from (1- tree-z) to (1+ tree-z)
+                    do (setf (block-at world x (1+ crown) z)
+                             *leaf-block*)))
+            (setf (block-at world tree-x (+ crown 2) tree-z)
+                  *leaf-block*)))))))
 
 (defmethod populate-block-world-chunk
     ((source little-world-source) (world block-world)
@@ -710,7 +764,10 @@ terrain, populate landmarks, then replay sparse edits."
                           (* right-amount right-amount))))
          (forward-amount (if (plusp length) (/ forward-amount length) 0d0))
          (right-amount (if (plusp length) (/ right-amount length) 0d0))
-         (speed (player-walk-speed player))
+         (sprinting-p
+           (camera-key-down-p pressed-keys :shift-left :shift-right))
+         (speed (* (player-walk-speed player)
+                   (if sprinting-p 1.65d0 1d0)))
          (target-x (* speed (+ (* (sin yaw) forward-amount)
                                (* (cos yaw) right-amount))))
          (target-z (* speed (+ (* (cos yaw) forward-amount)
@@ -744,6 +801,33 @@ terrain, populate landmarks, then replay sparse edits."
                    :reader cube-world-frame-uniform-buffer)
    (bind-group :initarg :bind-group :reader cube-world-frame-bind-group)))
 
+(defconstant +block-world-crosshair-vertex-count+ 24)
+
+(defun make-block-world-crosshair-vertices (width height)
+  "Make an outlined pixel-sized crosshair in Vulkan clip coordinates."
+  (let ((vertices (make-array 0 :element-type 'single-float
+                                :adjustable t :fill-pointer 0)))
+    (labels ((clip-x (pixels) (/ (* 2.0 pixels) width))
+             (clip-y (pixels) (/ (* 2.0 pixels) height))
+             (vertex (x y color)
+               (dolist (component
+                        (list (clip-x x) (clip-y y) 0.0
+                              (first color) (second color) (third color)))
+                 (vector-push-extend (coerce component 'single-float)
+                                     vertices)))
+             (rectangle (left top right bottom color)
+               (dolist (corner (list (list left top) (list right top)
+                                     (list right bottom) (list left top)
+                                     (list right bottom) (list left bottom)))
+                 (vertex (first corner) (second corner) color))))
+      ;; Charcoal establishes a crisp edge on both snow and foliage; the
+      ;; smaller white pair is emitted afterward and paints over it.
+      (rectangle -2.25 -11.0 2.25 11.0 '(0.08 0.09 0.10))
+      (rectangle -11.0 -2.25 11.0 2.25 '(0.08 0.09 0.10))
+      (rectangle -0.75 -8.0 0.75 8.0 '(0.96 0.98 1.0))
+      (rectangle -8.0 -0.75 8.0 0.75 '(0.96 0.98 1.0)))
+    vertices))
+
 (defparameter *chunk-neighbor-directions*
   '((-1 0 0) (1 0 0) (0 -1 0) (0 1 0) (0 0 -1) (0 0 1)))
 
@@ -776,6 +860,8 @@ terrain, populate landmarks, then replay sparse edits."
                      :accessor cube-world-demo-residency-center)
    (selected-block :initarg :selected-block :initform *stone-block*
                    :accessor cube-world-demo-selected-block)
+   (title-base :initarg :title-base :initform "luvcraft"
+               :reader cube-world-demo-title-base)
    (atlas-texture :initarg :atlas-texture
                   :reader cube-world-demo-atlas-texture)
    (atlas-view :initarg :atlas-view :reader cube-world-demo-atlas-view)
@@ -789,6 +875,12 @@ terrain, populate landmarks, then replay sparse edits."
    (depth-view :initarg :depth-view :reader cube-world-demo-depth-view)
    (layout :initarg :layout :reader cube-world-demo-layout)
    (pipeline :initarg :pipeline :reader cube-world-demo-pipeline)
+   (crosshair-vertex-buffer
+    :initarg :crosshair-vertex-buffer
+    :reader cube-world-demo-crosshair-vertex-buffer)
+   (crosshair-pipeline
+    :initarg :crosshair-pipeline
+    :reader cube-world-demo-crosshair-pipeline)
    (frame-states :initform (make-hash-table :test #'eq)
                  :reader cube-world-demo-frame-states)
    (resources :initarg :resources :initform nil
@@ -943,6 +1035,35 @@ still owns their last use."
        (vector (camera-x camera) (camera-y camera) (camera-z camera))
        forward #'block-solid-p :max-distance max-distance))))
 
+(defun update-cube-world-demo-title (demo)
+  (let* ((block (cube-world-demo-selected-block demo))
+         (number (position block *placeable-block-kinds* :test #'eq)))
+    (when (slot-boundp demo 'canvas)
+      (setf (canvas-title (cube-world-demo-canvas demo))
+            (format nil "~A — [~A] ~(~A~)  ·  1–7 select  ·  shift sprint"
+                    (cube-world-demo-title-base demo)
+                    (if number (1+ number) "?")
+                    (block-kind-name block)))))
+  demo)
+
+(defun select-cube-world-block (demo number)
+  "Select the one-based numbered placeable material and update the title."
+  (check-type number (integer 1))
+  (let ((block (nth (1- number) *placeable-block-kinds*)))
+    (when block
+      (setf (cube-world-demo-selected-block demo) block)
+      (update-cube-world-demo-title demo))
+    block))
+
+(defun pick-cube-world-block (demo)
+  "Select the material currently under the centre crosshair."
+  (multiple-value-bind (hit status) (cube-world-demo-target demo)
+    (when hit
+      (setf (cube-world-demo-selected-block demo)
+            (block-ray-hit-block hit))
+      (update-cube-world-demo-title demo))
+    (values (and hit (block-ray-hit-block hit)) status)))
+
 (defun edit-cube-world-block (demo action)
   "Apply ACTION (:REMOVE or :PLACE) along DEMO's centre view ray."
   (multiple-value-bind (hit status) (cube-world-demo-target demo)
@@ -1041,6 +1162,10 @@ still owns their last use."
             (set-vertex-buffer
              pass 0 (cube-world-chunk-product-vertex-buffer product))
             (draw pass (block-mesh-vertex-count mesh)))))
+      (set-pipeline pass (cube-world-demo-crosshair-pipeline demo))
+      (set-vertex-buffer
+       pass 0 (cube-world-demo-crosshair-vertex-buffer demo))
+      (draw pass +block-world-crosshair-vertex-count+)
       (end-pass pass))
     (when readback-buffer
       (encode
@@ -1116,7 +1241,12 @@ still owns their last use."
           (setf (gethash key (cube-world-demo-pressed-keys demo)) t)
           (when (and (eq key :space)
                      (not (canvas-key-event-repeat-p event)))
-            (setf (cube-world-demo-jump-requested-p demo) t)))))
+            (setf (cube-world-demo-jump-requested-p demo) t))
+          (unless (canvas-key-event-repeat-p event)
+            (let* ((character (canvas-key-event-character event))
+                   (number (and character (digit-char-p character))))
+              (when (and number (<= 1 number 7))
+                (select-cube-world-block demo number)))))))
   nil)
 
 (defmethod handle-canvas-event
@@ -1137,7 +1267,9 @@ still owns their last use."
       ((eq button :left)
        (edit-cube-world-block demo :remove))
       ((eq button :right)
-       (edit-cube-world-block demo :place))))
+       (edit-cube-world-block demo :place))
+      ((eq button :middle)
+       (pick-cube-world-block demo))))
   nil)
 
 (defmethod handle-canvas-event
@@ -1192,8 +1324,9 @@ still owns their last use."
 
 Click to capture the pointer, look with the mouse, walk with WASD, and jump
 with Space.  Once captured, left click removes the block at the centre of view
-and right click places the selected block.  Press Escape to release the
-pointer.
+and right click places the selected block.  Number keys select materials,
+middle click picks the targeted material, Shift sprints, and Escape releases
+the pointer.
 
 Pass :VISIBLE-P NIL to keep the SDL window hidden while still exercising the
 real SDL/Vulkan surface and swapchain path.  Pass :FRAMES-PER-SECOND NIL for a
@@ -1276,6 +1409,31 @@ capture-only demand clock."
                      (create device (make-shader-module-descriptor
                                      :label "block world fragment shader"
                                      :code (spv:block-world-fragment-shader)))))
+                  (crosshair-vertices
+                    (make-block-world-crosshair-vertices
+                     (first extent) (second extent)))
+                  (crosshair-vertex-buffer
+                    (keep
+                     (create
+                      device
+                      (make-buffer-descriptor
+                       :label "block world crosshair vertices"
+                       :size (* 4 (length crosshair-vertices))
+                       :usage '(:vertex)))))
+                  (crosshair-vertex-module
+                    (keep
+                     (create
+                      device
+                      (make-shader-module-descriptor
+                       :label "block world crosshair vertex shader"
+                       :code (spv:block-world-crosshair-vertex-shader)))))
+                  (crosshair-fragment-module
+                    (keep
+                     (create
+                      device
+                      (make-shader-module-descriptor
+                       :label "block world crosshair fragment shader"
+                       :code (spv:block-world-crosshair-fragment-shader)))))
                   (layout
                     (keep
                      (create
@@ -1309,6 +1467,28 @@ capture-only demand clock."
                        :depth-stencil
                        '(:format :depth32-float
                          :depth-write-enabled t :depth-compare :less)))))
+                  (crosshair-pipeline
+                    (keep
+                     (create
+                      device
+                      (make-render-pipeline-descriptor
+                       :label "block world crosshair pipeline"
+                       :layout layout
+                       :vertex
+                       `(:module ,crosshair-vertex-module
+                         :buffers ((:array-stride 24
+                                    :attributes
+                                    ((:shader-location 0 :offset 0
+                                      :format :float32x3)
+                                     (:shader-location 1 :offset 12
+                                      :format :float32x3)))))
+                       :fragment
+                       `(:module ,crosshair-fragment-module
+                         :targets ((:format ,(canvas-format context))))
+                       :primitive '(:topology :triangle-list)
+                       :depth-stencil
+                       '(:format :depth32-float
+                         :depth-write-enabled nil :depth-compare :always)))))
                   (new-demo
                     (make-instance
                      'cube-world-demo
@@ -1317,12 +1497,16 @@ capture-only demand clock."
                      :camera (sync-camera-to-player camera player)
                      :player player
                      :residency-radius residency-radius
+                     :title-base title
                      :atlas-texture atlas-texture :atlas-view atlas-view
                      :atlas-sampler atlas-sampler
                      :color-texture color-texture :color-view color-view
                      :depth-texture depth-texture :depth-view depth-view
                      :layout layout :pipeline pipeline
+                     :crosshair-vertex-buffer crosshair-vertex-buffer
+                     :crosshair-pipeline crosshair-pipeline
                      :resources resources)))
+             (write-buffer crosshair-vertex-buffer crosshair-vertices)
              (write-texture
               (device-queue device)
               (make-texture-copy :texture atlas-texture)
@@ -1332,6 +1516,7 @@ capture-only demand clock."
                :rows-per-image atlas-height)
               (list atlas-width atlas-height))
              (setf demo new-demo)
+             (update-cube-world-demo-title demo)
              (maintain-cube-world-residency demo)
              (refresh-cube-world-mesh demo)
              (setf (canvas-event-handler canvas) demo

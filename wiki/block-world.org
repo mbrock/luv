@@ -36,8 +36,9 @@ The current implementation is split between the renderer-independent model in
   from an absent chunk, while chunk and world revisions make changes explicit;
 - a seeded =little-world-source= deterministically materializes a sliding
   nine by nine square of 16-cubed terrain chunks from multi-scale value noise,
-  then populates sparse rocks and trees after the whole neighborhood is
-  resident;
+  chooses grassy, sandy, snowy, and rocky surfaces from height, moisture, and
+  local slope, then populates varied rocks and layered tree crowns after the
+  whole neighborhood is resident;
 - a sparse edit overlay records explicit removals and placements separately
   from generated content and replays them after chunk rematerialization;
 - an =exposed-face-mesher= walks resident chunks on the CPU and emits only
@@ -49,10 +50,12 @@ The current implementation is split between the renderer-independent model in
   samples the atlas, applies ambient plus directional sun lighting, and fades
   distant terrain into the sky;
 - a lattice DDA ray stops distinctly at a hit, a resident miss, or absent
-  terrain; left and right clicks remove and place blocks through that query;
+  terrain; an outlined Vulkan crosshair shows that ray, left and right clicks
+  remove and place, middle click picks, and number keys select seven materials;
 - a separate player AABB advances at fixed 120 Hz against the voxel lattice,
   with gravity, grounding, wall collision, acceleration, and jumping; the eye
-  camera follows the body while relative pointer input controls its view;
+  camera follows the body while relative pointer input controls its view and
+  Shift raises the same controller's target speed for sprinting;
 - a depth buffer, per-frame uniform buffers, and revision-driven per-chunk
   remeshing keep that inhabitable view on the real renderer;
   and

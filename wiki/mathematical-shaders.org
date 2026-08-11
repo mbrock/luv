@@ -124,13 +124,16 @@ global table saying that the =f-mul= opcode exists.
 :END:
 
 [[file:../mcclim-shader-lab.lisp][=mcclim-shader-lab.lisp=]] defines a real application frame on luv's McCLIM
-backend.  Its left pane renders declarations and nested mathematical
+backend.  Its material header renders the generated atlas as selectable block
+cards and offers live tabs for the block-surface and crosshair fragment
+specifications.  Its left pane renders declarations and nested mathematical
 expressions.  Its right pane renders CLOS functions, basic blocks, and literal
-SSA instruction forms.  Expressions, instructions, and blocks are distinct
-McCLIM presentation types.
+SSA instruction forms.  Materials, specifications, expressions, instructions,
+and blocks are distinct McCLIM presentation types.
 
 Selecting an expression highlights its associated instructions.  Selecting
-an instruction follows the reverse provenance map back to an expression.
+an instruction keeps that machine occurrence selected while following the
+reverse provenance map to highlight its source expression.
 The detail pane reports the source form, inferred type, and association count.
 The presentation objects are the compiler objects themselves; there is no
 parallel UI tree whose identities can drift.
@@ -146,11 +149,13 @@ In the durable SLY image:
 (luv.mcclim:close-shader-lab *shader-lab*)
 #+end_src
 
-The first live block-material frame contains 46 expression presentations, 34
-instruction presentations (including the module constants), and one
-basic-block presentation.  Invoking the
-same commands used by the select gesture in either direction returns to the
-=(* albedo light)= expression and forces both panes to redisplay.
+The workbench runs =run-frame-top-level= in its own McCLIM process; SDL
+translates native events, while the frame command loop resolves presentation
+gestures.  Closing the helper interrupts that process with =frame-exit= and
+lets the usual disown/native teardown path run.  The block-surface view has 46
+expression presentations, 34 instruction presentations (including module
+constants), one basic-block presentation, two shader tabs, and seven live
+material cards.
 
 * What this does not decide
 :PROPERTIES:

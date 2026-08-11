@@ -221,6 +221,7 @@
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on (#:luv/canvas
+               #:luv/examples
                #:luv/spir-v
                #:mcclim-render)
   :serial t

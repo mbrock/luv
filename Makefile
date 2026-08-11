@@ -23,9 +23,13 @@ shader-validate:
 		--eval '(asdf:load-asd (truename "luv.asd"))' \
 		--eval '(asdf:load-system :luv/spir-v)' \
 		--eval '(luv.spir-v:write-spir-v (luv.spir-v:block-world-vertex-shader) #p"build/block-world.vert.spv")' \
-		--eval '(luv.spir-v:write-spir-v (luv.spir-v:block-world-fragment-shader) #p"build/block-world.frag.spv")'
+		--eval '(luv.spir-v:write-spir-v (luv.spir-v:block-world-fragment-shader) #p"build/block-world.frag.spv")' \
+		--eval '(luv.spir-v:write-spir-v (luv.spir-v:block-world-crosshair-vertex-shader) #p"build/block-world-crosshair.vert.spv")' \
+		--eval '(luv.spir-v:write-spir-v (luv.spir-v:block-world-crosshair-fragment-shader) #p"build/block-world-crosshair.frag.spv")'
 	nix develop -c spirv-val --target-env vulkan1.0 build/block-world.vert.spv
 	nix develop -c spirv-val --target-env vulkan1.0 build/block-world.frag.spv
+	nix develop -c spirv-val --target-env vulkan1.0 build/block-world-crosshair.vert.spv
+	nix develop -c spirv-val --target-env vulkan1.0 build/block-world-crosshair.frag.spv
 
 smoke: luvcraft
 	mkdir -p build

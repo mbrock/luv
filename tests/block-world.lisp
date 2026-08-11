@@ -78,7 +78,7 @@
 
 (deftest block-atlas-and-mesh-vertices-carry-material-readings
   (let ((atlas (make-block-texture-atlas)))
-    (ok (equal (array-dimensions atlas) '(16 112)))
+    (ok (equal (array-dimensions atlas) '(16 144)))
     (ok (subtypep (array-element-type atlas) '(unsigned-byte 32)))
     (ok (= (ldb (byte 8 24) (aref atlas 8 8)) 255))
     (ok (/= (aref atlas 8 8) (aref atlas 8 (+ 8 (* 3 16))))))
@@ -87,7 +87,10 @@
     (ok (= (block-face-tile luv::*grass-block* (face :top)) 0))
     (ok (= (block-face-tile luv::*grass-block* (face :front)) 1))
     (ok (= (block-face-tile luv::*grass-block* (face :bottom)) 2))
-    (ok (= (block-face-tile luv::*wood-block* (face :top)) 5)))
+    (ok (= (block-face-tile luv::*wood-block* (face :top)) 5))
+    (ok (= (block-face-tile luv::*sand-block* (face :top)) 7))
+    (ok (= (block-face-tile luv::*snow-block* (face :top)) 8))
+    (ok (= (length (placeable-block-kinds)) 7)))
   (let ((world (make-block-world :chunk-width 2
                                  :chunk-height 2
                                  :chunk-depth 2)))
@@ -96,6 +99,32 @@
     (let ((mesh (mesh-block-world (make-instance 'exposed-face-mesher) world)))
       (ok (= (length (block-mesh-vertices mesh))
              (* 9 (block-mesh-vertex-count mesh)))))))
+
+(deftest little-world-has-readable-biome-materials
+  (let ((source (make-instance 'little-world-source :seed 121))
+        (materials (make-hash-table :test #'eq)))
+    (loop for x from -96 to 96 by 4 do
+      (loop for z from -96 to 96 by 4
+            for surface = (little-world-surface-height source x z 16)
+            do (setf (gethash
+                      (little-world-surface-material
+                       source x z surface 16)
+                      materials)
+                     t)))
+    (ok (gethash luv::*grass-block* materials))
+    (ok (gethash luv::*sand-block* materials))
+    (ok (gethash luv::*snow-block* materials))))
+
+(deftest crosshair-and-numbered-materials-are-playable-state
+  (let* ((vertices (luv::make-block-world-crosshair-vertices 960 640))
+         (demo (make-instance 'cube-world-demo
+                              :selected-block luv::*stone-block*)))
+    (ok (= (length vertices)
+           (* luv::+block-world-crosshair-vertex-count+ 6)))
+    (ok (eq (select-cube-world-block demo 1) luv::*grass-block*))
+    (ok (eq (cube-world-demo-selected-block demo) luv::*grass-block*))
+    (ok (eq (select-cube-world-block demo 7) luv::*snow-block*))
+    (ok (null (select-cube-world-block demo 8)))))
 
 (deftest scalar-player-walks-collides-and-jumps
   (let* ((world (make-block-world :chunk-width 4

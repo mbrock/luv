@@ -128,7 +128,13 @@
     (ok (equal (forms) (forms)))
     (let ((words (spv:block-world-fragment-shader)))
       (ok (> (length words) 5))
-      (ok (= (aref words 0) #x07230203)))))
+      (ok (= (aref words 0) #x07230203)))
+    (let ((vertex (spv:block-world-crosshair-vertex-shader))
+          (fragment (spv:block-world-crosshair-fragment-shader)))
+      (ok (> (length vertex) 5))
+      (ok (> (length fragment) 5))
+      (ok (= (aref vertex 0) #x07230203))
+      (ok (= (aref fragment 0) #x07230203)))))
 
 (deftest shader-diagnostics-name-the-source-failure
   (let ((unknown-reason

@@ -485,6 +485,7 @@ nothing else does."))
            #:little-world-source-edits
            #:little-world-value-noise
            #:little-world-surface-height
+           #:little-world-surface-material
            #:materialize-block-world-chunk
            #:populate-block-world-chunk
            #:apply-block-world-source-edits
@@ -513,6 +514,7 @@ nothing else does."))
            #:chunk-mesh-dependency-stamp
            #:emit-block-face
            #:make-block-texture-atlas
+           #:placeable-block-kinds
            #:fly-camera
            #:camera-x
            #:camera-y
@@ -550,6 +552,8 @@ nothing else does."))
            #:cube-world-demo-residency-center
            #:maintain-cube-world-residency
            #:cube-world-demo-selected-block
+           #:select-cube-world-block
+           #:pick-cube-world-block
            #:cube-world-demo-atlas-texture
            #:cube-world-demo-atlas-view
            #:cube-world-demo-atlas-sampler

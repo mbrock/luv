@@ -41,6 +41,9 @@
            #:shader-lab
            #:shader-lab-lowering
            #:shader-lab-selection
+           #:shader-lab-specifications
+           #:shader-lab-materials
+           #:shader-lab-process
            #:open-shader-lab
            #:close-shader-lab
            #:spinning-texture-compositor

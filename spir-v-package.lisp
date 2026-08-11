@@ -122,5 +122,10 @@
            #:block-world-fragment-specification
            #:block-world-fragment-lowering
            #:block-world-fragment-module
+           #:block-world-crosshair-vertex-module
+           #:block-world-crosshair-fragment-specification
+           #:block-world-crosshair-fragment-module
            #:block-world-vertex-shader
-           #:block-world-fragment-shader))
+           #:block-world-fragment-shader
+           #:block-world-crosshair-vertex-shader
+           #:block-world-crosshair-fragment-shader))

@@ -118,8 +118,15 @@ of durable image.
 ```
 
 Click the block-world window once to capture the pointer. Walk with WASD and
-jump with Space; left click removes the block at the centre of the view,
-right click places stone beside it, and Escape releases the pointer.
+jump with Space; hold Shift to sprint. The outlined centre crosshair is the
+edit ray: left click removes, right click places, middle click picks, and the
+number keys 1–7 select grass, dirt, stone, wood, leaves, sand, or snow.
+Escape releases the pointer.
+
+The shader lab is also a luvcraft material workbench. Its live atlas cards and
+shader tabs are McCLIM presentations; click between the block-surface and
+crosshair materials, then select expressions or SSA occurrences to follow the
+compiler's provenance in either direction.
 
 The hidden screenshot path is useful in CI-ish or server-ish environments:
 

@@ -38,3 +38,23 @@
 (defun block-world-fragment-shader ()
   (assemble-spir-v-module (block-world-fragment-module)))
 
+;;; The crosshair is deliberately another tiny mathematical material rather
+;;; than a magic fixed-function colour.  Its vertex half remains in SHADER.LISP
+;;; because the expression language does not yet pretend that integer vertex
+;;; indexing and position built-ins are ordinary fragment mathematics.
+
+(define-shader block-world-crosshair-fragment-specification
+    (:stage :fragment
+     :inputs ((ink-input :vec3 :location 0))
+     :outputs ((color-output :vec4 :location 0)))
+  (let* ((ink ink-input)
+         (rgba (vec4 ink 1.0)))
+    (set-output color-output rgba)))
+
+(defun block-world-crosshair-fragment-module ()
+  (shader-lowering-module
+   (compile-shader-specification
+    (block-world-crosshair-fragment-specification))))
+
+(defun block-world-crosshair-fragment-shader ()
+  (assemble-spir-v-module (block-world-crosshair-fragment-module)))
