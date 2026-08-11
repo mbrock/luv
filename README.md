@@ -111,8 +111,8 @@ of durable image.
 (luv:stop-cube-world-demo *world*)
 ```
 
-Click the block-world window once to capture the pointer. Fly with WASD,
-Space, and Shift; left click removes the block at the centre of the view,
+Click the block-world window once to capture the pointer. Walk with WASD and
+jump with Space; left click removes the block at the centre of the view,
 right click places stone beside it, and Escape releases the pointer.
 
 The hidden screenshot path is useful in CI-ish or server-ish environments:

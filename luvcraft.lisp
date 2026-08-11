@@ -17,7 +17,7 @@
          (progn
            (setf demo
                  (luv:start-cube-world-demo
-                  :title "luvcraft — click, look, fly, mine, and build"))
+                  :title "luvcraft — walk, jump, mine, and build"))
            ;; A native close request ends SDL's event loop.  Wait for complete
            ;; native teardown before releasing the demo-owned GPU resources.
            (loop until (eq :closed

@@ -466,7 +466,6 @@
    (z :initarg :z :initform -6.0 :accessor camera-z)
    (yaw :initarg :yaw :initform 0.0 :accessor camera-yaw)
    (pitch :initarg :pitch :initform -0.28 :accessor camera-pitch)
-   (speed :initarg :speed :initform 6.0 :accessor camera-speed)
    (sensitivity :initarg :sensitivity :initform 0.0025
                 :accessor camera-sensitivity)))
 
@@ -493,7 +492,6 @@
     (if (plusp length) (vec3-scale vector (/ length)) vector)))
 
 (defgeneric camera-basis (camera))
-(defgeneric advance-camera (camera pressed-keys seconds))
 (defgeneric camera-uniform-data (camera width height))
 
 (defmethod camera-basis ((camera fly-camera))
@@ -510,31 +508,6 @@
 
 (defun camera-key-down-p (keys &rest names)
   (some (lambda (name) (gethash name keys)) names))
-
-(defmethod advance-camera
-    ((camera fly-camera) pressed-keys seconds)
-  (multiple-value-bind (right up forward) (camera-basis camera)
-    (declare (ignore up))
-    (let* ((forward-amount
-             (- (if (camera-key-down-p pressed-keys :w :up) 1.0 0.0)
-                (if (camera-key-down-p pressed-keys :s :down) 1.0 0.0)))
-           (right-amount
-             (- (if (camera-key-down-p pressed-keys :d :right) 1.0 0.0)
-                (if (camera-key-down-p pressed-keys :a :left) 1.0 0.0)))
-           (up-amount
-             (- (if (camera-key-down-p pressed-keys :space) 1.0 0.0)
-                (if (camera-key-down-p
-                     pressed-keys :shift-left :shift-right) 1.0 0.0)))
-           (motion
-             (vec3-add (vec3-scale forward forward-amount)
-                       (vec3-scale right right-amount)
-                       (vec3 0.0 up-amount 0.0)))
-           (distance (* (camera-speed camera) seconds))
-           (step (vec3-scale (vec3-normalize motion) distance)))
-      (incf (camera-x camera) (aref step 0))
-      (incf (camera-y camera) (aref step 1))
-      (incf (camera-z camera) (aref step 2))))
-  camera)
 
 (defmethod camera-uniform-data ((camera fly-camera) width height)
   (multiple-value-bind (right up forward) (camera-basis camera)
@@ -557,6 +530,175 @@
              (coerce (/ (- (* far near)) (- far near))
                      'single-float)
              0.43 0.68 0.92 (coerce (/ far) 'single-float))))))
+
+;;; The first player controller is intentionally a small scalar reference
+;;; simulation.  Its body is distinct from the view camera, and its AABB
+;;; queries the voxel lattice directly.  This is the behavior later dense
+;;; body/contact domains and SIMD kernels must preserve, not their final
+;;; storage layout.
+
+(defconstant +player-physics-step+ (/ 1d0 120d0))
+(defconstant +player-collision-epsilon+ 1d-7)
+
+(defclass block-world-player ()
+  ((x :initarg :x :accessor player-x)
+   (y :initarg :y :accessor player-y)
+   (z :initarg :z :accessor player-z)
+   (velocity-x :initarg :velocity-x :initform 0d0
+               :accessor player-velocity-x)
+   (velocity-y :initarg :velocity-y :initform 0d0
+               :accessor player-velocity-y)
+   (velocity-z :initarg :velocity-z :initform 0d0
+               :accessor player-velocity-z)
+   (half-width :initarg :half-width :initform 0.30d0
+               :reader player-half-width)
+   (height :initarg :height :initform 1.80d0 :reader player-height)
+   (eye-height :initarg :eye-height :initform 1.62d0
+               :reader player-eye-height)
+   (walk-speed :initarg :walk-speed :initform 5.0d0
+               :reader player-walk-speed)
+   (ground-acceleration :initarg :ground-acceleration :initform 45d0
+                        :reader player-ground-acceleration)
+   (air-acceleration :initarg :air-acceleration :initform 14d0
+                     :reader player-air-acceleration)
+   (gravity :initarg :gravity :initform 24d0 :reader player-gravity)
+   (jump-speed :initarg :jump-speed :initform 8.0d0
+               :reader player-jump-speed)
+   (grounded-p :initarg :grounded-p :initform nil
+               :accessor player-grounded-p)))
+
+(defun make-player-for-camera (camera)
+  (make-instance 'block-world-player
+                 :x (coerce (camera-x camera) 'double-float)
+                 :y (- (coerce (camera-y camera) 'double-float) 1.62d0)
+                 :z (coerce (camera-z camera) 'double-float)))
+
+(defun sync-camera-to-player (camera player)
+  (setf (camera-x camera) (player-x player)
+        (camera-y camera) (+ (player-y player) (player-eye-height player))
+        (camera-z camera) (player-z player))
+  camera)
+
+(defun player-terrain-solid-p (world x y z)
+  "Treat absent horizontal terrain and the lower world boundary as solid."
+  (multiple-value-bind (block status) (block-at world x y z)
+    (if (eq status :resident)
+        (block-solid-p block)
+        (let ((height
+                (chunk-shape-height
+                 (voxel-space-chunk-shape (block-world-space world)))))
+          (< y height)))))
+
+(defun player-overlap-indices (minimum maximum)
+  (values (floor (+ minimum +player-collision-epsilon+))
+          (floor (- maximum +player-collision-epsilon+))))
+
+(defun map-player-overlapping-blocks (function player world)
+  (multiple-value-bind (minimum-x maximum-x)
+      (player-overlap-indices (- (player-x player) (player-half-width player))
+                              (+ (player-x player) (player-half-width player)))
+    (multiple-value-bind (minimum-y maximum-y)
+        (player-overlap-indices (player-y player)
+                                (+ (player-y player) (player-height player)))
+      (multiple-value-bind (minimum-z maximum-z)
+          (player-overlap-indices
+           (- (player-z player) (player-half-width player))
+           (+ (player-z player) (player-half-width player)))
+        (loop for x from minimum-x to maximum-x do
+          (loop for y from minimum-y to maximum-y do
+            (loop for z from minimum-z to maximum-z
+                  when (player-terrain-solid-p world x y z)
+                    do (funcall function x y z))))))))
+
+(defun move-player-axis (player world axis distance)
+  "Move PLAYER along AXIS and clamp its AABB against solid voxel cells."
+  (when (zerop distance)
+    (return-from move-player-axis nil))
+  (let ((position-slot (ecase axis (:x 'x) (:y 'y) (:z 'z)))
+        (velocity-slot
+          (ecase axis
+            (:x 'velocity-x) (:y 'velocity-y) (:z 'velocity-z)))
+        (collided-p nil))
+    (incf (slot-value player position-slot) distance)
+    (map-player-overlapping-blocks
+     (lambda (x y z)
+       (let ((coordinate (ecase axis (:x x) (:y y) (:z z))))
+         (setf collided-p t
+               (slot-value player position-slot)
+               (if (plusp distance)
+                   (min (slot-value player position-slot)
+                        (- coordinate
+                           (ecase axis
+                             ((:x :z) (player-half-width player))
+                             (:y (player-height player)))
+                           +player-collision-epsilon+))
+                   (max (slot-value player position-slot)
+                        (+ coordinate 1d0
+                           (ecase axis
+                             ((:x :z) (player-half-width player))
+                             (:y 0d0))
+                           +player-collision-epsilon+))))))
+     player world)
+    (when collided-p
+      (setf (slot-value player velocity-slot) 0d0)
+      (when (and (eq axis :y) (minusp distance))
+        (setf (player-grounded-p player) t)))
+    collided-p))
+
+(defun move-toward (value target maximum-change)
+  (cond ((< value target) (min target (+ value maximum-change)))
+        ((> value target) (max target (- value maximum-change)))
+        (t value)))
+
+(defun player-overlaps-block-p (player x y z)
+  (and player
+       (< (- (player-x player) (player-half-width player)) (1+ x))
+       (> (+ (player-x player) (player-half-width player)) x)
+       (< (player-y player) (1+ y))
+       (> (+ (player-y player) (player-height player)) y)
+       (< (- (player-z player) (player-half-width player)) (1+ z))
+       (> (+ (player-z player) (player-half-width player)) z)))
+
+(defun step-block-world-player
+    (player world camera pressed-keys seconds &key jump-p)
+  "Advance the scalar player controller by one small physics step."
+  (let* ((yaw (camera-yaw camera))
+         (forward-amount
+           (- (if (camera-key-down-p pressed-keys :w :up) 1d0 0d0)
+              (if (camera-key-down-p pressed-keys :s :down) 1d0 0d0)))
+         (right-amount
+           (- (if (camera-key-down-p pressed-keys :d :right) 1d0 0d0)
+              (if (camera-key-down-p pressed-keys :a :left) 1d0 0d0)))
+         (length (sqrt (+ (* forward-amount forward-amount)
+                          (* right-amount right-amount))))
+         (forward-amount (if (plusp length) (/ forward-amount length) 0d0))
+         (right-amount (if (plusp length) (/ right-amount length) 0d0))
+         (speed (player-walk-speed player))
+         (target-x (* speed (+ (* (sin yaw) forward-amount)
+                               (* (cos yaw) right-amount))))
+         (target-z (* speed (+ (* (cos yaw) forward-amount)
+                               (* (- (sin yaw)) right-amount))))
+         (acceleration
+           (if (player-grounded-p player)
+               (player-ground-acceleration player)
+               (player-air-acceleration player)))
+         (maximum-change (* acceleration seconds)))
+    (setf (player-velocity-x player)
+          (move-toward (player-velocity-x player) target-x maximum-change)
+          (player-velocity-z player)
+          (move-toward (player-velocity-z player) target-z maximum-change))
+    (when (and jump-p (player-grounded-p player))
+      (setf (player-velocity-y player) (player-jump-speed player)
+            (player-grounded-p player) nil))
+    (decf (player-velocity-y player) (* (player-gravity player) seconds))
+    (setf (player-velocity-y player)
+          (max -50d0 (player-velocity-y player))
+          (player-grounded-p player) nil)
+    (move-player-axis player world :x (* (player-velocity-x player) seconds))
+    (move-player-axis player world :z (* (player-velocity-z player) seconds))
+    (move-player-axis player world :y (* (player-velocity-y player) seconds)))
+  (sync-camera-to-player camera player)
+  player)
 
 ;;; Running demo.
 
@@ -590,6 +732,7 @@
     :initform -1
     :accessor cube-world-demo-meshed-world-revision)
    (camera :initarg :camera :reader cube-world-demo-camera)
+   (player :initarg :player :initform nil :reader cube-world-demo-player)
    (selected-block :initarg :selected-block :initform *stone-block*
                    :accessor cube-world-demo-selected-block)
    (atlas-texture :initarg :atlas-texture
@@ -614,6 +757,10 @@
    (pointer-captured-p :initform nil
                        :accessor cube-world-demo-pointer-captured-p)
    (last-frame-time :initform nil :accessor cube-world-demo-last-frame-time)
+   (physics-accumulator :initform 0d0
+                        :accessor cube-world-demo-physics-accumulator)
+   (jump-requested-p :initform nil
+                     :accessor cube-world-demo-jump-requested-p)
    (running-p :initform t :accessor cube-world-demo-running-p)))
 
 (defun remember-cube-world-resource (demo resource)
@@ -769,6 +916,9 @@ still owns their last use."
             (:place
              (when old-block
                (return-from edit-cube-world-block (values nil :blocked)))
+             (when (player-overlaps-block-p
+                    (cube-world-demo-player demo) x y z)
+               (return-from edit-cube-world-block (values nil :blocked)))
              (edit-block-at
               (cube-world-demo-selected-block demo) world x y z)))
           (values coordinate :edited))))))
@@ -858,12 +1008,24 @@ still owns their last use."
     (let* ((last (cube-world-demo-last-frame-time demo))
            (seconds (if last (min 0.1 (max 0.0 (- timestamp last))) 0.0)))
       (setf (cube-world-demo-last-frame-time demo) timestamp)
-      (advance-camera (cube-world-demo-camera demo)
-                      (cube-world-demo-pressed-keys demo) seconds)
+      (let ((player (cube-world-demo-player demo)))
+        (when player
+          (incf (cube-world-demo-physics-accumulator demo) seconds)
+          (loop while (>= (cube-world-demo-physics-accumulator demo)
+                          +player-physics-step+)
+                do (step-block-world-player
+                    player (cube-world-demo-world demo)
+                    (cube-world-demo-camera demo)
+                    (cube-world-demo-pressed-keys demo)
+                    +player-physics-step+
+                    :jump-p (cube-world-demo-jump-requested-p demo))
+                   (setf (cube-world-demo-jump-requested-p demo) nil)
+                   (decf (cube-world-demo-physics-accumulator demo)
+                         +player-physics-step+)))
       (present-canvas-frame
        (cube-world-demo-context demo)
        (lambda (surface-texture encoder)
-         (encode-cube-world-frame demo surface-texture encoder))))))
+         (encode-cube-world-frame demo surface-texture encoder)))))))
 
 (defun capture-cube-world-screenshot (demo pathname)
   "Render DEMO once, read its real color attachment, and write a PNG."
@@ -898,7 +1060,11 @@ still owns their last use."
         (when (cube-world-demo-pointer-captured-p demo)
           (set-canvas-relative-pointer-mode canvas nil)
           (setf (cube-world-demo-pointer-captured-p demo) nil))
-        (setf (gethash key (cube-world-demo-pressed-keys demo)) t)))
+        (progn
+          (setf (gethash key (cube-world-demo-pressed-keys demo)) t)
+          (when (and (eq key :space)
+                     (not (canvas-key-event-repeat-p event)))
+            (setf (cube-world-demo-jump-requested-p demo) t)))))
   nil)
 
 (defmethod handle-canvas-event
@@ -942,6 +1108,7 @@ still owns their last use."
     ((demo cube-world-demo) canvas (event canvas-window-focus-lost-event))
   (declare (ignore event))
   (clrhash (cube-world-demo-pressed-keys demo))
+  (setf (cube-world-demo-jump-requested-p demo) nil)
   (when (cube-world-demo-pointer-captured-p demo)
     (set-canvas-relative-pointer-mode canvas nil)
     (setf (cube-world-demo-pointer-captured-p demo) nil))
@@ -959,26 +1126,28 @@ still owns their last use."
   nil)
 
 (defun start-cube-world-demo (&key
-                                (title "luv little block world — click, look, fly")
+                                (title "luv little block world — click, look, walk")
                                 (width 960) (height 640)
                                 (frames-per-second 60)
                                 (visible-p t)
                                 (world (make-little-block-world))
                                 (mesher (make-instance
                                          'exposed-face-mesher))
-                                (camera (make-instance 'fly-camera)))
+                                (camera (make-instance 'fly-camera))
+                                player)
   "Open a little CPU-meshed block world.
 
-Click to capture the pointer, look with the mouse, fly with WASD, rise with
-Space, and descend with either Shift key.  Once captured, left click removes
-the block at the centre of view and right click places the selected block.
-Press Escape to release the pointer.
+Click to capture the pointer, look with the mouse, walk with WASD, and jump
+with Space.  Once captured, left click removes the block at the centre of view
+and right click places the selected block.  Press Escape to release the
+pointer.
 
 Pass :VISIBLE-P NIL to keep the SDL window hidden while still exercising the
 real SDL/Vulkan surface and swapchain path.  Pass :FRAMES-PER-SECOND NIL for a
 capture-only demand clock."
   (let ((canvas (make-sdl-canvas :title title :width width :height height
                                  :visible-p visible-p))
+        (player (or player (make-player-for-camera camera)))
         (device nil) (context nil) (resources nil) (demo nil)
         (completed-p nil))
     (open-canvas canvas)
@@ -1092,7 +1261,8 @@ capture-only demand clock."
                      'cube-world-demo
                      :canvas canvas :device device :context context
                      :world world :mesher mesher
-                     :camera camera
+                     :camera (sync-camera-to-player camera player)
+                     :player player
                      :atlas-texture atlas-texture :atlas-view atlas-view
                      :atlas-sampler atlas-sampler
                      :color-texture color-texture :color-view color-view

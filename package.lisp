@@ -519,8 +519,21 @@ nothing else does."))
            #:camera-yaw
            #:camera-pitch
            #:camera-basis
-           #:advance-camera
            #:camera-uniform-data
+           #:block-world-player
+           #:player-x
+           #:player-y
+           #:player-z
+           #:player-velocity-x
+           #:player-velocity-y
+           #:player-velocity-z
+           #:player-half-width
+           #:player-height
+           #:player-eye-height
+           #:player-grounded-p
+           #:make-player-for-camera
+           #:sync-camera-to-player
+           #:step-block-world-player
            #:cube-world-demo
            #:cube-world-demo-canvas
            #:cube-world-demo-world
@@ -531,6 +544,7 @@ nothing else does."))
            #:cube-world-chunk-product-dependency-stamp
            #:cube-world-chunk-product-mesh
            #:cube-world-demo-camera
+           #:cube-world-demo-player
            #:cube-world-demo-selected-block
            #:cube-world-demo-atlas-texture
            #:cube-world-demo-atlas-view

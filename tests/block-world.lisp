@@ -74,6 +74,48 @@
       (ok (= (length (block-mesh-vertices mesh))
              (* 9 (block-mesh-vertex-count mesh)))))))
 
+(deftest scalar-player-walks-collides-and-jumps
+  (let* ((world (make-block-world :chunk-width 4
+                                  :chunk-height 4
+                                  :chunk-depth 4))
+         (camera (make-instance 'fly-camera :x 1.5 :y 4.62 :z 1.5
+                                            :yaw 0d0 :pitch 0d0))
+         (player (make-instance 'block-world-player :x 1.5d0 :y 3d0
+                                                    :z 1.5d0))
+         (keys (make-hash-table :test #'eq)))
+    (ensure-world-chunk world 0 0 0)
+    (loop for x below 4 do
+      (loop for z below 4 do
+        (setf (block-at world x 0 z) luv::*stone-block*)))
+    ;; Gravity settles the body exactly on the block tops.
+    (dotimes (step 240)
+      (declare (ignorable step))
+      (step-block-world-player player world camera keys (/ 1d0 120d0)))
+    (ok (< (abs (- (player-y player) 1d0)) 1d-5))
+    (ok (player-grounded-p player))
+    (ok (< (abs (- (camera-y camera) 2.62d0)) 1d-5))
+    ;; A held right input accelerates into, but not through, a two-block wall.
+    (setf (block-at world 3 1 1) luv::*stone-block*
+          (block-at world 3 2 1) luv::*stone-block*
+          (gethash :d keys) t)
+    (dotimes (step 120)
+      (declare (ignorable step))
+      (step-block-world-player player world camera keys (/ 1d0 120d0)))
+    (ok (<= (player-x player) 2.700001d0))
+    (ok (= (player-velocity-x player) 0d0))
+    (remhash :d keys)
+    ;; Jump is an edge request, not a second form of flying.
+    (let ((ground-y (player-y player)))
+      (step-block-world-player player world camera keys (/ 1d0 120d0)
+                               :jump-p t)
+      (ok (> (player-y player) ground-y))
+      (ok (not (player-grounded-p player))))
+    (dotimes (step 120)
+      (declare (ignorable step))
+      (step-block-world-player player world camera keys (/ 1d0 120d0)))
+    (ok (< (abs (- (player-y player) 1d0)) 1d-5))
+    (ok (player-grounded-p player))))
+
 (deftest meshing-and-editing-cross-a-chunk-boundary
   (let ((world (make-block-world :chunk-width 2
                                  :chunk-height 2
@@ -131,6 +173,17 @@
       (ok (eq status :edited))
       (ok (= (world-coordinate-x coordinate) 2))
       (ok (null (block-at world 2 1 1))))
+    (let ((occupied-demo
+            (make-instance 'cube-world-demo
+                           :world world :camera camera
+                           :player (make-instance 'block-world-player
+                                                  :x 2.5d0 :y 1d0 :z 1.5d0)
+                           :selected-block luv::*dirt-block*)))
+      (multiple-value-bind (coordinate status)
+          (edit-cube-world-block occupied-demo :place)
+        (ok (null coordinate))
+        (ok (eq status :blocked))
+        (ok (null (block-at world 2 1 1)))))
     (multiple-value-bind (coordinate status)
         (edit-cube-world-block demo :place)
       (ok (eq status :edited))

@@ -14,9 +14,40 @@ objects, generic functions, and live inspection belong, and where dense
 columnar state and closed loops belong, such that neither side has to
 apologize to the other.
 
-Nothing here is decided.  The block-world sequence #S2K5HN places collision
-fifth, after touching and lighting; this page exists so that the earlier
-steps do not accidentally foreclose the later one.
+The first narrow decision is now executable.  The block-world sequence
+#S2K5HN has a scalar fixed-step player AABB with voxel collision, grounding,
+gravity, and jumping.  It is intentionally a behavioral oracle, not the
+general engine described below; this page keeps that small playable step from
+accidentally foreclosing the later one.
+
+* The first executable seam
+:PROPERTIES:
+:ID: H7P4CX
+:END:
+
+The current =block-world-player= is separate from both terrain and camera.  It
+owns one position, velocity, shape, and grounded reading.  At 120 Hz a closed
+scalar step accelerates horizontal velocity from input, applies gravity, and
+resolves its AABB axis by axis against candidate voxel cells.  The camera is
+then synchronized to the player's eye height.  Space is an edge-triggered
+jump request rather than upward flight.
+
+This is deliberately less machinery than a general rigid-body engine, but it
+establishes several contracts that survive the next representations:
+
+- the terrain lattice is queried directly as static geometry;
+- missing horizontal terrain is a solid simulation boundary, while space
+  above the current vertical materialization remains traversable;
+- simulation uses a fixed step distinct from render cadence;
+- the body and view have distinct ownership; and
+- tests state the reference behavior for falling, grounding, wall contact,
+  jumping, and camera attachment.
+
+The next physics step should not elaborate this controller into a framework.
+It should introduce the first dense awake-body columns and a terrain-contact
+domain beside it, run the same scalar behavior through those columns, and
+retain this controller as the small oracle used to compare later four-wide
+kernels.
 
 * Bodies, contacts, and constraints are domains of their own
 :PROPERTIES:
