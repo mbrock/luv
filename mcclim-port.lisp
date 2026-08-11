@@ -32,6 +32,23 @@
   (:documentation
    "A CPU raster medium whose image will be uploaded to a luv target."))
 
+(defclass luv-frame-manager (standard-frame-manager)
+  ()
+  (:documentation
+   "A McCLIM frame manager constrained by luv's current native host."))
+
+(defmethod frame-manager-menu-choose
+    ((manager luv-frame-manager) items &rest options)
+  (declare (ignore manager items))
+  ;; McCLIM implements menus as temporary top-level frames.  SDL's current
+  ;; Cocoa host gives one canvas a durable process-main-thread event loop, so a
+  ;; menu would require precisely the unsupported second native canvas that
+  ;; CLAIM-SDL-CANVAS-HOST rejects.  Decline it at the semantic boundary and
+  ;; leave the owning application frame responsive.
+  (warn "~A is unavailable: luv's Cocoa host currently supports one native canvas."
+        (or (getf options :label) "McCLIM popup menu"))
+  (values nil nil nil))
+
 (defclass luv-pointer (standard-pointer)
   ((x :initform 0 :accessor luv-pointer-x)
    (y :initform 0 :accessor luv-pointer-y)

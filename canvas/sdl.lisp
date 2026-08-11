@@ -87,6 +87,21 @@
 (defgeneric deactivate-sdl-canvas-host (canvas)
   (:documentation "Release CANVAS's native application presence after SDL_Quit."))
 
+(defgeneric claim-sdl-canvas-host (canvas)
+  (:documentation
+   "Claim any process-global native host required before CANVAS starts."))
+
+(defgeneric release-sdl-canvas-host (canvas)
+  (:documentation "Release a host previously claimed for CANVAS."))
+
+(defmethod claim-sdl-canvas-host ((canvas canvas))
+  (declare (ignore canvas))
+  nil)
+
+(defmethod release-sdl-canvas-host ((canvas canvas))
+  (declare (ignore canvas))
+  nil)
+
 (defmethod prepare-sdl-canvas-host ((canvas canvas))
   (declare (ignore canvas))
   (unless (sdl3:set-app-metadata "luv" "0.0.1" "com.mbrock.luv")
@@ -653,18 +668,48 @@
          (make-condition 'canvas-error :canvas canvas
                          :operation :frame :reason :canvas-closed))
         (setf (canvas-state canvas) :closed)
+        ;; CLOSE-CANVAS's completion is also permission for its caller to open
+        ;; a replacement.  Publish native-host release before waking it.
+        (release-sdl-canvas-host canvas)
         (sb-thread:signal-semaphore
          (sdl-canvas-shutdown-completion canvas))))))
 
 (defun start-sdl-canvas-thread (canvas)
   #+darwin
   (progn
-    (setf (sdl-canvas-thread canvas) (trivial-main-thread:main-thread))
-    (sb-thread:make-thread
-     (lambda ()
-       (trivial-main-thread:call-in-main-thread
-        (lambda () (run-sdl-canvas canvas))))
-     :name "luv SDL Cocoa dispatcher"))
+    ;; Claim synchronously.  CALL-IN-MAIN-THREAD cannot run a second canvas
+    ;; while the first one owns SDL's durable Cocoa event loop, so queueing it
+    ;; would leave OPEN-CANVAS waiting forever with no possible signaller.
+    (claim-sdl-canvas-host canvas)
+    (handler-case
+        (progn
+          (setf (sdl-canvas-thread canvas) (trivial-main-thread:main-thread))
+          (sb-thread:make-thread
+           (lambda ()
+             (handler-case
+                 (trivial-main-thread:call-in-main-thread
+                  ;; CALL-IN-MAIN-THREAD is intentionally nonblocking here:
+                  ;; this dispatcher returns once the work is queued.  Keep
+                  ;; host ownership around the queued function itself.
+                  (lambda ()
+                    (unwind-protect
+                         (run-sdl-canvas canvas)
+                      (release-sdl-canvas-host canvas))))
+               (error (condition)
+                 ;; A dispatcher failure happens outside RUN-SDL-CANVAS's
+                 ;; lifecycle handler.  Publish it to both waiters rather
+                 ;; than leaving OPEN-CANVAS or CLOSE-CANVAS asleep.
+                 (release-sdl-canvas-host canvas)
+                 (setf (sdl-canvas-startup-error canvas) condition
+                       (canvas-state canvas) :closed)
+                 (sb-thread:signal-semaphore
+                  (sdl-canvas-startup-completion canvas))
+                 (sb-thread:signal-semaphore
+                  (sdl-canvas-shutdown-completion canvas)))))
+           :name "luv SDL Cocoa dispatcher"))
+      (error (condition)
+        (release-sdl-canvas-host canvas)
+        (error condition))))
   #-darwin
   (setf (sdl-canvas-thread canvas)
         (sb-thread:make-thread
@@ -683,7 +728,16 @@
         (sb-thread:make-semaphore :count 0)
         (sdl-canvas-shutdown-completion canvas)
         (sb-thread:make-semaphore :count 0))
-  (start-sdl-canvas-thread canvas)
+  (handler-case
+      (start-sdl-canvas-thread canvas)
+    (error (condition)
+      ;; Keep a rejected host claim out of the :OPENING state.  In particular,
+      ;; callers such as REALIZE-MIRROR may reasonably attempt cleanup after
+      ;; OPEN-CANVAS signals; CLOSE-CANVAS must not wait for a thread that was
+      ;; never started.
+      (setf (sdl-canvas-startup-error canvas) condition
+            (canvas-state canvas) :closed)
+      (error condition)))
   (sb-thread:wait-on-semaphore (sdl-canvas-startup-completion canvas))
   (cond ((sdl-canvas-startup-error canvas)
          (error (sdl-canvas-startup-error canvas)))

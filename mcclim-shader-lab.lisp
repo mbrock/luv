@@ -496,7 +496,7 @@
   (check-type specification luv.spir-v:shader-specification)
   (let* ((port (find-port :server-path server-path))
          (manager (or (first (climi::frame-managers port))
-                      (make-instance 'standard-frame-manager :port port)))
+                      (make-instance 'luv-frame-manager :port port)))
          (frame nil)
          (startup-error nil)
          (startup-signaled-p nil)

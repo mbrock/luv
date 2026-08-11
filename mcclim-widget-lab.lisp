@@ -52,7 +52,7 @@
          ;; bootstrap here until FIND-FRAME-MANAGER's empty-port branch is
          ;; fixed upstream.
          (manager (or (first (climi::frame-managers port))
-                      (make-instance 'standard-frame-manager :port port)))
+                      (make-instance 'luv-frame-manager :port port)))
          (frame
            (make-application-frame
             'widget-lab :frame-manager manager :enable t)))

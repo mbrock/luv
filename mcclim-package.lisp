@@ -17,6 +17,7 @@
   (:local-nicknames (#:luv #:luv))
   (:export #:luv-port
            #:luv-raster-port
+           #:luv-frame-manager
            #:luv-graft
            #:luv-mirror
            #:luv-raster-mirror

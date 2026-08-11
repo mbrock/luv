@@ -15,7 +15,7 @@ multiple native canvases for McCLIM popup menu frames.  EXIT-FUNCTION, when
 provided, runs after the frame and its native canvas have been torn down."
   (let* ((port (find-port :server-path server-path))
          (manager (or (first (climi::frame-managers port))
-                      (make-instance 'standard-frame-manager :port port)))
+                      (make-instance 'luv-frame-manager :port port)))
          (frame nil)
          (startup-error nil)
          (startup-completion (sb-thread:make-semaphore :count 0)))

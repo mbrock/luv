@@ -33,6 +33,32 @@
 (defconstant +cocoa-activation-policy-regular+ 0)
 (defconstant +cocoa-activation-policy-prohibited+ 2)
 
+(defvar *cocoa-sdl-canvas-host* nil
+  "The canvas currently owning SDL's process-global Cocoa event loop.")
+
+(defvar *cocoa-sdl-canvas-host-lock*
+  (sb-thread:make-mutex :name "luv Cocoa SDL canvas host"))
+
+(defmethod claim-sdl-canvas-host ((canvas sdl-canvas))
+  (sb-thread:with-mutex (*cocoa-sdl-canvas-host-lock*)
+    (when (and *cocoa-sdl-canvas-host*
+               (not (eq *cocoa-sdl-canvas-host* canvas)))
+      (error 'canvas-error
+             :canvas canvas
+             :operation :open
+             :reason :cocoa-host-busy
+             :details
+             (format nil "~S already owns SDL's Cocoa event loop"
+                     *cocoa-sdl-canvas-host*)))
+    (setf *cocoa-sdl-canvas-host* canvas))
+  canvas)
+
+(defmethod release-sdl-canvas-host ((canvas sdl-canvas))
+  (sb-thread:with-mutex (*cocoa-sdl-canvas-host-lock*)
+    (when (eq *cocoa-sdl-canvas-host* canvas)
+      (setf *cocoa-sdl-canvas-host* nil)))
+  nil)
+
 (defun cocoa-application ()
   (%objc-send-object (%objc-get-class "NSApplication")
                      (%objc-selector "sharedApplication")))
