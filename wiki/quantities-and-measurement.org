@@ -1,0 +1,299 @@
+#+title: Quantities, dimensions, and interpretation
+#+startup: overview
+
+* One number participates in several kinds of meaning
+:PROPERTIES:
+:ID: U4M7KD
+:END:
+
+Moppe's use of mp-units and the smaller Zig Étalon experiment both resist a
+habit that becomes costly in simulation code: treating every =float= as the
+same sort of thing.  The point is not merely to attach metres or seconds to a
+number.  Several independent questions are involved:
+
+- What physical *dimension* does the value have?
+- What domain *meaning* does this value carry?
+- In which *unit* was it written or presented?
+- Is it a quantity or an affine *point*?
+- Is it scalar, vector, or another *tensor order*?
+- Which numerical *representation* stores it?
+- Over which *domain* is it a field?
+
+Keeping those questions separate is more useful than choosing one elaborate
+"unit type."  It lets a logical field retain strong meaning while its values
+occupy plain specialized arrays suitable for wide kernels such as SB-SIMD
+where that backend exists.  It also explains why the domain/bundle design in
+#L7C4GM is relevant to quantities rather than an unrelated storage concern.
+
+The principal source material is Moppe's
+[[file:../../src/moppe/docs/units.md][units guide]] and
+[[file:../../src/moppe/moppe/quantities.hh][quantity catalogue]], together with Étalon's
+[[file:../../src/moppe/etalon/README.md][workshop account]].  Étalon is evidence about a small mechanism, not a proposal
+to replace mp-units or to translate its Zig surface literally into Lisp.
+
+* Dimension describes lawful physical algebra
+:PROPERTIES:
+:ID: D8Q2LF
+:END:
+
+A dimension is a product of base dimensions raised to integer or rational
+powers.  For the mechanics we presently care about, an exponent vector over
+length, duration, and mass already distinguishes familiar cases:
+
+#+begin_example
+length        L
+duration      T
+velocity      L T^-1
+acceleration  L T^-2
+mass          M
+force         M L T^-2
+impulse       M L T^-1
+#+end_example
+
+Multiplication, division, powers, differentiation, and integration transform
+dimensions mechanically.  A compiler or Lisp protocol can establish that a
+force divided by a mass is an acceleration without knowing whether the force
+came from gravity, a spring, or a whimsical block.
+
+Dimensional equality is necessary for addition, but it is not always
+sufficient.  It cannot tell us that two equal-dimensional values answer
+different domain questions.
+
+* A specification carries semantic identity
+:PROPERTIES:
+:ID: S5V9CN
+:END:
+
+Moppe gives names to quantities such as airspeed, rate of climb, standing
+water depth, terrain elevation, and spatial coordinate.  Airspeed and rate of
+climb are both speeds, but accidentally adding or substituting one for the
+other usually expresses a mistake.  Water depth and grid spacing are both
+lengths, but using water depth as a finite-difference spacing is nonsense.
+
+A *quantity specification* can therefore be thought of as at least:
+
+#+begin_example
+(dimension, semantic meaning, tensor order)
+#+end_example
+
+Two specifications may have equal dimensions and equal representations while
+remaining unequal specifications.  This is the same principle by which two
+bundle columns can both contain =single-float= without becoming exchangeable.
+
+Dimensionless values make the distinction especially clear.  A probability,
+a proportion, a control input, a noise sample, a light level, and an occupancy
+fraction may all have dimension one.  That fact does not make their APIs
+interchangeable.  "Dimensionless" means the physical dimensions cancelled;
+it does not mean "semantically anonymous scalar."
+
+* A unit is a conversion, not the meaning
+:PROPERTIES:
+:ID: N3R6WY
+:END:
+
+Metres, feet, seconds, and milliseconds are units in which quantities can be
+constructed, displayed, persisted, or exchanged.  They do not say whether a
+length is elevation, water depth, cell spacing, or a wing span.
+
+The engine can normally store one coherent representation for a specification
+and convert at explicit boundaries.  That preserves pleasant authoring:
+
+#+begin_src lisp
+(make-quantity 'cell-spacing 50 'centimetre)
+(make-quantity 'player-height 1.8 'metre)
+#+end_src
+
+without requiring every hot loop to carry a runtime unit tag.  A block world
+may choose one metre per block today and later allow a world description to
+choose another scale.  The categorical block index still is not itself a
+length; a domain metric maps index differences to spatial displacement.
+
+* Points are not differences
+:PROPERTIES:
+:ID: P7A4HX
+:END:
+
+An origin-relative position is an affine point, while a displacement is a
+vector-like difference.  The lawful operations are deliberately asymmetric:
+
+#+begin_example
+point - point       -> difference
+point + difference  -> point
+difference + difference -> difference
+point + point       -> not intrinsically meaningful
+#+end_example
+
+Terrain elevation, simulation time, and temperature-like scales can need the
+same distinction.  Treating them as ordinary additive quantities silently
+chooses an origin and then permits operations that do not respect it.
+
+Étalon's generated =QuantityPoint= and =Quantity= types make this distinction
+at compile time.  In Lisp the important requirement is semantic, not that
+every value be boxed: a point-valued field may still occupy a raw array, while
+its field specification controls the operations made available on it.
+
+* Tensor order is independent of dimension
+:PROPERTIES:
+:ID: T2K8MJ
+:END:
+
+A speed may be a scalar magnitude or a velocity vector.  A spatial coordinate
+may be a scalar coordinate along one domain axis or a vector position in
+space.  Dimensions alone cannot distinguish those shapes.
+
+Tensor order therefore belongs beside dimension and meaning in a
+specification.  It prevents interpreting a scalar finite-difference result as
+a vector velocity merely because their dimensions match.  It also leaves the
+physical representation open: one vector-valued field can be stored as
+interleaved triples, three split arrays, SIMD packs, or a temporary register
+tuple without changing its logical specification.
+
+Rotation deserves care rather than a forced analogy.  An orientation may be
+a quaternion or other group element; angular displacement and angular
+velocity have their own lawful operations.  The quantity vocabulary should
+compose with such structures rather than make every mathematical object look
+like a scalar with a unit.
+
+* Calculation derives; interpretation names
+:PROPERTIES:
+:ID: I9F3QB
+:END:
+
+Étalon's strongest small idea is the separation between a mechanical result
+and a domain interpretation.  Its Laplacian derives a specification from the
+field and coordinate specifications.  Applying it to terrain elevation over a
+spatial coordinate yields the expected inverse-length dimension, but the
+operation does not simply declare that every inverse length is terrain
+curvature.  A separate checked interpretation gives that result its named
+meaning.
+
+This gives an attractive rhythm:
+
+1. Arithmetic and field operators derive dimensions and tensor shape.
+2. Equal meanings permit intrinsically meaningful addition or comparison.
+3. A named domain operation explicitly interprets a compatible derived
+   result.
+4. Tests reject equal-dimensional but semantically mistaken substitutions.
+
+The distinction could eventually help a shader arithmetic DSL as well as CPU
+Lisp.  A typed expression graph or SSA builder can infer representation types
+and dimensional results while preserving meaningful field names at its
+inputs and checked interpretations at its outputs.  That is a possible later
+compiler path, not a prerequisite for continuing the ordinary CPU mesher.
+
+* Bundles keep meaning outside the lanes
+:PROPERTIES:
+:ID: B5L7VG
+:END:
+
+Moppe stores quantities in typed Bundle columns.  Étalon's =Bundle(Domain,
+Row)= experiment used Zig's =MultiArrayList= to prove a related point: a row
+schema can retain semantic quantity specifications while the physical data is
+columnar.  It rejected a raw =f64= field in the bundle schema even though the
+underlying representations were numbers.
+
+For Lisp numerical kernels, this suggests that semantic type information
+usually belongs to the field specification and checked operation boundary,
+not in a heap wrapper around every scalar.  A field can have:
+
+- one inspectable specification object;
+- one representation object owning specialized arrays;
+- a domain establishing the meaning of offsets;
+- generic operations selected once for a whole phase; and
+- an inner loop operating on unboxed values or SIMD packs.
+
+The boundary performs the semantic check; the kernel does not redispatch on
+every lane.  #R9M4PV follows this into the planned physics layout.
+
+* A possible Lisp vocabulary
+:PROPERTIES:
+:ID: G4C2ZX
+:END:
+
+A small atelier might make the layers inspectable without designing a general
+symbolic algebra system:
+
+#+begin_src lisp
+(defclass quantity-specification ()
+  ((name         :initarg :name         :reader specification-name)
+   (dimension    :initarg :dimension    :reader specification-dimension)
+   (tensor-order :initarg :tensor-order :reader specification-tensor-order)
+   (affine-p     :initarg :affine-p     :reader specification-affine-p)))
+
+(defgeneric multiply-specifications (left right))
+(defgeneric interpret-quantity (derived named value))
+(defgeneric map-field-values (operation output &rest inputs))
+#+end_src
+
+Canonical exponent vectors could make dimensional equality and algebra cheap.
+Named specifications could be singleton CLOS objects, allowing ordinary
+inspection and class redefinition.  Field representations would own raw
+specialized arrays.  Generated or declared kernel methods could check their
+specifications once and then enter SB-SIMD code.
+
+This is intentionally weaker than making every arithmetic expression on
+ordinary Lisp numbers globally quantity-aware.  We should first learn where
+checks buy clarity: constructors and presentation, field combinators,
+simulation phase boundaries, and explicitly compiled kernels are promising
+places.
+
+* An initial block-world quantity map
+:PROPERTIES:
+:ID: M8W6RP
+:END:
+
+The following is a vocabulary sketch rather than a frozen catalogue:
+
+| Meaning | Dimension or category | Shape / affine character |
+|---------+-----------------------+--------------------------|
+| world position | L | vector point |
+| displacement | L | vector difference |
+| cell spacing or extent | L | scalar or vector difference |
+| cell index, palette index | discrete index | not a physical length |
+| duration | T | scalar difference |
+| simulation instant | T | affine point |
+| linear velocity | L T^-1 | vector |
+| acceleration | L T^-2 | vector |
+| mass | M | scalar |
+| inverse mass | M^-1 | scalar |
+| force | M L T^-2 | vector |
+| impulse | M L T^-1 | vector |
+| orientation | rotation structure | group element |
+| angular velocity | T^-1 with angular meaning | axial vector |
+| block content/state | categorical | palette-valued |
+| light level | semantic dimensionless | scalar field |
+| occupancy/coverage | semantic dimensionless | proportion field |
+| probability, control, noise | semantic dimensionless | distinct scalars |
+
+Counts, indices, and categorical codes should not acquire physical units just
+because they are represented by integers.  Conversely, converting a chunk
+coordinate and local cell coordinate into a world position should pass
+through an explicit metric rather than an unrecorded multiplication by an
+assumed block size.
+
+* Questions and executable claims
+:PROPERTIES:
+:ID: Q1D9ST
+:END:
+
+The first atelier should be judged by mistakes it prevents and hot paths it
+does not obstruct.  Useful executable claims include:
+
+- equal-dimensional airspeed and climb-rate values cannot be added by the
+  ordinary same-specification operation;
+- water depth cannot stand in for coordinate spacing;
+- a point cannot be added to another point;
+- a scalar result cannot be interpreted as a vector result;
+- composing fields from equal-size but different domains is rejected;
+- a SIMD or foreign kernel sees raw contiguous lanes after one checked
+  dispatch; and
+- unit conversion occurs at construction or presentation rather than in each
+  inner-loop operation.
+
+Open design questions remain.  Should specifications be instances, classes,
+symbols naming immutable definitions, or some combination?  Which dimension
+algebra belongs at macro-expansion time and which remains useful live?  How
+does a redefined specification invalidate compiled kernels and resident
+bundles?  Can ordinary scalar reference code and a SIMD specialization share
+one semantic operation definition?  A small real physics or lighting kernel
+will answer these better than a freestanding units framework.

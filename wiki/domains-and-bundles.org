@@ -1,0 +1,300 @@
+#+title: Domains, bundles, and materialized worlds
+#+startup: overview
+
+* The apparent CLOS–SoA contradiction
+:PROPERTIES:
+:ID: D5M8BZ
+:END:
+
+The little block world began with CLOS because generic functions, inspection,
+class redefinition, and multiple dispatch are unusually pleasant tools for a
+live engine.  A later interest in structure-of-arrays storage can sound like a
+retreat from that object-oriented view: if data belongs in columns, were the
+objects a mistake?
+
+There is no contradiction once object identity and repeated numerical storage
+are placed at different levels.  CLOS says how the engine's meaningful things
+relate and which protocols they support.  SoA says how many values of one
+representation are arranged for traversal.  A world, domain, chunk, bundle,
+field specification, block kind, generator, and solver can be objects while
+the values at ten thousand sites occupy compact specialized arrays.
+
+The stronger claim is that a domain/bundle model is itself object-oriented.
+It chooses domains, fields, materializations, and policies as the natural
+objects rather than assuming every sample is an independently allocated
+object.
+
+* Identity does not come from being addressable
+:PROPERTIES:
+:ID: C9L2WA
+:END:
+
+A cell can be addressed without being an individual in the engine's object
+model.  It normally has no independent allocation, ownership, or lifecycle;
+its identity is the site's identity inside a domain.  Its block content,
+light, moisture, or temperature are values borne at that site.
+
+This suggests three useful views:
+
+- a *column* exposes every value of one field for a whole-domain algorithm;
+- a *row* exposes the several logical values at one site for inspection or
+  local rules; and
+- a *focus* combines a row with its domain position and a neighborhood access
+  policy.
+
+Rows and foci can be ephemeral CLOS objects without turning the stored world
+into an array of row objects.  They are projections onto columnar storage.
+
+Persistent objects remain appropriate where a thing really has a separate
+lifecycle: a player, a block entity, a resident chunk, an edit journal, or a
+mesh waiting for its GPU submission to retire.
+
+* What Moppe's Bundle demonstrates
+:PROPERTIES:
+:ID: E4N7PX
+:END:
+
+Moppe's current
+[[file:../../src/moppe/moppe/spatial/bundle.hh][=spatial::Bundle=]] is an eager, finite store of typed columns over one
+domain.  The durable storage contract is deliberately small:
+
+- the domain supplies cardinality and checked index/offset conversion;
+- every declared quantity specification occurs once;
+- each field has one contiguous native vector;
+- construction checks that every column has one value per domain site;
+- a row proxy exposes one site without materializing a tuple; and
+- an optional interpolation protocol belongs to domains that can define it.
+
+Generic local operations live separately in
+[[file:../../src/moppe/moppe/spatial/bundle_operations.hh][=bundle_operations.hh=]].  There a focus combines one row with its domain
+index; the domain or an explicit policy supplies neighborhoods.  This split is
+important evidence: Bundle survived the deletion of a much broader terrain
+expression/program system because finite typed storage and domain-owned
+spatial meaning had independent value.
+
+Moppe also keeps ground geometry, derived readings, and water in separate
+bundles even though they share one terrain domain.  The reason is ownership
+and lifecycle, not layout.  See
+[[file:../../src/moppe/docs/surface-storage.md][=docs/surface-storage.md=]].
+
+* A finite domain is more than dimensions
+:PROPERTIES:
+:ID: B8R3KF
+:END:
+
+At minimum a finite domain answers:
+
+- how many sites exist;
+- which index type names one site;
+- how an index maps to a dense storage offset; and
+- how a dense offset maps back to an index.
+
+Additional capabilities should be explicit rather than presumed:
+
+- a neighborhood relation;
+- metric spacing or cell extent;
+- continuous reconstruction or sampling;
+- a boundary condition;
+- a world-space placement; and
+- a stable identity suitable for persistence or checked composition.
+
+Moppe's periodic terrain domain can own its neighborhood because its torus is
+closed.  A voxel chunk is not closed: a face neighbor across an edge belongs
+to another chunk.  A local =chunk-domain= should therefore own local indexing
+without pretending that an absent neighbor is intrinsically air.  #H2W9DJ
+separates local storage from cross-chunk access.
+
+Different domains may cover the same region.  A full-resolution block domain,
+a coarse occupancy domain, a body domain, and a contact-constraint domain have
+different sites and legal operations even when all ultimately describe one
+world.
+
+* Bundle means a checked materialization
+:PROPERTIES:
+:ID: V6T1QS
+:END:
+
+A bundle is an eager answer to a finite question: for every site in this
+domain, what are the values of these fields?  It is neither the entire world
+nor a universal database.
+
+A useful tentative contract for luv is:
+
+#+begin_example
+bundle
+  domain
+  closed schema of semantic field specifications
+  one column representation per field
+  exactly domain-size logical values per column
+#+end_example
+
+The schema should be closed by a class or other inspectable definition.  A
+hash table into which arbitrary properties can appear would lose the main
+benefit: an algorithm should be able to know which fields exist, what they
+mean, and how they are represented.
+
+Whole-column algorithms may borrow storage directly.  Row-oriented code may
+ask for a site view.  Neither form should require copying the other.
+
+Composition must check domain identity, not merely equal array lengths.  Two
+4096-element columns can describe different chunks, resolutions, placements,
+or kinds of site.  Equal cardinality is not shared meaning.
+
+* Logical fields and physical representations
+:PROPERTIES:
+:ID: L7C4GM
+:END:
+
+A semantic field and a storage lane are not the same thing.  A field
+specification can name:
+
+- its meaning;
+- its logical value category;
+- default or missing-value semantics;
+- legal reconstruction or interpolation;
+- a physical storage representation; and
+- persistence and presentation conversions.
+
+Several representations may implement the same logical field:
+
+- a =constant-column= for an all-air or uniformly lit region;
+- a =palette-column= for shared CLOS block states;
+- a =dense-column= backed by a specialized Lisp array;
+- a =nibble-column= for compact four-bit light;
+- a =bit-column= for a Boolean mask; and
+- a =split-vector-column= whose one logical vector is represented by separate
+  X, Y, and Z arrays for SIMD traversal.
+
+Mutation may promote a constant representation to a palette or dense one.
+The logical =block-at= or =position-at= protocol need not change when that
+happens.
+
+This separation is where the Bundle and quantity ideas meet.  Two fields can
+share an =(unsigned-byte 4)= representation without becoming semantically
+interchangeable.  Conversely, one vector-valued position field can occupy
+three scalar SIMD lanes without becoming three unrelated meanings.
+
+* Chunk boundaries need an environment
+:PROPERTIES:
+:ID: H2W9DJ
+:END:
+
+Meshing, ambient occlusion, lighting, fluids, and collision all inspect
+neighbors.  At a chunk edge, the required value belongs to an environment
+larger than the chunk's finite storage.
+
+Possible explicit contexts include:
+
+- a =block-world= that resolves world coordinates through resident chunks,
+  procedural sources, and edits;
+- a =chunk-neighborhood= capturing the center plus resident neighbors;
+- a one-cell halo snapshot made for a deterministic meshing job; or
+- a boundary policy that distinguishes missing, loading, generated-air, and
+  intentionally closed regions.
+
+The domain should say which local site an offset denotes.  The environment
+should say what exists beyond this materialization.  Keeping those questions
+apart avoids making streaming state look like terrain truth.
+
+A derived mesh or collider can record the source generations of the center
+and neighboring chunks it observed.  A boundary edit then invalidates every
+artifact whose proof included the old generations.
+
+* Level of detail changes the schema as well as the spacing
+:PROPERTIES:
+:ID: O3P8NV
+:END:
+
+Level of detail is not always the same field sampled less frequently.  Exact
+block content is categorical; averaging stone and air does not produce a
+half-stone block.  A coarse domain may need fields such as:
+
+- occupied volume or coverage;
+- minimum and maximum surface elevation;
+- dominant and secondary material;
+- surface normal or cone of possible normals;
+- conservative collision bounds; and
+- geometric or radiometric approximation error.
+
+Those are new semantic readings derived from a finer materialization or
+directly from the procedural source.  A coarse bundle can therefore have a
+different schema while sharing a world-space extent.
+
+This also suggests that procedural generation should answer domain-shaped
+requests.  The generator need not construct the finest blocks for a distant
+coarse chunk if it can produce honest coarse readings directly.
+
+* Products follow ownership and lifecycle
+:PROPERTIES:
+:ID: A6X2RT
+:END:
+
+One universal voxel bundle would combine values with very different causes
+and invalidation rules.  A more legible arrangement might eventually include:
+
+- a mandatory block-content bundle;
+- a derived or incrementally maintained light bundle;
+- an optional fluid bundle;
+- ecological or geological readings over their own domains;
+- sparse block entities outside dense site storage; and
+- chunk-level mesh, collider, navigation, and persistence products.
+
+This list is illustrative.  A field should not exist because a framework has
+a slot for it.  It should appear when an operation produces or consumes it.
+
+Narrow computations can return narrow products.  The world owner may retain
+them side by side, compose checked views, or materialize a wider persistence
+record.  Lisp aliasing and mutation make a literal port of Moppe's consuming
+=join= operation unnecessary until a real owner wants it.
+
+* A possible Lisp atelier
+:PROPERTIES:
+:ID: R3F8YC
+:END:
+
+A small experiment could use a metaclass without committing the game to a
+general framework:
+
+#+begin_src lisp
+(defclass voxel-content-bundle (finite-bundle)
+  ((block-content
+    :field-value-type block-state
+    :field-representation palette-index
+    :field-default *air-block*))
+  (:metaclass bundle-class))
+#+end_src
+
+The metaclass could turn field slot definitions into inspectable schema
+objects and allocate columns from the instance's domain.  It could reject
+duplicate field meanings and teach =describe= or an inspector how to show
+both logical values and physical storage.
+
+Common Lisp class redefinition offers a particularly playful experiment:
+=update-instance-for-redefined-class= could add a newly declared column to
+already resident chunks with the proper domain-sized default.  Whether that
+remains delightful after real use is an empirical question.
+
+The hot path need not use generic dispatch per site.  A generic operation can
+select a bundle representation or numerical phase once, borrow specialized
+arrays, and run an ordinary optimized loop.  #R9M4PV applies that arrangement
+to physics and possible wide backends.
+
+* What this page does not decide
+:PROPERTIES:
+:ID: N6Q2SH
+:END:
+
+- the chunk dimensions or world coordinate convention;
+- whether schemas are metaclasses, macros, ordinary CLOS objects, or some
+  smaller protocol;
+- whether palette indices begin as bytes or a wider representation;
+- whether light is packed immediately;
+- the exact streaming state machine;
+- whether level-of-detail domains form an octree, clipmap, or another
+  hierarchy; or
+- which physics data structure will emerge from the separate design work.
+
+The first useful proof is intentionally boring: store the current world in a
+finite domain plus one palette-backed block-content column, preserve
+=block-at= and the rendered screenshot, then let a genuinely new light field
+earn the reusable abstraction.

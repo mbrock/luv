@@ -12,10 +12,11 @@ checking, and count/fetch patterns once.
 
 ## Wiki
 
-The [GPU wiki](wiki/index.org) is where luv develops its understanding of GPU
-APIs and implementation mechanisms.  It treats WebGPU as a particularly useful
-landmark rather than a standard that luv has already adopted, and treats the
-current luv code as experimental evidence rather than settled design.
+The [workshop wiki](wiki/index.org) is where luv develops its understanding of
+GPU APIs, implementation mechanisms, and the emerging block world.  It treats
+WebGPU, Moppe, and small experiments as useful evidence rather than standards
+that luv has already adopted, and treats the current luv code as experimental
+evidence rather than settled design.
 
 ## GPU API
 

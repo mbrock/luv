@@ -1,0 +1,487 @@
+#+title: Field notes on Box3D's architecture
+#+startup: overview
+
+* Scope and method
+:PROPERTIES:
+:ID: K9T2BF
+:END:
+
+These notes describe the Box3D source tree at commit
+=3fc20f5b453ba9e14cdf54ecafa87a2a4bcdf53c= (2026-07-29, near tag =v0.1.0=), as
+checked out in =~/src/box3d=.  Box3D is Erin Catto's 3D physics engine for
+games, written in portable C17; it is essentially the Box2D v3 architecture
+carried into 3D, plus new subsystems: large-world double precision, recording
+and replay, contact recycling, and a hull database.
+
+Box3D enters this wiki the way WebGPU did in #W6P3JH: as a landmark, not an
+authority.  It is one of the most carefully engineered public examples of a
+simulation core that is data-oriented, multithreaded, SIMD-accelerated, and
+deterministic all at once — exactly the combination of pressures a luv
+simulation system would face.  Studying its answers is not the same as
+adopting them.
+
+The same honesty rules apply as in #V9H2RK.  A claim below is either an
+*observed mechanism* (the code demonstrably does it, cited by file and
+function), a *documented claim* (README, =docs/=, or comments say it), or a
+*reading* (our interpretation of why).  Where documentation and code diverge,
+the divergence is stated.  One example up front: the README advertises
+"extensive multithreading and SIMD," and the multithreading is indeed
+pervasive, but SIMD is precisely a four-wide path for the convex contact
+solver; joints, mesh contacts, and the overflow color are scalar.  The width
+is always four — SSE2 or NEON intrinsics behind one =b3FloatW= abstraction in
+=src/simd.h=, with a scalar struct-of-four fallback, and a static assertion
+pinning the contact solver to width four.
+
+* An id is an index, a generation, and a world
+:PROPERTIES:
+:ID: N7Q4XS
+:END:
+
+Every public handle (=include/box3d/id.h=) is a small value struct:
+
+#+begin_src c
+typedef struct b3BodyId {
+    int32_t index1;      // one-based; zero means null
+    uint16_t world0;     // which world owns this body
+    uint16_t generation; // slot reuse detector
+} b3BodyId;
+#+end_src
+
+Three decisions are packed in here.  The index is *one-based* so that a
+zero-initialized id is already the null id — C's cheapest initialization
+convention is recruited as API safety.  The world index means any id is
+globally resolvable without a world argument; a slot table of at most 128
+worlds recovers the world, itself generation-checked.  And the generation
+turns use-after-destroy from silent aliasing into a detectable validity
+failure: creating into a recycled slot increments the slot's generation
+(=b3CreateBody=, =src/body.c=), and every lookup compares.
+
+Id allocation is almost embarrassingly simple (=src/id_pool.c=): a free list
+of ints plus a next-index counter.  There is one pool per object class per
+world — bodies, shapes, joints, contacts, islands, and solver sets.  The
+sophistication lives not in the allocator but in what the index points at,
+which is the subject of the next figure.
+
+Compare the luv HAL, where the analogous role is played by CLOS object
+identity plus an explicit destroyed flag (#G6C2TX).  Box3D cannot rely on a
+garbage collector to keep dangling references distinguishable, so it makes
+staleness *checkable data* instead.  A Lisp system gets the memory safety for
+free but not the cheap value semantics: a =b3BodyId= crosses threads, is
+stored in gameplay structs, and packs into a =uint64_t= without any lifetime
+implications.
+
+* Stable sparse structs point into moving dense arrays
+:PROPERTIES:
+:ID: W2M9FJ
+:END:
+
+The id indexes a *sparse* array of small organizational structs that never
+move.  =b3Body= (=src/body.h=) holds user data, intrusive linked lists of
+contacts and joints, sleep bookkeeping, mass properties — and, crucially, a
+forwarding address: =setIndex= (which solver set the body currently lives in)
+and =localIndex= (its position inside that set's dense arrays).  The hot
+simulation data lives elsewhere, in dense arrays that are continually
+reorganized.
+
+The invariant that makes this safe is uniform across the codebase: dense
+arrays mutate only by swap-removal (=b3Array_RemoveSwap=,
+=src/container.h=), and every swap is immediately followed by a back-pointer
+fixup.  The element that was swapped into the hole carries its owning id
+(=b3BodySim::bodyId=, =b3JointSim::jointId=); that id reaches the sparse
+struct, whose =localIndex= is patched.  The idiom appears dozens of times —
+sleeping, waking, transferring bodies between sets, removing contacts from
+the constraint graph.
+
+So: ids never move, sims move constantly, and the sparse struct is the single
+source of truth for "where is my sim right now."  The same two-level pattern
+repeats for contacts, joints, and islands.
+
+This is the load-bearing wall of the whole design.  Everything else —
+contiguous sleeping islands, SIMD-packable constraint arrays, per-set body
+state — is possible because relocation is an internal, constant-time,
+invariant-preserving operation rather than an event user code can observe.
+
+* Memory is four allocators, none of them general
+:PROPERTIES:
+:ID: H4D8VN
+:END:
+
+Box3D's documentation claims that after the first step or two a world does no
+per-frame heap allocation.  The code substantiates this with four
+special-purpose allocators rather than one clever general one:
+
+- A per-world *stack allocator* (=b3Stack=, =src/arena_allocator.c=) serves
+  all transient per-step data: constraint buffers, solver stages, contact
+  index arrays.  Strict LIFO, high-water-mark resized at end of step so
+  steady state never misses, asserted empty when the step ends.
+- A per-worker *arena passed by value* (=b3Arena=) gives narrow-phase tasks
+  scratch space; because the arena struct is copied into the callee, the bump
+  pointer restores itself on return, while a shared overflow tracker records
+  peak demand.  Scope exit is deallocation, in C, by calling convention.
+- Bucketed *block allocators* solve variable-length manifold storage: a
+  contact needing N manifolds allocates one N-sized element from the Nth
+  pool.  Persistent, mutex-protected because the narrow phase is parallel.
+- A macro-generated typed *growable array* (=b3Array(T)=,
+  =src/container.h=) holds all persistent world state.  There is no
+  per-object malloc for bodies, contacts, or joints anywhere.
+
+The steady-state exceptions are honest ones: sleeping islands copy their data
+into freshly allocated per-island sets, and first-time growth still grows.
+
+The taxonomy matters more than the implementations.  Each allocator encodes a
+*lifetime shape* — per-step LIFO, per-task scope, persistent variable-length,
+persistent growable — and allocation sites choose a shape rather than a size.
+This resembles the direction luv's HAL took when frame resources became
+frontier clients (#M6P8XW): the question "who frees this and when" is
+answered by choosing which pool it comes from.
+
+* Solver sets sort the world by simulation temperature
+:PROPERTIES:
+:ID: S5K3WM
+:END:
+
+The organizing structure of a world is the *solver set*
+(=src/solver_set.h=): set 0 holds static bodies, set 1 disabled ones, set 2
+is the awake set, and every sleeping island gets a set of its own, numbered 3
+and up.  A set owns dense arrays of body sims, joint sims, and contact data.
+Only the awake set carries =b3BodyState= — the 56-byte hot struct of
+velocities and accumulated position deltas that the solver actually iterates:
+
+#+begin_src c
+typedef struct b3BodyState {      // src/body.h
+    b3Vec3 linearVelocity;        // 12 bytes
+    b3Vec3 angularVelocity;       // 12
+    b3Vec3 deltaPosition;         // 12  delta, not absolute position
+    b3Quat deltaRotation;         // 16  delta, so statics are identity
+    uint32_t flags;               // 4   lock bits, dynamic flag
+} b3BodyState;
+#+end_src
+
+Body data is split three ways by access temperature: =b3BodyState= (touched
+every solver iteration), =b3BodySim= (touched every step — transform, mass,
+inertia, damping), and the cold sparse =b3Body= (touched on structural
+events).  A comment notes the 56-byte state may want padding to a cache line,
+pending measurement — the layout is an argument about memory traffic, stated
+in bytes.
+
+Sleeping is therefore not a flag; it is *relocation*.  When an island sleeps,
+its bodies, joints, and touching contacts move out of the awake set into a
+contiguous set of their own, and their =b3BodyState= rows simply cease to
+exist.  A sleeping island costs zero per-step work — not "skipped work," but
+absent from every array the step iterates.  Waking is the reverse memcpy,
+with fresh identity states.  The delta-position representation is what makes
+this clean: statics and sleepers need no per-step state because "no movement"
+is the natural zero of the representation.
+
+* The Soft Step solver is a small loop with careful phases
+:PROPERTIES:
+:ID: R7F2QH
+:END:
+
+The advertised "Soft Step" solver is, structurally, the TGS-soft substepping
+scheme of Box2D v3 (comments cite Macklin's small-steps paper and Catto's
+soft-constraint talks).  One step at timestep dt with n substeps of h = dt/n
+runs (=b3SolverTask=, =src/solver.c=):
+
+#+begin_example
+prepare joints and contacts                (once per step)
+for each substep:
+    integrate velocities                   (gravity, damping, gyroscopic)
+    warm start                             (per graph color)
+    solve with bias                        (per color, one iteration)
+    integrate positions                    (accumulate delta pos/rot)
+    relax: solve without bias              (per color, one iteration)
+apply restitution                          (per color, once per step)
+store impulses back into manifolds         (once per step)
+#+end_example
+
+Softness is a three-number recipe (=b3MakeSoft=): a bias rate, a mass scale,
+and an impulse scale with mass + impulse scale equal to one; hertz zero
+degenerates to a rigid constraint.  The relax pass re-solves without bias to
+remove the energy the bias injected; restitution runs afterwards against
+pre-solve approach velocities, and only for points that accumulated normal
+impulse — speculative points that never truly touched do not bounce.
+
+Two anchor policies coexist, each with a stated reason.  Contact anchors stay
+fixed across the substep loop (better rolling behavior); joint anchors are
+re-rotated every substep (stability).  Current separation is recomputed each
+substep from the accumulated deltas, so position error tracking never touches
+static body state.  A positive separation applies a speculative bias of s/h —
+the impulse is pulled down so bodies arrive at rest exactly at contact
+distance; a negative one applies the soft bias.
+
+Friction is centralized per manifold rather than per point: one 2D friction
+impulse at a weighted friction center, one torsional impulse about the
+normal bounded by the lever-arm-weighted normal impulses, optional rolling
+resistance — and all of it runs only in the relax iterations, never against
+bias velocity.  Gyroscopic torque gets an implicit one-iteration
+Newton–Raphson solve in body-local coordinates, guarded by the comment
+"Jacobian derived by Erin Catto, Ph.D.  Do not attempt to do this without a
+Ph.D."
+
+All constraint memory for a step is carved from the stack allocator and freed
+in reverse order before the step returns.  The only solver state that
+persists between steps is the impulse cache written back into manifolds for
+next step's warm start.
+
+* Graph coloring is what buys parallelism and SIMD at once
+:PROPERTIES:
+:ID: G3W7KD
+:END:
+
+Constraints are assigned to one of 24 colors (=src/constraint_graph.c=) such
+that no two constraints in a color share a body.  Assignment is greedy bitset
+probing over body ids; what doesn't fit lands in a designated overflow color,
+solved single-threaded.  Two refinements carry design weight:
+
+- Constraints touching a static body probe colors from the high end
+  downward, dynamic–dynamic pairs from the low end up.  Colors are solved in
+  order within each substep, so static contacts are solved *last*, closest to
+  the position update — the comment explains this reduces tunneling from
+  push-through.  Solve order inside an iteration is being used as a solver
+  quality parameter.
+- Kinematic bodies are colored as if dynamic even though the solver never
+  writes them — because four-wide lanes *scatter* results, and letting many
+  workers "write" harmless zeros to one shared kinematic body would thrash
+  its cache line.  The coloring invariant is protecting memory traffic, not
+  just correctness.
+
+The payoff is double.  A color's constraints can be solved by many workers
+with no atomics, and — because disjointness holds per body, not per thread —
+four one-manifold convex contacts can be packed into one SIMD constraint
+(=b3ContactConstraintWide=, struct-of-arrays across four lanes) whose gather
+of body states and scatter of results can never collide.  Static lanes read
+a dummy identity state; only lanes whose body is dynamic write back.  Mesh
+contacts, with their variable manifold counts, always take the scalar path;
+joints are scalar too, but are interleaved into the same per-color block
+lists as contacts, so one color sweep dispatches joints and both contact
+flavors without extra barriers.
+
+Islands are explicitly *not* the parallelism mechanism — a comment says
+plainly that islands exist only for sleep.  One big pile of touching bodies
+is one island but many colors; coloring parallelizes inside it.
+
+* Islands are persistent, merged eagerly, split lazily
+:PROPERTIES:
+:ID: P8N4TC
+:END:
+
+Islands (=src/island.c=) are connectivity components over awake bodies,
+maintained persistently rather than rebuilt each step.  The asymmetry is the
+interesting decision:
+
+- *Merging is eager*: linking a contact or joint between islands appends the
+  smaller island's members to the larger, immediately.
+- *Splitting is lazy*: unlinking merely increments a counter.  Each step, at
+  most one island — the sleepiest one with pending removals, ties broken
+  deterministically — is actually split, by union-find with path halving,
+  run as a task overlapped with the solver (safe because splitting touches
+  only island bookkeeping, never sims).
+
+The reading: merges must be prompt because a missed merge could let half an
+island sleep while the other half pushes it.  A missed split merely delays
+sleep, which costs performance, not correctness.  So the split budget is
+bounded — one island per step — and an island with pending splits refuses to
+sleep, so laziness can never cause a spurious wake-up later.
+
+Sleep detection itself accounts for the solver's nature: the sleep velocity
+adds half the position-correction rate to the true velocity, so a stack
+still being squeezed by bias corrections does not doze mid-settle.
+
+* Contacts are a state machine that begins at AABB overlap
+:PROPERTIES:
+:ID: C6J9RW
+:END:
+
+A contact object exists from the moment two fat AABBs overlap, long before
+touching.  Non-touching contacts are cheap: an id in an index list, a
+persisted narrow-phase cache, no constraint.  When the narrow phase first
+produces manifold points, the contact is promoted — linked into body contact
+lists and islands (possibly waking sets, merging islands), colored into the
+constraint graph, and a begin-touch event recorded.  When manifolds vanish it
+is demoted symmetrically.  Everything — events, islands, sleeping, solving —
+hangs off this one state machine.
+
+The broad phase feeding it uses three dynamic AABB trees, one per body type
+(static, kinematic, dynamic), with margin-fattened boxes in the tree and a
+move buffer of proxies whose exact box escaped its fat one.  Tree rebuilds
+for the moving types run concurrently with the narrow phase.  Pair search is
+parallel; contact *creation* is then serialized in move-buffer order, one of
+several points where a parallel phase funnels through a deterministic serial
+one.
+
+The narrow phase dispatches through a type-pair function table
+(sphere/capsule/hull convex pairs via SAT and GJK with per-contact caches;
+mesh and height field versus convex producing multiple manifolds; compounds
+expanded per child; no mesh-versus-mesh).  Two mechanisms deserve wiki-level
+attention:
+
+- *Speculative contacts*: AABBs and manifolds include points up to four
+  linear slops away; the solver's positive-separation branch (#R7F2QH)
+  handles them.  Contact begins are therefore slightly early by design, and
+  the restitution pass must filter out points that never truly touched.
+- *Contact recycling*: if the relative pose of a pair moved less than a
+  conservative bound since the manifold was built, the narrow phase is
+  skipped entirely — anchors are re-rotated and separations refreshed.  The
+  bound is the same conservative-advancement arithmetic (translation plus
+  rotation-arc times extent) that gates sleep and continuous collision; one
+  small lemma reused three ways.  A comment asks: "Please cite this library
+  if you use this optimization."
+
+Continuous collision splits by threat model: any fast body sweeps against
+the static tree inline in its finalize task (order-independent, each body
+writes only itself), while designated bullets are collected and swept against
+everything in a later pass.
+
+* Determinism is a property of the whole design, not a mode
+:PROPERTIES:
+:ID: D2V7MK
+:END:
+
+The documentation claims bit-identical results across thread counts and
+platforms.  The code backs this with converging mechanisms, none of which is
+a "determinism flag":
+
+- Work stealing changes only *which worker* computes a block, never the data
+  or its internal order.  Colored blocks write disjoint bodies; block
+  iteration order is fixed.
+- Every cross-worker reduction is a bitset union iterated in index order —
+  contact state changes, hit events, enlarged AABBs, awake islands.  Sets,
+  not sequences, so arrival order cannot matter.
+- Where order does matter, a parallel phase funnels into an explicitly
+  ordered serial one: contact creation in move-buffer order, contact state
+  processing in ascending id order, move buffers populated from bitsets in
+  index order.
+- The floating-point diet: no hardware FMA in the SIMD path because it would
+  diverge from the scalar path; no fast reciprocal square root; hand-coded
+  minimax =b3Atan2= and cosine/sine because libm trig is not
+  cross-platform deterministic; compilation with contraction off.  Only
+  correctly-rounded operations (sqrt, remainder) are trusted from libm.
+- Atomics claim work and set flags; they never accumulate simulation state.
+
+Then the engine *polices* the property: the recording subsystem hashes world
+state every step, and replay compares hashes and flags divergence.
+Determinism is continuously regression-tested as a side effect of the replay
+feature.
+
+The lesson reads general: determinism was not recovered afterwards; the
+reduction shapes, the solver memory layout, and even the math library were
+chosen so that parallel execution has no observable schedule.  This connects
+to luv's queue-frontier work (#T9K4RC), which similarly builds an ordering
+property into the structure rather than checking it after the fact.
+
+* Events are buffered facts, polled after the step
+:PROPERTIES:
+:ID: F8H3PW
+:END:
+
+There are no user callbacks during a step, with three narrow documented
+exceptions (pre-solve, custom filter, material mixers).  Everything else is a
+buffer the user polls afterwards: body move events (one per awake body, with
+a fell-asleep flag patched retroactively by CCD and sleep), contact begin and
+end, hit events above a speed threshold, joint force-threshold events, sensor
+begin and end.  End-of-contact and sensor-end buffers are *double*-buffered
+across steps because destroying objects between steps can generate end events
+after the user already consumed the step's buffer; keeping them valid one
+extra frame removes a whole class of use-after-poll bugs.
+
+Sensors are not solved at all: a post-solve pass queries each sensor's
+overlaps into sorted visitor lists and diffs against the previous step's
+list, generation-aware so a destroyed-and-recycled shape id reads as an end
+plus a begin.  Events are diffs of retained state, not narrations of
+mid-step happenings.
+
+The API-shape observation for luv: this is the same move the HAL made when it
+rejected callbacks in favor of inspectable command data (#D8F3QM), applied to
+outputs instead of inputs.  The step is a transaction; its observable output
+is data with a defined validity window.
+
+* The math is chosen for determinism and locality, not generality
+:PROPERTIES:
+:ID: M4T6XB
+:END:
+
+The math vocabulary is minimal: three-float vectors, vector-first
+quaternions, a position-plus-quaternion transform, a 3×3 matrix.  There is no
+4×4 matrix anywhere in the engine, and no fixed up axis.  Rotation integration
+is first-order quaternion update plus normalize; interpolation is nlerp.
+
+The recurring trick is *representing positions as deltas from a local
+origin*: the solver accumulates =deltaPosition= rather than absolute
+positions, sweeps are re-based on their starting center, contact anchors are
+relative to centers of mass.  Optional large-world mode extends the same
+trick to the API boundary: world positions become doubles, but velocities,
+shapes, manifolds, the solver, and the broad phase stay float; one function —
+double minus double yielding float delta — is the entire precision boundary.
+The float build collapses the types back so nothing changes when the option
+is off.
+
+A small conservative-advancement lemma — bound a shape's swept extent by
+translation plus rotation arc times extent — appears as a shared helper and
+gates sleep, contact recycling, and continuous collision alike.
+
+* What "extensive SIMD" concretely means here
+:PROPERTIES:
+:ID: T3C8FV
+:END:
+
+Worth recording precisely, since luv is about to think about SIMD in Lisp
+(see the [[file:sb-simd.org][sb-simd field notes]]): Box3D's SIMD is one abstraction header
+(=src/simd.h=) defining =b3FloatW= as SSE2, NEON, or a scalar struct of four
+floats, always width four.  On top of it sit wide vector and symmetric-matrix
+types and exactly one consumer: the convex contact constraint solver, where
+graph coloring guarantees four gather/scatter targets never alias (#G3W7KD).
+Joints, mesh contacts, the broad phase, and integration are scalar.
+
+Determinism constrains the menu: no FMA, no approximate reciprocals, because
+the wide path must agree bitwise with the scalar path.  One clever exception
+to plainness: lane indices are embedded in the low mantissa bits of positive
+floats so a horizontal minimum returns an argmin for free, used in
+narrow-phase SAT.
+
+The reading: SIMD here is not a pervasive style but a surgical strike at the
+one loop that dominates the profile, enabled by a data layout (coloring plus
+struct-of-arrays constraints) that was justified independently by
+multithreading.  The prerequisite for the four-wide solver is not a SIMD
+library; it is the disjointness invariant and the SoA constraint layout.
+
+* What Box3D gives luv to think with
+:PROPERTIES:
+:ID: X6B2QP
+:END:
+
+Not conclusions — a list of transferable questions, in roughly the order the
+preceding figures raise them:
+
+1. Identity: should a luv simulation object be a CLOS instance, or a
+   generation-checked index into world arrays with CLOS objects as optional
+   inspectable views?  Box3D shows the index scheme is what makes relocation,
+   SoA, and sleep-as-relocation possible.  #W2M9FJ
+2. Allocation: luv already met "lifetime shapes" in the GPU frontier work.
+   Is there a per-step stack discipline worth making explicit in Lisp, given
+   that the garbage collector will otherwise happily absorb — and charge
+   for — per-step garbage?  #H4D8VN
+3. Temperature: the three-way body split (per-iteration, per-step, structural)
+   is a schema question, not a C question.  What would specialized arrays
+   for hot state plus CLOS for cold state look like, and where exactly is
+   the boundary crossed?  #S5K3WM
+4. Order as quality: solving static contacts last, friction only in relax,
+   restitution filtered by accumulated impulse — solver quality lives in
+   ordering decisions that a naive "iterate constraints" loop erases.  A luv
+   solver should keep these orderings inspectable rather than baking them
+   into loop structure.  #R7F2QH
+5. Coloring: disjointness per color is the single invariant that buys both
+   threads and lanes.  If luv wants either, it wants this invariant — even a
+   single-threaded four-wide solver needs it for scatter safety.  #G3W7KD
+6. Determinism: decide early, because it prices every later choice (math
+   library, reductions, parallel structure), and it is cheap to police with
+   a state hash once recording exists.  #D2V7MK
+7. Events: the step-as-transaction with polled, validity-windowed output
+   buffers matches luv's inspectable-data tendencies better than callbacks
+   would.  #F8H3PW
+8. The whole engine is a rebuke to "make it work, then make it fast": its
+   performance architecture (sets, coloring, SoA) *is* its correctness
+   architecture (sleep, determinism, events).  The luv question is which
+   half of that identity survives translation into an interactive,
+   redefinable Lisp image — [[file:physics-and-simd.org][Physics data and SIMD execution]] attempts an
+   answer.

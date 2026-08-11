@@ -1,4 +1,4 @@
-#+title: The luv GPU wiki
+#+title: The luv workshop wiki
 #+startup: overview
 
 * A workshop, not an authority
@@ -6,10 +6,12 @@
 :ID: H7QK3M
 :END:
 
-This wiki is a place to develop an understanding of GPU programming, API
-design, and implementation.  Its first subject is the shape of WebGPU and the
-work hidden beneath that shape, because those are useful things to think with
-while luv grows a small hardware abstraction layer.
+This wiki is a place to develop an understanding of GPU programming, engine
+design, and implementation.  Its first subject was the shape of WebGPU and the
+work hidden beneath that shape.  The little block world now adds a second path:
+how a live Common Lisp game might understand worlds, materialized data,
+measurement, simulation, and presentation without prematurely becoming a
+framework.
 
 Neither resemblance to WebGPU nor presence in the current luv implementation
 makes something correct.  WebGPU is a landmark: we want to understand the
@@ -30,6 +32,11 @@ evidence for the contract and some rationale, but a historical claim about why
 the working group chose a design may require proposals, issues, meeting notes,
 or mailing-list archaeology.  An attractive retrospective explanation is not
 automatically a historical fact.
+
+Source-study pages use a parallel discipline: distinguish a mechanism
+observed in code, a claim made by its documentation, and our reading of what
+it might teach luv.  The block-world synthesis pages distinguish those forms
+of evidence from tentative vocabularies and experiments still to be tried.
 
 * String figures
 :PROPERTIES:
@@ -63,6 +70,11 @@ discourse without changing Lisp semantics.
 
 The following are starting paths rather than a table of settled doctrine.
 
+** GPU semantics and implementation
+:PROPERTIES:
+:ID: G4R8PU
+:END:
+
 - [[file:webgpu-shape.org][Why WebGPU has this shape]] begins with the API as a portable contract over
   asynchronous execution.
 - [[file:resource-lifetimes.org][Resource lifetimes and reclamation]] separates public object state from
@@ -79,6 +91,31 @@ The following are starting paths rather than a table of settled doctrine.
   that captures command dependencies, defers destruction, and makes public
   submission asynchronous.  Explicit destroy remains the contract; leaked
   references are warned about and reclaimed by finalizers.
+
+** The little block world
+:PROPERTIES:
+:ID: B7W3LD
+:END:
+
+- [[file:block-world.org][The little block world and its possible worlds]] is the game-shaped starting
+  path: what exists now, what kind of world it might become, and an order of
+  experiments intended to stay fun.
+- [[file:domains-and-bundles.org][Domains, bundles, and materialized worlds]] studies why CLOS and
+  structure-of-arrays storage are compatible, and what chunking, level of
+  detail, procedural generation, and streaming ask of the object model.
+- [[file:quantities-and-measurement.org][Quantities, dimensions, and interpretation]] studies Moppe's mp-units
+  practice and the Zig Étalon experiment, then asks what semantic quantity
+  discipline might look like in Lisp without sacrificing compact SIMD lanes.
+- [[file:physics-and-simd.org][Physics data and SIMD execution]] identifies the seam for a Catto-inspired
+  3D physics experiment: CLOS at semantic boundaries, dense domains and
+  columnar numerical state inside the step, and derived collision structures
+  between bodies and the block world.
+- [[file:box3d-architecture.org][Field notes on Box3D's architecture]] follows the concrete identity,
+  sparse/dense storage, solver-set, contact, constraint-coloring, determinism,
+  and event mechanisms behind that landmark.
+- [[file:sb-simd.org][Field notes on sb-simd]] studies the generated SIMD vocabulary, scalar
+  mirrors, dispatch model, and the important empirical fact that the current
+  macOS arm64 SBCL has no usable Lisp-level SIMD backend.
 
 A useful first crossing is from the timeline distinction #T4V8QM to the five
 different senses of lifetime in #L8R2WF, then to the frame-slot episode

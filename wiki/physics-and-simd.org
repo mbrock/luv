@@ -1,0 +1,266 @@
+#+title: Physics data and SIMD execution
+#+startup: overview
+
+* A seam, not a specification
+:PROPERTIES:
+:ID: K2F6WD
+:END:
+
+This page thinks about a Catto-inspired physics experiment for the little
+block world, using three studies as material: the Box3D field notes
+([[file:box3d-architecture.org][Box3D's architecture]]), the sb-simd field notes ([[file:sb-simd.org][sb-simd]]), and the
+domain/bundle model of #D5M8BZ.  It tries to identify the *seam*: where CLOS
+objects, generic functions, and live inspection belong, and where dense
+columnar state and closed loops belong, such that neither side has to
+apologize to the other.
+
+Nothing here is decided.  The block-world sequence #S2K5HN places collision
+fifth, after touching and lighting; this page exists so that the earlier
+steps do not accidentally foreclose the later one.
+
+* Bodies, contacts, and constraints are domains of their own
+:PROPERTIES:
+:ID: Y5H8KC
+:END:
+
+The domain/bundle vocabulary was developed for terrain, but its real claim
+is broader: a finite domain identifies sites, and fields have values over
+those sites (#B8R3KF).  Box3D, read in this vocabulary, is a physics engine
+built from exactly such domains — with the twist that domain *membership* is
+dynamic:
+
+- The *awake body domain* is Box3D's awake solver set: a dense domain whose
+  sites are currently simulating bodies, with columns for velocity and
+  accumulated position delta.  Membership changes constantly — bodies sleep,
+  wake, and are created — and the storage compacts by swap-removal while
+  stable ids stay valid through a forwarding address (#W2M9FJ).
+- Each *sleeping island* is a retired materialization of the same schema
+  minus the hot columns: evicted from every array the step iterates, resident
+  as a contiguous copy, wakeable by memcpy (#S5K3WM).
+- The *contact domain* has pair-shaped sites: a contact exists from AABB
+  overlap onward, carrying persisted manifold and cache fields, and is
+  promoted into the solver only while touching (#C6J9RW).
+- The *constraint coloring* is a partition of the touching-contact domain
+  under one invariant — no two constraints in a color share a body — that
+  buys threads and lanes at once (#G3W7KD).
+
+The important structural observation: these domains have different sites,
+different lifecycles, and different legal operations, even though they all
+describe one world.  A body is not a block; a contact is not a body; none of
+them wants to live inside the terrain bundle.  This is the same conclusion
+#A6X2RT reached for terrain products — ownership and invalidation, not
+layout, decide what is stored together — now applied to simulation state.
+
+For luv the immediate consequence is pleasantly concrete: "add physics"
+does not mean adding fields to chunks.  It means introducing a body domain
+(with a bundle of kinematic columns), a contact domain derived jointly from
+bodies and terrain, and keeping the block-content bundle as what it already
+is — the static environment those domains query.
+
+* The sparse–dense split is the row/column distinction with a forwarding address
+:PROPERTIES:
+:ID: B5N8JT
+:END:
+
+Box3D splits every simulated thing into a stable sparse struct (identity,
+topology, user data) and moving dense rows (hot numerical state), with the
+sparse side holding a forwarding address that swap-removal must patch
+(#W2M9FJ).  In the vocabulary of #C9L2WA this is precisely the distinction
+between a persistent object and a row projected from columns — except that
+Box3D, lacking a garbage collector, also had to invent checkable identity:
+ids carry generations so staleness is detectable data (#N7Q4XS).
+
+A luv body can therefore be an honest CLOS object — the sparse side — owning
+its name, its shape references, its joints, its userland meaning, and a
+=set-index=/=local-index= forwarding address into whichever materialization
+currently holds its numbers.  The columns never contain object references;
+the object knows where its row is.  Inspection composes naturally: =describe=
+on the body can present its row as if it were slots, the way Box3D's natvis
+visualizers reunite what the layout separated.
+
+What Lisp does not get for free is the rest of the id story:
+
+- *Staleness*: a destroyed body's CLOS object still exists; like the HAL's
+  destroyed GPU wrappers (#G6C2TX), it needs an explicit invalid state, and
+  the step must never discover mid-loop that a row's owner died.  Structural
+  mutations belong between steps, as Box3D confines them to the serial
+  phases between parallel ones.
+- *Value handles*: the moment simulation state is shipped somewhere
+  non-Lisp — a GPU buffer, a replay log, a foreign solver — object
+  references stop working and something like the index-generation-world
+  triple reappears.  It costs little to give bodies a small integer id from
+  an id pool from the start, with the CLOS object as its resolution.
+
+The forwarding-address invariant — every relocation immediately patches the
+owner — is a five-line discipline in Lisp, but it is *the* invariant that
+makes compaction, sleep-as-relocation, and dense iteration compatible with
+stable identity.  It deserves a validation walker from day one, in the
+spirit of Box3D's =b3ValidateSolverSets=, because a live image will violate
+it in creative ways no C program can.
+
+* Select the phase once, then run closed loops
+:PROPERTIES:
+:ID: R9M4PV
+:END:
+
+The hot path of a physics step must not dispatch per site.  The arrangement
+#R3F8YC anticipates — a generic operation selects a representation or phase
+once, borrows specialized arrays, and runs an ordinary optimized loop —
+maps directly onto how Box3D structures a step: prepare (gather from
+domains into per-step constraint arrays), then substep iterations of closed
+loops over those arrays, then store (scatter results back) (#R7F2QH).
+
+Generic functions own the boundaries: which integrator, which solver
+flavor per constraint kind, which manifold function per shape pair —
+Box3D's own narrow phase is a type-pair function table, that is, a manual
+generic function.  Inside a phase, the loop is closed: locally declared,
+non-consing, over specialized arrays it borrowed from bundles.  Bodies never
+become tiny dispatching objects because bodies never appear in the loop at
+all — only columns do.
+
+On the SIMD half, the sb-simd study forces honesty (#L2W6KT): on the
+current arm64 machine there is no Lisp-level SIMD to feed, and none coming.
+The realistic execution tiers for kernels, in order of adoption:
+
+1. *Declared scalar Lisp*, written in sb-simd's naming discipline
+   (=f32-add= over =f32vec= columns, unrolled accumulators, explicit
+   tails).  SBCL's arm64 backend produces respectable scalar code, and for
+   the body counts the little block world implies, this tier may be the
+   permanent answer.
+2. *A small foreign shim* (Accelerate on macOS) for a proven-hot kernel,
+   with the Lisp definition kept as its oracle in sb-simd's
+   scalar-mirror style (#E8M3JC).
+3. *The GPU*, which luv already programs through its own SPIR-V assembler —
+   the natural home for wide regular work like broad-phase refits or mass
+   meshing, at the price of crossing the completion frontier (#T9K4RC).
+4. *x86-64 images*, where sb-simd's 128-bit packages genuinely light up.
+
+The design consequence is the same at every tier, and this is the point:
+what a kernel needs is not an instruction set but a *layout contract* —
+struct-of-arrays columns and, if constraints are ever packed four-wide, the
+coloring disjointness invariant that makes gather/scatter safe (#T3C8FV).
+Layout is portable; lanes are not.  Luv should buy the layout with the
+architecture and treat every tier above scalar as a swappable backend for
+the same columns, chosen per phase the way =instruction-set-case= chooses
+per CPU (#C3F7XM).
+
+* The smallest solver worth building
+:PROPERTIES:
+:ID: G7Q3XR
+:END:
+
+A first slice that exercises the seam without importing an engine:
+
+- *Shapes*: spheres only, against the block world.  Sphere–voxel contact
+  generation is simple enough to write in an afternoon and rich enough to
+  produce piles, which are the test that matters.
+- *Step*: the Soft Step skeleton at its minimum — substeps of integrate,
+  warm start, solve with bias, integrate positions, relax without bias;
+  restitution afterwards, filtered by accumulated impulse (#R7F2QH).  One
+  iteration per phase, exactly as Box3D ships.  The soft-constraint recipe
+  is three numbers per constraint class; the delta-position representation
+  comes along for free and keeps statics stateless.
+- *Contacts as a state machine*: born at (fat) AABB overlap with terrain or
+  another body, promoted while manifolds exist, demoted after, with
+  warm-start impulses persisted on the contact (#C6J9RW).  Begin and end
+  become buffered events polled after the step — the same
+  step-as-transaction shape as the HAL's command buffers, applied to
+  outputs (#F8H3PW).
+- *No threads, but the invariant anyway*: single-threaded, but constraints
+  colored from the start.  Coloring is cheap, it is the precondition for
+  both lanes and threads later, and — Box3D's quiet lesson — solving static
+  contacts last within an iteration is a solver *quality* decision
+  (#G3W7KD), so ordering must be explicit data rather than loop accident.
+
+Everything here stays live: the solver phases are generic functions one can
+redefine mid-pile, the contact domain is inspectable, and a =describe= of a
+body shows its row.  The CLOS block world already proved this style renders;
+the question this slice answers is whether it simulates.
+
+* The block world is the static tree
+:PROPERTIES:
+:ID: D9W4CH
+:END:
+
+Box3D queries static geometry through an AABB tree because its static world
+is a soup of arbitrary shapes.  A voxel world is better than a tree for
+this purpose: the grid *is* the acceleration structure, and a swept AABB
+enumerates candidate cells directly.  The broad phase against terrain
+degenerates to arithmetic, and only body–body pairs need anything like
+Box3D's proxy machinery — at little-block-world scale, brute force over a
+handful of fat AABBs is honest and inspectable.
+
+Two Box3D ideas still transfer:
+
+- *Fat bounds and speculative margin*: contacts should exist slightly
+  before touching, both to stabilize the solver (#R7F2QH) and to make
+  begin-touch events lead visual contact.  The margin constants are
+  tunable data, not folklore.
+- *Derived products carry provenance*: a chunk collider — even if it is
+  just "the chunk itself plus a query function" — should record the source
+  generations it observed, like meshes do, so a terrain edit invalidates
+  exactly the artifacts whose proof included the old state (#H2W9DJ).
+
+The chunk-boundary environment question returns with force here: a body
+standing on an absent neighbor chunk must not fall through the world.
+Missing is not air (#H2W9DJ); for physics the safe boundary policy is
+closer to "missing is temporarily solid" or "bodies near non-resident
+terrain do not simulate" — which is, pleasingly, exactly a sleep mechanism:
+put bodies whose support is absent into a not-yet-simulable set and wake
+them when residency arrives.
+
+* Sleep is residency, and it prices determinism
+:PROPERTIES:
+:ID: S6T2MV
+:END:
+
+Box3D's deepest structural rhyme with the block-world design: sleeping is
+relocation out of the iterated arrays (#S5K3WM), and chunk eviction is
+relocation out of the resident world (#W8D2MT).  Both say that "inactive"
+should mean *absent from the hot path*, not flagged within it.  A luv
+simulation adopting the domain model gets the shape of sleep almost for
+free: a sleeping island is one more materialization with a smaller schema.
+
+Determinism is the decision this page must flag rather than make.  Box3D
+shows it is a whole-design property — reduction shapes, ordering funnels,
+even the math library (#D2V7MK) — and that it is cheap to *police* once a
+state hash exists, but expensive to retrofit.  Luv's situation is genuinely
+different: a live image where the user redefines a solver method mid-pile
+is gloriously, intentionally non-replayable.  The honest options seem to
+be:
+
+1. declare determinism a non-goal and enjoy the freedom (Box3D's no-FMA,
+   no-libm-trig diet stops applying);
+2. aim for *same-image, fixed-code* reproducibility — deterministic
+   ordering and reductions, a per-step state hash as a regression tool —
+   without cross-platform ambitions; or
+3. full Box3D-style determinism, priced into every kernel and every future
+   backend tier of #R9M4PV (a foreign shim or GPU pass would have to match
+   the Lisp oracle bitwise, which Accelerate and GPUs will not promise).
+
+Option 2 looks like the workshop's natural stance: the state hash is a
+debugging instrument and a test oracle, not a shipped contract.  But it
+should be chosen, not drifted into — the first parallel or foreign kernel
+sets it.
+
+* Questions to keep open
+:PROPERTIES:
+:ID: X3K8FP
+:END:
+
+- Is the body id a CLOS object reference with an id pool behind it, or an
+  id struct with a CLOS object behind it — and which one do events carry?
+- Where exactly do quantities (#L7C4GM, and the boundary-not-lanes stance
+  of #B5L7VG) meet the kinematic columns: typed columns, typed accessors,
+  or only typed boundaries?
+- Does the contact domain own its manifolds as columns, or as per-contact
+  structs while counts are small?  Box3D needed bucketed pools only at
+  mesh-contact scale.
+- When terrain edits move blocks under a sleeping pile, who wakes it —
+  the edit, the collider invalidation, or a broad-phase re-query?
+- Which parts of a step could *become* GPU passes without changing the
+  domain model — broad phase? integration? — and does the completion
+  frontier (#T9K4RC) then own part of the step's transaction?
+- What does the inspector show for one contact: its pair, its manifold,
+  its color, its impulses, its events — and can that view stay cheap
+  enough to keep open while a pile settles?

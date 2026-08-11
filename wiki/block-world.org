@@ -1,0 +1,198 @@
+#+title: The little block world and its possible worlds
+#+startup: overview
+
+* A game-shaped path through the engine
+:PROPERTIES:
+:ID: B4K7WR
+:END:
+
+The little block world is the first luv experiment whose success is mostly
+felt rather than inferred.  It opens a window, gives the player a place to
+look around, and makes changes in world representation, meshing, lighting, and
+physics visible immediately.  That makes it an unusually good path through
+otherwise abstract engine questions.
+
+This page is a map, not a specification.  The aim is to preserve a sequence
+that stays fun while allowing the underlying ideas to become serious.  A
+Minecraft-like game is useful as a recognizable constraint, but luv need not
+reproduce Minecraft's implementation or close off stranger worlds.
+
+* The current proof
+:PROPERTIES:
+:ID: P3L8YX
+:END:
+
+The current implementation in
+[[file:../block-world.lisp::(defclass block-world][=block-world.lisp=]] is one deliberately small, eager world:
+
+- a finite three-dimensional Common Lisp array contains shared =block-kind=
+  objects or =nil=;
+- an =exposed-face-mesher= walks every occupied site on the CPU and emits only
+  faces beside empty sites;
+- ordinary Lisp computes directional face shade, deterministic colour
+  variation, and corner ambient occlusion;
+- structured s-expression SPIR-V transforms the interleaved position/colour
+  vertices and adds distance fog;
+- a fly camera, depth buffer, per-frame uniform buffers, and relative pointer
+  input make the result inhabitable; and
+- renderer-native image readback writes a PNG without screen automation.
+
+The whole slice remains live and inspectable:
+
+#+begin_src lisp
+(defparameter *cube-world* (luv:start-cube-world-demo))
+
+(luv:block-mesh-face-count
+ (luv:cube-world-demo-mesh *cube-world*))
+
+(luv:capture-cube-world-screenshot
+ *cube-world* #P"/tmp/luv-block-world.png")
+
+(luv:stop-cube-world-demo *cube-world*)
+#+end_src
+
+This implementation is evidence that the renderer and lifecycle are ready for
+game-shaped work.  Its array and mesh are not claims about the final world
+model.
+
+* A world is not necessarily its finest materialization
+:PROPERTIES:
+:ID: W8D2MT
+:END:
+
+It is tempting to say that a block world /is/ a three-dimensional array of
+block objects.  That description becomes strained as soon as the world is
+larger than memory, generated on demand, edited sparsely, or represented at
+more than one resolution.
+
+A more general reading is:
+
+#+begin_example
+world description
+  + procedural sources
+  + persistent edits
+  + materialization policy
+        |
+        +-- resident finite domains and their bundles
+        +-- derived meshes, colliders, and navigation products
+        `-- absent, loading, stale, and evicted regions
+#+end_example
+
+At full resolution, one site may have a categorical block state.  A coarse
+site may instead carry surface bounds, occupancy, dominant material, material
+coverage, or an approximation error.  There need not be a one-to-one coarse
+"block object."  What remains stable is that a finite domain identifies sites
+and semantic fields have values over those sites.
+
+The eager current world is then one complete materialization of a particularly
+small description, not the definition of worldhood.
+
+* Things with identity and values at sites
+:PROPERTIES:
+:ID: F6R9QA
+:END:
+
+CLOS does not require one heap object per cell.  It helps express which things
+really have identity, ownership, behaviour, and independently inspectable
+lifetimes.
+
+Likely objects include:
+
+- a world source, composition, or edit overlay;
+- a finite domain and a resident chunk over it;
+- a field specification and its storage representation;
+- a block kind or categorical block state shared by many sites;
+- a generator, materializer, mesher, lighting rule, or residency policy;
+- a derived mesh or collider with a source version; and
+- genuinely individuated entities such as a player, creature, dropped item,
+  or chest inventory.
+
+A site in a dense domain is usually not such an object.  It is an address at
+which one or more fields can be read.  A temporary row or focus object may
+make that site pleasant to inspect without allocating a permanent object for
+every cell.  #C9L2WA develops this distinction.
+
+* Block kinds, states, and exceptional entities
+:PROPERTIES:
+:ID: K5T2VF
+:END:
+
+The existing =block-kind= instances already behave like palette entries: many
+sites share one object that owns colour and generic behaviour.  A future
+chunk could preserve that model while storing compact palette indices rather
+than Lisp object references at every site.  =block-at= would continue to
+return the semantic object after decoding its representation.
+
+A useful distinction is:
+
+- a *block kind* says what grass, stone, or wood generally is;
+- a *block state* adds categorical variation such as orientation, age, or an
+  open/closed state;
+- a *site value* selects a block state for one domain site; and
+- a *block entity* owns sparse exceptional state that is not sensible as a
+  dense field, such as an inventory or program.
+
+Solidity, opacity, and ordinary face material may be derived from a palette
+entry rather than copied into fields.  Lighting, fluids, or ecological
+readings may deserve separate fields when algorithms actually consume them.
+
+* The sequence that stays fun
+:PROPERTIES:
+:ID: S2K5HN
+:END:
+
+The order below is meant to keep each architectural proof attached to a new
+experience:
+
+1. *Look around a little world.*  This is the current checkpoint.
+2. *Touch it.*  Select, remove, and place blocks; rebuild the affected mesh;
+   make edits visible to the REPL and renderer.
+3. *Let it glow.*  Introduce block-content and lighting as the first genuinely
+   distinct fields.  Add one emissive block and a small CPU light propagation
+   rule.
+4. *Walk into another chunk.*  Materialize several finite regions, remesh
+   across their boundaries, and make residency visible rather than pretending
+   the world is always complete.
+5. *Collide with it.*  Derive a chunk collision representation and connect it
+   to the separate body/constraint domains described by #Y5H8KC.
+6. *Let the world arrive.*  Generate chunks from a deterministic source, layer
+   sparse edits over it, save them, evict a region, and recover it.
+7. *See farther.*  Introduce a coarse domain only when there is enough world
+   for level of detail to solve a visible problem.
+8. *Let processes inhabit it.*  Fluids, growth, weathering, or ecology can
+   produce narrow typed fields rather than swelling one universal cell record.
+
+This is not a dependency graph.  A particularly delightful experiment may
+pull a later item forward.
+
+* Paths into the design
+:PROPERTIES:
+:ID: M9C4DJ
+:END:
+
+- [[file:domains-and-bundles.org][Domains, bundles, and materialized worlds]] asks what the world owns and how
+  its repeated values are stored.
+- [[file:quantities-and-measurement.org][Quantities, dimensions, and interpretation]] asks what numerical fields
+  mean, which operations are lawful, and where units enter or leave.
+- [[file:physics-and-simd.org][Physics data and SIMD execution]] asks how a CLOS engine can feed wide
+  numerical kernels without turning bodies into tiny dispatching objects.
+- [[file:completion-frontier.org][The queue completion frontier]] remains relevant whenever derived GPU
+  products outlive the Lisp frame that submitted them.
+
+* Questions to keep open
+:PROPERTIES:
+:ID: Q7V3LC
+:END:
+
+- Is the first streamed unit a cubic chunk, a vertical chunk column, or
+  something taught by the procedural generator?
+- Which block variation belongs in palette states and which deserves a field?
+- Does the first lighting experiment need packed nibbles, or should it stay
+  as one byte per site until behaviour is understood?
+- What is the smallest edit journal that can survive regeneration and changes
+  in level of detail?
+- Which coarse readings make a distant block world recognizable without
+  pretending they are full-resolution blocks?
+- Can a live inspector show a logical site, its source layers, resident
+  representation, and derived products without creating a general property
+  graph?
