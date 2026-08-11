@@ -61,6 +61,16 @@ scripts/luv eval '(luv:make-little-block-world)'
 scripts/luv block-world /tmp/luv-block-world.png
 ```
 
+For the standalone interactive block world, no Emacs or running Lisp image is
+needed:
+
+```sh
+make              # builds ./luvcraft
+./luvcraft         # opens the game window
+make test          # runs the model and block-world test suites
+make smoke         # runs the built program headlessly and writes a PNG
+```
+
 The world model can be loaded and tested without SDL or Vulkan:
 
 ```lisp
