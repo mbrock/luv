@@ -53,7 +53,9 @@
                #+darwin
                (:file "canvas-cocoa")
                (:file "canvas-vulkan")
-               (:file "demo")))
+               (:file "demo")
+               (:file "png")
+               (:file "block-world")))
 
 (asdf:defsystem #:luv/mcclim
   :description "An experimental McCLIM backend presented by luv."

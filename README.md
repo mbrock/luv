@@ -78,13 +78,14 @@ through the next one.  Pass `:include-prefix t` to include the partial interval
 from trace startup through its first presentation.  This is a host API and
 command-recording trace, not a measurement of when the GPU executes commands.
 
-The public queue `submit` operation waits for the Vulkan queue to become idle,
-which gives callers a deliberately simple synchronous ownership contract.
-Canvas presentation uses a separate two-slot in-flight path: each slot retains
-its command buffer and native resources until its fence signals, acquire
-semaphores rotate with slots, and render-finished semaphores belong to
-swapchain images.  Recording can therefore overlap the preceding GPU frame
-without weakening the public operation.
+The public queue `submit` operation is asynchronous.  Each submission advances
+a Vulkan timeline semaphore and retains its command buffers and dependencies
+until the completed value passes that submission.  `submitted-work-done`
+waits for the current frontier explicitly.  Canvas presentation uses the same
+frontier through two rotating frame slots; acquire semaphores belong to slots,
+while render-finished semaphores belong to swapchain images.  Recording can
+therefore overlap the preceding GPU frame without making resource lifetime
+implicit.
 
 GPU work is represented by inspectable command structures.  Command,
 render-pass, and compute-pass encoders are sibling subclasses of the abstract
@@ -110,10 +111,12 @@ private buffer-to-image copy submission.  Vulkan 1.4's optional host image
 copy facility may provide a more direct lowering later; neither choice leaks
 into the GPU API.
 
-The first concrete `gpu-buffer` slice is deliberately narrower: a
-host-visible, coherent `(:uniform)` buffer remains mapped for its lifetime,
-and `write-buffer` copies a one-dimensional single-float array into it.  Bind
-groups may combine one such buffer with a sampled texture and sampler.
+The first concrete `gpu-buffer` slice keeps host-visible, coherent
+`(:uniform)`, `(:vertex)`, and readback `(:copy-dst)` buffers mapped for their
+lifetime. `write-buffer` copies a one-dimensional single-float array into an
+upload buffer. `read-buffer` waits for the queue completion frontier before
+copying mapped bytes back to Lisp. Bind groups may contain a uniform buffer by
+itself or combine one with a sampled texture and sampler.
 
 The next slice owns 2D textures and records explicit clear and copy commands.
 Clearing is deliberately a transfer command for now; render-pass clears can
@@ -287,8 +290,9 @@ thread.  Calls from SLY workers are sent to the canvas thread and wait for the
 frame.  `request-canvas-frame` owns that native scheduling step;
 `call-with-canvas-frame` owns texture acquisition and presentation.
 Its Vulkan context rotates two frame slots.  Reusing a slot waits only for
-that slot's submission fence, then releases the completed framebuffer and
-command pool; it never drains the presentation queue between ordinary frames.
+that slot's submission timeline value, then releases the completed framebuffer
+and command pool; it never drains the presentation queue between ordinary
+frames.
 
 Because the Cocoa process is a durable Lisp rather than a disposable game
 executable, its application policy follows its windows: opening the first SDL
@@ -327,6 +331,37 @@ For a tiny end-to-end animated demo:
 
 Try `:speed 0.25` or `:frames-per-second 30` when starting it to change the
 color-cycle rate or cadence.
+
+## Little block world
+
+The first game-shaped slice is intentionally CPU-authored and small.  A
+`block-world` owns a three-dimensional Lisp array of inspectable `block-kind`
+objects.  An `exposed-face-mesher` walks it and emits only faces whose neighbor
+is empty into one interleaved XYZ/RGB vertex vector.  Face lighting, subtle
+per-block variation, and corner ambient occlusion are all ordinary Lisp; the
+vertex and fragment stages remain structured s-expression SPIR-V modules.
+
+```lisp
+(defparameter *cube-world* (luv:start-cube-world-demo))
+
+;; Click the window, look with the mouse, and fly with WASD.
+;; Space rises, either Shift descends, and Escape releases the pointer.
+
+(luv:capture-cube-world-screenshot
+ *cube-world* #P"/tmp/luv-block-world.png")
+
+;; World, mesh, and camera are live CLOS objects.
+(luv:block-mesh-face-count (luv:cube-world-demo-mesh *cube-world*))
+(setf (luv:camera-yaw (luv:cube-world-demo-camera *cube-world*)) 0.8)
+
+(luv:stop-cube-world-demo *cube-world*)
+```
+
+Screenshot capture does not depend on the window system.  It records a real
+Vulkan image-to-buffer copy from the rendered color attachment, waits through
+the queue completion frontier, reads the mapped buffer, and writes PNG bytes
+directly from Lisp.  This makes visual iteration available from SLY even when
+the native window belongs to an awkward macOS host process.
 
 ## McCLIM
 

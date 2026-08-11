@@ -173,7 +173,7 @@ the finalizer thread — against submission and device destruction."
     :initform nil
     :accessor vulkan-device-queue)
    (render-passes
-    :initform (make-hash-table :test #'eq)
+    :initform (make-hash-table :test #'equal)
     :reader vulkan-device-render-passes)))
 
 (defclass vulkan-gpu-queue (gpu-queue vulkan-gpu-object)
@@ -292,7 +292,15 @@ and scheduled texture layouts across the canvas and REPL threads.")))
     :reader vulkan-render-pipeline-layout)
    (render-pass
     :initarg :render-pass
-    :reader vulkan-render-pipeline-render-pass)))
+    :reader vulkan-render-pipeline-render-pass)
+   (vertex-buffers
+    :initarg :vertex-buffers
+    :initform nil
+    :reader vulkan-render-pipeline-vertex-buffers)
+   (depth-format
+    :initarg :depth-format
+    :initform nil
+    :reader vulkan-render-pipeline-depth-format)))
 
 (defclass vulkan-gpu-bind-group (gpu-bind-group vulkan-gpu-object)
   ((device
@@ -378,12 +386,19 @@ visible to it.")
    (target
     :initarg :target
     :reader vulkan-render-pass-target)
+   (depth-target
+    :initarg :depth-target
+    :initform nil
+    :reader vulkan-render-pass-depth-target)
    (pipeline
     :initform nil
     :accessor vulkan-render-pass-pipeline)
    (bind-group
     :initform nil
     :accessor vulkan-render-pass-bind-group)
+   (vertex-buffers
+    :initform (make-hash-table)
+    :reader vulkan-render-pass-vertex-buffers)
    (state
     :initform :recording
     :accessor vulkan-render-pass-state)))
@@ -597,7 +612,8 @@ wrapper, this finalizer cannot run before theirs have."
                   '((:rgba8-unorm . :r8g8b8a8-unorm)
                     (:rgba8-unorm-srgb . :r8g8b8a8-srgb)
                     (:bgra8-unorm . :b8g8r8a8-unorm)
-                    (:bgra8-unorm-srgb . :b8g8r8a8-srgb))))
+                    (:bgra8-unorm-srgb . :b8g8r8a8-srgb)
+                    (:depth32-float . :d32-sfloat))))
       (reject-gpu-request
        descriptor :unsupported-texture-format
        format)))
@@ -605,14 +621,31 @@ wrapper, this finalizer cannot run before theirs have."
 (defun vulkan-texture-format (descriptor)
   (vulkan-gpu-format (texture-descriptor-format descriptor) descriptor))
 
-(defun vulkan-image-usage (usages)
+(defun vulkan-depth-format-p (format)
+  (eq format :depth32-float))
+
+(defun vulkan-texture-aspect (texture)
+  (if (vulkan-depth-format-p (gpu-texture-format texture)) :depth :color))
+
+(defun vulkan-image-usage (usages format)
   (mapcar (lambda (usage)
             (ecase usage
               (:copy-src :transfer-src)
               (:copy-dst :transfer-dst)
               (:texture-binding :sampled)
-              (:render-attachment :color-attachment)
+              (:render-attachment
+               (if (vulkan-depth-format-p format)
+                   :depth-stencil-attachment
+                   :color-attachment))
               (:storage-binding :storage)))
+          usages))
+
+(defun vulkan-buffer-usage (usages)
+  (mapcar (lambda (usage)
+            (ecase usage
+              (:uniform :uniform)
+              (:vertex :vertex)
+              (:copy-dst :transfer-dst)))
           usages))
 
 (defun compatible-vulkan-memory-type-p (memory-type-bits index)
@@ -728,15 +761,23 @@ wrapper, this finalizer cannot run before theirs have."
 
 (defmethod create
     ((device vulkan-gpu-device) (descriptor buffer-descriptor))
-  "Create one persistently mapped, host-coherent uniform buffer."
+  "Create one persistently mapped, host-coherent uploadable buffer."
   (with-vulkan-gpu-driver-environment
     (ensure-live-vulkan-object device :create-buffer)
-    (let ((size (buffer-descriptor-size descriptor))
-          (usage (buffer-descriptor-usage descriptor)))
+    (let* ((size (buffer-descriptor-size descriptor))
+           (raw-usage (buffer-descriptor-usage descriptor))
+           (usage (typecase raw-usage
+                    (keyword (list raw-usage))
+                    (list (remove-duplicates raw-usage))
+                    (vector (remove-duplicates (coerce raw-usage 'list)))
+                    (otherwise nil))))
       (unless (and (typep size '(unsigned-byte 64)) (plusp size))
         (reject-gpu-request descriptor :invalid-buffer-size size))
-      (unless (equal usage '(:uniform))
-        (reject-gpu-request descriptor :unsupported-buffer-usage usage))
+      (unless (and usage
+                   (every (lambda (value)
+                            (member value '(:uniform :vertex :copy-dst)))
+                          usage))
+        (reject-gpu-request descriptor :unsupported-buffer-usage raw-usage))
       (let ((native-device (vulkan-handle device))
             (buffer nil)
             (memory nil)
@@ -744,7 +785,9 @@ wrapper, this finalizer cannot run before theirs have."
             (completed-p nil))
         (unwind-protect
              (progn
-               (setf buffer (lvk:create-buffer native-device size usage))
+               (setf buffer
+                     (lvk:create-buffer native-device size
+                                        (vulkan-buffer-usage usage)))
                (let* ((requirements
                         (lvk:get-buffer-memory-requirements
                          native-device buffer))
@@ -793,6 +836,25 @@ wrapper, this finalizer cannot run before theirs have."
               (aref data index)))))
   buffer)
 
+(defmethod read-buffer
+    ((buffer vulkan-gpu-buffer) &key (offset 0) size)
+  (with-vulkan-gpu-driver-environment
+    (ensure-live-vulkan-object buffer :read-buffer)
+    (let ((size (or size (- (gpu-buffer-size buffer) offset))))
+      (unless (and (typep offset '(unsigned-byte 64))
+                   (typep size '(unsigned-byte 64))
+                   (<= (+ offset size) (gpu-buffer-size buffer)))
+        (reject-gpu-request buffer :buffer-read-out-of-bounds
+                            (list :offset offset :size size)))
+      (submitted-work-done
+       (device-queue (vulkan-buffer-device buffer)))
+      (let ((bytes (make-array size :element-type '(unsigned-byte 8)))
+            (source (cffi:inc-pointer
+                     (vulkan-buffer-mapped buffer) offset)))
+        (dotimes (index size bytes)
+          (setf (aref bytes index)
+                (cffi:mem-aref source :uint8 index)))))))
+
 (defmethod create
     ((device vulkan-gpu-device) (descriptor texture-descriptor))
   "Create one owned, single-mip Vulkan 2D texture and bind its memory."
@@ -822,7 +884,8 @@ wrapper, this finalizer cannot run before theirs have."
                      :array-layers 1
                      :samples :1
                      :tiling :optimal
-                     :usage (vulkan-image-usage usages)
+                     :usage (vulkan-image-usage
+                             usages (texture-descriptor-format descriptor))
                      :sharing-mode :exclusive
                      :initial-layout :undefined))
              (let* ((requirements
@@ -881,7 +944,8 @@ wrapper, this finalizer cannot run before theirs have."
        :handle (lvk:create-image-view
                 (vulkan-handle device)
                 (vulkan-handle texture)
-                (vulkan-texture-vk-format texture))
+                (vulkan-texture-vk-format texture)
+                :aspect (vulkan-texture-aspect texture))
        :device device
        :texture texture))))
 
@@ -930,6 +994,16 @@ wrapper, this finalizer cannot run before theirs have."
       (reject-gpu-request descriptor :unsupported-bind-group-layout entries))
     (first entries)))
 
+(defun uniform-buffer-layout-entry (descriptor)
+  (let ((entries (bind-group-layout-descriptor-entries descriptor)))
+    (unless (and (listp entries) (= 1 (length entries))
+                 (listp (first entries))
+                 (eq :uniform-buffer (getf (first entries) :type))
+                 (typep (getf (first entries) :binding)
+                        '(unsigned-byte 32)))
+      (reject-gpu-request descriptor :unsupported-bind-group-layout entries))
+    (first entries)))
+
 (defun sampled-texture-sampler-layout-entries (descriptor)
   (let* ((entries (bind-group-layout-descriptor-entries descriptor))
          (texture (find :texture entries :key (lambda (entry)
@@ -968,6 +1042,16 @@ wrapper, this finalizer cannot run before theirs have."
             :handle (lvk:create-storage-image-descriptor-set-layout
                      (vulkan-handle device) :binding binding)
             :device device :binding binding :entries entries)))
+        ((and (= 1 (length entries))
+              (eq :uniform-buffer (getf (first entries) :type)))
+         (let* ((entry (uniform-buffer-layout-entry descriptor))
+                (binding (getf entry :binding)))
+           (make-instance
+            'vulkan-gpu-bind-group-layout
+            :label (gpu-descriptor-label descriptor)
+            :handle (lvk:create-uniform-buffer-descriptor-set-layout
+                     (vulkan-handle device) :binding binding)
+            :device device :entries entries)))
         (t
          (multiple-value-bind (entries texture sampler uniform)
              (sampled-texture-sampler-layout-entries descriptor)
@@ -1031,12 +1115,45 @@ wrapper, this finalizer cannot run before theirs have."
             (lvk:destroy-pipeline-layout
              (vulkan-handle device) pipeline-layout)))))))
 
-(defun vulkan-render-pass-for-format (device gpu-format descriptor)
-  (or (gethash gpu-format (vulkan-device-render-passes device))
-      (setf (gethash gpu-format (vulkan-device-render-passes device))
+(defun vulkan-render-pass-for-format
+    (device gpu-format descriptor &optional depth-format)
+  (let ((key (list gpu-format depth-format)))
+    (or (gethash key (vulkan-device-render-passes device))
+      (setf (gethash key (vulkan-device-render-passes device))
             (lvk:create-color-render-pass
              (vulkan-handle device)
-             (vulkan-gpu-format gpu-format descriptor)))))
+             (vulkan-gpu-format gpu-format descriptor)
+             :depth-format (and depth-format
+                                (vulkan-gpu-format depth-format descriptor)))))))
+
+(defun normalize-vulkan-vertex-buffers (descriptor buffers)
+  (unless (listp buffers)
+    (reject-gpu-request descriptor :invalid-vertex-buffers buffers))
+  (loop for buffer in buffers
+        for binding from 0
+        for stride = (getf buffer :array-stride)
+        for step-mode = (or (getf buffer :step-mode) :vertex)
+        for attributes = (getf buffer :attributes)
+        unless (and (typep stride '(unsigned-byte 32)) (plusp stride)
+                    (member step-mode '(:vertex :instance))
+                    (listp attributes) attributes
+                    (every (lambda (attribute)
+                             (and (typep (getf attribute :shader-location)
+                                         '(unsigned-byte 32))
+                                  (typep (getf attribute :offset)
+                                         '(unsigned-byte 32))
+                                  (eq :float32x3 (getf attribute :format))))
+                           attributes))
+          do (reject-gpu-request descriptor :invalid-vertex-buffer buffer)
+        collect
+        (list :binding binding :array-stride stride :step-mode step-mode
+              :attributes
+              (mapcar (lambda (attribute)
+                        (list :shader-location
+                              (getf attribute :shader-location)
+                              :offset (getf attribute :offset)
+                              :format :r32g32b32-sfloat))
+                      attributes))))
 
 (defmethod create
     ((device vulkan-gpu-device) (descriptor render-pipeline-descriptor))
@@ -1046,9 +1163,20 @@ wrapper, this finalizer cannot run before theirs have."
            (vertex (render-pipeline-descriptor-vertex descriptor))
            (fragment (render-pipeline-descriptor-fragment descriptor))
            (vertex-module (getf vertex :module))
+           (vertex-buffers
+             (normalize-vulkan-vertex-buffers
+              descriptor (or (getf vertex :buffers) nil)))
            (fragment-module (getf fragment :module))
            (targets (getf fragment :targets))
            (format (getf (first targets) :format))
+           (depth-stencil
+             (render-pipeline-descriptor-depth-stencil descriptor))
+           (depth-format (and depth-stencil (getf depth-stencil :format)))
+           (depth-compare (and depth-stencil
+                               (getf depth-stencil :depth-compare)))
+           (depth-write-enabled
+             (and depth-stencil
+                  (getf depth-stencil :depth-write-enabled)))
            (topology
              (or (getf (render-pipeline-descriptor-primitive descriptor)
                        :topology)
@@ -1058,6 +1186,12 @@ wrapper, this finalizer cannot run before theirs have."
                    (typep fragment-module 'vulkan-gpu-shader-module)
                    (= 1 (length targets))
                    format
+                   (or (null depth-stencil)
+                       (and (eq depth-format :depth32-float)
+                            (member depth-compare
+                                    '(:never :less :equal :less-or-equal
+                                      :greater :not-equal :greater-or-equal
+                                      :always))))
                    (member topology '(:triangle-list :triangle-strip)))
         (reject-gpu-request descriptor :unsupported-render-pipeline))
       (dolist (object (list layout vertex-module fragment-module))
@@ -1070,7 +1204,8 @@ wrapper, this finalizer cannot run before theirs have."
             (vulkan-shader-module-device object)))
          device :create-render-pipeline))
       (let* ((render-pass
-               (vulkan-render-pass-for-format device format descriptor))
+               (vulkan-render-pass-for-format
+                device format descriptor depth-format))
              (pipeline-layout
                (lvk:create-pipeline-layout
                 (vulkan-handle device) (vector (vulkan-handle layout))))
@@ -1087,13 +1222,17 @@ wrapper, this finalizer cannot run before theirs have."
                       :vertex-entry-point (or (getf vertex :entry-point) "main")
                       :fragment-entry-point
                       (or (getf fragment :entry-point) "main")
-                      :topology topology)
+                      :topology topology
+                      :vertex-buffers vertex-buffers
+                      :depth-compare depth-compare
+                      :depth-write-enabled depth-write-enabled)
                      completed-p t)
                (make-instance
                 'vulkan-gpu-render-pipeline
                 :label (gpu-descriptor-label descriptor)
                 :handle pipeline :device device :layout layout
-                :pipeline-layout pipeline-layout :render-pass render-pass))
+                :pipeline-layout pipeline-layout :render-pass render-pass
+                :vertex-buffers vertex-buffers :depth-format depth-format))
           (unless completed-p
             (lvk:destroy-pipeline-layout
              (vulkan-handle device) pipeline-layout)))))))
@@ -1142,6 +1281,49 @@ wrapper, this finalizer cannot run before theirs have."
     (values texture-entry sampler-entry uniform-entry
             texture-layout sampler-layout uniform-layout)))
 
+(defun uniform-buffer-bind-group-entry (descriptor layout)
+  (let* ((entries (bind-group-descriptor-entries descriptor))
+         (layout-entry (first (vulkan-bind-group-layout-entries layout)))
+         (entry (first entries)))
+    (unless (and (= 1 (length entries))
+                 (= (or (getf entry :binding) -1)
+                    (getf layout-entry :binding))
+                 (typep (getf entry :resource) 'vulkan-gpu-buffer))
+      (reject-gpu-request descriptor :unsupported-bind-group entries))
+    entry))
+
+(defun create-vulkan-uniform-bind-group (device descriptor layout)
+  (let* ((entry (uniform-buffer-bind-group-entry descriptor layout))
+         (buffer (getf entry :resource))
+         (binding (getf (first (vulkan-bind-group-layout-entries layout))
+                        :binding)))
+    (ensure-vulkan-object-device
+     buffer (vulkan-buffer-device buffer) device :create-bind-group)
+    (unless (member :uniform (gpu-buffer-usage buffer))
+      (error 'gpu-usage-error
+             :object buffer :operation :create-bind-group
+             :required-usage :uniform
+             :actual-usage (gpu-buffer-usage buffer)))
+    (let ((pool (lvk:create-uniform-buffer-descriptor-pool
+                 (vulkan-handle device)))
+          (set nil)
+          (completed-p nil))
+      (unwind-protect
+           (progn
+             (setf set (lvk:allocate-descriptor-set
+                        (vulkan-handle device) pool (vulkan-handle layout)))
+             (lvk:update-uniform-buffer-descriptor
+              (vulkan-handle device) set (vulkan-handle buffer)
+              (gpu-buffer-size buffer) :binding binding)
+             (setf completed-p t)
+             (make-instance
+              'vulkan-gpu-bind-group
+              :label (gpu-descriptor-label descriptor)
+              :handle set :device device :layout layout
+              :buffer buffer :descriptor-pool pool))
+        (unless completed-p
+          (lvk:destroy-descriptor-pool (vulkan-handle device) pool))))))
+
 (defmethod create
     ((device vulkan-gpu-device) (descriptor bind-group-descriptor))
   (with-vulkan-gpu-driver-environment
@@ -1183,7 +1365,12 @@ wrapper, this finalizer cannot run before theirs have."
                 (unless completed-p
                   (lvk:destroy-descriptor-pool
                    (vulkan-handle device) pool)))))
-          (multiple-value-bind
+          (if (and (= 1 (length (vulkan-bind-group-layout-entries layout)))
+                   (eq :uniform-buffer
+                       (getf (first (vulkan-bind-group-layout-entries layout))
+                             :type)))
+              (create-vulkan-uniform-bind-group device descriptor layout)
+              (multiple-value-bind
                 (texture-entry sampler-entry uniform-entry
                  texture-layout sampler-layout uniform-layout)
               (sampled-texture-sampler-bind-group-entries descriptor layout)
@@ -1247,7 +1434,7 @@ wrapper, this finalizer cannot run before theirs have."
                         :descriptor-pool pool))
                   (unless completed-p
                     (lvk:destroy-descriptor-pool
-                     (vulkan-handle device) pool))))))))))
+                     (vulkan-handle device) pool)))))))))))
 
 (defmethod create
     ((device vulkan-gpu-device) (descriptor command-encoder-descriptor))
@@ -1357,6 +1544,10 @@ ownership and cancel this finalizer."
     (:color-attachment-optimal
      (values (list :color-attachment-read :color-attachment-write)
              (list :color-attachment-output)))
+    (:depth-stencil-attachment-optimal
+     (values (list :depth-stencil-attachment-read
+                   :depth-stencil-attachment-write)
+             (list :early-fragment-tests :late-fragment-tests)))
     (:transfer-src-optimal
      (values (list :transfer-read) (list :transfer)))
     (:transfer-dst-optimal
@@ -1390,7 +1581,8 @@ ownership and cancel this finalizer."
            (vulkan-command-encoder-command-buffer encoder)
            (vulkan-handle texture)
            old-layout new-layout
-           src-access dst-access src-stage dst-stage)))
+           src-access dst-access src-stage dst-stage
+           :aspect (vulkan-texture-aspect texture))))
       (setf (gethash texture
                      (vulkan-command-encoder-texture-layouts encoder))
             new-layout)))
@@ -1480,6 +1672,41 @@ ownership and cancel this finalizer."
        (vulkan-handle destination) :transfer-dst-optimal
        (first (gpu-texture-size source))
        (second (gpu-texture-size source)))))
+  encoder)
+
+(defmethod encode
+    ((encoder vulkan-gpu-command-encoder)
+     (command gpu-copy-texture-to-buffer-command))
+  (with-vulkan-gpu-driver-environment
+    (ensure-vulkan-command-encoder-state encoder :encode)
+    (ensure-no-active-vulkan-pass encoder :encode)
+    (let* ((source
+             (ensure-vulkan-texture-for-command
+              encoder (gpu-copy-texture-to-buffer-command-source command)
+              command :copy-src))
+           (destination
+             (gpu-copy-texture-to-buffer-command-destination command))
+           (device (vulkan-command-encoder-device encoder))
+           (size (gpu-texture-size source))
+           (required-size (* 4 (first size) (second size))))
+      (unless (and (typep destination 'vulkan-gpu-buffer)
+                   (member :copy-dst (gpu-buffer-usage destination))
+                   (<= required-size (gpu-buffer-size destination))
+                   (member (gpu-texture-format source)
+                           '(:rgba8-unorm :rgba8-unorm-srgb
+                             :bgra8-unorm :bgra8-unorm-srgb)))
+        (reject-gpu-request
+         command :unsupported-texture-to-buffer-copy
+         (list :source source :destination destination)))
+      (ensure-vulkan-object-device
+       destination (vulkan-buffer-device destination) device
+       :copy-texture-to-buffer)
+      (transition-vulkan-texture encoder source :transfer-src-optimal)
+      (lvk:cmd-copy-image-to-buffer
+       (vulkan-command-encoder-command-buffer encoder)
+       (vulkan-handle source) :transfer-src-optimal
+       (vulkan-handle destination) (first size) (second size))
+      (retain-vulkan-resource encoder destination)))
   encoder)
 
 (defun reject-texture-write (destination reason &optional details)
@@ -1687,6 +1914,11 @@ lowering later without changing this queue-level operation."
       (reject-gpu-request descriptor :invalid-clear-color color))
     (map 'vector (lambda (value) (coerce value 'single-float)) components)))
 
+(defun normalize-render-pass-depth (descriptor depth)
+  (unless (and (realp depth) (<= 0 depth 1))
+    (reject-gpu-request descriptor :invalid-clear-depth depth))
+  (coerce depth 'single-float))
+
 (defmethod begin-render-pass
     ((encoder vulkan-gpu-command-encoder)
      (descriptor render-pass-descriptor))
@@ -1698,22 +1930,55 @@ lowering later without changing this queue-level operation."
            (view (and attachment (getf attachment :view)))
            (target (and (typep view 'vulkan-gpu-texture-view)
                         (gpu-texture-view-texture view)))
+           (depth-attachment
+             (render-pass-descriptor-depth-stencil-attachment descriptor))
+           (depth-view (and depth-attachment
+                            (getf depth-attachment :view)))
+           (depth-target
+             (and (typep depth-view 'vulkan-gpu-texture-view)
+                  (gpu-texture-view-texture depth-view)))
            (clear-color
              (normalize-render-pass-color
-              descriptor (or (getf attachment :clear-value) #(0 0 0 1)))))
+              descriptor (or (getf attachment :clear-value) #(0 0 0 1))))
+           (clear-depth
+             (and depth-attachment
+                  (normalize-render-pass-depth
+                   descriptor
+                   (or (getf depth-attachment :depth-clear-value) 1.0)))))
       (unless (and attachment target
                    (eq :clear (getf attachment :load-op))
-                   (eq :store (getf attachment :store-op)))
+                   (eq :store (getf attachment :store-op))
+                   (or (null depth-attachment)
+                       (and depth-target
+                            (eq :depth32-float
+                                (gpu-texture-format depth-target))
+                            (eq :clear
+                                (getf depth-attachment :depth-load-op))
+                            (eq :discard
+                                (getf depth-attachment :depth-store-op)))))
         (reject-gpu-request descriptor :unsupported-render-pass))
       (let* ((device (vulkan-command-encoder-device encoder))
              (size (gpu-texture-size target))
              (render-pass
                (vulkan-render-pass-for-format
-                device (gpu-texture-format target) descriptor))
+                device (gpu-texture-format target) descriptor
+                (and depth-target (gpu-texture-format depth-target))))
              (framebuffer nil)
              (completed-p nil))
         (ensure-vulkan-object-device
          view (vulkan-texture-view-device view) device :begin-render-pass)
+        (when depth-target
+          (unless (equal size (gpu-texture-size depth-target))
+            (reject-gpu-request descriptor :mismatched-depth-size
+                                (gpu-texture-size depth-target)))
+          (ensure-vulkan-object-device
+           depth-view (vulkan-texture-view-device depth-view)
+           device :begin-render-pass)
+          (retain-vulkan-resource encoder depth-view)
+          (ensure-vulkan-texture-for-command
+           encoder depth-target descriptor :render-attachment)
+          (transition-vulkan-texture
+           encoder depth-target :depth-stencil-attachment-optimal))
         (retain-vulkan-resource encoder view)
         (ensure-vulkan-texture-for-command
          encoder target descriptor :render-attachment)
@@ -1724,11 +1989,13 @@ lowering later without changing this queue-level operation."
                (setf framebuffer
                      (lvk:create-framebuffer
                       (vulkan-handle device) render-pass
-                      (vulkan-handle view) (first size) (second size)))
+                      (vulkan-handle view) (first size) (second size)
+                      :depth-view (and depth-view
+                                       (vulkan-handle depth-view))))
                (lvk:cmd-begin-color-render-pass
                 (vulkan-command-encoder-command-buffer encoder)
                 render-pass framebuffer (first size) (second size)
-                clear-color)
+                clear-color :depth-clear-value clear-depth)
                (lvk:cmd-set-viewport-and-scissor
                 (vulkan-command-encoder-command-buffer encoder)
                 (first size) (second size))
@@ -1738,7 +2005,7 @@ lowering later without changing this queue-level operation."
                        (make-instance
                         'vulkan-gpu-render-pass-encoder
                         :encoder encoder :framebuffer framebuffer
-                        :target target)))
+                        :target target :depth-target depth-target)))
                  (setf (vulkan-command-encoder-active-pass encoder) pass
                        completed-p t)
                  pass))
@@ -1777,7 +2044,10 @@ lowering later without changing this queue-level operation."
                   (vulkan-render-pass-for-format
                    device (gpu-texture-format
                            (vulkan-render-pass-target pass))
-                   pass))
+                   pass
+                   (and (vulkan-render-pass-depth-target pass)
+                        (gpu-texture-format
+                         (vulkan-render-pass-depth-target pass)))))
         (reject-gpu-request pipeline :incompatible-render-pass pass))
       (lvk:cmd-bind-graphics-pipeline
        (vulkan-command-encoder-command-buffer encoder)
@@ -1815,13 +2085,14 @@ lowering later without changing this queue-level operation."
          (vulkan-bind-group-buffer bind-group)
          (vulkan-buffer-device (vulkan-bind-group-buffer bind-group))
          device :set-bind-group))
-      (let ((texture
-              (gpu-texture-view-texture
-               (vulkan-bind-group-texture-view bind-group))))
-        (ensure-vulkan-texture-for-command
-         encoder texture pass :texture-binding)
-        (transition-vulkan-texture
-         encoder texture :shader-read-only-optimal))
+      (when (vulkan-bind-group-texture-view bind-group)
+        (let ((texture
+                (gpu-texture-view-texture
+                 (vulkan-bind-group-texture-view bind-group))))
+          (ensure-vulkan-texture-for-command
+           encoder texture pass :texture-binding)
+          (transition-vulkan-texture
+           encoder texture :shader-read-only-optimal)))
       (lvk:cmd-bind-graphics-descriptor-set
        (vulkan-command-encoder-command-buffer encoder)
        (vulkan-render-pipeline-layout pipeline)
@@ -1838,15 +2109,51 @@ lowering later without changing this queue-level operation."
 
 (defmethod encode
     ((pass vulkan-gpu-render-pass-encoder)
+     (command gpu-set-vertex-buffer-command))
+  (with-vulkan-gpu-driver-environment
+    (ensure-vulkan-render-pass-state pass :set-vertex-buffer)
+    (let* ((slot (gpu-set-vertex-buffer-command-slot command))
+           (buffer (gpu-set-vertex-buffer-command-buffer command))
+           (offset (gpu-set-vertex-buffer-command-offset command))
+           (encoder (vulkan-render-pass-command-encoder pass))
+           (device (vulkan-command-encoder-device encoder)))
+      (unless (and (typep slot '(unsigned-byte 32))
+                   (typep buffer 'vulkan-gpu-buffer)
+                   (typep offset '(unsigned-byte 64))
+                   (zerop (mod offset 4))
+                   (< offset (gpu-buffer-size buffer)))
+        (reject-gpu-request command :invalid-vertex-buffer-binding
+                            (list slot buffer offset)))
+      (ensure-vulkan-object-device
+       buffer (vulkan-buffer-device buffer) device :set-vertex-buffer)
+      (unless (member :vertex (gpu-buffer-usage buffer))
+        (error 'gpu-usage-error
+               :object buffer :operation :set-vertex-buffer
+               :required-usage :vertex
+               :actual-usage (gpu-buffer-usage buffer)))
+      (lvk:cmd-bind-vertex-buffer
+       (vulkan-command-encoder-command-buffer encoder)
+       slot (vulkan-handle buffer) offset)
+      (retain-vulkan-resource encoder buffer)
+      (setf (gethash slot (vulkan-render-pass-vertex-buffers pass)) buffer)))
+  pass)
+
+(defmethod encode
+    ((pass vulkan-gpu-render-pass-encoder)
      (command gpu-draw-command))
   (with-vulkan-gpu-driver-environment
     (ensure-vulkan-render-pass-state pass :draw)
     (unless (and (vulkan-render-pass-pipeline pass)
-                 (vulkan-render-pass-bind-group pass))
+                 (vulkan-render-pass-bind-group pass)
+                 (every (lambda (description)
+                          (gethash (getf description :binding)
+                                   (vulkan-render-pass-vertex-buffers pass)))
+                        (vulkan-render-pipeline-vertex-buffers
+                         (vulkan-render-pass-pipeline pass))))
       (error 'gpu-invalid-state-error
              :object pass :operation :draw
              :state :incomplete-bindings
-             :expected-state :pipeline-and-bind-group-bound))
+             :expected-state :pipeline-bind-group-and-vertex-buffers-bound))
     (let ((vertex-count (gpu-draw-command-vertex-count command))
           (instance-count (gpu-draw-command-instance-count command))
           (first-vertex (gpu-draw-command-first-vertex command))

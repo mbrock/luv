@@ -45,6 +45,7 @@
   (:pipeline-viewport-state-create-info 22)
   (:pipeline-rasterization-state-create-info 23)
   (:pipeline-multisample-state-create-info 24)
+  (:pipeline-depth-stencil-state-create-info 25)
   (:pipeline-color-blend-state-create-info 26)
   (:pipeline-dynamic-state-create-info 27)
   (:graphics-pipeline-create-info 28)
@@ -83,7 +84,9 @@
   (:r8g8b8a8-unorm 37)
   (:r8g8b8a8-srgb 43)
   (:b8g8r8a8-unorm 44)
-  (:b8g8r8a8-srgb 50))
+  (:b8g8r8a8-srgb 50)
+  (:r32g32b32-sfloat 106)
+  (:d32-sfloat 126))
 
 (cffi:defcenum (image-tiling :uint32)
   (:optimal 0)
@@ -97,6 +100,7 @@
   (:undefined 0)
   (:general 1)
   (:color-attachment-optimal 2)
+  (:depth-stencil-attachment-optimal 3)
   (:shader-read-only-optimal 5)
   (:transfer-src-optimal 6)
   (:transfer-dst-optimal 7)
@@ -135,7 +139,27 @@
 
 (cffi:defcenum (compare-op :uint32)
   (:never 0)
+  (:less 1)
+  (:equal 2)
+  (:less-or-equal 3)
+  (:greater 4)
+  (:not-equal 5)
+  (:greater-or-equal 6)
   (:always 7))
+
+(cffi:defcenum (stencil-op :uint32)
+  (:keep 0)
+  (:zero 1)
+  (:replace 2)
+  (:increment-and-clamp 3)
+  (:decrement-and-clamp 4)
+  (:invert 5)
+  (:increment-and-wrap 6)
+  (:decrement-and-wrap 7))
+
+(cffi:defcenum (vertex-input-rate :uint32)
+  (:vertex 0)
+  (:instance 1))
 
 (cffi:defcenum (border-color :uint32)
   (:float-transparent-black 0))
@@ -237,12 +261,14 @@
   (:transfer-dst #x2)
   (:sampled #x4)
   (:storage #x8)
-  (:color-attachment #x10))
+  (:color-attachment #x10)
+  (:depth-stencil-attachment #x20))
 
 (cffi:defbitfield (buffer-usage-flags :uint32)
   (:transfer-src #x1)
   (:transfer-dst #x2)
-  (:uniform #x10))
+  (:uniform #x10)
+  (:vertex #x80))
 
 (cffi:defbitfield (shader-stage-flags :uint32)
   (:vertex #x1)
@@ -284,6 +310,8 @@
   (:stencil #x4))
 
 (cffi:defbitfield (access-flags :uint32)
+  (:depth-stencil-attachment-read #x200)
+  (:depth-stencil-attachment-write #x400)
   (:color-attachment-read #x80)
   (:color-attachment-write #x100)
   (:shader-read #x20)
@@ -294,6 +322,8 @@
 (cffi:defbitfield (pipeline-stage-flags :uint32)
   (:top-of-pipe #x1)
   (:vertex-shader #x8)
+  (:early-fragment-tests #x100)
+  (:late-fragment-tests #x200)
   (:fragment-shader #x80)
   (:color-attachment-output #x400)
   (:compute-shader #x800)
@@ -305,6 +335,8 @@
 (cffi:defbitfield (pipeline-stage-flags-2 :uint64)
   (:top-of-pipe #x1)
   (:vertex-shader #x8)
+  (:early-fragment-tests #x100)
+  (:late-fragment-tests #x200)
   (:fragment-shader #x80)
   (:color-attachment-output #x400)
   (:compute-shader #x800)
@@ -574,6 +606,17 @@
   (vertex-attribute-description-count :uint32)
   (p-vertex-attribute-descriptions :pointer))
 
+(defvkstruct vertex-input-binding-description ()
+  (binding :uint32)
+  (stride :uint32)
+  (input-rate vertex-input-rate))
+
+(defvkstruct vertex-input-attribute-description ()
+  (location :uint32)
+  (binding :uint32)
+  (format format)
+  (offset :uint32))
+
 (defvkstruct pipeline-input-assembly-state-create-info
     (:s-type :pipeline-input-assembly-state-create-info)
   (flags :uint32)
@@ -611,6 +654,28 @@
   (p-sample-mask :pointer)
   (alpha-to-coverage-enable :uint32)
   (alpha-to-one-enable :uint32))
+
+(defvkstruct stencil-op-state ()
+  (fail-op stencil-op)
+  (pass-op stencil-op)
+  (depth-fail-op stencil-op)
+  (compare-op compare-op)
+  (compare-mask :uint32)
+  (write-mask :uint32)
+  (reference :uint32))
+
+(defvkstruct pipeline-depth-stencil-state-create-info
+    (:s-type :pipeline-depth-stencil-state-create-info)
+  (flags :uint32)
+  (depth-test-enable :uint32)
+  (depth-write-enable :uint32)
+  (depth-compare-op compare-op)
+  (depth-bounds-test-enable :uint32)
+  (stencil-test-enable :uint32)
+  (front (:struct stencil-op-state))
+  (back (:struct stencil-op-state))
+  (min-depth-bounds :float)
+  (max-depth-bounds :float))
 
 (defvkstruct pipeline-color-blend-attachment-state ()
   (blend-enable :uint32)
@@ -826,8 +891,13 @@
   (int-32 (:array :int32 4))
   (uint-32 (:array :uint32 4)))
 
+(defvkstruct clear-depth-stencil-value ()
+  (depth :float)
+  (stencil :uint32))
+
 (cffi:defcunion clear-value
-  (color (:union clear-color-value)))
+  (color (:union clear-color-value))
+  (depth-stencil (:struct clear-depth-stencil-value)))
 
 (defvkstruct render-pass-begin-info (:s-type :render-pass-begin-info)
   (render-pass :pointer)
@@ -1578,6 +1648,15 @@ the beginning of TRACE through its first presentation."
   (region-count :uint32)
   (regions :pointer))
 
+(defvkfun "vkCmdCopyImageToBuffer"
+    :void
+  (command-buffer :pointer)
+  (source-image :pointer)
+  (source-layout image-layout)
+  (destination-buffer :pointer)
+  (region-count :uint32)
+  (regions :pointer))
+
 (defvkfun "vkCmdBindPipeline"
     :void
   (command-buffer :pointer)
@@ -1594,6 +1673,14 @@ the beginning of TRACE through its first presentation."
   (sets :pointer)
   (dynamic-offset-count :uint32)
   (dynamic-offsets :pointer))
+
+(defvkfun "vkCmdBindVertexBuffers"
+    :void
+  (command-buffer :pointer)
+  (first-binding :uint32)
+  (binding-count :uint32)
+  (buffers :pointer)
+  (offsets :pointer))
 
 (defvkfun "vkCmdDispatch"
     :void
@@ -2265,7 +2352,8 @@ destroy it before destroying INSTANCE."
   (vk:unmap-memory device memory)
   (values))
 
-(defun create-image-view (device image format &key (view-type :2d))
+(defun create-image-view
+    (device image format &key (view-type :2d) (aspect :color))
   (with-vk (create-info image-view-create-info
             :flags 0
             :image image
@@ -2276,9 +2364,10 @@ destroy it before destroying INSTANCE."
       create-info '(:struct image-view-create-info) 'components)
      'component-mapping
      :r :identity :g :identity :b :identity :a :identity)
-    (fill-color-subresource-range
+    (fill-image-subresource-range
      (cffi:foreign-slot-pointer
-      create-info '(:struct image-view-create-info) 'subresource-range))
+      create-info '(:struct image-view-create-info) 'subresource-range)
+     aspect)
     (create-image-view-handle device create-info)))
 
 (defun destroy-image-view (device view)
@@ -2308,6 +2397,18 @@ destroy it before destroying INSTANCE."
               :flags 0
               :binding-count 1
               :p-bindings layout-binding)
+      (create-descriptor-set-layout-handle device create-info))))
+
+(defun create-uniform-buffer-descriptor-set-layout
+    (device &key (binding 0) (stages '(:vertex)))
+  (with-vk (layout-binding descriptor-set-layout-binding
+            :binding binding
+            :descriptor-type :uniform-buffer
+            :descriptor-count 1
+            :stage-flags stages
+            :p-immutable-samplers (cffi:null-pointer))
+    (with-vk (create-info descriptor-set-layout-create-info
+              :flags 0 :binding-count 1 :p-bindings layout-binding)
       (create-descriptor-set-layout-handle device create-info))))
 
 (defun create-sampled-image-sampler-descriptor-set-layout
@@ -2419,41 +2520,69 @@ destroy it before destroying INSTANCE."
   (vk:destroy-sampler device sampler (cffi:null-pointer))
   (values))
 
-(defun create-color-render-pass (device format)
-  (with-vk (attachment attachment-description
-            :flags 0 :format format :samples :1
-            :load-op :clear :store-op :store
-            :stencil-load-op :dont-care :stencil-store-op :dont-care
-            :initial-layout :color-attachment-optimal
-            :final-layout :color-attachment-optimal)
-    (with-vk (reference attachment-reference
-              :attachment 0 :layout :color-attachment-optimal)
-      (with-vk (subpass subpass-description
-                :flags 0 :pipeline-bind-point :graphics
-                :input-attachment-count 0
-                :p-input-attachments (cffi:null-pointer)
-                :color-attachment-count 1
-                :p-color-attachments reference
-                :p-resolve-attachments (cffi:null-pointer)
-                :p-depth-stencil-attachment (cffi:null-pointer)
-                :preserve-attachment-count 0
-                :p-preserve-attachments (cffi:null-pointer))
-        (with-vk (create-info render-pass-create-info
-                  :flags 0 :attachment-count 1 :p-attachments attachment
-                  :subpass-count 1 :p-subpasses subpass
-                  :dependency-count 0
-                  :p-dependencies (cffi:null-pointer))
-          (create-render-pass-handle device create-info))))))
+(defun create-color-render-pass (device format &key depth-format)
+  (let ((attachment-count (if depth-format 2 1)))
+    (cffi:with-foreign-object
+        (attachments '(:struct attachment-description) attachment-count)
+      (fill-vk
+       (cffi:mem-aptr attachments '(:struct attachment-description) 0)
+       'attachment-description
+       :flags 0 :format format :samples :1
+       :load-op :clear :store-op :store
+       :stencil-load-op :dont-care :stencil-store-op :dont-care
+       :initial-layout :color-attachment-optimal
+       :final-layout :color-attachment-optimal)
+      (when depth-format
+        (fill-vk
+         (cffi:mem-aptr attachments '(:struct attachment-description) 1)
+         'attachment-description
+         :flags 0 :format depth-format :samples :1
+         :load-op :clear :store-op :dont-care
+         :stencil-load-op :dont-care :stencil-store-op :dont-care
+         :initial-layout :depth-stencil-attachment-optimal
+         :final-layout :depth-stencil-attachment-optimal))
+      (with-vk (color-reference attachment-reference
+                :attachment 0 :layout :color-attachment-optimal)
+        (labels ((create-with-depth-reference (depth-reference)
+                   (with-vk (subpass subpass-description
+                             :flags 0 :pipeline-bind-point :graphics
+                             :input-attachment-count 0
+                             :p-input-attachments (cffi:null-pointer)
+                             :color-attachment-count 1
+                             :p-color-attachments color-reference
+                             :p-resolve-attachments (cffi:null-pointer)
+                             :p-depth-stencil-attachment depth-reference
+                             :preserve-attachment-count 0
+                             :p-preserve-attachments (cffi:null-pointer))
+                     (with-vk (create-info render-pass-create-info
+                               :flags 0 :attachment-count attachment-count
+                               :p-attachments attachments
+                               :subpass-count 1 :p-subpasses subpass
+                               :dependency-count 0
+                               :p-dependencies (cffi:null-pointer))
+                       (create-render-pass-handle device create-info)))))
+          (if depth-format
+              (with-vk (depth-reference attachment-reference
+                        :attachment 1
+                        :layout :depth-stencil-attachment-optimal)
+                (create-with-depth-reference depth-reference))
+              (create-with-depth-reference (cffi:null-pointer))))))))
 
 (defun destroy-render-pass (device render-pass)
   (vk:destroy-render-pass device render-pass (cffi:null-pointer))
   (values))
 
-(defun create-framebuffer (device render-pass image-view width height)
-  (with-foreign-array (attachments :pointer (vector image-view))
+(defun create-framebuffer
+    (device render-pass image-view width height &key depth-view)
+  (with-foreign-array
+      (attachments :pointer
+                   (if depth-view
+                       (vector image-view depth-view)
+                       (vector image-view)))
     (with-vk (create-info framebuffer-create-info
               :flags 0 :render-pass render-pass
-              :attachment-count 1 :p-attachments attachments
+              :attachment-count (if depth-view 2 1)
+              :p-attachments attachments
               :width width :height height :layers 1)
       (create-framebuffer-handle device create-info))))
 
@@ -2461,10 +2590,64 @@ destroy it before destroying INSTANCE."
   (vk:destroy-framebuffer device framebuffer (cffi:null-pointer))
   (values))
 
+(defun call-with-vertex-input-descriptions (vertex-buffers function)
+  (if (null vertex-buffers)
+      (funcall function 0 (cffi:null-pointer) 0 (cffi:null-pointer))
+      (let ((attribute-count
+              (loop for buffer in vertex-buffers
+                    sum (length (getf buffer :attributes)))))
+        (cffi:with-foreign-object
+            (bindings '(:struct vertex-input-binding-description)
+                      (length vertex-buffers))
+          (cffi:with-foreign-object
+              (attributes '(:struct vertex-input-attribute-description)
+                          attribute-count)
+            (loop with attribute-index = 0
+                  for buffer in vertex-buffers
+                  for default-binding from 0
+                  for binding = (or (getf buffer :binding) default-binding)
+                  do (fill-vk
+                      (cffi:mem-aptr
+                       bindings '(:struct vertex-input-binding-description)
+                       default-binding)
+                      'vertex-input-binding-description
+                      :binding binding
+                      :stride (getf buffer :array-stride)
+                      :input-rate (or (getf buffer :step-mode) :vertex))
+                     (dolist (attribute (getf buffer :attributes))
+                       (fill-vk
+                        (cffi:mem-aptr
+                         attributes
+                         '(:struct vertex-input-attribute-description)
+                         attribute-index)
+                        'vertex-input-attribute-description
+                        :location (getf attribute :shader-location)
+                        :binding binding
+                        :format (getf attribute :format)
+                        :offset (getf attribute :offset))
+                       (incf attribute-index)))
+            (funcall function (length vertex-buffers) bindings
+                     attribute-count attributes))))))
+
+(defun call-with-depth-stencil-state (depth-compare depth-write-enabled function)
+  (if depth-compare
+      (with-vk (state pipeline-depth-stencil-state-create-info
+                :flags 0
+                :depth-test-enable 1
+                :depth-write-enable (if depth-write-enabled 1 0)
+                :depth-compare-op depth-compare
+                :depth-bounds-test-enable 0
+                :stencil-test-enable 0
+                :min-depth-bounds 0.0
+                :max-depth-bounds 1.0)
+        (funcall function state))
+      (funcall function (cffi:null-pointer))))
+
 (defun create-graphics-pipeline
     (device vertex-module fragment-module layout render-pass
      &key (vertex-entry-point "main") (fragment-entry-point "main")
-          (topology :triangle-strip))
+          (topology :triangle-strip) vertex-buffers
+          depth-compare depth-write-enabled)
   (cffi:with-foreign-string (vertex-name vertex-entry-point)
     (cffi:with-foreign-string (fragment-name fragment-entry-point)
       (cffi:with-foreign-object
@@ -2479,67 +2662,85 @@ destroy it before destroying INSTANCE."
          'pipeline-shader-stage-create-info
          :flags 0 :stage '(:fragment) :module fragment-module
          :p-name fragment-name :p-specialization-info (cffi:null-pointer))
-        (with-vk (vertex-input pipeline-vertex-input-state-create-info
-                  :flags 0
-                  :vertex-binding-description-count 0
-                  :p-vertex-binding-descriptions (cffi:null-pointer)
-                  :vertex-attribute-description-count 0
-                  :p-vertex-attribute-descriptions (cffi:null-pointer))
-          (with-vk (input-assembly pipeline-input-assembly-state-create-info
-                    :flags 0 :topology topology
-                    :primitive-restart-enable 0)
-            (with-vk (viewport-state pipeline-viewport-state-create-info
-                      :flags 0 :viewport-count 1
-                      :p-viewports (cffi:null-pointer)
-                      :scissor-count 1 :p-scissors (cffi:null-pointer))
-              (with-vk (rasterization pipeline-rasterization-state-create-info
-                        :flags 0 :depth-clamp-enable 0
-                        :rasterizer-discard-enable 0 :polygon-mode :fill
-                        :cull-mode nil :front-face :counter-clockwise
-                        :depth-bias-enable 0 :depth-bias-constant-factor 0.0
-                        :depth-bias-clamp 0.0 :depth-bias-slope-factor 0.0
-                        :line-width 1.0)
-                (with-vk (multisample pipeline-multisample-state-create-info
-                          :flags 0 :rasterization-samples :1
-                          :sample-shading-enable 0 :min-sample-shading 0.0
-                          :p-sample-mask (cffi:null-pointer)
-                          :alpha-to-coverage-enable 0 :alpha-to-one-enable 0)
-                  (with-vk (blend-attachment
-                            pipeline-color-blend-attachment-state
-                            :blend-enable 0
-                            :src-color-blend-factor :one
-                            :dst-color-blend-factor :zero
-                            :color-blend-op :add
-                            :src-alpha-blend-factor :one
-                            :dst-alpha-blend-factor :zero
-                            :alpha-blend-op :add
-                            :color-write-mask '(:r :g :b :a))
-                    (with-vk (blend pipeline-color-blend-state-create-info
-                              :flags 0 :logic-op-enable 0 :logic-op :copy
-                              :attachment-count 1
-                              :p-attachments blend-attachment)
-                      (with-foreign-array
-                          (dynamic-states dynamic-state
-                                          #(:viewport :scissor))
-                        (with-vk (dynamic pipeline-dynamic-state-create-info
-                                  :flags 0 :dynamic-state-count 2
-                                  :p-dynamic-states dynamic-states)
-                          (with-vk (create-info graphics-pipeline-create-info
-                                    :flags 0 :stage-count 2 :p-stages stages
-                                    :p-vertex-input-state vertex-input
-                                    :p-input-assembly-state input-assembly
-                                    :p-tessellation-state (cffi:null-pointer)
-                                    :p-viewport-state viewport-state
-                                    :p-rasterization-state rasterization
-                                    :p-multisample-state multisample
-                                    :p-depth-stencil-state (cffi:null-pointer)
-                                    :p-color-blend-state blend
-                                    :p-dynamic-state dynamic :layout layout
-                                    :render-pass render-pass :subpass 0
-                                    :base-pipeline-handle (cffi:null-pointer)
-                                    :base-pipeline-index -1)
-                            (create-graphics-pipeline-handle
-                             device create-info)))))))))))))))
+        (call-with-vertex-input-descriptions
+         vertex-buffers
+         (lambda (binding-count bindings attribute-count attributes)
+           (with-vk (vertex-input pipeline-vertex-input-state-create-info
+                     :flags 0
+                     :vertex-binding-description-count binding-count
+                     :p-vertex-binding-descriptions bindings
+                     :vertex-attribute-description-count attribute-count
+                     :p-vertex-attribute-descriptions attributes)
+             (with-vk (input-assembly pipeline-input-assembly-state-create-info
+                       :flags 0 :topology topology
+                       :primitive-restart-enable 0)
+               (with-vk (viewport-state pipeline-viewport-state-create-info
+                         :flags 0 :viewport-count 1
+                         :p-viewports (cffi:null-pointer)
+                         :scissor-count 1 :p-scissors (cffi:null-pointer))
+                 (with-vk (rasterization
+                           pipeline-rasterization-state-create-info
+                           :flags 0 :depth-clamp-enable 0
+                           :rasterizer-discard-enable 0 :polygon-mode :fill
+                           :cull-mode nil :front-face :counter-clockwise
+                           :depth-bias-enable 0
+                           :depth-bias-constant-factor 0.0
+                           :depth-bias-clamp 0.0
+                           :depth-bias-slope-factor 0.0
+                           :line-width 1.0)
+                   (with-vk (multisample
+                             pipeline-multisample-state-create-info
+                             :flags 0 :rasterization-samples :1
+                             :sample-shading-enable 0
+                             :min-sample-shading 0.0
+                             :p-sample-mask (cffi:null-pointer)
+                             :alpha-to-coverage-enable 0
+                             :alpha-to-one-enable 0)
+                     (with-vk (blend-attachment
+                               pipeline-color-blend-attachment-state
+                               :blend-enable 0
+                               :src-color-blend-factor :one
+                               :dst-color-blend-factor :zero
+                               :color-blend-op :add
+                               :src-alpha-blend-factor :one
+                               :dst-alpha-blend-factor :zero
+                               :alpha-blend-op :add
+                               :color-write-mask '(:r :g :b :a))
+                       (with-vk (blend pipeline-color-blend-state-create-info
+                                 :flags 0 :logic-op-enable 0 :logic-op :copy
+                                 :attachment-count 1
+                                 :p-attachments blend-attachment)
+                         (with-foreign-array
+                             (dynamic-states dynamic-state
+                                             #(:viewport :scissor))
+                           (with-vk (dynamic
+                                     pipeline-dynamic-state-create-info
+                                     :flags 0 :dynamic-state-count 2
+                                     :p-dynamic-states dynamic-states)
+                             (call-with-depth-stencil-state
+                              depth-compare depth-write-enabled
+                              (lambda (depth-state)
+                                (with-vk
+                                    (create-info
+                                     graphics-pipeline-create-info
+                                     :flags 0 :stage-count 2
+                                     :p-stages stages
+                                     :p-vertex-input-state vertex-input
+                                     :p-input-assembly-state input-assembly
+                                     :p-tessellation-state
+                                     (cffi:null-pointer)
+                                     :p-viewport-state viewport-state
+                                     :p-rasterization-state rasterization
+                                     :p-multisample-state multisample
+                                     :p-depth-stencil-state depth-state
+                                     :p-color-blend-state blend
+                                     :p-dynamic-state dynamic :layout layout
+                                     :render-pass render-pass :subpass 0
+                                     :base-pipeline-handle
+                                     (cffi:null-pointer)
+                                     :base-pipeline-index -1)
+                                  (create-graphics-pipeline-handle
+                                   device create-info)))))))))))))))))))
 
 (defun destroy-pipeline (device pipeline)
   (vk:destroy-pipeline device pipeline (cffi:null-pointer))
@@ -2554,6 +2755,15 @@ destroy it before destroying INSTANCE."
               :max-sets max-sets
               :pool-size-count 1
               :p-pool-sizes pool-size)
+      (create-descriptor-pool-handle device create-info))))
+
+(defun create-uniform-buffer-descriptor-pool (device &key (max-sets 1))
+  (with-vk (pool-size descriptor-pool-size
+            :type :uniform-buffer
+            :descriptor-count max-sets)
+    (with-vk (create-info descriptor-pool-create-info
+              :flags 0 :max-sets max-sets
+              :pool-size-count 1 :p-pool-sizes pool-size)
       (create-descriptor-pool-handle device create-info))))
 
 (defun create-sampled-image-sampler-descriptor-pool
@@ -2620,6 +2830,21 @@ destroy it before destroying INSTANCE."
               :descriptor-type :storage-image
               :p-image-info image-info
               :p-buffer-info (cffi:null-pointer)
+              :p-texel-buffer-view (cffi:null-pointer))
+      (vk:update-descriptor-sets
+       device 1 write 0 (cffi:null-pointer))))
+  (values))
+
+(defun update-uniform-buffer-descriptor
+    (device descriptor-set buffer buffer-size &key (binding 0))
+  (with-vk (buffer-info descriptor-buffer-info
+            :buffer buffer :offset 0 :range buffer-size)
+    (with-vk (write write-descriptor-set
+              :dst-set descriptor-set :dst-binding binding
+              :dst-array-element 0 :descriptor-count 1
+              :descriptor-type :uniform-buffer
+              :p-image-info (cffi:null-pointer)
+              :p-buffer-info buffer-info
               :p-texel-buffer-view (cffi:null-pointer))
       (vk:update-descriptor-sets
        device 1 write 0 (cffi:null-pointer))))
@@ -2744,17 +2969,20 @@ destroy it before destroying INSTANCE."
     (vk:end-command-buffer command-buffer))
   command-buffer)
 
-(defun fill-color-subresource-range (range)
+(defun fill-image-subresource-range (range aspect)
   (fill-vk range 'image-subresource-range
-           :aspect-mask '(:color)
+           :aspect-mask (list aspect)
            :base-mip-level 0
            :level-count 1
            :base-array-layer 0
            :layer-count 1))
 
+(defun fill-color-subresource-range (range)
+  (fill-image-subresource-range range :color))
+
 (defun cmd-transition-image
     (command-buffer image old-layout new-layout
-     src-access dst-access src-stage dst-stage)
+     src-access dst-access src-stage dst-stage &key (aspect :color))
   (with-vk (barrier image-memory-barrier
             :src-access-mask src-access
             :dst-access-mask dst-access
@@ -2763,9 +2991,10 @@ destroy it before destroying INSTANCE."
             :src-queue-family-index +queue-family-ignored+
             :dst-queue-family-index +queue-family-ignored+
             :image image)
-    (fill-color-subresource-range
+    (fill-image-subresource-range
      (cffi:foreign-slot-pointer
-      barrier '(:struct image-memory-barrier) 'subresource-range))
+      barrier '(:struct image-memory-barrier) 'subresource-range)
+     aspect)
     (vk:cmd-pipeline-barrier
      command-buffer src-stage dst-stage nil
      0 (cffi:null-pointer)
@@ -2837,6 +3066,27 @@ destroy it before destroying INSTANCE."
      command-buffer buffer image layout 1 region))
   (values))
 
+(defun cmd-copy-image-to-buffer
+    (command-buffer image layout buffer width height &optional (depth 1))
+  (with-vk (region buffer-image-copy
+            :buffer-offset 0
+            :buffer-row-length 0
+            :buffer-image-height 0)
+    (fill-color-subresource-layers
+     (cffi:foreign-slot-pointer
+      region '(:struct buffer-image-copy) 'image-subresource))
+    (fill-vk
+     (cffi:foreign-slot-pointer
+      region '(:struct buffer-image-copy) 'image-offset)
+     'offset-3d :x 0 :y 0 :z 0)
+    (fill-vk
+     (cffi:foreign-slot-pointer
+      region '(:struct buffer-image-copy) 'image-extent)
+     'extent-3d :width width :height height :depth depth)
+    (vk:cmd-copy-image-to-buffer
+     command-buffer image layout buffer 1 region))
+  (values))
+
 (defun cmd-bind-compute-pipeline (command-buffer pipeline)
   (vk:cmd-bind-pipeline command-buffer :compute pipeline)
   (values))
@@ -2861,26 +3111,45 @@ destroy it before destroying INSTANCE."
      0 (cffi:null-pointer)))
   (values))
 
+(defun cmd-bind-vertex-buffer
+    (command-buffer binding buffer &optional (offset 0))
+  (with-foreign-array (buffers :pointer (vector buffer))
+    (with-foreign-array (offsets :uint64 (vector offset))
+      (vk:cmd-bind-vertex-buffers
+       command-buffer binding 1 buffers offsets)))
+  (values))
+
 (defun cmd-dispatch (command-buffer x y &optional (z 1))
   (vk:cmd-dispatch command-buffer x y z)
   (values))
 
 (defun cmd-begin-color-render-pass
-    (command-buffer render-pass framebuffer width height clear-color)
-  (cffi:with-foreign-object (clear '(:union clear-value))
-    (clear-foreign-object clear '(:union clear-value))
+    (command-buffer render-pass framebuffer width height clear-color
+     &key depth-clear-value)
+  (let ((clear-count (if depth-clear-value 2 1)))
+    (cffi:with-foreign-object (clears '(:union clear-value) clear-count)
+      (clear-foreign-object clears '(:union clear-value) clear-count)
     (let* ((color
              (cffi:foreign-slot-pointer
-              clear '(:union clear-value) 'color))
+              (cffi:mem-aptr clears '(:union clear-value) 0)
+              '(:union clear-value) 'color))
            (components
              (cffi:foreign-slot-pointer
               color '(:union clear-color-value) 'float-32)))
       (loop for component across clear-color
             for index below 4
             do (setf (cffi:mem-aref components :float index) component)))
+      (when depth-clear-value
+        (fill-vk
+         (cffi:foreign-slot-pointer
+          (cffi:mem-aptr clears '(:union clear-value) 1)
+          '(:union clear-value) 'depth-stencil)
+         'clear-depth-stencil-value
+         :depth (coerce depth-clear-value 'single-float)
+         :stencil 0))
     (with-vk (begin-info render-pass-begin-info
               :render-pass render-pass :framebuffer framebuffer
-              :clear-value-count 1 :p-clear-values clear)
+              :clear-value-count clear-count :p-clear-values clears)
       (let ((area
               (cffi:foreign-slot-pointer
                begin-info '(:struct render-pass-begin-info) 'render-area)))
@@ -2890,7 +3159,7 @@ destroy it before destroying INSTANCE."
         (fill-vk
          (cffi:foreign-slot-pointer area '(:struct rect-2d) 'extent)
          'extent-2d :width width :height height))
-      (vk:cmd-begin-render-pass command-buffer begin-info :inline)))
+        (vk:cmd-begin-render-pass command-buffer begin-info :inline))))
   (values))
 
 (defun cmd-set-viewport-and-scissor (command-buffer width height)

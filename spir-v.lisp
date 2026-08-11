@@ -264,7 +264,8 @@
   (:opcode 65) (:result :typed) (:operands :id :id))
 (define-typed-unary-instructions
   (load 61)
-  (convert-u-to-f 112))
+  (convert-u-to-f 112)
+  (f-negate 127))
 (define-instruction vector-shuffle (left right &rest components)
   (:opcode 79) (:result :typed) (:operands :id :id :literal))
 (define-instruction composite-construct (&rest constituents)
@@ -286,6 +287,7 @@
   (f-sub 131)
   (f-mul 133)
   (f-div 136)
+  (dot 148)
   (shift-right-logical 194)
   (bitwise-and 199))
 (define-instruction function (control function-type)

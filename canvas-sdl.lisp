@@ -140,6 +140,20 @@
            (values width height))))
       (values (canvas-width canvas) (canvas-height canvas))))
 
+(defmethod set-canvas-relative-pointer-mode ((canvas sdl-canvas) enabled)
+  (unless (eq :open (canvas-state canvas))
+    (error 'canvas-state-error :canvas canvas :operation :relative-pointer-mode
+           :reason :invalid-state :state (canvas-state canvas)
+           :expected-state :open))
+  (call-on-sdl-canvas-thread
+   canvas
+   (lambda ()
+     (unless (sdl3:set-window-relative-mouse-mode
+              (sdl-canvas-window canvas) (not (null enabled)))
+       (error 'canvas-error :canvas canvas :operation :relative-pointer-mode
+              :reason :native-pointer-mode-failed :details (sdl3:get-error)))
+     (not (null enabled)))))
+
 (defun sdl-canvas-native-thread-p (canvas)
   #+darwin
   (declare (ignore canvas))
@@ -324,7 +338,9 @@
      (make-instance class
                     :timestamp (sdl3:%timestamp event)
                     :x (sdl3:%x event)
-                    :y (sdl3:%y event)))))
+                    :y (sdl3:%y event)
+                    :delta-x (sdl3:%xrel event)
+                    :delta-y (sdl3:%yrel event)))))
 
 (defun dispatch-sdl-pointer-button (canvas event class)
   (when (sdl-canvas-window-event-p canvas event)

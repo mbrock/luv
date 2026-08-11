@@ -424,3 +424,188 @@ Binding 2 is a uniform block whose first vector contains sine and cosine."
 
 (defun spinning-texture-fragment-shader ()
   (assemble-spir-v-module (spinning-texture-fragment-module)))
+
+(defun block-world-vertex-module ()
+  "Make the vertex shader for interleaved position/color block vertices."
+  (make-instance
+   'spir-v-module
+   :entry-points
+   (list (make-instance
+          'spir-v-entry-point :execution-model 'vertex
+          :function '%main
+          :interfaces '(%world-position %vertex-color
+                        %position %color-output %fog-output)))
+   :annotations
+   '((decorate %world-position location 0)
+     (decorate %vertex-color location 1)
+     (decorate %position built-in (enum built-in position))
+     (decorate %color-output location 0)
+     (decorate %fog-output location 1)
+     (decorate %camera-block block)
+     (member-decorate %camera-block 0 offset 0)
+     (member-decorate %camera-block 1 offset 16)
+     (member-decorate %camera-block 2 offset 32)
+     (member-decorate %camera-block 3 offset 48)
+     (member-decorate %camera-block 4 offset 64)
+     (member-decorate %camera-block 5 offset 80)
+     (decorate %camera-buffer descriptor-set 0)
+     (decorate %camera-buffer binding 0))
+   :global-declarations
+   '((%void type-void)
+     (%uint type-int 32 0)
+     (%float type-float 32)
+     (%vec3 type-vector %float 3)
+     (%vec4 type-vector %float 4)
+     (%camera-block type-struct %vec4 %vec4 %vec4 %vec4 %vec4 %vec4)
+     (%input-vec3-pointer type-pointer input %vec3)
+     (%output-vec3-pointer type-pointer output %vec3)
+     (%output-vec4-pointer type-pointer output %vec4)
+     (%camera-block-pointer type-pointer uniform %camera-block)
+     (%uniform-vec4-pointer type-pointer uniform %vec4)
+     (%function-type type-function %void)
+     (%zero-u constant %uint 0)
+     (%one-u constant %uint 1)
+     (%two-u constant %uint 2)
+     (%three-u constant %uint 3)
+     (%four-u constant %uint 4)
+     (%five-u constant %uint 5)
+     (%one constant %float 1.0)
+     (%world-position variable %input-vec3-pointer input)
+     (%vertex-color variable %input-vec3-pointer input)
+     (%position variable %output-vec4-pointer output)
+     (%color-output variable %output-vec3-pointer output)
+     (%fog-output variable %output-vec4-pointer output)
+     (%camera-buffer variable %camera-block-pointer uniform))
+   :function-definitions
+   (list
+    (make-instance
+     'spir-v-function-definition
+     :result-id '%main :return-type '%void
+     :function-type '%function-type
+     :basic-blocks
+     (list
+      (make-instance
+       'spir-v-basic-block :label '%entry
+       :instructions
+       '((%world load %vec3 %world-position)
+         (%color load %vec3 %vertex-color)
+         (store %color-output %color)
+         (%camera-pointer access-chain
+                          %uniform-vec4-pointer %camera-buffer %zero-u)
+         (%right-pointer access-chain
+                         %uniform-vec4-pointer %camera-buffer %one-u)
+         (%up-pointer access-chain
+                      %uniform-vec4-pointer %camera-buffer %two-u)
+         (%forward-pointer access-chain
+                           %uniform-vec4-pointer %camera-buffer %three-u)
+         (%projection-pointer access-chain
+                              %uniform-vec4-pointer %camera-buffer %four-u)
+         (%fog-pointer access-chain
+                       %uniform-vec4-pointer %camera-buffer %five-u)
+         (%camera4 load %vec4 %camera-pointer)
+         (%right4 load %vec4 %right-pointer)
+         (%up4 load %vec4 %up-pointer)
+         (%forward4 load %vec4 %forward-pointer)
+         (%projection load %vec4 %projection-pointer)
+         (%fog-state load %vec4 %fog-pointer)
+         (%camera vector-shuffle %vec3 %camera4 %camera4 0 1 2)
+         (%right vector-shuffle %vec3 %right4 %right4 0 1 2)
+         (%up vector-shuffle %vec3 %up4 %up4 0 1 2)
+         (%forward vector-shuffle %vec3 %forward4 %forward4 0 1 2)
+         (%relative f-sub %vec3 %world %camera)
+         (%view-x dot %float %relative %right)
+         (%view-y dot %float %relative %up)
+         (%view-z dot %float %relative %forward)
+         (%inverse-far composite-extract %float %fog-state 3)
+         (%fog-distance f-mul %float %view-z %inverse-far)
+         (%fog-factor f-sub %float %one %fog-distance)
+         (%sky-red composite-extract %float %fog-state 0)
+         (%sky-green composite-extract %float %fog-state 1)
+         (%sky-blue composite-extract %float %fog-state 2)
+         (%fog-varying composite-construct
+                       %vec4 %sky-red %sky-green %sky-blue %fog-factor)
+         (store %fog-output %fog-varying)
+         (%x-scale composite-extract %float %projection 0)
+         (%y-scale composite-extract %float %projection 1)
+         (%z-scale composite-extract %float %projection 2)
+         (%z-offset composite-extract %float %projection 3)
+         (%clip-x f-mul %float %view-x %x-scale)
+         (%scaled-y f-mul %float %view-y %y-scale)
+         ;; Vulkan's positive viewport height points screen Y downward.
+         (%clip-y f-negate %float %scaled-y)
+         (%scaled-z f-mul %float %view-z %z-scale)
+         (%clip-z f-add %float %scaled-z %z-offset)
+         (%clip-position composite-construct
+                         %vec4 %clip-x %clip-y %clip-z %view-z)
+         (store %position %clip-position)
+         (return))))))))
+
+(defun block-world-fragment-module ()
+  "Make the untextured fragment shader for shaded block-face colors."
+  (make-instance
+   'spir-v-module
+   :entry-points
+   (list (make-instance
+          'spir-v-entry-point :execution-model 'fragment
+          :function '%main
+          :interfaces '(%color-input %fog-input %color-output)))
+   :execution-modes
+   (list (make-instance 'spir-v-execution-mode
+                        :function '%main :name 'origin-upper-left))
+   :annotations
+   '((decorate %color-input location 0)
+     (decorate %fog-input location 1)
+     (decorate %color-output location 0))
+   :global-declarations
+   '((%void type-void)
+     (%float type-float 32)
+     (%vec3 type-vector %float 3)
+     (%vec4 type-vector %float 4)
+     (%input-vec3-pointer type-pointer input %vec3)
+     (%input-vec4-pointer type-pointer input %vec4)
+     (%output-vec4-pointer type-pointer output %vec4)
+     (%function-type type-function %void)
+     (%one constant %float 1.0)
+     (%color-input variable %input-vec3-pointer input)
+     (%fog-input variable %input-vec4-pointer input)
+     (%color-output variable %output-vec4-pointer output))
+   :function-definitions
+   (list
+    (make-instance
+     'spir-v-function-definition
+     :result-id '%main :return-type '%void
+     :function-type '%function-type
+     :basic-blocks
+     (list
+      (make-instance
+       'spir-v-basic-block :label '%entry
+       :instructions
+       '((%color load %vec3 %color-input)
+         (%fog-state load %vec4 %fog-input)
+         (%sky-red composite-extract %float %fog-state 0)
+         (%sky-green composite-extract %float %fog-state 1)
+         (%sky-blue composite-extract %float %fog-state 2)
+         (%fog composite-extract %float %fog-state 3)
+         (%sky-mix f-sub %float %one %fog)
+         (%red composite-extract %float %color 0)
+         (%green composite-extract %float %color 1)
+         (%blue composite-extract %float %color 2)
+         (%fogged-red f-mul %float %red %fog)
+         (%fogged-green f-mul %float %green %fog)
+         (%fogged-blue f-mul %float %blue %fog)
+         (%sky-red-part f-mul %float %sky-red %sky-mix)
+         (%sky-green-part f-mul %float %sky-green %sky-mix)
+         (%sky-blue-part f-mul %float %sky-blue %sky-mix)
+         (%final-red f-add %float %fogged-red %sky-red-part)
+         (%final-green f-add %float %fogged-green %sky-green-part)
+         (%final-blue f-add %float %fogged-blue %sky-blue-part)
+         (%rgba composite-construct
+                %vec4 %final-red %final-green %final-blue %one)
+         (store %color-output %rgba)
+         (return))))))))
+
+(defun block-world-vertex-shader ()
+  (assemble-spir-v-module (block-world-vertex-module)))
+
+(defun block-world-fragment-shader ()
+  (assemble-spir-v-module (block-world-fragment-module)))

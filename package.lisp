@@ -120,6 +120,7 @@ nothing else does."))
            #:create-shader-module
            #:destroy-shader-module
            #:create-storage-image-descriptor-set-layout
+           #:create-uniform-buffer-descriptor-set-layout
            #:create-sampled-image-sampler-descriptor-set-layout
            #:create-sampled-image-sampler-uniform-descriptor-set-layout
            #:destroy-descriptor-set-layout
@@ -135,11 +136,13 @@ nothing else does."))
            #:create-framebuffer
            #:destroy-framebuffer
            #:create-storage-image-descriptor-pool
+           #:create-uniform-buffer-descriptor-pool
            #:create-sampled-image-sampler-descriptor-pool
            #:create-sampled-image-sampler-uniform-descriptor-pool
            #:destroy-descriptor-pool
            #:allocate-descriptor-set
            #:update-storage-image-descriptor
+           #:update-uniform-buffer-descriptor
            #:update-sampled-image-sampler-descriptors
            #:update-sampled-image-sampler-uniform-descriptors
            #:create-command-pool
@@ -151,10 +154,12 @@ nothing else does."))
            #:cmd-clear-color-image
            #:cmd-copy-image
            #:cmd-copy-buffer-to-image
+           #:cmd-copy-image-to-buffer
            #:cmd-bind-compute-pipeline
            #:cmd-bind-graphics-pipeline
            #:cmd-bind-compute-descriptor-set
            #:cmd-bind-graphics-descriptor-set
+           #:cmd-bind-vertex-buffer
            #:cmd-dispatch
            #:cmd-begin-color-render-pass
            #:cmd-set-viewport-and-scissor
@@ -251,9 +256,11 @@ nothing else does."))
            #:gpu-draw-command
            #:gpu-set-pipeline-command
            #:gpu-set-bind-group-command
+           #:gpu-set-vertex-buffer-command
            #:gpu-dispatch-workgroups-command
            #:gpu-clear-texture-command
            #:gpu-copy-texture-command
+           #:gpu-copy-texture-to-buffer-command
            #:gpu-write-texture-command
            #:gpu-object-label
            #:request-gpu-device
@@ -265,6 +272,7 @@ nothing else does."))
            #:submit
            #:submitted-work-done
            #:write-buffer
+           #:read-buffer
            #:write-texture
            #:destroy
            #:begin-compute-pass
@@ -272,6 +280,7 @@ nothing else does."))
            #:end-pass
            #:set-pipeline
            #:set-bind-group
+           #:set-vertex-buffer
            #:dispatch-workgroups
            #:draw
            #:make-device-descriptor
@@ -297,9 +306,11 @@ nothing else does."))
            #:make-command-encoder-descriptor
            #:make-gpu-clear-texture-command
            #:make-gpu-copy-texture-command
+           #:make-gpu-copy-texture-to-buffer-command
            #:make-gpu-write-texture-command
            #:make-gpu-set-pipeline-command
            #:make-gpu-set-bind-group-command
+           #:make-gpu-set-vertex-buffer-command
            #:make-gpu-dispatch-workgroups-command
            #:make-gpu-draw-command
            #:vulkan-gpu-provider
@@ -316,6 +327,8 @@ nothing else does."))
            #:canvas-pointer-event
            #:canvas-pointer-event-x
            #:canvas-pointer-event-y
+           #:canvas-pointer-event-delta-x
+           #:canvas-pointer-event-delta-y
            #:canvas-pointer-motion-event
            #:canvas-pointer-enter-event
            #:canvas-pointer-exit-event
@@ -377,6 +390,7 @@ nothing else does."))
            #:canvas-logical-size
            #:canvas-position
            #:canvas-visible-p
+           #:set-canvas-relative-pointer-mode
            #:show-canvas
            #:hide-canvas
            #:move-canvas
@@ -384,6 +398,49 @@ nothing else does."))
            #:raise-canvas
            #:minimize-canvas
            #:restore-canvas
+           #:write-rgba-png
+           #:block-kind
+           #:block-kind-name
+           #:block-solid-p
+           #:block-face-color
+           #:block-face
+           #:block-face-name
+           #:block-face-neighbor
+           #:block-face-corners
+           #:block-face-shade
+           #:block-world
+           #:block-world-width
+           #:block-world-height
+           #:block-world-depth
+           #:make-block-world
+           #:make-little-block-world
+           #:block-at
+           #:block-mesher
+           #:exposed-face-mesher
+           #:block-mesh
+           #:block-mesh-vertices
+           #:block-mesh-vertex-count
+           #:block-mesh-face-count
+           #:mesh-block-world
+           #:emit-block-face
+           #:fly-camera
+           #:camera-x
+           #:camera-y
+           #:camera-z
+           #:camera-yaw
+           #:camera-pitch
+           #:camera-basis
+           #:advance-camera
+           #:camera-uniform-data
+           #:cube-world-demo
+           #:cube-world-demo-canvas
+           #:cube-world-demo-world
+           #:cube-world-demo-mesh
+           #:cube-world-demo-camera
+           #:cube-world-demo-running-p
+           #:start-cube-world-demo
+           #:stop-cube-world-demo
+           #:capture-cube-world-screenshot
            #:request-canvas-frame
            #:make-canvas-context
            #:configure-canvas-context

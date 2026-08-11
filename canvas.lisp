@@ -145,7 +145,9 @@
   ((x :initarg :x :reader canvas-pointer-event-x)
    (y :initarg :y :reader canvas-pointer-event-y)))
 
-(defclass canvas-pointer-motion-event (canvas-pointer-event) ())
+(defclass canvas-pointer-motion-event (canvas-pointer-event)
+  ((delta-x :initarg :delta-x :initform 0.0 :reader canvas-pointer-event-delta-x)
+   (delta-y :initarg :delta-y :initform 0.0 :reader canvas-pointer-event-delta-y)))
 (defclass canvas-pointer-enter-event (canvas-pointer-motion-event) ())
 (defclass canvas-pointer-exit-event (canvas-pointer-motion-event) ())
 
@@ -230,6 +232,10 @@
 
 (defgeneric canvas-visible-p (canvas)
   (:documentation "Return whether CANVAS is intended to be visible."))
+
+(defgeneric set-canvas-relative-pointer-mode (canvas enabled)
+  (:documentation
+   "Capture or release relative pointer motion for CANVAS."))
 
 (defgeneric show-canvas (canvas)
   (:documentation "Make an open CANVAS visible."))

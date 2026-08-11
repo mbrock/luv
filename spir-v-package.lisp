@@ -58,4 +58,8 @@
            #:spinning-texture-vertex-module
            #:spinning-texture-fragment-module
            #:spinning-texture-vertex-shader
-           #:spinning-texture-fragment-shader))
+           #:spinning-texture-fragment-shader
+           #:block-world-vertex-module
+           #:block-world-fragment-module
+           #:block-world-vertex-shader
+           #:block-world-fragment-shader))

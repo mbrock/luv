@@ -230,6 +230,10 @@ completed on the GPU."))
 (defgeneric write-buffer (buffer data &key offset)
   (:documentation "Copy host DATA into BUFFER starting at byte OFFSET."))
 
+(defgeneric read-buffer (buffer &key offset size)
+  (:documentation
+   "Wait for BUFFER's device queue and copy mapped bytes back to the host."))
+
 (defgeneric destroy (handle)
   (:documentation "Destroy the GPU object denoted by HANDLE."))
 
@@ -282,10 +286,10 @@ completed on the GPU."))
   layout entries)
 
 (defstruct (render-pipeline-descriptor (:include gpu-descriptor))
-  layout vertex fragment (primitive '(:topology :triangle-list)))
+  layout vertex fragment (primitive '(:topology :triangle-list)) depth-stencil)
 
 (defstruct (render-pass-descriptor (:include gpu-descriptor))
-  color-attachments)
+  color-attachments depth-stencil-attachment)
 
 (defstruct (compute-pipeline-descriptor (:include gpu-descriptor))
   layout module (entry-point "main"))
@@ -320,6 +324,11 @@ completed on the GPU."))
   (index 0)
   bind-group)
 
+(defstruct (gpu-set-vertex-buffer-command (:include gpu-render-pass-command))
+  (slot 0)
+  buffer
+  (offset 0))
+
 (defstruct (gpu-dispatch-workgroups-command
             (:include gpu-compute-pass-command))
   x
@@ -340,6 +349,11 @@ completed on the GPU."))
   color)
 
 (defstruct (gpu-copy-texture-command
+            (:include gpu-command-encoder-command))
+  source
+  destination)
+
+(defstruct (gpu-copy-texture-to-buffer-command
             (:include gpu-command-encoder-command))
   source
   destination)
@@ -378,6 +392,11 @@ completed on the GPU."))
   (encode pass-encoder
           (make-gpu-set-bind-group-command
            :index index :bind-group bind-group)))
+
+(defun set-vertex-buffer (pass-encoder slot buffer &key (offset 0))
+  (encode pass-encoder
+          (make-gpu-set-vertex-buffer-command
+           :slot slot :buffer buffer :offset offset)))
 
 (defun dispatch-workgroups (pass-encoder x &optional (y 1) (z 1))
   (encode pass-encoder
