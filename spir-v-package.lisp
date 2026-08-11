@@ -53,6 +53,65 @@
            #:spir-v-basic-block-instructions
            #:lower-spir-v
            #:assemble-spir-v-module
+           #:shader-language-error
+           #:shader-language-error-form
+           #:shader-language-error-reason
+           #:shader-language-error-details
+           #:shader-type
+           #:shader-type-name
+           #:shader-type-component-count
+           #:shader-type-opaque-kind
+           #:find-shader-type
+           #:shader-type=
+           #:shader-object-name
+           #:shader-object-source-form
+           #:shader-variable-declaration
+           #:shader-declaration-type
+           #:shader-interface-variable
+           #:shader-interface-direction
+           #:shader-interface-location
+           #:shader-resource
+           #:shader-resource-descriptor-set
+           #:shader-resource-binding
+           #:shader-binding
+           #:shader-binding-expression
+           #:shader-expression
+           #:shader-expression-type
+           #:shader-expression-source-form
+           #:shader-expression-name
+           #:shader-literal
+           #:shader-literal-value
+           #:shader-reference
+           #:shader-reference-target
+           #:shader-call
+           #:shader-call-operator
+           #:shader-call-operands
+           #:shader-call-parameters
+           #:shader-expression-form
+           #:shader-expression-children
+           #:shader-output-assignment
+           #:shader-assignment-output
+           #:shader-assignment-value
+           #:shader-assignment-source-form
+           #:shader-specification
+           #:shader-specification-stage
+           #:shader-specification-inputs
+           #:shader-specification-outputs
+           #:shader-specification-resources
+           #:shader-specification-bindings
+           #:shader-specification-statements
+           #:shader-specification-expressions
+           #:define-shader
+           #:parse-shader-specification
+           #:compile-shader-specification
+           #:shader-lowering
+           #:shader-lowering-specification
+           #:shader-lowering-module
+           #:shader-lowering-expression-instructions
+           #:shader-lowering-instruction-expressions
+           #:shader-lowering-diagnostics
+           #:shader-module
+           #:assemble-shader-specification
            #:gradient-compute-module
            #:gradient-compute-shader
            #:spinning-texture-vertex-module
@@ -60,6 +119,8 @@
            #:spinning-texture-vertex-shader
            #:spinning-texture-fragment-shader
            #:block-world-vertex-module
+           #:block-world-fragment-specification
+           #:block-world-fragment-lowering
            #:block-world-fragment-module
            #:block-world-vertex-shader
            #:block-world-fragment-shader))

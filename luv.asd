@@ -4,6 +4,7 @@
   :author "Mikael Brockman"
   :depends-on (#:luv/examples)
   :in-order-to ((asdf:test-op (asdf:test-op #:luv/tests)
+                              (asdf:test-op #:luv/spir-v/tests)
                               (asdf:test-op #:luv/examples/tests))))
 
 (asdf:defsystem #:luv/packages
@@ -39,7 +40,25 @@
   :serial t
   :components ((:file "spir-v-package")
                (:file "spir-v")
-               (:file "shader")))
+               (:file "shader")
+               (:file "shader-expression")
+               (:file "block-fragment-shader")))
+
+(asdf:defsystem #:luv/spir-v/tests
+  :description "Tests for luv's mathematical shader language and lowering."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on (#:luv/spir-v
+               #:rove)
+  :components ((:module "tests"
+                :components ((:file "shader"))))
+  :perform (asdf:test-op (operation component)
+             (declare (ignore operation component))
+             (unless (uiop:symbol-call
+                      '#:rove '#:run-suite
+                      (uiop:symbol-call
+                       '#:rove '#:find-suite '#:luv/spir-v/tests))
+               (error "luv shader tests failed"))))
 
 (asdf:defsystem #:luv/gpu/api
   :description "The backend-neutral, WebGPU-shaped luv GPU API."

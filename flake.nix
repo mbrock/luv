@@ -94,6 +94,7 @@
               env.pkgs.python3
               env.pkgs.pkg-config
               env.pkgs.sdl3
+              env.pkgs.spirv-tools
               env.pkgs.vulkan-tools
             ];
             LD_LIBRARY_PATH = env.nativeLibraryPath;
