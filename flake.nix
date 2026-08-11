@@ -74,6 +74,20 @@
             LD_LIBRARY_PATH = env.nativeLibraryPath;
             LUV_SLYNK_DIR = "${env.slyRoot}/slynk";
             CL_SOURCE_REGISTRY = "${mcclim}//:${cl-sdl3}//";
+            shellHook = ''
+              if [ -z "''${SDL_VIDEODRIVER:-}" ] \
+                && [ -z "''${DISPLAY:-}" ] \
+                && [ -z "''${WAYLAND_DISPLAY:-}" ]; then
+                export SDL_VIDEODRIVER=offscreen
+              fi
+
+              if [ -n "''${LUV_LAVAPIPE_ICD:-}" ] \
+                && [ -f "$LUV_LAVAPIPE_ICD" ] \
+                && [ -z "''${VK_DRIVER_FILES:-}" ] \
+                && [ "''${SDL_VIDEODRIVER:-}" = offscreen ]; then
+                export VK_DRIVER_FILES="$LUV_LAVAPIPE_ICD"
+              fi
+            '';
           } // nixpkgs.lib.optionalAttrs (lavapipeIcd != null) {
             LUV_LAVAPIPE_ICD =
               "${env.pkgs.mesa}/share/vulkan/icd.d/${lavapipeIcd}";

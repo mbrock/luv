@@ -400,10 +400,10 @@ nix develop -c sbcl --script scripts/capture-hidden-block-world.lisp /tmp/luv-bl
 nix develop -c sbcl --script scripts/capture-hidden-block-world.lisp /tmp/luv-block-world-frames/ 6
 ```
 
-The script uses `SDL_VIDEODRIVER=offscreen` automatically when neither
-`DISPLAY` nor `WAYLAND_DISPLAY` is present, and the Nix shell points that mode
-at Mesa lavapipe so captures work through a CPU Vulkan device.  A desktop
-session can keep its normal driver and the window still stays hidden.
+The Nix development shell uses `SDL_VIDEODRIVER=offscreen` automatically when
+neither `DISPLAY` nor `WAYLAND_DISPLAY` is present, and points that mode at
+Mesa lavapipe so captures work through a CPU Vulkan device. A desktop session
+can keep its normal driver and the window still stays hidden.
 `SDL_VIDEODRIVER=dummy` is not enough for this path because SDL cannot create
 Vulkan windows on that driver.
 
@@ -528,13 +528,13 @@ load whichever slice you want to hack on:
 ```
 
 Nix supplies SBCL, SDL, the Vulkan loader and tools, and MoltenVK on Apple
-Silicon.  A native Vulkan implementation still comes from the host graphics
-stack.  Set `SDL_VIDEODRIVER=wayland` when you want to require Wayland rather
-than allowing SDL to choose another video backend.  On Linux, the development
-shell leaves Vulkan driver discovery to the host so a hardware ICD can be used.
-To test explicitly with Nix's software renderer instead, set `VK_DRIVER_FILES`
-to the appropriate `lvp_icd.*.json` under the Nix Mesa package's
-`share/vulkan/icd.d` directory.
+Silicon. A native Vulkan implementation still comes from the host graphics
+stack. Set `SDL_VIDEODRIVER=wayland` when you want to require Wayland rather
+than allowing SDL to choose another video backend. On Linux, the development
+shell leaves Vulkan driver discovery to the host when a display is available.
+When no display is available, it selects SDL's offscreen backend and points
+`VK_DRIVER_FILES` at Nix's Mesa lavapipe ICD so headless captures have a CPU
+Vulkan device by default.
 
 ## SLY and the one-shot client
 
