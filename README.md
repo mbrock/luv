@@ -396,8 +396,8 @@ path with the native window kept hidden:
 From a fresh shell, the same path is scriptable:
 
 ```sh
-nix develop -c sbcl --script scripts/capture-hidden-block-world.lisp /tmp/luv-block-world.png
-nix develop -c sbcl --script scripts/capture-hidden-block-world.lisp /tmp/luv-block-world-frames/ 6
+nix develop -c scripts/luv block-world /tmp/luv-block-world.png
+nix develop -c scripts/luv block-world /tmp/luv-block-world-frames/ --count 6
 ```
 
 The Nix development shell uses `SDL_VIDEODRIVER=offscreen` automatically when
@@ -537,6 +537,14 @@ When no display is available, it selects SDL's offscreen backend and points
 Vulkan device by default.
 
 ## SLY and the one-shot client
+
+For fresh-image one-offs, use the ASDF-backed `scripts/luv` launcher.  It loads
+`:luv/tools`, whose entry point is also available to ASDF's `program-op`:
+
+```sh
+nix develop -c scripts/luv eval '(luv:make-little-block-world)'
+nix develop -c sbcl --eval '(require :asdf)' --eval '(asdf:load-asd (truename "luv.asd"))' --eval '(asdf:make :luv/tools)' --eval '(uiop:quit)'
+```
 
 The server-friendly workflow does not need Emacs. Inside `nix develop`,
 `./sly` can start a durable Slynk image loaded with `:luv`:

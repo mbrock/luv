@@ -1,5 +1,6 @@
 .sly-server.log
 .sly-server.pid
+build/
 capture.png
 capture.ppm
 /mcluv

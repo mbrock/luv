@@ -138,6 +138,21 @@
                              (:file "png")
                              (:file "block-world")))))
 
+(asdf:defsystem #:luv/tools
+  :description "One-shot command-line tools for luv development."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on (#:luv/examples
+               #:uiop)
+  :build-operation "program-op"
+  :build-pathname "build/luv"
+  :entry-point "luv.tools:main"
+  :serial t
+  :components ((:module "tools"
+                :components ((:file "package")
+                             (:file "runner")
+                             (:file "block-world")))))
+
 (asdf:defsystem #:luv/mcclim
   :description "An experimental McCLIM backend presented by luv."
   :version "0.0.1"
