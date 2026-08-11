@@ -114,6 +114,44 @@ policy that bounds CPU frames in flight to the slot count.
 This answers one question from #J4C6WP as hoped: presentation slots are now
 clients of the general mechanism rather than a second lifetime system.
 
+* Leaked references are a warned failure, not a management strategy
+:PROPERTIES:
+:ID: X7J4TB
+:END:
+
+Explicit =destroy= is luv's resource contract.  The garbage collector is
+deliberately not the lifetime system: it is the tripwire that tells you
+the contract was broken.  Every Vulkan wrapper (and each recording
+command encoder) installs a finalizer at creation; explicit destruction
+cancels it silently, while a wrapper reclaimed by the collector signals a
+=gpu-resource-leaked= warning naming the class and label, records the
+condition in =*leaked-gpu-resources*= for REPL auditing, and then frees
+the native resources anyway so a long live session does not bleed GPU
+memory while you ignore the warnings.
+
+Three structural facts make the safety net sound:
+
+- A finalizer closure must not capture the wrapper it guards, or the
+  wrapper never becomes garbage.  =define-vulkan-resource-destroy=
+  therefore extracts the native handles into the closure up front, and
+  the same closure serves as both =destroy-vulkan-native= and the leak
+  finalizer.
+- Because each closure captures the device *wrapper*, a device stays
+  reachable until every collected child's pending finalizer has run:
+  child-before-device finalization ordering falls out of reachability
+  rather than needing a registry.
+- Submission records hold their resources strongly, so a wrapper can
+  only be collected after the frontier has passed its last use.  A
+  finalizer's teardown is therefore always immediately safe; it never
+  needs to defer.  Teardown on the finalizer thread is serialized with
+  submission and device destruction by the queue lock.
+
+Two honest limitations: the warning is eventual, not prompt, since a
+stale conservative stack reference can delay collection past several
+GCs; and a device that is itself dropped cannot reclaim native teardown
+that had been deferred onto its queue's records, because those records
+became garbage with it — the leaked-device warning still fires.
+
 * What the frontier does not yet establish
 :PROPERTIES:
 :ID: V3N7QJ
@@ -121,12 +159,10 @@ clients of the general mechanism rather than a second lifetime system.
 
 The ownership gaps of #S8R5JV are now closed for the current command
 vocabulary: capture is transitive, destruction defers, submission is
-asynchronous, and the queue state is locked.  What remains open is
-adjacent rather than internal:
+asynchronous, the queue state is locked, and dropped references are
+warned about and reclaimed (#X7J4TB).  What remains open is adjacent
+rather than internal:
 
-- There are still no finalizers.  Dropping the last Lisp reference to a
-  live resource leaks it; the frontier gives a future finalizer something
-  safe to enqueue onto, but that decision has not been made.
 - Nothing maps or reads back yet, so the frontier has no =mapAsync=-like
   client, and =write-buffer= on a persistently mapped uniform buffer is
   still excluded from GPU reads only by the compositor's slot pacing

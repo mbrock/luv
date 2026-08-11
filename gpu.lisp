@@ -106,6 +106,38 @@
              (gpu-error-operation condition)
              (gpu-usage-error-actual-usage condition)))))
 
+(define-condition gpu-resource-leaked (warning)
+  ((resource-class
+    :initarg :resource-class
+    :reader gpu-resource-leaked-class)
+   (label
+    :initarg :label
+    :initform nil
+    :reader gpu-resource-leaked-label))
+  (:report
+   (lambda (condition stream)
+     (format stream
+             "Leaked GPU ~A~@[ labeled ~S~]: it was reclaimed by the ~
+garbage collector instead of being destroyed explicitly."
+             (gpu-resource-leaked-class condition)
+             (gpu-resource-leaked-label condition))))
+  (:documentation "Signaled from the finalizer when a live GPU object is
+collected without DESTROY.  The native resources are still reclaimed, but
+explicit destruction is the expected discipline."))
+
+(defvar *leaked-gpu-resources* '()
+  "GPU-RESOURCE-LEAKED conditions recorded for objects the collector had
+to reclaim.  Inspect or clear this from the REPL to audit leak hygiene.")
+
+(defun note-gpu-resource-leak (resource-class label)
+  "Record and signal one GPU-RESOURCE-LEAKED warning."
+  (let ((condition (make-condition 'gpu-resource-leaked
+                                   :resource-class resource-class
+                                   :label label)))
+    (push condition *leaked-gpu-resources*)
+    (warn condition))
+  (values))
+
 (defclass gpu-provider () ()
   (:documentation "Instances of GPU-PROVIDER subclasses are platform-specific
 factories for requesting GPU-DEVICE instances."))

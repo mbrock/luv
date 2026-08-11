@@ -98,6 +98,55 @@
     :documentation "Index of the newest queue submission using this object.
 Zero means it has never been submitted.")))
 
+(defgeneric vulkan-native-teardown-closure (object)
+  (:method ((object t)) nil)
+  (:documentation "Return a thunk performing OBJECT's native teardown, or
+NIL when OBJECT owns nothing to tear down.
+
+The closure captures only extracted native handles and the device wrapper,
+never OBJECT itself, so it can outlive OBJECT as its leak finalizer.
+Capturing the device wrapper also orders finalization: a device stays
+reachable until every child's pending finalizer has run."))
+
+(defmacro with-vulkan-queue-teardown
+    ((device-object device-var) &body body)
+  "Run native teardown BODY with DEVICE-VAR bound to DEVICE-OBJECT's
+native handle, skipping it entirely once the device is destroyed.
+
+The queue's recursive lock serializes teardown — including teardown on
+the finalizer thread — against submission and device destruction."
+  (let ((object (gensym "OBJECT"))
+        (run (gensym "RUN"))
+        (queue (gensym "QUEUE")))
+    `(let ((,object ,device-object))
+       (flet ((,run ()
+                (unless (vulkan-object-destroyed-p ,object)
+                  (let ((,device-var (vulkan-handle ,object)))
+                    (declare (ignorable ,device-var))
+                    ,@body))))
+         (let ((,queue (vulkan-device-queue ,object)))
+           (if ,queue
+               (sb-thread:with-recursive-lock ((vulkan-queue-lock ,queue))
+                 (,run))
+               (,run)))))))
+
+(defmethod initialize-instance :after ((object vulkan-gpu-object) &key)
+  ;; Explicit DESTROY cancels this finalizer.  If the object is instead
+  ;; reclaimed by the collector, the leak is a warned discipline failure
+  ;; and the native resources are freed as a safety net.  Anything the
+  ;; queue still retains through a live submission record is reachable,
+  ;; so a collected wrapper is always past the completion frontier.
+  (let ((closer (vulkan-native-teardown-closure object)))
+    (when closer
+      (let ((resource-class (class-name (class-of object)))
+            (label (gpu-object-label object)))
+        (sb-ext:finalize
+         object
+         (lambda ()
+           (note-gpu-resource-leak resource-class label)
+           (with-vulkan-gpu-driver-environment
+             (funcall closer))))))))
+
 (defclass vulkan-gpu-device (gpu-device vulkan-gpu-object)
   ((instance
     :initarg :instance
@@ -292,9 +341,12 @@ and scheduled texture layouts across the canvas and REPL threads.")))
     :reader vulkan-command-encoder-resources
     :documentation "Every GPU object wrapper the recorded commands depend
 on, including the tracked textures.")
-   (native-resources
-    :initform nil
-    :accessor vulkan-command-encoder-native-resources)
+   (native-resource-box
+    :initform (list nil)
+    :reader vulkan-command-encoder-native-resource-box
+    :documentation "One-element list holding the tagged native resources,
+shared with the encoder's leak finalizer so mid-recording growth stays
+visible to it.")
    (active-pass
     :initform nil
     :accessor vulkan-command-encoder-active-pass)
@@ -364,6 +416,12 @@ on, including the tracked textures.")
     :initform :ready
     :accessor vulkan-command-buffer-state)))
 
+(defun vulkan-command-encoder-native-resources (encoder)
+  (first (vulkan-command-encoder-native-resource-box encoder)))
+
+(defun (setf vulkan-command-encoder-native-resources) (value encoder)
+  (setf (first (vulkan-command-encoder-native-resource-box encoder)) value))
+
 (defun ensure-live-vulkan-object (object operation)
   (when (vulkan-object-destroyed-p object)
     (error 'gpu-object-destroyed-error
@@ -384,6 +442,36 @@ on, including the tracked textures.")
              :operation :request-device
              :reason :no-graphics-queue
              :details physical-device)))
+
+(defun install-vulkan-device-leak-finalizer (device)
+  "Arrange to warn about and reclaim DEVICE if it is collected undestroyed.
+
+The finalizer captures only native handles: capturing the queue wrapper
+would keep DEVICE reachable through its own back reference forever.
+Because every child resource's teardown closure captures the device
+wrapper, this finalizer cannot run before theirs have."
+  (let ((label (gpu-object-label device))
+        (native-device (vulkan-handle device))
+        (instance (vulkan-device-instance device))
+        (messenger (vulkan-device-debug-messenger device))
+        (timeline (vulkan-queue-timeline (vulkan-device-queue device)))
+        (render-passes (vulkan-device-render-passes device)))
+    (sb-ext:finalize
+     device
+     (lambda ()
+       (note-gpu-resource-leak 'vulkan-gpu-device label)
+       (with-vulkan-gpu-driver-environment
+         (ignore-errors (lvk:device-wait-idle native-device))
+         (maphash (lambda (format render-pass)
+                    (declare (ignore format))
+                    (lvk:destroy-render-pass native-device render-pass))
+                  render-passes)
+         (lvk:destroy-semaphore native-device timeline)
+         (lvk:destroy-device native-device)
+         (when messenger
+           (ignore-errors (lvk:destroy-debug-messenger messenger)))
+         (lvk:destroy-instance instance)))))
+  device)
 
 (defun make-vulkan-gpu-device
     (instance physical-device queue-family descriptor
@@ -420,6 +508,7 @@ on, including the tracked textures.")
                     :family queue-family
                     :timeline timeline))))
           (setf (vulkan-device-queue device) queue)
+          (install-vulkan-device-leak-finalizer device)
           device)
       (error (condition)
         (when timeline
@@ -1179,16 +1268,37 @@ on, including the tracked textures.")
                       (vulkan-handle device) command-pool)))
                (lvk:begin-command-buffer command-buffer)
                (setf completed-p t)
-               (make-instance
-                'vulkan-gpu-command-encoder
-                :label (gpu-descriptor-label descriptor)
-                :device device
-                :command-pool command-pool
-                :command-buffer command-buffer)))
+               (install-vulkan-encoder-leak-finalizer
+                (make-instance
+                 'vulkan-gpu-command-encoder
+                 :label (gpu-descriptor-label descriptor)
+                 :device device
+                 :command-pool command-pool
+                 :command-buffer command-buffer))))
         (unless completed-p
           (when command-pool
             (lvk:destroy-command-pool
              (vulkan-handle device) command-pool)))))))
+
+(defun install-vulkan-encoder-leak-finalizer (encoder)
+  "Arrange to warn about and reclaim ENCODER if it is collected while it
+still owns its command pool.  FINISH and DESTROY transfer or release that
+ownership and cancel this finalizer."
+  (let ((device (vulkan-command-encoder-device encoder))
+        (command-pool (vulkan-command-encoder-command-pool encoder))
+        (box (vulkan-command-encoder-native-resource-box encoder))
+        (label (gpu-object-label encoder)))
+    (sb-ext:finalize
+     encoder
+     (lambda ()
+       (note-gpu-resource-leak 'vulkan-gpu-command-encoder label)
+       (with-vulkan-gpu-driver-environment
+         (with-vulkan-queue-teardown (device native-device)
+           (lvk:destroy-command-pool native-device command-pool)
+           (dolist (resource (first box))
+             (destroy-vulkan-command-native-resource
+              native-device resource)))))))
+  encoder)
 
 (defun ensure-vulkan-command-encoder-state (encoder operation)
   (unless (eq :recording (vulkan-command-encoder-state encoder))
@@ -1911,6 +2021,9 @@ lowering later without changing this queue-level operation."
           (command-pool (vulkan-command-encoder-command-pool encoder)))
       (ensure-live-vulkan-object device :finish)
       (lvk:end-command-buffer command-buffer)
+      ;; Ownership of the pool and native resources moves to the command
+      ;; buffer, whose own finalizer takes over leak protection.
+      (sb-ext:cancel-finalization encoder)
       (setf (vulkan-command-encoder-state encoder) :finished
             (vulkan-command-encoder-command-pool encoder) nil)
       (make-instance
@@ -2126,23 +2239,25 @@ destroy any of them immediately after this returns."
       (maintain-vulkan-queue queue)))
   (values))
 
-(defun destroy-vulkan-command-native-resource (device resource)
+(defun destroy-vulkan-command-native-resource (native-device resource)
   (ecase (first resource)
     (:framebuffer
-     (lvk:destroy-framebuffer (vulkan-handle device) (second resource)))
+     (lvk:destroy-framebuffer native-device (second resource)))
     (:upload-buffer
-     (lvk:destroy-buffer (vulkan-handle device) (second resource))
-     (lvk:free-memory (vulkan-handle device) (third resource))))
+     (lvk:destroy-buffer native-device (second resource))
+     (lvk:free-memory native-device (third resource))))
   (values))
 
 (defun destroy-vulkan-command-native-resources (device resources)
   (unless (vulkan-object-destroyed-p device)
     (dolist (resource resources)
-      (destroy-vulkan-command-native-resource device resource)))
+      (destroy-vulkan-command-native-resource
+       (vulkan-handle device) resource)))
   (values))
 
 (defmethod destroy ((encoder vulkan-gpu-command-encoder))
   (with-vulkan-gpu-driver-environment
+    (sb-ext:cancel-finalization encoder)
     (when (eq :recording (vulkan-command-encoder-state encoder))
       (let ((device (vulkan-command-encoder-device encoder))
             (command-pool (vulkan-command-encoder-command-pool encoder)))
@@ -2157,93 +2272,116 @@ destroy any of them immediately after this returns."
     (setf (vulkan-command-encoder-state encoder) :destroyed))
   (values))
 
-(defmacro define-vulkan-deferred-destroy
-    ((class variable) device-form &body native-teardown)
-  "Define DESTROY and DESTROY-VULKAN-NATIVE for CLASS.
+(defmacro define-vulkan-resource-destroy
+    ((class variable) device-form bindings &body native-teardown)
+  "Define DESTROY, DESTROY-VULKAN-NATIVE, and the teardown closure for CLASS.
 
-DESTROY marks the wrapper destroyed immediately, then either performs
-NATIVE-TEARDOWN now or defers it until the completion frontier passes the
-object's last submitted use.  NATIVE-TEARDOWN runs only while the device
-is alive, with DEVICE anaphorically bound to the native device handle."
+DESTROY marks the wrapper destroyed immediately, cancels its leak
+finalizer, then either performs NATIVE-TEARDOWN now or defers it until
+the completion frontier passes the object's last submitted use.
+
+BINDINGS extract every native handle NATIVE-TEARDOWN needs, so the
+teardown closure captures raw handles and the device wrapper rather than
+VARIABLE itself and can therefore serve as the wrapper's leak finalizer.
+NATIVE-TEARDOWN runs only while the device is alive, under the queue
+teardown lock, with DEVICE anaphorically bound to the native handle."
   (let ((device-object (gensym "DEVICE-OBJECT")))
     `(progn
+       (defmethod vulkan-native-teardown-closure ((,variable ,class))
+         (let ((,device-object ,device-form)
+               ,@bindings)
+           (lambda ()
+             (with-vulkan-queue-teardown (,device-object device)
+               ,@native-teardown))))
+       (defmethod destroy-vulkan-native ((,variable ,class))
+         (funcall (vulkan-native-teardown-closure ,variable)))
        (defmethod destroy ((,variable ,class))
          (with-vulkan-gpu-driver-environment
            (unless (vulkan-object-destroyed-p ,variable)
              (setf (vulkan-object-destroyed-p ,variable) t)
+             (sb-ext:cancel-finalization ,variable)
              (vulkan-destroy-or-defer ,variable ,device-form)))
          (values))
-       (defmethod destroy-vulkan-native ((,variable ,class))
-         (let ((,device-object ,device-form))
-           (unless (vulkan-object-destroyed-p ,device-object)
-             (let ((device (vulkan-handle ,device-object)))
-               (declare (ignorable device))
-               ,@native-teardown))))
        ',class)))
 
-(define-vulkan-deferred-destroy
+(define-vulkan-resource-destroy
     (vulkan-gpu-command-buffer command-buffer)
     (vulkan-command-buffer-device command-buffer)
-  (lvk:destroy-command-pool
-   device (vulkan-command-buffer-command-pool command-buffer))
-  (dolist (resource
-           (vulkan-command-buffer-native-resources command-buffer))
-    (destroy-vulkan-command-native-resource
-     (vulkan-command-buffer-device command-buffer) resource)))
+    ((command-pool (vulkan-command-buffer-command-pool command-buffer))
+     (resources (vulkan-command-buffer-native-resources command-buffer)))
+  (lvk:destroy-command-pool device command-pool)
+  (dolist (resource resources)
+    (destroy-vulkan-command-native-resource device resource)))
 
 (defmethod destroy :after ((command-buffer vulkan-gpu-command-buffer))
   (setf (vulkan-command-buffer-state command-buffer) :destroyed))
 
-(define-vulkan-deferred-destroy (vulkan-gpu-bind-group bind-group)
+(define-vulkan-resource-destroy (vulkan-gpu-bind-group bind-group)
     (vulkan-bind-group-device bind-group)
-  (lvk:destroy-descriptor-pool
-   device (vulkan-bind-group-descriptor-pool bind-group)))
+    ((descriptor-pool (vulkan-bind-group-descriptor-pool bind-group)))
+  (lvk:destroy-descriptor-pool device descriptor-pool))
 
-(define-vulkan-deferred-destroy (vulkan-gpu-compute-pipeline pipeline)
+(define-vulkan-resource-destroy (vulkan-gpu-compute-pipeline pipeline)
     (vulkan-compute-pipeline-device pipeline)
-  (lvk:destroy-pipeline device (vulkan-handle pipeline))
-  (lvk:destroy-pipeline-layout
-   device (vulkan-compute-pipeline-layout pipeline)))
+    ((handle (vulkan-handle pipeline))
+     (pipeline-layout (vulkan-compute-pipeline-layout pipeline)))
+  (lvk:destroy-pipeline device handle)
+  (lvk:destroy-pipeline-layout device pipeline-layout))
 
-(define-vulkan-deferred-destroy (vulkan-gpu-render-pipeline pipeline)
+(define-vulkan-resource-destroy (vulkan-gpu-render-pipeline pipeline)
     (vulkan-render-pipeline-device pipeline)
-  (lvk:destroy-pipeline device (vulkan-handle pipeline))
-  (lvk:destroy-pipeline-layout
-   device (vulkan-render-pipeline-layout pipeline)))
+    ((handle (vulkan-handle pipeline))
+     (pipeline-layout (vulkan-render-pipeline-layout pipeline)))
+  (lvk:destroy-pipeline device handle)
+  (lvk:destroy-pipeline-layout device pipeline-layout))
 
-(define-vulkan-deferred-destroy (vulkan-gpu-sampler sampler)
+(define-vulkan-resource-destroy (vulkan-gpu-sampler sampler)
     (vulkan-sampler-device sampler)
-  (lvk:destroy-sampler device (vulkan-handle sampler)))
+    ((handle (vulkan-handle sampler)))
+  (lvk:destroy-sampler device handle))
 
-(define-vulkan-deferred-destroy (vulkan-gpu-buffer buffer)
+(define-vulkan-resource-destroy (vulkan-gpu-buffer buffer)
     (vulkan-buffer-device buffer)
-  (lvk:unmap-memory device (vulkan-buffer-memory buffer))
-  (lvk:destroy-buffer device (vulkan-handle buffer))
-  (lvk:free-memory device (vulkan-buffer-memory buffer)))
+    ((handle (vulkan-handle buffer))
+     (memory (vulkan-buffer-memory buffer)))
+  (lvk:unmap-memory device memory)
+  (lvk:destroy-buffer device handle)
+  (lvk:free-memory device memory))
 
-(define-vulkan-deferred-destroy (vulkan-gpu-bind-group-layout layout)
+(define-vulkan-resource-destroy (vulkan-gpu-bind-group-layout layout)
     (vulkan-bind-group-layout-device layout)
-  (lvk:destroy-descriptor-set-layout device (vulkan-handle layout)))
+    ((handle (vulkan-handle layout)))
+  (lvk:destroy-descriptor-set-layout device handle))
 
-(define-vulkan-deferred-destroy (vulkan-gpu-shader-module module)
+(define-vulkan-resource-destroy (vulkan-gpu-shader-module module)
     (vulkan-shader-module-device module)
-  (lvk:destroy-shader-module device (vulkan-handle module)))
+    ((handle (vulkan-handle module)))
+  (lvk:destroy-shader-module device handle))
 
-(define-vulkan-deferred-destroy (vulkan-gpu-texture-view view)
+(define-vulkan-resource-destroy (vulkan-gpu-texture-view view)
     (vulkan-texture-view-device view)
-  (lvk:destroy-image-view device (vulkan-handle view)))
+    ((handle (vulkan-handle view)))
+  (lvk:destroy-image-view device handle))
 
-(define-vulkan-deferred-destroy (vulkan-gpu-texture texture)
+(define-vulkan-resource-destroy (vulkan-gpu-texture texture)
     (vulkan-texture-device texture)
-  (when (vulkan-texture-owned-p texture)
-    (lvk:destroy-image device (vulkan-handle texture))
-    (lvk:free-memory device (vulkan-texture-memory texture))))
+    ((handle (vulkan-handle texture))
+     (memory (vulkan-texture-memory texture))
+     (owned-p (vulkan-texture-owned-p texture)))
+  (when owned-p
+    (lvk:destroy-image device handle)
+    (lvk:free-memory device memory)))
 
 (defmethod destroy ((device vulkan-gpu-device))
   (with-vulkan-gpu-driver-environment
     (unless (vulkan-object-destroyed-p device)
+      (sb-ext:cancel-finalization device)
       (let ((queue (vulkan-device-queue device)))
-        (unwind-protect
+        ;; The queue lock serializes this against finalizer-thread
+        ;; teardown of collected children, which checks the device's
+        ;; destroyed mark under the same lock.
+        (sb-thread:with-recursive-lock ((vulkan-queue-lock queue))
+          (unwind-protect
              (progn
                (lvk:device-wait-idle (vulkan-handle device))
                (when queue
@@ -2269,5 +2407,5 @@ is alive, with DEVICE anaphorically bound to the native device handle."
               (lvk:destroy-instance (vulkan-device-instance device))
               (setf (vulkan-object-destroyed-p device) t)
               (when queue
-                (setf (vulkan-object-destroyed-p queue) t))))))))
+                (setf (vulkan-object-destroyed-p queue) t)))))))))
   (values))

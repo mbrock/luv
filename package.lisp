@@ -211,6 +211,10 @@ nothing else does."))
            #:gpu-usage-error
            #:gpu-usage-error-required-usage
            #:gpu-usage-error-actual-usage
+           #:gpu-resource-leaked
+           #:gpu-resource-leaked-class
+           #:gpu-resource-leaked-label
+           #:*leaked-gpu-resources*
            #:vulkan-gpu-error
            #:vulkan-gpu-error-reason
            #:vulkan-gpu-error-details
