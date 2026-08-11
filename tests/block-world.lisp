@@ -50,6 +50,25 @@
       (setf (block-at world 2 0 0) luv::*stone-block*)
       (ok (= (block-mesh-face-count (mesh-block-world mesher world)) 10)))))
 
+(deftest chunk-mesh-products-have-narrow-neighbor-dependencies
+  (let* ((world (make-block-world :chunk-width 4
+                                  :chunk-height 4
+                                  :chunk-depth 4))
+         (left (ensure-world-chunk world 0 0 0))
+         (right (ensure-world-chunk world 1 0 0))
+         (mesher (make-instance 'exposed-face-mesher)))
+    (setf (block-at world 3 1 1) luv::*stone-block*
+          (block-at world 4 1 1) luv::*stone-block*)
+    (ok (= (block-mesh-face-count (mesh-block-chunk mesher world left)) 5))
+    (ok (= (block-mesh-face-count (mesh-block-chunk mesher world right)) 5))
+    (let ((stamp (chunk-mesh-dependency-stamp world left)))
+      ;; This changes RIGHT, but not the boundary LEFT's mesh observes.
+      (setf (block-at world 5 2 2) luv::*stone-block*)
+      (ok (equal stamp (chunk-mesh-dependency-stamp world left)))
+      ;; This touches RIGHT's -X boundary and must invalidate LEFT.
+      (setf (block-at world 4 2 2) luv::*stone-block*)
+      (ok (not (equal stamp (chunk-mesh-dependency-stamp world left)))))))
+
 (deftest camera-edits-the-resident-lattice
   (let* ((world (make-block-world :chunk-width 4
                                   :chunk-height 4

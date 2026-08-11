@@ -114,6 +114,37 @@
     (ok (= (block-chunk-revision chunk) 4))
     (ok (= (block-world-revision world) 5))))
 
+(deftest chunk-boundaries-and-world-change-transactions
+  (let* ((world (make-block-world :chunk-width 4
+                                  :chunk-height 4
+                                  :chunk-depth 4))
+         (stone (list :stone))
+         (chunk nil))
+    (with-world-change-transaction (world)
+      (setf chunk (ensure-world-chunk world 0 0 0))
+      ;; Interior content changes do not invalidate neighbor-derived products.
+      (setf (chunk-block-at chunk 1 1 1) stone)
+      (with-world-change-transaction (world)
+        (setf (chunk-block-at chunk 0 1 1) stone)))
+    (ok (= (block-world-revision world) 1))
+    (ok (= (block-world-residency-revision world) 1))
+    (ok (= (block-chunk-revision chunk) 2))
+    (ok (= (block-chunk-boundary-revision chunk -1 0 0) 1))
+    (ok (= (block-chunk-boundary-revision chunk 1 0 0) 0))
+    (ok (= (block-chunk-boundary-revision chunk 0 -1 0) 0))
+    (ok (= (block-chunk-boundary-revision chunk 0 1 0) 0))
+    (ok (= (block-chunk-boundary-revision chunk 0 0 -1) 0))
+    (ok (= (block-chunk-boundary-revision chunk 0 0 1) 0))
+    ;; A transaction containing only no-op assignments is itself a no-op.
+    (with-world-change-transaction (world)
+      (setf (chunk-block-at chunk 1 1 1) stone))
+    (ok (= (block-world-revision world) 1))
+    (setf (chunk-block-at chunk 3 3 3) stone)
+    (ok (= (block-world-revision world) 2))
+    (ok (= (block-chunk-boundary-revision chunk 1 0 0) 1))
+    (ok (= (block-chunk-boundary-revision chunk 0 1 0) 1))
+    (ok (= (block-chunk-boundary-revision chunk 0 0 1) 1))))
+
 (deftest negative-and-cross-chunk-access
   (let* ((world (make-block-world :chunk-width 4
                                   :chunk-height 4

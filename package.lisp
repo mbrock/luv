@@ -449,6 +449,7 @@ nothing else does."))
            #:block-chunk-domain
            #:block-chunk-content
            #:block-chunk-revision
+           #:block-chunk-boundary-revision
            #:chunk-block-at
            #:map-chunk-blocks
            #:block-kind
@@ -465,6 +466,8 @@ nothing else does."))
            #:block-world-source
            #:block-world-revision
            #:block-world-residency-revision
+           #:call-with-world-change-transaction
+           #:with-world-change-transaction
            #:make-block-world
            #:world-chunk-at
            #:ensure-world-chunk
@@ -489,6 +492,8 @@ nothing else does."))
            #:block-mesh-vertex-count
            #:block-mesh-face-count
            #:mesh-block-world
+           #:mesh-block-chunk
+           #:chunk-mesh-dependency-stamp
            #:emit-block-face
            #:fly-camera
            #:camera-x
@@ -503,6 +508,11 @@ nothing else does."))
            #:cube-world-demo-canvas
            #:cube-world-demo-world
            #:cube-world-demo-mesh
+           #:cube-world-demo-chunk-products
+           #:cube-world-chunk-product
+           #:cube-world-chunk-product-coordinate
+           #:cube-world-chunk-product-dependency-stamp
+           #:cube-world-chunk-product-mesh
            #:cube-world-demo-camera
            #:cube-world-demo-selected-block
            #:cube-world-demo-meshed-world-revision

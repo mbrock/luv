@@ -95,52 +95,54 @@
 (defun materialize-little-world-chunk (source world chunk-x chunk-z)
   "Materialize one deterministic terrain chunk at vertical layer zero."
   (check-type source little-world-source)
-  (let* ((chunk (ensure-world-chunk world chunk-x 0 chunk-z))
-         (shape (voxel-space-chunk-shape (block-world-space world)))
-         (width (chunk-shape-width shape))
-         (height (chunk-shape-height shape))
-         (depth (chunk-shape-depth shape))
-         (origin (chunk-domain-origin (block-chunk-domain chunk))))
-    (dotimes (local-z depth)
-      (dotimes (local-x width)
-        (let* ((x (+ (world-coordinate-x origin) local-x))
-               (z (+ (world-coordinate-z origin) local-z))
-               (surface (little-world-surface-height source x z height)))
-          (dotimes (y (1+ surface))
-            (setf (block-at world x y z)
-                  (cond ((= y surface) *grass-block*)
-                        ((or (zerop y) (< y (- surface 2))) *stone-block*)
-                        (t *dirt-block*)))))))
-    chunk))
+  (with-world-change-transaction (world)
+    (let* ((chunk (ensure-world-chunk world chunk-x 0 chunk-z))
+           (shape (voxel-space-chunk-shape (block-world-space world)))
+           (width (chunk-shape-width shape))
+           (height (chunk-shape-height shape))
+           (depth (chunk-shape-depth shape))
+           (origin (chunk-domain-origin (block-chunk-domain chunk))))
+      (dotimes (local-z depth)
+        (dotimes (local-x width)
+          (let* ((x (+ (world-coordinate-x origin) local-x))
+                 (z (+ (world-coordinate-z origin) local-z))
+                 (surface (little-world-surface-height source x z height)))
+            (dotimes (y (1+ surface))
+              (setf (block-at world x y z)
+                    (cond ((= y surface) *grass-block*)
+                          ((or (zerop y) (< y (- surface 2))) *stone-block*)
+                          (t *dirt-block*)))))))
+      chunk)))
 
 (defun populate-little-world-chunk (source world chunk-x chunk-z)
   "Place deterministic, sparse landmarks after neighboring terrain exists."
-  (let* ((shape (voxel-space-chunk-shape (block-world-space world)))
-         (width (chunk-shape-width shape))
-         (height (chunk-shape-height shape))
-         (depth (chunk-shape-depth shape))
-         (origin-x (* chunk-x width))
-         (origin-z (* chunk-z depth))
-         (hash (little-world-hash source chunk-x chunk-z))
-         (rock-x (+ origin-x 2 (mod hash (- width 4))))
-         (rock-z (+ origin-z 2 (mod (ash hash -8) (- depth 4))))
-         (rock-y (1+ (little-world-surface-height
-                      source rock-x rock-z height))))
-    (setf (block-at world rock-x rock-y rock-z) *stone-block*)
-    (when (zerop (mod hash 2))
-      (setf (block-at world (1+ rock-x) rock-y rock-z) *stone-block*))
-    (when (< (mod (ash hash -16) 5) 3)
-      (let* ((tree-x (+ origin-x 3 (mod (ash hash -3) (- width 6))))
-             (tree-z (+ origin-z 3 (mod (ash hash -11) (- depth 6))))
-             (surface (little-world-surface-height
-                       source tree-x tree-z height))
-             (crown (+ surface 4)))
-        (loop for y from (1+ surface) below crown
-              do (setf (block-at world tree-x y tree-z) *wood-block*))
-        (loop for x from (1- tree-x) to (1+ tree-x)
-              do (loop for z from (1- tree-z) to (1+ tree-z)
-                       do (setf (block-at world x crown z) *leaf-block*)))
-        (setf (block-at world tree-x (1+ crown) tree-z) *leaf-block*)))))
+  (with-world-change-transaction (world)
+    (let* ((shape (voxel-space-chunk-shape (block-world-space world)))
+           (width (chunk-shape-width shape))
+           (height (chunk-shape-height shape))
+           (depth (chunk-shape-depth shape))
+           (origin-x (* chunk-x width))
+           (origin-z (* chunk-z depth))
+           (hash (little-world-hash source chunk-x chunk-z))
+           (rock-x (+ origin-x 2 (mod hash (- width 4))))
+           (rock-z (+ origin-z 2 (mod (ash hash -8) (- depth 4))))
+           (rock-y (1+ (little-world-surface-height
+                        source rock-x rock-z height))))
+      (setf (block-at world rock-x rock-y rock-z) *stone-block*)
+      (when (zerop (mod hash 2))
+        (setf (block-at world (1+ rock-x) rock-y rock-z) *stone-block*))
+      (when (< (mod (ash hash -16) 5) 3)
+        (let* ((tree-x (+ origin-x 3 (mod (ash hash -3) (- width 6))))
+               (tree-z (+ origin-z 3 (mod (ash hash -11) (- depth 6))))
+               (surface (little-world-surface-height
+                         source tree-x tree-z height))
+               (crown (+ surface 4)))
+          (loop for y from (1+ surface) below crown
+                do (setf (block-at world tree-x y tree-z) *wood-block*))
+          (loop for x from (1- tree-x) to (1+ tree-x)
+                do (loop for z from (1- tree-z) to (1+ tree-z)
+                         do (setf (block-at world x crown z) *leaf-block*)))
+          (setf (block-at world tree-x (1+ crown) tree-z) *leaf-block*))))))
 
 (defun make-little-block-world (&key (chunk-radius 1)
                                      (chunk-width 16)
@@ -158,19 +160,20 @@
                                   :chunk-height chunk-height
                                   :chunk-depth chunk-depth
                                   :source source)))
-    ;; Residency is established first so terrain and later features may cross
-    ;; chunk boundaries without ever pretending that absent terrain is air.
-    (loop for chunk-x from (- chunk-radius) to chunk-radius
-          do (loop for chunk-z from (- chunk-radius) to chunk-radius
-                   do (ensure-world-chunk world chunk-x 0 chunk-z)))
-    (loop for chunk-x from (- chunk-radius) to chunk-radius
-          do (loop for chunk-z from (- chunk-radius) to chunk-radius
-                   do (materialize-little-world-chunk
-                       source world chunk-x chunk-z)))
-    (loop for chunk-x from (- chunk-radius) to chunk-radius
-          do (loop for chunk-z from (- chunk-radius) to chunk-radius
-                   do (populate-little-world-chunk
-                       source world chunk-x chunk-z)))
+    (with-world-change-transaction (world)
+      ;; Residency is established first so terrain and later features may cross
+      ;; chunk boundaries without ever pretending that absent terrain is air.
+      (loop for chunk-x from (- chunk-radius) to chunk-radius
+            do (loop for chunk-z from (- chunk-radius) to chunk-radius
+                     do (ensure-world-chunk world chunk-x 0 chunk-z)))
+      (loop for chunk-x from (- chunk-radius) to chunk-radius
+            do (loop for chunk-z from (- chunk-radius) to chunk-radius
+                     do (materialize-little-world-chunk
+                         source world chunk-x chunk-z)))
+      (loop for chunk-x from (- chunk-radius) to chunk-radius
+            do (loop for chunk-z from (- chunk-radius) to chunk-radius
+                     do (populate-little-world-chunk
+                         source world chunk-x chunk-z))))
     world))
 
 (defclass block-mesher () ())
@@ -186,6 +189,7 @@
    (face-count :initarg :face-count :reader block-mesh-face-count)))
 
 (defgeneric mesh-block-world (mesher world))
+(defgeneric mesh-block-chunk (mesher world chunk))
 (defgeneric emit-block-face (mesher world vertices block face x y z))
 
 (defun push-block-vertex (vertices position color)
@@ -255,29 +259,45 @@
                              color))))
     vertices))
 
-(defmethod mesh-block-world
-    ((mesher exposed-face-mesher) (world block-world))
+(defmethod mesh-block-chunk
+    ((mesher exposed-face-mesher) (world block-world) (chunk block-chunk))
   (let ((vertices (make-array 0 :element-type 'single-float
                                 :adjustable t :fill-pointer 0))
         (face-count 0))
-    (dolist (chunk (resident-world-chunks world))
-      (let ((origin (chunk-domain-origin (block-chunk-domain chunk))))
-        (map-chunk-blocks
-         (lambda (block local-x local-y local-z)
-           (when (block-solid-p block)
-             (let ((x (+ (world-coordinate-x origin) local-x))
-                   (y (+ (world-coordinate-y origin) local-y))
-                   (z (+ (world-coordinate-z origin) local-z)))
-               (dolist (face *block-faces*)
-                 (destructuring-bind (dx dy dz) (block-face-neighbor face)
-                   (unless (block-solid-p
-                            (mesher-block-at mesher world
-                                             (+ x dx) (+ y dy) (+ z dz)))
-                     (emit-block-face mesher world vertices block face x y z)
-                     (incf face-count)))))))
-         chunk)))
+    (let ((origin (chunk-domain-origin (block-chunk-domain chunk))))
+      (map-chunk-blocks
+       (lambda (block local-x local-y local-z)
+         (when (block-solid-p block)
+           (let ((x (+ (world-coordinate-x origin) local-x))
+                 (y (+ (world-coordinate-y origin) local-y))
+                 (z (+ (world-coordinate-z origin) local-z)))
+             (dolist (face *block-faces*)
+               (destructuring-bind (dx dy dz) (block-face-neighbor face)
+                 (unless (block-solid-p
+                          (mesher-block-at mesher world
+                                           (+ x dx) (+ y dy) (+ z dz)))
+                   (emit-block-face mesher world vertices block face x y z)
+                   (incf face-count)))))))
+       chunk))
     (make-instance 'block-mesh :vertices vertices
                                :vertex-count (* face-count 6)
+                               :face-count face-count)))
+
+(defmethod mesh-block-world
+    ((mesher exposed-face-mesher) (world block-world))
+  "Make a combined compatibility mesh from independently meshed chunks."
+  (let ((vertices (make-array 0 :element-type 'single-float
+                                :adjustable t :fill-pointer 0))
+        (vertex-count 0)
+        (face-count 0))
+    (dolist (chunk (resident-world-chunks world))
+      (let ((mesh (mesh-block-chunk mesher world chunk)))
+        (loop for component across (block-mesh-vertices mesh)
+              do (vector-push-extend component vertices))
+        (incf vertex-count (block-mesh-vertex-count mesh))
+        (incf face-count (block-mesh-face-count mesh))))
+    (make-instance 'block-mesh :vertices vertices
+                               :vertex-count vertex-count
                                :face-count face-count)))
 
 ;;; Camera mathematics stays small and inspectable.  Six vec4 values are
@@ -388,21 +408,33 @@
                    :reader cube-world-frame-uniform-buffer)
    (bind-group :initarg :bind-group :reader cube-world-frame-bind-group)))
 
+(defparameter *chunk-neighbor-directions*
+  '((-1 0 0) (1 0 0) (0 -1 0) (0 1 0) (0 0 -1) (0 0 1)))
+
+(defclass cube-world-chunk-product ()
+  ((coordinate :initarg :coordinate
+               :reader cube-world-chunk-product-coordinate)
+   (dependency-stamp :initarg :dependency-stamp
+                     :reader cube-world-chunk-product-dependency-stamp)
+   (mesh :initarg :mesh :reader cube-world-chunk-product-mesh)
+   (vertex-buffer :initarg :vertex-buffer
+                  :reader cube-world-chunk-product-vertex-buffer)))
+
 (defclass cube-world-demo (canvas-event-handler)
   ((canvas :initarg :canvas :reader cube-world-demo-canvas)
    (device :initarg :device :reader cube-world-demo-device)
    (context :initarg :context :reader cube-world-demo-context)
    (world :initarg :world :reader cube-world-demo-world)
    (mesher :initarg :mesher :reader cube-world-demo-mesher)
-   (mesh :initarg :mesh :accessor cube-world-demo-mesh)
+   (chunk-products :initform (make-hash-table :test #'equal)
+                   :reader cube-world-demo-chunk-products)
    (meshed-world-revision
     :initarg :meshed-world-revision
+    :initform -1
     :accessor cube-world-demo-meshed-world-revision)
    (camera :initarg :camera :reader cube-world-demo-camera)
    (selected-block :initarg :selected-block :initform *stone-block*
                    :accessor cube-world-demo-selected-block)
-   (vertex-buffer :initarg :vertex-buffer
-                  :accessor cube-world-demo-vertex-buffer)
    (color-texture :initarg :color-texture
                   :reader cube-world-demo-color-texture)
    (color-view :initarg :color-view :reader cube-world-demo-color-view)
@@ -426,36 +458,120 @@
   (push resource (cube-world-demo-resources demo))
   resource)
 
-(defun refresh-cube-world-mesh (demo)
-  "Publish a fresh mesh and vertex buffer when DEMO's world has changed.
+(defun block-chunk-key (chunk)
+  (let ((coordinate
+          (chunk-domain-coordinate (block-chunk-domain chunk))))
+    (chunk-key (chunk-coordinate-x coordinate)
+               (chunk-coordinate-y coordinate)
+               (chunk-coordinate-z coordinate))))
 
-Previously published buffers remain owned by DEMO until teardown because a
-submitted frame may still refer to them."
+(defun chunk-mesh-dependency-stamp (world chunk)
+  "Describe exactly which resident block data CHUNK's exposed mesh observes."
+  (let* ((coordinate
+           (chunk-domain-coordinate (block-chunk-domain chunk)))
+         (x (chunk-coordinate-x coordinate))
+         (y (chunk-coordinate-y coordinate))
+         (z (chunk-coordinate-z coordinate)))
+    (cons
+     (list chunk (block-chunk-revision chunk))
+     (loop for (dx dy dz) in *chunk-neighbor-directions*
+           collect
+           (multiple-value-bind (neighbor present-p)
+               (world-chunk-at world (+ x dx) (+ y dy) (+ z dz))
+             (if present-p
+                 ;; Only the neighbor boundary facing this chunk contributes.
+                 (list neighbor
+                       (block-chunk-boundary-revision
+                        neighbor (- dx) (- dy) (- dz)))
+                 '(nil)))))))
+
+(defun cube-world-demo-products-in-order (demo)
+  (let ((products (cube-world-demo-chunk-products demo)))
+    (loop for chunk in (resident-world-chunks (cube-world-demo-world demo))
+          for product = (gethash (block-chunk-key chunk) products)
+          when product collect product)))
+
+(defun cube-world-demo-mesh (demo)
+  "Return a combined, inspectable snapshot of DEMO's chunk meshes."
+  (let ((vertices (make-array 0 :element-type 'single-float
+                                :adjustable t :fill-pointer 0))
+        (vertex-count 0)
+        (face-count 0))
+    (dolist (product (cube-world-demo-products-in-order demo))
+      (let ((mesh (cube-world-chunk-product-mesh product)))
+        (loop for component across (block-mesh-vertices mesh)
+              do (vector-push-extend component vertices))
+        (incf vertex-count (block-mesh-vertex-count mesh))
+        (incf face-count (block-mesh-face-count mesh))))
+    (make-instance 'block-mesh :vertices vertices
+                               :vertex-count vertex-count
+                               :face-count face-count)))
+
+(defun destroy-cube-world-chunk-products (demo)
+  (maphash
+   (lambda (key product)
+     (declare (ignore key))
+     (destroy (cube-world-chunk-product-vertex-buffer product)))
+   (cube-world-demo-chunk-products demo))
+  (clrhash (cube-world-demo-chunk-products demo))
+  (values))
+
+(defun refresh-cube-world-mesh (demo)
+  "Refresh only chunk products invalidated by content or neighbor boundaries.
+
+Replaced and evicted buffers are destroyed immediately at the API level.  The
+GPU completion frontier defers their native teardown when an in-flight frame
+still owns their last use."
   (let* ((world (cube-world-demo-world demo))
-         (revision (block-world-revision world)))
-    (unless (= revision (cube-world-demo-meshed-world-revision demo))
-      (let ((buffer nil) (completed-p nil))
-        (unwind-protect
-             (let* ((mesh (mesh-block-world
-                           (cube-world-demo-mesher demo) world))
-                    (vertices (block-mesh-vertices mesh)))
-               (setf buffer
-                     (create
-                      (cube-world-demo-device demo)
-                      (make-buffer-descriptor
-                       :label (format nil "block world vertices revision ~D"
-                                      revision)
-                       :size (max 4 (* 4 (length vertices)))
-                       :usage '(:vertex))))
-               (write-buffer buffer vertices)
-               (remember-cube-world-resource demo buffer)
-               (setf (cube-world-demo-vertex-buffer demo) buffer
-                     (cube-world-demo-mesh demo) mesh
-                     (cube-world-demo-meshed-world-revision demo) revision
-                     completed-p t))
-          (unless completed-p
-            (when buffer (destroy buffer)))))))
-  (cube-world-demo-mesh demo))
+         (products (cube-world-demo-chunk-products demo))
+         (resident-keys (make-hash-table :test #'equal)))
+    (dolist (chunk (resident-world-chunks world))
+      (let* ((key (block-chunk-key chunk))
+             (stamp (chunk-mesh-dependency-stamp world chunk))
+             (old (gethash key products)))
+        (setf (gethash key resident-keys) t)
+        (unless (and old
+                     (equal stamp
+                            (cube-world-chunk-product-dependency-stamp old)))
+          (let ((buffer nil) (completed-p nil))
+            (unwind-protect
+                 (let* ((mesh (mesh-block-chunk
+                               (cube-world-demo-mesher demo) world chunk))
+                        (vertices (block-mesh-vertices mesh)))
+                   (setf buffer
+                         (create
+                          (cube-world-demo-device demo)
+                          (make-buffer-descriptor
+                           :label (format nil "block chunk ~{~D~^,~} revision ~D"
+                                          key (block-chunk-revision chunk))
+                           :size (max 4 (* 4 (length vertices)))
+                           :usage '(:vertex))))
+                   (write-buffer buffer vertices)
+                   (setf (gethash key products)
+                         (make-instance
+                          'cube-world-chunk-product
+                          :coordinate
+                          (chunk-domain-coordinate (block-chunk-domain chunk))
+                          :dependency-stamp stamp
+                          :mesh mesh
+                          :vertex-buffer buffer)
+                         completed-p t)
+                   (when old
+                     (destroy
+                      (cube-world-chunk-product-vertex-buffer old))))
+              (unless completed-p
+                (when buffer (destroy buffer))))))))
+    (let ((evicted-keys nil))
+      (maphash (lambda (key product)
+                 (unless (gethash key resident-keys)
+                   (destroy (cube-world-chunk-product-vertex-buffer product))
+                   (push key evicted-keys)))
+               products)
+      (dolist (key evicted-keys)
+        (remhash key products)))
+    (setf (cube-world-demo-meshed-world-revision demo)
+          (block-world-revision world))
+    (cube-world-demo-products-in-order demo)))
 
 (defun cube-world-demo-target (demo &key (max-distance 8d0))
   "Raycast from DEMO's camera through resident block terrain."
@@ -530,8 +646,8 @@ submitted frame may still refer to them."
 
 (defun encode-cube-world-frame
     (demo surface-texture encoder &key readback-buffer)
-  (refresh-cube-world-mesh demo)
-  (let* ((extent (canvas-extent (cube-world-demo-context demo)))
+  (let* ((products (refresh-cube-world-mesh demo))
+         (extent (canvas-extent (cube-world-demo-context demo)))
          (frame (cube-world-frame-state demo surface-texture)))
     (write-buffer
      (cube-world-frame-uniform-buffer frame)
@@ -551,8 +667,12 @@ submitted frame may still refer to them."
                 :depth-clear-value 1.0)))))
       (set-pipeline pass (cube-world-demo-pipeline demo))
       (set-bind-group pass 0 (cube-world-frame-bind-group frame))
-      (set-vertex-buffer pass 0 (cube-world-demo-vertex-buffer demo))
-      (draw pass (block-mesh-vertex-count (cube-world-demo-mesh demo)))
+      (dolist (product products)
+        (let ((mesh (cube-world-chunk-product-mesh product)))
+          (when (plusp (block-mesh-vertex-count mesh))
+            (set-vertex-buffer
+             pass 0 (cube-world-chunk-product-vertex-buffer product))
+            (draw pass (block-mesh-vertex-count mesh)))))
       (end-pass pass))
     (when readback-buffer
       (encode
@@ -692,7 +812,8 @@ real SDL/Vulkan surface and swapchain path.  Pass :FRAMES-PER-SECOND NIL for a
 capture-only demand clock."
   (let ((canvas (make-sdl-canvas :title title :width width :height height
                                  :visible-p visible-p))
-        (device nil) (context nil) (resources nil) (completed-p nil))
+        (device nil) (context nil) (resources nil) (demo nil)
+        (completed-p nil))
     (open-canvas canvas)
     (unwind-protect
          (progn
@@ -707,15 +828,6 @@ capture-only demand clock."
                     (push resource resources)
                     resource))
              (let* ((extent (canvas-extent context))
-                  (mesh (mesh-block-world mesher world))
-                  (vertex-buffer
-                    (keep
-                     (create
-                      device
-                      (make-buffer-descriptor
-                       :label "block world vertices"
-                       :size (* 4 (length (block-mesh-vertices mesh)))
-                       :usage '(:vertex)))))
                   (color-texture
                     (keep
                      (create
@@ -780,19 +892,18 @@ capture-only demand clock."
                        :depth-stencil
                        '(:format :depth32-float
                          :depth-write-enabled t :depth-compare :less)))))
-                  (demo
+                  (new-demo
                     (make-instance
                      'cube-world-demo
                      :canvas canvas :device device :context context
-                     :world world :mesher mesher :mesh mesh
-                     :meshed-world-revision (block-world-revision world)
+                     :world world :mesher mesher
                      :camera camera
-                     :vertex-buffer vertex-buffer
                      :color-texture color-texture :color-view color-view
                      :depth-texture depth-texture :depth-view depth-view
                      :layout layout :pipeline pipeline
                      :resources resources)))
-             (write-buffer vertex-buffer (block-mesh-vertices mesh))
+             (setf demo new-demo)
+             (refresh-cube-world-mesh demo)
              (setf (canvas-event-handler canvas) demo
                    (canvas-clock canvas)
                    (if frames-per-second
@@ -805,6 +916,8 @@ capture-only demand clock."
                    completed-p t)
                demo)))
       (unless completed-p
+        (when demo
+          (ignore-errors (destroy-cube-world-chunk-products demo)))
         (dolist (resource resources)
           (ignore-errors (destroy resource)))
         (close-canvas canvas)
@@ -826,6 +939,7 @@ capture-only demand clock."
       (request-canvas-frame canvas (lambda (timestamp)
                                      (declare (ignore timestamp)))))
     (setf (canvas-event-handler canvas) nil)
+    (destroy-cube-world-chunk-products demo)
     (dolist (resource (cube-world-demo-resources demo))
       (destroy resource))
     (setf (cube-world-demo-resources demo) nil)

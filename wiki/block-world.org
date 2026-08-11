@@ -46,7 +46,8 @@ The current implementation is split between the renderer-independent model in
 - a lattice DDA ray stops distinctly at a hit, a resident miss, or absent
   terrain; left and right clicks remove and place blocks through that query;
 - a fly camera, depth buffer, per-frame uniform buffers, relative pointer
-  input, and revision-driven remeshing make the result inhabitable; and
+  input, and revision-driven per-chunk remeshing make the result inhabitable;
+  and
 - renderer-native image readback writes a PNG without screen automation.
 
 The whole slice remains live and inspectable:
@@ -87,26 +88,28 @@ little-world-source + seed
           v
 resident chunk domains -- dense palette-index fields
           |                         |
-          | edits                   | chunk revisions
+          | edits                   | own + boundary revisions
           v                         v
-monotonic world revision ------> derived world mesh
+coalesced world revision ---> chunk CPU/GPU mesh products
 #+end_example
 
 A resident chunk notifies its owning world when its content actually changes,
 including through the lower-level =chunk-block-at= writer.  Assigning the same
-value is a no-op.  The renderer compares the world revision with the revision
-of its mesh, constructs a fresh CPU mesh and GPU vertex buffer, then publishes
-the pair together.  Older GPU buffers remain owned until demo teardown, so a
-submitted frame is never invalidated by an edit.
+value is a no-op.  Bulk materialization nests world-change transactions, so
+thousands of site writes advance the general world revision once while chunk
+and residency revisions retain their finer meaning.
 
-The deliberate limitation is that one changed block currently rebuilds the
-whole resident-world mesh.  That is a correctness scaffold, not the desired
-large-world endpoint.  The next derived representation should be owned per
-chunk, carry the source chunk revision plus the neighboring boundary revisions
-on which its exposed faces depend, and retire old GPU buffers at the queue
-completion frontier.  Likewise, bulk materialization currently advances the
-world revision once per changed site; a later materialization transaction can
-coalesce notification without changing the meaning of revisions.
+Each resident chunk has its own CPU mesh and GPU vertex buffer.  Its dependency
+stamp contains the source chunk revision plus only the opposing boundary
+revision of each neighbor, so an interior edit rebuilds one product and a
+chunk-face edit rebuilds two.  The new pair is published together; the old GPU
+buffer is destroyed immediately at the API level, whose queue completion
+frontier defers native teardown if a submitted frame still owns its last use.
+
+The next deliberate limitation is that all nine chunks remain eagerly
+resident.  The same product ownership now permits a larger eager experiment
+without making edit cost proportional to world size, and later gives eviction
+a concrete CPU/GPU product to retire.
 
 The tests keep these layers visible.  =:luv/world= exercises coordinates,
 domains, palette storage, revisions, residency, and ray traversal without SDL

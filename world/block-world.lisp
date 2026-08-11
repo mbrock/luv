@@ -228,7 +228,13 @@ coordinates."
   ((domain :initarg :domain :reader block-chunk-domain)
    (content :initarg :content :reader block-chunk-content)
    (change-hook :initarg :change-hook :initform nil)
-   (revision :initform 0 :reader block-chunk-revision)))
+   (revision :initform 0 :reader block-chunk-revision)
+   ;; -X, +X, -Y, +Y, -Z, +Z.  A derived product for one chunk depends on
+   ;; only the opposing boundary revision of each neighbor, not on arbitrary
+   ;; edits in that neighbor's interior.
+   (boundary-revisions
+    :initform (make-array 6 :element-type '(unsigned-byte 64)
+                           :initial-element 0))))
 
 (defun make-block-chunk (domain &key change-hook)
   (check-type domain chunk-domain)
@@ -247,6 +253,33 @@ coordinates."
    (chunk-domain-offset (block-chunk-domain chunk)
                         (make-local-coordinate x y z))))
 
+(defun chunk-boundary-index (dx dy dz)
+  (cond ((and (= dx -1) (zerop dy) (zerop dz)) 0)
+        ((and (= dx 1) (zerop dy) (zerop dz)) 1)
+        ((and (zerop dx) (= dy -1) (zerop dz)) 2)
+        ((and (zerop dx) (= dy 1) (zerop dz)) 3)
+        ((and (zerop dx) (zerop dy) (= dz -1)) 4)
+        ((and (zerop dx) (zerop dy) (= dz 1)) 5)
+        (t (error "(~D ~D ~D) is not a block-face direction." dx dy dz))))
+
+(defun block-chunk-boundary-revision (chunk dx dy dz)
+  "Return CHUNK's revision for the boundary facing DX,DY,DZ."
+  (check-type chunk block-chunk)
+  (aref (slot-value chunk 'boundary-revisions)
+        (chunk-boundary-index dx dy dz)))
+
+(defun note-chunk-boundary-change (chunk x y z)
+  (let* ((shape
+           (voxel-space-chunk-shape
+            (chunk-domain-space (block-chunk-domain chunk))))
+         (revisions (slot-value chunk 'boundary-revisions)))
+    (when (zerop x) (incf (aref revisions 0)))
+    (when (= x (1- (chunk-shape-width shape))) (incf (aref revisions 1)))
+    (when (zerop y) (incf (aref revisions 2)))
+    (when (= y (1- (chunk-shape-height shape))) (incf (aref revisions 3)))
+    (when (zerop z) (incf (aref revisions 4)))
+    (when (= z (1- (chunk-shape-depth shape))) (incf (aref revisions 5)))))
+
 (defun (setf chunk-block-at) (block chunk x y z)
   (check-type chunk block-chunk)
   (when (set-block-content-at-offset
@@ -255,6 +288,7 @@ coordinates."
                               (make-local-coordinate x y z))
          block)
     (incf (slot-value chunk 'revision))
+    (note-chunk-boundary-change chunk x y z)
     (let ((change-hook (slot-value chunk 'change-hook)))
       (when change-hook
         (funcall change-hook chunk))))
@@ -299,7 +333,34 @@ coordinates."
            :reader block-world-chunks)
    (revision :initform 0 :reader block-world-revision)
    (residency-revision :initform 0
-                       :reader block-world-residency-revision)))
+                       :reader block-world-residency-revision)
+   (change-transaction-depth :initform 0)
+   (change-pending-p :initform nil)))
+
+(defun note-block-world-change (world)
+  (if (plusp (slot-value world 'change-transaction-depth))
+      (setf (slot-value world 'change-pending-p) t)
+      (incf (slot-value world 'revision))))
+
+(defun call-with-world-change-transaction (world function)
+  "Call FUNCTION and coalesce all WORLD changes into one general revision.
+
+Chunk and residency revisions retain their ordinary precision.  The outermost
+transaction advances WORLD's general revision once if any change occurred,
+including when FUNCTION exits non-locally after making a partial change."
+  (check-type world block-world)
+  (check-type function function)
+  (incf (slot-value world 'change-transaction-depth))
+  (unwind-protect
+       (funcall function)
+    (decf (slot-value world 'change-transaction-depth))
+    (when (and (zerop (slot-value world 'change-transaction-depth))
+               (slot-value world 'change-pending-p))
+      (setf (slot-value world 'change-pending-p) nil)
+      (incf (slot-value world 'revision)))))
+
+(defmacro with-world-change-transaction ((world) &body body)
+  `(call-with-world-change-transaction ,world (lambda () ,@body)))
 
 (defun make-block-world (&key (id (gensym "BLOCK-WORLD-"))
                               (chunk-width 16)
@@ -341,11 +402,11 @@ coordinates."
                   :change-hook
                   (lambda (changed-chunk)
                     (declare (ignore changed-chunk))
-                    (incf (slot-value world 'revision))))))
+                    (note-block-world-change world)))))
           (setf (gethash (chunk-key x y z) (block-world-chunks world))
                 new-chunk)
           (incf (slot-value world 'residency-revision))
-          (incf (slot-value world 'revision))
+          (note-block-world-change world)
           new-chunk))))
 
 (defun remove-world-chunk (world x y z)
@@ -358,7 +419,7 @@ coordinates."
       (setf (slot-value chunk 'change-hook) nil)
       (remhash (chunk-key x y z) (block-world-chunks world))
       (incf (slot-value world 'residency-revision))
-      (incf (slot-value world 'revision)))
+      (note-block-world-change world))
     (values chunk present-p)))
 
 (defun resident-world-chunks (world)
