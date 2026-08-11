@@ -22,6 +22,22 @@
       environmentFor = system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
+          sbclVersion = "2.6.7";
+          sbclUnwrapped = pkgs.sbcl.overrideAttrs (_finalAttrs: _previousAttrs: {
+            version = sbclVersion;
+            src = pkgs.fetchurl {
+              url = "mirror://sourceforge/project/sbcl/sbcl/${sbclVersion}/sbcl-${sbclVersion}-source.tar.bz2";
+              hash = "sha256-Hr3DXJ3I4nG4zRrESWXgC/JV+cAiFlD8t38Ps0wtOt4=";
+            };
+          });
+          sbcl = pkgs.wrapLisp {
+            pkg = sbclUnwrapped;
+            faslExt = "fasl";
+            flags = [
+              "--dynamic-space-size"
+              "3000"
+            ];
+          };
           nativeLibraryPath = nixpkgs.lib.makeLibraryPath (
             [
               pkgs.libffi
@@ -36,7 +52,7 @@
             ]
           );
           # Keep the owned CFFI binding and development tools available to SBCL.
-          lisp = pkgs.sbcl.withPackages (lispPackages: [
+          lisp = sbcl.withPackages (lispPackages: [
             lispPackages.alexandria
             lispPackages.cffi
             lispPackages.cffi-libffi
@@ -50,9 +66,18 @@
           slyRoot =
             "${pkgs.emacsPackages.sly}/share/emacs/site-lisp/elpa/${pkgs.emacsPackages.sly.pname}-${pkgs.emacsPackages.sly.version}";
         in
-        { inherit pkgs lisp nativeLibraryPath slyRoot; };
+        { inherit pkgs sbcl lisp nativeLibraryPath slyRoot; };
     in
     {
+      packages = forAllSystems (system:
+        let
+          env = environmentFor system;
+        in {
+          sbcl = env.sbcl;
+          lisp = env.lisp;
+          default = env.lisp;
+        });
+
       devShells = forAllSystems (system:
         let
           env = environmentFor system;
@@ -72,6 +97,7 @@
               env.pkgs.vulkan-tools
             ];
             LD_LIBRARY_PATH = env.nativeLibraryPath;
+            LUV_NIX_SHELL = "1";
             LUV_SLYNK_DIR = "${env.slyRoot}/slynk";
             CL_SOURCE_REGISTRY = "${mcclim}//:${cl-sdl3}//";
             shellHook = ''

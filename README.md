@@ -33,7 +33,8 @@ helpers and `SPV` for the SPIR-V pieces.
 
 ## Quick Start
 
-Use the Nix development shell for SBCL, SDL3, Vulkan tools, MoltenVK on macOS,
+The flake pins nixpkgs and provides the project's SBCL 2.6.7, including
+arm64/NEON `sb-simd` support, alongside SDL3, Vulkan tools, MoltenVK on macOS,
 Mesa/lavapipe for offscreen Linux captures, and the pinned local Lisp projects:
 
 ```sh
@@ -47,11 +48,13 @@ From there, load the project in Lisp:
 (asdf:load-system :luv)
 ```
 
-Or run a one-shot command:
+The project launchers enter that environment themselves, so a one-shot command
+does not depend on whichever `sbcl` happens to be installed by Homebrew or the
+host system:
 
 ```sh
-nix develop -c scripts/luv eval '(luv:make-little-block-world)'
-nix develop -c scripts/luv block-world /tmp/luv-block-world.png
+scripts/luv eval '(luv:make-little-block-world)'
+scripts/luv block-world /tmp/luv-block-world.png
 ```
 
 ## Live Workflow
@@ -89,8 +92,8 @@ of durable image.
 The hidden screenshot path is useful in CI-ish or server-ish environments:
 
 ```sh
-nix develop -c scripts/luv block-world /tmp/luv-block-world.png
-nix develop -c scripts/luv block-world /tmp/luv-block-world-frames/ --count 6
+scripts/luv block-world /tmp/luv-block-world.png
+scripts/luv block-world /tmp/luv-block-world-frames/ --count 6
 ```
 
 ## Notes
