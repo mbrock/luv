@@ -114,6 +114,8 @@ of durable image.
 
 (asdf:load-system :luv/mcclim)
 (defparameter *shader-lab* (luv.mcclim:open-shader-lab))
+(luv.mcclim:refresh-shader-lab *shader-lab*)
+(luv.mcclim:shader-lab-health *shader-lab*) ; => :responsive
 (luv.mcclim:close-shader-lab *shader-lab*)
 ```
 
@@ -124,9 +126,18 @@ number keys 1–7 select grass, dirt, stone, wood, leaves, sand, or snow.
 Escape releases the pointer.
 
 The shader lab is also a luvcraft material workbench. Its live atlas cards and
-shader tabs are McCLIM presentations; click between the block-surface and
-crosshair materials, then select expressions or SSA occurrences to follow the
-compiler's provenance in either direction.
+shader-definition tabs are McCLIM presentations; click between the
+block-surface and crosshair methods to recompile their current CLOS definitions,
+then select expressions or SSA occurrences to follow the compiler's provenance
+in either direction. Refresh and health checks use bounded acknowledgements, so
+a stuck command process reports `:unresponsive` instead of looking successful.
+
+The block-world fragment methods are hot-replaced at their CLOS role/stage
+coordinates. Luvcraft notices the MOP revision on its next frame, builds a full
+candidate pipeline, and publishes it only after Vulkan creation succeeds. A
+broken edit is retained as a diagnostic while the last good pipeline continues
+rendering. The current Cocoa host supports one native canvas, so close luvcraft
+before opening the standalone shader lab.
 
 The hidden screenshot path is useful in CI-ish or server-ish environments:
 

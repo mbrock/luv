@@ -556,6 +556,127 @@
          (parse-shader-specification ',name ',options ',body))
        (defun ,name () ,variable))))
 
+;;; Live definitions ---------------------------------------------------------
+
+(defgeneric shader-specification-for (role stage)
+  (:documentation
+   "Return the current durable shader specification for ROLE and STAGE."))
+
+(defmacro define-shader-method
+    (generic-function name specialized-lambda-list options &body body)
+  "Define a shader-producing method with ordinary DEFMETHOD identity.
+
+The parsed graph is constructed once when the method definition is loaded or
+evaluated.  Calling the generic function is consequently pure and cheap, while
+re-evaluating an identical qualifier/specializer coordinate replaces the old
+method and lets the MOP announce that definitional change."
+  `(defmethod ,generic-function ,specialized-lambda-list
+     (load-time-value
+      (parse-shader-specification ',name ',options ',body)
+      t)))
+
+(defclass shader-definition-dependent ()
+  ((generic-function
+    :initarg :generic-function
+    :reader shader-definition-dependent-generic-function)
+   (arguments
+    :initarg :arguments
+    :reader shader-definition-dependent-arguments)
+   (lock
+    :initform (sb-thread:make-mutex :name "luv shader definition dependent")
+    :reader shader-definition-dependent-lock)
+   (revision
+    :initform 0
+    :accessor shader-definition-dependent-revision)
+   (attempted-revision
+    :initform 0
+    :accessor shader-definition-dependent-attempted-revision)
+   (last-event
+    :initform nil
+    :accessor shader-definition-dependent-last-event)
+   (subscribed-p
+    :initform nil
+    :accessor shader-definition-dependent-subscribed-p))
+  (:documentation
+   "A narrow MOP subscription for one generic-function argument tuple.
+
+UPDATE-DEPENDENT only records a monotonically increasing revision.  Consumers
+perform compilation, GPU work, and calls back into the generic function after
+the method mutation has completed and outside the generic function's lock."))
+
+(defun shader-method-specializer-accepts-p (specializer argument)
+  (if (typep specializer 'closer-mop:eql-specializer)
+      (eql argument (closer-mop:eql-specializer-object specializer))
+      (typep argument specializer)))
+
+(defun shader-method-accepts-arguments-p (method arguments)
+  (let ((specializers (closer-mop:method-specializers method)))
+    (and (= (length specializers) (length arguments))
+         (every #'shader-method-specializer-accepts-p
+                specializers arguments))))
+
+(defmethod closer-mop:update-dependent
+    ((generic-function standard-generic-function)
+     (dependent shader-definition-dependent)
+     &rest event)
+  (declare (ignore generic-function))
+  ;; SBCL/Closer-MOP may also announce generic-function reinitialization with
+  ;; no event arguments.  ADD-METHOD and REMOVE-METHOD contain the affected
+  ;; method and are sufficient; replacement naturally coalesces to one pending
+  ;; revision before the next consumer turn.
+  (when (and (= (length event) 2)
+             (member (first event)
+                     '(add-method remove-method))
+             (shader-method-accepts-arguments-p
+              (second event)
+              (shader-definition-dependent-arguments dependent)))
+    (sb-thread:with-mutex ((shader-definition-dependent-lock dependent))
+      (incf (shader-definition-dependent-revision dependent))
+      (setf (shader-definition-dependent-last-event dependent) event)))
+  nil)
+
+(defun make-shader-definition-dependent (generic-function arguments)
+  "Subscribe a revision source to GENERIC-FUNCTION changes for ARGUMENTS."
+  (check-type generic-function standard-generic-function)
+  (let ((dependent
+          (make-instance 'shader-definition-dependent
+                         :generic-function generic-function
+                         :arguments (copy-list arguments))))
+    (closer-mop:add-dependent generic-function dependent)
+    (setf (shader-definition-dependent-subscribed-p dependent) t)
+    dependent))
+
+(defun shader-definition-change-pending-p (dependent)
+  (sb-thread:with-mutex ((shader-definition-dependent-lock dependent))
+    (> (shader-definition-dependent-revision dependent)
+       (shader-definition-dependent-attempted-revision dependent))))
+
+(defun shader-definition-change-snapshot (dependent)
+  "Return the current definition revision and its most recent MOP event."
+  (sb-thread:with-mutex ((shader-definition-dependent-lock dependent))
+    (values (shader-definition-dependent-revision dependent)
+            (copy-list (shader-definition-dependent-last-event dependent)))))
+
+(defun acknowledge-shader-definition-change (dependent revision)
+  "Record that the consumer finished attempting REVISION.
+
+A newer concurrent notification remains pending."
+  (sb-thread:with-mutex ((shader-definition-dependent-lock dependent))
+    (setf (shader-definition-dependent-attempted-revision dependent)
+          (max (shader-definition-dependent-attempted-revision dependent)
+               (min revision
+                    (shader-definition-dependent-revision dependent)))))
+  dependent)
+
+(defun release-shader-definition-dependent (dependent)
+  "Remove DEPENDENT from its generic function.  This operation is idempotent."
+  (when (shader-definition-dependent-subscribed-p dependent)
+    (closer-mop:remove-dependent
+     (shader-definition-dependent-generic-function dependent)
+     dependent)
+    (setf (shader-definition-dependent-subscribed-p dependent) nil))
+  nil)
+
 ;;; Lowering -----------------------------------------------------------------
 
 (defclass shader-lowering ()

@@ -562,6 +562,17 @@ nothing else does."))
            #:edit-cube-world-block
            #:refresh-cube-world-mesh
            #:cube-world-demo-running-p
+           #:live-shader-pipeline
+           #:live-shader-pipeline-role
+           #:live-shader-pipeline-stage
+           #:live-shader-pipeline-specification
+           #:live-shader-pipeline-lowering
+           #:live-shader-pipeline-status
+           #:live-shader-pipeline-diagnostic
+           #:live-shader-pipeline-installed-revision
+           #:cube-world-demo-block-pipeline
+           #:cube-world-demo-crosshair-pipeline
+           #:refresh-cube-world-shaders
            #:start-cube-world-demo
            #:stop-cube-world-demo
            #:capture-cube-world-screenshot

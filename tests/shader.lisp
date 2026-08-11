@@ -15,9 +15,56 @@
         ((consp form) (mapcar #'form-names form))
         (t form)))
 
+(defgeneric shader-method-probe (role stage))
+
+(spv:define-shader-method shader-method-probe shader-method-probe
+    ((role (eql :probe)) (stage (eql :fragment)))
+    (:stage :fragment
+     :outputs ((color :vec4 :location 0)))
+  (set-output color (vec4 0.1 0.2 0.3 1.0)))
+
+(deftest shader-method-redefinition-is-observable-and-coalesced
+  (let* ((generic-function (fdefinition 'shader-method-probe))
+         (dependent
+           (spv:make-shader-definition-dependent
+            generic-function '(:probe :fragment))))
+    (unwind-protect
+         (progn
+           (ok (not (spv:shader-definition-change-pending-p dependent)))
+           (eval
+            '(spv:define-shader-method
+                 shader-method-probe shader-method-probe
+                 ((role (eql :probe)) (stage (eql :fragment)))
+                 (:stage :fragment
+                  :outputs ((color :vec4 :location 0)))
+               (set-output color (vec4 0.8 0.4 0.2 1.0))))
+           (ok (= 1 (length (closer-mop:generic-function-methods
+                             generic-function))))
+           (ok (spv:shader-definition-change-pending-p dependent))
+           (multiple-value-bind (revision event)
+               (spv:shader-definition-change-snapshot dependent)
+             ;; Replacement emits REMOVE-METHOD and ADD-METHOD on the pinned
+             ;; SBCL/Closer-MOP stack.  Consumers see their coalesced revision.
+             (ok (>= revision 2))
+             (ok (eq (first event) 'add-method))
+             (ok (equal
+                  (form-names
+                   (spv:shader-expression-form
+                    (spv:shader-assignment-value
+                     (first
+                      (spv:shader-specification-statements
+                       (shader-method-probe :probe :fragment))))))
+                  '("vec4" 0.8 0.4 0.2 1.0)))
+             (spv:acknowledge-shader-definition-change dependent revision)
+             (ok (not (spv:shader-definition-change-pending-p dependent)))))
+      (spv:release-shader-definition-dependent dependent))))
+
 (deftest shader-source-is-a-typed-clos-graph
   (let* ((specification (spv:block-world-fragment-specification))
          (sun (binding-named 'sun specification))
+         (directional-light
+           (binding-named 'directional-light specification))
+         (light (binding-named 'light specification))
          (lit (binding-named 'lit specification))
          (fogged (binding-named 'fogged specification)))
     (ok (typep specification 'spv:shader-specification))
@@ -27,6 +74,15 @@
     (ok (typep (spv:shader-binding-expression sun) 'spv:shader-call))
     (ok (spv:shader-type=
          (spv:shader-expression-type (spv:shader-binding-expression sun))
+         :vec3))
+    (ok (equal
+         (form-names
+          (spv:shader-expression-form
+           (spv:shader-binding-expression directional-light)))
+         '("mix" "shade-light" "sun-light" "hemisphere")))
+    (ok (spv:shader-type=
+         (spv:shader-expression-type
+          (spv:shader-binding-expression light))
          :vec3))
     (ok (equal (form-names
                 (spv:shader-expression-form
@@ -51,7 +107,7 @@
     (ok instructions)
     (ok (every (lambda (instruction) (typep instruction 'spv:instruction))
                instructions))
-    (ok (find "VECTOR-TIMES-SCALAR" instructions
+    (ok (find "F-MUL" instructions
               :key (lambda (instruction)
                      (symbol-name (spv:instruction-name instruction)))
               :test #'string=))

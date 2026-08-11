@@ -840,6 +840,177 @@ terrain, populate landmarks, then replay sparse edits."
    (vertex-buffer :initarg :vertex-buffer
                   :reader cube-world-chunk-product-vertex-buffer)))
 
+;;; A live shader definition and its installed GPU derivative are deliberately
+;;; different objects.  DEFMETHOD owns source identity.  This artifact owns the
+;;; last pipeline that successfully crossed parsing, lowering, assembly, and
+;;; Vulkan creation, plus a MOP dependent which merely announces newer source.
+
+(defclass live-shader-pipeline ()
+  ((role :initarg :role :reader live-shader-pipeline-role)
+   (stage :initarg :stage :reader live-shader-pipeline-stage)
+   (label :initarg :label :reader live-shader-pipeline-label)
+   (device :initarg :device :reader live-shader-pipeline-device)
+   (layout :initarg :layout :reader live-shader-pipeline-layout)
+   (vertex-module :initarg :vertex-module
+                  :reader live-shader-pipeline-vertex-module)
+   (vertex-buffers :initarg :vertex-buffers
+                   :reader live-shader-pipeline-vertex-buffers)
+   (target-format :initarg :target-format
+                  :reader live-shader-pipeline-target-format)
+   (primitive :initarg :primitive :reader live-shader-pipeline-primitive)
+   (depth-stencil :initarg :depth-stencil
+                  :reader live-shader-pipeline-depth-stencil)
+   (dependent :initarg :dependent :reader live-shader-pipeline-dependent)
+   (specification :initform nil
+                  :accessor live-shader-pipeline-specification)
+   (lowering :initform nil :accessor live-shader-pipeline-lowering)
+   (fragment-module :initform nil
+                    :accessor live-shader-pipeline-fragment-module)
+   (pipeline :initform nil :accessor live-shader-pipeline-native-pipeline)
+   (status :initform :building :accessor live-shader-pipeline-status)
+   (diagnostic :initform nil :accessor live-shader-pipeline-diagnostic)
+   (installed-revision :initform 0
+                       :accessor live-shader-pipeline-installed-revision)))
+
+(defun build-live-shader-pipeline-candidate (artifact)
+  "Build a complete candidate without mutating ARTIFACT's installed state."
+  (let* ((specification
+           (spv:shader-specification-for
+            (live-shader-pipeline-role artifact)
+            (live-shader-pipeline-stage artifact)))
+         (lowering (spv:compile-shader-specification specification))
+         (words
+           (spv:assemble-spir-v-module
+            (spv:shader-lowering-module lowering)))
+         (device (live-shader-pipeline-device artifact))
+         (fragment-module nil)
+         (pipeline nil)
+         (completed-p nil))
+    (unwind-protect
+         (progn
+           (setf fragment-module
+                 (create
+                  device
+                  (make-shader-module-descriptor
+                   :label (format nil "~A fragment module"
+                                  (live-shader-pipeline-label artifact))
+                   :code words))
+                 pipeline
+                 (create
+                  device
+                  (make-render-pipeline-descriptor
+                   :label (live-shader-pipeline-label artifact)
+                   :layout (live-shader-pipeline-layout artifact)
+                   :vertex
+                   `(:module ,(live-shader-pipeline-vertex-module artifact)
+                     :buffers ,(live-shader-pipeline-vertex-buffers artifact))
+                   :fragment
+                   `(:module ,fragment-module
+                     :targets
+                     ((:format
+                       ,(live-shader-pipeline-target-format artifact))))
+                   :primitive (live-shader-pipeline-primitive artifact)
+                   :depth-stencil
+                   (live-shader-pipeline-depth-stencil artifact)))
+                 completed-p t)
+           (values specification lowering fragment-module pipeline))
+      (unless completed-p
+        (when pipeline (ignore-errors (destroy pipeline)))
+        (when fragment-module (ignore-errors (destroy fragment-module)))))))
+
+(defun install-live-shader-pipeline-candidate
+    (artifact revision specification lowering fragment-module pipeline)
+  (let ((old-pipeline (live-shader-pipeline-native-pipeline artifact))
+        (old-fragment-module
+          (live-shader-pipeline-fragment-module artifact))
+        (retirement-errors nil))
+    ;; Publish the complete replacement as one Lisp-side state transition.
+    ;; Command encoding after this point can observe only the new pipeline.
+    (setf (live-shader-pipeline-specification artifact) specification
+          (live-shader-pipeline-lowering artifact) lowering
+          (live-shader-pipeline-fragment-module artifact) fragment-module
+          (live-shader-pipeline-native-pipeline artifact) pipeline
+          (live-shader-pipeline-status artifact) :installed
+          (live-shader-pipeline-diagnostic artifact) nil
+          (live-shader-pipeline-installed-revision artifact) revision)
+    ;; Vulkan resource destruction is submission-aware.  Encoders retain the
+    ;; old pipeline, and its native handles cross the completion frontier before
+    ;; the backend actually destroys them.
+    (dolist (resource (list old-pipeline old-fragment-module))
+      (when resource
+        (handler-case (destroy resource)
+          (error (condition)
+            ;; The replacement is already installed.  Preserve that fact while
+            ;; retaining the exceptional retirement as useful diagnostic state.
+            (push condition retirement-errors)))))
+    (when retirement-errors
+      (setf (live-shader-pipeline-diagnostic artifact)
+            (first retirement-errors))))
+  artifact)
+
+(defun make-live-shader-pipeline
+    (&key role (stage :fragment) label device layout vertex-module
+          vertex-buffers target-format primitive depth-stencil)
+  (let* ((generic-function (fdefinition 'spv:shader-specification-for))
+         (dependent
+           (spv:make-shader-definition-dependent
+            generic-function (list role stage)))
+         (artifact
+           (make-instance
+            'live-shader-pipeline
+            :role role :stage stage :label label :device device
+            :layout layout :vertex-module vertex-module
+            :vertex-buffers vertex-buffers :target-format target-format
+            :primitive primitive :depth-stencil depth-stencil
+            :dependent dependent))
+         (completed-p nil))
+    (unwind-protect
+         (multiple-value-bind
+               (specification lowering fragment-module pipeline)
+             (build-live-shader-pipeline-candidate artifact)
+           (install-live-shader-pipeline-candidate
+            artifact 0 specification lowering fragment-module pipeline)
+           (setf completed-p t)
+           artifact)
+      (unless completed-p
+        (spv:release-shader-definition-dependent dependent)))))
+
+(defun refresh-live-shader-pipeline (artifact)
+  "Attempt the newest pending definition, retaining the last good pipeline."
+  (let ((dependent (live-shader-pipeline-dependent artifact)))
+    (when (spv:shader-definition-change-pending-p dependent)
+      (multiple-value-bind (revision event)
+          (spv:shader-definition-change-snapshot dependent)
+        (declare (ignore event))
+        (setf (live-shader-pipeline-status artifact) :building)
+        (handler-case
+            (multiple-value-bind
+                  (specification lowering fragment-module pipeline)
+                (build-live-shader-pipeline-candidate artifact)
+              (install-live-shader-pipeline-candidate
+               artifact revision specification lowering
+               fragment-module pipeline))
+          (error (condition)
+            ;; A failed edit is diagnostic state, not a rendering outage.
+            (setf (live-shader-pipeline-status artifact) :failed
+                  (live-shader-pipeline-diagnostic artifact) condition)))
+        (spv:acknowledge-shader-definition-change dependent revision))))
+  artifact)
+
+(defun release-live-shader-pipeline (artifact)
+  (spv:release-shader-definition-dependent
+   (live-shader-pipeline-dependent artifact))
+  (let ((pipeline (live-shader-pipeline-native-pipeline artifact)))
+    (when pipeline
+      (destroy pipeline)
+      (setf (live-shader-pipeline-native-pipeline artifact) nil)))
+  (let ((module (live-shader-pipeline-fragment-module artifact)))
+    (when module
+      (destroy module)
+      (setf (live-shader-pipeline-fragment-module artifact) nil)))
+  (setf (live-shader-pipeline-status artifact) :released)
+  nil)
+
 (defclass cube-world-demo (canvas-event-handler)
   ((canvas :initarg :canvas :reader cube-world-demo-canvas)
    (device :initarg :device :reader cube-world-demo-device)
@@ -874,13 +1045,13 @@ terrain, populate landmarks, then replay sparse edits."
                   :reader cube-world-demo-depth-texture)
    (depth-view :initarg :depth-view :reader cube-world-demo-depth-view)
    (layout :initarg :layout :reader cube-world-demo-layout)
-   (pipeline :initarg :pipeline :reader cube-world-demo-pipeline)
+   (block-pipeline :initarg :block-pipeline
+                   :reader cube-world-demo-block-pipeline)
    (crosshair-vertex-buffer
     :initarg :crosshair-vertex-buffer
     :reader cube-world-demo-crosshair-vertex-buffer)
-   (crosshair-pipeline
-    :initarg :crosshair-pipeline
-    :reader cube-world-demo-crosshair-pipeline)
+   (crosshair-pipeline :initarg :crosshair-pipeline
+                       :reader cube-world-demo-crosshair-pipeline)
    (frame-states :initform (make-hash-table :test #'eq)
                  :reader cube-world-demo-frame-states)
    (resources :initarg :resources :initform nil
@@ -895,6 +1066,20 @@ terrain, populate landmarks, then replay sparse edits."
    (jump-requested-p :initform nil
                      :accessor cube-world-demo-jump-requested-p)
    (running-p :initform t :accessor cube-world-demo-running-p)))
+
+(defun cube-world-demo-pipeline (demo)
+  (live-shader-pipeline-native-pipeline
+   (cube-world-demo-block-pipeline demo)))
+
+(defun cube-world-demo-crosshair-native-pipeline (demo)
+  (live-shader-pipeline-native-pipeline
+   (cube-world-demo-crosshair-pipeline demo)))
+
+(defun refresh-cube-world-shaders (demo)
+  "Install any successfully redefined block-world shader methods."
+  (refresh-live-shader-pipeline (cube-world-demo-block-pipeline demo))
+  (refresh-live-shader-pipeline (cube-world-demo-crosshair-pipeline demo))
+  demo)
 
 (defun maintain-cube-world-residency (demo)
   "Recenter DEMO's generated resident window when its player changes chunk."
@@ -1135,6 +1320,9 @@ still owns their last use."
 
 (defun encode-cube-world-frame
     (demo surface-texture encoder &key readback-buffer)
+  ;; The canvas callback is the ownership boundary for all GPU replacement.
+  ;; MOP notifications from SLY workers have only marked these artifacts dirty.
+  (refresh-cube-world-shaders demo)
   (let* ((products (refresh-cube-world-mesh demo))
          (extent (canvas-extent (cube-world-demo-context demo)))
          (frame (cube-world-frame-state demo surface-texture)))
@@ -1162,7 +1350,7 @@ still owns their last use."
             (set-vertex-buffer
              pass 0 (cube-world-chunk-product-vertex-buffer product))
             (draw pass (block-mesh-vertex-count mesh)))))
-      (set-pipeline pass (cube-world-demo-crosshair-pipeline demo))
+      (set-pipeline pass (cube-world-demo-crosshair-native-pipeline demo))
       (set-vertex-buffer
        pass 0 (cube-world-demo-crosshair-vertex-buffer demo))
       (draw pass +block-world-crosshair-vertex-count+)
@@ -1334,7 +1522,7 @@ capture-only demand clock."
   (let ((canvas (make-sdl-canvas :title title :width width :height height
                                  :visible-p visible-p))
         (player (or player (make-player-for-camera camera)))
-        (device nil) (context nil) (resources nil) (demo nil)
+        (device nil) (context nil) (resources nil) (pipelines nil) (demo nil)
         (completed-p nil))
     (open-canvas canvas)
     (unwind-protect
@@ -1404,11 +1592,6 @@ capture-only demand clock."
                      (create device (make-shader-module-descriptor
                                      :label "block world vertex shader"
                                      :code (spv:block-world-vertex-shader)))))
-                  (fragment-module
-                    (keep
-                     (create device (make-shader-module-descriptor
-                                     :label "block world fragment shader"
-                                     :code (spv:block-world-fragment-shader)))))
                   (crosshair-vertices
                     (make-block-world-crosshair-vertices
                      (first extent) (second extent)))
@@ -1427,13 +1610,6 @@ capture-only demand clock."
                       (make-shader-module-descriptor
                        :label "block world crosshair vertex shader"
                        :code (spv:block-world-crosshair-vertex-shader)))))
-                  (crosshair-fragment-module
-                    (keep
-                     (create
-                      device
-                      (make-shader-module-descriptor
-                       :label "block world crosshair fragment shader"
-                       :code (spv:block-world-crosshair-fragment-shader)))))
                   (layout
                     (keep
                      (create
@@ -1444,51 +1620,51 @@ capture-only demand clock."
                                   (:binding 1 :type :sampler)
                                   (:binding 2 :type :uniform-buffer))))))
                   (pipeline
-                    (keep
-                     (create
-                      device
-                      (make-render-pipeline-descriptor
-                       :label "block world pipeline"
-                       :layout layout
-                       :vertex
-                       `(:module ,vertex-module
-                         :buffers ((:array-stride 36
-                                    :attributes
-                                    ((:shader-location 0 :offset 0
-                                      :format :float32x3)
-                                     (:shader-location 1 :offset 12
-                                      :format :float32x3)
-                                     (:shader-location 2 :offset 24
-                                      :format :float32x3)))))
-                       :fragment
-                       `(:module ,fragment-module
-                         :targets ((:format ,(canvas-format context))))
-                       :primitive '(:topology :triangle-list)
-                       :depth-stencil
-                       '(:format :depth32-float
-                         :depth-write-enabled t :depth-compare :less)))))
+                    (let ((artifact
+                            (make-live-shader-pipeline
+                             :role :block-surface
+                             :label "block world pipeline"
+                             :device device :layout layout
+                             :vertex-module vertex-module
+                             :vertex-buffers
+                             '((:array-stride 36
+                                :attributes
+                                ((:shader-location 0 :offset 0
+                                  :format :float32x3)
+                                 (:shader-location 1 :offset 12
+                                  :format :float32x3)
+                                 (:shader-location 2 :offset 24
+                                  :format :float32x3))))
+                             :target-format (canvas-format context)
+                             :primitive '(:topology :triangle-list)
+                             :depth-stencil
+                             '(:format :depth32-float
+                               :depth-write-enabled t
+                               :depth-compare :less))))
+                      (push artifact pipelines)
+                      artifact))
                   (crosshair-pipeline
-                    (keep
-                     (create
-                      device
-                      (make-render-pipeline-descriptor
-                       :label "block world crosshair pipeline"
-                       :layout layout
-                       :vertex
-                       `(:module ,crosshair-vertex-module
-                         :buffers ((:array-stride 24
-                                    :attributes
-                                    ((:shader-location 0 :offset 0
-                                      :format :float32x3)
-                                     (:shader-location 1 :offset 12
-                                      :format :float32x3)))))
-                       :fragment
-                       `(:module ,crosshair-fragment-module
-                         :targets ((:format ,(canvas-format context))))
-                       :primitive '(:topology :triangle-list)
-                       :depth-stencil
-                       '(:format :depth32-float
-                         :depth-write-enabled nil :depth-compare :always)))))
+                    (let ((artifact
+                            (make-live-shader-pipeline
+                             :role :block-crosshair
+                             :label "block world crosshair pipeline"
+                             :device device :layout layout
+                             :vertex-module crosshair-vertex-module
+                             :vertex-buffers
+                             '((:array-stride 24
+                                :attributes
+                                ((:shader-location 0 :offset 0
+                                  :format :float32x3)
+                                 (:shader-location 1 :offset 12
+                                  :format :float32x3))))
+                             :target-format (canvas-format context)
+                             :primitive '(:topology :triangle-list)
+                             :depth-stencil
+                             '(:format :depth32-float
+                               :depth-write-enabled nil
+                               :depth-compare :always))))
+                      (push artifact pipelines)
+                      artifact))
                   (new-demo
                     (make-instance
                      'cube-world-demo
@@ -1502,7 +1678,7 @@ capture-only demand clock."
                      :atlas-sampler atlas-sampler
                      :color-texture color-texture :color-view color-view
                      :depth-texture depth-texture :depth-view depth-view
-                     :layout layout :pipeline pipeline
+                     :layout layout :block-pipeline pipeline
                      :crosshair-vertex-buffer crosshair-vertex-buffer
                      :crosshair-pipeline crosshair-pipeline
                      :resources resources)))
@@ -1533,6 +1709,8 @@ capture-only demand clock."
       (unless completed-p
         (when demo
           (ignore-errors (destroy-cube-world-chunk-products demo)))
+        (dolist (pipeline pipelines)
+          (ignore-errors (release-live-shader-pipeline pipeline)))
         (dolist (resource resources)
           (ignore-errors (destroy resource)))
         (close-canvas canvas)
@@ -1555,6 +1733,8 @@ capture-only demand clock."
                                      (declare (ignore timestamp)))))
     (setf (canvas-event-handler canvas) nil)
     (destroy-cube-world-chunk-products demo)
+    (release-live-shader-pipeline (cube-world-demo-block-pipeline demo))
+    (release-live-shader-pipeline (cube-world-demo-crosshair-pipeline demo))
     (dolist (resource (cube-world-demo-resources demo))
       (destroy resource))
     (setf (cube-world-demo-resources demo) nil)

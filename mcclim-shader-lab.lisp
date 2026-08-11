@@ -6,6 +6,7 @@
 (define-presentation-type shader-instruction-presentation ())
 (define-presentation-type shader-basic-block-presentation ())
 (define-presentation-type shader-specification-presentation ())
+(define-presentation-type shader-definition-presentation ())
 (define-presentation-type block-kind-presentation ())
 
 (defparameter *shader-accent-ink* (make-rgb-color 0.10 0.38 0.78))
@@ -33,19 +34,100 @@
   (typep object 'luv.spir-v:shader-specification))
 
 (define-presentation-method presentation-typep
+    (object (type shader-definition-presentation))
+  (typep object 'shader-definition-entry))
+
+(define-presentation-method presentation-typep
     (object (type block-kind-presentation))
   (typep object 'luv:block-kind))
+
+(defclass shader-definition-entry ()
+  ((role :initarg :role :reader shader-definition-entry-role)
+   (stage :initarg :stage :reader shader-definition-entry-stage)
+   (label :initarg :label :reader shader-definition-entry-label)
+   (dependent :initarg :dependent :initform nil
+              :reader shader-definition-entry-dependent)
+   (pipeline :initarg :pipeline :initform nil
+             :reader shader-definition-entry-pipeline)
+   (specification :initarg :specification :initform nil
+                  :accessor shader-definition-entry-specification)
+   (lowering :initform nil :accessor shader-definition-entry-lowering)
+   (status :initform :uncompiled :accessor shader-definition-entry-status)
+   (diagnostic :initform nil :accessor shader-definition-entry-diagnostic)))
+
+(defun refresh-shader-definition-entry (entry &key force)
+  "Compile ENTRY's current method without discarding its last good lowering."
+  (let ((dependent (shader-definition-entry-dependent entry)))
+    (when (or force
+              (and dependent
+                   (luv.spir-v:shader-definition-change-pending-p dependent)))
+      (multiple-value-bind (revision event)
+          (if dependent
+              (luv.spir-v:shader-definition-change-snapshot dependent)
+              (values 0 nil))
+        (declare (ignore event))
+        (setf (shader-definition-entry-status entry) :compiling)
+        (handler-case
+            (let* ((specification
+                     (if dependent
+                         (luv.spir-v:shader-specification-for
+                          (shader-definition-entry-role entry)
+                          (shader-definition-entry-stage entry))
+                         (shader-definition-entry-specification entry)))
+                   (lowering
+                     (luv.spir-v:compile-shader-specification specification)))
+              (setf (shader-definition-entry-specification entry) specification
+                    (shader-definition-entry-lowering entry) lowering
+                    (shader-definition-entry-status entry) :ready
+                    (shader-definition-entry-diagnostic entry) nil))
+          (error (condition)
+            (setf (shader-definition-entry-status entry) :failed
+                  (shader-definition-entry-diagnostic entry) condition)))
+        (when dependent
+          (luv.spir-v:acknowledge-shader-definition-change
+           dependent revision)))))
+  entry)
+
+(defun make-live-shader-definition-entry (role stage label pipeline)
+  (let* ((dependent
+           (luv.spir-v:make-shader-definition-dependent
+            (fdefinition 'luv.spir-v:shader-specification-for)
+            (list role stage)))
+         (entry
+           (make-instance 'shader-definition-entry
+                          :role role :stage stage :label label
+                          :dependent dependent :pipeline pipeline)))
+    (refresh-shader-definition-entry entry :force t)))
+
+(defun make-static-shader-definition-entry (specification)
+  (let ((entry
+          (make-instance
+           'shader-definition-entry
+           :role (luv.spir-v:shader-object-name specification)
+           :stage (luv.spir-v:shader-specification-stage specification)
+           :label (string-upcase
+                   (symbol-name
+                    (luv.spir-v:shader-object-name specification)))
+           :specification specification)))
+    (refresh-shader-definition-entry entry :force t)))
+
+(defun release-shader-definition-entry (entry)
+  (let ((dependent (shader-definition-entry-dependent entry)))
+    (when dependent
+      (luv.spir-v:release-shader-definition-dependent dependent)))
+  nil)
 
 (define-application-frame shader-lab ()
   ((lowering
     :initarg :lowering
     :initform (luv.spir-v:block-world-fragment-lowering)
     :accessor shader-lab-lowering)
-   (specifications
-    :initarg :specifications
-    :initform (list (luv.spir-v:block-world-fragment-specification)
-                    (luv.spir-v:block-world-crosshair-fragment-specification))
-    :reader shader-lab-specifications)
+   (definitions
+    :initarg :definitions
+    :reader shader-lab-definitions)
+   (current-definition
+    :initarg :current-definition
+    :accessor shader-lab-current-definition)
    (materials
     :initarg :materials
     :initform (luv:placeable-block-kinds)
@@ -88,6 +170,11 @@
              (1/2 source)
              (1/2 ssa)))
       (1/5 details)))))
+
+(defun shader-lab-specifications (frame)
+  "Return the current successfully compiled shader method results in FRAME."
+  (mapcar #'shader-definition-entry-specification
+          (shader-lab-definitions frame)))
 
 (defun selected-shader-expression (frame)
   (let ((selection (shader-lab-selection frame)))
@@ -152,11 +239,11 @@
        (+ left (* (1+ x) scale)) (+ top (* (1+ y) scale))
        :ink (packed-block-ink (aref atlas y (+ x (* tile 16))))))))
 
-(defun draw-shader-tab (frame stream specification left top)
-  (let ((selected-p (eq specification
-                        (shader-lab-current-specification frame))))
+(defun draw-shader-tab (frame stream definition left top)
+  (let ((selected-p (eq definition
+                        (shader-lab-current-definition frame))))
     (with-output-as-presentation
-        (stream specification 'shader-specification-presentation
+        (stream definition 'shader-definition-presentation
                 :single-box t)
       (draw-rectangle* stream left top (+ left 188) (+ top 25)
                        :ink (if selected-p
@@ -167,7 +254,7 @@
                                 *shader-accent-ink*
                                 *shader-muted-ink*)
                        :filled nil :line-thickness (if selected-p 2 1))
-      (draw-text* stream (shader-display-label specification)
+      (draw-text* stream (shader-definition-entry-label definition)
                   (+ left 10) (+ top 6)
                   :ink (if selected-p *shader-accent-ink* +black+)
                   :align-y :top))))
@@ -202,9 +289,9 @@
               :text-style (make-text-style :sans-serif :bold :normal))
   (draw-text* stream "choose a live shader" 14 30
               :ink *shader-muted-ink* :align-y :top)
-  (loop for specification in (shader-lab-specifications frame)
+  (loop for definition in (shader-lab-definitions frame)
         for index from 0
-        do (draw-shader-tab frame stream specification
+        do (draw-shader-tab frame stream definition
                             (+ 205 (* index 198)) 24))
   (loop for block in (shader-lab-materials frame)
         for number from 1
@@ -292,13 +379,36 @@
 (defun display-shader-source (frame stream)
   (let* ((lowering (shader-lab-lowering frame))
          (specification
-           (luv.spir-v:shader-lowering-specification lowering)))
+           (luv.spir-v:shader-lowering-specification lowering))
+         (definition (shader-lab-current-definition frame))
+         (dependent (shader-definition-entry-dependent definition))
+         (pipeline (shader-definition-entry-pipeline definition)))
     (with-drawing-options (stream :text-size :large :text-face :bold)
       (with-drawing-options (stream :ink *shader-accent-ink*)
         (write-string (string-downcase (shader-display-label specification))
                       stream)))
     (format stream "  ~(~A~)~2%"
             (luv.spir-v:shader-specification-stage specification))
+    (format stream "definition ~(~A~)/~(~A~)  ·  source ~(~A~)"
+            (shader-definition-entry-role definition)
+            (shader-definition-entry-stage definition)
+            (shader-definition-entry-status definition))
+    (when (and dependent
+               (luv.spir-v:shader-definition-change-pending-p dependent))
+      (write-string "  ·  changed" stream))
+    (terpri stream)
+    (when pipeline
+      (format stream "GPU ~(~A~)  ·  installed revision ~D~%"
+              (luv:live-shader-pipeline-status pipeline)
+              (luv:live-shader-pipeline-installed-revision pipeline)))
+    (let ((diagnostic
+            (or (shader-definition-entry-diagnostic definition)
+                (and pipeline
+                     (luv:live-shader-pipeline-diagnostic pipeline)))))
+      (when diagnostic
+        (with-drawing-options (stream :ink *shader-literal-ink*)
+          (format stream "diagnostic: ~A~%" diagnostic))))
+    (terpri stream)
     (with-drawing-options (stream :text-face :bold)
       (write-string "interface" stream))
     (terpri stream)
@@ -472,10 +582,14 @@
   (setf (shader-lab-selection *application-frame*) block)
   (redisplay-frame-panes *application-frame* :force-p t))
 
-(define-shader-lab-command (com-select-shader-specification :name nil)
-    ((specification 'shader-specification-presentation :gesture :select))
-  (setf (shader-lab-lowering *application-frame*)
-        (luv.spir-v:compile-shader-specification specification)
+(define-shader-lab-command (com-select-shader-definition :name nil)
+    ((definition 'shader-definition-presentation :gesture :select))
+  ;; Recompile on the frame's command thread.  A broken edit remains visible as
+  ;; diagnostic state while ENTRY retains its previous successful lowering.
+  (refresh-shader-definition-entry definition :force t)
+  (setf (shader-lab-current-definition *application-frame*) definition
+        (shader-lab-lowering *application-frame*)
+        (shader-definition-entry-lowering definition)
         (shader-lab-selection *application-frame*) nil)
   (redisplay-frame-panes *application-frame* :force-p t))
 
@@ -484,17 +598,101 @@
   (setf (shader-lab-selection *application-frame*) block)
   (redisplay-frame-panes *application-frame* :force-p t))
 
+(defun pipeline-for-shader-definition (role stage pipelines)
+  (find-if (lambda (pipeline)
+             (and (eq role (luv:live-shader-pipeline-role pipeline))
+                  (eq stage (luv:live-shader-pipeline-stage pipeline))))
+           pipelines))
+
+(defun make-default-shader-definitions (pipelines)
+  (loop for (role stage label) in
+        '((:block-surface :fragment "BLOCK SURFACE")
+          (:block-crosshair :fragment "CROSSHAIR INK"))
+        collect
+        (make-live-shader-definition-entry
+         role stage label
+         (pipeline-for-shader-definition role stage pipelines))))
+
+(defun refresh-shader-lab-now (frame)
+  (dolist (definition (shader-lab-definitions frame))
+    (refresh-shader-definition-entry definition :force t))
+  (let ((current (shader-lab-current-definition frame)))
+    (when (shader-definition-entry-lowering current)
+      (setf (shader-lab-lowering frame)
+            (shader-definition-entry-lowering current))))
+  (redisplay-frame-panes frame :force-p t)
+  frame)
+
+(defun call-in-shader-lab-process (frame function timeout)
+  "Run FUNCTION on FRAME's process and return completion and condition."
+  (let ((process (shader-lab-process frame)))
+    (if (null process)
+        (handler-case (values t (funcall function) nil)
+          (error (condition) (values t nil condition)))
+        (let ((completion (sb-thread:make-semaphore :count 0))
+              (result nil)
+              (condition nil))
+          (handler-case
+              (clim-sys:process-interrupt
+               process
+               (lambda ()
+                 (unwind-protect
+                      (handler-case (setf result (funcall function))
+                        (error (caught) (setf condition caught)))
+                   (sb-thread:signal-semaphore completion))))
+            (error (caught)
+              (setf condition caught)
+              (sb-thread:signal-semaphore completion)))
+          (if (sb-thread:wait-on-semaphore completion :timeout timeout)
+              (values t result condition)
+              (values nil nil nil))))))
+
+(defun shader-lab-health (frame &key (timeout 0.5))
+  "Boundedly ask FRAME's command process to acknowledge that it can run Lisp."
+  (check-type frame shader-lab)
+  (if (eq :disowned (frame-state frame))
+      (values :closed nil)
+      (multiple-value-bind (completed-p result condition)
+          (call-in-shader-lab-process frame (lambda () t) timeout)
+        (declare (ignore result))
+        (cond (condition (values :unresponsive condition))
+              (completed-p (values :responsive nil))
+              (t (values :unresponsive nil))))))
+
+(defun refresh-shader-lab (frame &key (timeout 1.0))
+  "Refresh definitions on FRAME's process, returning FRAME and a health state."
+  (check-type frame shader-lab)
+  (if (eq :disowned (frame-state frame))
+      (values frame :closed)
+      (multiple-value-bind (completed-p result condition)
+          (call-in-shader-lab-process
+           frame (lambda () (refresh-shader-lab-now frame)) timeout)
+        (declare (ignore result))
+        (cond (condition (values frame :unresponsive condition))
+              (completed-p (values frame :refreshed nil))
+              (t (values frame :unresponsive nil))))))
+
 (defun open-shader-lab
-    (&key (specification
-           (luv.spir-v:block-world-fragment-specification))
-          (specifications
-           (list specification
-                 (luv.spir-v:block-world-crosshair-fragment-specification)))
+    (&key specification specifications pipelines
           (server-path '(:luv))
           (title "Luvcraft material and shader workbench"))
-  "Open a material, expression, and SSA workbench on luv's McCLIM backend."
-  (check-type specification luv.spir-v:shader-specification)
-  (let* ((port (find-port :server-path server-path))
+  "Open a live-definition, expression, and SSA workbench on luv's backend.
+
+PIPELINES may contain a running demo's live shader artifacts; their installed
+revision and last diagnostic then appear alongside the source definition."
+  (when specification
+    (check-type specification luv.spir-v:shader-specification))
+  (let* ((definitions
+           (cond
+             (specifications
+              (mapcar #'make-static-shader-definition-entry specifications))
+             (specification
+              (mapcar #'make-static-shader-definition-entry
+                      (list specification
+                            (luv.spir-v:block-world-crosshair-fragment-specification))))
+             (t (make-default-shader-definitions pipelines))))
+         (current-definition (first definitions))
+         (port (find-port :server-path server-path))
          (manager (or (first (climi::frame-managers port))
                       (make-instance 'luv-frame-manager :port port)))
          (frame nil)
@@ -511,18 +709,22 @@
                            (make-application-frame
                             'shader-lab
                             :frame-manager manager
-                            :specifications specifications
+                            :definitions definitions
+                            :current-definition current-definition
                             :lowering
-                            (luv.spir-v:compile-shader-specification
-                             specification)))
+                            (shader-definition-entry-lowering
+                             current-definition)))
                      (setf (frame-pretty-name frame) title)
                      (setf startup-signaled-p t)
                      (sb-thread:signal-semaphore startup-completion)
-                     (unwind-protect
-                          (run-frame-top-level frame)
+                     (unwind-protect (run-frame-top-level frame)
+                       (dolist (definition definitions)
+                         (release-shader-definition-entry definition))
                        (when (frame-manager frame)
                          (disown-frame manager frame))))
                  (error (condition)
+                   (dolist (definition definitions)
+                     (release-shader-definition-entry definition))
                    (unless startup-signaled-p
                      (setf startup-error condition)
                      (sb-thread:signal-semaphore startup-completion))

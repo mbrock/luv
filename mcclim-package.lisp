@@ -42,9 +42,12 @@
            #:shader-lab
            #:shader-lab-lowering
            #:shader-lab-selection
+           #:shader-lab-definitions
            #:shader-lab-specifications
            #:shader-lab-materials
            #:shader-lab-process
+           #:shader-lab-health
+           #:refresh-shader-lab
            #:open-shader-lab
            #:close-shader-lab
            #:spinning-texture-compositor

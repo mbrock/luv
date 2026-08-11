@@ -102,6 +102,15 @@
            #:shader-specification-statements
            #:shader-specification-expressions
            #:define-shader
+           #:define-shader-method
+           #:shader-specification-for
+           #:shader-definition-dependent
+           #:make-shader-definition-dependent
+           #:shader-definition-dependent-arguments
+           #:shader-definition-change-pending-p
+           #:shader-definition-change-snapshot
+           #:acknowledge-shader-definition-change
+           #:release-shader-definition-dependent
            #:parse-shader-specification
            #:compile-shader-specification
            #:shader-lowering
