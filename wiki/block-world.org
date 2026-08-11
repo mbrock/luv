@@ -23,7 +23,7 @@ reproduce Minecraft's implementation or close off stranger worlds.
 :END:
 
 The current implementation in
-[[file:../block-world.lisp::(defclass block-world][=block-world.lisp=]] is one deliberately small, eager world:
+[[file:../examples/block-world.lisp::(defclass block-world][=examples/block-world.lisp=]] is one deliberately small, eager world:
 
 - a finite three-dimensional Common Lisp array contains shared =block-kind=
   objects or =nil=;

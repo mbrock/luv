@@ -43,6 +43,7 @@ nothing else does."))
            #:+swapchain-extension-name+
            #:+debug-utils-extension-name+
            #:vulkan-call-error
+           #:vulkan-call-error-operation
            #:vulkan-call-error-result
            #:vulkan-ffi
            #:*vulkan-ffi*
@@ -194,6 +195,10 @@ nothing else does."))
            #:wait-semaphore-value
            #:acquire-next-image
            #:present))
+
+;;; LUV remains the REPL-friendly public facade.  ASDF systems now separate
+;;; the GPU API, Vulkan binding layers, backend, canvas host/presentation, and
+;;; examples without forcing a package migration on current callers.
 
 (defpackage #:luv
   (:use #:cl)

@@ -6,7 +6,7 @@
 ;;;; over both what is invoked and who invokes it.  An API adopts the
 ;;;; protocol by subclassing INVOCATION-CLASS with its own metadata,
 ;;;; INVOCATION with its own families, and INVOKER with its own ways of
-;;;; performing a call; luv's Vulkan boundary (vulkan.lisp, DEFVKFUN) is
+;;;; performing a call; luv's Vulkan boundary (vulkan/fundament.lisp, DEFVKFUN) is
 ;;;; the first adopter.
 
 (in-package #:luv.invocation)

@@ -18,12 +18,33 @@ WebGPU, Moppe, and small experiments as useful evidence rather than standards
 that luv has already adopted, and treats the current luv code as experimental
 evidence rather than settled design.
 
+## System Structure
+
+The loading structure separates the experiment by contract:
+
+```text
+:luv/gpu/api          portable GPU classes, descriptors, commands, generics
+:luv/vulkan/fundament Vulkan loader, invocation bridge, binding macros, tracing
+:luv/vulkan/defs      hand-owned Vulkan enums, structs, and raw entry points
+:luv/vulkan           Lisp-shaped helpers over the raw Vulkan vocabulary
+:luv/gpu/vulkan       Vulkan implementation of the GPU API
+:luv/canvas/api       native canvas, events, frame clocks, context protocol
+:luv/canvas/sdl       SDL window host and event translation
+:luv/canvas/vulkan    Vulkan swapchain presentation for SDL canvases
+:luv/examples         demos, PNG capture, and the block world
+```
+
+`:luv/gpu` is the convenient GPU bundle with the Vulkan backend and default
+provider. `:luv/canvas` adds presentation without loading the demos.
+Top-level `:luv` loads the atelier bundle, including examples.
+
 ## GPU API
 
-The independently loadable `:luv/gpu` system is the beginning of a
-WebGPU-shaped API implemented by the Vulkan backend. Its first vertical slice
-owns a Vulkan instance, logical device, default graphics queue, command pool,
-and primary command buffer:
+The independently loadable `:luv/gpu/api` system is the beginning of a
+WebGPU-shaped HAL vocabulary. The `:luv/gpu` convenience system loads that API
+with the Vulkan backend. Its first vertical slice owns a Vulkan instance,
+logical device, default graphics queue, command pool, and primary command
+buffer:
 
 ```lisp
 (asdf:load-system :luv/gpu)
@@ -474,12 +495,14 @@ Nix supplies SDL3, its companion native libraries, libffi, Vulkan, and SBCL.
 ## Run
 
 Enter the reproducible environment with `nix develop`, load `luv.asd`, and
-load either the complete atelier or its SDL-free GPU core:
+load whichever slice you want to hack on:
 
 ```lisp
 (asdf:load-asd (truename "luv.asd"))
-(asdf:load-system :luv)       ; GPU plus native canvas
-;; (asdf:load-system :luv/gpu) ; GPU core only
+(asdf:load-system :luv)         ; canvas plus demos and experiments
+;; (asdf:load-system :luv/gpu)  ; GPU API plus Vulkan backend
+;; (asdf:load-system :luv/gpu/api)
+;; (asdf:load-system :luv/canvas)
 ```
 
 Nix supplies SBCL, SDL, the Vulkan loader and tools, and MoltenVK on Apple

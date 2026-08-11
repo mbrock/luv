@@ -53,9 +53,9 @@ This is a reminder that “frame,” “CPU frame slot,” “queue submission,�
 “swapchain image” are overlapping but non-identical lifetimes.
 
 The relevant current definitions are
-[[file:../canvas-vulkan.lisp::(defclass vulkan-canvas-frame-slot][=vulkan-canvas-frame-slot=]],
-[[file:../canvas-vulkan.lisp::(defun recycle-vulkan-canvas-frame-slot][=recycle-vulkan-canvas-frame-slot=]], and
-[[file:../canvas-vulkan.lisp::(defun call-with-vulkan-canvas-frame][=call-with-vulkan-canvas-frame=]].
+[[file:../canvas/vulkan.lisp::(defclass vulkan-canvas-frame-slot][=vulkan-canvas-frame-slot=]],
+[[file:../canvas/vulkan.lisp::(defun recycle-vulkan-canvas-frame-slot][=recycle-vulkan-canvas-frame-slot=]], and
+[[file:../canvas/vulkan.lisp::(defun call-with-vulkan-canvas-frame][=call-with-vulkan-canvas-frame=]].
 
 * What the slots do not establish
 :PROPERTIES:

@@ -55,10 +55,10 @@ scheduled texture layouts, since the SDL canvas thread and the REPL both
 submit.
 
 The relevant definitions are
-[[file:../gpu-vulkan.lisp::(defun vulkan-queue-completed-frontier][=vulkan-queue-completed-frontier=]],
-[[file:../gpu-vulkan.lisp::(defun maintain-vulkan-queue][=maintain-vulkan-queue=]],
-[[file:../gpu-vulkan.lisp::(defun wait-for-vulkan-submission][=wait-for-vulkan-submission=]], and
-[[file:../gpu-vulkan.lisp::(defun submit-vulkan-command-buffers][=submit-vulkan-command-buffers=]].
+[[file:../gpu/vulkan.lisp::(defun vulkan-queue-completed-frontier][=vulkan-queue-completed-frontier=]],
+[[file:../gpu/vulkan.lisp::(defun maintain-vulkan-queue][=maintain-vulkan-queue=]],
+[[file:../gpu/vulkan.lisp::(defun wait-for-vulkan-submission][=wait-for-vulkan-submission=]], and
+[[file:../gpu/vulkan.lisp::(defun submit-vulkan-command-buffers][=submit-vulkan-command-buffers=]].
 
 * Commands capture their dependencies; destroy defers through them
 :PROPERTIES:
@@ -79,8 +79,8 @@ the frontier has already passed the object's last use, or attaches the
 teardown to the still-live submission record that used it last.  Retiring
 that record performs the deferred destruction.  Device destruction waits
 for idle and drains every record, so nothing is leaked or torn down early.
-=define-vulkan-deferred-destroy= in
-[[file:../gpu-vulkan.lisp::(defmacro define-vulkan-deferred-destroy][=gpu-vulkan.lisp=]] gives every resource class the same split.
+=define-vulkan-resource-destroy= in
+[[file:../gpu/vulkan.lisp::(defmacro define-vulkan-resource-destroy][=gpu/vulkan.lisp=]] gives every resource class the same split.
 
 The payoff is the contract change this whole page exists for: public
 =submit= is now asynchronous.  It returns a submission index as soon as

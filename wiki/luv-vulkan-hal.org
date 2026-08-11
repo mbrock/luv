@@ -1,4 +1,4 @@
-#+title: Field notes on the current luv Vulkan HAL
+#+title: Field notes on the pre-split luv Vulkan HAL
 #+startup: overview
 
 * Scope and method
@@ -7,10 +7,13 @@
 :END:
 
 These notes describe the code at commit
-=7345e1551ae9ec83c23d8898ba4f500fcedc93c9=.  “HAL” is convenient shorthand
-here, not the name of one well-bounded component.  The object of study is the
-path through =gpu.lisp=, =gpu-vulkan.lisp=, =vulkan.lisp=, and
-=canvas-vulkan.lisp=.
+=7345e1551ae9ec83c23d8898ba4f500fcedc93c9=, before the ASDF-level split into
+=:luv/gpu/api=, =:luv/vulkan/fundament=, =:luv/vulkan/defs=,
+=:luv/vulkan=, =:luv/gpu/vulkan=, and the canvas systems.  “HAL” is convenient
+shorthand here, not the name of one well-bounded component.  The object of
+study was the path now housed under =gpu/api.lisp=, =gpu/vulkan.lisp=,
+=vulkan/fundament.lisp=, =vulkan/defs.lisp=, =vulkan/high.lisp=, and
+=canvas/vulkan.lisp=.
 
 The categories used below are deliberately modest:
 
@@ -37,13 +40,13 @@ The stack currently looks roughly like this:
 application and McCLIM compositor
        |
        v
-gpu.lisp                  portable-looking GPU vocabulary
+gpu/api.lisp                  portable-looking GPU vocabulary
        |
        v
-gpu-vulkan.lisp           Vulkan interpretation and GPU object wrappers
+gpu/vulkan.lisp           Vulkan interpretation and GPU object wrappers
        |                         ^
-       v                         | canvas-vulkan.lisp also enters here
-vulkan.lisp               owned, incomplete Vulkan vocabulary
+       v                         | canvas/vulkan.lisp also enters here
+vulkan/defs.lisp + high.lisp    owned, incomplete Vulkan vocabulary
        |
        v
 invocation.lisp           reified call / invoker protocol
@@ -52,16 +55,17 @@ invocation.lisp           reified call / invoker protocol
 CFFI and the Vulkan loader
 #+end_example
 
-The lower boundary is unusually explicit.  =vulkan.lisp= declares only the
-Vulkan structures, enumerants, and calls needed by concrete backend work.  Each
-foreign call is also a class of invocation routed through an invoker, so
-tracing or replacing the boundary is ordinary method dispatch.  This is a
-clear architectural decision, visible in
+The lower boundary was unusually explicit even before the file split.
+=vulkan/defs.lisp= declares only the Vulkan structures, enumerants, and calls
+needed by concrete backend work, while =vulkan/fundament.lisp= contains the
+binding machinery.  Each foreign call is also a class of invocation routed
+through an invoker, so tracing or replacing the boundary is ordinary method
+dispatch.  This is a clear architectural decision, visible in
 [[file:../invocation.lisp::(defclass invocation][the general invocation protocol]] and
-[[file:../vulkan.lisp::(defmacro defvkfun][=defvkfun=]].
+[[file:../vulkan/fundament.lisp::(defmacro defvkfun][=defvkfun=]].
 
-The upper boundary is younger.  =gpu.lisp= supplies backend-neutral-looking
-classes and generic functions, while =gpu-vulkan.lisp= immediately lowers them
+The upper boundary is younger.  =gpu/api.lisp= supplies backend-neutral-looking
+classes and generic functions, while =gpu/vulkan.lisp= immediately lowers them
 to Vulkan.  It is useful to distinguish “the owned Vulkan binding is a small
 coherent boundary” from the stronger and currently unproven claim “luv has a
 coherent portable GPU HAL.”
@@ -71,15 +75,16 @@ coherent portable GPU HAL.”
 :ID: A7N4XP
 :END:
 
-There is a real source seam: =gpu.lisp= contains no Vulkan calls and says that
+There is a real source seam: =gpu/api.lisp= contains no Vulkan calls and says that
 presentation is outside its API.  Commands are dispatched through generic
 functions, so another backend could specialize the same vocabulary.
 
-There is not yet a separately loadable abstract interface.  The =:luv/gpu=
-ASDF system loads =gpu.lisp=, the Vulkan binding, and the Vulkan backend
-together.  The =LUV= package exports the generic GPU vocabulary alongside
-=vulkan-gpu-provider= and Vulkan-specific conditions.  Loading the system also
-installs a Vulkan provider in =*gpu-provider*= when it is unbound.
+In the pre-split tree there was not yet a separately loadable abstract
+interface: =:luv/gpu= loaded the generic API, Vulkan binding, and Vulkan
+backend together.  The new =:luv/gpu/api= system now gives that API an ASDF
+boundary, while =:luv/gpu= remains the convenient Vulkan-backed bundle.
+The =LUV= package still exports the generic GPU vocabulary alongside
+=vulkan-gpu-provider= and Vulkan-specific conditions.
 
 The aspiration to support Metal is therefore a direction rather than a tested
 contract.  One particularly important undecided point is shader input:
@@ -117,8 +122,8 @@ adapter from a device, or requests a device suitable for a future surface
 without relying on initialization order.
 
 Relevant code begins at
-[[file:../gpu-vulkan.lisp::(defmethod request-gpu-device][=request-gpu-device=]] and
-[[file:../canvas-vulkan.lisp::(defmethod vulkan-provider-instance-options :around][the SDL extension augmentation]].
+[[file:../gpu/vulkan.lisp::(defmethod request-gpu-device][=request-gpu-device=]] and
+[[file:../canvas/vulkan.lisp::(defmethod vulkan-provider-instance-options :around][the SDL extension augmentation]].
 
 * Several local ownership rules are admirably concrete
 :PROPERTIES:
@@ -150,7 +155,7 @@ level.  These are good small-system properties: one can usually point at the
 object responsible for a native handle.
 
 The transfer in
-[[file:../gpu-vulkan.lisp::(defmethod finish][=finish=]] is especially worth retaining
+[[file:../gpu/vulkan.lisp::(defmethod finish][=finish=]] is especially worth retaining
 as the lifetime model grows.  It is already the seed of a submission bundle,
 even though it does not yet contain every dependency.
 
@@ -159,7 +164,7 @@ even though it does not yet contain every dependency.
 :ID: D8F3QM
 :END:
 
-The command structs in =gpu.lisp= and double dispatch through =encode= are a
+The command structs in =gpu/api.lisp= and double dispatch through =encode= are a
 legible decision.  Command kinds are separated by scope: queue commands,
 command-encoder commands, render-pass commands, and compute-pass commands.
 Pass encoders enforce an explicit recording/ended state and one active pass per
@@ -288,7 +293,7 @@ not something inherited merely because the names resemble WebGPU; see
 :ID: P5V8KN
 :END:
 
-Keeping canvas and swapchain concepts out of =gpu.lisp= is a clear and useful
+Keeping canvas and swapchain concepts out of =gpu/api.lisp= is a clear and useful
 decision.  =:luv/gpu= can run offscreen, while =:luv/canvas= adds SDL surface
 and presentation policy.  A context borrows its configured device rather than
 owning it, and swapchain images are explicitly represented as borrowed GPU
@@ -299,7 +304,7 @@ present mode, one more than the minimum image count, and at most two frame
 slots.  Unconfiguration waits for the whole device to become idle before
 destroying the swapchain-owned structures.
 
-The separation is not yet a narrow public interface.  =canvas-vulkan.lisp=
+The separation is not yet a narrow public interface.  =canvas/vulkan.lisp=
 calls backend-internal texture transition and submission functions and reaches
 Vulkan-specific slots.  This direct composition is readable, but a second
 backend will have to reveal which part is the generic canvas contract and
