@@ -34,9 +34,10 @@ The current implementation is split between the renderer-independent model in
   palette-indexed block-content column;
 - a =block-world= owns the resident chunk set and distinguishes resident air
   from an absent chunk, while chunk and world revisions make changes explicit;
-- a seeded =little-world-source= deterministically materializes a nine by
-  nine square of 16-cubed terrain chunks from multi-scale value noise, then
-  populates sparse rocks and trees after the whole neighborhood is resident;
+- a seeded =little-world-source= deterministically materializes a sliding
+  nine by nine square of 16-cubed terrain chunks from multi-scale value noise,
+  then populates sparse rocks and trees after the whole neighborhood is
+  resident;
 - a sparse edit overlay records explicit removals and placements separately
   from generated content and replays them after chunk rematerialization;
 - an =exposed-face-mesher= walks resident chunks on the CPU and emits only
@@ -81,12 +82,12 @@ finished system.
 :ID: E7N4ZS
 :END:
 
-The visible example now starts with 81 resident chunks rather than one
-handwritten block array.  Chunk residency is established first; smooth
-multi-scale value-noise terrain is materialized second; features are populated
-third; sparse player edits are replayed last.  The seed and world coordinates
-are the generator inputs, so materializing the same region twice is idempotent
-and two worlds with the same seed agree site for site.
+The visible example keeps 81 resident chunks rather than one handwritten block
+array.  Chunk residency is established first; smooth multi-scale value-noise
+terrain is materialized second; features are populated third; sparse player
+edits are replayed last.  The seed and world coordinates are the generator
+inputs, so materializing the same region twice is idempotent and two worlds
+with the same seed agree site for site.
 
 This is already a useful separation of concerns:
 
@@ -114,10 +115,13 @@ chunk-face edit rebuilds two.  The new pair is published together; the old GPU
 buffer is destroyed immediately at the API level, whose queue completion
 frontier defers native teardown if a submitted frame still owns its last use.
 
-The next deliberate limitation is that all 81 chunks remain eagerly
-resident.  The same product ownership now permits a larger eager experiment
-without making edit cost proportional to world size, and later gives eviction
-a concrete CPU/GPU product to retire.
+The square is now a camera-centered resident window rather than the whole
+world.  When the player crosses a chunk boundary, one deterministic strip is
+materialized and populated, sparse edits are replayed, and the opposite strip
+is evicted in one coalesced world transaction.  The next mesh refresh builds
+products for the entering chunks and destroys the leaving buffers through the
+GPU completion frontier.  Thus travel is not bounded by the original square,
+while resident world data and render products remain bounded at 81 chunks.
 
 The tests keep these layers visible.  =:luv/world= exercises coordinates,
 domains, palette storage, revisions, residency, and ray traversal without SDL
@@ -247,9 +251,9 @@ experience:
 2. *Touch it.*  Done as a first correctness pass: ray traversal selects,
    removes, and places blocks, and revisions make the edit visible to the
    renderer.
-3. *Walk into another chunk.*  The 81-chunk materialization, cross-boundary
-   mesh proof, and chunk-owned render products are done.  Dynamic residency
-   and eviction remain.
+3. *Walk into another chunk.*  Done: the 81-chunk materialization follows the
+   player, deterministically generating an entering strip and evicting the
+   opposite strip.  Chunk-owned CPU/GPU products arrive and retire with it.
 4. *Let it glow.*  The first visual-material pass is done: block-face atlas
    selection, procedural texels, geometric normals, corner occlusion, ambient
    and directional light, and longer distance fog all run through the real
@@ -261,8 +265,9 @@ experience:
    absent horizontal terrain is a solid simulation boundary.  General body
    and contact domains, persistent manifolds, sleeping, and constraint
    coloring remain the path described by #Y5H8KC.
-6. *Let the world arrive.*  Deterministic staged generation and sparse edit
-   replay are done.  Save the edits, evict a region, and recover it.
+6. *Let the world arrive.*  Deterministic staged generation, sparse edit
+   replay, bounded residency, eviction, and recovery are done in memory.
+   Persist the edit journal next.
 7. *See farther.*  Introduce a coarse domain only when there is enough world
    for level of detail to solve a visible problem.
 8. *Let processes inhabit it.*  Fluids, growth, weathering, or ecology can

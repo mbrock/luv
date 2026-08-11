@@ -280,6 +280,60 @@
     (populate-block-world-chunk source world chunk-x 0 chunk-z)
     (apply-block-world-source-edits source world chunk-x 0 chunk-z)))
 
+(defun block-chunk-key (chunk)
+  (let ((coordinate
+          (chunk-domain-coordinate (block-chunk-domain chunk))))
+    (chunk-key (chunk-coordinate-x coordinate)
+               (chunk-coordinate-y coordinate)
+               (chunk-coordinate-z coordinate))))
+
+(defun center-little-world-residency
+    (source world center-x center-z &key (radius 4))
+  "Materialize a square resident window and evict everything outside it.
+
+Return the entering and leaving chunk-coordinate keys.  Entering chunks are
+created as one staged transaction: establish all desired domains, materialize
+terrain, populate landmarks, then replay sparse edits."
+  (check-type source little-world-source)
+  (check-type radius (integer 0))
+  (let ((desired (make-hash-table :test #'equal))
+        (entering nil)
+        (leaving nil))
+    (loop for chunk-x from (- center-x radius) to (+ center-x radius) do
+      (loop for chunk-z from (- center-z radius) to (+ center-z radius)
+            for key = (chunk-key chunk-x 0 chunk-z)
+            do (setf (gethash key desired) t)
+               (unless (nth-value 1
+                                  (world-chunk-at world chunk-x 0 chunk-z))
+                 (push key entering))))
+    (dolist (chunk (resident-world-chunks world))
+      (let ((key (block-chunk-key chunk)))
+        (unless (gethash key desired)
+          (push key leaving))))
+    (setf entering (nreverse entering)
+          leaving (nreverse leaving))
+    (with-world-change-transaction (world)
+      ;; Establish the whole neighborhood first so every later stage observes
+      ;; resident air rather than confusing a not-yet-created neighbor with it.
+      (maphash (lambda (key present-p)
+                 (declare (ignore present-p))
+                 (destructuring-bind (x y z) key
+                   (ensure-world-chunk world x y z)))
+               desired)
+      (dolist (key entering)
+        (destructuring-bind (x y z) key
+          (materialize-block-world-chunk source world x y z)))
+      (dolist (key entering)
+        (destructuring-bind (x y z) key
+          (populate-block-world-chunk source world x y z)))
+      (dolist (key entering)
+        (destructuring-bind (x y z) key
+          (apply-block-world-source-edits source world x y z)))
+      (dolist (key leaving)
+        (destructuring-bind (x y z) key
+          (remove-world-chunk world x y z))))
+    (values entering leaving)))
+
 (defun make-little-block-world (&key (chunk-radius 4)
                                      (chunk-width 16)
                                      (chunk-height 16)
@@ -293,27 +347,10 @@
   (let* ((source (make-instance 'little-world-source :seed seed))
          (world (make-block-world :id (list :little-world seed)
                                   :chunk-width chunk-width
-                                  :chunk-height chunk-height
-                                  :chunk-depth chunk-depth
-                                  :source source)))
-    (with-world-change-transaction (world)
-      ;; Residency is established first so terrain and later features may cross
-      ;; chunk boundaries without ever pretending that absent terrain is air.
-      (loop for chunk-x from (- chunk-radius) to chunk-radius
-            do (loop for chunk-z from (- chunk-radius) to chunk-radius
-                     do (ensure-world-chunk world chunk-x 0 chunk-z)))
-      (loop for chunk-x from (- chunk-radius) to chunk-radius
-            do (loop for chunk-z from (- chunk-radius) to chunk-radius
-                     do (materialize-block-world-chunk
-                         source world chunk-x 0 chunk-z)))
-      (loop for chunk-x from (- chunk-radius) to chunk-radius
-            do (loop for chunk-z from (- chunk-radius) to chunk-radius
-                     do (populate-block-world-chunk
-                         source world chunk-x 0 chunk-z)))
-      (loop for chunk-x from (- chunk-radius) to chunk-radius
-            do (loop for chunk-z from (- chunk-radius) to chunk-radius
-                     do (apply-block-world-source-edits
-                         source world chunk-x 0 chunk-z))))
+                                 :chunk-height chunk-height
+                                 :chunk-depth chunk-depth
+                                 :source source)))
+    (center-little-world-residency source world 0 0 :radius chunk-radius)
     world))
 
 (defclass block-mesher () ())
@@ -733,6 +770,10 @@
     :accessor cube-world-demo-meshed-world-revision)
    (camera :initarg :camera :reader cube-world-demo-camera)
    (player :initarg :player :initform nil :reader cube-world-demo-player)
+   (residency-radius :initarg :residency-radius :initform 4
+                     :reader cube-world-demo-residency-radius)
+   (residency-center :initform nil
+                     :accessor cube-world-demo-residency-center)
    (selected-block :initarg :selected-block :initform *stone-block*
                    :accessor cube-world-demo-selected-block)
    (atlas-texture :initarg :atlas-texture
@@ -763,16 +804,26 @@
                      :accessor cube-world-demo-jump-requested-p)
    (running-p :initform t :accessor cube-world-demo-running-p)))
 
+(defun maintain-cube-world-residency (demo)
+  "Recenter DEMO's generated resident window when its player changes chunk."
+  (let* ((world (cube-world-demo-world demo))
+         (source (block-world-source world))
+         (player (cube-world-demo-player demo))
+         (radius (cube-world-demo-residency-radius demo)))
+    (when (and player radius (typep source 'little-world-source))
+      (let* ((shape (voxel-space-chunk-shape (block-world-space world)))
+             (center
+               (list (floor (player-x player) (chunk-shape-width shape))
+                     (floor (player-z player) (chunk-shape-depth shape)))))
+        (unless (equal center (cube-world-demo-residency-center demo))
+          (multiple-value-prog1
+              (center-little-world-residency
+               source world (first center) (second center) :radius radius)
+            (setf (cube-world-demo-residency-center demo) center)))))))
+
 (defun remember-cube-world-resource (demo resource)
   (push resource (cube-world-demo-resources demo))
   resource)
-
-(defun block-chunk-key (chunk)
-  (let ((coordinate
-          (chunk-domain-coordinate (block-chunk-domain chunk))))
-    (chunk-key (chunk-coordinate-x coordinate)
-               (chunk-coordinate-y coordinate)
-               (chunk-coordinate-z coordinate))))
 
 (defun chunk-mesh-dependency-stamp (world chunk)
   "Describe exactly which resident block data CHUNK's exposed mesh observes."
@@ -1022,6 +1073,7 @@ still owns their last use."
                    (setf (cube-world-demo-jump-requested-p demo) nil)
                    (decf (cube-world-demo-physics-accumulator demo)
                          +player-physics-step+)))
+      (maintain-cube-world-residency demo)
       (present-canvas-frame
        (cube-world-demo-context demo)
        (lambda (surface-texture encoder)
@@ -1134,7 +1186,8 @@ still owns their last use."
                                 (mesher (make-instance
                                          'exposed-face-mesher))
                                 (camera (make-instance 'fly-camera))
-                                player)
+                                player
+                                (residency-radius 4))
   "Open a little CPU-meshed block world.
 
 Click to capture the pointer, look with the mouse, walk with WASD, and jump
@@ -1263,6 +1316,7 @@ capture-only demand clock."
                      :world world :mesher mesher
                      :camera (sync-camera-to-player camera player)
                      :player player
+                     :residency-radius residency-radius
                      :atlas-texture atlas-texture :atlas-view atlas-view
                      :atlas-sampler atlas-sampler
                      :color-texture color-texture :color-view color-view
@@ -1278,6 +1332,7 @@ capture-only demand clock."
                :rows-per-image atlas-height)
               (list atlas-width atlas-height))
              (setf demo new-demo)
+             (maintain-cube-world-residency demo)
              (refresh-cube-world-mesh demo)
              (setf (canvas-event-handler canvas) demo
                    (canvas-clock canvas)

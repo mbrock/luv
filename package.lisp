@@ -489,6 +489,7 @@ nothing else does."))
            #:populate-block-world-chunk
            #:apply-block-world-source-edits
            #:edit-block-world-source
+           #:center-little-world-residency
            #:materialize-little-world-chunk
            #:populate-little-world-chunk
            #:rematerialize-little-world-chunk
@@ -545,6 +546,9 @@ nothing else does."))
            #:cube-world-chunk-product-mesh
            #:cube-world-demo-camera
            #:cube-world-demo-player
+           #:cube-world-demo-residency-radius
+           #:cube-world-demo-residency-center
+           #:maintain-cube-world-residency
            #:cube-world-demo-selected-block
            #:cube-world-demo-atlas-texture
            #:cube-world-demo-atlas-view
