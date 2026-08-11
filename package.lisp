@@ -259,6 +259,7 @@ nothing else does."))
            #:enqueue
            #:finish
            #:submit
+           #:submitted-work-done
            #:write-buffer
            #:write-texture
            #:destroy

@@ -185,7 +185,15 @@ of some object fulfilling the DESCRIPTOR."))
   (:documentation "Asks the ENCODER to seal its work sequence."))
 
 (defgeneric submit (queue work)
-  (:documentation "Submit some command buffers to the QUEUE."))
+  (:documentation "Schedule some command buffers on the QUEUE.
+
+Submission is asynchronous: returning does not mean the GPU has finished
+the work, only that the implementation retains everything the work depends
+on until it completes.  Use SUBMITTED-WORK-DONE to wait."))
+
+(defgeneric submitted-work-done (queue)
+  (:documentation "Block until all work submitted to QUEUE so far has
+completed on the GPU."))
 
 (defgeneric write-buffer (buffer data &key offset)
   (:documentation "Copy host DATA into BUFFER starting at byte OFFSET."))

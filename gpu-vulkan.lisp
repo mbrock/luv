@@ -91,7 +91,12 @@
     :reader vulkan-handle)
    (destroyed-p
     :initform nil
-    :accessor vulkan-object-destroyed-p)))
+    :accessor vulkan-object-destroyed-p)
+   (last-submission
+    :initform 0
+    :accessor vulkan-object-last-submission
+    :documentation "Index of the newest queue submission using this object.
+Zero means it has never been submitted.")))
 
 (defclass vulkan-gpu-device (gpu-device vulkan-gpu-object)
   ((instance
@@ -140,12 +145,19 @@
     :initform '()
     :accessor vulkan-queue-live-submissions
     :documentation "Submission records not yet passed by the frontier,
-oldest first.")))
+oldest first.")
+   (lock
+    :initform (sb-thread:make-mutex :name "vulkan gpu queue")
+    :reader vulkan-queue-lock
+    :documentation "Guards the counter, live records, deferred destroys,
+and scheduled texture layouts across the canvas and REPL threads.")))
 
 (defstruct vulkan-gpu-submission
   "One queue submission awaiting completion, retaining what the GPU may use."
   (index 0 :type (unsigned-byte 64))
-  (command-buffers #() :type vector))
+  (command-buffers #() :type vector)
+  (resources '() :type list)
+  (pending-destroys '() :type list))
 
 (defclass vulkan-gpu-buffer (gpu-buffer vulkan-gpu-object)
   ((device
@@ -275,6 +287,11 @@ oldest first.")))
    (textures
     :initform (make-hash-table :test #'eq)
     :reader vulkan-command-encoder-textures)
+   (resources
+    :initform (make-hash-table :test #'eq)
+    :reader vulkan-command-encoder-resources
+    :documentation "Every GPU object wrapper the recorded commands depend
+on, including the tracked textures.")
    (native-resources
     :initform nil
     :accessor vulkan-command-encoder-native-resources)
@@ -335,6 +352,10 @@ oldest first.")))
    (textures
     :initarg :textures
     :reader vulkan-command-buffer-textures)
+   (resources
+    :initarg :resources
+    :initform nil
+    :reader vulkan-command-buffer-resources)
    (native-resources
     :initarg :native-resources
     :initform nil
@@ -1185,6 +1206,12 @@ oldest first.")))
            :state :compute-pass
            :expected-state :between-passes)))
 
+(defun retain-vulkan-resource (encoder resource)
+  "Record RESOURCE as a dependency of ENCODER's future submission."
+  (when resource
+    (setf (gethash resource (vulkan-command-encoder-resources encoder)) t))
+  resource)
+
 (defun ensure-vulkan-texture-for-command
     (encoder texture command required-usage)
   (unless (typep texture 'vulkan-gpu-texture)
@@ -1204,6 +1231,7 @@ oldest first.")))
            :required-usage required-usage
            :actual-usage (gpu-texture-usage texture)))
   (setf (gethash texture (vulkan-command-encoder-textures encoder)) t)
+  (retain-vulkan-resource encoder texture)
   texture)
 
 (defun vulkan-layout-access-and-stage (layout)
@@ -1576,6 +1604,7 @@ lowering later without changing this queue-level operation."
              (completed-p nil))
         (ensure-vulkan-object-device
          view (vulkan-texture-view-device view) device :begin-render-pass)
+        (retain-vulkan-resource encoder view)
         (ensure-vulkan-texture-for-command
          encoder target descriptor :render-attachment)
         (transition-vulkan-texture
@@ -1643,6 +1672,7 @@ lowering later without changing this queue-level operation."
       (lvk:cmd-bind-graphics-pipeline
        (vulkan-command-encoder-command-buffer encoder)
        (vulkan-handle pipeline))
+      (retain-vulkan-resource encoder pipeline)
       (setf (vulkan-render-pass-pipeline pass) pipeline)))
   pass)
 
@@ -1686,6 +1716,13 @@ lowering later without changing this queue-level operation."
        (vulkan-command-encoder-command-buffer encoder)
        (vulkan-render-pipeline-layout pipeline)
        (vulkan-handle bind-group))
+        (retain-vulkan-resource encoder bind-group)
+        (retain-vulkan-resource
+         encoder (vulkan-bind-group-texture-view bind-group))
+        (retain-vulkan-resource
+         encoder (vulkan-bind-group-sampler bind-group))
+        (retain-vulkan-resource
+         encoder (vulkan-bind-group-buffer bind-group))
         (setf (vulkan-render-pass-bind-group pass) bind-group))))
   pass)
 
@@ -1772,6 +1809,7 @@ lowering later without changing this queue-level operation."
       (lvk:cmd-bind-compute-pipeline
        (vulkan-command-encoder-command-buffer encoder)
        (vulkan-handle pipeline))
+      (retain-vulkan-resource encoder pipeline)
       (setf (vulkan-compute-pass-pipeline pass) pipeline)))
   pass)
 
@@ -1815,6 +1853,13 @@ lowering later without changing this queue-level operation."
        (vulkan-command-encoder-command-buffer encoder)
        (vulkan-compute-pipeline-layout pipeline)
        (vulkan-handle bind-group))
+        (retain-vulkan-resource encoder bind-group)
+        (retain-vulkan-resource
+         encoder (vulkan-bind-group-texture-view bind-group))
+        (retain-vulkan-resource
+         encoder (vulkan-bind-group-sampler bind-group))
+        (retain-vulkan-resource
+         encoder (vulkan-bind-group-buffer bind-group))
         (setf (vulkan-compute-pass-bind-group pass) bind-group))))
   pass)
 
@@ -1881,6 +1926,8 @@ lowering later without changing this queue-level operation."
        (hash-table-alist (vulkan-command-encoder-texture-layouts encoder))
        :textures
        (hash-table-keys (vulkan-command-encoder-textures encoder))
+       :resources
+       (hash-table-keys (vulkan-command-encoder-resources encoder))
        :native-resources
        (prog1 (vulkan-command-encoder-native-resources encoder)
          (setf (vulkan-command-encoder-native-resources encoder) nil))))))
@@ -1957,67 +2004,127 @@ lowering later without changing this queue-level operation."
 (defun maintain-vulkan-queue (queue)
   "Retire live submissions the completion frontier has passed.
 
-Retirement currently only releases the queue's references to the retained
-command buffers; their explicit destruction still belongs to the caller.
-Deferred destruction will move that ownership here."
-  (let ((frontier (vulkan-queue-completed-frontier queue)))
-    (loop while (and (vulkan-queue-live-submissions queue)
-                     (<= (vulkan-gpu-submission-index
-                          (first (vulkan-queue-live-submissions queue)))
-                         frontier))
-          do (pop (vulkan-queue-live-submissions queue)))
-    frontier))
+Retiring a submission drops the queue's references to everything it
+retained and performs the native teardown of resources whose DESTROY was
+deferred while this submission was still in flight."
+  (with-vulkan-gpu-driver-environment
+    (sb-thread:with-recursive-lock ((vulkan-queue-lock queue))
+      (let ((frontier (vulkan-queue-completed-frontier queue)))
+        (loop while (and (vulkan-queue-live-submissions queue)
+                         (<= (vulkan-gpu-submission-index
+                              (first (vulkan-queue-live-submissions queue)))
+                             frontier))
+              do (let ((record (pop (vulkan-queue-live-submissions queue))))
+                   (dolist (resource
+                            (vulkan-gpu-submission-pending-destroys record))
+                     (destroy-vulkan-native resource))))
+        frontier))))
+
+(defgeneric destroy-vulkan-native (object)
+  (:documentation "Perform OBJECT's native Vulkan teardown unconditionally.
+
+Called either directly by DESTROY when nothing submitted still uses
+OBJECT, or by queue maintenance once the completion frontier passes its
+last use.  Callers are responsible for the logical destroyed mark."))
+
+(defun vulkan-destroy-or-defer (resource device)
+  "Destroy RESOURCE's native objects now, or once its last use completes.
+
+The public DESTROY has already marked RESOURCE destroyed, so no new
+submissions can mention it; this decides only when the native teardown is
+provably safe."
+  (let ((queue (vulkan-device-queue device))
+        (last-use (vulkan-object-last-submission resource)))
+    (if (or (null queue)
+            (vulkan-object-destroyed-p device)
+            (zerop last-use))
+        (destroy-vulkan-native resource)
+        (sb-thread:with-recursive-lock ((vulkan-queue-lock queue))
+          (let ((record
+                  (and (> last-use (vulkan-queue-completed-frontier queue))
+                       (find last-use (vulkan-queue-live-submissions queue)
+                             :key #'vulkan-gpu-submission-index))))
+            (if record
+                (push resource
+                      (vulkan-gpu-submission-pending-destroys record))
+                (destroy-vulkan-native resource))))))
+  (values))
 
 (defun submit-vulkan-command-buffers
     (queue command-buffers &key (wait-semaphores #())
                                 (signal-semaphores #())
-                                (wait-for-completion t))
+                                wait-for-completion)
   "Submit one WebGPU-style batch and track it on the queue's frontier.
 
 WAIT-SEMAPHORES and SIGNAL-SEMAPHORES are LVK semaphore submit entries of
 the form (SEMAPHORE STAGES &optional VALUE).  Every submission additionally
 signals the queue's timeline semaphore with a fresh submission index, which
-is returned.  The public SUBMIT keeps WAIT-FOR-COMPLETION and thus stays
-synchronous, but it now waits only for its own submission rather than for
-the whole queue to become idle."
+is returned.  The submission record retains the command buffers and every
+resource they captured until the frontier passes the index, so callers may
+destroy any of them immediately after this returns."
   (with-vulkan-gpu-driver-environment
     (ensure-live-vulkan-object queue :submit)
-    (loop for command-buffer across command-buffers
-          do (check-vulkan-command-buffer-for-submit queue command-buffer))
-    (let ((texture-layouts
-            (vulkan-submitted-texture-layouts command-buffers)))
-      (when (plusp (length command-buffers))
-        (let ((index (1+ (vulkan-queue-submission-counter queue))))
-          (lvk:submit-command-buffers
-           (vulkan-handle queue)
-           (map 'vector #'vulkan-handle command-buffers)
-           :wait-semaphores wait-semaphores
-           :signal-semaphores
-           (concatenate
-            'vector signal-semaphores
-            (vector (list (vulkan-queue-timeline queue)
-                          '(:all-commands)
-                          index))))
-          (setf (vulkan-queue-submission-counter queue) index)
-          (loop for command-buffer across command-buffers
-                do (setf (vulkan-command-buffer-state command-buffer)
-                         :submitted))
-          (maphash (lambda (texture layout)
-                     (setf (vulkan-texture-layout texture) layout))
-                   texture-layouts)
-          (setf (vulkan-queue-live-submissions queue)
-                (nconc (vulkan-queue-live-submissions queue)
-                       (list (make-vulkan-gpu-submission
-                              :index index
-                              :command-buffers command-buffers))))
-          (when wait-for-completion
-            (wait-for-vulkan-submission queue index))
-          (maintain-vulkan-queue queue)
-          index)))))
+    (let ((index nil))
+      (sb-thread:with-recursive-lock ((vulkan-queue-lock queue))
+        (loop for command-buffer across command-buffers
+              do (check-vulkan-command-buffer-for-submit
+                  queue command-buffer))
+        (let ((texture-layouts
+                (vulkan-submitted-texture-layouts command-buffers)))
+          (when (plusp (length command-buffers))
+            (setf index (1+ (vulkan-queue-submission-counter queue)))
+            (lvk:submit-command-buffers
+             (vulkan-handle queue)
+             (map 'vector #'vulkan-handle command-buffers)
+             :wait-semaphores wait-semaphores
+             :signal-semaphores
+             (concatenate
+              'vector signal-semaphores
+              (vector (list (vulkan-queue-timeline queue)
+                            '(:all-commands)
+                            index))))
+            (setf (vulkan-queue-submission-counter queue) index)
+            (let ((resources '()))
+              (loop for command-buffer across command-buffers
+                    do (setf (vulkan-command-buffer-state command-buffer)
+                             :submitted
+                             (vulkan-object-last-submission command-buffer)
+                             index)
+                       (dolist (resource
+                                (vulkan-command-buffer-resources
+                                 command-buffer))
+                         (setf (vulkan-object-last-submission resource)
+                               index)
+                         (push resource resources)))
+              (maphash (lambda (texture layout)
+                         (setf (vulkan-texture-layout texture) layout))
+                       texture-layouts)
+              (setf (vulkan-queue-live-submissions queue)
+                    (nconc (vulkan-queue-live-submissions queue)
+                           (list (make-vulkan-gpu-submission
+                                  :index index
+                                  :command-buffers command-buffers
+                                  :resources resources))))))))
+      (when index
+        (when wait-for-completion
+          (wait-for-vulkan-submission queue index))
+        (maintain-vulkan-queue queue))
+      index)))
 
 (defmethod submit ((queue vulkan-gpu-queue) (command-buffers vector))
-  "Submit one WebGPU-style batch and synchronously establish its completion."
+  "Schedule one WebGPU-style batch and return its submission index."
   (submit-vulkan-command-buffers queue command-buffers))
+
+(defmethod submitted-work-done ((queue vulkan-gpu-queue))
+  (with-vulkan-gpu-driver-environment
+    (ensure-live-vulkan-object queue :submitted-work-done)
+    (let ((counter
+            (sb-thread:with-recursive-lock ((vulkan-queue-lock queue))
+              (vulkan-queue-submission-counter queue))))
+      (when (plusp counter)
+        (wait-for-vulkan-submission queue counter))
+      (maintain-vulkan-queue queue)))
+  (values))
 
 (defun destroy-vulkan-command-native-resource (device resource)
   (ecase (first resource)
@@ -2050,119 +2157,87 @@ the whole queue to become idle."
     (setf (vulkan-command-encoder-state encoder) :destroyed))
   (values))
 
-(defmethod destroy ((command-buffer vulkan-gpu-command-buffer))
-  (with-vulkan-gpu-driver-environment
-    (unless (vulkan-object-destroyed-p command-buffer)
-      (let ((device (vulkan-command-buffer-device command-buffer)))
-        (unless (vulkan-object-destroyed-p device)
-          (lvk:destroy-command-pool
-           (vulkan-handle device)
-           (vulkan-command-buffer-command-pool command-buffer))
-          (destroy-vulkan-command-native-resources
-           device (vulkan-command-buffer-native-resources command-buffer))))
-      (setf (vulkan-object-destroyed-p command-buffer) t
-            (vulkan-command-buffer-state command-buffer) :destroyed)))
-  (values))
+(defmacro define-vulkan-deferred-destroy
+    ((class variable) device-form &body native-teardown)
+  "Define DESTROY and DESTROY-VULKAN-NATIVE for CLASS.
 
-(defmethod destroy ((bind-group vulkan-gpu-bind-group))
-  (with-vulkan-gpu-driver-environment
-    (unless (vulkan-object-destroyed-p bind-group)
-      (let ((device (vulkan-bind-group-device bind-group)))
-        (unless (vulkan-object-destroyed-p device)
-          (lvk:destroy-descriptor-pool
-           (vulkan-handle device)
-           (vulkan-bind-group-descriptor-pool bind-group))))
-      (setf (vulkan-object-destroyed-p bind-group) t)))
-  (values))
+DESTROY marks the wrapper destroyed immediately, then either performs
+NATIVE-TEARDOWN now or defers it until the completion frontier passes the
+object's last submitted use.  NATIVE-TEARDOWN runs only while the device
+is alive, with DEVICE anaphorically bound to the native device handle."
+  (let ((device-object (gensym "DEVICE-OBJECT")))
+    `(progn
+       (defmethod destroy ((,variable ,class))
+         (with-vulkan-gpu-driver-environment
+           (unless (vulkan-object-destroyed-p ,variable)
+             (setf (vulkan-object-destroyed-p ,variable) t)
+             (vulkan-destroy-or-defer ,variable ,device-form)))
+         (values))
+       (defmethod destroy-vulkan-native ((,variable ,class))
+         (let ((,device-object ,device-form))
+           (unless (vulkan-object-destroyed-p ,device-object)
+             (let ((device (vulkan-handle ,device-object)))
+               (declare (ignorable device))
+               ,@native-teardown))))
+       ',class)))
 
-(defmethod destroy ((pipeline vulkan-gpu-compute-pipeline))
-  (with-vulkan-gpu-driver-environment
-    (unless (vulkan-object-destroyed-p pipeline)
-      (let ((device (vulkan-compute-pipeline-device pipeline)))
-        (unless (vulkan-object-destroyed-p device)
-          (lvk:destroy-pipeline (vulkan-handle device)
-                                (vulkan-handle pipeline))
-          (lvk:destroy-pipeline-layout
-           (vulkan-handle device)
-           (vulkan-compute-pipeline-layout pipeline))))
-      (setf (vulkan-object-destroyed-p pipeline) t)))
-  (values))
+(define-vulkan-deferred-destroy
+    (vulkan-gpu-command-buffer command-buffer)
+    (vulkan-command-buffer-device command-buffer)
+  (lvk:destroy-command-pool
+   device (vulkan-command-buffer-command-pool command-buffer))
+  (dolist (resource
+           (vulkan-command-buffer-native-resources command-buffer))
+    (destroy-vulkan-command-native-resource
+     (vulkan-command-buffer-device command-buffer) resource)))
 
-(defmethod destroy ((pipeline vulkan-gpu-render-pipeline))
-  (with-vulkan-gpu-driver-environment
-    (unless (vulkan-object-destroyed-p pipeline)
-      (let ((device (vulkan-render-pipeline-device pipeline)))
-        (unless (vulkan-object-destroyed-p device)
-          (lvk:destroy-pipeline
-           (vulkan-handle device) (vulkan-handle pipeline))
-          (lvk:destroy-pipeline-layout
-           (vulkan-handle device) (vulkan-render-pipeline-layout pipeline))))
-      (setf (vulkan-object-destroyed-p pipeline) t)))
-  (values))
+(defmethod destroy :after ((command-buffer vulkan-gpu-command-buffer))
+  (setf (vulkan-command-buffer-state command-buffer) :destroyed))
 
-(defmethod destroy ((sampler vulkan-gpu-sampler))
-  (with-vulkan-gpu-driver-environment
-    (unless (vulkan-object-destroyed-p sampler)
-      (let ((device (vulkan-sampler-device sampler)))
-        (unless (vulkan-object-destroyed-p device)
-          (lvk:destroy-sampler
-           (vulkan-handle device) (vulkan-handle sampler))))
-      (setf (vulkan-object-destroyed-p sampler) t)))
-  (values))
+(define-vulkan-deferred-destroy (vulkan-gpu-bind-group bind-group)
+    (vulkan-bind-group-device bind-group)
+  (lvk:destroy-descriptor-pool
+   device (vulkan-bind-group-descriptor-pool bind-group)))
 
-(defmethod destroy ((buffer vulkan-gpu-buffer))
-  (with-vulkan-gpu-driver-environment
-    (unless (vulkan-object-destroyed-p buffer)
-      (let ((device (vulkan-buffer-device buffer)))
-        (unless (vulkan-object-destroyed-p device)
-          (let ((native-device (vulkan-handle device)))
-            (lvk:unmap-memory native-device (vulkan-buffer-memory buffer))
-            (lvk:destroy-buffer native-device (vulkan-handle buffer))
-            (lvk:free-memory native-device (vulkan-buffer-memory buffer)))))
-      (setf (vulkan-object-destroyed-p buffer) t)))
-  (values))
+(define-vulkan-deferred-destroy (vulkan-gpu-compute-pipeline pipeline)
+    (vulkan-compute-pipeline-device pipeline)
+  (lvk:destroy-pipeline device (vulkan-handle pipeline))
+  (lvk:destroy-pipeline-layout
+   device (vulkan-compute-pipeline-layout pipeline)))
 
-(defmethod destroy ((layout vulkan-gpu-bind-group-layout))
-  (with-vulkan-gpu-driver-environment
-    (unless (vulkan-object-destroyed-p layout)
-      (let ((device (vulkan-bind-group-layout-device layout)))
-        (unless (vulkan-object-destroyed-p device)
-          (lvk:destroy-descriptor-set-layout
-           (vulkan-handle device) (vulkan-handle layout))))
-      (setf (vulkan-object-destroyed-p layout) t)))
-  (values))
+(define-vulkan-deferred-destroy (vulkan-gpu-render-pipeline pipeline)
+    (vulkan-render-pipeline-device pipeline)
+  (lvk:destroy-pipeline device (vulkan-handle pipeline))
+  (lvk:destroy-pipeline-layout
+   device (vulkan-render-pipeline-layout pipeline)))
 
-(defmethod destroy ((module vulkan-gpu-shader-module))
-  (with-vulkan-gpu-driver-environment
-    (unless (vulkan-object-destroyed-p module)
-      (let ((device (vulkan-shader-module-device module)))
-        (unless (vulkan-object-destroyed-p device)
-          (lvk:destroy-shader-module
-           (vulkan-handle device) (vulkan-handle module))))
-      (setf (vulkan-object-destroyed-p module) t)))
-  (values))
+(define-vulkan-deferred-destroy (vulkan-gpu-sampler sampler)
+    (vulkan-sampler-device sampler)
+  (lvk:destroy-sampler device (vulkan-handle sampler)))
 
-(defmethod destroy ((view vulkan-gpu-texture-view))
-  (with-vulkan-gpu-driver-environment
-    (unless (vulkan-object-destroyed-p view)
-      (let ((device (vulkan-texture-view-device view)))
-        (unless (vulkan-object-destroyed-p device)
-          (lvk:destroy-image-view
-           (vulkan-handle device) (vulkan-handle view))))
-      (setf (vulkan-object-destroyed-p view) t)))
-  (values))
+(define-vulkan-deferred-destroy (vulkan-gpu-buffer buffer)
+    (vulkan-buffer-device buffer)
+  (lvk:unmap-memory device (vulkan-buffer-memory buffer))
+  (lvk:destroy-buffer device (vulkan-handle buffer))
+  (lvk:free-memory device (vulkan-buffer-memory buffer)))
 
-(defmethod destroy ((texture vulkan-gpu-texture))
-  (with-vulkan-gpu-driver-environment
-    (unless (vulkan-object-destroyed-p texture)
-      (let ((device (vulkan-texture-device texture)))
-        (when (and (vulkan-texture-owned-p texture)
-                   (not (vulkan-object-destroyed-p device)))
-          (lvk:destroy-image (vulkan-handle device) (vulkan-handle texture))
-          (lvk:free-memory
-           (vulkan-handle device) (vulkan-texture-memory texture))))
-      (setf (vulkan-object-destroyed-p texture) t)))
-  (values))
+(define-vulkan-deferred-destroy (vulkan-gpu-bind-group-layout layout)
+    (vulkan-bind-group-layout-device layout)
+  (lvk:destroy-descriptor-set-layout device (vulkan-handle layout)))
+
+(define-vulkan-deferred-destroy (vulkan-gpu-shader-module module)
+    (vulkan-shader-module-device module)
+  (lvk:destroy-shader-module device (vulkan-handle module)))
+
+(define-vulkan-deferred-destroy (vulkan-gpu-texture-view view)
+    (vulkan-texture-view-device view)
+  (lvk:destroy-image-view device (vulkan-handle view)))
+
+(define-vulkan-deferred-destroy (vulkan-gpu-texture texture)
+    (vulkan-texture-device texture)
+  (when (vulkan-texture-owned-p texture)
+    (lvk:destroy-image device (vulkan-handle texture))
+    (lvk:free-memory device (vulkan-texture-memory texture))))
 
 (defmethod destroy ((device vulkan-gpu-device))
   (with-vulkan-gpu-driver-environment
@@ -2172,7 +2247,10 @@ the whole queue to become idle."
              (progn
                (lvk:device-wait-idle (vulkan-handle device))
                (when queue
-                 (setf (vulkan-queue-live-submissions queue) '())
+                 ;; After the idle wait the frontier has reached the
+                 ;; counter, so this retires every record and performs
+                 ;; all deferred native destruction.
+                 (maintain-vulkan-queue queue)
                  (lvk:destroy-semaphore
                   (vulkan-handle device) (vulkan-queue-timeline queue)))
                (maphash

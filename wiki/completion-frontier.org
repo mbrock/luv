@@ -46,18 +46,53 @@ queue is idle" to "the prefix ending at my submission is complete," which
 no longer serializes against unrelated in-flight work such as canvas
 frames.
 
-Each submission also pushes a record — index plus the submitted command
-buffers — onto a queue-owned list of live submissions.  A maintenance step
-runs after each submit and retires every record the frontier has passed.
-Retirement currently only drops the queue's references; explicit
-destruction still belongs to the caller.  The record is thus the seed of a
-submission-owned resource set, not yet the owner.
+Each submission also pushes a record — index, the submitted command
+buffers, and every resource they captured — onto a queue-owned list of
+live submissions.  A maintenance step runs after each submit and after
+explicit waits, retiring every record the frontier has passed.  A
+recursive mutex on the queue guards the counter, the records, and the
+scheduled texture layouts, since the SDL canvas thread and the REPL both
+submit.
 
 The relevant definitions are
 [[file:../gpu-vulkan.lisp::(defun vulkan-queue-completed-frontier][=vulkan-queue-completed-frontier=]],
 [[file:../gpu-vulkan.lisp::(defun maintain-vulkan-queue][=maintain-vulkan-queue=]],
 [[file:../gpu-vulkan.lisp::(defun wait-for-vulkan-submission][=wait-for-vulkan-submission=]], and
 [[file:../gpu-vulkan.lisp::(defun submit-vulkan-command-buffers][=submit-vulkan-command-buffers=]].
+
+* Commands capture their dependencies; destroy defers through them
+:PROPERTIES:
+:ID: K8W2FN
+:END:
+
+Encoding now retains, in an encoder-owned set, every wrapper a recorded
+command depends on: pipelines, bind groups and their views, samplers, and
+uniform buffers, alongside the tracked textures.  =finish= transfers the
+set into the command buffer, and submission stamps each member with the
+submission index as its last use.  This closes the missing ownership edge
+of #B2M7QX for the current command vocabulary.
+
+On that foundation, =destroy= finally means what #D3H7VK describes.  The
+public operation marks the wrapper destroyed immediately — no new work can
+mention it — and then either performs the native teardown at once, when
+the frontier has already passed the object's last use, or attaches the
+teardown to the still-live submission record that used it last.  Retiring
+that record performs the deferred destruction.  Device destruction waits
+for idle and drains every record, so nothing is leaked or torn down early.
+=define-vulkan-deferred-destroy= in
+[[file:../gpu-vulkan.lisp::(defmacro define-vulkan-deferred-destroy][=gpu-vulkan.lisp=]] gives every resource class the same split.
+
+The payoff is the contract change this whole page exists for: public
+=submit= is now asynchronous.  It returns a submission index as soon as
+the work is scheduled, and destroying any resource the batch used —
+including the command buffer itself — is safe immediately, exactly the
+WebGPU shape.  =submitted-work-done= is the explicit, publicly exported
+completion wait, the synchronous analog of
+=GPUQueue.onSubmittedWorkDone()=.  The queue texture-write convenience is
+asynchronous for the same reason; its staging buffer rides the private
+command buffer through the frontier.  The demos' teardown paths, which
+destroy pipelines and bind groups while their last presented frame is
+still in flight, exercise this for real.
 
 * Frame slots became frontier clients
 :PROPERTIES:
@@ -72,6 +107,10 @@ swapchain acquisition and presentation still speak binary semaphores —
 presentation pacing and lifetime proof are different jobs, and only the
 second one moved to the frontier.
 
+Now that destruction defers through the frontier on its own, the slot's
+wait is no longer a safety requirement at all: it is purely the pacing
+policy that bounds CPU frames in flight to the slot count.
+
 This answers one question from #J4C6WP as hoped: presentation slots are now
 clients of the general mechanism rather than a second lifetime system.
 
@@ -80,22 +119,23 @@ clients of the general mechanism rather than a second lifetime system.
 :ID: V3N7QJ
 :END:
 
-The frontier is a completion oracle, not yet an ownership system.  The gaps
-named by #S8R5JV remain open:
+The ownership gaps of #S8R5JV are now closed for the current command
+vocabulary: capture is transitive, destruction defers, submission is
+asynchronous, and the queue state is locked.  What remains open is
+adjacent rather than internal:
 
-- A finished command buffer still does not retain the pipelines, bind
-  groups, texture views, samplers, or uniform buffers its commands
-  reference.  Complete transitive capture at encode time is the next step.
-- Submission records do not own destruction.  Explicit =destroy= remains
-  immediate (#G6C2TX); the logical/physical split of #D3H7VK needs a
-  last-use index per resource and a deferred-destroy path attached to the
-  owning record.
-- Queue submission state is unlocked.  The SDL canvas thread and the REPL
-  can both submit; the counter, the record list, and the texture layout
-  slots need either a lock or a stated single-thread discipline.
+- There are still no finalizers.  Dropping the last Lisp reference to a
+  live resource leaks it; the frontier gives a future finalizer something
+  safe to enqueue onto, but that decision has not been made.
 - Nothing maps or reads back yet, so the frontier has no =mapAsync=-like
-  client.
-
-Once capture and deferred destroy exist, the synchronous wait in public
-=submit= stops being load-bearing and can become an explicit choice rather
-than a safety requirement.
+  client, and =write-buffer= on a persistently mapped uniform buffer is
+  still excluded from GPU reads only by the compositor's slot pacing
+  (#B9Q4LC).
+- The capture set is defined by the encode methods that exist.  A new
+  command kind must remember to retain what it references; there is no
+  completeness check connecting command types to retention.
+- Access-hazard tracking is still the narrow layout model of #X2D7MF;
+  the frontier proves lifetime, not the absence of missing barriers.
+- Retirement happens at submits and explicit waits.  A long-idle queue
+  holds its last record and any deferred teardown until the next
+  maintenance point; nothing polls in the background.

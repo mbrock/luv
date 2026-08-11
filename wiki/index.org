@@ -75,8 +75,9 @@ The following are starting paths rather than a table of settled doctrine.
   ownership decisions, missing lifetime proofs, and open design questions in
   the present code.
 - [[file:completion-frontier.org][The queue frontier and modern-capabilities decision]] records the adoption
-  of Vulkan 1.4, timeline semaphores, and a per-queue completion frontier,
-  and what that mechanism does not yet own.
+  of Vulkan 1.4, timeline semaphores, and a per-queue completion frontier
+  that captures command dependencies, defers destruction, and makes public
+  submission asynchronous.
 
 A useful first crossing is from the timeline distinction #T4V8QM to the five
 different senses of lifetime in #L8R2WF, then to the frame-slot episode
