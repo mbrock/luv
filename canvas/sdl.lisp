@@ -69,9 +69,13 @@
 
 (defmacro with-sdl-native-environment (&body body)
   "Run BODY with the floating-point environment expected by native drivers."
-  #+darwin
+  #+sbcl
+  `(sb-int:with-float-traps-masked
+       (:invalid :divide-by-zero :overflow :underflow :inexact)
+     ,@body)
+  #+(and darwin (not sbcl))
   `(float-features:with-float-traps-masked t ,@body)
-  #-darwin
+  #-(or sbcl darwin)
   `(progn ,@body))
 
 (defgeneric prepare-sdl-canvas-host (canvas)
