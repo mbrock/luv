@@ -484,6 +484,64 @@ including when FUNCTION exits non-locally after making a partial change."
                             (local-coordinate-z local-coordinate))
             block))))
 
+;;; Sparse edits are an overlay on a materialized world, not another dense
+;;; chunk field.  NIL is a meaningful stored value (an explicitly removed
+;;; block), so hash-table presence distinguishes it from no edit.
+
+(defclass block-edit-overlay ()
+  ((entries :initform (make-hash-table :test #'equal)
+            :reader block-edit-overlay-entries)))
+
+(defun make-block-edit-overlay ()
+  (make-instance 'block-edit-overlay))
+
+(defun block-edit-overlay-count (overlay)
+  (hash-table-count (block-edit-overlay-entries overlay)))
+
+(defun record-block-edit (overlay block x y z)
+  "Record BLOCK as the explicit value for world site X,Y,Z."
+  (check-type overlay block-edit-overlay)
+  (let ((coordinate (make-world-coordinate x y z)))
+    (setf (gethash (list (world-coordinate-x coordinate)
+                         (world-coordinate-y coordinate)
+                         (world-coordinate-z coordinate))
+                   (block-edit-overlay-entries overlay))
+          block))
+  block)
+
+(defun block-edit-at (overlay x y z)
+  "Return the edited value at X,Y,Z and whether an edit is present."
+  (check-type overlay block-edit-overlay)
+  (let ((coordinate (make-world-coordinate x y z)))
+    (gethash (list (world-coordinate-x coordinate)
+                   (world-coordinate-y coordinate)
+                   (world-coordinate-z coordinate))
+             (block-edit-overlay-entries overlay))))
+
+(defun same-chunk-coordinate-p (left right)
+  (and (= (chunk-coordinate-x left) (chunk-coordinate-x right))
+       (= (chunk-coordinate-y left) (chunk-coordinate-y right))
+       (= (chunk-coordinate-z left) (chunk-coordinate-z right))))
+
+(defun apply-block-edits-to-chunk (overlay world chunk)
+  "Apply every edit in OVERLAY addressed to resident CHUNK."
+  (check-type overlay block-edit-overlay)
+  (check-type world block-world)
+  (check-type chunk block-chunk)
+  (let ((target (chunk-domain-coordinate (block-chunk-domain chunk))))
+    (with-world-change-transaction (world)
+      (maphash
+       (lambda (key block)
+         (destructuring-bind (x y z) key
+           (multiple-value-bind (coordinate local)
+               (world-coordinate-chunk-and-local
+                (block-world-space world) (make-world-coordinate x y z))
+             (declare (ignore local))
+             (when (same-chunk-coordinate-p coordinate target)
+               (setf (block-at world x y z) block)))))
+       (block-edit-overlay-entries overlay))))
+  chunk)
+
 ;;; Ray traversal is expressed in continuous lattice coordinates: integer
 ;;; planes are cell boundaries, independently of the physical cell extent.
 ;;; The traversal stops at absent terrain rather than silently seeing air.

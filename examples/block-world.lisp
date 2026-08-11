@@ -72,10 +72,12 @@
   (make-instance 'block-kind :name :leaves :color #(0.20 0.56 0.23)))
 
 (defclass little-world-source ()
-  ((seed :initarg :seed :initform 121 :reader little-world-source-seed)))
+  ((seed :initarg :seed :initform 121 :reader little-world-source-seed)
+   (edits :initarg :edits :initform (make-block-edit-overlay)
+          :reader little-world-source-edits)))
 
 (defun little-world-hash (source x z &optional (salt 0))
-  "A stable coordinate hash used only to place discrete terrain features."
+  "A stable coordinate hash for terrain readings and discrete features."
   (let ((value
           (logand #xffffffff
                   (+ (little-world-source-seed source)
@@ -84,13 +86,50 @@
                         (* (logxor value (ash value -13)) 1274126177)))
     (logand #xffffffff (logxor value (ash value -16)))))
 
+(defun little-world-hash-reading (source x z salt)
+  (- (* 2.0d0 (/ (little-world-hash source x z salt) #xffffffff)) 1.0d0))
+
+(defun smooth-little-world-reading (reading)
+  (* reading reading (- 3.0d0 (* 2.0d0 reading))))
+
+(defun interpolate-little-world-reading (left right amount)
+  (+ left (* (- right left) amount)))
+
+(defun little-world-value-noise (source x z period &optional (salt 0))
+  "Sample deterministic smooth value noise at integer world position X,Z."
+  (check-type period (real (0) *))
+  (let* ((sample-x (/ x (coerce period 'double-float)))
+         (sample-z (/ z (coerce period 'double-float)))
+         (cell-x (floor sample-x))
+         (cell-z (floor sample-z))
+         (tx (smooth-little-world-reading (- sample-x cell-x)))
+         (tz (smooth-little-world-reading (- sample-z cell-z)))
+         (near (interpolate-little-world-reading
+                (little-world-hash-reading source cell-x cell-z salt)
+                (little-world-hash-reading source (1+ cell-x) cell-z salt)
+                tx))
+         (far (interpolate-little-world-reading
+               (little-world-hash-reading source cell-x (1+ cell-z) salt)
+               (little-world-hash-reading
+                source (1+ cell-x) (1+ cell-z) salt)
+               tx)))
+    (interpolate-little-world-reading near far tz)))
+
 (defun little-world-surface-height (source x z height)
-  (let* ((phase (/ (mod (little-world-source-seed source) 97) 17.0d0))
-         (reading (+ 4.0d0
-                     (* 1.35d0 (sin (+ phase (* x 0.15d0))))
-                     (* 1.05d0 (cos (- (* z 0.13d0) phase)))
-                     (* 0.65d0 (sin (* (+ x z) 0.075d0))))))
+  (let ((reading
+          (+ 5.0d0
+             (* 2.8d0 (little-world-value-noise source x z 64 0))
+             (* 1.4d0 (little-world-value-noise source x z 28 1))
+             (* 0.65d0 (little-world-value-noise source x z 11 2)))))
     (max 2 (min (- height 6) (round reading)))))
+
+(defgeneric materialize-block-world-chunk
+    (source world chunk-x chunk-y chunk-z))
+(defgeneric populate-block-world-chunk
+    (source world chunk-x chunk-y chunk-z))
+(defgeneric apply-block-world-source-edits
+    (source world chunk-x chunk-y chunk-z))
+(defgeneric edit-block-world-source (source world block x y z))
 
 (defun materialize-little-world-chunk (source world chunk-x chunk-z)
   "Materialize one deterministic terrain chunk at vertical layer zero."
@@ -114,6 +153,13 @@
                           (t *dirt-block*)))))))
       chunk)))
 
+(defmethod materialize-block-world-chunk
+    ((source little-world-source) (world block-world)
+     chunk-x chunk-y chunk-z)
+  (unless (zerop chunk-y)
+    (error "The little world currently materializes only chunk layer zero."))
+  (materialize-little-world-chunk source world chunk-x chunk-z))
+
 (defun populate-little-world-chunk (source world chunk-x chunk-z)
   "Place deterministic, sparse landmarks after neighboring terrain exists."
   (with-world-change-transaction (world)
@@ -131,7 +177,10 @@
       (setf (block-at world rock-x rock-y rock-z) *stone-block*)
       (when (zerop (mod hash 2))
         (setf (block-at world (1+ rock-x) rock-y rock-z) *stone-block*))
-      (when (< (mod (ash hash -16) 5) 3)
+      (when (and (< (mod (ash hash -16) 5) 4)
+                 (> (little-world-value-noise
+                     source rock-x rock-z 48 29)
+                    -0.35d0))
         (let* ((tree-x (+ origin-x 3 (mod (ash hash -3) (- width 6))))
                (tree-z (+ origin-z 3 (mod (ash hash -11) (- depth 6))))
                (surface (little-world-surface-height
@@ -144,7 +193,46 @@
                          do (setf (block-at world x crown z) *leaf-block*)))
           (setf (block-at world tree-x (1+ crown) tree-z) *leaf-block*))))))
 
-(defun make-little-block-world (&key (chunk-radius 1)
+(defmethod populate-block-world-chunk
+    ((source little-world-source) (world block-world)
+     chunk-x chunk-y chunk-z)
+  (unless (zerop chunk-y)
+    (error "The little world currently populates only chunk layer zero."))
+  (populate-little-world-chunk source world chunk-x chunk-z))
+
+(defmethod apply-block-world-source-edits
+    ((source little-world-source) (world block-world)
+     chunk-x chunk-y chunk-z)
+  (multiple-value-bind (chunk present-p)
+      (world-chunk-at world chunk-x chunk-y chunk-z)
+    (unless present-p
+      (error "Cannot apply edits to absent chunk (~D ~D ~D)."
+             chunk-x chunk-y chunk-z))
+    (apply-block-edits-to-chunk (little-world-source-edits source)
+                                world chunk)))
+
+(defmethod edit-block-world-source
+    ((source little-world-source) (world block-world) block x y z)
+  (record-block-edit (little-world-source-edits source) block x y z)
+  (setf (block-at world x y z) block))
+
+(defmethod edit-block-world-source
+    ((source t) (world block-world) block x y z)
+  (setf (block-at world x y z) block))
+
+(defun edit-block-at (block world x y z)
+  "Edit one resident site, recording it in WORLD's source when supported."
+  (edit-block-world-source (block-world-source world) world block x y z))
+
+(defun rematerialize-little-world-chunk (source world chunk-x chunk-z)
+  "Regenerate one chunk from SOURCE, then replay its explicit edits."
+  (with-world-change-transaction (world)
+    (remove-world-chunk world chunk-x 0 chunk-z)
+    (materialize-block-world-chunk source world chunk-x 0 chunk-z)
+    (populate-block-world-chunk source world chunk-x 0 chunk-z)
+    (apply-block-world-source-edits source world chunk-x 0 chunk-z)))
+
+(defun make-little-block-world (&key (chunk-radius 4)
                                      (chunk-width 16)
                                      (chunk-height 16)
                                      (chunk-depth 16)
@@ -168,12 +256,16 @@
                      do (ensure-world-chunk world chunk-x 0 chunk-z)))
       (loop for chunk-x from (- chunk-radius) to chunk-radius
             do (loop for chunk-z from (- chunk-radius) to chunk-radius
-                     do (materialize-little-world-chunk
-                         source world chunk-x chunk-z)))
+                     do (materialize-block-world-chunk
+                         source world chunk-x 0 chunk-z)))
       (loop for chunk-x from (- chunk-radius) to chunk-radius
             do (loop for chunk-z from (- chunk-radius) to chunk-radius
-                     do (populate-little-world-chunk
-                         source world chunk-x chunk-z))))
+                     do (populate-block-world-chunk
+                         source world chunk-x 0 chunk-z)))
+      (loop for chunk-x from (- chunk-radius) to chunk-radius
+            do (loop for chunk-z from (- chunk-radius) to chunk-radius
+                     do (apply-block-world-source-edits
+                         source world chunk-x 0 chunk-z))))
     world))
 
 (defclass block-mesher () ())
@@ -305,7 +397,7 @@
 
 (defclass fly-camera ()
   ((x :initarg :x :initform 8.0 :accessor camera-x)
-   (y :initarg :y :initform 8.0 :accessor camera-y)
+   (y :initarg :y :initform 11.0 :accessor camera-y)
    (z :initarg :z :initform -6.0 :accessor camera-z)
    (yaw :initarg :yaw :initform 0.0 :accessor camera-yaw)
    (pitch :initarg :pitch :initform -0.28 :accessor camera-pitch)
@@ -603,12 +695,12 @@ still owns their last use."
             (return-from edit-cube-world-block (values nil :absent)))
           (ecase action
             (:remove
-             (setf (block-at world x y z) nil))
+             (edit-block-at nil world x y z))
             (:place
              (when old-block
                (return-from edit-cube-world-block (values nil :blocked)))
-             (setf (block-at world x y z)
-                   (cube-world-demo-selected-block demo))))
+             (edit-block-at
+              (cube-world-demo-selected-block demo) world x y z)))
           (values coordinate :edited))))))
 
 (defun cube-world-frame-state (demo surface-texture)

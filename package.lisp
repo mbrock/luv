@@ -482,9 +482,25 @@ nothing else does."))
            #:raycast-block-world
            #:little-world-source
            #:little-world-source-seed
+           #:little-world-source-edits
+           #:little-world-value-noise
+           #:little-world-surface-height
+           #:materialize-block-world-chunk
+           #:populate-block-world-chunk
+           #:apply-block-world-source-edits
+           #:edit-block-world-source
            #:materialize-little-world-chunk
+           #:populate-little-world-chunk
+           #:rematerialize-little-world-chunk
            #:make-little-block-world
            #:block-at
+           #:edit-block-at
+           #:block-edit-overlay
+           #:make-block-edit-overlay
+           #:block-edit-overlay-count
+           #:record-block-edit
+           #:block-edit-at
+           #:apply-block-edits-to-chunk
            #:block-mesher
            #:exposed-face-mesher
            #:block-mesh

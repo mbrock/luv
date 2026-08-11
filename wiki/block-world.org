@@ -34,9 +34,11 @@ The current implementation is split between the renderer-independent model in
   palette-indexed block-content column;
 - a =block-world= owns the resident chunk set and distinguishes resident air
   from an absent chunk, while chunk and world revisions make changes explicit;
-- a seeded =little-world-source= deterministically materializes a three by
-  three square of 16-cubed terrain chunks, then populates sparse rocks and
-  trees after the whole neighborhood is resident;
+- a seeded =little-world-source= deterministically materializes a nine by
+  nine square of 16-cubed terrain chunks from multi-scale value noise, then
+  populates sparse rocks and trees after the whole neighborhood is resident;
+- a sparse edit overlay records explicit removals and placements separately
+  from generated content and replays them after chunk rematerialization;
 - an =exposed-face-mesher= walks resident chunks on the CPU and emits only
   faces beside empty sites, under an explicit absent-neighbor policy;
 - ordinary Lisp computes directional face shade, deterministic colour
@@ -74,16 +76,17 @@ finished system.
 :ID: E7N4ZS
 :END:
 
-The visible example now starts with nine resident chunks rather than one
-handwritten block array.  Chunk residency is established first; continuous
-height terrain is materialized second; features are populated third.  The
-seed and world coordinates are the inputs, so materializing the same region
-twice is idempotent and two worlds with the same seed agree site for site.
+The visible example now starts with 81 resident chunks rather than one
+handwritten block array.  Chunk residency is established first; smooth
+multi-scale value-noise terrain is materialized second; features are populated
+third; sparse player edits are replayed last.  The seed and world coordinates
+are the generator inputs, so materializing the same region twice is idempotent
+and two worlds with the same seed agree site for site.
 
 This is already a useful separation of concerns:
 
 #+begin_example
-little-world-source + seed
+little-world-source + seed + sparse edits
           |
           v
 resident chunk domains -- dense palette-index fields
@@ -106,7 +109,7 @@ chunk-face edit rebuilds two.  The new pair is published together; the old GPU
 buffer is destroyed immediately at the API level, whose queue completion
 frontier defers native teardown if a submitted frame still owns its last use.
 
-The next deliberate limitation is that all nine chunks remain eagerly
+The next deliberate limitation is that all 81 chunks remain eagerly
 resident.  The same product ownership now permits a larger eager experiment
 without making edit cost proportional to world size, and later gives eviction
 a concrete CPU/GPU product to retire.
@@ -239,16 +242,16 @@ experience:
 2. *Touch it.*  Done as a first correctness pass: ray traversal selects,
    removes, and places blocks, and revisions make the edit visible to the
    renderer.
-3. *Walk into another chunk.*  The first nine-chunk materialization and
-   cross-boundary mesh proof are done.  Dynamic residency, eviction, and
-   chunk-owned derived products remain.
+3. *Walk into another chunk.*  The 81-chunk materialization, cross-boundary
+   mesh proof, and chunk-owned render products are done.  Dynamic residency
+   and eviction remain.
 4. *Let it glow.*  Introduce block-content and lighting as the first genuinely
    distinct fields.  Add one emissive block and a small CPU light propagation
    rule.
 5. *Collide with it.*  Derive a chunk collision representation and connect it
    to the separate body/constraint domains described by #Y5H8KC.
-6. *Let the world arrive.*  Generate chunks from a deterministic source, layer
-   sparse edits over it, save them, evict a region, and recover it.
+6. *Let the world arrive.*  Deterministic staged generation and sparse edit
+   replay are done.  Save the edits, evict a region, and recover it.
 7. *See farther.*  Introduce a coarse domain only when there is enough world
    for level of detail to solve a visible problem.
 8. *Let processes inhabit it.*  Fluids, growth, weathering, or ecology can

@@ -6,7 +6,7 @@
 (deftest little-world-is-deterministic-and-chunked
   (let ((first (make-little-block-world :seed 77))
         (second (make-little-block-world :seed 77)))
-    (ok (= (length (resident-world-chunks first)) 9))
+    (ok (= (length (resident-world-chunks first)) 81))
     (ok (typep (block-world-source first) 'little-world-source))
     (ok (= (little-world-source-seed (block-world-source first)) 77))
     (ok
@@ -23,7 +23,7 @@
                            (and (eq first-status :resident)
                                 (eq second-status :resident)
                                 (eq first-block second-block))))))))
-    (multiple-value-bind (block status) (block-at first 32 0 0)
+    (multiple-value-bind (block status) (block-at first 80 0 0)
       (ok (null block))
       (ok (eq status :absent))))
   (let* ((source (make-instance 'little-world-source :seed 77))
@@ -32,6 +32,26 @@
     (let ((revision (block-world-revision world)))
       (materialize-little-world-chunk source world 0 0)
       (ok (= (block-world-revision world) revision)))))
+
+(deftest little-world-edits-survive-rematerialization
+  (let* ((world (make-little-block-world :chunk-radius 0 :seed 31))
+         (source (block-world-source world)))
+    (ok (block-at world 1 1 1))
+    (edit-block-at nil world 1 1 1)
+    (multiple-value-bind (block present-p)
+        (block-edit-at (little-world-source-edits source) 1 1 1)
+      (ok present-p)
+      (ok (null block)))
+    (ok (= (block-edit-overlay-count (little-world-source-edits source)) 1))
+    (rematerialize-little-world-chunk source world 0 0)
+    (multiple-value-bind (block status) (block-at world 1 1 1)
+      (ok (eq status :resident))
+      (ok (null block)))
+    ;; Explicit placement into generated air is an overlay value too.
+    (edit-block-at luv::*stone-block* world 2 14 2)
+    (rematerialize-little-world-chunk source world 0 0)
+    (ok (eq (block-at world 2 14 2) luv::*stone-block*))
+    (ok (= (block-edit-overlay-count (little-world-source-edits source)) 2))))
 
 (deftest meshing-and-editing-cross-a-chunk-boundary
   (let ((world (make-block-world :chunk-width 2
