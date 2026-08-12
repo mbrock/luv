@@ -444,6 +444,8 @@ nothing else does."))
            #:block-content-column
            #:block-content-column-palette
            #:block-content-column-indices
+           #:borrow-block-content-storage
+           #:with-block-content-storage
            #:block-chunk
            #:make-block-chunk
            #:block-chunk-domain
@@ -451,6 +453,7 @@ nothing else does."))
            #:block-chunk-revision
            #:block-chunk-boundary-revision
            #:chunk-block-at
+           #:chunk-block-at-offset
            #:map-chunk-blocks
            #:block-kind
            #:block-kind-name
@@ -495,7 +498,7 @@ nothing else does."))
            #:populate-little-world-chunk
            #:rematerialize-little-world-chunk
            #:make-little-block-world
-           #:block-at
+           #:describe-block-allocatingly
            #:edit-block-at
            #:block-edit-overlay
            #:make-block-edit-overlay

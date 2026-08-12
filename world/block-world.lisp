@@ -168,12 +168,26 @@ coordinates."
 (defun chunk-domain-offset (domain local)
   (unless (chunk-domain-local-coordinate-p domain local)
     (error "Local coordinate ~S is outside domain ~S." local domain))
+  (chunk-domain-offset-components
+   domain
+   (local-coordinate-x local)
+   (local-coordinate-y local)
+   (local-coordinate-z local)))
+
+(defun chunk-domain-offset-components (domain x y z)
+  "Map scalar local coordinates to a dense offset without a row object."
+  (check-type domain chunk-domain)
   (let ((shape (voxel-space-chunk-shape (chunk-domain-space domain))))
-    (+ (local-coordinate-x local)
+    (unless (and (typep x 'integer) (<= 0 x) (< x (chunk-shape-width shape))
+                 (typep y 'integer) (<= 0 y) (< y (chunk-shape-height shape))
+                 (typep z 'integer) (<= 0 z) (< z (chunk-shape-depth shape)))
+      (error "Local coordinate (~S ~S ~S) is outside domain ~S."
+             x y z domain))
+    (+ x
        (* (chunk-shape-width shape)
-          (+ (local-coordinate-y local)
+          (+ y
              (* (chunk-shape-height shape)
-                (local-coordinate-z local)))))))
+                z))))))
 
 (defun chunk-domain-local-coordinate (domain offset)
   (check-type domain chunk-domain)
@@ -187,10 +201,13 @@ coordinates."
       (multiple-value-bind (y x) (floor remainder width)
         (make-local-coordinate x y z)))))
 
-;;; Block content is a narrow semantic field.  The public value is a shared
-;;; Lisp object (or NIL for air); the physical column is a dense u16 palette
-;;; index.  Other fields and sparse block entities intentionally live outside
-;;; this column.
+;;; Block content is a narrow semantic field.  The presentable value is a
+;;; shared Lisp object (or NIL for air); the physical column is a dense u16
+;;; palette index.  A site is an offset in a domain, not an object with an
+;;; identity or allocation of its own.  Computational code should borrow the
+;;; aggregate storage below and dispatch once per chunk.  Per-site descriptor
+;;; access is kept deliberately loud and allocating for inspectors, sparse
+;;; interaction, and other genuinely row-shaped work.
 
 (defclass block-content-column ()
   ((palette :initarg :palette :reader block-content-column-palette)
@@ -207,6 +224,21 @@ coordinates."
 (defun block-content-at-offset (column offset)
   (aref (block-content-column-palette column)
         (aref (block-content-column-indices column) offset)))
+
+(defgeneric borrow-block-content-storage (chunk)
+  (:documentation
+   "Return DOMAIN, PALETTE, and INDICES borrowed from CHUNK without copying.
+
+This is the ordinary entry point for whole-domain computation.  Generic
+dispatch chooses a representation once; the caller then traverses the dense
+specialized arrays rather than describing individual cells through CLOS."))
+
+(defmacro with-block-content-storage
+    ((domain palette indices) chunk &body body)
+  "Execute BODY with the three borrowed block-content storage values."
+  `(multiple-value-bind (,domain ,palette ,indices)
+       (borrow-block-content-storage ,chunk)
+     ,@body))
 
 (defun ensure-block-content-palette-index (column block)
   (or (position block (block-content-column-palette column) :test #'eq)
@@ -246,12 +278,24 @@ coordinates."
                  :content (make-block-content-column
                            (chunk-domain-cardinality domain))))
 
+(defmethod borrow-block-content-storage ((chunk block-chunk))
+  (let ((column (block-chunk-content chunk)))
+    (values (block-chunk-domain chunk)
+            (block-content-column-palette column)
+            (block-content-column-indices column))))
+
 (defun chunk-block-at (chunk x y z)
   (check-type chunk block-chunk)
-  (block-content-at-offset
-   (block-chunk-content chunk)
-   (chunk-domain-offset (block-chunk-domain chunk)
-                        (make-local-coordinate x y z))))
+  (chunk-block-at-offset
+   chunk (chunk-domain-offset-components (block-chunk-domain chunk) x y z)))
+
+(defun chunk-block-at-offset (chunk offset)
+  "Read one dense site from CHUNK without constructing a coordinate object."
+  (check-type chunk block-chunk)
+  (check-type offset (integer 0))
+  (unless (< offset (chunk-domain-cardinality (block-chunk-domain chunk)))
+    (error "Offset ~D is outside chunk ~S." offset chunk))
+  (block-content-at-offset (block-chunk-content chunk) offset))
 
 (defun chunk-boundary-index (dx dy dz)
   (cond ((and (= dx -1) (zerop dy) (zerop dz)) 0)
@@ -282,32 +326,46 @@ coordinates."
 
 (defun (setf chunk-block-at) (block chunk x y z)
   (check-type chunk block-chunk)
-  (when (set-block-content-at-offset
-         (block-chunk-content chunk)
-         (chunk-domain-offset (block-chunk-domain chunk)
-                              (make-local-coordinate x y z))
-         block)
-    (incf (slot-value chunk 'revision))
-    (note-chunk-boundary-change chunk x y z)
-    (let ((change-hook (slot-value chunk 'change-hook)))
-      (when change-hook
-        (funcall change-hook chunk))))
+  (setf (chunk-block-at-offset
+         chunk
+         (chunk-domain-offset-components (block-chunk-domain chunk) x y z))
+        block))
+
+(defun (setf chunk-block-at-offset) (block chunk offset)
+  "Set one dense site while retaining chunk and boundary invalidation."
+  (check-type chunk block-chunk)
+  (check-type offset (integer 0))
+  (let* ((domain (block-chunk-domain chunk))
+         (shape (voxel-space-chunk-shape (chunk-domain-space domain)))
+         (width (chunk-shape-width shape))
+         (height (chunk-shape-height shape)))
+    (unless (< offset (chunk-domain-cardinality domain))
+      (error "Offset ~D is outside chunk ~S." offset chunk))
+    (when (set-block-content-at-offset
+           (block-chunk-content chunk) offset block)
+      (incf (slot-value chunk 'revision))
+      (multiple-value-bind (z remainder) (floor offset (* width height))
+        (multiple-value-bind (y x) (floor remainder width)
+          (note-chunk-boundary-change chunk x y z)))
+      (let ((change-hook (slot-value chunk 'change-hook)))
+        (when change-hook
+          (funcall change-hook chunk)))))
   block)
 
 (defun map-chunk-blocks (function chunk)
-  "Call FUNCTION with BLOCK, local X, Y, and Z for every site in CHUNK."
+  "Describe each site to FUNCTION as BLOCK, local X, Y, and Z.
+
+This row-shaped convenience protocol is for presentation and irregular local
+work.  Whole-domain algorithms should use WITH-BLOCK-CONTENT-STORAGE."
   (check-type chunk block-chunk)
-  (let* ((domain (block-chunk-domain chunk))
-         (shape (voxel-space-chunk-shape (chunk-domain-space domain)))
-         (column (block-chunk-content chunk))
-         (palette (block-content-column-palette column))
-         (indices (block-content-column-indices column))
-         (offset 0))
-    (dotimes (z (chunk-shape-depth shape))
-      (dotimes (y (chunk-shape-height shape))
-        (dotimes (x (chunk-shape-width shape))
-          (funcall function (aref palette (aref indices offset)) x y z)
-          (incf offset)))))
+  (with-block-content-storage (domain palette indices) chunk
+    (let ((shape (voxel-space-chunk-shape (chunk-domain-space domain)))
+          (offset 0))
+      (dotimes (z (chunk-shape-depth shape))
+        (dotimes (y (chunk-shape-height shape))
+          (dotimes (x (chunk-shape-width shape))
+            (funcall function (aref palette (aref indices offset)) x y z)
+            (incf offset))))))
   chunk)
 
 ;;; A block world is the resident environment, not the complete world
@@ -437,11 +495,16 @@ including when FUNCTION exits non-locally after making a partial change."
                               (< (chunk-coordinate-z a)
                                  (chunk-coordinate-z b))))))))))
 
-(defgeneric block-at (world x y z)
+(defgeneric describe-block-allocatingly (world x y z)
   (:documentation
-   "Return BLOCK and :RESIDENT, or NIL and :ABSENT when its chunk is absent."))
+   "Describe one site as BLOCK and :RESIDENT, or NIL and :ABSENT.
 
-(defgeneric (setf block-at) (block world x y z))
+This intentionally conspicuous row API constructs coordinate descriptors and
+a chunk lookup key.  It is appropriate for inspectors, ray hits, and sparse
+interaction.  Algorithms over many cells should select a chunk/domain once
+and use WITH-BLOCK-CONTENT-STORAGE instead."))
+
+(defgeneric (setf describe-block-allocatingly) (block world x y z))
 
 (defun locate-world-coordinate (world x y z)
   (let ((coordinate (make-world-coordinate x y z)))
@@ -449,7 +512,7 @@ including when FUNCTION exits non-locally after making a partial change."
         (world-coordinate-chunk-and-local (block-world-space world) coordinate)
       (values coordinate chunk-coordinate local-coordinate))))
 
-(defmethod block-at ((world block-world) x y z)
+(defmethod describe-block-allocatingly ((world block-world) x y z)
   (multiple-value-bind (world-coordinate chunk-coordinate local-coordinate)
       (locate-world-coordinate world x y z)
     (declare (ignore world-coordinate))
@@ -466,7 +529,8 @@ including when FUNCTION exits non-locally after making a partial change."
                   :resident)
           (values nil :absent)))))
 
-(defmethod (setf block-at) (block (world block-world) x y z)
+(defmethod (setf describe-block-allocatingly)
+    (block (world block-world) x y z)
   (multiple-value-bind (world-coordinate chunk-coordinate local-coordinate)
       (locate-world-coordinate world x y z)
     (multiple-value-bind (chunk present-p)
@@ -538,7 +602,7 @@ including when FUNCTION exits non-locally after making a partial change."
                 (block-world-space world) (make-world-coordinate x y z))
              (declare (ignore local))
              (when (same-chunk-coordinate-p coordinate target)
-               (setf (block-at world x y z) block)))))
+               (setf (describe-block-allocatingly world x y z) block)))))
        (block-edit-overlay-entries overlay))))
   chunk)
 
@@ -618,7 +682,7 @@ three-component sequences in continuous cell coordinates."
            (adjacent nil))
       (loop
         (multiple-value-bind (block status)
-            (block-at world cell-x cell-y cell-z)
+            (describe-block-allocatingly world cell-x cell-y cell-z)
           (when (eq status :absent)
             (return (values nil :absent)))
           (when (funcall occupied-p block)

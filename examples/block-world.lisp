@@ -232,7 +232,9 @@
                    (little-world-surface-material
                     source x z surface height)))
             (dotimes (y (1+ surface))
-              (setf (block-at world x y z)
+              (setf (chunk-block-at-offset
+                     chunk
+                     (+ local-x (* width (+ y (* height local-z)))))
                     (cond ((= y surface) surface-material)
                           ((or (zerop y) (< y (- surface 2))) *stone-block*)
                           ((eq surface-material *sand-block*) *sand-block*)
@@ -260,9 +262,9 @@
            (rock-z (+ origin-z 2 (mod (ash hash -8) (- depth 4))))
            (rock-y (1+ (little-world-surface-height
                         source rock-x rock-z height))))
-      (setf (block-at world rock-x rock-y rock-z) *stone-block*)
+      (setf (describe-block-allocatingly world rock-x rock-y rock-z) *stone-block*)
       (when (zerop (mod hash 2))
-        (setf (block-at world (1+ rock-x) rock-y rock-z) *stone-block*))
+        (setf (describe-block-allocatingly world (1+ rock-x) rock-y rock-z) *stone-block*))
       (when (and (< (mod (ash hash -16) 5) 4)
                  (> (little-world-value-noise
                      source rock-x rock-z 48 29)
@@ -279,7 +281,7 @@
           (when (and (eq surface-material *grass-block*)
                      (< (+ crown 2) height))
             (loop for y from (1+ surface) to crown
-                  do (setf (block-at world tree-x y tree-z) *wood-block*))
+                  do (setf (describe-block-allocatingly world tree-x y tree-z) *wood-block*))
             ;; A broad, clipped lower crown and a small bright upper crown
             ;; make silhouettes much less like identical green boxes.
             (loop for x from (- tree-x 2) to (+ tree-x 2) do
@@ -287,12 +289,12 @@
                     when (<= (+ (abs (- x tree-x))
                                 (abs (- z tree-z)))
                              3)
-                      do (setf (block-at world x crown z) *leaf-block*)))
+                      do (setf (describe-block-allocatingly world x crown z) *leaf-block*)))
             (loop for x from (1- tree-x) to (1+ tree-x) do
               (loop for z from (1- tree-z) to (1+ tree-z)
-                    do (setf (block-at world x (1+ crown) z)
+                    do (setf (describe-block-allocatingly world x (1+ crown) z)
                              *leaf-block*)))
-            (setf (block-at world tree-x (+ crown 2) tree-z)
+            (setf (describe-block-allocatingly world tree-x (+ crown 2) tree-z)
                   *leaf-block*)))))))
 
 (defmethod populate-block-world-chunk
@@ -316,11 +318,11 @@
 (defmethod edit-block-world-source
     ((source little-world-source) (world block-world) block x y z)
   (record-block-edit (little-world-source-edits source) block x y z)
-  (setf (block-at world x y z) block))
+  (setf (describe-block-allocatingly world x y z) block))
 
 (defmethod edit-block-world-source
     ((source t) (world block-world) block x y z)
-  (setf (block-at world x y z) block))
+  (setf (describe-block-allocatingly world x y z) block))
 
 (defun edit-block-at (block world x y z)
   "Edit one resident site, recording it in WORLD's source when supported."
@@ -518,7 +520,7 @@ terrain, populate landmarks, then replay sparse edits."
 (defun mesher-block-at (mesher samples x y z)
   (multiple-value-bind (block status)
       (etypecase samples
-        (block-world (block-at samples x y z))
+        (block-world (describe-block-allocatingly samples x y z))
         (block-mesh-neighborhood
          (block-mesh-neighborhood-block-at samples x y z)))
     (ecase status
@@ -637,35 +639,34 @@ terrain, populate landmarks, then replay sparse edits."
          (origin-x (world-coordinate-x origin))
          (origin-y (world-coordinate-y origin))
          (origin-z (world-coordinate-z origin))
-         (column (block-chunk-content chunk))
-         (palette (block-content-column-palette column))
-         (indices (block-content-column-indices column))
-         (masks (make-array (length indices)
+         (masks (make-array (chunk-domain-cardinality domain)
                             :element-type '(unsigned-byte 8)
                             :initial-element 0))
          (face-count 0)
          (offset 0))
-    (dotimes (local-z depth)
-      (dotimes (local-y height)
-        (dotimes (local-x width)
-          (when (block-solid-p (aref palette (aref indices offset)))
-            (let ((x (+ origin-x local-x))
-                  (y (+ origin-y local-y))
-                  (z (+ origin-z local-z))
-                  (mask 0))
-              (loop for face in *block-faces*
-                    for bit from 0
-                    for normal = (block-face-neighbor face)
-                    unless (block-solid-p
-                            (mesher-block-at
-                             mesher samples
-                             (+ x (first normal))
-                             (+ y (second normal))
-                             (+ z (third normal))))
-                      do (setf mask (logior mask (ash 1 bit)))
-                         (incf face-count))
-              (setf (aref masks offset) mask)))
-          (incf offset))))
+    (with-block-content-storage (borrowed-domain palette indices) chunk
+      (assert (eq borrowed-domain domain))
+      (dotimes (local-z depth)
+        (dotimes (local-y height)
+          (dotimes (local-x width)
+            (when (block-solid-p (aref palette (aref indices offset)))
+              (let ((x (+ origin-x local-x))
+                    (y (+ origin-y local-y))
+                    (z (+ origin-z local-z))
+                    (mask 0))
+                (loop for face in *block-faces*
+                      for bit from 0
+                      for normal = (block-face-neighbor face)
+                      unless (block-solid-p
+                              (mesher-block-at
+                               mesher samples
+                               (+ x (first normal))
+                               (+ y (second normal))
+                               (+ z (third normal))))
+                        do (setf mask (logior mask (ash 1 bit)))
+                           (incf face-count))
+                (setf (aref masks offset) mask)))
+            (incf offset)))))
     (values masks face-count)))
 
 (defmethod mesh-block-chunk
@@ -679,9 +680,6 @@ terrain, populate landmarks, then replay sparse edits."
          (origin-x (world-coordinate-x origin))
          (origin-y (world-coordinate-y origin))
          (origin-z (world-coordinate-z origin))
-         (column (block-chunk-content chunk))
-         (palette (block-content-column-palette column))
-         (indices (block-content-column-indices column))
          (samples (make-block-mesh-neighborhood world chunk)))
     (multiple-value-bind (masks face-count)
         (block-chunk-face-masks mesher samples chunk)
@@ -689,21 +687,23 @@ terrain, populate landmarks, then replay sparse edits."
               (make-array (* face-count +block-mesh-floats-per-face+)
                           :element-type 'single-float :fill-pointer 0))
             (offset 0))
-        (dotimes (local-z depth)
-          (dotimes (local-y height)
-            (dotimes (local-x width)
-              (let ((mask (aref masks offset)))
-                (unless (zerop mask)
-                  (let ((block (aref palette (aref indices offset)))
-                        (x (+ origin-x local-x))
-                        (y (+ origin-y local-y))
-                        (z (+ origin-z local-z)))
-                    (loop for face in *block-faces*
-                          for bit from 0
-                          when (logbitp bit mask)
-                            do (emit-block-face-into
-                                mesher samples vertices block face x y z)))))
-              (incf offset))))
+        (with-block-content-storage (borrowed-domain palette indices) chunk
+          (assert (eq borrowed-domain domain))
+          (dotimes (local-z depth)
+            (dotimes (local-y height)
+              (dotimes (local-x width)
+                (let ((mask (aref masks offset)))
+                  (unless (zerop mask)
+                    (let ((block (aref palette (aref indices offset)))
+                          (x (+ origin-x local-x))
+                          (y (+ origin-y local-y))
+                          (z (+ origin-z local-z)))
+                      (loop for face in *block-faces*
+                            for bit from 0
+                            when (logbitp bit mask)
+                              do (emit-block-face-into
+                                  mesher samples vertices block face x y z)))))
+                (incf offset)))))
         (assert (= (length vertices)
                    (* face-count +block-mesh-floats-per-face+)))
         (make-instance 'block-mesh
@@ -853,7 +853,7 @@ terrain, populate landmarks, then replay sparse edits."
 
 (defun player-terrain-solid-p (world x y z)
   "Treat absent horizontal terrain and the lower world boundary as solid."
-  (multiple-value-bind (block status) (block-at world x y z)
+  (multiple-value-bind (block status) (describe-block-allocatingly world x y z)
     (if (eq status :resident)
         (block-solid-p block)
         (let ((height
@@ -1445,7 +1445,7 @@ still owns their last use."
       (let ((x (world-coordinate-x coordinate))
             (y (world-coordinate-y coordinate))
             (z (world-coordinate-z coordinate)))
-        (multiple-value-bind (old-block residency) (block-at world x y z)
+        (multiple-value-bind (old-block residency) (describe-block-allocatingly world x y z)
           (unless (eq residency :resident)
             (return-from edit-cube-world-block (values nil :absent)))
           (ecase action

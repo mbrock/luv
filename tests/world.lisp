@@ -64,20 +64,43 @@
     (ok (= (length (block-content-column-indices column)) 64))
     (ok (= (length (block-content-column-palette column)) 1))
     (ok (null (aref (block-content-column-palette column) 0)))
-    (setf (block-at world 0 0 0) stone
-          (block-at world 1 0 0) stone)
+    (setf (describe-block-allocatingly world 0 0 0) stone
+          (describe-block-allocatingly world 1 0 0) stone)
     (ok (= (length (block-content-column-palette column)) 2))
     (ok (= (aref (block-content-column-indices column) 0) 1))
     (ok (= (aref (block-content-column-indices column) 1) 1))
-    (multiple-value-bind (block status) (block-at world 1 0 0)
+    (multiple-value-bind (block status) (describe-block-allocatingly world 1 0 0)
       (ok (eq block stone))
       (ok (eq status :resident)))
-    (multiple-value-bind (block status) (block-at world 2 0 0)
+    (multiple-value-bind (block status) (describe-block-allocatingly world 2 0 0)
       (ok (null block))
       (ok (eq status :resident)))
-    (multiple-value-bind (block status) (block-at world 4 0 0)
+    (multiple-value-bind (block status) (describe-block-allocatingly world 4 0 0)
       (ok (null block))
       (ok (eq status :absent)))))
+
+(deftest whole-domain-block-storage-is-borrowed-without-row-objects
+  (let* ((world (make-block-world :chunk-width 4
+                                  :chunk-height 3
+                                  :chunk-depth 2))
+         (chunk (ensure-world-chunk world 0 0 0))
+         (stone (list :stone)))
+    (setf (chunk-block-at-offset chunk 1) stone)
+    (ok (= (block-chunk-revision chunk) 1))
+    (ok (= (block-world-revision world) 2))
+    (setf (chunk-block-at-offset chunk 1) stone)
+    (ok (= (block-chunk-revision chunk) 1))
+    (ok (= (block-world-revision world) 2))
+    (ok (= (block-chunk-boundary-revision chunk 0 -1 0) 1))
+    (ok (= (block-chunk-boundary-revision chunk 0 0 -1) 1))
+    (with-block-content-storage (domain palette indices) chunk
+      (ok (eq domain (block-chunk-domain chunk)))
+      (ok (eq palette
+              (block-content-column-palette (block-chunk-content chunk))))
+      (ok (eq indices
+              (block-content-column-indices (block-chunk-content chunk))))
+      (ok (= (length indices) (chunk-domain-cardinality domain)))
+      (ok (eq (aref palette (aref indices 1)) stone)))))
 
 (deftest chunk-and-residency-revisions
   (let* ((world (make-block-world :chunk-width 4
@@ -91,13 +114,13 @@
     (ok (= (block-world-residency-revision world) 1))
     (ok (= (block-world-revision world) 1))
     (ok (= (block-chunk-revision chunk) 0))
-    (setf (block-at world 0 0 0) stone)
+    (setf (describe-block-allocatingly world 0 0 0) stone)
     (ok (= (block-chunk-revision chunk) 1))
     (ok (= (block-world-revision world) 2))
-    (setf (block-at world 0 0 0) stone)
+    (setf (describe-block-allocatingly world 0 0 0) stone)
     (ok (= (block-chunk-revision chunk) 1))
     (ok (= (block-world-revision world) 2))
-    (setf (block-at world 0 0 0) nil)
+    (setf (describe-block-allocatingly world 0 0 0) nil)
     (ok (= (block-chunk-revision chunk) 2))
     (ok (= (block-world-revision world) 3))
     ;; A resident chunk is still world-owned: lower-level writes must also
@@ -153,14 +176,14 @@
          (right (ensure-world-chunk world 0 0 0))
          (stone (list :stone))
          (dirt (list :dirt)))
-    (setf (block-at world -1 0 0) stone
-          (block-at world 0 0 0) dirt)
+    (setf (describe-block-allocatingly world -1 0 0) stone
+          (describe-block-allocatingly world 0 0 0) dirt)
     (ok (eq (chunk-block-at left 3 0 0) stone))
     (ok (eq (chunk-block-at right 0 0 0) dirt))
-    (multiple-value-bind (block status) (block-at world -5 0 0)
+    (multiple-value-bind (block status) (describe-block-allocatingly world -5 0 0)
       (ok (null block))
       (ok (eq status :absent)))
-    (ok (signals (setf (block-at world -5 0 0) stone)
+    (ok (signals (setf (describe-block-allocatingly world -5 0 0) stone)
                  'chunk-not-resident))))
 
 (deftest domain-identity-and-deterministic-residency
@@ -189,7 +212,7 @@
                                   :chunk-depth 4))
          (stone (list :stone)))
     (ensure-world-chunk world 0 0 0)
-    (setf (block-at world 2 1 1) stone)
+    (setf (describe-block-allocatingly world 2 1 1) stone)
     (multiple-value-bind (hit status)
         (raycast-block-world world #(0.5d0 1.5d0 1.5d0) #(1d0 0d0 0d0)
                              #'identity :max-distance 8d0)
@@ -200,7 +223,7 @@
       (ok (coordinate= (block-ray-hit-adjacent-coordinate hit)
                        (make-world-coordinate 1 1 1)))
       (ok (= (block-ray-hit-distance hit) 1.5d0)))
-    (setf (block-at world 2 1 1) nil)
+    (setf (describe-block-allocatingly world 2 1 1) nil)
     (multiple-value-bind (hit status)
         (raycast-block-world world #(0.5d0 1.5d0 1.5d0) #(1d0 0d0 0d0)
                              #'identity :max-distance 2d0)

@@ -24,6 +24,52 @@ It chooses domains, fields, materializations, and policies as the natural
 objects rather than assuming every sample is an independently allocated
 object.
 
+* Dispatch on descriptions; compute on domains
+:PROPERTIES:
+:ID: J7A2KD
+:END:
+
+The intended division is not "CLOS outside, low-level code inside."  It is
+more precise:
+
+- CLOS objects describe worlds, domains, field meanings, representations,
+  policies, algorithms, and presentable categorical values;
+- generic dispatch selects an operation and storage representation once at an
+  aggregate boundary;
+- the selected operation borrows domain-sized specialized columns and runs a
+  closed loop over offsets; and
+- a cell normally contributes values to those columns without acquiring heap
+  identity, ownership, or a lifecycle.
+
+This makes the high level more semantic while leaving the numerical middle
+legible to the compiler, SIMD backends, profilers, and eventually GPU kernels.
+It also gives inspectors and interactive tools excellent CLOS objects to show
+without requiring the simulation to manufacture one such object for every
+site it visits.
+
+The naming should reveal which view is being requested.  In the current block
+world, =describe-block-allocatingly= is the intentionally loud single-site
+projection: it constructs coordinate descriptors, performs a resident-chunk
+lookup, and decodes the palette value into a presentable shared object.
+=with-block-content-storage= is the ordinary aggregate path: it dispatches
+once for a chunk and borrows its domain, palette, and dense index vector.
+Borrowed vectors are read-only unless a separate mutation protocol explicitly
+owns revision and boundary invalidation.
+
+The current dense mutation primitive is =chunk-block-at-offset=.  It accepts a
+site offset from the chunk's domain and updates the compact column without
+constructing coordinates, but remains chunk-owned so content revision, exact
+boundary revision, and world invalidation cannot be skipped.  Terrain
+materialization uses this route.  Directly mutating a borrowed index vector is
+not part of the protocol.
+
+Neither API is shameful.  A ray hit, inspector focus, editor selection, or
+error report really is row-shaped and benefits from description objects.  A
+mesher, generator, lighting pass, fluid step, collision broad phase, or
+scientific field operation is domain-shaped; repeated calls to the descriptive
+API inside such a loop are an architectural smell even when their answers are
+correct.
+
 * Identity does not come from being addressable
 :PROPERTIES:
 :ID: C9L2WA
@@ -166,8 +212,9 @@ Several representations may implement the same logical field:
   X, Y, and Z arrays for SIMD traversal.
 
 Mutation may promote a constant representation to a palette or dense one.
-The logical =block-at= or =position-at= protocol need not change when that
-happens.
+The logical single-site description or =position-at= protocol need not change
+when that happens, while aggregate operations can still select the new
+representation once and traverse it directly.
 
 This separation is where the Bundle and quantity ideas meet.  Two fields can
 share an =(unsigned-byte 4)= representation without becoming semantically
@@ -295,8 +342,9 @@ to physics and possible wide backends.
 - which physics data structure will emerge from the separate design work.
 
 The first useful proof is now present: the current world occupies a finite
-domain plus one palette-backed block-content column, =block-at= remains
-semantic, and the existing renderer consumes the new resident world.  The
-next field should still be earned by an operation: a genuine lighting
-experiment can show whether a small shared bundle abstraction is clearer than
-two concrete sibling columns.
+domain plus one palette-backed block-content column,
+=describe-block-allocatingly= remains an explicit semantic projection, and
+the mesher borrows aggregate storage through a representation-selected
+protocol.  The next field should still be earned by an operation: a genuine
+lighting experiment can show whether a small shared bundle abstraction is
+clearer than two concrete sibling columns.

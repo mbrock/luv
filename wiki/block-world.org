@@ -32,6 +32,10 @@ The current implementation is split between the renderer-independent model in
   Euclidean decomposition, including at negative coordinates;
 - each resident =block-chunk= owns a finite =chunk-domain= and one dense
   palette-indexed block-content column;
+- single-site presentation is deliberately named
+  =describe-block-allocatingly=, while domain-shaped code borrows the chunk's
+  palette and specialized index vector once through
+  =with-block-content-storage=;
 - a =block-world= owns the resident chunk set and distinguishes resident air
   from an absent chunk, while chunk and world revisions make changes explicit;
 - a seeded =little-world-source= deterministically materializes a sliding
@@ -109,7 +113,20 @@ A resident chunk notifies its owning world when its content actually changes,
 including through the lower-level =chunk-block-at= writer.  Assigning the same
 value is a no-op.  Bulk materialization nests world-change transactions, so
 thousands of site writes advance the general world revision once while chunk
-and residency revisions retain their finer meaning.
+and residency revisions retain their finer meaning.  Its dense inner loop
+writes =chunk-block-at-offset=: this avoids per-cell coordinates and resident
+world lookups without granting raw array mutation permission or losing those
+revision consequences.
+
+The API also makes the hot/cold boundary conspicuous.  CLOS owns the meaningful
+objects—world and source, chunk and domain, block-kind descriptor, mesher and
+policy—and generic dispatch selects a representation at those boundaries.
+The actual meshing pass then traverses a whole domain's dense unsigned index
+column.  Cells do not gain object identity merely because they are
+addressable.  The comically explicit =describe-block-allocatingly= exists for
+inspectors, sparse edits, ray interaction, and other places where constructing
+a presentable row description is genuinely useful; its appearance in a dense
+loop should look suspicious in code review.
 
 Each resident chunk has its own CPU mesh and GPU vertex buffer.  Its dependency
 stamp contains the source chunk revision plus only the opposing boundary
@@ -226,8 +243,9 @@ every cell.  #C9L2WA develops this distinction.
 The existing =block-kind= instances behave like palette entries: many sites
 share one object that owns colour and generic behaviour.  A chunk now stores
 compact unsigned 16-bit indices into a chunk-local vector of those semantic
-objects.  =block-at= returns the object after decoding, while a whole-column
-algorithm can inspect or borrow the contiguous index array.
+objects.  =describe-block-allocatingly= returns the shared object after
+decoding, while a whole-column algorithm borrows the contiguous index array
+through =with-block-content-storage=.
 
 A useful distinction is:
 
