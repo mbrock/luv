@@ -59,6 +59,7 @@
 (register-shader-type :vec4 :component-count 4)
 (register-shader-type :texture-2d :opaque-kind :texture-2d)
 (register-shader-type :sampler :opaque-kind :sampler)
+(register-shader-type :uniform-block :opaque-kind :uniform-block)
 
 (defun find-shader-type (designator &optional source-form)
   (or (and (typep designator 'shader-type) designator)
@@ -100,7 +101,12 @@
     :reader shader-interface-direction)
    (location
     :initarg :location
-    :reader shader-interface-location)))
+    :initform nil
+    :reader shader-interface-location)
+   (built-in
+    :initarg :built-in
+    :initform nil
+    :reader shader-interface-built-in)))
 
 (defclass shader-resource (shader-variable-declaration)
   ((descriptor-set
@@ -110,6 +116,27 @@
    (binding
     :initarg :binding
     :reader shader-resource-binding)))
+
+(defclass shader-uniform-block (shader-resource)
+  ((members
+    :initarg :members
+    :initform nil
+    :accessor shader-uniform-block-members))
+  (:documentation
+   "One descriptor-backed uniform block with ordered, inspectable members."))
+
+(defclass shader-uniform-member (shader-variable-declaration)
+  ((block
+    :initarg :block
+    :reader shader-uniform-member-block)
+   (index
+    :initarg :index
+    :reader shader-uniform-member-index)
+   (offset
+    :initarg :offset
+    :reader shader-uniform-member-offset))
+  (:documentation
+   "A named value inside a SHADER-UNIFORM-BLOCK, not a separate resource."))
 
 (defclass shader-binding (shader-named-object)
   ((expression
@@ -441,32 +468,73 @@
                 :form form :reason :unsupported-expression))))
 
 (defun parse-interface-declaration (form direction)
-  (destructuring-bind (name type &key location) form
-    (unless (typep location '(integer 0 *))
+  (destructuring-bind (name type &key location built-in) form
+    (unless (or (and (typep location '(integer 0 *)) (null built-in))
+                (and (null location) built-in))
       (error 'shader-language-error
-             :form form :reason :invalid-location :details location))
+             :form form :reason :invalid-interface-decoration
+             :details (list :location location :built-in built-in)))
     (make-instance 'shader-interface-variable
                    :name name
                    :type (find-shader-type type form)
                    :direction direction
                    :location location
+                   :built-in built-in
                    :source-form form)))
 
 (defun parse-resource-declaration (form)
-  (destructuring-bind (name type &key (set 0) binding) form
+  (destructuring-bind (name type &key (set 0) binding members) form
     (unless (and (typep set '(integer 0 *))
                  (typep binding '(integer 0 *)))
       (error 'shader-language-error
              :form form :reason :invalid-resource-location
              :details (list set binding)))
-    (let ((resolved-type (find-shader-type type form)))
-      (unless (shader-type-opaque-kind resolved-type)
+    (if (shader-symbol= type :uniform-block)
+        (let ((block
+                (make-instance 'shader-uniform-block
+                               :name name
+                               :type (find-shader-type :uniform-block form)
+                               :descriptor-set set :binding binding
+                               :source-form form)))
+          (unless (and (listp members) members)
+            (error 'shader-language-error
+                   :form form :reason :empty-uniform-block))
+          (setf (shader-uniform-block-members block)
+                (loop for member-form in members
+                      for index from 0
+                      collect
+                      (destructuring-bind (member-name member-type)
+                          member-form
+                        (let ((resolved-type
+                                (find-shader-type member-type member-form)))
+                          ;; This intentionally models the renderer's current
+                          ;; camera ABI: an aggregate of aligned vec4 lanes.
+                          ;; Do not imply general std140 packing until the
+                          ;; language owns that calculation explicitly.
+                          (unless (eq resolved-type (find-shader-type :vec4))
+                            (error 'shader-language-error
+                                   :form member-form
+                                   :reason :unsupported-uniform-member-type
+                                   :details member-type))
+                          (make-instance
+                           'shader-uniform-member
+                           :name member-name :type resolved-type
+                           :block block :index index :offset (* index 16)
+                           :source-form member-form)))))
+          block)
+        (let ((resolved-type (find-shader-type type form)))
+          (unless (and (shader-type-opaque-kind resolved-type)
+                       (not (eq (shader-type-opaque-kind resolved-type)
+                                :uniform-block)))
         (error 'shader-language-error
                :form form :reason :non-resource-type :details type))
-      (make-instance 'shader-resource
-                     :name name :type resolved-type
-                     :descriptor-set set :binding binding
-                     :source-form form))))
+          (when members
+            (error 'shader-language-error
+                   :form form :reason :members-on-opaque-resource))
+          (make-instance 'shader-resource
+                         :name name :type resolved-type
+                         :descriptor-set set :binding binding
+                         :source-form form)))))
 
 (defun parse-output-assignment (form environment outputs)
   (unless (and (consp form) (shader-symbol= (first form) 'set-output)
@@ -533,9 +601,15 @@
                           (getf options :outputs)))
          (resources (mapcar #'parse-resource-declaration
                             (getf options :resources)))
+         (environment-items
+           (append inputs
+                   (loop for resource in resources
+                         if (typep resource 'shader-uniform-block)
+                           append (shader-uniform-block-members resource)
+                         else collect resource)))
          (environment
            (mapcar (lambda (item) (cons (shader-object-name item) item))
-                   (append inputs resources))))
+                   environment-items)))
     (unless (member stage '(:vertex :fragment :compute))
       (error 'shader-language-error
              :form options :reason :invalid-stage :details stage))
@@ -705,6 +779,8 @@ A newer concurrent notification remains pending."
                  :accessor context-constant-ids)
    (variable-ids :initform (make-hash-table :test #'eq)
                  :accessor context-variable-ids)
+   (uniform-struct-ids :initform (make-hash-table :test #'eq)
+                       :accessor context-uniform-struct-ids)
    (loaded-values :initform (make-hash-table :test #'eq)
                   :accessor context-loaded-values)
    (loaded-instructions :initform (make-hash-table :test #'eq)
@@ -808,6 +884,41 @@ A newer concurrent notification remains pending."
                                (list id 'type-pointer storage-class value-id))
           id))))
 
+(defun ensure-uniform-block-type-id (context block)
+  (or (gethash block (context-uniform-struct-ids context))
+      (let ((id (reserve-shader-id
+                 context
+                 (format nil "~A-BLOCK" (shader-object-name block)))))
+        (setf (gethash block (context-uniform-struct-ids context)) id)
+        (append-context-form
+         'type-declarations context
+         (list* id 'type-struct
+                (mapcar (lambda (member)
+                          (ensure-shader-type-id
+                           context (shader-declaration-type member)))
+                        (shader-uniform-block-members block))))
+        (append-context-form 'annotations context
+                             (list 'decorate id 'block))
+        (dolist (member (shader-uniform-block-members block))
+          (append-context-form
+           'annotations context
+           (list 'member-decorate id
+                 (shader-uniform-member-index member)
+                 'offset (shader-uniform-member-offset member))))
+        id)))
+
+(defun ensure-uniform-block-pointer-type-id (context block)
+  (let* ((struct-id (ensure-uniform-block-type-id context block))
+         (key (list 'uniform struct-id)))
+    (or (gethash key (context-pointer-ids context))
+        (let ((id (reserve-shader-id
+                   context
+                   (format nil "~A-POINTER" (shader-object-name block)))))
+          (setf (gethash key (context-pointer-ids context)) id)
+          (append-context-form 'type-declarations context
+                               (list id 'type-pointer 'uniform struct-id))
+          id))))
+
 (defun shader-constant-name (value)
   (format nil "FLOAT-~A" value))
 
@@ -838,6 +949,23 @@ A newer concurrent notification remains pending."
               (associate-shader-instruction context expression instruction))
             id)))))
 
+(defun ensure-shader-uint-constant (context value)
+  "Return an internal unsigned constant used for structural addressing."
+  (let ((key (list :uint value)))
+    (or (gethash key (context-constant-ids context))
+        (let ((type-id (or (gethash :uint (context-type-ids context))
+                           (let ((id (reserve-shader-id context "UINT")))
+                             (setf (gethash :uint (context-type-ids context)) id)
+                             (append-context-form 'type-declarations context
+                                                  (list id 'type-int 32 0))
+                             id)))
+              (id (reserve-shader-id context
+                                     (format nil "UINT-~D" value))))
+          (setf (gethash key (context-constant-ids context)) id)
+          (append-context-form 'constant-declarations context
+                               (list id 'constant type-id value))
+          id))))
+
 (defun ensure-sampled-image-type-id (context)
   (let* ((key :sampled-image)
          (table (context-pointer-ids context)))
@@ -857,9 +985,13 @@ A newer concurrent notification remains pending."
               (ecase (shader-interface-direction declaration)
                 (:input 'input)
                 (:output 'output)))
+             (shader-uniform-block 'uniform)
              (shader-resource 'uniform-constant)))
          (type (shader-declaration-type declaration))
-         (pointer-id (ensure-pointer-type-id context direction type))
+         (pointer-id
+           (if (typep declaration 'shader-uniform-block)
+               (ensure-uniform-block-pointer-type-id context declaration)
+               (ensure-pointer-type-id context direction type)))
          (variable-id (reserve-shader-id context
                                          (shader-object-name declaration))))
     (setf (gethash declaration (context-variable-ids context)) variable-id)
@@ -869,8 +1001,12 @@ A newer concurrent notification remains pending."
       (shader-interface-variable
        (append-context-form
         'annotations context
-        (list 'decorate variable-id 'location
-              (shader-interface-location declaration)))
+        (if (shader-interface-built-in declaration)
+            (list 'decorate variable-id 'built-in
+                  (list 'enum 'built-in
+                        (shader-interface-built-in declaration)))
+            (list 'decorate variable-id 'location
+                  (shader-interface-location declaration))))
        (setf (context-interfaces context)
              (nconc (context-interfaces context) (list variable-id))))
       (shader-resource
@@ -935,6 +1071,26 @@ A newer concurrent notification remains pending."
        (let* ((source (shader-binding-expression target))
               (value (lower-shader-expression context source)))
          (alias-shader-expression context expression source)
+         value))
+      (shader-uniform-member
+       (let* ((block (shader-uniform-member-block target))
+              (type (shader-declaration-type target))
+              (pointer
+                (fresh-shader-id context
+                                 (format nil "~A-POINTER"
+                                         (shader-object-name target))))
+              (value
+                (fresh-shader-id context (shader-object-name target))))
+         (emit-shader-instruction
+          context expression
+          (list pointer 'access-chain
+                (ensure-pointer-type-id context 'uniform type)
+                (gethash block (context-variable-ids context))
+                (ensure-shader-uint-constant
+                 context (shader-uniform-member-index target))))
+         (emit-shader-instruction
+          context expression
+          (list value 'load (ensure-shader-type-id context type) pointer))
          value))
       (shader-variable-declaration
        (multiple-value-bind (value found-p)

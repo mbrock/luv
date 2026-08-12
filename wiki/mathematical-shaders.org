@@ -38,12 +38,12 @@ This separation preserves the assembler as an inspectable truth rather than
 hiding it behind a string-generating compiler.  It also makes the source and
 machine views objects that McCLIM can present and relate.
 
-* The block material is the first real client
+* The block pipeline is the first real client
 :PROPERTIES:
 :ID: B9M2FX
 :END:
 
-The fragment shader used by the playable block world lives in
+The vertex and fragment shaders used by the playable block world live in
 [[file:../block-fragment-shader.lisp][=block-fragment-shader.lisp=]].  Its complete material calculation is ordinary
 Lisp-shaped source:
 
@@ -78,6 +78,13 @@ Lisp-shaped source:
     (set-output color-output rgba)))
 #+end_src
 
+The vertex method is a CLOS graph too.  Its built-in =position= output and
+six-member camera uniform block are first-class declaration objects; member
+references lower to =AccessChain= and =Load= instructions with retained
+provenance.  Uniform blocks currently admit aligned =vec4= lanes only, matching
+the renderer's actual camera ABI instead of pretending to provide general
+=std140= packing.  The old handwritten block vertex module has been deleted.
+
 The public renderer API did not change.  =block-world-fragment-module= still
 returns a structured SPIR-V module and =block-world-fragment-shader= still
 returns assembled words.  =block-world-fragment-lowering= exposes the richer
@@ -104,18 +111,19 @@ of accumulating anonymous versions.
 A narrow MOP dependent observes =add-method= and =remove-method=.  Its callback
 only increments a revision under a mutex; it never calls the generic function,
 compiles, or enters Vulkan while the generic function is being mutated.  The
-block-world frame callback notices the pending revision and builds a complete
-candidate specification, lowering, SPIR-V module, shader module, and render
-pipeline on the renderer's owning thread.
+block-world frame callback notices a pending vertex or fragment revision and
+builds a complete pair of specifications, lowerings, SPIR-V modules, shader
+modules, and one render pipeline on the renderer's owning thread.
 
 Only a fully created candidate is published.  A failed edit records a
 diagnostic and leaves the last installed pipeline rendering.  A successful
-swap publishes the new artifact before retiring the old pipeline and fragment
-module through the backend's submission-aware destruction path.  Stopping the
-demo unsubscribes both method dependents and destroys the installed artifacts.
+swap publishes the new artifact before retiring the old pipeline and both
+shader modules through the backend's submission-aware destruction path.
+Stopping the demo unsubscribes all method dependents and destroys the installed
+artifacts.
 
-The two initial roles are =:block-surface/:fragment= and
-=:block-crosshair/:fragment=.  These are render roles, not block kinds: the
+The initial roles are =:block-surface/:vertex=,
+=:block-surface/:fragment=, and =:block-crosshair/:fragment=.  These are render roles, not block kinds: the
 current chunk mesh combines block materials into one atlas-backed draw, so
 pretending there is already one GPU pipeline per block kind would encode a
 false ownership model.
@@ -159,8 +167,8 @@ global table saying that the =f-mul= opcode exists.
 
 [[file:../mcclim-shader-lab.lisp][=mcclim-shader-lab.lisp=]] defines a real application frame on luv's McCLIM
 backend.  Its material header renders the generated atlas as selectable block
-cards and offers live definition tabs for the block-surface and crosshair
-methods.  Clicking a tab recompiles the current method while retaining the
+cards and offers live definition tabs for block geometry, block surface, and
+crosshair methods.  Clicking a tab recompiles the current method while retaining the
 last good lowering on error.  Its left pane renders declarations and nested mathematical
 expressions.  Its right pane renders CLOS functions, basic blocks, and literal
 SSA instruction forms.  Materials, definitions, expressions, instructions,
@@ -182,16 +190,24 @@ In the durable SLY image:
   (luv.mcclim:open-shader-lab))
 
 (luv.mcclim:refresh-shader-lab *shader-lab*)
-(luv.mcclim:shader-lab-health *shader-lab*) ; => :responsive
+(multiple-value-bind (status report)
+    (luv.mcclim:shader-lab-health *shader-lab*)
+  (list status
+        (luv.mcclim:shader-lab-health-report-mirror-count report)
+        (luv.mcclim:shader-lab-health-report-canvas-state report)))
+;; => (:responsive 1 :open)
 
 (luv.mcclim:close-shader-lab *shader-lab*)
 #+end_src
 
 The workbench runs =run-frame-top-level= in its own McCLIM process; SDL
 translates native events, while the frame command loop resolves presentation
-gestures.  Refresh and health checks interrupt that process, require a bounded
-semaphore acknowledgement, and return =:unresponsive= rather than silently
-assuming a frozen window processed the request.  Closing the helper interrupts
+gestures.  Refresh and health checks queue an event through that ordinary
+command loop and require a bounded acknowledgement.  The structured report
+also checks frame state, process liveness, mirror count, canvas state, and
+mirror/event-handler ownership.  A timeout returns =:unresponsive= with a
+best-effort frame-thread backtrace rather than silently assuming a live thread
+means a healthy window.  Startup is bounded too.  Closing the helper interrupts
 the process with =frame-exit= and lets the usual disown/native teardown path
 release its method dependents and native canvas.
 

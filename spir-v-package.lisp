@@ -70,9 +70,16 @@
            #:shader-interface-variable
            #:shader-interface-direction
            #:shader-interface-location
+           #:shader-interface-built-in
            #:shader-resource
            #:shader-resource-descriptor-set
            #:shader-resource-binding
+           #:shader-uniform-block
+           #:shader-uniform-block-members
+           #:shader-uniform-member
+           #:shader-uniform-member-block
+           #:shader-uniform-member-index
+           #:shader-uniform-member-offset
            #:shader-binding
            #:shader-binding-expression
            #:shader-expression
@@ -128,6 +135,8 @@
            #:spinning-texture-vertex-shader
            #:spinning-texture-fragment-shader
            #:block-world-vertex-module
+           #:block-world-vertex-specification
+           #:block-world-vertex-lowering
            #:block-world-fragment-specification
            #:block-world-fragment-lowering
            #:block-world-fragment-module

@@ -95,6 +95,65 @@
     (ok (> (length (spv:shader-specification-expressions specification))
            (length (spv:shader-specification-bindings specification))))))
 
+(deftest block-vertex-source-is-a-typed-clos-graph-with-an-explicit-abi
+  (let* ((specification (spv:block-world-vertex-specification))
+         (resource (first (spv:shader-specification-resources specification)))
+         (clip-position
+           (find 'clip-position
+                 (spv:shader-specification-outputs specification)
+                 :key #'spv:shader-object-name
+                 :test (lambda (left right)
+                         (string-equal (symbol-name left)
+                                       (symbol-name right)))))
+         (fog-factor (binding-named 'fog-factor specification)))
+    (ok (typep specification 'spv:shader-specification))
+    (ok (eq (spv:shader-specification-stage specification) :vertex))
+    (ok (= (length (spv:shader-specification-inputs specification)) 3))
+    (ok (= (length (spv:shader-specification-outputs specification)) 4))
+    (ok (eq (spv:shader-interface-built-in clip-position) :position))
+    (ok (typep resource 'spv:shader-uniform-block))
+    (ok (= (spv:shader-resource-binding resource) 2))
+    (ok (equal (mapcar (lambda (member)
+                         (string-downcase
+                          (symbol-name (spv:shader-object-name member))))
+                       (spv:shader-uniform-block-members resource))
+               '("camera-vector" "right-vector" "up-vector" "forward-vector"
+                 "projection-vector" "fog-vector")))
+    (ok (equal (mapcar #'spv:shader-uniform-member-offset
+                       (spv:shader-uniform-block-members resource))
+               '(0 16 32 48 64 80)))
+    (ok (equal (form-names
+                (spv:shader-expression-form
+                 (spv:shader-binding-expression fog-factor)))
+               '("-" 1.0 "fog-distance-squared")))))
+
+(deftest block-vertex-uniform-members-retain-access-chain-provenance
+  (let* ((lowering (spv:block-world-vertex-lowering))
+         (specification (spv:shader-lowering-specification lowering))
+         (camera (binding-named 'camera specification))
+         (reference
+           (first (spv:shader-call-operands
+                   (spv:shader-binding-expression camera))))
+         (instructions
+           (gethash reference
+                    (spv:shader-lowering-expression-instructions lowering)))
+         (names (mapcar (lambda (instruction)
+                          (symbol-name (spv:instruction-name instruction)))
+                        instructions)))
+    (ok (find "ACCESS-CHAIN" names :test #'string=))
+    (ok (find "LOAD" names :test #'string=))))
+
+(deftest uniform-blocks-do-not-pretend-to-implement-general-packing
+  (ok (signals
+       (spv::parse-shader-specification
+        'test-uniform-layout
+        '(:stage :vertex
+          :resources ((state :uniform-block :binding 0
+                       :members ((unsupported :float))))
+          :outputs ((position :vec4 :built-in :position)))
+        '((set-output position (vec4 0.0 0.0 0.0 1.0))))
+       'spv:shader-language-error)))
+
 (deftest lowering-retains-expression-to-ssa-provenance
   (let* ((lowering (spv:block-world-fragment-lowering))
          (specification (spv:shader-lowering-specification lowering))
@@ -190,7 +249,10 @@
       (ok (> (length vertex) 5))
       (ok (> (length fragment) 5))
       (ok (= (aref vertex 0) #x07230203))
-      (ok (= (aref fragment 0) #x07230203)))))
+      (ok (= (aref fragment 0) #x07230203)))
+    (let ((vertex (spv:block-world-vertex-shader)))
+      (ok (> (length vertex) 5))
+      (ok (= (aref vertex 0) #x07230203)))))
 
 (deftest shader-diagnostics-name-the-source-failure
   (let ((unknown-reason

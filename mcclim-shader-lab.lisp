@@ -55,6 +55,40 @@
    (status :initform :uncompiled :accessor shader-definition-entry-status)
    (diagnostic :initform nil :accessor shader-definition-entry-diagnostic)))
 
+(defclass shader-lab-health-report ()
+  ((status :initarg :status :reader shader-lab-health-report-status)
+   (frame-state :initarg :frame-state
+                :reader shader-lab-health-report-frame-state)
+   (process-alive-p :initarg :process-alive-p
+                    :reader shader-lab-health-report-process-alive-p)
+   (mirror-count :initarg :mirror-count :initform 0
+                 :reader shader-lab-health-report-mirror-count)
+   (canvas-state :initarg :canvas-state :initform nil
+                 :reader shader-lab-health-report-canvas-state)
+   (latency :initarg :latency :initform nil
+            :reader shader-lab-health-report-latency)
+   (problems :initarg :problems :initform nil
+             :reader shader-lab-health-report-problems)
+   (backtrace :initarg :backtrace :initform nil
+              :reader shader-lab-health-report-backtrace))
+  (:documentation
+   "One bounded diagnosis of frame, process, mirror, canvas, and responsiveness."))
+
+(defmethod print-object ((report shader-lab-health-report) stream)
+  (print-unreadable-object (report stream :type t)
+    (format stream "~S, ~D mirror~:P, canvas ~S~@[; ~{~A~^, ~}~]"
+            (shader-lab-health-report-status report)
+            (shader-lab-health-report-mirror-count report)
+            (shader-lab-health-report-canvas-state report)
+            (shader-lab-health-report-problems report))))
+
+(climi::define-event-class shader-lab-health-event (climi::standard-event)
+  ((sheet :initarg :sheet :reader clim:event-sheet)
+   (function :initarg :function :reader shader-lab-health-event-function)))
+
+(defmethod handle-event ((sheet sheet) (event shader-lab-health-event))
+  (funcall (shader-lab-health-event-function event)))
+
 (defun refresh-shader-definition-entry (entry &key force)
   "Compile ENTRY's current method without discarding its last good lowering."
   (let ((dependent (shader-definition-entry-dependent entry)))
@@ -138,6 +172,9 @@
    (process
     :initform nil
     :accessor shader-lab-process)
+   (health-report
+    :initform nil
+    :accessor shader-lab-last-health-report)
    (selection
     :initform nil
     :accessor shader-lab-selection))
@@ -363,10 +400,14 @@
             (luv.spir-v:shader-interface-direction declaration)))
   (write-char #\Space stream)
   (write-shader-name (luv.spir-v:shader-object-name declaration) stream)
-  (format stream " : ~A  [location ~D]~%"
+  (format stream " : ~A  [~A]~%"
           (shader-type-label
            (luv.spir-v:shader-declaration-type declaration))
-          (luv.spir-v:shader-interface-location declaration)))
+          (if (luv.spir-v:shader-interface-built-in declaration)
+              (format nil "built-in ~(~A~)"
+                      (luv.spir-v:shader-interface-built-in declaration))
+              (format nil "location ~D"
+                      (luv.spir-v:shader-interface-location declaration)))))
 
 (defun display-shader-resource (stream resource)
   (write-string "  resource " stream)
@@ -374,7 +415,15 @@
   (format stream " : ~A  [set ~D, binding ~D]~%"
           (shader-type-label (luv.spir-v:shader-declaration-type resource))
           (luv.spir-v:shader-resource-descriptor-set resource)
-          (luv.spir-v:shader-resource-binding resource)))
+          (luv.spir-v:shader-resource-binding resource))
+  (when (typep resource 'luv.spir-v:shader-uniform-block)
+    (dolist (member (luv.spir-v:shader-uniform-block-members resource))
+      (format stream "    ~2D  "
+              (luv.spir-v:shader-uniform-member-offset member))
+      (write-shader-name (luv.spir-v:shader-object-name member) stream)
+      (format stream " : ~A~%"
+              (shader-type-label
+               (luv.spir-v:shader-declaration-type member))))))
 
 (defun display-shader-source (frame stream)
   (let* ((lowering (shader-lab-lowering frame))
@@ -600,13 +649,18 @@
 
 (defun pipeline-for-shader-definition (role stage pipelines)
   (find-if (lambda (pipeline)
-             (and (eq role (luv:live-shader-pipeline-role pipeline))
-                  (eq stage (luv:live-shader-pipeline-stage pipeline))))
+             (ecase stage
+               (:vertex
+                (eq role (luv:live-shader-pipeline-vertex-role pipeline)))
+               (:fragment
+                (and (eq role (luv:live-shader-pipeline-role pipeline))
+                     (eq stage (luv:live-shader-pipeline-stage pipeline))))))
            pipelines))
 
 (defun make-default-shader-definitions (pipelines)
   (loop for (role stage label) in
-        '((:block-surface :fragment "BLOCK SURFACE")
+        '((:block-surface :vertex "BLOCK GEOMETRY")
+          (:block-surface :fragment "BLOCK SURFACE")
           (:block-crosshair :fragment "CROSSHAIR INK"))
         collect
         (make-live-shader-definition-entry
@@ -624,7 +678,7 @@
   frame)
 
 (defun call-in-shader-lab-process (frame function timeout)
-  "Run FUNCTION on FRAME's process and return completion and condition."
+  "Queue FUNCTION through FRAME's ordinary event loop, with a bounded wait."
   (let ((process (shader-lab-process frame)))
     (if (null process)
         (handler-case (values t (funcall function) nil)
@@ -633,13 +687,18 @@
               (result nil)
               (condition nil))
           (handler-case
-              (clim-sys:process-interrupt
-               process
-               (lambda ()
-                 (unwind-protect
-                      (handler-case (setf result (funcall function))
-                        (error (caught) (setf condition caught)))
-                   (sb-thread:signal-semaphore completion))))
+              (let ((sheet (frame-top-level-sheet frame)))
+                (climi::queue-append
+                 (climi::frame-event-queue frame)
+                 (make-instance
+                  'shader-lab-health-event
+                  :sheet sheet
+                  :function
+                  (lambda ()
+                    (unwind-protect
+                         (handler-case (setf result (funcall function))
+                           (error (caught) (setf condition caught)))
+                      (sb-thread:signal-semaphore completion))))))
             (error (caught)
               (setf condition caught)
               (sb-thread:signal-semaphore completion)))
@@ -647,17 +706,88 @@
               (values t result condition)
               (values nil nil nil))))))
 
+(defun shader-lab-window-snapshot (frame)
+  "Inspect FRAME's actual top-level mirror and native canvas on its process."
+  (let* ((sheet (frame-top-level-sheet frame))
+         (port (and sheet (port sheet)))
+         (mirrors (and (typep port 'luv-port) (port-mirrors port)))
+         (direct-mirror (and sheet (sheet-direct-mirror sheet)))
+         (canvas (and (typep direct-mirror 'luv-mirror)
+                      (mirror-target direct-mirror)))
+         (problems nil))
+    (unless sheet (push "no top-level sheet" problems))
+    (unless (typep port 'luv-port) (push "frame is not on a luv port" problems))
+    (unless (= (length mirrors) 1)
+      (push (format nil "expected one mirror, found ~D" (length mirrors))
+            problems))
+    (unless (and direct-mirror (member direct-mirror mirrors :test #'eq))
+      (push "direct mirror is not registered on the port" problems))
+    (unless (typep direct-mirror 'luv-mirror)
+      (push "top-level sheet has no luv mirror" problems))
+    (unless canvas (push "mirror has no native canvas" problems))
+    (when (and canvas (not (eq :open (luv:canvas-state canvas))))
+      (push (format nil "canvas is ~S" (luv:canvas-state canvas)) problems))
+    (when (and canvas (not (eq (luv:canvas-event-handler canvas)
+                               direct-mirror)))
+      (push "canvas event handler is not its mirror" problems))
+    (list :mirror-count (length mirrors)
+          :canvas-state (and canvas (luv:canvas-state canvas))
+          :problems (nreverse problems))))
+
+(defun capture-shader-lab-process-backtrace (process &key (timeout 0.25))
+  "Best-effort bounded backtrace capture for an unresponsive frame process."
+  (when (and process (sb-thread:thread-alive-p process))
+    (let ((completion (sb-thread:make-semaphore :count 0))
+          (backtrace nil))
+      (handler-case
+          (sb-thread:interrupt-thread
+           process
+           (lambda ()
+             (unwind-protect
+                  (setf backtrace (sb-debug:list-backtrace :count 30))
+               (sb-thread:signal-semaphore completion))))
+        (error () (return-from capture-shader-lab-process-backtrace nil)))
+      (when (sb-thread:wait-on-semaphore completion :timeout timeout)
+        backtrace))))
+
 (defun shader-lab-health (frame &key (timeout 0.5))
-  "Boundedly ask FRAME's command process to acknowledge that it can run Lisp."
+  "Return a status and structured frame/process/mirror/canvas health report."
   (check-type frame shader-lab)
-  (if (eq :disowned (frame-state frame))
-      (values :closed nil)
-      (multiple-value-bind (completed-p result condition)
-          (call-in-shader-lab-process frame (lambda () t) timeout)
-        (declare (ignore result))
-        (cond (condition (values :unresponsive condition))
-              (completed-p (values :responsive nil))
-              (t (values :unresponsive nil))))))
+  (let* ((state (frame-state frame))
+         (process (shader-lab-process frame))
+         (alive-p (or (null process) (sb-thread:thread-alive-p process)))
+         (start (get-internal-real-time))
+         (units (coerce internal-time-units-per-second 'double-float))
+         (report
+           (if (eq :disowned state)
+               (make-instance 'shader-lab-health-report
+                              :status :closed :frame-state state
+                              :process-alive-p alive-p)
+               (multiple-value-bind (completed-p snapshot condition)
+                   (call-in-shader-lab-process
+                    frame (lambda () (shader-lab-window-snapshot frame)) timeout)
+                 (let* ((latency (/ (- (get-internal-real-time) start) units))
+                        (problems (and snapshot (getf snapshot :problems)))
+                        (status (cond (condition :unresponsive)
+                                      ((not completed-p) :unresponsive)
+                                      (problems :degraded)
+                                      (t :responsive))))
+                   (make-instance
+                    'shader-lab-health-report
+                    :status status :frame-state state
+                    :process-alive-p alive-p
+                    :mirror-count (or (and snapshot
+                                           (getf snapshot :mirror-count)) 0)
+                    :canvas-state (and snapshot (getf snapshot :canvas-state))
+                    :latency latency
+                    :problems (append problems
+                                      (when condition
+                                        (list (princ-to-string condition))))
+                    :backtrace
+                    (when (eq status :unresponsive)
+                      (capture-shader-lab-process-backtrace process))))))))
+    (setf (shader-lab-last-health-report frame) report)
+    (values (shader-lab-health-report-status report) report)))
 
 (defun refresh-shader-lab (frame &key (timeout 1.0))
   "Refresh definitions on FRAME's process, returning FRAME and a health state."
@@ -675,6 +805,7 @@
 (defun open-shader-lab
     (&key specification specifications pipelines
           (server-path '(:luv))
+          (startup-timeout 10.0)
           (title "Luvcraft material and shader workbench"))
   "Open a live-definition, expression, and SSA workbench on luv's backend.
 
@@ -732,7 +863,13 @@ revision and last diagnostic then appear alongside the source definition."
       (let ((process
               (clim-sys:make-process
                #'run :name "Luvcraft material and shader workbench")))
-        (sb-thread:wait-on-semaphore startup-completion)
+        (unless (sb-thread:wait-on-semaphore
+                 startup-completion :timeout startup-timeout)
+          (ignore-errors (clim-sys:destroy-process process))
+          (dolist (definition definitions)
+            (release-shader-definition-entry definition))
+          (error "Shader lab did not create its frame within ~,2F seconds."
+                 startup-timeout))
         (when startup-error
           (error startup-error))
         (setf (shader-lab-process frame) process)

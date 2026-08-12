@@ -568,6 +568,9 @@ nothing else does."))
            #:live-shader-pipeline
            #:live-shader-pipeline-role
            #:live-shader-pipeline-stage
+           #:live-shader-pipeline-vertex-role
+           #:live-shader-pipeline-vertex-specification
+           #:live-shader-pipeline-vertex-lowering
            #:live-shader-pipeline-specification
            #:live-shader-pipeline-lowering
            #:live-shader-pipeline-status

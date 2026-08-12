@@ -115,7 +115,12 @@ of durable image.
 (asdf:load-system :luv/mcclim)
 (defparameter *shader-lab* (luv.mcclim:open-shader-lab))
 (luv.mcclim:refresh-shader-lab *shader-lab*)
-(luv.mcclim:shader-lab-health *shader-lab*) ; => :responsive
+(multiple-value-bind (status report)
+    (luv.mcclim:shader-lab-health *shader-lab*)
+  (list status
+        (luv.mcclim:shader-lab-health-report-mirror-count report)
+        (luv.mcclim:shader-lab-health-report-canvas-state report)))
+;; => (:responsive 1 :open)
 (luv.mcclim:close-shader-lab *shader-lab*)
 ```
 
@@ -126,18 +131,20 @@ number keys 1–7 select grass, dirt, stone, wood, leaves, sand, or snow.
 Escape releases the pointer.
 
 The shader lab is also a luvcraft material workbench. Its live atlas cards and
-shader-definition tabs are McCLIM presentations; click between the
-block-surface and crosshair methods to recompile their current CLOS definitions,
+shader-definition tabs are McCLIM presentations; click between block geometry,
+block surface, and crosshair methods to recompile their current CLOS definitions,
 then select expressions or SSA occurrences to follow the compiler's provenance
-in either direction. Refresh and health checks use bounded acknowledgements, so
-a stuck command process reports `:unresponsive` instead of looking successful.
+in either direction. Refresh and health checks use bounded event-loop
+acknowledgements. Health also verifies the frame state, owning process,
+registered mirror, native canvas, and event handler; a stuck command loop
+reports `:unresponsive` with a best-effort thread backtrace.
 
-The block-world fragment methods are hot-replaced at their CLOS role/stage
-coordinates. Luvcraft notices the MOP revision on its next frame, builds a full
-candidate pipeline, and publishes it only after Vulkan creation succeeds. A
-broken edit is retained as a diagnostic while the last good pipeline continues
-rendering. The current Cocoa host supports one native canvas, so close luvcraft
-before opening the standalone shader lab.
+The block-world vertex and fragment methods are hot-replaced at their CLOS
+role/stage coordinates. Luvcraft notices either MOP revision on its next frame,
+builds a coherent vertex-plus-fragment candidate pipeline, and publishes it only
+after Vulkan creation succeeds. A broken edit is retained as a diagnostic while
+the last good pipeline continues rendering. The current Cocoa host supports one
+native canvas, so close luvcraft before opening the standalone shader lab.
 
 The hidden screenshot path is useful in CI-ish or server-ish environments:
 

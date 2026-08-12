@@ -3,6 +3,65 @@
 (in-package #:luv.spir-v)
 
 (define-shader-method shader-specification-for
+    block-world-vertex-specification
+    ((role (eql :block-surface)) (stage (eql :vertex)))
+    (:stage :vertex
+     :inputs ((world-position :vec3 :location 0)
+              (uv-shade-input :vec3 :location 1)
+              (normal-input :vec3 :location 2))
+     :outputs ((clip-position :vec4 :built-in :position)
+               (uv-shade-output :vec3 :location 0)
+               (normal-output :vec3 :location 1)
+               (fog-output :vec4 :location 2))
+     :resources
+     ((camera-state :uniform-block :set 0 :binding 2
+                    :members ((camera-vector :vec4)
+                              (right-vector :vec4)
+                              (up-vector :vec4)
+                              (forward-vector :vec4)
+                              (projection-vector :vec4)
+                              (fog-vector :vec4)))))
+  (let* ((camera (swizzle camera-vector :xyz))
+         (right (swizzle right-vector :xyz))
+         (up (swizzle up-vector :xyz))
+         (forward (swizzle forward-vector :xyz))
+         (relative (- world-position camera))
+         (view-x (dot relative right))
+         (view-y (dot relative up))
+         (view-z (dot relative forward))
+         (inverse-far (swizzle fog-vector :w))
+         (fog-distance (* view-z inverse-far))
+         (fog-distance-squared (* fog-distance fog-distance))
+         (fog-factor (- 1.0 fog-distance-squared))
+         (sky (swizzle fog-vector :rgb))
+         (fog-varying (vec4 sky fog-factor))
+         (x-scale (swizzle projection-vector :x))
+         (y-scale (swizzle projection-vector :y))
+         (z-scale (swizzle projection-vector :z))
+         (z-offset (swizzle projection-vector :w))
+         (clip-x (* view-x x-scale))
+         (clip-y (- (* view-y y-scale)))
+         (clip-z (+ (* view-z z-scale) z-offset))
+         (clip (vec4 clip-x clip-y clip-z view-z)))
+    (set-output clip-position clip)
+    (set-output uv-shade-output uv-shade-input)
+    (set-output normal-output normal-input)
+    (set-output fog-output fog-varying)))
+
+(defun block-world-vertex-specification ()
+  (shader-specification-for :block-surface :vertex))
+
+(defun block-world-vertex-lowering ()
+  "Compile the camera transform and retain expression-to-SSA provenance."
+  (compile-shader-specification (block-world-vertex-specification)))
+
+(defun block-world-vertex-module ()
+  (shader-lowering-module (block-world-vertex-lowering)))
+
+(defun block-world-vertex-shader ()
+  (assemble-spir-v-module (block-world-vertex-module)))
+
+(define-shader-method shader-specification-for
     block-world-fragment-specification
     ((role (eql :block-surface)) (stage (eql :fragment)))
     (:stage :fragment

@@ -46,7 +46,17 @@
            #:shader-lab-specifications
            #:shader-lab-materials
            #:shader-lab-process
+           #:shader-lab-last-health-report
            #:shader-lab-health
+           #:shader-lab-health-report
+           #:shader-lab-health-report-status
+           #:shader-lab-health-report-frame-state
+           #:shader-lab-health-report-process-alive-p
+           #:shader-lab-health-report-mirror-count
+           #:shader-lab-health-report-canvas-state
+           #:shader-lab-health-report-latency
+           #:shader-lab-health-report-problems
+           #:shader-lab-health-report-backtrace
            #:refresh-shader-lab
            #:open-shader-lab
            #:close-shader-lab
