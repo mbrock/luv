@@ -185,6 +185,31 @@
       (setf (block-at world 2 0 0) luv::*stone-block*)
       (ok (= (block-mesh-face-count (mesh-block-world mesher world)) 10)))))
 
+(deftest chunk-mesh-is-exactly-sized-and-preserves-the-public-emitter
+  (let* ((world (make-block-world :chunk-width 2
+                                  :chunk-height 2
+                                  :chunk-depth 2))
+         (chunk (ensure-world-chunk world 0 0 0))
+         (mesher (make-instance 'exposed-face-mesher)))
+    (setf (block-at world 0 0 0) luv::*stone-block*)
+    (let* ((mesh (mesh-block-chunk mesher world chunk))
+           (vertices (block-mesh-vertices mesh)))
+      (ok (= (block-mesh-face-count mesh) 6))
+      (ok (= (length vertices)
+             (* (block-mesh-face-count mesh)
+                luv::+block-mesh-floats-per-face+)))
+      (ok (= (array-total-size vertices) (length vertices))))
+    ;; Tools may still emit a single semantic face through the exported API;
+    ;; the optimized neighborhood object remains an implementation detail.
+    (let ((vertices
+            (make-array luv::+block-mesh-floats-per-face+
+                        :element-type 'single-float :fill-pointer 0)))
+      (emit-block-face mesher world vertices luv::*stone-block*
+                       (find :top luv::*block-faces*
+                             :key #'block-face-name)
+                       0 0 0)
+      (ok (= (length vertices) luv::+block-mesh-floats-per-face+)))))
+
 (deftest chunk-mesh-products-have-narrow-neighbor-dependencies
   (let* ((world (make-block-world :chunk-width 4
                                   :chunk-height 4

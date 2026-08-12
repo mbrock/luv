@@ -423,20 +423,104 @@ terrain, populate landmarks, then replay sparse edits."
 (defgeneric mesh-block-chunk (mesher world chunk))
 (defgeneric emit-block-face (mesher world vertices block face x y z))
 
-(defun push-block-vertex (vertices position uv shade normal)
-  (dolist (component position)
-    (vector-push-extend (coerce component 'single-float) vertices))
-  (loop for component across uv
-        do (vector-push-extend component vertices))
-  (vector-push-extend (coerce shade 'single-float) vertices)
-  (dolist (component normal)
-    (vector-push-extend (coerce component 'single-float) vertices)))
+(defconstant +block-mesh-floats-per-vertex+ 9)
+(defconstant +block-mesh-vertices-per-face+ 6)
+(defconstant +block-mesh-floats-per-face+
+  (* +block-mesh-floats-per-vertex+ +block-mesh-vertices-per-face+))
+
+(declaim (inline push-block-vertex-components))
+(defun push-block-vertex-components
+    (vertices px py pz u v shade nx ny nz)
+  "Append one interleaved vertex without constructing tuple objects."
+  (vector-push (coerce px 'single-float) vertices)
+  (vector-push (coerce py 'single-float) vertices)
+  (vector-push (coerce pz 'single-float) vertices)
+  (vector-push (coerce u 'single-float) vertices)
+  (vector-push (coerce v 'single-float) vertices)
+  (vector-push (coerce shade 'single-float) vertices)
+  (vector-push (coerce nx 'single-float) vertices)
+  (vector-push (coerce ny 'single-float) vertices)
+  (vector-push (coerce nz 'single-float) vertices)
+  vertices)
 
 (defun block-color-variation (x y z)
   (+ 0.93 (* 0.07 (/ (mod (+ (* x 17) (* y 31) (* z 13)) 7) 6.0))))
 
-(defun mesher-block-at (mesher world x y z)
-  (multiple-value-bind (block status) (block-at world x y z)
+(defstruct (block-mesh-neighborhood
+             (:constructor %make-block-mesh-neighborhood))
+  "The 3x3x3 resident chunk neighborhood needed by one chunk mesh."
+  (origin-x 0 :type integer)
+  (origin-y 0 :type integer)
+  (origin-z 0 :type integer)
+  (width 16 :type (integer 1))
+  (height 16 :type (integer 1))
+  (depth 16 :type (integer 1))
+  (chunks (make-array 27 :initial-element nil) :type simple-vector))
+
+(defun block-mesh-neighborhood-index (dx dy dz)
+  (+ (1+ dx) (* 3 (+ (1+ dy) (* 3 (1+ dz))))))
+
+(defun make-block-mesh-neighborhood (world chunk)
+  "Resolve once the chunks every visibility and AO sample can reach."
+  (let* ((domain (block-chunk-domain chunk))
+         (coordinate (chunk-domain-coordinate domain))
+         (shape (voxel-space-chunk-shape (block-world-space world)))
+         (width (chunk-shape-width shape))
+         (height (chunk-shape-height shape))
+         (depth (chunk-shape-depth shape))
+         (chunk-x (chunk-coordinate-x coordinate))
+         (chunk-y (chunk-coordinate-y coordinate))
+         (chunk-z (chunk-coordinate-z coordinate))
+         (chunks (make-array 27 :initial-element nil)))
+    (loop for dz from -1 to 1 do
+      (loop for dy from -1 to 1 do
+        (loop for dx from -1 to 1 do
+          (setf (aref chunks (block-mesh-neighborhood-index dx dy dz))
+                (world-chunk-at world
+                                (+ chunk-x dx)
+                                (+ chunk-y dy)
+                                (+ chunk-z dz))))))
+    (%make-block-mesh-neighborhood
+     :origin-x (* chunk-x width)
+     :origin-y (* chunk-y height)
+     :origin-z (* chunk-z depth)
+     :width width :height height :depth depth :chunks chunks)))
+
+(declaim (inline block-mesh-neighborhood-block-at))
+(defun block-mesh-neighborhood-block-at (neighborhood x y z)
+  "Read a nearby world site with no coordinate objects or hash-key consing."
+  (let ((relative-x (- x (block-mesh-neighborhood-origin-x neighborhood)))
+        (relative-y (- y (block-mesh-neighborhood-origin-y neighborhood)))
+        (relative-z (- z (block-mesh-neighborhood-origin-z neighborhood))))
+    (multiple-value-bind (dx local-x)
+        (floor relative-x (block-mesh-neighborhood-width neighborhood))
+      (multiple-value-bind (dy local-y)
+          (floor relative-y (block-mesh-neighborhood-height neighborhood))
+        (multiple-value-bind (dz local-z)
+            (floor relative-z (block-mesh-neighborhood-depth neighborhood))
+          (if (and (<= -1 dx 1) (<= -1 dy 1) (<= -1 dz 1))
+              (let ((chunk
+                      (aref (block-mesh-neighborhood-chunks neighborhood)
+                            (block-mesh-neighborhood-index dx dy dz))))
+                (if chunk
+                    (values
+                     (block-content-at-offset
+                      (block-chunk-content chunk)
+                      (+ local-x
+                         (* (block-mesh-neighborhood-width neighborhood)
+                            (+ local-y
+                               (* (block-mesh-neighborhood-height neighborhood)
+                                  local-z)))))
+                     :resident)
+                    (values nil :absent)))
+              (values nil :absent)))))))
+
+(defun mesher-block-at (mesher samples x y z)
+  (multiple-value-bind (block status)
+      (etypecase samples
+        (block-world (block-at samples x y z))
+        (block-mesh-neighborhood
+         (block-mesh-neighborhood-block-at samples x y z)))
     (ecase status
       (:resident block)
       (:absent
@@ -446,31 +530,39 @@ terrain, populate landmarks, then replay sparse edits."
          (:error
           (error "Meshing reached absent terrain at (~D ~D ~D)." x y z)))))))
 
-(defun block-face-corner-occlusion (mesher world face corner x y z)
-  (let* ((normal (block-face-neighbor face))
-         (axes (loop for component in normal
-                     for axis from 0
-                     when (zerop component) collect axis))
-         (first-axis (first axes))
-         (second-axis (second axes))
-         (first-sign (if (zerop (nth first-axis corner)) -1 1))
-         (second-sign (if (zerop (nth second-axis corner)) -1 1)))
-    (labels ((occupied-p (first-step second-step)
-               (let ((offset (copy-list normal)))
-                 (incf (nth first-axis offset) first-step)
-                 (incf (nth second-axis offset) second-step)
-                 (block-solid-p
-                  (mesher-block-at mesher world
-                                   (+ x (first offset))
-                                   (+ y (second offset))
-                                   (+ z (third offset)))))))
-      (let* ((first-side (occupied-p first-sign 0))
-             (second-side (occupied-p 0 second-sign))
-             (corner-block (occupied-p first-sign second-sign)))
-        (if (and first-side second-side)
-            0.56
-            (- 1.0 (* 0.14 (count t (list first-side second-side
-                                           corner-block)))))))))
+(declaim (inline block-face-corner-occlusion-components))
+(defun block-face-corner-occlusion-components
+    (mesher samples nx ny nz cx cy cz x y z)
+  "Return corner AO using scalar offsets and no temporary axis/offset lists."
+  (flet ((occupied-p (ox oy oz)
+           (block-solid-p
+            (mesher-block-at mesher samples (+ x ox) (+ y oy) (+ z oz)))))
+    (multiple-value-bind (first-side second-side corner-block)
+        (cond
+          ((not (zerop nx))
+           (let ((sy (if (zerop cy) -1 1))
+                 (sz (if (zerop cz) -1 1)))
+             (values (occupied-p nx sy 0)
+                     (occupied-p nx 0 sz)
+                     (occupied-p nx sy sz))))
+          ((not (zerop ny))
+           (let ((sx (if (zerop cx) -1 1))
+                 (sz (if (zerop cz) -1 1)))
+             (values (occupied-p sx ny 0)
+                     (occupied-p 0 ny sz)
+                     (occupied-p sx ny sz))))
+          (t
+           (let ((sx (if (zerop cx) -1 1))
+                 (sy (if (zerop cy) -1 1)))
+             (values (occupied-p sx 0 nz)
+                     (occupied-p 0 sy nz)
+                     (occupied-p sx sy nz)))))
+      (if (and first-side second-side)
+          0.56
+          (- 1.0
+             (* 0.14 (+ (if first-side 1 0)
+                        (if second-side 1 0)
+                        (if corner-block 1 0))))))))
 
 (defun block-face-local-uv (face corner)
   (case (block-face-name face)
@@ -490,46 +582,135 @@ terrain, populate landmarks, then replay sparse edits."
            (v (/ (+ 0.5 (* local-v (1- size))) size)))
       (vector (coerce u 'single-float) (coerce v 'single-float)))))
 
-(defmethod emit-block-face
-    ((mesher exposed-face-mesher) (world block-world) vertices
-     (block block-kind)
-     (face block-face) x y z)
+(defun emit-block-face-into
+    (mesher samples vertices block face x y z)
   (let* ((corners (block-face-corners face))
+         (normal (block-face-neighbor face))
+         (nx (first normal))
+         (ny (second normal))
+         (nz (third normal))
+         (tile (block-face-tile block face))
+         (size +block-atlas-tile-size+)
+         (atlas-width (* size +block-atlas-tile-count+))
          (variation (block-color-variation x y z)))
     (dolist (index '(0 1 2 0 2 3))
       (let* ((corner (nth index corners))
+             (cx (first corner))
+             (cy (second corner))
+             (cz (third corner))
              (shade (* variation
-                       (block-face-corner-occlusion
-                        mesher world face corner x y z)))
-             (uv (block-face-atlas-uv block face corner)))
-        (destructuring-bind (cx cy cz) corner
-          (push-block-vertex vertices (list (+ x cx) (+ y cy) (+ z cz))
-                             uv shade (block-face-neighbor face)))))
+                       (block-face-corner-occlusion-components
+                        mesher samples nx ny nz cx cy cz x y z))))
+        (multiple-value-bind (local-u local-v)
+            (block-face-local-uv face corner)
+          (push-block-vertex-components
+           vertices (+ x cx) (+ y cy) (+ z cz)
+           (/ (+ (* tile size) 0.5 (* local-u (1- size))) atlas-width)
+           (/ (+ 0.5 (* local-v (1- size))) size)
+           shade nx ny nz))))
     vertices))
+
+(defmethod emit-block-face
+    ((mesher exposed-face-mesher) (world block-world) vertices
+     (block block-kind) (face block-face) x y z)
+  "Compatibility entry point for tools emitting an individual world face."
+  (let* ((shape (voxel-space-chunk-shape (block-world-space world)))
+         (chunk-x (floor x (chunk-shape-width shape)))
+         (chunk-y (floor y (chunk-shape-height shape)))
+         (chunk-z (floor z (chunk-shape-depth shape)))
+         (chunk (world-chunk-at world chunk-x chunk-y chunk-z)))
+    (unless chunk
+      (error "Cannot emit a face from absent chunk (~D ~D ~D)."
+             chunk-x chunk-y chunk-z))
+    (emit-block-face-into
+     mesher (make-block-mesh-neighborhood world chunk)
+     vertices block face x y z)))
+
+(defun block-chunk-face-masks (mesher samples chunk)
+  "Return one exposed-face bit mask per site and the exact face count."
+  (let* ((domain (block-chunk-domain chunk))
+         (shape (voxel-space-chunk-shape (chunk-domain-space domain)))
+         (width (chunk-shape-width shape))
+         (height (chunk-shape-height shape))
+         (depth (chunk-shape-depth shape))
+         (origin (chunk-domain-origin domain))
+         (origin-x (world-coordinate-x origin))
+         (origin-y (world-coordinate-y origin))
+         (origin-z (world-coordinate-z origin))
+         (column (block-chunk-content chunk))
+         (palette (block-content-column-palette column))
+         (indices (block-content-column-indices column))
+         (masks (make-array (length indices)
+                            :element-type '(unsigned-byte 8)
+                            :initial-element 0))
+         (face-count 0)
+         (offset 0))
+    (dotimes (local-z depth)
+      (dotimes (local-y height)
+        (dotimes (local-x width)
+          (when (block-solid-p (aref palette (aref indices offset)))
+            (let ((x (+ origin-x local-x))
+                  (y (+ origin-y local-y))
+                  (z (+ origin-z local-z))
+                  (mask 0))
+              (loop for face in *block-faces*
+                    for bit from 0
+                    for normal = (block-face-neighbor face)
+                    unless (block-solid-p
+                            (mesher-block-at
+                             mesher samples
+                             (+ x (first normal))
+                             (+ y (second normal))
+                             (+ z (third normal))))
+                      do (setf mask (logior mask (ash 1 bit)))
+                         (incf face-count))
+              (setf (aref masks offset) mask)))
+          (incf offset))))
+    (values masks face-count)))
 
 (defmethod mesh-block-chunk
     ((mesher exposed-face-mesher) (world block-world) (chunk block-chunk))
-  (let ((vertices (make-array 0 :element-type 'single-float
-                                :adjustable t :fill-pointer 0))
-        (face-count 0))
-    (let ((origin (chunk-domain-origin (block-chunk-domain chunk))))
-      (map-chunk-blocks
-       (lambda (block local-x local-y local-z)
-         (when (block-solid-p block)
-           (let ((x (+ (world-coordinate-x origin) local-x))
-                 (y (+ (world-coordinate-y origin) local-y))
-                 (z (+ (world-coordinate-z origin) local-z)))
-             (dolist (face *block-faces*)
-               (destructuring-bind (dx dy dz) (block-face-neighbor face)
-                 (unless (block-solid-p
-                          (mesher-block-at mesher world
-                                           (+ x dx) (+ y dy) (+ z dz)))
-                   (emit-block-face mesher world vertices block face x y z)
-                   (incf face-count)))))))
-       chunk))
-    (make-instance 'block-mesh :vertices vertices
-                               :vertex-count (* face-count 6)
-                               :face-count face-count)))
+  (let* ((domain (block-chunk-domain chunk))
+         (shape (voxel-space-chunk-shape (chunk-domain-space domain)))
+         (width (chunk-shape-width shape))
+         (height (chunk-shape-height shape))
+         (depth (chunk-shape-depth shape))
+         (origin (chunk-domain-origin domain))
+         (origin-x (world-coordinate-x origin))
+         (origin-y (world-coordinate-y origin))
+         (origin-z (world-coordinate-z origin))
+         (column (block-chunk-content chunk))
+         (palette (block-content-column-palette column))
+         (indices (block-content-column-indices column))
+         (samples (make-block-mesh-neighborhood world chunk)))
+    (multiple-value-bind (masks face-count)
+        (block-chunk-face-masks mesher samples chunk)
+      (let ((vertices
+              (make-array (* face-count +block-mesh-floats-per-face+)
+                          :element-type 'single-float :fill-pointer 0))
+            (offset 0))
+        (dotimes (local-z depth)
+          (dotimes (local-y height)
+            (dotimes (local-x width)
+              (let ((mask (aref masks offset)))
+                (unless (zerop mask)
+                  (let ((block (aref palette (aref indices offset)))
+                        (x (+ origin-x local-x))
+                        (y (+ origin-y local-y))
+                        (z (+ origin-z local-z)))
+                    (loop for face in *block-faces*
+                          for bit from 0
+                          when (logbitp bit mask)
+                            do (emit-block-face-into
+                                mesher samples vertices block face x y z)))))
+              (incf offset))))
+        (assert (= (length vertices)
+                   (* face-count +block-mesh-floats-per-face+)))
+        (make-instance 'block-mesh
+                       :vertices vertices
+                       :vertex-count (* face-count
+                                        +block-mesh-vertices-per-face+)
+                       :face-count face-count)))))
 
 (defmethod mesh-block-world
     ((mesher exposed-face-mesher) (world block-world))
