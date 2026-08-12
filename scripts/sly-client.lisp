@@ -27,6 +27,82 @@
 (defparameter *server-log-path*
   (merge-pathnames #P".sly-server.log" *project-root*))
 (defparameter *server-start-timeout* 120)
+(defparameter *default-output-limit* (* 256 1024))
+
+(defstruct output-budget
+  limit
+  (written 0)
+  (truncated-p nil))
+
+(defclass limited-output-stream
+    (sb-gray:fundamental-character-output-stream)
+  ((target :initarg :target :reader limited-output-target)
+   (budget :initarg :budget :reader limited-output-budget)))
+
+(defun utf-8-character-length (character)
+  (let ((code (char-code character)))
+    (cond
+      ((<= code #x7f) 1)
+      ((<= code #x7ff) 2)
+      ((<= code #xffff) 3)
+      (t 4))))
+
+(defmethod sb-gray:stream-write-char ((stream limited-output-stream) character)
+  (let* ((budget (limited-output-budget stream))
+         (width (utf-8-character-length character)))
+    (if (<= (+ (output-budget-written budget) width)
+            (output-budget-limit budget))
+        (progn
+          (incf (output-budget-written budget) width)
+          (write-char character (limited-output-target stream)))
+        (setf (output-budget-truncated-p budget) t)))
+  character)
+
+(defmethod sb-gray:stream-write-string
+    ((stream limited-output-stream) string &optional (start 0) end)
+  (let* ((end (or end (length string)))
+         (budget (limited-output-budget stream))
+         (remaining (- (output-budget-limit budget)
+                       (output-budget-written budget)))
+         (cutoff start))
+    (loop while (< cutoff end)
+          for width = (utf-8-character-length (char string cutoff))
+          while (<= width remaining)
+          do (decf remaining width)
+             (incf cutoff))
+    (when (< start cutoff)
+      (write-string string (limited-output-target stream)
+                    :start start :end cutoff)
+      (incf (output-budget-written budget)
+            (- (output-budget-limit budget) remaining
+               (output-budget-written budget))))
+    (when (< cutoff end)
+      (setf (output-budget-truncated-p budget) t))
+    string))
+
+(defmethod sb-gray:stream-line-column ((stream limited-output-stream))
+  (sb-gray:stream-line-column (limited-output-target stream)))
+
+(defmethod sb-gray:stream-force-output ((stream limited-output-stream))
+  (force-output (limited-output-target stream)))
+
+(defmethod sb-gray:stream-finish-output ((stream limited-output-stream))
+  (finish-output (limited-output-target stream)))
+
+(defmethod sb-gray:stream-clear-output ((stream limited-output-stream))
+  (clear-output (limited-output-target stream)))
+
+(defun configured-output-limit ()
+  (let ((value (sb-ext:posix-getenv "LUV_SLY_MAX_OUTPUT")))
+    (cond
+      ((or (null value) (zerop (length value))) *default-output-limit*)
+      (t
+       (let ((limit (parse-integer value :junk-allowed t)))
+         (unless (and limit
+                      (every #'digit-char-p value)
+                      (not (minusp limit)))
+           (error "LUV_SLY_MAX_OUTPUT must be a non-negative byte count"))
+         limit)))))
 
 (defun string-octets (string)
   (sb-ext:string-to-octets string :external-format :utf-8))
@@ -834,7 +910,10 @@
   (format stream "       ./sly edit NAME... [--package PACKAGE]~%")
   (format stream "       ./sly xref TYPE NAME... [--package PACKAGE]~%")
   (format stream "~%Xref types: calls, calls-who, references, binds, sets,~%")
-  (format stream "            macroexpands, specializes, callers, callees, uses~%"))
+  (format stream "            macroexpands, specializes, callers, callees, uses~%")
+  (format stream
+          "~%Output is capped at ~D bytes; set LUV_SLY_MAX_OUTPUT=0 for unlimited.~%"
+          *default-output-limit*))
 
 (defun read-standard-input-to-end ()
   (with-output-to-string (output)
@@ -1045,8 +1124,37 @@
       (t
        (error "Unknown command: ~A" command)))))
 
-(handler-case
-    (sb-ext:exit :code (main (cdr sb-ext:*posix-argv*)))
-  (error (condition)
-    (format *error-output* "sly: ~A~%" condition)
-    (sb-ext:exit :code 1)))
+(let* ((original-output *standard-output*)
+       (original-error *error-output*)
+       (limit (handler-case
+                  (configured-output-limit)
+                (error (condition)
+                  (format original-error "sly: ~A~%" condition)
+                  (sb-ext:exit :code 1))))
+       (budget (and (plusp limit)
+                    (make-output-budget :limit limit)))
+       (exit-code
+         (let ((*standard-output*
+                 (if budget
+                     (make-instance 'limited-output-stream
+                                    :target original-output
+                                    :budget budget)
+                     original-output))
+               (*error-output*
+                 (if budget
+                     (make-instance 'limited-output-stream
+                                    :target original-error
+                                    :budget budget)
+                     original-error)))
+           (handler-case
+               (main (cdr sb-ext:*posix-argv*))
+             (error (condition)
+               (format *error-output* "sly: ~A~%" condition)
+               1)))))
+  (when (and budget (output-budget-truncated-p budget))
+    (force-output original-output)
+    (format original-error
+            "~&[sly output truncated after ~D bytes; set LUV_SLY_MAX_OUTPUT=0 for unlimited]~%"
+            limit)
+    (force-output original-error))
+  (sb-ext:exit :code exit-code))
