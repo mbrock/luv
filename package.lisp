@@ -450,6 +450,7 @@ nothing else does."))
            #:make-block-chunk
            #:block-chunk-domain
            #:block-chunk-content
+           #:block-chunk-incarnation
            #:block-chunk-revision
            #:block-chunk-boundary-revision
            #:chunk-block-at
@@ -474,6 +475,7 @@ nothing else does."))
            #:make-block-world
            #:world-chunk-at
            #:ensure-world-chunk
+           #:install-world-chunk-storage
            #:remove-world-chunk
            #:resident-world-chunks
            #:chunk-not-resident
@@ -498,6 +500,7 @@ nothing else does."))
            #:populate-little-world-chunk
            #:rematerialize-little-world-chunk
            #:make-little-block-world
+           #:make-empty-little-block-world
            #:describe-block-allocatingly
            #:edit-block-at
            #:block-edit-overlay
@@ -512,8 +515,13 @@ nothing else does."))
            #:block-mesh-vertices
            #:block-mesh-vertex-count
            #:block-mesh-face-count
+           #:block-mesh-snapshot
+           #:block-mesh-snapshot-key
+           #:block-mesh-snapshot-dependency-stamp
+           #:make-block-mesh-snapshot
            #:mesh-block-world
            #:mesh-block-chunk
+           #:mesh-block-snapshot
            #:chunk-mesh-dependency-stamp
            #:emit-block-face
            #:make-block-texture-atlas
@@ -543,6 +551,10 @@ nothing else does."))
            #:cube-world-demo
            #:cube-world-demo-canvas
            #:cube-world-demo-world
+           #:cube-world-demo-production-system
+           #:cube-world-demo-desired-chunks
+           #:cube-world-demo-outstanding-production
+           #:cube-world-demo-production-errors
            #:cube-world-demo-mesh
            #:cube-world-demo-chunk-products
            #:cube-world-chunk-product
@@ -564,6 +576,7 @@ nothing else does."))
            #:cube-world-demo-target
            #:edit-cube-world-block
            #:refresh-cube-world-mesh
+           #:wait-for-cube-world-products
            #:cube-world-demo-running-p
            #:live-shader-pipeline
            #:live-shader-pipeline-role

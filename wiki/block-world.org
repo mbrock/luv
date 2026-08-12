@@ -135,6 +135,72 @@ chunk-face edit rebuilds two.  The new pair is published together; the old GPU
 buffer is destroyed immediately at the API level, whose queue completion
 frontier defers native teardown if a submitted frame still owns its last use.
 
+* Chunk production is an ownership boundary
+:PROPERTIES:
+:ID: A8Y3WN
+:END:
+
+Generation and meshing are now ordinary asynchronous CPU production, not part
+of rendering's compute budget.  [[file:../examples/production.lisp][=examples/production.lisp=]] owns a deliberately
+small single-worker system built from SBCL's =SB-CONCURRENCY:MAILBOX=.  A
+blocking request mailbox lets the worker sleep without polling; the render
+owner drains the result mailbox without blocking.  A latest-value table keyed
+by =(:load chunk-key)= or =(:mesh chunk-key)= supplies coalescing and priority,
+so walking does not retain every superseded request.  At most one completed
+value waits for publication: an active request itself suppresses another wake
+until its result has been received, bounding result memory when the window
+pauses.
+
+This is not a generally concurrent world.  The canvas/render thread is the
+single writer of the resident hash table, chunk contents after publication,
+sparse edit journal, product table, and every Vulkan object.  Worker inputs are
+immutable transfers:
+
+- a load request contains the seed, chunk dimensions, deterministic landmark
+  descriptions, sparse edits captured for that chunk, and a residency-demand
+  token;
+- a =block-mesh-snapshot= contains one dense =u16= target column, a one-cell
+  halo column, a compact semantic palette, and its dependency stamp;
+- results contain either transferred chunk columns or a plain single-float
+  mesh.  They contain no live world, chunk, hash table, or GPU object.
+
+The palettes intentionally retain shared CLOS =block-kind= descriptors.  Those
+objects are immutable presentable meanings; the repeated sites remain compact
+indices and never acquire per-cell identity.  Meshing dispatches once at the
+snapshot/mesher boundary and then traverses aggregates.
+
+Publication is optimistic.  Every chunk residency receives a monotonically
+increasing *incarnation*; mesh stamps contain coordinate, incarnation, content
+revision, and only the relevant neighbor boundary incarnations/revisions.  A
+returned mesh is accepted only if its stamp still equals the live stamp.  A
+load is accepted only if its residency-demand token is still desired and the
+coordinate remains absent.  Editing, eviction, rapid travel, and evict/reload
+therefore make obsolete work harmless rather than requiring cancellation in
+the worker's inner loop.
+
+The frame still performs small bounded publication work.  Its default limits
+schedule four loads, capture one mesh snapshot, and upload two completed
+products per frame.  GPU buffer construction and writes stay there because the
+render thread owns the device.  The old mesh remains renderable until a valid
+replacement is completely uploaded.  These limits are policy knobs, while the
+ownership and validation rules are invariants.
+
+Procedural little worlds own their moving desired window.  A caller-supplied
+world without that source remains caller-owned: its current resident chunks
+are meshed asynchronously, but this production layer neither invents absent
+chunks nor evicts resident ones.
+
+The first implementation uses one worker rather than a pool.  This removes the
+large computation from rendering while keeping order and failure diagnosis
+intelligible and avoiding CPU oversubscription.  It also does not make GC
+irrelevant: SBCL may stop all Lisp threads, so allocation-efficient aggregate
+meshing remains part of the latency story.
+
+Shutdown is cooperative: the owner stops new scheduling, clears desired work,
+sends =:stop= through the mailbox, joins the worker, and only then destroys GPU
+destinations.  Worker conditions cross back as structured production results
+and are retained on the demo instead of silently killing the producer.
+
 The square is now a camera-centered resident window rather than the whole
 world.  When the player crosses a chunk boundary, one deterministic strip is
 materialized and populated, sparse edits are replayed, and the opposite strip

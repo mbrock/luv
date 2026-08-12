@@ -206,6 +206,27 @@
                  domains))
       (ok (not (eq (first domains) (second domains)))))))
 
+(deftest chunk-incarnations-survive-eviction-and-storage-transfer-is-owned
+  (let* ((world (make-block-world :chunk-width 2
+                                  :chunk-height 2
+                                  :chunk-depth 2))
+         (first (ensure-world-chunk world 0 0 0))
+         (palette (make-array 2 :initial-contents
+                              (list nil :transferred-stone)))
+         (indices (make-array 8 :element-type '(unsigned-byte 16)
+                               :initial-element 0)))
+    (setf (aref indices 3) 1)
+    (remove-world-chunk world 0 0 0)
+    (let ((second (install-world-chunk-storage
+                   world 0 0 0 palette indices)))
+      (ok (> (block-chunk-incarnation second)
+             (block-chunk-incarnation first)))
+      (ok (eq (chunk-block-at-offset second 3) :transferred-stone))
+      (ok (eq (block-content-column-palette (block-chunk-content second))
+              palette))
+      (ok (eq (block-content-column-indices (block-chunk-content second))
+              indices)))))
+
 (deftest resident-lattice-raycast
   (let* ((world (make-block-world :chunk-width 4
                                   :chunk-height 4

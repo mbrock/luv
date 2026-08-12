@@ -130,6 +130,15 @@ edit ray: left click removes, right click places, middle click picks, and the
 number keys 1–7 select grass, dirt, stone, wood, leaves, sand, or snow.
 Escape releases the pointer.
 
+Terrain generation and meshing run on one sleeping SBCL worker rather than in
+the frame callback. The world/canvas thread remains the only writer of
+residency and the only owner of Vulkan objects: it sends immutable dense chunk
+or mesh snapshots, validates incarnation/revision tokens on return, then
+publishes only a small number of CPU/GPU products per frame. Rapid travel
+coalesces work by chunk key instead of accumulating a history-sized queue.
+Prebuilt worlds keep caller-owned residency while using the same asynchronous
+meshing and render-thread publication path.
+
 The shader lab is also a luvcraft material workbench. Its live atlas cards and
 shader-definition tabs are McCLIM presentations; click between block geometry,
 block surface, and crosshair methods to recompile their current CLOS definitions,

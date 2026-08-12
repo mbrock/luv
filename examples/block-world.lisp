@@ -409,6 +409,16 @@ terrain, populate landmarks, then replay sparse edits."
     (center-little-world-residency source world 0 0 :radius chunk-radius)
     world))
 
+(defun make-empty-little-block-world (&key (chunk-width 16)
+                                           (chunk-height 16)
+                                           (chunk-depth 16)
+                                           (seed 121))
+  "Make a sourced block world whose resident set is initially empty."
+  (make-block-world
+   :id (list :little-world seed)
+   :chunk-width chunk-width :chunk-height chunk-height :chunk-depth chunk-depth
+   :source (make-instance 'little-world-source :seed seed)))
+
 (defclass block-mesher () ())
 (defclass exposed-face-mesher (block-mesher)
   ((absent-neighbor-policy
@@ -421,8 +431,32 @@ terrain, populate landmarks, then replay sparse edits."
    (vertex-count :initarg :vertex-count :reader block-mesh-vertex-count)
    (face-count :initarg :face-count :reader block-mesh-face-count)))
 
+(defclass block-mesh-snapshot ()
+  ((key :initarg :key :reader block-mesh-snapshot-key)
+   (dependency-stamp :initarg :dependency-stamp
+                     :reader block-mesh-snapshot-dependency-stamp)
+   (domain :initarg :domain :reader block-mesh-snapshot-domain)
+   (palette :initarg :palette :reader block-mesh-snapshot-palette)
+   (target-indices :initarg :target-indices
+                   :reader block-mesh-snapshot-target-indices)
+   (sample-indices :initarg :sample-indices
+                   :reader block-mesh-snapshot-sample-indices)
+   (origin-x :initarg :origin-x :reader block-mesh-snapshot-origin-x)
+   (origin-y :initarg :origin-y :reader block-mesh-snapshot-origin-y)
+   (origin-z :initarg :origin-z :reader block-mesh-snapshot-origin-z)
+   (width :initarg :width :reader block-mesh-snapshot-width)
+   (height :initarg :height :reader block-mesh-snapshot-height)
+   (depth :initarg :depth :reader block-mesh-snapshot-depth))
+  (:documentation
+   "An immutable dense chunk plus one-cell halo transferred to a CPU worker.
+
+The snapshot owns compact u16 columns, but its small palette contains the same
+shared semantic block descriptors used by the world.  Cell identity does not
+cross the thread boundary, and the worker never observes live chunk storage."))
+
 (defgeneric mesh-block-world (mesher world))
 (defgeneric mesh-block-chunk (mesher world chunk))
+(defgeneric mesh-block-snapshot (mesher snapshot))
 (defgeneric emit-block-face (mesher world vertices block face x y z))
 
 (defconstant +block-mesh-floats-per-vertex+ 9)
@@ -517,12 +551,37 @@ terrain, populate landmarks, then replay sparse edits."
                     (values nil :absent)))
               (values nil :absent)))))))
 
+(declaim (inline block-mesh-snapshot-block-at))
+(defun block-mesh-snapshot-block-at (snapshot x y z)
+  (let ((sample-x (1+ (- x (block-mesh-snapshot-origin-x snapshot))))
+        (sample-y (1+ (- y (block-mesh-snapshot-origin-y snapshot))))
+        (sample-z (1+ (- z (block-mesh-snapshot-origin-z snapshot))))
+        (sample-width (+ 2 (block-mesh-snapshot-width snapshot)))
+        (sample-height (+ 2 (block-mesh-snapshot-height snapshot)))
+        (sample-depth (+ 2 (block-mesh-snapshot-depth snapshot))))
+    (if (and (<= 0 sample-x) (< sample-x sample-width)
+             (<= 0 sample-y) (< sample-y sample-height)
+             (<= 0 sample-z) (< sample-z sample-depth))
+        (let ((index
+                (aref (block-mesh-snapshot-sample-indices snapshot)
+                      (+ sample-x
+                         (* sample-width
+                            (+ sample-y (* sample-height sample-z)))))))
+          ;; Zero is absent.  Resident air has its own palette entry.
+          (if (zerop index)
+              (values nil :absent)
+              (values (aref (block-mesh-snapshot-palette snapshot) index)
+                      :resident)))
+        (values nil :absent))))
+
 (defun mesher-block-at (mesher samples x y z)
   (multiple-value-bind (block status)
       (etypecase samples
         (block-world (describe-block-allocatingly samples x y z))
         (block-mesh-neighborhood
-         (block-mesh-neighborhood-block-at samples x y z)))
+         (block-mesh-neighborhood-block-at samples x y z))
+        (block-mesh-snapshot
+         (block-mesh-snapshot-block-at samples x y z)))
     (ecase status
       (:resident block)
       (:absent
@@ -628,10 +687,9 @@ terrain, populate landmarks, then replay sparse edits."
      mesher (make-block-mesh-neighborhood world chunk)
      vertices block face x y z)))
 
-(defun block-chunk-face-masks (mesher samples chunk)
+(defun block-storage-face-masks (mesher samples domain palette indices)
   "Return one exposed-face bit mask per site and the exact face count."
-  (let* ((domain (block-chunk-domain chunk))
-         (shape (voxel-space-chunk-shape (chunk-domain-space domain)))
+  (let* ((shape (voxel-space-chunk-shape (chunk-domain-space domain)))
          (width (chunk-shape-width shape))
          (height (chunk-shape-height shape))
          (depth (chunk-shape-depth shape))
@@ -644,66 +702,60 @@ terrain, populate landmarks, then replay sparse edits."
                             :initial-element 0))
          (face-count 0)
          (offset 0))
-    (with-block-content-storage (borrowed-domain palette indices) chunk
-      (assert (eq borrowed-domain domain))
-      (dotimes (local-z depth)
-        (dotimes (local-y height)
-          (dotimes (local-x width)
-            (when (block-solid-p (aref palette (aref indices offset)))
-              (let ((x (+ origin-x local-x))
-                    (y (+ origin-y local-y))
-                    (z (+ origin-z local-z))
-                    (mask 0))
-                (loop for face in *block-faces*
-                      for bit from 0
-                      for normal = (block-face-neighbor face)
-                      unless (block-solid-p
-                              (mesher-block-at
-                               mesher samples
-                               (+ x (first normal))
-                               (+ y (second normal))
-                               (+ z (third normal))))
-                        do (setf mask (logior mask (ash 1 bit)))
-                           (incf face-count))
-                (setf (aref masks offset) mask)))
-            (incf offset)))))
+    (dotimes (local-z depth)
+      (dotimes (local-y height)
+        (dotimes (local-x width)
+          (when (block-solid-p (aref palette (aref indices offset)))
+            (let ((x (+ origin-x local-x))
+                  (y (+ origin-y local-y))
+                  (z (+ origin-z local-z))
+                  (mask 0))
+              (loop for face in *block-faces*
+                    for bit from 0
+                    for normal = (block-face-neighbor face)
+                    unless (block-solid-p
+                            (mesher-block-at
+                             mesher samples
+                             (+ x (first normal))
+                             (+ y (second normal))
+                             (+ z (third normal))))
+                      do (setf mask (logior mask (ash 1 bit)))
+                         (incf face-count))
+              (setf (aref masks offset) mask)))
+          (incf offset))))
     (values masks face-count)))
 
-(defmethod mesh-block-chunk
-    ((mesher exposed-face-mesher) (world block-world) (chunk block-chunk))
-  (let* ((domain (block-chunk-domain chunk))
-         (shape (voxel-space-chunk-shape (chunk-domain-space domain)))
+(defun mesh-block-storage (mesher samples domain palette indices)
+  "Mesh one immutable or owner-borrowed dense chunk representation."
+  (let* ((shape (voxel-space-chunk-shape (chunk-domain-space domain)))
          (width (chunk-shape-width shape))
          (height (chunk-shape-height shape))
          (depth (chunk-shape-depth shape))
          (origin (chunk-domain-origin domain))
          (origin-x (world-coordinate-x origin))
          (origin-y (world-coordinate-y origin))
-         (origin-z (world-coordinate-z origin))
-         (samples (make-block-mesh-neighborhood world chunk)))
+         (origin-z (world-coordinate-z origin)))
     (multiple-value-bind (masks face-count)
-        (block-chunk-face-masks mesher samples chunk)
+        (block-storage-face-masks mesher samples domain palette indices)
       (let ((vertices
               (make-array (* face-count +block-mesh-floats-per-face+)
                           :element-type 'single-float :fill-pointer 0))
             (offset 0))
-        (with-block-content-storage (borrowed-domain palette indices) chunk
-          (assert (eq borrowed-domain domain))
-          (dotimes (local-z depth)
-            (dotimes (local-y height)
-              (dotimes (local-x width)
-                (let ((mask (aref masks offset)))
-                  (unless (zerop mask)
-                    (let ((block (aref palette (aref indices offset)))
-                          (x (+ origin-x local-x))
-                          (y (+ origin-y local-y))
-                          (z (+ origin-z local-z)))
-                      (loop for face in *block-faces*
-                            for bit from 0
-                            when (logbitp bit mask)
-                              do (emit-block-face-into
-                                  mesher samples vertices block face x y z)))))
-                (incf offset)))))
+        (dotimes (local-z depth)
+          (dotimes (local-y height)
+            (dotimes (local-x width)
+              (let ((mask (aref masks offset)))
+                (unless (zerop mask)
+                  (let ((block (aref palette (aref indices offset)))
+                        (x (+ origin-x local-x))
+                        (y (+ origin-y local-y))
+                        (z (+ origin-z local-z)))
+                    (loop for face in *block-faces*
+                          for bit from 0
+                          when (logbitp bit mask)
+                            do (emit-block-face-into
+                                mesher samples vertices block face x y z)))))
+              (incf offset))))
         (assert (= (length vertices)
                    (* face-count +block-mesh-floats-per-face+)))
         (make-instance 'block-mesh
@@ -711,6 +763,148 @@ terrain, populate landmarks, then replay sparse edits."
                        :vertex-count (* face-count
                                         +block-mesh-vertices-per-face+)
                        :face-count face-count)))))
+
+(defmethod mesh-block-chunk
+    ((mesher exposed-face-mesher) (world block-world) (chunk block-chunk))
+  (let ((samples (make-block-mesh-neighborhood world chunk)))
+    (with-block-content-storage (domain palette indices) chunk
+      (mesh-block-storage mesher samples domain palette indices))))
+
+(defmethod mesh-block-snapshot
+    ((mesher exposed-face-mesher) (snapshot block-mesh-snapshot))
+  (mesh-block-storage
+   mesher snapshot
+   (block-mesh-snapshot-domain snapshot)
+   (block-mesh-snapshot-palette snapshot)
+   (block-mesh-snapshot-target-indices snapshot)))
+
+(defun block-mesh-snapshot-palette-index (block palette indices)
+  (or (gethash block indices)
+      (let ((index (length palette)))
+        (unless (< index #xffff)
+          (error "A mesh snapshot cannot contain more than 65534 block states."))
+        (vector-push-extend block palette)
+        (setf (gethash block indices) index)
+        index)))
+
+(defun make-block-mesh-snapshot (world chunk dependency-stamp)
+  "Copy CHUNK and its one-cell halo into immutable worker-owned columns."
+  (let* ((domain (block-chunk-domain chunk))
+         (shape (voxel-space-chunk-shape (chunk-domain-space domain)))
+         (width (chunk-shape-width shape))
+         (height (chunk-shape-height shape))
+         (depth (chunk-shape-depth shape))
+         (sample-width (+ width 2))
+         (sample-height (+ height 2))
+         (sample-depth (+ depth 2))
+         (origin (chunk-domain-origin domain))
+         (origin-x (world-coordinate-x origin))
+         (origin-y (world-coordinate-y origin))
+         (origin-z (world-coordinate-z origin))
+         ;; Index zero denotes an absent sample.  Index one denotes resident
+         ;; air, whose semantic descriptor is also NIL.
+         (palette (make-array 2 :adjustable t :fill-pointer 2
+                                :initial-contents '(nil nil)))
+         (palette-indices (make-hash-table :test #'eq))
+         (target-indices
+           (make-array (chunk-domain-cardinality domain)
+                       :element-type '(unsigned-byte 16)))
+         (sample-indices
+           (make-array (* sample-width sample-height sample-depth)
+                       :element-type '(unsigned-byte 16)))
+         (neighborhood (make-block-mesh-neighborhood world chunk)))
+    (setf (gethash nil palette-indices) 1)
+    (dotimes (sample-z sample-depth)
+      (dotimes (sample-y sample-height)
+        (dotimes (sample-x sample-width)
+          (let ((world-x (+ origin-x (1- sample-x)))
+                (world-y (+ origin-y (1- sample-y)))
+                (world-z (+ origin-z (1- sample-z))))
+            (multiple-value-bind (block status)
+                (block-mesh-neighborhood-block-at
+                 neighborhood world-x world-y world-z)
+              (let ((index
+                      (if (eq status :resident)
+                          (block-mesh-snapshot-palette-index
+                           block palette palette-indices)
+                          0)))
+                (setf (aref sample-indices
+                            (+ sample-x
+                               (* sample-width
+                                  (+ sample-y (* sample-height sample-z)))))
+                      index)
+                (when (and (<= 1 sample-x width)
+                           (<= 1 sample-y height)
+                           (<= 1 sample-z depth))
+                  (setf (aref target-indices
+                              (+ (1- sample-x)
+                                 (* width
+                                    (+ (1- sample-y)
+                                       (* height (1- sample-z))))))
+                        index))))))))
+    (make-instance
+     'block-mesh-snapshot
+     :key (block-chunk-key chunk) :dependency-stamp dependency-stamp
+     :domain domain :palette palette :target-indices target-indices
+     :sample-indices sample-indices
+     :origin-x origin-x :origin-y origin-y :origin-z origin-z
+     :width width :height height :depth depth)))
+
+(defclass block-mesh-production-request (production-request)
+  ((absent-neighbor-policy
+    :initarg :absent-neighbor-policy
+    :reader block-mesh-production-request-absent-neighbor-policy)
+   (snapshot :initarg :snapshot :reader block-mesh-production-request-snapshot)))
+
+(defmethod perform-production-request ((request block-mesh-production-request))
+  (mesh-block-snapshot
+   (make-instance
+    'exposed-face-mesher
+    :absent-neighbor-policy
+    (block-mesh-production-request-absent-neighbor-policy request))
+   (block-mesh-production-request-snapshot request)))
+
+(defclass block-chunk-load-payload ()
+  ((key :initarg :key :reader block-chunk-load-payload-key)
+   (palette :initarg :palette :reader block-chunk-load-payload-palette)
+   (indices :initarg :indices :reader block-chunk-load-payload-indices)))
+
+(defclass block-chunk-load-request (production-request)
+  ((seed :initarg :seed :reader block-chunk-load-request-seed)
+   (demand-token :initarg :demand-token
+                 :reader block-chunk-load-request-demand-token)
+   (width :initarg :width :reader block-chunk-load-request-width)
+   (height :initarg :height :reader block-chunk-load-request-height)
+   (depth :initarg :depth :reader block-chunk-load-request-depth)
+   (landmarks :initarg :landmarks :initform nil
+              :reader block-chunk-load-request-landmarks)
+   (edits :initarg :edits :initform nil
+          :reader block-chunk-load-request-edits)))
+
+(defmethod perform-production-request ((request block-chunk-load-request))
+  "Generate one isolated chunk and transfer only its dense content columns."
+  (destructuring-bind (chunk-x chunk-y chunk-z)
+      (second (production-request-key request))
+    (let* ((source (make-instance 'little-world-source
+                                  :seed (block-chunk-load-request-seed request)))
+           (world (make-block-world
+                   :chunk-width (block-chunk-load-request-width request)
+                   :chunk-height (block-chunk-load-request-height request)
+                   :chunk-depth (block-chunk-load-request-depth request)
+                   :source source)))
+      (materialize-block-world-chunk source world chunk-x chunk-y chunk-z)
+      (dolist (landmark (block-chunk-load-request-landmarks request))
+        (destructuring-bind (block x y z) landmark
+          (setf (describe-block-allocatingly world x y z) block)))
+      (dolist (edit (block-chunk-load-request-edits request))
+        (destructuring-bind (block x y z) edit
+          (setf (describe-block-allocatingly world x y z) block)))
+      (let ((chunk (world-chunk-at world chunk-x chunk-y chunk-z)))
+        (with-block-content-storage (domain palette indices) chunk
+          (declare (ignore domain))
+          (make-instance 'block-chunk-load-payload
+                         :key (list chunk-x chunk-y chunk-z)
+                         :palette palette :indices indices))))))
 
 (defmethod mesh-block-world
     ((mesher exposed-face-mesher) (world block-world))
@@ -1268,6 +1462,22 @@ terrain, populate landmarks, then replay sparse edits."
    (context :initarg :context :reader cube-world-demo-context)
    (world :initarg :world :reader cube-world-demo-world)
    (mesher :initarg :mesher :reader cube-world-demo-mesher)
+   (production-system :initarg :production-system :initform nil
+                      :reader cube-world-demo-production-system)
+   (desired-chunks :initform (make-hash-table :test #'equal)
+                   :reader cube-world-demo-desired-chunks)
+   (next-residency-demand :initform 0
+                          :accessor cube-world-demo-next-residency-demand)
+   (outstanding-production :initform (make-hash-table :test #'equal)
+                           :reader cube-world-demo-outstanding-production)
+   (production-errors :initform nil
+                      :accessor cube-world-demo-production-errors)
+   (publication-limit :initarg :publication-limit :initform 2
+                      :reader cube-world-demo-publication-limit)
+   (load-schedule-limit :initarg :load-schedule-limit :initform 4
+                        :reader cube-world-demo-load-schedule-limit)
+   (mesh-capture-limit :initarg :mesh-capture-limit :initform 1
+                       :reader cube-world-demo-mesh-capture-limit)
    (chunk-products :initform (make-hash-table :test #'equal)
                    :reader cube-world-demo-chunk-products)
    (meshed-world-revision
@@ -1332,22 +1542,94 @@ terrain, populate landmarks, then replay sparse edits."
   (refresh-live-shader-pipeline (cube-world-demo-crosshair-pipeline demo))
   demo)
 
+(defun cancel-cube-world-chunk-production (demo key)
+  (dolist (kind '(:load :mesh))
+    (let ((production-key (list kind key)))
+      ;; Active work cannot be canceled, so retain its ticket until its result
+      ;; returns and fails desired-set/incarnation validation.
+      (when (cancel-production-request
+             (cube-world-demo-production-system demo) production-key)
+        (remhash production-key
+                 (cube-world-demo-outstanding-production demo))))))
+
+(defun cube-world-player-chunk-center (world player)
+  (if player
+      (let ((shape (voxel-space-chunk-shape (block-world-space world))))
+        (list (floor (player-x player) (chunk-shape-width shape))
+              (floor (player-z player) (chunk-shape-depth shape))))
+      '(0 0)))
+
+(defun maintain-generated-cube-world-residency
+    (demo world player radius)
+  (let ((center (cube-world-player-chunk-center world player)))
+    (unless (equal center (cube-world-demo-residency-center demo))
+      (let ((desired (cube-world-demo-desired-chunks demo))
+            (next-desired (make-hash-table :test #'equal)))
+        (loop for chunk-x from (- (first center) radius)
+                to (+ (first center) radius) do
+          (loop for chunk-z from (- (second center) radius)
+                  to (+ (second center) radius)
+                for key = (chunk-key chunk-x 0 chunk-z)
+                do (setf (gethash key next-desired)
+                         (or (gethash key desired)
+                             (incf (cube-world-demo-next-residency-demand
+                                    demo))))))
+        (maphash
+         (lambda (old-key token)
+           (declare (ignore token))
+           (unless (gethash old-key next-desired)
+             (cancel-cube-world-chunk-production demo old-key)))
+         desired)
+        (clrhash desired)
+        (maphash (lambda (key token)
+                   (setf (gethash key desired) token))
+                 next-desired)
+        (setf (cube-world-demo-residency-center demo) center)
+        ;; Eviction is an owner-side publication.  Pending work is either
+        ;; canceled before it starts or allowed to finish and fail its
+        ;; desired-set/incarnation validation harmlessly.
+        (dolist (chunk (resident-world-chunks world))
+          (let ((key (block-chunk-key chunk)))
+            (unless (gethash key desired)
+              (destructuring-bind (x y z) key
+                (remove-world-chunk world x y z))
+              (cancel-cube-world-chunk-production demo key))))))))
+
+(defun maintain-static-cube-world-residency (demo world player)
+  "Treat a caller-owned resident set as desired without loading or eviction."
+  (let ((desired (cube-world-demo-desired-chunks demo))
+        (resident (make-hash-table :test #'equal)))
+    (dolist (chunk (resident-world-chunks world))
+      (let ((key (block-chunk-key chunk)))
+        (setf (gethash key resident) t)
+        (unless (gethash key desired)
+          (setf (gethash key desired)
+                (incf (cube-world-demo-next-residency-demand demo))))))
+    (let ((departed nil))
+      (maphash (lambda (key token)
+                 (declare (ignore token))
+                 (unless (gethash key resident)
+                   (push key departed)))
+               desired)
+      (dolist (key departed)
+        (remhash key desired)
+        (cancel-cube-world-chunk-production demo key)))
+    (setf (cube-world-demo-residency-center demo)
+          (cube-world-player-chunk-center world player))))
+
 (defun maintain-cube-world-residency (demo)
-  "Recenter DEMO's generated resident window when its player changes chunk."
+  "Reconcile desired residency without generating chunks on the frame thread."
   (let* ((world (cube-world-demo-world demo))
          (source (block-world-source world))
          (player (cube-world-demo-player demo))
          (radius (cube-world-demo-residency-radius demo)))
-    (when (and player radius (typep source 'little-world-source))
-      (let* ((shape (voxel-space-chunk-shape (block-world-space world)))
-             (center
-               (list (floor (player-x player) (chunk-shape-width shape))
-                     (floor (player-z player) (chunk-shape-depth shape)))))
-        (unless (equal center (cube-world-demo-residency-center demo))
-          (multiple-value-prog1
-              (center-little-world-residency
-               source world (first center) (second center) :radius radius)
-            (setf (cube-world-demo-residency-center demo) center)))))))
+    (if (and player radius (typep source 'little-world-source))
+        (maintain-generated-cube-world-residency
+         demo world player radius)
+        ;; A caller may supply an already resident world whose source has no
+        ;; asynchronous generator.  Those chunks still need immutable mesh
+        ;; production; they simply are not loaded or evicted by this demo.
+        (maintain-static-cube-world-residency demo world player))))
 
 (defun remember-cube-world-resource (demo resource)
   (push resource (cube-world-demo-resources demo))
@@ -1361,23 +1643,40 @@ terrain, populate landmarks, then replay sparse edits."
          (y (chunk-coordinate-y coordinate))
          (z (chunk-coordinate-z coordinate)))
     (cons
-     (list chunk (block-chunk-revision chunk))
+     (list (block-chunk-key chunk)
+           (block-chunk-incarnation chunk)
+           (block-chunk-revision chunk))
      (loop for (dx dy dz) in *chunk-neighbor-directions*
            collect
            (multiple-value-bind (neighbor present-p)
                (world-chunk-at world (+ x dx) (+ y dy) (+ z dz))
              (if present-p
                  ;; Only the neighbor boundary facing this chunk contributes.
-                 (list neighbor
+                 (list (block-chunk-key neighbor)
+                       (block-chunk-incarnation neighbor)
                        (block-chunk-boundary-revision
                         neighbor (- dx) (- dy) (- dz)))
                  '(nil)))))))
 
 (defun cube-world-demo-products-in-order (demo)
   (let ((products (cube-world-demo-chunk-products demo)))
-    (loop for chunk in (resident-world-chunks (cube-world-demo-world demo))
-          for product = (gethash (block-chunk-key chunk) products)
-          when product collect product)))
+    (loop for product being the hash-values of products
+          collect product into result
+          finally
+             (return
+               (sort result
+                     (lambda (left right)
+                       (let ((a (cube-world-chunk-product-coordinate left))
+                             (b (cube-world-chunk-product-coordinate right)))
+                         (or (< (chunk-coordinate-x a) (chunk-coordinate-x b))
+                             (and (= (chunk-coordinate-x a)
+                                     (chunk-coordinate-x b))
+                                  (or (< (chunk-coordinate-y a)
+                                         (chunk-coordinate-y b))
+                                      (and (= (chunk-coordinate-y a)
+                                              (chunk-coordinate-y b))
+                                           (< (chunk-coordinate-z a)
+                                              (chunk-coordinate-z b)))))))))))))
 
 (defun cube-world-demo-mesh (demo)
   "Return a combined, inspectable snapshot of DEMO's chunk meshes."
@@ -1404,62 +1703,269 @@ terrain, populate landmarks, then replay sparse edits."
   (clrhash (cube-world-demo-chunk-products demo))
   (values))
 
-(defun refresh-cube-world-mesh (demo)
-  "Refresh only chunk products invalidated by content or neighbor boundaries.
+(defun chunk-key-distance-squared (key center)
+  (+ (expt (- (first key) (first center)) 2)
+     (expt (- (third key) (second center)) 2)))
 
-Replaced and evicted buffers are destroyed immediately at the API level.  The
-GPU completion frontier defers their native teardown when an in-flight frame
-still owns their last use."
+(defun chunk-key-nearer-p (left right center)
+  (let ((left-distance (chunk-key-distance-squared left center))
+        (right-distance (chunk-key-distance-squared right center)))
+    (or (< left-distance right-distance)
+        (and (= left-distance right-distance)
+             (loop for a in left
+                   for b in right
+                   when (/= a b) return (< a b)
+                   finally (return nil))))))
+
+(defun little-world-landmarks-for-chunk (source world key)
+  "Capture deterministic landmarks whose owned sites lie inside KEY.
+
+This retains the current visual generator while making chunk production
+independent: cross-boundary canopy sites are attributed to their destination
+chunk and do not require neighboring live mutation."
+  (destructuring-bind (chunk-x chunk-y chunk-z) key
+    (unless (zerop chunk-y)
+      (return-from little-world-landmarks-for-chunk nil))
+    (let* ((shape (voxel-space-chunk-shape (block-world-space world)))
+           (width (chunk-shape-width shape))
+           (height (chunk-shape-height shape))
+           (depth (chunk-shape-depth shape))
+           (minimum-x (* chunk-x width))
+           (minimum-z (* chunk-z depth))
+           (maximum-x (+ minimum-x width))
+           (maximum-z (+ minimum-z depth))
+           (landmarks nil))
+      (flet ((emit (block x y z)
+               (when (and (<= minimum-x x) (< x maximum-x)
+                          (<= minimum-z z) (< z maximum-z)
+                          (<= 0 y) (< y height))
+                 (push (list block x y z) landmarks))))
+        ;; A destination chunk can receive a two-cell canopy overhang from a
+        ;; landmark rooted in an immediate neighbor.
+        (loop for owner-x from (1- chunk-x) to (1+ chunk-x) do
+          (loop for owner-z from (1- chunk-z) to (1+ chunk-z) do
+            (let* ((origin-x (* owner-x width))
+                   (origin-z (* owner-z depth))
+                   (hash (little-world-hash source owner-x owner-z))
+                   (rock-x (+ origin-x 2 (mod hash (- width 4))))
+                   (rock-z (+ origin-z 2 (mod (ash hash -8) (- depth 4))))
+                   (rock-y (1+ (little-world-surface-height
+                                source rock-x rock-z height))))
+              (emit *stone-block* rock-x rock-y rock-z)
+              (when (zerop (mod hash 2))
+                (emit *stone-block* (1+ rock-x) rock-y rock-z))
+              (when (and (< (mod (ash hash -16) 5) 4)
+                         (> (little-world-value-noise
+                             source rock-x rock-z 48 29)
+                            -0.35d0))
+                (let* ((tree-x (+ origin-x 3
+                                  (mod (ash hash -3) (- width 6))))
+                       (tree-z (+ origin-z 3
+                                  (mod (ash hash -11) (- depth 6))))
+                       (surface (little-world-surface-height
+                                 source tree-x tree-z height))
+                       (surface-material
+                         (little-world-surface-material
+                          source tree-x tree-z surface height))
+                       (trunk-height (+ 3 (mod (ash hash -23) 2)))
+                       (crown (+ surface trunk-height)))
+                  (when (and (eq surface-material *grass-block*)
+                             (< (+ crown 2) height))
+                    (loop for y from (1+ surface) to crown
+                          do (emit *wood-block* tree-x y tree-z))
+                    (loop for x from (- tree-x 2) to (+ tree-x 2) do
+                      (loop for z from (- tree-z 2) to (+ tree-z 2)
+                            when (<= (+ (abs (- x tree-x))
+                                        (abs (- z tree-z)))
+                                     3)
+                              do (emit *leaf-block* x crown z)))
+                    (loop for x from (1- tree-x) to (1+ tree-x) do
+                      (loop for z from (1- tree-z) to (1+ tree-z)
+                            do (emit *leaf-block* x (1+ crown) z)))
+                    (emit *leaf-block* tree-x (+ crown 2) tree-z))))))))
+      (nreverse landmarks))))
+
+(defun schedule-cube-world-chunk-loads (demo)
+  (let* ((world (cube-world-demo-world demo))
+         (source (block-world-source world))
+         (shape (voxel-space-chunk-shape (block-world-space world)))
+         (width (chunk-shape-width shape))
+         (height (chunk-shape-height shape))
+         (depth (chunk-shape-depth shape))
+         (center (cube-world-demo-residency-center demo))
+         (outstanding (cube-world-demo-outstanding-production demo))
+         (candidates nil))
+    (maphash
+     (lambda (key demand-token)
+       (let ((production-key (list :load key)))
+         (unless (or (nth-value 1 (apply #'world-chunk-at world key))
+                     (gethash production-key outstanding))
+           (push (list key demand-token production-key) candidates))))
+     (cube-world-demo-desired-chunks demo))
+    (setf candidates
+          (sort candidates
+                (lambda (left right)
+                  (chunk-key-nearer-p (first left) (first right) center))))
+    (loop repeat (cube-world-demo-load-schedule-limit demo)
+          for candidate in candidates
+          do (destructuring-bind (key demand-token production-key) candidate
+           (let ((captured-edits nil))
+             (when (typep source 'little-world-source)
+               (maphash
+                (lambda (coordinate block)
+                  (destructuring-bind (x y z) coordinate
+                    (when (and (= (floor x width) (first key))
+                               (= (floor y height) (second key))
+                               (= (floor z depth) (third key)))
+                      (push (list block x y z) captured-edits))))
+                (block-edit-overlay-entries (little-world-source-edits source))))
+             (let ((request
+                     (make-instance
+                      'block-chunk-load-request
+                      :key production-key
+                      :priority (chunk-key-distance-squared key center)
+                      :seed (little-world-source-seed source)
+                      :demand-token demand-token
+                      :width width :height height :depth depth
+                      :landmarks
+                      (little-world-landmarks-for-chunk source world key)
+                      :edits captured-edits)))
+               (setf (gethash production-key outstanding)
+                     (schedule-production-request
+                      (cube-world-demo-production-system demo) request))))))))
+
+(defun schedule-cube-world-meshes (demo)
+  "Capture at most the configured number of immutable mesh inputs this frame."
   (let* ((world (cube-world-demo-world demo))
          (products (cube-world-demo-chunk-products demo))
-         (resident-keys (make-hash-table :test #'equal)))
+         (outstanding (cube-world-demo-outstanding-production demo))
+         (center (cube-world-demo-residency-center demo))
+         (candidates nil))
     (dolist (chunk (resident-world-chunks world))
       (let* ((key (block-chunk-key chunk))
+             (production-key (list :mesh key))
              (stamp (chunk-mesh-dependency-stamp world chunk))
              (old (gethash key products)))
-        (setf (gethash key resident-keys) t)
-        (unless (and old
-                     (equal stamp
-                            (cube-world-chunk-product-dependency-stamp old)))
-          (let ((buffer nil) (completed-p nil))
-            (unwind-protect
-                 (let* ((mesh (mesh-block-chunk
-                               (cube-world-demo-mesher demo) world chunk))
-                        (vertices (block-mesh-vertices mesh)))
-                   (setf buffer
-                         (create
-                          (cube-world-demo-device demo)
-                          (make-buffer-descriptor
-                           :label (format nil "block chunk ~{~D~^,~} revision ~D"
-                                          key (block-chunk-revision chunk))
-                           :size (max 4 (* 4 (length vertices)))
-                           :usage '(:vertex))))
-                   (write-buffer buffer vertices)
-                   (setf (gethash key products)
-                         (make-instance
-                          'cube-world-chunk-product
-                          :coordinate
-                          (chunk-domain-coordinate (block-chunk-domain chunk))
-                          :dependency-stamp stamp
-                          :mesh mesh
-                          :vertex-buffer buffer)
-                         completed-p t)
-                   (when old
-                     (destroy
-                      (cube-world-chunk-product-vertex-buffer old))))
-              (unless completed-p
-                (when buffer (destroy buffer))))))))
-    (let ((evicted-keys nil))
-      (maphash (lambda (key product)
-                 (unless (gethash key resident-keys)
-                   (destroy (cube-world-chunk-product-vertex-buffer product))
-                   (push key evicted-keys)))
-               products)
-      (dolist (key evicted-keys)
-        (remhash key products)))
-    (setf (cube-world-demo-meshed-world-revision demo)
-          (block-world-revision world))
-    (cube-world-demo-products-in-order demo)))
+        (when (and (gethash key (cube-world-demo-desired-chunks demo))
+                   (not (gethash production-key outstanding))
+                   (not (and old
+                             (equal stamp
+                                    (cube-world-chunk-product-dependency-stamp
+                                     old)))))
+          (push (list (chunk-key-distance-squared key center)
+                      chunk key production-key stamp)
+                candidates))))
+    (setf candidates (sort candidates #'< :key #'first))
+    (loop repeat (cube-world-demo-mesh-capture-limit demo)
+          for candidate in candidates
+          do (destructuring-bind (priority chunk key production-key stamp)
+                 candidate
+               (declare (ignore key))
+               (let* ((snapshot
+                        (make-block-mesh-snapshot world chunk stamp))
+                      (request
+                        (make-instance
+                         'block-mesh-production-request
+                         :key production-key :priority priority
+                         :absent-neighbor-policy
+                         (exposed-face-mesher-absent-neighbor-policy
+                          (cube-world-demo-mesher demo))
+                         :snapshot snapshot)))
+                 (setf (gethash production-key outstanding)
+                       (schedule-production-request
+                        (cube-world-demo-production-system demo) request)))))))
+
+(defun publish-cube-world-mesh (demo request mesh)
+  "Validate and install one worker result on the render/GPU owning thread."
+  (let* ((snapshot (block-mesh-production-request-snapshot request))
+         (key (block-mesh-snapshot-key snapshot))
+         (world (cube-world-demo-world demo))
+         (chunk (apply #'world-chunk-at world key)))
+    (when (and chunk
+               (gethash key (cube-world-demo-desired-chunks demo))
+               (equal (block-mesh-snapshot-dependency-stamp snapshot)
+                      (chunk-mesh-dependency-stamp world chunk)))
+      (let ((buffer nil) (completed-p nil)
+            (old (gethash key (cube-world-demo-chunk-products demo))))
+        (unwind-protect
+             (progn
+               (setf buffer
+                     (create
+                      (cube-world-demo-device demo)
+                      (make-buffer-descriptor
+                       :label (format nil "block chunk ~{~D~^,~} async mesh" key)
+                       :size (max 4 (* 4 (length (block-mesh-vertices mesh))))
+                       :usage '(:vertex))))
+               (write-buffer buffer (block-mesh-vertices mesh))
+               (setf (gethash key (cube-world-demo-chunk-products demo))
+                     (make-instance
+                      'cube-world-chunk-product
+                      :coordinate
+                      (chunk-domain-coordinate (block-chunk-domain chunk))
+                      :dependency-stamp
+                      (block-mesh-snapshot-dependency-stamp snapshot)
+                      :mesh mesh :vertex-buffer buffer)
+                     completed-p t)
+               (when old
+                 (destroy (cube-world-chunk-product-vertex-buffer old))))
+          (unless completed-p
+            (when buffer (destroy buffer))))))))
+
+(defun publish-cube-world-load (demo request payload)
+  (let* ((key (block-chunk-load-payload-key payload))
+         (world (cube-world-demo-world demo)))
+    (when (and (eql (gethash key (cube-world-demo-desired-chunks demo))
+                    (block-chunk-load-request-demand-token request))
+               (not (nth-value 1 (apply #'world-chunk-at world key))))
+      (destructuring-bind (x y z) key
+        (install-world-chunk-storage
+         world x y z
+         (block-chunk-load-payload-palette payload)
+         (block-chunk-load-payload-indices payload))))))
+
+(defun drain-cube-world-production (demo)
+  "Publish a bounded number of completed CPU products this frame."
+  (loop repeat (cube-world-demo-publication-limit demo)
+        do (multiple-value-bind (result present-p)
+               (receive-production-result-no-hang
+                (cube-world-demo-production-system demo))
+             (unless present-p (return))
+             (let* ((request (production-result-request result))
+                    (key (production-request-key request))
+                    (ticket (gethash key
+                                     (cube-world-demo-outstanding-production
+                                      demo))))
+               (when (eql ticket (production-request-ticket request))
+                 (remhash key (cube-world-demo-outstanding-production demo))
+                 (cond
+                   ((production-result-condition result)
+                    (push result (cube-world-demo-production-errors demo)))
+                   ((typep request 'block-chunk-load-request)
+                    (publish-cube-world-load
+                     demo request (production-result-value result)))
+                   ((typep request 'block-mesh-production-request)
+                    (publish-cube-world-mesh
+                     demo request (production-result-value result)))))))))
+
+(defun evict-cube-world-products (demo)
+  (let ((evicted nil)
+        (desired (cube-world-demo-desired-chunks demo))
+        (products (cube-world-demo-chunk-products demo)))
+    (maphash (lambda (key product)
+               (unless (gethash key desired)
+                 (destroy (cube-world-chunk-product-vertex-buffer product))
+                 (push key evicted)))
+             products)
+    (dolist (key evicted) (remhash key products))))
+
+(defun refresh-cube-world-mesh (demo)
+  "Advance asynchronous loading/meshing without doing either computation here."
+  (drain-cube-world-production demo)
+  (schedule-cube-world-chunk-loads demo)
+  (schedule-cube-world-meshes demo)
+  (setf (cube-world-demo-meshed-world-revision demo)
+        (block-world-revision (cube-world-demo-world demo)))
+  (cube-world-demo-products-in-order demo))
 
 (defun cube-world-demo-target (demo &key (max-distance 8d0))
   "Raycast from DEMO's camera through resident block terrain."
@@ -1638,15 +2144,48 @@ still owns their last use."
                    (decf (cube-world-demo-physics-accumulator demo)
                          +player-physics-step+)))
       (maintain-cube-world-residency demo)
+      (evict-cube-world-products demo)
       (present-canvas-frame
        (cube-world-demo-context demo)
        (lambda (surface-texture encoder)
          (encode-cube-world-frame demo surface-texture encoder)))))))
 
+(defun wait-for-cube-world-products
+    (demo &key minimum (timeout 10.0))
+  "Wait outside frame encoding for a useful initial set of chunk meshes.
+
+MINIMUM defaults to nine or the whole desired set when it is smaller.  This
+keeps the procedural smoke path quick without making a one-chunk caller-owned
+world wait for products which can never exist."
+  (let* ((minimum (or minimum
+                      (min 9 (hash-table-count
+                              (cube-world-demo-desired-chunks demo)))))
+         (deadline (+ (get-internal-real-time)
+                      (round (* timeout internal-time-units-per-second)))))
+    (loop
+      (let ((products nil))
+        (request-canvas-frame
+       (cube-world-demo-canvas demo)
+       (lambda (timestamp)
+         (declare (ignore timestamp))
+         (refresh-cube-world-mesh demo)
+         (setf products
+               (hash-table-count (cube-world-demo-chunk-products demo)))))
+      (when (>= products minimum)
+        (return demo))
+      (when (>= (get-internal-real-time) deadline)
+        (error "Only ~D chunk meshes arrived within ~,2F seconds; expected ~D.~@[ Last worker error: ~A~]"
+               products
+               timeout minimum
+               (let ((result (first (cube-world-demo-production-errors demo))))
+                 (and result (production-result-condition result)))))
+      (sleep 0.005)))))
+
 (defun capture-cube-world-screenshot (demo pathname)
   "Render DEMO once, read its real color attachment, and write a PNG."
   (unless (eq :open (canvas-state (cube-world-demo-canvas demo)))
     (error "Cannot capture a closed cube-world demo."))
+  (wait-for-cube-world-products demo)
   (let* ((context (cube-world-demo-context demo))
          (extent (canvas-extent context))
          (buffer
@@ -1753,12 +2292,15 @@ still owns their last use."
                                 (width 960) (height 640)
                                 (frames-per-second 60)
                                 (visible-p t)
-                                (world (make-little-block-world))
+                                (world (make-empty-little-block-world))
                                 (mesher (make-instance
                                          'exposed-face-mesher))
                                 (camera (make-instance 'fly-camera))
                                 player
-                                (residency-radius 4))
+                                (residency-radius 4)
+                                (publication-limit 2)
+                                (load-schedule-limit 4)
+                                (mesh-capture-limit 1))
   "Open a little CPU-meshed block world.
 
 Click to capture the pointer, look with the mouse, walk with WASD, and jump
@@ -1774,6 +2316,7 @@ capture-only demand clock."
                                  :visible-p visible-p))
         (player (or player (make-player-for-camera camera)))
         (device nil) (context nil) (resources nil) (pipelines nil) (demo nil)
+        (production-system nil)
         (completed-p nil))
     (open-canvas canvas)
     (unwind-protect
@@ -1785,6 +2328,9 @@ capture-only demand clock."
                  (make-canvas-context
                   canvas *gpu-provider*
                   (make-canvas-configuration :device device)))
+           (setf production-system
+                 (make-single-worker-production-system
+                  :name "luvcraft chunk producer"))
            (flet ((keep (resource)
                     (push resource resources)
                     resource))
@@ -1916,9 +2462,13 @@ capture-only demand clock."
                      'cube-world-demo
                      :canvas canvas :device device :context context
                      :world world :mesher mesher
+                     :production-system production-system
                      :camera (sync-camera-to-player camera player)
                      :player player
                      :residency-radius residency-radius
+                     :publication-limit publication-limit
+                     :load-schedule-limit load-schedule-limit
+                     :mesh-capture-limit mesh-capture-limit
                      :title-base title
                      :atlas-texture atlas-texture :atlas-view atlas-view
                      :atlas-sampler atlas-sampler
@@ -1940,6 +2490,9 @@ capture-only demand clock."
              (setf demo new-demo)
              (update-cube-world-demo-title demo)
              (maintain-cube-world-residency demo)
+             ;; Startup does not synchronously generate or mesh the whole
+             ;; residency window.  The first frame may briefly show sky while
+             ;; the nearest immutable products arrive.
              (refresh-cube-world-mesh demo)
              (setf (canvas-event-handler canvas) demo
                    (canvas-clock canvas)
@@ -1953,6 +2506,8 @@ capture-only demand clock."
                    completed-p t)
                demo)))
       (unless completed-p
+        (when production-system
+          (ignore-errors (stop-production-system production-system)))
         (when demo
           (ignore-errors (destroy-cube-world-chunk-products demo)))
         (dolist (pipeline pipelines)
@@ -1978,6 +2533,8 @@ capture-only demand clock."
       (request-canvas-frame canvas (lambda (timestamp)
                                      (declare (ignore timestamp)))))
     (setf (canvas-event-handler canvas) nil)
+    ;; Stop CPU publication before releasing any render-owned destination.
+    (stop-production-system (cube-world-demo-production-system demo))
     (destroy-cube-world-chunk-products demo)
     (release-live-shader-pipeline (cube-world-demo-block-pipeline demo))
     (release-live-shader-pipeline (cube-world-demo-crosshair-pipeline demo))
@@ -1997,7 +2554,7 @@ capture-only demand clock."
     (pathname &key
                 (title "luv hidden block world")
                 (width 960) (height 640)
-                (world (make-little-block-world))
+                (world (make-empty-little-block-world))
                 (mesher (make-instance 'exposed-face-mesher))
                 (camera (make-instance 'fly-camera)))
   "Open a hidden SDL/Vulkan canvas, render one block-world frame, and save it."
@@ -2019,7 +2576,7 @@ capture-only demand clock."
                  (title "luv hidden block world")
                  (width 960) (height 640)
                  (yaw-step 0.35)
-                 (world (make-little-block-world))
+                 (world (make-empty-little-block-world))
                  (mesher (make-instance 'exposed-face-mesher))
                  (camera (make-instance 'fly-camera)))
   "Capture COUNT hidden block-world frames into DIRECTORY.

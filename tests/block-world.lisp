@@ -3,6 +3,27 @@
 
 (in-package #:luv/examples/tests)
 
+(defclass gated-production-request (luv::production-request)
+  ((gate :initarg :gate :reader gated-production-request-gate)
+   (value :initarg :value :reader gated-production-request-value)))
+
+(defmethod luv::perform-production-request ((request gated-production-request))
+  (sb-thread:wait-on-semaphore (gated-production-request-gate request))
+  (gated-production-request-value request))
+
+(defun production-system-active-request (system)
+  (sb-thread:with-mutex ((luv::production-system-lock system))
+    (luv::production-system-active-request system)))
+
+(defun wait-until (predicate &key (timeout 2.0))
+  (let ((deadline (+ (get-internal-real-time)
+                     (round (* timeout internal-time-units-per-second)))))
+    (loop until (funcall predicate)
+          when (>= (get-internal-real-time) deadline)
+            do (return nil)
+          do (sleep 0.001)
+          finally (return t))))
+
 (deftest little-world-is-deterministic-and-chunked
   (let ((first (make-little-block-world :seed 77))
         (second (make-little-block-world :seed 77)))
@@ -210,6 +231,125 @@
                        0 0 0)
       (ok (= (length vertices) luv::+block-mesh-floats-per-face+)))))
 
+(deftest immutable-mesh-snapshot-is-bit-identical-to-owner-side-meshing
+  (let* ((world (make-little-block-world :chunk-radius 1 :seed 121))
+         (chunk (world-chunk-at world 0 0 0))
+         (mesher (make-instance 'exposed-face-mesher))
+         (stamp (chunk-mesh-dependency-stamp world chunk))
+         (snapshot (make-block-mesh-snapshot world chunk stamp))
+         (direct (mesh-block-chunk mesher world chunk))
+         (copied (mesh-block-snapshot mesher snapshot)))
+    (ok (equal stamp (block-mesh-snapshot-dependency-stamp snapshot)))
+    (ok (= (block-mesh-face-count direct) (block-mesh-face-count copied)))
+    (ok (= (block-mesh-vertex-count direct) (block-mesh-vertex-count copied)))
+    (ok (equalp (block-mesh-vertices direct) (block-mesh-vertices copied)))
+    (setf (describe-block-allocatingly world 0 0 0) nil)
+    (ok (equalp (block-mesh-vertices copied)
+                (block-mesh-vertices (mesh-block-snapshot mesher snapshot))))))
+
+(deftest production-system-coalesces-desired-work-and-stops-cooperatively
+  (let ((system (luv::make-single-worker-production-system
+                 :name "luv production test")))
+    (unwind-protect
+         (let* ((first
+                  (make-instance
+                   'luv::block-chunk-load-request
+                   :key '(:load (0 0 0)) :priority 4
+                   :seed 1 :demand-token 1
+                   :width 8 :height 8 :depth 8))
+                (latest
+                  (make-instance
+                   'luv::block-chunk-load-request
+                   :key '(:load (0 0 0)) :priority 0
+                   :seed 2 :demand-token 2
+                   :width 8 :height 8 :depth 8)))
+           (luv::schedule-production-request system first)
+           (luv::schedule-production-request system latest)
+           (multiple-value-bind (result present-p)
+               (sb-concurrency:receive-message
+                (luv::production-system-result-mailbox system) :timeout 5.0)
+             (ok present-p)
+             (ok (null (luv::production-result-condition result)))
+             (ok (<= (luv::production-system-pending-count system) 2))))
+      (luv::stop-production-system system))
+    (ok (not (sb-thread:thread-alive-p
+              (luv::production-system-thread system))))))
+
+(deftest production-system-keeps-one-result-behind-its-owner
+  (let* ((system (luv::make-single-worker-production-system
+                  :name "luv production backpressure test"))
+         (first-gate (sb-thread:make-semaphore :count 0))
+         (second-gate (sb-thread:make-semaphore :count 0))
+         (first (make-instance 'gated-production-request
+                               :key :first :gate first-gate :value :first))
+         (second (make-instance 'gated-production-request
+                                :key :second :gate second-gate :value :second)))
+    (unwind-protect
+         (progn
+           (luv::schedule-production-request system first)
+           (ok (wait-until
+                (lambda () (eq (production-system-active-request system)
+                               first))))
+           ;; Scheduling while FIRST is active must remain desired work, not a
+           ;; second queued wake which can run behind an unread first result.
+           (luv::schedule-production-request system second)
+           (sb-thread:signal-semaphore first-gate)
+           (ok (wait-until
+                (lambda ()
+                  (and (= 1 (sb-concurrency:mailbox-count
+                             (luv::production-system-result-mailbox system)))
+                       (not (eq (production-system-active-request system)
+                                first))))))
+           (ok (null (production-system-active-request system)))
+           (ok (= 1 (sb-concurrency:mailbox-count
+                     (luv::production-system-result-mailbox system))))
+           (ok (nth-value
+                1 (gethash :second (luv::production-system-desired system))))
+           (multiple-value-bind (result present-p)
+               (luv::receive-production-result-no-hang system)
+             (ok present-p)
+             (ok (eq (luv::production-result-value result) :first)))
+           (ok (wait-until
+                (lambda () (eq (production-system-active-request system)
+                               second))))
+           (sb-thread:signal-semaphore second-gate)
+           (multiple-value-bind (result present-p)
+               (sb-concurrency:receive-message
+                (luv::production-system-result-mailbox system) :timeout 2.0)
+             (ok present-p)
+             (ok (eq (luv::production-result-value result) :second))))
+      (sb-thread:signal-semaphore first-gate)
+      (sb-thread:signal-semaphore second-gate)
+      (luv::stop-production-system system))))
+
+(deftest prebuilt-world-remains-desired-for-asynchronous-meshing
+  (let* ((world (make-block-world :chunk-width 8
+                                  :chunk-height 8
+                                  :chunk-depth 8))
+         (first (ensure-world-chunk world -1 0 2))
+         (second (ensure-world-chunk world 3 0 -4))
+         (system (luv::make-single-worker-production-system
+                  :name "luv static residency test"))
+         (demo (make-instance 'cube-world-demo
+                              :world world
+                              :player (make-instance 'block-world-player
+                                                     :x 0d0 :y 0d0 :z 0d0)
+                              :production-system system)))
+    (unwind-protect
+         (progn
+           (luv::maintain-cube-world-residency demo)
+           (ok (gethash (luv::block-chunk-key first)
+                        (cube-world-demo-desired-chunks demo)))
+           (ok (gethash (luv::block-chunk-key second)
+                        (cube-world-demo-desired-chunks demo)))
+           (remove-world-chunk world -1 0 2)
+           (luv::maintain-cube-world-residency demo)
+           (ok (not (gethash (luv::block-chunk-key first)
+                             (cube-world-demo-desired-chunks demo))))
+           (ok (gethash (luv::block-chunk-key second)
+                        (cube-world-demo-desired-chunks demo))))
+      (luv::stop-production-system system))))
+
 (deftest chunk-mesh-products-have-narrow-neighbor-dependencies
   (let* ((world (make-block-world :chunk-width 4
                                   :chunk-height 4
@@ -227,7 +367,12 @@
       (ok (equal stamp (chunk-mesh-dependency-stamp world left)))
       ;; This touches RIGHT's -X boundary and must invalidate LEFT.
       (setf (describe-block-allocatingly world 4 2 2) luv::*stone-block*)
-      (ok (not (equal stamp (chunk-mesh-dependency-stamp world left)))))))
+      (ok (not (equal stamp (chunk-mesh-dependency-stamp world left)))))
+    (let ((stamp (chunk-mesh-dependency-stamp world left)))
+      (remove-world-chunk world 0 0 0)
+      (let ((replacement (ensure-world-chunk world 0 0 0)))
+        (ok (not (equal stamp
+                        (chunk-mesh-dependency-stamp world replacement))))))))
 
 (deftest camera-edits-the-resident-lattice
   (let* ((world (make-block-world :chunk-width 4

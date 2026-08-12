@@ -259,6 +259,8 @@ specialized arrays rather than describing individual cells through CLOS."))
 (defclass block-chunk ()
   ((domain :initarg :domain :reader block-chunk-domain)
    (content :initarg :content :reader block-chunk-content)
+   (incarnation :initarg :incarnation :initform 0
+                :reader block-chunk-incarnation)
    (change-hook :initarg :change-hook :initform nil)
    (revision :initform 0 :reader block-chunk-revision)
    ;; -X, +X, -Y, +Y, -Z, +Z.  A derived product for one chunk depends on
@@ -268,15 +270,17 @@ specialized arrays rather than describing individual cells through CLOS."))
     :initform (make-array 6 :element-type '(unsigned-byte 64)
                            :initial-element 0))))
 
-(defun make-block-chunk (domain &key change-hook)
+(defun make-block-chunk (domain &key change-hook (incarnation 0) content)
   (check-type domain chunk-domain)
   (unless (or (null change-hook) (functionp change-hook))
     (error "A block chunk change hook must be a function or NIL."))
   (make-instance 'block-chunk
                  :domain domain
+                 :incarnation incarnation
                  :change-hook change-hook
-                 :content (make-block-content-column
-                           (chunk-domain-cardinality domain))))
+                 :content (or content
+                              (make-block-content-column
+                               (chunk-domain-cardinality domain)))))
 
 (defmethod borrow-block-content-storage ((chunk block-chunk))
   (let ((column (block-chunk-content chunk)))
@@ -392,6 +396,7 @@ work.  Whole-domain algorithms should use WITH-BLOCK-CONTENT-STORAGE."
    (revision :initform 0 :reader block-world-revision)
    (residency-revision :initform 0
                        :reader block-world-residency-revision)
+   (next-chunk-incarnation :initform 0)
    (change-transaction-depth :initform 0)
    (change-pending-p :initform nil)))
 
@@ -447,6 +452,19 @@ including when FUNCTION exits non-locally after making a partial change."
   (check-type world block-world)
   (gethash (chunk-key x y z) (block-world-chunks world)))
 
+(defun next-block-world-chunk-incarnation (world)
+  (incf (slot-value world 'next-chunk-incarnation)))
+
+(defun make-world-owned-block-chunk (world domain &key content)
+  (make-block-chunk
+   domain
+   :incarnation (next-block-world-chunk-incarnation world)
+   :content content
+   :change-hook
+   (lambda (changed-chunk)
+     (declare (ignore changed-chunk))
+     (note-block-world-change world))))
+
 (defun ensure-world-chunk (world x y z)
   "Return the resident chunk at X,Y,Z, creating an all-air chunk if absent."
   (multiple-value-bind (chunk present-p) (world-chunk-at world x y z)
@@ -454,18 +472,42 @@ including when FUNCTION exits non-locally after making a partial change."
         chunk
         (let* ((coordinate (make-chunk-coordinate x y z))
                (domain (make-chunk-domain (block-world-space world) coordinate))
-               (new-chunk
-                 (make-block-chunk
-                  domain
-                  :change-hook
-                  (lambda (changed-chunk)
-                    (declare (ignore changed-chunk))
-                    (note-block-world-change world)))))
+               (new-chunk (make-world-owned-block-chunk world domain)))
           (setf (gethash (chunk-key x y z) (block-world-chunks world))
                 new-chunk)
           (incf (slot-value world 'residency-revision))
           (note-block-world-change world)
           new-chunk))))
+
+(defun install-world-chunk-storage (world x y z palette indices)
+  "Install transferred dense storage as a newly resident chunk.
+
+The caller gives WORLD ownership of PALETTE and INDICES and must not mutate
+them afterward.  Installation is deliberately a single-writer operation: it
+publishes one complete chunk and advances residency/general revisions once."
+  (check-type world block-world)
+  (check-type palette vector)
+  (check-type indices (array (unsigned-byte 16) (*)))
+  (when (nth-value 1 (world-chunk-at world x y z))
+    (error "Chunk (~D ~D ~D) is already resident." x y z))
+  (let* ((coordinate (make-chunk-coordinate x y z))
+         (domain (make-chunk-domain (block-world-space world) coordinate))
+         (cardinality (chunk-domain-cardinality domain)))
+    (unless (= (length indices) cardinality)
+      (error "Transferred chunk storage has ~D indices; ~D are required."
+             (length indices) cardinality))
+    (dotimes (offset cardinality)
+      (unless (< (aref indices offset) (length palette))
+        (error "Palette index ~D at offset ~D exceeds palette length ~D."
+               (aref indices offset) offset (length palette))))
+    (let* ((content (make-instance 'block-content-column
+                                   :palette palette :indices indices))
+           (chunk (make-world-owned-block-chunk
+                   world domain :content content)))
+      (setf (gethash (chunk-key x y z) (block-world-chunks world)) chunk)
+      (incf (slot-value world 'residency-revision))
+      (note-block-world-change world)
+      chunk)))
 
 (defun remove-world-chunk (world x y z)
   "Remove a resident chunk.  Return the chunk and whether it was present."

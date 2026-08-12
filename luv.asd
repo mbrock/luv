@@ -162,11 +162,13 @@
   :depends-on (#:luv/world
                #:luv/canvas
                #:luv/spir-v
+               #:sb-concurrency
                #:uiop)
   :serial t
   :components ((:module "examples"
                 :components ((:file "demo")
                              (:file "png")
+                             (:file "production")
                              (:file "block-world"))))
   :in-order-to ((asdf:test-op (asdf:test-op #:luv/examples/tests))))
 
