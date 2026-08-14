@@ -365,6 +365,7 @@
   (f-min 37)
   (f-max 40)
   (f-clamp 43)
+  (step 48)
   (smooth-step 49)
   (normalize 69))
 (define-enumeration storage-class

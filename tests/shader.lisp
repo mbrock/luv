@@ -257,6 +257,45 @@
     (ok (find "VECTOR-TIMES-SCALAR" names :test #'string=))
     (ok (> (length (spv:assemble-shader-specification specification)) 5))))
 
+(deftest depth-texture-sampling-feeds-ordinary-float-math
+  (let* ((specification
+           (spv:parse-shader-specification
+            'depth-sample
+            '(:stage :fragment
+              :inputs ((uv :vec2 :location 0)
+                       (receiver-depth :float :location 1))
+              :outputs ((visibility :float :location 0))
+              :resources ((shadow-map :depth-texture-2d :binding 0)
+                          (shadow-sampler :sampler :binding 1)))
+            '((let* ((stored-depth (sample shadow-map shadow-sampler uv))
+                     (depth-lane (swizzle stored-depth :x))
+                     (visible (spv:step receiver-depth depth-lane)))
+                (set-output visibility visible)))))
+         (stored-depth (binding-named 'stored-depth specification))
+         (depth-lane (binding-named 'depth-lane specification))
+         (visible (binding-named 'visible specification))
+         (module (spv:shader-lowering-module
+                  (spv:compile-shader-specification specification)))
+         (instructions (spv:lower-spir-v module))
+         (names (mapcar (lambda (instruction)
+                          (symbol-name (spv:instruction-name instruction)))
+                        instructions)))
+    (ok (spv:shader-type=
+         (spv:shader-expression-type
+          (spv:shader-binding-expression stored-depth))
+         :vec4))
+    (ok (spv:shader-type=
+         (spv:shader-expression-type
+          (spv:shader-binding-expression depth-lane))
+         :float))
+    (ok (spv:shader-type=
+         (spv:shader-expression-type
+          (spv:shader-binding-expression visible))
+         :float))
+    (ok (find "IMAGE-SAMPLE-IMPLICIT-LOD" names :test #'string=))
+    (ok (find "EXT-INST" names :test #'string=))
+    (ok (> (length (spv:assemble-shader-specification specification)) 5))))
+
 (deftest shader-lowering-is-deterministic-and-assemblable
   (flet ((forms ()
            (mapcar #'spv:instruction-form

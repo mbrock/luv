@@ -1,7 +1,7 @@
 (defpackage #:luv.spir-v
   (:nicknames #:spv)
   (:use #:cl)
-  (:shadow #:function #:load #:return #:variable)
+  (:shadow #:function #:load #:return #:step #:variable)
   (:export #:spir-v-error
            #:spir-v-error-form
            #:spir-v-error-reason
@@ -66,6 +66,8 @@
            #:shader-type-name
            #:shader-type-component-count
            #:shader-type-opaque-kind
+           #:shader-type-sample-result-type
+           #:shader-type-image-depth-p
            #:find-shader-type
            #:shader-type=
            #:shader-object-name
@@ -114,6 +116,7 @@
            #:swizzle
            #:clamp
            #:smoothstep
+           #:step
            #:normalize
            #:set-output
            #:shader-operator

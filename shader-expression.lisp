@@ -44,7 +44,15 @@
    (opaque-kind
     :initarg :opaque-kind
     :initform nil
-    :reader shader-type-opaque-kind)))
+    :reader shader-type-opaque-kind)
+   (sample-result-type
+    :initarg :sample-result-type
+    :initform nil
+    :reader shader-type-sample-result-type)
+   (image-depth-p
+    :initarg :image-depth-p
+    :initform nil
+    :reader shader-type-image-depth-p)))
 
 (defmethod print-object ((type shader-type) stream)
   (print-unreadable-object (type stream :type t)
@@ -52,18 +60,27 @@
 
 (defparameter *shader-types* (make-hash-table :test #'eq))
 
-(defun register-shader-type (name &key component-count opaque-kind)
+(defun register-shader-type
+    (name &key component-count opaque-kind sample-result-type image-depth-p)
   (setf (gethash name *shader-types*)
         (make-instance 'shader-type
                        :name name
                        :component-count component-count
-                       :opaque-kind opaque-kind)))
+                       :opaque-kind opaque-kind
+                       :sample-result-type sample-result-type
+                       :image-depth-p image-depth-p)))
 
 (register-shader-type :float :component-count 1)
 (register-shader-type :vec2 :component-count 2)
 (register-shader-type :vec3 :component-count 3)
 (register-shader-type :vec4 :component-count 4)
-(register-shader-type :texture-2d :opaque-kind :texture-2d)
+(register-shader-type :texture-2d
+                      :opaque-kind :texture-2d
+                      :sample-result-type :vec4)
+(register-shader-type :depth-texture-2d
+                      :opaque-kind :texture-2d
+                      :sample-result-type :vec4
+                      :image-depth-p t)
 (register-shader-type :sampler :opaque-kind :sampler)
 (register-shader-type :uniform-block :opaque-kind :uniform-block)
 
@@ -420,10 +437,13 @@ repeating the lane arithmetic as a literal."
    (lambda (types)
      (and (= (length types) 3)
           (eq (shader-type-opaque-kind (first types)) :texture-2d)
+          (shader-type-sample-result-type (first types))
           (eq (shader-type-opaque-kind (second types)) :sampler)
           (shader-type= (third types) :vec2)))
    operands source-form :invalid-texture-sample)
-  (find-shader-type :vec4))
+  (find-shader-type
+   (shader-type-sample-result-type
+    (shader-expression-type (first operands)))))
 
 (defmethod infer-shader-call-type ((operator (eql 'mix)) operands source-form)
   (require-shader-types
@@ -469,6 +489,9 @@ repeating the lane arithmetic as a literal."
 (defmethod infer-shader-call-type
     ((operator (eql 'smoothstep)) operands source-form)
   (infer-uniform-extended-type operator operands source-form 3 3))
+
+(defmethod infer-shader-call-type ((operator (eql 'step)) operands source-form)
+  (infer-uniform-extended-type operator operands source-form 2 2))
 
 (defmethod infer-shader-call-type
     ((operator (eql 'normalize)) operands source-form)
@@ -574,6 +597,8 @@ never collides with a standard symbol's function documentation:
   "Constrain a value between uniformly typed lower and upper bounds.")
 (define-shader-operator smoothstep
   "Hermite interpolation from zero to one across an edge pair, then a value.")
+(define-shader-operator step
+  "Return zero below an edge and one at or above it, componentwise.")
 (define-shader-operator normalize
   "Scale one vector to unit length.")
 
@@ -1023,7 +1048,9 @@ A newer concurrent notification remains pending."
            (cond ((eq kind :texture-2d)
                   (list id 'type-image
                         (ensure-shader-type-id context :float)
-                        '2d 0 0 0 1 'unknown))
+                        '2d
+                        (if (shader-type-image-depth-p type) 1 0)
+                        0 0 1 'unknown))
                  ((eq kind :sampler) (list id 'type-sampler))
                  ((= (shader-type-component-count type) 1)
                   (list id 'type-float 32))
@@ -1137,8 +1164,9 @@ A newer concurrent notification remains pending."
                                (list id 'constant type-id value))
           id))))
 
-(defun ensure-sampled-image-type-id (context)
-  (let* ((key :sampled-image)
+(defun ensure-sampled-image-type-id (context texture-type)
+  (let* ((texture-type (find-shader-type texture-type))
+         (key (list :sampled-image texture-type))
          (table (context-pointer-ids context)))
     (or (gethash key table)
         (let ((id (reserve-shader-id context "SAMPLED-IMAGE")))
@@ -1146,7 +1174,7 @@ A newer concurrent notification remains pending."
           (append-context-form
            'type-declarations context
            (list id 'type-sampled-image
-                 (ensure-shader-type-id context :texture-2d)))
+                 (ensure-shader-type-id context texture-type)))
           id))))
 
 (defun ensure-glsl-extended-import (context)
@@ -1522,6 +1550,9 @@ Modules whose expressions use no extended mathematics never acquire one."
 (defmethod lower-shader-call ((operator (eql 'smoothstep)) context expression)
   (lower-extended-call context expression 'smooth-step))
 
+(defmethod lower-shader-call ((operator (eql 'step)) context expression)
+  (lower-extended-call context expression 'step))
+
 (defmethod lower-shader-call ((operator (eql 'normalize)) context expression)
   (lower-extended-call context expression 'normalize))
 
@@ -1531,16 +1562,18 @@ Modules whose expressions use no extended mathematics never acquire one."
     (let* ((texture-id (lower-shader-expression context texture))
            (sampler-id (lower-shader-expression context sampler))
            (coordinate-id (lower-shader-expression context coordinate))
+           (texture-type (shader-expression-type texture))
            (sampled-id
              (fresh-shader-id context
                               (expression-result-name expression))))
       (emit-shader-instruction
        context expression
        (list sampled-id 'sampled-image
-             (ensure-sampled-image-type-id context)
+             (ensure-sampled-image-type-id context texture-type)
              texture-id sampler-id))
       (emit-value-instruction
-       context expression :vec4 'image-sample-implicit-lod
+       context expression (shader-expression-type expression)
+       'image-sample-implicit-lod
        (list sampled-id coordinate-id)))))
 
 (defgeneric lower-shader-expression-value (context expression)
