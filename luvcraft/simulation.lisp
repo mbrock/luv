@@ -59,6 +59,10 @@
   (some (lambda (name) (gethash name keys)) names))
 
 (defmethod camera-uniform-data ((camera fly-camera) width height)
+  "The five camera lanes of the frame uniform: position, basis, projection.
+
+The environment lanes which complete the block are packed by
+FRAME-UNIFORM-DATA from the session's sky clock and profile."
   (multiple-value-bind (right up forward) (camera-basis camera)
     (let* ((near 0.1)
            (far 180.0)
@@ -67,7 +71,7 @@
            (projection
              (vec3 (/ focal aspect) focal (/ far (- far near)))))
       (make-array
-       24 :element-type 'single-float
+       20 :element-type 'single-float
        :initial-contents
        (list (coerce (camera-x camera) 'single-float)
              (coerce (camera-y camera) 'single-float)
@@ -77,8 +81,7 @@
              (aref forward 0) (aref forward 1) (aref forward 2) 0.0
              (aref projection 0) (aref projection 1) (aref projection 2)
              (coerce (/ (- (* far near)) (- far near))
-                     'single-float)
-             0.43 0.68 0.92 (coerce (/ far) 'single-float))))))
+                     'single-float))))))
 
 ;;; The first player controller is intentionally a small scalar reference
 ;;; simulation.  Its body is distinct from the view camera, and its AABB

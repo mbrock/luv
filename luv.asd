@@ -180,6 +180,7 @@
                              (:file "terrain")
                              (:file "mesher")
                              (:file "simulation")
+                             (:file "sky")
                              (:file "live-pipeline")
                              (:file "app")
                              (:file "streaming")

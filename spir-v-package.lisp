@@ -169,6 +169,12 @@
            #:block-world-fragment-specification
            #:block-world-fragment-lowering
            #:block-world-fragment-module
+           #:block-world-sky-vertex-specification
+           #:block-world-sky-vertex-module
+           #:block-world-sky-vertex-shader
+           #:block-world-sky-fragment-specification
+           #:block-world-sky-fragment-module
+           #:block-world-sky-fragment-shader
            #:block-world-crosshair-vertex-module
            #:block-world-crosshair-fragment-specification
            #:block-world-crosshair-fragment-module

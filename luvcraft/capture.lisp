@@ -71,8 +71,13 @@ world wait for products which can never exist."
                 (width 960) (height 640)
                 (world (make-empty-little-block-world))
                 (mesher (make-instance 'exposed-face-mesher))
-                (camera (make-instance 'fly-camera)))
-  "Open a hidden SDL/Vulkan canvas, render one block-world frame, and save it."
+                (camera (make-instance 'fly-camera))
+                (sky-clock (make-instance 'sky-clock
+                                          :pinned-day-fraction 0.5)))
+  "Open a hidden SDL/Vulkan canvas, render one block-world frame, and save it.
+
+The sky clock arrives pinned at noon so captures stay byte-deterministic;
+pass an unpinned clock to photograph another time of day."
   (let ((session nil))
     (unwind-protect
          (progn
@@ -80,7 +85,8 @@ world wait for products which can never exist."
                  (start-luvcraft
                   :title title :width width :height height
                   :frames-per-second nil :visible-p nil
-                  :world world :mesher mesher :camera camera))
+                  :world world :mesher mesher :camera camera
+                  :sky-clock sky-clock))
            (capture-luvcraft-screenshot session pathname))
       (when session
         (stop-luvcraft session)))))
@@ -93,7 +99,9 @@ world wait for products which can never exist."
                  (yaw-step 0.35)
                  (world (make-empty-little-block-world))
                  (mesher (make-instance 'exposed-face-mesher))
-                 (camera (make-instance 'fly-camera)))
+                 (camera (make-instance 'fly-camera))
+                 (sky-clock (make-instance 'sky-clock
+                                           :pinned-day-fraction 0.5)))
   "Capture COUNT hidden block-world frames into DIRECTORY.
 
 Each frame reuses one hidden SDL/Vulkan canvas and advances CAMERA's yaw by
@@ -110,7 +118,8 @@ YAW-STEP, returning the pathnames that were written."
                  (start-luvcraft
                   :title title :width width :height height
                   :frames-per-second nil :visible-p nil
-                  :world world :mesher mesher :camera camera))
+                  :world world :mesher mesher :camera camera
+                  :sky-clock sky-clock))
            (loop for index below count
                  for pathname =
                  (hidden-luvcraft-frame-pathname directory index)

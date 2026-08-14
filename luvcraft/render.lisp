@@ -40,17 +40,52 @@
       (rectangle -8.0 -0.75 8.0 0.75 '(0.96 0.98 1.0)))
     vertices))
 
-(defun block-world-camera-uniform-size (session)
-  "The camera buffer byte size derived from the shader-visible block layout.
+(defun frame-uniform-data (session width height)
+  "Pack the frame environment: camera lanes plus the evaluated sky.
 
-Checked against the host's packed camera data at construction, so growing
+Lane order must match *FRAME-UNIFORM-MEMBERS* exactly; the construction-time
+check in BLOCK-WORLD-CAMERA-UNIFORM-SIZE keeps the two honest."
+  (let* ((camera-lanes (camera-uniform-data
+                        (luvcraft-session-camera session) width height))
+         (sky (sky-frame-parameters (luvcraft-session-sky-clock session)
+                                    (luvcraft-session-sky-profile session)))
+         (data (make-array (+ (length camera-lanes) 28)
+                           :element-type 'single-float))
+         (index (length camera-lanes)))
+    (replace data camera-lanes)
+    (flet ((emit (&rest values)
+             (dolist (value values)
+               (setf (aref data index) (coerce value 'single-float))
+               (incf index)))
+           (color (vector) (coerce vector 'list)))
+      (let ((sun (sky-frame-parameters-sun-direction sky)))
+        (emit (sky-frame-parameters-fog-near sky)
+              (sky-frame-parameters-fog-far sky) 0.0 0.0)
+        (emit (aref sun 0) (aref sun 1) (aref sun 2)
+              (sky-frame-parameters-day-factor sky))
+        (apply #'emit (append (color (sky-frame-parameters-sun-color sky))
+                              (list (sky-frame-parameters-sun-angular-width
+                                     sky))))
+        (apply #'emit (append (color (sky-frame-parameters-zenith-color sky))
+                              (list 0.0)))
+        (apply #'emit (append (color (sky-frame-parameters-horizon-color sky))
+                              (list 0.0)))
+        (apply #'emit (append (color (sky-frame-parameters-ambient-color sky))
+                              (list (sky-frame-parameters-exposure sky))))
+        (apply #'emit (append (color (sky-frame-parameters-fog-color sky))
+                              (list 0.0)))))
+    data))
+
+(defun block-world-camera-uniform-size (session)
+  "The frame buffer byte size derived from the shader-visible block layout.
+
+Checked against the host's packed frame data at construction, so growing
 the frame uniform cannot silently diverge between shader and host."
   (let ((size (spv:shader-uniform-block-byte-size
                (spv:block-world-camera-uniform-block)))
-        (bytes (* 4 (length (camera-uniform-data
-                             (luvcraft-session-camera session) 1 1)))))
+        (bytes (* 4 (length (frame-uniform-data session 1 1)))))
     (unless (= size bytes)
-      (error "Camera uniform ABI mismatch: the shader block occupies ~D ~
+      (error "Frame uniform ABI mismatch: the shader block occupies ~D ~
               bytes but the host packs ~D." size bytes))
     size))
 
@@ -107,8 +142,7 @@ the frame uniform cannot silently diverge between shader and host."
          (frame (luvcraft-frame-state session surface-texture)))
     (write-buffer
      (luvcraft-frame-uniform-buffer frame)
-     (camera-uniform-data
-      (luvcraft-session-camera session) (first extent) (second extent)))
+     (frame-uniform-data session (first extent) (second extent)))
     (let ((pass
             (begin-render-pass
              encoder
@@ -121,8 +155,14 @@ the frame uniform cannot silently diverge between shader and host."
               `(:view ,(luvcraft-session-depth-view session)
                 :depth-load-op :clear :depth-store-op :discard
                 :depth-clear-value 1.0)))))
-      (set-pipeline pass (luvcraft-session-pipeline session))
+      ;; The sky triangle fills the frame before block geometry, with depth
+      ;; writes disabled; the clear value remains only a safe fallback.
+      (set-pipeline pass (luvcraft-session-sky-native-pipeline session))
       (set-bind-group pass 0 (luvcraft-frame-bind-group frame))
+      (set-vertex-buffer
+       pass 0 (luvcraft-session-sky-vertex-buffer session))
+      (draw pass 3)
+      (set-pipeline pass (luvcraft-session-pipeline session))
       (dolist (product products)
         (let ((mesh (luvcraft-chunk-product-mesh product)))
           (when (plusp (block-mesh-vertex-count mesh))
@@ -151,6 +191,7 @@ the frame uniform cannot silently diverge between shader and host."
     (let* ((last (luvcraft-session-last-frame-time session))
            (seconds (if last (min 0.1 (max 0.0 (- timestamp last))) 0.0)))
       (setf (luvcraft-session-last-frame-time session) timestamp)
+      (advance-sky-clock (luvcraft-session-sky-clock session) seconds)
       (let ((player (luvcraft-session-player session)))
         (when player
           (incf (luvcraft-session-physics-accumulator session) seconds)
@@ -261,6 +302,8 @@ the frame uniform cannot silently diverge between shader and host."
                                          'exposed-face-mesher))
                                 (camera (make-instance 'fly-camera))
                                 player
+                                (sky-clock (make-instance 'sky-clock))
+                                (sky-profile (make-default-sky-profile))
                                 (residency-radius 4)
                                 (publication-limit 2)
                                 (load-schedule-limit 4)
@@ -348,6 +391,20 @@ capture-only demand clock."
                                      :mag-filter :nearest
                                      :min-filter :nearest
                                      :mipmap-filter :nearest))))
+                  (sky-vertices
+                    (make-array
+                     9 :element-type 'single-float
+                     :initial-contents '(-1.0 -1.0 0.5
+                                         3.0 -1.0 0.5
+                                         -1.0 3.0 0.5)))
+                  (sky-vertex-buffer
+                    (keep
+                     (create
+                      device
+                      (make-buffer-descriptor
+                       :label "block world sky corners"
+                       :size (* 4 (length sky-vertices))
+                       :usage '(:vertex)))))
                   (crosshair-vertices
                     (make-block-world-crosshair-vertices
                      (first extent) (second extent)))
@@ -399,6 +456,26 @@ capture-only demand clock."
                                :depth-compare :less))))
                       (push artifact pipelines)
                       artifact))
+                  (sky-pipeline
+                    (let ((artifact
+                            (make-live-shader-pipeline
+                             :role :sky
+                             :vertex-role :sky
+                             :label "block world sky pipeline"
+                             :device device :layout layout
+                             :vertex-buffers
+                             '((:array-stride 12
+                                :attributes
+                                ((:shader-location 0 :offset 0
+                                  :format :float32x3))))
+                             :target-format (canvas-format context)
+                             :primitive '(:topology :triangle-list)
+                             :depth-stencil
+                             '(:format :depth32-float
+                               :depth-write-enabled nil
+                               :depth-compare :always))))
+                      (push artifact pipelines)
+                      artifact))
                   (crosshair-pipeline
                     (let ((artifact
                             (make-live-shader-pipeline
@@ -429,6 +506,7 @@ capture-only demand clock."
                      :production-system production-system
                      :camera (sync-camera-to-player camera player)
                      :player player
+                     :sky-clock sky-clock :sky-profile sky-profile
                      :residency-radius residency-radius
                      :publication-limit publication-limit
                      :load-schedule-limit load-schedule-limit
@@ -439,9 +517,12 @@ capture-only demand clock."
                      :color-texture color-texture :color-view color-view
                      :depth-texture depth-texture :depth-view depth-view
                      :layout layout :block-pipeline pipeline
+                     :sky-vertex-buffer sky-vertex-buffer
+                     :sky-pipeline sky-pipeline
                      :crosshair-vertex-buffer crosshair-vertex-buffer
                      :crosshair-pipeline crosshair-pipeline
                      :resources resources)))
+             (write-buffer sky-vertex-buffer sky-vertices)
              (write-buffer crosshair-vertex-buffer crosshair-vertices)
              (write-texture
               (device-queue device)
@@ -501,6 +582,7 @@ capture-only demand clock."
     (stop-production-system (luvcraft-session-production-system session))
     (destroy-luvcraft-chunk-products session)
     (release-live-shader-pipeline (luvcraft-session-block-pipeline session))
+    (release-live-shader-pipeline (luvcraft-session-sky-pipeline session))
     (release-live-shader-pipeline (luvcraft-session-crosshair-pipeline session))
     (dolist (resource (luvcraft-session-resources session))
       (destroy resource))

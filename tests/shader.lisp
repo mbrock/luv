@@ -67,7 +67,7 @@
 
 (deftest shader-source-is-a-typed-clos-graph
   (let* ((specification (spv:block-world-fragment-specification))
-         (sun (binding-named 'sun specification))
+         (sun-direction (binding-named 'sun-direction specification))
          (directional-light
            (binding-named 'directional-light specification))
          (light (binding-named 'light specification))
@@ -76,16 +76,18 @@
     (ok (typep specification 'spv:shader-specification))
     (ok (eq (spv:shader-specification-stage specification) :fragment))
     (ok (= (length (spv:shader-specification-inputs specification)) 3))
-    (ok (= (length (spv:shader-specification-resources specification)) 2))
-    (ok (typep (spv:shader-binding-expression sun) 'spv:shader-call))
+    (ok (= (length (spv:shader-specification-resources specification)) 3))
+    (ok (typep (spv:shader-binding-expression sun-direction)
+               'spv:shader-call))
     (ok (spv:shader-type=
-         (spv:shader-expression-type (spv:shader-binding-expression sun))
+         (spv:shader-expression-type
+          (spv:shader-binding-expression sun-direction))
          :vec3))
     (ok (equal
          (form-names
           (spv:shader-expression-form
            (spv:shader-binding-expression directional-light)))
-         '("mix" "shade-light" "sun-light" "hemisphere")))
+         '("mix" "ambient" "sun-light" ("*" "hemisphere" "day-factor"))))
     (ok (spv:shader-type=
          (spv:shader-expression-type
           (spv:shader-binding-expression light))
@@ -97,7 +99,7 @@
     (ok (equal (form-names
                 (spv:shader-expression-form
                  (spv:shader-binding-expression fogged)))
-               '("mix" "sky" "lit" "fog")))
+               '("mix" "lit" "fog-color" "fog-input")))
     (ok (> (length (spv:shader-specification-expressions specification))
            (length (spv:shader-specification-bindings specification))))))
 
@@ -111,7 +113,8 @@
                  :test (lambda (left right)
                          (string-equal (symbol-name left)
                                        (symbol-name right)))))
-         (fog-factor (binding-named 'fog-factor specification)))
+         (fog-progress (binding-named 'fog-progress specification))
+         (fog-amount (binding-named 'fog-amount specification)))
     (ok (typep specification 'spv:shader-specification))
     (ok (eq (spv:shader-specification-stage specification) :vertex))
     (ok (= (length (spv:shader-specification-inputs specification)) 3))
@@ -124,14 +127,21 @@
                           (symbol-name (spv:shader-object-name member))))
                        (spv:shader-uniform-block-members resource))
                '("camera-vector" "right-vector" "up-vector" "forward-vector"
-                 "projection-vector" "fog-vector")))
+                 "projection-vector" "fog-vector"
+                 "sun-vector" "sun-color-vector" "zenith-vector"
+                 "horizon-vector" "ambient-vector" "fog-color-vector")))
     (ok (equal (mapcar #'spv:shader-uniform-member-offset
                        (spv:shader-uniform-block-members resource))
-               '(0 16 32 48 64 80)))
+               '(0 16 32 48 64 80 96 112 128 144 160 176)))
+    (ok (= (spv:shader-uniform-block-byte-size resource) 192))
     (ok (equal (form-names
                 (spv:shader-expression-form
-                 (spv:shader-binding-expression fog-factor)))
-               '("clamp" ("-" 1.0 "fog-distance-squared") 0.0 1.0)))))
+                 (spv:shader-binding-expression fog-progress)))
+               '("clamp" ("/" ("-" "view-z" "fog-near") "fog-span") 0.0 1.0)))
+    (ok (equal (form-names
+                (spv:shader-expression-form
+                 (spv:shader-binding-expression fog-amount)))
+               '("*" "fog-progress" "fog-progress")))))
 
 (deftest block-vertex-uniform-members-retain-access-chain-provenance
   (let* ((lowering (spv:block-world-vertex-lowering))
@@ -204,10 +214,10 @@
            (gethash (second references)
                     (spv:shader-lowering-expression-instructions lowering)))
          (block-specification (spv:block-world-fragment-specification))
-         (sun (binding-named 'sun block-specification))
+         (hemisphere (binding-named 'hemisphere block-specification))
          (block-lowering (spv:block-world-fragment-lowering))
-         (literal (first (spv:shader-call-operands
-                          (spv:shader-binding-expression sun))))
+         (literal (second (spv:shader-call-operands
+                           (spv:shader-binding-expression hemisphere))))
          (constant-instructions
            (gethash literal
                     (spv:shader-lowering-expression-instructions
@@ -258,7 +268,70 @@
       (ok (= (aref fragment 0) #x07230203)))
     (let ((vertex (spv:block-world-vertex-shader)))
       (ok (> (length vertex) 5))
-      (ok (= (aref vertex 0) #x07230203)))))
+      (ok (= (aref vertex 0) #x07230203)))
+    (let ((vertex (spv:block-world-sky-vertex-shader))
+          (fragment (spv:block-world-sky-fragment-shader)))
+      (ok (> (length vertex) 5))
+      (ok (> (length fragment) 5))
+      (ok (= (aref vertex 0) #x07230203))
+      (ok (= (aref fragment 0) #x07230203)))))
+
+(deftest every-scene-stage-declares-the-same-frame-uniform-block
+  ;; Identical member order and offsets at binding 2 are the ABI contract
+  ;; which lets one buffer feed the vertex and fragment halves of both the
+  ;; block material and the sky.
+  (flet ((frame-block (specification)
+           (find-if (lambda (resource)
+                      (typep resource 'spv:shader-uniform-block))
+                    (spv:shader-specification-resources specification)))
+         (member-layout (block)
+           (mapcar (lambda (member)
+                     (list (string-downcase
+                            (symbol-name (spv:shader-object-name member)))
+                           (spv:shader-uniform-member-offset member)))
+                   (spv:shader-uniform-block-members block))))
+    (let* ((specifications
+             (list (spv:block-world-vertex-specification)
+                   (spv:block-world-fragment-specification)
+                   (spv:block-world-sky-vertex-specification)
+                   (spv:block-world-sky-fragment-specification)))
+           (blocks (mapcar #'frame-block specifications))
+           (reference (member-layout (first blocks))))
+      (ok (every (lambda (block) (typep block 'spv:shader-uniform-block))
+                 blocks))
+      (ok (every (lambda (block)
+                   (= (spv:shader-resource-binding block) 2))
+                 blocks))
+      (ok (every (lambda (block)
+                   (equal (member-layout block) reference))
+                 (rest blocks)))
+      (ok (every (lambda (block)
+                   (= (spv:shader-uniform-block-byte-size block) 192))
+                 blocks)))))
+
+(deftest the-sky-material-is-image-mathematics-over-environment-lanes
+  (let* ((vertex (spv:block-world-sky-vertex-specification))
+         (fragment (spv:block-world-sky-fragment-specification))
+         (fragment-module (spv:block-world-sky-fragment-module))
+         (ray (binding-named 'ray vertex))
+         (unit (binding-named 'unit fragment))
+         (disc (binding-named 'disc fragment)))
+    (ok (eq (spv:shader-specification-stage vertex) :vertex))
+    (ok (eq (spv:shader-specification-stage fragment) :fragment))
+    (ok (spv:shader-type=
+         (spv:shader-expression-type (spv:shader-binding-expression ray))
+         :vec3))
+    (ok (equal (form-names
+                (spv:shader-expression-form
+                 (spv:shader-binding-expression unit)))
+               '("normalize" "ray-input")))
+    (ok (equal (form-names
+                (spv:shader-expression-form
+                 (spv:shader-binding-expression disc)))
+               '("smoothstep" "disc-outer" "disc-inner" "alignment")))
+    ;; All the fragment's extended mathematics shares one import.
+    (ok (= 1 (length (spv:spir-v-module-extended-instruction-imports
+                      fragment-module))))))
 
 (deftest extended-math-lowers-through-one-shared-import-in-layout-order
   (let* ((specification

@@ -538,6 +538,19 @@ nothing else does."))
            #:camera-pitch
            #:camera-basis
            #:camera-uniform-data
+           #:sky-clock
+           #:sky-clock-day-fraction
+           #:sky-clock-rate
+           #:sky-clock-paused-p
+           #:sky-clock-pinned-day-fraction
+           #:advance-sky-clock
+           #:sky-keyframe
+           #:make-sky-keyframe
+           #:sky-profile
+           #:make-sky-profile
+           #:make-default-sky-profile
+           #:sky-frame-parameters
+           #:frame-uniform-data
            #:block-world-player
            #:player-x
            #:player-y
@@ -594,6 +607,9 @@ nothing else does."))
            #:live-shader-pipeline-diagnostic
            #:live-shader-pipeline-installed-revision
            #:luvcraft-session-block-pipeline
+           #:luvcraft-session-sky-pipeline
+           #:luvcraft-session-sky-clock
+           #:luvcraft-session-sky-profile
            #:luvcraft-session-crosshair-pipeline
            #:refresh-luvcraft-shaders
            #:start-luvcraft

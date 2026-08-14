@@ -37,6 +37,10 @@
     :initform -1
     :accessor luvcraft-session-meshed-world-revision)
    (camera :initarg :camera :reader luvcraft-session-camera)
+   (sky-clock :initarg :sky-clock :initform (make-instance 'sky-clock)
+              :accessor luvcraft-session-sky-clock)
+   (sky-profile :initarg :sky-profile :initform (make-default-sky-profile)
+                :accessor luvcraft-session-sky-profile)
    (player :initarg :player :initform nil :reader luvcraft-session-player)
    (residency-radius :initarg :residency-radius :initform 4
                      :reader luvcraft-session-residency-radius)
@@ -60,6 +64,10 @@
    (layout :initarg :layout :reader luvcraft-session-layout)
    (block-pipeline :initarg :block-pipeline
                    :reader luvcraft-session-block-pipeline)
+   (sky-vertex-buffer :initarg :sky-vertex-buffer :initform nil
+                      :reader luvcraft-session-sky-vertex-buffer)
+   (sky-pipeline :initarg :sky-pipeline :initform nil
+                 :reader luvcraft-session-sky-pipeline)
    (crosshair-vertex-buffer
     :initarg :crosshair-vertex-buffer
     :reader luvcraft-session-crosshair-vertex-buffer)
@@ -88,9 +96,14 @@
   (live-shader-pipeline-native-pipeline
    (luvcraft-session-crosshair-pipeline session)))
 
+(defun luvcraft-session-sky-native-pipeline (session)
+  (live-shader-pipeline-native-pipeline
+   (luvcraft-session-sky-pipeline session)))
+
 (defun refresh-luvcraft-shaders (session)
   "Install any successfully redefined block-world shader methods."
   (refresh-live-shader-pipeline (luvcraft-session-block-pipeline session))
+  (refresh-live-shader-pipeline (luvcraft-session-sky-pipeline session))
   (refresh-live-shader-pipeline (luvcraft-session-crosshair-pipeline session))
   session)
 

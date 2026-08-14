@@ -646,7 +646,9 @@ destroy it before destroying INSTANCE."
      (cffi:mem-aptr bindings '(:struct descriptor-set-layout-binding) 2)
      'descriptor-set-layout-binding
      :binding uniform-binding :descriptor-type :uniform-buffer
-     :descriptor-count 1 :stage-flags '(:vertex)
+     ;; The frame environment block feeds both stages: vertex work reads the
+     ;; camera basis while fragment materials read the sky and light lanes.
+     :descriptor-count 1 :stage-flags '(:vertex :fragment)
      :p-immutable-samplers (cffi:null-pointer))
     (with-vk (create-info descriptor-set-layout-create-info
               :flags 0 :binding-count 3 :p-bindings bindings)

@@ -7,6 +7,25 @@
 
 (in-package #:luv.spir-v)
 
+;;; Every stage which reads the frame environment declares the same uniform
+;;; block at binding 2: identical member order and offsets are an ABI
+;;; requirement, so the member list is written once and spliced at read time.
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defparameter *frame-uniform-members*
+    '((camera-vector :vec4)     ; camera position, w unused
+      (right-vector :vec4)
+      (up-vector :vec4)
+      (forward-vector :vec4)
+      (projection-vector :vec4) ; x scale, y scale, z scale, z offset
+      (fog-vector :vec4)        ; fog near, fog far, unused, unused
+      (sun-vector :vec4)        ; sun direction, day factor
+      (sun-color-vector :vec4)  ; sun colour, angular width
+      (zenith-vector :vec4)     ; zenith colour, w unused
+      (horizon-vector :vec4)    ; horizon colour, w unused
+      (ambient-vector :vec4)    ; ambient colour, exposure
+      (fog-color-vector :vec4)) ; fog colour, w unused
+    "The one frame-environment uniform layout shared by all scene stages."))
+
 (define-shader-method shader-specification-for
     block-world-vertex-specification
     ((role (eql :block-surface)) (stage (eql :vertex)))
@@ -17,15 +36,10 @@
      :outputs ((clip-position :vec4 :built-in :position)
                (uv-shade-output :vec3 :location 0)
                (normal-output :vec3 :location 1)
-               (fog-output :vec4 :location 2))
+               (fog-output :float :location 2))
      :resources
-     ((camera-state :uniform-block :set 0 :binding 2
-                    :members ((camera-vector :vec4)
-                              (right-vector :vec4)
-                              (up-vector :vec4)
-                              (forward-vector :vec4)
-                              (projection-vector :vec4)
-                              (fog-vector :vec4)))))
+     ((frame-state :uniform-block :set 0 :binding 2
+                   :members #.*frame-uniform-members*)))
   (let* ((camera (swizzle camera-vector :xyz))
          (right (swizzle right-vector :xyz))
          (up (swizzle up-vector :xyz))
@@ -34,15 +48,14 @@
          (view-x (dot relative right))
          (view-y (dot relative up))
          (view-z (dot relative forward))
-         (inverse-far (swizzle fog-vector :w))
-         (fog-distance (* view-z inverse-far))
-         (fog-distance-squared (* fog-distance fog-distance))
-         ;; Unclamped fog went negative beyond the far plane and above one
-         ;; behind the camera; the interpolated fragment blend then left the
-         ;; [0,1] mix contract.  Clamp at the vertex where fog is computed.
-         (fog-factor (clamp (- 1.0 fog-distance-squared) 0.0 1.0))
-         (sky (swizzle fog-vector :rgb))
-         (fog-varying (vec4 sky fog-factor))
+         ;; Fog has explicit near/far semantics: no attenuation before near,
+         ;; full fog at far, quadratic shaping between, clamped where the
+         ;; scene extends past either edge.
+         (fog-near (swizzle fog-vector :x))
+         (fog-far (swizzle fog-vector :y))
+         (fog-span (- fog-far fog-near))
+         (fog-progress (clamp (/ (- view-z fog-near) fog-span) 0.0 1.0))
+         (fog-amount (* fog-progress fog-progress))
          (x-scale (swizzle projection-vector :x))
          (y-scale (swizzle projection-vector :y))
          (z-scale (swizzle projection-vector :z))
@@ -54,7 +67,7 @@
     (set-output clip-position clip)
     (set-output uv-shade-output uv-shade-input)
     (set-output normal-output normal-input)
-    (set-output fog-output fog-varying)))
+    (set-output fog-output fog-amount)))
 
 (defun block-world-vertex-specification ()
   (shader-specification-for :block-surface :vertex))
@@ -81,30 +94,31 @@
     (:stage :fragment
      :inputs ((uv-shade-input :vec3 :location 0)
               (normal-input :vec3 :location 1)
-              (fog-input :vec4 :location 2))
+              (fog-input :float :location 2))
      :outputs ((color-output :vec4 :location 0))
      :resources ((block-atlas :texture-2d :set 0 :binding 0)
-                 (block-sampler :sampler :set 0 :binding 1)))
+                 (block-sampler :sampler :set 0 :binding 1)
+                 (frame-state :uniform-block :set 0 :binding 2
+                              :members #.*frame-uniform-members*)))
   (let* ((uv-shade uv-shade-input)
          (uv (swizzle uv-shade :xy))
          (ao (swizzle uv-shade :z))
          (normal normal-input)
-         (sun (vec3 0.30 0.86 0.40))
-         (hemisphere (* (+ (dot normal sun) 1.0) 0.5))
-         ;; A scalar light made every face the same hue and let snow flatten
-         ;; into the fog.  Interpolate between cool open-sky fill and a warm
-         ;; sun instead: face direction becomes legible without losing the
-         ;; texture atlas or the mesh-baked ambient occlusion.
-         (shade-light (vec3 0.48 0.58 0.76))
-         (sun-light (vec3 1.02 0.96 0.82))
-         (directional-light (mix shade-light sun-light hemisphere))
+         ;; The animated environment replaces the old hardcoded sun and sky:
+         ;; face direction interpolates ambient fill toward the sun colour,
+         ;; and the day factor retires direct light while the sun is below
+         ;; the horizon.
+         (sun-direction (swizzle sun-vector :xyz))
+         (day-factor (swizzle sun-vector :w))
+         (hemisphere (* (+ (dot normal sun-direction) 1.0) 0.5))
+         (ambient (swizzle ambient-vector :xyz))
+         (sun-light (swizzle sun-color-vector :xyz))
+         (directional-light (mix ambient sun-light (* hemisphere day-factor)))
          (light (* directional-light ao))
          (albedo (swizzle (sample block-atlas block-sampler uv) :rgb))
-         (fog-state fog-input)
-         (sky (swizzle fog-state :rgb))
-         (fog (swizzle fog-state :w))
          (lit (* albedo light))
-         (fogged (mix sky lit fog))
+         (fog-color (swizzle fog-color-vector :xyz))
+         (fogged (mix lit fog-color fog-input))
          (rgba (vec4 fogged 1.0)))
     (set-output color-output rgba)))
 
@@ -121,6 +135,90 @@
 
 (defun block-world-fragment-shader ()
   (assemble-spir-v-module (block-world-fragment-module)))
+
+;;; The sky is a fullscreen triangle drawn before block geometry with depth
+;;; writes disabled.  Its vertex stage reconstructs a per-corner view ray
+;;; from the camera basis; its fragment stage is pure image mathematics over
+;;; the interpolated ray and the frame environment lanes.
+
+(define-shader-method shader-specification-for
+    block-world-sky-vertex-specification
+    ((role (eql :sky)) (stage (eql :vertex)))
+    (:stage :vertex
+     :inputs ((corner-position :vec3 :location 0))
+     :outputs ((clip-position :vec4 :built-in :position)
+               (ray-output :vec3 :location 0))
+     :resources
+     ((frame-state :uniform-block :set 0 :binding 2
+                   :members #.*frame-uniform-members*)))
+  (let* ((corner corner-position)
+         (x (swizzle corner :x))
+         (y (swizzle corner :y))
+         (z (swizzle corner :z))
+         (right (swizzle right-vector :xyz))
+         (up (swizzle up-vector :xyz))
+         (forward (swizzle forward-vector :xyz))
+         (x-scale (swizzle projection-vector :x))
+         (y-scale (swizzle projection-vector :y))
+         ;; Invert the block vertex projection: clip x,y back to view-space
+         ;; slopes, including its y flip, so the ray agrees with the world.
+         (view-x (/ x x-scale))
+         (view-y (- (/ y y-scale)))
+         (ray (+ (* right view-x) (* up view-y) forward))
+         (clip (vec4 x y z 1.0)))
+    (set-output clip-position clip)
+    (set-output ray-output ray)))
+
+(defun block-world-sky-vertex-specification ()
+  (shader-specification-for :sky :vertex))
+
+(defun block-world-sky-vertex-module ()
+  (shader-lowering-module
+   (compile-shader-specification (block-world-sky-vertex-specification))))
+
+(defun block-world-sky-vertex-shader ()
+  (assemble-spir-v-module (block-world-sky-vertex-module)))
+
+(define-shader-method shader-specification-for
+    block-world-sky-fragment-specification
+    ((role (eql :sky)) (stage (eql :fragment)))
+    (:stage :fragment
+     :inputs ((ray-input :vec3 :location 0))
+     :outputs ((color-output :vec4 :location 0))
+     :resources
+     ((frame-state :uniform-block :set 0 :binding 2
+                   :members #.*frame-uniform-members*)))
+  (let* ((unit (normalize ray-input))
+         (elevation (swizzle unit :y))
+         (zenith (swizzle zenith-vector :xyz))
+         (horizon (swizzle horizon-vector :xyz))
+         ;; A soft vertical gradient with a wide horizon band; the band sits
+         ;; slightly below level so distant terrain meets the fog colour.
+         (height (smoothstep -0.04 0.45 elevation))
+         (base (mix horizon zenith height))
+         (sun-direction (swizzle sun-vector :xyz))
+         (day-factor (swizzle sun-vector :w))
+         (sun-color (swizzle sun-color-vector :xyz))
+         (sun-width (swizzle sun-color-vector :w))
+         (alignment (max 0.0 (dot unit sun-direction)))
+         (disc-outer (- 1.0 (* sun-width 3.0)))
+         (disc-inner (- 1.0 sun-width))
+         (disc (smoothstep disc-outer disc-inner alignment))
+         (glow (* (expt alignment 24.0) 0.35))
+         (sun-radiance (* sun-color (+ disc glow) day-factor))
+         (rgb (+ base sun-radiance))
+         (rgba (vec4 rgb 1.0)))
+    (set-output color-output rgba)))
+
+(defun block-world-sky-fragment-specification ()
+  (shader-specification-for :sky :fragment))
+
+(defun block-world-sky-fragment-module ()
+  (shader-lowering-module
+   (compile-shader-specification (block-world-sky-fragment-specification))))
+
+(defun block-world-sky-fragment-shader ()
+  (assemble-spir-v-module (block-world-sky-fragment-module)))
 
 ;;; The crosshair is deliberately another tiny mathematical material rather
 ;;; than a magic fixed-function colour.  Its vertex half remains in SHADER.LISP
