@@ -73,7 +73,8 @@ world wait for products which can never exist."
                 (mesher (make-instance 'exposed-face-mesher))
                 (camera (make-instance 'fly-camera))
                 (sky-clock (make-instance 'sky-clock
-                                          :pinned-day-fraction 0.5)))
+                                          :pinned-day-fraction 0.5))
+                (sky-profile (make-default-sky-profile)))
   "Open a hidden SDL/Vulkan canvas, render one block-world frame, and save it.
 
 The sky clock arrives pinned at noon so captures stay byte-deterministic;
@@ -86,7 +87,8 @@ pass an unpinned clock to photograph another time of day."
                   :title title :width width :height height
                   :frames-per-second nil :visible-p nil
                   :world world :mesher mesher :camera camera
-                  :sky-clock sky-clock))
+                  :sky-clock sky-clock
+                  :sky-profile sky-profile))
            (capture-luvcraft-screenshot session pathname))
       (when session
         (stop-luvcraft session)))))

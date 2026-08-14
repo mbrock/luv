@@ -184,9 +184,9 @@
   (let* ((view (find-luvcraft-gazetteer-view "shadow-yard"))
          (world (funcall (luv::luvcraft-gazetteer-view-world-factory view))))
     (ok (eq (world-block-at world 7 0 7) luv::*snow-block*))
-    (ok (eq (world-block-at world 11 5 9) luv::*stone-block*))
-    (ok (eq (world-block-at world 14 5 11) luv::*stone-block*))
-    (ok (eq (world-block-at world 10 3 11) luv::*stone-block*))
+    (ok (eq (world-block-at world 9 1 10) luv::*stone-block*))
+    (ok (eq (world-block-at world 10 8 10) luv::*stone-block*))
+    (ok (null (world-block-at world 9 9 10)))
     (ok (null (world-block-at world 8 1 4)))
     (ok (= (nth-value 0 (world-light-at world 7 1 7)) 15))))
 

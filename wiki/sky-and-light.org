@@ -726,13 +726,13 @@ Evidence:
   =shadow-visibility=; ambient skylight and blocklight keep their current
   semantics.
 - The first smoke capture was not strong enough evidence: it mostly proved the
-  frame survived.  The follow-up =shadow-yard= gazetteer view isolates a bright
-  snow receiver and elevated casters, and a shadow-disabled control made the
+  frame survived.  The follow-up =shadow-yard= gazetteer view now isolates a
+  bright snow receiver, a tall stone pillar, a low bright sun, and a
+  high-contrast sky profile; a shadow-disabled control made the earlier
   over-shadowing failure obvious.
 - The light-space forward axis now points from the sun toward the world.  With
-  that sign fixed, =build/gazetteer/shadow-yard.png= shows an isolated cast
-  rectangle from the elevated slab, while the control stays bright except for
-  voxel skylight/contact darkening.
+  that sign fixed, =build/gazetteer/shadow-yard.png= shows the pillar casting
+  a long, dark, pillar-shaped shadow across the receiver.
 - =make test=, =make smoke=, and
   =scripts/luv gazetteer build/gazetteer --view shadow-yard= passed.
 
@@ -751,8 +751,9 @@ or too dark to inspect.
 Evidence:
 
 - A shadow-map change needs at least one pinned gazetteer view whose scene is
-  composed for inspection: bright receiver, isolated caster, stable camera, and
-  known sky/direct-light inputs.
+  composed for inspection: bright receiver, isolated caster, stable camera,
+  known sky/direct-light inputs, and enough contrast that the cast shape is
+  obvious without zooming.
 - A smoke capture can remain a survival check, but it is not evidence that
   cast shadows are correct unless the shadow shape is obvious in frame.
 - When the visual result is ambiguous, capture a control image with shadow

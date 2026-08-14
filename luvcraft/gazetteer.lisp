@@ -24,6 +24,8 @@
                    :reader luvcraft-gazetteer-view-camera-factory)
    (sky-clock-factory :initarg :sky-clock-factory
                       :reader luvcraft-gazetteer-view-sky-clock-factory)
+   (sky-profile-factory :initarg :sky-profile-factory
+                        :reader luvcraft-gazetteer-view-sky-profile-factory)
    (width :initarg :width :initform nil
           :reader luvcraft-gazetteer-view-width)
    (height :initarg :height :initform nil
@@ -51,23 +53,33 @@
     (loop for x below 16 do
       (loop for z below 16 do
         (setf (world-block-at world x 0 z) *snow-block*)))
-    ;; Elevated casters offset from the camera: their shadow should read as a
-    ;; discrete diagonal mark on the bright receiver, not as general darkness.
-    (loop for x from 11 below 15 do
-      (loop for z from 9 below 12 do
-        (setf (world-block-at world x 5 z) *stone-block*)))
-    (setf (world-block-at world 10 1 11) *stone-block*
-          (world-block-at world 10 2 11) *stone-block*
-          (world-block-at world 10 3 11) *stone-block*)
+    ;; A tall simple pillar should cast an unmistakable pillar-shaped shadow
+    ;; across the bright receiver under the pinned low sun.
+    (loop for y from 1 to 8 do
+      (setf (world-block-at world 9 y 10) *stone-block*
+            (world-block-at world 10 y 10) *stone-block*))
     (relight-block-world world)
     world))
 
 (defun make-pinned-sky-clock (day-fraction)
   (make-instance 'sky-clock :pinned-day-fraction day-fraction))
 
+(defun make-shadow-yard-sky-profile ()
+  "A single-frame high-contrast profile for visual shadow inspection."
+  (make-sky-profile
+   (list
+    (make-sky-keyframe
+     :day-fraction 0.36
+     :zenith-color #(0.28 0.52 0.88)
+     :horizon-color #(0.72 0.84 0.96)
+     :sun-color #(2.20 2.05 1.70)
+     :ambient-color #(0.06 0.08 0.12)
+     :fog-color #(0.50 0.72 0.94)
+     :sun-angular-width 0.006))))
+
 (defun make-luvcraft-gazetteer-view
     (name description title world-factory camera-factory day-fraction
-     &key width height)
+     &key width height sky-profile-factory)
   (make-instance
    'luvcraft-gazetteer-view
    :name name
@@ -76,6 +88,7 @@
    :world-factory world-factory
    :camera-factory camera-factory
    :sky-clock-factory (lambda () (make-pinned-sky-clock day-fraction))
+   :sky-profile-factory (or sky-profile-factory #'make-default-sky-profile)
    :width width
    :height height))
 
@@ -124,10 +137,11 @@
     "luvcraft gazetteer - shadow yard"
     (lambda () (make-gazetteer-shadow-yard-world))
     (lambda () (make-instance 'fly-camera
-                              :x 7.5d0 :y 7.0d0 :z -5.0d0
-                              :yaw 0.12d0 :pitch -0.50d0))
-    0.50
-    :width 960 :height 640)))
+                              :x 7.5d0 :y 9.5d0 :z -7.0d0
+                              :yaw 0.10d0 :pitch -0.50d0))
+    0.36
+    :width 960 :height 640
+    :sky-profile-factory #'make-shadow-yard-sky-profile)))
 
 (defun luvcraft-gazetteer-views ()
   "Return the semantic screenshot views captured by the luvcraft gazetteer."
@@ -163,7 +177,9 @@
          (world (funcall (luvcraft-gazetteer-view-world-factory view)))
          (camera (funcall (luvcraft-gazetteer-view-camera-factory view)))
          (sky-clock
-           (funcall (luvcraft-gazetteer-view-sky-clock-factory view))))
+           (funcall (luvcraft-gazetteer-view-sky-clock-factory view)))
+         (sky-profile
+           (funcall (luvcraft-gazetteer-view-sky-profile-factory view))))
     (capture-hidden-luvcraft-screenshot
      pathname
      :title (luvcraft-gazetteer-view-title view)
@@ -171,7 +187,8 @@
      :height (or height (luvcraft-gazetteer-view-height view) 640)
      :world world
      :camera camera
-     :sky-clock sky-clock)
+     :sky-clock sky-clock
+     :sky-profile sky-profile)
     pathname))
 
 (defun capture-luvcraft-gazetteer
