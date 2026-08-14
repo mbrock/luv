@@ -4,7 +4,8 @@
   :author "Mikael Brockman"
   :depends-on (#:luv/examples
                #:luv/luvcraft)
-  :in-order-to ((asdf:test-op (asdf:test-op #:luv/tests)
+  :in-order-to ((asdf:test-op (asdf:test-op #:luv/arithmetic/tests)
+                              (asdf:test-op #:luv/tests)
                               (asdf:test-op #:luv/spir-v/tests)
                               (asdf:test-op #:luv/luvcraft/tests))))
 
@@ -13,6 +14,31 @@
   :version "0.0.1"
   :author "Mikael Brockman"
   :components ((:file "package")))
+
+(asdf:defsystem #:luv/arithmetic
+  :description "Semantic specifications and dimensional algebra for compiled arithmetic."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :serial t
+  :components ((:file "arithmetic-package")
+               (:file "arithmetic"))
+  :in-order-to ((asdf:test-op (asdf:test-op #:luv/arithmetic/tests))))
+
+(asdf:defsystem #:luv/arithmetic/tests
+  :description "Executable claims for backend-neutral semantic arithmetic."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on (#:luv/arithmetic
+               #:rove)
+  :components ((:module "tests"
+                :components ((:file "arithmetic"))))
+  :perform (asdf:test-op (operation component)
+             (declare (ignore operation component))
+             (unless (uiop:symbol-call
+                      '#:rove '#:run-suite
+                      (uiop:symbol-call
+                       '#:rove '#:find-suite '#:luv/arithmetic/tests))
+               (error "luv arithmetic tests failed"))))
 
 (asdf:defsystem #:luv/world
   :description "Finite chunk domains and the resident block-world model."
@@ -42,7 +68,8 @@
   :description "A small s-expression SPIR-V assembler for luv shaders."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on (#:cffi
+  :depends-on (#:luv/arithmetic
+               #:cffi
                #:closer-mop)
   :serial t
   :components ((:file "spir-v-package")

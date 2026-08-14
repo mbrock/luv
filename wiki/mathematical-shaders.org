@@ -153,6 +153,14 @@ out-of-range swizzle, an invalid product, a mismatched output, or a malformed
 resource declaration as a =shader-language-error= carrying the source form,
 reason, and details.
 
+Declarations may now also opt into the backend-neutral quantity experiment
+#9P358P with =:quantity=, =:dimension=, and =:affine-p=.  That metadata is
+separate from =shader-type=: ordinary arithmetic derives a semantic
+specification while valid annotated and unannotated graphs still lower to the
+same SPIR-V.  The real luvcraft shaders are not yet annotated; the initial
+shadow-depth probes establish the seam without pretending that sampling,
+shader resources, or every extended operator are general arithmetic.
+
 =let*= is semantic.  Lowering evaluates bindings in source order, interns
 types and constants deterministically, preserves useful lexical names in
 result ids, and emits instruction *instances* into a CLOS basic block.  A

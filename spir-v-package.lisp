@@ -1,6 +1,8 @@
 (defpackage #:luv.spir-v
   (:nicknames #:spv)
   (:use #:cl)
+  (:import-from #:luv.arithmetic #:dot)
+  (:local-nicknames (#:math #:luv.arithmetic))
   (:shadow #:function #:load #:return #:step #:variable)
   (:export #:spir-v-error
            #:spir-v-error-form
@@ -74,6 +76,7 @@
            #:shader-object-source-form
            #:shader-variable-declaration
            #:shader-declaration-type
+           #:shader-declaration-quantity-specification
            #:shader-interface-variable
            #:shader-interface-direction
            #:shader-interface-location
@@ -92,6 +95,7 @@
            #:shader-binding-expression
            #:shader-expression
            #:shader-expression-type
+           #:shader-expression-quantity-specification
            #:shader-expression-source-form
            #:shader-expression-name
            #:shader-literal

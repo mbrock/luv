@@ -1,6 +1,7 @@
 (defpackage #:luv/spir-v/tests
   (:use #:cl #:rove)
-  (:local-nicknames (#:spv #:luv.spir-v))
+  (:local-nicknames (#:spv #:luv.spir-v)
+                    (#:math #:luv.arithmetic))
   ;; Shader operators are identified by symbol, so specification bodies
   ;; written here must use the shader language's own words.
   (:import-from #:luv.spir-v
@@ -344,6 +345,78 @@
     (ok (find "IMAGE-SAMPLE-IMPLICIT-LOD" names :test #'string=))
     (ok (find "EXT-INST" names :test #'string=))
     (ok (> (length (spv:assemble-shader-specification specification)) 5))))
+
+(deftest shader-arithmetic-carries-backend-neutral-quantity-specifications
+  (flet ((parse-depth-probe (annotated-p)
+           (spv:parse-shader-specification
+            'semantic-depth-probe
+            (if annotated-p
+                '(:stage :fragment
+                  :inputs
+                  ((receiver-depth :float :location 0
+                                   :quantity :shadow-depth :affine-p t)
+                   (bias :float :location 1
+                         :quantity :shadow-depth))
+                  :outputs
+                  ((biased-depth :float :location 0
+                                 :quantity :shadow-depth :affine-p t)))
+                '(:stage :fragment
+                  :inputs ((receiver-depth :float :location 0)
+                           (bias :float :location 1))
+                  :outputs ((biased-depth :float :location 0))))
+            '((let* ((biased (- receiver-depth bias)))
+                (set-output biased-depth biased))))))
+    (let* ((annotated (parse-depth-probe t))
+           (plain (parse-depth-probe nil))
+           (receiver (first (spv:shader-specification-inputs annotated)))
+           (biased (binding-named 'biased annotated))
+           (receiver-specification
+             (spv:shader-declaration-quantity-specification receiver))
+           (biased-specification
+             (spv:shader-expression-quantity-specification
+              (spv:shader-binding-expression biased))))
+      (ok (eq :shadow-depth
+              (math:quantity-specification-name receiver-specification)))
+      (ok (math:quantity-specification-affine-p receiver-specification))
+      (ok (math:quantity-specification-affine-p biased-specification))
+      ;; Semantic checking is a source concern; it does not perturb the SPIR-V
+      ;; representation or the deterministic lowering of valid arithmetic.
+      (ok (equalp (spv:assemble-shader-specification annotated)
+                  (spv:assemble-shader-specification plain))))))
+
+(deftest shader-arithmetic-rejects-dimensionally-or-affinely-invalid-forms
+  (labels ((reason-for (options body)
+             (handler-case
+                 (progn
+                   (spv:parse-shader-specification
+                    'invalid-semantic-probe options body)
+                   nil)
+               (spv:shader-language-error (condition)
+                 (list (spv:shader-language-error-reason condition)
+                       (spv:shader-language-error-details condition))))))
+    (ok (equal
+         '(:invalid-quantity-operation :cannot-add-points)
+         (reason-for
+          '(:stage :fragment
+            :inputs ((left :float :location 0
+                           :quantity :shadow-depth :affine-p t)
+                     (right :float :location 1
+                            :quantity :shadow-depth :affine-p t))
+            :outputs ((result :float :location 0)))
+          '((let* ((sum (+ left right)))
+              (set-output result sum))))))
+    (ok (equal
+         '(:invalid-quantity-operation :different-quantity-spaces)
+         (reason-for
+          '(:stage :fragment
+            :inputs ((depth :float :location 0
+                            :quantity :shadow-depth)
+                     (distance :float :location 1
+                               :quantity :world-distance
+                               :dimension :length))
+            :outputs ((result :float :location 0)))
+          '((let* ((sum (+ depth distance)))
+              (set-output result sum))))))))
 
 (deftest shadow-visibility-is-a-source-abstraction-over-core-math
   (ok (spv:shader-abstraction-p 'spv:shadow-visibility))
