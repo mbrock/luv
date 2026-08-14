@@ -266,6 +266,16 @@ repeating the lane arithmetic as a literal."
 (defun shader-quantity-assumption-operand (expression)
   (shader-quantity-boundary-operand expression))
 
+(defclass shader-unit-conversion (shader-expression)
+  ((operand
+    :initarg :operand
+    :reader shader-unit-conversion-operand)
+   (factor
+    :initarg :factor
+    :reader shader-unit-conversion-factor))
+  (:documentation
+   "An explicit linear unit conversion that may emit numerical scaling."))
+
 (defmethod shader-expression-quantity-checked-p ((expression shader-literal))
   nil)
 
@@ -287,6 +297,11 @@ repeating the lane arithmetic as a literal."
 
 (defmethod shader-expression-quantity-checked-p
     ((expression shader-quantity-boundary))
+  (declare (ignore expression))
+  t)
+
+(defmethod shader-expression-quantity-checked-p
+    ((expression shader-unit-conversion))
   (declare (ignore expression))
   t)
 
@@ -347,6 +362,9 @@ repeating the lane arithmetic as a literal."
 (defmethod shader-expression-form ((expression shader-quantity-boundary))
   (shader-expression-source-form expression))
 
+(defmethod shader-expression-form ((expression shader-unit-conversion))
+  (shader-expression-source-form expression))
+
 (defmethod print-object ((expression shader-expression) stream)
   (print-unreadable-object (expression stream :type t)
     (prin1 (shader-expression-form expression) stream)
@@ -364,6 +382,9 @@ repeating the lane arithmetic as a literal."
 
 (defmethod shader-expression-children ((expression shader-quantity-boundary))
   (list (shader-quantity-boundary-operand expression)))
+
+(defmethod shader-expression-children ((expression shader-unit-conversion))
+  (list (shader-unit-conversion-operand expression)))
 
 (defun shader-specification-expressions (specification)
   "Return the expression graph in source order, without duplicate objects."
@@ -965,6 +986,8 @@ never collides with a standard symbol's function documentation:
   "State an explicit semantic assumption about an otherwise raw value.")
 (define-shader-operator interpret
   "Assign a checked semantic quantity specification without emitting code.")
+(define-shader-operator convert-unit
+  "Explicitly express a semantic quantity in another compatible unit.")
 
 ;;; Abstractions are source vocabulary, not core operators.  They rewrite into
 ;;; ordinary shader forms before parsing, so the typed graph and SPIR-V lowering
@@ -1186,12 +1209,13 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
 (defun parse-declaration-quantity-specification
     (quantity dimension unit affine-p type source-form)
   (when (or quantity dimension unit affine-p)
-    (math:make-quantity-specification
-     quantity
-     :dimension dimension
-     :unit unit
-     :tensor-order (shader-type-tensor-order type source-form)
-     :affine-p affine-p)))
+    (apply
+     #'math:make-quantity-specification quantity
+     (append
+      (and dimension (list :dimension dimension))
+      (list :unit unit
+            :tensor-order (shader-type-tensor-order type source-form)
+            :affine-p affine-p)))))
 
 (defun parse-declaration-quantity-layout
     (components type source-form &optional whole)
@@ -1278,6 +1302,40 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
                      :type type
                      :quantity-specification interpretation
                      :source-form form))))
+
+(defmethod parse-shader-operator-call
+    ((operator (eql 'convert-unit)) form environment)
+  (declare (ignore operator))
+  (destructuring-bind
+      (name operand-form &key (unit nil unit-supplied-p)) form
+    (declare (ignore name))
+    (unless unit-supplied-p
+      (error 'shader-language-error
+             :form form :reason :missing-target-unit))
+    (let* ((operand (parse-shader-expression operand-form environment))
+           (source (and (shader-expression-quantity-checked-p operand)
+                        (shader-expression-quantity-specification operand))))
+      (unless source
+        (error 'shader-language-error
+               :form form :reason :unit-conversion-requires-quantity))
+      (handler-case
+          (multiple-value-bind (target factor)
+              (math:convert-quantity-specification-unit source unit)
+            (make-instance
+             'shader-unit-conversion
+             :operand operand
+             :factor factor
+             :type (shader-expression-type operand)
+             :quantity-specification target
+             :source-form form))
+        (math:undefined-unit (condition)
+          (error 'shader-language-error
+                 :form form :reason :undefined-unit
+                 :details (math:undefined-unit-name condition)))
+        (math:quantity-operation-error (condition)
+          (error 'shader-language-error
+                 :form form :reason :invalid-unit-conversion
+                 :details (math:quantity-operation-error-reason condition)))))))
 
 (defun shader-constant-expression-p (expression)
   (typecase expression
@@ -2374,6 +2432,20 @@ Modules whose expressions use no extended mathematics never acquire one."
          (value (lower-shader-expression context operand)))
     (alias-shader-expression context expression operand)
     value))
+
+(defmethod lower-shader-expression-value
+    (context (expression shader-unit-conversion))
+  (let* ((operand (shader-unit-conversion-operand expression))
+         (operand-value (lower-shader-expression context operand))
+         (factor (shader-unit-conversion-factor expression)))
+    (if (= factor 1)
+        (progn
+          (alias-shader-expression context expression operand)
+          operand-value)
+        (emit-binary-arithmetic
+         context expression '* (shader-expression-type expression)
+         operand-value (shader-expression-type operand)
+         (ensure-shader-constant context factor) (find-shader-type :float)))))
 
 (defun lower-shader-expression (context expression)
   (or (gethash expression (context-expression-values context))

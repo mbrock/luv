@@ -8,7 +8,7 @@
                 #:dot #:sample #:sample-compare #:mix
                 #:vec2 #:vec3 #:vec4 #:swizzle
                 #:clamp #:smoothstep #:normalize
-                #:quantity #:assume-quantity #:interpret
+                #:quantity #:assume-quantity #:interpret #:convert-unit
                 #:set-output))
 
 (in-package #:luv/spir-v/tests)
@@ -674,6 +674,58 @@
                                 :dimension :length :unit :metre)
                :quantity :width
                :dimension :length :unit :metre))))))
+
+(deftest explicit-unit-conversion-preserves-meaning-and-scales-values
+  (let* ((specification
+           (spv:parse-shader-specification
+            'unit-conversion-probe
+            '(:stage :fragment
+              :outputs ((result :float :location 0)))
+            '((let* ((opacity
+                       (quantity 50.0 :quantity :opacity :unit :percent))
+                     (fraction (convert-unit opacity :unit :one)))
+                (set-output result fraction)))))
+         (binding (binding-named 'fraction specification))
+         (expression (spv:shader-binding-expression binding))
+         (quantity
+           (spv:shader-expression-quantity-specification expression))
+         (instructions
+           (spv:lower-spir-v
+            (spv:shader-lowering-module
+             (spv:compile-shader-specification specification))))
+         (names (mapcar (lambda (instruction)
+                          (symbol-name (spv:instruction-name instruction)))
+                        instructions)))
+    (ok (typep expression 'spv:shader-unit-conversion))
+    (ok (= 1/100 (spv:shader-unit-conversion-factor expression)))
+    (ok (eq :opacity (math:quantity-specification-name quantity)))
+    (ok (math:unitless-p (math:quantity-specification-unit quantity)))
+    (ok (find "F-MUL" names :test #'string=))
+    (ok (> (length (spv:assemble-shader-specification specification)) 5)))
+  (flet ((reason-for (form)
+           (handler-case
+               (progn
+                 (spv:parse-shader-specification
+                  'invalid-unit-conversion-probe
+                  '(:stage :fragment
+                    :inputs ((value :float :location 0))
+                    :outputs ((result :float :location 0)))
+                  `((set-output result ,form)))
+                 nil)
+             (spv:shader-language-error (condition)
+               (spv:shader-language-error-reason condition)))))
+    (ok (eq :unit-conversion-requires-quantity
+            (reason-for '(convert-unit value :unit :metre))))
+    (ok (eq :invalid-unit-conversion
+            (reason-for
+             '(convert-unit
+               (quantity 1.0 :quantity :duration :unit :second)
+               :unit :metre))))
+    (ok (eq :undefined-unit
+            (reason-for
+             '(convert-unit
+               (quantity 1.0 :quantity :distance :unit :metre)
+               :unit :furlong))))))
 
 (deftest production-shadow-material-carries-semantic-quantities
   (let ((specification (spv:block-world-fragment-specification)))

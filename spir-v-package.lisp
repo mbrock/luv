@@ -117,6 +117,9 @@
            #:shader-quantity-construction-operand
            #:shader-quantity-assumption
            #:shader-quantity-assumption-operand
+           #:shader-unit-conversion
+           #:shader-unit-conversion-operand
+           #:shader-unit-conversion-factor
            #:shader-expression-form
            #:shader-expression-children
            ;; The shader-language vocabulary.  Arithmetic operators are CL's
@@ -137,6 +140,7 @@
            #:quantity
            #:assume-quantity
            #:interpret
+           #:convert-unit
            #:set-output
            #:shader-operator
            #:define-shader-operator

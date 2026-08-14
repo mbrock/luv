@@ -31,6 +31,10 @@ The principal source material is Moppe's
 [[file:../../src/moppe/moppe/quantities.hh][quantity catalogue]], together with Étalon's
 [[file:../../src/moppe/etalon/README.md][workshop account]].  Étalon is evidence about a small mechanism, not a proposal
 to replace mp-units or to translate its Zig surface literally into Lisp.
+The mp-units [[https://mpusz.github.io/mp-units/latest/users_guide/framework_basics/dimensionless_quantities/][dimensionless-quantities guide]],
+[[https://mpusz.github.io/mp-units/latest/workshops/extensions/custom_dimensionless_units/][dimensionless-unit workshop]], and
+[[https://mpusz.github.io/mp-units/HEAD/blog/2024/10/28/international-system-of-quantities-isq-part-4---implementing-isq/][ISQ implementation article]] provide the corresponding library rationale and
+executable examples.
 
 * Dimension describes lawful physical algebra
 :PROPERTIES:
@@ -108,6 +112,46 @@ without requiring every hot loop to carry a runtime unit tag.  A block world
 may choose one metre per block today and later allow a world description to
 choose another scale.  The categorical block index still is not itself a
 length; a domain metric maps index differences to spatial displacement.
+
+* Dimension one still has semantic units
+:PROPERTIES:
+:ID: RK56VG
+:END:
+
+The Moppe catalogue makes the separation unusually concrete.  Control and
+noise signals, proportions, probabilities, cell and iteration counts, terrain
+slope, normals, flow fractions, persistence, sediment concentration, and
+influence fields all have dimension one.  They deliberately remain different
+quantity specifications.  Moppe normally expresses them in mp-units' =one=,
+but that does not erase their names.
+
+mp-units also gives dimension-one quantities real unit structure.  =percent=,
+=per_mille=, and =parts_per_million= are scaled versions of =one=.  A quantity
+can change presentation from =50 percent= to =1/2 one= without changing from,
+say, opacity into probability.  Other dimension-one units are narrower:
+=radian= belongs to angular measure, =steradian= to solid angular measure, and
+=bit= to storage capacity.  Thus these are three separate questions:
+
+#+begin_example
+quantity specification  opacity, probability, angle, storage capacity
+dimension               one, length, duration, ...
+unit                     percent, one, radian, bit, metre, ...
+#+end_example
+
+Luv now models the first useful portion of this.  Unit definitions carry a
+dimension, canonical basis, and magnitude.  =:percent= is =1/100= of =:one=;
+=:kilometre= is =1000= of =:metre=.  The source operation
+
+#+begin_src lisp
+(convert-unit
+ (quantity 50.0 :quantity :opacity :unit :percent)
+ :unit :one)
+#+end_src
+
+preserves =:opacity= and emits the numerical scale change.  It cannot rename
+the value, and ordinary addition still requires exact units.  The remaining
+mp-units lesson is unit *admissibility*: future definitions should be able to
+say that radians express angles but not arbitrary dimension-one values.
 
 * Points are not differences
 :PROPERTIES:
@@ -315,8 +359,8 @@ Evidence:
   error.  Fully unannotated shader graphs remain valid while the vocabulary is
   grown deliberately.
 - =min= and =max= require exactly compatible specifications.  Unit expressions
-  compose symbolically through products and quotients, but there is no common-
-  unit selection: =:metre= and =:kilometre= are different until source performs
+  compose through products and quotients, but there is no implicit common-unit
+  selection: =:metre= and =:kilometre= remain different until source performs
   an explicit conversion.
 - =quantity= constructs typed constants, =assume-quantity= marks otherwise raw
   boundaries, and =interpret= names only a compatible checked result.  All
@@ -354,7 +398,7 @@ Evidence:
 Outcome: the production proof covers coherent named spaces, tensor order,
 affine points, exact units, source-facing failures, unchanged SPIR-V, and live
 presentation.  Numerical unit conversion was deliberately not smuggled into
-=interpret=; it is isolated as follow-up #7MHTYL.
+=interpret=; the separate operation was subsequently completed in #7MHTYL.
 
 * DONE Give GPU components first-class quantity meaning
 :PROPERTIES:
@@ -393,7 +437,7 @@ boundary, projection is exact and checked, production shaders exercise both
 homogeneous and heterogeneous cases, and valid semantics remain representation-
 and codegen-neutral.
 
-* NEXT Make numerical unit conversion explicit
+* DONE Make numerical unit conversion explicit
 :PROPERTIES:
 :ID: 7MHTYL
 :END:
@@ -403,11 +447,59 @@ to metres without weakening exact-unit checking or turning =interpret= into a
 scale-changing cast.  Learn from mp-units' quantity/reference separation while
 keeping conversion policy small and inspectable.
 
-Done when: conversion factors are declared outside backend lowering; a source
-form performs and records the numerical scale change; compatible conversions
-derive the target exact unit and preserve dimension, tensor order, affine
-character, and semantic meaning; missing or dimension-changing conversions
-fail at parse time; and shader tests prove the emitted multiply is intentional.
+Evidence:
+
+- [[file:../arithmetic.lisp][=arithmetic.lisp=]] now defines inspectable =unit-definition= objects behind
+  an open =unit-definition-for= EQL protocol.  =define-unit= declares =:one=,
+  =:metre=, =:kilometre=, =:second=, and =:percent= with dimensions, canonical
+  bases, and scales.  Unknown unit symbols are errors.
+- A quantity specification derives its dimension from a declared unit and
+  rejects a contradictory explicit dimension.  Compound expressions retain
+  exact named units; =unit-conversion-factor= separately proves a shared basis
+  and computes source magnitude divided by target magnitude.
+- =convert-quantity-specification-unit= preserves name, physical dimension,
+  tensor order, and affine character.  It cannot perform semantic relabelling.
+- [[file:../shader-expression.lisp][=shader-expression.lisp=]] represents =convert-unit= as a first-class typed
+  expression with source provenance.  A non-unity factor lowers to an explicit
+  scalar or vector multiply; a unity factor remains a visible semantic node
+  while safely aliasing its operand.
+- [[file:../mcclim/shader-lab.lisp][The shader workbench]] renders the conversion operand, target specification,
+  and scale factor as a selectable expression rather than hiding the change in
+  its generated arithmetic.
+- [[file:../tests/arithmetic.lisp][Arithmetic tests]] prove kilometre/metre and percent/one conversion,
+  dimension inference, mismatch rejection, and undefined-unit failure.
+  [[file:../tests/shader.lisp][Shader tests]] prove that =50 percent= opacity becomes =1/2 one= opacity
+  through an emitted =F-MUL=, and reject raw, dimension-changing, and unknown-
+  unit conversions.
+- The production shader binaries and their Vulkan validation remain unchanged;
+  conversion is available without introducing implicit conversion into any
+  existing operation.
+
+Done when: achieved.  Unit changes are numerical operations distinct from
+interpretation, and dimension-one units exercise the same mechanism as
+physical units.
+
+* NEXT Constrain units to semantic quantity kinds
+:PROPERTIES:
+:ID: V3TSZA
+:END:
+
+Intent: add the mp-units distinction between universally scaled units such as
+=one= and =percent= and kind-specific units such as =radian=, =steradian=, or
+=bit=.  Let semantic quantity definitions form a small open hierarchy without
+weakening the current exact-name safety.
+
+Evidence: #RK56VG and Moppe's live quantity catalogue show why equal dimension
+does not imply either equal meaning or universal unit admissibility.  mp-units
+uses dimension-one subkinds for angles and storage while retaining =one= and
+its scaled forms across the hierarchy.
+
+Done when: unit definitions can declare an admissible quantity kind; quantity
+construction and conversion reject a dimensionally equal but semantically
+invalid unit; =one= and =percent= continue to express named dimension-one
+quantities; radians express angles but not opacity; and the design leaves room
+for symbolic magnitudes such as pi-over-180 without approximating them during
+semantic checking.
 
 * An initial block-world quantity map
 :PROPERTIES:
@@ -459,8 +551,8 @@ does not obstruct.  Useful executable claims include:
 - composing fields from equal-size but different domains is rejected;
 - a SIMD or foreign kernel sees raw contiguous lanes after one checked
   dispatch; and
-- unit conversion occurs at construction or presentation rather than in each
-  inner-loop operation.
+- unit conversion is an explicit recorded operation rather than an implicit
+  side effect of ordinary arithmetic.
 
 Open design questions remain.  Should specifications be instances, classes,
 symbols naming immutable definitions, or some combination?  Which dimension

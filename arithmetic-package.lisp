@@ -11,11 +11,25 @@
            #:multiply-dimensions
            #:divide-dimensions
            #:exponentiate-dimension
+           #:unit-definition
+           #:unit-definition-name
+           #:unit-definition-dimension
+           #:unit-definition-magnitude
+           #:unit-definition-basis
+           #:unit-definition-identity-p
+           #:unit-definition-for
+           #:define-unit
+           #:undefined-unit
+           #:undefined-unit-name
            #:unit-expression
            #:unit-expression-factors
            #:make-unit-expression
            #:unit-expression=
            #:unitless-p
+           #:unit-expression-dimension
+           #:unit-expression-magnitude
+           #:unit-expression-basis
+           #:unit-conversion-factor
            #:multiply-unit-expressions
            #:divide-unit-expressions
            #:quantity-specification
@@ -44,4 +58,5 @@
            #:quantity-operation-error-specifications
            #:quantity-operation-error-reason
            #:interpret-quantity-specification
+           #:convert-quantity-specification-unit
            #:derive-quantity-specification))

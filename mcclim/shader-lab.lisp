@@ -435,6 +435,16 @@
                         (quantity-specification-label
                          (luv.spir-v:shader-expression-quantity-specification
                           expression))))
+               (luv.spir-v:shader-unit-conversion
+                (write-string "convert-unit(" stream)
+                (write-shader-expression
+                 (luv.spir-v:shader-unit-conversion-operand expression)
+                 stream frame)
+                (format stream ", ~A, scale ~A)"
+                        (quantity-specification-label
+                         (luv.spir-v:shader-expression-quantity-specification
+                          expression))
+                        (luv.spir-v:shader-unit-conversion-factor expression)))
                (luv.spir-v:shader-call
                 (let ((operator (luv.spir-v:shader-call-operator expression))
                       (operands (luv.spir-v:shader-call-operands expression)))
@@ -479,6 +489,8 @@
                          *shader-accent-ink*)
                         (luv.spir-v:shader-quantity-assumption
                          *shader-literal-ink*)
+                        (luv.spir-v:shader-unit-conversion
+                         *shader-accent-ink*)
                         (luv.spir-v:shader-call *shader-call-ink*)))
             (write-body))))))
 

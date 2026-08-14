@@ -93,25 +93,70 @@ Each factor pair has the form (BASE EXPONENT), where EXPONENT is rational."
   (multiply-dimensions numerator
                        (exponentiate-dimension denominator -1)))
 
+(define-condition undefined-unit (error)
+  ((name
+    :initarg :name
+    :reader undefined-unit-name))
+  (:report
+   (lambda (condition stream)
+     (format stream "No semantic unit definition exists for ~S."
+             (undefined-unit-name condition)))))
+
+(defclass unit-definition ()
+  ((name
+    :initarg :name
+    :reader unit-definition-name)
+   (dimension
+    :initarg :dimension
+    :reader unit-definition-dimension)
+   (magnitude
+    :initarg :magnitude
+    :reader unit-definition-magnitude)
+   (basis
+    :initarg :basis
+    :reader unit-definition-basis)
+   (identity-p
+    :initarg :identity-p
+    :initform nil
+    :reader unit-definition-identity-p))
+  (:documentation
+   "A named linear unit with a dimension, canonical basis, and scale."))
+
+(defgeneric unit-definition-for (name)
+  (:documentation
+   "Return the semantic definition of unit NAME, or signal UNDEFINED-UNIT."))
+
+(defmethod unit-definition-for (name)
+  (error 'undefined-unit :name name))
+
 (defclass unit-expression ()
   ((factors
     :initarg :factors
     :reader unit-expression-factors))
   (:documentation
-   "A canonical symbolic unit product.  Distinct bases are not converted."))
+   "A canonical product of defined named units."))
+
+(defun raw-unit-expression (factors)
+  (make-instance 'unit-expression
+                 :factors (canonical-dimension-factors factors)))
 
 (defun make-unit-expression (&optional designator)
-  "Return a canonical exact unit from NIL, one unit symbol, or factor pairs.
+  "Return a canonical unit expression from NIL, a defined unit, or factors.
 
-This layer deliberately knows no scale conversions: :METRE and :KILOMETRE
-remain different bases until an explicit conversion operation is introduced."
+Every symbolic factor must have a semantic unit definition.  Exact unit
+identity remains visible here; conversions are requested separately."
   (etypecase designator
     (null (make-instance 'unit-expression :factors nil))
     (unit-expression designator)
-    (symbol (make-instance 'unit-expression
-                           :factors (list (cons designator 1))))
-    (list (make-instance 'unit-expression
-                         :factors (canonical-dimension-factors designator)))))
+    (symbol
+     (let ((definition (unit-definition-for designator)))
+       (if (unit-definition-identity-p definition)
+           (raw-unit-expression nil)
+           (raw-unit-expression (list (cons designator 1))))))
+    (list
+     (dolist (factor designator)
+       (unit-definition-for (car factor)))
+     (raw-unit-expression designator))))
 
 (defmethod print-object ((unit unit-expression) stream)
   (print-unreadable-object (unit stream :type t)
@@ -138,6 +183,57 @@ remain different bases until an explicit conversion operation is introduced."
 (defun unitless-p (unit)
   (null (unit-expression-factors (make-unit-expression unit))))
 
+(defun map-unit-expression-factors (function unit initial-value)
+  (reduce
+   (lambda (result factor)
+     (funcall function result
+              (unit-definition-for (car factor))
+              (cdr factor)))
+   (unit-expression-factors (make-unit-expression unit))
+   :initial-value initial-value))
+
+(defun unit-expression-dimension (unit)
+  "Return the physical dimension implied by UNIT's definitions."
+  (map-unit-expression-factors
+   (lambda (dimension definition exponent)
+     (multiply-dimensions
+      dimension
+      (exponentiate-dimension
+       (unit-definition-dimension definition) exponent)))
+   unit (make-dimension)))
+
+(defun unit-expression-magnitude (unit)
+  "Return UNIT's scale relative to its canonical basis."
+  (map-unit-expression-factors
+   (lambda (magnitude definition exponent)
+     (* magnitude (expt (unit-definition-magnitude definition) exponent)))
+   unit 1))
+
+(defun unit-expression-basis (unit)
+  "Return UNIT expressed only in canonical basis units."
+  (map-unit-expression-factors
+   (lambda (basis definition exponent)
+     (multiply-unit-expressions
+      basis
+      (exponentiate-unit-expression
+       (unit-definition-basis definition) exponent)))
+   unit (raw-unit-expression nil)))
+
+(defun unit-conversion-factor (source target)
+  "Return the numerical factor converting SOURCE values into TARGET values."
+  (let ((source (make-unit-expression source))
+        (target (make-unit-expression target)))
+    (unless (and (dimension=
+                  (unit-expression-dimension source)
+                  (unit-expression-dimension target))
+                 (unit-expression=
+                  (unit-expression-basis source)
+                  (unit-expression-basis target)))
+      (quantity-operation-error 'convert-unit (list source target)
+                                :incompatible-units))
+    (/ (unit-expression-magnitude source)
+       (unit-expression-magnitude target))))
+
 (defun multiply-unit-expressions (left right)
   (make-unit-expression
    (append (unit-expression-factors (make-unit-expression left))
@@ -154,6 +250,59 @@ remain different bases until an explicit conversion operation is introduced."
 (defun divide-unit-expressions (numerator denominator)
   (multiply-unit-expressions
    numerator (exponentiate-unit-expression denominator -1)))
+
+(defun make-unit-definition
+    (name &key (dimension nil dimension-supplied-p)
+               (reference nil reference-supplied-p)
+               (magnitude 1) identity-p)
+  (unless (and (symbolp name) (realp magnitude) (plusp magnitude))
+    (error "A unit needs a symbolic name and positive real magnitude: ~S, ~S."
+           name magnitude))
+  (when (and dimension-supplied-p reference-supplied-p)
+    (error "Unit ~S cannot define both a base dimension and a reference unit."
+           name))
+  (unless (or dimension-supplied-p reference-supplied-p)
+    (error "Unit ~S needs either :DIMENSION or :REFERENCE." name))
+  (when (and identity-p
+             (or reference-supplied-p
+                 (not (dimensionless-p (make-dimension dimension)))
+                 (/= magnitude 1)))
+    (error "Identity unit ~S must be a dimension-one base of magnitude one."
+           name))
+  (if reference-supplied-p
+      (let ((reference (make-unit-expression reference)))
+        (make-instance
+         'unit-definition
+         :name name
+         :dimension (unit-expression-dimension reference)
+         :magnitude (* magnitude (unit-expression-magnitude reference))
+         :basis (unit-expression-basis reference)
+         :identity-p nil))
+      (let ((dimension (make-dimension dimension)))
+        (make-instance
+         'unit-definition
+         :name name
+         :dimension dimension
+         :magnitude magnitude
+         :basis (if identity-p
+                    (raw-unit-expression nil)
+                    (raw-unit-expression (list (cons name 1))))
+         :identity-p (not (null identity-p))))))
+
+(defmacro define-unit (name &rest options)
+  "Define NAME as a semantic linear unit through an inspectable EQL method."
+  (let ((argument (gensym "UNIT")))
+    `(defmethod unit-definition-for ((,argument (eql ,name)))
+       (declare (ignore ,argument))
+       (load-time-value (make-unit-definition ,name ,@options)))))
+
+;; A deliberately small coherent vocabulary.  More units extend the same open
+;; protocol; an unknown spelling is an error rather than an anonymous factor.
+(define-unit :one :dimension nil :identity-p t)
+(define-unit :metre :dimension :length)
+(define-unit :kilometre :reference :metre :magnitude 1000)
+(define-unit :second :dimension :duration)
+(define-unit :percent :reference :one :magnitude 1/100)
 
 (defclass quantity-specification ()
   ((name
@@ -178,16 +327,33 @@ remain different bases until an explicit conversion operation is introduced."
    "The semantic meaning of a value, separate from its machine representation."))
 
 (defun make-quantity-specification
-    (name &key dimension unit (tensor-order 0) affine-p)
+    (name &key (dimension nil dimension-supplied-p) unit
+               (tensor-order 0) affine-p)
   (unless (typep tensor-order '(integer 0 *))
     (error "A tensor order must be a non-negative integer, not ~S."
            tensor-order))
-  (make-instance 'quantity-specification
-                 :name name
-                 :dimension (make-dimension dimension)
-                 :unit (make-unit-expression unit)
-                 :tensor-order tensor-order
-                 :affine-p (not (null affine-p))))
+  (let* ((unit-expression (make-unit-expression unit))
+         (unit-declares-dimension-p
+           (or (and unit (symbolp unit))
+               (not (unitless-p unit-expression))))
+         (unit-dimension
+           (and unit-declares-dimension-p
+                (unit-expression-dimension unit-expression)))
+         (declared-dimension (make-dimension dimension)))
+    (when (and unit-declares-dimension-p
+               dimension-supplied-p
+               (not (dimension= unit-dimension declared-dimension)))
+      (quantity-operation-error
+       'make-quantity-specification (list name dimension unit)
+       :unit-dimension-mismatch))
+    (make-instance 'quantity-specification
+                   :name name
+                   :dimension (if unit-declares-dimension-p
+                                  unit-dimension
+                                  declared-dimension)
+                   :unit unit-expression
+                   :tensor-order tensor-order
+                   :affine-p (not (null affine-p)))))
 
 (defmethod print-object ((specification quantity-specification) stream)
   (print-unreadable-object (specification stream :type t)
@@ -480,6 +646,30 @@ character agree with INTERPRETATION."
     (quantity-operation-error 'interpret (list derived interpretation)
                               :incompatible-interpretation))
   interpretation)
+
+(defun convert-quantity-specification-unit (source target-unit)
+  "Return SOURCE expressed in TARGET-UNIT and its required numeric factor.
+
+The operation preserves semantic name, dimension, tensor order, and affine
+character.  It is a linear unit conversion, not a semantic interpretation."
+  (check-type source quantity-specification)
+  (let* ((target-unit (make-unit-expression target-unit))
+         (factor
+           (unit-conversion-factor
+            (quantity-specification-unit source) target-unit))
+         (target-dimension (unit-expression-dimension target-unit)))
+    (unless (dimension= (quantity-specification-dimension source)
+                        target-dimension)
+      (quantity-operation-error
+       'convert-unit (list source target-unit) :incompatible-dimensions))
+    (values
+     (make-quantity-specification
+      (quantity-specification-name source)
+      :dimension target-dimension
+      :unit target-unit
+      :tensor-order (quantity-specification-tensor-order source)
+      :affine-p (quantity-specification-affine-p source))
+     factor)))
 
 (defgeneric derive-quantity-specification (operator &rest operands)
   (:documentation

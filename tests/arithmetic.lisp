@@ -82,6 +82,46 @@
          (math:quantity-specification-unit speed)
          '((:metre 1) (:second -1))))))
 
+(deftest semantic-units-own-dimensions-bases-and-scales
+  (let* ((metres
+           (math:make-quantity-specification :distance :unit :metre))
+         (kilometres
+           (math:make-quantity-specification :distance :unit :kilometre))
+         (percent-opacity
+           (math:make-quantity-specification :opacity :unit :percent)))
+    (ok (math:dimension=
+         :length (math:quantity-specification-dimension metres)))
+    (ok (math:dimensionless-p
+         (math:quantity-specification-dimension percent-opacity)))
+    (ok (= 1000
+           (math:unit-conversion-factor :kilometre :metre)))
+    (ok (= 1/100
+           (math:unit-conversion-factor :percent :one)))
+    (multiple-value-bind (converted factor)
+        (math:convert-quantity-specification-unit kilometres :metre)
+      (ok (= factor 1000))
+      (ok (eq :distance
+              (math:quantity-specification-name converted)))
+      (ok (math:unit-expression=
+           :metre (math:quantity-specification-unit converted))))
+    (multiple-value-bind (converted factor)
+        (math:convert-quantity-specification-unit percent-opacity :one)
+      (ok (= factor 1/100))
+      (ok (eq :opacity
+              (math:quantity-specification-name converted)))
+      (ok (math:unitless-p
+           (math:quantity-specification-unit converted))))
+    (ok (signals
+         (math:make-quantity-specification
+          :duration :dimension :duration :unit :metre)
+         'math:quantity-operation-error))
+    (ok (signals
+         (math:make-quantity-specification
+          :unitless :dimension nil :unit :metre)
+         'math:quantity-operation-error))
+    (ok (signals (math:make-unit-expression :mystery-unit)
+                 'math:undefined-unit))))
+
 (deftest extrema-require-exactly-compatible-quantities
   (let ((left
           (math:make-quantity-specification
