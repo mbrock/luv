@@ -495,6 +495,10 @@ nothing else does."))
            #:populate-block-world-chunk
            #:apply-block-world-source-edits
            #:edit-block-world-source
+           #:maintain-block-world-residency
+           #:make-block-chunk-load-request
+           #:block-chunk-load-request
+           #:block-chunk-load-payload
            #:center-little-world-residency
            #:materialize-little-world-chunk
            #:populate-little-world-chunk

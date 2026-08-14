@@ -253,13 +253,13 @@
     (unwind-protect
          (let* ((first
                   (make-instance
-                   'luv::block-chunk-load-request
+                   'luv::little-world-load-request
                    :key '(:load (0 0 0)) :priority 4
                    :seed 1 :demand-token 1
                    :width 8 :height 8 :depth 8))
                 (latest
                   (make-instance
-                   'luv::block-chunk-load-request
+                   'luv::little-world-load-request
                    :key '(:load (0 0 0)) :priority 0
                    :seed 2 :demand-token 2
                    :width 8 :height 8 :depth 8)))

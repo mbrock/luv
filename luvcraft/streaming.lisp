@@ -29,33 +29,85 @@
    (indices :initarg :indices :reader block-chunk-load-payload-indices)))
 
 (defclass block-chunk-load-request (production-request)
-  ((seed :initarg :seed :reader block-chunk-load-request-seed)
-   (demand-token :initarg :demand-token
-                 :reader block-chunk-load-request-demand-token)
-   (width :initarg :width :reader block-chunk-load-request-width)
-   (height :initarg :height :reader block-chunk-load-request-height)
-   (depth :initarg :depth :reader block-chunk-load-request-depth)
-   (landmarks :initarg :landmarks :initform nil
-              :reader block-chunk-load-request-landmarks)
-   (edits :initarg :edits :initform nil
-          :reader block-chunk-load-request-edits)))
+  ((demand-token :initarg :demand-token
+                 :reader block-chunk-load-request-demand-token))
+  (:documentation
+   "The source-neutral half of asynchronous chunk loading.
 
-(defmethod perform-production-request ((request block-chunk-load-request))
+A concrete world source subclasses this with whatever it needs to rebuild
+one chunk in isolation on the worker, and answers
+PERFORM-PRODUCTION-REQUEST with a BLOCK-CHUNK-LOAD-PAYLOAD.  Publication
+and demand-token validation live here, on the base class."))
+
+(defgeneric make-block-chunk-load-request (source world key demand-token priority)
+  (:documentation
+   "Make the off-thread load request which produces resident chunk KEY.
+
+Return NIL when SOURCE cannot generate chunks away from the owning thread;
+the session then keeps KEY desired without scheduling work for it.  A
+returned request must carry the production key (:LOAD KEY) so it matches
+the session's outstanding-work and cancellation bookkeeping."))
+
+(defmethod make-block-chunk-load-request
+    ((source t) world key demand-token priority)
+  (declare (ignore world key demand-token priority))
+  nil)
+
+;;; The little world's realization of the load protocol.  The request captures
+;;; everything the worker needs as plain values: the seed, the chunk shape,
+;;; deterministic landmarks owned by the chunk, and the sparse edits inside it.
+
+(defclass little-world-load-request (block-chunk-load-request)
+  ((seed :initarg :seed :reader little-world-load-request-seed)
+   (width :initarg :width :reader little-world-load-request-width)
+   (height :initarg :height :reader little-world-load-request-height)
+   (depth :initarg :depth :reader little-world-load-request-depth)
+   (landmarks :initarg :landmarks :initform nil
+              :reader little-world-load-request-landmarks)
+   (edits :initarg :edits :initform nil
+          :reader little-world-load-request-edits)))
+
+(defmethod make-block-chunk-load-request
+    ((source little-world-source) world key demand-token priority)
+  (let* ((shape (voxel-space-chunk-shape (block-world-space world)))
+         (width (chunk-shape-width shape))
+         (height (chunk-shape-height shape))
+         (depth (chunk-shape-depth shape))
+         (captured-edits nil))
+    (maphash
+     (lambda (coordinate block)
+       (destructuring-bind (x y z) coordinate
+         (when (and (= (floor x width) (first key))
+                    (= (floor y height) (second key))
+                    (= (floor z depth) (third key)))
+           (push (list block x y z) captured-edits))))
+     (block-edit-overlay-entries (little-world-source-edits source)))
+    (make-instance
+     'little-world-load-request
+     :key (list :load key)
+     :priority priority
+     :seed (little-world-source-seed source)
+     :demand-token demand-token
+     :width width :height height :depth depth
+     :landmarks (little-world-landmarks-for-chunk source world key)
+     :edits captured-edits)))
+
+(defmethod perform-production-request ((request little-world-load-request))
   "Generate one isolated chunk and transfer only its dense content columns."
   (destructuring-bind (chunk-x chunk-y chunk-z)
       (second (production-request-key request))
     (let* ((source (make-instance 'little-world-source
-                                  :seed (block-chunk-load-request-seed request)))
+                                  :seed (little-world-load-request-seed request)))
            (world (make-block-world
-                   :chunk-width (block-chunk-load-request-width request)
-                   :chunk-height (block-chunk-load-request-height request)
-                   :chunk-depth (block-chunk-load-request-depth request)
+                   :chunk-width (little-world-load-request-width request)
+                   :chunk-height (little-world-load-request-height request)
+                   :chunk-depth (little-world-load-request-depth request)
                    :source source)))
       (materialize-block-world-chunk source world chunk-x chunk-y chunk-z)
-      (dolist (landmark (block-chunk-load-request-landmarks request))
+      (dolist (landmark (little-world-load-request-landmarks request))
         (destructuring-bind (block x y z) landmark
           (setf (describe-block-allocatingly world x y z) block)))
-      (dolist (edit (block-chunk-load-request-edits request))
+      (dolist (edit (little-world-load-request-edits request))
         (destructuring-bind (block x y z) edit
           (setf (describe-block-allocatingly world x y z) block)))
       (let ((chunk (world-chunk-at world chunk-x chunk-y chunk-z)))
@@ -152,19 +204,35 @@
     (setf (luvcraft-session-residency-center session)
           (luvcraft-player-chunk-center world player))))
 
+(defgeneric maintain-block-world-residency (source session world)
+  (:documentation
+   "Reconcile SESSION's desired chunk set as WORLD's SOURCE prescribes.
+
+A source which can rematerialize its terrain keeps a sliding window around
+the player, letting the session load and evict chunks as the player moves.
+The default method treats a caller-owned resident set as desired without
+loading or eviction: those chunks still receive immutable mesh production,
+but nothing could regenerate them once evicted."))
+
+(defmethod maintain-block-world-residency ((source t) session world)
+  (maintain-static-luvcraft-residency
+   session world (luvcraft-session-player session)))
+
+(defmethod maintain-block-world-residency
+    ((source little-world-source) session world)
+  (let ((player (luvcraft-session-player session))
+        (radius (luvcraft-session-residency-radius session)))
+    ;; Without a player or radius there is no window to slide, so even a
+    ;; generative world falls back to caller-owned residency.
+    (if (and player radius)
+        (maintain-generated-luvcraft-residency session world player radius)
+        (call-next-method))))
+
 (defun maintain-luvcraft-residency (session)
   "Reconcile desired residency without generating chunks on the frame thread."
-  (let* ((world (luvcraft-session-world session))
-         (source (block-world-source world))
-         (player (luvcraft-session-player session))
-         (radius (luvcraft-session-residency-radius session)))
-    (if (and player radius (typep source 'little-world-source))
-        (maintain-generated-luvcraft-residency
-         session world player radius)
-        ;; A caller may supply an already resident world whose source has no
-        ;; asynchronous generator.  Those chunks still need immutable mesh
-        ;; production; they simply are not loaded or evicted by this session.
-        (maintain-static-luvcraft-residency session world player))))
+  (let ((world (luvcraft-session-world session)))
+    (maintain-block-world-residency
+     (block-world-source world) session world)))
 
 (defun chunk-mesh-dependency-stamp (world chunk)
   "Describe exactly which resident block data CHUNK's exposed mesh observes."
@@ -251,10 +319,6 @@
 (defun schedule-luvcraft-chunk-loads (session)
   (let* ((world (luvcraft-session-world session))
          (source (block-world-source world))
-         (shape (voxel-space-chunk-shape (block-world-space world)))
-         (width (chunk-shape-width shape))
-         (height (chunk-shape-height shape))
-         (depth (chunk-shape-depth shape))
          (center (luvcraft-session-residency-center session))
          (outstanding (luvcraft-session-outstanding-production session))
          (candidates nil))
@@ -272,30 +336,15 @@
     (loop repeat (luvcraft-session-load-schedule-limit session)
           for candidate in candidates
           do (destructuring-bind (key demand-token production-key) candidate
-           (let ((captured-edits nil))
-             (when (typep source 'little-world-source)
-               (maphash
-                (lambda (coordinate block)
-                  (destructuring-bind (x y z) coordinate
-                    (when (and (= (floor x width) (first key))
-                               (= (floor y height) (second key))
-                               (= (floor z depth) (third key)))
-                      (push (list block x y z) captured-edits))))
-                (block-edit-overlay-entries (little-world-source-edits source))))
-             (let ((request
-                     (make-instance
-                      'block-chunk-load-request
-                      :key production-key
-                      :priority (chunk-key-distance-squared key center)
-                      :seed (little-world-source-seed source)
-                      :demand-token demand-token
-                      :width width :height height :depth depth
-                      :landmarks
-                      (little-world-landmarks-for-chunk source world key)
-                      :edits captured-edits)))
-               (setf (gethash production-key outstanding)
-                     (schedule-production-request
-                      (luvcraft-session-production-system session) request))))))))
+               (let ((request
+                       (make-block-chunk-load-request
+                        source world key demand-token
+                        (chunk-key-distance-squared key center))))
+                 (when request
+                   (setf (gethash production-key outstanding)
+                         (schedule-production-request
+                          (luvcraft-session-production-system session)
+                          request))))))))
 
 (defun schedule-luvcraft-meshes (session)
   "Capture at most the configured number of immutable mesh inputs this frame."
