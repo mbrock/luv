@@ -4,6 +4,10 @@
 
 (in-package #:luv/arithmetic/tests)
 
+(math:define-quantity :position :kind :length)
+(math:define-quantity :position-x :kind :length)
+(math:define-quantity :position-y :kind :length)
+
 (deftest dimensions-form-a-canonical-symbolic-product
   (let* ((length (math:make-dimension :length))
          (duration (math:make-dimension :duration))
@@ -87,16 +91,24 @@
            (math:make-quantity-specification :distance :unit :metre))
          (kilometres
            (math:make-quantity-specification :distance :unit :kilometre))
-         (percent-opacity
-           (math:make-quantity-specification :opacity :unit :percent)))
+         (percent-proportion
+           (math:make-quantity-specification :proportion :unit :percent)))
     (ok (math:dimension=
          :length (math:quantity-specification-dimension metres)))
     (ok (math:dimensionless-p
-         (math:quantity-specification-dimension percent-opacity)))
+         (math:quantity-specification-dimension percent-proportion)))
     (ok (= 1000
            (math:unit-conversion-factor :kilometre :metre)))
     (ok (= 1/100
            (math:unit-conversion-factor :percent :one)))
+    (ok (= 1/1000
+           (math:unit-conversion-factor :per-mille :one)))
+    (ok (= 1/1000000
+           (math:unit-conversion-factor :parts-per-million :one)))
+    (ok (math:dimension=
+         '((:duration -1))
+         (math:quantity-specification-dimension
+          (math:make-quantity-specification :frequency :unit :hertz))))
     (multiple-value-bind (converted factor)
         (math:convert-quantity-specification-unit kilometres :metre)
       (ok (= factor 1000))
@@ -105,9 +117,9 @@
       (ok (math:unit-expression=
            :metre (math:quantity-specification-unit converted))))
     (multiple-value-bind (converted factor)
-        (math:convert-quantity-specification-unit percent-opacity :one)
+        (math:convert-quantity-specification-unit percent-proportion :one)
       (ok (= factor 1/100))
-      (ok (eq :opacity
+      (ok (eq :proportion
               (math:quantity-specification-name converted)))
       (ok (math:unitless-p
            (math:quantity-specification-unit converted))))
@@ -121,6 +133,43 @@
          'math:quantity-operation-error))
     (ok (signals (math:make-unit-expression :mystery-unit)
                  'math:undefined-unit))))
+
+(deftest units-are-admissible-only-for-their-semantic-quantity-kinds
+  (let ((angle
+          (math:make-quantity-specification :angle :unit :radian))
+        (proportion
+          (math:make-quantity-specification :proportion :unit :percent)))
+    (ok (eq :angular-measure
+            (math:quantity-specification-kind angle)))
+    (ok (eq :proportion
+            (math:quantity-specification-kind proportion)))
+    (multiple-value-bind (converted factor)
+        (math:convert-quantity-specification-unit angle :one)
+      (ok (= 1 factor))
+      (ok (eq :angular-measure
+              (math:quantity-specification-kind converted))))
+    (ok (signals
+         (math:make-quantity-specification :proportion :unit :radian)
+         'math:quantity-operation-error))
+    (ok (signals
+         (math:make-quantity-specification :angle :unit :steradian)
+         'math:quantity-operation-error))
+    (ok (signals
+         (math:make-quantity-specification
+          :proportion :unit '((:radian 1) (:second -1)))
+         'math:quantity-operation-error))
+    (ok (signals
+         (math:make-quantity-specification
+          :proportion :dimension :length)
+         'math:quantity-operation-error))
+    (ok (eq :undefined-quantity-definition
+            (handler-case
+                (progn
+                  (math:make-quantity-specification
+                   :unregistered-distance :unit :metre)
+                  nil)
+              (math:quantity-operation-error (condition)
+                (math:quantity-operation-error-reason condition)))))))
 
 (deftest extrema-require-exactly-compatible-quantities
   (let ((left

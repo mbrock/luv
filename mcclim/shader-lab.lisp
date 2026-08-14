@@ -347,8 +347,9 @@
 
 (defun quantity-specification-label (specification)
   (if specification
-      (format nil "~@[~(~A~) · ~]~A [~A] · ~A · ~A"
+      (format nil "~@[~(~A~) · ~]~@[kind ~(~A~) · ~]~A [~A] · ~A · ~A"
               (luv.arithmetic:quantity-specification-name specification)
+              (luv.arithmetic:quantity-specification-kind specification)
               (quantity-factors-label
                (luv.arithmetic:dimension-factors
                 (luv.arithmetic:quantity-specification-dimension

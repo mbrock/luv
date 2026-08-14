@@ -450,9 +450,11 @@ keeping conversion policy small and inspectable.
 Evidence:
 
 - [[file:../arithmetic.lisp][=arithmetic.lisp=]] now defines inspectable =unit-definition= objects behind
-  an open =unit-definition-for= EQL protocol.  =define-unit= declares =:one=,
-  =:metre=, =:kilometre=, =:second=, and =:percent= with dimensions, canonical
-  bases, and scales.  Unknown unit symbols are errors.
+  an open =unit-definition-for= EQL protocol.  The initial vocabulary included
+  =:one=, =:metre=, =:kilometre=, =:second=, and =:percent= with dimensions,
+  canonical bases, and scales; #V3TSZA subsequently made their admissible
+  quantity kinds explicit and added more coherent ISQ/SI units.  Unknown unit
+  symbols are errors.
 - A quantity specification derives its dimension from a declared unit and
   rejects a contradictory explicit dimension.  Compound expressions retain
   exact named units; =unit-conversion-factor= separately proves a shared basis
@@ -479,7 +481,7 @@ Done when: achieved.  Unit changes are numerical operations distinct from
 interpretation, and dimension-one units exercise the same mechanism as
 physical units.
 
-* NEXT Constrain units to semantic quantity kinds
+* DONE Constrain units to semantic quantity kinds
 :PROPERTIES:
 :ID: V3TSZA
 :END:
@@ -494,12 +496,68 @@ does not imply either equal meaning or universal unit admissibility.  mp-units
 uses dimension-one subkinds for angles and storage while retaining =one= and
 its scaled forms across the hierarchy.
 
-Done when: unit definitions can declare an admissible quantity kind; quantity
-construction and conversion reject a dimensionally equal but semantically
-invalid unit; =one= and =percent= continue to express named dimension-one
+- [[file:../arithmetic.lisp][=arithmetic.lisp=]] now defines inspectable =quantity-kind-definition= and
+  =quantity-definition= objects behind open EQL protocols.  Kinds form a
+  same-dimension parent hierarchy; quantity specifications expose their kind
+  without replacing the exact quantity name used by arithmetic.
+- Every named unit declares its admissible root kind.  The seed vocabulary now
+  includes =one=, percent, per-mille, parts per million, metre, kilometre,
+  second, hertz, radian, and steradian.  Radian and steradian have the same
+  physical dimension as =one= but different semantic constraints.
+- Named construction and conversion require a declared quantity definition
+  whenever a named unit imposes a kind.  A missing definition and a
+  dimensionally equal but inadmissible unit are hard errors; compound derived
+  units continue to be checked dimensionally without inventing a result kind.
+- [[file:../luvcraft/shaders.lisp][The production shader vocabulary]] classifies normalized texture/shadow
+  coordinates, affine normalized depth, unit directions, proportions, relative
+  linear-colour signals, controls, gradients, sample counts, and world distance.
+  Their declarations now say =:unit :one= or =:unit :metre= explicitly.
+- The lane called sun angular width is deliberately a normalized
+  =:sun-disc-coordinate= rather than an angle: its stored value is subtracted
+  from a cosine alignment near one.  Giving it radians would make the source
+  sound more physical while describing the actual representation less truly.
+- [[file:../tests/arithmetic.lisp][Arithmetic tests]] accept an angle in radians and an opacity-like proportion
+  in percent/one, reject proportion-in-radians, angle-in-steradians, and units
+  on unregistered quantities.  [[file:../tests/shader.lisp][Shader tests]] exercise the same failures at
+  the source-language boundary and inspect production quantity kinds.
+- [[file:../mcclim/shader-lab.lisp][The shader workbench]] now includes the semantic kind in its quantity label,
+  keeping name, kind, dimension, unit, tensor order, and affine character
+  separately visible.
+- =make test= passes strict Parinfer checks, all arithmetic/shader/project
+  suites, generated-module validation, and =make smoke= renders successfully.
+  The production fragment remains byte-identical at SHA-256
+  =da53933e77ce1a1f6123be4c5884aef43b0f28ddff849e12fe8125bc354bc494=.
+
+Done when: achieved.  Unit definitions declare an admissible quantity kind;
+quantity construction and conversion reject a dimensionally equal but
+semantically invalid unit; =one= and =percent= continue to express named dimension-one
 quantities; radians express angles but not opacity; and the design leaves room
 for symbolic magnitudes such as pi-over-180 without approximating them during
 semantic checking.
+
+* NEXT Carry semantic units through the vertex and camera ABI
+:PROPERTIES:
+:ID: S00PRF
+:END:
+
+Intent: extend the production proof from the heavily annotated fragment and
+sky calculations into the block vertex boundary.  World and camera positions
+should be metre-valued affine vectors; their subtraction should be a metre
+difference; camera basis vectors should be unit directions; fog near/far
+should be metre distances; and normalized mesh lanes should cross the
+vertex/fragment interface with the meanings they already have downstream.
+
+Evidence: #V3TSZA gives all of these meanings admissible unit/kind definitions,
+but the current vertex shader still receives most mesh and camera lanes as raw
+GPU values.  The existing =assume-quantity= boundaries around opaque shadow
+matrix rows illustrate where an ABI really does introduce meaning; ordinary
+pass-through values should instead carry it from their declarations.
+
+Done when: the vertex shader derives camera-relative metre differences and
+fog proportions without relabelling checked values, passes normalized UV,
+occlusion, normal, light, shadow-coordinate, and shadow-depth meanings across
+the stage interface, rejects a representative metre/one mix-up, and emits the
+same validated SPIR-V bytes.
 
 * An initial block-world quantity map
 :PROPERTIES:

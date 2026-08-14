@@ -17,6 +17,7 @@
            #:unit-definition-magnitude
            #:unit-definition-basis
            #:unit-definition-identity-p
+           #:unit-definition-quantity-kind
            #:unit-definition-for
            #:define-unit
            #:undefined-unit
@@ -32,11 +33,24 @@
            #:unit-conversion-factor
            #:multiply-unit-expressions
            #:divide-unit-expressions
+           #:quantity-kind-definition
+           #:quantity-kind-definition-name
+           #:quantity-kind-definition-parent
+           #:quantity-kind-definition-dimension
+           #:quantity-kind-definition-for
+           #:define-quantity-kind
+           #:quantity-kind-subkind-p
+           #:quantity-definition
+           #:quantity-definition-name
+           #:quantity-definition-kind
+           #:quantity-definition-for
+           #:define-quantity
            #:quantity-specification
            #:make-quantity-specification
            #:quantity-specification-name
            #:quantity-specification-dimension
            #:quantity-specification-unit
+           #:quantity-specification-kind
            #:quantity-specification-tensor-order
            #:quantity-specification-affine-p
            #:quantity-specification=

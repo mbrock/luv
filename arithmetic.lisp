@@ -118,9 +118,12 @@ Each factor pair has the form (BASE EXPONENT), where EXPONENT is rational."
    (identity-p
     :initarg :identity-p
     :initform nil
-    :reader unit-definition-identity-p))
+    :reader unit-definition-identity-p)
+   (quantity-kind
+    :initarg :quantity-kind
+    :reader unit-definition-quantity-kind))
   (:documentation
-   "A named linear unit with a dimension, canonical basis, and scale."))
+   "A named linear unit with a dimension, canonical basis, scale, and kind."))
 
 (defgeneric unit-definition-for (name)
   (:documentation
@@ -251,10 +254,135 @@ identity remains visible here; conversions are requested separately."
   (multiply-unit-expressions
    numerator (exponentiate-unit-expression denominator -1)))
 
+(defclass quantity-kind-definition ()
+  ((name
+    :initarg :name
+    :reader quantity-kind-definition-name)
+   (parent
+    :initarg :parent
+    :initform nil
+    :reader quantity-kind-definition-parent)
+   (dimension
+    :initarg :dimension
+    :reader quantity-kind-definition-dimension))
+  (:documentation
+   "One node in the semantic hierarchy of kinds sharing physical dimensions."))
+
+(defgeneric quantity-kind-definition-for (name)
+  (:documentation "Return the inspectable definition of quantity kind NAME."))
+
+(defmethod quantity-kind-definition-for (name)
+  (declare (ignore name))
+  nil)
+
+(defun make-quantity-kind-definition (name dimension parent)
+  (unless (symbolp name)
+    (error "A quantity kind needs a symbolic name, not ~S." name))
+  (let ((dimension (make-dimension dimension))
+        (parent-definition
+          (and parent (quantity-kind-definition-for parent))))
+    (when (and parent
+               (or (null parent-definition)
+                   (not (dimension=
+                         dimension
+                         (quantity-kind-definition-dimension
+                          parent-definition)))))
+      (error "Quantity kind ~S needs a defined parent of the same dimension, not ~S."
+             name parent))
+    (make-instance 'quantity-kind-definition
+                   :name name :dimension dimension :parent parent)))
+
+(defmacro define-quantity-kind (name &key dimension parent)
+  "Define a semantic quantity kind through an inspectable EQL method."
+  (let ((argument (gensym "QUANTITY-KIND")))
+    `(defmethod quantity-kind-definition-for ((,argument (eql ,name)))
+       (declare (ignore ,argument))
+       (load-time-value
+        (make-quantity-kind-definition ,name ',dimension ,parent)))))
+
+(defun quantity-kind-subkind-p (kind ancestor)
+  "Whether KIND is ANCESTOR or reaches it through declared parent kinds."
+  (loop with seen = nil
+        for name = kind then (quantity-kind-definition-parent definition)
+        for definition = (and name (quantity-kind-definition-for name))
+        while name
+        when (eq name ancestor) return t
+        do (when (or (null definition) (member name seen))
+             (return nil))
+           (push name seen)
+        finally (return nil)))
+
+(defclass quantity-definition ()
+  ((name
+    :initarg :name
+    :reader quantity-definition-name)
+   (kind
+    :initarg :kind
+    :reader quantity-definition-kind))
+  (:documentation
+   "A domain quantity name and the semantic kind whose units it admits."))
+
+(defgeneric quantity-definition-for (name)
+  (:documentation "Return the inspectable definition of quantity NAME, or NIL."))
+
+(defmethod quantity-definition-for (name)
+  (declare (ignore name))
+  nil)
+
+(defun make-quantity-definition (name kind)
+  (unless (and (symbolp name) (symbolp kind)
+               (quantity-kind-definition-for kind))
+    (error "Quantity ~S needs a defined symbolic kind, not ~S." name kind))
+  (make-instance 'quantity-definition :name name :kind kind))
+
+(defmacro define-quantity (name &key kind)
+  "Define quantity NAME as a member of semantic KIND through an EQL method."
+  (let ((argument (gensym "QUANTITY")))
+    `(defmethod quantity-definition-for ((,argument (eql ,name)))
+       (declare (ignore ,argument))
+       (load-time-value (make-quantity-definition ,name ,kind)))))
+
+(defun unit-designator-quantity-kind (unit)
+  "Return the kind constraint of one named UNIT, or NIL for a compound unit."
+  (cond
+    ((symbolp unit)
+     (unit-definition-quantity-kind (unit-definition-for unit)))
+    (t
+     (let ((factors (unit-expression-factors (make-unit-expression unit))))
+       (and (= (length factors) 1)
+            (= (cdar factors) 1)
+            (unit-definition-quantity-kind
+             (unit-definition-for (caar factors))))))))
+
+(defun validate-unit-admissibility (quantity-name unit unit-dimension)
+  (let ((required-kind (unit-designator-quantity-kind unit)))
+    (when quantity-name
+      (let* ((quantity (quantity-definition-for quantity-name))
+             (actual-kind (and quantity (quantity-definition-kind quantity)))
+             (kind-definition
+               (and actual-kind (quantity-kind-definition-for actual-kind))))
+        (unless quantity
+          (quantity-operation-error
+           'make-quantity-specification (list quantity-name unit)
+           :undefined-quantity-definition))
+        (unless (and kind-definition
+                     (dimension=
+                      unit-dimension
+                      (quantity-kind-definition-dimension kind-definition)))
+          (quantity-operation-error
+           'make-quantity-specification (list quantity-name unit)
+           :quantity-kind-dimension-mismatch))
+        (when (and required-kind
+                   (not (quantity-kind-subkind-p
+                         actual-kind required-kind)))
+          (quantity-operation-error
+           'make-quantity-specification (list quantity-name unit)
+           :unit-not-admissible-for-quantity))))))
+
 (defun make-unit-definition
     (name &key (dimension nil dimension-supplied-p)
                (reference nil reference-supplied-p)
-               (magnitude 1) identity-p)
+               (magnitude 1) identity-p quantity-kind)
   (unless (and (symbolp name) (realp magnitude) (plusp magnitude))
     (error "A unit needs a symbolic name and positive real magnitude: ~S, ~S."
            name magnitude))
@@ -269,6 +397,10 @@ identity remains visible here; conversions are requested separately."
                  (/= magnitude 1)))
     (error "Identity unit ~S must be a dimension-one base of magnitude one."
            name))
+  (unless (and (symbolp quantity-kind)
+               (quantity-kind-definition-for quantity-kind))
+    (error "Unit ~S needs a defined :QUANTITY-KIND, not ~S."
+           name quantity-kind))
   (if reference-supplied-p
       (let ((reference (make-unit-expression reference)))
         (make-instance
@@ -277,7 +409,8 @@ identity remains visible here; conversions are requested separately."
          :dimension (unit-expression-dimension reference)
          :magnitude (* magnitude (unit-expression-magnitude reference))
          :basis (unit-expression-basis reference)
-         :identity-p nil))
+         :identity-p nil
+         :quantity-kind quantity-kind))
       (let ((dimension (make-dimension dimension)))
         (make-instance
          'unit-definition
@@ -287,7 +420,8 @@ identity remains visible here; conversions are requested separately."
          :basis (if identity-p
                     (raw-unit-expression nil)
                     (raw-unit-expression (list (cons name 1))))
-         :identity-p (not (null identity-p))))))
+         :identity-p (not (null identity-p))
+         :quantity-kind quantity-kind))))
 
 (defmacro define-unit (name &rest options)
   "Define NAME as a semantic linear unit through an inspectable EQL method."
@@ -296,13 +430,48 @@ identity remains visible here; conversions are requested separately."
        (declare (ignore ,argument))
        (load-time-value (make-unit-definition ,name ,@options)))))
 
-;; A deliberately small coherent vocabulary.  More units extend the same open
+;; The roots are intentionally small: application domains add named quantities
+;; beneath these kinds without teaching the arithmetic core their vocabulary.
+(define-quantity-kind :dimensionless :dimension nil)
+(define-quantity-kind :length :dimension :length)
+(define-quantity-kind :duration :dimension :duration)
+(define-quantity-kind :frequency :dimension ((:duration -1)))
+(define-quantity-kind :proportion :dimension nil :parent :dimensionless)
+(define-quantity-kind :angular-measure :dimension nil :parent :dimensionless)
+(define-quantity-kind :solid-angular-measure
+  :dimension nil :parent :dimensionless)
+
+;; A compact ISQ/SI-inspired seed vocabulary.  More units extend the same open
 ;; protocol; an unknown spelling is an error rather than an anonymous factor.
-(define-unit :one :dimension nil :identity-p t)
-(define-unit :metre :dimension :length)
-(define-unit :kilometre :reference :metre :magnitude 1000)
-(define-unit :second :dimension :duration)
-(define-unit :percent :reference :one :magnitude 1/100)
+(define-unit :one :dimension nil :identity-p t
+  :quantity-kind :dimensionless)
+(define-unit :percent :reference :one :magnitude 1/100
+  :quantity-kind :dimensionless)
+(define-unit :per-mille :reference :one :magnitude 1/1000
+  :quantity-kind :dimensionless)
+(define-unit :parts-per-million :reference :one :magnitude 1/1000000
+  :quantity-kind :dimensionless)
+(define-unit :metre :dimension :length :quantity-kind :length)
+(define-unit :kilometre :reference :metre :magnitude 1000
+  :quantity-kind :length)
+(define-unit :second :dimension :duration :quantity-kind :duration)
+(define-unit :hertz :reference '((:second -1)) :quantity-kind :frequency)
+(define-unit :radian :reference :one :quantity-kind :angular-measure)
+(define-unit :steradian :reference :one
+  :quantity-kind :solid-angular-measure)
+
+;; Canonical quantity names are useful at generic boundaries; applications
+;; normally add narrower names (opacity, texture coordinates, world distance)
+;; beneath the same kinds.
+(define-quantity :dimensionless :kind :dimensionless)
+(define-quantity :proportion :kind :proportion)
+(define-quantity :distance :kind :length)
+(define-quantity :height :kind :length)
+(define-quantity :width :kind :length)
+(define-quantity :duration :kind :duration)
+(define-quantity :frequency :kind :frequency)
+(define-quantity :angle :kind :angular-measure)
+(define-quantity :solid-angle :kind :solid-angular-measure)
 
 (defclass quantity-specification ()
   ((name
@@ -315,6 +484,10 @@ identity remains visible here; conversions are requested separately."
    (unit
     :initarg :unit
     :reader quantity-specification-unit)
+   (kind
+    :initarg :kind
+    :initform nil
+    :reader quantity-specification-kind)
    (tensor-order
     :initarg :tensor-order
     :initform 0
@@ -339,26 +512,44 @@ identity remains visible here; conversions are requested separately."
          (unit-dimension
            (and unit-declares-dimension-p
                 (unit-expression-dimension unit-expression)))
-         (declared-dimension (make-dimension dimension)))
+         (declared-dimension (make-dimension dimension))
+         (effective-dimension (if unit-declares-dimension-p
+                                  unit-dimension
+                                  declared-dimension))
+         (quantity-definition (and name (quantity-definition-for name)))
+         (kind-definition
+           (and quantity-definition
+                (quantity-kind-definition-for
+                 (quantity-definition-kind quantity-definition)))))
     (when (and unit-declares-dimension-p
                dimension-supplied-p
                (not (dimension= unit-dimension declared-dimension)))
       (quantity-operation-error
        'make-quantity-specification (list name dimension unit)
        :unit-dimension-mismatch))
+    (when (and kind-definition
+               (not (dimension=
+                     effective-dimension
+                     (quantity-kind-definition-dimension kind-definition))))
+      (quantity-operation-error
+       'make-quantity-specification (list name dimension unit)
+       :quantity-kind-dimension-mismatch))
+    (when unit-declares-dimension-p
+      (validate-unit-admissibility name unit unit-dimension))
     (make-instance 'quantity-specification
                    :name name
-                   :dimension (if unit-declares-dimension-p
-                                  unit-dimension
-                                  declared-dimension)
+                   :dimension effective-dimension
                    :unit unit-expression
+                   :kind (and quantity-definition
+                              (quantity-definition-kind quantity-definition))
                    :tensor-order tensor-order
                    :affine-p (not (null affine-p)))))
 
 (defmethod print-object ((specification quantity-specification) stream)
   (print-unreadable-object (specification stream :type t)
-    (format stream "~S ~A [~A] order ~D~:[~; point~]"
+    (format stream "~S~@[ <~S>~] ~A [~A] order ~D~:[~; point~]"
             (quantity-specification-name specification)
+            (quantity-specification-kind specification)
             (quantity-specification-dimension specification)
             (quantity-specification-unit specification)
             (quantity-specification-tensor-order specification)

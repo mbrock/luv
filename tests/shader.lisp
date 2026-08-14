@@ -111,8 +111,8 @@
           (spv:shader-expression-form
            (spv:shader-binding-expression sun-visibility)))
          '("smoothstep"
-           ("quantity" 0.9 "quantity" "sky-light-level")
-           ("quantity" 1.0 "quantity" "sky-light-level")
+           ("quantity" 0.9 "quantity" "sky-light-level" "unit" "one")
+           ("quantity" 1.0 "quantity" "sky-light-level" "unit" "one")
            "sky-input")))
     (ok (equal
          (form-names
@@ -129,13 +129,13 @@
                '("interpret"
                  ("*" "albedo"
                   ("+" "sky-light" "sun-light" "local-light"))
-                 "quantity" "linear-rgb")))
+                 "quantity" "linear-rgb" "unit" "one")))
     (ok (equal (form-names
                 (spv:shader-expression-form
                  (spv:shader-binding-expression radiance)))
                '("+" "reflected"
                  ("interpret" ("*" "albedo" "emission-input")
-                  "quantity" "linear-rgb"))))
+                  "quantity" "linear-rgb" "unit" "one"))))
     (ok (equal (form-names
                 (spv:shader-expression-form
                  (spv:shader-binding-expression fogged)))
@@ -716,6 +716,13 @@
                (spv:shader-language-error-reason condition)))))
     (ok (eq :unit-conversion-requires-quantity
             (reason-for '(convert-unit value :unit :metre))))
+    (ok (eq :invalid-quantity-declaration
+            (reason-for
+             '(quantity 1.0 :quantity :opacity :unit :radian))))
+    (ok (eq :invalid-quantity-declaration
+            (reason-for
+             '(quantity 1.0 :quantity :unregistered-distance
+                            :unit :metre))))
     (ok (eq :invalid-unit-conversion
             (reason-for
              '(convert-unit
@@ -743,6 +750,8 @@
             (rgba (quantity 'rgba)))
         (ok (eq :shadow-uv
                 (math:quantity-specification-name coordinate)))
+        (ok (eq :normalized-coordinate
+                (math:quantity-specification-kind coordinate)))
         (ok (math:quantity-specification-affine-p coordinate))
         (ok (eq :shadow-depth
                 (math:quantity-specification-name receiver-depth)))
@@ -756,8 +765,12 @@
                 (math:quantity-specification-name blocker-separation)))
         (ok (eq :shadow-filter-radius
                 (math:quantity-specification-name filter-radius)))
+        (ok (eq :sample-count
+                (math:quantity-specification-kind filter-radius)))
         (ok (eq :linear-rgba
-                (math:quantity-specification-name rgba)))))))
+                (math:quantity-specification-name rgba)))
+        (ok (eq :relative-color-signal
+                (math:quantity-specification-kind rgba)))))))
 
 (deftest shadow-visibility-is-a-source-abstraction-over-core-math
   (ok (spv:shader-abstraction-p 'spv:shadow-visibility))

@@ -1209,13 +1209,22 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
 (defun parse-declaration-quantity-specification
     (quantity dimension unit affine-p type source-form)
   (when (or quantity dimension unit affine-p)
-    (apply
-     #'math:make-quantity-specification quantity
-     (append
-      (and dimension (list :dimension dimension))
-      (list :unit unit
-            :tensor-order (shader-type-tensor-order type source-form)
-            :affine-p affine-p)))))
+    (handler-case
+        (apply
+         #'math:make-quantity-specification quantity
+         (append
+          (and dimension (list :dimension dimension))
+          (list :unit unit
+                :tensor-order (shader-type-tensor-order type source-form)
+                :affine-p affine-p)))
+      (math:undefined-unit (condition)
+        (error 'shader-language-error
+               :form source-form :reason :undefined-unit
+               :details (math:undefined-unit-name condition)))
+      (math:quantity-operation-error (condition)
+        (error 'shader-language-error
+               :form source-form :reason :invalid-quantity-declaration
+               :details (math:quantity-operation-error-reason condition))))))
 
 (defun parse-declaration-quantity-layout
     (components type source-form &optional whole)
