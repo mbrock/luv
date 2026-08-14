@@ -216,7 +216,10 @@ repeating the lane arithmetic as a literal."
 
 (defgeneric shader-expression-quantity-checked-p (expression)
   (:documentation
-   "Whether semantic checking has entered EXPRESSION through an annotation."))
+   "Whether semantic quantity checking is active at EXPRESSION.
+
+Annotations enter checked arithmetic; an explicit REPRESENTATION boundary
+leaves it again while retaining the semantic operand in the expression graph."))
 
 (defclass shader-literal (shader-expression)
   ((value
@@ -266,6 +269,13 @@ repeating the lane arithmetic as a literal."
 (defun shader-quantity-assumption-operand (expression)
   (shader-quantity-boundary-operand expression))
 
+(defclass shader-representation (shader-quantity-boundary) ()
+  (:documentation
+   "An explicit exposure of a semantic value's raw machine representation."))
+
+(defun shader-representation-operand (expression)
+  (shader-quantity-boundary-operand expression))
+
 (defclass shader-unit-conversion (shader-expression)
   ((operand
     :initarg :operand
@@ -299,6 +309,15 @@ repeating the lane arithmetic as a literal."
     ((expression shader-quantity-boundary))
   (declare (ignore expression))
   t)
+
+(defmethod shader-expression-quantity-checked-p
+    ((expression shader-representation))
+  ;; This boundary is deliberately the one way for checked source to enter an
+  ;; opaque representation-level calculation.  Its operand remains visible in
+  ;; the graph, but arithmetic above the node is raw until meaning is assumed
+  ;; again at another explicit boundary.
+  (declare (ignore expression))
+  nil)
 
 (defmethod shader-expression-quantity-checked-p
     ((expression shader-unit-conversion))
@@ -986,6 +1005,8 @@ never collides with a standard symbol's function documentation:
   "State an explicit semantic assumption about an otherwise raw value.")
 (define-shader-operator interpret
   "Assign a checked semantic quantity specification without emitting code.")
+(define-shader-operator representation
+  "Expose a semantic value's raw representation without emitting code.")
 (define-shader-operator convert-unit
   "Explicitly express a semantic quantity in another compatible unit.")
 
@@ -1395,6 +1416,22 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
   (declare (ignore operator))
   (parse-raw-quantity-boundary
    'shader-quantity-assumption form environment))
+
+(defmethod parse-shader-operator-call
+    ((operator (eql 'representation)) form environment)
+  (declare (ignore operator))
+  (unless (= (length form) 2)
+    (error 'shader-language-error
+           :form form :reason :representation-arity))
+  (let ((operand (parse-shader-expression (second form) environment)))
+    (unless (shader-expression-quantity-checked-p operand)
+      (error 'shader-language-error
+             :form form :reason :representation-requires-quantity
+             :details (shader-expression-form operand)))
+    (make-instance 'shader-representation
+                   :operand operand
+                   :type (shader-expression-type operand)
+                   :source-form form)))
 
 (defun parse-interface-declaration (form direction)
   (destructuring-bind
@@ -2101,6 +2138,11 @@ Modules whose expressions use no extended mathematics never acquire one."
     ((expression shader-quantity-assumption))
   (declare (ignore expression))
   'assumption)
+
+(defmethod shader-expression-provenance-name
+    ((expression shader-representation))
+  (declare (ignore expression))
+  'representation)
 
 (defun expression-result-name (expression)
   (or (shader-expression-name expression)

@@ -8,7 +8,8 @@
                 #:dot #:sample #:sample-compare #:mix
                 #:vec2 #:vec3 #:vec4 #:swizzle
                 #:clamp #:smoothstep #:normalize
-                #:quantity #:assume-quantity #:interpret #:convert-unit
+                #:quantity #:assume-quantity #:interpret #:representation
+                #:convert-unit
                 #:set-output))
 
 (in-package #:luv/spir-v/tests)
@@ -154,7 +155,10 @@
                          (string-equal (symbol-name left)
                                        (symbol-name right)))))
          (fog-progress (binding-named 'fog-progress specification))
-         (fog-amount (binding-named 'fog-amount specification)))
+         (fog-amount (binding-named 'fog-amount specification))
+         (relative (binding-named 'relative specification))
+         (view-z (binding-named 'view-z specification))
+         (world (binding-named 'world specification)))
     (ok (typep specification 'spv:shader-specification))
     (ok (eq (spv:shader-specification-stage specification) :vertex))
     (ok (= (length (spv:shader-specification-inputs specification)) 4))
@@ -181,11 +185,32 @@
     (ok (equal (form-names
                 (spv:shader-expression-form
                  (spv:shader-binding-expression fog-progress)))
-               '("clamp" ("/" ("-" "view-z" "fog-near") "fog-span") 0.0 1.0)))
+               '("clamp" ("/" ("-" "view-z" "fog-near") "fog-span")
+                 ("quantity" 0.0 "unit" "one")
+                 ("quantity" 1.0 "unit" "one"))))
     (ok (equal (form-names
                 (spv:shader-expression-form
                  (spv:shader-binding-expression fog-amount)))
-               '("*" "fog-progress" "fog-progress")))))
+               '("interpret" ("*" "fog-progress" "fog-progress")
+                 "quantity" "fog-amount" "unit" "one")))
+    (let ((relative-quantity
+            (spv:shader-expression-quantity-specification
+             (spv:shader-binding-expression relative)))
+          (view-z-quantity
+            (spv:shader-expression-quantity-specification
+             (spv:shader-binding-expression view-z))))
+      (ok (eq :world-position
+              (math:quantity-specification-name relative-quantity)))
+      (ok (not (math:quantity-specification-affine-p relative-quantity)))
+      (ok (math:unit-expression=
+           :metre (math:quantity-specification-unit relative-quantity)))
+      (ok (eq :view-distance
+              (math:quantity-specification-name view-z-quantity)))
+      (ok (math:unit-expression=
+           :metre (math:quantity-specification-unit view-z-quantity))))
+    (ok (typep (first (spv:shader-call-operands
+                       (spv:shader-binding-expression world)))
+               'spv:shader-representation))))
 
 (deftest block-vertex-uniform-members-retain-access-chain-provenance
   (let* ((lowering (spv:block-world-vertex-lowering))
@@ -607,14 +632,20 @@
                            (assume-quantity right :quantity :right-factor))
                           (product (* typed-left typed-right))
                           (sum (interpret product
-                                          :quantity :combined-factor)))
-                    (set-output result sum)))
+                                          :quantity :combined-factor))
+                          (represented (representation sum))
+                          (recovered
+                            (assume-quantity represented
+                                             :quantity :combined-factor)))
+                    (set-output result recovered)))
                 '((let* ((sum (* left right)))
                     (set-output result sum)))))))
     (let* ((annotated (probe t))
            (plain (probe nil))
            (typed-left (binding-named 'typed-left annotated))
-           (sum (binding-named 'sum annotated)))
+           (sum (binding-named 'sum annotated))
+           (represented (binding-named 'represented annotated))
+           (recovered (binding-named 'recovered annotated)))
       (ok (typep (spv:shader-binding-expression typed-left)
                  'spv:shader-quantity-assumption))
       (ok (typep (spv:shader-binding-expression sum)
@@ -623,6 +654,14 @@
               (math:quantity-specification-name
                (spv:shader-expression-quantity-specification
                 (spv:shader-binding-expression sum)))))
+      (ok (typep (spv:shader-binding-expression represented)
+                 'spv:shader-representation))
+      (ok (not (spv:shader-expression-quantity-checked-p
+                (spv:shader-binding-expression represented))))
+      (ok (null (spv:shader-expression-quantity-specification
+                 (spv:shader-binding-expression represented))))
+      (ok (typep (spv:shader-binding-expression recovered)
+                 'spv:shader-quantity-assumption))
       (ok (equalp (spv:assemble-shader-specification annotated)
                   (spv:assemble-shader-specification plain)))))
   (flet ((probe (constructed-p)
@@ -656,6 +695,8 @@
                (spv:shader-language-error-reason condition)))))
     ;; INTERPRET can name checked arithmetic, but cannot smuggle meaning onto
     ;; a raw input.  ASSUME-QUANTITY is the deliberately loud boundary for it.
+    (ok (eq :representation-requires-quantity
+            (reason-for '(representation value))))
     (ok (eq :invalid-quantity-interpretation
             (reason-for
              '(interpret value :quantity :distance
@@ -674,6 +715,51 @@
                                 :dimension :length :unit :metre)
                :quantity :width
                :dimension :length :unit :metre))))))
+
+(deftest production-vertex-interfaces-carry-quantities-end-to-end
+  (let* ((specification (spv:block-world-vertex-specification))
+         (inputs (spv:shader-specification-inputs specification))
+         (outputs (spv:shader-specification-outputs specification))
+         (position (first inputs))
+         (uv-shade (second inputs))
+         (normal (third inputs))
+         (light (fourth inputs))
+         (fog (fourth outputs))
+         (shadow-uv (sixth outputs))
+         (shadow-depth (seventh outputs))
+         (position-quantity
+           (spv:shader-declaration-quantity-specification position)))
+    (ok (eq :world-position
+            (math:quantity-specification-name position-quantity)))
+    (ok (math:quantity-specification-affine-p position-quantity))
+    (ok (math:unit-expression=
+         :metre (math:quantity-specification-unit position-quantity)))
+    (ok (spv:shader-declaration-quantity-layout uv-shade))
+    (ok (eq :world-direction
+            (math:quantity-specification-name
+             (spv:shader-declaration-quantity-specification normal))))
+    (ok (spv:shader-declaration-quantity-layout light))
+    (ok (eq :fog-amount
+            (math:quantity-specification-name
+             (spv:shader-declaration-quantity-specification fog))))
+    (ok (eq :shadow-uv
+            (math:quantity-specification-name
+             (spv:shader-declaration-quantity-specification shadow-uv))))
+    (ok (eq :shadow-depth
+            (math:quantity-specification-name
+             (spv:shader-declaration-quantity-specification shadow-depth))))
+    (ok (signals
+         (spv:parse-shader-specification
+          'invalid-production-unit-mix
+          '(:stage :vertex
+            :inputs
+            ((position :vec3 :location 0
+                       :quantity :world-position :unit :metre :affine-p t)
+             (direction :vec3 :location 1
+                        :quantity :world-direction :unit :one))
+            :outputs ((result :vec3 :location 0)))
+         '((set-output result (+ position direction))))
+         'spv:shader-language-error))))
 
 (deftest explicit-unit-conversion-preserves-meaning-and-scales-values
   (let* ((specification

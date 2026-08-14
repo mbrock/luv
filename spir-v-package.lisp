@@ -117,6 +117,8 @@
            #:shader-quantity-construction-operand
            #:shader-quantity-assumption
            #:shader-quantity-assumption-operand
+           #:shader-representation
+           #:shader-representation-operand
            #:shader-unit-conversion
            #:shader-unit-conversion-operand
            #:shader-unit-conversion-factor
@@ -140,6 +142,7 @@
            #:quantity
            #:assume-quantity
            #:interpret
+           #:representation
            #:convert-unit
            #:set-output
            #:shader-operator

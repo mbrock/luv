@@ -436,6 +436,12 @@
                         (quantity-specification-label
                          (luv.spir-v:shader-expression-quantity-specification
                           expression))))
+               (luv.spir-v:shader-representation
+                (write-string "representation(" stream)
+                (write-shader-expression
+                 (luv.spir-v:shader-representation-operand expression)
+                 stream frame)
+                (write-char #\) stream))
                (luv.spir-v:shader-unit-conversion
                 (write-string "convert-unit(" stream)
                 (write-shader-expression
@@ -490,6 +496,8 @@
                          *shader-accent-ink*)
                         (luv.spir-v:shader-quantity-assumption
                          *shader-literal-ink*)
+                        (luv.spir-v:shader-representation
+                         *shader-accent-ink*)
                         (luv.spir-v:shader-unit-conversion
                          *shader-accent-ink*)
                         (luv.spir-v:shader-call *shader-call-ink*)))

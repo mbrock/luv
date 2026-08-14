@@ -426,9 +426,9 @@ Evidence:
   =:world-direction= vector whose =y= component has its own quantity name.
 - [[file:../tests/shader.lisp][=tests/shader.lisp=]] proves heterogeneous packed projections, rejects =yz=
   and whole-packed arithmetic, proves named homogeneous axes and texture sample
-  channel layouts, distinguishes =quantity=, =assume-quantity=, and =interpret=,
-  and checks their zero-codegen behavior.
-- [[file:../mcclim/shader-lab.lisp][The shader workbench]] presents packed lane maps and the three kinds of
+  channel layouts, distinguishes =quantity=, =assume-quantity=, =interpret=,
+  and =representation=, and checks their zero-codegen behavior.
+- [[file:../mcclim/shader-lab.lisp][The shader workbench]] presents packed lane maps and the four kinds of
   semantic boundary rather than flattening them into an undifferentiated
   annotation.
 
@@ -535,7 +535,27 @@ quantities; radians express angles but not opacity; and the design leaves room
 for symbolic magnitudes such as pi-over-180 without approximating them during
 semantic checking.
 
-* NEXT Carry semantic units through the vertex and camera ABI
+* Semantic representation boundaries point both ways
+:PROPERTIES:
+:ID: F83KGZ
+:END:
+
+Semantic checking should not pretend an opaque numerical ABI understands
+quantities.  The shader language therefore has two deliberately loud ways to
+cross that boundary.  =assume-quantity= introduces meaning to a raw external
+value; =representation= exposes the raw machine value of an already semantic
+operand.  Both remain first-class expression objects with source and lowering
+provenance, and both alias their operand without emitting an instruction.
+
+=representation= is not a general escape from a type error: its operand must
+already carry checked quantity semantics.  Above the node, arithmetic is raw
+until a later =assume-quantity= boundary introduces a stated meaning.  This is
+useful for the present shadow rows, whose =vec4= homogeneous-coordinate ABI is
+heterogeneous and not yet modeled as a semantic matrix.  It makes that missing
+model visible instead of either rejecting all use of the rows or silently
+forgetting that their input was a metre-valued affine point.
+
+* DONE Carry semantic units through the vertex and camera ABI
 :PROPERTIES:
 :ID: S00PRF
 :END:
@@ -547,17 +567,65 @@ difference; camera basis vectors should be unit directions; fog near/far
 should be metre distances; and normalized mesh lanes should cross the
 vertex/fragment interface with the meanings they already have downstream.
 
-Evidence: #V3TSZA gives all of these meanings admissible unit/kind definitions,
-but the current vertex shader still receives most mesh and camera lanes as raw
-GPU values.  The existing =assume-quantity= boundaries around opaque shadow
-matrix rows illustrate where an ABI really does introduce meaning; ordinary
-pass-through values should instead carry it from their declarations.
+Evidence:
 
-Done when: the vertex shader derives camera-relative metre differences and
-fog proportions without relabelling checked values, passes normalized UV,
-occlusion, normal, light, shadow-coordinate, and shadow-depth meanings across
-the stage interface, rejects a representative metre/one mix-up, and emits the
-same validated SPIR-V bytes.
+- [[file:../luvcraft/shaders.lisp][=luvcraft/shaders.lisp=]] now declares camera and world positions as affine
+  =:world-position= vectors in metres, the three camera basis lanes as unit
+  =:world-direction= vectors, projection scales in =one=, and fog near/far and
+  projection depth offset as metre-valued =:view-distance= values.
+- Point subtraction derives a non-affine metre vector; its forward projection
+  is interpreted as view distance, while fog subtraction and division derive
+  a dimensionless progress value before interpretation as =:fog-amount=.
+- The mesh ABI publishes texture UV plus ambient occlusion, unit normal, and
+  three distinct light lanes on both sides of the vertex/fragment interface.
+  Shadow UV and depth acquire their normalized meanings at the opaque shadow
+  transform result.  The shadow and sky vertex stages share the semantic frame
+  declarations rather than reintroducing direction meaning downstream.
+- #F83KGZ records the explicit =representation= boundary used where a semantic
+  metre point enters the still-raw homogeneous shadow rows.  It is visible in
+  the expression graph and shader workbench, requires a semantic operand, and
+  has no codegen effect.
+- [[file:../tests/shader.lisp][Shader tests]] inspect the affine/non-affine transition, exact metre units,
+  interface layouts, representation boundary, and the rejection of a
+  representative metre/one mix-up.  The focused suite passes all 28 tests.
+- Vulkan validation passes, and all five generated scene binaries remain
+  byte-identical: block vertex
+  =9c99780b969b33eb242976c943463449b2cce4b66f779674a291fc3a4f2aeb34=,
+  sky vertex
+  =2bff3dd9c5b4ffe74746a324b05868b12f866749b7cc5670ae47d39a53925fac=,
+  shadow vertex
+  =4402a20bc62ef9289244ec0b52d2cd32f644147938d372eda308021ce49c300a=,
+  block fragment
+  =da53933e77ce1a1f6123be4c5884aef43b0f28ddff849e12fe8125bc354bc494=,
+  and sky fragment
+  =2d7085ebfbe0c35e18cd96deb25369a28cbec391a55589ae747ff7ef8a0d9c48=.
+- =make test= passes strict Parinfer, the complete project suites, and generated
+  module validation; =make smoke= renders the block world successfully.
+
+Done when: achieved.  Vertex camera arithmetic is checked in metres,
+dimensionless fog is derived rather than asserted, normalized mesh meanings
+cross the stage interface, opaque representation boundaries are explicit, a
+metre/one mix-up is rejected, and the emitted SPIR-V is unchanged.
+
+* NEXT Give the remaining crosshair colour ABI meaning
+:PROPERTIES:
+:ID: NXA19H
+:END:
+
+Intent: finish the first production-shader audit at the small crosshair
+pipeline.  Its literal vertex module carries an RGB ink tuple into the
+mathematical fragment method, where that boundary should state linear RGB and
+the final alpha construction should state opacity and linear RGBA explicitly.
+
+Evidence: #S00PRF leaves the crosshair fragment as the only production
+mathematical shader whose meaningful numeric interface is wholly raw.  Its
+vertex half is intentionally literal SPIR-V, so the fragment declaration is a
+real external-meaning boundary rather than an ordinary pass-through value.
+
+Done when: the crosshair fragment input is linear RGB, its alpha lane is an
+opacity, its output derives linear RGBA through a checked interpretation, a
+colour/proportion misuse is rejected, and its validated SPIR-V stays
+byte-identical.
 
 * An initial block-world quantity map
 :PROPERTIES:

@@ -79,7 +79,7 @@ Lisp-shaped source:
 #+end_src
 
 The vertex method is a CLOS graph too.  Its built-in =position= output and
-six-member camera uniform block are first-class declaration objects; member
+shared frame uniform block are first-class declaration objects; member
 references lower to =AccessChain= and =Load= instructions with retained
 provenance.  Uniform blocks currently admit aligned =vec4= lanes only, matching
 the renderer's actual camera ABI instead of pretending to provide general
@@ -159,7 +159,10 @@ That metadata is separate from =shader-type=: ordinary arithmetic derives a
 semantic specification while valid annotated and unannotated graphs still
 lower to the same SPIR-V.  =quantity= constructs semantic constants,
 =assume-quantity= loudly marks raw external meaning, and =interpret= names only
-a compatible already-derived result; none emits an instruction.
+a compatible already-derived result.  Conversely, =representation= visibly
+exposes the raw machine value of checked source for an opaque ABI calculation;
+it requires a semantic operand and stops quantity propagation until a later
+explicit assumption.  None of these boundaries emits an instruction.
 
 #VC7VFY and completed work #SQR8KR make component structure first-class too.
 A homogeneous vector can publish named axes, while =:components= describes a
@@ -202,8 +205,8 @@ an instruction keeps that machine occurrence selected while following the
 reverse provenance map to highlight its source expression.
 The detail pane reports the source form, inferred type, semantic meaning, and
 association count.  Packed declarations and samples display lane-to-quantity
-maps, while construction, assumption, and interpretation remain distinct
-selectable expression nodes.
+maps, while construction, assumption, interpretation, and raw representation
+remain distinct selectable expression nodes.
 The presentation objects are the compiler objects themselves; there is no
 parallel UI tree whose identities can drift.
 

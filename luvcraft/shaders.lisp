@@ -49,6 +49,16 @@
 (math:define-quantity :shadow-diagnostic :kind :control-signal)
 (math:define-quantity :shadow-filter-radius :kind :sample-count)
 (math:define-quantity :world-distance :kind :length)
+(math:define-quantity :view-distance :kind :length)
+(math:define-quantity :world-position :kind :length)
+(math:define-quantity :world-x-position :kind :length)
+(math:define-quantity :world-y-position :kind :length)
+(math:define-quantity :world-z-position :kind :length)
+(math:define-quantity :projection-scale :kind :control-signal)
+(math:define-quantity :clip-coordinate :kind :normalized-coordinate)
+(math:define-quantity :clip-x-coordinate :kind :normalized-coordinate)
+(math:define-quantity :clip-y-coordinate :kind :normalized-coordinate)
+(math:define-quantity :clip-z-coordinate :kind :normalized-coordinate)
 
 ;;; Like mp-units' vector_components customization point, these EQL methods
 ;;; describe homogeneous mathematical vectors.  Packed GPU tuples instead
@@ -60,18 +70,41 @@
 (math:define-quantity-components
     :world-direction
     (:world-x-direction :world-y-direction :world-z-direction))
+(math:define-quantity-components
+    :world-position
+    (:world-x-position :world-y-position :world-z-position))
+(math:define-quantity-components
+    :clip-coordinate
+    (:clip-x-coordinate :clip-y-coordinate :clip-z-coordinate))
 
 ;;; Every stage which reads the frame environment declares the same uniform
 ;;; block at binding 2: identical member order and offsets are an ABI
 ;;; requirement, so the member list is written once and spliced at read time.
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defparameter *frame-uniform-members*
-    '((camera-vector :vec4)     ; camera position, w unused
-      (right-vector :vec4)
-      (up-vector :vec4)
-      (forward-vector :vec4)
-      (projection-vector :vec4) ; x scale, y scale, z scale, z offset
-      (fog-vector :vec4)        ; fog near, fog far, unused, unused
+    '((camera-vector :vec4      ; camera position, w unused
+                     :components
+                     ((:xyz :quantity :world-position
+                            :unit :metre :affine-p t)))
+      (right-vector :vec4
+                    :components
+                    ((:xyz :quantity :world-direction :unit :one)))
+      (up-vector :vec4
+                 :components
+                 ((:xyz :quantity :world-direction :unit :one)))
+      (forward-vector :vec4
+                      :components
+                      ((:xyz :quantity :world-direction :unit :one)))
+      (projection-vector :vec4  ; x scale, y scale, z scale, z offset
+                         :components
+                         ((:x :quantity :projection-scale :unit :one)
+                          (:y :quantity :projection-scale :unit :one)
+                          (:z :quantity :projection-scale :unit :one)
+                          (:w :quantity :view-distance :unit :metre)))
+      (fog-vector :vec4         ; fog near, fog far, unused, unused
+                  :components
+                  ((:x :quantity :view-distance :unit :metre)
+                   (:y :quantity :view-distance :unit :metre)))
       (sun-vector :vec4         ; sun direction, day factor
                   :components
                   ((:xyz :quantity :world-direction :unit :one)
@@ -113,17 +146,42 @@
     block-world-vertex-specification
     ((role (eql :block-surface)) (stage (eql :vertex)))
     (:stage :vertex
-     :inputs ((world-position :vec3 :location 0)
-              (uv-shade-input :vec3 :location 1)
-              (normal-input :vec3 :location 2)
-              (light-input :vec3 :location 3))
+     :inputs ((world-position :vec3 :location 0
+                              :quantity :world-position
+                              :unit :metre :affine-p t)
+              (uv-shade-input :vec3 :location 1
+                              :components
+                              ((:xy :quantity :texture-uv
+                                    :unit :one :affine-p t)
+                               (:z :quantity :ambient-occlusion :unit :one)))
+              (normal-input :vec3 :location 2
+                            :quantity :world-direction :unit :one)
+              (light-input :vec3 :location 3
+                           :components
+                           ((:x :quantity :sky-light-level :unit :one)
+                            (:y :quantity :block-light-level :unit :one)
+                            (:z :quantity :material-emission :unit :one))))
      :outputs ((clip-position :vec4 :built-in :position)
-               (uv-shade-output :vec3 :location 0)
-               (normal-output :vec3 :location 1)
-               (fog-output :float :location 2)
-               (light-output :vec3 :location 3)
-               (shadow-uv-output :vec2 :location 4)
-               (shadow-depth-output :float :location 5))
+               (uv-shade-output :vec3 :location 0
+                                :components
+                                ((:xy :quantity :texture-uv
+                                      :unit :one :affine-p t)
+                                 (:z :quantity :ambient-occlusion :unit :one)))
+               (normal-output :vec3 :location 1
+                              :quantity :world-direction :unit :one)
+               (fog-output :float :location 2
+                           :quantity :fog-amount :unit :one)
+               (light-output :vec3 :location 3
+                             :components
+                             ((:x :quantity :sky-light-level :unit :one)
+                              (:y :quantity :block-light-level :unit :one)
+                              (:z :quantity :material-emission :unit :one)))
+               (shadow-uv-output :vec2 :location 4
+                                 :quantity :shadow-uv
+                                 :unit :one :affine-p t)
+               (shadow-depth-output :float :location 5
+                                    :quantity :shadow-depth
+                                    :unit :one :affine-p t))
      :resources
      ((frame-state :uniform-block :set 0 :binding 2
                    :members #.*frame-uniform-members*)))
@@ -134,24 +192,35 @@
          (relative (- world-position camera))
          (view-x (dot relative right))
          (view-y (dot relative up))
-         (view-z (dot relative forward))
+         (view-z (interpret (dot relative forward)
+                            :quantity :view-distance :unit :metre))
          ;; Fog has explicit near/far semantics: no attenuation before near,
          ;; full fog at far, quadratic shaping between, clamped where the
          ;; scene extends past either edge.
          (fog-near (swizzle fog-vector :x))
          (fog-far (swizzle fog-vector :y))
          (fog-span (- fog-far fog-near))
-         (fog-progress (clamp (/ (- view-z fog-near) fog-span) 0.0 1.0))
-         (fog-amount (* fog-progress fog-progress))
+         (fog-progress
+           (clamp (/ (- view-z fog-near) fog-span)
+                  (quantity 0.0 :unit :one)
+                  (quantity 1.0 :unit :one)))
+         (fog-amount
+           (interpret (* fog-progress fog-progress)
+                      :quantity :fog-amount :unit :one))
          (x-scale (swizzle projection-vector :x))
          (y-scale (swizzle projection-vector :y))
          (z-scale (swizzle projection-vector :z))
          (z-offset (swizzle projection-vector :w))
          (clip-x (* view-x x-scale))
          (clip-y (- (* view-y y-scale)))
-         (clip-z (+ (* view-z z-scale) z-offset))
+         (clip-z (+ (interpret (* view-z z-scale)
+                              :quantity :view-distance :unit :metre)
+                    z-offset))
          (clip (vec4 clip-x clip-y clip-z view-z))
-         (world (vec4 world-position 1.0))
+         ;; The shadow rows are still an opaque matrix ABI over a homogeneous
+         ;; tuple.  Expose the metre-valued point's machine representation
+         ;; explicitly instead of silently discarding its meaning.
+         (world (vec4 (representation world-position) 1.0))
          (shadow-x (dot shadow-row-x world))
          (shadow-y (dot shadow-row-y world))
          (shadow-z (dot shadow-row-z world))
@@ -166,8 +235,14 @@
     (set-output normal-output normal-input)
     (set-output fog-output fog-amount)
     (set-output light-output light-input)
-    (set-output shadow-uv-output (vec2 shadow-u shadow-v))
-    (set-output shadow-depth-output shadow-ndc-z)))
+    (set-output shadow-uv-output
+                (assume-quantity (vec2 shadow-u shadow-v)
+                                 :quantity :shadow-uv
+                                 :unit :one :affine-p t))
+    (set-output shadow-depth-output
+                (assume-quantity shadow-ndc-z
+                                 :quantity :shadow-depth
+                                 :unit :one :affine-p t))))
 
 (defun block-world-vertex-specification ()
   (shader-specification-for :block-surface :vertex))
@@ -397,7 +472,8 @@
     block-world-sky-vertex-specification
     ((role (eql :sky)) (stage (eql :vertex)))
     (:stage :vertex
-     :inputs ((corner-position :vec3 :location 0))
+     :inputs ((corner-position :vec3 :location 0
+                               :quantity :clip-coordinate :unit :one))
      :outputs ((clip-position :vec4 :built-in :position)
                (ray-output :vec3 :location 0
                            :quantity :world-direction :unit :one))
@@ -418,11 +494,12 @@
          (view-x (/ x x-scale))
          (view-y (- (/ y y-scale)))
          (ray (+ (* right view-x) (* up view-y) forward))
-         (clip (vec4 x y z 1.0)))
+         (clip (vec4 (representation x)
+                     (representation y)
+                     (representation z)
+                     1.0)))
     (set-output clip-position clip)
-    (set-output ray-output
-                (assume-quantity ray
-                                 :quantity :world-direction :unit :one))))
+    (set-output ray-output ray)))
 
 (defun block-world-sky-vertex-specification ()
   (shader-specification-for :sky :vertex))
@@ -496,12 +573,14 @@
     block-world-shadow-vertex-specification
     ((role (eql :block-shadow)) (stage (eql :vertex)))
     (:stage :vertex
-     :inputs ((world-position :vec3 :location 0))
+     :inputs ((world-position :vec3 :location 0
+                              :quantity :world-position
+                              :unit :metre :affine-p t))
      :outputs ((clip-position :vec4 :built-in :position))
      :resources
      ((frame-state :uniform-block :set 0 :binding 2
                    :members #.*frame-uniform-members*)))
-  (let* ((world (vec4 world-position 1.0))
+  (let* ((world (vec4 (representation world-position) 1.0))
          (clip-x (dot shadow-row-x world))
          (clip-y (dot shadow-row-y world))
          (clip-z (dot shadow-row-z world))
