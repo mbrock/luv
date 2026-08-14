@@ -459,6 +459,7 @@ nothing else does."))
            #:block-kind
            #:block-kind-name
            #:block-kind-face-tiles
+           #:*crystal-block*
            #:block-solid-p
            #:block-face-tile
            #:block-face

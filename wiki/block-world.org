@@ -350,9 +350,8 @@ experience:
 4. *Let it glow.*  The sky and voxel-light proof is done: animated sky
    parameters, block-face atlas selection, procedural texels, geometric
    normals, corner occlusion, derived sky/blocklight fields, raw vertex light,
-   material emission input, and longer distance fog all run through the real
-   Vulkan path.  A player-placeable crystal block remains the next small
-   playable proof of the same pipeline.
+   material emission input, a player-placeable glowing crystal, and longer
+   distance fog all run through the real Vulkan path.
 5. *Collide with it.*  Done as a playable scalar reference: a distinct player
    body walks, falls, grounds, stops at voxel faces, and jumps under a fixed
    step.  The voxel lattice itself is the static acceleration structure and

@@ -228,7 +228,8 @@ the frame uniform cannot silently diverge between shader and host."
           (unless (canvas-key-event-repeat-p event)
             (let* ((character (canvas-key-event-character event))
                    (number (and character (digit-char-p character))))
-              (when (and number (<= 1 number 7))
+              (when (and number
+                         (<= 1 number (length (placeable-block-kinds))))
                 (select-luvcraft-block session number)))))))
   nil)
 

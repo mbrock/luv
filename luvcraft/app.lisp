@@ -120,20 +120,22 @@
        forward #'block-solid-p :max-distance max-distance))))
 
 (defun update-luvcraft-session-title (session)
-  (let* ((block (luvcraft-session-selected-block session))
-         (number (position block *placeable-block-kinds* :test #'eq)))
+  (let* ((blocks (placeable-block-kinds))
+         (block (luvcraft-session-selected-block session))
+         (number (position block blocks :test #'eq)))
     (when (slot-boundp session 'canvas)
       (setf (canvas-title (luvcraft-session-canvas session))
-            (format nil "~A — [~A] ~(~A~)  ·  1–7 select  ·  shift sprint"
+            (format nil "~A — [~A] ~(~A~)  ·  1–~D select  ·  shift sprint"
                     (luvcraft-session-title-base session)
                     (if number (1+ number) "?")
-                    (block-kind-name block)))))
+                    (block-kind-name block)
+                    (length blocks)))))
   session)
 
 (defun select-luvcraft-block (session number)
   "Select the one-based numbered placeable material and update the title."
   (check-type number (integer 1))
-  (let ((block (nth (1- number) *placeable-block-kinds*)))
+  (let ((block (nth (1- number) (placeable-block-kinds))))
     (when block
       (setf (luvcraft-session-selected-block session) block)
       (update-luvcraft-session-title session))

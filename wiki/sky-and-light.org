@@ -16,8 +16,8 @@ part of the work, not a cost to evade.  Frame-wide facts still belong in Lisp;
 spatially varying image mathematics belongs in shaders; and the boundary
 between them should become more capable as the renderer asks more of it.
 
-Phases 0--2 now have an implementation in the codebase; the later crystal,
-HDR, bloom, and directional-shadow sections remain a plan.  Each phase below
+Phases 0--3 now have an implementation in the codebase; the later HDR,
+bloom, and directional-shadow sections remain a plan.  Each phase below
 has a visible result and an evidence gate, so it can be revised from
 measurements without undoing the preceding phases.
 
@@ -415,17 +415,17 @@ reference relight after queues settle.
 :ID: SKCRYS
 :END:
 
-=*crystal-block*= carries light emission 14, surface emission 1.0, and its own
+=*crystal-block*= carries light emission 12, surface emission 1.2, and its own
 atlas tile.  Its surface-emission value makes the crystal face luminous; its
 light-emission value seeds the propagated field around it.  Those are related
 but distinct facts, which is why the mesh carries material emission separately
 from the blocklight level.
 
 Add it to =*placeable-block-kinds*= and make the key range and title derive
-from the palette length instead of hardcoding 1--7.  A block removal or
-placement feeds the ordinary content-change path: direct sky, blocklight,
-light publication, mesh invalidation, and GPU replacement all complete
-without a special crystal edit command.
+from the palette length instead of a fixed seven-material assumption.  A
+block removal or placement feeds the ordinary content-change path: direct sky,
+blocklight, light publication, mesh invalidation, and GPU replacement all
+complete without a special crystal edit command.
 
 ** Gate
 
@@ -570,7 +570,7 @@ Evidence:
 Done when: =:luv/luvcraft/tests= passes and the wiki describes the implemented
 Phase 0--2 state rather than the pre-implementation plan.
 
-** NEXT Player-placeable crystal
+** DONE Player-placeable crystal
 :PROPERTIES:
 :ID: WLCRYS
 :END:
@@ -578,14 +578,18 @@ Phase 0--2 state rather than the pre-implementation plan.
 Intent: turn the test-only glow block into a real material the player can
 select, place, remove, and inspect in motion.
 
-Evidence to gather:
+Evidence:
 
-- A public =*crystal-block*= or equivalently named block kind has its own atlas
-  tile, propagated light emission, and surface emission.
-- The placeable palette, number-key range, and window title derive from the
-  palette rather than the current hardcoded seven-material assumption.
-- Placing and removing the crystal on both sides of a chunk boundary converges
-  to the reference light field and remeshes only the affected products.
+- =luvcraft/blocks.lisp= defines public =*crystal-block*= with atlas tile 9,
+  propagated light emission 12, and surface emission 1.2.
+- =luvcraft/app.lisp= and =luvcraft/render.lisp= derive selection titles and
+  number-key bounds from =placeable-block-kinds=.
+- =tests/block-world.lisp= covers palette slot 8, key selection, title text,
+  atlas size, and the crystal material readings.
+- =tests/light.lisp= covers crystal placement/removal across a chunk boundary,
+  reference-field convergence, affected light revisions, and mesh emission.
+- A local pinned-night capture, generated as =build/crystal-night.png=, showed
+  the crystal face glowing and warming nearby floor surfaces.
 
 Done when: a pinned-night capture shows the crystal face glowing and warming
 nearby surfaces, while tests cover placement/removal and cross-chunk falloff.

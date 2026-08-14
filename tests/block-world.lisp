@@ -11,6 +11,9 @@
   (sb-thread:wait-on-semaphore (gated-production-request-gate request))
   (gated-production-request-value request))
 
+(defclass title-canvas ()
+  ((title :initarg :title :accessor canvas-title)))
+
 (defun production-system-active-request (system)
   (sb-thread:with-mutex ((luv::production-system-lock system))
     (luv::production-system-active-request system)))
@@ -99,10 +102,11 @@
 
 (deftest block-atlas-and-mesh-vertices-carry-material-readings
   (let ((atlas (make-block-texture-atlas)))
-    (ok (equal (array-dimensions atlas) '(16 144)))
+    (ok (equal (array-dimensions atlas) '(16 160)))
     (ok (subtypep (array-element-type atlas) '(unsigned-byte 32)))
     (ok (= (ldb (byte 8 24) (aref atlas 8 8)) 255))
-    (ok (/= (aref atlas 8 8) (aref atlas 8 (+ 8 (* 3 16))))))
+    (ok (/= (aref atlas 8 8) (aref atlas 8 (+ 8 (* 3 16)))))
+    (ok (/= (aref atlas 8 8) (aref atlas 8 (+ 8 (* 9 16))))))
   (flet ((face (name)
            (find name luv::*block-faces* :key #'block-face-name)))
     (ok (= (block-face-tile luv::*grass-block* (face :top)) 0))
@@ -111,7 +115,10 @@
     (ok (= (block-face-tile luv::*wood-block* (face :top)) 5))
     (ok (= (block-face-tile luv::*sand-block* (face :top)) 7))
     (ok (= (block-face-tile luv::*snow-block* (face :top)) 8))
-    (ok (= (length (placeable-block-kinds)) 7)))
+    (ok (= (block-face-tile *crystal-block* (face :top)) 9))
+    (ok (= (block-light-emission *crystal-block*) 12))
+    (ok (= (block-surface-emission *crystal-block*) 1.2))
+    (ok (= (length (placeable-block-kinds)) 8)))
   (let ((world (make-block-world :chunk-width 2
                                  :chunk-height 2
                                  :chunk-depth 2)))
@@ -138,14 +145,25 @@
 
 (deftest crosshair-and-numbered-materials-are-playable-state
   (let* ((vertices (luv::make-block-world-crosshair-vertices 960 640))
+         (canvas (make-instance 'title-canvas :title "luvcraft test"))
          (session (make-instance 'luvcraft-session
-                              :selected-block luv::*stone-block*)))
+                                 :canvas canvas
+                                 :title-base "luvcraft test"
+                                 :selected-block luv::*stone-block*)))
     (ok (= (length vertices)
            (* luv::+block-world-crosshair-vertex-count+ 6)))
     (ok (eq (select-luvcraft-block session 1) luv::*grass-block*))
     (ok (eq (luvcraft-session-selected-block session) luv::*grass-block*))
     (ok (eq (select-luvcraft-block session 7) luv::*snow-block*))
-    (ok (null (select-luvcraft-block session 8)))))
+    (ok (eq (select-luvcraft-block session 8) *crystal-block*))
+    (ok (search "1–8 select" (canvas-title canvas)))
+    (ok (search "crystal" (canvas-title canvas)))
+    (ok (null (select-luvcraft-block session 9)))
+    (handle-canvas-event
+     session canvas
+     (make-instance 'canvas-key-press-event
+                    :key-name :8 :character #\8))
+    (ok (eq (luvcraft-session-selected-block session) *crystal-block*))))
 
 (deftest scalar-player-walks-collides-and-jumps
   (let* ((world (make-block-world :chunk-width 4

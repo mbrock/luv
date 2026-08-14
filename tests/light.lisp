@@ -258,6 +258,41 @@
     (ok (light-matches-reference-p world))
     (ok (= (blocklight-at world 15 8 8) 0))))
 
+(deftest player-placeable-crystal-relights-across-chunk-boundaries
+  (let* ((world (make-open-sky-test-world '(0 0 0) '(1 0 0)))
+         (state (luv::attach-lighting-state world))
+         (left (luv::world-chunk-at world 0 0 0))
+         (right (luv::world-chunk-at world 1 0 0)))
+    (luv::reconcile-lighting state)
+    (let ((left-revision-before
+            (chunk-light-field-revision (block-chunk-light-field left)))
+          (right-revision-before
+            (chunk-light-field-revision (block-chunk-light-field right))))
+      (edit-block-at *crystal-block* world 16 8 8)
+      (ok (luv::reconcile-lighting state))
+      (ok (light-matches-reference-p world))
+      (ok (= (blocklight-at world 16 8 8)
+             (block-light-emission *crystal-block*)))
+      (ok (= (blocklight-at world 15 8 8)
+             (1- (block-light-emission *crystal-block*))))
+      (ok (> (chunk-light-field-revision (block-chunk-light-field left))
+             left-revision-before))
+      (ok (> (chunk-light-field-revision (block-chunk-light-field right))
+             right-revision-before)))
+    (let ((left-revision-before
+            (chunk-light-field-revision (block-chunk-light-field left)))
+          (right-revision-before
+            (chunk-light-field-revision (block-chunk-light-field right))))
+      (edit-block-at nil world 16 8 8)
+      (ok (luv::reconcile-lighting state))
+      (ok (light-matches-reference-p world))
+      (ok (= (blocklight-at world 16 8 8) 0))
+      (ok (= (blocklight-at world 15 8 8) 0))
+      (ok (> (chunk-light-field-revision (block-chunk-light-field left))
+             left-revision-before))
+      (ok (> (chunk-light-field-revision (block-chunk-light-field right))
+             right-revision-before)))))
+
 (deftest meshes-carry-raw-corner-light-and-material-emission
   (let* ((world (make-open-sky-test-world))
          (state (luv::attach-lighting-state world))
@@ -266,7 +301,7 @@
     (dotimes (x 16)
       (dotimes (z 16)
         (setf (world-block-at world x 0 z) luv::*stone-block*)))
-    (setf (world-block-at world 8 1 8) *test-glow-block*)
+    (setf (world-block-at world 8 1 8) *crystal-block*)
     (luv::reconcile-lighting state)
     (let* ((chunk (luv::world-chunk-at world 0 0 0))
            (mesh (mesh-block-chunk mesher world chunk))

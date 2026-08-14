@@ -114,17 +114,22 @@ hang upright."
 (defparameter *snow-block*
   (make-instance 'block-kind :name :snow
                              :face-tiles '(:top 8 :side 8 :bottom 2)))
+(defparameter *crystal-block*
+  (make-instance 'block-kind :name :crystal
+                             :face-tiles '(:all 9)
+                             :light-emission 12
+                             :surface-emission 1.2))
 
 (defparameter *placeable-block-kinds*
   (list *grass-block* *dirt-block* *stone-block* *wood-block*
-        *leaf-block* *sand-block* *snow-block*))
+        *leaf-block* *sand-block* *snow-block* *crystal-block*))
 
 (defun placeable-block-kinds ()
   "Return the numbered material palette used by luvcraft and its tools."
   (copy-list *placeable-block-kinds*))
 
 (defconstant +block-atlas-tile-size+ 16)
-(defconstant +block-atlas-tile-count+ 9)
+(defconstant +block-atlas-tile-count+ 10)
 
 (defun block-atlas-byte (value)
   (max 0 (min 255 (round value))))
@@ -209,6 +214,24 @@ material and rebuild the atlas without touching the rest of the palette."))
    226 238 242
    (+ (round (block-atlas-variation x y tile) 3)
       (if (zerop (mod (+ (* x 5) (* y 7)) 23)) 14 0))))
+
+(defmethod paint-block-atlas-tile ((tile (eql 9)) x y)
+  "Blue crystal, with bright diagonal facets."
+  (let* ((diagonal (abs (- x y)))
+         (facet (if (or (<= diagonal 1)
+                        (<= (abs (- (+ x y) 15)) 1))
+                    42
+                    0))
+         (edge (if (or (zerop x) (zerop y)
+                       (= x (1- +block-atlas-tile-size+))
+                       (= y (1- +block-atlas-tile-size+)))
+                   28
+                   0))
+         (variation (block-atlas-variation x y tile)))
+    (pack-block-atlas-rgba
+     (+ 72 (round variation 3) edge)
+     (+ 176 (round variation 2) facet edge)
+     (+ 235 variation facet edge))))
 
 (defun make-block-texture-atlas ()
   "Return the little world's horizontal RGBA8 atlas as packed pixel words."
