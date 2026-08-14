@@ -17,6 +17,14 @@ Use a short commit message that describes the iteration. Preserve unrelated
 user changes, and never rewrite or discard existing work just to make a clean
 commit.
 
+# Project skills
+
+Reusable design guidance lives in `.agents/skills/` using the open agent
+skills format (`SKILL.md` with name/description frontmatter), so any
+skill-aware agent can load it; `.claude/skills/` symlinks there for Claude
+Code. Start with `clos-design` before designing a new subsystem or
+refactoring dispatch code.
+
 # Live Lisp interaction
 
 Prefer `./sly` over `emacsclient` or a second SBCL when exploring, testing, or
