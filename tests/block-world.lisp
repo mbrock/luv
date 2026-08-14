@@ -1,7 +1,7 @@
-(defpackage #:luv/examples/tests
+(defpackage #:luv/luvcraft/tests
   (:use #:cl #:rove #:luv))
 
-(in-package #:luv/examples/tests)
+(in-package #:luv/luvcraft/tests)
 
 (defclass gated-production-request (luv::production-request)
   ((gate :initarg :gate :reader gated-production-request-gate)

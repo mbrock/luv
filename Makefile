@@ -8,7 +8,7 @@ luvcraft:
 	nix develop -c sbcl --script build-luvcraft.lisp
 
 run: luvcraft
-	./luvcraft
+	./build/luvcraft
 
 test: shader-validate
 	nix develop -c sbcl --non-interactive \
@@ -21,7 +21,7 @@ shader-validate:
 	nix develop -c sbcl --non-interactive \
 		--eval '(require :asdf)' \
 		--eval '(asdf:load-asd (truename "luv.asd"))' \
-		--eval '(asdf:load-system :luv/spir-v)' \
+		--eval '(asdf:load-system :luv/luvcraft/shaders)' \
 		--eval '(luv.spir-v:write-spir-v (luv.spir-v:block-world-vertex-shader) #p"build/block-world.vert.spv")' \
 		--eval '(luv.spir-v:write-spir-v (luv.spir-v:block-world-fragment-shader) #p"build/block-world.frag.spv")' \
 		--eval '(luv.spir-v:write-spir-v (luv.spir-v:block-world-crosshair-vertex-shader) #p"build/block-world-crosshair.vert.spv")' \
@@ -33,10 +33,10 @@ shader-validate:
 
 smoke: luvcraft
 	mkdir -p build
-	./luvcraft --smoke-test build/luvcraft-smoke.png
+	./build/luvcraft --smoke-test build/luvcraft-smoke.png
 
 mcluv:
 	nix develop -c sbcl --script build-mcluv.lisp
 
 clean:
-	rm -f ./luvcraft ./build/luvcraft-smoke.png
+	rm -f ./build/luvcraft ./build/mcluv ./build/luvcraft-smoke.png

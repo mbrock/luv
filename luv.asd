@@ -2,10 +2,11 @@
   :description "An experimental Common Lisp atelier for Vulkan."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on (#:luv/examples)
+  :depends-on (#:luv/examples
+               #:luv/luvcraft)
   :in-order-to ((asdf:test-op (asdf:test-op #:luv/tests)
                               (asdf:test-op #:luv/spir-v/tests)
-                              (asdf:test-op #:luv/examples/tests))))
+                              (asdf:test-op #:luv/luvcraft/tests))))
 
 (asdf:defsystem #:luv/packages
   :description "Package definitions for luv's public and internal names."
@@ -18,8 +19,8 @@
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on (#:luv/packages)
-  :components ((:module "world"
-                :components ((:file "block-world"))))
+  :components ((:module "luvcraft"
+                :components ((:file "world"))))
   :in-order-to ((asdf:test-op (asdf:test-op #:luv/tests))))
 
 (asdf:defsystem #:luv/invocation
@@ -41,14 +42,13 @@
   :components ((:file "spir-v-package")
                (:file "spir-v")
                (:file "shader")
-               (:file "shader-expression")
-               (:file "block-fragment-shader")))
+               (:file "shader-expression")))
 
 (asdf:defsystem #:luv/spir-v/tests
   :description "Tests for luv's mathematical shader language and lowering."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on (#:luv/spir-v
+  :depends-on (#:luv/luvcraft/shaders
                #:rove)
   :components ((:module "tests"
                 :components ((:file "shader"))))
@@ -155,22 +155,46 @@
   :author "Mikael Brockman"
   :depends-on (#:luv/canvas/vulkan))
 
-(asdf:defsystem #:luv/examples
-  :description "Interactive demos and exploratory applications built on luv."
+(asdf:defsystem #:luv/luvcraft/shaders
+  :description "The luvcraft block-world materials as mathematical shaders."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on (#:luv/spir-v)
+  :components ((:module "luvcraft"
+                :components ((:file "shaders")))))
+
+(asdf:defsystem #:luv/luvcraft
+  :description "Luvcraft: the interactive block world built on luv."
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on (#:luv/world
                #:luv/canvas
-               #:luv/spir-v
+               #:luv/luvcraft/shaders
                #:sb-concurrency
                #:uiop)
   :serial t
-  :components ((:module "examples"
-                :components ((:file "demo")
+  :components ((:module "luvcraft"
+                :components ((:file "production")
                              (:file "png")
-                             (:file "production")
-                             (:file "block-world"))))
-  :in-order-to ((asdf:test-op (asdf:test-op #:luv/examples/tests))))
+                             (:file "blocks")
+                             (:file "terrain")
+                             (:file "mesher")
+                             (:file "simulation")
+                             (:file "live-pipeline")
+                             (:file "app")
+                             (:file "streaming")
+                             (:file "render")
+                             (:file "capture"))))
+  :in-order-to ((asdf:test-op (asdf:test-op #:luv/luvcraft/tests))))
+
+(asdf:defsystem #:luv/examples
+  :description "Interactive demos and exploratory applications built on luv."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on (#:luv/canvas
+               #:luv/spir-v)
+  :components ((:module "examples"
+                :components ((:file "demo")))))
 
 (asdf:defsystem #:luv/tests
   :description "Executable claims about luv's renderer-independent models."
@@ -187,11 +211,11 @@
                       (uiop:symbol-call '#:rove '#:find-suite '#:luv/tests))
                (error "luv tests failed"))))
 
-(asdf:defsystem #:luv/examples/tests
+(asdf:defsystem #:luv/luvcraft/tests
   :description "Tests for the visible block-world slice above the core model."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on (#:luv/examples
+  :depends-on (#:luv/luvcraft
                #:rove)
   :components ((:module "tests"
                 :components ((:file "block-world"))))
@@ -200,14 +224,14 @@
              (unless (uiop:symbol-call
                       '#:rove '#:run-suite
                       (uiop:symbol-call
-                       '#:rove '#:find-suite '#:luv/examples/tests))
-               (error "luv example tests failed"))))
+                       '#:rove '#:find-suite '#:luv/luvcraft/tests))
+               (error "luvcraft tests failed"))))
 
 (asdf:defsystem #:luv/tools
   :description "One-shot command-line tools for luv development."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on (#:luv/examples
+  :depends-on (#:luv/luvcraft
                #:uiop)
   :build-operation "program-op"
   :build-pathname "build/luv"
@@ -223,17 +247,24 @@
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on (#:luv/canvas
-               #:luv/examples
                #:luv/spir-v
                #:mcclim-render)
   :serial t
-  :components ((:file "mcclim-package")
-               (:file "mcclim-port")
-               (:file "mcclim-mirror")
-               (:file "mcclim-lab")
-               (:file "mcclim-widget-lab")
-               (:file "mcclim-shader-lab")
-               (:file "mcclim-compositor")))
+  :components ((:module "mcclim"
+                :components ((:file "package")
+                             (:file "port")
+                             (:file "mirror")
+                             (:file "widget-lab")
+                             (:file "compositor")))))
+
+(asdf:defsystem #:luv/mcclim/shader-lab
+  :description "A McCLIM presentation browser for luvcraft's live shaders."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on (#:luv/mcclim
+               #:luv/luvcraft)
+  :components ((:module "mcclim"
+                :components ((:file "shader-lab")))))
 
 (asdf:defsystem #:luv/mcclim/listener
   :description "The McCLIM Listener running on luv."
@@ -241,4 +272,5 @@
   :author "Mikael Brockman"
   :depends-on (#:luv/mcclim
                #:clim-listener)
-  :components ((:file "mcclim-listener")))
+  :components ((:module "mcclim"
+                :components ((:file "listener")))))

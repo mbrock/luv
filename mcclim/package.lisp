@@ -30,10 +30,6 @@
            #:mirror-compositor
            #:port-mirrors
            #:present-mirror
-           #:lab-sheet
-           #:lab-sheet-image
-           #:open-lab-sheet
-           #:close-lab-sheet
            #:widget-lab
            #:widget-lab-click-count
            #:widget-lab-toggle-value

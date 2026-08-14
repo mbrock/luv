@@ -22,9 +22,9 @@ reproduce Minecraft's implementation or close off stranger worlds.
 :ID: P3L8YX
 :END:
 
-The current implementation is split between the renderer-independent model in
-[[file:../world/block-world.lisp][=world/block-world.lisp=]] and the deliberately small visual proof in
-[[file:../examples/block-world.lisp][=examples/block-world.lisp=]]:
+The current implementation lives in [[file:../luvcraft/][=luvcraft/=]], split between the
+renderer-independent model in [[file:../luvcraft/world.lisp][=luvcraft/world.lisp=]] and the visible slice
+above it (blocks, terrain, meshing, simulation, and the application files):
 
 - a =voxel-space= records a fixed chunk shape and explicit physical cell
   extent;

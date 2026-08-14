@@ -26,12 +26,20 @@ The ASDF systems are the useful map:
 :luv/world            coordinate spaces, chunk domains, resident block data
 :luv/spir-v           literal SPIR-V plus typed mathematical shader expressions
 :luv/spir-v/tests     expression typing, provenance, and lowering tests
-:luv/examples         demos, PNG capture, and the block world
+:luv/luvcraft/shaders the block-world materials as mathematical shaders
+:luv/luvcraft         luvcraft: the interactive block world application
+:luv/examples         small live demos of the canvas protocol
 :luv/tests            renderer-independent model tests
-:luv/examples/tests   generation, cross-chunk meshing, and edit tests
+:luv/luvcraft/tests   generation, cross-chunk meshing, and edit tests
 :luv/mcclim           experimental McCLIM backend on luv canvases
+:luv/mcclim/shader-lab McCLIM presentation browser for luvcraft's shaders
 :luv/tools            one-shot command-line tools
 ```
+
+Luvcraft — the block world — lives in [`luvcraft/`](luvcraft/), from the
+renderer-independent world model up through terrain generation, meshing,
+player simulation, live shader pipelines, and the interactive application.
+The McCLIM backend and its labs live in [`mcclim/`](mcclim/).
 
 The public package is still mostly `LUV`, with `LVK` for the lower Vulkan
 helpers and `SPV` for the SPIR-V pieces.
@@ -67,8 +75,8 @@ For the standalone interactive block world, no Emacs or running Lisp image is
 needed:
 
 ```sh
-make              # builds ./luvcraft
-./luvcraft         # opens the game window
+make              # builds ./build/luvcraft
+./build/luvcraft   # opens the game window
 make test          # runs the model and block-world test suites
 make smoke         # runs the built program headlessly and writes a PNG
 ```
@@ -78,7 +86,7 @@ The world model can be loaded and tested without SDL or Vulkan:
 ```lisp
 (asdf:load-system :luv/world)
 (asdf:test-system :luv/world)
-(asdf:test-system :luv/examples)
+(asdf:test-system :luv/luvcraft)
 ```
 
 ## Live Workflow
@@ -112,7 +120,7 @@ of durable image.
 (luv:capture-cube-world-screenshot *world* #P"/tmp/luv-block-world.png")
 (luv:stop-cube-world-demo *world*)
 
-(asdf:load-system :luv/mcclim)
+(asdf:load-system :luv/mcclim/shader-lab)
 (defparameter *shader-lab* (luv.mcclim:open-shader-lab))
 (luv.mcclim:refresh-shader-lab *shader-lab*)
 (multiple-value-bind (status report)

@@ -44,7 +44,7 @@ machine views objects that McCLIM can present and relate.
 :END:
 
 The vertex and fragment shaders used by the playable block world live in
-[[file:../block-fragment-shader.lisp][=block-fragment-shader.lisp=]].  Its complete material calculation is ordinary
+[[file:../luvcraft/shaders.lisp][=luvcraft/shaders.lisp=]].  Its complete material calculation is ordinary
 Lisp-shaped source:
 
 #+begin_src lisp
@@ -165,7 +165,7 @@ global table saying that the =f-mul= opcode exists.
 :ID: P7V5CK
 :END:
 
-[[file:../mcclim-shader-lab.lisp][=mcclim-shader-lab.lisp=]] defines a real application frame on luv's McCLIM
+[[file:../mcclim/shader-lab.lisp][=mcclim/shader-lab.lisp=]] defines a real application frame on luv's McCLIM
 backend.  Its material header renders the generated atlas as selectable block
 cards and offers live definition tabs for block geometry, block surface, and
 crosshair methods.  Clicking a tab recompiles the current method while retaining the
