@@ -34,7 +34,8 @@
   (in-string nil :type boolean)
   (escape nil :type boolean)
   (sharp-seen nil :type boolean)
-  (char-literal nil :type boolean))
+  (char-literal nil :type boolean)
+  (unmatched-closes 0 :type (integer 0)))
 
 (defun split-lines (text)
   (if (zerop (length text))
@@ -98,9 +99,11 @@
                    (write-char character output)
                    (push (1+ column) (state-stack state)))
                   ((char= character #\))
-                   (when (state-stack state)
-                     (pop (state-stack state))
-                     (write-char character output)))
+                   (if (state-stack state)
+                       (progn
+                         (pop (state-stack state))
+                         (write-char character output))
+                       (incf (state-unmatched-closes state))))
                   (t (write-char character output))))
                ((state-escape state)
                 (write-char character output)
@@ -122,9 +125,11 @@
                 (write-char character output)
                 (push (1+ column) (state-stack state)))
                ((and (not (state-in-string state)) (char= character #\)))
-                (when (state-stack state)
-                  (pop (state-stack state))
-                  (write-char character output)))
+                (if (state-stack state)
+                    (progn
+                      (pop (state-stack state))
+                      (write-char character output))
+                    (incf (state-unmatched-closes state))))
                (t (write-char character output))))
     (setf (state-escape state) nil
           (state-sharp-seen state) nil
@@ -134,27 +139,41 @@
   (append-closes-to-previous-line processed-lines
                                   (length (state-stack state))))
 
+(defun source-balanced-p (text)
+  "Return true when TEXT has no paren balance problem this pass can repair."
+  (let ((state (make-state)))
+    (dolist (line (split-lines text))
+      (process-line line state))
+    (and (null (state-stack state))
+         (zerop (state-unmatched-closes state))
+         (not (state-in-string state))
+         (not (state-escape state))
+         (not (state-sharp-seen state))
+         (not (state-char-literal state)))))
+
 (defun apply-indent-mode (text)
   "Repair TEXT using a minimal, indentation-driven Parinfer-like pass.
 
 Open forms close when indentation decreases or at EOF. Unmatched closing
 parentheses are dropped. Parentheses in strings, line comments, and character
-literals are ignored. This is deliberately a heuristic rather than a complete
-Common Lisp reader."
-  (let ((ends-with-newline
-          (and (plusp (length text))
-               (char= (char text (1- (length text))) #\Newline)))
-        (state (make-state))
-        (processed-lines nil))
-    (dolist (line (split-lines text))
-      (unless (or (state-in-string state)
-                  (empty-or-comment-line-p line))
-        (append-closes-to-previous-line
-         processed-lines
-         (dedent-closes state (count-leading-space line))))
-      (push (process-line line state) processed-lines))
-    (append-remaining-closes state processed-lines)
-    (let ((result (format nil "~{~A~^~%~}" (nreverse processed-lines))))
-      (if ends-with-newline
-          (concatenate 'string result (string #\Newline))
-          result))))
+literals are ignored. Already-balanced source is returned unchanged; this pass
+is a repair tool, not a formatter."
+  (if (source-balanced-p text)
+      text
+      (let ((ends-with-newline
+              (and (plusp (length text))
+                   (char= (char text (1- (length text))) #\Newline)))
+            (state (make-state))
+            (processed-lines nil))
+        (dolist (line (split-lines text))
+          (unless (or (state-in-string state)
+                      (empty-or-comment-line-p line))
+            (append-closes-to-previous-line
+             processed-lines
+             (dedent-closes state (count-leading-space line))))
+          (push (process-line line state) processed-lines))
+        (append-remaining-closes state processed-lines)
+        (let ((result (format nil "~{~A~^~%~}" (nreverse processed-lines))))
+          (if ends-with-newline
+              (concatenate 'string result (string #\Newline))
+              result)))))

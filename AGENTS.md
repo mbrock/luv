@@ -56,9 +56,9 @@ print a backtrace and wait on stdin for a restart number or `a` to abort.
 the object (`?` lists its commands, `q` quits).
 
 The connection-free `./sly parinfer [--check|--diff|--write] [--file FILE|CODE|FILE]`
-filter repairs common parenthesis mistakes using indentation. Prefer whole-file
-inspection with `./sly parinfer --diff path/to/file.lisp`; use `--check` in
-scripts or before tests to fail when a file would change, and `--write` only
-after the diff looks right. With no argument it reads multiline source from
-stdin, for example `./sly parinfer < unfinished.lisp`. It is intentionally a
-lossy heuristic, so inspect its output before replacing a file.
+filter repairs common parenthesis mistakes using indentation. Whole balanced
+files are returned unchanged, so `./sly parinfer --check path/to/file.lisp`
+is useful as a low-noise guard. Use `--diff` to inspect an actual repair and
+`--write` only after the diff looks right. With no argument it reads multiline
+source from stdin, for example `./sly parinfer < unfinished.lisp`. It is still
+a repair heuristic rather than a full Common Lisp reader.
