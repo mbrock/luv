@@ -178,10 +178,11 @@
 (deftest lowering-retains-expression-to-ssa-provenance
   (let* ((lowering (spv:block-world-fragment-lowering))
          (specification (spv:shader-lowering-specification lowering))
-         (lit-expression
-           (spv:shader-binding-expression (binding-named 'lit specification)))
+         (reflected-expression
+           (spv:shader-binding-expression
+            (binding-named 'reflected specification)))
          (instructions
-           (gethash lit-expression
+           (gethash reflected-expression
                     (spv:shader-lowering-expression-instructions lowering))))
     (ok (typep (spv:shader-lowering-module lowering) 'spv:spir-v-module))
     (ok instructions)
@@ -192,7 +193,7 @@
                      (symbol-name (spv:instruction-name instruction)))
               :test #'string=))
     (ok (some (lambda (instruction)
-                (member lit-expression
+                (member reflected-expression
                         (gethash instruction
                                  (spv:shader-lowering-instruction-expressions
                                   lowering))
@@ -377,7 +378,7 @@
                        (spv:compile-shader-specification specification))))))
       (ok (equal (forms) (forms))))
     (ok (null (spv:spir-v-module-extended-instruction-imports
-               (spv:block-world-fragment-module))))))
+               (spv:block-world-crosshair-fragment-module))))))
 
 (deftest extended-math-signatures-are-explicit-contracts
   (flet ((failure-reason (body)
