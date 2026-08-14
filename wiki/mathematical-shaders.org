@@ -143,10 +143,15 @@ and call is a =shader-expression= with:
 - and, for a =let*= value, its lexical result name.
 
 The parser understands float scalars, =vec2=/=vec3=/=vec4=, component
-swizzles, arithmetic, =dot=, =sample=, and =mix=.  Type inference rejects an
-unknown name, an out-of-range swizzle, an invalid product, a mismatched output,
-or a malformed resource declaration as a =shader-language-error= carrying the
-source form, reason, and details.
+swizzles, arithmetic, =dot=, =sample=, =mix=, and the GLSL.std.450 family
+currently needed by the block world: =min=, =max=, =clamp=, =smoothstep=,
+=step=, =abs=, =sqrt=, =expt=, and =normalize=.  Texture resources now include
+ordinary colour textures and depth textures; a depth-texture sample still
+lowers through the same image-sampling path and becomes scalar shadow math only
+after source-level swizzling.  Type inference rejects an unknown name, an
+out-of-range swizzle, an invalid product, a mismatched output, or a malformed
+resource declaration as a =shader-language-error= carrying the source form,
+reason, and details.
 
 =let*= is semantic.  Lowering evaluates bindings in source order, interns
 types and constants deterministically, preserves useful lexical names in

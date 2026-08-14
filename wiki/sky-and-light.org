@@ -78,9 +78,11 @@ which make the plan durable.
 - The expression language has floats, =vec2..4=, arithmetic, =dot=, =mix=,
   =swizzle=, texture sampling, and the first GLSL extended-math family:
   =min=, =max=, =clamp=, =smoothstep=, =abs=, =sqrt=, =expt=, and
-  =normalize=.  It still has no comparison/control-flow vocabulary or general
-  uniform packing.  Uniform blocks intentionally consist only of aligned vec4
-  lanes.
+  =normalize=.  A small shadow-ready follow-up added =step=, a typed
+  =:depth-texture-2d= resource, and depth-image sampling that feeds ordinary
+  scalar math through =swizzle=.  It still has no branching, loops, matrices,
+  boolean values, or general uniform packing.  Uniform blocks intentionally
+  consist only of aligned vec4 lanes.
 - [[file:../spir-v.lisp][=spir-v.lisp=]] now models =OpExtInstImport= and =OpExtInst= as structured
   module sections in logical-layout order.  Lowering requests =GLSL.std.450=
   once per module when needed, while modules with no extended math acquire no
@@ -455,7 +457,7 @@ The first bloom target is deliberately the crystal at night.  Exposure,
 threshold, radius, and intensity are live profile values, while the pinned
 smoke profile keeps deterministic output.
 
-* Later: directional shadows, not baked animated sunlight
+* Later: real-time shadows, not baked animated sunlight
 :PROPERTIES:
 :ID: SKLATR
 :END:
@@ -465,6 +467,14 @@ map (or another explicitly evaluated real-time technique).  Do not bake a
 directional term into chunk meshes and invalidate the whole resident world
 every time the clock moves.  The voxel skylight field remains useful ambient
 visibility underneath that future pass.
+
+The core shader language should stay mathematical.  A word such as
+=shadow-visibility= belongs in a shader-abstraction layer or in luvcraft
+material vocabulary, where it can expand into ordinary operations: sample a
+depth image, select a lane, compare receiver depth with a bias, and filter
+neighboring taps when PCF becomes useful.  This keeps the same abstraction
+available to a directional sun, a spot torch, or an eventual point-light atlas
+without making any one light shape a compiler primitive.
 
 Other later capabilities should be earned by a concrete scene: coloured
 blocklight needs three propagated channels; translucent foliage needs opacity
@@ -534,8 +544,9 @@ clock then keeps the new hash stable.
    dynamic palette keys, and measured edit-to-photon behavior.
 5. *HDR and bloom.*  Linear scene target, tone mapping, then a restrained
    crystal bloom with explicit resource lifetime and resize behavior.
-6. *Directional shadows, if the moving scene asks for them.*  A separate GPU
-   pass measured and judged in motion.
+6. *Real-time shadows, if the moving scene asks for them.*  Shader
+   abstractions first, then a separate GPU pass measured and judged in motion;
+   do not bake animated light into mesh products.
 
 Each checkpoint is useful on its own.  The sequence deliberately builds
 general shader and lighting capabilities where the feature needs them, while
@@ -613,6 +624,81 @@ Evidence to gather:
 Done when: the next scheduling decision is evidence-backed: keep owner-thread
 lighting, tune frame limits, or move captured light work into the existing
 production system.
+
+** DONE Shadow-ready shader math substrate
+:PROPERTIES:
+:ID: H9Q1Q0
+:END:
+
+Intent: prepare the core shader language for shadow-map expressions without
+adding a high-level =shadow= primitive.  The core vocabulary should remain
+ordinary typed mathematics and resource sampling.
+
+Evidence:
+
+- Commit =2d22815= adds =spv:step= through the existing EQL operator protocol.
+- =shader-type= records sample result and depth-image metadata; the expression
+  language accepts =:depth-texture-2d= as a typed resource.
+- =sample= still lowers as ordinary =OpImageSampleImplicitLod=; depth samples
+  remain =vec4= in valid SPIR-V and feed scalar depth math through =swizzle=.
+- =tests/shader.lisp= covers a depth-texture sample, =swizzle :x=, and =step=
+  as the comparison-shaped math a future shadow abstraction can expand to.
+- =make test= and an explicit =spirv-val --target-env vulkan1.0= check on the
+  depth-sampling fragment module passed.
+
+Done when: a shader can express the depth-read and receiver-depth comparison
+pieces of shadow visibility using only core mathematical operators.
+
+** NEXT Shader source abstractions for reusable shadow expressions
+:PROPERTIES:
+:ID: DXYHT4
+:END:
+
+Intent: add a source-expansion layer above the core shader operator set, then
+define shadow vocabulary there instead of teaching the compiler a special
+=shadow= primitive.
+
+Evidence to gather:
+
+- =define-shader-abstraction= or an equivalent protocol expands source forms
+  before ordinary expression parsing, while preserving useful source forms and
+  lowering provenance.
+- A first =shadow-visibility= abstraction expands into =sample=, =swizzle=,
+  =-=, =step=, and optional tap averaging, with no new SPIR-V lowering method
+  beyond the core math operators.
+- The abstraction is written in terms of supplied depth map, sampler,
+  coordinates, receiver depth, texel size, and bias, so sun and torch lights can
+  provide different projection data later.
+
+Done when: tests show that redefining a shadow abstraction changes the parsed
+shader graph, preserves last-known-good behavior on bad edits, and produces a
+valid SPIR-V module without adding a high-level shadow operator.
+
+** TODO Shadow-map render pass and light projection resources
+:PROPERTIES:
+:ID: 2WX9PW
+:END:
+
+Intent: make the renderer capable of producing and sampling a shadow depth map
+as a separate GPU product owned by the luvcraft session.
+
+Evidence to gather:
+
+- The GPU API/backend can encode a depth-only render pass whose depth attachment
+  is stored, transitioned to shader-read layout, and sampled in a later scene
+  pass.
+- Luvcraft owns a shadow depth texture, view, sampler, and bind group entries
+  without overfitting the layout to exactly one atlas texture plus one uniform
+  block.
+- A =:block-shadow= or equivalent depth pipeline renders block meshes from a
+  light-space transform.  The first visible consumer can be the sun, but the
+  resource/projection vocabulary should not rule out spot torches or point
+  light atlases.
+
+Done when: a pinned scene shows moving geometry casting real-time direct-light
+shadows through the shader abstraction, while voxel skylight remains the
+ambient term and all new textures/pipelines retire through the existing
+completion frontier.
 
 ** IDEA HDR crystal bloom
 :PROPERTIES:
