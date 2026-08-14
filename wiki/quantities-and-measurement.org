@@ -155,6 +155,50 @@ velocity have their own lawful operations.  The quantity vocabulary should
 compose with such structures rather than make every mathematical object look
 like a scalar with a unit.
 
+* Representation vectors can carry semantic products
+:PROPERTIES:
+:ID: VC7VFY
+:END:
+
+A GPU vector is a representation shape, not necessarily one mathematical
+vector.  Similar vector registers can have different semantic structure:
+
+#+begin_example
+vec3 world direction       xyz = one homogeneous vector quantity
+vec3 packed surface input  xy  = texture sample point; z = ambient occlusion
+vec4 texture result        rgb = linear colour; a = opacity
+#+end_example
+
+The second and third values are *semantic products*: operational packing puts
+several related values in one register without claiming that arbitrary lane
+combinations form quantities.  A =quantity-layout= records disjoint exact
+projections from representation lanes to quantity specifications.  Swizzling
+=xy= from the surface input therefore recovers the declared texture point,
+while =z= recovers ambient occlusion.  Swizzling =yz= is an error because that
+projection has no declared meaning.  Arithmetic on the packed =vec3= itself is
+also an error; source must project a semantic value first.
+
+Homogeneous quantities use a different rule.  A named vector quantity may
+publish ordered component names through =define-quantity-components=.  Its
+full =xyz= projection remains the original vector quantity, while =x= becomes
+an explicitly named scalar-axis quantity carrying the same dimension, exact
+unit, and affine character.  No fallback silently calls one component the
+whole vector.
+
+This learns from mp-units without confusing the two cases.  Its
+[[file:../../src/mp-units/src/core/include/mp-units/framework/vector_components.h][=vector_components= protocol]] lets a genuine vector quantity opt into
+compile-time component decomposition, and
+[[file:../../src/mp-units/docs/how_to_guides/advanced_usage/decompose_vector_quantity.md][its decomposition guide]] shows =get<Idx>= returning axis-specific quantity
+specifications in the same unit.  The compile-time index is important because
+different axes can have different types.  Luv adopts that explicit projection
+principle, then extends it to heterogeneous GPU packing which should not be
+modelled as one vector quantity at all.
+
+The layout remains semantic metadata.  It neither changes =shader-type= nor
+adds instructions.  Interface declarations, uniform members, and texture
+sample results may publish layouts; references and samples carry them until an
+exact =swizzle= projects a quantity.
+
 * Calculation derives; interpretation names
 :PROPERTIES:
 :ID: I9F3QB
@@ -176,11 +220,19 @@ This gives an attractive rhythm:
    result.
 4. Tests reject equal-dimensional but semantically mistaken substitutions.
 
-The distinction could eventually help a shader arithmetic DSL as well as CPU
-Lisp.  A typed expression graph or SSA builder can infer representation types
-and dimensional results while preserving meaningful field names at its
-inputs and checked interpretations at its outputs.  That is a possible later
-compiler path, not a prerequisite for continuing the ordinary CPU mesher.
+The distinction now governs the shader arithmetic graph as well as motivating
+future CPU Lisp.  Three zero-codegen source forms make the provenance of
+meaning explicit:
+
+- =quantity= constructs a semantically typed literal or constant vector;
+- =assume-quantity= marks the auditable boundary where an opaque raw value is
+  asserted to have a specification; and
+- =interpret= names a compatible, already checked arithmetic result.
+
+=interpret= deliberately rejects raw values.  That forces source to reveal
+whether meaning came from construction, a declaration, an explicit assumption,
+or calculation.  It remains a semantic interpretation rather than numerical
+unit conversion; exact-unit conversion is separate work #7MHTYL.
 
 * Bundles keep meaning outside the lanes
 :PROPERTIES:
@@ -266,11 +318,10 @@ Evidence:
   compose symbolically through products and quotients, but there is no common-
   unit selection: =:metre= and =:kilometre= are different until source performs
   an explicit conversion.
-- =interpret= introduces a checked semantic name at an untyped representation
-  boundary or on a compatible anonymous derived result.  It rejects unit
-  changes and semantic relabelling, and aliases its operand during lowering.
-  This is especially useful where one packed =vec4= carries heterogeneous
-  lanes which cannot truthfully share one declaration-level specification.
+- =quantity= constructs typed constants, =assume-quantity= marks otherwise raw
+  boundaries, and =interpret= names only a compatible checked result.  All
+  three alias their operand during lowering.  =interpret= rejects raw values,
+  unit changes, affine changes, and semantic relabelling.
 - Shader-specific EQL methods define the demonstrated semantic vocabulary:
   =sample= and =sample-compare= boundaries, vector constructors, =clamp=,
   =step=, =mix=, and =smoothstep=.  Once checking begins, an absent rule is an
@@ -297,12 +348,50 @@ Evidence:
   semantic interpretation itself emits no instruction.
 - The shader workbench shows representation type beside semantic meaning for
   interface values, packed uniform members, bindings, and selected expressions;
-  =interpret= nodes remain visible and selectable in the expression tree.
+  construction, assumption, interpretation, and packed component layouts stay
+  visible and selectable in the expression tree.
 
 Outcome: the production proof covers coherent named spaces, tensor order,
 affine points, exact units, source-facing failures, unchanged SPIR-V, and live
 presentation.  Numerical unit conversion was deliberately not smuggled into
 =interpret=; it is isolated as follow-up #7MHTYL.
+
+* DONE Give GPU components first-class quantity meaning
+:PROPERTIES:
+:ID: SQR8KR
+:END:
+
+Intent: make homogeneous vector quantities and heterogeneous packed GPU tuples
+different semantic structures.  Let a whole vector already carry quantity
+meaning, let exact swizzles recover explicitly declared component meanings,
+and make every undeclared projection or packed-whole arithmetic operation fail
+at parse time.
+
+Evidence:
+
+- [[file:../arithmetic.lisp][=arithmetic.lisp=]] defines backend-neutral =quantity-layout= and
+  =quantity-projection= objects plus an open EQL component-name protocol for
+  homogeneous vector quantities.
+- [[file:../shader-expression.lisp][=shader-expression.lisp=]] carries layouts through interface variables,
+  uniform members, references, and texture samples.  =swizzle= accepts only an
+  exact declared layout projection or a lawful homogeneous projection.
+- The production block material declares =uv-shade.xy= as texture UV and =z=
+  as ambient occlusion; three independent light lanes; colour/diagnostic and
+  shadow-control uniform packs; RGB/alpha atlas samples; and scalar depth
+  samples.  The sky ray crosses its vertex/fragment interface as one
+  =:world-direction= vector whose =y= component has its own quantity name.
+- [[file:../tests/shader.lisp][=tests/shader.lisp=]] proves heterogeneous packed projections, rejects =yz=
+  and whole-packed arithmetic, proves named homogeneous axes and texture sample
+  channel layouts, distinguishes =quantity=, =assume-quantity=, and =interpret=,
+  and checks their zero-codegen behavior.
+- [[file:../mcclim/shader-lab.lisp][The shader workbench]] presents packed lane maps and the three kinds of
+  semantic boundary rather than flattening them into an undifferentiated
+  annotation.
+
+Done when: achieved.  Component meaning is declared at the value or resource
+boundary, projection is exact and checked, production shaders exercise both
+homogeneous and heterogeneous cases, and valid semantics remain representation-
+and codegen-neutral.
 
 * NEXT Make numerical unit conversion explicit
 :PROPERTIES:

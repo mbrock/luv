@@ -8,10 +8,13 @@
                 #:dot #:sample #:sample-compare #:mix
                 #:vec2 #:vec3 #:vec4 #:swizzle
                 #:clamp #:smoothstep #:normalize
-                #:interpret
+                #:quantity #:assume-quantity #:interpret
                 #:set-output))
 
 (in-package #:luv/spir-v/tests)
+
+(math:define-quantity-components :test-position
+    (:test-position-x :test-position-y :test-position-z))
 
 (defun binding-named (name specification)
   (find name (spv:shader-specification-bindings specification)
@@ -94,7 +97,11 @@
     (ok (= (length (spv:shader-specification-inputs specification)) 6))
     (ok (= (length (spv:shader-specification-resources specification)) 6))
     (ok (typep (spv:shader-binding-expression sun-direction)
-               'spv:shader-interpretation))
+               'spv:shader-call))
+    (ok (eq :world-direction
+            (math:quantity-specification-name
+             (spv:shader-expression-quantity-specification
+              (spv:shader-binding-expression sun-direction)))))
     (ok (spv:shader-type=
          (spv:shader-expression-type
           (spv:shader-binding-expression sun-direction))
@@ -104,8 +111,8 @@
           (spv:shader-expression-form
            (spv:shader-binding-expression sun-visibility)))
          '("smoothstep"
-           ("interpret" 0.9 "quantity" "sky-light-level")
-           ("interpret" 1.0 "quantity" "sky-light-level")
+           ("quantity" 0.9 "quantity" "sky-light-level")
+           ("quantity" 1.0 "quantity" "sky-light-level")
            "sky-input")))
     (ok (equal
          (form-names
@@ -283,7 +290,7 @@
          (literal
            (first
             (spv:shader-call-operands
-             (spv:shader-interpretation-operand
+             (spv:shader-quantity-construction-operand
               (spv:shader-binding-expression torch-color)))))
          (constant-instructions
            (gethash literal
@@ -485,39 +492,161 @@
             (right :float :location 1))
           '(+ left right))))))
 
-(deftest interpretation-is-checked-and-has-no-codegen-effect
+(deftest packed-gpu-vectors-project-as-semantic-products
+  (let* ((specification
+           (spv:parse-shader-specification
+            'semantic-product-probe
+            '(:stage :fragment
+              :inputs
+              ((packed :vec3 :location 0
+                       :components
+                       ((:xy :quantity :sample-position :affine-p t)
+                        (:z :quantity :sample-value))))
+              :outputs
+              ((position-output :vec2 :location 0
+                                :quantity :sample-position :affine-p t)))
+            '((let* ((position (swizzle packed :xy))
+                     (sample-value (swizzle packed :z)))
+                (set-output position-output position)))))
+         (packed (first (spv:shader-specification-inputs specification)))
+         (layout (spv:shader-declaration-quantity-layout packed))
+         (position (binding-named 'position specification))
+         (sample-value (binding-named 'sample-value specification)))
+    (ok (null (spv:shader-declaration-quantity-specification packed)))
+    (ok (= 3 (math:quantity-layout-extent layout)))
+    (ok (eq :sample-position
+            (math:quantity-specification-name
+             (spv:shader-expression-quantity-specification
+              (spv:shader-binding-expression position)))))
+    (ok (eq :sample-value
+            (math:quantity-specification-name
+             (spv:shader-expression-quantity-specification
+              (spv:shader-binding-expression sample-value))))))
+  (labels ((reason-for (expression)
+             (handler-case
+                 (progn
+                   (spv:parse-shader-specification
+                    'invalid-semantic-product-probe
+                    '(:stage :fragment
+                      :inputs
+                      ((packed :vec3 :location 0
+                               :components
+                               ((:xy :quantity :sample-position)
+                                (:z :quantity :sample-value))))
+                      :outputs ((result :vec3 :location 0)))
+                    `((set-output result ,expression)))
+                   nil)
+               (spv:shader-language-error (condition)
+                 (spv:shader-language-error-reason condition)))))
+    (ok (eq :undeclared-quantity-projection
+            (reason-for '(swizzle packed :yz))))
+    (ok (eq :missing-quantity-specification
+            (reason-for '(+ packed packed)))))
+  (let* ((specification
+           (spv:parse-shader-specification
+            'homogeneous-component-probe
+            '(:stage :fragment
+              :inputs ((position :vec3 :location 0
+                                 :quantity :test-position))
+              :outputs ((x-output :float :location 0
+                                  :quantity :test-position-x)))
+            '((set-output x-output (swizzle position :x)))))
+         (x (spv:shader-assignment-value
+             (first (spv:shader-specification-statements specification)))))
+    (ok (eq :test-position-x
+            (math:quantity-specification-name
+             (spv:shader-expression-quantity-specification x))))))
+
+(deftest texture-samples-can-publish-semantic-channel-layouts
+  (let* ((specification
+           (spv:parse-shader-specification
+            'semantic-sample-probe
+            '(:stage :fragment
+              :inputs ((uv :vec2 :location 0))
+              :outputs ((rgb-output :vec3 :location 0
+                                    :quantity :linear-rgb))
+              :resources
+              ((image :texture-2d :binding 0
+                      :sample-components
+                      ((:rgb :quantity :linear-rgb)
+                       (:a :quantity :opacity)))
+               (sampler :sampler :binding 1)))
+            '((let* ((texel (sample image sampler uv))
+                     (rgb (swizzle texel :rgb))
+                     (alpha (swizzle texel :a)))
+                (set-output rgb-output rgb)))))
+         (image (first (spv:shader-specification-resources specification)))
+         (texel (binding-named 'texel specification))
+         (rgb (binding-named 'rgb specification))
+         (alpha (binding-named 'alpha specification)))
+    (ok (math:quantity-layout=
+         (spv:shader-resource-sample-quantity-layout image)
+         (spv:shader-expression-quantity-layout
+          (spv:shader-binding-expression texel))))
+    (ok (eq :linear-rgb
+            (math:quantity-specification-name
+             (spv:shader-expression-quantity-specification
+              (spv:shader-binding-expression rgb)))))
+    (ok (eq :opacity
+            (math:quantity-specification-name
+             (spv:shader-expression-quantity-specification
+              (spv:shader-binding-expression alpha)))))))
+
+(deftest semantic-boundaries-are-distinct-checked-and-have-no-codegen-effect
   (flet ((probe (annotated-p)
            (spv:parse-shader-specification
-            'interpretation-probe
+            'semantic-boundary-probe
             '(:stage :fragment
               :inputs ((left :float :location 0)
                        (right :float :location 1))
               :outputs ((result :float :location 0)))
             (if annotated-p
                 '((let* ((typed-left
-                           (interpret left :quantity :distance
-                                      :dimension :length :unit :metre))
+                           (assume-quantity left :quantity :left-factor))
                           (typed-right
-                           (interpret right :quantity :distance
-                                      :dimension :length :unit :metre))
-                          (sum (+ typed-left typed-right)))
+                           (assume-quantity right :quantity :right-factor))
+                          (product (* typed-left typed-right))
+                          (sum (interpret product
+                                          :quantity :combined-factor)))
                     (set-output result sum)))
-                '((let* ((sum (+ left right)))
+                '((let* ((sum (* left right)))
                     (set-output result sum)))))))
     (let* ((annotated (probe t))
            (plain (probe nil))
+           (typed-left (binding-named 'typed-left annotated))
            (sum (binding-named 'sum annotated)))
-      (ok (eq :distance
+      (ok (typep (spv:shader-binding-expression typed-left)
+                 'spv:shader-quantity-assumption))
+      (ok (typep (spv:shader-binding-expression sum)
+                 'spv:shader-interpretation))
+      (ok (eq :combined-factor
               (math:quantity-specification-name
                (spv:shader-expression-quantity-specification
                 (spv:shader-binding-expression sum)))))
       (ok (equalp (spv:assemble-shader-specification annotated)
                   (spv:assemble-shader-specification plain)))))
+  (flet ((probe (constructed-p)
+           (spv:parse-shader-specification
+            'quantity-construction-probe
+            '(:stage :fragment
+              :outputs ((result :float :location 0)))
+            `((set-output result
+                          ,(if constructed-p
+                               '(quantity 1.0 :quantity :threshold)
+                               1.0))))))
+    (let* ((constructed (probe t))
+           (plain (probe nil))
+           (expression
+             (spv:shader-assignment-value
+              (first (spv:shader-specification-statements constructed)))))
+      (ok (typep expression 'spv:shader-quantity-construction))
+      (ok (equalp (spv:assemble-shader-specification constructed)
+                  (spv:assemble-shader-specification plain)))))
   (flet ((reason-for (form)
            (handler-case
                (progn
                  (spv:parse-shader-specification
-                  'invalid-interpretation-probe
+                  'invalid-semantic-boundary-probe
                   '(:stage :fragment
                     :inputs ((value :float :location 0))
                     :outputs ((result :float :location 0)))
@@ -525,18 +654,24 @@
                  nil)
              (spv:shader-language-error (condition)
                (spv:shader-language-error-reason condition)))))
+    ;; INTERPRET can name checked arithmetic, but cannot smuggle meaning onto
+    ;; a raw input.  ASSUME-QUANTITY is the deliberately loud boundary for it.
+    (ok (eq :invalid-quantity-interpretation
+            (reason-for
+             '(interpret value :quantity :distance
+                         :dimension :length :unit :metre))))
     (ok (eq :invalid-quantity-interpretation
             (reason-for
              '(interpret
-               (interpret value :quantity :distance
-                          :dimension :length :unit :metre)
+               (assume-quantity value :quantity :distance
+                                :dimension :length :unit :metre)
                :quantity :distance
                :dimension :length :unit :kilometre))))
     (ok (eq :invalid-quantity-interpretation
             (reason-for
              '(interpret
-               (interpret value :quantity :height
-                          :dimension :length :unit :metre)
+               (assume-quantity value :quantity :height
+                                :dimension :length :unit :metre)
                :quantity :width
                :dimension :length :unit :metre))))))
 
@@ -579,32 +714,31 @@
            (spv:parse-shader-specification
             'shadow-visibility-probe
             '(:stage :fragment
-              :inputs ((uv :vec2 :location 0)
-                       (receiver-depth :float :location 1)
-                       (receiver-depth-gradient :vec2 :location 2)
-                       (texel-size :vec2 :location 3)
-                       (bias :float :location 4)
-                       (radius :float :location 5))
+              :inputs
+              ((uv :vec2 :location 0
+                   :quantity :shadow-uv :affine-p t)
+               (receiver-depth :float :location 1
+                               :quantity :shadow-depth :affine-p t)
+               (receiver-depth-gradient :vec2 :location 2
+                                        :quantity :shadow-depth-gradient)
+               (texel-size :vec2 :location 3
+                           :quantity :shadow-uv)
+               (bias :float :location 4
+                     :quantity :shadow-depth)
+               (radius :float :location 5
+                       :quantity :shadow-filter-radius))
               :outputs ((visibility :float :location 0))
               :resources ((shadow-map :depth-texture-2d :binding 0)
                           (shadow-sampler :sampler :binding 1)))
-            '((let* ((coordinate
-                       (interpret uv :quantity :shadow-uv :affine-p t))
-                      (depth
-                       (interpret receiver-depth
-                                  :quantity :shadow-depth :affine-p t))
-                      (gradient
-                       (interpret receiver-depth-gradient
-                                  :quantity :shadow-depth-gradient))
-                      (texel
-                       (interpret texel-size :quantity :shadow-uv))
-                      (depth-bias
-                       (interpret bias :quantity :shadow-depth))
-                      (filter-radius
-                       (interpret radius :quantity :shadow-filter-radius))
-                      (visible (spv:shadow-visibility
-                                shadow-map shadow-sampler coordinate
-                                depth gradient texel depth-bias filter-radius)))
+            '((let* ((coordinate uv)
+                     (depth receiver-depth)
+                     (gradient receiver-depth-gradient)
+                     (texel texel-size)
+                     (depth-bias bias)
+                     (filter-radius radius)
+                     (visible (spv:shadow-visibility
+                               shadow-map shadow-sampler coordinate
+                               depth gradient texel depth-bias filter-radius)))
                 (set-output visibility visible)))))
          (visible (binding-named 'visible specification))
          (expression (spv:shader-binding-expression visible))

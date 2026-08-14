@@ -371,6 +371,31 @@
                   "difference"))
       "unannotated"))
 
+(defun quantity-projection-lanes-label (positions)
+  (coerce (mapcar (lambda (position)
+                    (or (nth position '(#\x #\y #\z #\w)) #\?))
+                  positions)
+          'string))
+
+(defun quantity-layout-label (layout)
+  (when layout
+    (format nil "packed {~{~A~^; ~}}"
+            (mapcar
+             (lambda (projection)
+               (format nil "~A -> ~A"
+                       (quantity-projection-lanes-label
+                        (luv.arithmetic:quantity-projection-positions
+                         projection))
+                       (quantity-specification-label
+                        (luv.arithmetic:quantity-projection-specification
+                         projection))))
+             (luv.arithmetic:quantity-layout-projections layout)))))
+
+(defun quantity-semantics-label (specification layout)
+  (or (quantity-layout-label layout)
+      (and specification (quantity-specification-label specification))
+      "unannotated"))
+
 (defun write-shader-expression (expression stream frame)
   "Render EXPRESSION as nested selectable mathematical presentations."
   (labels ((write-body ()
@@ -387,6 +412,24 @@
                 (write-string "interpret(" stream)
                 (write-shader-expression
                  (luv.spir-v:shader-interpretation-operand expression)
+                 stream frame)
+                (format stream ", ~A)"
+                        (quantity-specification-label
+                         (luv.spir-v:shader-expression-quantity-specification
+                          expression))))
+               (luv.spir-v:shader-quantity-construction
+                (write-string "quantity(" stream)
+                (write-shader-expression
+                 (luv.spir-v:shader-quantity-construction-operand expression)
+                 stream frame)
+                (format stream ", ~A)"
+                        (quantity-specification-label
+                         (luv.spir-v:shader-expression-quantity-specification
+                          expression))))
+               (luv.spir-v:shader-quantity-assumption
+                (write-string "assume(" stream)
+                (write-shader-expression
+                 (luv.spir-v:shader-quantity-assumption-operand expression)
                  stream frame)
                 (format stream ", ~A)"
                         (quantity-specification-label
@@ -432,6 +475,10 @@
                          *shader-reference-ink*)
                         (luv.spir-v:shader-interpretation
                          *shader-accent-ink*)
+                        (luv.spir-v:shader-quantity-construction
+                         *shader-accent-ink*)
+                        (luv.spir-v:shader-quantity-assumption
+                         *shader-literal-ink*)
                         (luv.spir-v:shader-call *shader-call-ink*)))
             (write-body))))))
 
@@ -455,9 +502,9 @@
                       (luv.spir-v:shader-interface-built-in declaration))
               (format nil "location ~D"
                       (luv.spir-v:shader-interface-location declaration)))
-          (quantity-specification-label
-           (luv.spir-v:shader-declaration-quantity-specification
-            declaration))))
+          (quantity-semantics-label
+           (luv.spir-v:shader-declaration-quantity-specification declaration)
+           (luv.spir-v:shader-declaration-quantity-layout declaration))))
 
 (defun display-shader-resource (stream resource)
   (write-string "  resource " stream)
@@ -466,6 +513,13 @@
           (shader-type-label (luv.spir-v:shader-declaration-type resource))
           (luv.spir-v:shader-resource-descriptor-set resource)
           (luv.spir-v:shader-resource-binding resource))
+  (when (or (luv.spir-v:shader-resource-sample-quantity-specification resource)
+            (luv.spir-v:shader-resource-sample-quantity-layout resource))
+    (format stream "    sample meaning ~A~%"
+            (quantity-semantics-label
+             (luv.spir-v:shader-resource-sample-quantity-specification
+              resource)
+             (luv.spir-v:shader-resource-sample-quantity-layout resource))))
   (when (typep resource 'luv.spir-v:shader-uniform-block)
     (dolist (member (luv.spir-v:shader-uniform-block-members resource))
       (format stream "    ~2D  "
@@ -474,9 +528,9 @@
       (format stream " : ~A  ·  meaning ~A~%"
               (shader-type-label
                (luv.spir-v:shader-declaration-type member))
-              (quantity-specification-label
-               (luv.spir-v:shader-declaration-quantity-specification
-                member))))))
+              (quantity-semantics-label
+               (luv.spir-v:shader-declaration-quantity-specification member)
+               (luv.spir-v:shader-declaration-quantity-layout member))))))
 
 (defun display-shader-source (frame stream)
   (let* ((lowering (shader-lab-lowering frame))
@@ -534,9 +588,10 @@
         (format stream " : ~A  ·  meaning ~A = "
                 (shader-type-label
                  (luv.spir-v:shader-expression-type expression))
-                (quantity-specification-label
+                (quantity-semantics-label
                  (luv.spir-v:shader-expression-quantity-specification
-                  expression)))
+                  expression)
+                 (luv.spir-v:shader-expression-quantity-layout expression)))
         (write-shader-expression expression stream frame))
       (terpri stream))
     (terpri stream)
@@ -641,9 +696,10 @@
        (format stream " — representation ~A  ·  meaning ~A  ·  source "
                (shader-type-label
                 (luv.spir-v:shader-expression-type selection))
-               (quantity-specification-label
+               (quantity-semantics-label
                 (luv.spir-v:shader-expression-quantity-specification
-                 selection)))
+                 selection)
+                (luv.spir-v:shader-expression-quantity-layout selection)))
        (write-spir-v-form
         (luv.spir-v:shader-expression-source-form selection) stream)
        (let ((instructions

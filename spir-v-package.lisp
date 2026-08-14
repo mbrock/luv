@@ -77,6 +77,7 @@
            #:shader-variable-declaration
            #:shader-declaration-type
            #:shader-declaration-quantity-specification
+           #:shader-declaration-quantity-layout
            #:shader-interface-variable
            #:shader-interface-direction
            #:shader-interface-location
@@ -84,6 +85,8 @@
            #:shader-resource
            #:shader-resource-descriptor-set
            #:shader-resource-binding
+           #:shader-resource-sample-quantity-specification
+           #:shader-resource-sample-quantity-layout
            #:shader-uniform-block
            #:shader-uniform-block-members
            #:shader-uniform-block-byte-size
@@ -96,6 +99,7 @@
            #:shader-expression
            #:shader-expression-type
            #:shader-expression-quantity-specification
+           #:shader-expression-quantity-layout
            #:shader-expression-quantity-checked-p
            #:shader-expression-source-form
            #:shader-expression-name
@@ -109,6 +113,10 @@
            #:shader-call-parameters
            #:shader-interpretation
            #:shader-interpretation-operand
+           #:shader-quantity-construction
+           #:shader-quantity-construction-operand
+           #:shader-quantity-assumption
+           #:shader-quantity-assumption-operand
            #:shader-expression-form
            #:shader-expression-children
            ;; The shader-language vocabulary.  Arithmetic operators are CL's
@@ -126,6 +134,8 @@
            #:smoothstep
            #:step
            #:normalize
+           #:quantity
+           #:assume-quantity
            #:interpret
            #:set-output
            #:shader-operator

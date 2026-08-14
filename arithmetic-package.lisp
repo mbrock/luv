@@ -26,6 +26,19 @@
            #:quantity-specification-tensor-order
            #:quantity-specification-affine-p
            #:quantity-specification=
+           #:quantity-projection
+           #:make-quantity-projection
+           #:quantity-projection-positions
+           #:quantity-projection-specification
+           #:quantity-layout
+           #:make-quantity-layout
+           #:quantity-layout-extent
+           #:quantity-layout-projections
+           #:quantity-layout=
+           #:project-quantity-layout
+           #:quantity-component-names
+           #:define-quantity-components
+           #:project-quantity-specification
            #:quantity-operation-error
            #:quantity-operation-error-operator
            #:quantity-operation-error-specifications

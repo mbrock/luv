@@ -7,6 +7,17 @@
 
 (in-package #:luv.spir-v)
 
+;;; Like mp-units' vector_components customization point, these EQL methods
+;;; describe homogeneous mathematical vectors.  Packed GPU tuples instead
+;;; declare their local lane groups at the ABI boundary below.
+(math:define-quantity-components
+    :shadow-uv (:shadow-u :shadow-v))
+(math:define-quantity-components
+    :texture-uv (:texture-u :texture-v))
+(math:define-quantity-components
+    :world-direction
+    (:world-x-direction :world-y-direction :world-z-direction))
+
 ;;; Every stage which reads the frame environment declares the same uniform
 ;;; block at binding 2: identical member order and offsets are an ABI
 ;;; requirement, so the member list is written once and spliced at read time.
@@ -18,14 +29,37 @@
       (forward-vector :vec4)
       (projection-vector :vec4) ; x scale, y scale, z scale, z offset
       (fog-vector :vec4)        ; fog near, fog far, unused, unused
-      (sun-vector :vec4)        ; sun direction, day factor
-      (sun-color-vector :vec4)  ; sun colour, angular width
-      (zenith-vector :vec4)     ; zenith colour, w unused
-      (horizon-vector :vec4)    ; horizon colour, w unused
-      (ambient-vector :vec4)    ; ambient colour, exposure
-      (fog-color-vector :vec4)  ; fog colour, w shadow diagnostic selector
-      (shadow-control-vector :vec4) ; texel u/v, base bias, slope bias
-      (shadow-filter-vector :vec4) ; depth span, world/texel, min/max radius
+      (sun-vector :vec4         ; sun direction, day factor
+                  :components
+                  ((:xyz :quantity :world-direction)
+                   (:w :quantity :day-factor)))
+      (sun-color-vector :vec4   ; sun colour, angular width
+                        :components
+                        ((:xyz :quantity :linear-rgb)
+                         (:w :quantity :sun-disc-coordinate)))
+      (zenith-vector :vec4      ; zenith colour, w unused
+                     :components ((:xyz :quantity :linear-rgb)))
+      (horizon-vector :vec4     ; horizon colour, w unused
+                      :components ((:xyz :quantity :linear-rgb)))
+      (ambient-vector :vec4     ; ambient colour, exposure
+                      :components ((:xyz :quantity :linear-rgb)))
+      (fog-color-vector :vec4   ; fog colour, w shadow diagnostic selector
+                        :components
+                        ((:xyz :quantity :linear-rgb)
+                         (:w :quantity :shadow-diagnostic)))
+      (shadow-control-vector :vec4 ; texel u/v, base bias, slope bias
+                             :components
+                             ((:xy :quantity :shadow-uv)
+                              (:z :quantity :shadow-depth)
+                              (:w :quantity :shadow-depth)))
+      (shadow-filter-vector :vec4 ; depth span, world/texel, min/max radius
+                            :components
+                            ((:x :quantity :world-distance
+                                 :dimension :length :unit :metre)
+                             (:y :quantity :world-distance
+                                 :dimension :length :unit :metre)
+                             (:z :quantity :shadow-filter-radius)
+                             (:w :quantity :shadow-filter-radius)))
       (shadow-row-x :vec4)      ; light-space clip x from world position
       (shadow-row-y :vec4)      ; light-space clip y from world position
       (shadow-row-z :vec4)      ; light-space depth from world position
@@ -115,56 +149,56 @@
     block-world-fragment-specification
     ((role (eql :block-surface)) (stage (eql :fragment)))
     (:stage :fragment
-     :inputs ((uv-shade-input :vec3 :location 0)
-              (normal-input :vec3 :location 1)
-              (fog-input :float :location 2)
-              (light-input :vec3 :location 3)
-              (shadow-uv-input :vec2 :location 4)
-              (shadow-depth-input :float :location 5))
+     :inputs
+     ((uv-shade-input :vec3 :location 0
+                      :components
+                      ((:xy :quantity :texture-uv :affine-p t)
+                       (:z :quantity :ambient-occlusion)))
+      (normal-input :vec3 :location 1 :quantity :world-direction)
+      (fog-input :float :location 2 :quantity :fog-amount)
+      (light-input :vec3 :location 3
+                   :components
+                   ((:x :quantity :sky-light-level)
+                    (:y :quantity :block-light-level)
+                    (:z :quantity :material-emission)))
+      (shadow-uv-input :vec2 :location 4
+                       :quantity :shadow-uv :affine-p t)
+      (shadow-depth-input :float :location 5
+                          :quantity :shadow-depth :affine-p t))
      :outputs ((color-output :vec4 :location 0))
-     :resources ((block-atlas :texture-2d :set 0 :binding 0)
+     :resources ((block-atlas :texture-2d :set 0 :binding 0
+                              :sample-components
+                              ((:rgb :quantity :linear-rgb)
+                               (:a :quantity :opacity)))
                  (block-sampler :sampler :set 0 :binding 1)
                  (frame-state :uniform-block :set 0 :binding 2
                               :members #.*frame-uniform-members*)
-                 (shadow-map :depth-texture-2d :set 0 :binding 3)
+                 (shadow-map :depth-texture-2d :set 0 :binding 3
+                             :sample-components
+                             ((:x :quantity :shadow-depth :affine-p t)))
                  (shadow-sampler :sampler :set 0 :binding 4)
                  (shadow-comparison-sampler :sampler :set 0 :binding 5)))
   (let* ((uv-shade uv-shade-input)
-         (uv
-           (interpret (swizzle uv-shade :xy)
-                      :quantity :texture-uv :affine-p t))
-         (ao
-           (interpret (swizzle uv-shade :z)
-                      :quantity :ambient-occlusion))
-         (normal
-           (interpret normal-input :quantity :world-direction))
-         (sun-direction
-           (interpret (swizzle sun-vector :xyz)
-                      :quantity :world-direction))
+         (uv (swizzle uv-shade :xy))
+         (ao (swizzle uv-shade :z))
+         (normal normal-input)
+         (sun-direction (swizzle sun-vector :xyz))
          (n-dot-l (max 0.0 (dot normal sun-direction)))
-         (shadow-coordinate
-           (interpret shadow-uv-input
-                      :quantity :shadow-uv :affine-p t))
+         (shadow-coordinate shadow-uv-input)
          (shadow-u (swizzle shadow-coordinate :x))
          (shadow-v (swizzle shadow-coordinate :y))
          (shadow-in-bounds
-           (* (step (interpret 0.0 :quantity :shadow-uv :affine-p t)
+           (* (step (quantity 0.0 :quantity :shadow-u :affine-p t)
                     shadow-u)
               (step shadow-u
-                    (interpret 1.0 :quantity :shadow-uv :affine-p t))
-              (step (interpret 0.0 :quantity :shadow-uv :affine-p t)
+                    (quantity 1.0 :quantity :shadow-u :affine-p t))
+              (step (quantity 0.0 :quantity :shadow-v :affine-p t)
                     shadow-v)
               (step shadow-v
-                    (interpret 1.0 :quantity :shadow-uv :affine-p t))))
-         (shadow-texel-size
-           (interpret (swizzle shadow-control-vector :xy)
-                      :quantity :shadow-uv))
-         (shadow-base-bias
-           (interpret (swizzle shadow-control-vector :z)
-                      :quantity :shadow-depth))
-         (shadow-slope-bias
-           (interpret (swizzle shadow-control-vector :w)
-                      :quantity :shadow-depth))
+                    (quantity 1.0 :quantity :shadow-v :affine-p t))))
+         (shadow-texel-size (swizzle shadow-control-vector :xy))
+         (shadow-base-bias (swizzle shadow-control-vector :z))
+         (shadow-slope-bias (swizzle shadow-control-vector :w))
          (shadow-bias
            (+ shadow-base-bias (* shadow-slope-bias (- 1.0 n-dot-l))))
          ;; A PCF tap displaced across a receiver plane must compare against
@@ -175,24 +209,19 @@
          ;; grazing incidence, where direct sun is negligible.  This prevents
          ;; wide kernels from reading the receiver's own slope as an occluder.
          (shadow-right
-           (interpret (normalize (swizzle shadow-row-x :xyz))
-                      :quantity :world-direction))
+           (assume-quantity (normalize (swizzle shadow-row-x :xyz))
+                            :quantity :world-direction))
          (shadow-up
-           (interpret (normalize (swizzle shadow-row-y :xyz))
-                      :quantity :world-direction))
+           (assume-quantity (normalize (swizzle shadow-row-y :xyz))
+                            :quantity :world-direction))
          (shadow-forward
-           (interpret (normalize (swizzle shadow-row-z :xyz))
-                      :quantity :world-direction))
+           (assume-quantity (normalize (swizzle shadow-row-z :xyz))
+                            :quantity :world-direction))
          (shadow-normal-forward
            (min -0.05 (dot normal shadow-forward)))
-         (shadow-depth-span
-           (interpret (swizzle shadow-filter-vector :x)
-                      :quantity :world-distance
-                      :dimension :length :unit :metre))
+         (shadow-depth-span (swizzle shadow-filter-vector :x))
          (shadow-world-units-per-texel
-           (interpret (swizzle shadow-filter-vector :y)
-                      :quantity :world-distance
-                      :dimension :length :unit :metre))
+           (swizzle shadow-filter-vector :y))
          (shadow-world-span
            (interpret
             (/ shadow-world-units-per-texel (swizzle shadow-texel-size :x))
@@ -209,26 +238,15 @@
             :quantity :shadow-depth-gradient))
          (shadow-center-depth
            (swizzle
-            (interpret
-             (sample shadow-map shadow-sampler shadow-coordinate)
-             :quantity :shadow-depth :affine-p t)
-            :x))
-         (receiver-depth
-           (interpret shadow-depth-input
-                      :quantity :shadow-depth :affine-p t))
+            (sample shadow-map shadow-sampler shadow-coordinate) :x))
+         (receiver-depth shadow-depth-input)
          (shadow-blocker-separation
-           (max (interpret 0.0 :quantity :shadow-depth)
+           (max (quantity 0.0 :quantity :shadow-depth)
                 (- (- receiver-depth shadow-bias)
                    shadow-center-depth)))
-         (shadow-minimum-radius
-           (interpret (swizzle shadow-filter-vector :z)
-                      :quantity :shadow-filter-radius))
-         (shadow-maximum-radius
-           (interpret (swizzle shadow-filter-vector :w)
-                      :quantity :shadow-filter-radius))
-         (sun-angular-width
-           (interpret (swizzle sun-color-vector :w)
-                      :quantity :sun-angular-width))
+         (shadow-minimum-radius (swizzle shadow-filter-vector :z))
+         (shadow-maximum-radius (swizzle shadow-filter-vector :w))
+         (sun-angular-width (swizzle sun-color-vector :w))
          (shadow-penumbra-world-radius
            (interpret
             (* (* shadow-blocker-separation shadow-depth-span)
@@ -252,51 +270,38 @@
          ;; The mesh carries normalized raw light readings; every response
          ;; curve and balance below is an art parameter editable live
          ;; without remeshing the world.
-         (sky-input
-           (interpret (swizzle light-input :x)
-                      :quantity :sky-light-level))
-         (block-input
-           (interpret (swizzle light-input :y)
-                      :quantity :block-light-level))
-         (emission-input
-           (interpret (swizzle light-input :z)
-                      :quantity :material-emission))
+         (sky-input (swizzle light-input :x))
+         (block-input (swizzle light-input :y))
+         (emission-input (swizzle light-input :z))
          (sky-level (* sky-input sky-input))
          (block-level (* block-input block-input))
-         (day-factor
-           (interpret (swizzle sun-vector :w)
-                      :quantity :day-factor))
+         (day-factor (swizzle sun-vector :w))
          ;; Lateral skylight gives ambient visibility but not a hard sun
          ;; beam; the shadow map gates only the direct solar term.
          (sun-visibility
            (smoothstep
-            (interpret 0.90 :quantity :sky-light-level)
-            (interpret 1.0 :quantity :sky-light-level)
+            (quantity 0.90 :quantity :sky-light-level)
+            (quantity 1.0 :quantity :sky-light-level)
             sky-input))
-         (ambient
-           (interpret (swizzle ambient-vector :xyz)
-                      :quantity :linear-rgb))
-         (sun-color
-           (interpret (swizzle sun-color-vector :xyz)
-                      :quantity :linear-rgb))
+         (ambient (swizzle ambient-vector :xyz))
+         (sun-color (swizzle sun-color-vector :xyz))
          ;; A small floor keeps unlit geometry barely readable rather than
          ;; a void; caves stay dark for the right reason.
          (sky-light
-           (interpret
-            (* ambient (+ 0.06 (* 1.34 sky-level)) ao)
-            :quantity :linear-rgb))
+           (interpret (* ambient (+ 0.06 (* 1.34 sky-level)) ao)
+                      :quantity :linear-rgb))
          (sun-light
            (interpret
             (* sun-color
                (* n-dot-l sun-visibility day-factor direct-shadow))
             :quantity :linear-rgb))
          (torch-color
-           (interpret (vec3 1.0 0.82 0.58) :quantity :linear-rgb))
-         (local-light (* torch-color block-level))
+           (quantity (vec3 1.0 0.82 0.58) :quantity :linear-rgb))
+         (local-light
+           (interpret (* torch-color block-level)
+                      :quantity :linear-rgb))
          (albedo
-           (interpret
-            (swizzle (sample block-atlas block-sampler uv) :rgb)
-            :quantity :linear-rgb))
+           (swizzle (sample block-atlas block-sampler uv) :rgb))
          (reflected
            (interpret
             (* albedo (+ sky-light sun-light local-light))
@@ -305,17 +310,12 @@
            (+ reflected
               (interpret (* albedo emission-input)
                          :quantity :linear-rgb)))
-         (fog-color
-           (interpret (swizzle fog-color-vector :xyz)
-                      :quantity :linear-rgb))
-         (fog-amount
-           (interpret fog-input :quantity :fog-amount))
+         (fog-color (swizzle fog-color-vector :xyz))
+         (fog-amount fog-input)
          (fogged (mix radiance fog-color fog-amount))
          (normal-rgba
            (interpret (vec4 fogged 1.0) :quantity :linear-rgba))
-         (shadow-diagnostic
-           (interpret (swizzle fog-color-vector :w)
-                      :quantity :shadow-diagnostic))
+         (shadow-diagnostic (swizzle fog-color-vector :w))
          (shadow-rgba
            (interpret
             (vec4 (vec3 direct-shadow direct-shadow direct-shadow) 1.0)
@@ -348,7 +348,8 @@
     (:stage :vertex
      :inputs ((corner-position :vec3 :location 0))
      :outputs ((clip-position :vec4 :built-in :position)
-               (ray-output :vec3 :location 0))
+               (ray-output :vec3 :location 0
+                           :quantity :world-direction))
      :resources
      ((frame-state :uniform-block :set 0 :binding 2
                    :members #.*frame-uniform-members*)))
@@ -368,7 +369,8 @@
          (ray (+ (* right view-x) (* up view-y) forward))
          (clip (vec4 x y z 1.0)))
     (set-output clip-position clip)
-    (set-output ray-output ray)))
+    (set-output ray-output
+                (assume-quantity ray :quantity :world-direction))))
 
 (defun block-world-sky-vertex-specification ()
   (shader-specification-for :sky :vertex))
@@ -384,7 +386,8 @@
     block-world-sky-fragment-specification
     ((role (eql :sky)) (stage (eql :fragment)))
     (:stage :fragment
-     :inputs ((ray-input :vec3 :location 0))
+     :inputs ((ray-input :vec3 :location 0
+                         :quantity :world-direction))
      :outputs ((color-output :vec4 :location 0))
      :resources
      ((frame-state :uniform-block :set 0 :binding 2
@@ -395,18 +398,30 @@
          (horizon (swizzle horizon-vector :xyz))
          ;; A soft vertical gradient with a wide horizon band; the band sits
          ;; slightly below level so distant terrain meets the fog colour.
-         (height (smoothstep -0.04 0.45 elevation))
+         (height
+           (smoothstep
+            (quantity -0.04 :quantity :world-y-direction)
+            (quantity 0.45 :quantity :world-y-direction)
+            elevation))
          (base (mix horizon zenith height))
          (sun-direction (swizzle sun-vector :xyz))
          (day-factor (swizzle sun-vector :w))
          (sun-color (swizzle sun-color-vector :xyz))
          (sun-width (swizzle sun-color-vector :w))
-         (alignment (max 0.0 (dot unit sun-direction)))
-         (disc-outer (- 1.0 (* sun-width 3.0)))
-         (disc-inner (- 1.0 sun-width))
+         (alignment
+           (interpret (max 0.0 (dot unit sun-direction))
+                      :quantity :sun-disc-coordinate))
+         (disc-outer
+           (- (quantity 1.0 :quantity :sun-disc-coordinate)
+              (* sun-width 3.0)))
+         (disc-inner
+           (- (quantity 1.0 :quantity :sun-disc-coordinate)
+              sun-width))
          (disc (smoothstep disc-outer disc-inner alignment))
          (glow (* (expt alignment 24.0) 0.35))
-         (sun-radiance (* sun-color (+ disc glow) day-factor))
+         (sun-radiance
+           (interpret (* sun-color (+ disc glow) day-factor)
+                      :quantity :linear-rgb))
          (rgb (+ base sun-radiance))
          (rgba (vec4 rgb 1.0)))
     (set-output color-output rgba)))

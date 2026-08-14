@@ -120,7 +120,11 @@
    (quantity-specification
     :initarg :quantity-specification
     :initform nil
-    :reader shader-declaration-quantity-specification))
+    :reader shader-declaration-quantity-specification)
+   (quantity-layout
+    :initarg :quantity-layout
+    :initform nil
+    :reader shader-declaration-quantity-layout))
   (:documentation
    "A represented shader value with optional backend-neutral semantic meaning."))
 
@@ -144,7 +148,15 @@
     :reader shader-resource-descriptor-set)
    (binding
     :initarg :binding
-    :reader shader-resource-binding)))
+    :reader shader-resource-binding)
+   (sample-quantity-specification
+    :initarg :sample-quantity-specification
+    :initform nil
+    :reader shader-resource-sample-quantity-specification)
+   (sample-quantity-layout
+    :initarg :sample-quantity-layout
+    :initform nil
+    :reader shader-resource-sample-quantity-layout)))
 
 (defclass shader-uniform-block (shader-resource)
   ((members
@@ -190,6 +202,10 @@ repeating the lane arithmetic as a literal."
     :initarg :quantity-specification
     :initform nil
     :reader shader-expression-quantity-specification)
+   (quantity-layout
+    :initarg :quantity-layout
+    :initform nil
+    :reader shader-expression-quantity-layout)
    (source-form
     :initarg :source-form
     :reader shader-expression-source-form)
@@ -224,12 +240,31 @@ repeating the lane arithmetic as a literal."
     :initform nil
     :reader shader-call-parameters)))
 
-(defclass shader-interpretation (shader-expression)
+(defclass shader-quantity-boundary (shader-expression)
   ((operand
     :initarg :operand
-    :reader shader-interpretation-operand))
+    :reader shader-quantity-boundary-operand)))
+
+(defclass shader-interpretation (shader-quantity-boundary) ()
   (:documentation
    "A checked semantic name for a represented value, with no codegen effect."))
+
+(defun shader-interpretation-operand (expression)
+  (shader-quantity-boundary-operand expression))
+
+(defclass shader-quantity-construction (shader-quantity-boundary) ()
+  (:documentation
+   "An explicitly meaningful value constructed from semantically raw source."))
+
+(defun shader-quantity-construction-operand (expression)
+  (shader-quantity-boundary-operand expression))
+
+(defclass shader-quantity-assumption (shader-quantity-boundary) ()
+  (:documentation
+   "An explicit assumption that an opaque represented value has a meaning."))
+
+(defun shader-quantity-assumption-operand (expression)
+  (shader-quantity-boundary-operand expression))
 
 (defmethod shader-expression-quantity-checked-p ((expression shader-literal))
   nil)
@@ -238,17 +273,20 @@ repeating the lane arithmetic as a literal."
   (let ((target (shader-reference-target expression)))
     (etypecase target
       (shader-variable-declaration
-       (not (null (shader-declaration-quantity-specification target))))
+       (or (not (null (shader-declaration-quantity-specification target)))
+           (not (null (shader-declaration-quantity-layout target)))))
       (shader-binding
        (shader-expression-quantity-checked-p
         (shader-binding-expression target))))))
 
 (defmethod shader-expression-quantity-checked-p ((expression shader-call))
-  (some #'shader-expression-quantity-checked-p
-        (shader-call-operands expression)))
+  (or (shader-expression-quantity-specification expression)
+      (shader-expression-quantity-layout expression)
+      (some #'shader-expression-quantity-checked-p
+            (shader-call-operands expression))))
 
 (defmethod shader-expression-quantity-checked-p
-    ((expression shader-interpretation))
+    ((expression shader-quantity-boundary))
   (declare (ignore expression))
   t)
 
@@ -306,7 +344,7 @@ repeating the lane arithmetic as a literal."
                         (shader-call-operands expression)))
           (shader-call-parameters expression)))
 
-(defmethod shader-expression-form ((expression shader-interpretation))
+(defmethod shader-expression-form ((expression shader-quantity-boundary))
   (shader-expression-source-form expression))
 
 (defmethod print-object ((expression shader-expression) stream)
@@ -324,8 +362,8 @@ repeating the lane arithmetic as a literal."
 (defmethod shader-expression-children ((expression shader-call))
   (shader-call-operands expression))
 
-(defmethod shader-expression-children ((expression shader-interpretation))
-  (list (shader-interpretation-operand expression)))
+(defmethod shader-expression-children ((expression shader-quantity-boundary))
+  (list (shader-quantity-boundary-operand expression)))
 
 (defun shader-specification-expressions (specification)
   "Return the expression graph in source order, without duplicate objects."
@@ -370,6 +408,13 @@ repeating the lane arithmetic as a literal."
                      (shader-binding
                       (shader-expression-quantity-specification
                        (shader-binding-expression target))))
+                   :quantity-layout
+                   (etypecase target
+                     (shader-variable-declaration
+                      (shader-declaration-quantity-layout target))
+                     (shader-binding
+                      (shader-expression-quantity-layout
+                       (shader-binding-expression target))))
                    :source-form source-form)))
 
 (defun shader-numeric-type-p (type)
@@ -392,6 +437,15 @@ repeating the lane arithmetic as a literal."
     (operator operands source-form)
   (:documentation
    "Derive semantic meaning for one shader call once annotations enter it."))
+
+(defgeneric infer-shader-call-quantity-layout (operator operands source-form)
+  (:documentation
+   "Derive a packed semantic layout for one shader call, or return NIL."))
+
+(defmethod infer-shader-call-quantity-layout
+    (operator operands source-form)
+  (declare (ignore operator operands source-form))
+  nil)
 
 (defmethod infer-shader-call-quantity-specification
     (operator operands source-form)
@@ -456,9 +510,14 @@ silent loss of meaning."
       (require-semantic-operands operands source-form '(2))
       (require-dimensionless-coordinate
        (shader-expression-quantity-specification coordinate) source-form)))
-  ;; A texture's result meaning is not implied by its coordinate.  Source may
-  ;; name the sampled value explicitly with INTERPRET.
-  nil)
+  (let ((texture (shader-reference-target (first operands))))
+    (shader-resource-sample-quantity-specification texture)))
+
+(defmethod infer-shader-call-quantity-layout
+    ((operator (eql 'sample)) operands source-form)
+  (declare (ignore operator source-form))
+  (let ((texture (shader-reference-target (first operands))))
+    (shader-resource-sample-quantity-layout texture)))
 
 (defmethod infer-shader-call-quantity-specification
     ((operator (eql 'sample-compare)) operands source-form)
@@ -573,6 +632,49 @@ silent loss of meaning."
     (math:make-quantity-specification
      nil :tensor-order
      (math:quantity-specification-tensor-order compatible))))
+
+(defmethod math:derive-quantity-specification
+    ((operator (eql 'normalize)) &rest operands)
+  (unless (= (length operands) 1)
+    (error 'math:quantity-operation-error
+           :operator operator :specifications operands
+           :reason :normalize-arity))
+  (let ((operand (first operands)))
+    (unless (and (math:dimensionless-p
+                  (math:quantity-specification-dimension operand))
+                 (math:unitless-p
+                  (math:quantity-specification-unit operand))
+                 (= (math:quantity-specification-tensor-order operand) 1)
+                 (not (math:quantity-specification-affine-p operand)))
+      (error 'math:quantity-operation-error
+             :operator operator :specifications operands
+             :reason :normalize-requires-dimensionless-vector))
+    operand))
+
+(defmethod math:derive-quantity-specification
+    ((operator (eql 'expt)) &rest operands)
+  (unless (= (length operands) 2)
+    (error 'math:quantity-operation-error
+           :operator operator :specifications operands
+           :reason :expt-arity))
+  (destructuring-bind (base exponent) operands
+    (unless (and (math:dimensionless-p
+                  (math:quantity-specification-dimension base))
+                 (math:unitless-p
+                  (math:quantity-specification-unit base))
+                 (not (math:quantity-specification-affine-p base))
+                 (math:dimensionless-p
+                  (math:quantity-specification-dimension exponent))
+                 (math:unitless-p
+                  (math:quantity-specification-unit exponent))
+                 (zerop (math:quantity-specification-tensor-order exponent))
+                 (not (math:quantity-specification-affine-p exponent)))
+      (error 'math:quantity-operation-error
+             :operator operator :specifications operands
+             :reason :expt-requires-dimensionless-operands))
+    (math:make-quantity-specification
+     nil :tensor-order
+     (math:quantity-specification-tensor-order base))))
 
 (defmethod infer-shader-call-type (operator operands source-form)
   (declare (ignore operands))
@@ -857,6 +959,10 @@ never collides with a standard symbol's function documentation:
   "Return zero below an edge and one at or above it, componentwise.")
 (define-shader-operator normalize
   "Scale one vector to unit length.")
+(define-shader-operator quantity
+  "Construct an explicitly meaningful scalar or vector literal.")
+(define-shader-operator assume-quantity
+  "State an explicit semantic assumption about an otherwise raw value.")
 (define-shader-operator interpret
   "Assign a checked semantic quantity specification without emitting code.")
 
@@ -999,6 +1105,9 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
                    :quantity-specification
                    (infer-shader-call-quantity-specification
                     operator operands form)
+                   :quantity-layout
+                   (infer-shader-call-quantity-layout
+                    operator operands form)
                    :source-form form)))
 
 (defmethod parse-shader-operator-call ((operator (eql 'swizzle)) form environment)
@@ -1014,25 +1123,35 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
       (error 'shader-language-error
              :form form :reason :swizzle-out-of-range
              :details designator))
-    (make-instance 'shader-call
-                   :operator 'swizzle
-                   :operands (list operand)
-                   :parameters (list designator)
-                   :type (vector-type-for-width (length indices) form)
-                   :quantity-specification
-                   (let ((specification
-                           (shader-expression-quantity-specification operand)))
-                     (when specification
-                       (math:make-quantity-specification
-                        (math:quantity-specification-name specification)
-                        :dimension
-                        (math:quantity-specification-dimension specification)
-                        :unit
-                        (math:quantity-specification-unit specification)
-                        :tensor-order (if (= (length indices) 1) 0 1)
-                        :affine-p
-                        (math:quantity-specification-affine-p specification))))
-                   :source-form form)))
+    (let* ((specification
+             (shader-expression-quantity-specification operand))
+           (layout (shader-expression-quantity-layout operand))
+           (projected
+             (or (and layout
+                      (math:project-quantity-layout layout indices))
+                 (and specification
+                      (handler-case
+                          (math:project-quantity-specification
+                           specification indices input-width)
+                        (math:quantity-operation-error (condition)
+                          (error 'shader-language-error
+                                 :form form
+                                 :reason :invalid-quantity-projection
+                                 :details
+                                 (math:quantity-operation-error-reason
+                                  condition))))))))
+      (when (and (shader-expression-quantity-checked-p operand)
+                 (null projected))
+        (error 'shader-language-error
+               :form form :reason :undeclared-quantity-projection
+               :details designator))
+      (make-instance 'shader-call
+                     :operator 'swizzle
+                     :operands (list operand)
+                     :parameters (list designator)
+                     :type (vector-type-for-width (length indices) form)
+                     :quantity-specification projected
+                     :source-form form))))
 
 (defun parse-shader-call (form environment)
   (let ((operator (first form)))
@@ -1074,6 +1193,62 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
      :tensor-order (shader-type-tensor-order type source-form)
      :affine-p affine-p)))
 
+(defun parse-declaration-quantity-layout
+    (components type source-form &optional whole)
+  (when components
+    (let ((extent (shader-type-component-count type)))
+      (unless (and extent (> extent 1))
+        (error 'shader-language-error
+               :form source-form :reason :quantity-components-on-non-vector
+               :details (shader-type-name type)))
+      (let ((occupied nil)
+            (projections nil))
+        (dolist (component-form components)
+          (destructuring-bind
+              (selector &key quantity
+                        (dimension nil dimension-supplied-p)
+                        (unit nil unit-supplied-p)
+                        (affine-p nil affine-supplied-p))
+              component-form
+            (unless quantity
+              (error 'shader-language-error
+                     :form component-form
+                     :reason :missing-component-quantity))
+            (let ((positions (swizzle-components selector component-form)))
+              (unless (every (lambda (position) (< position extent)) positions)
+                (error 'shader-language-error
+                       :form component-form :reason :swizzle-out-of-range
+                       :details selector))
+              (let ((overlap (intersection positions occupied)))
+                (when overlap
+                  (error 'shader-language-error
+                         :form component-form
+                         :reason :overlapping-quantity-components
+                         :details overlap)))
+              (setf occupied (append positions occupied))
+              (let ((projection-type
+                      (vector-type-for-width (length positions) component-form)))
+                (push
+                 (math:make-quantity-projection
+                  positions
+                  (parse-declaration-quantity-specification
+                   quantity
+                   (if dimension-supplied-p
+                       dimension
+                       (and whole
+                            (math:quantity-specification-dimension whole)))
+                   (if unit-supplied-p
+                       unit
+                       (and whole
+                            (math:quantity-specification-unit whole)))
+                   (if affine-supplied-p
+                       affine-p
+                       (and whole
+                            (math:quantity-specification-affine-p whole)))
+                   projection-type component-form))
+                 projections)))))
+        (math:make-quantity-layout extent (nreverse projections))))))
+
 (defmethod parse-shader-operator-call
     ((operator (eql 'interpret)) form environment)
   (declare (ignore operator))
@@ -1104,28 +1279,88 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
                      :quantity-specification interpretation
                      :source-form form))))
 
+(defun shader-constant-expression-p (expression)
+  (typecase expression
+    (shader-literal t)
+    (shader-call
+     (and (member (shader-call-operator expression) '(vec2 vec3 vec4))
+          (every #'shader-constant-expression-p
+                 (shader-call-operands expression))))
+    (t nil)))
+
+(defun parse-raw-quantity-boundary
+    (class form environment &key constant-only-p)
+  (destructuring-bind
+      (name operand-form &key quantity dimension unit affine-p) form
+    (declare (ignore name))
+    (unless (or quantity dimension unit affine-p)
+      (error 'shader-language-error
+             :form form :reason :missing-quantity-interpretation))
+    (let* ((operand (parse-shader-expression operand-form environment))
+           (type (shader-expression-type operand)))
+      (when (or (shader-expression-quantity-checked-p operand)
+                (shader-expression-quantity-layout operand))
+        (error 'shader-language-error
+               :form form :reason :quantity-already-has-semantics
+               :details (shader-expression-form operand)))
+      (when (and constant-only-p
+                 (not (shader-constant-expression-p operand)))
+        (error 'shader-language-error
+               :form form :reason :quantity-requires-literal-construction
+               :details (shader-expression-form operand)))
+      (make-instance
+       class
+       :operand operand
+       :type type
+       :quantity-specification
+       (parse-declaration-quantity-specification
+        quantity dimension unit affine-p type form)
+       :source-form form))))
+
+(defmethod parse-shader-operator-call
+    ((operator (eql 'quantity)) form environment)
+  (declare (ignore operator))
+  (parse-raw-quantity-boundary
+   'shader-quantity-construction form environment :constant-only-p t))
+
+(defmethod parse-shader-operator-call
+    ((operator (eql 'assume-quantity)) form environment)
+  (declare (ignore operator))
+  (parse-raw-quantity-boundary
+   'shader-quantity-assumption form environment))
+
 (defun parse-interface-declaration (form direction)
   (destructuring-bind
-      (name type &key location built-in quantity dimension unit affine-p) form
+      (name type &key location built-in quantity dimension unit affine-p
+                       components)
+      form
     (unless (or (and (typep location '(integer 0 *)) (null built-in))
                 (and (null location) built-in))
       (error 'shader-language-error
              :form form :reason :invalid-interface-decoration
              :details (list :location location :built-in built-in)))
-    (let ((resolved-type (find-shader-type type form)))
+    (let* ((resolved-type (find-shader-type type form))
+           (specification
+             (parse-declaration-quantity-specification
+              quantity dimension unit affine-p resolved-type form)))
       (make-instance 'shader-interface-variable
                      :name name
                      :type resolved-type
-                     :quantity-specification
-                     (parse-declaration-quantity-specification
-                      quantity dimension unit affine-p resolved-type form)
+                     :quantity-specification specification
+                     :quantity-layout
+                     (parse-declaration-quantity-layout
+                      components resolved-type form specification)
                      :direction direction
                      :location location
                      :built-in built-in
                      :source-form form))))
 
 (defun parse-resource-declaration (form)
-  (destructuring-bind (name type &key (set 0) binding members) form
+  (destructuring-bind
+      (name type &key (set 0) binding members
+                       sample-quantity sample-dimension sample-unit
+                       sample-affine-p sample-components)
+      form
     (unless (and (typep set '(integer 0 *))
                  (typep binding '(integer 0 *)))
       (error 'shader-language-error
@@ -1147,7 +1382,7 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
                       collect
                       (destructuring-bind
                           (member-name member-type
-                           &key quantity dimension unit affine-p)
+                           &key quantity dimension unit affine-p components)
                           member-form
                         (let ((resolved-type
                                 (find-shader-type member-type member-form)))
@@ -1160,17 +1395,32 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
                                    :form member-form
                                    :reason :unsupported-uniform-member-type
                                    :details member-type))
-                          (make-instance
-                           'shader-uniform-member
-                           :name member-name :type resolved-type
-                           :quantity-specification
-                           (parse-declaration-quantity-specification
-                            quantity dimension unit affine-p
-                            resolved-type member-form)
-                           :block block :index index :offset (* index 16)
-                           :source-form member-form)))))
+                          (let ((specification
+                                  (parse-declaration-quantity-specification
+                                   quantity dimension unit affine-p
+                                   resolved-type member-form)))
+                            (make-instance
+                             'shader-uniform-member
+                             :name member-name :type resolved-type
+                             :quantity-specification specification
+                             :quantity-layout
+                             (parse-declaration-quantity-layout
+                              components resolved-type member-form
+                              specification)
+                             :block block :index index :offset (* index 16)
+                             :source-form member-form))))))
           block)
-        (let ((resolved-type (find-shader-type type form)))
+        (let* ((resolved-type (find-shader-type type form))
+               (sample-type
+                 (and (shader-type-sample-result-type resolved-type)
+                      (find-shader-type
+                       (shader-type-sample-result-type resolved-type)
+                       form)))
+               (sample-specification
+                 (and sample-type
+                      (parse-declaration-quantity-specification
+                       sample-quantity sample-dimension sample-unit
+                       sample-affine-p sample-type form))))
           (unless (and (shader-type-opaque-kind resolved-type)
                        (not (eq (shader-type-opaque-kind resolved-type)
                                 :uniform-block)))
@@ -1179,8 +1429,19 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
           (when members
             (error 'shader-language-error
                    :form form :reason :members-on-opaque-resource))
+          (when (and (or sample-quantity sample-dimension sample-unit
+                         sample-affine-p sample-components)
+                     (null sample-type))
+            (error 'shader-language-error
+                   :form form :reason :sample-semantics-on-non-texture))
           (make-instance 'shader-resource
                          :name name :type resolved-type
+                         :sample-quantity-specification sample-specification
+                         :sample-quantity-layout
+                         (and sample-type
+                              (parse-declaration-quantity-layout
+                               sample-components sample-type form
+                               sample-specification))
                          :descriptor-set set :binding binding
                          :source-form form)))))
 
@@ -1206,13 +1467,24 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
     (let ((expected
             (shader-declaration-quantity-specification output))
           (actual
-            (shader-expression-quantity-specification value)))
+            (shader-expression-quantity-specification value))
+          (expected-layout
+            (shader-declaration-quantity-layout output))
+          (actual-layout
+            (shader-expression-quantity-layout value)))
       (when (and expected
                  (or (null actual)
                      (not (math:quantity-specification= expected actual))))
         (error 'shader-language-error
                :form form :reason :output-quantity-mismatch
-               :details (list expected actual))))
+               :details (list expected actual)))
+      (when (and expected-layout
+                 (or (null actual-layout)
+                     (not (math:quantity-layout=
+                           expected-layout actual-layout))))
+        (error 'shader-language-error
+               :form form :reason :output-quantity-layout-mismatch
+               :details (list expected-layout actual-layout))))
     (make-instance 'shader-output-assignment
                    :output output :value value :source-form form)))
 
@@ -1753,6 +2025,16 @@ Modules whose expressions use no extended mathematics never acquire one."
   (declare (ignore expression))
   'interpretation)
 
+(defmethod shader-expression-provenance-name
+    ((expression shader-quantity-construction))
+  (declare (ignore expression))
+  'quantity)
+
+(defmethod shader-expression-provenance-name
+    ((expression shader-quantity-assumption))
+  (declare (ignore expression))
+  'assumption)
+
 (defun expression-result-name (expression)
   (or (shader-expression-name expression)
       (shader-expression-provenance-name expression)))
@@ -2087,8 +2369,8 @@ Modules whose expressions use no extended mathematics never acquire one."
   (lower-shader-call (shader-call-operator expression) context expression))
 
 (defmethod lower-shader-expression-value
-    (context (expression shader-interpretation))
-  (let* ((operand (shader-interpretation-operand expression))
+    (context (expression shader-quantity-boundary))
+  (let* ((operand (shader-quantity-boundary-operand expression))
          (value (lower-shader-expression context operand)))
     (alias-shader-expression context expression operand)
     value))

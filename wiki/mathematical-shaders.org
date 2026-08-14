@@ -157,11 +157,19 @@ Declarations and expressions may opt into the backend-neutral quantity
 experiment #9P358P with =:quantity=, =:dimension=, =:unit=, and =:affine-p=.
 That metadata is separate from =shader-type=: ordinary arithmetic derives a
 semantic specification while valid annotated and unannotated graphs still
-lower to the same SPIR-V.  =interpret= is the explicit, checked boundary from
-a represented value or anonymous derived result to a named meaning; it cannot
-relabel an already named value or convert units.  The production luvcraft
-fragment shader now carries meanings from its packed inputs through shadow
-filtering, lighting, fog, and final colour without changing the emitted module.
+lower to the same SPIR-V.  =quantity= constructs semantic constants,
+=assume-quantity= loudly marks raw external meaning, and =interpret= names only
+a compatible already-derived result; none emits an instruction.
+
+#VC7VFY and completed work #SQR8KR make component structure first-class too.
+A homogeneous vector can publish named axes, while =:components= describes a
+heterogeneous representation such as =vec3(xy: texture point, z: occlusion)=.
+Only exact declared swizzles recover quantities; undeclared projections and
+arithmetic on the packed whole fail.  Texture resources can likewise publish
+sample-channel layouts, so RGB and alpha acquire meaning at the sample rather
+than through a later cast.  The production luvcraft shaders carry these
+meanings through shadow filtering, lighting, sky, fog, and final colour without
+changing the representation or emitted module.
 
 =let*= is semantic.  Lowering evaluates bindings in source order, interns
 types and constants deterministically, preserves useful lexical names in
@@ -192,7 +200,10 @@ and blocks are distinct McCLIM presentation types.
 Selecting an expression highlights its associated instructions.  Selecting
 an instruction keeps that machine occurrence selected while following the
 reverse provenance map to highlight its source expression.
-The detail pane reports the source form, inferred type, and association count.
+The detail pane reports the source form, inferred type, semantic meaning, and
+association count.  Packed declarations and samples display lane-to-quantity
+maps, while construction, assumption, and interpretation remain distinct
+selectable expression nodes.
 The presentation objects are the compiler objects themselves; there is no
 parallel UI tree whose identities can drift.
 

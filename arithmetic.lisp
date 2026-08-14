@@ -210,6 +210,141 @@ remain different bases until an explicit conversion operation is introduced."
        (eq (quantity-specification-affine-p left)
            (quantity-specification-affine-p right))))
 
+(defclass quantity-projection ()
+  ((positions
+    :initarg :positions
+    :reader quantity-projection-positions)
+   (specification
+    :initarg :specification
+    :reader quantity-projection-specification))
+  (:documentation
+   "One quantity occupying selected positions of a composite representation."))
+
+(defun make-quantity-projection (positions specification)
+  (unless (and (consp positions)
+               (every (lambda (position)
+                        (typep position '(integer 0 *)))
+                      positions)
+               (= (length positions)
+                  (length (remove-duplicates positions))))
+    (error "Quantity projection positions must be distinct non-negative integers, not ~S."
+           positions))
+  (check-type specification quantity-specification)
+  (make-instance 'quantity-projection
+                 :positions (copy-list positions)
+                 :specification specification))
+
+(defclass quantity-layout ()
+  ((extent
+    :initarg :extent
+    :reader quantity-layout-extent)
+   (projections
+    :initarg :projections
+    :reader quantity-layout-projections))
+  (:documentation
+   "Semantic quantities packed into disjoint positions of one representation."))
+
+(defun make-quantity-layout (extent projections)
+  (unless (typep extent '(integer 1 *))
+    (error "A quantity layout extent must be a positive integer, not ~S."
+           extent))
+  (let ((occupied nil))
+    (dolist (projection projections)
+      (check-type projection quantity-projection)
+      (dolist (position (quantity-projection-positions projection))
+        (unless (< position extent)
+          (error "Quantity projection position ~D is outside extent ~D."
+                 position extent))
+        (when (member position occupied)
+          (error "Quantity layout position ~D is specified more than once."
+                 position))
+        (push position occupied))))
+  (make-instance 'quantity-layout
+                 :extent extent
+                 :projections (copy-list projections)))
+
+(defmethod print-object ((layout quantity-layout) stream)
+  (print-unreadable-object (layout stream :type t)
+    (format stream "~D lanes: ~{~S~^, ~}"
+            (quantity-layout-extent layout)
+            (mapcar
+             (lambda (projection)
+               (list (quantity-projection-positions projection)
+                     (quantity-specification-name
+                      (quantity-projection-specification projection))))
+             (quantity-layout-projections layout)))))
+
+(defun quantity-layout= (left right)
+  (and (= (quantity-layout-extent left) (quantity-layout-extent right))
+       (= (length (quantity-layout-projections left))
+          (length (quantity-layout-projections right)))
+       (every
+        (lambda (left-projection)
+          (let ((right-projection
+                  (find (quantity-projection-positions left-projection)
+                        (quantity-layout-projections right)
+                        :test #'equal
+                        :key #'quantity-projection-positions)))
+            (and right-projection
+                 (quantity-specification=
+                  (quantity-projection-specification left-projection)
+                  (quantity-projection-specification right-projection)))))
+        (quantity-layout-projections left))))
+
+(defun project-quantity-layout (layout positions)
+  "Return the quantity exactly occupying POSITIONS in LAYOUT, or NIL."
+  (let ((projection
+          (find positions (quantity-layout-projections layout)
+                :test #'equal :key #'quantity-projection-positions)))
+    (and projection (quantity-projection-specification projection))))
+
+(defgeneric quantity-component-names (quantity-name)
+  (:documentation
+   "Return the ordered component quantity names of a homogeneous quantity."))
+
+(defmethod quantity-component-names (quantity-name)
+  (declare (ignore quantity-name))
+  nil)
+
+(defmacro define-quantity-components (quantity-name (&rest component-names))
+  "Define the ordered component names of QUANTITY-NAME through an EQL method."
+  `(defmethod quantity-component-names ((quantity-name (eql ,quantity-name)))
+     (declare (ignore quantity-name))
+     ',component-names))
+
+(defun project-quantity-specification (specification positions extent)
+  "Derive the quantity selected from a homogeneous represented quantity.
+
+Selecting every position in order preserves the whole.  A single component
+of an anonymous quantity remains anonymous.  A named quantity must explicitly
+publish ordered component names; no default silently calls one axis the whole."
+  (check-type specification quantity-specification)
+  (cond
+    ((equal positions (loop for position below extent collect position))
+     specification)
+    ((= (length positions) 1)
+     (let* ((whole-name (quantity-specification-name specification))
+            (component-names
+              (and whole-name (quantity-component-names whole-name)))
+            (position (first positions))
+            (component-name
+              (and (< position (length component-names))
+                   (nth position component-names))))
+       (when (and whole-name (null component-name))
+         (quantity-operation-error
+          'project (list specification positions)
+          :missing-quantity-component-definition))
+       (make-quantity-specification
+        component-name
+        :dimension (quantity-specification-dimension specification)
+        :unit (quantity-specification-unit specification)
+        :tensor-order 0
+        :affine-p (quantity-specification-affine-p specification))))
+    (t
+     (quantity-operation-error
+      'project (list specification positions)
+      :missing-quantity-projection-definition))))
+
 (define-condition quantity-operation-error (error)
   ((operator
     :initarg :operator
@@ -328,21 +463,20 @@ This is a semantic interpretation, never a numerical unit conversion.  An
 already named quantity may only retain its name; anonymous derived results may
 acquire one when their dimension, exact unit, tensor order, and affine
 character agree with INTERPRETATION."
-  (unless (and (or (null derived)
-                   (null (quantity-specification-name derived))
+  (unless (and derived
+               (or (null (quantity-specification-name derived))
                    (eq (quantity-specification-name derived)
                        (quantity-specification-name interpretation)))
-               (or (null derived)
-                   (and (dimension=
-                         (quantity-specification-dimension derived)
-                         (quantity-specification-dimension interpretation))
-                        (unit-expression=
-                         (quantity-specification-unit derived)
-                         (quantity-specification-unit interpretation))
-                        (= (quantity-specification-tensor-order derived)
-                           (quantity-specification-tensor-order interpretation))
-                        (eq (quantity-specification-affine-p derived)
-                            (quantity-specification-affine-p interpretation)))))
+               (dimension=
+                (quantity-specification-dimension derived)
+                (quantity-specification-dimension interpretation))
+               (unit-expression=
+                (quantity-specification-unit derived)
+                (quantity-specification-unit interpretation))
+               (= (quantity-specification-tensor-order derived)
+                  (quantity-specification-tensor-order interpretation))
+               (eq (quantity-specification-affine-p derived)
+                   (quantity-specification-affine-p interpretation)))
     (quantity-operation-error 'interpret (list derived interpretation)
                               :incompatible-interpretation))
   interpretation)
