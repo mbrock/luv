@@ -30,4 +30,5 @@
            #:quantity-operation-error-operator
            #:quantity-operation-error-specifications
            #:quantity-operation-error-reason
+           #:interpret-quantity-specification
            #:derive-quantity-specification))

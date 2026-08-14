@@ -238,7 +238,7 @@ checks buy clarity: constructors and presentation, field combinators,
 simulation phase boundaries, and explicitly compiled kernels are promising
 places.
 
-* NEXT Prove semantic arithmetic in the shadow graph
+* DONE Prove semantic arithmetic in the shadow graph
 :PROPERTIES:
 :ID: 9P358P
 :END:
@@ -266,6 +266,15 @@ Evidence:
   compose symbolically through products and quotients, but there is no common-
   unit selection: =:metre= and =:kilometre= are different until source performs
   an explicit conversion.
+- =interpret= introduces a checked semantic name at an untyped representation
+  boundary or on a compatible anonymous derived result.  It rejects unit
+  changes and semantic relabelling, and aliases its operand during lowering.
+  This is especially useful where one packed =vec4= carries heterogeneous
+  lanes which cannot truthfully share one declaration-level specification.
+- Shader-specific EQL methods define the demonstrated semantic vocabulary:
+  =sample= and =sample-compare= boundaries, vector constructors, =clamp=,
+  =step=, =mix=, and =smoothstep=.  Once checking begins, an absent rule is an
+  error rather than a reason to discard semantic information.
 - =tests/arithmetic.lisp= rejects equal-dimensional but differently named
   quantities, mismatched exact units, and illegal affine operations.
   =tests/shader.lisp= proves shadow-depth subtraction and compatible =max=,
@@ -277,17 +286,39 @@ Evidence:
   arithmetic finds a common reference and converts operands; this experiment
   intentionally adopts the separation but requires exact units instead of
   implicit conversion.
-- The production shadow graph in =luvcraft/shaders.lisp= remains deliberately
-  unannotated.  It is the next evidence source, not something the substrate
-  already claims to understand.
+- The production [[file:../luvcraft/shaders.lisp][block fragment graph]] now distinguishes shadow UV points and
+  offsets, shadow-depth points and differences, metre-valued world spans,
+  gradients, filter radii, light controls, and linear colour.  Strict checking
+  continues from the shadow result through lighting and fog to the final RGBA.
+- The production fragment module remains byte-for-byte identical to the module
+  from before those annotations (SHA-256 =da53933e77ce1a1f6123be4c5884aef43b0f28ddff849e12fe8125bc354bc494=).
+  Keeping =receiver-depth= at its original demand point also demonstrated that
+  source-order bindings are part of deterministic code generation even when
+  semantic interpretation itself emits no instruction.
+- The shader workbench shows representation type beside semantic meaning for
+  interface values, packed uniform members, bindings, and selected expressions;
+  =interpret= nodes remain visible and selectable in the expression tree.
 
-Done when: the receiver depth, bias, UV coordinates and offsets, world spans,
-texel scale, and filter radius in the real shadow calculation carry coherent
-specifications; valid source still emits identical SPIR-V; representative
-space- and unit-mixing edits fail at parse time with source-facing diagnostics;
-explicit unit conversion has a visible source form rather than compiler magic;
-and the shader workbench can present both representation type and semantic
-meaning.
+Outcome: the production proof covers coherent named spaces, tensor order,
+affine points, exact units, source-facing failures, unchanged SPIR-V, and live
+presentation.  Numerical unit conversion was deliberately not smuggled into
+=interpret=; it is isolated as follow-up #7MHTYL.
+
+* NEXT Make numerical unit conversion explicit
+:PROPERTIES:
+:ID: 7MHTYL
+:END:
+
+Intent: add a visible arithmetic operation for conversions such as kilometres
+to metres without weakening exact-unit checking or turning =interpret= into a
+scale-changing cast.  Learn from mp-units' quantity/reference separation while
+keeping conversion policy small and inspectable.
+
+Done when: conversion factors are declared outside backend lowering; a source
+form performs and records the numerical scale change; compatible conversions
+derive the target exact unit and preserve dimension, tensor order, affine
+character, and semantic meaning; missing or dimension-changing conversions
+fail at parse time; and shader tests prove the emitted multiply is intentional.
 
 * An initial block-world quantity map
 :PROPERTIES:

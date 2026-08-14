@@ -130,21 +130,41 @@
                  (shadow-sampler :sampler :set 0 :binding 4)
                  (shadow-comparison-sampler :sampler :set 0 :binding 5)))
   (let* ((uv-shade uv-shade-input)
-         (uv (swizzle uv-shade :xy))
-         (ao (swizzle uv-shade :z))
-         (normal normal-input)
-         (sun-direction (swizzle sun-vector :xyz))
+         (uv
+           (interpret (swizzle uv-shade :xy)
+                      :quantity :texture-uv :affine-p t))
+         (ao
+           (interpret (swizzle uv-shade :z)
+                      :quantity :ambient-occlusion))
+         (normal
+           (interpret normal-input :quantity :world-direction))
+         (sun-direction
+           (interpret (swizzle sun-vector :xyz)
+                      :quantity :world-direction))
          (n-dot-l (max 0.0 (dot normal sun-direction)))
-         (shadow-u (swizzle shadow-uv-input :x))
-         (shadow-v (swizzle shadow-uv-input :y))
+         (shadow-coordinate
+           (interpret shadow-uv-input
+                      :quantity :shadow-uv :affine-p t))
+         (shadow-u (swizzle shadow-coordinate :x))
+         (shadow-v (swizzle shadow-coordinate :y))
          (shadow-in-bounds
-           (* (step 0.0 shadow-u)
-              (step shadow-u 1.0)
-              (step 0.0 shadow-v)
-              (step shadow-v 1.0)))
-         (shadow-texel-size (swizzle shadow-control-vector :xy))
-         (shadow-base-bias (swizzle shadow-control-vector :z))
-         (shadow-slope-bias (swizzle shadow-control-vector :w))
+           (* (step (interpret 0.0 :quantity :shadow-uv :affine-p t)
+                    shadow-u)
+              (step shadow-u
+                    (interpret 1.0 :quantity :shadow-uv :affine-p t))
+              (step (interpret 0.0 :quantity :shadow-uv :affine-p t)
+                    shadow-v)
+              (step shadow-v
+                    (interpret 1.0 :quantity :shadow-uv :affine-p t))))
+         (shadow-texel-size
+           (interpret (swizzle shadow-control-vector :xy)
+                      :quantity :shadow-uv))
+         (shadow-base-bias
+           (interpret (swizzle shadow-control-vector :z)
+                      :quantity :shadow-depth))
+         (shadow-slope-bias
+           (interpret (swizzle shadow-control-vector :w)
+                      :quantity :shadow-depth))
          (shadow-bias
            (+ shadow-base-bias (* shadow-slope-bias (- 1.0 n-dot-l))))
          ;; A PCF tap displaced across a receiver plane must compare against
@@ -154,76 +174,152 @@
          ;; world-span/depth-span ratio.  Its denominator is bounded only near
          ;; grazing incidence, where direct sun is negligible.  This prevents
          ;; wide kernels from reading the receiver's own slope as an occluder.
-         (shadow-right (normalize (swizzle shadow-row-x :xyz)))
-         (shadow-up (normalize (swizzle shadow-row-y :xyz)))
-         (shadow-forward (normalize (swizzle shadow-row-z :xyz)))
+         (shadow-right
+           (interpret (normalize (swizzle shadow-row-x :xyz))
+                      :quantity :world-direction))
+         (shadow-up
+           (interpret (normalize (swizzle shadow-row-y :xyz))
+                      :quantity :world-direction))
+         (shadow-forward
+           (interpret (normalize (swizzle shadow-row-z :xyz))
+                      :quantity :world-direction))
          (shadow-normal-forward
            (min -0.05 (dot normal shadow-forward)))
-         (shadow-depth-span (swizzle shadow-filter-vector :x))
-         (shadow-world-units-per-texel (swizzle shadow-filter-vector :y))
+         (shadow-depth-span
+           (interpret (swizzle shadow-filter-vector :x)
+                      :quantity :world-distance
+                      :dimension :length :unit :metre))
+         (shadow-world-units-per-texel
+           (interpret (swizzle shadow-filter-vector :y)
+                      :quantity :world-distance
+                      :dimension :length :unit :metre))
          (shadow-world-span
-           (/ shadow-world-units-per-texel (swizzle shadow-texel-size :x)))
+           (interpret
+            (/ shadow-world-units-per-texel (swizzle shadow-texel-size :x))
+            :quantity :world-distance
+            :dimension :length :unit :metre))
          (shadow-span-ratio (/ shadow-world-span shadow-depth-span))
          (shadow-depth-gradient
-           (vec2
-            (- (* (/ (dot normal shadow-right) shadow-normal-forward)
-                  shadow-span-ratio))
-            (- (* (/ (dot normal shadow-up) shadow-normal-forward)
-                  shadow-span-ratio))))
+           (interpret
+            (vec2
+             (- (* (/ (dot normal shadow-right) shadow-normal-forward)
+                   shadow-span-ratio))
+             (- (* (/ (dot normal shadow-up) shadow-normal-forward)
+                   shadow-span-ratio)))
+            :quantity :shadow-depth-gradient))
          (shadow-center-depth
            (swizzle
-            (sample shadow-map shadow-sampler shadow-uv-input) :x))
+            (interpret
+             (sample shadow-map shadow-sampler shadow-coordinate)
+             :quantity :shadow-depth :affine-p t)
+            :x))
+         (receiver-depth
+           (interpret shadow-depth-input
+                      :quantity :shadow-depth :affine-p t))
          (shadow-blocker-separation
-           (max 0.0 (- (- shadow-depth-input shadow-bias)
-                       shadow-center-depth)))
-         (shadow-minimum-radius (swizzle shadow-filter-vector :z))
-         (shadow-maximum-radius (swizzle shadow-filter-vector :w))
-         (sun-angular-width (swizzle sun-color-vector :w))
+           (max (interpret 0.0 :quantity :shadow-depth)
+                (- (- receiver-depth shadow-bias)
+                   shadow-center-depth)))
+         (shadow-minimum-radius
+           (interpret (swizzle shadow-filter-vector :z)
+                      :quantity :shadow-filter-radius))
+         (shadow-maximum-radius
+           (interpret (swizzle shadow-filter-vector :w)
+                      :quantity :shadow-filter-radius))
+         (sun-angular-width
+           (interpret (swizzle sun-color-vector :w)
+                      :quantity :sun-angular-width))
          (shadow-penumbra-world-radius
-           (* (* shadow-blocker-separation shadow-depth-span)
-              sun-angular-width))
+           (interpret
+            (* (* shadow-blocker-separation shadow-depth-span)
+               sun-angular-width)
+            :quantity :world-distance
+            :dimension :length :unit :metre))
          (shadow-filter-radius
            (clamp
             (+ shadow-minimum-radius
-               (/ shadow-penumbra-world-radius
-                  shadow-world-units-per-texel))
+               (interpret
+                (/ shadow-penumbra-world-radius
+                   shadow-world-units-per-texel)
+                :quantity :shadow-filter-radius))
             shadow-minimum-radius shadow-maximum-radius))
          (shadow-sample
            (shadow-visibility
             shadow-map shadow-comparison-sampler
-            shadow-uv-input shadow-depth-input shadow-depth-gradient
+            shadow-coordinate receiver-depth shadow-depth-gradient
             shadow-texel-size shadow-bias shadow-filter-radius))
          (direct-shadow (mix 1.0 shadow-sample shadow-in-bounds))
          ;; The mesh carries normalized raw light readings; every response
          ;; curve and balance below is an art parameter editable live
          ;; without remeshing the world.
-         (sky-input (swizzle light-input :x))
-         (block-input (swizzle light-input :y))
-         (emission-input (swizzle light-input :z))
+         (sky-input
+           (interpret (swizzle light-input :x)
+                      :quantity :sky-light-level))
+         (block-input
+           (interpret (swizzle light-input :y)
+                      :quantity :block-light-level))
+         (emission-input
+           (interpret (swizzle light-input :z)
+                      :quantity :material-emission))
          (sky-level (* sky-input sky-input))
          (block-level (* block-input block-input))
-         (day-factor (swizzle sun-vector :w))
+         (day-factor
+           (interpret (swizzle sun-vector :w)
+                      :quantity :day-factor))
          ;; Lateral skylight gives ambient visibility but not a hard sun
          ;; beam; the shadow map gates only the direct solar term.
-         (sun-visibility (smoothstep 0.90 1.0 sky-input))
-         (ambient (swizzle ambient-vector :xyz))
-         (sun-color (swizzle sun-color-vector :xyz))
+         (sun-visibility
+           (smoothstep
+            (interpret 0.90 :quantity :sky-light-level)
+            (interpret 1.0 :quantity :sky-light-level)
+            sky-input))
+         (ambient
+           (interpret (swizzle ambient-vector :xyz)
+                      :quantity :linear-rgb))
+         (sun-color
+           (interpret (swizzle sun-color-vector :xyz)
+                      :quantity :linear-rgb))
          ;; A small floor keeps unlit geometry barely readable rather than
          ;; a void; caves stay dark for the right reason.
-         (sky-light (* ambient (+ 0.06 (* 1.34 sky-level)) ao))
+         (sky-light
+           (interpret
+            (* ambient (+ 0.06 (* 1.34 sky-level)) ao)
+            :quantity :linear-rgb))
          (sun-light
-           (* sun-color (* n-dot-l sun-visibility day-factor direct-shadow)))
-         (torch-color (vec3 1.0 0.82 0.58))
+           (interpret
+            (* sun-color
+               (* n-dot-l sun-visibility day-factor direct-shadow))
+            :quantity :linear-rgb))
+         (torch-color
+           (interpret (vec3 1.0 0.82 0.58) :quantity :linear-rgb))
          (local-light (* torch-color block-level))
-         (albedo (swizzle (sample block-atlas block-sampler uv) :rgb))
-         (reflected (* albedo (+ sky-light sun-light local-light)))
-         (radiance (+ reflected (* albedo emission-input)))
-         (fog-color (swizzle fog-color-vector :xyz))
-         (fogged (mix radiance fog-color fog-input))
-         (normal-rgba (vec4 fogged 1.0))
-         (shadow-diagnostic (swizzle fog-color-vector :w))
+         (albedo
+           (interpret
+            (swizzle (sample block-atlas block-sampler uv) :rgb)
+            :quantity :linear-rgb))
+         (reflected
+           (interpret
+            (* albedo (+ sky-light sun-light local-light))
+            :quantity :linear-rgb))
+         (radiance
+           (+ reflected
+              (interpret (* albedo emission-input)
+                         :quantity :linear-rgb)))
+         (fog-color
+           (interpret (swizzle fog-color-vector :xyz)
+                      :quantity :linear-rgb))
+         (fog-amount
+           (interpret fog-input :quantity :fog-amount))
+         (fogged (mix radiance fog-color fog-amount))
+         (normal-rgba
+           (interpret (vec4 fogged 1.0) :quantity :linear-rgba))
+         (shadow-diagnostic
+           (interpret (swizzle fog-color-vector :w)
+                      :quantity :shadow-diagnostic))
          (shadow-rgba
-           (vec4 (vec3 direct-shadow direct-shadow direct-shadow) 1.0))
+           (interpret
+            (vec4 (vec3 direct-shadow direct-shadow direct-shadow) 1.0)
+            :quantity :linear-rgba))
          (rgba (mix normal-rgba shadow-rgba shadow-diagnostic)))
     (set-output color-output rgba)))
 

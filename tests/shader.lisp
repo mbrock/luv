@@ -8,6 +8,7 @@
                 #:dot #:sample #:sample-compare #:mix
                 #:vec2 #:vec3 #:vec4 #:swizzle
                 #:clamp #:smoothstep #:normalize
+                #:interpret
                 #:set-output))
 
 (in-package #:luv/spir-v/tests)
@@ -93,7 +94,7 @@
     (ok (= (length (spv:shader-specification-inputs specification)) 6))
     (ok (= (length (spv:shader-specification-resources specification)) 6))
     (ok (typep (spv:shader-binding-expression sun-direction)
-               'spv:shader-call))
+               'spv:shader-interpretation))
     (ok (spv:shader-type=
          (spv:shader-expression-type
           (spv:shader-binding-expression sun-direction))
@@ -102,7 +103,10 @@
          (form-names
           (spv:shader-expression-form
            (spv:shader-binding-expression sun-visibility)))
-         '("smoothstep" 0.9 1.0 "sky-input")))
+         '("smoothstep"
+           ("interpret" 0.9 "quantity" "sky-light-level")
+           ("interpret" 1.0 "quantity" "sky-light-level")
+           "sky-input")))
     (ok (equal
          (form-names
           (spv:shader-expression-form
@@ -115,16 +119,20 @@
     (ok (equal (form-names
                 (spv:shader-expression-form
                  (spv:shader-binding-expression reflected)))
-               '("*" "albedo"
-                 ("+" "sky-light" "sun-light" "local-light"))))
+               '("interpret"
+                 ("*" "albedo"
+                  ("+" "sky-light" "sun-light" "local-light"))
+                 "quantity" "linear-rgb")))
     (ok (equal (form-names
                 (spv:shader-expression-form
                  (spv:shader-binding-expression radiance)))
-               '("+" "reflected" ("*" "albedo" "emission-input"))))
+               '("+" "reflected"
+                 ("interpret" ("*" "albedo" "emission-input")
+                  "quantity" "linear-rgb"))))
     (ok (equal (form-names
                 (spv:shader-expression-form
                  (spv:shader-binding-expression fogged)))
-               '("mix" "radiance" "fog-color" "fog-input")))
+               '("mix" "radiance" "fog-color" "fog-amount")))
     (ok (> (length (spv:shader-specification-expressions specification))
            (length (spv:shader-specification-bindings specification))))))
 
@@ -272,8 +280,11 @@
          (torch-color (binding-named 'torch-color block-specification))
          (block-lowering
            (spv:compile-shader-specification block-specification))
-         (literal (first (spv:shader-call-operands
-                          (spv:shader-binding-expression torch-color))))
+         (literal
+           (first
+            (spv:shader-call-operands
+             (spv:shader-interpretation-operand
+              (spv:shader-binding-expression torch-color)))))
          (constant-instructions
            (gethash literal
                     (spv:shader-lowering-expression-instructions
@@ -474,6 +485,93 @@
             (right :float :location 1))
           '(+ left right))))))
 
+(deftest interpretation-is-checked-and-has-no-codegen-effect
+  (flet ((probe (annotated-p)
+           (spv:parse-shader-specification
+            'interpretation-probe
+            '(:stage :fragment
+              :inputs ((left :float :location 0)
+                       (right :float :location 1))
+              :outputs ((result :float :location 0)))
+            (if annotated-p
+                '((let* ((typed-left
+                           (interpret left :quantity :distance
+                                      :dimension :length :unit :metre))
+                          (typed-right
+                           (interpret right :quantity :distance
+                                      :dimension :length :unit :metre))
+                          (sum (+ typed-left typed-right)))
+                    (set-output result sum)))
+                '((let* ((sum (+ left right)))
+                    (set-output result sum)))))))
+    (let* ((annotated (probe t))
+           (plain (probe nil))
+           (sum (binding-named 'sum annotated)))
+      (ok (eq :distance
+              (math:quantity-specification-name
+               (spv:shader-expression-quantity-specification
+                (spv:shader-binding-expression sum)))))
+      (ok (equalp (spv:assemble-shader-specification annotated)
+                  (spv:assemble-shader-specification plain)))))
+  (flet ((reason-for (form)
+           (handler-case
+               (progn
+                 (spv:parse-shader-specification
+                  'invalid-interpretation-probe
+                  '(:stage :fragment
+                    :inputs ((value :float :location 0))
+                    :outputs ((result :float :location 0)))
+                  `((set-output result ,form)))
+                 nil)
+             (spv:shader-language-error (condition)
+               (spv:shader-language-error-reason condition)))))
+    (ok (eq :invalid-quantity-interpretation
+            (reason-for
+             '(interpret
+               (interpret value :quantity :distance
+                          :dimension :length :unit :metre)
+               :quantity :distance
+               :dimension :length :unit :kilometre))))
+    (ok (eq :invalid-quantity-interpretation
+            (reason-for
+             '(interpret
+               (interpret value :quantity :height
+                          :dimension :length :unit :metre)
+               :quantity :width
+               :dimension :length :unit :metre))))))
+
+(deftest production-shadow-material-carries-semantic-quantities
+  (let ((specification (spv:block-world-fragment-specification)))
+    (flet ((quantity (name)
+             (spv:shader-expression-quantity-specification
+              (spv:shader-binding-expression
+               (binding-named name specification)))))
+      (let ((coordinate (quantity 'shadow-coordinate))
+            (receiver-depth (quantity 'receiver-depth))
+            (bias (quantity 'shadow-bias))
+            (world-span (quantity 'shadow-world-span))
+            (gradient (quantity 'shadow-depth-gradient))
+            (blocker-separation (quantity 'shadow-blocker-separation))
+            (filter-radius (quantity 'shadow-filter-radius))
+            (rgba (quantity 'rgba)))
+        (ok (eq :shadow-uv
+                (math:quantity-specification-name coordinate)))
+        (ok (math:quantity-specification-affine-p coordinate))
+        (ok (eq :shadow-depth
+                (math:quantity-specification-name receiver-depth)))
+        (ok (math:quantity-specification-affine-p receiver-depth))
+        (ok (not (math:quantity-specification-affine-p bias)))
+        (ok (math:unit-expression=
+             :metre (math:quantity-specification-unit world-span)))
+        (ok (eq :shadow-depth-gradient
+                (math:quantity-specification-name gradient)))
+        (ok (eq :shadow-depth
+                (math:quantity-specification-name blocker-separation)))
+        (ok (eq :shadow-filter-radius
+                (math:quantity-specification-name filter-radius)))
+        (ok (eq :linear-rgba
+                (math:quantity-specification-name rgba)))))))
+
 (deftest shadow-visibility-is-a-source-abstraction-over-core-math
   (ok (spv:shader-abstraction-p 'spv:shadow-visibility))
   (ok (not (spv:shader-operator-p 'spv:shadow-visibility)))
@@ -490,10 +588,23 @@
               :outputs ((visibility :float :location 0))
               :resources ((shadow-map :depth-texture-2d :binding 0)
                           (shadow-sampler :sampler :binding 1)))
-            '((let* ((visible (spv:shadow-visibility
-                               shadow-map shadow-sampler uv
-                               receiver-depth receiver-depth-gradient
-                               texel-size bias radius)))
+            '((let* ((coordinate
+                       (interpret uv :quantity :shadow-uv :affine-p t))
+                      (depth
+                       (interpret receiver-depth
+                                  :quantity :shadow-depth :affine-p t))
+                      (gradient
+                       (interpret receiver-depth-gradient
+                                  :quantity :shadow-depth-gradient))
+                      (texel
+                       (interpret texel-size :quantity :shadow-uv))
+                      (depth-bias
+                       (interpret bias :quantity :shadow-depth))
+                      (filter-radius
+                       (interpret radius :quantity :shadow-filter-radius))
+                      (visible (spv:shadow-visibility
+                                shadow-map shadow-sampler coordinate
+                                depth gradient texel depth-bias filter-radius)))
                 (set-output visibility visible)))))
          (visible (binding-named 'visible specification))
          (expression (spv:shader-binding-expression visible))

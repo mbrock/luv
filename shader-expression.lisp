@@ -224,6 +224,13 @@ repeating the lane arithmetic as a literal."
     :initform nil
     :reader shader-call-parameters)))
 
+(defclass shader-interpretation (shader-expression)
+  ((operand
+    :initarg :operand
+    :reader shader-interpretation-operand))
+  (:documentation
+   "A checked semantic name for a represented value, with no codegen effect."))
+
 (defmethod shader-expression-quantity-checked-p ((expression shader-literal))
   nil)
 
@@ -239,6 +246,11 @@ repeating the lane arithmetic as a literal."
 (defmethod shader-expression-quantity-checked-p ((expression shader-call))
   (some #'shader-expression-quantity-checked-p
         (shader-call-operands expression)))
+
+(defmethod shader-expression-quantity-checked-p
+    ((expression shader-interpretation))
+  (declare (ignore expression))
+  t)
 
 (defclass shader-output-assignment ()
   ((output
@@ -294,6 +306,9 @@ repeating the lane arithmetic as a literal."
                         (shader-call-operands expression)))
           (shader-call-parameters expression)))
 
+(defmethod shader-expression-form ((expression shader-interpretation))
+  (shader-expression-source-form expression))
+
 (defmethod print-object ((expression shader-expression) stream)
   (print-unreadable-object (expression stream :type t)
     (prin1 (shader-expression-form expression) stream)
@@ -308,6 +323,9 @@ repeating the lane arithmetic as a literal."
 
 (defmethod shader-expression-children ((expression shader-call))
   (shader-call-operands expression))
+
+(defmethod shader-expression-children ((expression shader-interpretation))
+  (list (shader-interpretation-operand expression)))
 
 (defun shader-specification-expressions (specification)
   "Return the expression graph in source order, without duplicate objects."
@@ -370,7 +388,12 @@ repeating the lane arithmetic as a literal."
   (:documentation
    "Check OPERANDS against OPERATOR's contract and return the call's type."))
 
-(defun infer-shader-call-quantity-specification
+(defgeneric infer-shader-call-quantity-specification
+    (operator operands source-form)
+  (:documentation
+   "Derive semantic meaning for one shader call once annotations enter it."))
+
+(defmethod infer-shader-call-quantity-specification
     (operator operands source-form)
   "Derive semantics totally once any operand descends from an annotation.
 
@@ -399,6 +422,157 @@ silent loss of meaning."
                  :reason :invalid-quantity-operation
                  :details (math:quantity-operation-error-reason
                            condition)))))))
+
+(defun require-semantic-operands (operands source-form indices)
+  (loop for index in indices
+        for operand = (nth index operands)
+        for specification = (and operand
+                                 (shader-expression-quantity-specification
+                                  operand))
+        unless specification
+          collect (and operand (shader-expression-form operand)) into missing
+        finally
+           (when missing
+             (error 'shader-language-error
+                    :form source-form
+                    :reason :missing-quantity-specification
+                    :details missing))))
+
+(defun require-dimensionless-coordinate (specification source-form)
+  (unless (and (= (math:quantity-specification-tensor-order specification) 1)
+               (math:dimensionless-p
+                (math:quantity-specification-dimension specification))
+               (math:unitless-p
+                (math:quantity-specification-unit specification)))
+    (error 'shader-language-error
+           :form source-form :reason :invalid-sample-coordinate-quantity
+           :details specification)))
+
+(defmethod infer-shader-call-quantity-specification
+    ((operator (eql 'sample)) operands source-form)
+  (declare (ignore operator))
+  (let ((coordinate (third operands)))
+    (when (shader-expression-quantity-checked-p coordinate)
+      (require-semantic-operands operands source-form '(2))
+      (require-dimensionless-coordinate
+       (shader-expression-quantity-specification coordinate) source-form)))
+  ;; A texture's result meaning is not implied by its coordinate.  Source may
+  ;; name the sampled value explicitly with INTERPRET.
+  nil)
+
+(defmethod infer-shader-call-quantity-specification
+    ((operator (eql 'sample-compare)) operands source-form)
+  (declare (ignore operator))
+  (let ((coordinate (third operands))
+        (reference (fourth operands)))
+    (when (or (shader-expression-quantity-checked-p coordinate)
+              (shader-expression-quantity-checked-p reference))
+      (require-semantic-operands operands source-form '(2 3))
+      (require-dimensionless-coordinate
+       (shader-expression-quantity-specification coordinate) source-form)
+      (unless (zerop (math:quantity-specification-tensor-order
+                      (shader-expression-quantity-specification reference)))
+        (error 'shader-language-error
+               :form source-form :reason :invalid-depth-reference-quantity
+               :details
+               (shader-expression-quantity-specification reference)))
+      (math:make-quantity-specification nil))))
+
+(defun infer-vector-constructor-quantity-specification
+    (operator operands source-form)
+  (declare (ignore operator))
+  (when (some #'shader-expression-quantity-checked-p operands)
+    (require-semantic-operands
+     operands source-form (loop for index below (length operands) collect index))
+    (let* ((specifications
+             (mapcar #'shader-expression-quantity-specification operands))
+           (first (first specifications))
+           (name (math:quantity-specification-name first)))
+      (dolist (specification (rest specifications))
+        (unless (and (math:dimension=
+                      (math:quantity-specification-dimension specification)
+                      (math:quantity-specification-dimension first))
+                     (math:unit-expression=
+                      (math:quantity-specification-unit specification)
+                      (math:quantity-specification-unit first))
+                     (eq (math:quantity-specification-affine-p specification)
+                         (math:quantity-specification-affine-p first)))
+          (error 'shader-language-error
+                 :form source-form
+                 :reason :invalid-quantity-operation
+                 :details :incompatible-vector-constituents))
+        (unless (eq (math:quantity-specification-name specification) name)
+          (setf name nil)))
+      (math:make-quantity-specification
+       name
+       :dimension (math:quantity-specification-dimension first)
+       :unit (math:quantity-specification-unit first)
+       :tensor-order 1
+       :affine-p (math:quantity-specification-affine-p first)))))
+
+(defmethod infer-shader-call-quantity-specification
+    ((operator (eql 'vec2)) operands source-form)
+  (infer-vector-constructor-quantity-specification
+   operator operands source-form))
+
+(defmethod infer-shader-call-quantity-specification
+    ((operator (eql 'vec3)) operands source-form)
+  (infer-vector-constructor-quantity-specification
+   operator operands source-form))
+
+(defmethod infer-shader-call-quantity-specification
+    ((operator (eql 'vec4)) operands source-form)
+  (infer-vector-constructor-quantity-specification
+   operator operands source-form))
+
+(defmethod math:derive-quantity-specification
+    ((operator (eql 'clamp)) &rest operands)
+  (unless (= (length operands) 3)
+    (error 'math:quantity-operation-error
+           :operator operator :specifications operands :reason :clamp-arity))
+  (apply #'math:derive-quantity-specification 'max operands))
+
+(defmethod math:derive-quantity-specification
+    ((operator (eql 'step)) &rest operands)
+  (unless (= (length operands) 2)
+    (error 'math:quantity-operation-error
+           :operator operator :specifications operands :reason :step-arity))
+  (let ((compatible
+          (apply #'math:derive-quantity-specification 'max operands)))
+    (math:make-quantity-specification
+     nil :tensor-order
+     (math:quantity-specification-tensor-order compatible))))
+
+(defmethod math:derive-quantity-specification
+    ((operator (eql 'mix)) &rest operands)
+  (unless (= (length operands) 3)
+    (error 'math:quantity-operation-error
+           :operator operator :specifications operands :reason :mix-arity))
+  (destructuring-bind (from to amount) operands
+    (let ((result (math:derive-quantity-specification 'max from to)))
+      (unless (and (math:dimensionless-p
+                    (math:quantity-specification-dimension amount))
+                   (math:unitless-p
+                    (math:quantity-specification-unit amount))
+                   (zerop
+                    (math:quantity-specification-tensor-order amount))
+                   (not (math:quantity-specification-affine-p amount)))
+        (error 'math:quantity-operation-error
+               :operator operator :specifications operands
+               :reason :mix-requires-dimensionless-scalar-amount))
+      result)))
+
+(defmethod math:derive-quantity-specification
+    ((operator (eql 'smoothstep)) &rest operands)
+  (unless (= (length operands) 3)
+    (error 'math:quantity-operation-error
+           :operator operator :specifications operands
+           :reason :smoothstep-arity))
+  (let ((compatible
+          (apply #'math:derive-quantity-specification 'max operands)))
+    (math:make-quantity-specification
+     nil :tensor-order
+     (math:quantity-specification-tensor-order compatible))))
 
 (defmethod infer-shader-call-type (operator operands source-form)
   (declare (ignore operands))
@@ -683,6 +857,8 @@ never collides with a standard symbol's function documentation:
   "Return zero below an edge and one at or above it, componentwise.")
 (define-shader-operator normalize
   "Scale one vector to unit length.")
+(define-shader-operator interpret
+  "Assign a checked semantic quantity specification without emitting code.")
 
 ;;; Abstractions are source vocabulary, not core operators.  They rewrite into
 ;;; ordinary shader forms before parsing, so the typed graph and SPIR-V lowering
@@ -774,14 +950,18 @@ shader source form made from core operators or other abstractions."
   "Weighted disk PCF with receiver-plane depth correction at every tap."
   (flet ((tap (x y weight)
            (let ((offset
-                   `(* ,texel-size
-                       (vec2 (* ,radius ,x) (* ,radius ,y)))))
+                   `(interpret
+                     (* ,texel-size
+                        (vec2 (* ,radius ,x) (* ,radius ,y)))
+                     :quantity :shadow-uv)))
              `(* ,weight
                  (shadow-depth-test
                   ,depth-texture ,sampler
                   (+ ,coordinate ,offset)
                   (+ ,receiver-depth
-                     (dot ,receiver-depth-gradient ,offset))
+                     (interpret
+                      (dot ,receiver-depth-gradient ,offset)
+                      :quantity :shadow-depth))
                   ,bias)))))
     `(/ (+
          ,(tap 0.0 0.0 4.0)
@@ -893,6 +1073,36 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
      :unit unit
      :tensor-order (shader-type-tensor-order type source-form)
      :affine-p affine-p)))
+
+(defmethod parse-shader-operator-call
+    ((operator (eql 'interpret)) form environment)
+  (declare (ignore operator))
+  (destructuring-bind
+      (name operand-form &key quantity dimension unit affine-p) form
+    (declare (ignore name))
+    (unless (or quantity dimension unit affine-p)
+      (error 'shader-language-error
+             :form form :reason :missing-quantity-interpretation))
+    (let* ((operand (parse-shader-expression operand-form environment))
+           (type (shader-expression-type operand))
+           (interpretation
+             (parse-declaration-quantity-specification
+              quantity dimension unit affine-p type form)))
+      (handler-case
+          (math:interpret-quantity-specification
+           (and (shader-expression-quantity-checked-p operand)
+                (shader-expression-quantity-specification operand))
+           interpretation)
+        (math:quantity-operation-error (condition)
+          (error 'shader-language-error
+                 :form form
+                 :reason :invalid-quantity-interpretation
+                 :details (math:quantity-operation-error-reason condition))))
+      (make-instance 'shader-interpretation
+                     :operand operand
+                     :type type
+                     :quantity-specification interpretation
+                     :source-form form))))
 
 (defun parse-interface-declaration (form direction)
   (destructuring-bind
@@ -1538,6 +1748,11 @@ Modules whose expressions use no extended mathematics never acquire one."
 (defmethod shader-expression-provenance-name ((expression shader-call))
   (shader-operator-result-name (shader-call-operator expression)))
 
+(defmethod shader-expression-provenance-name
+    ((expression shader-interpretation))
+  (declare (ignore expression))
+  'interpretation)
+
 (defun expression-result-name (expression)
   (or (shader-expression-name expression)
       (shader-expression-provenance-name expression)))
@@ -1870,6 +2085,13 @@ Modules whose expressions use no extended mathematics never acquire one."
 
 (defmethod lower-shader-expression-value (context (expression shader-call))
   (lower-shader-call (shader-call-operator expression) context expression))
+
+(defmethod lower-shader-expression-value
+    (context (expression shader-interpretation))
+  (let* ((operand (shader-interpretation-operand expression))
+         (value (lower-shader-expression context operand)))
+    (alias-shader-expression context expression operand)
+    value))
 
 (defun lower-shader-expression (context expression)
   (or (gethash expression (context-expression-values context))

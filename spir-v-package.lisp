@@ -96,6 +96,7 @@
            #:shader-expression
            #:shader-expression-type
            #:shader-expression-quantity-specification
+           #:shader-expression-quantity-checked-p
            #:shader-expression-source-form
            #:shader-expression-name
            #:shader-literal
@@ -106,6 +107,8 @@
            #:shader-call-operator
            #:shader-call-operands
            #:shader-call-parameters
+           #:shader-interpretation
+           #:shader-interpretation-operand
            #:shader-expression-form
            #:shader-expression-children
            ;; The shader-language vocabulary.  Arithmetic operators are CL's
@@ -123,6 +126,7 @@
            #:smoothstep
            #:step
            #:normalize
+           #:interpret
            #:set-output
            #:shader-operator
            #:define-shader-operator

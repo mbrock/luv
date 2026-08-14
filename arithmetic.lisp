@@ -321,6 +321,32 @@ remain different bases until an explicit conversion operation is introduced."
                                   :different-units)))
   left)
 
+(defun interpret-quantity-specification (derived interpretation)
+  "Give a compatible anonymous DERIVED specification an explicit meaning.
+
+This is a semantic interpretation, never a numerical unit conversion.  An
+already named quantity may only retain its name; anonymous derived results may
+acquire one when their dimension, exact unit, tensor order, and affine
+character agree with INTERPRETATION."
+  (unless (and (or (null derived)
+                   (null (quantity-specification-name derived))
+                   (eq (quantity-specification-name derived)
+                       (quantity-specification-name interpretation)))
+               (or (null derived)
+                   (and (dimension=
+                         (quantity-specification-dimension derived)
+                         (quantity-specification-dimension interpretation))
+                        (unit-expression=
+                         (quantity-specification-unit derived)
+                         (quantity-specification-unit interpretation))
+                        (= (quantity-specification-tensor-order derived)
+                           (quantity-specification-tensor-order interpretation))
+                        (eq (quantity-specification-affine-p derived)
+                            (quantity-specification-affine-p interpretation)))))
+    (quantity-operation-error 'interpret (list derived interpretation)
+                              :incompatible-interpretation))
+  interpretation)
+
 (defgeneric derive-quantity-specification (operator &rest operands)
   (:documentation
    "Derive the semantic result of applying OPERATOR to quantity OPERANDS."))
