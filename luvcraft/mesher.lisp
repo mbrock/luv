@@ -163,14 +163,26 @@ cross the thread boundary, and the worker never observes live chunk storage."))
                       :resident)))
         (values nil :absent))))
 
+(defgeneric sample-block-at (samples x y z)
+  (:documentation
+   "Read one world site from a meshing sample source.
+
+Return (VALUES BLOCK STATUS) where STATUS is :RESIDENT or :ABSENT.  Meshing
+itself never chooses a representation: the live world, a preresolved chunk
+neighborhood, and an immutable worker snapshot each answer through their own
+method, and further sample sources only need to add one."))
+
+(defmethod sample-block-at ((samples block-world) x y z)
+  (describe-block-allocatingly samples x y z))
+
+(defmethod sample-block-at ((samples block-mesh-neighborhood) x y z)
+  (block-mesh-neighborhood-block-at samples x y z))
+
+(defmethod sample-block-at ((samples block-mesh-snapshot) x y z)
+  (block-mesh-snapshot-block-at samples x y z))
+
 (defun mesher-block-at (mesher samples x y z)
-  (multiple-value-bind (block status)
-      (etypecase samples
-        (block-world (describe-block-allocatingly samples x y z))
-        (block-mesh-neighborhood
-         (block-mesh-neighborhood-block-at samples x y z))
-        (block-mesh-snapshot
-         (block-mesh-snapshot-block-at samples x y z)))
+  (multiple-value-bind (block status) (sample-block-at samples x y z)
     (ecase status
       (:resident block)
       (:absent
@@ -213,13 +225,6 @@ cross the thread boundary, and the worker never observes live chunk storage."))
              (* 0.14 (+ (if first-side 1 0)
                         (if second-side 1 0)
                         (if corner-block 1 0))))))))
-
-(defun block-face-local-uv (face corner)
-  (case (block-face-name face)
-    ((:top :bottom) (values (first corner) (third corner)))
-    ((:front :back) (values (first corner) (- 1 (second corner))))
-    ((:left :right) (values (third corner) (- 1 (second corner))))
-    (otherwise (error "Unknown block face ~S." (block-face-name face)))))
 
 (defun block-face-atlas-uv (block face corner)
   (multiple-value-bind (local-u local-v) (block-face-local-uv face corner)

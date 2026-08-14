@@ -338,8 +338,17 @@
                        (schedule-production-request
                         (luvcraft-session-production-system session) request)))))))
 
-(defun publish-luvcraft-mesh (session request mesh)
-  "Validate and install one worker result on the render/GPU owning thread."
+(defgeneric publish-production-result (session request value)
+  (:documentation
+   "Validate and install one worker product on the render/GPU owning thread.
+
+This is the owner-side mirror of PERFORM-PRODUCTION-REQUEST: each request
+class carries its own publication rule, so a new kind of asynchronous product
+plugs in with one method on each generic rather than an edit to the drain
+loop.  A stale product simply fails its own validation here."))
+
+(defmethod publish-production-result
+    ((session luvcraft-session) (request block-mesh-production-request) mesh)
   (let* ((snapshot (block-mesh-production-request-snapshot request))
          (key (block-mesh-snapshot-key snapshot))
          (world (luvcraft-session-world session))
@@ -374,7 +383,8 @@
           (unless completed-p
             (when buffer (destroy buffer))))))))
 
-(defun publish-luvcraft-load (session request payload)
+(defmethod publish-production-result
+    ((session luvcraft-session) (request block-chunk-load-request) payload)
   (let* ((key (block-chunk-load-payload-key payload))
          (world (luvcraft-session-world session)))
     (when (and (eql (gethash key (luvcraft-session-desired-chunks session))
@@ -400,15 +410,10 @@
                                       session))))
                (when (eql ticket (production-request-ticket request))
                  (remhash key (luvcraft-session-outstanding-production session))
-                 (cond
-                   ((production-result-condition result)
-                    (push result (luvcraft-session-production-errors session)))
-                   ((typep request 'block-chunk-load-request)
-                    (publish-luvcraft-load
-                     session request (production-result-value result)))
-                   ((typep request 'block-mesh-production-request)
-                    (publish-luvcraft-mesh
-                     session request (production-result-value result)))))))))
+                 (if (production-result-condition result)
+                     (push result (luvcraft-session-production-errors session))
+                     (publish-production-result
+                      session request (production-result-value result))))))))
 
 (defun evict-luvcraft-products (session)
   (let ((evicted nil)

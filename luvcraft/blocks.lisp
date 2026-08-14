@@ -26,6 +26,19 @@
   (make-instance 'block-face :name name :neighbor neighbor
                               :corners corners))
 
+(defun block-face-local-uv (face corner)
+  "Project CORNER onto FACE's plane as tile-local UV coordinates.
+
+The rule is read from the face's own outward normal rather than its name:
+horizontal faces map world X,Z straight across the tile, and lateral faces
+keep the world-horizontal axis as U while flipping world Y into V so tiles
+hang upright."
+  (destructuring-bind (nx ny nz) (block-face-neighbor face)
+    (declare (ignore nx))
+    (cond ((not (zerop ny)) (values (first corner) (third corner)))
+          ((not (zerop nz)) (values (first corner) (- 1 (second corner))))
+          (t (values (third corner) (- 1 (second corner)))))))
+
 (defparameter *block-faces*
   (list
    (make-block-face :left '(-1 0 0)
@@ -95,37 +108,77 @@
 (defun block-atlas-variation (x y salt)
   (- (mod (+ (* x 17) (* y 31) (* salt 43) (* x y 7)) 25) 12))
 
-(defun block-atlas-pixel (tile x y)
-  (labels ((pixel (red green blue &optional (variation 0))
-             (pack-block-atlas-rgba (+ red variation)
-                                    (+ green variation)
-                                    (+ blue variation))))
-    (let ((variation (block-atlas-variation x y tile)))
-      (case tile
-        (0 (pixel 91 171 68 variation))
-        (1 (if (< y 4)
-               (pixel 86 158 61 variation)
-               (pixel 123 82 48 (round variation 2))))
-        (2 (pixel 126 84 49 variation))
-        (3 (pixel 126 132 136
-                  (+ (round variation 2)
-                     (if (zerop (mod (+ (* x 3) (* y 5)) 19)) 20 0))))
-        (4 (pixel 116 76 39
-                  (+ (round variation 3)
-                     (if (zerop (mod x 5)) 18 0))))
-        (5 (let* ((dx (- x 7.5))
-                  (dy (- y 7.5))
-                  (ring (mod (floor (+ (* dx dx) (* dy dy))) 18)))
-             (pixel 133 91 49 (- ring 9))))
-        (6 (pixel 51 132 58
-                  (+ variation (if (evenp (+ x y)) 8 -8))))
-        (7 (pixel 205 185 128
-                  (+ (round variation 2)
-                     (if (zerop (mod (+ x (* y 3)) 13)) 13 0))))
-        (8 (pixel 226 238 242
-                  (+ (round variation 3)
-                     (if (zerop (mod (+ (* x 5) (* y 7)) 23)) 14 0))))
-        (otherwise (error "Unknown block atlas tile ~D." tile))))))
+(defun shaded-block-atlas-pixel (red green blue &optional (variation 0))
+  (pack-block-atlas-rgba (+ red variation)
+                         (+ green variation)
+                         (+ blue variation)))
+
+(defgeneric paint-block-atlas-tile (tile x y)
+  (:documentation
+   "Return the packed RGBA pixel of atlas tile TILE at tile-local X,Y.
+
+Each numbered tile is one EQL method, so a live image can repaint a single
+material and rebuild the atlas without touching the rest of the palette."))
+
+(defmethod paint-block-atlas-tile (tile x y)
+  (declare (ignore x y))
+  (error "Unknown block atlas tile ~S." tile))
+
+(defmethod paint-block-atlas-tile ((tile (eql 0)) x y)
+  "Grass top."
+  (shaded-block-atlas-pixel 91 171 68 (block-atlas-variation x y tile)))
+
+(defmethod paint-block-atlas-tile ((tile (eql 1)) x y)
+  "Grass side: a green fringe over dirt."
+  (let ((variation (block-atlas-variation x y tile)))
+    (if (< y 4)
+        (shaded-block-atlas-pixel 86 158 61 variation)
+        (shaded-block-atlas-pixel 123 82 48 (round variation 2)))))
+
+(defmethod paint-block-atlas-tile ((tile (eql 2)) x y)
+  "Dirt."
+  (shaded-block-atlas-pixel 126 84 49 (block-atlas-variation x y tile)))
+
+(defmethod paint-block-atlas-tile ((tile (eql 3)) x y)
+  "Stone, with sparse bright flecks."
+  (shaded-block-atlas-pixel
+   126 132 136
+   (+ (round (block-atlas-variation x y tile) 2)
+      (if (zerop (mod (+ (* x 3) (* y 5)) 19)) 20 0))))
+
+(defmethod paint-block-atlas-tile ((tile (eql 4)) x y)
+  "Wood bark, with vertical grain stripes."
+  (shaded-block-atlas-pixel
+   116 76 39
+   (+ (round (block-atlas-variation x y tile) 3)
+      (if (zerop (mod x 5)) 18 0))))
+
+(defmethod paint-block-atlas-tile ((tile (eql 5)) x y)
+  "Wood end grain: concentric rings around the tile centre."
+  (let* ((dx (- x 7.5))
+         (dy (- y 7.5))
+         (ring (mod (floor (+ (* dx dx) (* dy dy))) 18)))
+    (shaded-block-atlas-pixel 133 91 49 (- ring 9))))
+
+(defmethod paint-block-atlas-tile ((tile (eql 6)) x y)
+  "Leaves: a strong checker so the canopy reads as foliage."
+  (shaded-block-atlas-pixel
+   51 132 58
+   (+ (block-atlas-variation x y tile) (if (evenp (+ x y)) 8 -8))))
+
+(defmethod paint-block-atlas-tile ((tile (eql 7)) x y)
+  "Sand, with sparse darker grains."
+  (shaded-block-atlas-pixel
+   205 185 128
+   (+ (round (block-atlas-variation x y tile) 2)
+      (if (zerop (mod (+ x (* y 3)) 13)) 13 0))))
+
+(defmethod paint-block-atlas-tile ((tile (eql 8)) x y)
+  "Snow, with sparse glints."
+  (shaded-block-atlas-pixel
+   226 238 242
+   (+ (round (block-atlas-variation x y tile) 3)
+      (if (zerop (mod (+ (* x 5) (* y 7)) 23)) 14 0))))
 
 (defun make-block-texture-atlas ()
   "Return the little world's horizontal RGBA8 atlas as packed pixel words."
@@ -136,5 +189,5 @@
       (dotimes (tile +block-atlas-tile-count+)
         (dotimes (x +block-atlas-tile-size+)
           (setf (aref pixels y (+ x (* tile +block-atlas-tile-size+)))
-                (block-atlas-pixel tile x y)))))
+                (paint-block-atlas-tile tile x y)))))
     pixels))
