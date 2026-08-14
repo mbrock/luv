@@ -13,7 +13,9 @@
          ("--height" :height ,#'parse-integer-option)
          ("--count" :count ,#'parse-integer-option)
          ("--forward-step" :forward-step ,#'parse-real-option)
-         ("--yaw-step" :yaw-step ,#'parse-real-option)))
+         ("--yaw-step" :yaw-step ,#'parse-real-option)
+         ("--day-start" :day-start ,#'parse-real-option)
+         ("--day-step" :day-step ,#'parse-real-option)))
     (unless (= 1 (length positionals))
       (command-line-error "gazetteer expects exactly one TARGET directory."))
     (let ((target (pathname (first positionals)))
@@ -29,6 +31,8 @@
                      view target :count count
                      :forward-step (or (getf options :forward-step) 0.2)
                      :yaw-step (or (getf options :yaw-step) 0.0)
+                     :day-start (getf options :day-start)
+                     :day-step (or (getf options :day-step) 0.0)
                      :width width :height height)
                     (luv:capture-luvcraft-gazetteer
                      target

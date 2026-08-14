@@ -687,18 +687,32 @@ shader source form made from core operators or other abstractions."
          (swizzle (sample ,depth-texture ,sampler ,coordinate) :x)))
 
 (define-shader-abstraction shadow-visibility
-    (depth-texture sampler coordinate receiver-depth texel-size bias)
-  "Nine-tap percentage-closer visibility around one shadow coordinate."
-  `(/ (+ ,@(loop for y in '(-1.0 0.0 1.0)
-                 append
-                 (loop for x in '(-1.0 0.0 1.0)
-                       collect
-                       `(shadow-depth-test
-                         ,depth-texture ,sampler
-                         (+ ,coordinate
-                            (* ,texel-size (vec2 ,x ,y)))
-                         ,receiver-depth ,bias))))
-      9.0))
+    (depth-texture sampler coordinate receiver-depth texel-size bias radius)
+  "Weighted disk PCF with a caller-selected radius measured in texels."
+  (flet ((tap (x y weight)
+           `(* ,weight
+               (shadow-depth-test
+                ,depth-texture ,sampler
+                (+ ,coordinate
+                   (* ,texel-size
+                      (vec2 (* ,radius ,x) (* ,radius ,y))))
+                ,receiver-depth ,bias))))
+    `(/ (+
+         ,(tap 0.0 0.0 4.0)
+         ;; An inner, heavier ring gives the footprint a Gaussian-like core.
+         ,@(loop for (x y) in '((0.45 0.0) (0.3182 0.3182)
+                                (0.0 0.45) (-0.3182 0.3182)
+                                (-0.45 0.0) (-0.3182 -0.3182)
+                                (0.0 -0.45) (0.3182 -0.3182))
+                 collect (tap x y 2.0))
+         ;; Rotate the outer ring by half a sector so no square sample border
+         ;; is reinforced along the light-space axes.
+         ,@(loop for (x y) in '((0.9239 0.3827) (0.3827 0.9239)
+                                (-0.3827 0.9239) (-0.9239 0.3827)
+                                (-0.9239 -0.3827) (-0.3827 -0.9239)
+                                (0.3827 -0.9239) (0.9239 -0.3827))
+                 collect (tap x y 1.0)))
+        28.0)))
 
 (defgeneric parse-shader-operator-call (operator form environment)
   (:documentation

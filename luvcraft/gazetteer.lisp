@@ -213,7 +213,7 @@
 
 (defun capture-luvcraft-gazetteer-sequence
     (view directory &key (count 4) (forward-step 0.2) (yaw-step 0.0)
-                         width height)
+                         day-start (day-step 0.0) width height)
   "Capture consecutive neighboring camera positions for one gazetteer VIEW."
   (let* ((view (if (typep view 'luvcraft-gazetteer-view)
                    view
@@ -227,6 +227,7 @@
     (capture-hidden-luvcraft-frames
      directory
      :count count :forward-step forward-step :yaw-step yaw-step
+     :day-start day-start :day-step day-step
      :pathname-prefix
      (string-downcase (symbol-name (luvcraft-gazetteer-view-name view)))
      :title (luvcraft-gazetteer-view-title view)

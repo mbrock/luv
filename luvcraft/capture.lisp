@@ -101,6 +101,8 @@ pass an unpinned clock to photograph another time of day."
                  (width 960) (height 640)
                  (yaw-step 0.35)
                  (forward-step 0.0)
+                 day-start
+                 (day-step 0.0)
                  (pathname-prefix "block-world")
                  (world (make-empty-little-block-world))
                  (mesher (make-instance 'exposed-face-mesher))
@@ -111,16 +113,22 @@ pass an unpinned clock to photograph another time of day."
   "Capture COUNT hidden block-world frames into DIRECTORY.
 
 Each frame reuses one hidden SDL/Vulkan canvas, advances CAMERA's yaw by
-YAW-STEP, and moves FORWARD-STEP world units along its initial heading.  This
-is a consecutive-view capture, not a set of independently restarted scenes."
+YAW-STEP, moves FORWARD-STEP world units along its initial heading, and moves
+the evaluated sky by DAY-STEP day fractions.  This is a consecutive-view
+capture, not a set of independently restarted scenes."
   (check-type count (integer 1))
   (check-type yaw-step real)
   (check-type forward-step real)
+  (when day-start
+    (check-type day-start real))
+  (check-type day-step real)
   (let ((directory (uiop:ensure-directory-pathname directory))
         (session nil)
         (initial-x (camera-x camera))
         (initial-z (camera-z camera))
-        (initial-yaw (camera-yaw camera)))
+        (initial-yaw (camera-yaw camera))
+        (initial-day-fraction
+          (or day-start (sky-clock-current-day-fraction sky-clock))))
     (ensure-directories-exist directory)
     (unwind-protect
          (progn
@@ -142,6 +150,14 @@ is a consecutive-view capture, not a set of independently restarted scenes."
                           (camera-z camera)
                           (+ initial-z
                              (* forward-step index (cos initial-yaw))))
+                    (let ((day-fraction
+                            (mod (+ initial-day-fraction (* day-step index))
+                                 1.0)))
+                      (if (sky-clock-pinned-day-fraction sky-clock)
+                          (setf (sky-clock-pinned-day-fraction sky-clock)
+                                day-fraction)
+                          (setf (sky-clock-day-fraction sky-clock)
+                                day-fraction)))
                     (capture-luvcraft-screenshot session pathname)
                  collect pathname))
       (when session

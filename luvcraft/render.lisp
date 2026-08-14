@@ -17,11 +17,13 @@
                       :reader luvcraft-frame-shadow-bind-group)))
 
 (defconstant +block-world-crosshair-vertex-count+ 24)
-(defconstant +luvcraft-shadow-map-size+ 1024)
+(defconstant +luvcraft-shadow-map-size+ 2048)
 (defconstant +luvcraft-shadow-half-extent+ 64.0)
 (defconstant +luvcraft-shadow-depth-radius+ 96.0)
 (defconstant +luvcraft-shadow-base-bias+ 0.00045)
 (defconstant +luvcraft-shadow-slope-bias+ 0.0015)
+(defconstant +luvcraft-shadow-minimum-filter-radius+ 2.0)
+(defconstant +luvcraft-shadow-maximum-filter-radius+ 6.0)
 
 (defun vec3-dot (left right)
   (+ (* (aref left 0) (aref right 0))
@@ -68,10 +70,10 @@
            (vec3-scale
             (vec3-normalize (sky-frame-parameters-sun-direction sky))
             -1.0))
-         (basis-up
-           (if (< (abs (aref forward 1)) 0.92)
-               (vec3 0.0 1.0 0.0)
-               (vec3 0.0 0.0 1.0)))
+         ;; The tilted solar orbit never reaches the world-Y pole, so its
+         ;; projection is a safe continuous reference.  Switching to world Z
+         ;; near noon used to rotate the whole shadow map discontinuously.
+         (basis-up (vec3 0.0 1.0 0.0))
          (right (vec3-normalize (vec3-cross basis-up forward)))
          (up (vec3-cross forward right))
          (extent +luvcraft-shadow-half-extent+)
@@ -105,7 +107,7 @@ check in BLOCK-WORLD-CAMERA-UNIFORM-SIZE keeps the two honest."
                         (luvcraft-session-camera session) width height))
          (sky (sky-frame-parameters (luvcraft-session-sky-clock session)
                                     (luvcraft-session-sky-profile session)))
-         (data (make-array (+ (length camera-lanes) 48)
+         (data (make-array (+ (length camera-lanes) 52)
                            :element-type 'single-float))
          (index (length camera-lanes)))
     (replace data camera-lanes)
@@ -134,6 +136,11 @@ check in BLOCK-WORLD-CAMERA-UNIFORM-SIZE keeps the two honest."
               (/ +luvcraft-shadow-map-size+)
               +luvcraft-shadow-base-bias+
               +luvcraft-shadow-slope-bias+)
+        (emit (* 2.0 +luvcraft-shadow-depth-radius+)
+              (/ (* 2.0 +luvcraft-shadow-half-extent+)
+                 +luvcraft-shadow-map-size+)
+              +luvcraft-shadow-minimum-filter-radius+
+              +luvcraft-shadow-maximum-filter-radius+)
         (apply #'emit (shadow-frame-rows
                        (luvcraft-session-camera session) sky))))
     data))

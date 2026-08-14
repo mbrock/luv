@@ -25,6 +25,7 @@
       (ambient-vector :vec4)    ; ambient colour, exposure
       (fog-color-vector :vec4)  ; fog colour, w unused
       (shadow-control-vector :vec4) ; texel u/v, base bias, slope bias
+      (shadow-filter-vector :vec4) ; depth span, world/texel, min/max radius
       (shadow-row-x :vec4)      ; light-space clip x from world position
       (shadow-row-y :vec4)      ; light-space clip y from world position
       (shadow-row-z :vec4)      ; light-space depth from world position
@@ -145,10 +146,30 @@
          (shadow-slope-bias (swizzle shadow-control-vector :w))
          (shadow-bias
            (+ shadow-base-bias (* shadow-slope-bias (- 1.0 n-dot-l))))
+         (shadow-center-depth
+           (swizzle
+            (sample shadow-map shadow-sampler shadow-uv-input) :x))
+         (shadow-blocker-separation
+           (max 0.0 (- (- shadow-depth-input shadow-bias)
+                       shadow-center-depth)))
+         (shadow-depth-span (swizzle shadow-filter-vector :x))
+         (shadow-world-units-per-texel (swizzle shadow-filter-vector :y))
+         (shadow-minimum-radius (swizzle shadow-filter-vector :z))
+         (shadow-maximum-radius (swizzle shadow-filter-vector :w))
+         (sun-angular-width (swizzle sun-color-vector :w))
+         (shadow-penumbra-world-radius
+           (* (* shadow-blocker-separation shadow-depth-span)
+              sun-angular-width))
+         (shadow-filter-radius
+           (clamp
+            (+ shadow-minimum-radius
+               (/ shadow-penumbra-world-radius
+                  shadow-world-units-per-texel))
+            shadow-minimum-radius shadow-maximum-radius))
          (shadow-sample
            (shadow-visibility
             shadow-map shadow-sampler shadow-uv-input shadow-depth-input
-            shadow-texel-size shadow-bias))
+            shadow-texel-size shadow-bias shadow-filter-radius))
          (direct-shadow (mix 1.0 shadow-sample shadow-in-bounds))
          ;; The mesh carries normalized raw light readings; every response
          ;; curve and balance below is an art parameter editable live

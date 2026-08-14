@@ -204,10 +204,35 @@
          (nearby-rows (luv::shadow-frame-rows nearby-camera sky))
          (farther-rows (luv::shadow-frame-rows farther-camera sky)))
     ;; The first two rows locate the orthographic footprint.  Translation
-    ;; smaller than one 0.125-world-unit shadow texel cannot move it.
+    ;; smaller than one 0.0625-world-unit shadow texel cannot move it.
     (ok (equal (subseq first-rows 0 8) (subseq nearby-rows 0 8)))
     (ok (not (equal (subseq first-rows 0 8)
                     (subseq farther-rows 0 8))))))
+
+(deftest shadow-projection-is-continuous-through-old-up-axis-threshold
+  (let* ((camera (make-instance 'fly-camera))
+         (profile (make-default-sky-profile))
+         (before
+           (luv::shadow-frame-rows
+            camera
+            (sky-frame-parameters
+             (make-instance 'sky-clock :pinned-day-fraction 0.451)
+             profile)))
+         (after
+           (luv::shadow-frame-rows
+            camera
+            (sky-frame-parameters
+             (make-instance 'sky-clock :pinned-day-fraction 0.453)
+             profile)))
+         (right-dot
+           (loop for index below 3
+                 sum (* (nth index before) (nth index after)))))
+    ;; Row X has length 1/extent.  Undo that scale before comparing the
+    ;; neighboring orientations around the former abs(forward.y)=0.92 switch.
+    (ok (> (* right-dot
+              luv::+luvcraft-shadow-half-extent+
+              luv::+luvcraft-shadow-half-extent+)
+           0.99))))
 
 (deftest scalar-player-walks-collides-and-jumps
   (let* ((world (make-block-world :chunk-width 4

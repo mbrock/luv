@@ -788,7 +788,7 @@ Evidence:
   shadows anchored across movement, with no projection jump or detached
   contact.  The bright snow remains clipped by the known LDR path; that is
   evidence for #WLHDRB, not a shadow-map success claim.
-- The 1024x1024 map covers a 128-world-unit square, so one texel is 0.125
+- At this checkpoint the 1024x1024 map covered a 128-world-unit square, so one texel was 0.125
   world units.  The light-space footprint snaps to that grid.  A 3x3 PCF
   kernel uses explicit nearest depth reads and a receiver bias of 0.00045 plus
   =0.0015 * (1 - n-dot-l)=, replacing the coarse constant 0.003 bias.
@@ -837,6 +837,59 @@ Done when: escaped symbols survive the checker, abstraction edits reach a live
 pipeline without sacrificing last-known-good behavior, every shader stage is
 validated, and the public capture path exits cleanly on macOS.
 
+** DONE Moving-sun shadow shape and temporal evidence
+:PROPERTIES:
+:ID: UDVPDW
+:END:
+
+Intent: make rotating sunlight read as a smooth depth cue during the ten-minute
+day without pretending that pinned-sun camera captures establish temporal
+quality.  Preserve truthful block occlusion, but prefer a round, contact-aware
+filter footprint over visible square texel steps.
+
+Evidence:
+
+- #CH2CD0 pins the sun at day fraction 0.42.  It establishes camera-translation
+  stability only; it does not exercise the light-space basis or rasterized
+  silhouettes while the sun moves.
+- The earlier equal-weight 3x3 PCF kernel had a square footprint.  Diagonal
+  projected edges could therefore expose both the depth map's texel grid and
+  the filter's axis alignment, especially as long sunset shadows moved.
+- =shadow-frame-rows= now uses world Y continuously.  The tilted solar orbit
+  never reaches that pole, so the former =abs(forward.y)= 0.92 reference-axis
+  switch and its whole-map rotation are gone.  A regression test compares the
+  neighboring orientations through that old threshold.
+- The map is now 2048x2048 over the same 128-world-unit square, or 0.0625 world
+  units per texel.  =shadow-visibility= is a weighted 17-tap disk: a heavy
+  inner ring and half-sector-rotated outer ring avoid reinforcing a square
+  light-space border.  Its two-to-six-texel radius grows from the center
+  depth's receiver/blocker separation, the 192-unit light-depth span, and the
+  sky profile's sun angular width.
+- This is deliberately a center-sample, PCSS-shaped approximation, not a full
+  blocker-search PCSS implementation.  A minimum two-texel footprint keeps
+  lit-side edges filtered; the sampled separation makes deep projected canopy
+  masses softer without inventing spherical caster geometry.
+- Consecutive capture accepts =--day-start= and =--day-step=.  The command
+  =scripts/luv gazetteer build/shadow-dusk-review --view shadow-forest --count 6
+  --forward-step 0 --yaw-step 0 --day-start 0.70 --day-step 1/600= inspected a
+  fixed camera at one-real-second-equivalent intervals in the ten-minute day.
+  The long tree shadow swept as a cohesive soft mass without a projection pop.
+  This sampling exposes gross discontinuities and changing silhouette shape;
+  it does not by itself prove sub-frame temporal smoothness at display cadence.
+- The updated =shadow-yard= capture retained pillar contact, direction, and a
+  readable far edge.  =make test= passed with valid fragment SPIR-V and 17
+  explicit disk samples, and =make smoke= completed through the executable.
+- A 60-frame hidden run at 1512x982 measured 10.66 ms/frame wall time after one
+  captured warm-up frame.  The previous 3x3 checkpoint recorded 10.81
+  ms/frame, so this pair shows no obvious end-to-end regression; both are
+  single-run wall measurements rather than an isolated GPU A/B.
+
+Done when: the light basis remains continuous through the old threshold; the
+gazetteer can capture a fixed camera at explicit neighboring sun times; a
+rounder, distance-aware filter and any resolution change pass shader validation
+and are inspected in both the analytic yard and representative forest; and the
+wiki records what each capture can and cannot prove.
+
 ** IDEA HDR crystal bloom
 :PROPERTIES:
 :ID: WLHDRB
@@ -875,7 +928,9 @@ Made here:
 - first storage is two u8 columns and first vertex transport is an explicit
   float vec3;
 - directional sun shadows use a separate camera-centered, texel-snapped depth
-  pass and are accepted with both analytic and consecutive-play evidence;
+  pass with a continuous light basis and round, blocker-distance-guided
+  filtering; analytic, camera-motion, and explicit sun-motion captures provide
+  distinct evidence;
 - bloom waits for an HDR scene path and does not commandeer alpha.
 
 Questions for probes rather than prior debate:

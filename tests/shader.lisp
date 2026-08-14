@@ -153,14 +153,14 @@
                  "projection-vector" "fog-vector"
                  "sun-vector" "sun-color-vector" "zenith-vector"
                  "horizon-vector" "ambient-vector" "fog-color-vector"
-                 "shadow-control-vector"
+                 "shadow-control-vector" "shadow-filter-vector"
                  "shadow-row-x" "shadow-row-y"
                  "shadow-row-z" "shadow-row-w")))
     (ok (equal (mapcar #'spv:shader-uniform-member-offset
                        (spv:shader-uniform-block-members resource))
                '(0 16 32 48 64 80 96 112 128 144 160 176
-                 192 208 224 240 256)))
-    (ok (= (spv:shader-uniform-block-byte-size resource) 272))
+                 192 208 224 240 256 272)))
+    (ok (= (spv:shader-uniform-block-byte-size resource) 288))
     (ok (equal (form-names
                 (spv:shader-expression-form
                  (spv:shader-binding-expression fog-progress)))
@@ -354,13 +354,14 @@
               :inputs ((uv :vec2 :location 0)
                        (receiver-depth :float :location 1)
                        (texel-size :vec2 :location 2)
-                       (bias :float :location 3))
+                       (bias :float :location 3)
+                       (radius :float :location 4))
               :outputs ((visibility :float :location 0))
               :resources ((shadow-map :depth-texture-2d :binding 0)
                           (shadow-sampler :sampler :binding 1)))
             '((let* ((visible (spv:shadow-visibility
                                shadow-map shadow-sampler uv
-                               receiver-depth texel-size bias)))
+                               receiver-depth texel-size bias radius)))
                 (set-output visibility visible)))))
          (visible (binding-named 'visible specification))
          (expression (spv:shader-binding-expression visible))
@@ -372,7 +373,7 @@
                         instructions)))
     (ok (typep expression 'spv:shader-call))
     (ok (eq (spv:shader-call-operator expression) '/))
-    (ok (= 9 (count "IMAGE-SAMPLE-IMPLICIT-LOD" names :test #'string=)))
+    (ok (= 17 (count "IMAGE-SAMPLE-IMPLICIT-LOD" names :test #'string=)))
     (ok (find "EXT-INST" names :test #'string=))
     (ok (> (length (spv:assemble-shader-specification specification)) 5))))
 
@@ -495,7 +496,7 @@
                    (equal (member-layout block) reference))
                  (rest blocks)))
       (ok (every (lambda (block)
-                   (= (spv:shader-uniform-block-byte-size block) 272))
+                   (= (spv:shader-uniform-block-byte-size block) 288))
                  blocks)))))
 
 (deftest the-sky-material-is-image-mathematics-over-environment-lanes
