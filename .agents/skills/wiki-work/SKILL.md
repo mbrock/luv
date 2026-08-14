@@ -27,6 +27,9 @@ When adding a figure:
 - update `wiki/index.org` only when the page becomes a new path into the
   material.
 
+Use `scripts/gensym` from this skill directory to print a dozen fresh figure
+IDs. Pass a number to request a different count.
+
 ## Work marks
 
 A work mark is a figure that also tracks one coherent iteration. It is an Org
