@@ -937,7 +937,7 @@
 (defun usage (&optional (stream *standard-output*))
   (format stream "Usage: ./sly start|stop|status|log~%")
   (format stream "       ./sly eval CODE [--package PACKAGE]~%")
-  (format stream "       ./sly parinfer [CODE]~%")
+  (format stream "       ./sly parinfer [--check|--diff|--write] [--file FILE|CODE|FILE]~%")
   (format stream "       ./sly inspect CODE [--package PACKAGE]~%")
   (format stream "       ./sly describe NAME... [--function] [--package PACKAGE]~%")
   (format stream "       ./sly describe-package PACKAGE...~%")
@@ -958,14 +958,121 @@
           while character
           do (write-char character output))))
 
+(defun read-text-file (pathname)
+  (with-open-file (stream pathname :direction :input)
+    (with-output-to-string (output)
+      (loop for character = (read-char stream nil nil)
+            while character
+            do (write-char character output)))))
+
+(defun write-text-file (pathname text)
+  (with-open-file (stream pathname
+                          :direction :output
+                          :if-exists :supersede
+                          :if-does-not-exist :create)
+    (write-string text stream)))
+
+(defun temporary-parinfer-pathname (label)
+  (make-pathname
+   :name (format nil "luv-parinfer-~A-~D-~D"
+                 label (get-universal-time) (random 1000000))
+   :type "lisp"
+   :defaults #P"/tmp/"))
+
+(defun call-diff (left-label left-path right-label right-path)
+  (let ((process
+          (sb-ext:run-program
+           "diff"
+           (list "-u" "--label" left-label "--label" right-label
+                 (namestring left-path) (namestring right-path))
+           :search t
+           :output *standard-output*
+           :error *error-output*
+           :wait t)))
+    (sb-ext:process-exit-code process)))
+
+(defun print-parinfer-diff (source repaired label)
+  (let ((source-path (temporary-parinfer-pathname "source"))
+        (repaired-path (temporary-parinfer-pathname "repaired")))
+    (unwind-protect
+         (progn
+           (write-text-file source-path source)
+           (write-text-file repaired-path repaired)
+           (call-diff label source-path "parinfer" repaired-path))
+      (ignore-errors (delete-file source-path))
+      (ignore-errors (delete-file repaired-path)))))
+
+(defun parse-parinfer-arguments (arguments)
+  (let ((mode :print)
+        (source nil)
+        (file nil))
+    (loop while arguments
+          for argument = (pop arguments)
+          do (cond
+               ((string= argument "--check")
+                (setf mode :check))
+               ((string= argument "--diff")
+                (setf mode :diff))
+               ((string= argument "--write")
+                (setf mode :write))
+               ((string= argument "--file")
+                (unless arguments
+                  (error "--file requires a pathname"))
+                (setf file (pop arguments)))
+               (source
+                (error "parinfer accepts at most one source argument"))
+               (t
+                (setf source argument))))
+    (when (and file source)
+      (error "parinfer accepts either --file or a source argument, not both"))
+    (when (and (eq mode :write) (not (or file
+                                         (and source (probe-file source)))))
+      (error "parinfer --write requires a file path"))
+    (when file
+      (setf file (namestring (truename file))))
+    (when (and (not file) source (probe-file source))
+      (setf file (namestring (truename source))
+            source nil))
+    (values mode source file)))
+
 (defun run-parinfer (arguments)
-  (when (cdr arguments)
-    (error "parinfer accepts at most one source argument"))
-  (write-string
-   (sly-client/parinfer:apply-indent-mode
-    (if arguments
-        (first arguments)
-        (read-standard-input-to-end)))))
+  (multiple-value-bind (mode source file)
+      (parse-parinfer-arguments arguments)
+    (let* ((label (or file "stdin"))
+           (original
+             (cond (file (read-text-file file))
+                   (source source)
+                   (t (read-standard-input-to-end))))
+           (repaired
+             (sly-client/parinfer:apply-indent-mode original))
+           (changed-p (not (string= original repaired))))
+      (ecase mode
+        (:print
+         (write-string repaired)
+         0)
+        (:check
+         (if changed-p
+             (progn
+               (format *error-output*
+                       "parinfer: ~A would change; use --diff or --write.~%"
+                       label)
+               1)
+             (progn
+               (format t "parinfer: ~A unchanged.~%" label)
+               0)))
+        (:diff
+         (if changed-p
+             (print-parinfer-diff original repaired label)
+             (progn
+               (format t "parinfer: ~A unchanged.~%" label)
+               0)))
+        (:write
+         (if changed-p
+             (progn
+               (write-text-file file repaired)
+               (format t "parinfer: rewrote ~A.~%" file))
+             (format t "parinfer: ~A unchanged.~%" file))
+         0)))))
 
 (defun parse-code-arguments (command arguments)
   (unless arguments
@@ -1118,8 +1225,7 @@
          (evaluate code package))
        0)
       ((string= command "parinfer")
-       (run-parinfer arguments)
-       0)
+       (run-parinfer arguments))
       ((string= command "inspect")
        (ensure-server)
        (multiple-value-bind (code package)

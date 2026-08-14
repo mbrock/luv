@@ -705,7 +705,7 @@ Evidence:
 Done when: the frame produces a stored shadow depth map from block geometry
 without changing visible lighting yet; visible sampling moves to #MFBOFD.
 
-** NEXT Sample the shadow map in the block material
+** DONE Sample the shadow map in the block material
 :PROPERTIES:
 :ID: MFBOFD
 :END:
@@ -714,20 +714,19 @@ Intent: consume the shadow depth map from the block material using the
 =shadow-visibility= abstraction, so moving sun light gets real direct shadows
 while voxel skylight remains the ambient term.
 
-Evidence to gather:
+Evidence:
 
-- The bind-group layout can carry atlas texture/sampler, shadow depth
-  texture/sampler, and the frame uniform without hard-coding a one-texture
-  layout.
-- The block vertex shader exports shadow coordinates and receiver depth, or an
-  equivalent fragment-available light-space value, without mixing projection
-  policy into the core shader DSL.
+- The Vulkan bind-group path now accepts multiple textures, samplers, and
+  buffers in one layout, so luvcraft can bind the atlas, shadow depth map, and
+  frame uniform without a one-texture special case.
+- The block vertex shader exports light-space shadow UV and receiver depth to
+  the fragment shader using the frame uniform's shadow rows; the core shader
+  DSL still only sees ordinary vector math and typed resources.
 - The block fragment shader multiplies only the direct sun term by
   =shadow-visibility=; ambient skylight and blocklight keep their current
   semantics.
-- A pinned gazetteer or smoke scene visibly shows block geometry casting
-  real-time shadows, and the new image is inspected before accepting any hash
-  change.
+- =make test= and =make smoke= passed, and the smoke capture at
+  =build/luvcraft-smoke.png= was inspected with visible block shadows.
 
 Done when: a pinned scene shows moving geometry casting real-time direct-light
 shadows through the shader abstraction, with all new textures, bind groups, and

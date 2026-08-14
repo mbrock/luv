@@ -69,14 +69,15 @@
   (let* ((specification (spv:block-world-fragment-specification))
          (sun-direction (binding-named 'sun-direction specification))
          (sun-visibility (binding-named 'sun-visibility specification))
+         (direct-shadow (binding-named 'direct-shadow specification))
          (sky-light (binding-named 'sky-light specification))
          (reflected (binding-named 'reflected specification))
          (radiance (binding-named 'radiance specification))
          (fogged (binding-named 'fogged specification)))
     (ok (typep specification 'spv:shader-specification))
     (ok (eq (spv:shader-specification-stage specification) :fragment))
-    (ok (= (length (spv:shader-specification-inputs specification)) 4))
-    (ok (= (length (spv:shader-specification-resources specification)) 3))
+    (ok (= (length (spv:shader-specification-inputs specification)) 6))
+    (ok (= (length (spv:shader-specification-resources specification)) 5))
     (ok (typep (spv:shader-binding-expression sun-direction)
                'spv:shader-call))
     (ok (spv:shader-type=
@@ -88,6 +89,11 @@
           (spv:shader-expression-form
            (spv:shader-binding-expression sun-visibility)))
          '("smoothstep" 0.9 1.0 "sky-input")))
+    (ok (equal
+         (form-names
+          (spv:shader-expression-form
+           (spv:shader-binding-expression direct-shadow)))
+         '("mix" 1.0 "shadow-sample" "shadow-in-bounds")))
     (ok (spv:shader-type=
          (spv:shader-expression-type
           (spv:shader-binding-expression sky-light))
@@ -123,7 +129,7 @@
     (ok (typep specification 'spv:shader-specification))
     (ok (eq (spv:shader-specification-stage specification) :vertex))
     (ok (= (length (spv:shader-specification-inputs specification)) 4))
-    (ok (= (length (spv:shader-specification-outputs specification)) 5))
+    (ok (= (length (spv:shader-specification-outputs specification)) 7))
     (ok (eq (spv:shader-interface-built-in clip-position) :position))
     (ok (typep resource 'spv:shader-uniform-block))
     (ok (= (spv:shader-resource-binding resource) 2))

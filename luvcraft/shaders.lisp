@@ -42,7 +42,9 @@
                (uv-shade-output :vec3 :location 0)
                (normal-output :vec3 :location 1)
                (fog-output :float :location 2)
-               (light-output :vec3 :location 3))
+               (light-output :vec3 :location 3)
+               (shadow-uv-output :vec2 :location 4)
+               (shadow-depth-output :float :location 5))
      :resources
      ((frame-state :uniform-block :set 0 :binding 2
                    :members #.*frame-uniform-members*)))
@@ -69,12 +71,24 @@
          (clip-x (* view-x x-scale))
          (clip-y (- (* view-y y-scale)))
          (clip-z (+ (* view-z z-scale) z-offset))
-         (clip (vec4 clip-x clip-y clip-z view-z)))
+         (clip (vec4 clip-x clip-y clip-z view-z))
+         (world (vec4 world-position 1.0))
+         (shadow-x (dot shadow-row-x world))
+         (shadow-y (dot shadow-row-y world))
+         (shadow-z (dot shadow-row-z world))
+         (shadow-w (dot shadow-row-w world))
+         (shadow-ndc-x (/ shadow-x shadow-w))
+         (shadow-ndc-y (/ shadow-y shadow-w))
+         (shadow-ndc-z (/ shadow-z shadow-w))
+         (shadow-u (+ (* shadow-ndc-x 0.5) 0.5))
+         (shadow-v (+ (* shadow-ndc-y 0.5) 0.5)))
     (set-output clip-position clip)
     (set-output uv-shade-output uv-shade-input)
     (set-output normal-output normal-input)
     (set-output fog-output fog-amount)
-    (set-output light-output light-input)))
+    (set-output light-output light-input)
+    (set-output shadow-uv-output (vec2 shadow-u shadow-v))
+    (set-output shadow-depth-output shadow-ndc-z)))
 
 (defun block-world-vertex-specification ()
   (shader-specification-for :block-surface :vertex))
@@ -102,16 +116,32 @@
      :inputs ((uv-shade-input :vec3 :location 0)
               (normal-input :vec3 :location 1)
               (fog-input :float :location 2)
-              (light-input :vec3 :location 3))
+              (light-input :vec3 :location 3)
+              (shadow-uv-input :vec2 :location 4)
+              (shadow-depth-input :float :location 5))
      :outputs ((color-output :vec4 :location 0))
      :resources ((block-atlas :texture-2d :set 0 :binding 0)
                  (block-sampler :sampler :set 0 :binding 1)
                  (frame-state :uniform-block :set 0 :binding 2
-                              :members #.*frame-uniform-members*)))
+                              :members #.*frame-uniform-members*)
+                 (shadow-map :depth-texture-2d :set 0 :binding 3)
+                 (shadow-sampler :sampler :set 0 :binding 4)))
   (let* ((uv-shade uv-shade-input)
          (uv (swizzle uv-shade :xy))
          (ao (swizzle uv-shade :z))
          (normal normal-input)
+         (shadow-u (swizzle shadow-uv-input :x))
+         (shadow-v (swizzle shadow-uv-input :y))
+         (shadow-in-bounds
+           (* (step 0.0 shadow-u)
+              (step shadow-u 1.0)
+              (step 0.0 shadow-v)
+              (step shadow-v 1.0)))
+         (shadow-sample
+           (shadow-visibility
+            shadow-map shadow-sampler shadow-uv-input shadow-depth-input
+            0.003))
+         (direct-shadow (mix 1.0 shadow-sample shadow-in-bounds))
          ;; The mesh carries normalized raw light readings; every response
          ;; curve and balance below is an art parameter editable live
          ;; without remeshing the world.
@@ -124,14 +154,15 @@
          (day-factor (swizzle sun-vector :w))
          (n-dot-l (max 0.0 (dot normal sun-direction)))
          ;; Lateral skylight gives ambient visibility but not a hard sun
-         ;; beam; the moving sun stays unshadowed until a real shadow pass.
+         ;; beam; the shadow map gates only the direct solar term.
          (sun-visibility (smoothstep 0.90 1.0 sky-input))
          (ambient (swizzle ambient-vector :xyz))
          (sun-color (swizzle sun-color-vector :xyz))
          ;; A small floor keeps unlit geometry barely readable rather than
          ;; a void; caves stay dark for the right reason.
          (sky-light (* ambient (+ 0.06 (* 1.34 sky-level)) ao))
-         (sun-light (* sun-color (* n-dot-l sun-visibility day-factor)))
+         (sun-light
+           (* sun-color (* n-dot-l sun-visibility day-factor direct-shadow)))
          (torch-color (vec3 1.0 0.82 0.58))
          (local-light (* torch-color block-level))
          (albedo (swizzle (sample block-atlas block-sampler uv) :rgb))

@@ -1238,7 +1238,10 @@ A newer concurrent notification remains pending."
          (key (list :sampled-image texture-type))
          (table (context-pointer-ids context)))
     (or (gethash key table)
-        (let ((id (reserve-shader-id context "SAMPLED-IMAGE")))
+        (let ((id (reserve-shader-id
+                   context
+                   (format nil "~A-SAMPLED-IMAGE"
+                           (shader-type-name texture-type)))))
           (setf (gethash key table) id)
           (append-context-form
            'type-declarations context

@@ -11,7 +11,10 @@
 (defclass luvcraft-frame-state ()
   ((uniform-buffer :initarg :uniform-buffer
                    :reader luvcraft-frame-uniform-buffer)
-   (bind-group :initarg :bind-group :reader luvcraft-frame-bind-group)))
+   (scene-bind-group :initarg :scene-bind-group
+                     :reader luvcraft-frame-scene-bind-group)
+   (shadow-bind-group :initarg :shadow-bind-group
+                      :reader luvcraft-frame-shadow-bind-group)))
 
 (defconstant +block-world-crosshair-vertex-count+ 24)
 (defconstant +luvcraft-shadow-map-size+ 1024)
@@ -136,7 +139,10 @@ the frame uniform cannot silently diverge between shader and host."
 
 (defun luvcraft-frame-state (session surface-texture)
   (or (gethash surface-texture (luvcraft-session-frame-states session))
-      (let ((buffer nil) (bind-group nil) (completed-p nil))
+      (let ((buffer nil)
+            (scene-bind-group nil)
+            (shadow-bind-group nil)
+            (completed-p nil))
         (unwind-protect
              (progn
                (setf buffer
@@ -146,32 +152,55 @@ the frame uniform cannot silently diverge between shader and host."
                        :label "block world camera uniform"
                        :size (block-world-camera-uniform-size session)
                        :usage '(:uniform)))
-                     bind-group
+                     scene-bind-group
                      (create
                       (luvcraft-session-device session)
                       (make-bind-group-descriptor
-                       :label "block world frame bindings"
+                       :label "block world scene bindings"
                        :layout (luvcraft-session-layout session)
                        :entries
                        `((:binding 0
                           :resource ,(luvcraft-session-atlas-view session))
                          (:binding 1
                           :resource ,(luvcraft-session-atlas-sampler session))
-                         (:binding 2 :resource ,buffer)))))
+                         (:binding 2 :resource ,buffer)
+                         (:binding 3
+                          :resource ,(luvcraft-session-shadow-depth-view
+                                       session))
+                         (:binding 4
+                          :resource ,(luvcraft-session-shadow-depth-sampler
+                                       session)))))
+                     shadow-bind-group
+                     (create
+                      (luvcraft-session-device session)
+                      (make-bind-group-descriptor
+                       :label "block world shadow-pass bindings"
+                       :layout (luvcraft-session-shadow-layout session)
+                       :entries `((:binding 2 :resource ,buffer)))))
                (remember-luvcraft-resource session buffer)
-               (remember-luvcraft-resource session bind-group)
+               (remember-luvcraft-resource session scene-bind-group)
+               (remember-luvcraft-resource session shadow-bind-group)
                (let ((state
                        (make-instance
                         'luvcraft-frame-state
-                        :uniform-buffer buffer :bind-group bind-group)))
+                        :uniform-buffer buffer
+                        :scene-bind-group scene-bind-group
+                        :shadow-bind-group shadow-bind-group)))
                  (setf (gethash surface-texture
                                 (luvcraft-session-frame-states session))
                        state
                        completed-p t)
                  state))
           (unless completed-p
-            (when bind-group (destroy bind-group))
+            (when shadow-bind-group (destroy shadow-bind-group))
+            (when scene-bind-group (destroy scene-bind-group))
             (when buffer (destroy buffer)))))))
+
+(defun prepare-luvcraft-shadow-map-sampling (session encoder)
+  "Move the just-rendered shadow depth texture into sampled-image layout."
+  (let ((texture (luvcraft-session-shadow-depth-texture session)))
+    (ensure-vulkan-texture-for-command encoder texture session :texture-binding)
+    (transition-vulkan-texture encoder texture :shader-read-only-optimal)))
 
 (defun encode-luvcraft-frame
     (session surface-texture encoder &key readback-buffer)
@@ -194,7 +223,7 @@ the frame uniform cannot silently diverge between shader and host."
                 :depth-load-op :clear :depth-store-op :store
                 :depth-clear-value 1.0)))))
       (set-pipeline pass (luvcraft-session-shadow-native-pipeline session))
-      (set-bind-group pass 0 (luvcraft-frame-bind-group frame))
+      (set-bind-group pass 0 (luvcraft-frame-shadow-bind-group frame))
       (dolist (product products)
         (let ((mesh (luvcraft-chunk-product-mesh product)))
           (when (plusp (block-mesh-vertex-count mesh))
@@ -202,6 +231,7 @@ the frame uniform cannot silently diverge between shader and host."
              pass 0 (luvcraft-chunk-product-vertex-buffer product))
             (draw pass (block-mesh-vertex-count mesh)))))
       (end-pass pass))
+    (prepare-luvcraft-shadow-map-sampling session encoder)
     (let ((pass
             (begin-render-pass
              encoder
@@ -217,7 +247,7 @@ the frame uniform cannot silently diverge between shader and host."
       ;; The sky triangle fills the frame before block geometry, with depth
       ;; writes disabled; the clear value remains only a safe fallback.
       (set-pipeline pass (luvcraft-session-sky-native-pipeline session))
-      (set-bind-group pass 0 (luvcraft-frame-bind-group frame))
+      (set-bind-group pass 0 (luvcraft-frame-scene-bind-group frame))
       (set-vertex-buffer
        pass 0 (luvcraft-session-sky-vertex-buffer session))
       (draw pass 3)
@@ -513,7 +543,16 @@ capture-only demand clock."
                        :label "block world layout"
                        :entries '((:binding 0 :type :texture)
                                   (:binding 1 :type :sampler)
-                                  (:binding 2 :type :uniform-buffer))))))
+                                  (:binding 2 :type :uniform-buffer)
+                                  (:binding 3 :type :texture)
+                                  (:binding 4 :type :sampler))))))
+                  (shadow-layout
+                    (keep
+                     (create
+                      device
+                      (make-bind-group-layout-descriptor
+                       :label "block world shadow-pass layout"
+                       :entries '((:binding 2 :type :uniform-buffer))))))
                   (pipeline
                     (let ((artifact
                             (make-live-shader-pipeline
@@ -546,7 +585,7 @@ capture-only demand clock."
                              :role :block-shadow
                              :stage :vertex
                              :label "block world shadow pipeline"
-                             :device device :layout layout
+                             :device device :layout shadow-layout
                              :vertex-buffers
                              '((:array-stride 48
                                 :attributes
@@ -631,7 +670,8 @@ capture-only demand clock."
                      :shadow-depth-texture shadow-depth-texture
                      :shadow-depth-view shadow-depth-view
                      :shadow-depth-sampler shadow-depth-sampler
-                     :layout layout :block-pipeline pipeline
+                     :layout layout :shadow-layout shadow-layout
+                     :block-pipeline pipeline
                      :shadow-pipeline shadow-pipeline
                      :sky-vertex-buffer sky-vertex-buffer
                      :sky-pipeline sky-pipeline

@@ -70,6 +70,8 @@
    (shadow-depth-sampler :initarg :shadow-depth-sampler
                          :reader luvcraft-session-shadow-depth-sampler)
    (layout :initarg :layout :reader luvcraft-session-layout)
+   (shadow-layout :initarg :shadow-layout
+                  :reader luvcraft-session-shadow-layout)
    (block-pipeline :initarg :block-pipeline
                    :reader luvcraft-session-block-pipeline)
    (shadow-pipeline :initarg :shadow-pipeline

@@ -122,6 +122,7 @@ nothing else does."))
            #:destroy-shader-module
            #:create-storage-image-descriptor-set-layout
            #:create-uniform-buffer-descriptor-set-layout
+           #:create-texture-sampler-uniform-descriptor-set-layout
            #:create-sampled-image-sampler-descriptor-set-layout
            #:create-sampled-image-sampler-uniform-descriptor-set-layout
            #:destroy-descriptor-set-layout
@@ -139,12 +140,14 @@ nothing else does."))
            #:destroy-framebuffer
            #:create-storage-image-descriptor-pool
            #:create-uniform-buffer-descriptor-pool
+           #:create-texture-sampler-uniform-descriptor-pool
            #:create-sampled-image-sampler-descriptor-pool
            #:create-sampled-image-sampler-uniform-descriptor-pool
            #:destroy-descriptor-pool
            #:allocate-descriptor-set
            #:update-storage-image-descriptor
            #:update-uniform-buffer-descriptor
+           #:update-texture-sampler-uniform-descriptors
            #:update-sampled-image-sampler-descriptors
            #:update-sampled-image-sampler-uniform-descriptors
            #:create-command-pool

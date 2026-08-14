@@ -317,14 +317,26 @@ and scheduled texture layouts across the canvas and REPL threads.")))
     :initarg :texture-view
     :initform nil
     :reader vulkan-bind-group-texture-view)
+   (texture-views
+    :initarg :texture-views
+    :initform nil
+    :reader vulkan-bind-group-texture-views)
    (sampler
     :initarg :sampler
     :initform nil
     :reader vulkan-bind-group-sampler)
+   (samplers
+    :initarg :samplers
+    :initform nil
+    :reader vulkan-bind-group-samplers)
    (buffer
     :initarg :buffer
     :initform nil
     :reader vulkan-bind-group-buffer)
+   (buffers
+    :initarg :buffers
+    :initform nil
+    :reader vulkan-bind-group-buffers)
    (descriptor-pool
     :initarg :descriptor-pool
     :reader vulkan-bind-group-descriptor-pool)))
@@ -1014,24 +1026,23 @@ wrapper, this finalizer cannot run before theirs have."
 
 (defun sampled-texture-sampler-layout-entries (descriptor)
   (let* ((entries (bind-group-layout-descriptor-entries descriptor))
-         (texture (find :texture entries :key (lambda (entry)
-                                                (getf entry :type))))
-         (sampler (find :sampler entries :key (lambda (entry)
-                                                (getf entry :type))))
-         (uniform (find :uniform-buffer entries :key (lambda (entry)
-                                                       (getf entry :type))))
          (bindings (mapcar (lambda (entry) (getf entry :binding)) entries)))
-    (unless (and (listp entries) (member (length entries) '(2 3))
-                 texture sampler
-                 (if (= 3 (length entries)) uniform (null uniform))
+    (unless (and (listp entries) (plusp (length entries))
                  (every (lambda (entry)
-                          (typep (getf entry :binding)
-                                 '(unsigned-byte 32)))
+                          (and (listp entry)
+                               (member (getf entry :type)
+                                       '(:texture :sampler :uniform-buffer))
+                               (typep (getf entry :binding)
+                                      '(unsigned-byte 32))))
                         entries)
+                 (find :texture entries
+                       :key (lambda (entry) (getf entry :type)))
+                 (find :sampler entries
+                       :key (lambda (entry) (getf entry :type)))
                  (= (length bindings)
                     (length (remove-duplicates bindings))))
       (reject-gpu-request descriptor :unsupported-bind-group-layout entries))
-    (values entries texture sampler uniform)))
+    entries))
 
 (defmethod create
     ((device vulkan-gpu-device)
@@ -1061,22 +1072,13 @@ wrapper, this finalizer cannot run before theirs have."
                      (vulkan-handle device) :binding binding)
             :device device :entries entries)))
         (t
-         (multiple-value-bind (entries texture sampler uniform)
-             (sampled-texture-sampler-layout-entries descriptor)
+         (let ((entries (sampled-texture-sampler-layout-entries descriptor)))
            (make-instance
             'vulkan-gpu-bind-group-layout
             :label (gpu-descriptor-label descriptor)
             :handle
-            (if uniform
-                (lvk:create-sampled-image-sampler-uniform-descriptor-set-layout
-                 (vulkan-handle device)
-                 :texture-binding (getf texture :binding)
-                 :sampler-binding (getf sampler :binding)
-                 :uniform-binding (getf uniform :binding))
-                (lvk:create-sampled-image-sampler-descriptor-set-layout
-                 (vulkan-handle device)
-                 :texture-binding (getf texture :binding)
-                 :sampler-binding (getf sampler :binding)))
+            (lvk:create-texture-sampler-uniform-descriptor-set-layout
+             (vulkan-handle device) entries)
             :device device :entries entries)))))))
 
 (defmethod create
@@ -1273,36 +1275,25 @@ wrapper, this finalizer cannot run before theirs have."
 
 (defun sampled-texture-sampler-bind-group-entries (descriptor layout)
   (let* ((entries (bind-group-descriptor-entries descriptor))
-         (layout-entries (vulkan-bind-group-layout-entries layout))
-         (texture-layout (find :texture layout-entries
-                               :key (lambda (entry) (getf entry :type))))
-         (sampler-layout (find :sampler layout-entries
-                               :key (lambda (entry) (getf entry :type))))
-         (uniform-layout (find :uniform-buffer layout-entries
-                               :key (lambda (entry) (getf entry :type))))
-         (texture-entry
-           (find (getf texture-layout :binding) entries
-                 :key (lambda (entry) (getf entry :binding))))
-         (sampler-entry
-           (find (getf sampler-layout :binding) entries
-                 :key (lambda (entry) (getf entry :binding))))
-         (uniform-entry
-           (and uniform-layout
-                (find (getf uniform-layout :binding) entries
-                      :key (lambda (entry) (getf entry :binding))))))
-    (unless (and (= (length layout-entries) (length entries))
-                 texture-entry sampler-entry
-                 (if uniform-layout uniform-entry (null uniform-entry))
-                 (typep (getf texture-entry :resource)
-                        'vulkan-gpu-texture-view)
-                 (typep (getf sampler-entry :resource)
-                        'vulkan-gpu-sampler)
-                 (or (null uniform-entry)
-                     (typep (getf uniform-entry :resource)
-                            'vulkan-gpu-buffer)))
+         (layout-entries (vulkan-bind-group-layout-entries layout)))
+    (unless (= (length layout-entries) (length entries))
       (reject-gpu-request descriptor :unsupported-bind-group entries))
-    (values texture-entry sampler-entry uniform-entry
-            texture-layout sampler-layout uniform-layout)))
+    (loop for layout-entry in layout-entries
+          for entry = (find (getf layout-entry :binding) entries
+                            :key (lambda (entry) (getf entry :binding)))
+          unless (and entry
+                      (ecase (getf layout-entry :type)
+                        (:texture
+                         (typep (getf entry :resource)
+                                'vulkan-gpu-texture-view))
+                        (:sampler
+                         (typep (getf entry :resource)
+                                'vulkan-gpu-sampler))
+                        (:uniform-buffer
+                         (typep (getf entry :resource)
+                                'vulkan-gpu-buffer))))
+            do (reject-gpu-request descriptor :unsupported-bind-group entries)
+          collect (list layout-entry entry))))
 
 (defun uniform-buffer-bind-group-entry (descriptor layout)
   (let* ((entries (bind-group-descriptor-entries descriptor))
@@ -1343,7 +1334,8 @@ wrapper, this finalizer cannot run before theirs have."
               'vulkan-gpu-bind-group
               :label (gpu-descriptor-label descriptor)
               :handle set :device device :layout layout
-              :buffer buffer :descriptor-pool pool))
+              :buffer buffer :buffers (list buffer)
+              :descriptor-pool pool))
         (unless completed-p
           (lvk:destroy-descriptor-pool (vulkan-handle device) pool))))))
 
@@ -1384,7 +1376,8 @@ wrapper, this finalizer cannot run before theirs have."
                       'vulkan-gpu-bind-group
                       :label (gpu-descriptor-label descriptor)
                       :handle set :device device :layout layout
-                      :texture-view view :descriptor-pool pool))
+                      :texture-view view :texture-views (list view)
+                      :descriptor-pool pool))
                 (unless completed-p
                   (lvk:destroy-descriptor-pool
                    (vulkan-handle device) pool)))))
@@ -1393,71 +1386,91 @@ wrapper, this finalizer cannot run before theirs have."
                        (getf (first (vulkan-bind-group-layout-entries layout))
                              :type)))
               (create-vulkan-uniform-bind-group device descriptor layout)
-              (multiple-value-bind
-                (texture-entry sampler-entry uniform-entry
-                 texture-layout sampler-layout uniform-layout)
-              (sampled-texture-sampler-bind-group-entries descriptor layout)
-            (let* ((view (getf texture-entry :resource))
-                   (sampler (getf sampler-entry :resource))
-                   (buffer (and uniform-entry
-                                (getf uniform-entry :resource)))
-                   (texture (gpu-texture-view-texture view)))
-              (ensure-vulkan-object-device
-               view (vulkan-texture-view-device view) device
-               :create-bind-group)
-              (ensure-vulkan-object-device
-               sampler (vulkan-sampler-device sampler) device
-               :create-bind-group)
-              (when buffer
-                (ensure-vulkan-object-device
-                 buffer (vulkan-buffer-device buffer) device
-                 :create-bind-group)
-                (unless (member :uniform (gpu-buffer-usage buffer))
-                  (error 'gpu-usage-error
-                         :object buffer :operation :create-bind-group
-                         :required-usage :uniform
-                         :actual-usage (gpu-buffer-usage buffer))))
-              (unless (member :texture-binding (gpu-texture-usage texture))
-                (error 'gpu-usage-error
-                       :object texture :operation :create-bind-group
-                       :required-usage :texture-binding
-                       :actual-usage (gpu-texture-usage texture)))
-              (let ((pool
-                      (if buffer
-                          (lvk:create-sampled-image-sampler-uniform-descriptor-pool
-                           (vulkan-handle device))
-                          (lvk:create-sampled-image-sampler-descriptor-pool
-                           (vulkan-handle device))))
-                    (set nil) (completed-p nil))
-                (unwind-protect
-                     (progn
-                       (setf set
-                             (lvk:allocate-descriptor-set
-                              (vulkan-handle device) pool
-                              (vulkan-handle layout)))
-                       (if buffer
-                           (lvk:update-sampled-image-sampler-uniform-descriptors
-                            (vulkan-handle device) set
-                            (vulkan-handle view) (vulkan-handle sampler)
-                            (vulkan-handle buffer) (gpu-buffer-size buffer)
-                            :texture-binding (getf texture-layout :binding)
-                            :sampler-binding (getf sampler-layout :binding)
-                            :uniform-binding (getf uniform-layout :binding))
-                           (lvk:update-sampled-image-sampler-descriptors
-                            (vulkan-handle device) set
-                            (vulkan-handle view) (vulkan-handle sampler)
-                            :texture-binding (getf texture-layout :binding)
-                            :sampler-binding (getf sampler-layout :binding)))
-                       (setf completed-p t)
-                       (make-instance
-                        'vulkan-gpu-bind-group
-                        :label (gpu-descriptor-label descriptor)
-                        :handle set :device device :layout layout
-                        :texture-view view :sampler sampler :buffer buffer
-                        :descriptor-pool pool))
-                  (unless completed-p
-                    (lvk:destroy-descriptor-pool
-                     (vulkan-handle device) pool)))))))))))
+              (let* ((pairs
+                       (sampled-texture-sampler-bind-group-entries
+                        descriptor layout))
+                     (views nil)
+                     (samplers nil)
+                     (buffers nil)
+                     (descriptor-entries nil))
+                (dolist (pair pairs)
+                  (destructuring-bind (layout-entry entry) pair
+                    (let ((resource (getf entry :resource)))
+                      (ecase (getf layout-entry :type)
+                        (:texture
+                         (ensure-vulkan-object-device
+                          resource (vulkan-texture-view-device resource)
+                          device :create-bind-group)
+                         (let ((texture (gpu-texture-view-texture resource)))
+                           (unless (member :texture-binding
+                                           (gpu-texture-usage texture))
+                             (error 'gpu-usage-error
+                                    :object texture
+                                    :operation :create-bind-group
+                                    :required-usage :texture-binding
+                                    :actual-usage
+                                    (gpu-texture-usage texture))))
+                         (push resource views)
+                         (push `(:binding ,(getf layout-entry :binding)
+                                 :type :texture
+                                 :image-view ,(vulkan-handle resource))
+                               descriptor-entries))
+                        (:sampler
+                         (ensure-vulkan-object-device
+                          resource (vulkan-sampler-device resource)
+                          device :create-bind-group)
+                         (push resource samplers)
+                         (push `(:binding ,(getf layout-entry :binding)
+                                 :type :sampler
+                                 :sampler ,(vulkan-handle resource))
+                               descriptor-entries))
+                        (:uniform-buffer
+                         (ensure-vulkan-object-device
+                          resource (vulkan-buffer-device resource)
+                          device :create-bind-group)
+                         (unless (member :uniform (gpu-buffer-usage resource))
+                           (error 'gpu-usage-error
+                                  :object resource
+                                  :operation :create-bind-group
+                                  :required-usage :uniform
+                                  :actual-usage (gpu-buffer-usage resource)))
+                         (push resource buffers)
+                         (push `(:binding ,(getf layout-entry :binding)
+                                 :type :uniform-buffer
+                                 :buffer ,(vulkan-handle resource)
+                                 :buffer-size ,(gpu-buffer-size resource))
+                               descriptor-entries))))))
+                (setf views (nreverse views)
+                      samplers (nreverse samplers)
+                      buffers (nreverse buffers)
+                      descriptor-entries (nreverse descriptor-entries))
+                (let ((pool
+                        (lvk:create-texture-sampler-uniform-descriptor-pool
+                         (vulkan-handle device) descriptor-entries))
+                      (set nil) (completed-p nil))
+                  (unwind-protect
+                       (progn
+                         (setf set
+                               (lvk:allocate-descriptor-set
+                                (vulkan-handle device) pool
+                                (vulkan-handle layout)))
+                         (lvk:update-texture-sampler-uniform-descriptors
+                          (vulkan-handle device) set descriptor-entries)
+                         (setf completed-p t)
+                         (make-instance
+                          'vulkan-gpu-bind-group
+                          :label (gpu-descriptor-label descriptor)
+                          :handle set :device device :layout layout
+                          :texture-view (first views)
+                          :texture-views views
+                          :sampler (first samplers)
+                          :samplers samplers
+                          :buffer (first buffers)
+                          :buffers buffers
+                          :descriptor-pool pool))
+                    (unless completed-p
+                      (lvk:destroy-descriptor-pool
+                       (vulkan-handle device) pool))))))))))
 
 (defmethod create
     ((device vulkan-gpu-device) (descriptor command-encoder-descriptor))
@@ -2123,15 +2136,12 @@ lowering later without changing this queue-level operation."
       (unless (eq (vulkan-bind-group-layout bind-group)
                   (vulkan-render-pipeline-bind-group-layout pipeline))
         (reject-gpu-request bind-group :incompatible-pipeline-layout pipeline))
-      (when (vulkan-bind-group-buffer bind-group)
+      (dolist (buffer (vulkan-bind-group-buffers bind-group))
         (ensure-vulkan-object-device
-         (vulkan-bind-group-buffer bind-group)
-         (vulkan-buffer-device (vulkan-bind-group-buffer bind-group))
+         buffer (vulkan-buffer-device buffer)
          device :set-bind-group))
-      (when (vulkan-bind-group-texture-view bind-group)
-        (let ((texture
-                (gpu-texture-view-texture
-                 (vulkan-bind-group-texture-view bind-group))))
+      (dolist (texture-view (vulkan-bind-group-texture-views bind-group))
+        (let ((texture (gpu-texture-view-texture texture-view)))
           (ensure-vulkan-texture-for-command
            encoder texture pass :texture-binding)
           (transition-vulkan-texture
@@ -2141,12 +2151,12 @@ lowering later without changing this queue-level operation."
        (vulkan-render-pipeline-layout pipeline)
        (vulkan-handle bind-group))
         (retain-vulkan-resource encoder bind-group)
-        (retain-vulkan-resource
-         encoder (vulkan-bind-group-texture-view bind-group))
-        (retain-vulkan-resource
-         encoder (vulkan-bind-group-sampler bind-group))
-        (retain-vulkan-resource
-         encoder (vulkan-bind-group-buffer bind-group))
+        (dolist (texture-view (vulkan-bind-group-texture-views bind-group))
+          (retain-vulkan-resource encoder texture-view))
+        (dolist (sampler (vulkan-bind-group-samplers bind-group))
+          (retain-vulkan-resource encoder sampler))
+        (dolist (buffer (vulkan-bind-group-buffers bind-group))
+          (retain-vulkan-resource encoder buffer))
         (setf (vulkan-render-pass-bind-group pass) bind-group))))
   pass)
 
@@ -2298,28 +2308,26 @@ lowering later without changing this queue-level operation."
       (unless (eq (vulkan-bind-group-layout bind-group)
                   (vulkan-compute-pipeline-bind-group-layout pipeline))
         (reject-gpu-request bind-group :incompatible-pipeline-layout pipeline))
-      (when (vulkan-bind-group-buffer bind-group)
+      (dolist (buffer (vulkan-bind-group-buffers bind-group))
         (ensure-vulkan-object-device
-         (vulkan-bind-group-buffer bind-group)
-         (vulkan-buffer-device (vulkan-bind-group-buffer bind-group))
+         buffer (vulkan-buffer-device buffer)
          device :set-bind-group))
-      (let ((texture
-              (gpu-texture-view-texture
-               (vulkan-bind-group-texture-view bind-group))))
-        (ensure-vulkan-texture-for-command
-         encoder texture pass :storage-binding)
-        (transition-vulkan-texture encoder texture :general))
+      (dolist (texture-view (vulkan-bind-group-texture-views bind-group))
+        (let ((texture (gpu-texture-view-texture texture-view)))
+          (ensure-vulkan-texture-for-command
+           encoder texture pass :storage-binding)
+          (transition-vulkan-texture encoder texture :general)))
       (lvk:cmd-bind-compute-descriptor-set
        (vulkan-command-encoder-command-buffer encoder)
        (vulkan-compute-pipeline-layout pipeline)
        (vulkan-handle bind-group))
         (retain-vulkan-resource encoder bind-group)
-        (retain-vulkan-resource
-         encoder (vulkan-bind-group-texture-view bind-group))
-        (retain-vulkan-resource
-         encoder (vulkan-bind-group-sampler bind-group))
-        (retain-vulkan-resource
-         encoder (vulkan-bind-group-buffer bind-group))
+        (dolist (texture-view (vulkan-bind-group-texture-views bind-group))
+          (retain-vulkan-resource encoder texture-view))
+        (dolist (sampler (vulkan-bind-group-samplers bind-group))
+          (retain-vulkan-resource encoder sampler))
+        (dolist (buffer (vulkan-bind-group-buffers bind-group))
+          (retain-vulkan-resource encoder buffer))
         (setf (vulkan-compute-pass-bind-group pass) bind-group))))
   pass)
 

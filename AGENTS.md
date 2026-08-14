@@ -55,7 +55,10 @@ print a backtrace and wait on stdin for a restart number or `a` to abort.
 `inspect` is interactive and keeps its one connection open while navigating
 the object (`?` lists its commands, `q` quits).
 
-The connection-free `./sly parinfer [CODE]` filter repairs common parenthesis
-mistakes using indentation. With no argument it reads multiline source from
+The connection-free `./sly parinfer [--check|--diff|--write] [--file FILE|CODE|FILE]`
+filter repairs common parenthesis mistakes using indentation. Prefer whole-file
+inspection with `./sly parinfer --diff path/to/file.lisp`; use `--check` in
+scripts or before tests to fail when a file would change, and `--write` only
+after the diff looks right. With no argument it reads multiline source from
 stdin, for example `./sly parinfer < unfinished.lisp`. It is intentionally a
 lossy heuristic, so inspect its output before replacing a file.

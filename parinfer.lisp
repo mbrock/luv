@@ -147,7 +147,8 @@ Common Lisp reader."
         (state (make-state))
         (processed-lines nil))
     (dolist (line (split-lines text))
-      (unless (empty-or-comment-line-p line)
+      (unless (or (state-in-string state)
+                  (empty-or-comment-line-p line))
         (append-closes-to-previous-line
          processed-lines
          (dedent-closes state (count-leading-space line))))

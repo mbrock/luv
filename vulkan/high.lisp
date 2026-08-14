@@ -605,54 +605,55 @@ destroy it before destroying INSTANCE."
               :flags 0 :binding-count 1 :p-bindings layout-binding)
       (create-descriptor-set-layout-handle device create-info))))
 
+(defun texture-sampler-uniform-descriptor-type (type)
+  (ecase type
+    (:texture :sampled-image)
+    (:sampler :sampler)
+    (:uniform-buffer :uniform-buffer)))
+
+(defun texture-sampler-uniform-descriptor-stages (entry)
+  (or (getf entry :stages)
+      (ecase (getf entry :type)
+        ((:texture :sampler :uniform-buffer) '(:vertex :fragment)))))
+
+(defun create-texture-sampler-uniform-descriptor-set-layout
+    (device entries)
+  (let ((count (length entries)))
+    (cffi:with-foreign-object
+        (bindings '(:struct descriptor-set-layout-binding) count)
+      (loop for entry in entries
+            for index from 0
+            do (fill-vk
+                (cffi:mem-aptr
+                 bindings '(:struct descriptor-set-layout-binding) index)
+                'descriptor-set-layout-binding
+                :binding (getf entry :binding)
+                :descriptor-type
+                (texture-sampler-uniform-descriptor-type
+                 (getf entry :type))
+                :descriptor-count 1
+                :stage-flags
+                (texture-sampler-uniform-descriptor-stages entry)
+                :p-immutable-samplers (cffi:null-pointer)))
+      (with-vk (create-info descriptor-set-layout-create-info
+                :flags 0 :binding-count count :p-bindings bindings)
+        (create-descriptor-set-layout-handle device create-info)))))
+
 (defun create-sampled-image-sampler-descriptor-set-layout
     (device &key (texture-binding 0) (sampler-binding 1))
-  (cffi:with-foreign-object
-      (bindings '(:struct descriptor-set-layout-binding) 2)
-    (fill-vk
-     (cffi:mem-aptr bindings '(:struct descriptor-set-layout-binding) 0)
-     'descriptor-set-layout-binding
-     :binding texture-binding :descriptor-type :sampled-image
-     :descriptor-count 1 :stage-flags '(:vertex :fragment)
-     :p-immutable-samplers (cffi:null-pointer))
-    (fill-vk
-     (cffi:mem-aptr bindings '(:struct descriptor-set-layout-binding) 1)
-     'descriptor-set-layout-binding
-     :binding sampler-binding :descriptor-type :sampler
-     :descriptor-count 1 :stage-flags '(:vertex :fragment)
-     :p-immutable-samplers (cffi:null-pointer))
-    (with-vk (create-info descriptor-set-layout-create-info
-              :flags 0 :binding-count 2 :p-bindings bindings)
-      (create-descriptor-set-layout-handle device create-info))))
+  (create-texture-sampler-uniform-descriptor-set-layout
+   device
+   `((:binding ,texture-binding :type :texture)
+     (:binding ,sampler-binding :type :sampler))))
 
 (defun create-sampled-image-sampler-uniform-descriptor-set-layout
     (device &key (texture-binding 0) (sampler-binding 1)
                  (uniform-binding 2))
-  (cffi:with-foreign-object
-      (bindings '(:struct descriptor-set-layout-binding) 3)
-    (fill-vk
-     (cffi:mem-aptr bindings '(:struct descriptor-set-layout-binding) 0)
-     'descriptor-set-layout-binding
-     :binding texture-binding :descriptor-type :sampled-image
-     :descriptor-count 1 :stage-flags '(:fragment)
-     :p-immutable-samplers (cffi:null-pointer))
-    (fill-vk
-     (cffi:mem-aptr bindings '(:struct descriptor-set-layout-binding) 1)
-     'descriptor-set-layout-binding
-     :binding sampler-binding :descriptor-type :sampler
-     :descriptor-count 1 :stage-flags '(:fragment)
-     :p-immutable-samplers (cffi:null-pointer))
-    (fill-vk
-     (cffi:mem-aptr bindings '(:struct descriptor-set-layout-binding) 2)
-     'descriptor-set-layout-binding
-     :binding uniform-binding :descriptor-type :uniform-buffer
-     ;; The frame environment block feeds both stages: vertex work reads the
-     ;; camera basis while fragment materials read the sky and light lanes.
-     :descriptor-count 1 :stage-flags '(:vertex :fragment)
-     :p-immutable-samplers (cffi:null-pointer))
-    (with-vk (create-info descriptor-set-layout-create-info
-              :flags 0 :binding-count 3 :p-bindings bindings)
-      (create-descriptor-set-layout-handle device create-info))))
+  (create-texture-sampler-uniform-descriptor-set-layout
+   device
+   `((:binding ,texture-binding :type :texture :stages (:fragment))
+     (:binding ,sampler-binding :type :sampler :stages (:fragment))
+     (:binding ,uniform-binding :type :uniform-buffer))))
 
 (defun destroy-descriptor-set-layout (device layout)
   (vk:destroy-descriptor-set-layout device layout (cffi:null-pointer))
@@ -1078,6 +1079,38 @@ destroy it before destroying INSTANCE."
               :pool-size-count 3 :p-pool-sizes pool-sizes)
       (create-descriptor-pool-handle device create-info))))
 
+(defun texture-sampler-uniform-pool-counts (entries)
+  (values (count :texture entries :key (lambda (entry) (getf entry :type)))
+          (count :sampler entries :key (lambda (entry) (getf entry :type)))
+          (count :uniform-buffer entries
+                 :key (lambda (entry) (getf entry :type)))))
+
+(defun create-texture-sampler-uniform-descriptor-pool
+    (device entries &key (max-sets 1))
+  (multiple-value-bind (texture-count sampler-count uniform-count)
+      (texture-sampler-uniform-pool-counts entries)
+    (let ((sizes (append
+                  (when (plusp texture-count)
+                    (list (list :sampled-image texture-count)))
+                  (when (plusp sampler-count)
+                    (list (list :sampler sampler-count)))
+                  (when (plusp uniform-count)
+                    (list (list :uniform-buffer uniform-count))))))
+      (cffi:with-foreign-object
+          (pool-sizes '(:struct descriptor-pool-size) (length sizes))
+        (loop for (type count) in sizes
+              for index from 0
+              do (fill-vk
+                  (cffi:mem-aptr
+                   pool-sizes '(:struct descriptor-pool-size) index)
+                  'descriptor-pool-size
+                  :type type :descriptor-count (* count max-sets)))
+        (with-vk (create-info descriptor-pool-create-info
+                  :flags 0 :max-sets max-sets
+                  :pool-size-count (length sizes)
+                  :p-pool-sizes pool-sizes)
+          (create-descriptor-pool-handle device create-info))))))
+
 (defun destroy-descriptor-pool (device pool)
   (vk:destroy-descriptor-pool device pool (cffi:null-pointer))
   (values))
@@ -1210,6 +1243,101 @@ destroy it before destroying INSTANCE."
          :p-texel-buffer-view (cffi:null-pointer))
         (vk:update-descriptor-sets
          device 3 writes 0 (cffi:null-pointer)))))
+  (values))
+
+(defun update-texture-sampler-uniform-descriptors
+    (device descriptor-set entries)
+  (let ((image-count
+          (count-if (lambda (entry)
+                      (member (getf entry :type) '(:texture :sampler)))
+                    entries))
+        (buffer-count
+          (count :uniform-buffer entries
+                 :key (lambda (entry) (getf entry :type))))
+        (write-count (length entries)))
+    (cffi:with-foreign-object
+        (image-infos '(:struct descriptor-image-info) (max 1 image-count))
+      (cffi:with-foreign-object
+          (buffer-infos '(:struct descriptor-buffer-info)
+                        (max 1 buffer-count))
+        (cffi:with-foreign-object
+            (writes '(:struct write-descriptor-set) write-count)
+          (loop with image-index = 0
+                with buffer-index = 0
+                for entry in entries
+                for write-index from 0
+                for type = (getf entry :type)
+                for write = (cffi:mem-aptr
+                             writes '(:struct write-descriptor-set)
+                             write-index)
+                do
+                   (ecase type
+                     (:texture
+                      (let ((image-info
+                              (cffi:mem-aptr
+                               image-infos
+                               '(:struct descriptor-image-info)
+                               image-index)))
+                        (fill-vk image-info 'descriptor-image-info
+                                 :sampler (cffi:null-pointer)
+                                 :image-view (getf entry :image-view)
+                                 :image-layout
+                                 :shader-read-only-optimal)
+                        (fill-vk
+                         write 'write-descriptor-set
+                         :dst-set descriptor-set
+                         :dst-binding (getf entry :binding)
+                         :dst-array-element 0
+                         :descriptor-count 1
+                         :descriptor-type :sampled-image
+                         :p-image-info image-info
+                         :p-buffer-info (cffi:null-pointer)
+                         :p-texel-buffer-view (cffi:null-pointer))
+                        (incf image-index)))
+                     (:sampler
+                      (let ((image-info
+                              (cffi:mem-aptr
+                               image-infos
+                               '(:struct descriptor-image-info)
+                               image-index)))
+                        (fill-vk image-info 'descriptor-image-info
+                                 :sampler (getf entry :sampler)
+                                 :image-view (cffi:null-pointer)
+                                 :image-layout :undefined)
+                        (fill-vk
+                         write 'write-descriptor-set
+                         :dst-set descriptor-set
+                         :dst-binding (getf entry :binding)
+                         :dst-array-element 0
+                         :descriptor-count 1
+                         :descriptor-type :sampler
+                         :p-image-info image-info
+                         :p-buffer-info (cffi:null-pointer)
+                         :p-texel-buffer-view (cffi:null-pointer))
+                        (incf image-index)))
+                     (:uniform-buffer
+                      (let ((buffer-info
+                              (cffi:mem-aptr
+                               buffer-infos
+                               '(:struct descriptor-buffer-info)
+                               buffer-index)))
+                        (fill-vk buffer-info 'descriptor-buffer-info
+                                 :buffer (getf entry :buffer)
+                                 :offset 0
+                                 :range (getf entry :buffer-size))
+                        (fill-vk
+                         write 'write-descriptor-set
+                         :dst-set descriptor-set
+                         :dst-binding (getf entry :binding)
+                         :dst-array-element 0
+                         :descriptor-count 1
+                         :descriptor-type :uniform-buffer
+                         :p-image-info (cffi:null-pointer)
+                         :p-buffer-info buffer-info
+                         :p-texel-buffer-view (cffi:null-pointer))
+                        (incf buffer-index)))))
+          (vk:update-descriptor-sets
+           device write-count writes 0 (cffi:null-pointer))))))
   (values))
 
 (defun create-command-pool (device queue-family-index &key flags)
