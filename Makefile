@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := all
 
-.PHONY: all luvcraft run test shader-validate smoke mcluv clean
+.PHONY: all luvcraft run test parinfer-check shader-validate smoke mcluv clean
 
 all: luvcraft
 
@@ -10,11 +10,14 @@ luvcraft:
 run: luvcraft
 	nix develop -c ./build/luvcraft
 
-test: shader-validate
+test: parinfer-check shader-validate
 	nix develop -c sbcl --non-interactive \
 		--eval '(require :asdf)' \
 		--eval '(asdf:load-asd (truename "luv.asd"))' \
 		--eval '(asdf:test-system :luv)'
+
+parinfer-check:
+	@nix develop -c sh -c 'tmp=$$(mktemp); trap "rm -f $$tmp" EXIT; for file in $$(rg --files -g"*.lisp"); do if ! ./sly parinfer --strict --check "$$file" >"$$tmp" 2>&1; then cat "$$tmp"; exit 1; fi; done; echo "parinfer: strict check passed."'
 
 shader-validate:
 	mkdir -p build
