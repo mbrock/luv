@@ -2,6 +2,17 @@
 
 (in-package #:luv)
 
+(defclass gazetteer-open-sky-source () ())
+
+(defmethod absent-chunk-light-semantics
+    ((source gazetteer-open-sky-source) world chunk-key direction)
+  (declare (ignore source world chunk-key))
+  (destructuring-bind (dx dy dz) direction
+    (declare (ignore dx dz))
+    (cond ((plusp dy) :open-sky)
+          ((minusp dy) :closed)
+          (t :unknown))))
+
 (defclass luvcraft-gazetteer-view ()
   ((name :initarg :name :reader luvcraft-gazetteer-view-name)
    (description :initarg :description
@@ -29,6 +40,25 @@
         (loop for z below 16 do
           (setf (world-block-at world x 0 z) *stone-block*))))
     (setf (world-block-at world crystal-x crystal-y crystal-z) *crystal-block*)
+    (relight-block-world world)
+    world))
+
+(defun make-gazetteer-shadow-yard-world ()
+  "A deliberately artificial yard for checking legible cast shadows."
+  (let ((world (make-block-world
+                :source (make-instance 'gazetteer-open-sky-source))))
+    (ensure-world-chunk world 0 0 0)
+    (loop for x below 16 do
+      (loop for z below 16 do
+        (setf (world-block-at world x 0 z) *snow-block*)))
+    ;; Elevated casters offset from the camera: their shadow should read as a
+    ;; discrete diagonal mark on the bright receiver, not as general darkness.
+    (loop for x from 11 below 15 do
+      (loop for z from 9 below 12 do
+        (setf (world-block-at world x 5 z) *stone-block*)))
+    (setf (world-block-at world 10 1 11) *stone-block*
+          (world-block-at world 10 2 11) *stone-block*
+          (world-block-at world 10 3 11) *stone-block*)
     (relight-block-world world)
     world))
 
@@ -87,7 +117,17 @@
     (lambda () (make-instance 'fly-camera
                               :x 15.5d0 :y 4.2d0 :z 1.2d0
                               :yaw 0.05d0 :pitch -0.28d0))
-    0.90)))
+    0.90)
+   (make-luvcraft-gazetteer-view
+    :shadow-yard
+    "A low sun over a flat receiver with elevated block casters."
+    "luvcraft gazetteer - shadow yard"
+    (lambda () (make-gazetteer-shadow-yard-world))
+    (lambda () (make-instance 'fly-camera
+                              :x 7.5d0 :y 7.0d0 :z -5.0d0
+                              :yaw 0.12d0 :pitch -0.50d0))
+    0.50
+    :width 960 :height 640)))
 
 (defun luvcraft-gazetteer-views ()
   "Return the semantic screenshot views captured by the luvcraft gazetteer."

@@ -61,7 +61,9 @@
   "Pack a simple orthographic light-space transform as four vec4 rows."
   (let* ((center (vec3 (camera-x camera) (camera-y camera) (camera-z camera)))
          (forward
-           (vec3-normalize (sky-frame-parameters-sun-direction sky)))
+           (vec3-scale
+            (vec3-normalize (sky-frame-parameters-sun-direction sky))
+            -1.0))
          (basis-up
            (if (< (abs (aref forward 1)) 0.92)
                (vec3 0.0 1.0 0.0)

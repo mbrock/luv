@@ -725,12 +725,42 @@ Evidence:
 - The block fragment shader multiplies only the direct sun term by
   =shadow-visibility=; ambient skylight and blocklight keep their current
   semantics.
-- =make test= and =make smoke= passed, and the smoke capture at
-  =build/luvcraft-smoke.png= was inspected with visible block shadows.
+- The first smoke capture was not strong enough evidence: it mostly proved the
+  frame survived.  The follow-up =shadow-yard= gazetteer view isolates a bright
+  snow receiver and elevated casters, and a shadow-disabled control made the
+  over-shadowing failure obvious.
+- The light-space forward axis now points from the sun toward the world.  With
+  that sign fixed, =build/gazetteer/shadow-yard.png= shows an isolated cast
+  rectangle from the elevated slab, while the control stays bright except for
+  voxel skylight/contact darkening.
+- =make test=, =make smoke=, and
+  =scripts/luv gazetteer build/gazetteer --view shadow-yard= passed.
 
 Done when: a pinned scene shows moving geometry casting real-time direct-light
 shadows through the shader abstraction, with all new textures, bind groups, and
 pipelines retiring through the existing completion frontier.
+
+** DONE Visual evidence standard for shadow changes
+:PROPERTIES:
+:ID: 0BHYRT
+:END:
+
+Intent: keep shadow work from passing on screenshots that are merely plausible
+or too dark to inspect.
+
+Evidence:
+
+- A shadow-map change needs at least one pinned gazetteer view whose scene is
+  composed for inspection: bright receiver, isolated caster, stable camera, and
+  known sky/direct-light inputs.
+- A smoke capture can remain a survival check, but it is not evidence that
+  cast shadows are correct unless the shadow shape is obvious in frame.
+- When the visual result is ambiguous, capture a control image with shadow
+  sampling disabled or otherwise isolated, then compare the receiver region
+  before accepting the implementation.
+
+Done when: future shadow iterations cite the pinned view and inspection
+condition they used, not just the existence of a rendered PNG.
 
 ** IDEA HDR crystal bloom
 :PROPERTIES:
