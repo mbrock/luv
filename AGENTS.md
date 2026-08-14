@@ -59,8 +59,10 @@ The connection-free `./sly parinfer [--check|--diff|--write] [--strict] [--file 
 filter repairs common parenthesis mistakes using indentation. Ordinary
 `--check` is a low-noise guard for validated balance repairs. Add `--strict`
 to also fail when a file is already paren-balanced but indentation suggests a
-different tree. `--diff` shows the indentation candidate in either case;
-`--write` only applies validated repairs for unbalanced input and refuses to
+different tree. The indentation candidate knows a few Lisp layout conventions,
+including top-level blank-line fences and common binding-list shapes. `--diff`
+shows the indentation candidate in either case; `--write` only applies
+validated repairs for unbalanced input and refuses to
 rewrite suspicious-but-balanced source. With no argument it reads multiline
 source from stdin, for example `./sly parinfer < unfinished.lisp`. It is still
 a repair heuristic rather than a full Common Lisp reader.

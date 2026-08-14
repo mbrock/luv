@@ -45,11 +45,19 @@
   (block-comment-depth 0 :type (integer 0))
   (block-sharp-seen nil :type boolean)
   (block-bar-seen nil :type boolean)
+  (token-buffer nil :type list)
+  token-form
   (unmatched-closes 0 :type (integer 0)))
 
-(defstruct (open-form (:constructor make-open-form (column line)))
+(defstruct (open-form
+            (:constructor make-open-form
+                (column line &key open-column role head element-count)))
   (column 0 :type (integer 0))
-  (line 0 :type (integer 0)))
+  (line 0 :type (integer 0))
+  (open-column 0 :type (integer 0))
+  (role :ordinary :type symbol)
+  head
+  (element-count 0 :type (integer 0)))
 
 (defstruct (close-event (:constructor make-close-event (open-form column)))
   open-form
@@ -60,6 +68,15 @@
   (candidate "" :type string)
   (candidate-balanced-p nil :type boolean)
   (candidate-changed-p nil :type boolean))
+
+(defparameter *binding-form-heads*
+  '("LET" "LET*" "FLET" "LABELS" "MACROLET" "SYMBOL-MACROLET"))
+
+(defparameter *clause-form-heads*
+  '("COND" "CASE" "CCASE" "ECASE" "TYPECASE" "CTYPECASE" "ETYPECASE"))
+
+(defparameter *slot-list-form-heads*
+  '("DEFCLASS"))
 
 (defun split-lines (text)
   (if (zerop (length text))
@@ -83,19 +100,109 @@
     (or (string= trimmed "")
         (char= (char trimmed 0) #\;))))
 
+(defun blank-line-p (line)
+  (string= (string-left-trim '(#\Space #\Tab) line) ""))
+
+(defun leftmost-opening-line-p (line)
+  (and (plusp (length line))
+       (char= (char line 0) #\()))
+
+(defun normalized-token (characters)
+  (string-upcase (coerce (nreverse characters) 'string)))
+
+(defun register-form-element (form)
+  (when form
+    (incf (open-form-element-count form))))
+
+(defun finish-token (state)
+  (when (state-token-buffer state)
+    (let ((form (state-token-form state))
+          (token (normalized-token (state-token-buffer state))))
+      (when form
+        (register-form-element form)
+        (when (= (open-form-element-count form) 1)
+          (setf (open-form-head form) token))))
+    (setf (state-token-buffer state) nil
+          (state-token-form state) nil)))
+
+(defun token-character-p (character)
+  (not (member character
+               '(#\Space #\Tab #\Newline #\( #\) #\" #\;))))
+
+(defun begin-or-continue-token (state character)
+  (unless (state-token-buffer state)
+    (setf (state-token-form state) (first (state-stack state))))
+  (push character (state-token-buffer state)))
+
+(defun child-role (parent child-index)
+  (cond
+    ((and parent
+          (member (open-form-head parent) *binding-form-heads*
+                  :test #'string=)
+          (= child-index 2))
+     :binding-list)
+    ((and parent
+          (eq (open-form-role parent) :binding-list))
+     :binding)
+    ((and parent
+          (member (open-form-head parent) *clause-form-heads*
+                  :test #'string=)
+          (>= child-index 2))
+     :clause)
+    ((and parent
+          (member (open-form-head parent) *slot-list-form-heads*
+                  :test #'string=)
+          (= child-index 4))
+     :slot-list)
+    ((and parent
+          (eq (open-form-role parent) :slot-list))
+     :slot)
+    (t :ordinary)))
+
+(defun opener-column-role-p (role)
+  (member role '(:binding-list :slot-list)))
+
+(defun role-open-threshold (role open-column)
+  (case role
+    (:binding-list (max 0 (1- open-column)))
+    (t open-column)))
+
+(defun make-child-open-form (parent open-column line-number)
+  (let* ((child-index (when parent
+                        (register-form-element parent)
+                        (open-form-element-count parent)))
+         (role (child-role parent child-index))
+         (threshold (if (opener-column-role-p role)
+                        (role-open-threshold role open-column)
+                        (1+ open-column))))
+    (make-open-form threshold line-number
+                    :open-column open-column
+                    :role role)))
+
+(defun maybe-lower-head-continuation-threshold (form indentation)
+  (when (and (open-form-head form)
+             (= (open-form-element-count form) 1))
+    (let ((continuation-column (max 0 (1- (open-form-open-column form)))))
+      (when (and (<= continuation-column indentation)
+                 (< continuation-column (open-form-column form)))
+        (setf (open-form-column form) continuation-column)))))
+
 (defun dedent-closes (state indentation)
-  (loop while (and (state-stack state)
-                   (> (open-form-column (first (state-stack state)))
-                      indentation))
+  (loop while (state-stack state)
+        for form = (first (state-stack state))
+        do (maybe-lower-head-continuation-threshold form indentation)
+        while (> (open-form-column form) indentation)
         do (pop (state-stack state))
         count 1))
 
 (defun append-closes-to-previous-line (processed-lines count)
   (when (and (plusp count) processed-lines)
-    (setf (first processed-lines)
-          (concatenate 'string
-                       (first processed-lines)
-                       (make-string count :initial-element #\)))))
+    (let ((target (find-if-not #'blank-line-p processed-lines)))
+      (when target
+        (setf (car (member target processed-lines :test #'eq))
+              (concatenate 'string
+                           target
+                           (make-string count :initial-element #\)))))))
   processed-lines)
 
 (defun last-code-character-index (line)
@@ -123,8 +230,11 @@
 (defun tail-events (events count)
   (last events (min count (length events))))
 
-(defun defer-pending-trail-closes (state processed-lines pending-events indentation)
+(defun defer-pending-trail-closes
+    (state processed-lines pending-events indentation previous-indentation)
   (loop while (and pending-events
+                   previous-indentation
+                   (> indentation previous-indentation)
                    (<= (open-form-column
                         (close-event-open-form (first pending-events)))
                        indentation))
@@ -183,9 +293,11 @@
                    (write-char character output))
                   ((char= character #\()
                    (write-char character output)
-                   (push (make-open-form (1+ column) line-number)
+                   (push (make-child-open-form
+                          (first (state-stack state)) column line-number)
                          (state-stack state)))
                   ((char= character #\))
+                   (finish-token state)
                    (if (state-stack state)
                        (let ((open-form (pop (state-stack state))))
                          (push (make-close-event open-form column)
@@ -200,26 +312,42 @@
                 (write-char character output)
                 (setf (state-escape state) t))
                ((char= character #\")
+                (unless (state-in-string state)
+                  (finish-token state))
                 (write-char character output)
                 (setf (state-in-string state)
                       (not (state-in-string state))))
                ((and (not (state-in-string state)) (char= character #\#))
+                (finish-token state)
                 (write-char character output)
                 (setf (state-sharp-seen state) t))
                ((and (not (state-in-string state)) (char= character #\;))
+                (finish-token state)
                 (write-string line output :start column)
                 (loop-finish))
+               ((and (not (state-in-string state))
+                     (member character '(#\Space #\Tab)))
+                (finish-token state)
+                (write-char character output))
                ((and (not (state-in-string state)) (char= character #\())
+                (finish-token state)
                 (write-char character output)
-                (push (make-open-form (1+ column) line-number)
+                (push (make-child-open-form
+                       (first (state-stack state)) column line-number)
                       (state-stack state)))
                ((and (not (state-in-string state)) (char= character #\)))
+                (finish-token state)
                 (if (state-stack state)
                     (let ((open-form (pop (state-stack state))))
                       (push (make-close-event open-form column) close-events)
                       (write-char character output))
                     (incf (state-unmatched-closes state))))
+               ((and (not (state-in-string state))
+                     (token-character-p character))
+                (begin-or-continue-token state character)
+                (write-char character output))
                (t (write-char character output))))
+       (finish-token state)
        (setf (state-escape state) nil
              (state-sharp-seen state) nil
              (state-char-literal state) nil
@@ -259,27 +387,53 @@ candidate, not necessarily a safe edit."
                (char= (char text (1- (length text))) #\Newline)))
         (state (make-state))
         (processed-lines nil)
-        (pending-trail-events nil))
+        (pending-trail-events nil)
+        (pending-trail-indentation nil)
+        (blank-boundary-seen-p nil))
     (loop for line in (split-lines text)
           for line-number from 1
-          do (progn
-               (unless (or (state-in-string state)
-                           (plusp (state-block-comment-depth state))
-                           (empty-or-comment-line-p line))
-                 (setf pending-trail-events
-                       (defer-pending-trail-closes
-                        state processed-lines pending-trail-events
-                        (count-leading-space line)))
-                 (append-closes-to-previous-line
-                  processed-lines
-                  (dedent-closes state (count-leading-space line))))
-               (multiple-value-bind (processed-line close-events)
-                   (process-line line state line-number)
-                 (push processed-line processed-lines)
-                 (setf pending-trail-events
-                       (reverse
-                        (tail-events close-events
-                                     (trailing-close-count line)))))))
+          do (cond
+               ((and (not (state-in-string state))
+                     (zerop (state-block-comment-depth state))
+                     (blank-line-p line))
+                (setf blank-boundary-seen-p t)
+                (push line processed-lines))
+               (t
+                (let ((line-started-in-string-p (state-in-string state))
+                      (line-started-in-block-comment-p
+                        (plusp (state-block-comment-depth state))))
+                  (unless (or line-started-in-string-p
+                              line-started-in-block-comment-p
+                              (empty-or-comment-line-p line))
+                    (when (and blank-boundary-seen-p
+                               (leftmost-opening-line-p line))
+                      (append-closes-to-previous-line
+                       processed-lines (length (state-stack state)))
+                      (setf (state-stack state) nil
+                            pending-trail-events nil
+                            pending-trail-indentation nil))
+                    (setf pending-trail-events
+                          (defer-pending-trail-closes
+                           state processed-lines pending-trail-events
+                           (count-leading-space line)
+                           pending-trail-indentation))
+                    (append-closes-to-previous-line
+                     processed-lines
+                     (dedent-closes state (count-leading-space line))))
+                  (setf blank-boundary-seen-p nil)
+                  (multiple-value-bind (processed-line close-events)
+                      (process-line line state line-number)
+                    (push processed-line processed-lines)
+                    (if (or line-started-in-string-p
+                            line-started-in-block-comment-p)
+                        (setf pending-trail-events nil
+                              pending-trail-indentation nil)
+                        (setf pending-trail-events
+                              (reverse
+                               (tail-events close-events
+                                            (trailing-close-count line)))
+                              pending-trail-indentation
+                              (count-leading-space line))))))))
     (append-remaining-closes state processed-lines)
     (let ((result (format nil "~{~A~^~%~}" (nreverse processed-lines))))
       (if ends-with-newline
