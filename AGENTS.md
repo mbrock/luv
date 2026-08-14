@@ -21,7 +21,7 @@ commit.
 
 Reusable design guidance lives in `.agents/skills/` using the open agent
 skills format (`SKILL.md` with name/description frontmatter), so any
-skill-aware agent can load it; `.claude/skills/` symlinks there for Claude
+skill-aware agent can load it; `.claude/skills` is a symlink there for Claude
 Code. Start with `clos-design` before designing a new subsystem or
 refactoring dispatch code.
 
