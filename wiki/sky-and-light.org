@@ -508,7 +508,7 @@ verification loop remains:
 #+begin_src sh
 make test
 make smoke
-scripts/luv gazetteer build/gazetteer --view crystal-night
+scripts/luv gazetteer build/gazetteer --view glow-floor
 md5 -q build/luvcraft-smoke.png
 #+end_src
 
@@ -589,8 +589,8 @@ Evidence:
   atlas size, and the crystal material readings.
 - =tests/light.lisp= covers crystal placement/removal across a chunk boundary,
   reference-field convergence, affected light revisions, and mesh emission.
-- A local pinned-night capture, generated as =build/crystal-night.png=, showed
-  the crystal face glowing and warming nearby floor surfaces.
+- The gazetteer =glow-floor= view showed the crystal face glowing and warming
+  nearby floor surfaces.
 
 Done when: a pinned-night capture shows the crystal face glowing and warming
 nearby surfaces, while tests cover placement/removal and cross-chunk falloff.

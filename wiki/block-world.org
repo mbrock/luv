@@ -96,12 +96,12 @@ finished system.
 The gazetteer is a small set of semantic screenshot descriptors.  Each entry
 names a gameplay-ish view, builds or streams the world it needs, pins the sky
 clock, chooses a camera, and captures through the real hidden SDL/Vulkan path.
-The first views cover generated terrain at noon and dusk, a crystal at night,
-and a crystal placed on a chunk seam.
+The first views cover generated terrain at noon and dusk, a placed emitter on
+a dark floor, and a crystal placed on a chunk seam.
 
 #+begin_src sh
 scripts/luv gazetteer build/gazetteer
-scripts/luv gazetteer build/gazetteer --view crystal-night --width 640 --height 480
+scripts/luv gazetteer build/gazetteer --view glow-floor --width 640 --height 480
 #+end_src
 
 This is not a replacement for tests.  It is a stable visual vocabulary for

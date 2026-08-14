@@ -170,7 +170,7 @@
          (names (mapcar #'luvcraft-gazetteer-view-name views)))
     (ok (equal names (remove-duplicates names :test #'eq)))
     (dolist (name '(:little-world-noon :little-world-dusk
-                   :crystal-night :crystal-seam))
+                   :glow-floor :crystal-seam))
       (ok (find name names)))
     (let* ((view (find-luvcraft-gazetteer-view "crystal-seam"))
            (world

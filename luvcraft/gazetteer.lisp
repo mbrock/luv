@@ -70,9 +70,9 @@
                               :yaw 0.42d0 :pitch -0.30d0))
     0.74)
    (make-luvcraft-gazetteer-view
-    :crystal-night
-    "A placed crystal proving material emission and blocklight at night."
-    "luvcraft gazetteer - crystal night"
+    :glow-floor
+    "A placed emitter proving material emission and blocklight under a dark sky."
+    "luvcraft gazetteer - glow floor"
     (lambda () (make-gazetteer-floor-world))
     (lambda () (make-instance 'fly-camera
                               :x 8.0d0 :y 4.0d0 :z 1.5d0
