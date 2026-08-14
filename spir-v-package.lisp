@@ -125,8 +125,10 @@
            #:shader-abstraction
            #:define-shader-abstraction
            #:shader-abstraction-p
+           #:shader-abstraction-revision
            #:expand-shader-abstraction-call
            #:expand-shader-source-form
+           #:shadow-depth-test
            #:shadow-visibility
            #:parse-shader-operator-call
            #:infer-shader-call-type

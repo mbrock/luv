@@ -10,17 +10,29 @@
        arguments
        `(("--view" :view ,#'parse-gazetteer-view-name-option)
          ("--width" :width ,#'parse-integer-option)
-         ("--height" :height ,#'parse-integer-option)))
+         ("--height" :height ,#'parse-integer-option)
+         ("--count" :count ,#'parse-integer-option)
+         ("--forward-step" :forward-step ,#'parse-real-option)
+         ("--yaw-step" :yaw-step ,#'parse-real-option)))
     (unless (= 1 (length positionals))
       (command-line-error "gazetteer expects exactly one TARGET directory."))
     (let ((target (pathname (first positionals)))
           (view (getf options :view))
           (width (getf options :width))
-          (height (getf options :height)))
+          (height (getf options :height))
+          (count (getf options :count)))
+      (when (and count (null view))
+        (command-line-error "gazetteer --count requires one --view."))
       (dolist (pathname
-                (luv:capture-luvcraft-gazetteer
-                 target
-                 :views (and view (list view))
-                 :width width
-                 :height height))
+                (if count
+                    (luv:capture-luvcraft-gazetteer-sequence
+                     view target :count count
+                     :forward-step (or (getf options :forward-step) 0.2)
+                     :yaw-step (or (getf options :yaw-step) 0.0)
+                     :width width :height height)
+                    (luv:capture-luvcraft-gazetteer
+                     target
+                     :views (and view (list view))
+                     :width width
+                     :height height)))
         (format t "~A~%" pathname)))))

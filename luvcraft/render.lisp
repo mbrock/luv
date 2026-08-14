@@ -18,6 +18,10 @@
 
 (defconstant +block-world-crosshair-vertex-count+ 24)
 (defconstant +luvcraft-shadow-map-size+ 1024)
+(defconstant +luvcraft-shadow-half-extent+ 64.0)
+(defconstant +luvcraft-shadow-depth-radius+ 96.0)
+(defconstant +luvcraft-shadow-base-bias+ 0.00045)
+(defconstant +luvcraft-shadow-slope-bias+ 0.0015)
 
 (defun vec3-dot (left right)
   (+ (* (aref left 0) (aref right 0))
@@ -58,7 +62,7 @@
     vertices))
 
 (defun shadow-frame-rows (camera sky)
-  "Pack a simple orthographic light-space transform as four vec4 rows."
+  "Pack a texel-stable orthographic light-space transform as four vec4 rows."
   (let* ((center (vec3 (camera-x camera) (camera-y camera) (camera-z camera)))
          (forward
            (vec3-scale
@@ -70,16 +74,24 @@
                (vec3 0.0 0.0 1.0)))
          (right (vec3-normalize (vec3-cross basis-up forward)))
          (up (vec3-cross forward right))
-         (extent 64.0)
-         (depth-radius 96.0))
+         (extent +luvcraft-shadow-half-extent+)
+         (depth-radius +luvcraft-shadow-depth-radius+)
+         (world-units-per-texel
+           (/ (* 2.0 extent) +luvcraft-shadow-map-size+))
+         (center-right
+           (* (round (/ (vec3-dot center right) world-units-per-texel))
+              world-units-per-texel))
+         (center-up
+           (* (round (/ (vec3-dot center up) world-units-per-texel))
+              world-units-per-texel)))
     (flet ((lane (axis scale offset)
              (list (* (aref axis 0) scale)
                    (* (aref axis 1) scale)
                    (* (aref axis 2) scale)
                    offset)))
       (append
-       (lane right (/ extent) (- (/ (vec3-dot center right) extent)))
-       (lane up (/ extent) (- (/ (vec3-dot center up) extent)))
+       (lane right (/ extent) (- (/ center-right extent)))
+       (lane up (/ extent) (- (/ center-up extent)))
        (lane forward (/ (* 2.0 depth-radius))
              (- 0.5 (/ (vec3-dot center forward) (* 2.0 depth-radius))))
        '(0.0 0.0 0.0 1.0)))))
@@ -93,7 +105,7 @@ check in BLOCK-WORLD-CAMERA-UNIFORM-SIZE keeps the two honest."
                         (luvcraft-session-camera session) width height))
          (sky (sky-frame-parameters (luvcraft-session-sky-clock session)
                                     (luvcraft-session-sky-profile session)))
-         (data (make-array (+ (length camera-lanes) 44)
+         (data (make-array (+ (length camera-lanes) 48)
                            :element-type 'single-float))
          (index (length camera-lanes)))
     (replace data camera-lanes)
@@ -118,6 +130,10 @@ check in BLOCK-WORLD-CAMERA-UNIFORM-SIZE keeps the two honest."
                               (list (sky-frame-parameters-exposure sky))))
         (apply #'emit (append (color (sky-frame-parameters-fog-color sky))
                               (list 0.0)))
+        (emit (/ +luvcraft-shadow-map-size+)
+              (/ +luvcraft-shadow-map-size+)
+              +luvcraft-shadow-base-bias+
+              +luvcraft-shadow-slope-bias+)
         (apply #'emit (shadow-frame-rows
                        (luvcraft-session-camera session) sky))))
     data))
@@ -478,8 +494,8 @@ capture-only demand clock."
                     (keep
                      (create device (make-sampler-descriptor
                                      :label "block world shadow sampler"
-                                     :mag-filter :linear
-                                     :min-filter :linear
+                                     :mag-filter :nearest
+                                     :min-filter :nearest
                                      :mipmap-filter :nearest))))
                   (atlas-width
                     (* +block-atlas-tile-size+ +block-atlas-tile-count+))

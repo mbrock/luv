@@ -30,13 +30,15 @@ shader-validate:
 		--eval '(luv.spir-v:write-spir-v (luv.spir-v:block-world-crosshair-vertex-shader) #p"build/block-world-crosshair.vert.spv")' \
 		--eval '(luv.spir-v:write-spir-v (luv.spir-v:block-world-crosshair-fragment-shader) #p"build/block-world-crosshair.frag.spv")' \
 		--eval '(luv.spir-v:write-spir-v (luv.spir-v:block-world-sky-vertex-shader) #p"build/block-world-sky.vert.spv")' \
-		--eval '(luv.spir-v:write-spir-v (luv.spir-v:block-world-sky-fragment-shader) #p"build/block-world-sky.frag.spv")'
+		--eval '(luv.spir-v:write-spir-v (luv.spir-v:block-world-sky-fragment-shader) #p"build/block-world-sky.frag.spv")' \
+		--eval '(luv.spir-v:write-spir-v (luv.spir-v:block-world-shadow-vertex-shader) #p"build/block-world-shadow.vert.spv")'
 	nix develop -c spirv-val --target-env vulkan1.0 build/block-world.vert.spv
 	nix develop -c spirv-val --target-env vulkan1.0 build/block-world.frag.spv
 	nix develop -c spirv-val --target-env vulkan1.0 build/block-world-crosshair.vert.spv
 	nix develop -c spirv-val --target-env vulkan1.0 build/block-world-crosshair.frag.spv
 	nix develop -c spirv-val --target-env vulkan1.0 build/block-world-sky.vert.spv
 	nix develop -c spirv-val --target-env vulkan1.0 build/block-world-sky.frag.spv
+	nix develop -c spirv-val --target-env vulkan1.0 build/block-world-shadow.vert.spv
 
 smoke: luvcraft
 	mkdir -p build

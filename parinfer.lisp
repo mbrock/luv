@@ -40,6 +40,8 @@
   (stack nil :type list)
   (in-string nil :type boolean)
   (escape nil :type boolean)
+  (in-bar-symbol nil :type boolean)
+  (symbol-escape nil :type boolean)
   (sharp-seen nil :type boolean)
   (char-literal nil :type boolean)
   (block-comment-depth 0 :type (integer 0))
@@ -305,6 +307,17 @@
                          (write-char character output))
                        (incf (state-unmatched-closes state))))
                   (t (write-char character output))))
+               ((state-symbol-escape state)
+                (begin-or-continue-token state character)
+                (write-char character output)
+                (setf (state-symbol-escape state) nil))
+               ((state-in-bar-symbol state)
+                (begin-or-continue-token state character)
+                (write-char character output)
+                (cond ((char= character #\\)
+                       (setf (state-symbol-escape state) t))
+                      ((char= character #\|)
+                       (setf (state-in-bar-symbol state) nil))))
                ((state-escape state)
                 (write-char character output)
                 (setf (state-escape state) nil))
@@ -317,6 +330,14 @@
                 (write-char character output)
                 (setf (state-in-string state)
                       (not (state-in-string state))))
+               ((and (not (state-in-string state)) (char= character #\|))
+                (begin-or-continue-token state character)
+                (write-char character output)
+                (setf (state-in-bar-symbol state) t))
+               ((and (not (state-in-string state)) (char= character #\\))
+                (begin-or-continue-token state character)
+                (write-char character output)
+                (setf (state-symbol-escape state) t))
                ((and (not (state-in-string state)) (char= character #\#))
                 (finish-token state)
                 (write-char character output)
@@ -347,7 +368,9 @@
                 (begin-or-continue-token state character)
                 (write-char character output))
                (t (write-char character output))))
-       (finish-token state)
+       (unless (or (state-in-bar-symbol state)
+                   (state-symbol-escape state))
+         (finish-token state))
        (setf (state-escape state) nil
              (state-sharp-seen state) nil
              (state-char-literal state) nil
@@ -370,6 +393,8 @@
          (zerop (state-block-comment-depth state))
          (not (state-in-string state))
          (not (state-escape state))
+         (not (state-in-bar-symbol state))
+         (not (state-symbol-escape state))
          (not (state-sharp-seen state))
          (not (state-char-literal state))
          (not (state-block-sharp-seen state))
@@ -394,15 +419,19 @@ candidate, not necessarily a safe edit."
           for line-number from 1
           do (cond
                ((and (not (state-in-string state))
+                     (not (state-in-bar-symbol state))
                      (zerop (state-block-comment-depth state))
                      (blank-line-p line))
                 (setf blank-boundary-seen-p t)
                 (push line processed-lines))
                (t
                 (let ((line-started-in-string-p (state-in-string state))
+                      (line-started-in-bar-symbol-p
+                        (state-in-bar-symbol state))
                       (line-started-in-block-comment-p
                         (plusp (state-block-comment-depth state))))
                   (unless (or line-started-in-string-p
+                              line-started-in-bar-symbol-p
                               line-started-in-block-comment-p
                               (empty-or-comment-line-p line))
                     (when (and blank-boundary-seen-p
@@ -425,6 +454,7 @@ candidate, not necessarily a safe edit."
                       (process-line line state line-number)
                     (push processed-line processed-lines)
                     (if (or line-started-in-string-p
+                            line-started-in-bar-symbol-p
                             line-started-in-block-comment-p)
                         (setf pending-trail-events nil
                               pending-trail-indentation nil)

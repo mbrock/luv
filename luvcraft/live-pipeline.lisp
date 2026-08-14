@@ -42,7 +42,11 @@
    (status :initform :building :accessor live-shader-pipeline-status)
    (diagnostic :initform nil :accessor live-shader-pipeline-diagnostic)
    (installed-revision :initform 0
-                       :accessor live-shader-pipeline-installed-revision)))
+                       :accessor live-shader-pipeline-installed-revision)
+   (installed-abstraction-revision :initform 0
+     :accessor live-shader-pipeline-installed-abstraction-revision)
+   (attempted-abstraction-revision :initform 0
+     :accessor live-shader-pipeline-attempted-abstraction-revision)))
 
 (defun build-live-shader-pipeline-candidate (artifact)
   "Build a complete candidate without mutating ARTIFACT's installed state."
@@ -125,8 +129,9 @@
           (ignore-errors (destroy vertex-module)))))))
 
 (defun install-live-shader-pipeline-candidate
-    (artifact revision vertex-specification vertex-lowering vertex-module
-     specification lowering fragment-module pipeline)
+    (artifact revision abstraction-revision vertex-specification
+     vertex-lowering vertex-module specification lowering fragment-module
+     pipeline)
   (let ((old-pipeline (live-shader-pipeline-native-pipeline artifact))
         (old-vertex-module
           (and (or (live-shader-pipeline-vertex-role artifact)
@@ -147,7 +152,11 @@
           (live-shader-pipeline-native-pipeline artifact) pipeline
           (live-shader-pipeline-status artifact) :installed
           (live-shader-pipeline-diagnostic artifact) nil
-          (live-shader-pipeline-installed-revision artifact) revision)
+          (live-shader-pipeline-installed-revision artifact) revision
+          (live-shader-pipeline-installed-abstraction-revision artifact)
+          abstraction-revision
+          (live-shader-pipeline-attempted-abstraction-revision artifact)
+          abstraction-revision)
     ;; Vulkan resource destruction is submission-aware.  Encoders retain the
     ;; old pipeline, and its native handles cross the completion frontier before
     ;; the backend actually destroys them.
@@ -168,6 +177,7 @@
     (&key role (stage :fragment) vertex-role label device layout vertex-module
           vertex-buffers target-format primitive depth-stencil)
   (let* ((generic-function (fdefinition 'spv:shader-specification-for))
+         (abstraction-revision (spv:shader-abstraction-revision))
          (dependent
            (spv:make-shader-definition-dependent
             generic-function (list role stage)))
@@ -191,7 +201,8 @@
                 specification lowering fragment-module pipeline)
              (build-live-shader-pipeline-candidate artifact)
            (install-live-shader-pipeline-candidate
-            artifact 0 vertex-specification vertex-lowering
+            artifact 0 abstraction-revision
+            vertex-specification vertex-lowering
             candidate-vertex-module specification lowering
             fragment-module pipeline)
            (setf completed-p t)
@@ -204,10 +215,14 @@
 (defun refresh-live-shader-pipeline (artifact)
   "Attempt the newest pending definition, retaining the last good pipeline."
   (let ((dependent (live-shader-pipeline-dependent artifact))
-        (vertex-dependent (live-shader-pipeline-vertex-dependent artifact)))
+        (vertex-dependent (live-shader-pipeline-vertex-dependent artifact))
+        (abstraction-revision (spv:shader-abstraction-revision)))
     (when (or (spv:shader-definition-change-pending-p dependent)
               (and vertex-dependent
-                   (spv:shader-definition-change-pending-p vertex-dependent)))
+                   (spv:shader-definition-change-pending-p vertex-dependent))
+              (> abstraction-revision
+                 (live-shader-pipeline-attempted-abstraction-revision
+                  artifact)))
       (multiple-value-bind (revision event)
           (spv:shader-definition-change-snapshot dependent)
         (declare (ignore event))
@@ -224,12 +239,16 @@
                   (build-live-shader-pipeline-candidate artifact)
                 (install-live-shader-pipeline-candidate
                  artifact (1+ (live-shader-pipeline-installed-revision artifact))
+                 abstraction-revision
                  vertex-specification vertex-lowering vertex-module
                  specification lowering fragment-module pipeline))
             (error (condition)
               ;; A failed edit is diagnostic state, not a rendering outage.
               (setf (live-shader-pipeline-status artifact) :failed
-                    (live-shader-pipeline-diagnostic artifact) condition)))
+                    (live-shader-pipeline-diagnostic artifact) condition
+                    (live-shader-pipeline-attempted-abstraction-revision
+                     artifact)
+                    abstraction-revision)))
             (spv:acknowledge-shader-definition-change dependent revision)
             (when vertex-dependent
               (spv:acknowledge-shader-definition-change

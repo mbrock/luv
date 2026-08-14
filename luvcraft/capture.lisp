@@ -60,9 +60,10 @@ world wait for products which can never exist."
             (first extent) (second extent) (canvas-format context)))
       (destroy buffer))))
 
-(defun hidden-luvcraft-frame-pathname (directory index)
+(defun hidden-luvcraft-frame-pathname
+    (directory index &optional (prefix "block-world"))
   (merge-pathnames
-   (format nil "block-world-~3,'0D.png" index)
+   (format nil "~A-~3,'0D.png" prefix index)
    (uiop:ensure-directory-pathname directory)))
 
 (defun capture-hidden-luvcraft-screenshot
@@ -99,19 +100,26 @@ pass an unpinned clock to photograph another time of day."
                  (title "luv hidden block world")
                  (width 960) (height 640)
                  (yaw-step 0.35)
+                 (forward-step 0.0)
+                 (pathname-prefix "block-world")
                  (world (make-empty-little-block-world))
                  (mesher (make-instance 'exposed-face-mesher))
                  (camera (make-instance 'fly-camera))
                  (sky-clock (make-instance 'sky-clock
-                                           :pinned-day-fraction 0.5)))
+                                           :pinned-day-fraction 0.5))
+                 (sky-profile (make-default-sky-profile)))
   "Capture COUNT hidden block-world frames into DIRECTORY.
 
-Each frame reuses one hidden SDL/Vulkan canvas and advances CAMERA's yaw by
-YAW-STEP, returning the pathnames that were written."
+Each frame reuses one hidden SDL/Vulkan canvas, advances CAMERA's yaw by
+YAW-STEP, and moves FORWARD-STEP world units along its initial heading.  This
+is a consecutive-view capture, not a set of independently restarted scenes."
   (check-type count (integer 1))
   (check-type yaw-step real)
+  (check-type forward-step real)
   (let ((directory (uiop:ensure-directory-pathname directory))
         (session nil)
+        (initial-x (camera-x camera))
+        (initial-z (camera-z camera))
         (initial-yaw (camera-yaw camera)))
     (ensure-directories-exist directory)
     (unwind-protect
@@ -121,12 +129,19 @@ YAW-STEP, returning the pathnames that were written."
                   :title title :width width :height height
                   :frames-per-second nil :visible-p nil
                   :world world :mesher mesher :camera camera
-                  :sky-clock sky-clock))
+                  :sky-clock sky-clock :sky-profile sky-profile))
            (loop for index below count
                  for pathname =
-                 (hidden-luvcraft-frame-pathname directory index)
+                 (hidden-luvcraft-frame-pathname
+                  directory index pathname-prefix)
                  do (setf (camera-yaw camera)
-                          (+ initial-yaw (* yaw-step index)))
+                          (+ initial-yaw (* yaw-step index))
+                          (camera-x camera)
+                          (+ initial-x
+                             (* forward-step index (sin initial-yaw)))
+                          (camera-z camera)
+                          (+ initial-z
+                             (* forward-step index (cos initial-yaw))))
                     (capture-luvcraft-screenshot session pathname)
                  collect pathname))
       (when session

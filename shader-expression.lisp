@@ -608,6 +608,21 @@ never collides with a standard symbol's function documentation:
 
 (defvar *shader-abstraction-documentation* (make-hash-table :test #'eq))
 
+(defvar *shader-abstraction-revision* 0)
+(defvar *shader-abstraction-revision-lock*
+  (sb-thread:make-mutex :name "luv shader abstraction revision"))
+
+(defun shader-abstraction-revision ()
+  "Return the revision of the process-wide source-abstraction vocabulary."
+  (sb-thread:with-mutex (*shader-abstraction-revision-lock*)
+    *shader-abstraction-revision*))
+
+(defun note-shader-abstraction-redefinition (name)
+  "Record that NAME's source expansion may have changed."
+  (declare (ignore name))
+  (sb-thread:with-mutex (*shader-abstraction-revision-lock*)
+    (incf *shader-abstraction-revision*)))
+
 (defmethod documentation ((name symbol) (type (eql 'shader-abstraction)))
   (gethash name *shader-abstraction-documentation*))
 
@@ -654,6 +669,7 @@ shader source form made from core operators or other abstractions."
        ,@(when documentation
            `((setf (documentation ',name 'shader-abstraction)
                    ,documentation)))
+       (note-shader-abstraction-redefinition ',name)
        ',name)))
 
 (defun expand-shader-source-form (form)
@@ -664,11 +680,25 @@ shader source form made from core operators or other abstractions."
           (expand-shader-abstraction-call (first form) form)))
         (t (mapcar #'expand-shader-source-form form))))
 
-(define-shader-abstraction shadow-visibility
+(define-shader-abstraction shadow-depth-test
     (depth-texture sampler coordinate receiver-depth bias)
-  "Hard shadow visibility from one depth-map sample and a receiver depth."
+  "One explicit receiver-versus-depth-map comparison."
   `(step (- ,receiver-depth ,bias)
          (swizzle (sample ,depth-texture ,sampler ,coordinate) :x)))
+
+(define-shader-abstraction shadow-visibility
+    (depth-texture sampler coordinate receiver-depth texel-size bias)
+  "Nine-tap percentage-closer visibility around one shadow coordinate."
+  `(/ (+ ,@(loop for y in '(-1.0 0.0 1.0)
+                 append
+                 (loop for x in '(-1.0 0.0 1.0)
+                       collect
+                       `(shadow-depth-test
+                         ,depth-texture ,sampler
+                         (+ ,coordinate
+                            (* ,texel-size (vec2 ,x ,y)))
+                         ,receiver-depth ,bias))))
+      9.0))
 
 (defgeneric parse-shader-operator-call (operator form environment)
   (:documentation
@@ -903,14 +933,12 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
     (generic-function name specialized-lambda-list options &body body)
   "Define a shader-producing method with ordinary DEFMETHOD identity.
 
-The parsed graph is constructed once when the method definition is loaded or
-evaluated.  Calling the generic function is consequently pure and cheap, while
-re-evaluating an identical qualifier/specializer coordinate replaces the old
-method and lets the MOP announce that definitional change."
+Calling the method reparses its small source form so changes to source-level
+abstractions participate in live rebuilding.  Method replacement remains the
+role/stage identity watched by the MOP; abstraction revisions are tracked
+separately by live artifacts."
   `(defmethod ,generic-function ,specialized-lambda-list
-     (load-time-value
-      (parse-shader-specification ',name ',options ',body)
-      t)))
+     (parse-shader-specification ',name ',options ',body)))
 
 (defclass shader-definition-dependent ()
   ((generic-function

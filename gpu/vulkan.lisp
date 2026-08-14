@@ -313,26 +313,14 @@ and scheduled texture layouts across the canvas and REPL threads.")))
    (layout
     :initarg :layout
     :reader vulkan-bind-group-layout)
-   (texture-view
-    :initarg :texture-view
-    :initform nil
-    :reader vulkan-bind-group-texture-view)
    (texture-views
     :initarg :texture-views
     :initform nil
     :reader vulkan-bind-group-texture-views)
-   (sampler
-    :initarg :sampler
-    :initform nil
-    :reader vulkan-bind-group-sampler)
    (samplers
     :initarg :samplers
     :initform nil
     :reader vulkan-bind-group-samplers)
-   (buffer
-    :initarg :buffer
-    :initform nil
-    :reader vulkan-bind-group-buffer)
    (buffers
     :initarg :buffers
     :initform nil
@@ -1334,7 +1322,7 @@ wrapper, this finalizer cannot run before theirs have."
               'vulkan-gpu-bind-group
               :label (gpu-descriptor-label descriptor)
               :handle set :device device :layout layout
-              :buffer buffer :buffers (list buffer)
+              :buffers (list buffer)
               :descriptor-pool pool))
         (unless completed-p
           (lvk:destroy-descriptor-pool (vulkan-handle device) pool))))))
@@ -1376,7 +1364,7 @@ wrapper, this finalizer cannot run before theirs have."
                       'vulkan-gpu-bind-group
                       :label (gpu-descriptor-label descriptor)
                       :handle set :device device :layout layout
-                      :texture-view view :texture-views (list view)
+                      :texture-views (list view)
                       :descriptor-pool pool))
                 (unless completed-p
                   (lvk:destroy-descriptor-pool
@@ -1461,11 +1449,8 @@ wrapper, this finalizer cannot run before theirs have."
                           'vulkan-gpu-bind-group
                           :label (gpu-descriptor-label descriptor)
                           :handle set :device device :layout layout
-                          :texture-view (first views)
                           :texture-views views
-                          :sampler (first samplers)
                           :samplers samplers
-                          :buffer (first buffers)
                           :buffers buffers
                           :descriptor-pool pool))
                     (unless completed-p

@@ -6,6 +6,7 @@
   (format stream "Commands:~%")
   (format stream "  block-world TARGET [--count N] [--width N] [--height N] [--yaw-step R]~%")
   (format stream "  gazetteer TARGET-DIR [--view NAME] [--width N] [--height N]~%")
+  (format stream "             [--count N] [--forward-step R] [--yaw-step R]~%")
   (format stream "  eval FORM [--package PACKAGE]~%")
   (format stream "  help~%"))
 
@@ -108,7 +109,7 @@
     (t
      (command-line-error "Unknown command ~A." command))))
 
-(defun main (&optional (arguments (uiop:command-line-arguments)))
+(defun dispatch-main (arguments)
   (handler-case
       (if arguments
           (dispatch-command (first arguments) (rest arguments))
@@ -119,3 +120,29 @@
       (format *error-output* "luv: ~A~%~%" condition)
       (usage *error-output*)
       (uiop:quit 2))))
+
+#+darwin
+(defun run-tool-program-thread (arguments)
+  "Run command work off the process main thread while Cocoa owns that thread."
+  (sb-thread:make-thread
+   (lambda ()
+     (handler-case
+         (progn
+           (dispatch-main arguments)
+           (finish-output *standard-output*)
+           (finish-output *error-output*)
+           (sb-ext:exit :code 0 :abort t))
+       (error (condition)
+         (format *error-output* "luv: ~A~%" condition)
+         (finish-output *error-output*)
+         (sb-ext:exit :code 1 :abort t))))
+   :name "luv tool command")
+  ;; SDL dispatches its Cocoa event loop here through TRIVIAL-MAIN-THREAD.
+  ;; The worker owns command completion and process exit.
+  (loop (sleep 3600)))
+
+(defun main (&optional (arguments (uiop:command-line-arguments)))
+  #+darwin
+  (run-tool-program-thread arguments)
+  #-darwin
+  (dispatch-main arguments))

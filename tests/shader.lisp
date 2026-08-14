@@ -22,12 +22,24 @@
         (t form)))
 
 (defgeneric shader-method-probe (role stage))
+(defgeneric shader-abstraction-method-probe (role stage))
 
 (spv:define-shader-method shader-method-probe shader-method-probe
     ((role (eql :probe)) (stage (eql :fragment)))
     (:stage :fragment
      :outputs ((color :vec4 :location 0)))
   (set-output color (vec4 0.1 0.2 0.3 1.0)))
+
+(spv:define-shader-method
+    shader-abstraction-method-probe shader-abstraction-method-probe
+    ((role (eql :abstraction-probe)) (stage (eql :fragment)))
+    (:stage :fragment
+     :inputs ((receiver :float :location 0)
+              (depth :float :location 1)
+              (bias :float :location 2))
+     :outputs ((visibility :float :location 0)))
+  (let* ((visible (test-shadow-rewrite receiver depth bias)))
+    (set-output visibility visible)))
 
 (deftest shader-method-redefinition-is-observable-and-coalesced
   (let* ((generic-function (fdefinition 'shader-method-probe))
@@ -141,13 +153,14 @@
                  "projection-vector" "fog-vector"
                  "sun-vector" "sun-color-vector" "zenith-vector"
                  "horizon-vector" "ambient-vector" "fog-color-vector"
+                 "shadow-control-vector"
                  "shadow-row-x" "shadow-row-y"
                  "shadow-row-z" "shadow-row-w")))
     (ok (equal (mapcar #'spv:shader-uniform-member-offset
                        (spv:shader-uniform-block-members resource))
                '(0 16 32 48 64 80 96 112 128 144 160 176
-                 192 208 224 240)))
-    (ok (= (spv:shader-uniform-block-byte-size resource) 256))
+                 192 208 224 240 256)))
+    (ok (= (spv:shader-uniform-block-byte-size resource) 272))
     (ok (equal (form-names
                 (spv:shader-expression-form
                  (spv:shader-binding-expression fog-progress)))
@@ -255,7 +268,8 @@
                     (spv:shader-lowering-expression-instructions lowering)))
          (block-specification (spv:block-world-fragment-specification))
          (torch-color (binding-named 'torch-color block-specification))
-         (block-lowering (spv:block-world-fragment-lowering))
+         (block-lowering
+           (spv:compile-shader-specification block-specification))
          (literal (first (spv:shader-call-operands
                           (spv:shader-binding-expression torch-color))))
          (constant-instructions
@@ -339,13 +353,14 @@
             '(:stage :fragment
               :inputs ((uv :vec2 :location 0)
                        (receiver-depth :float :location 1)
-                       (bias :float :location 2))
+                       (texel-size :vec2 :location 2)
+                       (bias :float :location 3))
               :outputs ((visibility :float :location 0))
               :resources ((shadow-map :depth-texture-2d :binding 0)
                           (shadow-sampler :sampler :binding 1)))
             '((let* ((visible (spv:shadow-visibility
                                shadow-map shadow-sampler uv
-                               receiver-depth bias)))
+                               receiver-depth texel-size bias)))
                 (set-output visibility visible)))))
          (visible (binding-named 'visible specification))
          (expression (spv:shader-binding-expression visible))
@@ -356,12 +371,8 @@
                           (symbol-name (spv:instruction-name instruction)))
                         instructions)))
     (ok (typep expression 'spv:shader-call))
-    (ok (eq (spv:shader-call-operator expression) 'spv:step))
-    (ok (equal
-         (form-names (spv:shader-expression-form expression))
-         '("step" ("-" "receiver-depth" "bias")
-           ("swizzle" ("sample" "shadow-map" "shadow-sampler" "uv") "x"))))
-    (ok (find "IMAGE-SAMPLE-IMPLICIT-LOD" names :test #'string=))
+    (ok (eq (spv:shader-call-operator expression) '/))
+    (ok (= 9 (count "IMAGE-SAMPLE-IMPLICIT-LOD" names :test #'string=)))
     (ok (find "EXT-INST" names :test #'string=))
     (ok (> (length (spv:assemble-shader-specification specification)) 5))))
 
@@ -396,15 +407,28 @@
               (spv:shader-binding-expression
                (binding-named 'visible specification)))))
     (unwind-protect
-         (progn
+           (progn
            (install-subtraction)
            (let* ((subtracted (parse-probe))
-                  (subtracted-form (visible-form subtracted)))
+                  (subtracted-form (visible-form subtracted))
+                  (method-subtracted-form
+                    (visible-form
+                     (shader-abstraction-method-probe
+                      :abstraction-probe :fragment)))
+                  (revision (spv:shader-abstraction-revision)))
              (install-addition)
-             (let ((added (parse-probe)))
+             (let ((added (parse-probe))
+                   (method-added
+                     (shader-abstraction-method-probe
+                      :abstraction-probe :fragment)))
+               (ok (> (spv:shader-abstraction-revision) revision))
                (ok (equal (form-names subtracted-form)
                           '("step" ("-" "receiver" "bias") "depth")))
                (ok (equal (form-names (visible-form added))
+                          '("step" ("+" "receiver" "bias") "depth")))
+               (ok (equal (form-names method-subtracted-form)
+                          '("step" ("-" "receiver" "bias") "depth")))
+               (ok (equal (form-names (visible-form method-added))
                           '("step" ("+" "receiver" "bias") "depth")))
                (install-bad-expansion)
                (ok (signals (parse-probe) 'spv:shader-language-error))
@@ -471,7 +495,7 @@
                    (equal (member-layout block) reference))
                  (rest blocks)))
       (ok (every (lambda (block)
-                   (= (spv:shader-uniform-block-byte-size block) 256))
+                   (= (spv:shader-uniform-block-byte-size block) 272))
                  blocks)))))
 
 (deftest the-sky-material-is-image-mathematics-over-environment-lanes

@@ -23,6 +23,12 @@
                 :components ((:file "world"))))
   :in-order-to ((asdf:test-op (asdf:test-op #:luv/tests))))
 
+(asdf:defsystem #:luv/parinfer
+  :description "The connection-free indentation and parenthesis checker."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :components ((:file "parinfer")))
+
 (asdf:defsystem #:luv/invocation
   :description "A small protocol for reifying API calls as invocations."
   :version "0.0.1"
@@ -204,9 +210,11 @@
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on (#:luv/world
+               #:luv/parinfer
                #:rove)
   :components ((:module "tests"
-                :components ((:file "world"))))
+                :components ((:file "world")
+                             (:file "parinfer"))))
   :perform (asdf:test-op (operation component)
              (declare (ignore operation component))
              (unless (uiop:symbol-call

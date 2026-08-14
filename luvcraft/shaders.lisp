@@ -24,6 +24,7 @@
       (horizon-vector :vec4)    ; horizon colour, w unused
       (ambient-vector :vec4)    ; ambient colour, exposure
       (fog-color-vector :vec4)  ; fog colour, w unused
+      (shadow-control-vector :vec4) ; texel u/v, base bias, slope bias
       (shadow-row-x :vec4)      ; light-space clip x from world position
       (shadow-row-y :vec4)      ; light-space clip y from world position
       (shadow-row-z :vec4)      ; light-space depth from world position
@@ -130,6 +131,8 @@
          (uv (swizzle uv-shade :xy))
          (ao (swizzle uv-shade :z))
          (normal normal-input)
+         (sun-direction (swizzle sun-vector :xyz))
+         (n-dot-l (max 0.0 (dot normal sun-direction)))
          (shadow-u (swizzle shadow-uv-input :x))
          (shadow-v (swizzle shadow-uv-input :y))
          (shadow-in-bounds
@@ -137,10 +140,15 @@
               (step shadow-u 1.0)
               (step 0.0 shadow-v)
               (step shadow-v 1.0)))
+         (shadow-texel-size (swizzle shadow-control-vector :xy))
+         (shadow-base-bias (swizzle shadow-control-vector :z))
+         (shadow-slope-bias (swizzle shadow-control-vector :w))
+         (shadow-bias
+           (+ shadow-base-bias (* shadow-slope-bias (- 1.0 n-dot-l))))
          (shadow-sample
            (shadow-visibility
             shadow-map shadow-sampler shadow-uv-input shadow-depth-input
-            0.003))
+            shadow-texel-size shadow-bias))
          (direct-shadow (mix 1.0 shadow-sample shadow-in-bounds))
          ;; The mesh carries normalized raw light readings; every response
          ;; curve and balance below is an art parameter editable live
@@ -150,9 +158,7 @@
          (emission-input (swizzle light-input :z))
          (sky-level (* sky-input sky-input))
          (block-level (* block-input block-input))
-         (sun-direction (swizzle sun-vector :xyz))
          (day-factor (swizzle sun-vector :w))
-         (n-dot-l (max 0.0 (dot normal sun-direction)))
          ;; Lateral skylight gives ambient visibility but not a hard sun
          ;; beam; the shadow map gates only the direct solar term.
          (sun-visibility (smoothstep 0.90 1.0 sky-input))
@@ -271,9 +277,9 @@
 (defun block-world-sky-fragment-shader ()
   (assemble-spir-v-module (block-world-sky-fragment-module)))
 
-;;; A first shadow-map pass renders the same block mesh into a stored depth
-;;; texture from light-space.  The scene material does not sample it yet; this
-;;; stage establishes the GPU product that the later fragment shader will read.
+;;; The shadow-map pass renders the same block mesh into stored light-space
+;;; depth.  The block fragment material samples that product with explicit
+;;; percentage-closer filtering and receiver bias above.
 
 (define-shader-method shader-specification-for
     block-world-shadow-vertex-specification

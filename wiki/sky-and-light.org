@@ -16,10 +16,10 @@ part of the work, not a cost to evade.  Frame-wide facts still belong in Lisp;
 spatially varying image mathematics belongs in shaders; and the boundary
 between them should become more capable as the renderer asks more of it.
 
-Phases 0--3 now have an implementation in the codebase; the later HDR,
-bloom, and directional-shadow sections remain a plan.  Each phase below
-has a visible result and an evidence gate, so it can be revised from
-measurements without undoing the preceding phases.
+Phases 0--4 and the first directional-shadow pass now have implementations in
+the codebase; HDR and bloom remain a plan.  Each phase below has a visible
+result and an evidence gate, so it can be revised from measurements without
+undoing the preceding phases.
 
 * What the critique changed
 :PROPERTIES:
@@ -149,9 +149,9 @@ self-emission.  When the HDR phase arrives, radiance above 1.0 survives until
 tone mapping and can feed bloom naturally.
 
 Propagated skylight is not a directional shadow map.  It makes caves dark and
-canopies reduce ambient sky access.  The moving sun remains unshadowed until a
-later GPU shadow pass; the plan does not call vertical canopy shade an angled
-sun shadow.
+canopies reduce ambient sky access.  A separate GPU depth pass now shadows the
+moving sun; vertical canopy shade remains ambient access, not an angled sun
+shadow.
 
 * Phase 0: give the shader language the mathematics this work needs
 :PROPERTIES:
@@ -544,9 +544,10 @@ clock then keeps the new hash stable.
    dynamic palette keys, and measured edit-to-photon behavior.
 5. *HDR and bloom.*  Linear scene target, tone mapping, then a restrained
    crystal bloom with explicit resource lifetime and resize behavior.
-6. *Real-time shadows, if the moving scene asks for them.*  Shader
-   abstractions first, then a separate GPU pass measured and judged in motion;
-   do not bake animated light into mesh products.
+6. *Real-time shadows.*  Done as a first credible pass: shader abstractions,
+   separate GPU depth, stable projection, filtered receiver sampling, and
+   isolated plus consecutive-play evidence.  Animated light remains outside
+   mesh products.
 
 Each checkpoint is useful on its own.  The sequence deliberately builds
 general shader and lighting capabilities where the feature needs them, while
@@ -663,9 +664,10 @@ Evidence:
 - =define-shader-abstraction= adds an open EQL-method source vocabulary beside
   the core =define-shader-operator= protocol; =expand-shader-source-form=
   rewrites abstractions before ordinary expression parsing.
-- =shadow-visibility= is an abstraction, not a shader operator. It expands to
-  =step= over a biased receiver depth and the =:x= lane of a depth-texture
-  =sample=, so no high-level shadow lowering primitive exists.
+- =shadow-depth-test= is the one-sample abstraction over =step= and a biased
+  receiver depth.  =shadow-visibility= is also source vocabulary, composing a
+  3x3 grid of those tests.  Neither is a shader operator or a special lowering
+  primitive.
 - =tests/shader.lisp= proves the expanded graph lowers through
   =OpImageSampleImplicitLod= plus the existing extended =step= path, that
   abstraction redefinition affects fresh parses, and that a bad expansion
@@ -740,13 +742,14 @@ Done when: a pinned scene shows moving geometry casting real-time direct-light
 shadows through the shader abstraction, with all new textures, bind groups, and
 pipelines retiring through the existing completion frontier.
 
-** DONE Visual evidence standard for shadow changes
+** DONE First isolated visual evidence standard for shadow changes
 :PROPERTIES:
 :ID: 0BHYRT
 :END:
 
 Intent: keep shadow work from passing on screenshots that are merely plausible
-or too dark to inspect.
+or too dark to inspect.  This was the first gate; #CH2CD0 records why it was
+necessary but insufficient for representative-play acceptance.
 
 Evidence:
 
@@ -762,6 +765,77 @@ Evidence:
 
 Done when: future shadow iterations cite the pinned view and inspection
 condition they used, not just the existence of a rendered PNG.
+
+** DONE Shadow credibility in representative play
+:PROPERTIES:
+:ID: CH2CD0
+:END:
+
+Intent: replace the weak inference "the isolated yard contains a cast shadow,
+therefore shadows are good" with separate, falsifiable evidence for shadow
+geometry and for shadow behavior in the moving block world.
+
+Evidence:
+
+- =scripts/luv gazetteer build/gazetteer-review --view shadow-yard= now exits
+  normally and reproduces the analytic 960x640 caster/receiver image.  The
+  long pillar shadow keeps its expected direction and contact while the edge
+  is filtered instead of a raw depth interpolation.
+- =shadow-forest= is generated terrain at 1512x982.  The command
+  =scripts/luv gazetteer build/gazetteer-review --view shadow-forest --count 4
+  --forward-step 0.2= captures four neighboring camera positions from one
+  live session.  Inspection of frames 000--003 found the tree and terrain
+  shadows anchored across movement, with no projection jump or detached
+  contact.  The bright snow remains clipped by the known LDR path; that is
+  evidence for #WLHDRB, not a shadow-map success claim.
+- The 1024x1024 map covers a 128-world-unit square, so one texel is 0.125
+  world units.  The light-space footprint snaps to that grid.  A 3x3 PCF
+  kernel uses explicit nearest depth reads and a receiver bias of 0.00045 plus
+  =0.0015 * (1 - n-dot-l)=, replacing the coarse constant 0.003 bias.
+- A 60-frame hidden run at 1512x982 measured 10.81 ms/frame wall time with
+  3x3 PCF.  A one-tap abstraction in a separate fresh process measured 10.90
+  ms/frame.  At this workload the difference is below run noise; these are
+  end-to-end frame-loop timings, not GPU-only measurements.
+- =tests/block-world.lisp= proves that a 0.01-world-unit camera translation
+  leaves the first two light-space rows unchanged while a 0.25 translation
+  crosses the snap grid.  =tests/shader.lisp= proves nine depth samples and
+  valid SPIR-V.
+
+Done when: both the isolator and representative moving-view evidence are
+credible, the documented CLI can reproduce them without hanging, and the
+implementation has an explicit stable projection, filtering, and bias rule.
+
+** DONE Tool and live-definition hardening after the shadow review
+:PROPERTIES:
+:ID: 9250U7
+:END:
+
+Intent: remove the review findings which made the shadow evidence or live
+shader story less trustworthy than their documentation claimed.
+
+Evidence:
+
+- The tools entrypoint now leaves the process main thread to Cocoa and runs
+  dispatch on a worker, matching the executable.  The formerly hanging
+  documented =scripts/luv gazetteer= path completed for both single and
+  consecutive captures.
+- Parinfer now models vertical-bar symbols and single escapes; its unit tests
+  cover =|foo(bar|=, =foo\\(bar=, an escaped bar, an unterminated bar, and an
+  ordinary repair.  Reader-valid escaped symbols are not rewritten.
+- Shader-producing methods reparse their small source form, abstraction
+  definitions advance a locked revision, and each live artifact attempts that
+  revision transactionally outside the MOP callback.  A live GPU probe changed
+  =shadow-visibility= and observed =(:installed t t)=: installed status,
+  advanced abstraction revision, and a replaced native pipeline.
+- =make shader-validate= now emits and validates the shadow vertex module.
+  The generalized descriptor path no longer carries unused singular readers
+  or six obsolete sampled-image/sampler compatibility wrappers.
+- =make test=, =make smoke=, strict repo-wide parinfer, and the documented
+  gazetteer paths pass.
+
+Done when: escaped symbols survive the checker, abstraction edits reach a live
+pipeline without sacrificing last-known-good behavior, every shader stage is
+validated, and the public capture path exits cleanly on macOS.
 
 ** IDEA HDR crystal bloom
 :PROPERTIES:
@@ -800,6 +874,8 @@ Made here:
 - opacity and emission are block semantics from the start;
 - first storage is two u8 columns and first vertex transport is an explicit
   float vec3;
+- directional sun shadows use a separate camera-centered, texel-snapped depth
+  pass and are accepted with both analytic and consecutive-play evidence;
 - bloom waits for an HDR scene path and does not commandeer alpha.
 
 Questions for probes rather than prior debate:
@@ -813,5 +889,6 @@ Questions for probes rather than prior debate:
   actual terrain scale?
 - Does HDR bright extraction give the desired restrained bloom, or does art
   direction require a separate emission attachment?
-- When ambient canopy shade is present, which scenes still need a directional
-  shadow map badly enough to pay for it?
+- When larger vistas arrive, does one 128-world-unit orthographic footprint
+  remain sufficient, or does measured play justify cascades or another
+  representation?

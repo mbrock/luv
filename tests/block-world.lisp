@@ -169,7 +169,8 @@
   (let* ((views (luvcraft-gazetteer-views))
          (names (mapcar #'luvcraft-gazetteer-view-name views)))
     (ok (equal names (remove-duplicates names :test #'eq)))
-    (dolist (name '(:little-world-noon :little-world-dusk :glow-floor :crystal-seam :shadow-yard))
+    (dolist (name '(:little-world-noon :little-world-dusk :shadow-forest
+                    :glow-floor :crystal-seam :shadow-yard))
       (ok (find name names)))
     (let* ((view (find-luvcraft-gazetteer-view "crystal-seam"))
            (world
@@ -189,6 +190,24 @@
     (ok (null (world-block-at world 9 9 10)))
     (ok (null (world-block-at world 8 1 4)))
     (ok (= (nth-value 0 (world-light-at world 7 1 7)) 15))))
+
+(deftest shadow-projection-ignores-subtexel-camera-translation
+  (let* ((clock (make-instance 'sky-clock :pinned-day-fraction 0.42))
+         (sky (sky-frame-parameters clock (make-default-sky-profile)))
+         (first-camera
+           (make-instance 'fly-camera :x 0.0d0 :y 0.0d0 :z 0.0d0))
+         (nearby-camera
+           (make-instance 'fly-camera :x 0.01d0 :y 0.0d0 :z 0.01d0))
+         (farther-camera
+           (make-instance 'fly-camera :x 0.25d0 :y 0.0d0 :z 0.25d0))
+         (first-rows (luv::shadow-frame-rows first-camera sky))
+         (nearby-rows (luv::shadow-frame-rows nearby-camera sky))
+         (farther-rows (luv::shadow-frame-rows farther-camera sky)))
+    ;; The first two rows locate the orthographic footprint.  Translation
+    ;; smaller than one 0.125-world-unit shadow texel cannot move it.
+    (ok (equal (subseq first-rows 0 8) (subseq nearby-rows 0 8)))
+    (ok (not (equal (subseq first-rows 0 8)
+                    (subseq farther-rows 0 8))))))
 
 (deftest scalar-player-walks-collides-and-jumps
   (let* ((world (make-block-world :chunk-width 4

@@ -113,6 +113,16 @@
                               :yaw 0.42d0 :pitch -0.30d0))
     0.74)
    (make-luvcraft-gazetteer-view
+    :shadow-forest
+    "Generated terrain for representative cast-shadow inspection in motion."
+    "luvcraft gazetteer - shadow forest"
+    (lambda () (make-empty-little-block-world :seed 121))
+    (lambda () (make-instance 'fly-camera
+                              :x 8.0d0 :y 16.0d0 :z -18.0d0
+                              :yaw 0.0d0 :pitch -0.42d0))
+    0.42
+    :width 1512 :height 982)
+   (make-luvcraft-gazetteer-view
     :glow-floor
     "A placed emitter proving material emission and blocklight under a dark sky."
     "luvcraft gazetteer - glow floor"
@@ -200,3 +210,27 @@
     (loop for view in views
           collect (capture-luvcraft-gazetteer-view
                    view directory :width width :height height))))
+
+(defun capture-luvcraft-gazetteer-sequence
+    (view directory &key (count 4) (forward-step 0.2) (yaw-step 0.0)
+                         width height)
+  "Capture consecutive neighboring camera positions for one gazetteer VIEW."
+  (let* ((view (if (typep view 'luvcraft-gazetteer-view)
+                   view
+                   (find-luvcraft-gazetteer-view view)))
+         (world (funcall (luvcraft-gazetteer-view-world-factory view)))
+         (camera (funcall (luvcraft-gazetteer-view-camera-factory view)))
+         (sky-clock
+           (funcall (luvcraft-gazetteer-view-sky-clock-factory view)))
+         (sky-profile
+           (funcall (luvcraft-gazetteer-view-sky-profile-factory view))))
+    (capture-hidden-luvcraft-frames
+     directory
+     :count count :forward-step forward-step :yaw-step yaw-step
+     :pathname-prefix
+     (string-downcase (symbol-name (luvcraft-gazetteer-view-name view)))
+     :title (luvcraft-gazetteer-view-title view)
+     :width (or width (luvcraft-gazetteer-view-width view) 960)
+     :height (or height (luvcraft-gazetteer-view-height view) 640)
+     :world world :camera camera :sky-clock sky-clock
+     :sky-profile sky-profile)))
