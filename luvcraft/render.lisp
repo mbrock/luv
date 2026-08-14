@@ -40,6 +40,20 @@
       (rectangle -8.0 -0.75 8.0 0.75 '(0.96 0.98 1.0)))
     vertices))
 
+(defun block-world-camera-uniform-size (session)
+  "The camera buffer byte size derived from the shader-visible block layout.
+
+Checked against the host's packed camera data at construction, so growing
+the frame uniform cannot silently diverge between shader and host."
+  (let ((size (spv:shader-uniform-block-byte-size
+               (spv:block-world-camera-uniform-block)))
+        (bytes (* 4 (length (camera-uniform-data
+                             (luvcraft-session-camera session) 1 1)))))
+    (unless (= size bytes)
+      (error "Camera uniform ABI mismatch: the shader block occupies ~D ~
+              bytes but the host packs ~D." size bytes))
+    size))
+
 (defun remember-luvcraft-resource (session resource)
   (push resource (luvcraft-session-resources session))
   resource)
@@ -54,7 +68,8 @@
                       (luvcraft-session-device session)
                       (make-buffer-descriptor
                        :label "block world camera uniform"
-                       :size 96 :usage '(:uniform)))
+                       :size (block-world-camera-uniform-size session)
+                       :usage '(:uniform)))
                      bind-group
                      (create
                       (luvcraft-session-device session)

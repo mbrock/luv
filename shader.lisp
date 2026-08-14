@@ -22,6 +22,14 @@
     :initarg :capabilities
     :initform '(shader)
     :accessor spir-v-module-capabilities)
+   (extensions
+    :initarg :extensions
+    :initform nil
+    :accessor spir-v-module-extensions)
+   (extended-instruction-imports
+    :initarg :extended-instruction-imports
+    :initform nil
+    :accessor spir-v-module-extended-instruction-imports)
    (addressing-model
     :initarg :addressing-model
     :initform 'logical
@@ -54,6 +62,19 @@
     :initarg :function-definitions
     :initform nil
     :accessor spir-v-module-function-definitions)))
+
+(defclass spir-v-extended-instruction-import (spir-v-structure)
+  ((result-id
+    :initarg :result-id
+    :accessor spir-v-extended-instruction-import-result-id)
+   (name
+    :initarg :name
+    :initform "GLSL.std.450"
+    :accessor spir-v-extended-instruction-import-name))
+  (:documentation
+   "A durable OpExtInstImport: one named instruction set the module uses.
+Extended operations reference its result id, so repeated operators in one
+module share a single import."))
 
 (defclass spir-v-entry-point (spir-v-structure)
   ((execution-model
@@ -143,6 +164,13 @@
          objects)
     instructions))
 
+(defmethod lower-spir-v ((import spir-v-extended-instruction-import))
+  (list
+   (parse-instruction
+    (list (spir-v-extended-instruction-import-result-id import)
+          'ext-inst-import
+          (spir-v-extended-instruction-import-name import)))))
+
 (defmethod lower-spir-v ((entry-point spir-v-entry-point))
   (list
    (parse-instruction
@@ -183,6 +211,12 @@
   (append
    (loop for capability in (spir-v-module-capabilities module)
          collect (parse-instruction (list 'capability capability)))
+   ;; SPIR-V logical layout: extensions and extended-instruction imports sit
+   ;; between the capabilities and the memory model.
+   (loop for extension in (spir-v-module-extensions module)
+         collect (parse-instruction (list 'extension extension)))
+   (lower-spir-v-sequence
+    (spir-v-module-extended-instruction-imports module))
    (list
     (parse-instruction
      (list 'memory-model

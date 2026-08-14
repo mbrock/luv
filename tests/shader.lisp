@@ -5,6 +5,7 @@
   ;; written here must use the shader language's own words.
   (:import-from #:luv.spir-v
                 #:dot #:sample #:mix #:vec2 #:vec3 #:vec4 #:swizzle
+                #:clamp #:smoothstep #:normalize
                 #:set-output))
 
 (in-package #:luv/spir-v/tests)
@@ -130,7 +131,7 @@
     (ok (equal (form-names
                 (spv:shader-expression-form
                  (spv:shader-binding-expression fog-factor)))
-               '("-" 1.0 "fog-distance-squared")))))
+               '("clamp" ("-" 1.0 "fog-distance-squared") 0.0 1.0)))))
 
 (deftest block-vertex-uniform-members-retain-access-chain-provenance
   (let* ((lowering (spv:block-world-vertex-lowering))
@@ -258,6 +259,100 @@
     (let ((vertex (spv:block-world-vertex-shader)))
       (ok (> (length vertex) 5))
       (ok (= (aref vertex 0) #x07230203)))))
+
+(deftest extended-math-lowers-through-one-shared-import-in-layout-order
+  (let* ((specification
+           (spv:parse-shader-specification
+            'extended-math
+            '(:stage :fragment
+              :inputs ((direction :vec3 :location 0)
+                       (level :float :location 1))
+              :outputs ((color :vec4 :location 0)))
+            '((let* ((unit (normalize direction))
+                     (glow (smoothstep 0.9 1.0 level))
+                     (lit (max 0.0 (dot unit (vec3 0.0 1.0 0.0))))
+                     (shaped (expt (clamp (+ glow lit) 0.0 1.0) 2.2))
+                     (softened (sqrt (abs shaped)))
+                     (rgb (* unit softened)))
+                (set-output color (vec4 rgb (min 1.0 softened)))))))
+         (module (spv:shader-lowering-module
+                  (spv:compile-shader-specification specification)))
+         (instructions (spv:lower-spir-v module))
+         (names (mapcar (lambda (instruction)
+                          (symbol-name (spv:instruction-name instruction)))
+                        instructions)))
+    ;; Every extended operator in one module shares a single import, which
+    ;; sits in SPIR-V logical layout between capability and memory model.
+    (ok (= 1 (length
+              (spv:spir-v-module-extended-instruction-imports module))))
+    (ok (= 1 (count "EXT-INST-IMPORT" names :test #'string=)))
+    (ok (< (position "CAPABILITY" names :test #'string=)
+           (position "EXT-INST-IMPORT" names :test #'string=)
+           (position "MEMORY-MODEL" names :test #'string=)))
+    (ok (= 8 (count "EXT-INST" names :test #'string=)))
+    (ok (> (length (spv:assemble-shader-specification specification)) 5))
+    ;; Deterministic lowering, and no import where no extended math occurs.
+    (flet ((forms ()
+             (mapcar #'spv:instruction-form
+                     (spv:lower-spir-v
+                      (spv:shader-lowering-module
+                       (spv:compile-shader-specification specification))))))
+      (ok (equal (forms) (forms))))
+    (ok (null (spv:spir-v-module-extended-instruction-imports
+               (spv:block-world-fragment-module))))))
+
+(deftest extended-math-signatures-are-explicit-contracts
+  (flet ((failure-reason (body)
+           (handler-case
+               (progn
+                 (spv:parse-shader-specification
+                  'bad-extended-math
+                  '(:stage :fragment
+                    :inputs ((value :vec3 :location 0)
+                             (scale :float :location 1))
+                    :outputs ((color :vec3 :location 0)))
+                  body)
+                 nil)
+             (spv:shader-language-error (condition)
+               (spv:shader-language-error-reason condition)))))
+    ;; Vector values with scalar bounds are not silently splatted.
+    (ok (eq (failure-reason '((set-output color (clamp value 0.0 1.0))))
+            :incompatible-arithmetic-types))
+    (ok (eq (failure-reason '((let* ((unit (normalize scale)))
+                                (set-output color (* value unit)))))
+            :invalid-normalize))
+    (ok (eq (failure-reason '((set-output color (min value))))
+            :wrong-operand-count))
+    (ok (eq (failure-reason '((set-output color (expt value))))
+            :wrong-operand-count))))
+
+(deftest extended-operations-retain-expression-provenance
+  (let* ((specification
+           (spv:parse-shader-specification
+            'clamped-level
+            '(:stage :fragment
+              :inputs ((level :float :location 0))
+              :outputs ((color :float :location 0)))
+            '((let* ((held (clamp level 0.0 1.0)))
+                (set-output color held)))))
+         (lowering (spv:compile-shader-specification specification))
+         (call (spv:shader-binding-expression
+                (binding-named 'held specification)))
+         (instructions
+           (gethash call
+                    (spv:shader-lowering-expression-instructions lowering))))
+    (ok instructions)
+    (ok (find "EXT-INST" instructions
+              :key (lambda (instruction)
+                     (symbol-name (spv:instruction-name instruction)))
+              :test #'string=))
+    (ok (some (lambda (instruction)
+                (member call
+                        (gethash instruction
+                                 (spv:shader-lowering-instruction-expressions
+                                  lowering))
+                        :test #'eq))
+              instructions))))
 
 (deftest shader-diagnostics-name-the-source-failure
   (let ((unknown-reason

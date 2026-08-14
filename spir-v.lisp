@@ -209,6 +209,22 @@
   (:opcode 17)
   (:operands (:enum capability)))
 
+(define-instruction extension (name)
+  (:opcode 10)
+  (:operands :string))
+
+(define-instruction ext-inst-import (name)
+  (:opcode 11)
+  (:result :id)
+  (:operands :string))
+
+;; The extended instruction number is a literal, so lowering may write the
+;; readable (enum glsl-std-450 f-clamp) form rather than a bare integer.
+(define-instruction ext-inst (set instruction &rest operands)
+  (:opcode 12)
+  (:result :typed)
+  (:operands :id :literal :id))
+
 (define-instruction memory-model (addressing-model memory-model)
   (:opcode 14)
   (:operands (:enum addressing-model) (:enum memory-model)))
@@ -340,6 +356,17 @@
   (unknown 0)
   (rgba8 4))
 (define-enumeration image-operands (lod #x2))
+;; GLSL.std.450 extended instruction numbers, spelled with this assembler's
+;; word conventions.  Entries follow actual shader needs, like the opcodes.
+(define-enumeration glsl-std-450
+  (f-abs 4)
+  (pow 26)
+  (sqrt 31)
+  (f-min 37)
+  (f-max 40)
+  (f-clamp 43)
+  (smooth-step 49)
+  (normalize 69))
 (define-enumeration storage-class
   (uniform-constant 0)
   (input 1)

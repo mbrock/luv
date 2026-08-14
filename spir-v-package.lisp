@@ -24,6 +24,11 @@
            #:spir-v-module-version
            #:spir-v-module-generator
            #:spir-v-module-capabilities
+           #:spir-v-module-extensions
+           #:spir-v-module-extended-instruction-imports
+           #:spir-v-extended-instruction-import
+           #:spir-v-extended-instruction-import-result-id
+           #:spir-v-extended-instruction-import-name
            #:spir-v-module-addressing-model
            #:spir-v-module-memory-model
            #:spir-v-module-entry-points
@@ -76,6 +81,7 @@
            #:shader-resource-binding
            #:shader-uniform-block
            #:shader-uniform-block-members
+           #:shader-uniform-block-byte-size
            #:shader-uniform-member
            #:shader-uniform-member-block
            #:shader-uniform-member-index
@@ -106,6 +112,9 @@
            #:vec3
            #:vec4
            #:swizzle
+           #:clamp
+           #:smoothstep
+           #:normalize
            #:set-output
            #:shader-operator
            #:define-shader-operator
@@ -156,6 +165,7 @@
            #:block-world-vertex-module
            #:block-world-vertex-specification
            #:block-world-vertex-lowering
+           #:block-world-camera-uniform-block
            #:block-world-fragment-specification
            #:block-world-fragment-lowering
            #:block-world-fragment-module

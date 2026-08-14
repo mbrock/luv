@@ -37,7 +37,10 @@
          (inverse-far (swizzle fog-vector :w))
          (fog-distance (* view-z inverse-far))
          (fog-distance-squared (* fog-distance fog-distance))
-         (fog-factor (- 1.0 fog-distance-squared))
+         ;; Unclamped fog went negative beyond the far plane and above one
+         ;; behind the camera; the interpolated fragment blend then left the
+         ;; [0,1] mix contract.  Clamp at the vertex where fog is computed.
+         (fog-factor (clamp (- 1.0 fog-distance-squared) 0.0 1.0))
          (sky (swizzle fog-vector :rgb))
          (fog-varying (vec4 sky fog-factor))
          (x-scale (swizzle projection-vector :x))
@@ -55,6 +58,12 @@
 
 (defun block-world-vertex-specification ()
   (shader-specification-for :block-surface :vertex))
+
+(defun block-world-camera-uniform-block ()
+  "The frame uniform block exactly as the vertex specification declares it."
+  (find-if (lambda (resource) (typep resource 'shader-uniform-block))
+           (shader-specification-resources
+            (block-world-vertex-specification))))
 
 (defun block-world-vertex-lowering ()
   "Compile the camera transform and retain expression-to-SSA provenance."

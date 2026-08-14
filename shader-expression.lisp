@@ -144,6 +144,16 @@
   (:documentation
    "A named value inside a SHADER-UNIFORM-BLOCK, not a separate resource."))
 
+(defun shader-uniform-block-byte-size (block)
+  "The host byte size implied by BLOCK's shader-visible vec4-lane layout.
+
+Hosts allocating a backing buffer should derive their size here rather than
+repeating the lane arithmetic as a literal."
+  (let ((members (shader-uniform-block-members block)))
+    (if members
+        (+ (shader-uniform-member-offset (car (last members))) 16)
+        0)))
+
 (defclass shader-binding (shader-named-object)
   ((expression
     :initarg :expression
@@ -425,6 +435,49 @@
    operands source-form :invalid-mix)
   (shader-expression-type (first operands)))
 
+;;; The extended-math family shares one componentwise contract: a fixed or
+;;; open operand count, every operand carrying the same scalar or vector
+;;; type, and a result of that type.  Each operator states its accepted
+;;; signature explicitly instead of promising every GLSL overload.
+
+(defun infer-uniform-extended-type (operator operands source-form minimum maximum)
+  (unless (and (<= minimum (length operands))
+               (or (null maximum) (<= (length operands) maximum)))
+    (error 'shader-language-error
+           :form source-form :reason :wrong-operand-count
+           :details (list operator (length operands))))
+  (infer-uniform-arithmetic-type operator operands source-form))
+
+(defmethod infer-shader-call-type ((operator (eql 'min)) operands source-form)
+  (infer-uniform-extended-type operator operands source-form 2 nil))
+
+(defmethod infer-shader-call-type ((operator (eql 'max)) operands source-form)
+  (infer-uniform-extended-type operator operands source-form 2 nil))
+
+(defmethod infer-shader-call-type ((operator (eql 'abs)) operands source-form)
+  (infer-uniform-extended-type operator operands source-form 1 1))
+
+(defmethod infer-shader-call-type ((operator (eql 'sqrt)) operands source-form)
+  (infer-uniform-extended-type operator operands source-form 1 1))
+
+(defmethod infer-shader-call-type ((operator (eql 'expt)) operands source-form)
+  (infer-uniform-extended-type operator operands source-form 2 2))
+
+(defmethod infer-shader-call-type ((operator (eql 'clamp)) operands source-form)
+  (infer-uniform-extended-type operator operands source-form 3 3))
+
+(defmethod infer-shader-call-type
+    ((operator (eql 'smoothstep)) operands source-form)
+  (infer-uniform-extended-type operator operands source-form 3 3))
+
+(defmethod infer-shader-call-type
+    ((operator (eql 'normalize)) operands source-form)
+  (require-shader-types
+   (lambda (types)
+     (and (= (length types) 1) (shader-vector-type-p (first types))))
+   operands source-form :invalid-normalize)
+  (shader-expression-type (first operands)))
+
 (defun infer-vector-constructor-type (type-name width operands source-form)
   (unless (= width (vector-constructor-width operands source-form))
     (error 'shader-language-error
@@ -507,6 +560,22 @@ never collides with a standard symbol's function documentation:
   "Construct a four-component vector from scalars and vectors of total width 4.")
 (define-shader-operator swizzle
   "Select and reorder vector components by a designator such as :XYZ or :RGB.")
+(define-shader-operator min
+  "The componentwise minimum of two or more uniformly typed values.")
+(define-shader-operator max
+  "The componentwise maximum of two or more uniformly typed values.")
+(define-shader-operator abs
+  "The componentwise absolute value of one scalar or vector.")
+(define-shader-operator sqrt
+  "The componentwise square root of one scalar or vector.")
+(define-shader-operator expt
+  "Raise a value to a power, componentwise over one uniform type.")
+(define-shader-operator clamp
+  "Constrain a value between uniformly typed lower and upper bounds.")
+(define-shader-operator smoothstep
+  "Hermite interpolation from zero to one across an edge pair, then a value.")
+(define-shader-operator normalize
+  "Scale one vector to unit length.")
 
 (defgeneric parse-shader-operator-call (operator form environment)
   (:documentation
@@ -897,6 +966,8 @@ A newer concurrent notification remains pending."
                 :accessor context-claimed-ids)
    (name-counts :initform (make-hash-table :test #'equal)
                 :accessor context-name-counts)
+   (extended-instruction-imports
+    :initform nil :accessor context-extended-instruction-imports)
    (type-declarations :initform nil :accessor context-type-declarations)
    (constant-declarations :initform nil :accessor context-constant-declarations)
    (variable-declarations :initform nil :accessor context-variable-declarations)
@@ -1076,6 +1147,19 @@ A newer concurrent notification remains pending."
            'type-declarations context
            (list id 'type-sampled-image
                  (ensure-shader-type-id context :texture-2d)))
+          id))))
+
+(defun ensure-glsl-extended-import (context)
+  "Return the module's single GLSL.std.450 import id, requesting it once.
+
+Modules whose expressions use no extended mathematics never acquire one."
+  (let ((import (first (context-extended-instruction-imports context))))
+    (if import
+        (spir-v-extended-instruction-import-result-id import)
+        (let ((id (reserve-shader-id context "GLSL-STD-450")))
+          (setf (context-extended-instruction-imports context)
+                (list (make-instance 'spir-v-extended-instruction-import
+                                     :result-id id)))
           id))))
 
 (defun register-shader-variable (context declaration)
@@ -1262,6 +1346,32 @@ A newer concurrent notification remains pending."
     (emit-value-instruction context expression result-type instruction
                             (list left-id right-id))))
 
+(defun emit-extended-instruction (context expression type instruction-name operands)
+  "Emit one GLSL.std.450 operation, keyed by its enumerated instruction name."
+  (emit-value-instruction
+   context expression type 'ext-inst
+   (list* (ensure-glsl-extended-import context)
+          (list 'enum 'glsl-std-450 instruction-name)
+          operands)))
+
+(defun lower-extended-call (context expression instruction-name)
+  "Lower EXPRESSION as one extended instruction over its lowered operands."
+  (emit-extended-instruction
+   context expression (shader-expression-type expression) instruction-name
+   (mapcar (lambda (operand) (lower-shader-expression context operand))
+           (shader-call-operands expression))))
+
+(defun lower-chained-extended-call (context expression instruction-name)
+  "Fold EXPRESSION's operands left to right through a binary extended step."
+  (let* ((operands (shader-call-operands expression))
+         (value (lower-shader-expression context (first operands))))
+    (dolist (operand (rest operands) value)
+      (setf value
+            (emit-extended-instruction
+             context expression (shader-expression-type expression)
+             instruction-name
+             (list value (lower-shader-expression context operand)))))))
+
 (defgeneric lower-shader-call (operator context expression)
   (:documentation
    "Emit EXPRESSION's instructions into CONTEXT and return its value id."))
@@ -1391,6 +1501,30 @@ A newer concurrent notification remains pending."
 (defmethod lower-shader-call ((operator (eql 'vec4)) context expression)
   (lower-vector-constructor context expression))
 
+(defmethod lower-shader-call ((operator (eql 'min)) context expression)
+  (lower-chained-extended-call context expression 'f-min))
+
+(defmethod lower-shader-call ((operator (eql 'max)) context expression)
+  (lower-chained-extended-call context expression 'f-max))
+
+(defmethod lower-shader-call ((operator (eql 'abs)) context expression)
+  (lower-extended-call context expression 'f-abs))
+
+(defmethod lower-shader-call ((operator (eql 'sqrt)) context expression)
+  (lower-extended-call context expression 'sqrt))
+
+(defmethod lower-shader-call ((operator (eql 'expt)) context expression)
+  (lower-extended-call context expression 'pow))
+
+(defmethod lower-shader-call ((operator (eql 'clamp)) context expression)
+  (lower-extended-call context expression 'f-clamp))
+
+(defmethod lower-shader-call ((operator (eql 'smoothstep)) context expression)
+  (lower-extended-call context expression 'smooth-step))
+
+(defmethod lower-shader-call ((operator (eql 'normalize)) context expression)
+  (lower-extended-call context expression 'normalize))
+
 (defmethod lower-shader-call ((operator (eql 'sample)) context expression)
   (destructuring-bind (texture sampler coordinate)
       (shader-call-operands expression)
@@ -1466,6 +1600,8 @@ A newer concurrent notification remains pending."
     (let* ((module
              (make-instance
               'spir-v-module
+              :extended-instruction-imports
+              (context-extended-instruction-imports context)
               :entry-points
               (list (make-instance
                      'spir-v-entry-point
