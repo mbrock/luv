@@ -266,7 +266,8 @@ completed on the GPU."))
   (address-mode-w :clamp-to-edge)
   (mag-filter :linear)
   (min-filter :linear)
-  (mipmap-filter :nearest))
+  (mipmap-filter :nearest)
+  compare)
 
 (defstruct texture-copy
   texture

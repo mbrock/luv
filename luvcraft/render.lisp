@@ -194,7 +194,11 @@ the frame uniform cannot silently diverge between shader and host."
                                        session))
                          (:binding 4
                           :resource ,(luvcraft-session-shadow-depth-sampler
-                                       session)))))
+                                       session))
+                         (:binding 5
+                          :resource
+                          ,(luvcraft-session-shadow-comparison-sampler
+                            session)))))
                      shadow-bind-group
                      (create
                       (luvcraft-session-device session)
@@ -504,6 +508,14 @@ capture-only demand clock."
                                      :mag-filter :nearest
                                      :min-filter :nearest
                                      :mipmap-filter :nearest))))
+                  (shadow-comparison-sampler
+                    (keep
+                     (create device (make-sampler-descriptor
+                                     :label "block world shadow comparison sampler"
+                                     :mag-filter :linear
+                                     :min-filter :linear
+                                     :mipmap-filter :nearest
+                                     :compare :less-or-equal))))
                   (atlas-width
                     (* +block-atlas-tile-size+ +block-atlas-tile-count+))
                   (atlas-height +block-atlas-tile-size+)
@@ -570,7 +582,8 @@ capture-only demand clock."
                                   (:binding 1 :type :sampler)
                                   (:binding 2 :type :uniform-buffer)
                                   (:binding 3 :type :texture)
-                                  (:binding 4 :type :sampler))))))
+                                  (:binding 4 :type :sampler)
+                                  (:binding 5 :type :sampler))))))
                   (shadow-layout
                     (keep
                      (create
@@ -695,6 +708,7 @@ capture-only demand clock."
                      :shadow-depth-texture shadow-depth-texture
                      :shadow-depth-view shadow-depth-view
                      :shadow-depth-sampler shadow-depth-sampler
+                     :shadow-comparison-sampler shadow-comparison-sampler
                      :layout layout :shadow-layout shadow-layout
                      :block-pipeline pipeline
                      :shadow-pipeline shadow-pipeline

@@ -4,7 +4,8 @@
   ;; Shader operators are identified by symbol, so specification bodies
   ;; written here must use the shader language's own words.
   (:import-from #:luv.spir-v
-                #:dot #:sample #:mix #:vec2 #:vec3 #:vec4 #:swizzle
+                #:dot #:sample #:sample-compare #:mix
+                #:vec2 #:vec3 #:vec4 #:swizzle
                 #:clamp #:smoothstep #:normalize
                 #:set-output))
 
@@ -89,7 +90,7 @@
     (ok (typep specification 'spv:shader-specification))
     (ok (eq (spv:shader-specification-stage specification) :fragment))
     (ok (= (length (spv:shader-specification-inputs specification)) 6))
-    (ok (= (length (spv:shader-specification-resources specification)) 5))
+    (ok (= (length (spv:shader-specification-resources specification)) 6))
     (ok (typep (spv:shader-binding-expression sun-direction)
                'spv:shader-call))
     (ok (spv:shader-type=
@@ -373,8 +374,7 @@
                         instructions)))
     (ok (typep expression 'spv:shader-call))
     (ok (eq (spv:shader-call-operator expression) '/))
-    (ok (= 17 (count "IMAGE-SAMPLE-IMPLICIT-LOD" names :test #'string=)))
-    (ok (find "EXT-INST" names :test #'string=))
+    (ok (= 17 (count "IMAGE-SAMPLE-DREF-IMPLICIT-LOD" names :test #'string=)))
     (ok (> (length (spv:assemble-shader-specification specification)) 5))))
 
 (deftest shader-abstraction-redefinition-affects-fresh-parses

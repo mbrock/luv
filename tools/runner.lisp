@@ -7,7 +7,7 @@
   (format stream "  block-world TARGET [--count N] [--width N] [--height N] [--yaw-step R]~%")
   (format stream "  gazetteer TARGET-DIR [--view NAME] [--width N] [--height N]~%")
   (format stream "             [--count N] [--forward-step R] [--yaw-step R]~%")
-  (format stream "             [--day-start R] [--day-step R]~%")
+  (format stream "             [--day-start R] [--day-step R] [--difference-scale R]~%")
   (format stream "  eval FORM [--package PACKAGE]~%")
   (format stream "  help~%"))
 

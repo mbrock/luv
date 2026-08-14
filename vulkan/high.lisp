@@ -681,7 +681,8 @@ destroy it before destroying INSTANCE."
                  (mipmap-mode :nearest)
                  (address-mode-u :clamp-to-edge)
                  (address-mode-v :clamp-to-edge)
-                 (address-mode-w :clamp-to-edge))
+                 (address-mode-w :clamp-to-edge)
+                 compare)
   (with-vk (create-info sampler-create-info
             :flags 0
             :mag-filter mag-filter :min-filter min-filter
@@ -691,7 +692,7 @@ destroy it before destroying INSTANCE."
             :address-mode-w address-mode-w
             :mip-lod-bias 0.0
             :anisotropy-enable 0 :max-anisotropy 1.0
-            :compare-enable 0 :compare-op :always
+            :compare-enable (if compare 1 0) :compare-op (or compare :always)
             :min-lod 0.0 :max-lod 0.0
             :border-color :float-transparent-black
             :unnormalized-coordinates 0)

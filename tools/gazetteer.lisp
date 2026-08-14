@@ -15,7 +15,8 @@
          ("--forward-step" :forward-step ,#'parse-real-option)
          ("--yaw-step" :yaw-step ,#'parse-real-option)
          ("--day-start" :day-start ,#'parse-real-option)
-         ("--day-step" :day-step ,#'parse-real-option)))
+         ("--day-step" :day-step ,#'parse-real-option)
+         ("--difference-scale" :difference-scale ,#'parse-real-option)))
     (unless (= 1 (length positionals))
       (command-line-error "gazetteer expects exactly one TARGET directory."))
     (let ((target (pathname (first positionals)))
@@ -25,18 +26,23 @@
           (count (getf options :count)))
       (when (and count (null view))
         (command-line-error "gazetteer --count requires one --view."))
-      (dolist (pathname
-                (if count
-                    (luv:capture-luvcraft-gazetteer-sequence
-                     view target :count count
-                     :forward-step (or (getf options :forward-step) 0.2)
-                     :yaw-step (or (getf options :yaw-step) 0.0)
-                     :day-start (getf options :day-start)
-                     :day-step (or (getf options :day-step) 0.0)
-                     :width width :height height)
-                    (luv:capture-luvcraft-gazetteer
-                     target
-                     :views (and view (list view))
-                     :width width
-                     :height height)))
-        (format t "~A~%" pathname)))))
+      (let ((pathnames
+              (if count
+                  (luv:capture-luvcraft-gazetteer-sequence
+                   view target :count count
+                   :forward-step (or (getf options :forward-step) 0.2)
+                   :yaw-step (or (getf options :yaw-step) 0.0)
+                   :day-start (getf options :day-start)
+                   :day-step (or (getf options :day-step) 0.0)
+                   :difference-scale (getf options :difference-scale)
+                   :width width :height height)
+                  (luv:capture-luvcraft-gazetteer
+                   target
+                   :views (and view (list view))
+                   :width width
+                   :height height))))
+        (if (getf options :difference-scale)
+            (format t "Wrote ~D temporal artifacts under ~A~%"
+                    (length pathnames) target)
+            (dolist (pathname pathnames)
+              (format t "~A~%" pathname)))))))

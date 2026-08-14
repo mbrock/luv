@@ -972,7 +972,8 @@ wrapper, this finalizer cannot run before theirs have."
       :mipmap-mode (sampler-descriptor-mipmap-filter descriptor)
       :address-mode-u (sampler-descriptor-address-mode-u descriptor)
       :address-mode-v (sampler-descriptor-address-mode-v descriptor)
-      :address-mode-w (sampler-descriptor-address-mode-w descriptor))
+      :address-mode-w (sampler-descriptor-address-mode-w descriptor)
+      :compare (sampler-descriptor-compare descriptor))
      :device device)))
 
 (defmethod create

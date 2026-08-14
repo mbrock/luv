@@ -445,6 +445,19 @@ repeating the lane arithmetic as a literal."
    (shader-type-sample-result-type
     (shader-expression-type (first operands)))))
 
+(defmethod infer-shader-call-type
+    ((operator (eql 'sample-compare)) operands source-form)
+  (require-shader-types
+   (lambda (types)
+     (and (= (length types) 4)
+          (eq (shader-type-opaque-kind (first types)) :texture-2d)
+          (shader-type-image-depth-p (first types))
+          (eq (shader-type-opaque-kind (second types)) :sampler)
+          (shader-type= (third types) :vec2)
+          (shader-type= (fourth types) :float)))
+   operands source-form :invalid-depth-comparison-sample)
+  (find-shader-type :float))
+
 (defmethod infer-shader-call-type ((operator (eql 'mix)) operands source-form)
   (require-shader-types
    (lambda (types)
@@ -573,6 +586,8 @@ never collides with a standard symbol's function documentation:
   "The scalar inner product of two vectors of the same width.")
 (define-shader-operator sample
   "Sample a two-dimensional texture through a sampler at a UV coordinate.")
+(define-shader-operator sample-compare
+  "Compare a depth reference through a comparison sampler at a UV coordinate.")
 (define-shader-operator mix
   "Linear interpolation from one value toward another by a scalar amount.")
 (define-shader-operator vec2
@@ -682,9 +697,9 @@ shader source form made from core operators or other abstractions."
 
 (define-shader-abstraction shadow-depth-test
     (depth-texture sampler coordinate receiver-depth bias)
-  "One explicit receiver-versus-depth-map comparison."
-  `(step (- ,receiver-depth ,bias)
-         (swizzle (sample ,depth-texture ,sampler ,coordinate) :x)))
+  "One receiver-versus-depth-map comparison, filterable after comparison."
+  `(sample-compare ,depth-texture ,sampler ,coordinate
+                   (- ,receiver-depth ,bias)))
 
 (define-shader-abstraction shadow-visibility
     (depth-texture sampler coordinate receiver-depth texel-size bias radius)
@@ -1689,6 +1704,29 @@ Modules whose expressions use no extended mathematics never acquire one."
        context expression (shader-expression-type expression)
        'image-sample-implicit-lod
        (list sampled-id coordinate-id)))))
+
+(defmethod lower-shader-call
+    ((operator (eql 'sample-compare)) context expression)
+  (destructuring-bind (texture sampler coordinate depth-reference)
+      (shader-call-operands expression)
+    (let* ((texture-id (lower-shader-expression context texture))
+           (sampler-id (lower-shader-expression context sampler))
+           (coordinate-id (lower-shader-expression context coordinate))
+           (depth-reference-id
+             (lower-shader-expression context depth-reference))
+           (texture-type (shader-expression-type texture))
+           (sampled-id
+             (fresh-shader-id context
+                              (expression-result-name expression))))
+      (emit-shader-instruction
+       context expression
+       (list sampled-id 'sampled-image
+             (ensure-sampled-image-type-id context texture-type)
+             texture-id sampler-id))
+      (emit-value-instruction
+       context expression (shader-expression-type expression)
+       'image-sample-dref-implicit-lod
+       (list sampled-id coordinate-id depth-reference-id)))))
 
 (defgeneric lower-shader-expression-value (context expression)
   (:documentation "Lower EXPRESSION into instructions and return its value id."))

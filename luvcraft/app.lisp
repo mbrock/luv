@@ -69,6 +69,8 @@
                       :reader luvcraft-session-shadow-depth-view)
    (shadow-depth-sampler :initarg :shadow-depth-sampler
                          :reader luvcraft-session-shadow-depth-sampler)
+   (shadow-comparison-sampler :initarg :shadow-comparison-sampler
+                              :reader luvcraft-session-shadow-comparison-sampler)
    (layout :initarg :layout :reader luvcraft-session-layout)
    (shadow-layout :initarg :shadow-layout
                   :reader luvcraft-session-shadow-layout)

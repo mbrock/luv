@@ -615,6 +615,7 @@ nothing else does."))
            #:luvcraft-session-shadow-depth-texture
            #:luvcraft-session-shadow-depth-view
            #:luvcraft-session-shadow-depth-sampler
+           #:luvcraft-session-shadow-comparison-sampler
            #:luvcraft-session-meshed-world-revision
            #:luvcraft-session-target
            #:edit-luvcraft-block

@@ -296,6 +296,9 @@
     (sampled-image coordinate image-operands &rest operands)
   (:opcode 88) (:result :typed)
   (:operands :id :id (:enum image-operands) :id))
+(define-instruction image-sample-dref-implicit-lod
+    (sampled-image coordinate depth-reference)
+  (:opcode 89) (:result :typed) (:operands :id :id :id))
 (define-instruction image-write (image coordinate texel)
   (:opcode 99) (:operands :id :id :id))
 (define-typed-binary-instructions

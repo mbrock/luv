@@ -234,6 +234,23 @@
               luv::+luvcraft-shadow-half-extent+)
            0.99))))
 
+(deftest temporal-frame-derivatives-expose-change-and-flicker
+  (let ((first #(10 20 30 255 40 50 60 255))
+        (second #(13 17 36 255 40 50 60 255))
+        (third #(16 14 42 255 43 53 63 255)))
+    (multiple-value-bind (difference mean maximum changed)
+        (luv::temporal-derivative-rgba second first 10.0)
+      (ok (equalp difference #(40 40 40 255 0 0 0 255)))
+      (ok (< (abs (- mean (/ 2.0 255.0))) 1e-6))
+      (ok (< (abs (- maximum (/ 4.0 255.0))) 1e-6))
+      (ok (= changed 0.5)))
+    (multiple-value-bind (difference mean maximum changed)
+        (luv::temporal-derivative-rgba third second 10.0 first)
+      (ok (equalp difference #(0 0 0 255 30 30 30 255)))
+      (ok (< (abs (- mean (/ 1.5 255.0))) 1e-6))
+      (ok (< (abs (- maximum (/ 3.0 255.0))) 1e-6))
+      (ok (= changed 0.5)))))
+
 (deftest scalar-player-walks-collides-and-jumps
   (let* ((world (make-block-world :chunk-width 4
                                   :chunk-height 4

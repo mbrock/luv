@@ -55,10 +55,81 @@ world wait for products which can never exist."
               (encode-luvcraft-frame
                session surface-texture encoder :readback-buffer buffer)))
            (ensure-directories-exist pathname)
-           (write-rgba-png
-            pathname (read-buffer buffer)
-            (first extent) (second extent) (canvas-format context)))
+           (let ((pixels (read-buffer buffer))
+                 (format (canvas-format context)))
+             (write-rgba-png
+              pathname pixels (first extent) (second extent) format)
+             (values pathname pixels (first extent) (second extent) format)))
       (destroy buffer))))
+
+(defun temporal-derivative-rgba
+    (current previous scale &optional previous-previous)
+  "Return a visible RGBA temporal derivative and normalized summary values.
+
+With PREVIOUS-PREVIOUS, compute the absolute second temporal derivative;
+otherwise compute the absolute first derivative.  RGB channel order is
+irrelevant because the output is grayscale.  Values returned after the image
+are normalized mean magnitude, maximum magnitude, and changed-pixel fraction."
+  (unless (= (length current) (length previous))
+    (error "Temporal derivative frame sizes differ: ~D and ~D."
+           (length current) (length previous)))
+  (when (and previous-previous
+             (/= (length current) (length previous-previous)))
+    (error "Second temporal derivative frame sizes differ: ~D and ~D."
+           (length current) (length previous-previous)))
+  (unless (zerop (mod (length current) 4))
+    (error "Temporal derivative expects tightly packed RGBA pixels."))
+  (check-type scale (real 0))
+  (let ((output (make-array (length current)
+                            :element-type '(unsigned-byte 8)))
+        (sum 0)
+        (maximum 0)
+        (changed 0)
+        (pixel-count (/ (length current) 4)))
+    (loop for offset from 0 below (length current) by 4
+          for magnitude =
+          (round
+           (/ (loop for channel below 3
+                    for current-value = (aref current (+ offset channel))
+                    for previous-value = (aref previous (+ offset channel))
+                    sum (abs
+                         (if previous-previous
+                             (+ current-value
+                                (- (* 2 previous-value))
+                                (aref previous-previous (+ offset channel)))
+                             (- current-value previous-value))))
+              3))
+          for visible = (min 255 (round (* scale magnitude)))
+          do (incf sum magnitude)
+             (setf maximum (max maximum magnitude))
+             (when (plusp magnitude)
+               (incf changed))
+             (setf (aref output offset) visible
+                   (aref output (+ offset 1)) visible
+                   (aref output (+ offset 2)) visible
+                   (aref output (+ offset 3)) 255))
+    (values output
+            (/ sum (* pixel-count 255.0))
+            (/ maximum 255.0)
+            (/ changed (float pixel-count)))))
+
+(defun write-temporal-derivative-summary (pathname rows)
+  "Write temporal derivative metric ROWS to a small CSV file."
+  (with-open-file (stream pathname :direction :output :if-exists :supersede)
+    (format stream "frame,d1_mean,d1_max,d1_changed,d2_mean,d2_max,d2_changed~%")
+    (dolist (row rows)
+      (format stream "~D,~,8F,~,8F,~,8F," (first row) (second row)
+              (third row) (fourth row))
+      (when (fifth row)
+        (format stream "~,8F" (fifth row)))
+      (write-char #\, stream)
+      (when (sixth row)
+        (format stream "~,8F" (sixth row)))
+      (write-char #\, stream)
+      (when (seventh row)
+        (format stream "~,8F" (seventh row)))
+      (terpri stream)))
+  pathname)
 
 (defun hidden-luvcraft-frame-pathname
     (directory index &optional (prefix "block-world"))
@@ -103,6 +174,7 @@ pass an unpinned clock to photograph another time of day."
                  (forward-step 0.0)
                  day-start
                  (day-step 0.0)
+                 difference-scale
                  (pathname-prefix "block-world")
                  (world (make-empty-little-block-world))
                  (mesher (make-instance 'exposed-face-mesher))
@@ -114,16 +186,25 @@ pass an unpinned clock to photograph another time of day."
 
 Each frame reuses one hidden SDL/Vulkan canvas, advances CAMERA's yaw by
 YAW-STEP, moves FORWARD-STEP world units along its initial heading, and moves
-the evaluated sky by DAY-STEP day fractions.  This is a consecutive-view
-capture, not a set of independently restarted scenes."
+the evaluated sky by DAY-STEP day fractions.  DAY-START can replace the
+clock's initial time.  When DIFFERENCE-SCALE is non-NIL, also write amplified
+first and second frame derivatives plus a CSV of unscaled normalized metrics.
+This is a consecutive-view capture, not a set of independently restarted
+scenes."
   (check-type count (integer 1))
   (check-type yaw-step real)
   (check-type forward-step real)
   (when day-start
     (check-type day-start real))
   (check-type day-step real)
+  (when difference-scale
+    (check-type difference-scale (real 0)))
   (let ((directory (uiop:ensure-directory-pathname directory))
         (session nil)
+        (previous-pixels nil)
+        (previous-previous-pixels nil)
+        (derivative-rows '())
+        (outputs '())
         (initial-x (camera-x camera))
         (initial-z (camera-z camera))
         (initial-yaw (camera-yaw camera))
@@ -138,6 +219,14 @@ capture, not a set of independently restarted scenes."
                   :frames-per-second nil :visible-p nil
                   :world world :mesher mesher :camera camera
                   :sky-clock sky-clock :sky-profile sky-profile))
+           ;; Temporal evidence requires a fixed scene.  The ordinary capture
+           ;; threshold of nine products is enough for a useful screenshot but
+           ;; allowed later desired chunks to publish in the middle of a
+           ;; derivative sequence.
+           (wait-for-luvcraft-products
+            session
+            :minimum
+            (hash-table-count (luvcraft-session-desired-chunks session)))
            (loop for index below count
                  for pathname =
                  (hidden-luvcraft-frame-pathname
@@ -158,7 +247,54 @@ capture, not a set of independently restarted scenes."
                                 day-fraction)
                           (setf (sky-clock-day-fraction sky-clock)
                                 day-fraction)))
-                    (capture-luvcraft-screenshot session pathname)
-                 collect pathname))
+                    (multiple-value-bind
+                        (written pixels frame-width frame-height format)
+                        (capture-luvcraft-screenshot session pathname)
+                      (push written outputs)
+                      (when (and difference-scale previous-pixels)
+                        (multiple-value-bind
+                            (difference mean maximum changed)
+                            (temporal-derivative-rgba
+                             pixels previous-pixels difference-scale)
+                          (let ((difference-pathname
+                                  (hidden-luvcraft-frame-pathname
+                                   directory index
+                                   (format nil "~A-d1" pathname-prefix))))
+                            (write-rgba-png difference-pathname difference
+                                            frame-width frame-height format)
+                            (push difference-pathname outputs))
+                          (let ((row (list index mean maximum changed
+                                           nil nil nil)))
+                            (when previous-previous-pixels
+                              (multiple-value-bind
+                                  (second-difference second-mean second-maximum
+                                   second-changed)
+                                  (temporal-derivative-rgba
+                                   pixels previous-pixels difference-scale
+                                   previous-previous-pixels)
+                                (let ((difference-pathname
+                                        (hidden-luvcraft-frame-pathname
+                                         directory index
+                                         (format nil "~A-d2"
+                                                 pathname-prefix))))
+                                  (write-rgba-png
+                                   difference-pathname second-difference
+                                   frame-width frame-height format)
+                                  (push difference-pathname outputs))
+                                (setf (fifth row) second-mean
+                                      (sixth row) second-maximum
+                                      (seventh row) second-changed)))
+                            (push row derivative-rows))))
+                      (setf previous-previous-pixels previous-pixels
+                            previous-pixels pixels)))
+           (when difference-scale
+             (let ((summary
+                     (merge-pathnames
+                      (format nil "~A-temporal.csv" pathname-prefix)
+                      directory)))
+               (write-temporal-derivative-summary
+                summary (nreverse derivative-rows))
+               (push summary outputs)))
+           (nreverse outputs))
       (when session
         (stop-luvcraft session)))))

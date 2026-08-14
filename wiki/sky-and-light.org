@@ -890,6 +890,65 @@ rounder, distance-aware filter and any resolution change pass shader validation
 and are inspected in both the analytic yard and representative forest; and the
 wiki records what each capture can and cannot prove.
 
+** DONE Temporal derivatives and continuously filtered shadow decisions
+:PROPERTIES:
+:ID: GKEHPF
+:END:
+
+Intent: turn moving-shadow shimmer into inspectable temporal evidence, then
+remove discrete nearest-sampled comparison flips without adding a whole-scene
+temporal reconstruction system prematurely.
+
+Evidence:
+
+- The 17-tap disk in #UDVPDW read nearest depth values and applied binary
+  comparisons.  Its weighted result therefore moved through discrete levels
+  as a rotating silhouette crossed light-space texels; changing edge/lattice
+  alignment accounts for the reported angle-dependent beat frequency without
+  requiring a floating-point precision failure.
+- Linear filtering of raw depth is not the desired fix because interpolated
+  depths across a discontinuity invent surfaces.  The renderer now has a
+  separate linear comparison sampler.  Each =sample-compare= classifies the
+  four neighboring depths and Vulkan bilinearly filters their visibility;
+  ordinary nearest sampling remains available for the center blocker-distance
+  estimate.  The shader language lowers this explicitly to
+  =OpImageSampleDrefImplicitLod=, and =spirv-val= accepts the fragment module.
+- Gazetteer sequences accept =--difference-scale=.  They write amplified
+  grayscale first and second derivatives plus unscaled normalized mean,
+  maximum, and changed-pixel fractions in =VIEW-temporal.csv=.  The first run
+  immediately falsified its own fixed-world premise: a large derivative spike
+  was terrain and trees publishing halfway through the sequence because the
+  ordinary screenshot threshold waits for only nine useful products.  Temporal
+  capture now waits for every desired chunk product before frame zero.
+- The settled comparison used 60 fixed 960x640 frames, =--day-start 0.70=,
+  =--day-step 1/36000=, and no camera motion: one display-frame-equivalent step
+  for a ten-minute day.  Against the otherwise identical nearest-comparison
+  sequence, mean first-derivative magnitude fell from 0.00011173 to 0.00009798
+  (12.3 percent), and peak changed-pixel fraction fell from 0.02354 to 0.01829
+  (22.3 percent).  Mean second derivative rose slightly, from 0.00022243 to
+  0.00023217, while its peak changed area fell from 0.04544 to 0.04367.
+- Those CSV values measure final 8-bit RGB, not isolated shadow visibility.
+  The derivative plates reveal many one-code-value material and sky changes,
+  so numerical second differences are a sensitive regression detector rather
+  than a complete perceptual shimmer score.  Inspection of the moving first
+  and second derivatives shows less concentrated edge chatter, and the
+  analytic =shadow-yard= still has attached pillar contact and a coherent
+  penumbra.
+- This is spatially continuous comparison filtering, not temporal AA.  Full
+  TAA would require jitter, history buffers, motion/reprojection, disocclusion
+  rejection, and a policy for moving block edits.  The narrower change attacks
+  the observed light-space texel transitions without adding that stateful
+  reconstruction system.
+- Strict Parinfer, =make test= (including 17 comparison-sampled disk taps),
+  fragment SPIR-V validation, the 60-frame runtime capture, and =make smoke=
+  pass.
+
+Done when: gazetteer capture can emit first and second temporal derivatives
+plus numerical summaries; a 60-Hz-equivalent fixed-camera sun sequence makes
+the shimmer measurable; the chosen sampling change reduces derivative chatter
+without detaching contact shadows; and tests, SPIR-V validation, smoke, and the
+wiki distinguish spatial comparison filtering from full temporal AA.
+
 ** IDEA HDR crystal bloom
 :PROPERTIES:
 :ID: WLHDRB

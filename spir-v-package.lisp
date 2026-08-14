@@ -109,6 +109,7 @@
            ;; protocol for defining and implementing new operators.
            #:dot
            #:sample
+           #:sample-compare
            #:mix
            #:vec2
            #:vec3

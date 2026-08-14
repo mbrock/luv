@@ -127,7 +127,8 @@
                  (frame-state :uniform-block :set 0 :binding 2
                               :members #.*frame-uniform-members*)
                  (shadow-map :depth-texture-2d :set 0 :binding 3)
-                 (shadow-sampler :sampler :set 0 :binding 4)))
+                 (shadow-sampler :sampler :set 0 :binding 4)
+                 (shadow-comparison-sampler :sampler :set 0 :binding 5)))
   (let* ((uv-shade uv-shade-input)
          (uv (swizzle uv-shade :xy))
          (ao (swizzle uv-shade :z))
@@ -168,7 +169,8 @@
             shadow-minimum-radius shadow-maximum-radius))
          (shadow-sample
            (shadow-visibility
-            shadow-map shadow-sampler shadow-uv-input shadow-depth-input
+            shadow-map shadow-comparison-sampler
+            shadow-uv-input shadow-depth-input
             shadow-texel-size shadow-bias shadow-filter-radius))
          (direct-shadow (mix 1.0 shadow-sample shadow-in-bounds))
          ;; The mesh carries normalized raw light readings; every response
