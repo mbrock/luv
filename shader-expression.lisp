@@ -33,6 +33,19 @@
              (shader-language-error-reason condition)
              (shader-language-error-details condition)))))
 
+(defmacro with-shader-quantity-errors ((source-form reason) &body body)
+  "Translate backend-neutral quantity failures into shader source errors."
+  `(handler-case
+       (progn ,@body)
+     (math:undefined-unit (condition)
+       (error 'shader-language-error
+              :form ,source-form :reason :undefined-unit
+              :details (math:undefined-unit-name condition)))
+     (math:quantity-operation-error (condition)
+       (error 'shader-language-error
+              :form ,source-form :reason ,reason
+              :details (math:quantity-operation-error-reason condition)))))
+
 (defclass shader-type ()
   ((name
     :initarg :name
@@ -580,15 +593,10 @@ silent loss of meaning."
                      for specification in specifications
                      unless specification
                        collect (shader-expression-form operand))))
-      (handler-case
-          (apply #'math:derive-quantity-specification
-                 operator specifications)
-        (math:quantity-operation-error (condition)
-          (error 'shader-language-error
-                 :form source-form
-                 :reason :invalid-quantity-operation
-                 :details (math:quantity-operation-error-reason
-                           condition)))))))
+      (with-shader-quantity-errors
+          (source-form :invalid-quantity-operation)
+        (apply #'math:derive-quantity-specification
+               operator specifications)))))
 
 (defun require-semantic-operands (operands source-form indices)
   (loop for index in indices
@@ -700,15 +708,13 @@ silent loss of meaning."
 (defmethod math:derive-quantity-specification
     ((operator (eql 'clamp)) &rest operands)
   (unless (= (length operands) 3)
-    (error 'math:quantity-operation-error
-           :operator operator :specifications operands :reason :clamp-arity))
+    (math:quantity-operation-error operator operands :clamp-arity))
   (apply #'math:derive-quantity-specification 'max operands))
 
 (defmethod math:derive-quantity-specification
     ((operator (eql 'step)) &rest operands)
   (unless (= (length operands) 2)
-    (error 'math:quantity-operation-error
-           :operator operator :specifications operands :reason :step-arity))
+    (math:quantity-operation-error operator operands :step-arity))
   (let ((compatible
           (apply #'math:derive-quantity-specification 'max operands)))
     (math:make-quantity-specification
@@ -718,28 +724,18 @@ silent loss of meaning."
 (defmethod math:derive-quantity-specification
     ((operator (eql 'mix)) &rest operands)
   (unless (= (length operands) 3)
-    (error 'math:quantity-operation-error
-           :operator operator :specifications operands :reason :mix-arity))
+    (math:quantity-operation-error operator operands :mix-arity))
   (destructuring-bind (from to amount) operands
     (let ((result (math:derive-quantity-specification 'max from to)))
-      (unless (and (math:dimensionless-p
-                    (math:quantity-specification-dimension amount))
-                   (math:unitless-p
-                    (math:quantity-specification-unit amount))
-                   (zerop
-                    (math:quantity-specification-tensor-order amount))
-                   (not (math:quantity-specification-affine-p amount)))
-        (error 'math:quantity-operation-error
-               :operator operator :specifications operands
-               :reason :mix-requires-dimensionless-scalar-amount))
+      (unless (math:dimensionless-quantity-specification-p amount 0)
+        (math:quantity-operation-error
+         operator operands :mix-requires-dimensionless-scalar-amount))
       result)))
 
 (defmethod math:derive-quantity-specification
     ((operator (eql 'smoothstep)) &rest operands)
   (unless (= (length operands) 3)
-    (error 'math:quantity-operation-error
-           :operator operator :specifications operands
-           :reason :smoothstep-arity))
+    (math:quantity-operation-error operator operands :smoothstep-arity))
   (let ((compatible
           (apply #'math:derive-quantity-specification 'max operands)))
     (math:make-quantity-specification
@@ -749,42 +745,22 @@ silent loss of meaning."
 (defmethod math:derive-quantity-specification
     ((operator (eql 'normalize)) &rest operands)
   (unless (= (length operands) 1)
-    (error 'math:quantity-operation-error
-           :operator operator :specifications operands
-           :reason :normalize-arity))
+    (math:quantity-operation-error operator operands :normalize-arity))
   (let ((operand (first operands)))
-    (unless (and (math:dimensionless-p
-                  (math:quantity-specification-dimension operand))
-                 (math:unitless-p
-                  (math:quantity-specification-unit operand))
-                 (= (math:quantity-specification-tensor-order operand) 1)
-                 (not (math:quantity-specification-affine-p operand)))
-      (error 'math:quantity-operation-error
-             :operator operator :specifications operands
-             :reason :normalize-requires-dimensionless-vector))
+    (unless (math:dimensionless-quantity-specification-p operand 1)
+      (math:quantity-operation-error
+       operator operands :normalize-requires-dimensionless-vector))
     operand))
 
 (defmethod math:derive-quantity-specification
     ((operator (eql 'expt)) &rest operands)
   (unless (= (length operands) 2)
-    (error 'math:quantity-operation-error
-           :operator operator :specifications operands
-           :reason :expt-arity))
+    (math:quantity-operation-error operator operands :expt-arity))
   (destructuring-bind (base exponent) operands
-    (unless (and (math:dimensionless-p
-                  (math:quantity-specification-dimension base))
-                 (math:unitless-p
-                  (math:quantity-specification-unit base))
-                 (not (math:quantity-specification-affine-p base))
-                 (math:dimensionless-p
-                  (math:quantity-specification-dimension exponent))
-                 (math:unitless-p
-                  (math:quantity-specification-unit exponent))
-                 (zerop (math:quantity-specification-tensor-order exponent))
-                 (not (math:quantity-specification-affine-p exponent)))
-      (error 'math:quantity-operation-error
-             :operator operator :specifications operands
-             :reason :expt-requires-dimensionless-operands))
+    (unless (and (math:dimensionless-quantity-specification-p base)
+                 (math:dimensionless-quantity-specification-p exponent 0))
+      (math:quantity-operation-error
+       operator operands :expt-requires-dimensionless-operands))
     (math:make-quantity-specification
      nil :tensor-order
      (math:quantity-specification-tensor-order base))))
@@ -1249,16 +1225,10 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
              (or (and layout
                       (math:project-quantity-layout layout indices))
                  (and specification
-                      (handler-case
-                          (math:project-quantity-specification
-                           specification indices input-width)
-                        (math:quantity-operation-error (condition)
-                          (error 'shader-language-error
-                                 :form form
-                                 :reason :invalid-quantity-projection
-                                 :details
-                                 (math:quantity-operation-error-reason
-                                  condition))))))))
+                      (with-shader-quantity-errors
+                          (form :invalid-quantity-projection)
+                        (math:project-quantity-specification
+                         specification indices input-width))))))
       (when (and (shader-expression-quantity-checked-p operand)
                  (null projected))
         (error 'shader-language-error
@@ -1305,22 +1275,15 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
 (defun parse-declaration-quantity-specification
     (quantity dimension unit affine-p type source-form)
   (when (or quantity dimension unit affine-p)
-    (handler-case
-        (apply
-         #'math:make-quantity-specification quantity
-         (append
-          (and dimension (list :dimension dimension))
-          (list :unit unit
-                :tensor-order (shader-type-tensor-order type source-form)
-                :affine-p affine-p)))
-      (math:undefined-unit (condition)
-        (error 'shader-language-error
-               :form source-form :reason :undefined-unit
-               :details (math:undefined-unit-name condition)))
-      (math:quantity-operation-error (condition)
-        (error 'shader-language-error
-               :form source-form :reason :invalid-quantity-declaration
-               :details (math:quantity-operation-error-reason condition))))))
+    (with-shader-quantity-errors
+        (source-form :invalid-quantity-declaration)
+      (apply
+       #'math:make-quantity-specification quantity
+       (append
+        (and dimension (list :dimension dimension))
+        (list :unit unit
+              :tensor-order (shader-type-tensor-order type source-form)
+              :affine-p affine-p))))))
 
 (defun parse-declaration-quantity-layout
     (components type source-form &optional whole)
@@ -1527,16 +1490,12 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
            (interpretation
              (parse-declaration-quantity-specification
               quantity dimension unit affine-p type form)))
-      (handler-case
-          (math:interpret-quantity-specification
-           (and (shader-expression-quantity-checked-p operand)
-                (shader-expression-quantity-specification operand))
-           interpretation)
-        (math:quantity-operation-error (condition)
-          (error 'shader-language-error
-                 :form form
-                 :reason :invalid-quantity-interpretation
-                 :details (math:quantity-operation-error-reason condition))))
+      (with-shader-quantity-errors
+          (form :invalid-quantity-interpretation)
+        (math:interpret-quantity-specification
+         (and (shader-expression-quantity-checked-p operand)
+              (shader-expression-quantity-specification operand))
+         interpretation))
       (make-instance 'shader-interpretation
                      :operand operand
                      :type type
@@ -1558,24 +1517,16 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
       (unless source
         (error 'shader-language-error
                :form form :reason :unit-conversion-requires-quantity))
-      (handler-case
-          (multiple-value-bind (target factor)
-              (math:convert-quantity-specification-unit source unit)
-            (make-instance
-             'shader-unit-conversion
-             :operand operand
-             :factor factor
-             :type (shader-expression-type operand)
-             :quantity-specification target
-             :source-form form))
-        (math:undefined-unit (condition)
-          (error 'shader-language-error
-                 :form form :reason :undefined-unit
-                 :details (math:undefined-unit-name condition)))
-        (math:quantity-operation-error (condition)
-          (error 'shader-language-error
-                 :form form :reason :invalid-unit-conversion
-                 :details (math:quantity-operation-error-reason condition)))))))
+      (with-shader-quantity-errors (form :invalid-unit-conversion)
+        (multiple-value-bind (target factor)
+            (math:convert-quantity-specification-unit source unit)
+          (make-instance
+           'shader-unit-conversion
+           :operand operand
+           :factor factor
+           :type (shader-expression-type operand)
+           :quantity-specification target
+           :source-form form))))))
 
 (defun shader-constant-expression-p (expression)
   (typecase expression

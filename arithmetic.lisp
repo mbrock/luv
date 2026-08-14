@@ -7,14 +7,21 @@
 
 (in-package #:luv.arithmetic)
 
-(defclass dimension ()
+(defclass factor-product ()
   ((factors
     :initarg :factors
-    :reader dimension-factors))
+    :reader factor-product-factors))
+  (:documentation
+   "Internal canonical representation shared by dimensions and exact units."))
+
+(defclass dimension (factor-product) ()
   (:documentation
    "A canonical product of symbolic base dimensions raised to rational powers."))
 
-(defun dimension-factor-name (factor)
+(defun dimension-factors (dimension)
+  (factor-product-factors dimension))
+
+(defun factor-name (factor)
   (let ((symbol (car factor)))
     (format nil "~A::~A"
             (or (and (symbol-package symbol)
@@ -22,7 +29,7 @@
                 "")
             (symbol-name symbol))))
 
-(defun canonical-dimension-factors (factors)
+(defun canonical-factors (factors)
   (let ((powers (make-hash-table :test #'eq)))
     (dolist (factor factors)
       (let ((base (car factor))
@@ -31,13 +38,13 @@
                           (second factor)
                           (cdr factor))))
         (unless (and (symbolp base) (rationalp exponent))
-          (error "Invalid dimension factor ~S." factor))
+          (error "Invalid symbolic factor ~S." factor))
         (incf (gethash base powers 0) exponent)))
     (sort (loop for base being the hash-keys of powers
                   using (hash-value exponent)
                 unless (zerop exponent)
                   collect (cons base exponent))
-          #'string< :key #'dimension-factor-name)))
+          #'string< :key #'factor-name)))
 
 (defun make-dimension (&optional designator)
   "Return a canonical dimension from NIL, one base symbol, or factor pairs.
@@ -49,45 +56,46 @@ Each factor pair has the form (BASE EXPONENT), where EXPONENT is rational."
     (symbol (make-instance 'dimension
                            :factors (list (cons designator 1))))
     (list (make-instance 'dimension
-                         :factors (canonical-dimension-factors designator)))))
+                         :factors (canonical-factors designator)))))
 
-(defmethod print-object ((dimension dimension) stream)
-  (print-unreadable-object (dimension stream :type t)
-    (if (dimension-factors dimension)
+(defmethod print-object ((product factor-product) stream)
+  (print-unreadable-object (product stream :type t)
+    (if (factor-product-factors product)
         (format stream "~{~A~^ ~}"
                 (mapcar (lambda (factor)
                           (if (= (cdr factor) 1)
                               (car factor)
                               (format nil "~A^~A" (car factor) (cdr factor))))
-                        (dimension-factors dimension)))
+                        (factor-product-factors product)))
         (write-string "1" stream))))
 
+(defun factor-product= (left right)
+  (equal (factor-product-factors left)
+         (factor-product-factors right)))
+
+(defun combined-factors (left right)
+  (append (factor-product-factors left)
+          (factor-product-factors right)))
+
+(defun scaled-factors (product exponent)
+  (mapcar (lambda (factor)
+            (list (car factor) (* exponent (cdr factor))))
+          (factor-product-factors product)))
+
 (defun dimension= (left right)
-  (let ((left (make-dimension left))
-        (right (make-dimension right)))
-    (and (= (length (dimension-factors left))
-            (length (dimension-factors right)))
-         (every (lambda (left-factor right-factor)
-                  (and (eq (car left-factor) (car right-factor))
-                       (= (cdr left-factor) (cdr right-factor))))
-                (dimension-factors left)
-                (dimension-factors right)))))
+  (factor-product= (make-dimension left) (make-dimension right)))
 
 (defun dimensionless-p (dimension)
   (null (dimension-factors (make-dimension dimension))))
 
 (defun multiply-dimensions (left right)
-  (make-dimension
-   (append (dimension-factors (make-dimension left))
-           (dimension-factors (make-dimension right)))))
+  (make-dimension (combined-factors (make-dimension left)
+                                    (make-dimension right))))
 
 (defun exponentiate-dimension (dimension exponent)
   (unless (rationalp exponent)
     (error "A dimension exponent must be rational, not ~S." exponent))
-  (make-dimension
-   (mapcar (lambda (factor)
-             (list (car factor) (* exponent (cdr factor))))
-           (dimension-factors (make-dimension dimension)))))
+  (make-dimension (scaled-factors (make-dimension dimension) exponent)))
 
 (defun divide-dimensions (numerator denominator)
   (multiply-dimensions numerator
@@ -132,16 +140,16 @@ Each factor pair has the form (BASE EXPONENT), where EXPONENT is rational."
 (defmethod unit-definition-for (name)
   (error 'undefined-unit :name name))
 
-(defclass unit-expression ()
-  ((factors
-    :initarg :factors
-    :reader unit-expression-factors))
+(defclass unit-expression (factor-product) ()
   (:documentation
    "A canonical product of defined named units."))
 
+(defun unit-expression-factors (unit)
+  (factor-product-factors unit))
+
 (defun raw-unit-expression (factors)
   (make-instance 'unit-expression
-                 :factors (canonical-dimension-factors factors)))
+                 :factors (canonical-factors factors)))
 
 (defun make-unit-expression (&optional designator)
   "Return a canonical unit expression from NIL, a defined unit, or factors.
@@ -161,27 +169,8 @@ identity remains visible here; conversions are requested separately."
        (unit-definition-for (car factor)))
      (raw-unit-expression designator))))
 
-(defmethod print-object ((unit unit-expression) stream)
-  (print-unreadable-object (unit stream :type t)
-    (if (unit-expression-factors unit)
-        (format stream "~{~A~^ ~}"
-                (mapcar (lambda (factor)
-                          (if (= (cdr factor) 1)
-                              (car factor)
-                              (format nil "~A^~A" (car factor) (cdr factor))))
-                        (unit-expression-factors unit)))
-        (write-string "1" stream))))
-
 (defun unit-expression= (left right)
-  (let ((left (make-unit-expression left))
-        (right (make-unit-expression right)))
-    (and (= (length (unit-expression-factors left))
-            (length (unit-expression-factors right)))
-         (every (lambda (left-factor right-factor)
-                  (and (eq (car left-factor) (car right-factor))
-                       (= (cdr left-factor) (cdr right-factor))))
-                (unit-expression-factors left)
-                (unit-expression-factors right)))))
+  (factor-product= (make-unit-expression left) (make-unit-expression right)))
 
 (defun unitless-p (unit)
   (null (unit-expression-factors (make-unit-expression unit))))
@@ -239,16 +228,14 @@ identity remains visible here; conversions are requested separately."
 
 (defun multiply-unit-expressions (left right)
   (make-unit-expression
-   (append (unit-expression-factors (make-unit-expression left))
-           (unit-expression-factors (make-unit-expression right)))))
+   (combined-factors (make-unit-expression left)
+                     (make-unit-expression right))))
 
 (defun exponentiate-unit-expression (unit exponent)
   (unless (rationalp exponent)
     (error "A unit exponent must be rational, not ~S." exponent))
   (make-unit-expression
-   (mapcar (lambda (factor)
-             (list (car factor) (* exponent (cdr factor))))
-           (unit-expression-factors (make-unit-expression unit)))))
+   (scaled-factors (make-unit-expression unit) exponent)))
 
 (defun divide-unit-expressions (numerator denominator)
   (multiply-unit-expressions
@@ -275,6 +262,13 @@ identity remains visible here; conversions are requested separately."
   (declare (ignore name))
   nil)
 
+(defmacro define-semantic-definition (function name value-form)
+  "Define NAME as one inspectable value behind an EQL-specialized FUNCTION."
+  (let ((argument (gensym "NAME")))
+    `(defmethod ,function ((,argument (eql ,name)))
+       (declare (ignore ,argument))
+       (load-time-value ,value-form))))
+
 (defun make-quantity-kind-definition (name dimension parent)
   (unless (symbolp name)
     (error "A quantity kind needs a symbolic name, not ~S." name))
@@ -294,11 +288,8 @@ identity remains visible here; conversions are requested separately."
 
 (defmacro define-quantity-kind (name &key dimension parent)
   "Define a semantic quantity kind through an inspectable EQL method."
-  (let ((argument (gensym "QUANTITY-KIND")))
-    `(defmethod quantity-kind-definition-for ((,argument (eql ,name)))
-       (declare (ignore ,argument))
-       (load-time-value
-        (make-quantity-kind-definition ,name ',dimension ,parent)))))
+  `(define-semantic-definition quantity-kind-definition-for ,name
+     (make-quantity-kind-definition ,name ',dimension ,parent)))
 
 (defun quantity-kind-subkind-p (kind ancestor)
   "Whether KIND is ANCESTOR or reaches it through declared parent kinds."
@@ -318,9 +309,13 @@ identity remains visible here; conversions are requested separately."
     :reader quantity-definition-name)
    (kind
     :initarg :kind
-    :reader quantity-definition-kind))
+    :reader quantity-definition-kind)
+   (components
+    :initarg :components
+    :initform nil
+    :reader quantity-definition-components))
   (:documentation
-   "A domain quantity name and the semantic kind whose units it admits."))
+   "A domain quantity name, its unit kind, and homogeneous components."))
 
 (defgeneric quantity-definition-for (name)
   (:documentation "Return the inspectable definition of quantity NAME, or NIL."))
@@ -329,18 +324,28 @@ identity remains visible here; conversions are requested separately."
   (declare (ignore name))
   nil)
 
-(defun make-quantity-definition (name kind)
+(defun make-quantity-definition (name kind &optional components)
   (unless (and (symbolp name) (symbolp kind)
                (quantity-kind-definition-for kind))
     (error "Quantity ~S needs a defined symbolic kind, not ~S." name kind))
-  (make-instance 'quantity-definition :name name :kind kind))
+  (unless (and (every #'symbolp components)
+               (= (length components) (length (remove-duplicates components)))
+               (not (member name components)))
+    (error "Quantity ~S needs distinct symbolic component names, not ~S."
+           name components))
+  (make-instance 'quantity-definition
+                 :name name :kind kind :components (copy-list components)))
 
-(defmacro define-quantity (name &key kind)
-  "Define quantity NAME as a member of semantic KIND through an EQL method."
-  (let ((argument (gensym "QUANTITY")))
-    `(defmethod quantity-definition-for ((,argument (eql ,name)))
-       (declare (ignore ,argument))
-       (load-time-value (make-quantity-definition ,name ,kind)))))
+(defmacro define-quantity (name &key kind components)
+  "Define quantity NAME and any homogeneous COMPONENTS as members of KIND."
+  `(progn
+     (define-semantic-definition quantity-definition-for ,name
+       (make-quantity-definition ,name ,kind ',components))
+     ,@(loop for component in components
+             collect
+             `(define-semantic-definition quantity-definition-for ,component
+                (make-quantity-definition ,component ,kind)))
+     ',name))
 
 (defun unit-designator-quantity-kind (unit)
   "Return the kind constraint of one named UNIT, or NIL for a compound unit."
@@ -401,34 +406,34 @@ identity remains visible here; conversions are requested separately."
                (quantity-kind-definition-for quantity-kind))
     (error "Unit ~S needs a defined :QUANTITY-KIND, not ~S."
            name quantity-kind))
-  (if reference-supplied-p
-      (let ((reference (make-unit-expression reference)))
-        (make-instance
-         'unit-definition
-         :name name
-         :dimension (unit-expression-dimension reference)
-         :magnitude (* magnitude (unit-expression-magnitude reference))
-         :basis (unit-expression-basis reference)
-         :identity-p nil
-         :quantity-kind quantity-kind))
-      (let ((dimension (make-dimension dimension)))
-        (make-instance
-         'unit-definition
-         :name name
-         :dimension dimension
-         :magnitude magnitude
-         :basis (if identity-p
-                    (raw-unit-expression nil)
-                    (raw-unit-expression (list (cons name 1))))
-         :identity-p (not (null identity-p))
-         :quantity-kind quantity-kind))))
+  (let* ((reference-expression
+           (and reference-supplied-p (make-unit-expression reference)))
+         (effective-dimension
+           (if reference-expression
+               (unit-expression-dimension reference-expression)
+               (make-dimension dimension)))
+         (effective-magnitude
+           (* magnitude
+              (if reference-expression
+                  (unit-expression-magnitude reference-expression)
+                  1)))
+         (basis
+           (cond (reference-expression
+                  (unit-expression-basis reference-expression))
+                 (identity-p (raw-unit-expression nil))
+                 (t (raw-unit-expression (list (cons name 1)))))))
+    (make-instance 'unit-definition
+                   :name name
+                   :dimension effective-dimension
+                   :magnitude effective-magnitude
+                   :basis basis
+                   :identity-p (not (null identity-p))
+                   :quantity-kind quantity-kind)))
 
 (defmacro define-unit (name &rest options)
   "Define NAME as a semantic linear unit through an inspectable EQL method."
-  (let ((argument (gensym "UNIT")))
-    `(defmethod unit-definition-for ((,argument (eql ,name)))
-       (declare (ignore ,argument))
-       (load-time-value (make-unit-definition ,name ,@options)))))
+  `(define-semantic-definition unit-definition-for ,name
+     (make-unit-definition ,name ,@options)))
 
 ;; The roots are intentionally small: application domains add named quantities
 ;; beneath these kinds without teaching the arithmetic core their vocabulary.
@@ -567,6 +572,31 @@ identity remains visible here; conversions are requested separately."
        (eq (quantity-specification-affine-p left)
            (quantity-specification-affine-p right))))
 
+(defun dimensionless-quantity-specification-p
+    (specification &optional tensor-order)
+  "Whether SPECIFICATION is linear, unitless, and optionally of TENSOR-ORDER."
+  (and (dimensionless-p
+        (quantity-specification-dimension specification))
+       (unitless-p (quantity-specification-unit specification))
+       (or (null tensor-order)
+           (= tensor-order
+              (quantity-specification-tensor-order specification)))
+       (not (quantity-specification-affine-p specification))))
+
+(defun copy-quantity-specification
+    (source &key
+              (name (quantity-specification-name source))
+              (dimension (quantity-specification-dimension source))
+              (unit (quantity-specification-unit source))
+              (tensor-order (quantity-specification-tensor-order source))
+              (affine-p (quantity-specification-affine-p source)))
+  "Copy SOURCE, replacing only the explicitly supplied semantic fields."
+  (make-quantity-specification name
+                               :dimension dimension
+                               :unit unit
+                               :tensor-order tensor-order
+                               :affine-p affine-p))
+
 (defclass quantity-projection ()
   ((positions
     :initarg :positions
@@ -655,19 +685,10 @@ identity remains visible here; conversions are requested separately."
                 :test #'equal :key #'quantity-projection-positions)))
     (and projection (quantity-projection-specification projection))))
 
-(defgeneric quantity-component-names (quantity-name)
-  (:documentation
-   "Return the ordered component quantity names of a homogeneous quantity."))
-
-(defmethod quantity-component-names (quantity-name)
-  (declare (ignore quantity-name))
-  nil)
-
-(defmacro define-quantity-components (quantity-name (&rest component-names))
-  "Define the ordered component names of QUANTITY-NAME through an EQL method."
-  `(defmethod quantity-component-names ((quantity-name (eql ,quantity-name)))
-     (declare (ignore quantity-name))
-     ',component-names))
+(defun quantity-component-names (quantity-name)
+  "Return the ordered homogeneous components declared for QUANTITY-NAME."
+  (let ((definition (quantity-definition-for quantity-name)))
+    (and definition (quantity-definition-components definition))))
 
 (defun project-quantity-specification (specification positions extent)
   "Derive the quantity selected from a homogeneous represented quantity.
@@ -691,12 +712,9 @@ publish ordered component names; no default silently calls one axis the whole."
          (quantity-operation-error
           'project (list specification positions)
           :missing-quantity-component-definition))
-       (make-quantity-specification
-        component-name
-        :dimension (quantity-specification-dimension specification)
-        :unit (quantity-specification-unit specification)
-        :tensor-order 0
-        :affine-p (quantity-specification-affine-p specification))))
+       (copy-quantity-specification specification
+                                    :name component-name
+                                    :tensor-order 0)))
     (t
      (quantity-operation-error
       'project (list specification positions)
@@ -739,10 +757,7 @@ publish ordered component names; no default silently calls one axis the whole."
 
 (defun scalar-number-specification-p (specification)
   (and (null (quantity-specification-name specification))
-       (dimensionless-p (quantity-specification-dimension specification))
-       (unitless-p (quantity-specification-unit specification))
-       (zerop (quantity-specification-tensor-order specification))
-       (not (quantity-specification-affine-p specification))))
+       (dimensionless-quantity-specification-p specification 0)))
 
 (defun additive-pair (operator left right)
   (unless (same-quantity-space-p left right)
@@ -759,22 +774,14 @@ publish ordered component names; no default silently calls one axis the whole."
        (when (and left-point-p right-point-p)
          (quantity-operation-error operator (list left right)
                                    :cannot-add-points))
-       (make-quantity-specification
-        (quantity-specification-name left)
-        :dimension (quantity-specification-dimension left)
-        :unit (quantity-specification-unit left)
-        :tensor-order (quantity-specification-tensor-order left)
-        :affine-p (or left-point-p right-point-p)))
+       (copy-quantity-specification
+        left :affine-p (or left-point-p right-point-p)))
       (-
        (when (and (not left-point-p) right-point-p)
          (quantity-operation-error operator (list left right)
                                    :cannot-subtract-point-from-difference))
-       (make-quantity-specification
-        (quantity-specification-name left)
-        :dimension (quantity-specification-dimension left)
-        :unit (quantity-specification-unit left)
-        :tensor-order (quantity-specification-tensor-order left)
-        :affine-p (and left-point-p (not right-point-p)))))))
+       (copy-quantity-specification
+        left :affine-p (and left-point-p (not right-point-p)))))))
 
 (defun product-tensor-order (operator left right)
   (let ((left-order (quantity-specification-tensor-order left))
@@ -854,12 +861,9 @@ character.  It is a linear unit conversion, not a semantic interpretation."
       (quantity-operation-error
        'convert-unit (list source target-unit) :incompatible-dimensions))
     (values
-     (make-quantity-specification
-      (quantity-specification-name source)
-      :dimension target-dimension
-      :unit target-unit
-      :tensor-order (quantity-specification-tensor-order source)
-      :affine-p (quantity-specification-affine-p source))
+     (copy-quantity-specification source
+                                  :dimension target-dimension
+                                  :unit target-unit)
      factor)))
 
 (defgeneric derive-quantity-specification (operator &rest operands)
@@ -869,10 +873,16 @@ character.  It is a linear unit conversion, not a semantic interpretation."
 (defmethod derive-quantity-specification (operator &rest operands)
   (quantity-operation-error operator operands :unknown-operator))
 
-(defmethod derive-quantity-specification ((operator (eql '+)) &rest operands)
-  (unless operands
+(defun reduce-quantity-specifications
+    (operator operands pair-function &optional (minimum 1))
+  (when (< (length operands) minimum)
     (quantity-operation-error operator operands :missing-operands))
-  (reduce (lambda (left right) (additive-pair operator left right)) operands))
+  (reduce (lambda (left right)
+            (funcall pair-function operator left right))
+          operands))
+
+(defmethod derive-quantity-specification ((operator (eql '+)) &rest operands)
+  (reduce-quantity-specifications operator operands #'additive-pair))
 
 (defmethod derive-quantity-specification ((operator (eql '-)) &rest operands)
   (unless operands
@@ -886,11 +896,7 @@ character.  It is a linear unit conversion, not a semantic interpretation."
               (rest operands) :initial-value (first operands))))
 
 (defmethod derive-quantity-specification ((operator (eql '*)) &rest operands)
-  (unless operands
-    (quantity-operation-error operator operands :missing-operands))
-  (reduce (lambda (left right)
-            (multiplicative-pair operator left right))
-          (rest operands) :initial-value (first operands)))
+  (reduce-quantity-specifications operator operands #'multiplicative-pair))
 
 (defmethod derive-quantity-specification ((operator (eql '/)) &rest operands)
   (unless (= (length operands) 2)
@@ -929,13 +935,7 @@ character.  It is a linear unit conversion, not a semantic interpretation."
      0)))
 
 (defmethod derive-quantity-specification ((operator (eql 'min)) &rest operands)
-  (unless (>= (length operands) 2)
-    (quantity-operation-error operator operands :missing-operands))
-  (reduce (lambda (left right) (compatible-pair operator left right))
-          (rest operands) :initial-value (first operands)))
+  (reduce-quantity-specifications operator operands #'compatible-pair 2))
 
 (defmethod derive-quantity-specification ((operator (eql 'max)) &rest operands)
-  (unless (>= (length operands) 2)
-    (quantity-operation-error operator operands :missing-operands))
-  (reduce (lambda (left right) (compatible-pair operator left right))
-          (rest operands) :initial-value (first operands)))
+  (reduce-quantity-specifications operator operands #'compatible-pair 2))

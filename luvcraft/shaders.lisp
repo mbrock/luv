@@ -24,19 +24,16 @@
 (math:define-quantity-kind :sample-count
   :dimension nil :parent :dimensionless)
 
-(math:define-quantity :shadow-uv :kind :normalized-coordinate)
-(math:define-quantity :shadow-u :kind :normalized-coordinate)
-(math:define-quantity :shadow-v :kind :normalized-coordinate)
-(math:define-quantity :texture-uv :kind :normalized-coordinate)
-(math:define-quantity :texture-u :kind :normalized-coordinate)
-(math:define-quantity :texture-v :kind :normalized-coordinate)
+(math:define-quantity :shadow-uv :kind :normalized-coordinate
+  :components (:shadow-u :shadow-v))
+(math:define-quantity :texture-uv :kind :normalized-coordinate
+  :components (:texture-u :texture-v))
 (math:define-quantity :shadow-depth :kind :normalized-coordinate)
 (math:define-quantity :sun-disc-coordinate :kind :normalized-coordinate)
 (math:define-quantity :shadow-depth-gradient :kind :normalized-gradient)
-(math:define-quantity :world-direction :kind :unit-direction)
-(math:define-quantity :world-x-direction :kind :unit-direction)
-(math:define-quantity :world-y-direction :kind :unit-direction)
-(math:define-quantity :world-z-direction :kind :unit-direction)
+(math:define-quantity :world-direction :kind :unit-direction
+  :components
+  (:world-x-direction :world-y-direction :world-z-direction))
 (math:define-quantity :linear-rgb :kind :relative-color-signal)
 (math:define-quantity :linear-rgba :kind :relative-color-signal)
 (math:define-quantity :day-factor :kind :proportion)
@@ -50,32 +47,12 @@
 (math:define-quantity :shadow-filter-radius :kind :sample-count)
 (math:define-quantity :world-distance :kind :length)
 (math:define-quantity :view-distance :kind :length)
-(math:define-quantity :world-position :kind :length)
-(math:define-quantity :world-x-position :kind :length)
-(math:define-quantity :world-y-position :kind :length)
-(math:define-quantity :world-z-position :kind :length)
+(math:define-quantity :world-position :kind :length
+  :components (:world-x-position :world-y-position :world-z-position))
 (math:define-quantity :projection-scale :kind :control-signal)
-(math:define-quantity :clip-coordinate :kind :normalized-coordinate)
-(math:define-quantity :clip-x-coordinate :kind :normalized-coordinate)
-(math:define-quantity :clip-y-coordinate :kind :normalized-coordinate)
-(math:define-quantity :clip-z-coordinate :kind :normalized-coordinate)
-
-;;; Like mp-units' vector_components customization point, these EQL methods
-;;; describe homogeneous mathematical vectors.  Packed GPU tuples instead
-;;; declare their local lane groups at the ABI boundary below.
-(math:define-quantity-components
-    :shadow-uv (:shadow-u :shadow-v))
-(math:define-quantity-components
-    :texture-uv (:texture-u :texture-v))
-(math:define-quantity-components
-    :world-direction
-    (:world-x-direction :world-y-direction :world-z-direction))
-(math:define-quantity-components
-    :world-position
-    (:world-x-position :world-y-position :world-z-position))
-(math:define-quantity-components
-    :clip-coordinate
-    (:clip-x-coordinate :clip-y-coordinate :clip-z-coordinate))
+(math:define-quantity :clip-coordinate :kind :normalized-coordinate
+  :components
+  (:clip-x-coordinate :clip-y-coordinate :clip-z-coordinate))
 
 ;;; A matrix is representation; this is the meaning of the operation it
 ;;; participates in.  The four dense rows arrive through the frame ABI, but

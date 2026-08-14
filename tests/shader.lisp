@@ -14,8 +14,8 @@
 
 (in-package #:luv/spir-v/tests)
 
-(math:define-quantity-components :test-position
-    (:test-position-x :test-position-y :test-position-z))
+(math:define-quantity :test-position :kind :dimensionless
+  :components (:test-position-x :test-position-y :test-position-z))
 
 (defun binding-named (name specification)
   (find name (spv:shader-specification-bindings specification)

@@ -223,11 +223,12 @@ projection has no declared meaning.  Arithmetic on the packed =vec3= itself is
 also an error; source must project a semantic value first.
 
 Homogeneous quantities use a different rule.  A named vector quantity may
-publish ordered component names through =define-quantity-components=.  Its
-full =xyz= projection remains the original vector quantity, while =x= becomes
-an explicitly named scalar-axis quantity carrying the same dimension, exact
-unit, and affine character.  No fallback silently calls one component the
-whole vector.
+declare ordered =:components= in its =define-quantity= form.  The definition
+owns that data and defines the component quantities in the same semantic kind.
+Its full =xyz= projection remains the original vector quantity, while =x=
+becomes an explicitly named scalar-axis quantity carrying the same dimension,
+exact unit, and affine character.  No fallback silently calls one component
+the whole vector.
 
 This learns from mp-units without confusing the two cases.  Its
 [[file:../../src/mp-units/src/core/include/mp-units/framework/vector_components.h][=vector_components= protocol]] lets a genuine vector quantity opt into
@@ -414,8 +415,8 @@ at parse time.
 Evidence:
 
 - [[file:../arithmetic.lisp][=arithmetic.lisp=]] defines backend-neutral =quantity-layout= and
-  =quantity-projection= objects plus an open EQL component-name protocol for
-  homogeneous vector quantities.
+  =quantity-projection= objects; inspectable quantity definitions own the
+  ordered component names of homogeneous vectors.
 - [[file:../shader-expression.lisp][=shader-expression.lisp=]] carries layouts through interface variables,
   uniform members, references, and texture samples.  =swizzle= accepts only an
   exact declared layout projection or a lawful homogeneous projection.

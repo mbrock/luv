@@ -4,9 +4,8 @@
 
 (in-package #:luv/arithmetic/tests)
 
-(math:define-quantity :position :kind :length)
-(math:define-quantity :position-x :kind :length)
-(math:define-quantity :position-y :kind :length)
+(math:define-quantity :position :kind :length
+  :components (:position-x :position-y))
 
 (deftest dimensions-form-a-canonical-symbolic-product
   (let* ((length (math:make-dimension :length))
@@ -187,7 +186,14 @@
          (math:derive-quantity-specification 'max left other-unit)
          'math:quantity-operation-error))))
 
-(math:define-quantity-components :position (:position-x :position-y))
+(deftest quantity-definitions-own-their-homogeneous-components
+  (let ((position (math:quantity-definition-for :position))
+        (position-x (math:quantity-definition-for :position-x)))
+    (ok (equal '(:position-x :position-y)
+               (math:quantity-definition-components position)))
+    (ok (equal (math:quantity-definition-components position)
+               (math:quantity-component-names :position)))
+    (ok (eq :length (math:quantity-definition-kind position-x)))))
 
 (deftest semantic-layouts-distinguish-vectors-from-packed-tuples
   (let* ((uv

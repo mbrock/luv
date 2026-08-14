@@ -1,3 +1,12 @@
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  ;; DEFPACKAGE warns instead of retracting stale exports in a live image.
+  (let ((package (find-package '#:luv.arithmetic)))
+    (when package
+      (multiple-value-bind (symbol status)
+          (find-symbol "DEFINE-QUANTITY-COMPONENTS" package)
+        (when (eq status :external)
+          (unexport symbol package))))))
+
 (defpackage #:luv.arithmetic
   (:use #:cl)
   (:documentation
@@ -43,6 +52,7 @@
            #:quantity-definition
            #:quantity-definition-name
            #:quantity-definition-kind
+           #:quantity-definition-components
            #:quantity-definition-for
            #:define-quantity
            #:quantity-specification
@@ -54,6 +64,7 @@
            #:quantity-specification-tensor-order
            #:quantity-specification-affine-p
            #:quantity-specification=
+           #:dimensionless-quantity-specification-p
            #:quantity-projection
            #:make-quantity-projection
            #:quantity-projection-positions
@@ -65,7 +76,6 @@
            #:quantity-layout=
            #:project-quantity-layout
            #:quantity-component-names
-           #:define-quantity-components
            #:project-quantity-specification
            #:quantity-operation-error
            #:quantity-operation-error-operator
