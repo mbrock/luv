@@ -356,10 +356,12 @@ specialized arrays rather than describing individual cells through CLOS."))
       (incf (slot-value chunk 'revision))
       (multiple-value-bind (z remainder) (floor offset (* width height))
         (multiple-value-bind (y x) (floor remainder width)
-          (note-chunk-boundary-change chunk x y z)))
-      (let ((change-hook (slot-value chunk 'change-hook)))
-        (when change-hook
-          (funcall change-hook chunk)))))
+          (note-chunk-boundary-change chunk x y z)
+          ;; The hook receives the edited site so derived domains such as
+          ;; lighting can react to the cell, not merely the chunk.
+          (let ((change-hook (slot-value chunk 'change-hook)))
+            (when change-hook
+              (funcall change-hook chunk x y z)))))))
   block)
 
 (defun map-chunk-blocks (function chunk)
@@ -402,6 +404,13 @@ work.  Whole-domain algorithms should use WITH-BLOCK-CONTENT-STORAGE."
    (revision :initform 0 :reader block-world-revision)
    (residency-revision :initform 0
                        :reader block-world-residency-revision)
+   ;; Derived-domain subscriptions.  The cell hook receives (CHUNK X Y Z)
+   ;; in world coordinates after an authored content change; the residency
+   ;; hook receives (X Y Z EVENT) with EVENT :ARRIVED or :DEPARTED in chunk
+   ;; coordinates after residency publication.
+   (cell-change-hook :initform nil :accessor block-world-cell-change-hook)
+   (residency-change-hook :initform nil
+                          :accessor block-world-residency-change-hook)
    (next-chunk-incarnation :initform 0)
    (change-transaction-depth :initform 0)
    (change-pending-p :initform nil)))
@@ -467,9 +476,21 @@ including when FUNCTION exits non-locally after making a partial change."
    :incarnation (next-block-world-chunk-incarnation world)
    :content content
    :change-hook
-   (lambda (changed-chunk)
-     (declare (ignore changed-chunk))
-     (note-block-world-change world))))
+   (lambda (changed-chunk local-x local-y local-z)
+     (note-block-world-change world)
+     (let ((cell-hook (block-world-cell-change-hook world)))
+       (when cell-hook
+         (let ((origin (chunk-domain-origin
+                        (block-chunk-domain changed-chunk))))
+           (funcall cell-hook changed-chunk
+                    (+ (world-coordinate-x origin) local-x)
+                    (+ (world-coordinate-y origin) local-y)
+                    (+ (world-coordinate-z origin) local-z))))))))
+
+(defun note-world-residency-event (world x y z event)
+  (let ((hook (block-world-residency-change-hook world)))
+    (when hook
+      (funcall hook x y z event))))
 
 (defun ensure-world-chunk (world x y z)
   "Return the resident chunk at X,Y,Z, creating an all-air chunk if absent."
@@ -483,6 +504,7 @@ including when FUNCTION exits non-locally after making a partial change."
                 new-chunk)
           (incf (slot-value world 'residency-revision))
           (note-block-world-change world)
+          (note-world-residency-event world x y z :arrived)
           new-chunk))))
 
 (defun install-world-chunk-storage (world x y z palette indices)
@@ -513,6 +535,7 @@ publishes one complete chunk and advances residency/general revisions once."
       (setf (gethash (chunk-key x y z) (block-world-chunks world)) chunk)
       (incf (slot-value world 'residency-revision))
       (note-block-world-change world)
+      (note-world-residency-event world x y z :arrived)
       chunk)))
 
 (defun remove-world-chunk (world x y z)
@@ -525,7 +548,8 @@ publishes one complete chunk and advances residency/general revisions once."
       (setf (slot-value chunk 'change-hook) nil)
       (remhash (chunk-key x y z) (block-world-chunks world))
       (incf (slot-value world 'residency-revision))
-      (note-block-world-change world))
+      (note-block-world-change world)
+      (note-world-residency-event world x y z :departed))
     (values chunk present-p)))
 
 (defun resident-world-chunks (world)

@@ -144,6 +144,105 @@
         (ok (= (chunk-light-field-boundary-revision field 0 -1 0)
                (1+ bottom-before)))))))
 
+;;; The incremental relighter is judged against the reference solver: after
+;;; its queues settle, every resident cell must be bit-identical to a
+;;; from-scratch solve of the same world.
+
+(defun light-matches-reference-p (world)
+  (let ((reference (luv::solve-light-region
+                    (luv::capture-light-region world))))
+    (loop for chunk in (resident-world-chunks world)
+          always
+          (let* ((key (luv::block-chunk-key chunk))
+                 (entry (gethash key (luv::light-region-entries reference)))
+                 (field (block-chunk-light-field chunk)))
+            (and field
+                 (equalp (luv::light-region-entry-sky entry)
+                         (chunk-light-field-sky-levels field))
+                 (equalp (luv::light-region-entry-block entry)
+                         (chunk-light-field-block-levels field)))))))
+
+(deftest incremental-edits-converge-to-the-reference-field
+  (let* ((world (make-block-world
+                 :source (make-instance 'little-world-source :seed 1)))
+         (state (luv::attach-lighting-state world)))
+    ;; Arrival through the hook lights the fresh chunk incrementally.
+    (luv::ensure-world-chunk world 0 0 0)
+    (ok (luv::reconcile-lighting state))
+    (ok (light-matches-reference-p world))
+    ;; Roofing one cell darkens its column; removing it restores the beam.
+    (setf (world-block-at world 8 15 8) luv::*stone-block*)
+    (ok (luv::reconcile-lighting state))
+    (ok (light-matches-reference-p world))
+    (ok (= (sky-at world 8 14 8) 14))
+    (setf (world-block-at world 8 15 8) nil)
+    (ok (luv::reconcile-lighting state))
+    (ok (light-matches-reference-p world))
+    (ok (= (sky-at world 8 0 8) 15))
+    ;; An emitter appears and disappears.
+    (setf (world-block-at world 4 4 4) *test-glow-block*)
+    (ok (luv::reconcile-lighting state))
+    (ok (light-matches-reference-p world))
+    (ok (= (blocklight-at world 4 5 4) 9))
+    (setf (world-block-at world 4 4 4) nil)
+    (ok (luv::reconcile-lighting state))
+    (ok (light-matches-reference-p world))
+    (ok (= (blocklight-at world 4 5 4) 0))
+    ;; A settled state publishes nothing further.
+    (ok (null (luv::reconcile-lighting state)))
+    (ok (plusp (luv::lighting-state-publications state)))
+    (ok (plusp (luv::lighting-state-cells-visited state)))))
+
+(deftest random-edits-and-residency-match-the-reference-solver
+  (let* ((world (make-block-world
+                 :source (make-instance 'little-world-source :seed 1)))
+         (state (luv::attach-lighting-state world))
+         (rng 987654321)
+         (chunk-keys '((0 0 0) (1 0 0) (0 1 0))))
+    (labels ((next-random (limit)
+               (setf rng (mod (+ (* rng 1103515245) 12345) (expt 2 31)))
+               (mod (floor rng 65536) limit))
+             (random-block ()
+               (case (next-random 8)
+                 ((0 1 2) luv::*stone-block*)
+                 (3 *test-glow-block*)
+                 (t nil)))
+             (random-resident-cell ()
+               (let* ((keys (mapcar #'luv::block-chunk-key
+                                    (resident-world-chunks world)))
+                      (key (nth (next-random (length keys)) keys)))
+                 (list (+ (* 16 (first key)) (next-random 16))
+                       (+ (* 16 (second key)) (next-random 16))
+                       (+ (* 16 (third key)) (next-random 16))))))
+      (dolist (key chunk-keys)
+        (apply #'luv::ensure-world-chunk world key))
+      ;; Random terrain, then interleaved edit bursts and reconciles.
+      (dotimes (index 300)
+        (destructuring-bind (x y z) (random-resident-cell)
+          (setf (world-block-at world x y z) (random-block))))
+      (luv::reconcile-lighting state)
+      (ok (light-matches-reference-p world))
+      (dotimes (round 6)
+        (dotimes (edit 10)
+          (destructuring-bind (x y z) (random-resident-cell)
+            (setf (world-block-at world x y z) (random-block))))
+        (luv::reconcile-lighting state)
+        (ok (light-matches-reference-p world)))
+      ;; A departure relights the retained neighbors; a re-arrival with
+      ;; fresh edits converges again.
+      (luv::remove-world-chunk world 1 0 0)
+      (luv::reconcile-lighting state)
+      (ok (light-matches-reference-p world))
+      (luv::ensure-world-chunk world 1 0 0)
+      (dotimes (edit 12)
+        (setf (world-block-at world
+                              (+ 16 (next-random 16))
+                              (next-random 16)
+                              (next-random 16))
+              (random-block)))
+      (luv::reconcile-lighting state)
+      (ok (light-matches-reference-p world)))))
+
 (deftest absent-neighbors-are-never-silently-open-sky
   ;; A world with no source keeps every boundary :UNKNOWN, so nothing is
   ;; lit and the result says so instead of inventing daylight.

@@ -103,47 +103,74 @@ resident.  DIRECTION is a (dx dy dz) unit list in chunk coordinates."))
   (opacity-lut nil)
   (emission-lut nil)
   (sky nil :type (or null (simple-array (unsigned-byte 8) (*))))
-  (block nil :type (or null (simple-array (unsigned-byte 8) (*))))
-  (unknown-boundary-p nil))
+  (block nil :type (or null (simple-array (unsigned-byte 8) (*)))))
 
 (defstruct (light-region (:constructor %make-light-region))
   (world nil)
   (width 16 :type (integer 1))
   (height 16 :type (integer 1))
   (depth 16 :type (integer 1))
-  (entries (make-hash-table :test #'equal) :type hash-table))
+  (entries (make-hash-table :test #'equal) :type hash-table)
+  ;; A from-scratch capture enumerates its entries eagerly.  An incremental
+  ;; candidate instead materializes entries on first touch, initialized from
+  ;; the chunk's current published field, so propagation may wander into any
+  ;; resident chunk without precomputing the affected set.
+  (ensure-entry nil :type (or null function)))
+
+(defun add-light-region-entry (region chunk &key from-field-p)
+  "Materialize CHUNK's dense capture in REGION and return the new entry."
+  (with-block-content-storage (domain palette indices) chunk
+    (multiple-value-bind (opacity emission)
+        (block-palette-light-tables palette)
+      (let* ((origin (chunk-domain-origin domain))
+             (key (block-chunk-key chunk))
+             (cardinality (length indices))
+             (field (and from-field-p (block-chunk-light-field chunk)))
+             (sky (make-array cardinality :element-type '(unsigned-byte 8)
+                                          :initial-element 0))
+             (block-levels (make-array cardinality
+                                       :element-type '(unsigned-byte 8)
+                                       :initial-element 0)))
+        (when field
+          (replace sky (chunk-light-field-sky-levels field))
+          (replace block-levels (chunk-light-field-block-levels field)))
+        (setf (gethash key (light-region-entries region))
+              (%make-light-region-entry
+               :chunk chunk :key key
+               :origin-x (world-coordinate-x origin)
+               :origin-y (world-coordinate-y origin)
+               :origin-z (world-coordinate-z origin)
+               :indices (coerce indices
+                                '(simple-array (unsigned-byte 16) (*)))
+               :opacity-lut opacity :emission-lut emission
+               :sky sky :block block-levels))))))
 
 (defun capture-light-region (world)
   "Capture every resident chunk of WORLD for a from-scratch relight."
   (let* ((shape (voxel-space-chunk-shape (block-world-space world)))
-         (width (chunk-shape-width shape))
-         (height (chunk-shape-height shape))
-         (depth (chunk-shape-depth shape))
          (region (%make-light-region
-                  :world world :width width :height height :depth depth))
-         (cardinality (* width height depth)))
+                  :world world
+                  :width (chunk-shape-width shape)
+                  :height (chunk-shape-height shape)
+                  :depth (chunk-shape-depth shape))))
     (dolist (chunk (resident-world-chunks world))
-      (with-block-content-storage (domain palette indices) chunk
-        (multiple-value-bind (opacity emission)
-            (block-palette-light-tables palette)
-          (let* ((origin (chunk-domain-origin domain))
-                 (key (block-chunk-key chunk)))
-            (setf (gethash key (light-region-entries region))
-                  (%make-light-region-entry
-                   :chunk chunk :key key
-                   :origin-x (world-coordinate-x origin)
-                   :origin-y (world-coordinate-y origin)
-                   :origin-z (world-coordinate-z origin)
-                   :indices (coerce indices
-                                    '(simple-array (unsigned-byte 16) (*)))
-                   :opacity-lut opacity :emission-lut emission
-                   :sky (make-array cardinality
-                                    :element-type '(unsigned-byte 8)
-                                    :initial-element 0)
-                   :block (make-array cardinality
-                                      :element-type '(unsigned-byte 8)
-                                      :initial-element 0)))))))
+      (add-light-region-entry region chunk))
     region))
+
+(defun make-light-candidate (world)
+  "A lazily populated region whose entries start from current fields."
+  (let ((shape (voxel-space-chunk-shape (block-world-space world))))
+    (%make-light-region
+     :world world
+     :width (chunk-shape-width shape)
+     :height (chunk-shape-height shape)
+     :depth (chunk-shape-depth shape)
+     :ensure-entry
+     (lambda (region key)
+       (multiple-value-bind (chunk present-p)
+           (apply #'world-chunk-at world key)
+         (when present-p
+           (add-light-region-entry region chunk :from-field-p t)))))))
 
 (declaim (inline light-region-locate))
 (defun light-region-locate (region x y z)
@@ -153,8 +180,10 @@ resident.  DIRECTION is a (dx dy dz) unit list in chunk coordinates."))
         (floor y (light-region-height region))
       (multiple-value-bind (chunk-z local-z)
           (floor z (light-region-depth region))
-        (let ((entry (gethash (list chunk-x chunk-y chunk-z)
-                              (light-region-entries region))))
+        (let* ((key (list chunk-x chunk-y chunk-z))
+               (entry (or (gethash key (light-region-entries region))
+                          (let ((ensure (light-region-ensure-entry region)))
+                            (and ensure (funcall ensure region key))))))
           (when entry
             (values entry
                     (+ local-x
@@ -175,95 +204,117 @@ resident.  DIRECTION is a (dx dy dz) unit list in chunk coordinates."))
 ;;;   loses one level per step plus the target cell's opacity.
 
 (defun propagate-light-region (region field-reader queue skylight-p)
-  "Run FIELD's max-fixpoint BFS from the seeded QUEUE of (x y z) conses."
-  (loop while queue
-        do (destructuring-bind (x y z) (pop queue)
-             (multiple-value-bind (entry offset)
-                 (light-region-locate region x y z)
-               (when entry
-                 (let ((level (aref (funcall field-reader entry) offset)))
-                   (when (plusp level)
-                     (loop for (dx dy dz) in *chunk-neighbor-directions*
-                           do (let ((nx (+ x dx)) (ny (+ y dy)) (nz (+ z dz)))
-                                (multiple-value-bind (neighbor neighbor-offset)
-                                    (light-region-locate region nx ny nz)
-                                  (when neighbor
-                                    (let* ((opacity
-                                             (light-region-opacity
-                                              neighbor neighbor-offset))
-                                           (loss
-                                             (if (and skylight-p (= dy -1))
-                                                 opacity
-                                                 (+ 1 opacity)))
-                                           (candidate (- level loss))
-                                           (levels (funcall field-reader
-                                                            neighbor)))
-                                      (when (> candidate
-                                               (aref levels neighbor-offset))
-                                        (setf (aref levels neighbor-offset)
-                                              candidate)
-                                        (push (list nx ny nz)
-                                              queue)))))))))))))
-  region)
+  "Run FIELD's max-fixpoint BFS from the seeded QUEUE of (x y z) conses.
+
+Returns the number of cells visited, for the runtime's work counters."
+  (let ((visited 0))
+    (loop while queue
+          do (destructuring-bind (x y z) (pop queue)
+               (incf visited)
+               (multiple-value-bind (entry offset)
+                   (light-region-locate region x y z)
+                 (when entry
+                   (let ((level (aref (funcall field-reader entry) offset)))
+                     (when (plusp level)
+                       (loop for (dx dy dz) in *chunk-neighbor-directions*
+                             do (let ((nx (+ x dx))
+                                      (ny (+ y dy))
+                                      (nz (+ z dz)))
+                                  (multiple-value-bind
+                                        (neighbor neighbor-offset)
+                                      (light-region-locate region nx ny nz)
+                                    (when neighbor
+                                      (let* ((opacity
+                                               (light-region-opacity
+                                                neighbor neighbor-offset))
+                                             (loss
+                                               (if (and skylight-p (= dy -1))
+                                                   opacity
+                                                   (+ 1 opacity)))
+                                             (candidate (- level loss))
+                                             (levels (funcall field-reader
+                                                              neighbor)))
+                                        (when (> candidate
+                                                 (aref levels
+                                                       neighbor-offset))
+                                          (setf (aref levels neighbor-offset)
+                                                candidate)
+                                          (push (list nx ny nz)
+                                                queue)))))))))))))
+    visited))
+
+(defun chunk-neighbor-resident-p (world key direction)
+  (destructuring-bind (dx dy dz) direction
+    (nth-value 1 (world-chunk-at world
+                                 (+ (first key) dx)
+                                 (+ (second key) dy)
+                                 (+ (third key) dz)))))
+
+(defun light-region-provisional-p (region key)
+  "Whether chunk KEY currently borders any :UNKNOWN residency boundary."
+  (let* ((world (light-region-world region))
+         (source (block-world-source world)))
+    (loop for direction in *chunk-neighbor-directions*
+          thereis (and (not (chunk-neighbor-resident-p world key direction))
+                       (eq (absent-chunk-light-semantics
+                            source world key direction)
+                           :unknown)))))
+
+(defun map-entry-face-cells (region entry dx dy dz function)
+  "Call FUNCTION with the world coordinates of each cell on one face."
+  (flet ((limits (delta extent origin)
+           (cond ((= delta -1) (values origin origin))
+                 ((= delta 1)
+                  (values (+ origin extent -1) (+ origin extent -1)))
+                 (t (values origin (+ origin extent -1))))))
+    (multiple-value-bind (x-low x-high)
+        (limits dx (light-region-width region)
+                (light-region-entry-origin-x entry))
+      (multiple-value-bind (y-low y-high)
+          (limits dy (light-region-height region)
+                  (light-region-entry-origin-y entry))
+        (multiple-value-bind (z-low z-high)
+            (limits dz (light-region-depth region)
+                    (light-region-entry-origin-z entry))
+          (loop for z from z-low to z-high do
+            (loop for y from y-low to y-high do
+              (loop for x from x-low to x-high do
+                (funcall function x y z)))))))))
+
+(defun seed-open-sky-cell (region x y z downward-p)
+  "Admit boundary sky into one cell; return its coordinates when it grew."
+  (multiple-value-bind (entry offset) (light-region-locate region x y z)
+    (when entry
+      (let* ((opacity (light-region-opacity entry offset))
+             (level (- +maximum-light-level+
+                       (if downward-p opacity (+ 1 opacity)))))
+        (when (> level (aref (light-region-entry-sky entry) offset))
+          (setf (aref (light-region-entry-sky entry) offset) level)
+          (list x y z))))))
+
+(defun seed-entry-open-boundaries (region key entry enqueue)
+  "Seed ENTRY's faces whose absent neighbors are known open sky."
+  (let* ((world (light-region-world region))
+         (source (block-world-source world)))
+    (dolist (direction *chunk-neighbor-directions*)
+      (destructuring-bind (dx dy dz) direction
+        (when (and (not (chunk-neighbor-resident-p world key direction))
+                   (eq (absent-chunk-light-semantics
+                        source world key direction)
+                       :open-sky))
+          (map-entry-face-cells
+           region entry dx dy dz
+           (lambda (x y z)
+             (let ((seed (seed-open-sky-cell region x y z (= dy 1))))
+               (when seed (funcall enqueue seed))))))))))
 
 (defun seed-region-sky-boundaries (region)
-  "Seed open-sky boundary light and record unknown boundaries; return seeds."
-  (let* ((world (light-region-world region))
-         (source (block-world-source world))
-         (width (light-region-width region))
-         (height (light-region-height region))
-         (depth (light-region-depth region))
-         (queue nil))
-    (flet ((seed-face-cell (entry x y z downward-p)
-             ;; Light crossing into a boundary cell from a known open sky.
-             (multiple-value-bind (cell-entry offset)
-                 (light-region-locate region x y z)
-               (declare (ignore cell-entry))
-               (let* ((opacity (light-region-opacity entry offset))
-                      (level (- +maximum-light-level+
-                                (if downward-p opacity (+ 1 opacity)))))
-                 (when (> level
-                          (aref (light-region-entry-sky entry) offset))
-                   (setf (aref (light-region-entry-sky entry) offset) level)
-                   (push (list x y z) queue))))))
-      (maphash
-       (lambda (key entry)
-         (destructuring-bind (chunk-x chunk-y chunk-z) key
-           (dolist (direction *chunk-neighbor-directions*)
-             (destructuring-bind (dx dy dz) direction
-               (let ((neighbor-key (list (+ chunk-x dx)
-                                         (+ chunk-y dy)
-                                         (+ chunk-z dz))))
-                 (unless (gethash neighbor-key (light-region-entries region))
-                   (ecase (absent-chunk-light-semantics
-                           source world key direction)
-                     (:open-sky
-                      (let ((origin-x (light-region-entry-origin-x entry))
-                            (origin-y (light-region-entry-origin-y entry))
-                            (origin-z (light-region-entry-origin-z entry)))
-                        (flet ((face-limits (delta extent origin)
-                                 (cond ((= delta -1) (list origin origin))
-                                       ((= delta 1)
-                                        (list (+ origin extent -1)
-                                              (+ origin extent -1)))
-                                       (t (list origin
-                                                (+ origin extent -1))))))
-                          (destructuring-bind (x-low x-high)
-                              (face-limits dx width origin-x)
-                            (destructuring-bind (y-low y-high)
-                                (face-limits dy height origin-y)
-                              (destructuring-bind (z-low z-high)
-                                  (face-limits dz depth origin-z)
-                                (loop for z from z-low to z-high do
-                                  (loop for y from y-low to y-high do
-                                    (loop for x from x-low to x-high do
-                                      (seed-face-cell
-                                       entry x y z (= dy 1)))))))))))
-                     (:closed nil)
-                     (:unknown
-                      (setf (light-region-entry-unknown-boundary-p entry)
-                            t)))))))))
-       (light-region-entries region)))
+  "Seed every entry's open-sky boundary light; return the seed queue."
+  (let ((queue nil))
+    (maphash (lambda (key entry)
+               (seed-entry-open-boundaries
+                region key entry (lambda (seed) (push seed queue))))
+             (light-region-entries region))
     queue))
 
 (defun seed-region-emitters (region)
@@ -335,12 +386,11 @@ resident.  DIRECTION is a (dx dy dz) unit list in chunk coordinates."))
         (changed nil))
     (maphash
      (lambda (key entry)
-       (declare (ignore key))
        (let* ((chunk (light-region-entry-chunk entry))
               (field (block-chunk-light-field chunk))
               (new-sky (light-region-entry-sky entry))
               (new-block (light-region-entry-block entry))
-              (state (if (light-region-entry-unknown-boundary-p entry)
+              (state (if (light-region-provisional-p region key)
                          :provisional
                          :stable)))
          (cond
@@ -401,6 +451,319 @@ incremental state is suspect."
                   (aref (chunk-light-field-block-levels field) offset)
                   (chunk-light-field-state field)))
         (values 0 0 :unlit))))
+
+;;; The incremental runtime relighter.  Content edits and residency events
+;;; accumulate in a LUVCRAFT-LIGHTING-STATE through the world's hooks; a
+;;; reconcile pass runs removal then addition queues over a lazily captured
+;;; candidate and publishes complete fields through the same
+;;; PUBLISH-LIGHT-REGION transaction as the reference solver.
+;;;
+;;; Removal deliberately over-removes: any cell whose value could have been
+;;; fed by a removed cell is cleared, and every brighter survivor met along
+;;; the way re-enters the addition queue, so the max fixpoint is restored
+;;; from true sources only.
+
+(defun unlight-light-region (region field-reader queue skylight-p removed)
+  "Clear light reachable from QUEUE of (x y z level) removal records.
+
+Marks cleared cells in the REMOVED table and returns (VALUES SOURCES
+VISITED): surviving brighter cells to re-propagate from, and the number of
+removal steps performed."
+  (let ((sources nil)
+        (visited 0))
+    (loop while queue
+          do (destructuring-bind (x y z level) (pop queue)
+               (incf visited)
+               (loop for (dx dy dz) in *chunk-neighbor-directions*
+                     do (let ((nx (+ x dx)) (ny (+ y dy)) (nz (+ z dz)))
+                          (multiple-value-bind (neighbor offset)
+                              (light-region-locate region nx ny nz)
+                            (when neighbor
+                              (let* ((levels (funcall field-reader neighbor))
+                                     (value (aref levels offset)))
+                                (when (plusp value)
+                                  (if (or (< value level)
+                                          (and skylight-p (= dy -1)
+                                               (= value level)))
+                                      (progn
+                                        (setf (aref levels offset) 0)
+                                        (setf (gethash (list nx ny nz)
+                                                       removed)
+                                              t)
+                                        (push (list nx ny nz value) queue))
+                                      (push (list nx ny nz)
+                                            sources))))))))))
+    (values sources visited)))
+
+(defun reseed-cell-open-boundaries (region x y z enqueue)
+  "Re-admit boundary sky at one cell which may sit on an open face."
+  (multiple-value-bind (entry offset) (light-region-locate region x y z)
+    (declare (ignore offset))
+    (when entry
+      (let* ((width (light-region-width region))
+             (height (light-region-height region))
+             (depth (light-region-depth region))
+             (local-x (- x (light-region-entry-origin-x entry)))
+             (local-y (- y (light-region-entry-origin-y entry)))
+             (local-z (- z (light-region-entry-origin-z entry)))
+             (world (light-region-world region))
+             (source (block-world-source world))
+             (key (light-region-entry-key entry)))
+        (dolist (direction *chunk-neighbor-directions*)
+          (destructuring-bind (dx dy dz) direction
+            (when (and (or (and (= dx -1) (= local-x 0))
+                           (and (= dx 1) (= local-x (1- width)))
+                           (and (= dy -1) (= local-y 0))
+                           (and (= dy 1) (= local-y (1- height)))
+                           (and (= dz -1) (= local-z 0))
+                           (and (= dz 1) (= local-z (1- depth))))
+                       (not (chunk-neighbor-resident-p world key direction))
+                       (eq (absent-chunk-light-semantics
+                            source world key direction)
+                           :open-sky))
+              (let ((seed (seed-open-sky-cell region x y z (= dy 1))))
+                (when seed (funcall enqueue seed))))))))))
+
+(defclass luvcraft-lighting-state ()
+  ((world :initarg :world :reader lighting-state-world)
+   (dirty-cells :initform (make-hash-table :test #'equal)
+                :reader lighting-state-dirty-cells)
+   (arrivals :initform (make-hash-table :test #'equal)
+             :reader lighting-state-arrivals)
+   (departures :initform (make-hash-table :test #'equal)
+               :reader lighting-state-departures)
+   ;; Work counters, exposed so performance claims come from measurements.
+   (cells-visited :initform 0 :accessor lighting-state-cells-visited)
+   (chunks-touched :initform 0 :accessor lighting-state-chunks-touched)
+   (publications :initform 0 :accessor lighting-state-publications)
+   (last-latency-seconds :initform 0d0
+                         :accessor lighting-state-last-latency-seconds))
+  (:documentation
+   "Accumulated lighting dirtiness for one world, owned by its session.
+
+Content edits and residency transitions feed this object through the
+world's hooks; RECONCILE-LIGHTING settles the queues and publishes."))
+
+(defun attach-lighting-state (world)
+  "Subscribe a fresh lighting state to WORLD's content and residency hooks."
+  (let ((state (make-instance 'luvcraft-lighting-state :world world)))
+    (setf (block-world-cell-change-hook world)
+          (lambda (chunk x y z)
+            (declare (ignore chunk))
+            (setf (gethash (list x y z)
+                           (lighting-state-dirty-cells state))
+                  t))
+          (block-world-residency-change-hook world)
+          (lambda (x y z event)
+            (let ((key (list x y z)))
+              (ecase event
+                (:arrived
+                 (setf (gethash key (lighting-state-arrivals state)) t)
+                 (remhash key (lighting-state-departures state)))
+                (:departed
+                 (setf (gethash key (lighting-state-departures state)) t)
+                 (remhash key (lighting-state-arrivals state)))))))
+    state))
+
+(defun lighting-state-dirty-p (state)
+  (or (plusp (hash-table-count (lighting-state-dirty-cells state)))
+      (plusp (hash-table-count (lighting-state-arrivals state)))
+      (plusp (hash-table-count (lighting-state-departures state)))))
+
+(defun seed-arrived-chunk (region key seed-sky seed-block)
+  "Seed one newly resident chunk and import its neighbors' boundary light."
+  (let* ((world (light-region-world region))
+         (entry (multiple-value-bind (chunk present-p)
+                    (apply #'world-chunk-at world key)
+                  (and present-p
+                       (or (gethash key (light-region-entries region))
+                           (add-light-region-entry
+                            region chunk :from-field-p t))))))
+    (when entry
+      (seed-entry-open-boundaries region key entry seed-sky)
+      ;; The chunk's own emitters.
+      (let ((indices (light-region-entry-indices entry))
+            (emission (light-region-entry-emission-lut entry))
+            (levels (light-region-entry-block entry))
+            (width (light-region-width region))
+            (height (light-region-height region)))
+        (dotimes (offset (length indices))
+          (let ((level (aref emission (aref indices offset))))
+            (when (> level (aref levels offset))
+              (setf (aref levels offset) level)
+              (multiple-value-bind (z remainder)
+                  (floor offset (* width height))
+                (multiple-value-bind (y x) (floor remainder width)
+                  (funcall seed-block
+                           (list (+ (light-region-entry-origin-x entry) x)
+                                 (+ (light-region-entry-origin-y entry) y)
+                                 (+ (light-region-entry-origin-z entry)
+                                    z)))))))))
+      ;; Resident neighbors: their facing boundary cells re-propagate into
+      ;; the newcomer.
+      (dolist (direction *chunk-neighbor-directions*)
+        (destructuring-bind (dx dy dz) direction
+          (let* ((neighbor-key (list (+ (first key) dx)
+                                     (+ (second key) dy)
+                                     (+ (third key) dz)))
+                 (neighbor-entry
+                   (multiple-value-bind (neighbor-chunk present-p)
+                       (apply #'world-chunk-at world neighbor-key)
+                     (and present-p
+                          (or (gethash neighbor-key
+                                       (light-region-entries region))
+                              (add-light-region-entry
+                               region neighbor-chunk :from-field-p t))))))
+            (when neighbor-entry
+              (map-entry-face-cells
+               region neighbor-entry (- dx) (- dy) (- dz)
+               (lambda (cell-x cell-y cell-z)
+                 (funcall seed-sky (list cell-x cell-y cell-z))
+                 (funcall seed-block
+                          (list cell-x cell-y cell-z)))))))))))
+
+(defun reconcile-lighting (state)
+  "Settle STATE's queues over a candidate and publish once.
+
+Returns the chunks whose published light changed.  Work runs on the calling
+owner thread; the counters record its actual cost so any move to captured
+producer batches is justified by measurement rather than guesswork."
+  (unless (lighting-state-dirty-p state)
+    (return-from reconcile-lighting nil))
+  (let* ((start (get-internal-real-time))
+         (world (lighting-state-world state))
+         (region (make-light-candidate world))
+         (sky-removals nil) (block-removals nil)
+         (sky-removed (make-hash-table :test #'equal))
+         (block-removed (make-hash-table :test #'equal))
+         (sky-seeds nil) (block-seeds nil)
+         (visited 0))
+    (flet ((seed-sky (cell) (push cell sky-seeds))
+           (seed-block (cell) (push cell block-seeds)))
+      ;; Dirty cells lose both their values; removal rediscovers what they
+      ;; fed, and surviving neighbors return as addition sources.
+      (maphash
+       (lambda (cell present)
+         (declare (ignore present))
+         (destructuring-bind (x y z) cell
+           (multiple-value-bind (entry offset)
+               (light-region-locate region x y z)
+             (when entry
+               (let ((old-sky (aref (light-region-entry-sky entry) offset))
+                     (old-block
+                       (aref (light-region-entry-block entry) offset)))
+                 (setf (aref (light-region-entry-sky entry) offset) 0
+                       (aref (light-region-entry-block entry) offset) 0
+                       (gethash cell sky-removed) t
+                       (gethash cell block-removed) t)
+                 (push (list x y z old-sky) sky-removals)
+                 (push (list x y z old-block) block-removals))))))
+       (lighting-state-dirty-cells state))
+      ;; A departed neighbor may have been feeding the retained faces.
+      (maphash
+       (lambda (key present)
+         (declare (ignore present))
+         (dolist (direction *chunk-neighbor-directions*)
+           (destructuring-bind (dx dy dz) direction
+             (let* ((neighbor-key (list (+ (first key) dx)
+                                        (+ (second key) dy)
+                                        (+ (third key) dz)))
+                    (entry
+                      (multiple-value-bind (chunk present-p)
+                          (apply #'world-chunk-at world neighbor-key)
+                        (and present-p
+                             (or (gethash neighbor-key
+                                          (light-region-entries region))
+                                 (add-light-region-entry
+                                  region chunk :from-field-p t))))))
+               (when entry
+                 (map-entry-face-cells
+                  region entry (- dx) (- dy) (- dz)
+                  (lambda (x y z)
+                    (multiple-value-bind (cell-entry offset)
+                        (light-region-locate region x y z)
+                      (declare (ignore cell-entry))
+                      (let ((old-sky
+                              (aref (light-region-entry-sky entry) offset))
+                            (old-block
+                              (aref (light-region-entry-block entry)
+                                    offset)))
+                        (when (plusp old-sky)
+                          (setf (aref (light-region-entry-sky entry)
+                                      offset)
+                                0
+                                (gethash (list x y z) sky-removed) t)
+                          (push (list x y z old-sky) sky-removals))
+                        (when (plusp old-block)
+                          (setf (aref (light-region-entry-block entry)
+                                      offset)
+                                0
+                                (gethash (list x y z) block-removed) t)
+                          (push (list x y z old-block)
+                                block-removals)))))))))))
+       (lighting-state-departures state))
+      ;; Removal to exhaustion, collecting surviving sources.
+      (multiple-value-bind (sources count)
+          (unlight-light-region
+           region #'light-region-entry-sky sky-removals t sky-removed)
+        (setf sky-seeds (nconc sources sky-seeds))
+        (incf visited count))
+      (multiple-value-bind (sources count)
+          (unlight-light-region
+           region #'light-region-entry-block block-removals nil
+           block-removed)
+        (setf block-seeds (nconc sources block-seeds))
+        (incf visited count))
+      ;; Every cleared cell whose block emits re-seeds its own emission:
+      ;; edited cells pick up a newly placed emitter, and removal waves
+      ;; which swept over an untouched emitter must not extinguish it.
+      (maphash
+       (lambda (cell present)
+         (declare (ignore present))
+         (destructuring-bind (x y z) cell
+           (multiple-value-bind (entry offset)
+               (light-region-locate region x y z)
+             (when entry
+               (let ((level (aref (light-region-entry-emission-lut entry)
+                                  (aref (light-region-entry-indices entry)
+                                        offset))))
+                 (when (> level
+                          (aref (light-region-entry-block entry) offset))
+                   (setf (aref (light-region-entry-block entry) offset)
+                         level)
+                   (seed-block cell)))))))
+       block-removed)
+      ;; Cells cleared by sky removal may sit on an open boundary whose
+      ;; direct light must be re-admitted.
+      (maphash (lambda (cell present)
+                 (declare (ignore present))
+                 (destructuring-bind (x y z) cell
+                   (reseed-cell-open-boundaries region x y z #'seed-sky)))
+               sky-removed)
+      ;; Arrivals solve their own chunk and import neighbor boundaries.
+      (maphash (lambda (key present)
+                 (declare (ignore present))
+                 (seed-arrived-chunk region key #'seed-sky #'seed-block))
+               (lighting-state-arrivals state))
+      ;; Addition to the max fixpoint.
+      (incf visited
+            (propagate-light-region
+             region #'light-region-entry-sky sky-seeds t))
+      (incf visited
+            (propagate-light-region
+             region #'light-region-entry-block block-seeds nil)))
+    (let ((changed (publish-light-region region)))
+      (clrhash (lighting-state-dirty-cells state))
+      (clrhash (lighting-state-arrivals state))
+      (clrhash (lighting-state-departures state))
+      (incf (lighting-state-cells-visited state) visited)
+      (incf (lighting-state-chunks-touched state)
+            (hash-table-count (light-region-entries region)))
+      (incf (lighting-state-publications state))
+      (setf (lighting-state-last-latency-seconds state)
+            (/ (- (get-internal-real-time) start)
+               (coerce internal-time-units-per-second 'double-float)))
+      changed)))
 
 (defun world-light-at (world x y z)
   "Return (VALUES SKY BLOCK STATE) at a world coordinate, or zeros when
