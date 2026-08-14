@@ -186,7 +186,8 @@
                              (:file "app")
                              (:file "streaming")
                              (:file "render")
-                             (:file "capture"))))
+                             (:file "capture")
+                             (:file "gazetteer"))))
   :in-order-to ((asdf:test-op (asdf:test-op #:luv/luvcraft/tests))))
 
 (asdf:defsystem #:luv/examples
@@ -243,7 +244,8 @@
   :components ((:module "tools"
                 :components ((:file "package")
                              (:file "runner")
-                             (:file "block-world")))))
+                             (:file "block-world")
+                             (:file "gazetteer")))))
 
 (asdf:defsystem #:luv/mcclim
   :description "An experimental McCLIM backend presented by luv."

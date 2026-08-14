@@ -58,7 +58,8 @@ above it (blocks, terrain, meshing, simulation, and the application files):
   emission in linear space, and fades distant terrain into the sky;
 - a lattice DDA ray stops distinctly at a hit, a resident miss, or absent
   terrain; an outlined Vulkan crosshair shows that ray, left and right clicks
-  remove and place, middle click picks, and number keys select seven materials;
+  remove and place, middle click picks, and number keys select placeable
+  materials;
 - a separate player AABB advances at fixed 120 Hz against the voxel lattice,
   with gravity, grounding, wall collision, acceleration, and jumping; the eye
   camera follows the body while relative pointer input controls its view and
@@ -86,6 +87,26 @@ This implementation is evidence that the renderer and lifecycle are ready for
 game-shaped work.  The resident model is a first substrate, not a claim that
 residency, generation, edits, lighting, or derived products have become one
 finished system.
+
+* The screenshot gazetteer names gameplay views
+:PROPERTIES:
+:ID: 2SKLGB
+:END:
+
+The gazetteer is a small set of semantic screenshot descriptors.  Each entry
+names a gameplay-ish view, builds or streams the world it needs, pins the sky
+clock, chooses a camera, and captures through the real hidden SDL/Vulkan path.
+The first views cover generated terrain at noon and dusk, a crystal at night,
+and a crystal placed on a chunk seam.
+
+#+begin_src sh
+scripts/luv gazetteer build/gazetteer
+scripts/luv gazetteer build/gazetteer --view crystal-night --width 640 --height 480
+#+end_src
+
+This is not a replacement for tests.  It is a stable visual vocabulary for
+asking whether a change still looks playable: the names are semantic, while
+the PNGs remain generated artifacts under =build/=.
 
 * What the first extension establishes
 :PROPERTIES:

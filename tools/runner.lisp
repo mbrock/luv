@@ -5,6 +5,7 @@
   (format stream "~%")
   (format stream "Commands:~%")
   (format stream "  block-world TARGET [--count N] [--width N] [--height N] [--yaw-step R]~%")
+  (format stream "  gazetteer TARGET-DIR [--view NAME] [--width N] [--height N]~%")
   (format stream "  eval FORM [--package PACKAGE]~%")
   (format stream "  help~%"))
 
@@ -100,6 +101,8 @@
      (usage))
     ((string= command "block-world")
      (command-block-world arguments))
+    ((string= command "gazetteer")
+     (command-gazetteer arguments))
     ((string= command "eval")
      (command-eval arguments))
     (t

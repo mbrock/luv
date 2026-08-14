@@ -642,6 +642,13 @@ nothing else does."))
            #:capture-luvcraft-screenshot
            #:capture-hidden-luvcraft-screenshot
            #:capture-hidden-luvcraft-frames
+           #:luvcraft-gazetteer-view
+           #:luvcraft-gazetteer-view-name
+           #:luvcraft-gazetteer-view-description
+           #:luvcraft-gazetteer-views
+           #:find-luvcraft-gazetteer-view
+           #:capture-luvcraft-gazetteer-view
+           #:capture-luvcraft-gazetteer
            #:request-canvas-frame
            #:make-canvas-context
            #:configure-canvas-context

@@ -165,6 +165,22 @@
                     :key-name :8 :character #\8))
     (ok (eq (luvcraft-session-selected-block session) *crystal-block*))))
 
+(deftest gazetteer-names-semantic-gameplay-views
+  (let* ((views (luvcraft-gazetteer-views))
+         (names (mapcar #'luvcraft-gazetteer-view-name views)))
+    (ok (equal names (remove-duplicates names :test #'eq)))
+    (dolist (name '(:little-world-noon :little-world-dusk
+                   :crystal-night :crystal-seam))
+      (ok (find name names)))
+    (let* ((view (find-luvcraft-gazetteer-view "crystal-seam"))
+           (world
+             (funcall (luv::luvcraft-gazetteer-view-world-factory view))))
+      (ok (eq (world-block-at world 16 1 8) *crystal-block*))
+      (ok (= (nth-value 1 (world-light-at world 16 1 8))
+             (block-light-emission *crystal-block*)))
+      (ok (= (nth-value 1 (world-light-at world 15 1 8))
+             (1- (block-light-emission *crystal-block*)))))))
+
 (deftest scalar-player-walks-collides-and-jumps
   (let* ((world (make-block-world :chunk-width 4
                                   :chunk-height 4

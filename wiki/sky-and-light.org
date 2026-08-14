@@ -508,6 +508,7 @@ verification loop remains:
 #+begin_src sh
 make test
 make smoke
+scripts/luv gazetteer build/gazetteer --view crystal-night
 md5 -q build/luvcraft-smoke.png
 #+end_src
 
