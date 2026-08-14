@@ -49,10 +49,13 @@ above it (blocks, terrain, meshing, simulation, and the application files):
   faces beside empty sites, under an explicit absent-neighbor policy;
 - each block kind selects faces from a small procedurally authored sRGB
   texture atlas; mesh vertices carry texture coordinates, corner ambient
-  occlusion, and geometric face normals rather than baked colours;
+  occlusion, geometric face normals, and raw light/material readings rather
+  than baked colours;
+- each resident chunk may publish a derived voxel light field with separate
+  sky and blocklight arrays, light revisions, and boundary revisions;
 - structured s-expression SPIR-V transforms those interleaved vertices,
-  samples the atlas, applies ambient plus directional sun lighting, and fades
-  distant terrain into the sky;
+  samples the atlas, applies animated sky, sun, blocklight, and material
+  emission in linear space, and fades distant terrain into the sky;
 - a lattice DDA ray stops distinctly at a hit, a resident miss, or absent
   terrain; an outlined Vulkan crosshair shows that ray, left and right clicks
   remove and place, middle click picks, and number keys select seven materials;
@@ -102,9 +105,10 @@ This is already a useful separation of concerns:
 little-world-source + seed + sparse edits
           |
           v
-resident chunk domains -- dense palette-index fields
+        resident chunk domains -- dense palette-index fields
           |                         |
           | edits                   | own + boundary revisions
+          |                         | derived light fields + revisions
           v                         v
 coalesced world revision ---> chunk CPU/GPU mesh products
 #+end_example
@@ -129,11 +133,13 @@ genuinely row-shaped work; its appearance in a dense loop should look
 suspicious in code review.
 
 Each resident chunk has its own CPU mesh and GPU vertex buffer.  Its dependency
-stamp contains the source chunk revision plus only the opposing boundary
-revision of each neighbor, so an interior edit rebuilds one product and a
-chunk-face edit rebuilds two.  The new pair is published together; the old GPU
-buffer is destroyed immediately at the API level, whose queue completion
-frontier defers native teardown if a submitted frame still owns its last use.
+stamp contains the source chunk revision and light revision, plus only the
+opposing content and light boundary revisions of each resident neighbor.  Thus
+an interior edit rebuilds one product, while a chunk-face edit or light-boundary
+change rebuilds the products that actually sample that face.  The new pair is
+published together; the old GPU buffer is destroyed immediately at the API
+level, whose queue completion frontier defers native teardown if a submitted
+frame still owns its last use.
 
 * Chunk production is an ownership boundary
 :PROPERTIES:
@@ -341,11 +347,12 @@ experience:
 3. *Walk into another chunk.*  Done: the 81-chunk materialization follows the
    player, deterministically generating an entering strip and evicting the
    opposite strip.  Chunk-owned CPU/GPU products arrive and retire with it.
-4. *Let it glow.*  The first visual-material pass is done: block-face atlas
-   selection, procedural texels, geometric normals, corner occlusion, ambient
-   and directional light, and longer distance fog all run through the real
-   Vulkan path.  A block-content light field, one emissive block, and a small
-   CPU propagation rule remain deliberately separate work.
+4. *Let it glow.*  The sky and voxel-light proof is done: animated sky
+   parameters, block-face atlas selection, procedural texels, geometric
+   normals, corner occlusion, derived sky/blocklight fields, raw vertex light,
+   material emission input, and longer distance fog all run through the real
+   Vulkan path.  A player-placeable crystal block remains the next small
+   playable proof of the same pipeline.
 5. *Collide with it.*  Done as a playable scalar reference: a distinct player
    body walks, falls, grounds, stops at voxel faces, and jumps under a fixed
    step.  The voxel lattice itself is the static acceleration structure and

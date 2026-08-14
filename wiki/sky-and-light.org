@@ -1,13 +1,13 @@
 #+title: Sky, atmosphere, and voxel light for the little block world
 #+startup: overview
 
-* Status: reviewed implementation plan
+* Status: implementation notes and remaining plan
 :PROPERTIES:
 :ID: SK7L2T
 :END:
 
-This page plans a sky and lighting system for luvcraft: an animated sky and
-primary light, caves and overhangs which become dark for the right reason,
+This page records the sky and lighting system for luvcraft: an animated sky
+and primary light, caves and overhangs which become dark for the right reason,
 light-emitting blocks, relighting after edits and residency changes, and a
 clean route to HDR bloom and directional shadows.
 
@@ -16,9 +16,10 @@ part of the work, not a cost to evade.  Frame-wide facts still belong in Lisp;
 spatially varying image mathematics belongs in shaders; and the boundary
 between them should become more capable as the renderer asks more of it.
 
-This is a plan rather than an implemented specification.  Each phase below has
-a visible result and an evidence gate, so it can be revised from measurements
-without undoing the preceding phases.
+Phases 0--2 now have an implementation in the codebase; the later crystal,
+HDR, bloom, and directional-shadow sections remain a plan.  Each phase below
+has a visible result and an evidence gate, so it can be revised from
+measurements without undoing the preceding phases.
 
 * What the critique changed
 :PROPERTIES:
@@ -74,34 +75,32 @@ which make the plan durable.
   and parsing, typing, lowering, result naming, and documentation are
   EQL-specialized generic functions.  A new operator should be a cohesive
   method cluster, not another central dispatch table.
-- The expression language currently has floats, =vec2..4=, arithmetic,
-  =dot=, =mix=, =swizzle=, and texture sampling.  It has no extended-instruction
-  import, comparison/control-flow vocabulary, or general uniform packing.
-  Uniform blocks intentionally consist only of aligned vec4 lanes.
-- [[file:../spir-v.lisp][=spir-v.lisp=]] has neither =OpExtInstImport= nor =OpExtInst=, and the
-  structured module in [[file:../shader.lisp][=shader.lisp=]] has no import section between
-  capabilities and the memory model.  These are small but real backend
-  additions; extended math is not merely a few surface aliases.
+- The expression language has floats, =vec2..4=, arithmetic, =dot=, =mix=,
+  =swizzle=, texture sampling, and the first GLSL extended-math family:
+  =min=, =max=, =clamp=, =smoothstep=, =abs=, =sqrt=, =expt=, and
+  =normalize=.  It still has no comparison/control-flow vocabulary or general
+  uniform packing.  Uniform blocks intentionally consist only of aligned vec4
+  lanes.
+- [[file:../spir-v.lisp][=spir-v.lisp=]] now models =OpExtInstImport= and =OpExtInst= as structured
+  module sections in logical-layout order.  Lowering requests =GLSL.std.450=
+  once per module when needed, while modules with no extended math acquire no
+  import.
 - The live shader path in [[file:../luvcraft/live-pipeline.lisp][=luvcraft/live-pipeline.lisp=]] transactionally rebuilds complete
   vertex/fragment pipelines and retains the last-known-good pipeline after a
   bad edit.  New sky and post materials should use that path rather than a
   parallel compilation mechanism.
-- The block vertex shader reads six vec4 camera lanes.  The host independently
-  allocates a hard-coded 96-byte buffer.  Adding sky lanes must also remove
-  that duplicated size knowledge or validate it at construction.
-- Fog is computed per vertex as =1 - (z/far)^2= without a clamp and then
-  interpolated to the fragment stage.  The first use of =clamp= is therefore a
-  correctness improvement in an existing shader, not speculative vocabulary.
-- The visible material hardcodes its sun vector, sky fill, sun colour, and sky
-  colour.  The same sky literal also appears in the camera uniform and the
-  render-pass clear value.
-- The mesh vertex is three =:float32x3= attributes: position, UV plus AO, and
-  normal.  The Vulkan backend currently accepts only =:float32x3= vertex
-  attributes.  A new =:vec3= light/material attribute fits that honest current
-  API; a proposed =:vec2= attribute does not work without first extending it.
-- Meshing already copies a one-cell block halo to an immutable worker
-  snapshot.  Corner AO samples only that neighborhood, and mesh results are
-  rejected when their dependency stamp is stale.
+- The block vertex shader and sky shaders share one frame uniform block, and
+  the host derives the uniform byte size from the shader-visible layout.
+  Fog now has explicit near/far semantics with clamped quadratic shaping.
+- The visible material reads the shared sky/environment lanes, samples raw
+  vertex light, computes sky, sun, and block contributions in linear space,
+  adds surface emission, and then fogs.
+- The mesh vertex is four =:float32x3= attributes: position, UV plus AO,
+  normal, and =(sky block emission)=.  The 48-byte stride fits the backend's
+  current vertex format support.
+- Meshing copies a one-cell block and light halo to an immutable worker
+  snapshot.  Corner AO and corner light sampling use separate named rules, and
+  mesh results are rejected when their dependency stamp is stale.
 - The current scene target is the canvas's LDR sRGB format.  It is rendered
   offscreen and then copied to the surface, which is a useful post-processing
   seam but not yet an HDR or multi-pass pipeline.
@@ -232,8 +231,8 @@ aligned lanes for at least:
 - ambient colour plus exposure;
 - fog colour and near/far shaping.
 
-Replace the three hardcoded sky literals with this one frame result.  The
-clear value is merely a safe fallback.
+The three hardcoded sky literals have been replaced by this one frame result.
+The clear value is merely a safe fallback.
 
 A live =:sky= pipeline draws a fullscreen triangle before block geometry in
 the existing scene pass, with depth writes disabled.  Its fragment shader
@@ -314,6 +313,10 @@ looks like another authored edit.
   dependency includes that boundary state.  Arrival or departure dirties the
   retained face and schedules reconciliation before a new stable light
   revision is published.
+- Residency events accumulate until reconciliation.  A same-key
+  remove-and-arrive replacement must run both sides of the transition: remove
+  the old incarnation's influence from retained neighbors, then seed the new
+  resident chunk.
 
 The little generated world can initially declare open sky above its known
 vertical extent and a closed lower boundary.  A future vertically streamed
@@ -384,7 +387,7 @@ The mesh adds one attribute at location 3:
 #+begin_example
 light-material-input :vec3 = (sky-level / 15,
                               block-level / 15,
-                              surface emission / 15)
+                              surface emission)
 #+end_example
 
 That widens the current 36-byte vertex to four =:float32x3= lanes and a
@@ -486,6 +489,7 @@ Targeted tests cover:
 - blocklight falloff, removal, competing emitters, and alternate paths;
 - all six chunk seams, including vertical seams;
 - known-open, known-closed, and unknown residency boundaries;
+- same-key chunk replacement before reconciliation;
 - independent content/light revisions and stale snapshot rejection;
 - corner interpolation without light leaks through two occluding sides;
 - shader operator typing, imports, provenance, uniform ABI, and invalid-edit
@@ -516,14 +520,15 @@ clock then keeps the new hash stable.
 :ID: SKPHAS
 :END:
 
-1. *Shader mathematics.*  Extended-instruction structure, typed math
+1. *Shader mathematics.*  Done: extended-instruction structure, typed math
    operators, clamped existing fog, uniform-size validation, =spirv-val=, and
    live replacement proof.
-2. *Sky.*  Session clock/profile, shared frame parameters, fullscreen live sky
-   pipeline, animated material/fog, and pinned deterministic captures.
-3. *Skylight.*  Light-field objects and revisions, explicit boundary/source
+2. *Sky.*  Done: session clock/profile, shared frame parameters, fullscreen
+   live sky pipeline, animated material/fog, and pinned deterministic captures.
+3. *Skylight.*  Done as a first CPU proof: light-field objects and revisions,
+   explicit boundary/source
    semantics, reference and incremental solvers, snapshot light halo, raw
-   vertex light, and caves/canopies visible in a vertical test world.
+   vertex light, and caves/canopies visible in tests.
 4. *Crystal.*  Emission/opacity block vocabulary, propagated blocklight,
    dynamic palette keys, and measured edit-to-photon behavior.
 5. *HDR and bloom.*  Linear scene target, tone mapping, then a restrained
