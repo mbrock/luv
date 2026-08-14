@@ -565,11 +565,9 @@ first reconcile lights a caller-built world without a separate protocol."
             (let ((key (list x y z)))
               (ecase event
                 (:arrived
-                 (setf (gethash key (lighting-state-arrivals state)) t)
-                 (remhash key (lighting-state-departures state)))
+                 (setf (gethash key (lighting-state-arrivals state)) t))
                 (:departed
-                 (setf (gethash key (lighting-state-departures state)) t)
-                 (remhash key (lighting-state-arrivals state)))))))
+                 (setf (gethash key (lighting-state-departures state)) t))))))
     state))
 
 (defun lighting-state-dirty-p (state)

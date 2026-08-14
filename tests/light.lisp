@@ -243,6 +243,21 @@
       (luv::reconcile-lighting state)
       (ok (light-matches-reference-p world)))))
 
+(deftest same-key-replacement-removes-the-old-chunk-light
+  (let* ((world (make-open-sky-test-world '(0 0 0) '(1 0 0)))
+         (state (luv::attach-lighting-state world)))
+    (setf (world-block-at world 16 8 8) *test-glow-block*)
+    (luv::reconcile-lighting state)
+    (ok (= (blocklight-at world 15 8 8) 9))
+    ;; Streaming can replace a chunk at the same key before the next lighting
+    ;; reconcile.  The departure still has to run, or retained neighbors keep
+    ;; light propagated from the old incarnation.
+    (luv::remove-world-chunk world 1 0 0)
+    (luv::ensure-world-chunk world 1 0 0)
+    (luv::reconcile-lighting state)
+    (ok (light-matches-reference-p world))
+    (ok (= (blocklight-at world 15 8 8) 0))))
+
 (deftest meshes-carry-raw-corner-light-and-material-emission
   (let* ((world (make-open-sky-test-world))
          (state (luv::attach-lighting-state world))
