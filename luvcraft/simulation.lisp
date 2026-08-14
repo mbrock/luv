@@ -130,7 +130,7 @@
 
 (defun player-terrain-solid-p (world x y z)
   "Treat absent horizontal terrain and the lower world boundary as solid."
-  (multiple-value-bind (block status) (describe-block-allocatingly world x y z)
+  (multiple-value-bind (block status) (world-block-at world x y z)
     (if (eq status :resident)
         (block-solid-p block)
         (let ((height

@@ -38,13 +38,13 @@
                  (loop for y below 16
                        always
                        (multiple-value-bind (first-block first-status)
-                           (describe-block-allocatingly first x y z)
+                           (world-block-at first x y z)
                          (multiple-value-bind (second-block second-status)
-                             (describe-block-allocatingly second x y z)
+                             (world-block-at second x y z)
                            (and (eq first-status :resident)
                                 (eq second-status :resident)
                                 (eq first-block second-block))))))))
-    (multiple-value-bind (block status) (describe-block-allocatingly first 80 0 0)
+    (multiple-value-bind (block status) (world-block-at first 80 0 0)
       (ok (null block))
       (ok (eq status :absent))))
   (let* ((source (make-instance 'little-world-source :seed 77))
@@ -57,7 +57,7 @@
 (deftest little-world-edits-survive-rematerialization
   (let* ((world (make-little-block-world :chunk-radius 0 :seed 31))
          (source (block-world-source world)))
-    (ok (describe-block-allocatingly world 1 1 1))
+    (ok (world-block-at world 1 1 1))
     (edit-block-at nil world 1 1 1)
     (multiple-value-bind (block present-p)
         (block-edit-at (little-world-source-edits source) 1 1 1)
@@ -65,13 +65,13 @@
       (ok (null block)))
     (ok (= (block-edit-overlay-count (little-world-source-edits source)) 1))
     (rematerialize-little-world-chunk source world 0 0)
-    (multiple-value-bind (block status) (describe-block-allocatingly world 1 1 1)
+    (multiple-value-bind (block status) (world-block-at world 1 1 1)
       (ok (eq status :resident))
       (ok (null block)))
     ;; Explicit placement into generated air is an overlay value too.
     (edit-block-at luv::*stone-block* world 2 14 2)
     (rematerialize-little-world-chunk source world 0 0)
-    (ok (eq (describe-block-allocatingly world 2 14 2) luv::*stone-block*))
+    (ok (eq (world-block-at world 2 14 2) luv::*stone-block*))
     (ok (= (block-edit-overlay-count (little-world-source-edits source)) 2))))
 
 (deftest little-world-residency-follows-a-bounded-window
@@ -87,7 +87,7 @@
       (ok (null chunk))
       (ok (null present-p)))
     (center-little-world-residency source world 0 0 :radius 1)
-    (multiple-value-bind (block status) (describe-block-allocatingly world 1 1 1)
+    (multiple-value-bind (block status) (world-block-at world 1 1 1)
       (ok (eq status :resident))
       (ok (null block)))
     (let ((revision (block-world-revision world)))
@@ -116,7 +116,7 @@
                                  :chunk-height 2
                                  :chunk-depth 2)))
     (ensure-world-chunk world 0 0 0)
-    (setf (describe-block-allocatingly world 0 0 0) luv::*stone-block*)
+    (setf (world-block-at world 0 0 0) luv::*stone-block*)
     (let ((mesh (mesh-block-world (make-instance 'exposed-face-mesher) world)))
       (ok (= (length (block-mesh-vertices mesh))
              (* 9 (block-mesh-vertex-count mesh)))))))
@@ -159,7 +159,7 @@
     (ensure-world-chunk world 0 0 0)
     (loop for x below 4 do
       (loop for z below 4 do
-        (setf (describe-block-allocatingly world x 0 z) luv::*stone-block*)))
+        (setf (world-block-at world x 0 z) luv::*stone-block*)))
     ;; Gravity settles the body exactly on the block tops.
     (dotimes (step 240)
       (declare (ignorable step))
@@ -168,8 +168,8 @@
     (ok (player-grounded-p player))
     (ok (< (abs (- (camera-y camera) 2.62d0)) 1d-5))
     ;; A held right input accelerates into, but not through, a two-block wall.
-    (setf (describe-block-allocatingly world 3 1 1) luv::*stone-block*
-          (describe-block-allocatingly world 3 2 1) luv::*stone-block*
+    (setf (world-block-at world 3 1 1) luv::*stone-block*
+          (world-block-at world 3 2 1) luv::*stone-block*
           (gethash :d keys) t)
     (dotimes (step 120)
       (declare (ignorable step))
@@ -195,15 +195,15 @@
                                  :chunk-depth 2)))
     (ensure-world-chunk world 0 0 0)
     (ensure-world-chunk world 1 0 0)
-    (setf (describe-block-allocatingly world 1 0 0) luv::*stone-block*
-          (describe-block-allocatingly world 2 0 0) luv::*stone-block*)
+    (setf (world-block-at world 1 0 0) luv::*stone-block*
+          (world-block-at world 2 0 0) luv::*stone-block*)
     (let ((mesher (make-instance 'exposed-face-mesher)))
       (ok (= (block-mesh-face-count (mesh-block-world mesher world)) 10))
       (let ((revision (block-world-revision world)))
-        (setf (describe-block-allocatingly world 2 0 0) nil)
+        (setf (world-block-at world 2 0 0) nil)
         (ok (= (block-world-revision world) (1+ revision))))
       (ok (= (block-mesh-face-count (mesh-block-world mesher world)) 6))
-      (setf (describe-block-allocatingly world 2 0 0) luv::*stone-block*)
+      (setf (world-block-at world 2 0 0) luv::*stone-block*)
       (ok (= (block-mesh-face-count (mesh-block-world mesher world)) 10)))))
 
 (deftest chunk-mesh-is-exactly-sized-and-preserves-the-public-emitter
@@ -212,7 +212,7 @@
                                   :chunk-depth 2))
          (chunk (ensure-world-chunk world 0 0 0))
          (mesher (make-instance 'exposed-face-mesher)))
-    (setf (describe-block-allocatingly world 0 0 0) luv::*stone-block*)
+    (setf (world-block-at world 0 0 0) luv::*stone-block*)
     (let* ((mesh (mesh-block-chunk mesher world chunk))
            (vertices (block-mesh-vertices mesh)))
       (ok (= (block-mesh-face-count mesh) 6))
@@ -243,7 +243,7 @@
     (ok (= (block-mesh-face-count direct) (block-mesh-face-count copied)))
     (ok (= (block-mesh-vertex-count direct) (block-mesh-vertex-count copied)))
     (ok (equalp (block-mesh-vertices direct) (block-mesh-vertices copied)))
-    (setf (describe-block-allocatingly world 0 0 0) nil)
+    (setf (world-block-at world 0 0 0) nil)
     (ok (equalp (block-mesh-vertices copied)
                 (block-mesh-vertices (mesh-block-snapshot mesher snapshot))))))
 
@@ -357,16 +357,16 @@
          (left (ensure-world-chunk world 0 0 0))
          (right (ensure-world-chunk world 1 0 0))
          (mesher (make-instance 'exposed-face-mesher)))
-    (setf (describe-block-allocatingly world 3 1 1) luv::*stone-block*
-          (describe-block-allocatingly world 4 1 1) luv::*stone-block*)
+    (setf (world-block-at world 3 1 1) luv::*stone-block*
+          (world-block-at world 4 1 1) luv::*stone-block*)
     (ok (= (block-mesh-face-count (mesh-block-chunk mesher world left)) 5))
     (ok (= (block-mesh-face-count (mesh-block-chunk mesher world right)) 5))
     (let ((stamp (chunk-mesh-dependency-stamp world left)))
       ;; This changes RIGHT, but not the boundary LEFT's mesh observes.
-      (setf (describe-block-allocatingly world 5 2 2) luv::*stone-block*)
+      (setf (world-block-at world 5 2 2) luv::*stone-block*)
       (ok (equal stamp (chunk-mesh-dependency-stamp world left)))
       ;; This touches RIGHT's -X boundary and must invalidate LEFT.
-      (setf (describe-block-allocatingly world 4 2 2) luv::*stone-block*)
+      (setf (world-block-at world 4 2 2) luv::*stone-block*)
       (ok (not (equal stamp (chunk-mesh-dependency-stamp world left)))))
     (let ((stamp (chunk-mesh-dependency-stamp world left)))
       (remove-world-chunk world 0 0 0)
@@ -388,13 +388,13 @@
     (ensure-world-chunk world 0 0 0)
     ;; The second stone means placing after removing the first still has a
     ;; solid target beyond the empty adjacent site.
-    (setf (describe-block-allocatingly world 2 1 1) luv::*stone-block*
-          (describe-block-allocatingly world 3 1 1) luv::*stone-block*)
+    (setf (world-block-at world 2 1 1) luv::*stone-block*
+          (world-block-at world 3 1 1) luv::*stone-block*)
     (multiple-value-bind (coordinate status)
         (edit-luvcraft-block session :remove)
       (ok (eq status :edited))
       (ok (= (world-coordinate-x coordinate) 2))
-      (ok (null (describe-block-allocatingly world 2 1 1))))
+      (ok (null (world-block-at world 2 1 1))))
     (let ((occupied-session
             (make-instance 'luvcraft-session
                            :world world :camera camera
@@ -405,9 +405,9 @@
           (edit-luvcraft-block occupied-session :place)
         (ok (null coordinate))
         (ok (eq status :blocked))
-        (ok (null (describe-block-allocatingly world 2 1 1)))))
+        (ok (null (world-block-at world 2 1 1)))))
     (multiple-value-bind (coordinate status)
         (edit-luvcraft-block session :place)
       (ok (eq status :edited))
       (ok (= (world-coordinate-x coordinate) 2))
-      (ok (eq (describe-block-allocatingly world 2 1 1) luv::*dirt-block*)))))
+      (ok (eq (world-block-at world 2 1 1) luv::*dirt-block*)))))

@@ -173,7 +173,7 @@ neighborhood, and an immutable worker snapshot each answer through their own
 method, and further sample sources only need to add one."))
 
 (defmethod sample-block-at ((samples block-world) x y z)
-  (describe-block-allocatingly samples x y z))
+  (world-block-at samples x y z))
 
 (defmethod sample-block-at ((samples block-mesh-neighborhood) x y z)
   (block-mesh-neighborhood-block-at samples x y z))

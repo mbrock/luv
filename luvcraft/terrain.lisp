@@ -130,9 +130,9 @@
            (rock-z (+ origin-z 2 (mod (ash hash -8) (- depth 4))))
            (rock-y (1+ (little-world-surface-height
                         source rock-x rock-z height))))
-      (setf (describe-block-allocatingly world rock-x rock-y rock-z) *stone-block*)
+      (setf (world-block-at world rock-x rock-y rock-z) *stone-block*)
       (when (zerop (mod hash 2))
-        (setf (describe-block-allocatingly world (1+ rock-x) rock-y rock-z) *stone-block*))
+        (setf (world-block-at world (1+ rock-x) rock-y rock-z) *stone-block*))
       (when (and (< (mod (ash hash -16) 5) 4)
                  (> (little-world-value-noise
                      source rock-x rock-z 48 29)
@@ -149,7 +149,7 @@
           (when (and (eq surface-material *grass-block*)
                      (< (+ crown 2) height))
             (loop for y from (1+ surface) to crown
-                  do (setf (describe-block-allocatingly world tree-x y tree-z) *wood-block*))
+                  do (setf (world-block-at world tree-x y tree-z) *wood-block*))
             ;; A broad, clipped lower crown and a small bright upper crown
             ;; make silhouettes much less like identical green boxes.
             (loop for x from (- tree-x 2) to (+ tree-x 2) do
@@ -157,12 +157,12 @@
                     when (<= (+ (abs (- x tree-x))
                                 (abs (- z tree-z)))
                              3)
-                      do (setf (describe-block-allocatingly world x crown z) *leaf-block*)))
+                      do (setf (world-block-at world x crown z) *leaf-block*)))
             (loop for x from (1- tree-x) to (1+ tree-x) do
               (loop for z from (1- tree-z) to (1+ tree-z)
-                    do (setf (describe-block-allocatingly world x (1+ crown) z)
+                    do (setf (world-block-at world x (1+ crown) z)
                              *leaf-block*)))
-            (setf (describe-block-allocatingly world tree-x (+ crown 2) tree-z)
+            (setf (world-block-at world tree-x (+ crown 2) tree-z)
                   *leaf-block*)))))))
 
 (defmethod populate-block-world-chunk
@@ -186,11 +186,11 @@
 (defmethod edit-block-world-source
     ((source little-world-source) (world block-world) block x y z)
   (record-block-edit (little-world-source-edits source) block x y z)
-  (setf (describe-block-allocatingly world x y z) block))
+  (setf (world-block-at world x y z) block))
 
 (defmethod edit-block-world-source
     ((source t) (world block-world) block x y z)
-  (setf (describe-block-allocatingly world x y z) block))
+  (setf (world-block-at world x y z) block))
 
 (defun edit-block-at (block world x y z)
   "Edit one resident site, recording it in WORLD's source when supported."

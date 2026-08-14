@@ -178,11 +178,11 @@ means "every micro entity becomes a heap-allocated instance":
   vertex arrays, packed `(unsigned-byte 32)` atlas pixels. Cells, vertices,
   and pixels do not gain object identity merely because they are
   addressable.
-- Where a per-site object *description* is genuinely useful (inspectors,
-  sparse edits, ray hits), name it conspicuously —
-  `describe-block-allocatingly` — so its appearance in a dense loop looks
-  suspicious in review. Domain-shaped code borrows the dense storage once
-  via `with-block-content-storage` instead.
+- Where single-site world access is genuinely useful (inspectors, sparse
+  edits, ray hits), use the explicitly world-level `world-block-at`; its
+  documentation advertises the coordinate and lookup allocation, and its
+  appearance in a dense loop should look suspicious in review. Domain-shaped
+  code borrows the dense storage once via `with-block-content-storage` instead.
 - Per-call dispatch cost is a boundary question, not a prohibition: a
   generic replacing an ETYPECASE in the same spot (as `sample-block-at` did)
   does not move the decision into a hotter-grained loop; introducing dispatch

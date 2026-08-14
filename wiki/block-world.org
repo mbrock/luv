@@ -32,8 +32,8 @@ above it (blocks, terrain, meshing, simulation, and the application files):
   Euclidean decomposition, including at negative coordinates;
 - each resident =block-chunk= owns a finite =chunk-domain= and one dense
   palette-indexed block-content column;
-- single-site presentation is deliberately named
-  =describe-block-allocatingly=, while domain-shaped code borrows the chunk's
+- single-site world-coordinate access uses =world-block-at=, while
+  domain-shaped code borrows the chunk's
   palette and specialized index vector once through
   =with-block-content-storage=;
 - a =block-world= owns the resident chunk set and distinguishes resident air
@@ -123,10 +123,10 @@ objects—world and source, chunk and domain, block-kind descriptor, mesher and
 policy—and generic dispatch selects a representation at those boundaries.
 The actual meshing pass then traverses a whole domain's dense unsigned index
 column.  Cells do not gain object identity merely because they are
-addressable.  The comically explicit =describe-block-allocatingly= exists for
-inspectors, sparse edits, ray interaction, and other places where constructing
-a presentable row description is genuinely useful; its appearance in a dense
-loop should look suspicious in code review.
+addressable.  =world-block-at= resolves a single world coordinate for
+inspectors, sparse edits, ray interaction, collision probes, and other
+genuinely row-shaped work; its appearance in a dense loop should look
+suspicious in code review.
 
 Each resident chunk has its own CPU mesh and GPU vertex buffer.  Its dependency
 stamp contains the source chunk revision plus only the opposing boundary
@@ -309,7 +309,7 @@ every cell.  #C9L2WA develops this distinction.
 The existing =block-kind= instances behave like palette entries: many sites
 share one object that owns colour and generic behaviour.  A chunk now stores
 compact unsigned 16-bit indices into a chunk-local vector of those semantic
-objects.  =describe-block-allocatingly= returns the shared object after
+objects.  =world-block-at= returns the shared object after
 decoding, while a whole-column algorithm borrows the contiguous index array
 through =with-block-content-storage=.
 

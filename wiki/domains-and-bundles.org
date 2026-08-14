@@ -48,9 +48,9 @@ without requiring the simulation to manufacture one such object for every
 site it visits.
 
 The naming should reveal which view is being requested.  In the current block
-world, =describe-block-allocatingly= is the intentionally loud single-site
-projection: it constructs coordinate descriptors, performs a resident-chunk
-lookup, and decodes the palette value into a presentable shared object.
+world, =world-block-at= is the single-site world-coordinate accessor: it
+constructs coordinate descriptors, performs a resident-chunk lookup, and
+decodes the palette value into a presentable shared object.
 =with-block-content-storage= is the ordinary aggregate path: it dispatches
 once for a chunk and borrows its domain, palette, and dense index vector.
 Borrowed vectors are read-only unless a separate mutation protocol explicitly
@@ -343,7 +343,7 @@ to physics and possible wide backends.
 
 The first useful proof is now present: the current world occupies a finite
 domain plus one palette-backed block-content column,
-=describe-block-allocatingly= remains an explicit semantic projection, and
+=world-block-at= remains an explicit semantic projection, and
 the mesher borrows aggregate storage through a representation-selected
 protocol.  The next field should still be earned by an operation: a genuine
 lighting experiment can show whether a small shared bundle abstraction is

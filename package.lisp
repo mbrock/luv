@@ -505,7 +505,7 @@ nothing else does."))
            #:rematerialize-little-world-chunk
            #:make-little-block-world
            #:make-empty-little-block-world
-           #:describe-block-allocatingly
+           #:world-block-at
            #:edit-block-at
            #:block-edit-overlay
            #:make-block-edit-overlay

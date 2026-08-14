@@ -205,9 +205,9 @@ coordinates."
 ;;; shared Lisp object (or NIL for air); the physical column is a dense u16
 ;;; palette index.  A site is an offset in a domain, not an object with an
 ;;; identity or allocation of its own.  Computational code should borrow the
-;;; aggregate storage below and dispatch once per chunk.  Per-site descriptor
-;;; access is kept deliberately loud and allocating for inspectors, sparse
-;;; interaction, and other genuinely row-shaped work.
+;;; aggregate storage below and dispatch once per chunk.  Single-site world
+;;; access still resolves through coordinate descriptors and a chunk key; it
+;;; is for inspectors, sparse interaction, and other genuinely row-shaped work.
 
 (defclass block-content-column ()
   ((palette :initarg :palette :reader block-content-column-palette)
@@ -537,16 +537,22 @@ publishes one complete chunk and advances residency/general revisions once."
                               (< (chunk-coordinate-z a)
                                  (chunk-coordinate-z b))))))))))
 
-(defgeneric describe-block-allocatingly (world x y z)
+(defgeneric world-block-at (world x y z)
   (:documentation
-   "Describe one site as BLOCK and :RESIDENT, or NIL and :ABSENT.
+   "Return one site as BLOCK and :RESIDENT, or NIL and :ABSENT.
 
-This intentionally conspicuous row API constructs coordinate descriptors and
-a chunk lookup key.  It is appropriate for inspectors, ray hits, and sparse
-interaction.  Algorithms over many cells should select a chunk/domain once
-and use WITH-BLOCK-CONTENT-STORAGE instead."))
+This sparse world-coordinate accessor constructs coordinate descriptors and a
+chunk lookup key.  It is appropriate for inspectors, ray hits, collision
+probes, and sparse interaction.  Algorithms over many cells should select a
+chunk/domain once and use WITH-BLOCK-CONTENT-STORAGE instead."))
 
-(defgeneric (setf describe-block-allocatingly) (block world x y z))
+(defgeneric (setf world-block-at) (block world x y z)
+  (:documentation
+   "Set BLOCK at one resident world site and return BLOCK.
+
+This follows the same sparse coordinate-resolution path as WORLD-BLOCK-AT.
+It signals CHUNK-NOT-RESIDENT rather than materializing absent terrain, and
+retains chunk revision, boundary revision, and world invalidation semantics."))
 
 (defun locate-world-coordinate (world x y z)
   (let ((coordinate (make-world-coordinate x y z)))
@@ -554,7 +560,7 @@ and use WITH-BLOCK-CONTENT-STORAGE instead."))
         (world-coordinate-chunk-and-local (block-world-space world) coordinate)
       (values coordinate chunk-coordinate local-coordinate))))
 
-(defmethod describe-block-allocatingly ((world block-world) x y z)
+(defmethod world-block-at ((world block-world) x y z)
   (multiple-value-bind (world-coordinate chunk-coordinate local-coordinate)
       (locate-world-coordinate world x y z)
     (declare (ignore world-coordinate))
@@ -571,7 +577,7 @@ and use WITH-BLOCK-CONTENT-STORAGE instead."))
                   :resident)
           (values nil :absent)))))
 
-(defmethod (setf describe-block-allocatingly)
+(defmethod (setf world-block-at)
     (block (world block-world) x y z)
   (multiple-value-bind (world-coordinate chunk-coordinate local-coordinate)
       (locate-world-coordinate world x y z)
@@ -644,7 +650,7 @@ and use WITH-BLOCK-CONTENT-STORAGE instead."))
                 (block-world-space world) (make-world-coordinate x y z))
              (declare (ignore local))
              (when (same-chunk-coordinate-p coordinate target)
-               (setf (describe-block-allocatingly world x y z) block)))))
+               (setf (world-block-at world x y z) block)))))
        (block-edit-overlay-entries overlay))))
   chunk)
 
@@ -724,7 +730,7 @@ three-component sequences in continuous cell coordinates."
            (adjacent nil))
       (loop
         (multiple-value-bind (block status)
-            (describe-block-allocatingly world cell-x cell-y cell-z)
+            (world-block-at world cell-x cell-y cell-z)
           (when (eq status :absent)
             (return (values nil :absent)))
           (when (funcall occupied-p block)

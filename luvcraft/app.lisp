@@ -148,7 +148,7 @@
       (let ((x (world-coordinate-x coordinate))
             (y (world-coordinate-y coordinate))
             (z (world-coordinate-z coordinate)))
-        (multiple-value-bind (old-block residency) (describe-block-allocatingly world x y z)
+        (multiple-value-bind (old-block residency) (world-block-at world x y z)
           (unless (eq residency :resident)
             (return-from edit-luvcraft-block (values nil :absent)))
           (ecase action

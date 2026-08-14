@@ -106,10 +106,10 @@ the session's outstanding-work and cancellation bookkeeping."))
       (materialize-block-world-chunk source world chunk-x chunk-y chunk-z)
       (dolist (landmark (little-world-load-request-landmarks request))
         (destructuring-bind (block x y z) landmark
-          (setf (describe-block-allocatingly world x y z) block)))
+          (setf (world-block-at world x y z) block)))
       (dolist (edit (little-world-load-request-edits request))
         (destructuring-bind (block x y z) edit
-          (setf (describe-block-allocatingly world x y z) block)))
+          (setf (world-block-at world x y z) block)))
       (let ((chunk (world-chunk-at world chunk-x chunk-y chunk-z)))
         (with-block-content-storage (domain palette indices) chunk
           (declare (ignore domain))
