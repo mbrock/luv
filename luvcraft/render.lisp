@@ -14,6 +14,20 @@
    (bind-group :initarg :bind-group :reader luvcraft-frame-bind-group)))
 
 (defconstant +block-world-crosshair-vertex-count+ 24)
+(defconstant +luvcraft-shadow-map-size+ 1024)
+
+(defun vec3-dot (left right)
+  (+ (* (aref left 0) (aref right 0))
+     (* (aref left 1) (aref right 1))
+     (* (aref left 2) (aref right 2))))
+
+(defun vec3-cross (left right)
+  (vec3 (- (* (aref left 1) (aref right 2))
+           (* (aref left 2) (aref right 1)))
+        (- (* (aref left 2) (aref right 0))
+           (* (aref left 0) (aref right 2)))
+        (- (* (aref left 0) (aref right 1))
+           (* (aref left 1) (aref right 0)))))
 
 (defun make-block-world-crosshair-vertices (width height)
   "Make an outlined pixel-sized crosshair in Vulkan clip coordinates."
@@ -40,6 +54,31 @@
       (rectangle -8.0 -0.75 8.0 0.75 '(0.96 0.98 1.0)))
     vertices))
 
+(defun shadow-frame-rows (camera sky)
+  "Pack a simple orthographic light-space transform as four vec4 rows."
+  (let* ((center (vec3 (camera-x camera) (camera-y camera) (camera-z camera)))
+         (forward
+           (vec3-normalize (sky-frame-parameters-sun-direction sky)))
+         (basis-up
+           (if (< (abs (aref forward 1)) 0.92)
+               (vec3 0.0 1.0 0.0)
+               (vec3 0.0 0.0 1.0)))
+         (right (vec3-normalize (vec3-cross basis-up forward)))
+         (up (vec3-cross forward right))
+         (extent 64.0)
+         (depth-radius 96.0))
+    (flet ((lane (axis scale offset)
+             (list (* (aref axis 0) scale)
+                   (* (aref axis 1) scale)
+                   (* (aref axis 2) scale)
+                   offset)))
+      (append
+       (lane right (/ extent) (- (/ (vec3-dot center right) extent)))
+       (lane up (/ extent) (- (/ (vec3-dot center up) extent)))
+       (lane forward (/ (* 2.0 depth-radius))
+             (- 0.5 (/ (vec3-dot center forward) (* 2.0 depth-radius))))
+       '(0.0 0.0 0.0 1.0)))))
+
 (defun frame-uniform-data (session width height)
   "Pack the frame environment: camera lanes plus the evaluated sky.
 
@@ -49,7 +88,7 @@ check in BLOCK-WORLD-CAMERA-UNIFORM-SIZE keeps the two honest."
                         (luvcraft-session-camera session) width height))
          (sky (sky-frame-parameters (luvcraft-session-sky-clock session)
                                     (luvcraft-session-sky-profile session)))
-         (data (make-array (+ (length camera-lanes) 28)
+         (data (make-array (+ (length camera-lanes) 44)
                            :element-type 'single-float))
          (index (length camera-lanes)))
     (replace data camera-lanes)
@@ -73,7 +112,9 @@ check in BLOCK-WORLD-CAMERA-UNIFORM-SIZE keeps the two honest."
         (apply #'emit (append (color (sky-frame-parameters-ambient-color sky))
                               (list (sky-frame-parameters-exposure sky))))
         (apply #'emit (append (color (sky-frame-parameters-fog-color sky))
-                              (list 0.0)))))
+                              (list 0.0)))
+        (apply #'emit (shadow-frame-rows
+                       (luvcraft-session-camera session) sky))))
     data))
 
 (defun block-world-camera-uniform-size (session)
@@ -143,6 +184,24 @@ the frame uniform cannot silently diverge between shader and host."
     (write-buffer
      (luvcraft-frame-uniform-buffer frame)
      (frame-uniform-data session (first extent) (second extent)))
+    (let ((pass
+            (begin-render-pass
+             encoder
+             (make-render-pass-descriptor
+              :color-attachments nil
+              :depth-stencil-attachment
+              `(:view ,(luvcraft-session-shadow-depth-view session)
+                :depth-load-op :clear :depth-store-op :store
+                :depth-clear-value 1.0)))))
+      (set-pipeline pass (luvcraft-session-shadow-native-pipeline session))
+      (set-bind-group pass 0 (luvcraft-frame-bind-group frame))
+      (dolist (product products)
+        (let ((mesh (luvcraft-chunk-product-mesh product)))
+          (when (plusp (block-mesh-vertex-count mesh))
+            (set-vertex-buffer
+             pass 0 (luvcraft-chunk-product-vertex-buffer product))
+            (draw pass (block-mesh-vertex-count mesh)))))
+      (end-pass pass))
     (let ((pass
             (begin-render-pass
              encoder
@@ -369,6 +428,27 @@ capture-only demand clock."
                     (keep
                      (create device (make-texture-view-descriptor
                                      :texture depth-texture))))
+                  (shadow-depth-texture
+                    (keep
+                     (create
+                      device
+                      (make-texture-descriptor
+                       :label "block world shadow depth"
+                       :size (list +luvcraft-shadow-map-size+
+                                   +luvcraft-shadow-map-size+)
+                       :dimensions :2d :format :depth32-float
+                       :usage '(:render-attachment :texture-binding)))))
+                  (shadow-depth-view
+                    (keep
+                     (create device (make-texture-view-descriptor
+                                     :texture shadow-depth-texture))))
+                  (shadow-depth-sampler
+                    (keep
+                     (create device (make-sampler-descriptor
+                                     :label "block world shadow sampler"
+                                     :mag-filter :linear
+                                     :min-filter :linear
+                                     :mipmap-filter :nearest))))
                   (atlas-width
                     (* +block-atlas-tile-size+ +block-atlas-tile-count+))
                   (atlas-height +block-atlas-tile-size+)
@@ -460,6 +540,33 @@ capture-only demand clock."
                                :depth-compare :less))))
                       (push artifact pipelines)
                       artifact))
+                  (shadow-pipeline
+                    (let ((artifact
+                            (make-live-shader-pipeline
+                             :role :block-shadow
+                             :stage :vertex
+                             :label "block world shadow pipeline"
+                             :device device :layout layout
+                             :vertex-buffers
+                             '((:array-stride 48
+                                :attributes
+                                ((:shader-location 0 :offset 0
+                                  :format :float32x3)
+                                 (:shader-location 1 :offset 12
+                                  :format :float32x3)
+                                 (:shader-location 2 :offset 24
+                                  :format :float32x3)
+                                 (:shader-location 3 :offset 36
+                                  :format :float32x3))))
+                             :target-format nil
+                             :primitive '(:topology :triangle-list)
+                             :depth-stencil
+                             '(:format :depth32-float
+                               :depth-write-enabled t
+                               :depth-compare :less
+                               :depth-store-op :store))))
+                      (push artifact pipelines)
+                      artifact))
                   (sky-pipeline
                     (let ((artifact
                             (make-live-shader-pipeline
@@ -521,7 +628,11 @@ capture-only demand clock."
                      :atlas-sampler atlas-sampler
                      :color-texture color-texture :color-view color-view
                      :depth-texture depth-texture :depth-view depth-view
+                     :shadow-depth-texture shadow-depth-texture
+                     :shadow-depth-view shadow-depth-view
+                     :shadow-depth-sampler shadow-depth-sampler
                      :layout layout :block-pipeline pipeline
+                     :shadow-pipeline shadow-pipeline
                      :sky-vertex-buffer sky-vertex-buffer
                      :sky-pipeline sky-pipeline
                      :crosshair-vertex-buffer crosshair-vertex-buffer
@@ -587,6 +698,7 @@ capture-only demand clock."
     (stop-production-system (luvcraft-session-production-system session))
     (destroy-luvcraft-chunk-products session)
     (release-live-shader-pipeline (luvcraft-session-block-pipeline session))
+    (release-live-shader-pipeline (luvcraft-session-shadow-pipeline session))
     (release-live-shader-pipeline (luvcraft-session-sky-pipeline session))
     (release-live-shader-pipeline (luvcraft-session-crosshair-pipeline session))
     (dolist (resource (luvcraft-session-resources session))

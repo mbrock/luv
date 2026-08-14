@@ -133,6 +133,7 @@ nothing else does."))
            #:create-sampler
            #:destroy-sampler
            #:create-color-render-pass
+           #:create-depth-render-pass
            #:destroy-render-pass
            #:create-framebuffer
            #:destroy-framebuffer
@@ -163,6 +164,7 @@ nothing else does."))
            #:cmd-bind-vertex-buffer
            #:cmd-dispatch
            #:cmd-begin-color-render-pass
+           #:cmd-begin-depth-render-pass
            #:cmd-set-viewport-and-scissor
            #:cmd-end-render-pass
            #:cmd-draw
@@ -613,6 +615,9 @@ nothing else does."))
            #:luvcraft-session-atlas-texture
            #:luvcraft-session-atlas-view
            #:luvcraft-session-atlas-sampler
+           #:luvcraft-session-shadow-depth-texture
+           #:luvcraft-session-shadow-depth-view
+           #:luvcraft-session-shadow-depth-sampler
            #:luvcraft-session-meshed-world-revision
            #:luvcraft-session-target
            #:edit-luvcraft-block
@@ -631,6 +636,7 @@ nothing else does."))
            #:live-shader-pipeline-diagnostic
            #:live-shader-pipeline-installed-revision
            #:luvcraft-session-block-pipeline
+           #:luvcraft-session-shadow-pipeline
            #:luvcraft-session-lighting-state
            #:luvcraft-session-sky-pipeline
            #:luvcraft-session-sky-clock

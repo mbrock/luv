@@ -394,6 +394,10 @@ visible to it.")
     :initarg :depth-target
     :initform nil
     :reader vulkan-render-pass-depth-target)
+   (depth-store-op
+    :initarg :depth-store-op
+    :initform nil
+    :reader vulkan-render-pass-depth-store-op)
    (pipeline
     :initform nil
     :accessor vulkan-render-pass-pipeline)
@@ -1120,15 +1124,23 @@ wrapper, this finalizer cannot run before theirs have."
              (vulkan-handle device) pipeline-layout)))))))
 
 (defun vulkan-render-pass-for-format
-    (device gpu-format descriptor &optional depth-format)
-  (let ((key (list gpu-format depth-format)))
+    (device gpu-format descriptor &optional depth-format
+            (depth-store-op :discard))
+  (let ((key (list gpu-format depth-format depth-store-op)))
     (or (gethash key (vulkan-device-render-passes device))
-      (setf (gethash key (vulkan-device-render-passes device))
-            (lvk:create-color-render-pass
-             (vulkan-handle device)
-             (vulkan-gpu-format gpu-format descriptor)
-             :depth-format (and depth-format
-                                (vulkan-gpu-format depth-format descriptor)))))))
+        (setf (gethash key (vulkan-device-render-passes device))
+              (if gpu-format
+                  (lvk:create-color-render-pass
+                   (vulkan-handle device)
+                   (vulkan-gpu-format gpu-format descriptor)
+                   :depth-format
+                   (and depth-format
+                        (vulkan-gpu-format depth-format descriptor))
+                   :depth-store-op depth-store-op)
+                  (lvk:create-depth-render-pass
+                   (vulkan-handle device)
+                   (vulkan-gpu-format depth-format descriptor)
+                   :depth-store-op depth-store-op))))))
 
 (defun normalize-vulkan-vertex-buffers (descriptor buffers)
   (unless (listp buffers)
@@ -1181,15 +1193,22 @@ wrapper, this finalizer cannot run before theirs have."
            (depth-write-enabled
              (and depth-stencil
                   (getf depth-stencil :depth-write-enabled)))
+           (depth-store-op
+             (and depth-stencil
+                  (or (getf depth-stencil :depth-store-op) :discard)))
            (topology
              (or (getf (render-pipeline-descriptor-primitive descriptor)
                        :topology)
                  :triangle-list)))
       (unless (and (typep layout 'vulkan-gpu-bind-group-layout)
                    (typep vertex-module 'vulkan-gpu-shader-module)
-                   (typep fragment-module 'vulkan-gpu-shader-module)
-                   (= 1 (length targets))
-                   format
+                   (or (and (typep fragment-module
+                                    'vulkan-gpu-shader-module)
+                            (= 1 (length targets))
+                            format)
+                       (and (null fragment-module)
+                            (null targets)
+                            depth-stencil))
                    (or (null depth-stencil)
                        (and (eq depth-format :depth32-float)
                             (member depth-compare
@@ -1198,7 +1217,7 @@ wrapper, this finalizer cannot run before theirs have."
                                       :always))))
                    (member topology '(:triangle-list :triangle-strip)))
         (reject-gpu-request descriptor :unsupported-render-pipeline))
-      (dolist (object (list layout vertex-module fragment-module))
+      (dolist (object (remove nil (list layout vertex-module fragment-module)))
         (ensure-vulkan-object-device
          object
          (etypecase object
@@ -1209,7 +1228,7 @@ wrapper, this finalizer cannot run before theirs have."
          device :create-render-pipeline))
       (let* ((render-pass
                (vulkan-render-pass-for-format
-                device format descriptor depth-format))
+                device format descriptor depth-format depth-store-op))
              (pipeline-layout
                (lvk:create-pipeline-layout
                 (vulkan-handle device) (vector (vulkan-handle layout))))
@@ -1221,7 +1240,7 @@ wrapper, this finalizer cannot run before theirs have."
                      (lvk:create-graphics-pipeline
                       (vulkan-handle device)
                       (vulkan-handle vertex-module)
-                      (vulkan-handle fragment-module)
+                      (and fragment-module (vulkan-handle fragment-module))
                       pipeline-layout render-pass
                       :vertex-entry-point (or (getf vertex :entry-point) "main")
                       :fragment-entry-point
@@ -1942,37 +1961,45 @@ lowering later without changing this queue-level operation."
              (and (typep depth-view 'vulkan-gpu-texture-view)
                   (gpu-texture-view-texture depth-view)))
            (clear-color
-             (normalize-render-pass-color
-              descriptor (or (getf attachment :clear-value) #(0 0 0 1))))
+             (and attachment
+                  (normalize-render-pass-color
+                   descriptor
+                   (or (getf attachment :clear-value) #(0 0 0 1)))))
            (clear-depth
              (and depth-attachment
                   (normalize-render-pass-depth
                    descriptor
-                   (or (getf depth-attachment :depth-clear-value) 1.0)))))
-      (unless (and attachment target
-                   (eq :clear (getf attachment :load-op))
-                   (eq :store (getf attachment :store-op))
+                   (or (getf depth-attachment :depth-clear-value) 1.0))))
+           (depth-store-op
+             (and depth-attachment
+                  (getf depth-attachment :depth-store-op))))
+      (unless (and (or (and attachment target
+                            (eq :clear (getf attachment :load-op))
+                            (eq :store (getf attachment :store-op)))
+                       (and (null attachments) (null attachment)))
                    (or (null depth-attachment)
                        (and depth-target
                             (eq :depth32-float
                                 (gpu-texture-format depth-target))
                             (eq :clear
                                 (getf depth-attachment :depth-load-op))
-                            (eq :discard
-                                (getf depth-attachment :depth-store-op)))))
+                            (member depth-store-op '(:discard :store)))))
         (reject-gpu-request descriptor :unsupported-render-pass))
       (let* ((device (vulkan-command-encoder-device encoder))
-             (size (gpu-texture-size target))
+             (size (gpu-texture-size (or target depth-target)))
              (render-pass
                (vulkan-render-pass-for-format
-                device (gpu-texture-format target) descriptor
-                (and depth-target (gpu-texture-format depth-target))))
+                device (and target (gpu-texture-format target)) descriptor
+                (and depth-target (gpu-texture-format depth-target))
+                (or depth-store-op :discard)))
              (framebuffer nil)
              (completed-p nil))
-        (ensure-vulkan-object-device
-         view (vulkan-texture-view-device view) device :begin-render-pass)
+        (when target
+          (ensure-vulkan-object-device
+           view (vulkan-texture-view-device view) device :begin-render-pass))
         (when depth-target
-          (unless (equal size (gpu-texture-size depth-target))
+          (unless (or (null target)
+                      (equal size (gpu-texture-size depth-target)))
             (reject-gpu-request descriptor :mismatched-depth-size
                                 (gpu-texture-size depth-target)))
           (ensure-vulkan-object-device
@@ -1983,23 +2010,30 @@ lowering later without changing this queue-level operation."
            encoder depth-target descriptor :render-attachment)
           (transition-vulkan-texture
            encoder depth-target :depth-stencil-attachment-optimal))
-        (retain-vulkan-resource encoder view)
-        (ensure-vulkan-texture-for-command
-         encoder target descriptor :render-attachment)
-        (transition-vulkan-texture
-         encoder target :color-attachment-optimal)
+        (when target
+          (retain-vulkan-resource encoder view)
+          (ensure-vulkan-texture-for-command
+           encoder target descriptor :render-attachment)
+          (transition-vulkan-texture
+           encoder target :color-attachment-optimal))
         (unwind-protect
              (progn
                (setf framebuffer
                      (lvk:create-framebuffer
                       (vulkan-handle device) render-pass
-                      (vulkan-handle view) (first size) (second size)
+                      (and view (vulkan-handle view))
+                      (first size) (second size)
                       :depth-view (and depth-view
                                        (vulkan-handle depth-view))))
-               (lvk:cmd-begin-color-render-pass
-                (vulkan-command-encoder-command-buffer encoder)
-                render-pass framebuffer (first size) (second size)
-                clear-color :depth-clear-value clear-depth)
+               (if target
+                   (lvk:cmd-begin-color-render-pass
+                    (vulkan-command-encoder-command-buffer encoder)
+                    render-pass framebuffer (first size) (second size)
+                    clear-color :depth-clear-value clear-depth)
+                   (lvk:cmd-begin-depth-render-pass
+                    (vulkan-command-encoder-command-buffer encoder)
+                    render-pass framebuffer (first size) (second size)
+                    clear-depth))
                (lvk:cmd-set-viewport-and-scissor
                 (vulkan-command-encoder-command-buffer encoder)
                 (first size) (second size))
@@ -2009,7 +2043,8 @@ lowering later without changing this queue-level operation."
                        (make-instance
                         'vulkan-gpu-render-pass-encoder
                         :encoder encoder :framebuffer framebuffer
-                        :target target :depth-target depth-target)))
+                        :target target :depth-target depth-target
+                        :depth-store-op depth-store-op)))
                  (setf (vulkan-command-encoder-active-pass encoder) pass
                        completed-p t)
                  pass))
@@ -2046,12 +2081,16 @@ lowering later without changing this queue-level operation."
        :set-pipeline)
       (unless (eq (vulkan-render-pipeline-render-pass pipeline)
                   (vulkan-render-pass-for-format
-                   device (gpu-texture-format
-                           (vulkan-render-pass-target pass))
+                   device
+                   (and (vulkan-render-pass-target pass)
+                        (gpu-texture-format
+                         (vulkan-render-pass-target pass)))
                    pass
                    (and (vulkan-render-pass-depth-target pass)
                         (gpu-texture-format
-                         (vulkan-render-pass-depth-target pass)))))
+                         (vulkan-render-pass-depth-target pass)))
+                   (or (vulkan-render-pass-depth-store-op pass)
+                       :discard)))
         (reject-gpu-request pipeline :incompatible-render-pass pass))
       (lvk:cmd-bind-graphics-pipeline
        (vulkan-command-encoder-command-buffer encoder)

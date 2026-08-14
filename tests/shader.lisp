@@ -134,11 +134,14 @@
                '("camera-vector" "right-vector" "up-vector" "forward-vector"
                  "projection-vector" "fog-vector"
                  "sun-vector" "sun-color-vector" "zenith-vector"
-                 "horizon-vector" "ambient-vector" "fog-color-vector")))
+                 "horizon-vector" "ambient-vector" "fog-color-vector"
+                 "shadow-row-x" "shadow-row-y"
+                 "shadow-row-z" "shadow-row-w")))
     (ok (equal (mapcar #'spv:shader-uniform-member-offset
                        (spv:shader-uniform-block-members resource))
-               '(0 16 32 48 64 80 96 112 128 144 160 176)))
-    (ok (= (spv:shader-uniform-block-byte-size resource) 192))
+               '(0 16 32 48 64 80 96 112 128 144 160 176
+                 192 208 224 240)))
+    (ok (= (spv:shader-uniform-block-byte-size resource) 256))
     (ok (equal (form-names
                 (spv:shader-expression-form
                  (spv:shader-binding-expression fog-progress)))
@@ -163,6 +166,31 @@
                         instructions)))
     (ok (find "ACCESS-CHAIN" names :test #'string=))
     (ok (find "LOAD" names :test #'string=))))
+
+(deftest block-shadow-vertex-is-a-light-space-depth-shader
+  (let* ((specification (spv:block-world-shadow-vertex-specification))
+         (resource (first (spv:shader-specification-resources specification)))
+         (clip-x (binding-named 'clip-x specification))
+         (clip-position
+           (first (spv:shader-specification-statements specification))))
+    (ok (eq (spv:shader-specification-stage specification) :vertex))
+    (ok (= (length (spv:shader-specification-inputs specification)) 1))
+    (ok (= (length (spv:shader-specification-outputs specification)) 1))
+    (ok (typep resource 'spv:shader-uniform-block))
+    (ok (= (spv:shader-resource-binding resource) 2))
+    (ok (spv:shader-type=
+         (spv:shader-expression-type
+          (spv:shader-binding-expression clip-x))
+         :float))
+    (ok (equal (form-names
+                (spv:shader-expression-form
+                 (spv:shader-binding-expression clip-x)))
+               '("dot" "shadow-row-x" "world")))
+    (ok (spv:shader-type=
+         (spv:shader-expression-type
+          (spv:shader-assignment-value clip-position))
+         :vec4))
+    (ok (> (length (spv:block-world-shadow-vertex-shader)) 5))))
 
 (deftest uniform-blocks-do-not-pretend-to-implement-general-packing
   (ok (signals
@@ -401,7 +429,10 @@
       (ok (> (length vertex) 5))
       (ok (> (length fragment) 5))
       (ok (= (aref vertex 0) #x07230203))
-      (ok (= (aref fragment 0) #x07230203)))))
+      (ok (= (aref fragment 0) #x07230203)))
+    (let ((vertex (spv:block-world-shadow-vertex-shader)))
+      (ok (> (length vertex) 5))
+      (ok (= (aref vertex 0) #x07230203)))))
 
 (deftest every-scene-stage-declares-the-same-frame-uniform-block
   ;; Identical member order and offsets at binding 2 are the ABI contract
@@ -421,7 +452,8 @@
              (list (spv:block-world-vertex-specification)
                    (spv:block-world-fragment-specification)
                    (spv:block-world-sky-vertex-specification)
-                   (spv:block-world-sky-fragment-specification)))
+                   (spv:block-world-sky-fragment-specification)
+                   (spv:block-world-shadow-vertex-specification)))
            (blocks (mapcar #'frame-block specifications))
            (reference (member-layout (first blocks))))
       (ok (every (lambda (block) (typep block 'spv:shader-uniform-block))
@@ -433,7 +465,7 @@
                    (equal (member-layout block) reference))
                  (rest blocks)))
       (ok (every (lambda (block)
-                   (= (spv:shader-uniform-block-byte-size block) 192))
+                   (= (spv:shader-uniform-block-byte-size block) 256))
                  blocks)))))
 
 (deftest the-sky-material-is-image-mathematics-over-environment-lanes

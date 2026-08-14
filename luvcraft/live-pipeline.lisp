@@ -46,21 +46,31 @@
 
 (defun build-live-shader-pipeline-candidate (artifact)
   "Build a complete candidate without mutating ARTIFACT's installed state."
-  (let* ((vertex-specification
-           (when (live-shader-pipeline-vertex-role artifact)
-             (spv:shader-specification-for
-              (live-shader-pipeline-vertex-role artifact) :vertex)))
+  (let* ((vertex-only-p
+           (eq (live-shader-pipeline-stage artifact) :vertex))
+         (vertex-specification
+           (cond
+             ((live-shader-pipeline-vertex-role artifact)
+              (spv:shader-specification-for
+               (live-shader-pipeline-vertex-role artifact) :vertex))
+             (vertex-only-p
+              (spv:shader-specification-for
+               (live-shader-pipeline-role artifact) :vertex))))
          (vertex-lowering
            (when vertex-specification
              (spv:compile-shader-specification vertex-specification)))
          (specification
-           (spv:shader-specification-for
-            (live-shader-pipeline-role artifact)
-            (live-shader-pipeline-stage artifact)))
-         (lowering (spv:compile-shader-specification specification))
+           (unless vertex-only-p
+             (spv:shader-specification-for
+              (live-shader-pipeline-role artifact)
+              (live-shader-pipeline-stage artifact))))
+         (lowering
+           (and specification
+                (spv:compile-shader-specification specification)))
          (words
-           (spv:assemble-spir-v-module
-            (spv:shader-lowering-module lowering)))
+           (and lowering
+                (spv:assemble-spir-v-module
+                 (spv:shader-lowering-module lowering))))
          (device (live-shader-pipeline-device artifact))
          (vertex-module nil)
          (fragment-module nil)
@@ -72,20 +82,21 @@
                  (if vertex-lowering
                      (create
                       device
-                      (make-shader-module-descriptor
-                       :label (format nil "~A vertex module"
-                                      (live-shader-pipeline-label artifact))
+                       (make-shader-module-descriptor
+                        :label (format nil "~A vertex module"
+                                       (live-shader-pipeline-label artifact))
                        :code
                        (spv:assemble-spir-v-module
                         (spv:shader-lowering-module vertex-lowering))))
                      (live-shader-pipeline-vertex-module artifact))
                  fragment-module
-                 (create
-                  device
-                  (make-shader-module-descriptor
-                   :label (format nil "~A fragment module"
-                                  (live-shader-pipeline-label artifact))
-                   :code words))
+                 (and words
+                      (create
+                       device
+                       (make-shader-module-descriptor
+                        :label (format nil "~A fragment module"
+                                       (live-shader-pipeline-label artifact))
+                        :code words)))
                  pipeline
                  (create
                   device
@@ -96,10 +107,11 @@
                    `(:module ,vertex-module
                      :buffers ,(live-shader-pipeline-vertex-buffers artifact))
                    :fragment
-                   `(:module ,fragment-module
-                     :targets
-                     ((:format
-                       ,(live-shader-pipeline-target-format artifact))))
+                   (and fragment-module
+                        `(:module ,fragment-module
+                          :targets
+                          ((:format
+                            ,(live-shader-pipeline-target-format artifact)))))
                    :primitive (live-shader-pipeline-primitive artifact)
                    :depth-stencil
                    (live-shader-pipeline-depth-stencil artifact)))
@@ -117,7 +129,8 @@
      specification lowering fragment-module pipeline)
   (let ((old-pipeline (live-shader-pipeline-native-pipeline artifact))
         (old-vertex-module
-          (and (live-shader-pipeline-vertex-role artifact)
+          (and (or (live-shader-pipeline-vertex-role artifact)
+                   (eq (live-shader-pipeline-stage artifact) :vertex))
                (live-shader-pipeline-vertex-module artifact)))
         (old-fragment-module
           (live-shader-pipeline-fragment-module artifact))
@@ -237,7 +250,8 @@
     (when module
       (destroy module)
       (setf (live-shader-pipeline-fragment-module artifact) nil)))
-  (when (live-shader-pipeline-vertex-role artifact)
+  (when (or (live-shader-pipeline-vertex-role artifact)
+            (eq (live-shader-pipeline-stage artifact) :vertex))
     (let ((module (live-shader-pipeline-vertex-module artifact)))
       (when module
         (destroy module)

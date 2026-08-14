@@ -184,6 +184,9 @@
            #:block-world-sky-fragment-specification
            #:block-world-sky-fragment-module
            #:block-world-sky-fragment-shader
+           #:block-world-shadow-vertex-specification
+           #:block-world-shadow-vertex-module
+           #:block-world-shadow-vertex-shader
            #:block-world-crosshair-vertex-module
            #:block-world-crosshair-fragment-specification
            #:block-world-crosshair-fragment-module

@@ -716,7 +716,13 @@ destroy it before destroying INSTANCE."
   (vk:destroy-sampler device sampler (cffi:null-pointer))
   (values))
 
-(defun create-color-render-pass (device format &key depth-format)
+(defun vulkan-attachment-store-op (store-op)
+  (ecase store-op
+    (:store :store)
+    (:discard :dont-care)))
+
+(defun create-color-render-pass
+    (device format &key depth-format (depth-store-op :discard))
   (let ((attachment-count (if depth-format 2 1)))
     (cffi:with-foreign-object
         (attachments '(:struct attachment-description) attachment-count)
@@ -733,7 +739,8 @@ destroy it before destroying INSTANCE."
          (cffi:mem-aptr attachments '(:struct attachment-description) 1)
          'attachment-description
          :flags 0 :format depth-format :samples :1
-         :load-op :clear :store-op :dont-care
+         :load-op :clear
+         :store-op (vulkan-attachment-store-op depth-store-op)
          :stencil-load-op :dont-care :stencil-store-op :dont-care
          :initial-layout :depth-stencil-attachment-optimal
          :final-layout :depth-stencil-attachment-optimal))
@@ -764,23 +771,54 @@ destroy it before destroying INSTANCE."
                 (create-with-depth-reference depth-reference))
               (create-with-depth-reference (cffi:null-pointer))))))))
 
+(defun create-depth-render-pass
+    (device depth-format &key (depth-store-op :store))
+  (cffi:with-foreign-object
+      (attachments '(:struct attachment-description) 1)
+    (fill-vk
+     attachments 'attachment-description
+     :flags 0 :format depth-format :samples :1
+     :load-op :clear
+     :store-op (vulkan-attachment-store-op depth-store-op)
+     :stencil-load-op :dont-care :stencil-store-op :dont-care
+     :initial-layout :depth-stencil-attachment-optimal
+     :final-layout :depth-stencil-attachment-optimal)
+    (with-vk (depth-reference attachment-reference
+              :attachment 0 :layout :depth-stencil-attachment-optimal)
+      (with-vk (subpass subpass-description
+                :flags 0 :pipeline-bind-point :graphics
+                :input-attachment-count 0
+                :p-input-attachments (cffi:null-pointer)
+                :color-attachment-count 0
+                :p-color-attachments (cffi:null-pointer)
+                :p-resolve-attachments (cffi:null-pointer)
+                :p-depth-stencil-attachment depth-reference
+                :preserve-attachment-count 0
+                :p-preserve-attachments (cffi:null-pointer))
+        (with-vk (create-info render-pass-create-info
+                  :flags 0 :attachment-count 1 :p-attachments attachments
+                  :subpass-count 1 :p-subpasses subpass
+                  :dependency-count 0 :p-dependencies (cffi:null-pointer))
+          (create-render-pass-handle device create-info))))))
+
 (defun destroy-render-pass (device render-pass)
   (vk:destroy-render-pass device render-pass (cffi:null-pointer))
   (values))
 
 (defun create-framebuffer
     (device render-pass image-view width height &key depth-view)
-  (with-foreign-array
-      (attachments :pointer
-                   (if depth-view
-                       (vector image-view depth-view)
-                       (vector image-view)))
-    (with-vk (create-info framebuffer-create-info
-              :flags 0 :render-pass render-pass
-              :attachment-count (if depth-view 2 1)
-              :p-attachments attachments
-              :width width :height height :layers 1)
-      (create-framebuffer-handle device create-info))))
+  (let ((attachment-vector
+          (cond ((and image-view depth-view) (vector image-view depth-view))
+                (image-view (vector image-view))
+                (depth-view (vector depth-view))
+                (t (error "A framebuffer needs at least one attachment.")))))
+    (with-foreign-array (attachments :pointer attachment-vector)
+      (with-vk (create-info framebuffer-create-info
+                :flags 0 :render-pass render-pass
+                :attachment-count (length attachment-vector)
+                :p-attachments attachments
+                :width width :height height :layers 1)
+        (create-framebuffer-handle device create-info)))))
 
 (defun destroy-framebuffer (device framebuffer)
   (vk:destroy-framebuffer device framebuffer (cffi:null-pointer))
@@ -844,99 +882,139 @@ destroy it before destroying INSTANCE."
      &key (vertex-entry-point "main") (fragment-entry-point "main")
           (topology :triangle-strip) vertex-buffers
           depth-compare depth-write-enabled)
-  (cffi:with-foreign-string (vertex-name vertex-entry-point)
-    (cffi:with-foreign-string (fragment-name fragment-entry-point)
-      (cffi:with-foreign-object
-          (stages '(:struct pipeline-shader-stage-create-info) 2)
-        (fill-vk
-         (cffi:mem-aptr stages '(:struct pipeline-shader-stage-create-info) 0)
-         'pipeline-shader-stage-create-info
-         :flags 0 :stage '(:vertex) :module vertex-module
-         :p-name vertex-name :p-specialization-info (cffi:null-pointer))
-        (fill-vk
-         (cffi:mem-aptr stages '(:struct pipeline-shader-stage-create-info) 1)
-         'pipeline-shader-stage-create-info
-         :flags 0 :stage '(:fragment) :module fragment-module
-         :p-name fragment-name :p-specialization-info (cffi:null-pointer))
-        (call-with-vertex-input-descriptions
-         vertex-buffers
-         (lambda (binding-count bindings attribute-count attributes)
-           (with-vk (vertex-input pipeline-vertex-input-state-create-info
-                     :flags 0
-                     :vertex-binding-description-count binding-count
-                     :p-vertex-binding-descriptions bindings
-                     :vertex-attribute-description-count attribute-count
-                     :p-vertex-attribute-descriptions attributes)
-             (with-vk (input-assembly pipeline-input-assembly-state-create-info
-                       :flags 0 :topology topology
-                       :primitive-restart-enable 0)
-               (with-vk (viewport-state pipeline-viewport-state-create-info
-                         :flags 0 :viewport-count 1
-                         :p-viewports (cffi:null-pointer)
-                         :scissor-count 1 :p-scissors (cffi:null-pointer))
-                 (with-vk (rasterization
-                           pipeline-rasterization-state-create-info
-                           :flags 0 :depth-clamp-enable 0
-                           :rasterizer-discard-enable 0 :polygon-mode :fill
-                           :cull-mode nil :front-face :counter-clockwise
-                           :depth-bias-enable 0
-                           :depth-bias-constant-factor 0.0
-                           :depth-bias-clamp 0.0
-                           :depth-bias-slope-factor 0.0
-                           :line-width 1.0)
-                   (with-vk (multisample
-                             pipeline-multisample-state-create-info
-                             :flags 0 :rasterization-samples :1
-                             :sample-shading-enable 0
-                             :min-sample-shading 0.0
-                             :p-sample-mask (cffi:null-pointer)
-                             :alpha-to-coverage-enable 0
-                             :alpha-to-one-enable 0)
-                     (with-vk (blend-attachment
-                               pipeline-color-blend-attachment-state
-                               :blend-enable 0
-                               :src-color-blend-factor :one
-                               :dst-color-blend-factor :zero
-                               :color-blend-op :add
-                               :src-alpha-blend-factor :one
-                               :dst-alpha-blend-factor :zero
-                               :alpha-blend-op :add
-                               :color-write-mask '(:r :g :b :a))
-                       (with-vk (blend pipeline-color-blend-state-create-info
-                                 :flags 0 :logic-op-enable 0 :logic-op :copy
-                                 :attachment-count 1
-                                 :p-attachments blend-attachment)
-                         (with-foreign-array
-                             (dynamic-states dynamic-state
-                                             #(:viewport :scissor))
-                           (with-vk (dynamic
-                                     pipeline-dynamic-state-create-info
-                                     :flags 0 :dynamic-state-count 2
-                                     :p-dynamic-states dynamic-states)
-                             (call-with-depth-stencil-state
-                              depth-compare depth-write-enabled
-                              (lambda (depth-state)
+  (labels
+      ((create-with-shader-names (vertex-name fragment-name)
+         (let ((stage-count (if fragment-module 2 1)))
+           (cffi:with-foreign-object
+               (stages '(:struct pipeline-shader-stage-create-info)
+                       stage-count)
+             (fill-vk
+              (cffi:mem-aptr stages
+                             '(:struct pipeline-shader-stage-create-info) 0)
+              'pipeline-shader-stage-create-info
+              :flags 0 :stage '(:vertex) :module vertex-module
+              :p-name vertex-name
+              :p-specialization-info (cffi:null-pointer))
+             (when fragment-module
+               (fill-vk
+                (cffi:mem-aptr stages
+                               '(:struct pipeline-shader-stage-create-info) 1)
+                'pipeline-shader-stage-create-info
+                :flags 0 :stage '(:fragment) :module fragment-module
+                :p-name fragment-name
+                :p-specialization-info (cffi:null-pointer)))
+             (call-with-vertex-input-descriptions
+              vertex-buffers
+              (lambda (binding-count bindings attribute-count attributes)
+                (with-vk (vertex-input
+                          pipeline-vertex-input-state-create-info
+                          :flags 0
+                          :vertex-binding-description-count binding-count
+                          :p-vertex-binding-descriptions bindings
+                          :vertex-attribute-description-count attribute-count
+                          :p-vertex-attribute-descriptions attributes)
+                  (with-vk (input-assembly
+                            pipeline-input-assembly-state-create-info
+                            :flags 0 :topology topology
+                            :primitive-restart-enable 0)
+                    (with-vk (viewport-state
+                              pipeline-viewport-state-create-info
+                              :flags 0 :viewport-count 1
+                              :p-viewports (cffi:null-pointer)
+                              :scissor-count 1
+                              :p-scissors (cffi:null-pointer))
+                      (with-vk (rasterization
+                                pipeline-rasterization-state-create-info
+                                :flags 0 :depth-clamp-enable 0
+                                :rasterizer-discard-enable 0
+                                :polygon-mode :fill
+                                :cull-mode nil
+                                :front-face :counter-clockwise
+                                :depth-bias-enable 0
+                                :depth-bias-constant-factor 0.0
+                                :depth-bias-clamp 0.0
+                                :depth-bias-slope-factor 0.0
+                                :line-width 1.0)
+                        (with-vk (multisample
+                                  pipeline-multisample-state-create-info
+                                  :flags 0 :rasterization-samples :1
+                                  :sample-shading-enable 0
+                                  :min-sample-shading 0.0
+                                  :p-sample-mask (cffi:null-pointer)
+                                  :alpha-to-coverage-enable 0
+                                  :alpha-to-one-enable 0)
+                          (labels
+                              ((create-with-blend (attachment-count
+                                                   attachments)
+                                 (with-vk
+                                     (blend
+                                      pipeline-color-blend-state-create-info
+                                      :flags 0 :logic-op-enable 0
+                                      :logic-op :copy
+                                      :attachment-count attachment-count
+                                      :p-attachments attachments)
+                                   (with-foreign-array
+                                       (dynamic-states dynamic-state
+                                                       #(:viewport :scissor))
+                                     (with-vk
+                                         (dynamic
+                                          pipeline-dynamic-state-create-info
+                                          :flags 0
+                                          :dynamic-state-count 2
+                                          :p-dynamic-states dynamic-states)
+                                       (call-with-depth-stencil-state
+                                        depth-compare depth-write-enabled
+                                        (lambda (depth-state)
+                                          (with-vk
+                                              (create-info
+                                               graphics-pipeline-create-info
+                                               :flags 0
+                                               :stage-count stage-count
+                                               :p-stages stages
+                                               :p-vertex-input-state
+                                               vertex-input
+                                               :p-input-assembly-state
+                                               input-assembly
+                                               :p-tessellation-state
+                                               (cffi:null-pointer)
+                                               :p-viewport-state
+                                               viewport-state
+                                               :p-rasterization-state
+                                               rasterization
+                                               :p-multisample-state
+                                               multisample
+                                               :p-depth-stencil-state
+                                               depth-state
+                                               :p-color-blend-state blend
+                                               :p-dynamic-state dynamic
+                                               :layout layout
+                                               :render-pass render-pass
+                                               :subpass 0
+                                               :base-pipeline-handle
+                                               (cffi:null-pointer)
+                                               :base-pipeline-index -1)
+                                            (create-graphics-pipeline-handle
+                                             device create-info)))))))))
+                            (if fragment-module
                                 (with-vk
-                                    (create-info
-                                     graphics-pipeline-create-info
-                                     :flags 0 :stage-count 2
-                                     :p-stages stages
-                                     :p-vertex-input-state vertex-input
-                                     :p-input-assembly-state input-assembly
-                                     :p-tessellation-state
-                                     (cffi:null-pointer)
-                                     :p-viewport-state viewport-state
-                                     :p-rasterization-state rasterization
-                                     :p-multisample-state multisample
-                                     :p-depth-stencil-state depth-state
-                                     :p-color-blend-state blend
-                                     :p-dynamic-state dynamic :layout layout
-                                     :render-pass render-pass :subpass 0
-                                     :base-pipeline-handle
-                                     (cffi:null-pointer)
-                                     :base-pipeline-index -1)
-                                  (create-graphics-pipeline-handle
-                                   device create-info)))))))))))))))))))
+                                    (blend-attachment
+                                     pipeline-color-blend-attachment-state
+                                     :blend-enable 0
+                                     :src-color-blend-factor :one
+                                     :dst-color-blend-factor :zero
+                                     :color-blend-op :add
+                                     :src-alpha-blend-factor :one
+                                     :dst-alpha-blend-factor :zero
+                                     :alpha-blend-op :add
+                                     :color-write-mask '(:r :g :b :a))
+                                  (create-with-blend 1 blend-attachment))
+                                (create-with-blend 0
+                                                   (cffi:null-pointer)))))))))))))))
+    (cffi:with-foreign-string (vertex-name vertex-entry-point)
+      (if fragment-module
+          (cffi:with-foreign-string (fragment-name fragment-entry-point)
+            (create-with-shader-names vertex-name fragment-name))
+          (create-with-shader-names vertex-name (cffi:null-pointer))))))
 
 (defun destroy-pipeline (device pipeline)
   (vk:destroy-pipeline device pipeline (cffi:null-pointer))
@@ -1356,6 +1434,31 @@ destroy it before destroying INSTANCE."
          (cffi:foreign-slot-pointer area '(:struct rect-2d) 'extent)
          'extent-2d :width width :height height))
         (vk:cmd-begin-render-pass command-buffer begin-info :inline))))
+  (values))
+
+(defun cmd-begin-depth-render-pass
+    (command-buffer render-pass framebuffer width height depth-clear-value)
+  (cffi:with-foreign-object (clears '(:union clear-value) 1)
+    (clear-foreign-object clears '(:union clear-value) 1)
+    (fill-vk
+     (cffi:foreign-slot-pointer
+      clears '(:union clear-value) 'depth-stencil)
+     'clear-depth-stencil-value
+     :depth (coerce depth-clear-value 'single-float)
+     :stencil 0)
+    (with-vk (begin-info render-pass-begin-info
+              :render-pass render-pass :framebuffer framebuffer
+              :clear-value-count 1 :p-clear-values clears)
+      (let ((area
+              (cffi:foreign-slot-pointer
+               begin-info '(:struct render-pass-begin-info) 'render-area)))
+        (fill-vk
+         (cffi:foreign-slot-pointer area '(:struct rect-2d) 'offset)
+         'offset-2d :x 0 :y 0)
+        (fill-vk
+         (cffi:foreign-slot-pointer area '(:struct rect-2d) 'extent)
+         'extent-2d :width width :height height))
+      (vk:cmd-begin-render-pass command-buffer begin-info :inline)))
   (values))
 
 (defun cmd-set-viewport-and-scissor (command-buffer width height)

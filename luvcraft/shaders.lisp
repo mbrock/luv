@@ -23,7 +23,11 @@
       (zenith-vector :vec4)     ; zenith colour, w unused
       (horizon-vector :vec4)    ; horizon colour, w unused
       (ambient-vector :vec4)    ; ambient colour, exposure
-      (fog-color-vector :vec4)) ; fog colour, w unused
+      (fog-color-vector :vec4)  ; fog colour, w unused
+      (shadow-row-x :vec4)      ; light-space clip x from world position
+      (shadow-row-y :vec4)      ; light-space clip y from world position
+      (shadow-row-z :vec4)      ; light-space depth from world position
+      (shadow-row-w :vec4))     ; light-space homogeneous w
     "The one frame-environment uniform layout shared by all scene stages."))
 
 (define-shader-method shader-specification-for
@@ -235,6 +239,37 @@
 
 (defun block-world-sky-fragment-shader ()
   (assemble-spir-v-module (block-world-sky-fragment-module)))
+
+;;; A first shadow-map pass renders the same block mesh into a stored depth
+;;; texture from light-space.  The scene material does not sample it yet; this
+;;; stage establishes the GPU product that the later fragment shader will read.
+
+(define-shader-method shader-specification-for
+    block-world-shadow-vertex-specification
+    ((role (eql :block-shadow)) (stage (eql :vertex)))
+    (:stage :vertex
+     :inputs ((world-position :vec3 :location 0))
+     :outputs ((clip-position :vec4 :built-in :position))
+     :resources
+     ((frame-state :uniform-block :set 0 :binding 2
+                   :members #.*frame-uniform-members*)))
+  (let* ((world (vec4 world-position 1.0))
+         (clip-x (dot shadow-row-x world))
+         (clip-y (dot shadow-row-y world))
+         (clip-z (dot shadow-row-z world))
+         (clip-w (dot shadow-row-w world))
+         (clip (vec4 clip-x clip-y clip-z clip-w)))
+    (set-output clip-position clip)))
+
+(defun block-world-shadow-vertex-specification ()
+  (shader-specification-for :block-shadow :vertex))
+
+(defun block-world-shadow-vertex-module ()
+  (shader-lowering-module
+   (compile-shader-specification (block-world-shadow-vertex-specification))))
+
+(defun block-world-shadow-vertex-shader ()
+  (assemble-spir-v-module (block-world-shadow-vertex-module)))
 
 ;;; The crosshair is deliberately another tiny mathematical material rather
 ;;; than a magic fixed-function colour.  Its vertex half remains in SHADER.LISP

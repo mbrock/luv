@@ -63,9 +63,17 @@
    (depth-texture :initarg :depth-texture
                   :reader luvcraft-session-depth-texture)
    (depth-view :initarg :depth-view :reader luvcraft-session-depth-view)
+   (shadow-depth-texture :initarg :shadow-depth-texture
+                         :reader luvcraft-session-shadow-depth-texture)
+   (shadow-depth-view :initarg :shadow-depth-view
+                      :reader luvcraft-session-shadow-depth-view)
+   (shadow-depth-sampler :initarg :shadow-depth-sampler
+                         :reader luvcraft-session-shadow-depth-sampler)
    (layout :initarg :layout :reader luvcraft-session-layout)
    (block-pipeline :initarg :block-pipeline
                    :reader luvcraft-session-block-pipeline)
+   (shadow-pipeline :initarg :shadow-pipeline
+                    :reader luvcraft-session-shadow-pipeline)
    (sky-vertex-buffer :initarg :sky-vertex-buffer :initform nil
                       :reader luvcraft-session-sky-vertex-buffer)
    (sky-pipeline :initarg :sky-pipeline :initform nil
@@ -94,6 +102,10 @@
   (live-shader-pipeline-native-pipeline
    (luvcraft-session-block-pipeline session)))
 
+(defun luvcraft-session-shadow-native-pipeline (session)
+  (live-shader-pipeline-native-pipeline
+   (luvcraft-session-shadow-pipeline session)))
+
 (defun luvcraft-session-crosshair-native-pipeline (session)
   (live-shader-pipeline-native-pipeline
    (luvcraft-session-crosshair-pipeline session)))
@@ -105,6 +117,7 @@
 (defun refresh-luvcraft-shaders (session)
   "Install any successfully redefined block-world shader methods."
   (refresh-live-shader-pipeline (luvcraft-session-block-pipeline session))
+  (refresh-live-shader-pipeline (luvcraft-session-shadow-pipeline session))
   (refresh-live-shader-pipeline (luvcraft-session-sky-pipeline session))
   (refresh-live-shader-pipeline (luvcraft-session-crosshair-pipeline session))
   session)

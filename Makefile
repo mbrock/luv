@@ -8,7 +8,7 @@ luvcraft:
 	nix develop -c sbcl --script build-luvcraft.lisp
 
 run: luvcraft
-	./build/luvcraft
+	nix develop -c ./build/luvcraft
 
 test: shader-validate
 	nix develop -c sbcl --non-interactive \
@@ -37,7 +37,7 @@ shader-validate:
 
 smoke: luvcraft
 	mkdir -p build
-	./build/luvcraft --smoke-test build/luvcraft-smoke.png
+	nix develop -c ./build/luvcraft --smoke-test build/luvcraft-smoke.png
 
 mcluv:
 	nix develop -c sbcl --script build-mcluv.lisp

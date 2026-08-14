@@ -676,31 +676,62 @@ Done when: shader authors can define reusable shadow source vocabulary that
 compiles to the same mathematical expression graph as handwritten core shader
 forms.
 
-** TODO Shadow-map render pass and light projection resources
+** DONE Shadow-map producer pass and light projection resources
 :PROPERTIES:
 :ID: 2WX9PW
 :END:
 
-Intent: make the renderer capable of producing and sampling a shadow depth map
-as a separate GPU product owned by the luvcraft session.
+Intent: make the renderer capable of producing a shadow depth map as a
+separate GPU product owned by the luvcraft session, with light-space
+projection data carried through the ordinary frame uniform.
+
+Evidence:
+
+- The Vulkan backend accepts a depth-only render pass and a vertex-only
+  graphics pipeline; the depth attachment can be stored instead of discarded.
+- The live pipeline artifact can now watch a =:vertex= shader role directly,
+  so the shadow pass remains hot-reloadable through the same CLOS/MOP path as
+  visible materials.
+- =luvcraft= owns a 1024x1024 =:depth32-float= shadow texture, view, sampler,
+  and =:block-shadow= pipeline, and encodes a shadow pass before the normal
+  sky/material/crosshair pass.
+- The shared frame uniform grew by four light-space rows, and
+  =block-world-shadow-vertex-specification= projects mesh positions with dot
+  products against those rows.
+- =make test= passed; an explicit =spirv-val --target-env vulkan1.0= check on
+  =build/block-world-shadow.vert.spv= passed; =make smoke= rendered a hidden
+  frame successfully.
+
+Done when: the frame produces a stored shadow depth map from block geometry
+without changing visible lighting yet; visible sampling moves to #MFBOFD.
+
+** NEXT Sample the shadow map in the block material
+:PROPERTIES:
+:ID: MFBOFD
+:END:
+
+Intent: consume the shadow depth map from the block material using the
+=shadow-visibility= abstraction, so moving sun light gets real direct shadows
+while voxel skylight remains the ambient term.
 
 Evidence to gather:
 
-- The GPU API/backend can encode a depth-only render pass whose depth attachment
-  is stored, transitioned to shader-read layout, and sampled in a later scene
-  pass.
-- Luvcraft owns a shadow depth texture, view, sampler, and bind group entries
-  without overfitting the layout to exactly one atlas texture plus one uniform
-  block.
-- A =:block-shadow= or equivalent depth pipeline renders block meshes from a
-  light-space transform.  The first visible consumer can be the sun, but the
-  resource/projection vocabulary should not rule out spot torches or point
-  light atlases.
+- The bind-group layout can carry atlas texture/sampler, shadow depth
+  texture/sampler, and the frame uniform without hard-coding a one-texture
+  layout.
+- The block vertex shader exports shadow coordinates and receiver depth, or an
+  equivalent fragment-available light-space value, without mixing projection
+  policy into the core shader DSL.
+- The block fragment shader multiplies only the direct sun term by
+  =shadow-visibility=; ambient skylight and blocklight keep their current
+  semantics.
+- A pinned gazetteer or smoke scene visibly shows block geometry casting
+  real-time shadows, and the new image is inspected before accepting any hash
+  change.
 
 Done when: a pinned scene shows moving geometry casting real-time direct-light
-shadows through the shader abstraction, while voxel skylight remains the
-ambient term and all new textures/pipelines retire through the existing
-completion frontier.
+shadows through the shader abstraction, with all new textures, bind groups, and
+pipelines retiring through the existing completion frontier.
 
 ** IDEA HDR crystal bloom
 :PROPERTIES:
