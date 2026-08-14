@@ -55,10 +55,12 @@ print a backtrace and wait on stdin for a restart number or `a` to abort.
 `inspect` is interactive and keeps its one connection open while navigating
 the object (`?` lists its commands, `q` quits).
 
-The connection-free `./sly parinfer [--check|--diff|--write] [--file FILE|CODE|FILE]`
-filter repairs common parenthesis mistakes using indentation. Whole balanced
-files are returned unchanged, so `./sly parinfer --check path/to/file.lisp`
-is useful as a low-noise guard. Use `--diff` to inspect an actual repair and
-`--write` only after the diff looks right. With no argument it reads multiline
+The connection-free `./sly parinfer [--check|--diff|--write] [--strict] [--file FILE|CODE|FILE]`
+filter repairs common parenthesis mistakes using indentation. Ordinary
+`--check` is a low-noise guard for validated balance repairs. Add `--strict`
+to also fail when a file is already paren-balanced but indentation suggests a
+different tree. `--diff` shows the indentation candidate in either case;
+`--write` only applies validated repairs for unbalanced input and refuses to
+rewrite suspicious-but-balanced source. With no argument it reads multiline
 source from stdin, for example `./sly parinfer < unfinished.lisp`. It is still
 a repair heuristic rather than a full Common Lisp reader.

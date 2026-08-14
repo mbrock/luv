@@ -937,7 +937,7 @@
 (defun usage (&optional (stream *standard-output*))
   (format stream "Usage: ./sly start|stop|status|log~%")
   (format stream "       ./sly eval CODE [--package PACKAGE]~%")
-  (format stream "       ./sly parinfer [--check|--diff|--write] [--file FILE|CODE|FILE]~%")
+  (format stream "       ./sly parinfer [--check|--diff|--write] [--strict] [--file FILE|CODE|FILE]~%")
   (format stream "       ./sly inspect CODE [--package PACKAGE]~%")
   (format stream "       ./sly describe NAME... [--function] [--package PACKAGE]~%")
   (format stream "       ./sly describe-package PACKAGE...~%")
@@ -1005,7 +1005,8 @@
 (defun parse-parinfer-arguments (arguments)
   (let ((mode :print)
         (source nil)
-        (file nil))
+        (file nil)
+        (strict nil))
     (loop while arguments
           for argument = (pop arguments)
           do (cond
@@ -1015,6 +1016,8 @@
                 (setf mode :diff))
                ((string= argument "--write")
                 (setf mode :write))
+               ((string= argument "--strict")
+                (setf strict t))
                ((string= argument "--file")
                 (unless arguments
                   (error "--file requires a pathname"))
@@ -1033,46 +1036,101 @@
     (when (and (not file) source (probe-file source))
       (setf file (namestring (truename source))
             source nil))
-    (values mode source file)))
+    (values mode source file strict)))
+
+(defun parinfer-safe-repair-p (report)
+  (and (not (sly-client/parinfer:indent-mode-report-source-balanced-p report))
+       (sly-client/parinfer:indent-mode-report-candidate-balanced-p report)
+       (sly-client/parinfer:indent-mode-report-candidate-changed-p report)))
+
+(defun parinfer-balanced-conflict-p (report)
+  (and (sly-client/parinfer:indent-mode-report-source-balanced-p report)
+       (sly-client/parinfer:indent-mode-report-candidate-changed-p report)))
+
+(defun explain-parinfer-report (report label stream)
+  (cond
+    ((parinfer-balanced-conflict-p report)
+     (format stream
+             "parinfer: ~A is paren-balanced, but indentation suggests a different tree; use --diff to inspect the candidate.~%"
+             label))
+    ((parinfer-safe-repair-p report)
+     (format stream
+             "parinfer: ~A has a validated indentation repair candidate; use --diff or --write.~%"
+             label))
+    ((not (sly-client/parinfer:indent-mode-report-source-balanced-p report))
+     (format stream
+             "parinfer: ~A is not paren-balanced, and no validated repair candidate was found.~%"
+             label))
+    (t
+     (format stream "parinfer: ~A unchanged.~%" label))))
 
 (defun run-parinfer (arguments)
-  (multiple-value-bind (mode source file)
+  (multiple-value-bind (mode source file strict)
       (parse-parinfer-arguments arguments)
     (let* ((label (or file "stdin"))
            (original
              (cond (file (read-text-file file))
                    (source source)
                    (t (read-standard-input-to-end))))
+           (report
+             (sly-client/parinfer:analyze-indent-mode original))
+           (candidate
+             (sly-client/parinfer:indent-mode-report-candidate report))
            (repaired
              (sly-client/parinfer:apply-indent-mode original))
-           (changed-p (not (string= original repaired))))
+           (changed-p (not (string= original repaired)))
+           (candidate-changed-p
+             (sly-client/parinfer:indent-mode-report-candidate-changed-p
+              report))
+           (source-balanced-p
+             (sly-client/parinfer:indent-mode-report-source-balanced-p
+              report)))
       (ecase mode
         (:print
          (write-string repaired)
          0)
         (:check
-         (if changed-p
-             (progn
-               (format *error-output*
-                       "parinfer: ~A would change; use --diff or --write.~%"
-                       label)
-               1)
-             (progn
-               (format t "parinfer: ~A unchanged.~%" label)
-               0)))
+         (cond
+           ((or changed-p (not source-balanced-p))
+            (explain-parinfer-report report label *error-output*)
+            1)
+           ((and strict candidate-changed-p)
+            (explain-parinfer-report report label *error-output*)
+            1)
+           (t
+            (format t "parinfer: ~A unchanged.~%" label)
+            0)))
         (:diff
-         (if changed-p
-             (print-parinfer-diff original repaired label)
-             (progn
-               (format t "parinfer: ~A unchanged.~%" label)
-               0)))
+         (cond
+           (candidate-changed-p
+            (when (parinfer-balanced-conflict-p report)
+              (format *error-output*
+                      "parinfer: ~A is paren-balanced; showing indentation candidate, not a safe rewrite.~%"
+                      label))
+            (print-parinfer-diff original candidate label))
+           ((not source-balanced-p)
+            (explain-parinfer-report report label *error-output*)
+            1)
+           (t
+            (format t "parinfer: ~A unchanged.~%" label)
+            0)))
         (:write
-         (if changed-p
-             (progn
-               (write-text-file file repaired)
-               (format t "parinfer: rewrote ~A.~%" file))
-             (format t "parinfer: ~A unchanged.~%" file))
-         0)))))
+         (cond
+           (changed-p
+            (write-text-file file repaired)
+            (format t "parinfer: rewrote ~A.~%" file)
+            0)
+           ((parinfer-balanced-conflict-p report)
+            (format *error-output*
+                    "parinfer: ~A is paren-balanced, but indentation suggests a different tree; refusing --write. Use --diff to inspect it.~%"
+                    file)
+            1)
+           ((not source-balanced-p)
+            (explain-parinfer-report report file *error-output*)
+            1)
+           (t
+            (format t "parinfer: ~A unchanged.~%" file)
+            0)))))))
 
 (defun parse-code-arguments (command arguments)
   (unless arguments
