@@ -602,6 +602,74 @@ never collides with a standard symbol's function documentation:
 (define-shader-operator normalize
   "Scale one vector to unit length.")
 
+;;; Abstractions are source vocabulary, not core operators.  They rewrite into
+;;; ordinary shader forms before parsing, so the typed graph and SPIR-V lowering
+;;; remain built from the small mathematical operator set above.
+
+(defvar *shader-abstraction-documentation* (make-hash-table :test #'eq))
+
+(defmethod documentation ((name symbol) (type (eql 'shader-abstraction)))
+  (gethash name *shader-abstraction-documentation*))
+
+(defmethod (setf documentation)
+    (new-value (name symbol) (type (eql 'shader-abstraction)))
+  (if new-value
+      (setf (gethash name *shader-abstraction-documentation*) new-value)
+      (progn (remhash name *shader-abstraction-documentation*) nil)))
+
+(defgeneric shader-abstraction-p (operator)
+  (:documentation
+   "Whether OPERATOR names source vocabulary expanded before shader parsing."))
+
+(defmethod shader-abstraction-p (operator)
+  (declare (ignore operator))
+  nil)
+
+(defgeneric expand-shader-abstraction-call (operator form)
+  (:documentation
+   "Expand one source abstraction call into core shader-language forms."))
+
+(defmethod expand-shader-abstraction-call (operator form)
+  (declare (ignore operator))
+  (error 'shader-language-error
+         :form form :reason :unknown-abstraction :details (first form)))
+
+(defmacro define-shader-abstraction (name lambda-list &body body)
+  "Define NAME as a source-level shader abstraction.
+
+The expansion body receives the destructured call operands and returns a raw
+shader source form made from core operators or other abstractions."
+  (let* ((form (gensym "FORM"))
+         (operator (gensym "OPERATOR"))
+         (documentation (and (stringp (first body)) (first body)))
+         (forms (if documentation (rest body) body)))
+    `(progn
+       (defmethod shader-abstraction-p ((,operator (eql ',name)))
+         t)
+       (defmethod expand-shader-abstraction-call
+           ((,operator (eql ',name)) ,form)
+         (destructuring-bind (,operator ,@lambda-list) ,form
+           (declare (ignore ,operator))
+           ,@forms))
+       ,@(when documentation
+           `((setf (documentation ',name 'shader-abstraction)
+                   ,documentation)))
+       ',name)))
+
+(defun expand-shader-source-form (form)
+  "Expand all shader abstraction calls nested inside FORM."
+  (cond ((atom form) form)
+        ((and (symbolp (first form)) (shader-abstraction-p (first form)))
+         (expand-shader-source-form
+          (expand-shader-abstraction-call (first form) form)))
+        (t (mapcar #'expand-shader-source-form form))))
+
+(define-shader-abstraction shadow-visibility
+    (depth-texture sampler coordinate receiver-depth bias)
+  "Hard shadow visibility from one depth-map sample and a receiver depth."
+  `(step (- ,receiver-depth ,bias)
+         (swizzle (sample ,depth-texture ,sampler ,coordinate) :x)))
+
 (defgeneric parse-shader-operator-call (operator form environment)
   (:documentation
    "Parse one (OPERATOR . ARGUMENTS) form into a typed SHADER-CALL.
@@ -787,6 +855,7 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
 
 (defun parse-shader-specification (name options body)
   (let* ((stage (getf options :stage))
+         (expanded-body (mapcar #'expand-shader-source-form body))
          (inputs (mapcar (lambda (form)
                            (parse-interface-declaration form :input))
                          (getf options :inputs)))
@@ -808,7 +877,7 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
       (error 'shader-language-error
              :form options :reason :invalid-stage :details stage))
     (multiple-value-bind (bindings statements)
-        (parse-shader-body body environment outputs)
+        (parse-shader-body expanded-body environment outputs)
       (make-instance 'shader-specification
                      :name name :stage stage
                      :inputs inputs :outputs outputs :resources resources

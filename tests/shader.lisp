@@ -296,6 +296,88 @@
     (ok (find "EXT-INST" names :test #'string=))
     (ok (> (length (spv:assemble-shader-specification specification)) 5))))
 
+(deftest shadow-visibility-is-a-source-abstraction-over-core-math
+  (ok (spv:shader-abstraction-p 'spv:shadow-visibility))
+  (ok (not (spv:shader-operator-p 'spv:shadow-visibility)))
+  (let* ((specification
+           (spv:parse-shader-specification
+            'shadow-visibility-probe
+            '(:stage :fragment
+              :inputs ((uv :vec2 :location 0)
+                       (receiver-depth :float :location 1)
+                       (bias :float :location 2))
+              :outputs ((visibility :float :location 0))
+              :resources ((shadow-map :depth-texture-2d :binding 0)
+                          (shadow-sampler :sampler :binding 1)))
+            '((let* ((visible (spv:shadow-visibility
+                               shadow-map shadow-sampler uv
+                               receiver-depth bias)))
+                (set-output visibility visible)))))
+         (visible (binding-named 'visible specification))
+         (expression (spv:shader-binding-expression visible))
+         (module (spv:shader-lowering-module
+                  (spv:compile-shader-specification specification)))
+         (instructions (spv:lower-spir-v module))
+         (names (mapcar (lambda (instruction)
+                          (symbol-name (spv:instruction-name instruction)))
+                        instructions)))
+    (ok (typep expression 'spv:shader-call))
+    (ok (eq (spv:shader-call-operator expression) 'spv:step))
+    (ok (equal
+         (form-names (spv:shader-expression-form expression))
+         '("step" ("-" "receiver-depth" "bias")
+           ("swizzle" ("sample" "shadow-map" "shadow-sampler" "uv") "x"))))
+    (ok (find "IMAGE-SAMPLE-IMPLICIT-LOD" names :test #'string=))
+    (ok (find "EXT-INST" names :test #'string=))
+    (ok (> (length (spv:assemble-shader-specification specification)) 5))))
+
+(deftest shader-abstraction-redefinition-affects-fresh-parses
+  (labels ((install-subtraction ()
+             (eval
+              '(spv:define-shader-abstraction test-shadow-rewrite
+                   (receiver depth bias)
+                 `(spv:step (- ,receiver ,bias) ,depth))))
+           (install-addition ()
+             (eval
+              '(spv:define-shader-abstraction test-shadow-rewrite
+                   (receiver depth bias)
+                 `(spv:step (+ ,receiver ,bias) ,depth))))
+           (install-bad-expansion ()
+             (eval
+              '(spv:define-shader-abstraction test-shadow-rewrite
+                   (receiver depth bias)
+                 `(spv:step ,receiver ,depth ,bias))))
+           (parse-probe ()
+             (spv:parse-shader-specification
+              'shadow-rewrite-probe
+              '(:stage :fragment
+                :inputs ((receiver :float :location 0)
+                         (depth :float :location 1)
+                         (bias :float :location 2))
+                :outputs ((visibility :float :location 0)))
+              '((let* ((visible (test-shadow-rewrite receiver depth bias)))
+                  (set-output visibility visible)))))
+           (visible-form (specification)
+             (spv:shader-expression-form
+              (spv:shader-binding-expression
+               (binding-named 'visible specification)))))
+    (unwind-protect
+         (progn
+           (install-subtraction)
+           (let* ((subtracted (parse-probe))
+                  (subtracted-form (visible-form subtracted)))
+             (install-addition)
+             (let ((added (parse-probe)))
+               (ok (equal (form-names subtracted-form)
+                          '("step" ("-" "receiver" "bias") "depth")))
+               (ok (equal (form-names (visible-form added))
+                          '("step" ("+" "receiver" "bias") "depth")))
+               (install-bad-expansion)
+               (ok (signals (parse-probe) 'spv:shader-language-error))
+               (ok (equal (form-names subtracted-form)
+                          '("step" ("-" "receiver" "bias") "depth"))))))
+      (install-subtraction))))
+
 (deftest shader-lowering-is-deterministic-and-assemblable
   (flet ((forms ()
            (mapcar #'spv:instruction-form

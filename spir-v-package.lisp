@@ -122,6 +122,12 @@
            #:shader-operator
            #:define-shader-operator
            #:shader-operator-p
+           #:shader-abstraction
+           #:define-shader-abstraction
+           #:shader-abstraction-p
+           #:expand-shader-abstraction-call
+           #:expand-shader-source-form
+           #:shadow-visibility
            #:parse-shader-operator-call
            #:infer-shader-call-type
            #:lower-shader-call

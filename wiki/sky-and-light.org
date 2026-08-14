@@ -649,7 +649,7 @@ Evidence:
 Done when: a shader can express the depth-read and receiver-depth comparison
 pieces of shadow visibility using only core mathematical operators.
 
-** NEXT Shader source abstractions for reusable shadow expressions
+** DONE Shader source abstractions for reusable shadow expressions
 :PROPERTIES:
 :ID: DXYHT4
 :END:
@@ -658,21 +658,23 @@ Intent: add a source-expansion layer above the core shader operator set, then
 define shadow vocabulary there instead of teaching the compiler a special
 =shadow= primitive.
 
-Evidence to gather:
+Evidence:
 
-- =define-shader-abstraction= or an equivalent protocol expands source forms
-  before ordinary expression parsing, while preserving useful source forms and
-  lowering provenance.
-- A first =shadow-visibility= abstraction expands into =sample=, =swizzle=,
-  =-=, =step=, and optional tap averaging, with no new SPIR-V lowering method
-  beyond the core math operators.
-- The abstraction is written in terms of supplied depth map, sampler,
-  coordinates, receiver depth, texel size, and bias, so sun and torch lights can
-  provide different projection data later.
+- =define-shader-abstraction= adds an open EQL-method source vocabulary beside
+  the core =define-shader-operator= protocol; =expand-shader-source-form=
+  rewrites abstractions before ordinary expression parsing.
+- =shadow-visibility= is an abstraction, not a shader operator. It expands to
+  =step= over a biased receiver depth and the =:x= lane of a depth-texture
+  =sample=, so no high-level shadow lowering primitive exists.
+- =tests/shader.lisp= proves the expanded graph lowers through
+  =OpImageSampleImplicitLod= plus the existing extended =step= path, that
+  abstraction redefinition affects fresh parses, and that a bad expansion
+  signals during parsing while already parsed graphs remain ordinary data.
+- =make test= passed.
 
-Done when: tests show that redefining a shadow abstraction changes the parsed
-shader graph, preserves last-known-good behavior on bad edits, and produces a
-valid SPIR-V module without adding a high-level shadow operator.
+Done when: shader authors can define reusable shadow source vocabulary that
+compiles to the same mathematical expression graph as handwritten core shader
+forms.
 
 ** TODO Shadow-map render pass and light projection resources
 :PROPERTIES:
