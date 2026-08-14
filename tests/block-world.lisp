@@ -138,14 +138,14 @@
 
 (deftest crosshair-and-numbered-materials-are-playable-state
   (let* ((vertices (luv::make-block-world-crosshair-vertices 960 640))
-         (demo (make-instance 'cube-world-demo
+         (session (make-instance 'luvcraft-session
                               :selected-block luv::*stone-block*)))
     (ok (= (length vertices)
            (* luv::+block-world-crosshair-vertex-count+ 6)))
-    (ok (eq (select-cube-world-block demo 1) luv::*grass-block*))
-    (ok (eq (cube-world-demo-selected-block demo) luv::*grass-block*))
-    (ok (eq (select-cube-world-block demo 7) luv::*snow-block*))
-    (ok (null (select-cube-world-block demo 8)))))
+    (ok (eq (select-luvcraft-block session 1) luv::*grass-block*))
+    (ok (eq (luvcraft-session-selected-block session) luv::*grass-block*))
+    (ok (eq (select-luvcraft-block session 7) luv::*snow-block*))
+    (ok (null (select-luvcraft-block session 8)))))
 
 (deftest scalar-player-walks-collides-and-jumps
   (let* ((world (make-block-world :chunk-width 4
@@ -330,24 +330,24 @@
          (second (ensure-world-chunk world 3 0 -4))
          (system (luv::make-single-worker-production-system
                   :name "luv static residency test"))
-         (demo (make-instance 'cube-world-demo
+         (session (make-instance 'luvcraft-session
                               :world world
                               :player (make-instance 'block-world-player
                                                      :x 0d0 :y 0d0 :z 0d0)
                               :production-system system)))
     (unwind-protect
          (progn
-           (luv::maintain-cube-world-residency demo)
+           (luv::maintain-luvcraft-residency session)
            (ok (gethash (luv::block-chunk-key first)
-                        (cube-world-demo-desired-chunks demo)))
+                        (luvcraft-session-desired-chunks session)))
            (ok (gethash (luv::block-chunk-key second)
-                        (cube-world-demo-desired-chunks demo)))
+                        (luvcraft-session-desired-chunks session)))
            (remove-world-chunk world -1 0 2)
-           (luv::maintain-cube-world-residency demo)
+           (luv::maintain-luvcraft-residency session)
            (ok (not (gethash (luv::block-chunk-key first)
-                             (cube-world-demo-desired-chunks demo))))
+                             (luvcraft-session-desired-chunks session))))
            (ok (gethash (luv::block-chunk-key second)
-                        (cube-world-demo-desired-chunks demo))))
+                        (luvcraft-session-desired-chunks session))))
       (luv::stop-production-system system))))
 
 (deftest chunk-mesh-products-have-narrow-neighbor-dependencies
@@ -381,7 +381,7 @@
          (camera (make-instance 'fly-camera
                                 :x 0.5 :y 1.5 :z 1.5
                                 :yaw (/ pi 2) :pitch 0.0))
-         (demo (make-instance 'cube-world-demo
+         (session (make-instance 'luvcraft-session
                               :world world
                               :camera camera
                               :selected-block luv::*dirt-block*)))
@@ -391,23 +391,23 @@
     (setf (describe-block-allocatingly world 2 1 1) luv::*stone-block*
           (describe-block-allocatingly world 3 1 1) luv::*stone-block*)
     (multiple-value-bind (coordinate status)
-        (edit-cube-world-block demo :remove)
+        (edit-luvcraft-block session :remove)
       (ok (eq status :edited))
       (ok (= (world-coordinate-x coordinate) 2))
       (ok (null (describe-block-allocatingly world 2 1 1))))
-    (let ((occupied-demo
-            (make-instance 'cube-world-demo
+    (let ((occupied-session
+            (make-instance 'luvcraft-session
                            :world world :camera camera
                            :player (make-instance 'block-world-player
                                                   :x 2.5d0 :y 1d0 :z 1.5d0)
                            :selected-block luv::*dirt-block*)))
       (multiple-value-bind (coordinate status)
-          (edit-cube-world-block occupied-demo :place)
+          (edit-luvcraft-block occupied-session :place)
         (ok (null coordinate))
         (ok (eq status :blocked))
         (ok (null (describe-block-allocatingly world 2 1 1)))))
     (multiple-value-bind (coordinate status)
-        (edit-cube-world-block demo :place)
+        (edit-luvcraft-block session :place)
       (ok (eq status :edited))
       (ok (= (world-coordinate-x coordinate) 2))
       (ok (eq (describe-block-allocatingly world 2 1 1) luv::*dirt-block*)))))

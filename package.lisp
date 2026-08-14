@@ -548,36 +548,36 @@ nothing else does."))
            #:make-player-for-camera
            #:sync-camera-to-player
            #:step-block-world-player
-           #:cube-world-demo
-           #:cube-world-demo-canvas
-           #:cube-world-demo-world
-           #:cube-world-demo-production-system
-           #:cube-world-demo-desired-chunks
-           #:cube-world-demo-outstanding-production
-           #:cube-world-demo-production-errors
-           #:cube-world-demo-mesh
-           #:cube-world-demo-chunk-products
-           #:cube-world-chunk-product
-           #:cube-world-chunk-product-coordinate
-           #:cube-world-chunk-product-dependency-stamp
-           #:cube-world-chunk-product-mesh
-           #:cube-world-demo-camera
-           #:cube-world-demo-player
-           #:cube-world-demo-residency-radius
-           #:cube-world-demo-residency-center
-           #:maintain-cube-world-residency
-           #:cube-world-demo-selected-block
-           #:select-cube-world-block
-           #:pick-cube-world-block
-           #:cube-world-demo-atlas-texture
-           #:cube-world-demo-atlas-view
-           #:cube-world-demo-atlas-sampler
-           #:cube-world-demo-meshed-world-revision
-           #:cube-world-demo-target
-           #:edit-cube-world-block
-           #:refresh-cube-world-mesh
-           #:wait-for-cube-world-products
-           #:cube-world-demo-running-p
+           #:luvcraft-session
+           #:luvcraft-session-canvas
+           #:luvcraft-session-world
+           #:luvcraft-session-production-system
+           #:luvcraft-session-desired-chunks
+           #:luvcraft-session-outstanding-production
+           #:luvcraft-session-production-errors
+           #:luvcraft-session-mesh
+           #:luvcraft-session-chunk-products
+           #:luvcraft-chunk-product
+           #:luvcraft-chunk-product-coordinate
+           #:luvcraft-chunk-product-dependency-stamp
+           #:luvcraft-chunk-product-mesh
+           #:luvcraft-session-camera
+           #:luvcraft-session-player
+           #:luvcraft-session-residency-radius
+           #:luvcraft-session-residency-center
+           #:maintain-luvcraft-residency
+           #:luvcraft-session-selected-block
+           #:select-luvcraft-block
+           #:pick-luvcraft-block
+           #:luvcraft-session-atlas-texture
+           #:luvcraft-session-atlas-view
+           #:luvcraft-session-atlas-sampler
+           #:luvcraft-session-meshed-world-revision
+           #:luvcraft-session-target
+           #:edit-luvcraft-block
+           #:refresh-luvcraft-mesh
+           #:wait-for-luvcraft-products
+           #:luvcraft-session-running-p
            #:live-shader-pipeline
            #:live-shader-pipeline-role
            #:live-shader-pipeline-stage
@@ -589,14 +589,14 @@ nothing else does."))
            #:live-shader-pipeline-status
            #:live-shader-pipeline-diagnostic
            #:live-shader-pipeline-installed-revision
-           #:cube-world-demo-block-pipeline
-           #:cube-world-demo-crosshair-pipeline
-           #:refresh-cube-world-shaders
-           #:start-cube-world-demo
-           #:stop-cube-world-demo
-           #:capture-cube-world-screenshot
-           #:capture-hidden-cube-world-screenshot
-           #:capture-hidden-cube-world-frames
+           #:luvcraft-session-block-pipeline
+           #:luvcraft-session-crosshair-pipeline
+           #:refresh-luvcraft-shaders
+           #:start-luvcraft
+           #:stop-luvcraft
+           #:capture-luvcraft-screenshot
+           #:capture-hidden-luvcraft-screenshot
+           #:capture-hidden-luvcraft-frames
            #:request-canvas-frame
            #:make-canvas-context
            #:configure-canvas-context

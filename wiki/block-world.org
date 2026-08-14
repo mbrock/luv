@@ -68,15 +68,15 @@ above it (blocks, terrain, meshing, simulation, and the application files):
 The whole slice remains live and inspectable:
 
 #+begin_src lisp
-(defparameter *cube-world* (luv:start-cube-world-demo))
+(defparameter *luvcraft* (luv:start-luvcraft))
 
 (luv:block-mesh-face-count
- (luv:cube-world-demo-mesh *cube-world*))
+ (luv:luvcraft-session-mesh *luvcraft*))
 
-(luv:capture-cube-world-screenshot
- *cube-world* #P"/tmp/luv-block-world.png")
+(luv:capture-luvcraft-screenshot
+ *luvcraft* #P"/tmp/luv-block-world.png")
 
-(luv:stop-cube-world-demo *cube-world*)
+(luv:stop-luvcraft *luvcraft*)
 #+end_src
 
 This implementation is evidence that the renderer and lifecycle are ready for
@@ -141,7 +141,7 @@ frontier defers native teardown if a submitted frame still owns its last use.
 :END:
 
 Generation and meshing are now ordinary asynchronous CPU production, not part
-of rendering's compute budget.  [[file:../examples/production.lisp][=examples/production.lisp=]] owns a deliberately
+of rendering's compute budget.  [[file:../luvcraft/production.lisp][=luvcraft/production.lisp=]] owns a deliberately
 small single-worker system built from SBCL's =SB-CONCURRENCY:MAILBOX=.  A
 blocking request mailbox lets the worker sleep without polling; the render
 owner drains the result mailbox without blocking.  A latest-value table keyed

@@ -12,24 +12,24 @@
 
 (defun run-interactive ()
   "Run luvcraft until its native window closes."
-  (let ((demo nil))
+  (let ((session nil))
     (unwind-protect
          (progn
-           (setf demo
-                 (luv:start-cube-world-demo
+           (setf session
+                 (luv:start-luvcraft
                   :title "luvcraft — walk, jump, mine, and build"))
            ;; A native close request ends SDL's event loop.  Wait for complete
-           ;; native teardown before releasing the demo-owned GPU resources.
+           ;; native teardown before releasing the session-owned GPU resources.
            (loop until (eq :closed
                            (luv:canvas-state
-                            (luv:cube-world-demo-canvas demo)))
+                            (luv:luvcraft-session-canvas session)))
                  do (sleep 0.05)))
-      (when demo
-        (luv:stop-cube-world-demo demo)))))
+      (when session
+        (luv:stop-luvcraft session)))))
 
 (defun run-smoke-test (pathname)
   (format t "Rendering ~A~%" pathname)
-  (luv:capture-hidden-cube-world-screenshot pathname)
+  (luv:capture-hidden-luvcraft-screenshot pathname)
   (format t "Wrote ~A~%" (truename pathname)))
 
 (defun dispatch (arguments)

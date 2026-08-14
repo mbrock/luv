@@ -68,37 +68,37 @@
 (defparameter *chunk-neighbor-directions*
   '((-1 0 0) (1 0 0) (0 -1 0) (0 1 0) (0 0 -1) (0 0 1)))
 
-(defclass cube-world-chunk-product ()
+(defclass luvcraft-chunk-product ()
   ((coordinate :initarg :coordinate
-               :reader cube-world-chunk-product-coordinate)
+               :reader luvcraft-chunk-product-coordinate)
    (dependency-stamp :initarg :dependency-stamp
-                     :reader cube-world-chunk-product-dependency-stamp)
-   (mesh :initarg :mesh :reader cube-world-chunk-product-mesh)
+                     :reader luvcraft-chunk-product-dependency-stamp)
+   (mesh :initarg :mesh :reader luvcraft-chunk-product-mesh)
    (vertex-buffer :initarg :vertex-buffer
-                  :reader cube-world-chunk-product-vertex-buffer)))
+                  :reader luvcraft-chunk-product-vertex-buffer)))
 
-(defun cancel-cube-world-chunk-production (demo key)
+(defun cancel-luvcraft-chunk-production (session key)
   (dolist (kind '(:load :mesh))
     (let ((production-key (list kind key)))
       ;; Active work cannot be canceled, so retain its ticket until its result
       ;; returns and fails desired-set/incarnation validation.
       (when (cancel-production-request
-             (cube-world-demo-production-system demo) production-key)
+             (luvcraft-session-production-system session) production-key)
         (remhash production-key
-                 (cube-world-demo-outstanding-production demo))))))
+                 (luvcraft-session-outstanding-production session))))))
 
-(defun cube-world-player-chunk-center (world player)
+(defun luvcraft-player-chunk-center (world player)
   (if player
       (let ((shape (voxel-space-chunk-shape (block-world-space world))))
         (list (floor (player-x player) (chunk-shape-width shape))
               (floor (player-z player) (chunk-shape-depth shape))))
       '(0 0)))
 
-(defun maintain-generated-cube-world-residency
-    (demo world player radius)
-  (let ((center (cube-world-player-chunk-center world player)))
-    (unless (equal center (cube-world-demo-residency-center demo))
-      (let ((desired (cube-world-demo-desired-chunks demo))
+(defun maintain-generated-luvcraft-residency
+    (session world player radius)
+  (let ((center (luvcraft-player-chunk-center world player)))
+    (unless (equal center (luvcraft-session-residency-center session))
+      (let ((desired (luvcraft-session-desired-chunks session))
             (next-desired (make-hash-table :test #'equal)))
         (loop for chunk-x from (- (first center) radius)
                 to (+ (first center) radius) do
@@ -107,19 +107,19 @@
                 for key = (chunk-key chunk-x 0 chunk-z)
                 do (setf (gethash key next-desired)
                          (or (gethash key desired)
-                             (incf (cube-world-demo-next-residency-demand
-                                    demo))))))
+                             (incf (luvcraft-session-next-residency-demand
+                                    session))))))
         (maphash
          (lambda (old-key token)
            (declare (ignore token))
            (unless (gethash old-key next-desired)
-             (cancel-cube-world-chunk-production demo old-key)))
+             (cancel-luvcraft-chunk-production session old-key)))
          desired)
         (clrhash desired)
         (maphash (lambda (key token)
                    (setf (gethash key desired) token))
                  next-desired)
-        (setf (cube-world-demo-residency-center demo) center)
+        (setf (luvcraft-session-residency-center session) center)
         ;; Eviction is an owner-side publication.  Pending work is either
         ;; canceled before it starts or allowed to finish and fail its
         ;; desired-set/incarnation validation harmlessly.
@@ -128,18 +128,18 @@
             (unless (gethash key desired)
               (destructuring-bind (x y z) key
                 (remove-world-chunk world x y z))
-              (cancel-cube-world-chunk-production demo key))))))))
+              (cancel-luvcraft-chunk-production session key))))))))
 
-(defun maintain-static-cube-world-residency (demo world player)
+(defun maintain-static-luvcraft-residency (session world player)
   "Treat a caller-owned resident set as desired without loading or eviction."
-  (let ((desired (cube-world-demo-desired-chunks demo))
+  (let ((desired (luvcraft-session-desired-chunks session))
         (resident (make-hash-table :test #'equal)))
     (dolist (chunk (resident-world-chunks world))
       (let ((key (block-chunk-key chunk)))
         (setf (gethash key resident) t)
         (unless (gethash key desired)
           (setf (gethash key desired)
-                (incf (cube-world-demo-next-residency-demand demo))))))
+                (incf (luvcraft-session-next-residency-demand session))))))
     (let ((departed nil))
       (maphash (lambda (key token)
                  (declare (ignore token))
@@ -148,23 +148,23 @@
                desired)
       (dolist (key departed)
         (remhash key desired)
-        (cancel-cube-world-chunk-production demo key)))
-    (setf (cube-world-demo-residency-center demo)
-          (cube-world-player-chunk-center world player))))
+        (cancel-luvcraft-chunk-production session key)))
+    (setf (luvcraft-session-residency-center session)
+          (luvcraft-player-chunk-center world player))))
 
-(defun maintain-cube-world-residency (demo)
+(defun maintain-luvcraft-residency (session)
   "Reconcile desired residency without generating chunks on the frame thread."
-  (let* ((world (cube-world-demo-world demo))
+  (let* ((world (luvcraft-session-world session))
          (source (block-world-source world))
-         (player (cube-world-demo-player demo))
-         (radius (cube-world-demo-residency-radius demo)))
+         (player (luvcraft-session-player session))
+         (radius (luvcraft-session-residency-radius session)))
     (if (and player radius (typep source 'little-world-source))
-        (maintain-generated-cube-world-residency
-         demo world player radius)
+        (maintain-generated-luvcraft-residency
+         session world player radius)
         ;; A caller may supply an already resident world whose source has no
         ;; asynchronous generator.  Those chunks still need immutable mesh
-        ;; production; they simply are not loaded or evicted by this demo.
-        (maintain-static-cube-world-residency demo world player))))
+        ;; production; they simply are not loaded or evicted by this session.
+        (maintain-static-luvcraft-residency session world player))))
 
 (defun chunk-mesh-dependency-stamp (world chunk)
   "Describe exactly which resident block data CHUNK's exposed mesh observes."
@@ -189,16 +189,16 @@
                         neighbor (- dx) (- dy) (- dz)))
                  '(nil)))))))
 
-(defun cube-world-demo-products-in-order (demo)
-  (let ((products (cube-world-demo-chunk-products demo)))
+(defun luvcraft-session-products-in-order (session)
+  (let ((products (luvcraft-session-chunk-products session)))
     (loop for product being the hash-values of products
           collect product into result
           finally
              (return
                (sort result
                      (lambda (left right)
-                       (let ((a (cube-world-chunk-product-coordinate left))
-                             (b (cube-world-chunk-product-coordinate right)))
+                       (let ((a (luvcraft-chunk-product-coordinate left))
+                             (b (luvcraft-chunk-product-coordinate right)))
                          (or (< (chunk-coordinate-x a) (chunk-coordinate-x b))
                              (and (= (chunk-coordinate-x a)
                                      (chunk-coordinate-x b))
@@ -209,14 +209,14 @@
                                            (< (chunk-coordinate-z a)
                                               (chunk-coordinate-z b)))))))))))))
 
-(defun cube-world-demo-mesh (demo)
-  "Return a combined, inspectable snapshot of DEMO's chunk meshes."
+(defun luvcraft-session-mesh (session)
+  "Return a combined, inspectable snapshot of SESSION's chunk meshes."
   (let ((vertices (make-array 0 :element-type 'single-float
                                 :adjustable t :fill-pointer 0))
         (vertex-count 0)
         (face-count 0))
-    (dolist (product (cube-world-demo-products-in-order demo))
-      (let ((mesh (cube-world-chunk-product-mesh product)))
+    (dolist (product (luvcraft-session-products-in-order session))
+      (let ((mesh (luvcraft-chunk-product-mesh product)))
         (loop for component across (block-mesh-vertices mesh)
               do (vector-push-extend component vertices))
         (incf vertex-count (block-mesh-vertex-count mesh))
@@ -225,13 +225,13 @@
                                :vertex-count vertex-count
                                :face-count face-count)))
 
-(defun destroy-cube-world-chunk-products (demo)
+(defun destroy-luvcraft-chunk-products (session)
   (maphash
    (lambda (key product)
      (declare (ignore key))
-     (destroy (cube-world-chunk-product-vertex-buffer product)))
-   (cube-world-demo-chunk-products demo))
-  (clrhash (cube-world-demo-chunk-products demo))
+     (destroy (luvcraft-chunk-product-vertex-buffer product)))
+   (luvcraft-session-chunk-products session))
+  (clrhash (luvcraft-session-chunk-products session))
   (values))
 
 (defun chunk-key-distance-squared (key center)
@@ -248,15 +248,15 @@
                    when (/= a b) return (< a b)
                    finally (return nil))))))
 
-(defun schedule-cube-world-chunk-loads (demo)
-  (let* ((world (cube-world-demo-world demo))
+(defun schedule-luvcraft-chunk-loads (session)
+  (let* ((world (luvcraft-session-world session))
          (source (block-world-source world))
          (shape (voxel-space-chunk-shape (block-world-space world)))
          (width (chunk-shape-width shape))
          (height (chunk-shape-height shape))
          (depth (chunk-shape-depth shape))
-         (center (cube-world-demo-residency-center demo))
-         (outstanding (cube-world-demo-outstanding-production demo))
+         (center (luvcraft-session-residency-center session))
+         (outstanding (luvcraft-session-outstanding-production session))
          (candidates nil))
     (maphash
      (lambda (key demand-token)
@@ -264,12 +264,12 @@
          (unless (or (nth-value 1 (apply #'world-chunk-at world key))
                      (gethash production-key outstanding))
            (push (list key demand-token production-key) candidates))))
-     (cube-world-demo-desired-chunks demo))
+     (luvcraft-session-desired-chunks session))
     (setf candidates
           (sort candidates
                 (lambda (left right)
                   (chunk-key-nearer-p (first left) (first right) center))))
-    (loop repeat (cube-world-demo-load-schedule-limit demo)
+    (loop repeat (luvcraft-session-load-schedule-limit session)
           for candidate in candidates
           do (destructuring-bind (key demand-token production-key) candidate
            (let ((captured-edits nil))
@@ -295,31 +295,31 @@
                       :edits captured-edits)))
                (setf (gethash production-key outstanding)
                      (schedule-production-request
-                      (cube-world-demo-production-system demo) request))))))))
+                      (luvcraft-session-production-system session) request))))))))
 
-(defun schedule-cube-world-meshes (demo)
+(defun schedule-luvcraft-meshes (session)
   "Capture at most the configured number of immutable mesh inputs this frame."
-  (let* ((world (cube-world-demo-world demo))
-         (products (cube-world-demo-chunk-products demo))
-         (outstanding (cube-world-demo-outstanding-production demo))
-         (center (cube-world-demo-residency-center demo))
+  (let* ((world (luvcraft-session-world session))
+         (products (luvcraft-session-chunk-products session))
+         (outstanding (luvcraft-session-outstanding-production session))
+         (center (luvcraft-session-residency-center session))
          (candidates nil))
     (dolist (chunk (resident-world-chunks world))
       (let* ((key (block-chunk-key chunk))
              (production-key (list :mesh key))
              (stamp (chunk-mesh-dependency-stamp world chunk))
              (old (gethash key products)))
-        (when (and (gethash key (cube-world-demo-desired-chunks demo))
+        (when (and (gethash key (luvcraft-session-desired-chunks session))
                    (not (gethash production-key outstanding))
                    (not (and old
                              (equal stamp
-                                    (cube-world-chunk-product-dependency-stamp
+                                    (luvcraft-chunk-product-dependency-stamp
                                      old)))))
           (push (list (chunk-key-distance-squared key center)
                       chunk key production-key stamp)
                 candidates))))
     (setf candidates (sort candidates #'< :key #'first))
-    (loop repeat (cube-world-demo-mesh-capture-limit demo)
+    (loop repeat (luvcraft-session-mesh-capture-limit session)
           for candidate in candidates
           do (destructuring-bind (priority chunk key production-key stamp)
                  candidate
@@ -332,37 +332,37 @@
                          :key production-key :priority priority
                          :absent-neighbor-policy
                          (exposed-face-mesher-absent-neighbor-policy
-                          (cube-world-demo-mesher demo))
+                          (luvcraft-session-mesher session))
                          :snapshot snapshot)))
                  (setf (gethash production-key outstanding)
                        (schedule-production-request
-                        (cube-world-demo-production-system demo) request)))))))
+                        (luvcraft-session-production-system session) request)))))))
 
-(defun publish-cube-world-mesh (demo request mesh)
+(defun publish-luvcraft-mesh (session request mesh)
   "Validate and install one worker result on the render/GPU owning thread."
   (let* ((snapshot (block-mesh-production-request-snapshot request))
          (key (block-mesh-snapshot-key snapshot))
-         (world (cube-world-demo-world demo))
+         (world (luvcraft-session-world session))
          (chunk (apply #'world-chunk-at world key)))
     (when (and chunk
-               (gethash key (cube-world-demo-desired-chunks demo))
+               (gethash key (luvcraft-session-desired-chunks session))
                (equal (block-mesh-snapshot-dependency-stamp snapshot)
                       (chunk-mesh-dependency-stamp world chunk)))
       (let ((buffer nil) (completed-p nil)
-            (old (gethash key (cube-world-demo-chunk-products demo))))
+            (old (gethash key (luvcraft-session-chunk-products session))))
         (unwind-protect
              (progn
                (setf buffer
                      (create
-                      (cube-world-demo-device demo)
+                      (luvcraft-session-device session)
                       (make-buffer-descriptor
                        :label (format nil "block chunk ~{~D~^,~} async mesh" key)
                        :size (max 4 (* 4 (length (block-mesh-vertices mesh))))
                        :usage '(:vertex))))
                (write-buffer buffer (block-mesh-vertices mesh))
-               (setf (gethash key (cube-world-demo-chunk-products demo))
+               (setf (gethash key (luvcraft-session-chunk-products session))
                      (make-instance
-                      'cube-world-chunk-product
+                      'luvcraft-chunk-product
                       :coordinate
                       (chunk-domain-coordinate (block-chunk-domain chunk))
                       :dependency-stamp
@@ -370,14 +370,14 @@
                       :mesh mesh :vertex-buffer buffer)
                      completed-p t)
                (when old
-                 (destroy (cube-world-chunk-product-vertex-buffer old))))
+                 (destroy (luvcraft-chunk-product-vertex-buffer old))))
           (unless completed-p
             (when buffer (destroy buffer))))))))
 
-(defun publish-cube-world-load (demo request payload)
+(defun publish-luvcraft-load (session request payload)
   (let* ((key (block-chunk-load-payload-key payload))
-         (world (cube-world-demo-world demo)))
-    (when (and (eql (gethash key (cube-world-demo-desired-chunks demo))
+         (world (luvcraft-session-world session)))
+    (when (and (eql (gethash key (luvcraft-session-desired-chunks session))
                     (block-chunk-load-request-demand-token request))
                (not (nth-value 1 (apply #'world-chunk-at world key))))
       (destructuring-bind (x y z) key
@@ -386,46 +386,46 @@
          (block-chunk-load-payload-palette payload)
          (block-chunk-load-payload-indices payload))))))
 
-(defun drain-cube-world-production (demo)
+(defun drain-luvcraft-production (session)
   "Publish a bounded number of completed CPU products this frame."
-  (loop repeat (cube-world-demo-publication-limit demo)
+  (loop repeat (luvcraft-session-publication-limit session)
         do (multiple-value-bind (result present-p)
                (receive-production-result-no-hang
-                (cube-world-demo-production-system demo))
+                (luvcraft-session-production-system session))
              (unless present-p (return))
              (let* ((request (production-result-request result))
                     (key (production-request-key request))
                     (ticket (gethash key
-                                     (cube-world-demo-outstanding-production
-                                      demo))))
+                                     (luvcraft-session-outstanding-production
+                                      session))))
                (when (eql ticket (production-request-ticket request))
-                 (remhash key (cube-world-demo-outstanding-production demo))
+                 (remhash key (luvcraft-session-outstanding-production session))
                  (cond
                    ((production-result-condition result)
-                    (push result (cube-world-demo-production-errors demo)))
+                    (push result (luvcraft-session-production-errors session)))
                    ((typep request 'block-chunk-load-request)
-                    (publish-cube-world-load
-                     demo request (production-result-value result)))
+                    (publish-luvcraft-load
+                     session request (production-result-value result)))
                    ((typep request 'block-mesh-production-request)
-                    (publish-cube-world-mesh
-                     demo request (production-result-value result)))))))))
+                    (publish-luvcraft-mesh
+                     session request (production-result-value result)))))))))
 
-(defun evict-cube-world-products (demo)
+(defun evict-luvcraft-products (session)
   (let ((evicted nil)
-        (desired (cube-world-demo-desired-chunks demo))
-        (products (cube-world-demo-chunk-products demo)))
+        (desired (luvcraft-session-desired-chunks session))
+        (products (luvcraft-session-chunk-products session)))
     (maphash (lambda (key product)
                (unless (gethash key desired)
-                 (destroy (cube-world-chunk-product-vertex-buffer product))
+                 (destroy (luvcraft-chunk-product-vertex-buffer product))
                  (push key evicted)))
              products)
     (dolist (key evicted) (remhash key products))))
 
-(defun refresh-cube-world-mesh (demo)
+(defun refresh-luvcraft-mesh (session)
   "Advance asynchronous loading/meshing without doing either computation here."
-  (drain-cube-world-production demo)
-  (schedule-cube-world-chunk-loads demo)
-  (schedule-cube-world-meshes demo)
-  (setf (cube-world-demo-meshed-world-revision demo)
-        (block-world-revision (cube-world-demo-world demo)))
-  (cube-world-demo-products-in-order demo))
+  (drain-luvcraft-production session)
+  (schedule-luvcraft-chunk-loads session)
+  (schedule-luvcraft-meshes session)
+  (setf (luvcraft-session-meshed-world-revision session)
+        (block-world-revision (luvcraft-session-world session)))
+  (luvcraft-session-products-in-order session))

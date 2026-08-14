@@ -17,7 +17,7 @@
           (yaw-step (or (getf options :yaw-step) 0.35)))
       (if count
           (dolist (pathname
-                    (luv:capture-hidden-cube-world-frames
+                    (luv:capture-hidden-luvcraft-frames
                      target
                      :count count
                      :width width
@@ -25,7 +25,7 @@
                      :yaw-step yaw-step))
             (format t "~A~%" pathname))
           (format t "~A~%"
-                  (luv:capture-hidden-cube-world-screenshot
+                  (luv:capture-hidden-luvcraft-screenshot
                    target
                    :width width
                    :height height))))))

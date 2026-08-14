@@ -116,9 +116,9 @@ of durable image.
 (defparameter *compute* (luv:start-compute-gradient-demo))
 (luv:stop-compute-gradient-demo *compute*)
 
-(defparameter *world* (luv:start-cube-world-demo))
-(luv:capture-cube-world-screenshot *world* #P"/tmp/luv-block-world.png")
-(luv:stop-cube-world-demo *world*)
+(defparameter *world* (luv:start-luvcraft))
+(luv:capture-luvcraft-screenshot *world* #P"/tmp/luv-block-world.png")
+(luv:stop-luvcraft *world*)
 
 (asdf:load-system :luv/mcclim/shader-lab)
 (defparameter *shader-lab* (luv.mcclim:open-shader-lab))

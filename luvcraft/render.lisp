@@ -8,10 +8,10 @@
 
 (in-package #:luv)
 
-(defclass cube-world-frame-state ()
+(defclass luvcraft-frame-state ()
   ((uniform-buffer :initarg :uniform-buffer
-                   :reader cube-world-frame-uniform-buffer)
-   (bind-group :initarg :bind-group :reader cube-world-frame-bind-group)))
+                   :reader luvcraft-frame-uniform-buffer)
+   (bind-group :initarg :bind-group :reader luvcraft-frame-bind-group)))
 
 (defconstant +block-world-crosshair-vertex-count+ 24)
 
@@ -40,41 +40,41 @@
       (rectangle -8.0 -0.75 8.0 0.75 '(0.96 0.98 1.0)))
     vertices))
 
-(defun remember-cube-world-resource (demo resource)
-  (push resource (cube-world-demo-resources demo))
+(defun remember-luvcraft-resource (session resource)
+  (push resource (luvcraft-session-resources session))
   resource)
 
-(defun cube-world-frame-state (demo surface-texture)
-  (or (gethash surface-texture (cube-world-demo-frame-states demo))
+(defun luvcraft-frame-state (session surface-texture)
+  (or (gethash surface-texture (luvcraft-session-frame-states session))
       (let ((buffer nil) (bind-group nil) (completed-p nil))
         (unwind-protect
              (progn
                (setf buffer
                      (create
-                      (cube-world-demo-device demo)
+                      (luvcraft-session-device session)
                       (make-buffer-descriptor
                        :label "block world camera uniform"
                        :size 96 :usage '(:uniform)))
                      bind-group
                      (create
-                      (cube-world-demo-device demo)
+                      (luvcraft-session-device session)
                       (make-bind-group-descriptor
                        :label "block world frame bindings"
-                       :layout (cube-world-demo-layout demo)
+                       :layout (luvcraft-session-layout session)
                        :entries
                        `((:binding 0
-                          :resource ,(cube-world-demo-atlas-view demo))
+                          :resource ,(luvcraft-session-atlas-view session))
                          (:binding 1
-                          :resource ,(cube-world-demo-atlas-sampler demo))
+                          :resource ,(luvcraft-session-atlas-sampler session))
                          (:binding 2 :resource ,buffer)))))
-               (remember-cube-world-resource demo buffer)
-               (remember-cube-world-resource demo bind-group)
+               (remember-luvcraft-resource session buffer)
+               (remember-luvcraft-resource session bind-group)
                (let ((state
                        (make-instance
-                        'cube-world-frame-state
+                        'luvcraft-frame-state
                         :uniform-buffer buffer :bind-group bind-group)))
                  (setf (gethash surface-texture
-                                (cube-world-demo-frame-states demo))
+                                (luvcraft-session-frame-states session))
                        state
                        completed-p t)
                  state))
@@ -82,128 +82,128 @@
             (when bind-group (destroy bind-group))
             (when buffer (destroy buffer)))))))
 
-(defun encode-cube-world-frame
-    (demo surface-texture encoder &key readback-buffer)
+(defun encode-luvcraft-frame
+    (session surface-texture encoder &key readback-buffer)
   ;; The canvas callback is the ownership boundary for all GPU replacement.
   ;; MOP notifications from SLY workers have only marked these artifacts dirty.
-  (refresh-cube-world-shaders demo)
-  (let* ((products (refresh-cube-world-mesh demo))
-         (extent (canvas-extent (cube-world-demo-context demo)))
-         (frame (cube-world-frame-state demo surface-texture)))
+  (refresh-luvcraft-shaders session)
+  (let* ((products (refresh-luvcraft-mesh session))
+         (extent (canvas-extent (luvcraft-session-context session)))
+         (frame (luvcraft-frame-state session surface-texture)))
     (write-buffer
-     (cube-world-frame-uniform-buffer frame)
+     (luvcraft-frame-uniform-buffer frame)
      (camera-uniform-data
-      (cube-world-demo-camera demo) (first extent) (second extent)))
+      (luvcraft-session-camera session) (first extent) (second extent)))
     (let ((pass
             (begin-render-pass
              encoder
              (make-render-pass-descriptor
               :color-attachments
-              `((:view ,(cube-world-demo-color-view demo)
+              `((:view ,(luvcraft-session-color-view session)
                  :load-op :clear :store-op :store
                  :clear-value #(0.43 0.68 0.92 1.0)))
               :depth-stencil-attachment
-              `(:view ,(cube-world-demo-depth-view demo)
+              `(:view ,(luvcraft-session-depth-view session)
                 :depth-load-op :clear :depth-store-op :discard
                 :depth-clear-value 1.0)))))
-      (set-pipeline pass (cube-world-demo-pipeline demo))
-      (set-bind-group pass 0 (cube-world-frame-bind-group frame))
+      (set-pipeline pass (luvcraft-session-pipeline session))
+      (set-bind-group pass 0 (luvcraft-frame-bind-group frame))
       (dolist (product products)
-        (let ((mesh (cube-world-chunk-product-mesh product)))
+        (let ((mesh (luvcraft-chunk-product-mesh product)))
           (when (plusp (block-mesh-vertex-count mesh))
             (set-vertex-buffer
-             pass 0 (cube-world-chunk-product-vertex-buffer product))
+             pass 0 (luvcraft-chunk-product-vertex-buffer product))
             (draw pass (block-mesh-vertex-count mesh)))))
-      (set-pipeline pass (cube-world-demo-crosshair-native-pipeline demo))
+      (set-pipeline pass (luvcraft-session-crosshair-native-pipeline session))
       (set-vertex-buffer
-       pass 0 (cube-world-demo-crosshair-vertex-buffer demo))
+       pass 0 (luvcraft-session-crosshair-vertex-buffer session))
       (draw pass +block-world-crosshair-vertex-count+)
       (end-pass pass))
     (when readback-buffer
       (encode
        encoder
        (make-gpu-copy-texture-to-buffer-command
-        :source (cube-world-demo-color-texture demo)
+        :source (luvcraft-session-color-texture session)
         :destination readback-buffer)))
     (encode
      encoder
      (make-gpu-copy-texture-command
-      :source (cube-world-demo-color-texture demo)
+      :source (luvcraft-session-color-texture session)
       :destination surface-texture))))
 
-(defun render-cube-world-frame (demo timestamp)
-  (when (cube-world-demo-running-p demo)
-    (let* ((last (cube-world-demo-last-frame-time demo))
+(defun render-luvcraft-frame (session timestamp)
+  (when (luvcraft-session-running-p session)
+    (let* ((last (luvcraft-session-last-frame-time session))
            (seconds (if last (min 0.1 (max 0.0 (- timestamp last))) 0.0)))
-      (setf (cube-world-demo-last-frame-time demo) timestamp)
-      (let ((player (cube-world-demo-player demo)))
+      (setf (luvcraft-session-last-frame-time session) timestamp)
+      (let ((player (luvcraft-session-player session)))
         (when player
-          (incf (cube-world-demo-physics-accumulator demo) seconds)
-          (loop while (>= (cube-world-demo-physics-accumulator demo)
+          (incf (luvcraft-session-physics-accumulator session) seconds)
+          (loop while (>= (luvcraft-session-physics-accumulator session)
                           +player-physics-step+)
                 do (step-block-world-player
-                    player (cube-world-demo-world demo)
-                    (cube-world-demo-camera demo)
-                    (cube-world-demo-pressed-keys demo)
+                    player (luvcraft-session-world session)
+                    (luvcraft-session-camera session)
+                    (luvcraft-session-pressed-keys session)
                     +player-physics-step+
-                    :jump-p (cube-world-demo-jump-requested-p demo))
-                   (setf (cube-world-demo-jump-requested-p demo) nil)
-                   (decf (cube-world-demo-physics-accumulator demo)
+                    :jump-p (luvcraft-session-jump-requested-p session))
+                   (setf (luvcraft-session-jump-requested-p session) nil)
+                   (decf (luvcraft-session-physics-accumulator session)
                          +player-physics-step+)))
-      (maintain-cube-world-residency demo)
-      (evict-cube-world-products demo)
+      (maintain-luvcraft-residency session)
+      (evict-luvcraft-products session)
       (present-canvas-frame
-       (cube-world-demo-context demo)
+       (luvcraft-session-context session)
        (lambda (surface-texture encoder)
-         (encode-cube-world-frame demo surface-texture encoder)))))))
+         (encode-luvcraft-frame session surface-texture encoder)))))))
 
 (defmethod handle-canvas-event
-    ((demo cube-world-demo) canvas (event canvas-key-press-event))
+    ((session luvcraft-session) canvas (event canvas-key-press-event))
   (let ((key (canvas-key-event-key-name event)))
     (if (eq key :escape)
-        (when (cube-world-demo-pointer-captured-p demo)
+        (when (luvcraft-session-pointer-captured-p session)
           (set-canvas-relative-pointer-mode canvas nil)
-          (setf (cube-world-demo-pointer-captured-p demo) nil))
+          (setf (luvcraft-session-pointer-captured-p session) nil))
         (progn
-          (setf (gethash key (cube-world-demo-pressed-keys demo)) t)
+          (setf (gethash key (luvcraft-session-pressed-keys session)) t)
           (when (and (eq key :space)
                      (not (canvas-key-event-repeat-p event)))
-            (setf (cube-world-demo-jump-requested-p demo) t))
+            (setf (luvcraft-session-jump-requested-p session) t))
           (unless (canvas-key-event-repeat-p event)
             (let* ((character (canvas-key-event-character event))
                    (number (and character (digit-char-p character))))
               (when (and number (<= 1 number 7))
-                (select-cube-world-block demo number)))))))
+                (select-luvcraft-block session number)))))))
   nil)
 
 (defmethod handle-canvas-event
-    ((demo cube-world-demo) canvas (event canvas-key-release-event))
+    ((session luvcraft-session) canvas (event canvas-key-release-event))
   (declare (ignore canvas))
   (remhash (canvas-key-event-key-name event)
-           (cube-world-demo-pressed-keys demo))
+           (luvcraft-session-pressed-keys session))
   nil)
 
 (defmethod handle-canvas-event
-    ((demo cube-world-demo) canvas (event canvas-pointer-button-press-event))
+    ((session luvcraft-session) canvas (event canvas-pointer-button-press-event))
   (let ((button (canvas-pointer-event-button event)))
     (cond
-      ((not (cube-world-demo-pointer-captured-p demo))
+      ((not (luvcraft-session-pointer-captured-p session))
        (when (eq button :left)
          (set-canvas-relative-pointer-mode canvas t)
-         (setf (cube-world-demo-pointer-captured-p demo) t)))
+         (setf (luvcraft-session-pointer-captured-p session) t)))
       ((eq button :left)
-       (edit-cube-world-block demo :remove))
+       (edit-luvcraft-block session :remove))
       ((eq button :right)
-       (edit-cube-world-block demo :place))
+       (edit-luvcraft-block session :place))
       ((eq button :middle)
-       (pick-cube-world-block demo))))
+       (pick-luvcraft-block session))))
   nil)
 
 (defmethod handle-canvas-event
-    ((demo cube-world-demo) canvas (event canvas-pointer-motion-event))
+    ((session luvcraft-session) canvas (event canvas-pointer-motion-event))
   (declare (ignore canvas))
-  (when (cube-world-demo-pointer-captured-p demo)
-    (let ((camera (cube-world-demo-camera demo)))
+  (when (luvcraft-session-pointer-captured-p session)
+    (let ((camera (luvcraft-session-camera session)))
       (incf (camera-yaw camera)
             (* (canvas-pointer-event-delta-x event)
                (camera-sensitivity camera)))
@@ -216,27 +216,27 @@
   nil)
 
 (defmethod handle-canvas-event
-    ((demo cube-world-demo) canvas (event canvas-window-focus-lost-event))
+    ((session luvcraft-session) canvas (event canvas-window-focus-lost-event))
   (declare (ignore event))
-  (clrhash (cube-world-demo-pressed-keys demo))
-  (setf (cube-world-demo-jump-requested-p demo) nil)
-  (when (cube-world-demo-pointer-captured-p demo)
+  (clrhash (luvcraft-session-pressed-keys session))
+  (setf (luvcraft-session-jump-requested-p session) nil)
+  (when (luvcraft-session-pointer-captured-p session)
     (set-canvas-relative-pointer-mode canvas nil)
-    (setf (cube-world-demo-pointer-captured-p demo) nil))
+    (setf (luvcraft-session-pointer-captured-p session) nil))
   nil)
 
 (defmethod handle-canvas-event
-    ((demo cube-world-demo) canvas (event canvas-window-close-request-event))
+    ((session luvcraft-session) canvas (event canvas-window-close-request-event))
   (declare (ignore canvas event))
-  (setf (cube-world-demo-running-p demo) nil)
+  (setf (luvcraft-session-running-p session) nil)
   nil)
 
 (defmethod handle-canvas-event
-    ((demo cube-world-demo) canvas (event canvas-event))
-  (declare (ignore demo canvas event))
+    ((session luvcraft-session) canvas (event canvas-event))
+  (declare (ignore session canvas event))
   nil)
 
-(defun start-cube-world-demo (&key
+(defun start-luvcraft (&key
                                 (title "luv little block world — click, look, walk")
                                 (width 960) (height 640)
                                 (frames-per-second 60)
@@ -264,7 +264,7 @@ capture-only demand clock."
   (let ((canvas (make-sdl-canvas :title title :width width :height height
                                  :visible-p visible-p))
         (player (or player (make-player-for-camera camera)))
-        (device nil) (context nil) (resources nil) (pipelines nil) (demo nil)
+        (device nil) (context nil) (resources nil) (pipelines nil) (session nil)
         (production-system nil)
         (completed-p nil))
     (open-canvas canvas)
@@ -406,9 +406,9 @@ capture-only demand clock."
                                :depth-compare :always))))
                       (push artifact pipelines)
                       artifact))
-                  (new-demo
+                  (new-session
                     (make-instance
-                     'cube-world-demo
+                     'luvcraft-session
                      :canvas canvas :device device :context context
                      :world world :mesher mesher
                      :production-system production-system
@@ -436,29 +436,29 @@ capture-only demand clock."
                :bytes-per-row (* atlas-width 4)
                :rows-per-image atlas-height)
               (list atlas-width atlas-height))
-             (setf demo new-demo)
-             (update-cube-world-demo-title demo)
-             (maintain-cube-world-residency demo)
+             (setf session new-session)
+             (update-luvcraft-session-title session)
+             (maintain-luvcraft-residency session)
              ;; Startup does not synchronously generate or mesh the whole
              ;; residency window.  The first frame may briefly show sky while
              ;; the nearest immutable products arrive.
-             (refresh-cube-world-mesh demo)
-             (setf (canvas-event-handler canvas) demo
+             (refresh-luvcraft-mesh session)
+             (setf (canvas-event-handler canvas) session
                    (canvas-clock canvas)
                    (if frames-per-second
                        (make-cadence-clock
                         (lambda (native-canvas timestamp)
                           (declare (ignore native-canvas))
-                          (render-cube-world-frame demo timestamp))
+                          (render-luvcraft-frame session timestamp))
                         :frames-per-second frames-per-second)
                        (make-demand-clock))
                    completed-p t)
-               demo)))
+               session)))
       (unless completed-p
         (when production-system
           (ignore-errors (stop-production-system production-system)))
-        (when demo
-          (ignore-errors (destroy-cube-world-chunk-products demo)))
+        (when session
+          (ignore-errors (destroy-luvcraft-chunk-products session)))
         (dolist (pipeline pipelines)
           (ignore-errors (release-live-shader-pipeline pipeline)))
         (dolist (resource resources)
@@ -466,30 +466,30 @@ capture-only demand clock."
         (close-canvas canvas)
         (when device (destroy device))))))
 
-(defun stop-cube-world-demo (demo)
-  "Stop DEMO and explicitly release all of its GPU and canvas resources."
+(defun stop-luvcraft (session)
+  "Stop SESSION and explicitly release all of its GPU and canvas resources."
   ;; A native close request may already have set this, but the resources still
-  ;; belong to the demo until this explicit teardown.
-  (setf (cube-world-demo-running-p demo) nil)
-  (let ((canvas (cube-world-demo-canvas demo)))
+  ;; belong to the session until this explicit teardown.
+  (setf (luvcraft-session-running-p session) nil)
+  (let ((canvas (luvcraft-session-canvas session)))
     (when (eq :open (canvas-state canvas))
       (setf (canvas-clock canvas) (make-demand-clock))
-      (when (cube-world-demo-pointer-captured-p demo)
+      (when (luvcraft-session-pointer-captured-p session)
         (ignore-errors (set-canvas-relative-pointer-mode canvas nil))
-        (setf (cube-world-demo-pointer-captured-p demo) nil))
+        (setf (luvcraft-session-pointer-captured-p session) nil))
       ;; A synchronous no-op after changing the clock is a native-thread
       ;; barrier: an already-running frame has finished before teardown starts.
       (request-canvas-frame canvas (lambda (timestamp)
                                      (declare (ignore timestamp)))))
     (setf (canvas-event-handler canvas) nil)
     ;; Stop CPU publication before releasing any render-owned destination.
-    (stop-production-system (cube-world-demo-production-system demo))
-    (destroy-cube-world-chunk-products demo)
-    (release-live-shader-pipeline (cube-world-demo-block-pipeline demo))
-    (release-live-shader-pipeline (cube-world-demo-crosshair-pipeline demo))
-    (dolist (resource (cube-world-demo-resources demo))
+    (stop-production-system (luvcraft-session-production-system session))
+    (destroy-luvcraft-chunk-products session)
+    (release-live-shader-pipeline (luvcraft-session-block-pipeline session))
+    (release-live-shader-pipeline (luvcraft-session-crosshair-pipeline session))
+    (dolist (resource (luvcraft-session-resources session))
       (destroy resource))
-    (setf (cube-world-demo-resources demo) nil)
+    (setf (luvcraft-session-resources session) nil)
     (close-canvas canvas))
-  (destroy (cube-world-demo-device demo))
+  (destroy (luvcraft-session-device session))
   (values))
