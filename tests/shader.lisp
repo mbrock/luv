@@ -1,6 +1,11 @@
 (defpackage #:luv/spir-v/tests
   (:use #:cl #:rove)
-  (:local-nicknames (#:spv #:luv.spir-v)))
+  (:local-nicknames (#:spv #:luv.spir-v))
+  ;; Shader operators are identified by symbol, so specification bodies
+  ;; written here must use the shader language's own words.
+  (:import-from #:luv.spir-v
+                #:dot #:sample #:mix #:vec2 #:vec3 #:vec4 #:swizzle
+                #:set-output))
 
 (in-package #:luv/spir-v/tests)
 

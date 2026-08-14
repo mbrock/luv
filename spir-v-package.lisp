@@ -96,6 +96,25 @@
            #:shader-call-parameters
            #:shader-expression-form
            #:shader-expression-children
+           ;; The shader-language vocabulary.  Arithmetic operators are CL's
+           ;; own symbols; these are the words CL does not have, plus the
+           ;; protocol for defining and implementing new operators.
+           #:dot
+           #:sample
+           #:mix
+           #:vec2
+           #:vec3
+           #:vec4
+           #:swizzle
+           #:set-output
+           #:shader-operator
+           #:define-shader-operator
+           #:shader-operator-p
+           #:parse-shader-operator-call
+           #:infer-shader-call-type
+           #:lower-shader-call
+           #:shader-operator-result-name
+           #:binary-arithmetic-instruction
            #:shader-output-assignment
            #:shader-assignment-output
            #:shader-assignment-value

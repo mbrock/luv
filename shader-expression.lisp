@@ -5,6 +5,12 @@
 ;;; expression are CLOS objects which retain their source forms.  Lowering keeps
 ;;; an object-to-object correspondence between those expressions and the CLOS
 ;;; instruction occurrences in the resulting basic block.
+;;;
+;;; The language itself is a small compiled subset of Common Lisp plus a
+;;; vector library.  Operators are named by ordinary symbols — CL's own where
+;;; CL has the word, this package's where it does not — and each operator's
+;;; parsing, typing, and lowering are EQL-specialized methods, so growing the
+;;; language means defining methods, never editing a dispatch table.
 
 (in-package #:luv.spir-v)
 
@@ -223,19 +229,13 @@
   (shader-object-name (shader-reference-target expression)))
 
 (defmethod shader-expression-form ((expression shader-call))
-  (case (shader-call-operator expression)
-    (:swizzle
-     (list 'swizzle
-           (shader-expression-form (first (shader-call-operands expression)))
-           (first (shader-call-parameters expression))))
-    (otherwise
-     (cons (case (shader-call-operator expression)
-             (:+ '+) (:- '-) (:* '*) (:/ '/)
-             (:dot 'dot) (:sample 'sample) (:mix 'mix)
-             (:vec2 'vec2) (:vec3 'vec3) (:vec4 'vec4)
-             (otherwise (shader-call-operator expression)))
-           (mapcar #'shader-expression-form
-                   (shader-call-operands expression))))))
+  ;; The operator is the symbol the author wrote, so the form rebuilds by
+  ;; simple reassembly; trailing parameters cover special syntax like
+  ;; SWIZZLE's component designator.
+  (append (cons (shader-call-operator expression)
+                (mapcar #'shader-expression-form
+                        (shader-call-operands expression)))
+          (shader-call-parameters expression)))
 
 (defmethod print-object ((expression shader-expression) stream)
   (print-unreadable-object (expression stream :type t)
@@ -243,11 +243,14 @@
     (format stream " : ~A"
             (shader-type-name (shader-expression-type expression)))))
 
-(defun shader-expression-children (expression)
-  (etypecase expression
-    (shader-literal nil)
-    (shader-reference nil)
-    (shader-call (shader-call-operands expression))))
+(defgeneric shader-expression-children (expression)
+  (:documentation "The immediate subexpressions EXPRESSION computes from."))
+
+(defmethod shader-expression-children ((expression shader-expression))
+  nil)
+
+(defmethod shader-expression-children ((expression shader-call))
+  (shader-call-operands expression))
 
 (defun shader-specification-expressions (specification)
   "Return the expression graph in source order, without duplicate objects."
@@ -299,46 +302,69 @@
                                (shader-expression-type operand)))
                             operands))))
 
-(defun infer-arithmetic-type (operator operands source-form)
+(defgeneric infer-shader-call-type (operator operands source-form)
+  (:documentation
+   "Check OPERANDS against OPERATOR's contract and return the call's type."))
+
+(defmethod infer-shader-call-type (operator operands source-form)
+  (declare (ignore operands))
+  (error 'shader-language-error
+         :form source-form :reason :unknown-operator :details operator))
+
+(defun require-numeric-operands (operator operands source-form)
   (unless operands
     (error 'shader-language-error
            :form source-form :reason :missing-operands :details operator))
   (require-shader-types
    (lambda (types) (every #'shader-numeric-type-p types))
-   operands source-form :non-numeric-arithmetic)
+   operands source-form :non-numeric-arithmetic))
+
+(defun infer-uniform-arithmetic-type (operator operands source-form)
+  "The shared + and - contract: every operand carries one common type."
+  (require-numeric-operands operator operands source-form)
   (let ((types (mapcar #'shader-expression-type operands)))
-    (case operator
-      ((:+ :-)
-       (unless (every (lambda (type) (shader-type= type (first types)))
-                      (rest types))
-         (error 'shader-language-error
-                :form source-form :reason :incompatible-arithmetic-types
-                :details (mapcar #'shader-type-name types)))
-       (first types))
-      (:*
-       (let ((vectors (remove-if-not #'shader-vector-type-p types)))
-         (cond ((null vectors) (find-shader-type :float))
-               ((every (lambda (type)
-                         (or (shader-float-type-p type)
-                             (shader-type= type (first vectors))))
-                       types)
-                (first vectors))
-               (t
-                (error 'shader-language-error
-                       :form source-form :reason :incompatible-product-types
-                       :details (mapcar #'shader-type-name types))))))
-      (:/
-       (unless (= (length types) 2)
-         (error 'shader-language-error
-                :form source-form :reason :division-arity))
-       (cond ((shader-type= (first types) (second types)) (first types))
-             ((and (shader-vector-type-p (first types))
-                   (shader-float-type-p (second types)))
-              (first types))
-             (t
-              (error 'shader-language-error
-                     :form source-form :reason :incompatible-division-types
-                     :details (mapcar #'shader-type-name types))))))))
+    (unless (every (lambda (type) (shader-type= type (first types)))
+                   (rest types))
+      (error 'shader-language-error
+             :form source-form :reason :incompatible-arithmetic-types
+             :details (mapcar #'shader-type-name types)))
+    (first types)))
+
+(defmethod infer-shader-call-type ((operator (eql '+)) operands source-form)
+  (infer-uniform-arithmetic-type operator operands source-form))
+
+(defmethod infer-shader-call-type ((operator (eql '-)) operands source-form)
+  (infer-uniform-arithmetic-type operator operands source-form))
+
+(defmethod infer-shader-call-type ((operator (eql '*)) operands source-form)
+  (require-numeric-operands operator operands source-form)
+  (let* ((types (mapcar #'shader-expression-type operands))
+         (vectors (remove-if-not #'shader-vector-type-p types)))
+    (cond ((null vectors) (find-shader-type :float))
+          ((every (lambda (type)
+                    (or (shader-float-type-p type)
+                        (shader-type= type (first vectors))))
+                  types)
+           (first vectors))
+          (t
+           (error 'shader-language-error
+                  :form source-form :reason :incompatible-product-types
+                  :details (mapcar #'shader-type-name types))))))
+
+(defmethod infer-shader-call-type ((operator (eql '/)) operands source-form)
+  (require-numeric-operands operator operands source-form)
+  (let ((types (mapcar #'shader-expression-type operands)))
+    (unless (= (length types) 2)
+      (error 'shader-language-error
+             :form source-form :reason :division-arity))
+    (cond ((shader-type= (first types) (second types)) (first types))
+          ((and (shader-vector-type-p (first types))
+                (shader-float-type-p (second types)))
+           (first types))
+          (t
+           (error 'shader-language-error
+                  :form source-form :reason :incompatible-division-types
+                  :details (mapcar #'shader-type-name types))))))
 
 (defun swizzle-components (designator source-form)
   (let* ((name (string-downcase (symbol-name designator)))
@@ -370,90 +396,162 @@
                     :form source-form :reason :opaque-vector-constituent)
         sum count))
 
-(defun canonical-shader-operator (operator)
-  (cond ((shader-symbol= operator '+) :+)
-        ((shader-symbol= operator '-) :-)
-        ((shader-symbol= operator '*) :*)
-        ((shader-symbol= operator '/) :/)
-        ((shader-symbol= operator 'dot) :dot)
-        ((shader-symbol= operator 'sample) :sample)
-        ((shader-symbol= operator 'mix) :mix)
-        ((shader-symbol= operator 'vec2) :vec2)
-        ((shader-symbol= operator 'vec3) :vec3)
-        ((shader-symbol= operator 'vec4) :vec4)
-        ((shader-symbol= operator 'swizzle) :swizzle)
-        (t nil)))
+(defmethod infer-shader-call-type ((operator (eql 'dot)) operands source-form)
+  (require-shader-types
+   (lambda (types)
+     (and (= (length types) 2)
+          (shader-vector-type-p (first types))
+          (shader-type= (first types) (second types))))
+   operands source-form :invalid-dot-product)
+  (find-shader-type :float))
+
+(defmethod infer-shader-call-type ((operator (eql 'sample)) operands source-form)
+  (require-shader-types
+   (lambda (types)
+     (and (= (length types) 3)
+          (eq (shader-type-opaque-kind (first types)) :texture-2d)
+          (eq (shader-type-opaque-kind (second types)) :sampler)
+          (shader-type= (third types) :vec2)))
+   operands source-form :invalid-texture-sample)
+  (find-shader-type :vec4))
+
+(defmethod infer-shader-call-type ((operator (eql 'mix)) operands source-form)
+  (require-shader-types
+   (lambda (types)
+     (and (= (length types) 3)
+          (shader-type= (first types) (second types))
+          (shader-numeric-type-p (first types))
+          (shader-float-type-p (third types))))
+   operands source-form :invalid-mix)
+  (shader-expression-type (first operands)))
+
+(defun infer-vector-constructor-type (type-name width operands source-form)
+  (unless (= width (vector-constructor-width operands source-form))
+    (error 'shader-language-error
+           :form source-form :reason :invalid-vector-width :details width))
+  (find-shader-type type-name))
+
+(defmethod infer-shader-call-type ((operator (eql 'vec2)) operands source-form)
+  (infer-vector-constructor-type :vec2 2 operands source-form))
+
+(defmethod infer-shader-call-type ((operator (eql 'vec3)) operands source-form)
+  (infer-vector-constructor-type :vec3 3 operands source-form))
+
+(defmethod infer-shader-call-type ((operator (eql 'vec4)) operands source-form)
+  (infer-vector-constructor-type :vec4 4 operands source-form))
+
+;;; Operators are named by ordinary symbols, treating the shader language as
+;;; a small compiled subset of Common Lisp plus a vector library.  Where CL
+;;; already has the word with the right meaning the operator IS that symbol:
+;;; + is CL:+, exactly as SBCL's own compiler keys IR knowledge off standard
+;;; names it never funcalls.  Where CL is silent (DOT, MIX, SWIZZLE, ...) the
+;;; operator is an exported symbol of this package.  A SHADER-CALL stores the
+;;; symbol, never a resolved behavior object, so redefining an operator's
+;;; methods reaches every existing specification on its next compile.
+
+(defvar *shader-operator-documentation* (make-hash-table :test #'eq))
+
+(defmethod documentation ((name symbol) (type (eql 'shader-operator)))
+  (gethash name *shader-operator-documentation*))
+
+(defmethod (setf documentation)
+    (new-value (name symbol) (type (eql 'shader-operator)))
+  (if new-value
+      (setf (gethash name *shader-operator-documentation*) new-value)
+      (progn (remhash name *shader-operator-documentation*) nil)))
+
+(defgeneric shader-operator-p (operator)
+  (:documentation
+   "Whether OPERATOR names an operator of the shader language.
+
+Membership is an open set of EQL methods: DEFINE-SHADER-OPERATOR admits a
+name, and the operator's behavior arrives as further EQL methods on
+PARSE-SHADER-OPERATOR-CALL, INFER-SHADER-CALL-TYPE, and LOWER-SHADER-CALL."))
+
+(defmethod shader-operator-p (operator)
+  (declare (ignore operator))
+  nil)
+
+(defmacro define-shader-operator (name &optional documentation)
+  "Admit NAME into the shader operator vocabulary, with its documentation.
+
+Documentation lives under the SHADER-OPERATOR doc-type, so shader meaning
+never collides with a standard symbol's function documentation:
+\(DOCUMENTATION 'CL:+ 'SHADER-OPERATOR) answers for shaders alone."
+  `(progn
+     (defmethod shader-operator-p ((operator (eql ',name)))
+       t)
+     ,@(when documentation
+         `((setf (documentation ',name 'shader-operator) ,documentation)))
+     ',name))
+
+(define-shader-operator +
+  "Componentwise addition of uniformly typed scalar or vector values.")
+(define-shader-operator -
+  "Componentwise subtraction, or negation when given a single operand.")
+(define-shader-operator *
+  "Chained multiplication of scalars, matching vectors, and vector-scalar pairs.")
+(define-shader-operator /
+  "Division of two matching values, or a vector scaled by a scalar's reciprocal.")
+(define-shader-operator dot
+  "The scalar inner product of two vectors of the same width.")
+(define-shader-operator sample
+  "Sample a two-dimensional texture through a sampler at a UV coordinate.")
+(define-shader-operator mix
+  "Linear interpolation from one value toward another by a scalar amount.")
+(define-shader-operator vec2
+  "Construct a two-component vector from scalars and vectors of total width 2.")
+(define-shader-operator vec3
+  "Construct a three-component vector from scalars and vectors of total width 3.")
+(define-shader-operator vec4
+  "Construct a four-component vector from scalars and vectors of total width 4.")
+(define-shader-operator swizzle
+  "Select and reorder vector components by a designator such as :XYZ or :RGB.")
+
+(defgeneric parse-shader-operator-call (operator form environment)
+  (:documentation
+   "Parse one (OPERATOR . ARGUMENTS) form into a typed SHADER-CALL.
+
+The default method parses every argument as an expression and asks
+INFER-SHADER-CALL-TYPE for the result type; an operator with special
+syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
+
+(defmethod parse-shader-operator-call (operator form environment)
+  (let ((operands (mapcar (lambda (operand)
+                            (parse-shader-expression operand environment))
+                          (rest form))))
+    (make-instance 'shader-call
+                   :operator operator
+                   :operands operands
+                   :type (infer-shader-call-type operator operands form)
+                   :source-form form)))
+
+(defmethod parse-shader-operator-call ((operator (eql 'swizzle)) form environment)
+  (unless (= (length (rest form)) 2)
+    (error 'shader-language-error :form form :reason :swizzle-arity))
+  (let* ((operand (parse-shader-expression (second form) environment))
+         (designator (third form))
+         (indices (swizzle-components designator form))
+         (input-width
+           (shader-type-component-count (shader-expression-type operand))))
+    (unless (and input-width (every (lambda (index) (< index input-width))
+                                    indices))
+      (error 'shader-language-error
+             :form form :reason :swizzle-out-of-range
+             :details designator))
+    (make-instance 'shader-call
+                   :operator 'swizzle
+                   :operands (list operand)
+                   :parameters (list designator)
+                   :type (vector-type-for-width (length indices) form)
+                   :source-form form)))
 
 (defun parse-shader-call (form environment)
-  (let* ((operator (canonical-shader-operator (first form)))
-         (raw-operands (rest form)))
-    (unless operator
+  (let ((operator (first form)))
+    (unless (shader-operator-p operator)
       (error 'shader-language-error
-             :form form :reason :unknown-operator :details (first form)))
-    (when (eq operator :swizzle)
-      (unless (= (length raw-operands) 2)
-        (error 'shader-language-error :form form :reason :swizzle-arity))
-      (let* ((operand (parse-shader-expression (first raw-operands)
-                                                environment))
-             (indices (swizzle-components (second raw-operands) form))
-             (input-width
-               (shader-type-component-count (shader-expression-type operand))))
-        (unless (and input-width (every (lambda (index) (< index input-width))
-                                        indices))
-          (error 'shader-language-error
-                 :form form :reason :swizzle-out-of-range
-                 :details (second raw-operands)))
-        (return-from parse-shader-call
-          (make-instance 'shader-call
-                         :operator :swizzle
-                         :operands (list operand)
-                         :parameters (list (second raw-operands))
-                         :type (vector-type-for-width (length indices) form)
-                         :source-form form))))
-    (let ((operands (mapcar (lambda (operand)
-                              (parse-shader-expression operand environment))
-                            raw-operands)))
-      (make-instance
-       'shader-call
-       :operator operator
-       :operands operands
-       :source-form form
-       :type
-       (case operator
-         ((:+ :- :* :/) (infer-arithmetic-type operator operands form))
-         (:dot
-          (require-shader-types
-           (lambda (types)
-             (and (= (length types) 2)
-                  (shader-vector-type-p (first types))
-                  (shader-type= (first types) (second types))))
-           operands form :invalid-dot-product)
-          (find-shader-type :float))
-         (:sample
-          (require-shader-types
-           (lambda (types)
-             (and (= (length types) 3)
-                  (eq (shader-type-opaque-kind (first types)) :texture-2d)
-                  (eq (shader-type-opaque-kind (second types)) :sampler)
-                  (shader-type= (third types) :vec2)))
-           operands form :invalid-texture-sample)
-          (find-shader-type :vec4))
-         (:mix
-          (require-shader-types
-           (lambda (types)
-             (and (= (length types) 3)
-                  (shader-type= (first types) (second types))
-                  (shader-numeric-type-p (first types))
-                  (shader-float-type-p (third types))))
-           operands form :invalid-mix)
-          (shader-expression-type (first operands)))
-         ((:vec2 :vec3 :vec4)
-          (let ((expected (ecase operator (:vec2 2) (:vec3 3) (:vec4 4))))
-            (unless (= expected (vector-constructor-width operands form))
-              (error 'shader-language-error
-                     :form form :reason :invalid-vector-width
-                     :details expected))
-            (find-shader-type operator))))))))
+             :form form :reason :unknown-operator :details operator))
+    (parse-shader-operator-call operator form environment)))
 
 (defun parse-shader-expression (form environment)
   (cond ((realp form)
@@ -537,7 +635,7 @@
                          :source-form form)))))
 
 (defun parse-output-assignment (form environment outputs)
-  (unless (and (consp form) (shader-symbol= (first form) 'set-output)
+  (unless (and (consp form) (eq (first form) 'set-output)
                (= (length form) 3))
     (error 'shader-language-error
            :form form :reason :expected-output-assignment))
@@ -563,7 +661,9 @@
     (error 'shader-language-error
            :form body :reason :expected-single-shader-body))
   (let ((form (first body)))
-    (if (and (consp form) (shader-symbol= (first form) 'let*))
+    ;; LET* is CL:LET* by identity: the language is a compiled subset of CL,
+    ;; and its binding form is the standard symbol, not a look-alike.
+    (if (and (consp form) (eq (first form) 'let*))
         (destructuring-bind (operator raw-bindings &rest statements) form
           (declare (ignore operator))
           (let ((bindings nil)
@@ -1044,18 +1144,33 @@ A newer concurrent notification remains pending."
            (gethash source-expression (context-expression-instructions context)))
     (associate-shader-instruction context expression instruction)))
 
+(defgeneric shader-operator-result-name (operator)
+  (:documentation
+   "The noun naming OPERATOR's SSA results in lowered provenance."))
+
+(defmethod shader-operator-result-name ((operator symbol))
+  operator)
+
+(defmethod shader-operator-result-name ((operator (eql '+))) 'sum)
+(defmethod shader-operator-result-name ((operator (eql '-))) 'difference)
+(defmethod shader-operator-result-name ((operator (eql '*))) 'product)
+(defmethod shader-operator-result-name ((operator (eql '/))) 'quotient)
+
+(defgeneric shader-expression-provenance-name (expression)
+  (:documentation "The default noun naming EXPRESSION's lowered results."))
+
+(defmethod shader-expression-provenance-name ((expression shader-literal))
+  'literal)
+
+(defmethod shader-expression-provenance-name ((expression shader-reference))
+  (shader-object-name (shader-reference-target expression)))
+
+(defmethod shader-expression-provenance-name ((expression shader-call))
+  (shader-operator-result-name (shader-call-operator expression)))
+
 (defun expression-result-name (expression)
   (or (shader-expression-name expression)
-      (etypecase expression
-        (shader-literal 'literal)
-        (shader-reference (shader-object-name
-                           (shader-reference-target expression)))
-        (shader-call
-         (case (shader-call-operator expression)
-           (:+ 'sum) (:- 'difference) (:* 'product) (:/ 'quotient)
-           (:dot 'dot) (:sample 'sample) (:mix 'mix)
-           (:vec2 'vec2) (:vec3 'vec3) (:vec4 'vec4)
-           (:swizzle 'swizzle))))))
+      (shader-expression-provenance-name expression)))
 
 (defun emit-value-instruction (context expression type instruction operands)
   (let ((result (fresh-shader-id context (expression-result-name expression))))
@@ -1113,74 +1228,110 @@ A newer concurrent notification remains pending."
                      instruction)
                value)))))))
 
+(defgeneric binary-arithmetic-instruction (operator left-type right-type)
+  (:documentation
+   "The SPIR-V instruction computing one binary step of OPERATOR."))
+
+(defmethod binary-arithmetic-instruction ((operator (eql '+)) left-type right-type)
+  (declare (ignore left-type right-type))
+  'f-add)
+
+(defmethod binary-arithmetic-instruction ((operator (eql '-)) left-type right-type)
+  (declare (ignore left-type right-type))
+  'f-sub)
+
+(defmethod binary-arithmetic-instruction ((operator (eql '/)) left-type right-type)
+  (declare (ignore left-type right-type))
+  'f-div)
+
+(defmethod binary-arithmetic-instruction ((operator (eql '*)) left-type right-type)
+  (if (or (and (shader-vector-type-p left-type)
+               (shader-float-type-p right-type))
+          (and (shader-float-type-p left-type)
+               (shader-vector-type-p right-type)))
+      'vector-times-scalar
+      'f-mul))
+
 (defun emit-binary-arithmetic
     (context expression operator result-type left-id left-type right-id right-type)
   (let ((instruction
-          (case operator
-            (:+ 'f-add)
-            (:- 'f-sub)
-            (:/ 'f-div)
-            (:*
-             (if (or (and (shader-vector-type-p left-type)
-                          (shader-float-type-p right-type))
-                     (and (shader-float-type-p left-type)
-                          (shader-vector-type-p right-type)))
-                 'vector-times-scalar
-                 'f-mul)))))
+          (binary-arithmetic-instruction operator left-type right-type)))
     (when (and (eq instruction 'vector-times-scalar)
                (shader-float-type-p left-type))
       (rotatef left-id right-id))
     (emit-value-instruction context expression result-type instruction
                             (list left-id right-id))))
 
-(defun lower-arithmetic-call (context expression)
+(defgeneric lower-shader-call (operator context expression)
+  (:documentation
+   "Emit EXPRESSION's instructions into CONTEXT and return its value id."))
+
+(defmethod lower-shader-call (operator context expression)
+  (declare (ignore context))
+  (error 'shader-language-error
+         :form (shader-expression-source-form expression)
+         :reason :unknown-operator :details operator))
+
+(defun lower-chained-arithmetic (context expression)
+  "Fold EXPRESSION's operands left to right through its binary operator."
   (let* ((operator (shader-call-operator expression))
-         (operands (shader-call-operands expression)))
-    (when (and (eq operator :-) (= (length operands) 1))
-      (return-from lower-arithmetic-call
+         (operands (shader-call-operands expression))
+         (first (first operands))
+         (value (lower-shader-expression context first))
+         (value-type (shader-expression-type first)))
+    (dolist (operand (rest operands) value)
+      (let ((operand-value (lower-shader-expression context operand))
+            (operand-type (shader-expression-type operand)))
+        (setf value
+              (emit-binary-arithmetic
+               context expression operator
+               (cond ((shader-vector-type-p value-type) value-type)
+                     ((shader-vector-type-p operand-type) operand-type)
+                     (t (find-shader-type :float)))
+               value value-type operand-value operand-type)
+              value-type
+              (cond ((shader-vector-type-p value-type) value-type)
+                    ((shader-vector-type-p operand-type) operand-type)
+                    (t (find-shader-type :float))))))))
+
+(defmethod lower-shader-call ((operator (eql '+)) context expression)
+  (lower-chained-arithmetic context expression))
+
+(defmethod lower-shader-call ((operator (eql '*)) context expression)
+  (lower-chained-arithmetic context expression))
+
+(defmethod lower-shader-call ((operator (eql '-)) context expression)
+  (let ((operands (shader-call-operands expression)))
+    (if (= (length operands) 1)
         (emit-value-instruction
          context expression (shader-expression-type expression) 'f-negate
-         (list (lower-shader-expression context (first operands))))))
-    (when (and (eq operator :/)
-               (shader-vector-type-p
-                (shader-expression-type (first operands)))
-               (shader-float-type-p
-                (shader-expression-type (second operands))))
-      (let* ((vector (first operands))
-             (scalar (second operands))
-             (vector-id (lower-shader-expression context vector))
-             (scalar-id (lower-shader-expression context scalar))
-             (float-type (find-shader-type :float))
-             (reciprocal-id (fresh-shader-id context 'reciprocal)))
-        (emit-shader-instruction
-         context expression
-         (list reciprocal-id 'f-div
-               (ensure-shader-type-id context float-type)
-               (ensure-shader-constant context 1.0) scalar-id))
-        (return-from lower-arithmetic-call
-          (emit-binary-arithmetic
-           context expression :* (shader-expression-type vector)
-           vector-id (shader-expression-type vector)
-           reciprocal-id float-type))))
-    (let* ((first (first operands))
-           (value (lower-shader-expression context first))
-           (value-type (shader-expression-type first)))
-      (dolist (operand (rest operands) value)
-        (let ((operand-value (lower-shader-expression context operand))
-              (operand-type (shader-expression-type operand)))
-          (setf value
-                (emit-binary-arithmetic
-                 context expression operator
-                 (cond ((shader-vector-type-p value-type) value-type)
-                       ((shader-vector-type-p operand-type) operand-type)
-                       (t (find-shader-type :float)))
-                 value value-type operand-value operand-type)
-                value-type
-                (cond ((shader-vector-type-p value-type) value-type)
-                      ((shader-vector-type-p operand-type) operand-type)
-                      (t (find-shader-type :float)))))))))
+         (list (lower-shader-expression context (first operands))))
+        (lower-chained-arithmetic context expression))))
 
-(defun lower-mix-call (context expression)
+(defmethod lower-shader-call ((operator (eql '/)) context expression)
+  (let ((operands (shader-call-operands expression)))
+    (if (and (shader-vector-type-p
+              (shader-expression-type (first operands)))
+             (shader-float-type-p
+              (shader-expression-type (second operands))))
+        (let* ((vector (first operands))
+               (scalar (second operands))
+               (vector-id (lower-shader-expression context vector))
+               (scalar-id (lower-shader-expression context scalar))
+               (float-type (find-shader-type :float))
+               (reciprocal-id (fresh-shader-id context 'reciprocal)))
+          (emit-shader-instruction
+           context expression
+           (list reciprocal-id 'f-div
+                 (ensure-shader-type-id context float-type)
+                 (ensure-shader-constant context 1.0) scalar-id))
+          (emit-binary-arithmetic
+           context expression '* (shader-expression-type vector)
+           vector-id (shader-expression-type vector)
+           reciprocal-id float-type))
+        (lower-chained-arithmetic context expression))))
+
+(defmethod lower-shader-call ((operator (eql 'mix)) context expression)
   (destructuring-bind (from to amount) (shader-call-operands expression)
     (let* ((from-id (lower-shader-expression context from))
            (to-id (lower-shader-expression context to))
@@ -1189,78 +1340,93 @@ A newer concurrent notification remains pending."
            (float-type (find-shader-type :float))
            (value-type (shader-expression-type expression))
            (inverse
-             (emit-binary-arithmetic context expression :- float-type
+             (emit-binary-arithmetic context expression '- float-type
                                      one-id float-type amount-id float-type))
            ;; Emit the target contribution first to retain the arithmetic
            ;; ordering of luvcraft's original pointful shader.
            (to-part
-             (emit-binary-arithmetic context expression :* value-type
+             (emit-binary-arithmetic context expression '* value-type
                                      to-id value-type amount-id float-type))
            (from-part
-             (emit-binary-arithmetic context expression :* value-type
+             (emit-binary-arithmetic context expression '* value-type
                                      from-id value-type inverse float-type)))
-      (emit-binary-arithmetic context expression :+ value-type
+      (emit-binary-arithmetic context expression '+ value-type
                               to-part value-type from-part value-type))))
 
-(defun lower-shader-call (context expression)
-  (let ((operator (shader-call-operator expression))
-        (operands (shader-call-operands expression)))
-    (case operator
-      ((:+ :- :* :/) (lower-arithmetic-call context expression))
-      (:dot
-       (emit-value-instruction
-        context expression :float 'dot
-        (mapcar (lambda (operand) (lower-shader-expression context operand))
-                operands)))
-      (:swizzle
-       (let* ((operand (first operands))
-              (value (lower-shader-expression context operand))
-              (indices (swizzle-components
-                        (first (shader-call-parameters expression))
-                        (shader-expression-source-form expression))))
-         (if (= (length indices) 1)
-             (emit-value-instruction context expression
-                                     (shader-expression-type expression)
-                                     'composite-extract
-                                     (list value (first indices)))
-             (emit-value-instruction context expression
-                                     (shader-expression-type expression)
-                                     'vector-shuffle
-                                     (list* value value indices)))))
-      ((:vec2 :vec3 :vec4)
-       (emit-value-instruction
-        context expression (shader-expression-type expression)
-        'composite-construct
-        (mapcar (lambda (operand) (lower-shader-expression context operand))
-                operands)))
-      (:sample
-       (destructuring-bind (texture sampler coordinate) operands
-         (let* ((texture-id (lower-shader-expression context texture))
-                (sampler-id (lower-shader-expression context sampler))
-                (coordinate-id (lower-shader-expression context coordinate))
-                (sampled-id
-                  (fresh-shader-id context
-                                   (expression-result-name expression))))
-           (emit-shader-instruction
-            context expression
-            (list sampled-id 'sampled-image
-                  (ensure-sampled-image-type-id context)
-                  texture-id sampler-id))
-           (emit-value-instruction
-            context expression :vec4 'image-sample-implicit-lod
-            (list sampled-id coordinate-id)))))
-      (:mix (lower-mix-call context expression)))))
+(defmethod lower-shader-call ((operator (eql 'dot)) context expression)
+  (emit-value-instruction
+   context expression :float 'dot
+   (mapcar (lambda (operand) (lower-shader-expression context operand))
+           (shader-call-operands expression))))
+
+(defmethod lower-shader-call ((operator (eql 'swizzle)) context expression)
+  (let* ((operand (first (shader-call-operands expression)))
+         (value (lower-shader-expression context operand))
+         (indices (swizzle-components
+                   (first (shader-call-parameters expression))
+                   (shader-expression-source-form expression))))
+    (if (= (length indices) 1)
+        (emit-value-instruction context expression
+                                (shader-expression-type expression)
+                                'composite-extract
+                                (list value (first indices)))
+        (emit-value-instruction context expression
+                                (shader-expression-type expression)
+                                'vector-shuffle
+                                (list* value value indices)))))
+
+(defun lower-vector-constructor (context expression)
+  (emit-value-instruction
+   context expression (shader-expression-type expression)
+   'composite-construct
+   (mapcar (lambda (operand) (lower-shader-expression context operand))
+           (shader-call-operands expression))))
+
+(defmethod lower-shader-call ((operator (eql 'vec2)) context expression)
+  (lower-vector-constructor context expression))
+
+(defmethod lower-shader-call ((operator (eql 'vec3)) context expression)
+  (lower-vector-constructor context expression))
+
+(defmethod lower-shader-call ((operator (eql 'vec4)) context expression)
+  (lower-vector-constructor context expression))
+
+(defmethod lower-shader-call ((operator (eql 'sample)) context expression)
+  (destructuring-bind (texture sampler coordinate)
+      (shader-call-operands expression)
+    (let* ((texture-id (lower-shader-expression context texture))
+           (sampler-id (lower-shader-expression context sampler))
+           (coordinate-id (lower-shader-expression context coordinate))
+           (sampled-id
+             (fresh-shader-id context
+                              (expression-result-name expression))))
+      (emit-shader-instruction
+       context expression
+       (list sampled-id 'sampled-image
+             (ensure-sampled-image-type-id context)
+             texture-id sampler-id))
+      (emit-value-instruction
+       context expression :vec4 'image-sample-implicit-lod
+       (list sampled-id coordinate-id)))))
+
+(defgeneric lower-shader-expression-value (context expression)
+  (:documentation "Lower EXPRESSION into instructions and return its value id."))
+
+(defmethod lower-shader-expression-value (context (expression shader-literal))
+  (ensure-shader-constant context
+                          (shader-literal-value expression)
+                          expression))
+
+(defmethod lower-shader-expression-value (context (expression shader-reference))
+  (lower-shader-reference context expression))
+
+(defmethod lower-shader-expression-value (context (expression shader-call))
+  (lower-shader-call (shader-call-operator expression) context expression))
 
 (defun lower-shader-expression (context expression)
   (or (gethash expression (context-expression-values context))
       (setf (gethash expression (context-expression-values context))
-            (etypecase expression
-              (shader-literal
-               (ensure-shader-constant context
-                                       (shader-literal-value expression)
-                                       expression))
-              (shader-reference (lower-shader-reference context expression))
-              (shader-call (lower-shader-call context expression))))))
+            (lower-shader-expression-value context expression))))
 
 (defun shader-entry-execution-model (stage)
   (ecase stage

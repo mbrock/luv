@@ -239,12 +239,11 @@
   (write-string (string-downcase (symbol-name name)) stream))
 
 (defun shader-infix-operator-p (operator)
-  (member operator '(:+ :- :* :/)))
+  ;; Shader operators are ordinary symbols; arithmetic is CL's own.
+  (member operator '(+ - * /)))
 
 (defun shader-operator-label (operator)
-  (case operator
-    (:+ "+") (:- "-") (:* "*") (:/ "/")
-    (otherwise (string-downcase (symbol-name operator)))))
+  (string-downcase (symbol-name operator)))
 
 (defun shader-lab-current-specification (frame)
   (luv.spir-v:shader-lowering-specification
