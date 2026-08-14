@@ -549,11 +549,61 @@ provenance, and both alias their operand without emitting an instruction.
 
 =representation= is not a general escape from a type error: its operand must
 already carry checked quantity semantics.  Above the node, arithmetic is raw
-until a later =assume-quantity= boundary introduces a stated meaning.  This is
-useful for the present shadow rows, whose =vec4= homogeneous-coordinate ABI is
-heterogeneous and not yet modeled as a semantic matrix.  It makes that missing
-model visible instead of either rejecting all use of the rows or silently
-forgetting that their input was a metre-valued affine point.
+until a later =assume-quantity= boundary introduces a stated meaning.  This
+exposed the original block-shadow calculation honestly while its four rows
+were still an unmodelled matrix.  The block-surface shader now replaces that
+particular escape with the semantic map in #SM4DFB; =representation= remains
+the right boundary where only an opaque ABI operation is actually known.
+
+* Maps carry spaces; rows carry representation
+:PROPERTIES:
+:ID: SM4DFB
+:END:
+
+A tensor quantity and a map answer related but different questions.  A tensor
+quantity says that a scalar, vector, or higher-order representation carries a
+quantity specification.  A map says what source space it accepts, what target
+space it produces, and what kind of application is lawful.  Four =vec4= rows
+alone cannot say whether they map world points or directions, whether their
+result is clip space or a packed sampling tuple, or whether homogeneous
+division and a viewport remap are part of the operation.
+
+This is where luv deliberately extends the mp-units lesson.  mp-units supplies
+tensor-character quantities, vector component decomposition, and tensor inner
+products; those are useful semantics for the values represented by vectors and
+tensors.  Moppe's =atelier/matrix.hh= then shows the application boundary
+plainly: quantities are converted to raw values before entering a
+=simd_float4x4=.  Luv controls the shader DSL and can retain the missing
+relation as an inspectable object instead:
+
+#+begin_src lisp
+(define-projective-shader-map :world-to-shadow
+  :domain-type :vec3
+  :domain-quantity :world-position
+  :domain-unit :metre
+  :domain-affine-p t
+  :codomain-type :vec3
+  :codomain-components
+  ((:xy :quantity :shadow-uv :unit :one :affine-p t)
+   (:z :quantity :shadow-depth :unit :one :affine-p t))
+  :coordinate-scale (1/2 1/2 1)
+  :coordinate-offset (1/2 1/2 0))
+#+end_src
+
+=shader-map-definition= is an open semantic protocol.  The first concrete
+definition is projective rather than pretending perspective division is a
+linear operation.  =project-point= requires the exact affine metre-valued
+domain and four raw represented rows.  Its result is a virtual semantic
+product: =xy= projects affine shadow UV and =z= projects affine shadow depth.
+The packed whole is not treated as a homogeneous mathematical vector.
+
+Lowering expands the application into the existing homogeneous construction,
+four dot products, division, and coordinate remap once, then lets exact
+swizzles select the three component values.  It does not materialize an extra
+=vec3=.  Thus domain/codomain and point semantics become stricter while the
+SPIR-V stays byte-identical.  Future linear, affine, normal, and projective map
+definitions can share this separation: dense coefficients are representation;
+the named map owns meaning.
 
 * DONE Carry semantic units through the vertex and camera ABI
 :PROPERTIES:
@@ -578,13 +628,15 @@ Evidence:
   a dimensionless progress value before interpretation as =:fog-amount=.
 - The mesh ABI publishes texture UV plus ambient occlusion, unit normal, and
   three distinct light lanes on both sides of the vertex/fragment interface.
-  Shadow UV and depth acquire their normalized meanings at the opaque shadow
-  transform result.  The shadow and sky vertex stages share the semantic frame
-  declarations rather than reintroducing direction meaning downstream.
+  In this iteration shadow UV and depth acquired their normalized meanings at
+  the opaque shadow-transform result; #U0AHTQ subsequently replaced that
+  assumption with a checked map.  The shadow and sky vertex stages share the
+  semantic frame declarations rather than reintroducing direction meaning
+  downstream.
 - #F83KGZ records the explicit =representation= boundary used where a semantic
-  metre point enters the still-raw homogeneous shadow rows.  It is visible in
-  the expression graph and shader workbench, requires a semantic operand, and
-  has no codegen effect.
+  metre point entered the then-raw homogeneous shadow rows.  It was visible in
+  the expression graph and shader workbench, required a semantic operand, and
+  had no codegen effect; #U0AHTQ records its semantic replacement.
 - [[file:../tests/shader.lisp][Shader tests]] inspect the affine/non-affine transition, exact metre units,
   interface layouts, representation boundary, and the rejection of a
   representative metre/one mix-up.  The focused suite passes all 28 tests.
@@ -607,7 +659,68 @@ dimensionless fog is derived rather than asserted, normalized mesh meanings
 cross the stage interface, opaque representation boundaries are explicit, a
 metre/one mix-up is rejected, and the emitted SPIR-V is unchanged.
 
-* NEXT Give the remaining crosshair colour ABI meaning
+* DONE Make the world-to-shadow transform a semantic projective map
+:PROPERTIES:
+:ID: U0AHTQ
+:END:
+
+Intent: replace the most consequential remaining raw arithmetic island with a
+first-class map whose domain, codomain, affine-point requirement, packed result,
+and projective coordinate remap are checked independently of its four-row GPU
+representation.
+
+Evidence:
+
+- [[file:../shader-expression.lisp][=shader-expression.lisp=]] now provides inspectable =shader-map-definition=
+  objects behind an open name protocol, a projective definition with coordinate
+  scale/offset, a =project-point= expression, and lowering specialized on the
+  map definition class.
+- [[file:../luvcraft/shaders.lisp][The block vertex shader]] applies =:world-to-shadow= directly to an affine
+  =:world-position= in metres.  Its virtual packed codomain projects =:shadow-uv=
+  and =:shadow-depth= with their affine normalized meanings; the prior
+  =representation= and two =assume-quantity= nodes are gone from this path.
+- Undefined maps, raw or wrong-domain points, the wrong number of rows, and
+  semantically annotated rows are source-language errors.  Missing map
+  semantics therefore cannot silently collapse to raw arithmetic.
+- The virtual product lowers once and exact swizzles reuse its component IDs;
+  it adds no intermediate vector.  Vulkan validation passes and the block
+  vertex binary remains byte-identical at SHA-256
+  =9c99780b969b33eb242976c943463449b2cce4b66f779674a291fc3a4f2aeb34=.
+- [[file:../mcclim/shader-lab.lisp][The shader workbench]] renders the map application as its own selectable
+  expression, including the named map, semantic point, and represented rows.
+  [[file:../tests/shader.lisp][Shader tests]] inspect its domain, packed codomain, affine character,
+  virtual materialization policy, raw rows, and failure contracts.
+
+Done when: achieved.  A real production matrix application is a checked
+semantic map, point versus raw/direction misuse is rejected, projected fields
+arrive with meaning rather than assumptions, tools can inspect the map object,
+and emitted GPU code is unchanged.
+
+* NEXT Separate homogeneous projection from shadow sampling
+:PROPERTIES:
+:ID: ZYCSYZ
+:END:
+
+Intent: let one semantic world-to-light projective map serve both production
+uses of the four shadow rows.  The shadow vertex stage needs the homogeneous
+clip result directly, while the block vertex stage additionally divides and
+remaps it into shadow sampling coordinates.  Those should be named operations
+over one map rather than two unrelated arithmetic spellings.
+
+Evidence: #U0AHTQ proves that a projective application can be checked and
+lowered without changing code, but its first definition packages row
+application, homogeneous division, and sampling remap together.  The shadow
+vertex shader still uses =representation= and four manual dots to produce the
+same pre-division clip value.  That duplication now identifies a real
+composition boundary rather than a hypothetical matrix framework.
+
+Done when: the four rows have one inspectable world-to-light map definition;
+one operation projects an affine world point to its homogeneous result; a
+second checked operation produces shadow UV/depth; both production vertex
+stages use the shared semantics; point/direction and incompatible-space uses
+fail; and both validated binaries remain byte-identical.
+
+* TODO Give the remaining crosshair colour ABI meaning
 :PROPERTIES:
 :ID: NXA19H
 :END:

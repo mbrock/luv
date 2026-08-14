@@ -94,6 +94,16 @@
            #:shader-uniform-member-block
            #:shader-uniform-member-index
            #:shader-uniform-member-offset
+           #:shader-map-definition
+           #:shader-projective-map-definition
+           #:shader-map-domain-type
+           #:shader-map-domain-quantity-specification
+           #:shader-map-codomain-type
+           #:shader-map-codomain-quantity-layout
+           #:shader-projective-map-coordinate-scale
+           #:shader-projective-map-coordinate-offset
+           #:shader-map-definition-for
+           #:define-projective-shader-map
            #:shader-binding
            #:shader-binding-expression
            #:shader-expression
@@ -101,6 +111,7 @@
            #:shader-expression-quantity-specification
            #:shader-expression-quantity-layout
            #:shader-expression-quantity-checked-p
+           #:shader-expression-materialized-p
            #:shader-expression-source-form
            #:shader-expression-name
            #:shader-literal
@@ -111,6 +122,10 @@
            #:shader-call-operator
            #:shader-call-operands
            #:shader-call-parameters
+           #:shader-map-application
+           #:shader-map-application-definition
+           #:shader-map-application-point
+           #:shader-map-application-rows
            #:shader-interpretation
            #:shader-interpretation-operand
            #:shader-quantity-construction
@@ -143,6 +158,7 @@
            #:assume-quantity
            #:interpret
            #:representation
+           #:project-point
            #:convert-unit
            #:set-output
            #:shader-operator
@@ -159,6 +175,7 @@
            #:parse-shader-operator-call
            #:infer-shader-call-type
            #:lower-shader-call
+           #:lower-shader-map-component-values
            #:shader-operator-result-name
            #:binary-arithmetic-instruction
            #:shader-output-assignment

@@ -9,7 +9,7 @@
                 #:vec2 #:vec3 #:vec4 #:swizzle
                 #:clamp #:smoothstep #:normalize
                 #:quantity #:assume-quantity #:interpret #:representation
-                #:convert-unit
+                #:convert-unit #:project-point
                 #:set-output))
 
 (in-package #:luv/spir-v/tests)
@@ -158,7 +158,8 @@
          (fog-amount (binding-named 'fog-amount specification))
          (relative (binding-named 'relative specification))
          (view-z (binding-named 'view-z specification))
-         (world (binding-named 'world specification)))
+         (shadow-projection
+           (binding-named 'shadow-projection specification)))
     (ok (typep specification 'spv:shader-specification))
     (ok (eq (spv:shader-specification-stage specification) :vertex))
     (ok (= (length (spv:shader-specification-inputs specification)) 4))
@@ -208,9 +209,103 @@
               (math:quantity-specification-name view-z-quantity)))
       (ok (math:unit-expression=
            :metre (math:quantity-specification-unit view-z-quantity))))
-    (ok (typep (first (spv:shader-call-operands
-                       (spv:shader-binding-expression world)))
-               'spv:shader-representation))))
+    (ok (typep (spv:shader-binding-expression shadow-projection)
+               'spv:shader-map-application))))
+
+(deftest projective-maps-are-semantic-objects-with-packed-products
+  (let* ((specification (spv:block-world-vertex-specification))
+         (binding (binding-named 'shadow-projection specification))
+         (application (spv:shader-binding-expression binding))
+         (definition (spv:shader-map-definition-for :world-to-shadow))
+         (domain
+           (spv:shader-map-domain-quantity-specification definition))
+         (layout (spv:shader-map-codomain-quantity-layout definition))
+         (uv (math:project-quantity-layout layout '(0 1)))
+         (depth (math:project-quantity-layout layout '(2))))
+    (ok (typep definition 'spv:shader-projective-map-definition))
+    (ok (eq definition (spv:shader-map-application-definition application)))
+    (ok (spv:shader-type= :vec3 (spv:shader-map-domain-type definition)))
+    (ok (eq :world-position
+            (math:quantity-specification-name domain)))
+    (ok (math:quantity-specification-affine-p domain))
+    (ok (math:unit-expression=
+         :metre (math:quantity-specification-unit domain)))
+    (ok (eq :shadow-uv (math:quantity-specification-name uv)))
+    (ok (math:quantity-specification-affine-p uv))
+    (ok (eq :shadow-depth (math:quantity-specification-name depth)))
+    (ok (math:quantity-specification-affine-p depth))
+    (ok (math:quantity-layout=
+         layout (spv:shader-expression-quantity-layout application)))
+    (ok (equal '(1/2 1/2 1)
+               (spv:shader-projective-map-coordinate-scale definition)))
+    (ok (equal '(1/2 1/2 0)
+               (spv:shader-projective-map-coordinate-offset definition)))
+    (ok (= 4 (length (spv:shader-map-application-rows application))))
+    (ok (every (lambda (row)
+                 (not (spv:shader-expression-quantity-checked-p row)))
+               (spv:shader-map-application-rows application)))
+    (ok (not (spv:shader-expression-materialized-p application)))
+    (labels ((contains-representation-p (expression)
+               (or (typep expression 'spv:shader-representation)
+                   (some #'contains-representation-p
+                         (spv:shader-expression-children expression)))))
+      (ok (not (contains-representation-p application))))))
+
+(deftest projective-map-applications-reject-undefined-or-wrong-semantics
+  (flet ((reason-for (point-declaration form &optional annotated-row-p)
+           (handler-case
+               (progn
+                 (spv:parse-shader-specification
+                  'invalid-projective-map-probe
+                  `(:stage :vertex
+                    :inputs
+                    (,point-declaration
+                     (row-x :vec4 :location 1
+                            ,@(when annotated-row-p
+                                '(:quantity :linear-rgba :unit :one)))
+                     (row-y :vec4 :location 2)
+                     (row-z :vec4 :location 3)
+                     (row-w :vec4 :location 4))
+                    :outputs
+                    ((result :vec2 :location 0
+                             :quantity :shadow-uv :unit :one :affine-p t)))
+                  `((set-output result (swizzle ,form :xy))))
+                 nil)
+             (spv:shader-language-error (condition)
+               (spv:shader-language-error-reason condition)))))
+    (let ((world
+            '(position :vec3 :location 0
+              :quantity :world-position :unit :metre :affine-p t))
+          (raw '(position :vec3 :location 0))
+          (direction
+            '(position :vec3 :location 0
+              :quantity :world-direction :unit :one)))
+      (ok (eq :undefined-shader-map
+              (reason-for
+               world
+               '(project-point :missing-map position
+                 row-x row-y row-z row-w))))
+      (ok (eq :projective-map-domain-mismatch
+              (reason-for
+               raw
+               '(project-point :world-to-shadow position
+                 row-x row-y row-z row-w))))
+      (ok (eq :projective-map-domain-mismatch
+              (reason-for
+               direction
+               '(project-point :world-to-shadow position
+                 row-x row-y row-z row-w))))
+      (ok (eq :projective-map-row-count
+              (reason-for
+               world
+               '(project-point :world-to-shadow position
+                 row-x row-y row-z))))
+      (ok (eq :invalid-projective-map-rows
+              (reason-for
+               world
+               '(project-point :world-to-shadow position
+                 row-x row-y row-z row-w)
+               t))))))
 
 (deftest block-vertex-uniform-members-retain-access-chain-provenance
   (let* ((lowering (spv:block-world-vertex-lowering))

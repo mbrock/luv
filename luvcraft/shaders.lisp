@@ -77,6 +77,22 @@
     :clip-coordinate
     (:clip-x-coordinate :clip-y-coordinate :clip-z-coordinate))
 
+;;; A matrix is representation; this is the meaning of the operation it
+;;; participates in.  The four dense rows arrive through the frame ABI, but
+;;; applying them is a checked map from an affine metre-valued world point to
+;;; the deliberately packed shadow sample tuple used by the fragment stage.
+(define-projective-shader-map :world-to-shadow
+  :domain-type :vec3
+  :domain-quantity :world-position
+  :domain-unit :metre
+  :domain-affine-p t
+  :codomain-type :vec3
+  :codomain-components
+  ((:xy :quantity :shadow-uv :unit :one :affine-p t)
+   (:z :quantity :shadow-depth :unit :one :affine-p t))
+  :coordinate-scale (1/2 1/2 1)
+  :coordinate-offset (1/2 1/2 0))
+
 ;;; Every stage which reads the frame environment declares the same uniform
 ;;; block at binding 2: identical member order and offsets are an ABI
 ;;; requirement, so the member list is written once and spliced at read time.
@@ -217,32 +233,20 @@
                               :quantity :view-distance :unit :metre)
                     z-offset))
          (clip (vec4 clip-x clip-y clip-z view-z))
-         ;; The shadow rows are still an opaque matrix ABI over a homogeneous
-         ;; tuple.  Expose the metre-valued point's machine representation
-         ;; explicitly instead of silently discarding its meaning.
-         (world (vec4 (representation world-position) 1.0))
-         (shadow-x (dot shadow-row-x world))
-         (shadow-y (dot shadow-row-y world))
-         (shadow-z (dot shadow-row-z world))
-         (shadow-w (dot shadow-row-w world))
-         (shadow-ndc-x (/ shadow-x shadow-w))
-         (shadow-ndc-y (/ shadow-y shadow-w))
-         (shadow-ndc-z (/ shadow-z shadow-w))
-         (shadow-u (+ (* shadow-ndc-x 0.5) 0.5))
-         (shadow-v (+ (* shadow-ndc-y 0.5) 0.5)))
+         (shadow-projection
+           (project-point :world-to-shadow world-position
+                          shadow-row-x shadow-row-y
+                          shadow-row-z shadow-row-w))
+         ;; Projecting either field lowers the shared homogeneous map once.
+         ;; Keeping depth first preserves the established instruction order.
+         (shadow-depth (swizzle shadow-projection :z)))
     (set-output clip-position clip)
     (set-output uv-shade-output uv-shade-input)
     (set-output normal-output normal-input)
     (set-output fog-output fog-amount)
     (set-output light-output light-input)
-    (set-output shadow-uv-output
-                (assume-quantity (vec2 shadow-u shadow-v)
-                                 :quantity :shadow-uv
-                                 :unit :one :affine-p t))
-    (set-output shadow-depth-output
-                (assume-quantity shadow-ndc-z
-                                 :quantity :shadow-depth
-                                 :unit :one :affine-p t))))
+    (set-output shadow-uv-output (swizzle shadow-projection :xy))
+    (set-output shadow-depth-output shadow-depth)))
 
 (defun block-world-vertex-specification ()
   (shader-specification-for :block-surface :vertex))

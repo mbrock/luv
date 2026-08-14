@@ -135,7 +135,7 @@ The following are starting paths rather than a table of settled doctrine.
 - [[file:quantities-and-measurement.org][Quantities, dimensions, and interpretation]] studies Moppe's mp-units
   practice and the Zig Étalon experiment, then follows the resulting semantic
   arithmetic into homogeneous vector components, heterogeneous packed GPU
-  tuples, and compact SIMD-friendly representations.
+  tuples, semantic projective maps, and compact SIMD-friendly representations.
 - [[file:physics-and-simd.org][Physics data and SIMD execution]] identifies the seam for a Catto-inspired
   3D physics experiment: CLOS at semantic boundaries, dense domains and
   columnar numerical state inside the step, and derived collision structures

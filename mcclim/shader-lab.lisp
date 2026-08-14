@@ -409,6 +409,23 @@
                  (luv.spir-v:shader-object-name
                   (luv.spir-v:shader-reference-target expression))
                  stream))
+               (luv.spir-v:shader-map-application
+                (write-string "project-point[" stream)
+                (write-shader-name
+                 (luv.spir-v:shader-object-name
+                  (luv.spir-v:shader-map-application-definition expression))
+                 stream)
+                (write-string "](" stream)
+                (write-shader-expression
+                 (luv.spir-v:shader-map-application-point expression)
+                 stream frame)
+                (write-string "; rows " stream)
+                (loop for row in
+                        (luv.spir-v:shader-map-application-rows expression)
+                      for first-p = t then nil
+                      unless first-p do (write-string ", " stream)
+                      do (write-shader-expression row stream frame))
+                (write-char #\) stream))
                (luv.spir-v:shader-interpretation
                 (write-string "interpret(" stream)
                 (write-shader-expression
@@ -490,6 +507,8 @@
                         (luv.spir-v:shader-literal *shader-literal-ink*)
                         (luv.spir-v:shader-reference
                          *shader-reference-ink*)
+                        (luv.spir-v:shader-map-application
+                         *shader-call-ink*)
                         (luv.spir-v:shader-interpretation
                          *shader-accent-ink*)
                         (luv.spir-v:shader-quantity-construction

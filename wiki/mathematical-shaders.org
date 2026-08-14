@@ -186,6 +186,41 @@ Those maps are intentionally occurrence-based.  “This multiply in this basic
 block came from this expression object” is more useful for a live tool than a
 global table saying that the =f-mul= opcode exists.
 
+* Semantic maps are not merely matrix-shaped values
+:PROPERTIES:
+:ID: 4XAF9Z
+:END:
+
+The first matrix feature is deliberately a map protocol rather than a generic
+=mat4= shader type.  A =shader-map-definition= names a domain type and quantity,
+a codomain type and semantic layout, and the behavior of application.  Its
+dense coefficients remain ordinary represented shader values.  This separates
+“four rows happen to be stored here” from “this operation accepts an affine
+world point in metres and produces shadow sampling coordinates.”  The broader
+quantity argument and mp-units/Moppe comparison lives in #SM4DFB.
+
+The production =:world-to-shadow= definition is projective: it forms a
+homogeneous point, evaluates four row dot products, divides by =w=, and remaps
+the first two coordinates.  Calling
+
+#+begin_src lisp
+(project-point :world-to-shadow world-position
+               shadow-row-x shadow-row-y shadow-row-z shadow-row-w)
+#+end_src
+
+constructs a =shader-map-application= whose packed =vec3= result exposes only
+the declared projections: =xy= is affine =:shadow-uv= and =z= is affine
+=:shadow-depth=.  The application is virtual.  Lowering caches its three
+represented component ids, so selecting both fields performs the shared map
+once without constructing an intermediate vector.  This preserves the exact
+SPIR-V previously emitted by handwritten row arithmetic.
+
+Map names use an open EQL-specialized lookup protocol, and lowering dispatches
+on definition class.  An unknown map, incompatible domain, non-affine point,
+wrong row count, or semantic row is a source error.  Adding linear, affine,
+normal, or other map families therefore means adding semantic definitions and
+lowering methods, not weakening failed cases to unannotated values.
+
 * McCLIM presents the relationship
 :PROPERTIES:
 :ID: P7V5CK
@@ -206,7 +241,9 @@ reverse provenance map to highlight its source expression.
 The detail pane reports the source form, inferred type, semantic meaning, and
 association count.  Packed declarations and samples display lane-to-quantity
 maps, while construction, assumption, interpretation, and raw representation
-remain distinct selectable expression nodes.
+remain distinct selectable expression nodes.  Projective applications are
+selectable nodes too, rendered with their map name, semantic point, and dense
+represented rows.
 The presentation objects are the compiler objects themselves; there is no
 parallel UI tree whose identities can drift.
 
@@ -253,9 +290,11 @@ windows is part of keeping the owning McCLIM frame responsive.
 :END:
 
 This is a coherent first language, not a commitment to grow a second Common
-Lisp inside Common Lisp.  Control flow, user functions, matrices, integer and
-boolean types, storage buffers, derivative operations, and stage-specific
-validation should arrive only with shaders that require them.
+Lisp inside Common Lisp.  Control flow, user functions, general matrix values
+and composition, integer and boolean types, storage buffers, derivative
+operations, and stage-specific validation should arrive only with shaders that
+require them.  The projective-map slice exists because two production shaders
+already supply that requirement.
 
 The useful constraints for the next experiments are already visible:
 

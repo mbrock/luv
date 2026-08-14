@@ -179,6 +179,39 @@
   (:documentation
    "A named value inside a SHADER-UNIFORM-BLOCK, not a separate resource."))
 
+(defclass shader-map-definition (shader-named-object)
+  ((domain-type
+    :initarg :domain-type
+    :reader shader-map-domain-type)
+   (domain-quantity-specification
+    :initarg :domain-quantity-specification
+    :reader shader-map-domain-quantity-specification)
+   (codomain-type
+    :initarg :codomain-type
+    :reader shader-map-codomain-type)
+   (codomain-quantity-layout
+    :initarg :codomain-quantity-layout
+    :reader shader-map-codomain-quantity-layout))
+  (:documentation
+   "An inspectable semantic map whose dense representation is supplied at use."))
+
+(defclass shader-projective-map-definition (shader-map-definition)
+  ((coordinate-scale
+    :initarg :coordinate-scale
+    :reader shader-projective-map-coordinate-scale)
+   (coordinate-offset
+    :initarg :coordinate-offset
+    :reader shader-projective-map-coordinate-offset))
+  (:documentation
+   "A four-row homogeneous map followed by division and coordinate remapping."))
+
+(defgeneric shader-map-definition-for (name)
+  (:documentation "Return the shader semantic map named by NAME, or NIL."))
+
+(defmethod shader-map-definition-for (name)
+  (declare (ignore name))
+  nil)
+
 (defun shader-uniform-block-byte-size (block)
   "The host byte size implied by BLOCK's shader-visible vec4-lane layout.
 
@@ -221,6 +254,14 @@ repeating the lane arithmetic as a literal."
 Annotations enter checked arithmetic; an explicit REPRESENTATION boundary
 leaves it again while retaining the semantic operand in the expression graph."))
 
+(defgeneric shader-expression-materialized-p (expression)
+  (:documentation
+   "Whether EXPRESSION directly denotes one lowerable represented value."))
+
+(defmethod shader-expression-materialized-p ((expression shader-expression))
+  (declare (ignore expression))
+  t)
+
 (defclass shader-literal (shader-expression)
   ((value
     :initarg :value
@@ -237,11 +278,24 @@ leaves it again while retaining the semantic operand in the expression graph."))
     :reader shader-call-operator)
    (operands
     :initarg :operands
-    :reader shader-call-operands)
+   :reader shader-call-operands)
    (parameters
     :initarg :parameters
     :initform nil
     :reader shader-call-parameters)))
+
+(defclass shader-map-application (shader-expression)
+  ((definition
+    :initarg :definition
+    :reader shader-map-application-definition)
+   (point
+    :initarg :point
+    :reader shader-map-application-point)
+   (rows
+    :initarg :rows
+    :reader shader-map-application-rows))
+  (:documentation
+   "A virtual semantic product obtained by applying a represented map."))
 
 (defclass shader-quantity-boundary (shader-expression)
   ((operand
@@ -304,6 +358,18 @@ leaves it again while retaining the semantic operand in the expression graph."))
       (shader-expression-quantity-layout expression)
       (some #'shader-expression-quantity-checked-p
             (shader-call-operands expression))))
+
+(defmethod shader-expression-quantity-checked-p
+    ((expression shader-map-application))
+  (declare (ignore expression))
+  t)
+
+(defmethod shader-expression-materialized-p
+    ((expression shader-map-application))
+  ;; A semantic product is projected into represented values.  Materializing
+  ;; an intermediate vec3 would add GPU work solely for compiler convenience.
+  (declare (ignore expression))
+  nil)
 
 (defmethod shader-expression-quantity-checked-p
     ((expression shader-quantity-boundary))
@@ -378,6 +444,9 @@ leaves it again while retaining the semantic operand in the expression graph."))
                         (shader-call-operands expression)))
           (shader-call-parameters expression)))
 
+(defmethod shader-expression-form ((expression shader-map-application))
+  (shader-expression-source-form expression))
+
 (defmethod shader-expression-form ((expression shader-quantity-boundary))
   (shader-expression-source-form expression))
 
@@ -398,6 +467,10 @@ leaves it again while retaining the semantic operand in the expression graph."))
 
 (defmethod shader-expression-children ((expression shader-call))
   (shader-call-operands expression))
+
+(defmethod shader-expression-children ((expression shader-map-application))
+  (cons (shader-map-application-point expression)
+        (shader-map-application-rows expression)))
 
 (defmethod shader-expression-children ((expression shader-quantity-boundary))
   (list (shader-quantity-boundary-operand expression)))
@@ -1007,6 +1080,8 @@ never collides with a standard symbol's function documentation:
   "Assign a checked semantic quantity specification without emitting code.")
 (define-shader-operator representation
   "Expose a semantic value's raw representation without emitting code.")
+(define-shader-operator project-point
+  "Apply a named projective map to a semantic affine point.")
 (define-shader-operator convert-unit
   "Explicitly express a semantic quantity in another compatible unit.")
 
@@ -1302,6 +1377,141 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
                    projection-type component-form))
                  projections)))))
         (math:make-quantity-layout extent (nreverse projections))))))
+
+(defun make-projective-shader-map-definition
+    (name &key domain-type domain-quantity domain-dimension domain-unit
+               domain-affine-p codomain-type codomain-components
+               coordinate-scale coordinate-offset source-form)
+  "Construct a checked projective map definition from declarative semantics."
+  (let* ((domain-type (find-shader-type domain-type source-form))
+         (codomain-type (find-shader-type codomain-type source-form))
+         (domain-component-count
+           (shader-type-component-count domain-type))
+         (component-count (shader-type-component-count codomain-type)))
+    (unless (and domain-component-count
+                 component-count
+                 (= domain-component-count 3)
+                 (= component-count 3)
+                 (listp coordinate-scale)
+                 (listp coordinate-offset)
+                 (= (length coordinate-scale) component-count)
+                 (= (length coordinate-offset) component-count)
+                 (every #'realp coordinate-scale)
+                 (every #'realp coordinate-offset))
+      (error 'shader-language-error
+             :form source-form :reason :invalid-projective-map-shape))
+    (let ((domain
+            (parse-declaration-quantity-specification
+             domain-quantity domain-dimension domain-unit domain-affine-p
+             domain-type source-form))
+          (codomain
+            (parse-declaration-quantity-layout
+             codomain-components codomain-type source-form)))
+      (unless (and domain
+                   (math:quantity-specification-affine-p domain)
+                   codomain)
+        (error 'shader-language-error
+               :form source-form :reason :invalid-projective-map-semantics))
+      (make-instance
+       'shader-projective-map-definition
+       :name name
+       :source-form source-form
+       :domain-type domain-type
+       :domain-quantity-specification domain
+       :codomain-type codomain-type
+       :codomain-quantity-layout codomain
+       :coordinate-scale coordinate-scale
+       :coordinate-offset coordinate-offset))))
+
+(defmacro define-projective-shader-map
+    (name &key domain-type domain-quantity domain-dimension domain-unit
+               domain-affine-p codomain-type codomain-components
+               coordinate-scale coordinate-offset)
+  "Define an inspectable projective map behind an EQL-specialized protocol."
+  (let ((storage
+          (intern (format nil "*~A-SHADER-MAP*" (symbol-name name))
+                  *package*))
+        (source
+          `(define-projective-shader-map ,name
+             :domain-type ,domain-type
+             :domain-quantity ,domain-quantity
+             :domain-dimension ,domain-dimension
+             :domain-unit ,domain-unit
+             :domain-affine-p ,domain-affine-p
+             :codomain-type ,codomain-type
+             :codomain-components ,codomain-components
+             :coordinate-scale ,coordinate-scale
+             :coordinate-offset ,coordinate-offset)))
+    `(progn
+       (defparameter ,storage
+         (make-projective-shader-map-definition
+          ',name
+          :domain-type ',domain-type
+          :domain-quantity ',domain-quantity
+          :domain-dimension ',domain-dimension
+          :domain-unit ',domain-unit
+          :domain-affine-p ',domain-affine-p
+          :codomain-type ',codomain-type
+          :codomain-components ',codomain-components
+          :coordinate-scale ',coordinate-scale
+          :coordinate-offset ',coordinate-offset
+          :source-form ',source))
+       (defmethod shader-map-definition-for ((map-name (eql ',name)))
+         (declare (ignore map-name))
+         ,storage)
+       ',name)))
+
+(defmethod parse-shader-operator-call
+    ((operator (eql 'project-point)) form environment)
+  (declare (ignore operator))
+  (destructuring-bind (name map-name point-form &rest row-forms) form
+    (declare (ignore name))
+    (unless (symbolp map-name)
+      (error 'shader-language-error
+             :form form :reason :invalid-shader-map-name
+             :details map-name))
+    (let ((definition (shader-map-definition-for map-name)))
+      (unless definition
+        (error 'shader-language-error
+               :form form :reason :undefined-shader-map :details map-name))
+      (unless (= (length row-forms) 4)
+        (error 'shader-language-error
+               :form form :reason :projective-map-row-count
+               :details (length row-forms)))
+      (let* ((point (parse-shader-expression point-form environment))
+             (rows
+               (mapcar (lambda (row)
+                         (parse-shader-expression row environment))
+                       row-forms))
+             (point-quantity
+               (shader-expression-quantity-specification point)))
+        (unless (and (shader-type=
+                      (shader-expression-type point)
+                      (shader-map-domain-type definition))
+                     (shader-expression-quantity-checked-p point)
+                     point-quantity
+                     (math:quantity-specification=
+                      point-quantity
+                      (shader-map-domain-quantity-specification definition)))
+          (error 'shader-language-error
+                 :form form :reason :projective-map-domain-mismatch
+                 :details (shader-expression-form point)))
+        (unless (every
+                 (lambda (row)
+                   (and (shader-type= (shader-expression-type row) :vec4)
+                        (not (shader-expression-quantity-checked-p row))))
+                 rows)
+          (error 'shader-language-error
+                 :form form :reason :invalid-projective-map-rows
+                 :details (mapcar #'shader-expression-form rows)))
+        (make-instance
+         'shader-map-application
+         :definition definition
+         :point point
+         :rows rows
+         :type (shader-map-codomain-type definition)
+         :quantity-layout (shader-map-codomain-quantity-layout definition)
+         :source-form form)))))
 
 (defmethod parse-shader-operator-call
     ((operator (eql 'interpret)) form environment)
@@ -1824,6 +2034,8 @@ A newer concurrent notification remains pending."
                           :accessor context-constant-instructions)
    (expression-values :initform (make-hash-table :test #'eq)
                       :accessor context-expression-values)
+   (map-component-values :initform (make-hash-table :test #'eq)
+                         :accessor context-map-component-values)
    (expression-instructions :initform (make-hash-table :test #'eq)
                             :reader context-expression-instructions)
    (instruction-expressions :initform (make-hash-table :test #'eq)
@@ -2125,6 +2337,11 @@ Modules whose expressions use no extended mathematics never acquire one."
   (shader-operator-result-name (shader-call-operator expression)))
 
 (defmethod shader-expression-provenance-name
+    ((expression shader-map-application))
+  (declare (ignore expression))
+  'projected-point)
+
+(defmethod shader-expression-provenance-name
     ((expression shader-interpretation))
   (declare (ignore expression))
   'interpretation)
@@ -2361,21 +2578,123 @@ Modules whose expressions use no extended mathematics never acquire one."
    (mapcar (lambda (operand) (lower-shader-expression context operand))
            (shader-call-operands expression))))
 
+(defgeneric shader-map-application-for-projection (expression)
+  (:documentation
+   "Return the virtual map application denoted by EXPRESSION, or NIL."))
+
+(defmethod shader-map-application-for-projection (expression)
+  (declare (ignore expression))
+  nil)
+
+(defmethod shader-map-application-for-projection
+    ((expression shader-map-application))
+  expression)
+
+(defgeneric shader-map-application-from-target (target)
+  (:documentation
+   "Return a virtual map application carried by reference TARGET, or NIL."))
+
+(defmethod shader-map-application-from-target (target)
+  (declare (ignore target))
+  nil)
+
+(defmethod shader-map-application-from-target ((target shader-binding))
+  (shader-map-application-for-projection
+   (shader-binding-expression target)))
+
+(defmethod shader-map-application-for-projection
+    ((expression shader-reference))
+  (shader-map-application-from-target
+   (shader-reference-target expression)))
+
+(defgeneric lower-shader-map-component-values
+    (definition context application)
+  (:documentation
+   "Lower APPLICATION once and return its represented codomain components."))
+
+(defmethod lower-shader-map-component-values
+    ((definition shader-projective-map-definition) context application)
+  (or (gethash application (context-map-component-values context))
+      (let* ((point (shader-map-application-point application))
+             (point-value (lower-shader-expression context point))
+             (float-type (find-shader-type :float))
+             (homogeneous
+               (emit-value-instruction
+                context application :vec4 'composite-construct
+                (list point-value (ensure-shader-constant context 1.0))))
+             (clip
+               (mapcar
+                (lambda (row)
+                  (emit-value-instruction
+                   context application :float 'dot
+                   (list (lower-shader-expression context row) homogeneous)))
+                (shader-map-application-rows application)))
+             (w (fourth clip))
+             (normalized
+               (loop for component in (subseq clip 0 3)
+                     collect
+                     (emit-binary-arithmetic
+                      context application '/ :float
+                      component float-type w float-type)))
+             (result
+               (loop for component in normalized
+                     for scale in
+                       (shader-projective-map-coordinate-scale definition)
+                     for offset in
+                       (shader-projective-map-coordinate-offset definition)
+                     collect
+                     (let ((scaled
+                             (if (= scale 1)
+                                 component
+                                 (emit-binary-arithmetic
+                                  context application '* :float
+                                  component float-type
+                                  (ensure-shader-constant context scale)
+                                  float-type))))
+                       (if (zerop offset)
+                           scaled
+                           (emit-binary-arithmetic
+                            context application '+ :float
+                            scaled float-type
+                            (ensure-shader-constant context offset)
+                            float-type))))))
+        (setf (gethash application (context-map-component-values context))
+              result))))
+
+(defun lower-shader-map-projection
+    (context expression application indices)
+  (let ((components
+          (lower-shader-map-component-values
+           (shader-map-application-definition application)
+           context application)))
+    (alias-shader-expression context expression application)
+    (if (= (length indices) 1)
+        (nth (first indices) components)
+        (emit-value-instruction
+         context expression (shader-expression-type expression)
+         'composite-construct
+         (mapcar (lambda (index) (nth index components)) indices)))))
+
 (defmethod lower-shader-call ((operator (eql 'swizzle)) context expression)
   (let* ((operand (first (shader-call-operands expression)))
-         (value (lower-shader-expression context operand))
          (indices (swizzle-components
                    (first (shader-call-parameters expression))
-                   (shader-expression-source-form expression))))
-    (if (= (length indices) 1)
-        (emit-value-instruction context expression
-                                (shader-expression-type expression)
-                                'composite-extract
-                                (list value (first indices)))
-        (emit-value-instruction context expression
-                                (shader-expression-type expression)
-                                'vector-shuffle
-                                (list* value value indices)))))
+                   (shader-expression-source-form expression)))
+         (map-application
+           (shader-map-application-for-projection operand)))
+    (if map-application
+        (lower-shader-map-projection
+         context expression map-application indices)
+        (let ((value (lower-shader-expression context operand)))
+          (if (= (length indices) 1)
+              (emit-value-instruction context expression
+                                      (shader-expression-type expression)
+                                      'composite-extract
+                                      (list value (first indices)))
+              (emit-value-instruction context expression
+                                      (shader-expression-type expression)
+                                      'vector-shuffle
+                                      (list* value value indices)))))))
 
 (defun lower-vector-constructor (context expression)
   (emit-value-instruction
@@ -2478,6 +2797,13 @@ Modules whose expressions use no extended mathematics never acquire one."
   (lower-shader-call (shader-call-operator expression) context expression))
 
 (defmethod lower-shader-expression-value
+    (context (expression shader-map-application))
+  (declare (ignore context))
+  (error 'shader-language-error
+         :form (shader-expression-source-form expression)
+         :reason :projective-map-result-requires-projection))
+
+(defmethod lower-shader-expression-value
     (context (expression shader-quantity-boundary))
   (let* ((operand (shader-quantity-boundary-operand expression))
          (value (lower-shader-expression context operand)))
@@ -2528,7 +2854,9 @@ Modules whose expressions use no extended mathematics never acquire one."
     ;; binding computations in source order so the resulting basic block reads
     ;; alongside the specification and retains ordinary Lisp evaluation order.
     (dolist (binding (shader-specification-bindings specification))
-      (lower-shader-expression context (shader-binding-expression binding)))
+      (let ((expression (shader-binding-expression binding)))
+        (when (shader-expression-materialized-p expression)
+          (lower-shader-expression context expression))))
     (dolist (statement (shader-specification-statements specification))
       (let* ((value-expression (shader-assignment-value statement))
              (value (lower-shader-expression context value-expression))
