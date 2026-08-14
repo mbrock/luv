@@ -33,8 +33,8 @@ commits/files are the worked examples.
 - **CASE on the name slot of an instance.** `block-face-local-uv` cased on
   `(block-face-name face)` — dispatching on a *label* of an object instead of
   the object's own data. The projection now derives from the face's normal,
-  beside the class (`luvcraft/blocks.lisp`). A name slot is for printing,
-  never for dispatch.
+  beside the class (`luvcraft/blocks.lisp`). Do not dispatch indirectly on an
+  object's label when its class or domain data already expresses the choice.
 - **Parallel CASE tables that grow together.** Adding a shader operator once
   meant editing the parser's cond, the type-inference case, the lowering
   case, the provenance case, and the shader lab's label case. That shotgun
@@ -52,10 +52,31 @@ thread → render thread), give it a generic on each side:
 validates and installs. New product kinds plug in without touching the
 transport loop.
 
-**Default methods encode the safe fallback.** A source without residency
-methods keeps caller-owned chunks; an unknown load request returns NIL and
-the chunk simply stays desired. Design the `(specializer T)` method first —
-it states what the protocol means when nobody customizes it.
+**Default methods encode a genuinely safe fallback.** A source without
+residency methods keeps caller-owned chunks; an unknown load request returns
+NIL and the chunk simply stays desired. Define a `(specializer T)` method only
+when that behavior is semantically valid for every uncustomized participant.
+If the operation is unsupported or a missing extension is a bug, leave the
+generic without a default or signal an explicit condition; silent degradation
+would erase useful evidence.
+
+**Choose the representation deliberately.** The same small vocabulary can
+plausibly be represented four ways; choose according to what gives it meaning:
+
+- Use `CASE` for a closed, usually externally owned enumeration.
+- Use EQL-specialized symbols when the interned name is the durable identity
+  and several independent protocols contribute behavior for that name.
+- Use instances when entries carry runtime data, configuration, or identity
+  that users should inspect and change.
+- Use classes when entries form behavioral families and inheritance is part of
+  the domain model.
+
+**Dispatch on the relationship.** If an operation depends symmetrically on
+several semantic participants, specialize all of them instead of making one
+participant interrogate the others. `block-face-tile` belongs to both a block
+kind and a face; `invoke` belongs to both an invoker and a reified invocation.
+This is the ordinary CLOS alternative to visitors, double-dispatch scaffolding,
+and policy switches hidden inside one privileged object.
 
 **EQL methods on symbols — the compiler pattern.** The shader language's
 operators are ordinary symbols (`cl:+` where CL has the word, `spv:dot`
@@ -88,11 +109,38 @@ are CLOS instances carrying their data (face tiles, corners, normals).
 Behavior reads the object's data or dispatches on its class; it never cases
 on which instance it is.
 
+**Method combination for orthogonal policy.** `:before`, `:after`, and
+`:around` methods are useful when a concern composes independently with the
+primary operation: Cocoa host activation surrounds the shared canvas protocol,
+and `tracing-invoker` records any `invoke` implementation. Keep the essential
+control sequence in primary methods. An `:around` method either calls
+`call-next-method` or makes its deliberate replacement semantics obvious;
+auxiliary methods should not turn ordinary lifecycle code into archaeology.
+
+**Metaclasses when definitions are domain objects.** Use the MOP when the
+class definition itself carries meaning, not merely to manufacture a hidden
+registry. `invocation-class` stores an entry point's argument specification on
+its class metaobject; `instruction-class` stores SPIR-V opcode, operand, and
+result conventions. Keep the resulting instances and generic protocols
+ordinary, and keep the metaclass surface as narrow as the definition metadata
+requires.
+
 **Thin definer macros.** `define-shader-operator`, `define-shader-method`
 are definition sites (M-. finds them, re-evaluation replaces cleanly) that
 expand to plain defmethods and documentation. The macro is ergonomics; the
 protocol is the generics. Never hide a registry inside a macro that methods
 couldn't also reach.
+
+**Live definitions are runtime state.** Preserve ordinary `DEFMETHOD` identity
+so re-evaluating the same qualifier and specializer coordinate replaces the
+existing definition. When runtime artifacts depend on methods, MOP callbacks
+should only record and coalesce a revision; never compile shaders, touch the
+GPU, or call back into the mutating generic function while its definition is
+being changed. Rebuild outside the generic-function lock, install the complete
+candidate transactionally at the owning frame boundary, retain the
+last-known-good artifact on failure, and explicitly unsubscribe dependents
+when their owner is released (`shader-expression.lisp`,
+`examples/block-world.lisp`).
 
 ## When CASE is right — do not CLOSify these
 
@@ -136,9 +184,10 @@ means "every micro entity becomes a heap-allocated instance":
   suspicious in review. Domain-shaped code borrows the dense storage once
   via `with-block-content-storage` instead.
 - Per-call dispatch cost is a boundary question, not a prohibition: a
-  generic replacing an equal-cost ETYPECASE in the same spot (as
-  `sample-block-at` did) changes nothing; introducing dispatch *per element
-  of a dense loop* where none existed deserves a second look.
+  generic replacing an ETYPECASE in the same spot (as `sample-block-at` did)
+  does not move the decision into a hotter-grained loop; introducing dispatch
+  *per element of a dense loop* where none existed deserves a second look and
+  a measurement.
 
 ## Proving a dispatch refactor
 
@@ -147,9 +196,15 @@ full suite and compare the deterministic smoke render byte-for-byte —
 
 ```sh
 make test
-./build/luvcraft --smoke-test build/luvcraft-smoke.png && md5 -q build/luvcraft-smoke.png
+make smoke
+md5 -q build/luvcraft-smoke.png
 ```
 
 Four successive CLOS refactors (mesher sampling, production publication,
 world-source protocol, shader operators) each kept the render hash
-identical. That is the standard to hold new ones to.
+identical. That is the standard to hold new ones to. When the claimed benefit
+is live redefinition, a cold test process is not sufficient: use `./sly` to
+re-evaluate the same definition coordinate and verify that the running owner
+observes the replacement. For transactional definitions, also verify that an
+invalid edit preserves the last-known-good artifact and that a subsequent
+valid edit recovers automatically.
