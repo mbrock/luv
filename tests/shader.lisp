@@ -354,15 +354,17 @@
             '(:stage :fragment
               :inputs ((uv :vec2 :location 0)
                        (receiver-depth :float :location 1)
-                       (texel-size :vec2 :location 2)
-                       (bias :float :location 3)
-                       (radius :float :location 4))
+                       (receiver-depth-gradient :vec2 :location 2)
+                       (texel-size :vec2 :location 3)
+                       (bias :float :location 4)
+                       (radius :float :location 5))
               :outputs ((visibility :float :location 0))
               :resources ((shadow-map :depth-texture-2d :binding 0)
                           (shadow-sampler :sampler :binding 1)))
             '((let* ((visible (spv:shadow-visibility
                                shadow-map shadow-sampler uv
-                               receiver-depth texel-size bias radius)))
+                               receiver-depth receiver-depth-gradient
+                               texel-size bias radius)))
                 (set-output visibility visible)))))
          (visible (binding-named 'visible specification))
          (expression (spv:shader-binding-expression visible))
@@ -375,6 +377,7 @@
     (ok (typep expression 'spv:shader-call))
     (ok (eq (spv:shader-call-operator expression) '/))
     (ok (= 17 (count "IMAGE-SAMPLE-DREF-IMPLICIT-LOD" names :test #'string=)))
+    (ok (= 17 (count "DOT" names :test #'string=)))
     (ok (> (length (spv:assemble-shader-specification specification)) 5))))
 
 (deftest shader-abstraction-redefinition-affects-fresh-parses

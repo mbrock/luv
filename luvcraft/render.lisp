@@ -130,8 +130,11 @@ check in BLOCK-WORLD-CAMERA-UNIFORM-SIZE keeps the two honest."
                               (list 0.0)))
         (apply #'emit (append (color (sky-frame-parameters-ambient-color sky))
                               (list (sky-frame-parameters-exposure sky))))
-        (apply #'emit (append (color (sky-frame-parameters-fog-color sky))
-                              (list 0.0)))
+        (apply #'emit
+               (append (color (sky-frame-parameters-fog-color sky))
+                       (list (if (luvcraft-session-shadow-diagnostic-p session)
+                                 1.0
+                                 0.0))))
         (emit (/ +luvcraft-shadow-map-size+)
               (/ +luvcraft-shadow-map-size+)
               +luvcraft-shadow-base-bias+
@@ -423,6 +426,7 @@ the frame uniform cannot silently diverge between shader and host."
                                 player
                                 (sky-clock (make-instance 'sky-clock))
                                 (sky-profile (make-default-sky-profile))
+                                (shadow-diagnostic-p nil)
                                 (residency-radius 4)
                                 (publication-limit 2)
                                 (load-schedule-limit 4)
@@ -696,6 +700,7 @@ capture-only demand clock."
                      :player player
                      :lighting-state lighting-state
                      :sky-clock sky-clock :sky-profile sky-profile
+                     :shadow-diagnostic-p shadow-diagnostic-p
                      :residency-radius residency-radius
                      :publication-limit publication-limit
                      :load-schedule-limit load-schedule-limit

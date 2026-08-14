@@ -942,12 +942,78 @@ Evidence:
 - Strict Parinfer, =make test= (including 17 comparison-sampled disk taps),
   fragment SPIR-V validation, the 60-frame runtime capture, and =make smoke=
   pass.
+- Immediate play after this checkpoint still showed substantial constant
+  flicker.  That falsifies any stronger perceptual reading of the final-colour
+  averages above: this work established comparison filtering and temporal
+  capture substrate, not a complete shimmer fix.  #X9Q2YS isolates the
+  shadow term and identifies the missed failure.
 
 Done when: gazetteer capture can emit first and second temporal derivatives
 plus numerical summaries; a 60-Hz-equivalent fixed-camera sun sequence makes
 the shimmer measurable; the chosen sampling change reduces derivative chatter
 without detaching contact shadows; and tests, SPIR-V validation, smoke, and the
 wiki distinguish spatial comparison filtering from full temporal AA.
+
+** DONE Receiver-plane shadow evidence and self-shadow stability
+:PROPERTIES:
+:ID: X9Q2YS
+:END:
+
+Intent: explain and remove the constant frame-by-frame flicker which survived
+#GKEHPF, and make temporal capture observe the shadow decision directly rather
+than infer it from final colour.
+
+Evidence:
+
+- =--shadow-only 1= uses the otherwise-unused fog-colour W lane to replace
+  block material output with =direct-shadow=.  It preserves the exact runtime
+  shadow map, projection, sampler, kernel, and sun sequence while removing
+  albedo, ambient colour, fog, and most final 8-bit colour quantization as
+  confounds.
+- The diagnostic made the missed phenomenon unmistakable: supposedly lit
+  horizontal faces were covered by fine alternating light/dark stripes.  As
+  the sun rotated, this self-shadow acne crawled across the whole receiver.
+  The original final-colour mean hid a spatially coherent alternating-sign
+  pattern inside a small image-wide scalar; raw shadow visibility showed about
+  19 to 20 percent of block-surface pixels changing per display-equivalent
+  frame.
+- A fixed five-texel radius falsified the single-nearest-blocker hypothesis as
+  the principal cause: both first and second temporal derivative measures grew.
+  The adaptive two-to-six-texel footprint remains.
+- A pure 120-frame transform probe found the light-space center's one-texel
+  stabilization steps at frames 31 and 78, while the strongest raw-shadow
+  first-derivative events occurred at frames 70, 89, and 80.  Texel snapping
+  can still make an occasional grid event, but it does not explain the
+  field-wide constant pattern in this reproduction.
+- Every old PCF tap compared its displaced depth texel to the center
+  fragment's receiver depth.  On a face oblique to the light, the receiver's
+  own depth changes substantially across a two-to-six-texel kernel; the test
+  therefore misclassified the receiver plane itself as a sequence of
+  occluders.  A larger scalar slope bias can hide this only by increasing
+  peter-panning and detached contacts.
+- The block fragment shader now derives an analytical receiver-plane depth
+  gradient from the face normal, normalized light-space right/up/forward rows,
+  and the orthographic world-span/depth-span ratio.  The denominator is bounded
+  near grazing incidence, where direct sun is negligible.  Each of the 17
+  comparison taps adjusts its reference depth by the dot product of that
+  gradient and its UV offset before applying the small ordinary bias.
+- In otherwise identical 120-frame, fixed-camera, 60-Hz-equivalent sunset
+  captures, raw-shadow mean first derivative fell from 0.00188675 to
+  0.00073287 (61.2 percent), and peak changed area fell from 0.20165 to 0.07720
+  (61.7 percent).  Mean second derivative fell from 0.00279323 to 0.00096447
+  (65.5 percent).  The diagnostic plates change from field-wide stripes to
+  activity concentrated at actual cast-shadow boundaries.
+- In the ordinary rendered first 59 comparisons, mean first derivative fell
+  from 0.00009798 to 0.00001835 (81.3 percent), peak changed area from 0.01829
+  to 0.00565 (69.1 percent), and mean second derivative from 0.00023217 to
+  0.00005004 (78.4 percent).  The analytic yard retains attached pillar
+  contact and the same coherent penumbra.
+
+Done when: a capture mode exposes shadow visibility without material and sky
+confounds; the broad crawling receiver pattern is visible before and absent
+after an explained geometric correction; normal and shadow-only derivatives
+both improve substantially; contact remains attached; and tests, SPIR-V
+validation, runtime capture, and smoke pass.
 
 ** IDEA HDR crystal bloom
 :PROPERTIES:

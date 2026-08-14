@@ -213,7 +213,8 @@
 
 (defun capture-luvcraft-gazetteer-sequence
     (view directory &key (count 4) (forward-step 0.2) (yaw-step 0.0)
-                         day-start (day-step 0.0) difference-scale width height)
+                         day-start (day-step 0.0) difference-scale
+                         shadow-diagnostic-p width height)
   "Capture one gazetteer VIEW as a consecutive spatial or temporal sequence."
   (let* ((view (if (typep view 'luvcraft-gazetteer-view)
                    view
@@ -229,6 +230,7 @@
      :count count :forward-step forward-step :yaw-step yaw-step
      :day-start day-start :day-step day-step
      :difference-scale difference-scale
+     :shadow-diagnostic-p shadow-diagnostic-p
      :pathname-prefix
      (string-downcase (symbol-name (luvcraft-gazetteer-view-name view)))
      :title (luvcraft-gazetteer-view-title view)

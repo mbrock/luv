@@ -702,16 +702,20 @@ shader source form made from core operators or other abstractions."
                    (- ,receiver-depth ,bias)))
 
 (define-shader-abstraction shadow-visibility
-    (depth-texture sampler coordinate receiver-depth texel-size bias radius)
-  "Weighted disk PCF with a caller-selected radius measured in texels."
+    (depth-texture sampler coordinate receiver-depth receiver-depth-gradient
+     texel-size bias radius)
+  "Weighted disk PCF with receiver-plane depth correction at every tap."
   (flet ((tap (x y weight)
-           `(* ,weight
-               (shadow-depth-test
-                ,depth-texture ,sampler
-                (+ ,coordinate
-                   (* ,texel-size
-                      (vec2 (* ,radius ,x) (* ,radius ,y))))
-                ,receiver-depth ,bias))))
+           (let ((offset
+                   `(* ,texel-size
+                       (vec2 (* ,radius ,x) (* ,radius ,y)))))
+             `(* ,weight
+                 (shadow-depth-test
+                  ,depth-texture ,sampler
+                  (+ ,coordinate ,offset)
+                  (+ ,receiver-depth
+                     (dot ,receiver-depth-gradient ,offset))
+                  ,bias)))))
     `(/ (+
          ,(tap 0.0 0.0 4.0)
          ;; An inner, heavier ring gives the footprint a Gaussian-like core.

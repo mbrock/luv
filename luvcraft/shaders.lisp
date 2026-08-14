@@ -23,7 +23,7 @@
       (zenith-vector :vec4)     ; zenith colour, w unused
       (horizon-vector :vec4)    ; horizon colour, w unused
       (ambient-vector :vec4)    ; ambient colour, exposure
-      (fog-color-vector :vec4)  ; fog colour, w unused
+      (fog-color-vector :vec4)  ; fog colour, w shadow diagnostic selector
       (shadow-control-vector :vec4) ; texel u/v, base bias, slope bias
       (shadow-filter-vector :vec4) ; depth span, world/texel, min/max radius
       (shadow-row-x :vec4)      ; light-space clip x from world position
@@ -147,14 +147,35 @@
          (shadow-slope-bias (swizzle shadow-control-vector :w))
          (shadow-bias
            (+ shadow-base-bias (* shadow-slope-bias (- 1.0 n-dot-l))))
+         ;; A PCF tap displaced across a receiver plane must compare against
+         ;; that plane's depth at the tap, not the center fragment depth.
+         ;; With the orthographic shadow rows, the analytical UV depth gradient
+         ;; is the face normal expressed in the light basis and scaled by the
+         ;; world-span/depth-span ratio.  Its denominator is bounded only near
+         ;; grazing incidence, where direct sun is negligible.  This prevents
+         ;; wide kernels from reading the receiver's own slope as an occluder.
+         (shadow-right (normalize (swizzle shadow-row-x :xyz)))
+         (shadow-up (normalize (swizzle shadow-row-y :xyz)))
+         (shadow-forward (normalize (swizzle shadow-row-z :xyz)))
+         (shadow-normal-forward
+           (min -0.05 (dot normal shadow-forward)))
+         (shadow-depth-span (swizzle shadow-filter-vector :x))
+         (shadow-world-units-per-texel (swizzle shadow-filter-vector :y))
+         (shadow-world-span
+           (/ shadow-world-units-per-texel (swizzle shadow-texel-size :x)))
+         (shadow-span-ratio (/ shadow-world-span shadow-depth-span))
+         (shadow-depth-gradient
+           (vec2
+            (- (* (/ (dot normal shadow-right) shadow-normal-forward)
+                  shadow-span-ratio))
+            (- (* (/ (dot normal shadow-up) shadow-normal-forward)
+                  shadow-span-ratio))))
          (shadow-center-depth
            (swizzle
             (sample shadow-map shadow-sampler shadow-uv-input) :x))
          (shadow-blocker-separation
            (max 0.0 (- (- shadow-depth-input shadow-bias)
                        shadow-center-depth)))
-         (shadow-depth-span (swizzle shadow-filter-vector :x))
-         (shadow-world-units-per-texel (swizzle shadow-filter-vector :y))
          (shadow-minimum-radius (swizzle shadow-filter-vector :z))
          (shadow-maximum-radius (swizzle shadow-filter-vector :w))
          (sun-angular-width (swizzle sun-color-vector :w))
@@ -170,7 +191,7 @@
          (shadow-sample
            (shadow-visibility
             shadow-map shadow-comparison-sampler
-            shadow-uv-input shadow-depth-input
+            shadow-uv-input shadow-depth-input shadow-depth-gradient
             shadow-texel-size shadow-bias shadow-filter-radius))
          (direct-shadow (mix 1.0 shadow-sample shadow-in-bounds))
          ;; The mesh carries normalized raw light readings; every response
@@ -199,7 +220,11 @@
          (radiance (+ reflected (* albedo emission-input)))
          (fog-color (swizzle fog-color-vector :xyz))
          (fogged (mix radiance fog-color fog-input))
-         (rgba (vec4 fogged 1.0)))
+         (normal-rgba (vec4 fogged 1.0))
+         (shadow-diagnostic (swizzle fog-color-vector :w))
+         (shadow-rgba
+           (vec4 (vec3 direct-shadow direct-shadow direct-shadow) 1.0))
+         (rgba (mix normal-rgba shadow-rgba shadow-diagnostic)))
     (set-output color-output rgba)))
 
 (defun block-world-fragment-specification ()

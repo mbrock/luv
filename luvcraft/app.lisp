@@ -43,6 +43,8 @@
               :accessor luvcraft-session-sky-clock)
    (sky-profile :initarg :sky-profile :initform (make-default-sky-profile)
                 :accessor luvcraft-session-sky-profile)
+   (shadow-diagnostic-p :initarg :shadow-diagnostic-p :initform nil
+                        :reader luvcraft-session-shadow-diagnostic-p)
    (player :initarg :player :initform nil :reader luvcraft-session-player)
    (residency-radius :initarg :residency-radius :initform 4
                      :reader luvcraft-session-residency-radius)

@@ -175,6 +175,7 @@ pass an unpinned clock to photograph another time of day."
                  day-start
                  (day-step 0.0)
                  difference-scale
+                 (shadow-diagnostic-p nil)
                  (pathname-prefix "block-world")
                  (world (make-empty-little-block-world))
                  (mesher (make-instance 'exposed-face-mesher))
@@ -189,6 +190,8 @@ YAW-STEP, moves FORWARD-STEP world units along its initial heading, and moves
 the evaluated sky by DAY-STEP day fractions.  DAY-START can replace the
 clock's initial time.  When DIFFERENCE-SCALE is non-NIL, also write amplified
 first and second frame derivatives plus a CSV of unscaled normalized metrics.
+SHADOW-DIAGNOSTIC-P replaces block materials with direct-shadow visibility so
+the derivatives are not confounded by albedo, sky colour, or fog changes.
 This is a consecutive-view capture, not a set of independently restarted
 scenes."
   (check-type count (integer 1))
@@ -218,7 +221,8 @@ scenes."
                   :title title :width width :height height
                   :frames-per-second nil :visible-p nil
                   :world world :mesher mesher :camera camera
-                  :sky-clock sky-clock :sky-profile sky-profile))
+                  :sky-clock sky-clock :sky-profile sky-profile
+                  :shadow-diagnostic-p shadow-diagnostic-p))
            ;; Temporal evidence requires a fixed scene.  The ordinary capture
            ;; threshold of nine products is enough for a useful screenshot but
            ;; allowed later desired chunks to publish in the middle of a

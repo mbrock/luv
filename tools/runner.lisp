@@ -8,6 +8,7 @@
   (format stream "  gazetteer TARGET-DIR [--view NAME] [--width N] [--height N]~%")
   (format stream "             [--count N] [--forward-step R] [--yaw-step R]~%")
   (format stream "             [--day-start R] [--day-step R] [--difference-scale R]~%")
+  (format stream "             [--shadow-only 1]~%")
   (format stream "  eval FORM [--package PACKAGE]~%")
   (format stream "  help~%"))
 

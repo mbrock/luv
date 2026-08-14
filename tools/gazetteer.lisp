@@ -16,7 +16,8 @@
          ("--yaw-step" :yaw-step ,#'parse-real-option)
          ("--day-start" :day-start ,#'parse-real-option)
          ("--day-step" :day-step ,#'parse-real-option)
-         ("--difference-scale" :difference-scale ,#'parse-real-option)))
+         ("--difference-scale" :difference-scale ,#'parse-real-option)
+         ("--shadow-only" :shadow-only ,#'parse-integer-option)))
     (unless (= 1 (length positionals))
       (command-line-error "gazetteer expects exactly one TARGET directory."))
     (let ((target (pathname (first positionals)))
@@ -35,6 +36,7 @@
                    :day-start (getf options :day-start)
                    :day-step (or (getf options :day-step) 0.0)
                    :difference-scale (getf options :difference-scale)
+                   :shadow-diagnostic-p (getf options :shadow-only)
                    :width width :height height)
                   (luv:capture-luvcraft-gazetteer
                    target
