@@ -307,13 +307,128 @@ preserves which domain made a product stale."
                                :face-count face-count)))
 
 (defun destroy-luvcraft-chunk-products (session)
-  (maphash
-   (lambda (key product)
-     (declare (ignore key))
-     (destroy (luvcraft-chunk-product-vertex-buffer product)))
-   (luvcraft-session-chunk-products session))
-  (clrhash (luvcraft-session-chunk-products session))
+  (dolist (products (list (luvcraft-session-chunk-products session)
+                          (luvcraft-session-staged-chunk-products session)))
+    (maphash
+     (lambda (key product)
+       (declare (ignore key))
+       (let ((buffer (luvcraft-chunk-product-vertex-buffer product)))
+         (when buffer (destroy buffer))))
+     products)
+    (clrhash products))
   (values))
+
+(defun current-luvcraft-chunk-product-p (session key product)
+  (let* ((world (luvcraft-session-world session))
+         (chunk (apply #'world-chunk-at world key)))
+    (and chunk
+         (gethash key (luvcraft-session-desired-chunks session))
+         (equal (luvcraft-chunk-product-dependency-stamp product)
+                (chunk-mesh-dependency-stamp world chunk)))))
+
+(defun stale-luvcraft-visible-product-keys (session)
+  "Return the keys of visible products which no longer describe the world."
+  (let ((keys nil))
+    (maphash
+     (lambda (key product)
+       (when (and (gethash key (luvcraft-session-desired-chunks session))
+                  (not (current-luvcraft-chunk-product-p session key product)))
+         (push key keys)))
+     (luvcraft-session-chunk-products session))
+    keys))
+
+(defun chunk-neighbor-key (key direction)
+  (destructuring-bind (x y z) key
+    (destructuring-bind (dx dy dz) direction
+      (chunk-key (+ x dx) (+ y dy) (+ z dz)))))
+
+(defun luvcraft-stale-product-components (session)
+  "Group stale visible chunk products connected across block faces."
+  (let ((remaining (make-hash-table :test #'equal))
+        (components nil))
+    (dolist (key (stale-luvcraft-visible-product-keys session))
+      (setf (gethash key remaining) t))
+    (loop while (plusp (hash-table-count remaining))
+          for seed = (loop for key being the hash-keys of remaining
+                           do (return key))
+          do (let ((frontier (list seed))
+                   (component nil))
+               (remhash seed remaining)
+               (loop while frontier
+                     for key = (pop frontier)
+                     do (push key component)
+                        (dolist (direction *chunk-neighbor-directions*)
+                          (let ((neighbor
+                                  (chunk-neighbor-key key direction)))
+                            (when (gethash neighbor remaining)
+                              (remhash neighbor remaining)
+                              (push neighbor frontier)))))
+               (push component components)))
+    components))
+
+(defun ready-luvcraft-mesh-publication-groups (session)
+  "Return staged mesh groups which may replace visible products together.
+
+A block edit can invalidate its own chunk and each face-neighbor whose mesh
+observed the edited boundary.  Connected stale visible products therefore
+form one publication cohort: the old cohort remains drawable until every
+current replacement is staged.  A chunk with no visible predecessor may be
+published independently."
+  (let* ((staged (luvcraft-session-staged-chunk-products session))
+         (stale-components (luvcraft-stale-product-components session))
+         (stale-keys (make-hash-table :test #'equal))
+         (groups nil))
+    (dolist (component stale-components)
+      (dolist (key component)
+        (setf (gethash key stale-keys) t))
+      (when (every (lambda (key)
+                     (let ((product (gethash key staged)))
+                       (and product
+                            (current-luvcraft-chunk-product-p
+                             session key product))))
+                   component)
+        (push component groups)))
+    (maphash
+     (lambda (key product)
+       (when (and (not (gethash key stale-keys))
+                  (current-luvcraft-chunk-product-p session key product))
+         (push (list key) groups)))
+     staged)
+    groups))
+
+(defun discard-stale-luvcraft-staged-products (session)
+  (let ((discarded nil)
+        (staged (luvcraft-session-staged-chunk-products session)))
+    (maphash
+     (lambda (key product)
+       (unless (current-luvcraft-chunk-product-p session key product)
+         (let ((buffer (luvcraft-chunk-product-vertex-buffer product)))
+           (when buffer (destroy buffer)))
+         (push key discarded)))
+     staged)
+    (dolist (key discarded) (remhash key staged))
+    (length discarded)))
+
+(defun publish-ready-luvcraft-meshes (session)
+  "Atomically replace every complete stale mesh cohort at a frame boundary."
+  (let ((published 0)
+        (retired nil)
+        (products (luvcraft-session-chunk-products session))
+        (staged (luvcraft-session-staged-chunk-products session)))
+    (dolist (group (ready-luvcraft-mesh-publication-groups session))
+      ;; No rendering can interleave with these owner-thread hash updates.
+      ;; Install the complete cohort before retiring any of its predecessors.
+      (dolist (key group)
+        (let ((candidate (gethash key staged))
+              (old (gethash key products)))
+          (setf (gethash key products) candidate)
+          (remhash key staged)
+          (when old (push old retired))
+          (incf published))))
+    (dolist (product retired)
+      (let ((buffer (luvcraft-chunk-product-vertex-buffer product)))
+        (when buffer (destroy buffer))))
+    published))
 
 (defun chunk-key-distance-squared (key center)
   (+ (expt (- (first key) (first center)) 2)
@@ -363,6 +478,7 @@ preserves which domain made a product stale."
   "Capture at most the configured number of immutable mesh inputs this frame."
   (let* ((world (luvcraft-session-world session))
          (products (luvcraft-session-chunk-products session))
+         (staged (luvcraft-session-staged-chunk-products session))
          (outstanding (luvcraft-session-outstanding-production session))
          (center (luvcraft-session-residency-center session))
          (candidates nil))
@@ -370,13 +486,14 @@ preserves which domain made a product stale."
       (let* ((key (block-chunk-key chunk))
              (production-key (list :mesh key))
              (stamp (chunk-mesh-dependency-stamp world chunk))
-             (old (gethash key products)))
+             (old (gethash key products))
+             (candidate (gethash key staged)))
         (when (and (gethash key (luvcraft-session-desired-chunks session))
                    (not (gethash production-key outstanding))
-                   (not (and old
+                   (not (and (or candidate old)
                              (equal stamp
                                     (luvcraft-chunk-product-dependency-stamp
-                                     old)))))
+                                     (or candidate old))))))
           (push (list (chunk-key-distance-squared key center)
                       chunk key production-key stamp)
                 candidates))))
@@ -402,12 +519,14 @@ preserves which domain made a product stale."
 
 (defgeneric publish-production-result (session request value)
   (:documentation
-   "Validate and install one worker product on the render/GPU owning thread.
+   "Validate and accept one worker product on the render/GPU owning thread.
 
 This is the owner-side mirror of PERFORM-PRODUCTION-REQUEST: each request
 class carries its own publication rule, so a new kind of asynchronous product
 plugs in with one method on each generic rather than an edit to the drain
-loop.  A stale product simply fails its own validation here."))
+loop.  A stale product simply fails its own validation here.  Product kinds
+whose visible dependencies span several chunks may stage a complete candidate
+here and install its publication cohort later at the frame boundary."))
 
 (defmethod publish-production-result
     ((session luvcraft-session) (request block-mesh-production-request) mesh)
@@ -420,7 +539,8 @@ loop.  A stale product simply fails its own validation here."))
                (equal (block-mesh-snapshot-dependency-stamp snapshot)
                       (chunk-mesh-dependency-stamp world chunk)))
       (let ((buffer nil) (completed-p nil)
-            (old (gethash key (luvcraft-session-chunk-products session))))
+            (old (gethash key
+                          (luvcraft-session-staged-chunk-products session))))
         (unwind-protect
              (progn
                (setf buffer
@@ -431,7 +551,8 @@ loop.  A stale product simply fails its own validation here."))
                        :size (max 4 (* 4 (length (block-mesh-vertices mesh))))
                        :usage '(:vertex))))
                (write-buffer buffer (block-mesh-vertices mesh))
-               (setf (gethash key (luvcraft-session-chunk-products session))
+               (setf (gethash key
+                              (luvcraft-session-staged-chunk-products session))
                      (make-instance
                       'luvcraft-chunk-product
                       :coordinate
@@ -441,7 +562,9 @@ loop.  A stale product simply fails its own validation here."))
                       :mesh mesh :vertex-buffer buffer)
                      completed-p t)
                (when old
-                 (destroy (luvcraft-chunk-product-vertex-buffer old))))
+                 (let ((old-buffer
+                         (luvcraft-chunk-product-vertex-buffer old)))
+                   (when old-buffer (destroy old-buffer)))))
           (unless completed-p
             (when buffer (destroy buffer))))))))
 
@@ -480,13 +603,18 @@ loop.  A stale product simply fails its own validation here."))
 (defun evict-luvcraft-products (session)
   (let ((evicted nil)
         (desired (luvcraft-session-desired-chunks session))
-        (products (luvcraft-session-chunk-products session)))
-    (maphash (lambda (key product)
-               (unless (gethash key desired)
-                 (destroy (luvcraft-chunk-product-vertex-buffer product))
-                 (push key evicted)))
-             products)
-    (dolist (key evicted) (remhash key products))))
+        (product-tables
+          (list (luvcraft-session-chunk-products session)
+                (luvcraft-session-staged-chunk-products session))))
+    (dolist (products product-tables)
+      (setf evicted nil)
+      (maphash (lambda (key product)
+                 (unless (gethash key desired)
+                   (let ((buffer (luvcraft-chunk-product-vertex-buffer product)))
+                     (when buffer (destroy buffer)))
+                   (push key evicted)))
+               products)
+      (dolist (key evicted) (remhash key products)))))
 
 (defun refresh-luvcraft-mesh (session)
   "Advance asynchronous loading/meshing without doing either computation here."
@@ -497,6 +625,11 @@ loop.  A stale product simply fails its own validation here."))
   (let ((lighting (luvcraft-session-lighting-state session)))
     (when lighting
       (reconcile-lighting lighting)))
+  ;; A result captured before this frame's lighting publication may already
+  ;; be stale.  Reject it before deciding whether a complete mesh cohort can
+  ;; cross the frame boundary.
+  (discard-stale-luvcraft-staged-products session)
+  (publish-ready-luvcraft-meshes session)
   (schedule-luvcraft-meshes session)
   (setf (luvcraft-session-meshed-world-revision session)
         (block-world-revision (luvcraft-session-world session)))

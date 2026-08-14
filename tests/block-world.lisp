@@ -478,6 +478,66 @@
         (ok (not (equal stamp
                         (chunk-mesh-dependency-stamp world replacement))))))))
 
+(defun test-luvcraft-chunk-product (chunk stamp)
+  (make-instance
+   'luv::luvcraft-chunk-product
+   :coordinate (chunk-domain-coordinate (block-chunk-domain chunk))
+   :dependency-stamp stamp
+   :mesh nil :vertex-buffer nil))
+
+(deftest boundary-mesh-replacements-publish-as-one-visible-cohort
+  (let* ((world (make-block-world :chunk-width 2
+                                  :chunk-height 2
+                                  :chunk-depth 2))
+         (left (ensure-world-chunk world 0 0 0))
+         (right (ensure-world-chunk world 1 0 0))
+         (session (make-instance 'luv::luvcraft-session :world world))
+         (left-key '(0 0 0))
+         (right-key '(1 0 0)))
+    (setf (gethash left-key (luv::luvcraft-session-desired-chunks session)) t
+          (gethash right-key (luv::luvcraft-session-desired-chunks session)) t
+          (world-block-at world 1 0 0) luv::*stone-block*
+          (world-block-at world 2 0 0) luv::*stone-block*)
+    (let ((old-left
+            (test-luvcraft-chunk-product
+             left (chunk-mesh-dependency-stamp world left)))
+          (old-right
+            (test-luvcraft-chunk-product
+             right (chunk-mesh-dependency-stamp world right))))
+      (setf (gethash left-key (luv::luvcraft-session-chunk-products session))
+            old-left
+            (gethash right-key (luv::luvcraft-session-chunk-products session))
+            old-right)
+      ;; Removing RIGHT's boundary block also exposes a face owned by LEFT.
+      ;; One completed replacement must leave the whole old pair visible.
+      (setf (world-block-at world 2 0 0) nil)
+      (let ((new-right
+              (test-luvcraft-chunk-product
+               right (chunk-mesh-dependency-stamp world right))))
+        (setf (gethash right-key
+                       (luv::luvcraft-session-staged-chunk-products session))
+              new-right)
+        (ok (zerop (luv::publish-ready-luvcraft-meshes session)))
+        (ok (eq old-left
+                (gethash left-key
+                         (luv::luvcraft-session-chunk-products session))))
+        (ok (eq old-right
+                (gethash right-key
+                         (luv::luvcraft-session-chunk-products session))))
+        (let ((new-left
+                (test-luvcraft-chunk-product
+                 left (chunk-mesh-dependency-stamp world left))))
+          (setf (gethash left-key
+                         (luv::luvcraft-session-staged-chunk-products session))
+                new-left)
+          (ok (= 2 (luv::publish-ready-luvcraft-meshes session)))
+          (ok (eq new-left
+                  (gethash left-key
+                           (luv::luvcraft-session-chunk-products session))))
+          (ok (eq new-right
+                  (gethash right-key
+                           (luv::luvcraft-session-chunk-products session)))))))))
+
 (deftest camera-edits-the-resident-lattice
   (let* ((world (make-block-world :chunk-width 4
                                   :chunk-height 4

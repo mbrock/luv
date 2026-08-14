@@ -32,6 +32,8 @@
                        :reader luvcraft-session-mesh-capture-limit)
    (chunk-products :initform (make-hash-table :test #'equal)
                    :reader luvcraft-session-chunk-products)
+   (staged-chunk-products :initform (make-hash-table :test #'equal)
+                          :reader luvcraft-session-staged-chunk-products)
    (meshed-world-revision
     :initarg :meshed-world-revision
     :initform -1
