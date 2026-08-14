@@ -37,6 +37,8 @@
     :initform -1
     :accessor luvcraft-session-meshed-world-revision)
    (camera :initarg :camera :reader luvcraft-session-camera)
+   (lighting-state :initarg :lighting-state :initform nil
+                   :reader luvcraft-session-lighting-state)
    (sky-clock :initarg :sky-clock :initform (make-instance 'sky-clock)
               :accessor luvcraft-session-sky-clock)
    (sky-profile :initarg :sky-profile :initform (make-default-sky-profile)

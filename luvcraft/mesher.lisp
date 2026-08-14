@@ -30,6 +30,11 @@
                    :reader block-mesh-snapshot-target-indices)
    (sample-indices :initarg :sample-indices
                    :reader block-mesh-snapshot-sample-indices)
+   ;; Published light copied for the same one-cell halo as block samples.
+   (sky-samples :initarg :sky-samples :initform nil
+                :reader block-mesh-snapshot-sky-samples)
+   (block-light-samples :initarg :block-light-samples :initform nil
+                        :reader block-mesh-snapshot-block-light-samples)
    (origin-x :initarg :origin-x :reader block-mesh-snapshot-origin-x)
    (origin-y :initarg :origin-y :reader block-mesh-snapshot-origin-y)
    (origin-z :initarg :origin-z :reader block-mesh-snapshot-origin-z)
@@ -48,15 +53,19 @@ cross the thread boundary, and the worker never observes live chunk storage."))
 (defgeneric mesh-block-snapshot (mesher snapshot))
 (defgeneric emit-block-face (mesher world vertices block face x y z))
 
-(defconstant +block-mesh-floats-per-vertex+ 9)
+(defconstant +block-mesh-floats-per-vertex+ 12)
 (defconstant +block-mesh-vertices-per-face+ 6)
 (defconstant +block-mesh-floats-per-face+
   (* +block-mesh-floats-per-vertex+ +block-mesh-vertices-per-face+))
 
 (declaim (inline push-block-vertex-components))
 (defun push-block-vertex-components
-    (vertices px py pz u v shade nx ny nz)
-  "Append one interleaved vertex without constructing tuple objects."
+    (vertices px py pz u v shade nx ny nz sky-level block-level emission)
+  "Append one interleaved vertex without constructing tuple objects.
+
+The fourth lane carries normalized raw light readings, not an
+art-directed bake: shader edits can change the response curve without
+remeshing the world."
   (vector-push (coerce px 'single-float) vertices)
   (vector-push (coerce py 'single-float) vertices)
   (vector-push (coerce pz 'single-float) vertices)
@@ -66,6 +75,9 @@ cross the thread boundary, and the worker never observes live chunk storage."))
   (vector-push (coerce nx 'single-float) vertices)
   (vector-push (coerce ny 'single-float) vertices)
   (vector-push (coerce nz 'single-float) vertices)
+  (vector-push (coerce sky-level 'single-float) vertices)
+  (vector-push (coerce block-level 'single-float) vertices)
+  (vector-push (coerce emission 'single-float) vertices)
   vertices)
 
 (defun block-color-variation (x y z)
@@ -181,6 +193,75 @@ method, and further sample sources only need to add one."))
 (defmethod sample-block-at ((samples block-mesh-snapshot) x y z)
   (block-mesh-snapshot-block-at samples x y z))
 
+(defgeneric sample-light-at (samples x y z)
+  (:documentation
+   "Read one site's published light from a meshing sample source.
+
+Return (VALUES SKY BLOCK STATUS) with raw 0..15 levels.  STATUS is
+:RESIDENT or :ABSENT; an absent or unlit sample answers zeros, and the
+corner-averaging rules decide what that means rather than any caller
+falling through to BLOCK-SOLID-P."))
+
+(defmethod sample-light-at ((samples block-world) x y z)
+  (multiple-value-bind (sky block state) (world-light-at samples x y z)
+    (if (eq state :absent)
+        (values 0 0 :absent)
+        (values sky block :resident))))
+
+(defmethod sample-light-at ((samples block-mesh-neighborhood) x y z)
+  (let ((relative-x (- x (block-mesh-neighborhood-origin-x samples)))
+        (relative-y (- y (block-mesh-neighborhood-origin-y samples)))
+        (relative-z (- z (block-mesh-neighborhood-origin-z samples))))
+    (multiple-value-bind (dx local-x)
+        (floor relative-x (block-mesh-neighborhood-width samples))
+      (multiple-value-bind (dy local-y)
+          (floor relative-y (block-mesh-neighborhood-height samples))
+        (multiple-value-bind (dz local-z)
+            (floor relative-z (block-mesh-neighborhood-depth samples))
+          (let ((chunk (and (<= -1 dx 1) (<= -1 dy 1) (<= -1 dz 1)
+                            (aref (block-mesh-neighborhood-chunks samples)
+                                  (block-mesh-neighborhood-index
+                                   dx dy dz)))))
+            (if chunk
+                (let ((field (block-chunk-light-field chunk))
+                      (offset
+                        (+ local-x
+                           (* (block-mesh-neighborhood-width samples)
+                              (+ local-y
+                                 (* (block-mesh-neighborhood-height
+                                     samples)
+                                    local-z))))))
+                  (if field
+                      (values
+                       (aref (chunk-light-field-sky-levels field) offset)
+                       (aref (chunk-light-field-block-levels field) offset)
+                       :resident)
+                      (values 0 0 :resident)))
+                (values 0 0 :absent))))))))
+
+(defmethod sample-light-at ((samples block-mesh-snapshot) x y z)
+  (let ((sample-x (1+ (- x (block-mesh-snapshot-origin-x samples))))
+        (sample-y (1+ (- y (block-mesh-snapshot-origin-y samples))))
+        (sample-z (1+ (- z (block-mesh-snapshot-origin-z samples))))
+        (sample-width (+ 2 (block-mesh-snapshot-width samples)))
+        (sample-height (+ 2 (block-mesh-snapshot-height samples)))
+        (sample-depth (+ 2 (block-mesh-snapshot-depth samples))))
+    (if (and (<= 0 sample-x) (< sample-x sample-width)
+             (<= 0 sample-y) (< sample-y sample-height)
+             (<= 0 sample-z) (< sample-z sample-depth))
+        (let ((offset (+ sample-x
+                         (* sample-width
+                            (+ sample-y (* sample-height sample-z))))))
+          (if (zerop (aref (block-mesh-snapshot-sample-indices samples)
+                           offset))
+              (values 0 0 :absent)
+              (values
+               (aref (block-mesh-snapshot-sky-samples samples) offset)
+               (aref (block-mesh-snapshot-block-light-samples samples)
+                     offset)
+               :resident)))
+        (values 0 0 :absent))))
+
 (defun mesher-block-at (mesher samples x y z)
   (multiple-value-bind (block status) (sample-block-at samples x y z)
     (ecase status
@@ -226,6 +307,50 @@ method, and further sample sources only need to add one."))
                         (if second-side 1 0)
                         (if corner-block 1 0))))))))
 
+(declaim (inline block-face-corner-light-components))
+(defun block-face-corner-light-components
+    (mesher samples nx ny nz cx cy cz x y z)
+  "Average the reachable face-adjacent light around one vertex corner.
+
+The four candidate cells mirror the ambient-occlusion neighborhood, but
+occupancy and light averaging remain separately named results.  A solid
+cell holds no air light; an absent or unlit sample contributes nothing
+rather than posing as open sky; and the diagonal cell is unreachable when
+both side cells occlude it.  Returns (VALUES SKY-LEVEL BLOCK-LEVEL)
+normalized to 0..1."
+  (let ((sky-sum 0) (block-sum 0) (count 0))
+    (flet ((solid-p (ox oy oz)
+             (block-solid-p
+              (mesher-block-at mesher samples (+ x ox) (+ y oy) (+ z oz))))
+           (consider (ox oy oz)
+             (multiple-value-bind (sky block status)
+                 (sample-light-at samples (+ x ox) (+ y oy) (+ z oz))
+               (when (eq status :resident)
+                 (incf sky-sum sky)
+                 (incf block-sum block)
+                 (incf count)))))
+      (multiple-value-bind (s1x s1y s1z s2x s2y s2z dx dy dz)
+          (cond ((not (zerop nx))
+                 (let ((sy (if (zerop cy) -1 1))
+                       (sz (if (zerop cz) -1 1)))
+                   (values nx sy 0 nx 0 sz nx sy sz)))
+                ((not (zerop ny))
+                 (let ((sx (if (zerop cx) -1 1))
+                       (sz (if (zerop cz) -1 1)))
+                   (values sx ny 0 0 ny sz sx ny sz)))
+                (t
+                 (let ((sx (if (zerop cx) -1 1))
+                       (sy (if (zerop cy) -1 1)))
+                   (values sx 0 nz 0 sy nz sx sy nz))))
+        (consider nx ny nz)
+        (unless (solid-p s1x s1y s1z) (consider s1x s1y s1z))
+        (unless (solid-p s2x s2y s2z) (consider s2x s2y s2z))
+        (unless (and (solid-p s1x s1y s1z) (solid-p s2x s2y s2z))
+          (unless (solid-p dx dy dz) (consider dx dy dz)))))
+    (if (plusp count)
+        (values (/ sky-sum (* 15.0 count)) (/ block-sum (* 15.0 count)))
+        (values 0.0 0.0))))
+
 (defun block-face-atlas-uv (block face corner)
   (multiple-value-bind (local-u local-v) (block-face-local-uv face corner)
     (let* ((tile (block-face-tile block face))
@@ -256,13 +381,18 @@ method, and further sample sources only need to add one."))
              (shade (* variation
                        (block-face-corner-occlusion-components
                         mesher samples nx ny nz cx cy cz x y z))))
-        (multiple-value-bind (local-u local-v)
-            (block-face-local-uv face corner)
-          (push-block-vertex-components
-           vertices (+ x cx) (+ y cy) (+ z cz)
-           (/ (+ (* tile size) 0.5 (* local-u (1- size))) atlas-width)
-           (/ (+ 0.5 (* local-v (1- size))) size)
-           shade nx ny nz))))
+        (multiple-value-bind (sky-level block-level)
+            (block-face-corner-light-components
+             mesher samples nx ny nz cx cy cz x y z)
+          (multiple-value-bind (local-u local-v)
+              (block-face-local-uv face corner)
+            (push-block-vertex-components
+             vertices (+ x cx) (+ y cy) (+ z cz)
+             (/ (+ (* tile size) 0.5 (* local-u (1- size))) atlas-width)
+             (/ (+ 0.5 (* local-v (1- size))) size)
+             shade nx ny nz
+             sky-level block-level
+             (block-surface-emission block))))))
     vertices))
 
 (defmethod emit-block-face
@@ -406,6 +536,14 @@ method, and further sample sources only need to add one."))
          (sample-indices
            (make-array (* sample-width sample-height sample-depth)
                        :element-type '(unsigned-byte 16)))
+         (sky-samples
+           (make-array (* sample-width sample-height sample-depth)
+                       :element-type '(unsigned-byte 8)
+                       :initial-element 0))
+         (block-light-samples
+           (make-array (* sample-width sample-height sample-depth)
+                       :element-type '(unsigned-byte 8)
+                       :initial-element 0))
          (neighborhood (make-block-mesh-neighborhood world chunk)))
     (setf (gethash nil palette-indices) 1)
     (dotimes (sample-z sample-depth)
@@ -413,7 +551,11 @@ method, and further sample sources only need to add one."))
         (dotimes (sample-x sample-width)
           (let ((world-x (+ origin-x (1- sample-x)))
                 (world-y (+ origin-y (1- sample-y)))
-                (world-z (+ origin-z (1- sample-z))))
+                (world-z (+ origin-z (1- sample-z)))
+                (sample-offset
+                  (+ sample-x
+                     (* sample-width
+                        (+ sample-y (* sample-height sample-z))))))
             (multiple-value-bind (block status)
                 (block-mesh-neighborhood-block-at
                  neighborhood world-x world-y world-z)
@@ -422,11 +564,7 @@ method, and further sample sources only need to add one."))
                           (block-mesh-snapshot-palette-index
                            block palette palette-indices)
                           0)))
-                (setf (aref sample-indices
-                            (+ sample-x
-                               (* sample-width
-                                  (+ sample-y (* sample-height sample-z)))))
-                      index)
+                (setf (aref sample-indices sample-offset) index)
                 (when (and (<= 1 sample-x width)
                            (<= 1 sample-y height)
                            (<= 1 sample-z depth))
@@ -435,12 +573,19 @@ method, and further sample sources only need to add one."))
                                  (* width
                                     (+ (1- sample-y)
                                        (* height (1- sample-z))))))
-                        index))))))))
+                        index))))
+            (multiple-value-bind (sky block-light status)
+                (sample-light-at neighborhood world-x world-y world-z)
+              (declare (ignore status))
+              (setf (aref sky-samples sample-offset) sky
+                    (aref block-light-samples sample-offset)
+                    block-light))))))
     (make-instance
      'block-mesh-snapshot
      :key (block-chunk-key chunk) :dependency-stamp dependency-stamp
      :domain domain :palette palette :target-indices target-indices
      :sample-indices sample-indices
+     :sky-samples sky-samples :block-light-samples block-light-samples
      :origin-x origin-x :origin-y origin-y :origin-z origin-z
      :width width :height height :depth depth)))
 

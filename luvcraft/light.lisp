@@ -545,8 +545,15 @@ Content edits and residency transitions feed this object through the
 world's hooks; RECONCILE-LIGHTING settles the queues and publishes."))
 
 (defun attach-lighting-state (world)
-  "Subscribe a fresh lighting state to WORLD's content and residency hooks."
+  "Subscribe a fresh lighting state to WORLD's content and residency hooks.
+
+Chunks already resident at attachment are treated as arrivals, so the
+first reconcile lights a caller-built world without a separate protocol."
   (let ((state (make-instance 'luvcraft-lighting-state :world world)))
+    (dolist (chunk (resident-world-chunks world))
+      (setf (gethash (block-chunk-key chunk)
+                     (lighting-state-arrivals state))
+            t))
     (setf (block-world-cell-change-hook world)
           (lambda (chunk x y z)
             (declare (ignore chunk))

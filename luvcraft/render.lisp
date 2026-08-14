@@ -341,7 +341,8 @@ capture-only demand clock."
            (flet ((keep (resource)
                     (push resource resources)
                     resource))
-             (let* ((extent (canvas-extent context))
+             (let* ((lighting-state (attach-lighting-state world))
+                  (extent (canvas-extent context))
                   (color-texture
                     (keep
                      (create
@@ -440,13 +441,15 @@ capture-only demand clock."
                              :label "block world pipeline"
                              :device device :layout layout
                              :vertex-buffers
-                             '((:array-stride 36
+                             '((:array-stride 48
                                 :attributes
                                 ((:shader-location 0 :offset 0
                                   :format :float32x3)
                                  (:shader-location 1 :offset 12
                                   :format :float32x3)
                                  (:shader-location 2 :offset 24
+                                  :format :float32x3)
+                                 (:shader-location 3 :offset 36
                                   :format :float32x3))))
                              :target-format (canvas-format context)
                              :primitive '(:topology :triangle-list)
@@ -506,6 +509,7 @@ capture-only demand clock."
                      :production-system production-system
                      :camera (sync-camera-to-player camera player)
                      :player player
+                     :lighting-state lighting-state
                      :sky-clock sky-clock :sky-profile sky-profile
                      :residency-radius residency-radius
                      :publication-limit publication-limit

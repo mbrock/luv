@@ -243,6 +243,43 @@
       (luv::reconcile-lighting state)
       (ok (light-matches-reference-p world)))))
 
+(deftest meshes-carry-raw-corner-light-and-material-emission
+  (let* ((world (make-open-sky-test-world))
+         (state (luv::attach-lighting-state world))
+         (mesher (make-instance 'exposed-face-mesher)))
+    ;; A solid floor with a glowing block resting on it, under open sky.
+    (dotimes (x 16)
+      (dotimes (z 16)
+        (setf (world-block-at world x 0 z) luv::*stone-block*)))
+    (setf (world-block-at world 8 1 8) *test-glow-block*)
+    (luv::reconcile-lighting state)
+    (let* ((chunk (luv::world-chunk-at world 0 0 0))
+           (mesh (mesh-block-chunk mesher world chunk))
+           (vertices (block-mesh-vertices mesh))
+           (stride luv::+block-mesh-floats-per-vertex+)
+           (sky-readings nil)
+           (block-readings nil)
+           (emissive-vertices 0))
+      (loop for base from 0 below (length vertices) by stride
+            do (push (aref vertices (+ base 9)) sky-readings)
+               (push (aref vertices (+ base 10)) block-readings)
+               (when (plusp (aref vertices (+ base 11)))
+                 (incf emissive-vertices)))
+      ;; Floor tops under open sky read full skylight; the glow block's own
+      ;; faces carry its surface emission, and its blocklight reaches the
+      ;; floor around it.
+      (ok (find 1.0 sky-readings))
+      (ok (plusp (reduce #'max block-readings)))
+      ;; Five exposed faces of the resting glow block, six vertices each.
+      (ok (= emissive-vertices 30))
+      ;; The immutable snapshot meshes bit-identically to the owner side.
+      (let* ((snapshot (luv::make-block-mesh-snapshot
+                        world chunk
+                        (luv::chunk-mesh-dependency-stamp world chunk)))
+             (snapshot-mesh (mesh-block-snapshot mesher snapshot)))
+        (ok (equalp (block-mesh-vertices mesh)
+                    (block-mesh-vertices snapshot-mesh)))))))
+
 (deftest absent-neighbors-are-never-silently-open-sky
   ;; A world with no source keeps every boundary :UNKNOWN, so nothing is
   ;; lit and the result says so instead of inventing daylight.

@@ -32,11 +32,13 @@
     (:stage :vertex
      :inputs ((world-position :vec3 :location 0)
               (uv-shade-input :vec3 :location 1)
-              (normal-input :vec3 :location 2))
+              (normal-input :vec3 :location 2)
+              (light-input :vec3 :location 3))
      :outputs ((clip-position :vec4 :built-in :position)
                (uv-shade-output :vec3 :location 0)
                (normal-output :vec3 :location 1)
-               (fog-output :float :location 2))
+               (fog-output :float :location 2)
+               (light-output :vec3 :location 3))
      :resources
      ((frame-state :uniform-block :set 0 :binding 2
                    :members #.*frame-uniform-members*)))
@@ -67,7 +69,8 @@
     (set-output clip-position clip)
     (set-output uv-shade-output uv-shade-input)
     (set-output normal-output normal-input)
-    (set-output fog-output fog-amount)))
+    (set-output fog-output fog-amount)
+    (set-output light-output light-input)))
 
 (defun block-world-vertex-specification ()
   (shader-specification-for :block-surface :vertex))
@@ -94,7 +97,8 @@
     (:stage :fragment
      :inputs ((uv-shade-input :vec3 :location 0)
               (normal-input :vec3 :location 1)
-              (fog-input :float :location 2))
+              (fog-input :float :location 2)
+              (light-input :vec3 :location 3))
      :outputs ((color-output :vec4 :location 0))
      :resources ((block-atlas :texture-2d :set 0 :binding 0)
                  (block-sampler :sampler :set 0 :binding 1)
@@ -104,21 +108,33 @@
          (uv (swizzle uv-shade :xy))
          (ao (swizzle uv-shade :z))
          (normal normal-input)
-         ;; The animated environment replaces the old hardcoded sun and sky:
-         ;; face direction interpolates ambient fill toward the sun colour,
-         ;; and the day factor retires direct light while the sun is below
-         ;; the horizon.
+         ;; The mesh carries normalized raw light readings; every response
+         ;; curve and balance below is an art parameter editable live
+         ;; without remeshing the world.
+         (sky-input (swizzle light-input :x))
+         (block-input (swizzle light-input :y))
+         (emission-input (swizzle light-input :z))
+         (sky-level (* sky-input sky-input))
+         (block-level (* block-input block-input))
          (sun-direction (swizzle sun-vector :xyz))
          (day-factor (swizzle sun-vector :w))
-         (hemisphere (* (+ (dot normal sun-direction) 1.0) 0.5))
+         (n-dot-l (max 0.0 (dot normal sun-direction)))
+         ;; Lateral skylight gives ambient visibility but not a hard sun
+         ;; beam; the moving sun stays unshadowed until a real shadow pass.
+         (sun-visibility (smoothstep 0.90 1.0 sky-input))
          (ambient (swizzle ambient-vector :xyz))
-         (sun-light (swizzle sun-color-vector :xyz))
-         (directional-light (mix ambient sun-light (* hemisphere day-factor)))
-         (light (* directional-light ao))
+         (sun-color (swizzle sun-color-vector :xyz))
+         ;; A small floor keeps unlit geometry barely readable rather than
+         ;; a void; caves stay dark for the right reason.
+         (sky-light (* ambient (+ 0.06 (* 1.34 sky-level)) ao))
+         (sun-light (* sun-color (* n-dot-l sun-visibility day-factor)))
+         (torch-color (vec3 1.0 0.82 0.58))
+         (local-light (* torch-color block-level))
          (albedo (swizzle (sample block-atlas block-sampler uv) :rgb))
-         (lit (* albedo light))
+         (reflected (* albedo (+ sky-light sun-light local-light)))
+         (radiance (+ reflected (* albedo emission-input)))
          (fog-color (swizzle fog-color-vector :xyz))
-         (fogged (mix lit fog-color fog-input))
+         (fogged (mix radiance fog-color fog-input))
          (rgba (vec4 fogged 1.0)))
     (set-output color-output rgba)))
 

@@ -542,6 +542,15 @@ nothing else does."))
            #:relight-block-world
            #:chunk-light-levels-at
            #:world-light-at
+           #:luvcraft-lighting-state
+           #:attach-lighting-state
+           #:reconcile-lighting
+           #:lighting-state-world
+           #:lighting-state-cells-visited
+           #:lighting-state-chunks-touched
+           #:lighting-state-publications
+           #:lighting-state-last-latency-seconds
+           #:sample-light-at
            #:make-block-texture-atlas
            #:placeable-block-kinds
            #:fly-camera
@@ -621,6 +630,7 @@ nothing else does."))
            #:live-shader-pipeline-diagnostic
            #:live-shader-pipeline-installed-revision
            #:luvcraft-session-block-pipeline
+           #:luvcraft-session-lighting-state
            #:luvcraft-session-sky-pipeline
            #:luvcraft-session-sky-clock
            #:luvcraft-session-sky-profile

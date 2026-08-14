@@ -68,14 +68,14 @@
 (deftest shader-source-is-a-typed-clos-graph
   (let* ((specification (spv:block-world-fragment-specification))
          (sun-direction (binding-named 'sun-direction specification))
-         (directional-light
-           (binding-named 'directional-light specification))
-         (light (binding-named 'light specification))
-         (lit (binding-named 'lit specification))
+         (sun-visibility (binding-named 'sun-visibility specification))
+         (sky-light (binding-named 'sky-light specification))
+         (reflected (binding-named 'reflected specification))
+         (radiance (binding-named 'radiance specification))
          (fogged (binding-named 'fogged specification)))
     (ok (typep specification 'spv:shader-specification))
     (ok (eq (spv:shader-specification-stage specification) :fragment))
-    (ok (= (length (spv:shader-specification-inputs specification)) 3))
+    (ok (= (length (spv:shader-specification-inputs specification)) 4))
     (ok (= (length (spv:shader-specification-resources specification)) 3))
     (ok (typep (spv:shader-binding-expression sun-direction)
                'spv:shader-call))
@@ -86,20 +86,25 @@
     (ok (equal
          (form-names
           (spv:shader-expression-form
-           (spv:shader-binding-expression directional-light)))
-         '("mix" "ambient" "sun-light" ("*" "hemisphere" "day-factor"))))
+           (spv:shader-binding-expression sun-visibility)))
+         '("smoothstep" 0.9 1.0 "sky-input")))
     (ok (spv:shader-type=
          (spv:shader-expression-type
-          (spv:shader-binding-expression light))
+          (spv:shader-binding-expression sky-light))
          :vec3))
     (ok (equal (form-names
                 (spv:shader-expression-form
-                 (spv:shader-binding-expression lit)))
-               '("*" "albedo" "light")))
+                 (spv:shader-binding-expression reflected)))
+               '("*" "albedo"
+                 ("+" "sky-light" "sun-light" "local-light"))))
+    (ok (equal (form-names
+                (spv:shader-expression-form
+                 (spv:shader-binding-expression radiance)))
+               '("+" "reflected" ("*" "albedo" "emission-input"))))
     (ok (equal (form-names
                 (spv:shader-expression-form
                  (spv:shader-binding-expression fogged)))
-               '("mix" "lit" "fog-color" "fog-input")))
+               '("mix" "radiance" "fog-color" "fog-input")))
     (ok (> (length (spv:shader-specification-expressions specification))
            (length (spv:shader-specification-bindings specification))))))
 
@@ -117,8 +122,8 @@
          (fog-amount (binding-named 'fog-amount specification)))
     (ok (typep specification 'spv:shader-specification))
     (ok (eq (spv:shader-specification-stage specification) :vertex))
-    (ok (= (length (spv:shader-specification-inputs specification)) 3))
-    (ok (= (length (spv:shader-specification-outputs specification)) 4))
+    (ok (= (length (spv:shader-specification-inputs specification)) 4))
+    (ok (= (length (spv:shader-specification-outputs specification)) 5))
     (ok (eq (spv:shader-interface-built-in clip-position) :position))
     (ok (typep resource 'spv:shader-uniform-block))
     (ok (= (spv:shader-resource-binding resource) 2))
@@ -214,10 +219,10 @@
            (gethash (second references)
                     (spv:shader-lowering-expression-instructions lowering)))
          (block-specification (spv:block-world-fragment-specification))
-         (hemisphere (binding-named 'hemisphere block-specification))
+         (torch-color (binding-named 'torch-color block-specification))
          (block-lowering (spv:block-world-fragment-lowering))
-         (literal (second (spv:shader-call-operands
-                           (spv:shader-binding-expression hemisphere))))
+         (literal (first (spv:shader-call-operands
+                          (spv:shader-binding-expression torch-color))))
          (constant-instructions
            (gethash literal
                     (spv:shader-lowering-expression-instructions

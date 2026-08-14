@@ -231,8 +231,21 @@ but nothing could regenerate them once evicted."))
     (maintain-block-world-residency
      (block-world-source world) session world)))
 
+(defun chunk-light-stamp-revision (chunk)
+  "The chunk's light revision, or -1 while it has no published field."
+  (let ((field (block-chunk-light-field chunk)))
+    (if field (chunk-light-field-revision field) -1)))
+
+(defun chunk-light-stamp-boundary-revision (chunk dx dy dz)
+  (let ((field (block-chunk-light-field chunk)))
+    (if field (chunk-light-field-boundary-revision field dx dy dz) -1)))
+
 (defun chunk-mesh-dependency-stamp (world chunk)
-  "Describe exactly which resident block data CHUNK's exposed mesh observes."
+  "Describe exactly which resident data CHUNK's exposed mesh observes.
+
+Content and light are named as separate revision domains: relighting must
+invalidate a mesh without impersonating an authored edit, and the stamp
+preserves which domain made a product stale."
   (let* ((coordinate
            (chunk-domain-coordinate (block-chunk-domain chunk)))
          (x (chunk-coordinate-x coordinate))
@@ -241,7 +254,8 @@ but nothing could regenerate them once evicted."))
     (cons
      (list (block-chunk-key chunk)
            (block-chunk-incarnation chunk)
-           (block-chunk-revision chunk))
+           (block-chunk-revision chunk)
+           (chunk-light-stamp-revision chunk))
      (loop for (dx dy dz) in *chunk-neighbor-directions*
            collect
            (multiple-value-bind (neighbor present-p)
@@ -251,6 +265,8 @@ but nothing could regenerate them once evicted."))
                  (list (block-chunk-key neighbor)
                        (block-chunk-incarnation neighbor)
                        (block-chunk-boundary-revision
+                        neighbor (- dx) (- dy) (- dz))
+                       (chunk-light-stamp-boundary-revision
                         neighbor (- dx) (- dy) (- dz)))
                  '(nil)))))))
 
@@ -476,6 +492,11 @@ loop.  A stale product simply fails its own validation here."))
   "Advance asynchronous loading/meshing without doing either computation here."
   (drain-luvcraft-production session)
   (schedule-luvcraft-chunk-loads session)
+  ;; Lighting reconciles before mesh snapshots are captured, so every
+  ;; snapshot and dependency stamp observes stable published light.
+  (let ((lighting (luvcraft-session-lighting-state session)))
+    (when lighting
+      (reconcile-lighting lighting)))
   (schedule-luvcraft-meshes session)
   (setf (luvcraft-session-meshed-world-revision session)
         (block-world-revision (luvcraft-session-world session)))

@@ -119,7 +119,7 @@
     (setf (world-block-at world 0 0 0) luv::*stone-block*)
     (let ((mesh (mesh-block-world (make-instance 'exposed-face-mesher) world)))
       (ok (= (length (block-mesh-vertices mesh))
-             (* 9 (block-mesh-vertex-count mesh)))))))
+             (* 12 (block-mesh-vertex-count mesh)))))))
 
 (deftest little-world-has-readable-biome-materials
   (let ((source (make-instance 'little-world-source :seed 121))
