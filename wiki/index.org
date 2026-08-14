@@ -63,6 +63,32 @@ only a stable reference, a resolvable object, source metadata, or something
 else.  Comments and docstrings containing =#D3H7VK= already participate in the
 discourse without changing Lisp semantics.
 
+* Work marks
+:PROPERTIES:
+:ID: W3K9MK
+:END:
+
+Some figures are also *work marks*: tiny roadmap entries that live in the
+same wiki page as the design they move forward.  A work mark is an Org heading
+with:
+
+- a status keyword in the title: =NEXT=, =TODO=, =WAIT=, =DONE=, or =IDEA=;
+- a stable six-character =ID= property, so code, commits, and other pages can
+  mention it as =#W3K9MK= style text;
+- one coherent iteration of scope, not a project-management breakdown; and
+- short =Intent=, =Evidence=, and =Done when= paragraphs or lists.
+
+The status words are deliberately small.  =NEXT= is the current best small bet.
+=TODO= is committed enough to keep visible but not selected.  =WAIT= needs
+outside information or another completed step.  =DONE= records the evidence
+that closed the loop.  =IDEA= is a tempting possibility that should not steer
+implementation yet.
+
+Work marks should not duplicate code review, issues, or test output.  They are
+the wiki's memory of why a step exists, what would count as progress, and what
+evidence changed its status.  When implementation changes the plan, update the
+nearby work mark instead of appending a disconnected status page.
+
 * Paths into the initial material
 :PROPERTIES:
 :ID: S9D4KC

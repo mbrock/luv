@@ -541,6 +541,93 @@ general shader and lighting capabilities where the feature needs them, while
 keeping the frame sequence, ownership boundaries, dense hot data, and live
 development behavior direct and inspectable.
 
+* Light work marks
+:PROPERTIES:
+:ID: WKLITE
+:END:
+
+These are the current work marks for the lighting path.  They use the wiki's
+work-mark convention #W3K9MK: each item is a figure with a small status,
+intent, evidence, and done condition.
+
+** DONE First CPU voxel-light proof
+:PROPERTIES:
+:ID: WLDONE
+:END:
+
+Intent: make sky/block light a derived chunk field with its own revisions,
+incremental reconciliation, raw mesh transport, and shader-side response
+curves.
+
+Evidence:
+
+- =luvcraft/light.lisp= owns reference and incremental solvers.
+- =luvcraft/mesher.lisp= snapshots a one-cell light halo and emits the
+  =(sky block emission)= attribute.
+- =tests/light.lisp= checks reference equivalence, mesh light transport, and
+  same-key chunk replacement before reconciliation.
+
+Done when: =:luv/luvcraft/tests= passes and the wiki describes the implemented
+Phase 0--2 state rather than the pre-implementation plan.
+
+** NEXT Player-placeable crystal
+:PROPERTIES:
+:ID: WLCRYS
+:END:
+
+Intent: turn the test-only glow block into a real material the player can
+select, place, remove, and inspect in motion.
+
+Evidence to gather:
+
+- A public =*crystal-block*= or equivalently named block kind has its own atlas
+  tile, propagated light emission, and surface emission.
+- The placeable palette, number-key range, and window title derive from the
+  palette rather than the current hardcoded seven-material assumption.
+- Placing and removing the crystal on both sides of a chunk boundary converges
+  to the reference light field and remeshes only the affected products.
+
+Done when: a pinned-night capture shows the crystal face glowing and warming
+nearby surfaces, while tests cover placement/removal and cross-chunk falloff.
+
+** TODO Measure light-to-mesh latency
+:PROPERTIES:
+:ID: WLLATM
+:END:
+
+Intent: find out whether owner-thread relighting plus one mesh capture per
+frame feels immediate enough during edit bursts and residency churn.
+
+Evidence to gather:
+
+- SLY-visible counters or capture logs report relight cells popped, chunks
+  touched, light publication latency, remesh latency, and mesh bytes.
+- A repeatable edit/residency script exercises a worst-plausible visible
+  burst without relying on hand timing.
+
+Done when: the next scheduling decision is evidence-backed: keep owner-thread
+lighting, tune frame limits, or move captured light work into the existing
+production system.
+
+** IDEA HDR crystal bloom
+:PROPERTIES:
+:ID: WLHDRB
+:END:
+
+Intent: give emissive materials headroom and bloom without abusing alpha or
+the current LDR scene target.
+
+Evidence to gather:
+
+- A linear HDR scene texture, tone-map pass, and LDR presentation copy exist
+  with explicit resize and lifetime handling.
+- Bright extraction and blur are driven by live profile values and remain
+  deterministic under a pinned capture.
+
+Done when: a crystal-at-night smoke image has stable tone mapping and
+restrained bloom, and the intermediate resources retire through the existing
+completion frontier.
+
 * Decisions now made; questions left to evidence
 :PROPERTIES:
 :ID: SKOPEN
