@@ -37,7 +37,16 @@
 (defclass limited-output-stream
     (sb-gray:fundamental-character-output-stream)
   ((target :initarg :target :reader limited-output-target)
-   (budget :initarg :budget :reader limited-output-budget)))
+   (budget :initarg :budget :reader limited-output-budget)
+   (line-column :initform 0 :accessor limited-output-line-column)))
+
+(defun advance-line-column (stream string start end)
+  (let ((last-newline (position #\Newline string
+                                :start start :end end :from-end t)))
+    (if last-newline
+        (setf (limited-output-line-column stream)
+              (- end last-newline 1))
+        (incf (limited-output-line-column stream) (- end start)))))
 
 (defun utf-8-character-length (character)
   (let ((code (char-code character)))
@@ -54,7 +63,10 @@
             (output-budget-limit budget))
         (progn
           (incf (output-budget-written budget) width)
-          (write-char character (limited-output-target stream)))
+          (write-char character (limited-output-target stream))
+          (if (char= character #\Newline)
+              (setf (limited-output-line-column stream) 0)
+              (incf (limited-output-line-column stream))))
         (setf (output-budget-truncated-p budget) t)))
   character)
 
@@ -73,6 +85,7 @@
     (when (< start cutoff)
       (write-string string (limited-output-target stream)
                     :start start :end cutoff)
+      (advance-line-column stream string start cutoff)
       (incf (output-budget-written budget)
             (- (output-budget-limit budget) remaining
                (output-budget-written budget))))
@@ -81,7 +94,7 @@
     string))
 
 (defmethod sb-gray:stream-line-column ((stream limited-output-stream))
-  (sb-gray:stream-line-column (limited-output-target stream)))
+  (limited-output-line-column stream))
 
 (defmethod sb-gray:stream-force-output ((stream limited-output-stream))
   (force-output (limited-output-target stream)))
@@ -263,9 +276,28 @@
        (ignore-errors (sb-bsd-sockets:socket-close socket)))))
 
 (defun eval-request (code package)
+  ;; EVAL-AND-GRAB-OUTPUT captures *STANDARD-OUTPUT* itself, but a standalone
+  ;; connection has no SLY listener to forward *ERROR-OUTPUT* or *TRACE-OUTPUT*.
+  ;; Return those streams explicitly so compiler diagnostics reach this client.
   (format nil
-          "(:emacs-rex (slynk:eval-and-grab-output ~S) ~S t 1)"
+          (concatenate
+           'string
+           "(:emacs-rex "
+           "(cl:let ((diagnostic-output (cl:make-string-output-stream))) "
+           "(cl:let ((cl:*error-output* diagnostic-output) "
+           "(cl:*trace-output* diagnostic-output)) "
+           "(cl:destructuring-bind (output value) "
+           "(slynk:eval-and-grab-output ~S) "
+           "(cl:list output value "
+           "(cl:get-output-stream-string diagnostic-output))))) ~S t 1)")
           code package))
+
+(defun write-diagnostic-output (output)
+  (unless (zerop (length output))
+    (write-string output *error-output*)
+    (unless (char= (char output (1- (length output))) #\Newline)
+      (terpri *error-output*))
+    (force-output *error-output*)))
 
 (defun query-request (operation package &rest arguments)
   (format nil "(:emacs-rex (~A~{ ~S~}) ~S t 1)"
@@ -400,11 +432,14 @@
   (with-slynk-connection (stream)
     (authenticate stream)
     (write-packet stream (eval-request code package))
-    (destructuring-bind (output value) (read-eval-return stream package)
+    (destructuring-bind (output value diagnostic-output)
+        (read-eval-return stream package)
       (unless (zerop (length output))
         (write-string output)
         (unless (char= (char output (1- (length output))) #\Newline)
-          (terpri)))
+          (terpri))
+        (force-output))
+      (write-diagnostic-output diagnostic-output)
       (write-line value))))
 
 (defun call-inspector (stream package operation &rest arguments)
@@ -538,8 +573,10 @@
 
 (defun evaluate-captured-output-on (stream code &optional (package "CL-USER"))
   (write-packet stream (eval-request code package))
-  (destructuring-bind (output value) (read-eval-return stream package)
+  (destructuring-bind (output value diagnostic-output)
+      (read-eval-return stream package)
     (declare (ignore value))
+    (write-diagnostic-output diagnostic-output)
     output))
 
 (defun listener-process-id ()
