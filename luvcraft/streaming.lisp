@@ -117,9 +117,6 @@ the session's outstanding-work and cancellation bookkeeping."))
                          :key (list chunk-x chunk-y chunk-z)
                          :palette palette :indices indices))))))
 
-(defparameter *chunk-neighbor-directions*
-  '((-1 0 0) (1 0 0) (0 -1 0) (0 1 0) (0 0 -1) (0 0 1)))
-
 (defclass luvcraft-chunk-product ()
   ((coordinate :initarg :coordinate
                :reader luvcraft-chunk-product-coordinate)

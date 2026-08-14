@@ -178,6 +178,7 @@
                              (:file "png")
                              (:file "blocks")
                              (:file "terrain")
+                             (:file "light")
                              (:file "mesher")
                              (:file "simulation")
                              (:file "sky")
@@ -219,7 +220,8 @@
   :depends-on (#:luv/luvcraft
                #:rove)
   :components ((:module "tests"
-                :components ((:file "block-world"))))
+                :components ((:file "block-world")
+                             (:file "light"))))
   :perform (asdf:test-op (operation component)
              (declare (ignore operation component))
              (unless (uiop:symbol-call

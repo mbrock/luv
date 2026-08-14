@@ -9,13 +9,43 @@
 
 (defclass block-kind ()
   ((name :initarg :name :reader block-kind-name)
-   (face-tiles :initarg :face-tiles :reader block-kind-face-tiles)))
+   (face-tiles :initarg :face-tiles :reader block-kind-face-tiles)
+   ;; Light behavior is distinct from collision: opacity is how much a cell
+   ;; costs propagating light, emission seeds the propagated blocklight
+   ;; field, and surface emission is the material's own visible radiance.
+   ;; One glowing crystal may configure both emissions, but they are
+   ;; different facts.
+   (light-opacity :initarg :light-opacity :initform 15
+                  :reader block-kind-light-opacity)
+   (light-emission :initarg :light-emission :initform 0
+                   :reader block-kind-light-emission)
+   (surface-emission :initarg :surface-emission :initform 0.0
+                     :reader block-kind-surface-emission)))
 
 (defgeneric block-solid-p (block))
 (defgeneric block-face-tile (block face))
 
+(defgeneric block-light-opacity (block)
+  (:documentation "How strongly BLOCK attenuates propagated light, 0..15."))
+(defgeneric block-light-emission (block)
+  (:documentation "The blocklight level BLOCK seeds into its own cell, 0..15."))
+(defgeneric block-surface-emission (block)
+  (:documentation "BLOCK's own linear material radiance, independent of
+propagated light."))
+
 (defmethod block-solid-p ((block null)) nil)
 (defmethod block-solid-p ((block block-kind)) t)
+
+(defmethod block-light-opacity ((block null)) 0)
+(defmethod block-light-emission ((block null)) 0)
+(defmethod block-surface-emission ((block null)) 0.0)
+
+(defmethod block-light-opacity ((block block-kind))
+  (block-kind-light-opacity block))
+(defmethod block-light-emission ((block block-kind))
+  (block-kind-light-emission block))
+(defmethod block-surface-emission ((block block-kind))
+  (block-kind-surface-emission block))
 
 (defclass block-face ()
   ((name :initarg :name :reader block-face-name)

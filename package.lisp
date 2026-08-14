@@ -528,6 +528,20 @@ nothing else does."))
            #:mesh-block-snapshot
            #:chunk-mesh-dependency-stamp
            #:emit-block-face
+           #:block-light-opacity
+           #:block-light-emission
+           #:block-surface-emission
+           #:chunk-light-field
+           #:chunk-light-field-sky-levels
+           #:chunk-light-field-block-levels
+           #:chunk-light-field-revision
+           #:chunk-light-field-boundary-revision
+           #:chunk-light-field-state
+           #:block-chunk-light-field
+           #:absent-chunk-light-semantics
+           #:relight-block-world
+           #:chunk-light-levels-at
+           #:world-light-at
            #:make-block-texture-atlas
            #:placeable-block-kinds
            #:fly-camera

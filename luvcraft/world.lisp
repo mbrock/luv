@@ -268,7 +268,10 @@ specialized arrays rather than describing individual cells through CLOS."))
    ;; edits in that neighbor's interior.
    (boundary-revisions
     :initform (make-array 6 :element-type '(unsigned-byte 64)
-                           :initial-element 0))))
+                           :initial-element 0))
+   ;; The chunk's derived voxel light, revised independently from block
+   ;; content.  NIL until a lighting solver publishes a field.
+   (light-field :initform nil :accessor block-chunk-light-field)))
 
 (defun make-block-chunk (domain &key change-hook (incarnation 0) content)
   (check-type domain chunk-domain)
@@ -300,6 +303,9 @@ specialized arrays rather than describing individual cells through CLOS."))
   (unless (< offset (chunk-domain-cardinality (block-chunk-domain chunk)))
     (error "Offset ~D is outside chunk ~S." offset chunk))
   (block-content-at-offset (block-chunk-content chunk) offset))
+
+(defparameter *chunk-neighbor-directions*
+  '((-1 0 0) (1 0 0) (0 -1 0) (0 1 0) (0 0 -1) (0 0 1)))
 
 (defun chunk-boundary-index (dx dy dz)
   (cond ((and (= dx -1) (zerop dy) (zerop dz)) 0)
