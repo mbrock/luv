@@ -255,12 +255,28 @@ Evidence:
   quantity specifications.  EQL methods on ordinary arithmetic symbols derive
   addition, subtraction, products, quotients, and dot products.
 - Shader inputs, outputs, and uniform members can opt into =:quantity=,
-  =:dimension=, and =:affine-p= without changing their =shader-type= or SPIR-V
-  representation.  Arithmetic expressions retain the derived specification.
+  =:dimension=, =:unit=, and =:affine-p= without changing their =shader-type=
+  or SPIR-V representation.  Arithmetic expressions retain the derived
+  specification.
+- Once an annotation enters a shader expression, semantic derivation is total:
+  an unannotated operand or an operator without a quantity rule is a parse-time
+  error.  Fully unannotated shader graphs remain valid while the vocabulary is
+  grown deliberately.
+- =min= and =max= require exactly compatible specifications.  Unit expressions
+  compose symbolically through products and quotients, but there is no common-
+  unit selection: =:metre= and =:kilometre= are different until source performs
+  an explicit conversion.
 - =tests/arithmetic.lisp= rejects equal-dimensional but differently named
-  quantities and illegal affine operations.  =tests/shader.lisp= proves
-  shadow-depth subtraction, rejects point-plus-point and depth-plus-length,
-  and produces byte-identical SPIR-V with and without semantic annotations.
+  quantities, mismatched exact units, and illegal affine operations.
+  =tests/shader.lisp= proves shadow-depth subtraction and compatible =max=,
+  rejects point-plus-point, depth-plus-length, metre-plus-kilometre, missing
+  annotations, and unsupported semantic operators, and produces byte-identical
+  SPIR-V with and without semantic annotations.
+- A clean [[file:../../src/mp-units/][=mp-units= reference checkout]] at commit =20cedd5= shows the
+  useful separation between quantity specification and unit reference.  Its
+  arithmetic finds a common reference and converts operands; this experiment
+  intentionally adopts the separation but requires exact units instead of
+  implicit conversion.
 - The production shadow graph in =luvcraft/shaders.lisp= remains deliberately
   unannotated.  It is the next evidence source, not something the substrate
   already claims to understand.
@@ -268,8 +284,10 @@ Evidence:
 Done when: the receiver depth, bias, UV coordinates and offsets, world spans,
 texel scale, and filter radius in the real shadow calculation carry coherent
 specifications; valid source still emits identical SPIR-V; representative
-space-mixing edits fail at parse time with source-facing diagnostics; and the
-shader workbench can present both representation type and semantic meaning.
+space- and unit-mixing edits fail at parse time with source-facing diagnostics;
+explicit unit conversion has a visible source form rather than compiler magic;
+and the shader workbench can present both representation type and semantic
+meaning.
 
 * An initial block-world quantity map
 :PROPERTIES:

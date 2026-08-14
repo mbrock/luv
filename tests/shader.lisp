@@ -418,6 +418,62 @@
           '((let* ((sum (+ depth distance)))
               (set-output result sum))))))))
 
+(deftest annotated-shader-arithmetic-is-total-and-unit-exact
+  (labels ((reason-for (inputs expression)
+             (handler-case
+                 (progn
+                   (spv:parse-shader-specification
+                    'semantic-totality-probe
+                    `(:stage :fragment
+                      :inputs ,inputs
+                      :outputs ((result :float :location 0)))
+                    `((let* ((value ,expression))
+                        (set-output result value))))
+                   nil)
+               (spv:shader-language-error (condition)
+                 (list (spv:shader-language-error-reason condition)
+                       (spv:shader-language-error-details condition))))))
+    (let* ((specification
+             (spv:parse-shader-specification
+              'semantic-max-probe
+              '(:stage :fragment
+                :inputs ((left :float :location 0
+                                :quantity :distance
+                                :dimension :length :unit :metre)
+                         (right :float :location 1
+                                 :quantity :distance
+                                 :dimension :length :unit :metre))
+                :outputs ((result :float :location 0)))
+              '((let* ((value (max left right)))
+                  (set-output result value)))))
+           (value (binding-named 'value specification)))
+      (ok (math:unit-expression=
+           :metre
+           (math:quantity-specification-unit
+            (spv:shader-expression-quantity-specification
+             (spv:shader-binding-expression value))))))
+    (ok (equal
+         '(:invalid-quantity-operation :different-units)
+         (reason-for
+          '((left :float :location 0 :quantity :distance
+                  :dimension :length :unit :metre)
+            (right :float :location 1 :quantity :distance
+                   :dimension :length :unit :kilometre))
+          '(max left right))))
+    (ok (equal
+         '(:invalid-quantity-operation :unknown-operator)
+         (reason-for
+          '((value :float :location 0 :quantity :distance
+                   :dimension :length :unit :metre))
+          '(abs value))))
+    (ok (equal
+         '(:missing-quantity-specification (RIGHT))
+         (reason-for
+          '((left :float :location 0 :quantity :distance
+                  :dimension :length :unit :metre)
+            (right :float :location 1))
+          '(+ left right))))))
+
 (deftest shadow-visibility-is-a-source-abstraction-over-core-math
   (ok (spv:shader-abstraction-p 'spv:shadow-visibility))
   (ok (not (spv:shader-operator-p 'spv:shadow-visibility)))

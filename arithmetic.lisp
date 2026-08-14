@@ -93,6 +93,68 @@ Each factor pair has the form (BASE EXPONENT), where EXPONENT is rational."
   (multiply-dimensions numerator
                        (exponentiate-dimension denominator -1)))
 
+(defclass unit-expression ()
+  ((factors
+    :initarg :factors
+    :reader unit-expression-factors))
+  (:documentation
+   "A canonical symbolic unit product.  Distinct bases are not converted."))
+
+(defun make-unit-expression (&optional designator)
+  "Return a canonical exact unit from NIL, one unit symbol, or factor pairs.
+
+This layer deliberately knows no scale conversions: :METRE and :KILOMETRE
+remain different bases until an explicit conversion operation is introduced."
+  (etypecase designator
+    (null (make-instance 'unit-expression :factors nil))
+    (unit-expression designator)
+    (symbol (make-instance 'unit-expression
+                           :factors (list (cons designator 1))))
+    (list (make-instance 'unit-expression
+                         :factors (canonical-dimension-factors designator)))))
+
+(defmethod print-object ((unit unit-expression) stream)
+  (print-unreadable-object (unit stream :type t)
+    (if (unit-expression-factors unit)
+        (format stream "~{~A~^ ~}"
+                (mapcar (lambda (factor)
+                          (if (= (cdr factor) 1)
+                              (car factor)
+                              (format nil "~A^~A" (car factor) (cdr factor))))
+                        (unit-expression-factors unit)))
+        (write-string "1" stream))))
+
+(defun unit-expression= (left right)
+  (let ((left (make-unit-expression left))
+        (right (make-unit-expression right)))
+    (and (= (length (unit-expression-factors left))
+            (length (unit-expression-factors right)))
+         (every (lambda (left-factor right-factor)
+                  (and (eq (car left-factor) (car right-factor))
+                       (= (cdr left-factor) (cdr right-factor))))
+                (unit-expression-factors left)
+                (unit-expression-factors right)))))
+
+(defun unitless-p (unit)
+  (null (unit-expression-factors (make-unit-expression unit))))
+
+(defun multiply-unit-expressions (left right)
+  (make-unit-expression
+   (append (unit-expression-factors (make-unit-expression left))
+           (unit-expression-factors (make-unit-expression right)))))
+
+(defun exponentiate-unit-expression (unit exponent)
+  (unless (rationalp exponent)
+    (error "A unit exponent must be rational, not ~S." exponent))
+  (make-unit-expression
+   (mapcar (lambda (factor)
+             (list (car factor) (* exponent (cdr factor))))
+           (unit-expression-factors (make-unit-expression unit)))))
+
+(defun divide-unit-expressions (numerator denominator)
+  (multiply-unit-expressions
+   numerator (exponentiate-unit-expression denominator -1)))
+
 (defclass quantity-specification ()
   ((name
     :initarg :name
@@ -101,6 +163,9 @@ Each factor pair has the form (BASE EXPONENT), where EXPONENT is rational."
    (dimension
     :initarg :dimension
     :reader quantity-specification-dimension)
+   (unit
+    :initarg :unit
+    :reader quantity-specification-unit)
    (tensor-order
     :initarg :tensor-order
     :initform 0
@@ -113,21 +178,23 @@ Each factor pair has the form (BASE EXPONENT), where EXPONENT is rational."
    "The semantic meaning of a value, separate from its machine representation."))
 
 (defun make-quantity-specification
-    (name &key dimension (tensor-order 0) affine-p)
+    (name &key dimension unit (tensor-order 0) affine-p)
   (unless (typep tensor-order '(integer 0 *))
     (error "A tensor order must be a non-negative integer, not ~S."
            tensor-order))
   (make-instance 'quantity-specification
                  :name name
                  :dimension (make-dimension dimension)
+                 :unit (make-unit-expression unit)
                  :tensor-order tensor-order
                  :affine-p (not (null affine-p))))
 
 (defmethod print-object ((specification quantity-specification) stream)
   (print-unreadable-object (specification stream :type t)
-    (format stream "~S ~A order ~D~:[~; point~]"
+    (format stream "~S ~A [~A] order ~D~:[~; point~]"
             (quantity-specification-name specification)
             (quantity-specification-dimension specification)
+            (quantity-specification-unit specification)
             (quantity-specification-tensor-order specification)
             (quantity-specification-affine-p specification))))
 
@@ -136,6 +203,8 @@ Each factor pair has the form (BASE EXPONENT), where EXPONENT is rational."
            (quantity-specification-name right))
        (dimension= (quantity-specification-dimension left)
                    (quantity-specification-dimension right))
+       (unit-expression= (quantity-specification-unit left)
+                         (quantity-specification-unit right))
        (= (quantity-specification-tensor-order left)
           (quantity-specification-tensor-order right))
        (eq (quantity-specification-affine-p left)
@@ -170,14 +239,16 @@ Each factor pair has the form (BASE EXPONENT), where EXPONENT is rational."
        (= (quantity-specification-tensor-order left)
           (quantity-specification-tensor-order right))))
 
-(defun derived-specification (dimension tensor-order)
+(defun derived-specification (dimension unit tensor-order)
   (make-quantity-specification nil
                                :dimension dimension
+                               :unit unit
                                :tensor-order tensor-order))
 
 (defun scalar-number-specification-p (specification)
   (and (null (quantity-specification-name specification))
        (dimensionless-p (quantity-specification-dimension specification))
+       (unitless-p (quantity-specification-unit specification))
        (zerop (quantity-specification-tensor-order specification))
        (not (quantity-specification-affine-p specification))))
 
@@ -185,6 +256,10 @@ Each factor pair has the form (BASE EXPONENT), where EXPONENT is rational."
   (unless (same-quantity-space-p left right)
     (quantity-operation-error operator (list left right)
                               :different-quantity-spaces))
+  (unless (unit-expression= (quantity-specification-unit left)
+                            (quantity-specification-unit right))
+    (quantity-operation-error operator (list left right)
+                              :different-units))
   (let ((left-point-p (quantity-specification-affine-p left))
         (right-point-p (quantity-specification-affine-p right)))
     (ecase operator
@@ -195,6 +270,7 @@ Each factor pair has the form (BASE EXPONENT), where EXPONENT is rational."
        (make-quantity-specification
         (quantity-specification-name left)
         :dimension (quantity-specification-dimension left)
+        :unit (quantity-specification-unit left)
         :tensor-order (quantity-specification-tensor-order left)
         :affine-p (or left-point-p right-point-p)))
       (-
@@ -204,6 +280,7 @@ Each factor pair has the form (BASE EXPONENT), where EXPONENT is rational."
        (make-quantity-specification
         (quantity-specification-name left)
         :dimension (quantity-specification-dimension left)
+        :unit (quantity-specification-unit left)
         :tensor-order (quantity-specification-tensor-order left)
         :affine-p (and left-point-p (not right-point-p)))))))
 
@@ -229,7 +306,20 @@ Each factor pair has the form (BASE EXPONENT), where EXPONENT is rational."
           (multiply-dimensions
            (quantity-specification-dimension left)
            (quantity-specification-dimension right))
+          (multiply-unit-expressions
+           (quantity-specification-unit left)
+           (quantity-specification-unit right))
           (product-tensor-order operator left right)))))
+
+(defun compatible-pair (operator left right)
+  (unless (quantity-specification= left right)
+    (quantity-operation-error operator (list left right)
+                              (if (unit-expression=
+                                   (quantity-specification-unit left)
+                                   (quantity-specification-unit right))
+                                  :incompatible-quantities
+                                  :different-units)))
+  left)
 
 (defgeneric derive-quantity-specification (operator &rest operands)
   (:documentation
@@ -274,6 +364,9 @@ Each factor pair has the form (BASE EXPONENT), where EXPONENT is rational."
          (divide-dimensions
           (quantity-specification-dimension numerator)
           (quantity-specification-dimension denominator))
+         (divide-unit-expressions
+          (quantity-specification-unit numerator)
+          (quantity-specification-unit denominator))
          (product-tensor-order operator numerator denominator)))))
 
 (defmethod derive-quantity-specification ((operator (eql 'dot)) &rest operands)
@@ -289,4 +382,19 @@ Each factor pair has the form (BASE EXPONENT), where EXPONENT is rational."
      (multiply-dimensions
       (quantity-specification-dimension left)
       (quantity-specification-dimension right))
+     (multiply-unit-expressions
+      (quantity-specification-unit left)
+      (quantity-specification-unit right))
      0)))
+
+(defmethod derive-quantity-specification ((operator (eql 'min)) &rest operands)
+  (unless (>= (length operands) 2)
+    (quantity-operation-error operator operands :missing-operands))
+  (reduce (lambda (left right) (compatible-pair operator left right))
+          (rest operands) :initial-value (first operands)))
+
+(defmethod derive-quantity-specification ((operator (eql 'max)) &rest operands)
+  (unless (>= (length operands) 2)
+    (quantity-operation-error operator operands :missing-operands))
+  (reduce (lambda (left right) (compatible-pair operator left right))
+          (rest operands) :initial-value (first operands)))

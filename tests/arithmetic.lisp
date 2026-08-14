@@ -57,3 +57,43 @@
          (number (math:make-quantity-specification nil))
          (scaled (math:derive-quantity-specification '* number bias)))
     (ok (math:quantity-specification= scaled bias))))
+
+(deftest exact-units-compose-without-implicit-conversion
+  (let* ((metres
+           (math:make-quantity-specification
+            :distance :dimension :length :unit :metre))
+         (kilometres
+           (math:make-quantity-specification
+            :distance :dimension :length :unit :kilometre))
+         (seconds
+           (math:make-quantity-specification
+            :duration :dimension :duration :unit :second))
+         (speed (math:derive-quantity-specification '/ metres seconds)))
+    (ok (signals (math:derive-quantity-specification '+ metres kilometres)
+                 'math:quantity-operation-error))
+    (ok (eq :different-units
+            (handler-case
+                (progn
+                  (math:derive-quantity-specification '+ metres kilometres)
+                  nil)
+              (math:quantity-operation-error (condition)
+                (math:quantity-operation-error-reason condition)))))
+    (ok (math:unit-expression=
+         (math:quantity-specification-unit speed)
+         '((:metre 1) (:second -1))))))
+
+(deftest extrema-require-exactly-compatible-quantities
+  (let ((left
+          (math:make-quantity-specification
+           :distance :dimension :length :unit :metre))
+        (right
+          (math:make-quantity-specification
+           :distance :dimension :length :unit :metre))
+        (other-unit
+          (math:make-quantity-specification
+           :distance :dimension :length :unit :kilometre)))
+    (ok (math:quantity-specification=
+         left (math:derive-quantity-specification 'max left right)))
+    (ok (signals
+         (math:derive-quantity-specification 'max left other-unit)
+         'math:quantity-operation-error))))

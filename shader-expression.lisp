@@ -198,6 +198,10 @@ repeating the lane arithmetic as a literal."
     :initform nil
     :accessor shader-expression-name)))
 
+(defgeneric shader-expression-quantity-checked-p (expression)
+  (:documentation
+   "Whether semantic checking has entered EXPRESSION through an annotation."))
+
 (defclass shader-literal (shader-expression)
   ((value
     :initarg :value
@@ -219,6 +223,22 @@ repeating the lane arithmetic as a literal."
     :initarg :parameters
     :initform nil
     :reader shader-call-parameters)))
+
+(defmethod shader-expression-quantity-checked-p ((expression shader-literal))
+  nil)
+
+(defmethod shader-expression-quantity-checked-p ((expression shader-reference))
+  (let ((target (shader-reference-target expression)))
+    (etypecase target
+      (shader-variable-declaration
+       (not (null (shader-declaration-quantity-specification target))))
+      (shader-binding
+       (shader-expression-quantity-checked-p
+        (shader-binding-expression target))))))
+
+(defmethod shader-expression-quantity-checked-p ((expression shader-call))
+  (some #'shader-expression-quantity-checked-p
+        (shader-call-operands expression)))
 
 (defclass shader-output-assignment ()
   ((output
@@ -352,24 +372,33 @@ repeating the lane arithmetic as a literal."
 
 (defun infer-shader-call-quantity-specification
     (operator operands source-form)
-  "Derive semantic arithmetic when every operand carries a specification.
+  "Derive semantics totally once any operand descends from an annotation.
 
-Operators outside the first backend-neutral arithmetic vocabulary leave the
-semantic result unknown.  This lets shader-only sampling and construction
-remain in their own layer while the shared protocol earns more consumers."
-  (when (member operator '(+ - * / dot) :test #'eq)
+An entirely unannotated graph remains valid legacy shader source.  Once an
+annotation enters a calculation, however, a missing operand specification or
+an operator without a backend-neutral rule is a source error rather than a
+silent loss of meaning."
+  (when (some #'shader-expression-quantity-checked-p operands)
     (let ((specifications
             (mapcar #'shader-expression-quantity-specification operands)))
-      (when (every #'identity specifications)
-        (handler-case
-            (apply #'math:derive-quantity-specification
-                   operator specifications)
-          (math:quantity-operation-error (condition)
-            (error 'shader-language-error
-                   :form source-form
-                   :reason :invalid-quantity-operation
-                   :details (math:quantity-operation-error-reason
-                             condition))))))))
+      (unless (every #'identity specifications)
+        (error 'shader-language-error
+               :form source-form
+               :reason :missing-quantity-specification
+               :details
+               (loop for operand in operands
+                     for specification in specifications
+                     unless specification
+                       collect (shader-expression-form operand))))
+      (handler-case
+          (apply #'math:derive-quantity-specification
+                 operator specifications)
+        (math:quantity-operation-error (condition)
+          (error 'shader-language-error
+                 :form source-form
+                 :reason :invalid-quantity-operation
+                 :details (math:quantity-operation-error-reason
+                           condition)))))))
 
 (defmethod infer-shader-call-type (operator operands source-form)
   (declare (ignore operands))
@@ -818,6 +847,8 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
                         (math:quantity-specification-name specification)
                         :dimension
                         (math:quantity-specification-dimension specification)
+                        :unit
+                        (math:quantity-specification-unit specification)
                         :tensor-order (if (= (length indices) 1) 0 1)
                         :affine-p
                         (math:quantity-specification-affine-p specification))))
@@ -854,17 +885,18 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
     (if (= count 1) 0 1)))
 
 (defun parse-declaration-quantity-specification
-    (quantity dimension affine-p type source-form)
-  (when (or quantity dimension affine-p)
+    (quantity dimension unit affine-p type source-form)
+  (when (or quantity dimension unit affine-p)
     (math:make-quantity-specification
      quantity
      :dimension dimension
+     :unit unit
      :tensor-order (shader-type-tensor-order type source-form)
      :affine-p affine-p)))
 
 (defun parse-interface-declaration (form direction)
   (destructuring-bind
-      (name type &key location built-in quantity dimension affine-p) form
+      (name type &key location built-in quantity dimension unit affine-p) form
     (unless (or (and (typep location '(integer 0 *)) (null built-in))
                 (and (null location) built-in))
       (error 'shader-language-error
@@ -876,7 +908,7 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
                      :type resolved-type
                      :quantity-specification
                      (parse-declaration-quantity-specification
-                      quantity dimension affine-p resolved-type form)
+                      quantity dimension unit affine-p resolved-type form)
                      :direction direction
                      :location location
                      :built-in built-in
@@ -905,7 +937,7 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
                       collect
                       (destructuring-bind
                           (member-name member-type
-                           &key quantity dimension affine-p)
+                           &key quantity dimension unit affine-p)
                           member-form
                         (let ((resolved-type
                                 (find-shader-type member-type member-form)))
@@ -923,7 +955,7 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
                            :name member-name :type resolved-type
                            :quantity-specification
                            (parse-declaration-quantity-specification
-                            quantity dimension affine-p
+                            quantity dimension unit affine-p
                             resolved-type member-form)
                            :block block :index index :offset (* index 16)
                            :source-form member-form)))))
