@@ -1,0 +1,571 @@
+#+title: Sky, atmosphere, and voxel light for the little block world
+#+startup: overview
+
+* Status: reviewed implementation plan
+:PROPERTIES:
+:ID: SK7L2T
+:END:
+
+This page plans a sky and lighting system for luvcraft: an animated sky and
+primary light, caves and overhangs which become dark for the right reason,
+light-emitting blocks, relighting after edits and residency changes, and a
+clean route to HDR bloom and directional shadows.
+
+The important outcome of the design review is that shader-language growth is
+part of the work, not a cost to evade.  Frame-wide facts still belong in Lisp;
+spatially varying image mathematics belongs in shaders; and the boundary
+between them should become more capable as the renderer asks more of it.
+
+This is a plan rather than an implemented specification.  Each phase below has
+a visible result and an evidence gate, so it can be revised from measurements
+without undoing the preceding phases.
+
+* What the critique changed
+:PROPERTIES:
+:ID: SKCRIT
+:END:
+
+The first draft had a useful inventory and a good instinct for dense chunk
+data, immutable mesh snapshots, and last-known-good shader replacement.  It
+also optimized too hard for making no new machinery.  These are the changes
+which make the plan durable.
+
+- *Grow the shader language on purpose.*  Avoiding =max=, =clamp=,
+  =smoothstep=, normalization, and exponentiation is not a design objective.
+  They are ordinary graphics vocabulary needed immediately by fog, a sky
+  gradient and sun disc, tunable light response, and later tone mapping.  Add
+  them as one coherent typed-math extension and keep their source-to-SPIR-V
+  provenance inspectable.
+- *Do not make the present world height a lighting invariant.*  The current
+  generated world resides only at chunk Y=0, but =block-world= and
+  =voxel-space= already admit arbitrary chunk coordinates and shapes.  A
+  3x3-horizontal regional proof becomes false once a sky opening can affect a
+  tall column.  The runtime solver will therefore be incremental and
+  height-independent; a from-scratch solver remains its oracle.
+- *Keep source and derived revisions distinct.*  Block content revisions say
+  that authored world data changed.  Light revisions say that a derived field
+  changed.  Relighting must not impersonate a block edit by bumping content
+  revisions; mesh dependency stamps should name both domains explicitly.
+- *Residency is a lighting input.*  Arrival and departure alter the boundary
+  conditions of retained chunks.  Eviction cannot merely invalidate a mesh
+  and leave its baked light untouched.  Lighting receives content and
+  residency dirtiness, and unknown terrain is not silently reclassified as
+  open sky.
+- *Add light in linear space.*  Screen blend is bounded and convenient, but it
+  is not a useful foundation for several light sources and it destroys the
+  headroom emissive surfaces need.  The material sums sky, direct, and block
+  illumination, adds self-emission separately, then fogs and eventually tone
+  maps.
+- *Do not spend alpha as an undocumented bloom bus.*  Propagated blocklight is
+  not the same fact as material emission, and the current sRGB scene target
+  cannot retain HDR energy anyway.  Emission gets an explicit material input;
+  bloom follows a deliberate linear-HDR scene path.
+- *Measure scheduling claims.*  There is no evidence yet that a relight is
+  sub-millisecond or that a one-mesh-per-frame ripple is pleasant.  The system
+  will expose work counters and latency, publish light atomically, and move
+  captured work to the existing producer only if measurements justify it.
+
+* What exists today: verified touch points
+:PROPERTIES:
+:ID: SK9INV
+:END:
+
+- [[file:../shader-expression.lisp][=shader-expression.lisp=]] is already an open compiler.  Operators are symbols,
+  and parsing, typing, lowering, result naming, and documentation are
+  EQL-specialized generic functions.  A new operator should be a cohesive
+  method cluster, not another central dispatch table.
+- The expression language currently has floats, =vec2..4=, arithmetic,
+  =dot=, =mix=, =swizzle=, and texture sampling.  It has no extended-instruction
+  import, comparison/control-flow vocabulary, or general uniform packing.
+  Uniform blocks intentionally consist only of aligned vec4 lanes.
+- [[file:../spir-v.lisp][=spir-v.lisp=]] has neither =OpExtInstImport= nor =OpExtInst=, and the
+  structured module in [[file:../shader.lisp][=shader.lisp=]] has no import section between
+  capabilities and the memory model.  These are small but real backend
+  additions; extended math is not merely a few surface aliases.
+- The live shader path in [[file:../luvcraft/live-pipeline.lisp][=luvcraft/live-pipeline.lisp=]] transactionally rebuilds complete
+  vertex/fragment pipelines and retains the last-known-good pipeline after a
+  bad edit.  New sky and post materials should use that path rather than a
+  parallel compilation mechanism.
+- The block vertex shader reads six vec4 camera lanes.  The host independently
+  allocates a hard-coded 96-byte buffer.  Adding sky lanes must also remove
+  that duplicated size knowledge or validate it at construction.
+- Fog is computed per vertex as =1 - (z/far)^2= without a clamp and then
+  interpolated to the fragment stage.  The first use of =clamp= is therefore a
+  correctness improvement in an existing shader, not speculative vocabulary.
+- The visible material hardcodes its sun vector, sky fill, sun colour, and sky
+  colour.  The same sky literal also appears in the camera uniform and the
+  render-pass clear value.
+- The mesh vertex is three =:float32x3= attributes: position, UV plus AO, and
+  normal.  The Vulkan backend currently accepts only =:float32x3= vertex
+  attributes.  A new =:vec3= light/material attribute fits that honest current
+  API; a proposed =:vec2= attribute does not work without first extending it.
+- Meshing already copies a one-cell block halo to an immutable worker
+  snapshot.  Corner AO samples only that neighborhood, and mesh results are
+  rejected when their dependency stamp is stale.
+- The current scene target is the canvas's LDR sRGB format.  It is rendered
+  offscreen and then copied to the surface, which is a useful post-processing
+  seam but not yet an HDR or multi-pass pipeline.
+
+* The rendering model
+:PROPERTIES:
+:ID: SKRMOD
+:END:
+
+There are two related systems, not one.
+
+1. The *environment* is continuous and changes every frame: sky radiance,
+   primary-light direction and colour, ambient colour, fog, exposure, and
+   time of day.  Lisp evaluates its small time/profile model once per frame
+   and writes a uniform block.  Sky and material shaders evaluate spatial
+   image functions from those parameters.
+2. The *voxel light field* changes when block content or residency changes:
+   sky access, propagated blocklight, opacity, and emission.  It is a dense
+   derived field associated with resident chunks, revised independently from
+   block content, and sampled into immutable mesh snapshots.
+
+The block fragment material starts from a linear-light equation rather than a
+blend trick.  In schematic form:
+
+#+begin_src lisp
+(let* ((sky-level      (light-response sky-input))
+       (block-level    (light-response block-input))
+       (n-dot-l        (max 0.0 (dot normal sun-direction)))
+       ;; Lateral skylight gives ambient visibility but not a hard sun beam.
+       (sun-visibility (smoothstep 0.90 1.0 sky-input))
+       (sky-light      (* sky-color sky-level ao))
+       (sun-light      (* sun-color n-dot-l sun-visibility day-factor))
+       (local-light    (* block-light-color block-level))
+       (reflected      (* albedo (+ sky-light sun-light local-light)))
+       (radiance       (+ reflected (* emission-color emission-input)))
+       (fogged         (mix radiance fog-color fog-amount)))
+  (set-output color-output (vec4 fogged 1.0)))
+#+end_src
+
+The exact response curves and balances are art parameters, not baked mesh
+facts.  Vertices carry normalized raw levels; shader edits can change the
+curve without remeshing the world.  AO modulates diffuse sky access, not
+self-emission.  When the HDR phase arrives, radiance above 1.0 survives until
+tone mapping and can feed bloom naturally.
+
+Propagated skylight is not a directional shadow map.  It makes caves dark and
+canopies reduce ambient sky access.  The moving sun remains unshadowed until a
+later GPU shadow pass; the plan does not call vertical canopy shade an angled
+sun shadow.
+
+* Phase 0: give the shader language the mathematics this work needs
+:PROPERTIES:
+:ID: SKSHDR
+:END:
+
+Add the SPIR-V and expression-language capability before designing visual
+effects around its absence.
+
+** SPIR-V structure
+
+- Define =OpExtInstImport= and =OpExtInst= in the instruction vocabulary.
+- Give =spir-v-module= explicit extension and extended-instruction-import
+  sections in SPIR-V logical-layout order.  Imports are durable structured
+  objects, not instruction forms inserted ad hoc by individual shaders.
+- Let lowering request =GLSL.std.450= once when an operator needs it.  Repeated
+  operators in one module share the import ID; modules which use no extended
+  math do not acquire one.
+- Preserve the bidirectional expression/instruction provenance used by the
+  shader lab.  An extended operation must still highlight as the instruction
+  belonging to its source expression.
+
+** Typed operator vocabulary
+
+The first useful family is =min=, =max=, =clamp=, =smoothstep=, =abs=,
+=sqrt=, =expt=, and =normalize=.  Use CL's symbol where its meaning matches
+the compiled subset; use exported shader symbols for words CL does not have.
+Each operator gets explicit accepted scalar/vector signatures rather than a
+promise that every GLSL overload exists.  The existing EQL-method protocol is
+the extension mechanism; a convenience definer may emit ordinary methods but
+must not hide a registry.
+
+This phase does not add branching, loops, matrices, or every GLSL function
+pre-emptively.  It establishes the import/lowering machinery and a coherent
+math baseline with immediate consumers.  Later language growth remains a
+normal feature, not an architectural exception.
+
+** Uniform and vertex ABI checks
+
+- Keep vec4-lane uniform blocks for this phase: they are simple, aligned, and
+  sufficient.  Derive or assert the host byte size from the shader-visible
+  layout so the 96-to-N-byte change is not duplicated magic.
+- Verify that the same frame uniform block can be declared in both vertex and
+  fragment specifications at binding 2.  Both stages must declare identical
+  member order and offsets.
+- Use a fourth =:float32x3= block vertex attribute for =(sky block emission)=.
+  Do not quietly write =:float32x2= into the plan while the backend rejects
+  it.  General vertex formats remain a worthwhile GPU-API project when a
+  consumer benefits from them.
+
+** Gate
+
+Unit tests cover successful and rejected signatures, a single shared import,
+logical module ordering, deterministic lowering, and provenance.  Generated
+modules pass =spirv-val --target-env vulkan1.0=.  A live invalid edit preserves
+the old pipeline, and a corrected use of an extended operator installs on the
+running Vulkan path.
+
+* Phase 1: a real sky driven by a small Lisp clock
+:PROPERTIES:
+:ID: SKDYCY
+:END:
+
+A =sky-clock= belongs to the luvcraft session because it has mutable runtime
+identity worth inspecting: time, rate, paused state, and an optional pinned
+time for deterministic capture.  A sky profile is ordinary data: keyframes
+for sky/horizon colour, primary-light colour, ambient colour, fog, and
+exposure.  There is no class hierarchy or generic dispatch until more than one
+actual sky model exists.
+
+=sky-frame-parameters= evaluates the clock and profile once per frame.  CPU
+trigonometry is appropriate for a single sun direction; it is not a reason to
+move per-pixel sky shaping out of the shader.  The frame uniform grows by
+aligned lanes for at least:
+
+- sun direction plus day factor;
+- sun colour plus angular size or intensity;
+- zenith and horizon colours;
+- ambient colour plus exposure;
+- fog colour and near/far shaping.
+
+Replace the three hardcoded sky literals with this one frame result.  The
+clear value is merely a safe fallback.
+
+A live =:sky= pipeline draws a fullscreen triangle before block geometry in
+the existing scene pass, with depth writes disabled.  Its fragment shader
+reconstructs or receives a view ray and uses =normalize=, =smoothstep=,
+=max=, and =expt= for a vertical gradient, horizon band, sun disc, and a soft
+forward glow.  A tiny static fullscreen vertex buffer is acceptable; integer
+vertex-index support is not a prerequisite unless it is independently useful.
+
+The block shader reads the same environment lanes directly.  Fog becomes a
+clamped function with explicit near/far semantics.  The sky pass itself is
+not fogged into its own colour.
+
+The clock advances in =render-luvcraft-frame= from its bounded delta.  SLY can
+pause it, set a time, change its rate, or replace the profile without
+restarting.  Smoke capture pins it; interactive play animates it.
+
+** Gate
+
+Noon, dusk, and night captures show a continuous sky, matching fog, and a
+moving primary light in the actual renderer.  The shader lab can inspect the
+sky specifications.  A fixed clock produces a byte-identical smoke image;
+unpinning it visibly advances without changing block content or remeshing.
+
+* Phase 2: make voxel light an explicit derived domain
+:PROPERTIES:
+:ID: SKSTOR
+:END:
+
+Each resident =block-chunk= may own a =chunk-light-field= with:
+
+- sky and block arrays of =(unsigned-byte 8)= values constrained to 0..15;
+- a light revision and six light-boundary revisions;
+- a state such as =:unlit=, =:stable=, or =:provisional=.
+
+The semantic light-field object belongs at the chunk boundary; its 4096-site
+columns remain dense arrays.  Two u8 arrays cost 8 KiB for a 16-cubed chunk.
+Nibble packing is deferred until memory or bandwidth measurements say it
+matters.
+
+Block light behavior is distinct from collision.  Add both protocols now:
+
+#+begin_src lisp
+(defgeneric block-light-opacity (block)) ; 0..15
+(defgeneric block-light-emission (block)) ; 0..15
+(defgeneric block-surface-emission (block)) ; linear material intensity
+#+end_src
+
+Air answers zero for all three.  A =block-kind= method reads configured slots
+with opaque/non-emissive defaults; particular kind instances carry the data.
+Propagation strength and visible surface radiance are separate even when one
+crystal configures both.  The solver dispatches once per palette entry to
+build dense opacity and light-emission lookup vectors, then its hot loops index
+those vectors.  It does not call a generic for every cell.
+
+Light publication advances light revisions only.  The mesh dependency stamp
+contains the target chunk's content and light revisions plus the opposing
+content and light boundary revisions of sampled neighbors.  That preserves
+the reason a mesh became stale and avoids feedback in which derived light
+looks like another authored edit.
+
+* Lighting semantics and boundaries
+:PROPERTIES:
+:ID: SKBOUND
+:END:
+
+- Blocklight begins at =block-light-emission= and loses at least one level per
+  six-neighbor step, with opacity contributing further loss.
+- Direct sky enters from a boundary known to be open to the sky.  It travels
+  downward through transparent cells without losing a level; lateral and
+  upward propagation attenuate.  This rule works across any number of vertical
+  chunks.
+- A missing resident neighbor has one of three meanings: known open boundary,
+  known closed/outside boundary, or unknown terrain.  Only the world/source
+  policy may decide which.  The lighting solver never equates =:absent= with
+  open sky merely because the mesher currently chooses =:air= for missing
+  geometry.
+- Provisional results may be rendered at a residency edge, but their
+  dependency includes that boundary state.  Arrival or departure dirties the
+  retained face and schedules reconciliation before a new stable light
+  revision is published.
+
+The little generated world can initially declare open sky above its known
+vertical extent and a closed lower boundary.  A future vertically streamed
+source can provide sky-column knowledge or retain =:unknown= until the upper
+stack is known.  That source protocol, rather than a hardcoded chunk Y=0 test,
+is the growth seam.
+
+* The solver: reference truth plus incremental runtime work
+:PROPERTIES:
+:ID: SKRELT
+:END:
+
+Implement two algorithms with the same semantics.
+
+1. A *from-scratch reference relight* clears a finite captured region, seeds
+   known sky boundaries and emitters, imports explicit boundary values, and
+   propagates to fixation.  It favors obvious correctness and is used by tests,
+   inspections, and recovery.
+2. The *runtime relighter* maintains removal and addition queues.  Content
+   changes first recompute direct-sky seeds for affected columns.  Decreased or
+   invalidated values enter the removal queue; surviving sources and alternate
+   paths enter the addition queue.  The same mechanism crosses resident chunk
+   faces and works for both edits and residency transitions.
+
+The old 3x3-horizontal recomputation remains a useful test case and perhaps a
+current-world fallback: with a 0..15 attenuating lateral field and one known
+vertical chunk it bounds local influence.  It is not the public correctness
+argument and no caller may assume that shape.
+
+A =luvcraft-lighting-state= owned by the session records dirty cell/column or
+chunk coordinates, residency-boundary changes, queue counters, and an
+in-progress candidate.  World content hooks and residency publication feed
+that state; a dirty bit stored only on a chunk would lose departures and give
+too little information for future vertical columns.
+
+Reconciliation runs before mesh snapshots are captured, but it does not expose
+half-solved arrays.  Work is accumulated in candidate copies of touched light
+fields and published as one owner-thread transaction when the queues settle.
+Until then meshes continue to use the previous stable revision.  A new edit
+either merges into or invalidates the candidate explicitly.
+
+Start with bounded owner-thread work and record cells popped, chunks touched,
+milliseconds, restarts, and edit-to-publish latency.  If real captures show
+hitches, capture immutable block/light/boundary inputs in a new production
+request and publish a complete candidate through the existing
+=perform-production-request= / =publish-production-result= protocol.  Its
+dependency stamp rejects stale results.  Do not add a second worker system.
+
+* Meshing carries raw light, not an art-directed bake
+:PROPERTIES:
+:ID: SKMESH
+:END:
+
+=make-block-mesh-snapshot= copies sky and block u8 columns for the same
+one-cell halo as block samples, after stable lighting publication.  A
+=sample-light-at= generic is justified at this representation boundary: the
+live world/neighborhood and immutable snapshot each provide one method, while
+the dense inner representation remains arrays.
+
+Corner lighting samples the face-adjacent air cells around each vertex.  It
+may share the existing AO traversal after a test establishes the intended
+sample coordinates, but AO occupancy and light averaging remain separately
+named results.  Occluded samples and absent/unknown samples have explicit
+rules rather than falling through =block-solid-p=.
+
+The mesh adds one attribute at location 3:
+
+#+begin_example
+light-material-input :vec3 = (sky-level / 15,
+                              block-level / 15,
+                              surface emission / 15)
+#+end_example
+
+That widens the current 36-byte vertex to four =:float32x3= lanes and a
+48-byte stride, which the backend can describe today.  It is intentionally
+plain for the first proof.  Record generated vertex bytes and mesh time; if
+bandwidth becomes material, add normalized packed vertex formats to the GPU
+API as a measured optimization rather than obscuring the initial format.
+
+Light revision changes schedule remeshing through the existing snapshot and
+stale-result machinery.  Relit visible chunks receive priority; an
+artificially slow “pleasant ripple” is not an acceptance criterion.  Measure
+solver completion and mesh publication separately so either bottleneck is
+visible.
+
+** Gate
+
+Caves, overhangs, and canopy shade work across chunk seams.  Arrival and
+eviction do not leave stale bright or dark borders.  A vertical multi-chunk
+test world works even though the current generator resides at Y=0.  Random
+edit and residency sequences leave the runtime field bit-identical to the
+reference relight after queues settle.
+
+* Phase 3: one crystal proves emission and edit propagation
+:PROPERTIES:
+:ID: SKCRYS
+:END:
+
+=*crystal-block*= carries light emission 14, surface emission 1.0, and its own
+atlas tile.  Its surface-emission value makes the crystal face luminous; its
+light-emission value seeds the propagated field around it.  Those are related
+but distinct facts, which is why the mesh carries material emission separately
+from the blocklight level.
+
+Add it to =*placeable-block-kinds*= and make the key range and title derive
+from the palette length instead of hardcoding 1--7.  A block removal or
+placement feeds the ordinary content-change path: direct sky, blocklight,
+light publication, mesh invalidation, and GPU replacement all complete
+without a special crystal edit command.
+
+** Gate
+
+At pinned night, a crystal remains visibly emissive and warms neighboring
+surfaces with a continuous cross-chunk falloff.  Placing and removing it
+converges to the reference field, rejects any stale mesh work already in
+flight, and updates the visible neighborhood within a measured latency budget.
+
+* Phase 4: HDR scene colour, tone mapping, and restrained bloom
+:PROPERTIES:
+:ID: SKHDR
+:END:
+
+Bloom is not “three easy passes” on the current target.  First add an explicit
+linear HDR scene format (normally RGBA16F) to the GPU API/backend and render
+sky plus world into it.  A live fullscreen post pipeline tone maps into an LDR
+sRGB presentation target which can be copied to the surface as today.
+
+Then add half-resolution bright extraction, separable blur, and composite.
+The extraction can use HDR luminance and a threshold/knee expressed with the
+new shader math.  If art direction later requires “emissive materials only,”
+add a named emission attachment and multiple render targets; do not overload
+scene alpha.  All intermediate textures have explicit session ownership,
+resize handling, usage flags, and completion-safe destruction.
+
+The first bloom target is deliberately the crystal at night.  Exposure,
+threshold, radius, and intensity are live profile values, while the pinned
+smoke profile keeps deterministic output.
+
+* Later: directional shadows, not baked animated sunlight
+:PROPERTIES:
+:ID: SKLATR
+:END:
+
+If trees and terrain need shadows which rotate with the sun, add a GPU shadow
+map (or another explicitly evaluated real-time technique).  Do not bake a
+directional term into chunk meshes and invalidate the whole resident world
+every time the clock moves.  The voxel skylight field remains useful ambient
+visibility underneath that future pass.
+
+Other later capabilities should be earned by a concrete scene: coloured
+blocklight needs three propagated channels; translucent foliage needs opacity
+values between air and stone plus suitable material blending; clouds need a
+separate sky layer.  None requires replacing the environment/derived-field
+split above.
+
+* Verification and observability
+:PROPERTIES:
+:ID: SKTEST
+:END:
+
+The strongest lighting test is differential: generate finite random worlds
+including multiple vertical chunks, apply random content edits and
+arrival/departure sequences, settle the incremental queues, and compare every
+resident sky/block value with a from-scratch solve using the same explicit
+boundary conditions.
+
+Targeted tests cover:
+
+- open columns, roofs, tunnels, shafts, overhangs, and partial opacity;
+- blocklight falloff, removal, competing emitters, and alternate paths;
+- all six chunk seams, including vertical seams;
+- known-open, known-closed, and unknown residency boundaries;
+- independent content/light revisions and stale snapshot rejection;
+- corner interpolation without light leaks through two occluding sides;
+- shader operator typing, imports, provenance, uniform ABI, and invalid-edit
+  recovery.
+
+Runtime counters exposed to SLY report lighting queue sizes and cell visits,
+candidate age/restarts, chunks and bytes touched, light publication latency,
+remesh latency, mesh bytes, and relevant frame CPU time.  Performance claims
+come from those counters and repeated captures, not estimates in this page.
+
+Visual review uses the actual moving renderer at pinned noon, dusk, and night:
+walk from sunlight into a cave, move under and around trees, cross residency
+edges, and place/remove a crystal on both sides of a chunk seam.  The ordinary
+verification loop remains:
+
+#+begin_src sh
+make test
+make smoke
+md5 -q build/luvcraft-smoke.png
+#+end_src
+
+Every shader module added by a phase also passes =spirv-val=.  A visual phase
+changes the smoke hash deliberately only after inspecting the image; a fixed
+clock then keeps the new hash stable.
+
+* Playable implementation sequence
+:PROPERTIES:
+:ID: SKPHAS
+:END:
+
+1. *Shader mathematics.*  Extended-instruction structure, typed math
+   operators, clamped existing fog, uniform-size validation, =spirv-val=, and
+   live replacement proof.
+2. *Sky.*  Session clock/profile, shared frame parameters, fullscreen live sky
+   pipeline, animated material/fog, and pinned deterministic captures.
+3. *Skylight.*  Light-field objects and revisions, explicit boundary/source
+   semantics, reference and incremental solvers, snapshot light halo, raw
+   vertex light, and caves/canopies visible in a vertical test world.
+4. *Crystal.*  Emission/opacity block vocabulary, propagated blocklight,
+   dynamic palette keys, and measured edit-to-photon behavior.
+5. *HDR and bloom.*  Linear scene target, tone mapping, then a restrained
+   crystal bloom with explicit resource lifetime and resize behavior.
+6. *Directional shadows, if the moving scene asks for them.*  A separate GPU
+   pass measured and judged in motion.
+
+Each checkpoint is useful on its own.  The sequence deliberately builds
+general shader and lighting capabilities where the feature needs them, while
+keeping the frame sequence, ownership boundaries, dense hot data, and live
+development behavior direct and inspectable.
+
+* Decisions now made; questions left to evidence
+:PROPERTIES:
+:ID: SKOPEN
+:END:
+
+Made here:
+
+- shader-language growth is welcome and happens before the sky shader;
+- frame-wide time/profile evaluation is CPU work, spatial image math is GPU
+  work;
+- light contributions add in linear space, with material emission separate;
+- voxel light has its own data and revisions beside block content;
+- absent residency and open sky are different states;
+- the runtime algorithm is height-independent and checked against a simple
+  full relight;
+- opacity and emission are block semantics from the start;
+- first storage is two u8 columns and first vertex transport is an explicit
+  float vec3;
+- bloom waits for an HDR scene path and does not commandeer alpha.
+
+Questions for probes rather than prior debate:
+
+- Does owner-thread incremental reconciliation stay within its measured frame
+  budget during streaming and edit bursts, or should captured batches use the
+  existing producer?
+- Is the 48-byte vertex materially more expensive in the current scene, and
+  which packed format would recover enough bandwidth to justify GPU-API work?
+- Which sky profile and sun angular treatment look good in motion at the
+  actual terrain scale?
+- Does HDR bright extraction give the desired restrained bloom, or does art
+  direction require a separate emission attachment?
+- When ambient canopy shade is present, which scenes still need a directional
+  shadow map badly enough to pay for it?

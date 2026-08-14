@@ -113,6 +113,10 @@ The following are starting paths rather than a table of settled doctrine.
   3D physics experiment: CLOS at semantic boundaries, dense domains and
   columnar numerical state inside the step, and derived collision structures
   between bodies and the block world.
+- [[file:sky-and-light.org][Sky, atmosphere, and voxel light for the little block world]] is the reviewed
+  implementation path for a more capable mathematical shader language, an
+  animated sky, height-independent skylight and blocklight, visible relighting
+  on edits and residency changes, and an eventual linear-HDR bloom path.
 - [[file:box3d-architecture.org][Field notes on Box3D's architecture]] follows the concrete identity,
   sparse/dense storage, solver-set, contact, constraint-coloring, determinism,
   and event mechanisms behind that landmark.
