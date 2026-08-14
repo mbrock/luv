@@ -1782,62 +1782,62 @@ ownership and cancel this finalizer."
          (extent
            (texture-write-components
             size '(2 3) destination :invalid-write-size)))
-    (when (= 2 (length origin))
-      (setf origin (append origin '(0))))
-    (when (= 2 (length extent))
-      (setf extent (append extent '(1))))
-    (unless (and (typep texture 'vulkan-gpu-texture)
-                 (= 0 (texture-copy-mip-level destination))
-                 (eq :all (texture-copy-aspect destination))
-                 (= 0 (third origin))
-                 (= 1 (third extent)))
-      (reject-texture-write destination :unsupported-texture-copy destination))
-    (ensure-live-vulkan-object device :write-texture)
-    (ensure-vulkan-object-device
-     texture (vulkan-texture-device texture) device
-     :write-texture)
-    (unless (member :copy-dst (gpu-texture-usage texture))
-      (error 'gpu-usage-error
-             :object texture :operation :write-texture
-             :required-usage :copy-dst
-             :actual-usage (gpu-texture-usage texture)))
-    (unless (member (gpu-texture-format texture)
-                    '(:rgba8-unorm :rgba8-unorm-srgb
-                      :bgra8-unorm :bgra8-unorm-srgb))
-      (reject-texture-write
-       destination :unsupported-texture-format
-       (gpu-texture-format texture)))
-    (unless (and (plusp (first extent)) (plusp (second extent))
-                 (<= (+ (first origin) (first extent))
-                     (first (gpu-texture-size texture)))
-                 (<= (+ (second origin) (second extent))
-                     (second (gpu-texture-size texture))))
-      (reject-texture-write destination :write-out-of-bounds
-                            (list :origin origin :size extent)))
-    (unless (and (arrayp data)
-                 (= 2 (array-rank data))
-                 (nth-value 0
-                   (subtypep (array-element-type data)
-                             '(unsigned-byte 32)))
-                 (>= (array-dimension data 0) (second extent))
-                 (>= (array-dimension data 1) (first extent)))
-      (reject-texture-write destination :unsupported-texture-data data))
-    (let* ((width (first extent))
-           (height (second extent))
-           (offset (texture-data-layout-offset data-layout))
-           (bytes-per-row
-             (or (texture-data-layout-bytes-per-row data-layout)
-                 (* width 4)))
-           (rows-per-image
-             (or (texture-data-layout-rows-per-image data-layout) height)))
-      (unless (and (typep offset '(unsigned-byte 64))
-                   (zerop (mod offset 4))
-                   (typep bytes-per-row '(unsigned-byte 32))
-                   (>= bytes-per-row (* width 4))
-                   (zerop (mod bytes-per-row 4))
-                   (typep rows-per-image '(unsigned-byte 32))
-                   (>= rows-per-image height))
-        (reject-texture-write destination :invalid-data-layout data-layout))
+      (when (= 2 (length origin))
+        (setf origin (append origin '(0))))
+      (when (= 2 (length extent))
+        (setf extent (append extent '(1))))
+      (unless (and (typep texture 'vulkan-gpu-texture)
+                   (= 0 (texture-copy-mip-level destination))
+                   (eq :all (texture-copy-aspect destination))
+                   (= 0 (third origin))
+                   (= 1 (third extent)))
+        (reject-texture-write destination :unsupported-texture-copy destination))
+      (ensure-live-vulkan-object device :write-texture)
+      (ensure-vulkan-object-device
+       texture (vulkan-texture-device texture) device
+       :write-texture)
+      (unless (member :copy-dst (gpu-texture-usage texture))
+        (error 'gpu-usage-error
+               :object texture :operation :write-texture
+               :required-usage :copy-dst
+               :actual-usage (gpu-texture-usage texture)))
+      (unless (member (gpu-texture-format texture)
+                      '(:rgba8-unorm :rgba8-unorm-srgb
+                        :bgra8-unorm :bgra8-unorm-srgb))
+        (reject-texture-write
+         destination :unsupported-texture-format
+         (gpu-texture-format texture)))
+      (unless (and (plusp (first extent)) (plusp (second extent))
+                   (<= (+ (first origin) (first extent))
+                       (first (gpu-texture-size texture)))
+                   (<= (+ (second origin) (second extent))
+                       (second (gpu-texture-size texture))))
+        (reject-texture-write destination :write-out-of-bounds
+                              (list :origin origin :size extent)))
+      (unless (and (arrayp data)
+                   (= 2 (array-rank data))
+                   (nth-value 0
+                     (subtypep (array-element-type data)
+                               '(unsigned-byte 32)))
+                   (>= (array-dimension data 0) (second extent))
+                   (>= (array-dimension data 1) (first extent)))
+        (reject-texture-write destination :unsupported-texture-data data))
+      (let* ((width (first extent))
+             (height (second extent))
+             (offset (texture-data-layout-offset data-layout))
+             (bytes-per-row
+               (or (texture-data-layout-bytes-per-row data-layout)
+                   (* width 4)))
+             (rows-per-image
+               (or (texture-data-layout-rows-per-image data-layout) height)))
+        (unless (and (typep offset '(unsigned-byte 64))
+                     (zerop (mod offset 4))
+                     (typep bytes-per-row '(unsigned-byte 32))
+                     (>= bytes-per-row (* width 4))
+                     (zerop (mod bytes-per-row 4))
+                     (typep rows-per-image '(unsigned-byte 32))
+                     (>= rows-per-image height))
+          (reject-texture-write destination :invalid-data-layout data-layout))
         (values texture origin extent offset bytes-per-row rows-per-image
                 data destination)))))
 
@@ -2130,26 +2130,26 @@ lowering later without changing this queue-level operation."
                                 :object pass :operation :set-bind-group
                                 :state :no-pipeline
                                 :expected-state :pipeline-bound))))
-      (ensure-vulkan-object-device
-       bind-group (vulkan-bind-group-device bind-group) device
-       :set-bind-group)
-      (unless (eq (vulkan-bind-group-layout bind-group)
-                  (vulkan-render-pipeline-bind-group-layout pipeline))
-        (reject-gpu-request bind-group :incompatible-pipeline-layout pipeline))
-      (dolist (buffer (vulkan-bind-group-buffers bind-group))
         (ensure-vulkan-object-device
-         buffer (vulkan-buffer-device buffer)
-         device :set-bind-group))
-      (dolist (texture-view (vulkan-bind-group-texture-views bind-group))
-        (let ((texture (gpu-texture-view-texture texture-view)))
-          (ensure-vulkan-texture-for-command
-           encoder texture pass :texture-binding)
-          (transition-vulkan-texture
-           encoder texture :shader-read-only-optimal)))
-      (lvk:cmd-bind-graphics-descriptor-set
-       (vulkan-command-encoder-command-buffer encoder)
-       (vulkan-render-pipeline-layout pipeline)
-       (vulkan-handle bind-group))
+         bind-group (vulkan-bind-group-device bind-group) device
+         :set-bind-group)
+        (unless (eq (vulkan-bind-group-layout bind-group)
+                    (vulkan-render-pipeline-bind-group-layout pipeline))
+          (reject-gpu-request bind-group :incompatible-pipeline-layout pipeline))
+        (dolist (buffer (vulkan-bind-group-buffers bind-group))
+          (ensure-vulkan-object-device
+           buffer (vulkan-buffer-device buffer)
+           device :set-bind-group))
+        (dolist (texture-view (vulkan-bind-group-texture-views bind-group))
+          (let ((texture (gpu-texture-view-texture texture-view)))
+            (ensure-vulkan-texture-for-command
+             encoder texture pass :texture-binding)
+            (transition-vulkan-texture
+             encoder texture :shader-read-only-optimal)))
+        (lvk:cmd-bind-graphics-descriptor-set
+         (vulkan-command-encoder-command-buffer encoder)
+         (vulkan-render-pipeline-layout pipeline)
+         (vulkan-handle bind-group))
         (retain-vulkan-resource encoder bind-group)
         (dolist (texture-view (vulkan-bind-group-texture-views bind-group))
           (retain-vulkan-resource encoder texture-view))
@@ -2302,25 +2302,25 @@ lowering later without changing this queue-level operation."
                                 :operation :set-bind-group
                                 :state :no-pipeline
                                 :expected-state :pipeline-bound))))
-      (ensure-vulkan-object-device
-       bind-group (vulkan-bind-group-device bind-group) device
-       :set-bind-group)
-      (unless (eq (vulkan-bind-group-layout bind-group)
-                  (vulkan-compute-pipeline-bind-group-layout pipeline))
-        (reject-gpu-request bind-group :incompatible-pipeline-layout pipeline))
-      (dolist (buffer (vulkan-bind-group-buffers bind-group))
         (ensure-vulkan-object-device
-         buffer (vulkan-buffer-device buffer)
-         device :set-bind-group))
-      (dolist (texture-view (vulkan-bind-group-texture-views bind-group))
-        (let ((texture (gpu-texture-view-texture texture-view)))
-          (ensure-vulkan-texture-for-command
-           encoder texture pass :storage-binding)
-          (transition-vulkan-texture encoder texture :general)))
-      (lvk:cmd-bind-compute-descriptor-set
-       (vulkan-command-encoder-command-buffer encoder)
-       (vulkan-compute-pipeline-layout pipeline)
-       (vulkan-handle bind-group))
+         bind-group (vulkan-bind-group-device bind-group) device
+         :set-bind-group)
+        (unless (eq (vulkan-bind-group-layout bind-group)
+                    (vulkan-compute-pipeline-bind-group-layout pipeline))
+          (reject-gpu-request bind-group :incompatible-pipeline-layout pipeline))
+        (dolist (buffer (vulkan-bind-group-buffers bind-group))
+          (ensure-vulkan-object-device
+           buffer (vulkan-buffer-device buffer)
+           device :set-bind-group))
+        (dolist (texture-view (vulkan-bind-group-texture-views bind-group))
+          (let ((texture (gpu-texture-view-texture texture-view)))
+            (ensure-vulkan-texture-for-command
+             encoder texture pass :storage-binding)
+            (transition-vulkan-texture encoder texture :general)))
+        (lvk:cmd-bind-compute-descriptor-set
+         (vulkan-command-encoder-command-buffer encoder)
+         (vulkan-compute-pipeline-layout pipeline)
+         (vulkan-handle bind-group))
         (retain-vulkan-resource encoder bind-group)
         (dolist (texture-view (vulkan-bind-group-texture-views bind-group))
           (retain-vulkan-resource encoder texture-view))

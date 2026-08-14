@@ -216,24 +216,24 @@
                 (spv:shader-definition-change-snapshot vertex-dependent)
                 (values 0 nil))
           (declare (ignore vertex-event))
-        (setf (live-shader-pipeline-status artifact) :building)
-        (handler-case
-            (multiple-value-bind
-                  (vertex-specification vertex-lowering vertex-module
-                   specification lowering fragment-module pipeline)
-                (build-live-shader-pipeline-candidate artifact)
-              (install-live-shader-pipeline-candidate
-               artifact (1+ (live-shader-pipeline-installed-revision artifact))
-               vertex-specification vertex-lowering vertex-module
-               specification lowering fragment-module pipeline))
-          (error (condition)
-            ;; A failed edit is diagnostic state, not a rendering outage.
-            (setf (live-shader-pipeline-status artifact) :failed
-                  (live-shader-pipeline-diagnostic artifact) condition)))
-          (spv:acknowledge-shader-definition-change dependent revision)
-          (when vertex-dependent
-            (spv:acknowledge-shader-definition-change
-             vertex-dependent vertex-revision))))))
+          (setf (live-shader-pipeline-status artifact) :building)
+          (handler-case
+              (multiple-value-bind
+                    (vertex-specification vertex-lowering vertex-module
+                     specification lowering fragment-module pipeline)
+                  (build-live-shader-pipeline-candidate artifact)
+                (install-live-shader-pipeline-candidate
+                 artifact (1+ (live-shader-pipeline-installed-revision artifact))
+                 vertex-specification vertex-lowering vertex-module
+                 specification lowering fragment-module pipeline))
+            (error (condition)
+              ;; A failed edit is diagnostic state, not a rendering outage.
+              (setf (live-shader-pipeline-status artifact) :failed
+                    (live-shader-pipeline-diagnostic artifact) condition)))
+            (spv:acknowledge-shader-definition-change dependent revision)
+            (when vertex-dependent
+              (spv:acknowledge-shader-definition-change
+               vertex-dependent vertex-revision))))))
   artifact)
 
 (defun release-live-shader-pipeline (artifact)

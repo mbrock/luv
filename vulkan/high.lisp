@@ -1531,16 +1531,16 @@ destroy it before destroying INSTANCE."
   (let ((clear-count (if depth-clear-value 2 1)))
     (cffi:with-foreign-object (clears '(:union clear-value) clear-count)
       (clear-foreign-object clears '(:union clear-value) clear-count)
-    (let* ((color
-             (cffi:foreign-slot-pointer
-              (cffi:mem-aptr clears '(:union clear-value) 0)
-              '(:union clear-value) 'color))
-           (components
-             (cffi:foreign-slot-pointer
-              color '(:union clear-color-value) 'float-32)))
-      (loop for component across clear-color
-            for index below 4
-            do (setf (cffi:mem-aref components :float index) component)))
+      (let* ((color
+               (cffi:foreign-slot-pointer
+                (cffi:mem-aptr clears '(:union clear-value) 0)
+                '(:union clear-value) 'color))
+             (components
+               (cffi:foreign-slot-pointer
+                color '(:union clear-color-value) 'float-32)))
+        (loop for component across clear-color
+              for index below 4
+              do (setf (cffi:mem-aref components :float index) component)))
       (when depth-clear-value
         (fill-vk
          (cffi:foreign-slot-pointer
@@ -1549,18 +1549,18 @@ destroy it before destroying INSTANCE."
          'clear-depth-stencil-value
          :depth (coerce depth-clear-value 'single-float)
          :stencil 0))
-    (with-vk (begin-info render-pass-begin-info
-              :render-pass render-pass :framebuffer framebuffer
-              :clear-value-count clear-count :p-clear-values clears)
-      (let ((area
-              (cffi:foreign-slot-pointer
-               begin-info '(:struct render-pass-begin-info) 'render-area)))
-        (fill-vk
-         (cffi:foreign-slot-pointer area '(:struct rect-2d) 'offset)
-         'offset-2d :x 0 :y 0)
-        (fill-vk
-         (cffi:foreign-slot-pointer area '(:struct rect-2d) 'extent)
-         'extent-2d :width width :height height))
+      (with-vk (begin-info render-pass-begin-info
+                :render-pass render-pass :framebuffer framebuffer
+                :clear-value-count clear-count :p-clear-values clears)
+        (let ((area
+                (cffi:foreign-slot-pointer
+                 begin-info '(:struct render-pass-begin-info) 'render-area)))
+          (fill-vk
+           (cffi:foreign-slot-pointer area '(:struct rect-2d) 'offset)
+           'offset-2d :x 0 :y 0)
+          (fill-vk
+           (cffi:foreign-slot-pointer area '(:struct rect-2d) 'extent)
+           'extent-2d :width width :height height))
         (vk:cmd-begin-render-pass command-buffer begin-info :inline))))
   (values))
 

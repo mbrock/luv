@@ -130,7 +130,7 @@
     (ok (= (block-world-revision world) 4))
     (multiple-value-bind (removed present-p) (remove-world-chunk world 0 0 0)
       (ok (eq removed chunk))
-    (ok present-p))
+      (ok present-p))
     (ok (= (block-world-residency-revision world) 2))
     (ok (= (block-world-revision world) 5))
     (setf (chunk-block-at chunk 2 0 0) stone)

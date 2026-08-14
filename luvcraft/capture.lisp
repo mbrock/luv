@@ -17,21 +17,21 @@ world wait for products which can never exist."
     (loop
       (let ((products nil))
         (request-canvas-frame
-       (luvcraft-session-canvas session)
-       (lambda (timestamp)
-         (declare (ignore timestamp))
-         (refresh-luvcraft-mesh session)
-         (setf products
-               (hash-table-count (luvcraft-session-chunk-products session)))))
-      (when (>= products minimum)
-        (return session))
-      (when (>= (get-internal-real-time) deadline)
-        (error "Only ~D chunk meshes arrived within ~,2F seconds; expected ~D.~@[ Last worker error: ~A~]"
-               products
-               timeout minimum
-               (let ((result (first (luvcraft-session-production-errors session))))
-                 (and result (production-result-condition result)))))
-      (sleep 0.005)))))
+         (luvcraft-session-canvas session)
+         (lambda (timestamp)
+           (declare (ignore timestamp))
+           (refresh-luvcraft-mesh session)
+           (setf products
+                 (hash-table-count (luvcraft-session-chunk-products session)))))
+        (when (>= products minimum)
+          (return session))
+        (when (>= (get-internal-real-time) deadline)
+          (error "Only ~D chunk meshes arrived within ~,2F seconds; expected ~D.~@[ Last worker error: ~A~]"
+                 products
+                 timeout minimum
+                 (let ((result (first (luvcraft-session-production-errors session))))
+                   (and result (production-result-condition result)))))
+        (sleep 0.005)))))
 
 (defun capture-luvcraft-screenshot (session pathname)
   "Render SESSION once, read its real color attachment, and write a PNG."

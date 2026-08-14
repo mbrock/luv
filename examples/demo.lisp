@@ -55,20 +55,20 @@ object with STOP-CLEAR-COLOR-DEMO."
                  *gpu-provider*
                  (make-device-descriptor :label title)))
           (let* ((context
-                 (make-canvas-context
-                  canvas *gpu-provider*
-                  (make-canvas-configuration :device device)))
-               (demo (make-instance 'clear-color-demo
-                                    :canvas canvas
-                                    :device device
-                                    :context context
-                                    :speed speed)))
-          (setf (canvas-clock canvas)
-                (make-cadence-clock
-                 (lambda (native-canvas timestamp)
-                   (declare (ignore native-canvas))
-                   (render-clear-color-demo-frame demo timestamp))
-                 :frames-per-second frames-per-second))
+                   (make-canvas-context
+                    canvas *gpu-provider*
+                    (make-canvas-configuration :device device)))
+                 (demo (make-instance 'clear-color-demo
+                                      :canvas canvas
+                                      :device device
+                                      :context context
+                                      :speed speed)))
+            (setf (canvas-clock canvas)
+                  (make-cadence-clock
+                   (lambda (native-canvas timestamp)
+                     (declare (ignore native-canvas))
+                     (render-clear-color-demo-frame demo timestamp))
+                   :frames-per-second frames-per-second))
             demo))
       (error (condition)
         (close-canvas canvas)

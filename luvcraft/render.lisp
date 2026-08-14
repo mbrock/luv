@@ -296,13 +296,13 @@ the frame uniform cannot silently diverge between shader and host."
                     :jump-p (luvcraft-session-jump-requested-p session))
                    (setf (luvcraft-session-jump-requested-p session) nil)
                    (decf (luvcraft-session-physics-accumulator session)
-                         +player-physics-step+)))
+                         +player-physics-step+))))
       (maintain-luvcraft-residency session)
       (evict-luvcraft-products session)
       (present-canvas-frame
        (luvcraft-session-context session)
        (lambda (surface-texture encoder)
-         (encode-luvcraft-frame session surface-texture encoder)))))))
+         (encode-luvcraft-frame session surface-texture encoder))))))
 
 (defmethod handle-canvas-event
     ((session luvcraft-session) canvas (event canvas-key-press-event))
@@ -680,33 +680,33 @@ capture-only demand clock."
                      :crosshair-vertex-buffer crosshair-vertex-buffer
                      :crosshair-pipeline crosshair-pipeline
                      :resources resources)))
-             (write-buffer sky-vertex-buffer sky-vertices)
-             (write-buffer crosshair-vertex-buffer crosshair-vertices)
-             (write-texture
-              (device-queue device)
-              (make-texture-copy :texture atlas-texture)
-              atlas-data
-              (make-texture-data-layout
-               :bytes-per-row (* atlas-width 4)
-               :rows-per-image atlas-height)
-              (list atlas-width atlas-height))
-             (setf session new-session)
-             (update-luvcraft-session-title session)
-             (maintain-luvcraft-residency session)
-             ;; Startup does not synchronously generate or mesh the whole
-             ;; residency window.  The first frame may briefly show sky while
-             ;; the nearest immutable products arrive.
-             (refresh-luvcraft-mesh session)
-             (setf (canvas-event-handler canvas) session
-                   (canvas-clock canvas)
-                   (if frames-per-second
-                       (make-cadence-clock
-                        (lambda (native-canvas timestamp)
-                          (declare (ignore native-canvas))
-                          (render-luvcraft-frame session timestamp))
-                        :frames-per-second frames-per-second)
-                       (make-demand-clock))
-                   completed-p t)
+               (write-buffer sky-vertex-buffer sky-vertices)
+               (write-buffer crosshair-vertex-buffer crosshair-vertices)
+               (write-texture
+                (device-queue device)
+                (make-texture-copy :texture atlas-texture)
+                atlas-data
+                (make-texture-data-layout
+                 :bytes-per-row (* atlas-width 4)
+                 :rows-per-image atlas-height)
+                (list atlas-width atlas-height))
+               (setf session new-session)
+               (update-luvcraft-session-title session)
+               (maintain-luvcraft-residency session)
+               ;; Startup does not synchronously generate or mesh the whole
+               ;; residency window.  The first frame may briefly show sky while
+               ;; the nearest immutable products arrive.
+               (refresh-luvcraft-mesh session)
+               (setf (canvas-event-handler canvas) session
+                     (canvas-clock canvas)
+                     (if frames-per-second
+                         (make-cadence-clock
+                          (lambda (native-canvas timestamp)
+                            (declare (ignore native-canvas))
+                            (render-luvcraft-frame session timestamp))
+                          :frames-per-second frames-per-second)
+                         (make-demand-clock))
+                     completed-p t)
                session)))
       (unless completed-p
         (when production-system

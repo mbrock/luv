@@ -786,8 +786,8 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
           (unless (and (shader-type-opaque-kind resolved-type)
                        (not (eq (shader-type-opaque-kind resolved-type)
                                 :uniform-block)))
-        (error 'shader-language-error
-               :form form :reason :non-resource-type :details type))
+            (error 'shader-language-error
+                   :form form :reason :non-resource-type :details type))
           (when members
             (error 'shader-language-error
                    :form form :reason :members-on-opaque-resource))

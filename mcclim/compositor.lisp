@@ -159,20 +159,20 @@
                                     :entry-point "main"
                                     :targets ((:format ,format)))
                         :primitive '(:topology :triangle-strip)))))
-               (setf (spinning-compositor-device compositor) device
-                     (spinning-compositor-source compositor) source
-                     (spinning-compositor-size compositor) size
-                     (spinning-compositor-output compositor) output
-                     (spinning-compositor-source-view compositor) source-view
-                     (spinning-compositor-output-view compositor) output-view
-                     (spinning-compositor-sampler compositor) sampler
-                     (spinning-compositor-vertex-module compositor)
-                     vertex-module
-                     (spinning-compositor-fragment-module compositor)
-                     fragment-module
-                     (spinning-compositor-layout compositor) layout
-                     (spinning-compositor-pipeline compositor) pipeline
-                     completed-p t)))
+                 (setf (spinning-compositor-device compositor) device
+                       (spinning-compositor-source compositor) source
+                       (spinning-compositor-size compositor) size
+                       (spinning-compositor-output compositor) output
+                       (spinning-compositor-source-view compositor) source-view
+                       (spinning-compositor-output-view compositor) output-view
+                       (spinning-compositor-sampler compositor) sampler
+                       (spinning-compositor-vertex-module compositor)
+                       vertex-module
+                       (spinning-compositor-fragment-module compositor)
+                       fragment-module
+                       (spinning-compositor-layout compositor) layout
+                       (spinning-compositor-pipeline compositor) pipeline
+                       completed-p t)))
           (unless completed-p
             (dolist (resource created)
               (ignore-errors (luv:destroy resource))))))))
@@ -271,11 +271,11 @@
                (luv:encode
                 pass (luv:make-gpu-draw-command :vertex-count 4))
                (luv:end-pass pass))
-           (luv:encode
-            encoder
-            (luv:make-gpu-copy-texture-command
-             :source (spinning-compositor-output compositor)
-             :destination surface))))))))
+             (luv:encode
+              encoder
+              (luv:make-gpu-copy-texture-command
+               :source (spinning-compositor-output compositor)
+               :destination surface))))))))
   mirror)
 
 (defmethod present-raster-mirror-texture
