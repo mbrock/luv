@@ -11,6 +11,8 @@
   ((documents :initarg :documents :initform '() :accessor site-documents)
    (source-files :initarg :source-files :initform '() :accessor site-source-files
                  :documentation "SOURCE-FILEs of the systems the site browses.")
+   (systems :initarg :systems :initform '() :accessor site-systems
+            :documentation "SYSTEM-ENTRYs in dependency order, for the source index.")
    (definitions :initarg :definitions :initform '() :accessor site-definitions
                 :documentation "DEFINITIONs read from the source files, if any.")
    (definition-table :initform (make-hash-table :test 'equalp) :accessor site-definition-table

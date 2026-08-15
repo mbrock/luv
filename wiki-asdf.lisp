@@ -86,6 +86,56 @@ loading anything."
 (defun code-source-files ()
   (mapcar #'car (code-source-components)))
 
+(defclass system-entry ()
+  ((name :initarg :name :accessor system-entry-name)
+   (description :initarg :description :initform nil :accessor system-entry-description)
+   (depends-on :initarg :depends-on :initform '() :accessor system-entry-depends-on
+               :documentation "Names of the code systems this one depends on.")
+   (files :initarg :files :initform '() :accessor system-entry-files
+          :documentation "SOURCE-FILEs of this system's components."))
+  (:documentation "One of the code systems, for the source index."))
+
+(defun code-systems (source-files)
+  "SYSTEM-ENTRYs for the registered code systems, in dependency order:
+a system comes after everything it depends on, ties broken by name, and
+each SOURCE-FILE of SOURCE-FILES attached to its system."
+  (let* ((names (remove-if-not (lambda (n) (member (asdf:primary-system-name n) *code-systems*
+                                                    :test #'string=))
+                               (asdf:registered-systems)))
+         (entries (mapcar (lambda (name)
+                            (let ((system (asdf:registered-system name)))
+                              (make-instance
+                               'system-entry
+                               :name name
+                               :description (asdf:system-description system)
+                               :depends-on (sort (remove-if-not
+                                                  (lambda (d) (member d names :test #'string=))
+                                                  (mapcar (lambda (d) (string-downcase
+                                                                       (if (consp d) (second d) d)))
+                                                          (asdf:system-depends-on system)))
+                                                 #'string<)
+                               :files (remove name source-files
+                                              :key #'source-file-system-name :test-not #'string=))))
+                          ;; Alphabetical, but test systems after the rest so the
+                          ;; topological pass places them behind their subjects.
+                          (sort (copy-list names)
+                                (lambda (a b)
+                                  (let ((ta (and (search "/tests" a) t)) (tb (and (search "/tests" b) t)))
+                                    (if (eq ta tb) (string< a b) tb))))))
+         (ordered '()))
+    ;; Topological order: repeatedly take the first entry whose dependencies
+    ;; are all placed.
+    (loop while entries
+          do (let ((next (or (find-if (lambda (e)
+                                        (every (lambda (d) (find d ordered :key #'system-entry-name
+                                                                            :test #'string=))
+                                               (system-entry-depends-on e)))
+                                      entries)
+                             (first entries))))
+               (push next ordered)
+               (setf entries (remove next entries))))
+    (nreverse ordered)))
+
 (defun arglists-file (system)
   "The introspected operator lambda lists the renderer reads, if present."
   (let ((pathname (asdf:system-relative-pathname system "wiki/arglists.sexp")))
@@ -117,9 +167,11 @@ is not read again within one image.")
 (defun system-site (system)
   (let ((root (asdf:system-source-directory system)))
     (load-arglists (merge-pathnames "wiki/arglists.sexp" root))
-    (make-site (system-documents system)
-               :source-files (code-sources :root root)
-               :source-directory root)))
+    (let ((sources (code-sources :root root)))
+      (make-site (system-documents system)
+                 :source-files sources
+                 :systems (code-systems sources)
+                 :source-directory root))))
 
 ;;; Rendering
 

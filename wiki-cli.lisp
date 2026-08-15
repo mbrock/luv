@@ -73,9 +73,11 @@ definition, which is harmless."
                                       (remove "index" documents :key #'wiki:document-name :test #'string=)))
               (when code (ensure-systems))
               (wiki::load-arglists (merge-pathnames "wiki/arglists.sexp" (root)))
-              (wiki:make-site documents
-                              :source-files (and code (wiki:code-sources :root (root)))
-                              :source-directory (root))))))
+              (let ((sources (and code (wiki:code-sources :root (root)))))
+                (wiki:make-site documents
+                                :source-files sources
+                                :systems (and code (wiki::code-systems sources))
+                                :source-directory (root)))))))
 
 ;;; Plain text
 

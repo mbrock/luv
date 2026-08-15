@@ -167,37 +167,43 @@ as dexp boxes, each anchored by its starting line."
                   (render-html node))))))))
      :body-class "source-page")))
 
+(defun render-file-summary (file)
+  "The file's relative path with the file name itself emphasized."
+  (let* ((path (source-file-relative-path file))
+         (slash (position #\/ path :from-end t)))
+    (spinneret:with-html
+      (:a.path :href (source-page-name file)
+               (when slash (:span.directory (subseq path 0 (1+ slash))))
+               (:span.file (subseq path (if slash (1+ slash) 0))))
+      (:span.count (format nil "~D" (length (source-file-definitions file)))))))
+
 (defun render-source-index (site)
-  "Emit source.html: the files of the corpus, grouped by directory with
-space between groups, each expandable to its definitions."
+  "Emit source.html: the ASDF systems of the code in dependency order, each
+with its description, dependencies, and files, the files expandable to their
+definitions."
   (let ((*page-prefix* "")
-        (*rendering-document* nil)
-        (groups '()))
-    (dolist (file (site-source-files site))
-      (let* ((path (source-file-relative-path file))
-             (slash (position #\/ path))
-             (directory (if slash (subseq path 0 slash) ""))
-             (group (assoc directory groups :test #'string=)))
-        (if group
-            (push file (cdr group))
-            (push (list directory file) groups))))
-    (setf groups (sort (mapcar (lambda (g) (cons (car g) (reverse (cdr g)))) groups)
-                       #'string< :key #'car))
+        (*rendering-document* nil))
     (render-page-frame
      "Source"
      (lambda ()
        (spinneret:with-html
          (:h1 "Source")
-         (:p "Every source file of the systems the wiki reads, drawn as dexp boxes.
-Open a file here to see its definitions; symbols in the pages link to their
-definitions and " (:code "#ID") " mentions link to figures.")
-         (dolist (group groups)
-           (:section.source-group
-            (dolist (file (cdr group))
+         (:p "The systems of luv in dependency order, fundamentals first, with
+their files.  Open a file to see its definitions; symbols in the pages link
+to their definitions and " (:code "#ID") " mentions link to figures.")
+         (dolist (entry (site-systems site))
+           (:section.system :id (concatenate 'string "system-" (substitute #\- #\/ (system-entry-name entry)))
+            (:h2 (:code (system-entry-name entry)))
+            (when (system-entry-description entry)
+              (:p.description (system-entry-description entry)))
+            (when (system-entry-depends-on entry)
+              (:p.depends "depends on "
+                (loop for name in (system-entry-depends-on entry)
+                      for first = t then nil
+                      do (unless first (spinneret:html ", "))
+                         (:a :href (concatenate 'string "#system-" (substitute #\- #\/ name))
+                             (:code name)))))
+            (dolist (file (system-entry-files entry))
               (:details.source-file
-               (:summary
-                (:a :href (source-page-name file) (source-file-relative-path file))
-                (:span.count (format nil "~D" (length (source-file-definitions file))))
-                (when (source-file-system-name file)
-                  (:span.system (source-file-system-name file))))
+               (:summary (render-file-summary file))
                (render-source-toc file :prefix (source-page-name file)))))))))))

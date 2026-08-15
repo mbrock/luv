@@ -487,8 +487,32 @@ details.source-file > summary .system {
   font-size: 0.8em;
 }
 
-section.source-group {
-  margin: 1.4rem 0;
+section.system {
+  margin: 2rem 0;
+}
+
+section.system > h2 {
+  font-size: 1.15rem;
+  margin-bottom: 0.3rem;
+}
+
+section.system > p.description,
+section.system > p.depends {
+  margin: 0.2rem 0 0.6rem;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+section.system > p.depends code {
+  font-size: 0.85em;
+}
+
+details.source-file > summary .directory {
+  color: var(--muted);
+}
+
+details.source-file > summary .file {
+  color: var(--accent);
 }
 
 details.source-file > nav.definitions {
