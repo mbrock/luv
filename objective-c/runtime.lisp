@@ -276,10 +276,31 @@
 (defclass objective-c-runtime (invoker)
   ()
   (:documentation
-   "A runtime that sends declared messages through the native catch bridge."))
+   "A runtime that sends declared messages according to the dynamic policy."))
 
 (defvar *objective-c-runtime* (make-instance 'objective-c-runtime)
   "The invoker through which every declared Objective-C message passes.")
+
+(defvar *objective-c-exception-policy* :catch
+  "How declared messages cross the native boundary: :CATCH or :UNCHECKED.
+
+:CATCH uses NSInvocation and turns NSException into Lisp conditions.
+:UNCHECKED calls objc_msgSend directly and must never encounter NSException.
+See #P6RUG7.")
+
+(defmacro with-unchecked-objective-c-messages (() &body body)
+  "Send declared messages in BODY directly, without catching NSException."
+  `(let ((*objective-c-exception-policy* :unchecked))
+     ,@body))
+
+(defmacro with-objective-c-exception-handling (() &body body)
+  "Catch NSException in BODY, even inside an unchecked dynamic context."
+  `(let ((*objective-c-exception-policy* :catch))
+     ,@body))
+
+(defun objective-c-message-send-pointer ()
+  (cffi:foreign-symbol-pointer "objc_msgSend"
+                               :library 'objective-c-runtime-library))
 
 (defgeneric check-consumable-objective-c-receiver (receiver)
   (:documentation "Validate that RECEIVER owns the retain a message consumes."))
@@ -299,7 +320,7 @@
       value))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  (defun objective-c-message-send-form
+  (defun caught-objective-c-message-send-form
       (message receiver result-type arguments)
     (let ((result-storage (gensym "RESULT-STORAGE"))
           (argument-array (gensym "ARGUMENT-ARRAY"))
@@ -355,7 +376,20 @@
                        ,(objective-c-argument-form name type))
                       ,(argument-forms tail (rest remaining-storages))))
                  (result-form))))
-        (argument-forms arguments argument-storages)))))
+        (argument-forms arguments argument-storages))))
+
+  (defun unchecked-objective-c-message-send-form
+      (message receiver result-type arguments)
+    `(cffi:foreign-funcall-pointer
+      (objective-c-message-send-pointer) ()
+      :pointer (objective-c-pointer ,receiver)
+      :pointer (objective-c-message-selector-pointer (class-of ,message))
+      ,@(loop for (argument-name argument-type) in arguments
+              append
+              (list (objective-c-foreign-type argument-type)
+                    (objective-c-argument-form
+                     argument-name argument-type)))
+      ,(objective-c-foreign-type result-type))))
 
 (defmacro define-objective-c-message
     (name (selector result-type &key ownership class consumes-receiver)
@@ -381,8 +415,13 @@
               '(check-consumable-objective-c-receiver receiver))
            (let ((result
                    (with-objective-c-native-environment
-                     ,(objective-c-message-send-form
-                       'message 'receiver result-type arguments))))
+                     (ecase *objective-c-exception-policy*
+                       (:catch
+                        ,(caught-objective-c-message-send-form
+                          'message 'receiver result-type arguments))
+                       (:unchecked
+                        ,(unchecked-objective-c-message-send-form
+                          'message 'receiver result-type arguments))))))
              ,(when consumes-receiver
                 '(setf (objective-c-object-released-p receiver) t))
              (translate-objective-c-result result (class-of message)))))

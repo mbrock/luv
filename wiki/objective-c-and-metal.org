@@ -215,21 +215,28 @@ should name the awkward mechanism it contains.  If the helper surface starts
 mirroring ordinary Metal methods, the boundary has slipped back toward the
 wrapper list this design is meant to avoid.
 
-Objective-C exceptions must stop inside that companion.  An =NSException=
-cannot safely unwind through libffi and SBCL frames.  The default
-=objective-c-runtime= therefore sends every declared message inside one native
-=@try= / =@catch= frame and signals an =objective-c-exception= with the reified
-message, receiver, selector, exception name, reason, and copied native call
-stack.  Declaration/signature disagreements instead signal the sibling
+Objective-C exceptions must normally stop inside that companion.  An
+=NSException= cannot safely unwind through libffi and SBCL frames.  The initial
+=*objective-c-exception-policy*= is therefore =:catch=: every declared message
+uses one native =@try= / =@catch= frame and signals an
+=objective-c-exception= with the reified message, receiver, selector,
+exception name, reason, and copied native call stack.
+Declaration/signature disagreements instead signal the sibling
 =objective-c-bridge-error= before invoking anything.  Neither condition offers
 a continue-with-a-fabricated-value restart: a throwing message may already
 have performed side effects.
 
-=NSInvocation= is the correctness-first runtime, not a claim about the final
-cost of a draw-heavy path.  Runtime × concrete-message dispatch remains open,
-so measured hot messages can later specialize a cached native implementation.
-Such a path must still keep its own native catch frame; speed is not permission
-to let an Objective-C exception cross Lisp's foreign-call stack.
+=NSInvocation= is the correctness-first path, not a claim about the final cost
+of a draw-heavy path.  #P6RUG7 adds one deliberately sharp escape hatch:
+=with-unchecked-objective-c-messages= dynamically selects direct
+=objc_msgSend= for a block, while =with-objective-c-exception-handling= can
+restore catching within a nested region.  Invocation objects, tracing,
+ownership checks, and result translation remain above that choice.  An
+=NSException= on the unchecked path is a violated precondition and may cross
+or terminate the Lisp foreign-call stack; debugging then means reproducing
+under =:catch= (locally or as the global special-variable value).  Runtime ×
+concrete-message dispatch also remains open for future measured native
+specializations which need a catch frame without =NSInvocation=.
 
 Ownership must be visible from the first experiment.  A wrapper records
 whether its pointer is borrowed or owned; =retain=, =release=, and an
@@ -484,8 +491,8 @@ Done when (met):
 :ID: H0UX9P
 :END:
 
-Intent: make every declared message a safe condition boundary so an
-=NSException= never unwinds through CFFI or SBCL frames.
+Intent: make the default path for every declared message a safe condition
+boundary so an =NSException= does not unwind through CFFI or SBCL frames.
 
 Evidence:
 
@@ -507,6 +514,41 @@ Done when (met): a native Objective-C exception becomes an inspectable Lisp
 condition, tracing records it as signaled, the image remains usable afterward,
 declaration ABI errors stop before the send, and the real Metal clear remains
 valid.
+
+* DONE Make Objective-C exception catching dynamically selectable
+:PROPERTIES:
+:ID: P6RUG7
+:END:
+
+Intent: retain the correctness-first condition boundary by default while
+allowing measured, established hot blocks to select direct =objc_msgSend=.
+
+Evidence:
+
+- [[file:../objective-c/runtime.lisp][The runtime]] defines the special
+  =*objective-c-exception-policy*= with the closed values =:catch= and
+  =:unchecked=.  =with-unchecked-objective-c-messages= binds the latter;
+  =with-objective-c-exception-handling= provides a composable nested override.
+- Both branches retain the same message objects, runtime dispatch, tracing,
+  ownership checks, and result translation.  Only the native crossing differs:
+  the catch bridge uses =NSInvocation=, while unchecked sends call
+  =objc_msgSend= through CFFI/libffi.
+- [[file:../tests/objective-c.lisp][Objective-C tests]] prove dynamic nesting and returned trace events across both
+  policies.  [[file:../tests/metal.lisp][Metal tests]] round-trip a by-value =CGSize= through a real
+  =CAMetalLayer= under the unchecked policy.
+- In five alternating cold-image runs of 100,000 =MTLDevice/registryID= sends,
+  median caught time was 1.014 seconds and median unchecked time was 0.956
+  seconds: about 0.59 microseconds, or 5.8%, saved per declared send in this
+  Lisp-heavy microbenchmark.
+- A complete unchecked =MTL_DEBUG_LAYER=1 SDL Metal clear presented the normal
+  Metal 4 selector sequence, including =CGSize= and =MTLClearColor= by value,
+  then closed the canvas and destroyed the view, window, context, and device.
+  Production frame code remains on the caught default until a concrete frame
+  measurement justifies moving a block.
+
+Done when (met): catching is the default, a lexical block can dynamically opt
+into direct sends, a nested block can restore catching, both scalar and
+structure ABIs work unchecked, and the complete Metal clear remains valid.
 
 * DONE Present a Metal clear through the existing SDL canvas
 :PROPERTIES:

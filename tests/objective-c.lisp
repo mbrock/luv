@@ -70,6 +70,28 @@
       (ok (eq (first (second (first (getf registry :arguments))))
               :objective-c-object)))))
 
+(deftest exception-policy-is-dynamic-and-tracing-is-orthogonal
+  (ok (eq objc:*objective-c-exception-policy* :catch))
+  (let (trace)
+    (objc:with-autorelease-pool ()
+      (objc:with-owned-objective-c-object
+          (device (metal:make-system-default-device))
+        (objc:with-objective-c-trace (active-trace)
+          (setf trace active-trace)
+          (objc:with-unchecked-objective-c-messages ()
+            (ok (eq objc:*objective-c-exception-policy* :unchecked))
+            (ok (plusp (metal:device-registry-id device)))
+            (objc:with-objective-c-exception-handling ()
+              (ok (eq objc:*objective-c-exception-policy* :catch))
+              (ok (stringp
+                   (objc:objective-c-string (metal:device-name device)))))
+            (ok (eq objc:*objective-c-exception-policy* :unchecked))))))
+    (ok (eq objc:*objective-c-exception-policy* :catch))
+    (let ((events (luv.invocation:invocation-trace-events trace)))
+      (ok (= (length events) 3))
+      (dolist (event events)
+        (ok (eq (luv.invocation:invocation-status event) :returned))))))
+
 (deftest fresh-device-probe-is-bounded-and-printable
   (let ((description (metal:probe-system-default-device)))
     (ok (stringp (getf description :class)))

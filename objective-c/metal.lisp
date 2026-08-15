@@ -1,8 +1,9 @@
 ;;;; The Metal 4 and CAMetalLayer vocabulary needed by the first frame.
 ;;;;
-;;;; The two small structures cross as typed foreign storage through the
-;;;; shared NSInvocation bridge.  They stay declarations in the same message
-;;;; system as scalar and object calls; no per-selector shim is needed.
+;;;; The two small structures cross as typed foreign storage through either
+;;;; the default NSInvocation bridge or direct libffi calls in an explicitly
+;;;; unchecked scope.  They stay declarations in the same message system as
+;;;; scalar and object calls; no per-selector shim is needed.
 
 (in-package #:luv.metal)
 

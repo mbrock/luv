@@ -34,6 +34,9 @@
            #:with-owned-objective-c-object
            #:objective-c-object=
            #:with-objective-c-native-environment
+           #:*objective-c-exception-policy*
+           #:with-unchecked-objective-c-messages
+           #:with-objective-c-exception-handling
            #:objective-c-message-class
            #:objective-c-message
            #:objective-c-message-selector

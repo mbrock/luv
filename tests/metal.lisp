@@ -5,6 +5,9 @@
 
 (in-package #:luv/metal/tests)
 
+(objc:define-objective-c-message make-test-metal-layer
+    ("new" :object :ownership :owned :class "CAMetalLayer"))
+
 (deftest metal-messages-retain-structure-abi
   (let ((size
           (objc:objective-c-message-description
@@ -18,6 +21,18 @@
     (ok (equal (getf clear :selector) "setClearColor:"))
     (ok (equal (second (second (getf clear :argument-types)))
                '(:struct metal::mtl-clear-color)))))
+
+(deftest unchecked-messages-preserve-by-value-structure-abi
+  (objc:with-autorelease-pool ()
+    (objc:with-owned-objective-c-object
+        (layer
+          (make-test-metal-layer (objc:find-objective-c-class "CAMetalLayer")))
+      (objc:with-unchecked-objective-c-messages ()
+        (metal:set-layer-drawable-size layer 641 359)
+        (multiple-value-bind (width height)
+            (metal:layer-drawable-size layer)
+          (ok (= width 641.0d0))
+          (ok (= height 359.0d0)))))))
 
 (deftest canvas-presentation-policy-is-explicit-and-provider-specific
   (ok (equal (luv::sdl-presentation-window-flags :vulkan)

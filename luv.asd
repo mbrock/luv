@@ -173,6 +173,7 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
   :author "Mikael Brockman"
   :depends-on (#:luv/invocation
                #:cffi
+               #:cffi-libffi
                #:closer-mop)
   :serial t
   :components ((:module "objective-c"
