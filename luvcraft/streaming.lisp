@@ -9,6 +9,38 @@
 
 (in-package #:luv)
 
+(defun wait-for-luvcraft-products
+    (session &key minimum (timeout 10.0))
+  "Wait outside frame encoding for a useful initial set of chunk meshes.
+
+MINIMUM defaults to nine or the whole desired set when it is smaller.  The
+visible startup path asks only for the nearest product before its first
+presentation; deterministic captures wait for the broader default set."
+  (let* ((minimum (or minimum
+                      (min 9 (hash-table-count
+                              (luvcraft-session-desired-chunks session)))))
+         (deadline (+ (get-internal-real-time)
+                      (round (* timeout internal-time-units-per-second)))))
+    (loop
+      (let ((products nil))
+        (request-canvas-frame
+         (luvcraft-session-canvas session)
+         (lambda (timestamp)
+           (declare (ignore timestamp))
+           (refresh-luvcraft-mesh session)
+           (setf products
+                 (hash-table-count (luvcraft-session-chunk-products session)))))
+        (when (>= products minimum)
+          (return session))
+        (when (>= (get-internal-real-time) deadline)
+          (error "Only ~D chunk meshes arrived within ~,2F seconds; expected ~D.~@[ Last worker error: ~A~]"
+                 products
+                 timeout minimum
+                 (let ((result
+                         (first (luvcraft-session-production-errors session))))
+                   (and result (production-result-condition result)))))
+        (sleep 0.005)))))
+
 (defclass block-mesh-production-request (production-request)
   ((absent-neighbor-policy
     :initarg :absent-neighbor-policy

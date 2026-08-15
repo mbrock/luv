@@ -1,69 +1,32 @@
-(defpackage #:luv.invocation
-  (:use #:cl)
-  (:documentation
-   "A general protocol for reifying the calls of an API as objects, the
-way the condition system reifies situations.  Each entry point is a class
-of invocations; INVOKE dispatches on both the invoker and the invocation.")
-  (:export #:invocation-class
-           #:invocation-class-arguments
-           #:invocation
-           #:invocation-name
-           #:invocation-arguments
-           #:invocation-sequence
-           #:invocation-timestamp
-           #:invocation-duration
-           #:invocation-thread
-           #:invocation-values
-           #:invocation-status
-           #:invocation-condition
-           #:invoker
-           #:invoke
-           #:snapshot-invocation-object
-           #:snapshot-invocation-value
-           #:snapshot-invocation-arguments
-           #:invocation-trace
-           #:make-invocation-trace
-           #:stop-invocation-trace
-           #:invocation-trace-events
-           #:tracing-invoker
-           #:tracing-invoker-trace))
-
 (defpackage #:luv.vk
   (:nicknames #:vk)
   (:use)
   (:documentation
-   "The Vulkan entry points luv speaks, one external symbol per foreign
-function.  Each symbol names both the class of that function's invocations
-and the function that performs one.  DEFVKFUN interns and exports here;
-nothing else does."))
+   "The Vulkan entry points luv speaks, one external function per foreign
+entry point.  DEFVKFUN interns and exports here; nothing else does."))
 
 (defpackage #:luv.vulkan
   (:nicknames #:lvk)
-  (:use #:cl #:luv.invocation)
+  (:use #:cl)
   (:export #:+portability-enumeration-extension-name+
            #:+swapchain-extension-name+
            #:+debug-utils-extension-name+
            #:vulkan-call-error
            #:vulkan-call-error-operation
            #:vulkan-call-error-result
-           #:vulkan-ffi
-           #:*vulkan-ffi*
-           #:invoke
-           #:tracing-ffi
-           #:vulkan-invocation
-           #:vulkan-command
-           #:invocation-sequence
-           #:invocation-timestamp
-           #:invocation-duration
-           #:invocation-thread
-           #:invocation-name
-           #:invocation-foreign-name
-           #:invocation-arguments
-           #:invocation-values
-           #:invocation-status
-           #:invocation-condition
-           #:invocation-trace
-           #:invocation-trace-events
+           #:vulkan-call-event
+           #:vulkan-call-event-sequence
+           #:vulkan-call-event-timestamp
+           #:vulkan-call-event-duration
+           #:vulkan-call-event-thread
+           #:vulkan-call-event-name
+           #:vulkan-call-event-foreign-name
+           #:vulkan-call-event-arguments
+           #:vulkan-call-event-values
+           #:vulkan-call-event-status
+           #:vulkan-call-event-condition
+           #:vulkan-trace
+           #:vulkan-trace-events
            #:start-vulkan-trace
            #:stop-vulkan-trace
            #:current-vulkan-trace

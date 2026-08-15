@@ -471,7 +471,10 @@ keep the SDL window hidden while still exercising the real presentation path.
 Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
   (let* ((canvas (make-sdl-canvas
                   :title title :width width :height height
-                  :visible-p visible-p
+                  ;; Keep the native window hidden until its first complete
+                  ;; terrain frame has been presented.  Showing it here would
+                  ;; expose black initialization and sky-only streaming states.
+                  :visible-p nil
                   :presentation-api (sdl-presentation-api-for provider)))
          (player (or player (make-player-for-camera camera)))
          (device nil) (context nil) (resources nil) (pipelines nil)
@@ -756,12 +759,19 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                (setf session new-session)
                (update-luvcraft-session-title session)
                (maintain-luvcraft-residency session)
-               ;; Startup does not synchronously generate or mesh the whole
-               ;; residency window.  The first frame may briefly show sky while
-               ;; the nearest immutable products arrive.
                (refresh-luvcraft-mesh session)
-               (setf (canvas-event-handler canvas) session
-                     (canvas-clock canvas)
+               (setf (canvas-event-handler canvas) session)
+               (when visible-p
+                 ;; Preserve asynchronous residency after startup, but do not
+                 ;; publish the window until the nearest immutable mesh and one
+                 ;; complete frame are ready.
+                 (wait-for-luvcraft-products session :minimum 1)
+                 (request-canvas-frame
+                  canvas
+                  (lambda (timestamp)
+                    (render-luvcraft-frame session timestamp)))
+                 (show-canvas canvas))
+               (setf (canvas-clock canvas)
                      (if frames-per-second
                          (make-cadence-clock
                           (lambda (native-canvas timestamp)

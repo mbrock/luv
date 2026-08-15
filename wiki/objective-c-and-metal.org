@@ -9,7 +9,7 @@
 Luv's Objective-C interface began as a prerequisite for Metal, but its useful
 boundary is the Apple object system itself: runtime classes and selectors,
 declared message ABIs, explicit ownership, native exceptions, and inspectable
-invocations.  Cocoa delegates, framework objects, and future callback work can
+trace events.  Cocoa delegates, framework objects, and future callback work can
 reuse that substrate without becoming Metal concepts.
 
 [[file:metal-backend.org][The native Metal 4 backend]] (#4M91DG) is now a separate page.  It owns SDL presentation,
@@ -36,19 +36,18 @@ protocols, and Lisp implementations of Objective-C methods.  Luv does not
 need that complete system before drawing, but the precedent makes the right
 abstraction level clear.
 
-The meaningful boundary objects are inspectable CLOS instances:
+The meaningful boundary objects are small and explicit:
 
 - an =objective-c-class= is a borrowed native class identity;
-- an =objective-c-message-class= owns selector, ABI, ownership, and result
-  metadata;
-- an =objective-c-message= reifies one send through the general invocation
-  protocol; and
+- an internal definition structure retains selector, ABI, ownership, and result
+  metadata for each declared Lisp function;
 - an =objective-c-object= owns or borrows one pointer explicitly.
 
-Execution is open multiple dispatch over runtime × concrete message class.
-=tracing-objective-c-runtime= contributes the general tracing behavior without
-changing message definitions.  Dense shader data, vertex bytes, and argument
-table entries remain dense data; they do not become objects per element.
+Ordinary execution calls =objc_msgSend= directly.  A trace event is allocated
+only while =with-objective-c-trace= is active, and the native =NSInvocation=
+bridge is entered only while =with-objective-c-exception-handling= is active.
+There is no per-send CLOS object or generic dispatch.  Dense shader data,
+vertex bytes, and argument table entries likewise remain dense data.
 
 * Declarations generate typed messages
 :PROPERTIES:
@@ -70,10 +69,10 @@ declaration-led rather than a magical untyped =send=:
   (device :object))
 #+end_src
 
-The definition site contains the ABI.  The macro creates an invocation class,
-selector metadata, a runtime method, and an ordinary Lisp function.  Runtime
-method signatures validate declared storage sizes on the caught path; they do
-not silently replace the explicit source declaration.
+The definition site contains the ABI.  The macro retains plain selector
+metadata and creates an ordinary direct-calling Lisp function.  Runtime method
+signatures validate declared storage sizes on the explicitly caught path; they
+do not silently replace the explicit source declaration.
 
 Foundation owns the small =new=, =drain=, =retain=, =release=, and
 =UTF8String= vocabulary.  Framework files own demand-driven declarations
@@ -81,10 +80,9 @@ beside ordinary C entry points such as =MTLCreateSystemDefaultDevice=.  Header
 generation becomes attractive only after several real declarations make its
 policy clear.
 
-Re-evaluating a declaration replaces the ordinary =invoke= method at the same
-specializer coordinate and updates metadata without replacing class identity.
-That is the live-system property worth preserving; a hidden selector registry
-would add indirection without improving it.
+Re-evaluating a declaration replaces the ordinary function and its metadata.
+That is the live-system property worth preserving; per-call instances and a
+generic invoker hierarchy added indirection without improving redefinition.
 
 * The hybrid boundary is an explicit escape hatch
 :PROPERTIES:
@@ -99,9 +97,9 @@ callbacks on arbitrary queues each add obligations.
 The boundary is deliberately hybrid:
 
 - direct CFFI calls handle C runtime and framework entry points;
-- the default declared-message path uses one native =NSInvocation=
+- the default declared-message path calls =objc_msgSend= through libffi;
+- an explicit diagnostic scope uses one native =NSInvocation=
   =@try= / =@catch= bridge;
-- an explicitly unchecked dynamic scope calls =objc_msgSend= through libffi;
   and
 - small native helpers remain available for blocks, callbacks, or ABI forms
   not confidently expressible through CFFI.
@@ -112,23 +110,24 @@ back toward the wrapper list this design avoids.
 
 =CGSize= and =MTLClearColor= proved that structures remain first-class message
 ABI types.  The caught path copies their exact foreign storage through
-=NSInvocation=; the unchecked path sends the same types directly.  Invocation
-objects, selector metadata, tracing, ownership checks, and result translation
-remain above that choice.
+=NSInvocation=; the ordinary path sends the same types directly.  Selector
+metadata, opt-in tracing, ownership checks, and result translation remain
+above that choice.
 
 Objective-C exceptions normally stop inside the companion because an
 =NSException= cannot safely unwind through libffi and SBCL frames.  The initial
-=*objective-c-exception-policy*= is =:catch=.  Declaration/signature errors
-signal =objective-c-bridge-error= before invocation; native exceptions signal
+=*objective-c-exception-policy*= is =:unchecked=.  Within an explicit caught
+scope, declaration/signature errors signal =objective-c-bridge-error= before
+the message send; native exceptions signal
 =objective-c-exception= with the message, receiver, selector, name, reason,
 and copied call stack.  Neither condition fabricates a result.
 
-#P6RUG7 adds a deliberately sharp escape hatch:
-=with-unchecked-objective-c-messages= dynamically selects direct sends for a
-measured block, and =with-objective-c-exception-handling= restores the caught
-path inside a nested region.  An exception in unchecked code is a violated
-precondition and may terminate or cross the Lisp foreign-call stack; the first
-debugging move is to reproduce it under =:catch=.
+#P6RUG7 makes the costly safety boundary explicit:
+=with-objective-c-exception-handling= dynamically selects caught sends for a
+diagnostic block.  =with-unchecked-objective-c-messages= remains a composable
+spelling of the ordinary policy for nested scopes.  An exception in direct code
+is a violated precondition and may terminate or cross the Lisp foreign-call
+stack; the first debugging move is to reproduce it under =:catch=.
 
 Ownership remains explicit regardless of policy.  Retaining a borrowed object
 returns a distinct owned wrapper for the same native identity; releasing a
@@ -156,8 +155,8 @@ trying to bind an entire framework.
 
 Evidence:
 
-- [[file:../objective-c/runtime.lisp][The runtime]] defines receivers, declaration metadata, runtime × message
-  dispatch, trace snapshots, conditions, and =define-objective-c-message=.
+- [[file:../objective-c/runtime.lisp][The runtime]] defines receivers, declaration metadata, direct sends, opt-in
+  trace snapshots, conditions, and =define-objective-c-message=.
 - [[file:../objective-c/foundation.lisp][The Foundation vocabulary]] supplies explicit retain/release, owned scopes,
   autorelease pools, and string conversion.
 - [[file:../objective-c/metal-probe.lisp][The first framework proof]] returns an owned =MTLDevice= and declares its
@@ -165,11 +164,11 @@ Evidence:
 - Cold tests cover metadata, native identity, ownership failures, released
   objects, tracing, and a real device probe; =make objective-c-probe= exits
   cleanly with bounded printable evidence.
-- Live re-evaluation preserves the message class metaobject while replacing
-  its method and returning the same device registry identity.
+- Live re-evaluation replaces the definition and function while returning the
+  same device registry identity.
 
 Done when (met): a declaration sends one typed message, ownership is explicit,
-traces are inspectable, redefinition preserves identity, and a fresh image
+opt-in traces are inspectable, redefinition remains live, and a fresh image
 exits cleanly.
 
 * DONE Turn Objective-C exceptions into Lisp conditions
@@ -177,8 +176,8 @@ exits cleanly.
 :ID: H0UX9P
 :END:
 
-Intent: make the default declared-message path a safe condition boundary so an
-=NSException= does not unwind through CFFI or SBCL frames.
+Intent: provide an explicit safe condition boundary so a diagnostic can catch
+an =NSException= without unwinding through CFFI or SBCL frames.
 
 Evidence:
 
@@ -189,7 +188,7 @@ Evidence:
   sibling =objective-c-bridge-error= before the message is sent.
 - [[file:../tests/objective-c.lisp][Cold tests]] provoke a real =NSRangeException=, observe a =:signaled= trace
   event, then successfully send another message in the same image.  A wrong
-  result size is rejected before invocation.
+  result size is rejected before the message send.
 - The validated Metal clear still crosses object, scalar, and by-value
   structure messages and tears down cleanly.
 
@@ -202,23 +201,23 @@ framework path remains valid.
 :ID: P6RUG7
 :END:
 
-Intent: retain the correctness-first boundary by default while allowing
-measured, established hot blocks to select direct =objc_msgSend=.
+Intent: keep exception translation available without imposing =NSInvocation=
+on every established framework call.
 
 Evidence:
 
 - =*objective-c-exception-policy*= has the closed values =:catch= and
-  =:unchecked=; the two public macros provide composable dynamic bindings.
+  =:unchecked=; direct sends are the default and the two public macros provide
+  composable dynamic bindings.
 - Tests prove nested policy restoration and returned trace events across both
   paths; Metal tests round-trip a by-value =CGSize= unchecked.
-- Five alternating 100,000-send =MTLDevice/registryID= runs measured median
-  caught time 1.014 seconds and unchecked time 0.956 seconds: about 0.59
-  microseconds, or 5.8%, saved per declared send in this Lisp-heavy probe.
+- A real 480×320 luvcraft frame exposed the architectural cost: 801 generic
+  invocation calls accounted for 0.950 seconds of 0.988 profiled seconds.  The
+  direct frame path subsequently submitted steady frames in about 17 ms.
 - A complete unchecked SDL Metal clear passed Metal API validation, including
   =CGSize= and =MTLClearColor=, and destroyed all native presentation state.
-  Production frame code remains caught until a frame measurement justifies an
-  explicit unchecked block.
+  Production frame code uses the ordinary direct path.
 
-Done when (met): catching is the default, a block can dynamically opt out, a
-nested block can restore catching, tracing and both structure ABI directions
-still work, and the complete framework proof remains valid.
+Done when (met): direct sending is the default, a block can dynamically opt
+into catching, tracing and both structure ABI directions still work, and the
+complete framework proof remains valid.

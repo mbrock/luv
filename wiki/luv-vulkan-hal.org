@@ -55,14 +55,15 @@ invocation.lisp           reified call / invoker protocol
 CFFI and the Vulkan loader
 #+end_example
 
-The lower boundary was unusually explicit even before the file split.
+The diagram records the historical snapshot.  The lower boundary was unusually explicit even before the file split.
 =vulkan/defs.lisp= declares only the Vulkan structures, enumerants, and calls
 needed by concrete backend work, while =vulkan/fundament.lisp= contains the
-binding machinery.  Each foreign call is also a class of invocation routed
-through an invoker, so tracing or replacing the boundary is ordinary method
-dispatch.  This is a clear architectural decision, visible in
-[[file:../invocation.lisp::(defclass invocation][the general invocation protocol]] and
-[[file:../vulkan/fundament.lisp::(defmacro defvkfun][=defvkfun=]].
+binding machinery.  At the snapshot, each foreign call was also a class of
+invocation routed through an invoker.  Later Metal profiling showed that the
+same mandatory design could dominate a real frame while its only live use was
+optional tracing.  The current [[file:../vulkan/fundament.lisp::(defmacro defvkfun][=defvkfun=]] therefore emits a direct CFFI
+function and allocates backend-local trace events only when tracing is active;
+the general invocation subsystem has been deleted.
 
 The upper boundary is younger.  =gpu/api.lisp= supplies backend-neutral-looking
 classes and generic functions, while =gpu/vulkan.lisp= immediately lowers them
@@ -385,7 +386,7 @@ generative:
 - grow the Vulkan binding only from concrete backend needs;
 - keep the actual Vulkan treaty visible rather than generating an enormous
   opaque binding;
-- reify driver crossings at one general invocation boundary;
+- keep driver crossings direct and make diagnostics explicit and backend-local;
 - use command scope types and double dispatch instead of a giant opcode
   switch;
 - make borrowed native ownership explicit;

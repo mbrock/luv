@@ -293,9 +293,9 @@
   (mapcar
    (lambda (event)
      (getf
-      (luv.objective-c:objective-c-invocation-description event)
+      (luv.objective-c:objective-c-message-event-description event)
       :selector))
-   (luv.invocation:invocation-trace-events trace)))
+   (luv.objective-c:objective-c-trace-events trace)))
 
 (defparameter +metal-clear-submission-sequence+
   '("beginCommandBufferWithAllocator:"

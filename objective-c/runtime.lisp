@@ -170,35 +170,82 @@
        (= (cffi:pointer-address (objective-c-pointer left))
           (cffi:pointer-address (objective-c-pointer right)))))
 
-(defmethod snapshot-invocation-object ((class objective-c-class))
-  (list :objective-c-class
-        :name (objective-c-class-name class)
-        :pointer (cffi:pointer-address (%objective-c-class-pointer class))))
+(defstruct objective-c-message-definition
+  name selector selector-pointer result-type result-ownership result-class-name
+  consumes-receiver-p arguments)
 
-(defmethod snapshot-invocation-object ((object objective-c-object))
-  (list :objective-c-object
-        :class (objective-c-object-class-name object)
-        :protocol (objective-c-object-protocol-name object)
-        :ownership (objective-c-object-ownership object)
-        :released (objective-c-object-released-p object)
-        :pointer (cffi:pointer-address (%objective-c-object-pointer object))))
+(defvar *objective-c-message-definitions* (make-hash-table :test #'eq))
 
-(defclass objective-c-message-class (invocation-class)
-  ((selector :initform nil :accessor objective-c-message-selector)
-   (selector-pointer :initform nil
-                     :accessor objective-c-message-selector-pointer)
-   (result-type :initform nil :accessor objective-c-message-result-type)
-   (result-ownership :initform nil
-                     :accessor objective-c-message-result-ownership)
-   (result-class-name :initform nil
-                      :accessor objective-c-message-result-class-name)
-   (consumes-receiver-p :initform nil
-                        :accessor objective-c-message-consumes-receiver-p)))
+(defstruct objective-c-message-event
+  sequence timestamp duration thread name arguments values status condition)
 
-(defclass objective-c-message (invocation)
-  ((receiver :initarg :receiver :reader objective-c-message-receiver))
-  (:metaclass objective-c-message-class)
-  (:documentation "One declared and ABI-typed Objective-C message send."))
+(defstruct (objective-c-trace
+             (:constructor %make-objective-c-trace)
+             (:conc-name %objective-c-trace-))
+  (started-at 0.0d0)
+  (next-sequence 0)
+  (events (make-array 0 :adjustable t :fill-pointer 0))
+  #+sb-thread
+  (lock (sb-thread:make-mutex :name "luv Objective-C trace")))
+
+(defvar *objective-c-trace* nil
+  "The current opt-in Objective-C trace, or NIL on the ordinary direct path.")
+
+(defun objective-c-trace-now ()
+  (/ (get-internal-real-time)
+     (coerce internal-time-units-per-second 'double-float)))
+
+(defmacro with-objective-c-trace-lock ((trace) &body body)
+  #+sb-thread
+  `(sb-thread:with-mutex ((%objective-c-trace-lock ,trace)) ,@body)
+  #-sb-thread
+  `(progn ,@body))
+
+(defun make-objective-c-trace ()
+  (%make-objective-c-trace :started-at (objective-c-trace-now)))
+
+(defun objective-c-trace-events (trace)
+  (with-objective-c-trace-lock (trace)
+    (sort (coerce (copy-seq (%objective-c-trace-events trace)) 'list)
+          #'< :key #'objective-c-message-event-sequence)))
+
+(defun objective-c-trace-thread-name ()
+  #+sb-thread
+  (or (sb-thread:thread-name sb-thread:*current-thread*) "unnamed thread")
+  #-sb-thread
+  "single thread")
+
+(defun snapshot-objective-c-value (value &optional (depth 0))
+  (cond
+    ((typep value 'objective-c-class)
+     (list :objective-c-class
+           :name (objective-c-class-name value)
+           :pointer (cffi:pointer-address (%objective-c-class-pointer value))))
+    ((typep value 'objective-c-object)
+     (list :objective-c-object
+           :class (objective-c-object-class-name value)
+           :protocol (objective-c-object-protocol-name value)
+           :ownership (objective-c-object-ownership value)
+           :released (objective-c-object-released-p value)
+           :pointer (cffi:pointer-address (%objective-c-object-pointer value))))
+    ((cffi:pointerp value)
+     (list :pointer (cffi:pointer-address value)))
+    ((or (null value) (symbolp value) (numberp value) (characterp value))
+     value)
+    ((stringp value) (copy-seq value))
+    ((>= depth 6) (list :object (type-of value)))
+    ((consp value)
+     (cons (snapshot-objective-c-value (car value) (1+ depth))
+           (snapshot-objective-c-value (cdr value) (1+ depth))))
+    ((vectorp value)
+     (map 'vector
+          (lambda (item)
+            (snapshot-objective-c-value item (1+ depth)))
+          value))
+    (t
+     (list :object (type-of value)
+           (handler-case (princ-to-string value)
+             (error () "<unprintable>"))))))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defun objective-c-foreign-type (type)
@@ -223,70 +270,55 @@
       (error "Consuming Objective-C message ~S cannot also return an object."
              name)))
 
-  (defun configure-objective-c-message-class
-      (class selector result-type ownership result-class-name
+  (defun register-objective-c-message-definition
+      (name selector result-type ownership result-class-name
        consumes-receiver-p arguments)
-    (setf (objective-c-message-selector class) selector
-          (objective-c-message-selector-pointer class)
-          (%sel-register-name selector)
-          (objective-c-message-result-type class) result-type
-          (objective-c-message-result-ownership class) ownership
-          (objective-c-message-result-class-name class) result-class-name
-          (objective-c-message-consumes-receiver-p class) consumes-receiver-p
-          (invocation-class-arguments class)
-          (cons '(receiver :object) arguments))
-    class)
+    (let ((definition
+            (make-objective-c-message-definition
+             :name name :selector selector
+             :selector-pointer (%sel-register-name selector)
+             :result-type result-type :result-ownership ownership
+             :result-class-name result-class-name
+             :consumes-receiver-p consumes-receiver-p
+             :arguments (cons '(receiver :object) arguments))))
+      (setf (gethash name *objective-c-message-definitions*) definition)
+      definition))
 
   (defun objective-c-argument-form (name type)
     (case type
       ((:object :class) `(objective-c-pointer ,name))
       (otherwise name))))
 
-(defgeneric objective-c-message-class-of (designator)
-  (:documentation "Resolve a message name, invocation, or metaobject to its class."))
-
-(defmethod objective-c-message-class-of ((name symbol))
-  (objective-c-message-class-of (find-class name)))
-
-(defmethod objective-c-message-class-of ((message objective-c-message))
-  (class-of message))
-
-(defmethod objective-c-message-class-of ((class objective-c-message-class))
-  class)
-
-(defun objective-c-message-description (designator)
+(defun objective-c-message-description (name)
   "Return the selector, ABI, and ownership metadata for one declared message."
-  (let ((class (objective-c-message-class-of designator)))
-    (list :selector (objective-c-message-selector class)
-          :result-type (objective-c-message-result-type class)
-          :result-ownership (objective-c-message-result-ownership class)
-          :result-class (objective-c-message-result-class-name class)
+  (let ((definition
+          (or (gethash name *objective-c-message-definitions*)
+              (error "No Objective-C message named ~S." name))))
+    (list :selector (objective-c-message-definition-selector definition)
+          :result-type (objective-c-message-definition-result-type definition)
+          :result-ownership
+          (objective-c-message-definition-result-ownership definition)
+          :result-class
+          (objective-c-message-definition-result-class-name definition)
           :consumes-receiver
-          (objective-c-message-consumes-receiver-p class)
-          :argument-types (invocation-class-arguments class))))
+          (objective-c-message-definition-consumes-receiver-p definition)
+          :argument-types
+          (objective-c-message-definition-arguments definition))))
 
-(defun objective-c-invocation-description (invocation)
-  "Return durable trace data plus declared ABI metadata for INVOCATION."
-  (append (objective-c-message-description invocation)
-          (list :status (invocation-status invocation)
-                :arguments (invocation-arguments invocation)
-                :values (invocation-values invocation)
-                :condition (invocation-condition invocation))))
+(defun objective-c-message-event-description (event)
+  "Return one opt-in trace EVENT with its declared ABI metadata."
+  (append (objective-c-message-description
+           (objective-c-message-event-name event))
+          (list :status (objective-c-message-event-status event)
+                :arguments (objective-c-message-event-arguments event)
+                :values (objective-c-message-event-values event)
+                :condition (objective-c-message-event-condition event))))
 
-(defclass objective-c-runtime (invoker)
-  ()
-  (:documentation
-   "A runtime that sends declared messages according to the dynamic policy."))
-
-(defvar *objective-c-runtime* (make-instance 'objective-c-runtime)
-  "The invoker through which every declared Objective-C message passes.")
-
-(defvar *objective-c-exception-policy* :catch
+(defvar *objective-c-exception-policy* :unchecked
   "How declared messages cross the native boundary: :CATCH or :UNCHECKED.
 
-:CATCH uses NSInvocation and turns NSException into Lisp conditions.
-:UNCHECKED calls objc_msgSend directly and must never encounter NSException.
-See #P6RUG7.")
+:UNCHECKED calls objc_msgSend directly and is the ordinary path.  :CATCH uses
+the native NSInvocation exception bridge for an explicit diagnostic scope.")
 
 (defmacro with-unchecked-objective-c-messages (() &body body)
   "Send declared messages in BODY directly, without catching NSException."
@@ -296,6 +328,12 @@ See #P6RUG7.")
 (defmacro with-objective-c-exception-handling (() &body body)
   "Catch NSException in BODY, even inside an unchecked dynamic context."
   `(let ((*objective-c-exception-policy* :catch))
+     ,@body))
+
+(defmacro with-objective-c-trace ((trace) &body body)
+  "Run BODY with declared sends recorded as backend-local trace events."
+  `(let* ((,trace (make-objective-c-trace))
+          (*objective-c-trace* ,trace))
      ,@body))
 
 (defun objective-c-message-send-pointer ()
@@ -311,17 +349,56 @@ See #P6RUG7.")
     (error 'objective-c-ownership-error :object receiver))
   (objective-c-pointer receiver))
 
-(defun translate-objective-c-result (value message-class)
-  (if (eq (objective-c-message-result-type message-class) :object)
+(defun translate-objective-c-result (value definition)
+  (if (eq (objective-c-message-definition-result-type definition) :object)
       (wrap-objective-c-object
        value
-       :ownership (objective-c-message-result-ownership message-class)
-       :protocol-name (objective-c-message-result-class-name message-class))
+       :ownership
+       (objective-c-message-definition-result-ownership definition)
+       :protocol-name
+       (objective-c-message-definition-result-class-name definition))
       value))
+
+(defun call-with-objective-c-message-trace
+    (trace definition arguments function)
+  (let* ((started-at (objective-c-trace-now))
+         (event
+           (make-objective-c-message-event
+            :sequence
+            (with-objective-c-trace-lock (trace)
+              (prog1 (%objective-c-trace-next-sequence trace)
+                (incf (%objective-c-trace-next-sequence trace))))
+            :timestamp (- started-at (%objective-c-trace-started-at trace))
+            :thread (objective-c-trace-thread-name)
+            :name (objective-c-message-definition-name definition)
+            :arguments
+            (mapcar (lambda (argument)
+                      (list (first argument)
+                            (snapshot-objective-c-value (second argument))))
+                    arguments)
+            :status :signaled)))
+    (handler-bind
+        ((error
+           (lambda (condition)
+             (setf (objective-c-message-event-condition event)
+                   (list :type (type-of condition)
+                         :message
+                         (handler-case (princ-to-string condition)
+                           (error () "<unprintable condition>")))))))
+      (unwind-protect
+           (let ((results (multiple-value-list (funcall function))))
+             (setf (objective-c-message-event-status event) :returned
+                   (objective-c-message-event-values event)
+                   (mapcar #'snapshot-objective-c-value results))
+             (values-list results))
+        (setf (objective-c-message-event-duration event)
+              (- (objective-c-trace-now) started-at))
+        (with-objective-c-trace-lock (trace)
+          (vector-push-extend event (%objective-c-trace-events trace)))))))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defun caught-objective-c-message-send-form
-      (message receiver result-type arguments)
+      (definition receiver result-type arguments)
     (let ((result-storage (gensym "RESULT-STORAGE"))
           (argument-array (gensym "ARGUMENT-ARRAY"))
           (argument-size-array (gensym "ARGUMENT-SIZE-ARRAY"))
@@ -344,10 +421,10 @@ See #P6RUG7.")
                               (cffi:foreign-type-size
                                ',(objective-c-foreign-type type))))
                     (call-with-objective-c-exception-boundary
-                     ,message ,receiver ,result ,result-size
+                     ,definition ,receiver ,result ,result-size
                      ,argument-array ,argument-size-array ,(length arguments)))
                  `(call-with-objective-c-exception-boundary
-                   ,message ,receiver ,result ,result-size
+                   ,definition ,receiver ,result ,result-size
                    (cffi:null-pointer) (cffi:null-pointer) 0)))
            (result-form ()
              (if (eq result-type :void)
@@ -379,11 +456,12 @@ See #P6RUG7.")
         (argument-forms arguments argument-storages))))
 
   (defun unchecked-objective-c-message-send-form
-      (message receiver result-type arguments)
+      (definition receiver result-type arguments)
     `(cffi:foreign-funcall-pointer
       (objective-c-message-send-pointer) ()
       :pointer (objective-c-pointer ,receiver)
-      :pointer (objective-c-message-selector-pointer (class-of ,message))
+      :pointer
+      (objective-c-message-definition-selector-pointer ,definition)
       ,@(loop for (argument-name argument-type) in arguments
               append
               (list (objective-c-foreign-type argument-type)
@@ -397,53 +475,39 @@ See #P6RUG7.")
   "Define NAME as an inspectable, ABI-typed class and message-sending function."
   (validate-objective-c-message-declaration
    name result-type ownership consumes-receiver arguments)
-  (let ((argument-names (mapcar #'first arguments)))
+  (let ((argument-names (mapcar #'first arguments))
+        (definition-name
+          (intern (format nil "*~A-DEFINITION*" name)
+                  (symbol-package name))))
     `(progn
-       (defclass ,name (objective-c-message)
-         ,(loop for argument-name in argument-names
-                collect `(,argument-name
-                          :initarg ,(intern (symbol-name argument-name) :keyword)))
-         (:metaclass objective-c-message-class))
-       (eval-when (:load-toplevel :execute)
-         (configure-objective-c-message-class
-          (find-class ',name) ,selector ',result-type ',ownership ,class
+       (defparameter ,definition-name
+         (register-objective-c-message-definition
+          ',name ,selector ',result-type ',ownership ,class
           ,consumes-receiver ',arguments))
-       (defmethod invoke ((runtime objective-c-runtime) (message ,name))
-         (declare (ignore runtime))
-         (with-slots (receiver ,@argument-names) message
-           ,(when consumes-receiver
-              '(check-consumable-objective-c-receiver receiver))
-           (let ((result
-                   (with-objective-c-native-environment
-                     (ecase *objective-c-exception-policy*
-                       (:catch
-                        ,(caught-objective-c-message-send-form
-                          'message 'receiver result-type arguments))
-                       (:unchecked
-                        ,(unchecked-objective-c-message-send-form
-                          'message 'receiver result-type arguments))))))
-             ,(when consumes-receiver
-                '(setf (objective-c-object-released-p receiver) t))
-             (translate-objective-c-result result (class-of message)))))
        (defun ,name (receiver ,@argument-names)
-         (invoke
-          *objective-c-runtime*
-          (make-instance ',name :receiver receiver
-                         ,@(loop for argument-name in argument-names
-                                 append
-                                 (list (intern (symbol-name argument-name)
-                                               :keyword)
-                                       argument-name)))))
+         ,(when consumes-receiver
+            '(check-consumable-objective-c-receiver receiver))
+         (flet ((send ()
+                  (let ((result
+                          (with-objective-c-native-environment
+                            (ecase *objective-c-exception-policy*
+                              (:catch
+                               ,(caught-objective-c-message-send-form
+                                 definition-name 'receiver result-type
+                                 arguments))
+                              (:unchecked
+                               ,(unchecked-objective-c-message-send-form
+                                 definition-name 'receiver result-type
+                                 arguments))))))
+                    ,(when consumes-receiver
+                       '(setf (objective-c-object-released-p receiver) t))
+                    (translate-objective-c-result result ,definition-name))))
+           (if *objective-c-trace*
+               (call-with-objective-c-message-trace
+                *objective-c-trace* ,definition-name
+                (list (list 'receiver receiver)
+                      ,@(loop for argument-name in argument-names
+                              collect `(list ',argument-name ,argument-name)))
+                #'send)
+               (send))))
        ',name)))
-
-(defclass tracing-objective-c-runtime (tracing-invoker objective-c-runtime)
-  ()
-  (:documentation "An Objective-C runtime that records every declared send."))
-
-(defmacro with-objective-c-trace ((trace) &body body)
-  "Run BODY with this thread's declared messages recorded into TRACE."
-  `(let* ((,trace (make-invocation-trace))
-          (*objective-c-runtime*
-            (make-instance 'tracing-objective-c-runtime :trace ,trace)))
-     (unwind-protect (progn ,@body)
-       (stop-invocation-trace ,trace))))

@@ -19,6 +19,7 @@
                               (asdf:test-op #:luv/objective-c/tests)
                               #+darwin
                               (asdf:test-op #:luv/metal/tests)
+                              (asdf:test-op #:luv/vulkan/tests)
                               (asdf:test-op #:luv/tests)
                               (asdf:test-op #:luv/spir-v/tests)
                               (asdf:test-op #:luv/msl/tests)
@@ -161,24 +162,13 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
                              (:static-file "site.js")
                              (:static-file "images/dexp.png")))))
 
-(asdf:defsystem #:luv/invocation
-  :description "A small protocol for reifying API calls as invocations."
-  :version "0.0.1"
-  :author "Mikael Brockman"
-  :depends-on (#:luv/packages
-               #:cffi
-               #:closer-mop)
-  :components ((:file "invocation")))
-
 #+darwin
 (asdf:defsystem #:luv/objective-c
-  :description "A declared, inspectable Objective-C foreign object system."
+  :description "A declared Objective-C foreign object system with opt-in tracing."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on (#:luv/invocation
-               #:cffi
-               #:cffi-libffi
-               #:closer-mop)
+  :depends-on (#:cffi
+               #:cffi-libffi)
   :serial t
   :components ((:module "objective-c"
                 :components ((:file "package")
@@ -287,10 +277,10 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
                 :components ((:file "api")))))
 
 (asdf:defsystem #:luv/vulkan/fundament
-  :description "Binding machinery for luv's owned Vulkan vocabulary."
+  :description "Direct bindings and opt-in tracing for luv's Vulkan vocabulary."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on (#:luv/invocation
+  :depends-on (#:luv/packages
                #:cffi)
   :components ((:module "vulkan"
                 :components ((:file "fundament")))))
@@ -310,6 +300,22 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
   :depends-on (#:luv/vulkan/defs)
   :components ((:module "vulkan"
                 :components ((:file "high")))))
+
+(asdf:defsystem #:luv/vulkan/tests
+  :description "Executable claims for direct Vulkan calls and opt-in tracing."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on (#:luv/vulkan
+               #:rove)
+  :components ((:module "tests"
+                :components ((:file "vulkan"))))
+  :perform (asdf:test-op (operation component)
+             (declare (ignore operation component))
+             (unless (uiop:symbol-call
+                      '#:rove '#:run-suite
+                      (uiop:symbol-call
+                       '#:rove '#:find-suite '#:luv/vulkan/tests))
+               (error "luv Vulkan tests failed"))))
 
 (asdf:defsystem #:luv/gpu/vulkan
   :description "Vulkan implementation of the luv GPU API."

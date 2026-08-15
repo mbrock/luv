@@ -2,37 +2,6 @@
 
 (in-package #:luv)
 
-(defun wait-for-luvcraft-products
-    (session &key minimum (timeout 10.0))
-  "Wait outside frame encoding for a useful initial set of chunk meshes.
-
-MINIMUM defaults to nine or the whole desired set when it is smaller.  This
-keeps the procedural smoke path quick without making a one-chunk caller-owned
-world wait for products which can never exist."
-  (let* ((minimum (or minimum
-                      (min 9 (hash-table-count
-                              (luvcraft-session-desired-chunks session)))))
-         (deadline (+ (get-internal-real-time)
-                      (round (* timeout internal-time-units-per-second)))))
-    (loop
-      (let ((products nil))
-        (request-canvas-frame
-         (luvcraft-session-canvas session)
-         (lambda (timestamp)
-           (declare (ignore timestamp))
-           (refresh-luvcraft-mesh session)
-           (setf products
-                 (hash-table-count (luvcraft-session-chunk-products session)))))
-        (when (>= products minimum)
-          (return session))
-        (when (>= (get-internal-real-time) deadline)
-          (error "Only ~D chunk meshes arrived within ~,2F seconds; expected ~D.~@[ Last worker error: ~A~]"
-                 products
-                 timeout minimum
-                 (let ((result (first (luvcraft-session-production-errors session))))
-                   (and result (production-result-condition result)))))
-        (sleep 0.005)))))
-
 (defun capture-luvcraft-screenshot (session pathname)
   "Render SESSION once, read its real color attachment, and write a PNG."
   (unless (eq :open (canvas-state (luvcraft-session-canvas session)))

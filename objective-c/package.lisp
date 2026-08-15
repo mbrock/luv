@@ -1,6 +1,6 @@
 (defpackage #:luv.objective-c
   (:nicknames #:objc)
-  (:use #:cl #:luv.invocation)
+  (:use #:cl)
   (:documentation
    "Declared Objective-C messages, explicit native ownership, and tracing.")
   (:export #:objective-c-error
@@ -37,19 +37,12 @@
            #:*objective-c-exception-policy*
            #:with-unchecked-objective-c-messages
            #:with-objective-c-exception-handling
-           #:objective-c-message-class
-           #:objective-c-message
-           #:objective-c-message-selector
-           #:objective-c-message-result-type
-           #:objective-c-message-result-ownership
-           #:objective-c-message-result-class-name
-           #:objective-c-message-consumes-receiver-p
            #:objective-c-message-description
-           #:objective-c-invocation-description
+           #:objective-c-message-event-description
+           #:objective-c-message-event-status
+           #:objective-c-message-event-condition
+           #:objective-c-trace-events
            #:define-objective-c-message
-           #:objective-c-runtime
-           #:*objective-c-runtime*
-           #:tracing-objective-c-runtime
            #:with-objective-c-trace
            #:with-autorelease-pool
            #:objective-c-string
