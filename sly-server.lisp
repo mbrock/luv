@@ -21,9 +21,13 @@
      (:tree ,(namestring slynk-root))
      :inherit-configuration))
   (asdf:load-asd (merge-pathnames #P"slynk.asd" slynk-root))
-  (asdf:load-asd (merge-pathnames #P"luv.asd" project-root))
+  ;; Slynk first: loading luv.asd already loads luv-wiki (luv/wiki depends on
+  ;; it at definition time), and its IN-READTABLE forms register their
+  ;; readtables with Slynk only if Slynk is present at that moment.
   (asdf:load-system :slynk)
+  (asdf:load-asd (merge-pathnames #P"luv.asd" project-root))
   (asdf:load-system :luv)
+  (asdf:load-system :luv-wiki)
   (format t "~&Starting luv Slynk on 127.0.0.1:~D.~%" port)
   (funcall (find-symbol "CREATE-SERVER" "SLYNK")
            :interface "127.0.0.1"

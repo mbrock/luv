@@ -56,6 +56,18 @@ Useful starting points:
 ./sly xref uses render-canvas-color --package LUV
 ```
 
+`./sly status`, `./sly start`, and `./sly stop` manage the image when it is
+the `./sly`-managed one (`sly-server.lisp`, which loads `luv` and `luv-wiki`).
+The image is only as current as the environment it was started in: when it
+cannot find a system or component that the flake now provides (`Component
+SPINNERET not found`), or otherwise reflects an old world (a package or
+readtable that should exist does not, `flake.nix` or an `.asd` has changed
+since it started), **fix the image rather than routing around it** -- check
+`./sly status` for who owns it and that no client is connected, then
+`./sly stop && ./sly start`, and confirm with an eval that the missing thing
+is there.  Do not fall back to a fresh `sbcl` for the rest of a session
+because the durable image is broken; that leaves it broken for everyone.
+
 `describe`, `apropos`, and `edit` accept multiple names. `apropos` shows only
 external symbols by default; pass `--all` for internals. Failed evaluations
 print a backtrace and wait on stdin for a restart number or `a` to abort.

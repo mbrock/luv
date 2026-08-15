@@ -4,6 +4,18 @@
 
 (asdf:load-asd (merge-pathnames #P"luv.asd" *load-truename*))
 (asdf:load-system :luv)
+(asdf:load-system :luv-wiki)
+
+(defun register-luv-readtables ()
+  "Tell Slynk which packages read under a named readtable, so C-c C-c and
+./sly eval read them as their files do.  IN-READTABLE does this itself when
+Slynk is loaded first; here Slynk arrives after luv."
+  (let ((alist (find-symbol "*READTABLE-ALIST*" "SLYNK")))
+    (dolist (entry (list (cons "LUV.WIKI.STYLE"
+                               (named-readtables:find-readtable 'luv.css:syntax))))
+      (setf (symbol-value alist)
+            (cons entry (remove (car entry) (symbol-value alist)
+                                :key #'car :test #'string=))))))
 
 (defvar cl-user::*luv-slynk-port* nil)
 
@@ -23,6 +35,7 @@
                       (setf cl-user::*luv-slynk-port*
                             (funcall create-server
                                      :port port :dont-close t))
+                    (register-luv-readtables)
                     (error (condition)
                       (setf cl-user::*luv-slynk-port* nil)
                       (format *error-output*
