@@ -562,13 +562,21 @@ conditionals correctly, which a hand-rolled tokenizer would not; parinfer's
 tokenizer is deliberately a repair heuristic and stays that.
 
 Reading with Eclector gives a *definition index* beside the figure index:
-for every =cl-source-file= that ASDF lists for the luv systems (pathnames
-only, via =asdf:required-components=), each top-level form with its kind,
-name, qualifiers or specializers, file, line range, comment text, and the
-=#ID= mentions inside it.  Figures ask it who references them; =lisp:= links
-ask it where a name is defined; the McCLIM browser can present it directly.
-Reader conditionals and =#.= are rendered as visible tokens, never
-evaluated.
+for every =cl-source-file= in the registered luv systems' component trees,
+each top-level form with its kind, name, qualifiers or specializers, file,
+line range, comment text, and the =#ID= mentions inside it.  Figures ask it
+who references them; =lisp:= links ask it where a name is defined; the
+McCLIM browser can present it directly.  Reader conditionals and =#.=
+are rendered as visible tokens, never evaluated.
+
+Platform availability belongs to ASDF's =:if-feature= metadata, not to a
+=#+darwin= conditional around the =defsystem= form.  ASDF therefore registers
+the Objective-C and Metal systems and constructs their component trees on
+Linux, while their compile and load actions remain invalid there.  The wiki
+deliberately walks those complete trees rather than ASDF's active
+=sub-components=, so a Linux documentation build renders the Darwin sources
+without loading them.  Individual files such as the Cocoa canvas helper use
+the same component-level =:if-feature= convention.
 
 * Dexp on McCLIM
 :PROPERTIES:

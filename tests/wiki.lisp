@@ -396,3 +396,14 @@ and *features* stay text; *special* names are code.\"
     (ok (search "DONE" marks))
     (ok (search "String figures" figure))
     (ok (search "Mentioned in:" figure))))
+
+(deftest platform-gated-systems-remain-in-the-source-corpus
+  ;; ASDF's :IF-FEATURE keeps these systems registered for introspection on
+  ;; every host while making their build actions invalid away from Darwin.
+  ;; The wiki deliberately walks the complete component tree rather than only
+  ;; ASDF's active SUB-COMPONENTS, so Linux CI can render the Metal sources.
+  (let* ((system (asdf:find-system :luv/gpu/metal))
+         (root (asdf:system-source-directory :luv/wiki))
+         (metal-source (merge-pathnames "gpu/metal.lisp" root)))
+    (ok (equal :darwin (asdf/component:component-if-feature system)))
+    (ok (find metal-source (wiki:code-source-files) :test #'equal))))

@@ -15,9 +15,7 @@
   :in-order-to ((asdf:test-op (asdf:test-op #:luv/arithmetic/tests)
                               (asdf:test-op #:luv/arithmetic/language/tests)
                               (asdf:test-op #:luv/arithmetic/lisp/tests)
-                              #+darwin
                               (asdf:test-op #:luv/objective-c/tests)
-                              #+darwin
                               (asdf:test-op #:luv/metal/tests)
                               (asdf:test-op #:luv/vulkan/tests)
                               (asdf:test-op #:luv/tests)
@@ -164,11 +162,11 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
                              (:static-file "site.js")
                              (:static-file "images/dexp.png")))))
 
-#+darwin
 (asdf:defsystem #:luv/objective-c
   :description "A declared Objective-C foreign object system with opt-in tracing."
   :version "0.0.1"
   :author "Mikael Brockman"
+  :if-feature :darwin
   :depends-on (#:cffi
                #:cffi-libffi)
   :serial t
@@ -179,29 +177,29 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
                              (:file "runtime")
                              (:file "foundation")))))
 
-#+darwin
 (asdf:defsystem #:luv/metal
   :description "The native Metal vocabulary declared through luv's Objective-C system."
   :version "0.0.1"
   :author "Mikael Brockman"
+  :if-feature :darwin
   :depends-on (#:luv/objective-c)
   :serial t
   :components ((:module "objective-c"
                 :components ((:file "metal-probe")
                              (:file "metal")))))
 
-#+darwin
 (asdf:defsystem #:luv/metal/probe
   :description "The smallest native Metal object proof through luv's Objective-C system."
   :version "0.0.1"
   :author "Mikael Brockman"
+  :if-feature :darwin
   :depends-on (#:luv/metal))
 
-#+darwin
 (asdf:defsystem #:luv/objective-c/tests
   :description "Executable claims for the Objective-C foreign object system."
   :version "0.0.1"
   :author "Mikael Brockman"
+  :if-feature :darwin
   :depends-on (#:luv/metal/probe
                #:rove)
   :components ((:module "tests"
@@ -334,16 +332,15 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
                #:luv/vulkan
                #:luv/spir-v
                #:cffi
-               #+darwin
-               #:float-features)
+               (:feature :darwin #:float-features))
   :components ((:module "gpu"
                 :components ((:file "vulkan")))))
 
-#+darwin
 (asdf:defsystem #:luv/gpu/metal
   :description "Metal 4 implementation of luv's first GPU vocabulary."
   :version "0.0.1"
   :author "Mikael Brockman"
+  :if-feature :darwin
   :depends-on (#:luv/gpu/api
                #:luv/metal
                #:luv/msl)
@@ -370,13 +367,11 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
   :author "Mikael Brockman"
   :depends-on (#:luv/canvas/api
                #:sdl3
-               #+darwin
-               #:trivial-main-thread)
+               (:feature :darwin #:trivial-main-thread))
   :serial t
   :components ((:module "canvas"
                 :components ((:file "sdl")
-                             #+darwin
-                             (:file "cocoa")))))
+                             (:file "cocoa" :if-feature :darwin)))))
 
 (asdf:defsystem #:luv/canvas/vulkan
   :description "Vulkan presentation contexts for luv canvases."
@@ -387,11 +382,11 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
   :components ((:module "canvas"
                 :components ((:file "vulkan")))))
 
-#+darwin
 (asdf:defsystem #:luv/canvas/metal
   :description "Metal 4 presentation contexts for SDL canvases."
   :version "0.0.1"
   :author "Mikael Brockman"
+  :if-feature :darwin
   :depends-on (#:luv/canvas/sdl
                #:luv/gpu/metal)
   :components ((:module "canvas"
@@ -402,14 +397,13 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on (#:luv/canvas/vulkan
-               #+darwin
                #:luv/canvas/metal))
 
-#+darwin
 (asdf:defsystem #:luv/metal/tests
   :description "Executable claims for the SDL and Metal 4 presentation seam."
   :version "0.0.1"
   :author "Mikael Brockman"
+  :if-feature :darwin
   :depends-on (#:luv/canvas/metal
                #:luv/luvcraft
                #:rove)
