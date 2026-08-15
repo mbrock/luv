@@ -705,66 +705,6 @@ silent loss of meaning."
   (infer-vector-constructor-quantity-specification
    operator operands source-form))
 
-(defmethod math:derive-quantity-specification
-    ((operator (eql 'clamp)) &rest operands)
-  (unless (= (length operands) 3)
-    (math:quantity-operation-error operator operands :clamp-arity))
-  (apply #'math:derive-quantity-specification 'max operands))
-
-(defmethod math:derive-quantity-specification
-    ((operator (eql 'step)) &rest operands)
-  (unless (= (length operands) 2)
-    (math:quantity-operation-error operator operands :step-arity))
-  (let ((compatible
-          (apply #'math:derive-quantity-specification 'max operands)))
-    (math:make-quantity-specification
-     nil :tensor-order
-     (math:quantity-specification-tensor-order compatible))))
-
-(defmethod math:derive-quantity-specification
-    ((operator (eql 'mix)) &rest operands)
-  (unless (= (length operands) 3)
-    (math:quantity-operation-error operator operands :mix-arity))
-  (destructuring-bind (from to amount) operands
-    (let ((result (math:derive-quantity-specification 'max from to)))
-      (unless (math:dimensionless-quantity-specification-p amount 0)
-        (math:quantity-operation-error
-         operator operands :mix-requires-dimensionless-scalar-amount))
-      result)))
-
-(defmethod math:derive-quantity-specification
-    ((operator (eql 'smoothstep)) &rest operands)
-  (unless (= (length operands) 3)
-    (math:quantity-operation-error operator operands :smoothstep-arity))
-  (let ((compatible
-          (apply #'math:derive-quantity-specification 'max operands)))
-    (math:make-quantity-specification
-     nil :tensor-order
-     (math:quantity-specification-tensor-order compatible))))
-
-(defmethod math:derive-quantity-specification
-    ((operator (eql 'normalize)) &rest operands)
-  (unless (= (length operands) 1)
-    (math:quantity-operation-error operator operands :normalize-arity))
-  (let ((operand (first operands)))
-    (unless (math:dimensionless-quantity-specification-p operand 1)
-      (math:quantity-operation-error
-       operator operands :normalize-requires-dimensionless-vector))
-    operand))
-
-(defmethod math:derive-quantity-specification
-    ((operator (eql 'expt)) &rest operands)
-  (unless (= (length operands) 2)
-    (math:quantity-operation-error operator operands :expt-arity))
-  (destructuring-bind (base exponent) operands
-    (unless (and (math:dimensionless-quantity-specification-p base)
-                 (math:dimensionless-quantity-specification-p exponent 0))
-      (math:quantity-operation-error
-       operator operands :expt-requires-dimensionless-operands))
-    (math:make-quantity-specification
-     nil :tensor-order
-     (math:quantity-specification-tensor-order base))))
-
 (defmethod infer-shader-call-type (operator operands source-form)
   (declare (ignore operands))
   (error 'shader-language-error

@@ -939,3 +939,68 @@ character.  It is a linear unit conversion, not a semantic interpretation."
 
 (defmethod derive-quantity-specification ((operator (eql 'max)) &rest operands)
   (reduce-quantity-specifications operator operands #'compatible-pair 2))
+
+;;; Portable numerical operators extend the same open semantic protocol as
+;;; Common Lisp arithmetic.  Execution backends remain responsible for their
+;;; representations and implementations; these methods state only the lawful
+;;; quantity relationship.
+
+(defmethod derive-quantity-specification
+    ((operator (eql 'clamp)) &rest operands)
+  (unless (= (length operands) 3)
+    (quantity-operation-error operator operands :clamp-arity))
+  (apply #'derive-quantity-specification 'max operands))
+
+(defmethod derive-quantity-specification
+    ((operator (eql 'step)) &rest operands)
+  (unless (= (length operands) 2)
+    (quantity-operation-error operator operands :step-arity))
+  (let ((compatible
+          (apply #'derive-quantity-specification 'max operands)))
+    (make-quantity-specification
+     nil :tensor-order
+     (quantity-specification-tensor-order compatible))))
+
+(defmethod derive-quantity-specification
+    ((operator (eql 'mix)) &rest operands)
+  (unless (= (length operands) 3)
+    (quantity-operation-error operator operands :mix-arity))
+  (destructuring-bind (from to amount) operands
+    (let ((result (derive-quantity-specification 'max from to)))
+      (unless (dimensionless-quantity-specification-p amount 0)
+        (quantity-operation-error
+         operator operands :mix-requires-dimensionless-scalar-amount))
+      result)))
+
+(defmethod derive-quantity-specification
+    ((operator (eql 'smoothstep)) &rest operands)
+  (unless (= (length operands) 3)
+    (quantity-operation-error operator operands :smoothstep-arity))
+  (let ((compatible
+          (apply #'derive-quantity-specification 'max operands)))
+    (make-quantity-specification
+     nil :tensor-order
+     (quantity-specification-tensor-order compatible))))
+
+(defmethod derive-quantity-specification
+    ((operator (eql 'normalize)) &rest operands)
+  (unless (= (length operands) 1)
+    (quantity-operation-error operator operands :normalize-arity))
+  (let ((operand (first operands)))
+    (unless (dimensionless-quantity-specification-p operand 1)
+      (quantity-operation-error
+       operator operands :normalize-requires-dimensionless-vector))
+    operand))
+
+(defmethod derive-quantity-specification
+    ((operator (eql 'expt)) &rest operands)
+  (unless (= (length operands) 2)
+    (quantity-operation-error operator operands :expt-arity))
+  (destructuring-bind (base exponent) operands
+    (unless (and (dimensionless-quantity-specification-p base)
+                 (dimensionless-quantity-specification-p exponent 0))
+      (quantity-operation-error
+       operator operands :expt-requires-dimensionless-operands))
+    (make-quantity-specification
+     nil :tensor-order
+     (quantity-specification-tensor-order base))))

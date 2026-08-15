@@ -188,11 +188,22 @@
   :author "Mikael Brockman"
   :depends-on (#:luv/canvas/vulkan))
 
+(asdf:defsystem #:luv/luvcraft/quantities
+  :description "Backend-neutral semantic quantities for the luvcraft domain."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on (#:luv/arithmetic)
+  :serial t
+  :components ((:module "luvcraft"
+                :components ((:file "quantities-package")
+                             (:file "quantities")))))
+
 (asdf:defsystem #:luv/luvcraft/shaders
   :description "The luvcraft block-world materials as mathematical shaders."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on (#:luv/spir-v)
+  :depends-on (#:luv/luvcraft/quantities
+               #:luv/spir-v)
   :components ((:module "luvcraft"
                 :components ((:file "shaders")))))
 
@@ -202,6 +213,7 @@
   :author "Mikael Brockman"
   :depends-on (#:luv/world
                #:luv/canvas
+               #:luv/luvcraft/quantities
                #:luv/luvcraft/shaders
                #:sb-concurrency
                #:uiop)

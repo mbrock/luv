@@ -186,6 +186,36 @@
          (math:derive-quantity-specification 'max left other-unit)
          'math:quantity-operation-error))))
 
+(deftest portable-numerical-operators-own-backend-neutral-semantics
+  (let* ((depth
+           (math:make-quantity-specification
+            :distance :dimension :length :unit :metre))
+         (amount (math:make-quantity-specification nil))
+         (direction
+           (math:make-quantity-specification nil :tensor-order 1)))
+    (ok (math:quantity-specification=
+         depth
+         (math:derive-quantity-specification
+          'math:clamp depth depth depth)))
+    (ok (math:quantity-specification=
+         depth
+         (math:derive-quantity-specification
+          'math:mix depth depth amount)))
+    (ok (math:dimensionless-quantity-specification-p
+         (math:derive-quantity-specification
+          'math:step depth depth)
+         0))
+    (ok (math:dimensionless-quantity-specification-p
+         (math:derive-quantity-specification
+          'math:smoothstep depth depth depth)
+         0))
+    (ok (eq direction
+            (math:derive-quantity-specification
+             'math:normalize direction)))
+    (ok (math:dimensionless-quantity-specification-p
+         (math:derive-quantity-specification 'expt amount amount)
+         0))))
+
 (deftest quantity-definitions-own-their-homogeneous-components
   (let ((position (math:quantity-definition-for :position))
         (position-x (math:quantity-definition-for :position-x)))

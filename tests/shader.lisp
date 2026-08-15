@@ -17,6 +17,14 @@
 (math:define-quantity :test-position :kind :dimensionless
   :components (:test-position-x :test-position-y :test-position-z))
 
+(deftest portable-operator-symbols-retain-shader-identity
+  (ok (eq 'spv:dot 'math:dot))
+  (ok (eq 'spv:clamp 'math:clamp))
+  (ok (eq 'spv:mix 'math:mix))
+  (ok (eq 'spv:smoothstep 'math:smoothstep))
+  (ok (eq 'spv:step 'math:step))
+  (ok (eq 'spv:normalize 'math:normalize)))
+
 (defun binding-named (name specification)
   (find name (spv:shader-specification-bindings specification)
         :key #'spv:shader-object-name

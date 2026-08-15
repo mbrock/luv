@@ -9,9 +9,15 @@
 
 (defpackage #:luv.arithmetic
   (:use #:cl)
+  (:shadow #:step)
   (:documentation
    "Semantic specifications and dimensional algebra for compiled arithmetic.")
   (:export #:dot
+           #:clamp
+           #:mix
+           #:smoothstep
+           #:step
+           #:normalize
            #:dimension
            #:dimension-factors
            #:make-dimension

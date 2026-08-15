@@ -1,9 +1,24 @@
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  ;; These portable operator names originally belonged to LUV.SPIR-V.  Remove
+  ;; stale home symbols before importing their backend-neutral identities in a
+  ;; live image; existing expression objects retain the old symbols and methods
+  ;; until their definitions are reparsed.
+  (let ((package (find-package '#:luv.spir-v)))
+    (when package
+      (dolist (name '("CLAMP" "MIX" "SMOOTHSTEP" "STEP" "NORMALIZE"))
+        (multiple-value-bind (symbol status) (find-symbol name package)
+          (when (and (member status '(:internal :external))
+                     (eq (symbol-package symbol) package))
+            (unintern symbol package)))))))
+
 (defpackage #:luv.spir-v
   (:nicknames #:spv)
   (:use #:cl)
-  (:import-from #:luv.arithmetic #:dot)
+  (:import-from #:luv.arithmetic
+                #:dot #:clamp #:mix #:smoothstep #:normalize)
+  (:shadowing-import-from #:luv.arithmetic #:step)
   (:local-nicknames (#:math #:luv.arithmetic))
-  (:shadow #:function #:load #:return #:step #:variable)
+  (:shadow #:function #:load #:return #:variable)
   (:export #:spir-v-error
            #:spir-v-error-form
            #:spir-v-error-reason

@@ -335,6 +335,188 @@ checks buy clarity: constructors and presentation, field combinators,
 simulation phase boundaries, and explicitly compiled kernels are promising
 places.
 
+* Arithmetic definitions outlive execution backends
+:PROPERTIES:
+:ID: SQC5JN
+:END:
+
+The quantity algebra in [[file:../arithmetic.lisp][=arithmetic.lisp=]] is already independent of any execution
+backend, but the compiled language which presently exercises it is still
+named and owned as a shader language.  Its literal, reference, call, binding,
+quantity-boundary, and conversion objects live beside shader stages,
+resources, texture operations, and SPIR-V lowering.  CPU code can ask the
+quantity protocol whether an operation is lawful, but it cannot yet define,
+check, and execute the same Lisp-shaped arithmetic graph without loading the
+shader system.
+
+The intended ownership has three layers:
+
+#+begin_example
+quantity algebra
+  dimensions, units, named meanings, affine character, layouts
+                         |
+compiled arithmetic definitions and expressions
+  source forms, lexical bindings, operator contracts, semantic checking
+                 /                       \
+       Lisp/CPU realization          shader realization
+       raw scalar/vector data        stages, resources, SPIR-V
+#+end_example
+
+A shared definition is the durable source-level object.  Each realization may
+produce its own typed expression graph or compiled artifact: shader literals
+are currently single floats, while CPU simulation already has legitimate
+double-float and specialized-array representations.  Sharing the definition
+must not force those representations to become identical.
+
+The runtime rule remains #B5L7VG: check meaning at definition, compilation, or
+kernel boundaries, then execute over ordinary dense values.  A Lisp backend
+should therefore lower a checked definition to an ordinary compiled function;
+it should not wrap every scalar in a quantity object or redispatch for every
+array lane.  SPIR-V becomes one realization of this arithmetic language rather
+than the owner of the language itself.
+
+Shader-only vocabulary remains shader-owned: stages, interfaces, resources,
+texture sampling, output assignment, ABI packing, and instruction provenance.
+Arithmetic expressions, quantity boundaries, numerical unit conversion,
+portable operator rules, and source abstractions can move beneath that
+envelope.  Semantic maps need a similar split: domain and codomain meaning are
+backend-neutral, while four shader rows or a CPU matrix are realizations.
+
+* DONE Give luvcraft quantities backend-neutral ownership
+:PROPERTIES:
+:ID: BRYSBI
+:END:
+
+Intent: let CPU code name world position, view distance, direction, colour,
+fog, and related luvcraft quantities without loading their definitions as a
+side effect of the shader system.
+
+Evidence:
+
+- The open quantity protocols themselves live in =:luv/arithmetic=, while the
+  vocabulary previously lived at the head of [[file:../luvcraft/shaders.lisp][=luvcraft/shaders.lisp=]] in the
+  =LUV.SPIR-V= package.  The names are domain meanings used at simulation and
+  ABI boundaries, not properties of SPIR-V.
+- [[file:../luvcraft/quantities.lisp][=luvcraft/quantities.lisp=]] now publishes the unchanged kind and quantity
+  definitions from the =LUVCRAFT.QUANTITIES= package.  The small
+  =:luv/luvcraft/quantities= system depends only on =:luv/arithmetic=;
+  =:luv/luvcraft/shaders= and =:luv/luvcraft= state their dependency on it.
+- A fresh SBCL image loaded =:luv/luvcraft/quantities=, resolved
+  =:world-position= as a length quantity, and proved that the =LUV.SPIR-V=
+  package did not exist.  Full tests, generated-module validation, and the
+  smoke render pass.
+
+Done when: a small =:luv/luvcraft/quantities= system depends only on
+=:luv/arithmetic=; loading it publishes the existing definitions without
+loading =:luv/spir-v=; shaders depend on it explicitly; focused and project
+tests retain their behavior.
+
+* DONE Move portable operator semantics below shaders
+:PROPERTIES:
+:ID: ODID1K
+:END:
+
+Intent: make the semantic contracts of ordinary numerical operations available
+to every arithmetic client before extracting the expression frontend.
+
+Evidence:
+
+- =+ - * / dot min max= already derived quantity specifications in
+  [[file:../arithmetic.lisp][=arithmetic.lisp=]], while =clamp=, =step=, =mix=, =smoothstep=,
+  =normalize=, and =expt= added methods to that same generic from
+  [[file:../shader-expression.lisp][=shader-expression.lisp=]].  Their contracts did not mention textures,
+  stages, SPIR-V, or another shader-only concern.
+- The portable methods and non-CL operator symbols now belong to
+  =LUV.ARITHMETIC=.  =LUV.SPIR-V= imports and re-exports those exact symbol
+  identities, retaining its established source vocabulary without owning the
+  semantic rules.  Live package reload removes the obsolete home symbols
+  before importing their common identities.
+- Arithmetic tests exercise all six moved contracts without loading shaders;
+  shader tests assert the common/SPIR-V symbol identities.  Strict Parinfer,
+  full tests, and =spirv-val= pass.  The five tracked production shader hashes
+  remain byte-identical, and the smoke render completes at MD5
+  =226c4ffdd4515837d5c5a2d9fc415fa4=.
+- A forced reload in the durable SLY image replaced the package definitions
+  cleanly and reported EQ identity for all six common/SPIR-V operator names.
+
+Done when: portable operator symbols and quantity-derivation methods are owned
+below =:luv/spir-v=; arithmetic tests exercise them directly; shader source
+keeps the same symbol identity and diagnostics; generated shader modules are
+unchanged.
+
+* NEXT Extract a compiled arithmetic frontend
+:PROPERTIES:
+:ID: VIZMU6
+:END:
+
+Intent: make one inspectable definition and expression vocabulary usable by
+both CPU and shader realizations while retaining the shader workbench's source
+provenance.
+
+Evidence: =shader-expression=, literals, references, calls, lexical bindings,
+quantity boundaries, unit conversion, traversal, and most parsing mechanics do
+not intrinsically mention SPIR-V.  Representation inference, texture calls,
+interface declarations, and output statements do.
+
+Done when: a backend-neutral system owns arithmetic definition and base
+expression objects, one-expression functions and lexical =let*=, quantity
+checking, and source reconstruction; the shader frontend extends or consumes
+that protocol rather than duplicating it; existing shader graphs remain
+inspectable and lower identically.
+
+* TODO Compile checked arithmetic to Lisp
+:PROPERTIES:
+:ID: FTQEQD
+:END:
+
+Intent: execute arithmetic definitions on the CPU over ordinary Lisp numbers
+and vectors after checking their semantic contracts once.
+
+Evidence: scalar reference code in [[file:../luvcraft/sky.lisp][=luvcraft/sky.lisp=]] and
+[[file:../luvcraft/simulation.lisp][=luvcraft/simulation.lisp=]] already contains useful unchecked arithmetic,
+while #B5L7VG requires semantic objects at boundaries and dense values inside.
+The shader parser's unconditional single-float literal coercion is also
+evidence that CPU and GPU need distinct target artifacts.
+
+Done when: a Lisp realization lowers a checked definition to a compiled
+function without runtime quantity wrappers; tests prove numerical execution,
+compile-time rejection of a dimensional mistake, affine arithmetic, and an
+explicit unit conversion.
+
+* TODO Share one production computation between CPU and GPU
+:PROPERTIES:
+:ID: D1R2NK
+:END:
+
+Intent: make definition sharing answer a real engine question rather than only
+demonstrate two toy evaluators.
+
+Evidence: fog shaping is a small scalar candidate; the =:world-to-shadow= map
+is a richer candidate already used by production shaders and useful to CPU
+tests and tools.  The latter should follow the semantic-map split and the
+homogeneous-projection composition work in #ZYCSYZ rather than forcing its
+current shader representation into the common layer.
+
+Done when: one named definition is invoked by a production shader and by CPU
+Lisp code or a CPU-facing engine test; both realizations enforce the same
+quantity contract; target-specific representations and generated shader code
+remain appropriate to their backends.
+
+* IDEA Lower checked domains to native SIMD kernels
+:PROPERTIES:
+:ID: VKLLPR
+:END:
+
+Intent: eventually let a field or simulation phase select a scalar or SB-SIMD
+realization of the same semantic operation once per dense kernel.
+
+Evidence: #B5L7VG and the native SIMD study describe the representation seam,
+but a scalar Lisp realization and a real shared computation should establish
+the frontend contract first.
+
+Done when: promoted only after #FTQEQD and #D1R2NK expose a real dense kernel
+whose scalar reference and storage layout are stable enough to compare.
+
 * DONE Prove semantic arithmetic in the shadow graph
 :PROPERTIES:
 :ID: 9P358P
@@ -697,7 +879,7 @@ semantic map, point versus raw/direction misuse is rejected, projected fields
 arrive with meaning rather than assumptions, tools can inspect the map object,
 and emitted GPU code is unchanged.
 
-* NEXT Separate homogeneous projection from shadow sampling
+* TODO Separate homogeneous projection from shadow sampling
 :PROPERTIES:
 :ID: ZYCSYZ
 :END:
