@@ -781,7 +781,10 @@ Evidence: fog shaping is a small scalar candidate; the =:world-to-shadow= map
 is a richer candidate already used by production shaders and useful to CPU
 tests and tools.  The latter should follow the semantic-map split and the
 homogeneous-projection composition work in #ZYCSYZ rather than forcing its
-current shader representation into the common layer.
+current shader representation into the common layer.  The field/kernel seam
+in #ADR040 supplies another production-shaped test: light-level decoding or a
+named light-response law can connect one semantic field to CPU tooling and GPU
+presentation without asking the arithmetic graph to own light propagation.
 
 Done when: one named definition is invoked by a production shader and by CPU
 Lisp code or a CPU-facing engine test; both realizations enforce the same

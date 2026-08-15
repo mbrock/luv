@@ -174,6 +174,7 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
                              (:file "quantities-and-measurement")
                              (:file "sb-simd")
                              (:file "sky-and-light")
+                             (:file "voxel-fields-and-windows")
                              (:file "wiki-site")
                              (:static-file "site.js")
                              (:static-file "images/dexp.png")))))

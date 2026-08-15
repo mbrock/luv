@@ -294,13 +294,17 @@ them side by side, compose checked views, or materialize a wider persistence
 record.  Lisp aliasing and mutation make a literal port of Moppe's consuming
 =join= operation unnecessary until a real owner wants it.
 
-* A possible Lisp atelier
+* The first Lisp atelier should stay ordinary
 :PROPERTIES:
 :ID: R3F8YC
 :END:
 
-A small experiment could use a metaclass without committing the game to a
-general framework:
+A small experiment should attach ordinary inspectable field definitions to
+the block-content and light columns which already exist, without committing
+the game to a general framework or changing their storage.  The concrete
+spatial extraction and field/kernel bridge are developed in #18MPLA.
+
+A later metaclass experiment might look like:
 
 #+begin_src lisp
 (defclass voxel-content-bundle (finite-bundle)
@@ -311,15 +315,18 @@ general framework:
   (:metaclass bundle-class))
 #+end_src
 
-The metaclass could turn field slot definitions into inspectable schema
+Such a metaclass could turn field slot definitions into inspectable schema
 objects and allocate columns from the instance's domain.  It could reject
 duplicate field meanings and teach =describe= or an inspector how to show
 both logical values and physical storage.
 
-Common Lisp class redefinition offers a particularly playful experiment:
+Common Lisp class redefinition would offer a particularly playful experiment:
 =update-instance-for-redefined-class= could add a newly declared column to
 already resident chunks with the proper domain-sized default.  Whether that
-remains delightful after real use is an empirical question.
+remains delightful after real use is an empirical question.  Start there only
+after block content, voxel light, and another real field have shown that
+class-level schema, allocation, and migration repeatedly want the same
+machinery.
 
 The hot path need not use generic dispatch per site.  A generic operation can
 select a bundle representation or numerical phase once, borrow specialized
@@ -341,10 +348,11 @@ to physics and possible wide backends.
   hierarchy; or
 - which physics data structure will emerge from the separate design work.
 
-The first useful proof is now present: the current world occupies a finite
-domain plus one palette-backed block-content column,
-=world-block-at= remains an explicit semantic projection, and
-the mesher borrows aggregate storage through a representation-selected
-protocol.  The next field should still be earned by an operation: a genuine
-lighting experiment can show whether a small shared bundle abstraction is
-clearer than two concrete sibling columns.
+The first proofs are now present: the current world occupies finite domains
+with palette-backed block content, and voxel lighting publishes separate sky
+and blocklight columns with its own revisions.  Their common indexing did not
+make one universal bundle desirable.  Instead, the working light region,
+meshing neighborhood, and halo snapshot revealed repeated location, stepping,
+boundary, and offset machinery.  #K3KZTG records the smaller next proof:
+extract that shared spatial vocabulary before introducing a schema metaclass
+or a generalized solver.

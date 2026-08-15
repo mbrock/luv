@@ -459,6 +459,9 @@ pull a later item forward.
 
 - [[file:domains-and-bundles.org][Domains, bundles, and materialized worlds]] asks what the world owns and how
   its repeated values are stored.
+- [[file:voxel-fields-and-windows.org][Voxel fields and chunk windows]] asks how block content, lighting, meshing,
+  collision, and future processes can inhabit one chunked space without
+  sharing ownership or rebuilding its traversal rules.
 - [[file:quantities-and-measurement.org][Quantities, dimensions, and interpretation]] asks what numerical fields
   mean, which operations are lawful, and where units enter or leave.
 - [[file:physics-and-simd.org][Physics data and SIMD execution]] asks how a CLOS engine can feed wide
@@ -474,8 +477,8 @@ pull a later item forward.
 - Is the first streamed unit a cubic chunk, a vertical chunk column, or
   something taught by the procedural generator?
 - Which block variation belongs in palette states and which deserves a field?
-- Does the first lighting experiment need packed nibbles, or should it stay
-  as one byte per site until behaviour is understood?
+- When measurements justify changing the current byte-per-light-level
+  representation, does nibble packing preserve a clean field boundary?
 - When would an append-only edit log and periodic checkpoint repay their
   recovery, migration, and compaction machinery?  #TR2JNQ
 - Which coarse readings make a distant block world recognizable without

@@ -1,0 +1,545 @@
+#+title: Voxel fields and chunk windows
+#+startup: overview
+
+* The seam is shared spatial meaning, not shared ownership
+:PROPERTIES:
+:ID: 18MPLA
+:END:
+
+Luvcraft now has the right evidence for a spatial vocabulary to become more
+than an attractive analogy.  Block content, derived light, live meshing
+neighborhoods, immutable worker snapshots, collision, and streaming all
+inhabit the same chunked voxel world.  They should not become one object, but
+neither should each of them reconstruct what a cell address, local offset,
+neighbor, face, and chunk crossing mean.
+
+The duplicated arrays are not the deepest problem.  Separate fields often
+/should/ be separate because they have different producers, owners, revisions,
+and storage.  The architectural seam is that several such products currently
+rebuild the spatial substrate beneath those differences.
+
+This is the first concrete client of the more general domain/bundle account in
+#D5M8BZ.  It also sharpens that account: *Bundle is not the whole missing
+abstraction.*  The useful decomposition is:
+
+#+begin_example
+voxel space       how cell addresses and physical positions relate
+finite domain     which local sites and storage offsets belong to one patch
+field product     which distributed fact is materialized over those sites
+chunk window      how a local query continues into other materializations
+provenance        which incarnations and revisions justify the result
+#+end_example
+
+The aim is not to make the engine advertise advanced mathematics.  It is to
+let lighting code speak about lighting, meshing code speak about surfaces, and
+physics code speak about bodies while sharing one honest account of where
+their data lives.
+
+* Mathematical ideas should improve the questions, not burden the names
+:PROPERTIES:
+:ID: EQ6GLY
+:END:
+
+Affine lattices, combinatorial topology, covers, sheaves, order-theoretic
+lattices, and discrete exterior calculus are useful sources of distinctions.
+They draw attention to placement, adjacency, incidence, locality, overlap,
+restriction, partial knowledge, and values associated with cells or faces.
+That does not yet earn those terms as source-level abstractions.
+
+The implementation vocabulary can remain ordinary:
+
+#+begin_example
+voxel-space
+chunk-domain
+chunk-window
+neighbor
+boundary-crossing
+voxel-field
+field-materialization
+field-kernel
+#+end_example
+
+"Chunk window" is a particularly useful hacker-facing name for the part that
+resembles a cover or atlas.  It says that an operation has a finite local view
+onto a larger chunked world without claiming a precise mathematical structure
+the implementation does not provide.
+
+Likewise, today's cells and six-neighbor steps do not justify a general
+topological-space protocol.  If future fluid or geometry work places values on
+faces, edges, and vertices and consumes explicit incidence operations, a cell
+complex or cochain vocabulary may then be earned by a real calculation.
+
+* Addressing and metric are two sides of voxel space
+:PROPERTIES:
+:ID: KV001P
+:END:
+
+The voxel world has a discrete addressing side:
+
+- an integer triple names a cell;
+- primitive directions identify face neighbors;
+- a world address decomposes into chunk address plus local address; and
+- a finite chunk maps local addresses to dense offsets.
+
+It also has a physical metric side:
+
+- a cell has an extent;
+- a cell address maps to a physical point;
+- an address difference maps to a physical displacement; and
+- face area, cell volume, and step length follow from the extent.
+
+[[file:../luvcraft/world.lisp][=voxel-space=]] already contains both a chunk shape and a =cell-extent=, and
+=world-coordinate-cell-origin= performs the first explicit address-to-position
+map.  The distinction should become more pervasive rather than disappear into
+one universal kind of neighborhood.
+
+Voxel light is step-based: an ordinary six-neighbor move loses a gameplay
+light level regardless of how many metres one cell represents.  Physics is
+metric: velocity, acceleration, collision extents, and timestep require
+physical quantities.  A diffusion stencil may need both adjacency and a
+spacing-dependent influence.  Moppe's =TerrainDomain= is useful evidence: its
+four neighbors carry inverse-area influences, so a generic Laplacian derives
+the right physical dimension without knowing the grid spacing itself.
+
+The shared concepts should therefore remain distinct:
+
+| Concept | Answers |
+|-
+| neighbor relation | Which sites are adjacent? |
+| step displacement | What physical displacement separates them? |
+| neighborhood policy | Which adjacent or nearby sites does this operation use? |
+
+The current mesher and player simulation appear to treat one cell as one
+metre even though =voxel-space= admits another extent.  That is a hypothesis to
+verify during the bridge work, not a settled bug claim.  The durable rule is
+that a discrete cell address is not itself a metre-valued world position; the
+space performs that interpretation explicitly.  #M8W6RP already records the
+corresponding quantity distinction.
+
+* A chunk domain owns local traversal, not world truth
+:PROPERTIES:
+:ID: E4T0PD
+:END:
+
+A =chunk-domain= should be the one place that knows the finite patch's local
+shape and storage order.  Its useful operational vocabulary is approximately:
+
+#+begin_example
+domain-cardinality
+domain-index / domain-offset
+map-domain-sites
+step-domain-site
+map-domain-face
+#+end_example
+
+=step-domain-site= should report either another local site or a boundary
+crossing.  It should not decide that crossing the east face reaches air,
+stone, open sky, an unloaded chunk, or an error.  Those are facts or policies
+of the environment in which the domain is being used.
+
+Nor should one neighborhood become intrinsic to every chunk calculation.
+Lighting wants six face neighbors; ambient occlusion wants side and diagonal
+samples; meshing wants a face neighbor plus corner stencils; collision wants
+the cells intersecting a volume.  The domain supplies primitive traversal and
+boundary facts.  Explicit policies assemble the neighborhoods algorithms
+actually mean, following the separation that survived in Moppe's
+=bundle_operations.hh= (#E4N7PX).
+
+The first extraction should retain a component-level path.  Descriptive
+coordinate objects remain excellent for inspectors, edits, ray hits, and
+error reports, while dense traversal must be able to decompose and step
+without allocating a coordinate object or dispatching once per cell.
+
+* A chunk window continues a local domain
+:PROPERTIES:
+:ID: YUBB7X
+:END:
+
+A local domain can say that a step crossed its boundary.  A *chunk window*
+answers what spatial materialization, if any, can continue the query:
+
+#+begin_src mermaid
+flowchart LR
+  A["local site"] --> B["domain step"]
+  B -->|"stays local"| C["local offset"]
+  B -->|"crosses a face"| D["chunk window"]
+  D --> E["neighbor materialization"]
+  D --> F["open / closed / unknown"]
+  D --> G["unavailable"]
+#+end_src
+
+The window reports availability; the subsystem interprets it.  Lighting may
+distinguish open sky, closed world, and unknown terrain.  Meshing may treat an
+absent sample as air, solid, or an error.  Physics may treat unknown support
+as solid or suspend a body.  Ecology may call the reading unavailable rather
+than zero.  Moving those choices into the domain would turn streaming state
+into terrain truth.
+
+Different windows need not share one representation.  They need a small
+aggregate protocol for operations such as locating a cell, resolving a
+boundary crossing, and borrowing a requested field product.  Field-specific
+facades such as =sample-block-at= and =sample-light-at= can remain readable
+interfaces above that mechanism.
+
+* The current program already contains four windows
+:PROPERTIES:
+:ID: WUB581
+:END:
+
+The proposed vocabulary names structures that already work:
+
+| Current structure | Window it provides | Spatial work it currently owns |
+|-
+| =block-world= | live resident world | coordinate decomposition, resident lookup, absent status |
+| =block-mesh-neighborhood= | resolved $3\times3\times3$ window | relative chunk decomposition and repeated dense offsets |
+| =block-mesh-snapshot= | immutable one-cell halo | expanded-halo coordinates and repeated sample offsets |
+| =light-region= | eager or lazy solver atlas | world decomposition, chunk keys, offsets, faces, and lazy entry capture |
+
+The duplication is visible in current source rather than inferred from equal
+array lengths.  [[file:../luvcraft/light.lisp][=light-region-locate=]] performs three floor divisions, constructs a
+chunk key, resolves an entry, and rebuilds the dense offset.
+=map-entry-face-cells= separately reconstructs boundary planes.  In
+[[file:../luvcraft/mesher.lisp][=luvcraft/mesher.lisp=]], block and light access through the resolved neighborhood
+repeat the relative decomposition and offset arithmetic, while the immutable
+snapshot repeats expanded-halo addressing for both fields.
+
+This is an unusually good refactoring target because the algorithms around
+the arithmetic are already distinct and tested.  The work can remove spatial
+duplication while leaving light propagation, AO sampling, face visibility,
+snapshot ownership, and stale-result rejection recognizable.
+
+* Field identity, value meaning, and representation are independent
+:PROPERTIES:
+:ID: FKAV5Y
+:END:
+
+A field definition says which distributed fact one column represents.  Its
+value quantity says what a reading at one site means.  Its representation says
+how those readings are stored.  These are three different identities.
+
+For example, sky light and block light are different fields: they have
+different sources and may have different invalidation rules.  They may also
+use distinct named quantity specifications.  Both currently occupy u8 arrays,
+but equal representation makes neither the fields nor their values
+interchangeable.
+
+Conversely, two field roles may deliberately carry the same quantity
+specification while remaining separate columns.  One semantic light value
+could also be represented as constant zero, a packed nibble, u8 levels,
+normalized float, SIMD-expanded floats, or a GPU lane without changing the
+field's meaning.
+
+A first field definition might need only:
+
+#+begin_example
+field identity
+site kind
+value quantity specification
+default or missing-value meaning
+legal range or encoding
+representation policy
+#+end_example
+
+A field materialization then binds that definition to a finite domain and
+actual storage.  Product-wide revisions, boundary revisions, and stability
+state belong to the materialization or its owning derived product, not to
+every site value.
+
+Block opacity exposes why these distinctions matter.  The atlas's normalized
+=:opacity= is a rendering proportion.  =block-light-opacity= is documented as
+a 0..15 propagation cost.  Calling both opacity does not make them one
+quantity.  A field experiment should probably rename the latter meaning to
+something like propagation loss or light-step cost before using arithmetic
+typing to bless an accidental equivalence.
+
+* Domain, materialization, and revision have different identities
+:PROPERTIES:
+:ID: HAUW7L
+:END:
+
+A chunk removed and reinstalled at the same chunk coordinate covers the same
+spatial domain, but it is not the same resident materialization.  A field can
+then change several times within that incarnation.  Luvcraft's same-key
+replacement tests already rely on this distinction when withdrawing the old
+chunk's propagated light.
+
+At least three identities must therefore remain visible:
+
+#+begin_example
+domain identity           which sites these are
+materialization identity  which resident incarnation supplies them
+revision identity         which version of its fields was observed
+#+end_example
+
+Bundle compatibility checks domain identity rather than equal cardinality.
+A mesh, collider, or light publication proof additionally records the
+materialization incarnations and field revisions it observed.  Folding all
+three into one "domain version" would erase the correctness property the
+current stale-result machinery carefully preserves.
+
+This is also why one universal voxel bundle is the wrong endpoint.  Block
+content, voxel light, fluids, and ecological readings can be sibling
+materializations over compatible domains while retaining their own owners and
+validity conditions (#A6X2RT).
+
+* Field kernels bridge domains to semantic arithmetic
+:PROPERTIES:
+:ID: ADR040
+:END:
+
+Luv's arithmetic work already has the layers this design needs:
+
+- =luv.arithmetic= owns dimensions, units, named quantity meanings, tensor
+  order, and point/absolute/difference character;
+- =luv.arithmetic.language= owns backend-neutral checked definitions and
+  expression graphs;
+- =luv.arithmetic.lisp= lowers one such definition to an ordinary compiled
+  Lisp function over raw numbers and vectors; and
+- the shader language adds GPU interfaces, resources, and target lowering
+  around that same arithmetic substrate.
+
+Shaders therefore do not own meaningful arithmetic.  They are one realization
+of it.  The missing bridge says:
+
+#+begin_quote
+This field carries this value meaning over these sites in this
+representation; choose one checked operation and run it over borrowed storage.
+#+end_quote
+
+A *field kernel* should connect field definitions to a checked arithmetic
+definition, select a scalar or wide realization once, borrow the arrays, and
+then run an ordinary loop or worklist without per-cell CLOS dispatch.
+
+#+begin_src mermaid
+flowchart TB
+  A["field definitions + finite domains"] --> B["checked kernel boundary"]
+  C["arithmetic definition"] --> B
+  B --> D["borrowed raw arrays"]
+  B --> E["scalar / SIMD / GPU realization"]
+  D --> F["closed loop or worklist"]
+  E --> F
+#+end_src
+
+This is the Lisp analogue of Moppe storing mp-units values in typed Bundle
+columns, but it need not copy the C++ technique.  Inspectable definitions and
+aggregate checks can keep the semantic information outside unboxed runtime
+lanes, as #B5L7VG anticipates.
+
+Physics is the obvious next numerical client, but not another reason to add
+columns to a universal voxel record.  Collision traversal should remain
+domain/window code which enumerates occupied cells and constructs contacts;
+integration, acceleration, and eventual impulse laws can be checked arithmetic
+over body fields.  Bodies and contacts then retain their own finite domains as
+#Y5H8KC describes, while the block world remains the static environment they
+query.
+
+* Lighting should use a checked local law, not become an arithmetic graph
+:PROPERTIES:
+:ID: WEE8P5
+:END:
+
+The light solver is the best first proof because it already separates block
+content, two light fields, palette-derived attenuation and emission tables,
+boundary availability, fixed-point work, publication, and revision tracking.
+
+The arithmetic DSL should describe a *local transfer law*, not the entire
+algorithm.  In rough form one edge computes:
+
+#+begin_example
+candidate = attenuate(source level, propagation loss, direction)
+destination = max(destination, candidate)
+#+end_example
+
+Chunk lookup, residency, queues, removal waves, scheduling, publication, and
+revision tracking remain lighting control structure.  The chunk window
+supplies the destination site; field materializations supply typed storage;
+the checked local law computes one influence; the worklist decides when to
+visit again.
+
+There is an open semantic choice at the CPU/mesh boundary.  The stored 0..15
+level may be only an encoding of a normalized light proportion, making
+division by 15 a representation conversion.  Or one gameplay light step may
+be a meaningful scaled dimensionless unit, making the propagation rule and
+conversion to =:one= explicit arithmetic.  "Lose one level per ordinary
+step" is currently a game rule, so the second reading is plausible, but the
+first field experiment should force and record the decision rather than hide
+it in u8 storage.
+
+If ordinary subtraction cannot truthfully express attenuation, add a named
+operation such as =attenuate-light= through the open EQL-specialized operator
+protocol.  Do not weaken =-= until two differently named integers happen to
+type-check.
+
+* The fixed-point algebra should wait for a second client
+:PROPERTIES:
+:ID: BA9MCA
+:END:
+
+Light has two lattice-like structures.  Its sites form a spatial lattice under
+six-neighbor adjacency.  Its levels form a finite order in which =max= is the
+join.  From-scratch propagation repeatedly joins attenuated neighbor
+contributions until it reaches a fixed point.  Incremental removal first
+over-removes a region, then rebuilds the monotone closure from surviving
+sources.
+
+That suggests a later reusable shape:
+
+#+begin_example
+worklist fixed point
+  domain and window
+  input and output fields
+  sources
+  neighborhood policy
+  edge transfer
+  join
+#+end_example
+
+Distance transforms, reachability, influence propagation, or ecological
+fields might eventually share it.  Extracting this solver before a second
+client would be a framework searching for evidence.  Domain stepping, window
+resolution, field meaning, and kernel boundaries already have multiple real
+clients and should come first.
+
+The sheaf-like interpretation should remain similarly informal.  Chunks are
+local patches, halos resemble restrictions, and snapshots collect compatible
+local readings.  But core chunk domains do not overlap, residency introduces
+unknown values, and lighting solves a nonlocal equation rather than merely
+gluing existing answers.  "Field materialization" and "chunk window" are more
+operationally exact today.
+
+* Chunk hierarchy and level of detail are related but not identical
+:PROPERTIES:
+:ID: TDEVBM
+:END:
+
+A residency hierarchy groups the same underlying cells into chunks, regions,
+or superchunks for lookup, persistence, scheduling, and invalidation.  It does
+not necessarily make the world coarser.
+
+Level of detail introduces different sites or different field meanings.  A
+coarse site may carry occupancy fraction, dominant material, surface bounds,
+average radiance, or conservative collision information rather than one
+categorical block state.  #O3P8NV develops why its schema may differ as well
+as its spacing.
+
+An octree can host either concern, which is why they are easy to conflate.
+The semantic test is:
+
+- same cells grouped into larger administrative regions means hierarchy;
+- different sites carrying a coarser description means level of detail.
+
+A later hierarchical window may resolve a request from an ordinary resident
+chunk, an ancestor cache, or a coarse materialization.  Local algorithms need
+not know the lookup structure, but the returned field meaning, resolution,
+and confidence must remain honest.
+
+Not everything spatial is a voxel field either.  Moisture, temperature,
+smell, or habitat suitability may be cell fields.  A critter is more likely a
+persistent entity carrying a position, perhaps indexed by spatial buckets.
+Vegetation can have both density fields and individual nearby plants.  These
+systems can share voxel-space and chunk-window protocols without sharing one
+storage abstraction.
+
+* The Lisp shape is semantic objects around dense data
+:PROPERTIES:
+:ID: M0REWV
+:END:
+
+The idiomatic arrangement follows the project's existing CLOS practice:
+
+- EQL-specialized symbols name field definitions, quantity definitions, and
+  arithmetic operations;
+- CLOS instances represent voxel spaces, chunk domains, chunk windows,
+  materializations, policies, and derived products;
+- generic dispatch selects a representation or kernel at a chunk or phase
+  boundary;
+- specialized arrays and closed loops remain visible inside that selection;
+  and
+- thin definition macros appear only when repeated ordinary methods reveal a
+  pleasant definition site.
+
+The first experiment should not begin with =bundle-class=.  Ordinary
+inspectable field definitions attached to the existing block-content and
+light columns can reveal what metadata and redefinition behavior are actually
+needed.  A metaclass becomes useful only if real definitions repeatedly want
+class-level schema, allocation, migration, and inspector support.
+
+Live redefinition adds one requirement that Moppe gets from C++ compilation:
+a materialization must know which field-definition revision made its bytes
+meaningful.  Redefining =:sky-light= must either remain representation
+compatible, visibly invalidate existing arrays, or migrate them.  It must not
+silently reinterpret live storage.  Compiled kernels likewise need dependency
+revisions and last-known-good replacement, following the existing shader
+discipline.
+
+* A staged concretization
+:PROPERTIES:
+:ID: BA1QCS
+:END:
+
+The following is a sequence to refine from evidence, not a Gantt chart.
+
+1. *State the value vocabulary.*  Complete #9ZK7Q7 so luvcraft's existing
+   amounts and points stop relying on use-site annotations.  Decide whether a
+   gameplay light step is a unit or a storage encoding; distinguish
+   propagation loss from texture opacity.
+
+2. *Extract local spatial operations.*  Give =chunk-domain= allocation-free
+   world/chunk/local decomposition, primitive stepping with boundary results,
+   storage-order traversal, and face enumeration.  Migrate light-region and
+   meshing paths without changing their algorithms.
+
+3. *Name the window protocol.*  Let the live world, resolved meshing
+   neighborhood, immutable halo, and light-region atlas resolve locations or
+   crossings through their existing representations.  Preserve semantic
+   facades such as =sample-block-at= and =sample-light-at=.
+
+4. *Attach ordinary field definitions.*  Describe the existing block-content,
+   sky-light, and block-light columns without changing their arrays.  Keep
+   field identity, value quantity, representation, product state, and
+   provenance distinct.
+
+5. *Share one production calculation.*  Refine #D1R2NK with a domain-shaped
+   client.  Light decoding or a named light-response law is modest; a transfer
+   law is more revealing if both CPU tooling and a shader genuinely use it.
+
+6. *Earn a field kernel.*  Once one scalar field operation is stable, select
+   its representation once and run it over borrowed arrays.  A native SIMD
+   realization follows a real measured kernel (#VKLLPR), not the vocabulary
+   design.
+
+Each step should delete a concrete duplication or make a concrete mistake
+unrepresentable.  None requires a universal bundle, a generalized fixed-point
+solver, a sheaf API, per-cell objects, or a broad rewrite of the working light
+system.
+
+* NEXT Make chunk traversal one owned vocabulary
+:PROPERTIES:
+:ID: K3KZTG
+:END:
+
+Intent: establish the smallest reusable spatial substrate beneath the current
+light and meshing products.  Add allocation-free decomposition, primitive
+local stepping with explicit boundary crossings, storage-order site
+enumeration, and face enumeration to =chunk-domain= or one narrowly related
+voxel-domain protocol.  Rewrite =light-region-locate=,
+=map-entry-face-cells=, the resolved meshing-neighborhood accessors, and halo
+capture to consume those operations while retaining their representations and
+policies.
+
+Evidence to gather:
+
+- the old floor-division, dense-offset, and face-plane formulas disappear
+  from the migrated consumers rather than moving into weak wrappers;
+- the world, meshing neighborhood, halo snapshot, and light region remain
+  independently inspectable concrete objects;
+- light tests still cover lateral and vertical seams, open/closed/unknown
+  boundaries, incremental/reference equality, revisions, and same-key
+  replacement;
+- meshing and production tests retain stale-snapshot and halo behavior; and
+- =make test= and =make smoke= retain the accepted deterministic render.
+
+Done when: one owned domain vocabulary supplies local traversal to both
+lighting and meshing, the subsystem code reads more directly in its own
+terms, and no field schema, metaclass, generalized solver, or per-cell dispatch
+was needed to obtain the first deletion.

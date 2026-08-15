@@ -131,12 +131,17 @@ The following are starting paths rather than a table of settled doctrine.
 - [[file:domains-and-bundles.org][Domains, bundles, and materialized worlds]] studies why CLOS and
   structure-of-arrays storage are compatible, and what chunking, level of
   detail, procedural generation, and streaming ask of the object model.
+- [[file:voxel-fields-and-windows.org][Voxel fields and chunk windows]] takes the working light and meshing systems as
+  the first concrete domain/bundle clients.  It separates local domain
+  traversal, cross-chunk windows, semantic field products, provenance, and
+  checked arithmetic kernels, then names the first extraction to perform.
 - [[file:quantities-and-measurement.org][Quantities, dimensions, and interpretation]] studies Moppe's mp-units
   practice and the Zig Étalon experiment, then follows the resulting semantic
   arithmetic into homogeneous vector components, heterogeneous packed GPU
   tuples, semantic projective maps, and compact SIMD-friendly representations.
-  It records where the built system goes beyond its sources, and carries the
-  next design step: the three-way point/absolute/difference character.
+  It records where the built system goes beyond its sources and the next
+  production steps: declaring luvcraft's quantity character and sharing one
+  checked computation between CPU and GPU.
 - [[file:moppe-legacy.org][The Moppe legacy]] reads the predecessor engine's lighting, post-processing,
   atmosphere, temporal reconstruction, and mesh shaders as source evidence
   and a tuning library.  Backend architecture now lives on the Metal page.

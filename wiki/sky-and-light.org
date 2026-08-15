@@ -46,7 +46,8 @@ which make the plan durable.
 - *Keep source and derived revisions distinct.*  Block content revisions say
   that authored world data changed.  Light revisions say that a derived field
   changed.  Relighting must not impersonate a block edit by bumping content
-  revisions; mesh dependency stamps should name both domains explicitly.
+  revisions; mesh dependency stamps should name the source and derived field
+  revisions explicitly.
 - *Residency is a lighting input.*  Arrival and departure alter the boundary
   conditions of retained chunks.  Eviction cannot merely invalidate a mesh
   and leave its baked light untouched.  Lighting receives content and
@@ -258,7 +259,7 @@ moving primary light in the actual renderer.  The shader lab can inspect the
 sky specifications.  A fixed clock produces a byte-identical smoke image;
 unpinning it visibly advances without changing block content or remeshing.
 
-* Phase 2: make voxel light an explicit derived domain
+* Phase 2: make voxel light an explicit derived field
 :PROPERTIES:
 :ID: SKSTOR
 :END:
@@ -294,6 +295,13 @@ contains the target chunk's content and light revisions plus the opposing
 content and light boundary revisions of sampled neighbors.  That preserves
 the reason a mesh became stale and avoids feedback in which derived light
 looks like another authored edit.
+
+This field is a sibling materialization over the chunk's domain, not a second
+spatial domain merely because it has its own revisions.  The current
+=light-region= nevertheless rebuilds world decomposition, dense offsets, and
+face enumeration, while meshing rebuilds related traversal for its resolved
+neighborhood and immutable halo.  #WUB581 records that concrete duplication;
+#K3KZTG makes the shared domain/window vocabulary the next structural proof.
 
 * Lighting semantics and boundaries
 :PROPERTIES:
