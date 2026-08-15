@@ -101,6 +101,10 @@ clauses, not calls."))
 (defclass loop-layout (layout) ()
   (:documentation "LOOP: its clause keywords start new rows."))
 
+(defclass pairs-layout (layout) ()
+  (:documentation "SETF, SETQ, PSETF: the arguments are place value pairs;
+with more than one pair each is a row of a two-column table."))
+
 (defvar *operator-layouts* (make-hash-table :test 'equal)
   "Downcased operator name -> LAYOUT instance.")
 
@@ -132,6 +136,7 @@ clauses, not calls."))
   body-layout :head-count 1)
 (define-layout ("progn") body-layout :head-count 0)
 (define-layout ("loop") loop-layout)
+(define-layout ("setf" "setq" "psetf" "psetq") pairs-layout)
 
 (defparameter *loop-keywords*
   '("named" "with" "for" "as" "initially" "finally" "repeat" "while" "until"
@@ -240,6 +245,14 @@ under LAYOUT (comments are not counted and never asked), or NIL.")
   (declare (ignore list))
   (cond ((>= index (layout-head-count layout)) "body")
         ((and (eql index (layout-lambda-list-index layout)) (typep child 'lisp-list)) "lambda-list")
+        (t nil)))
+
+(defmethod child-role ((layout pairs-layout) list index child)
+  "Values are body forms when there is more than one pair, so the pairs
+stack as rows; a single pair stays inline."
+  (declare (ignore child))
+  (cond ((= index 0) "operator")
+        ((and (evenp index) (> (length (argument-children list)) 3)) "body")
         (t nil)))
 
 (defmethod child-role ((layout loop-layout) list index child)
@@ -369,11 +382,15 @@ SLOTS is a binding grid; LAMBDA-LIST is a lambda list."
           (t nil))))
 
 (defgeneric layout-pairs-index (layout arguments)
-  (:documentation "The argument index where :keyword value pairs begin under
-LAYOUT, or NIL; the default guesses from the arguments themselves.")
+  (:documentation "The argument index where key value pairs begin under
+LAYOUT, or NIL; the default guesses a trailing run of :keyword value
+pairs from the arguments themselves.")
   (:method ((layout layout) arguments)
-    (unless (typep layout '(or loop-layout lambda-list-layout grid-layout))
-      (keyword-pairs-start arguments)))
+    (keyword-pairs-start arguments))
+  (:method ((layout loop-layout) arguments) nil)
+  (:method ((layout lambda-list-layout) arguments) nil)
+  (:method ((layout grid-layout) arguments) nil)
+  (:method ((layout pairs-layout) arguments) 1)
   (:method ((layout derived-layout) arguments)
     (or (layout-pairs-start layout) (call-next-method))))
 
@@ -524,6 +541,9 @@ span and every body form is a row."
     (and (some #'item-body-p (layout-items layout list)) '("stacked")))
   (:method ((layout clauses-layout) list)
     (list* "clauses" (call-next-method)))
+  (:method ((layout pairs-layout) list)
+    (let ((classes (call-next-method)))
+      (if classes (list* "pairs" classes) classes)))
   (:method ((layout clause-layout) list)
     (declare (ignore list))
     '())

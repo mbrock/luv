@@ -300,6 +300,9 @@ forms is a grid of rows (see the stacked group)."
     :color --accent)
    (".list > .list.body > .operator, .list > .list > .operator"
     :color --accent)
+   (".symbol"
+    ;; A name broken at a hyphen reads as two names; the box scrolls instead.
+    :white-space nowrap)
    (".package"
     :opacity 0.55)
    (".keyword"
@@ -607,7 +610,8 @@ wiki-dexp.lisp assigns."
 
 (define-style pairs
   "Keyword/value pairs stay together; in body position each pair is a row
-with keys loosely aligned."
+with keys loosely aligned.  A SETF with several pairs is a place/value
+table: each pair a subgrid row of its two-column box."
   (".lisp .pair"
    :display inline-flex
    :align-items baseline
@@ -616,7 +620,18 @@ with keys loosely aligned."
    ("&.body"
     :display flex
     :flex-basis 100%
-    ("& > .symbol:first-child" :min-width 8em))))
+    ("& > .symbol:first-child" :min-width 8em)))
+  (".lisp .list.pairs"
+   :grid-template-columns (max-content (minmax 0 1fr))
+   :column-gap 0.6em
+   ("& > .head, & > .comment"
+    :grid-column (span 2))
+   ("& > .pair.body"
+    :display grid
+    :grid-template-columns subgrid
+    :grid-column (span 2)
+    :align-items baseline
+    ("& > .symbol:first-child" :min-width 0))))
 
 (define-style narrow-screens
   "Narrow screens: one column, smaller title, ragged prose."

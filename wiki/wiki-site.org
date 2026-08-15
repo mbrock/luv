@@ -508,12 +508,15 @@ values, nesting, and media queries.
 :ID: ACX8LK
 :END:
 
-/Intent./ Smaller layout wins in the order they pay: =setf=, =setq=,
-=psetf= as a two-column grid of place and value when there is more than
-one pair; keyword pairs on rows aligned by a subgrid instead of a guessed
-=min-width= for the key; =loop= as a keyword table, each clause a row
-of keyword and rest as Emacs indents it; and function calls whose
-arguments wrap continuing under the first argument.
+/Intent./ Smaller layout wins in the order they pay: keyword pairs on
+rows aligned by a subgrid instead of a guessed =min-width= for the key;
+=loop= as a keyword table, each clause a row of keyword and rest as
+Emacs indents it; and function calls whose arguments wrap continuing
+under the first argument, which would also size a call holding a
+stacked argument by its rows rather than by one imagined line.  Done
+already: =setf=, =setq=, =psetf=, =psetq= draw as a place/value table
+when they have more than one pair (=pairs-layout=; a single pair stays
+inline), and symbol names no longer break at hyphens.
 
 Underneath, fold =derived-layout= into constructors of the existing
 layout classes so that a table entry and an introspected lambda list
