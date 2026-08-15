@@ -159,7 +159,8 @@ Nothing here refers to anything.
            (progn
              (wiki:write-site site directory)
              (ok (probe-file (merge-pathnames "index.html" directory)))
-             (ok (probe-file (merge-pathnames "figures.html" directory))))
+             (ok (probe-file (merge-pathnames "pages.html" directory)))
+             (ok (probe-file (merge-pathnames "work.html" directory))))
         (uiop:delete-directory-tree directory :validate t :if-does-not-exist :ignore)))))
 
 (defparameter *source*

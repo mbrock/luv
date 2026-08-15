@@ -175,47 +175,77 @@ as dexp boxes, each anchored by its starting line."
      :status title
      :right (or (source-file-system-name file) "source"))))
 
-(defun render-file-summary (file)
-  "The file's relative path with the file name itself emphasized."
+(defvar *file-cards* nil
+  "While the source index renders: files whose definitions get a card.")
+
+(defun file-card-id (file)
+  (format nil "file-~A" (substitute-if #\- (lambda (c) (member c '(#\/ #\.)))
+                                       (source-file-relative-path file))))
+
+(defun render-file-entry (file)
+  "A file's relative path linking to its page, the file name emphasized,
+and a count button that shows the definitions in a popover."
   (let* ((path (source-file-relative-path file))
          (slash (position #\/ path :from-end t)))
+    (push file *file-cards*)
     (spinneret:with-html
-      (:a.path :href (source-page-name file)
-               (when slash (:span.directory (subseq path 0 (1+ slash))))
-               (:span.file (subseq path (if slash (1+ slash) 0))))
-      (:span.count (format nil "~D" (length (source-file-definitions file)))))))
+      (:span.file-entry
+       (:a.path :href (source-page-name file)
+                (when slash (:span.directory (subseq path 0 (1+ slash))))
+                (:span.file (subseq path (if slash (1+ slash) 0))))
+       (:button.count :type "button" :data-card (file-card-id file)
+                      :title "definitions"
+                      (format nil "~D" (length (source-file-definitions file))))))))
+
+(defun render-file-cards ()
+  "Hidden cards holding each listed file's definitions, for the popover."
+  (spinneret:with-html
+    (:div.figure-cards :hidden t
+      (dolist (file (reverse *file-cards*))
+        (:div.figure-card.file-card :id (file-card-id file)
+          (:a.card-title :href (source-page-name file) (source-file-relative-path file))
+          (render-source-toc file :prefix (source-page-name file)))))))
+
+(defun render-system-graph (site)
+  "The systems and their dependencies as a Mermaid flowchart."
+  (spinneret:with-html
+    (:pre.mermaid.system-graph
+     (with-output-to-string (out)
+       (format out "%%{init: {\"flowchart\": {\"useMaxWidth\": false, \"nodeSpacing\": 18, \"rankSpacing\": 36}}}%%~%")
+       (format out "flowchart LR~%")
+       (dolist (entry (site-systems site))
+         (let ((name (system-entry-name entry)))
+           (format out "  ~A[\"~A\"]~%" (substitute #\_ #\/ name) name)
+           (dolist (dependency (system-entry-depends-on entry))
+             (format out "  ~A --> ~A~%" (substitute #\_ #\/ dependency) (substitute #\_ #\/ name)))))))))
 
 (defun render-source-index (site)
-  "Emit source.html: the ASDF systems of the code as one dense table in
-dependency order — system, description, dependencies, files — with each
-file expandable to its definitions in place."
+  "Emit source.html: the dependency graph of the systems, then one dense
+table in dependency order — system, description, files — where a file's
+count opens its definitions in a popover."
   (let ((*page-prefix* "")
         (*page-kind* "source")
-        (*rendering-document* nil))
+        (*rendering-document* nil)
+        (*file-cards* '()))
     (flet ((system-anchor (name) (concatenate 'string "system-" (substitute #\- #\/ name))))
       (render-page-frame
        "Source"
        (lambda ()
          (spinneret:with-html
            (:h1 "Source")
-           (:p.lede "The systems of luv in dependency order, fundamentals first.  Open a file
-to see its definitions; symbols in the pages link to their definitions and "
+           (:p.lede "The systems of luv, fundamentals first.  A file's count opens its
+definitions; symbols in the pages link to their definitions and "
                     (:code "#ID") " mentions link to figures.")
+           (render-system-graph site)
            (:table.systems
-            (:thead (:tr (:th "system") (:th "description") (:th "depends on") (:th "files")))
+            (:thead (:tr (:th "system") (:th "description") (:th "files")))
             (:tbody
              (dolist (entry (site-systems site))
                (:tr :id (system-anchor (system-entry-name entry))
                 (:td.system-name (system-entry-name entry))
                 (:td.system-description (or (system-entry-description entry) ""))
-                (:td.system-depends
-                 (loop for name in (system-entry-depends-on entry)
-                       for first = t then nil
-                       do (unless first (spinneret:html ", "))
-                          (:a :href (concatenate 'string "#" (system-anchor name)) name)))
                 (:td.system-files
                  (dolist (file (system-entry-files entry))
-                   (:details.source-file
-                    (:summary (render-file-summary file))
-                    (render-source-toc file :prefix (source-page-name file)))))))))))
+                   (render-file-entry file)))))))
+           (render-file-cards)))
        :body-class "wide source-index"))))

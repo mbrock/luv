@@ -33,7 +33,8 @@
     var pop = ensurePopover();
     var rect = link.getBoundingClientRect();
     var margin = 8;
-    var width = Math.min(34 * 16, window.innerWidth - 2 * margin);
+    var wide = pop.querySelector("nav.definitions") !== null;
+    var width = Math.min((wide ? 40 : 34) * 16, window.innerWidth - 2 * margin);
     pop.style.width = width + "px";
     pop.style.left = "0px";
     pop.style.top = "0px";
@@ -82,6 +83,10 @@
     return node && node.closest && node.closest("a.mention[href], a.definition-link[href]");
   }
 
+  function isCardButton(node) {
+    return node && node.closest && node.closest("button[data-card]");
+  }
+
   document.addEventListener("mouseover", function (event) {
     var link = isMention(event.target);
     if (!link) return;
@@ -106,7 +111,15 @@
   });
 
   // On touch, the first tap shows the card; the second follows the link.
+  // A card button toggles its card.
   document.addEventListener("click", function (event) {
+    var button = isCardButton(event.target);
+    if (button) {
+      event.preventDefault();
+      if (current === button && popover && popover.matches(":popover-open")) hide();
+      else show(button);
+      return;
+    }
     var link = isMention(event.target);
     if (!link) { if (popover && !event.target.closest(".figure-popover")) hide(); return; }
     if (window.matchMedia("(hover: none)").matches && current !== link) {

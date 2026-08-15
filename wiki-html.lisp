@@ -423,12 +423,14 @@ the main column, and a footer."
            (:p.eyebrow "luv")
            (:h1 (:a :href (href "index.html") "Workshop wiki")))
           (:nav.doors
-           (:a :class (if (equal kind "page") "door selected" "door") :href (href "index.html")
+           (:a :class (if (member kind '("page" "pages") :test #'equal) "door selected" "door")
+               :href (href "pages.html")
                (:span.door-title "Pages")
-               (:span.door-meta "design memory, figures, work marks"))
-           (:a :class (if (equal kind "figures") "door selected" "door") :href (href "figures.html")
-               (:span.door-title "Figures")
-               (:span.door-meta "every addressable heading"))
+               (:span.door-meta (format nil "~D pages of design memory"
+                                        (length (site-documents *site*)))))
+           (:a :class (if (equal kind "work") "door selected" "door") :href (href "work.html")
+               (:span.door-title "Work")
+               (:span.door-meta "work marks by status"))
            (when (site-source-files *site*)
              (:a :class (if (member kind '("source" "source-file") :test #'equal) "door selected" "door")
                  :href (href "source.html")
@@ -591,30 +593,76 @@ popovers when a mention is hovered or tapped."
                                                                 (site-code-references *site*))
                                      append (definition-mentions definition))))))))))
 
-(defun render-figures-page (site)
-  "Emit an index page listing every figure and its work-mark status."
+(defun render-pages-page (site)
+  "Emit pages.html: every wiki page with its headings, each a link to its
+figure, work marks flagged; a dense table."
   (let ((*rendering-document* nil)
         (*page-prefix* "")
-        (*page-kind* "figures"))
+        (*page-kind* "pages"))
     (render-page-frame
-     "Figures"
+     "Pages"
      (lambda ()
        (spinneret:with-html
-         (:h1 "Figures")
-         (:p "Every addressable heading in the wiki, by page.  Work marks show their status.")
-         (dolist (document (site-documents site))
-           (let ((figures (document-figures document)))
-             (when figures
-               (:section
-                (:h2 (:a :href (site-page-name document)
-                         (or (document-title document) (document-name document))))
-                (:ul.figure-list
-                 (dolist (figure figures)
-                   (:li :class (format nil "level-~D" (heading-level figure))
-                        (:a.figure-id :href (figure-href (heading-id figure) :site site)
-                                      (format nil "#~A" (heading-id figure)))
-                        " "
-                        (render-heading-title figure)))))))))))))
+         (:h1 "Pages")
+         (:p.lede "Every page of the wiki with its headings.  Each heading is a figure with a
+stable ID; work marks carry their status.")
+         (:table.pages
+          (:tbody
+           (dolist (document (site-documents site))
+             (:tr
+              (:td.page-title
+               (:a :href (site-page-name document)
+                   (or (document-title document) (document-name document))))
+              (:td.page-headings
+               (dolist (figure (document-figures document))
+                 (:a :class (format nil "heading level-~D~@[ marked~]"
+                                    (heading-level figure) (heading-keyword figure))
+                     :href (figure-href (heading-id figure) :site site)
+                     (render-heading-title figure))))))))))
+     :body-class "wide")))
+
+(defparameter *work-statuses*
+  '(("NEXT" . "the current best small bets")
+    ("TODO" . "visible and likely, not yet selected")
+    ("WAIT" . "blocked on outside evidence or another step")
+    ("IDEA" . "tempting, not allowed to steer implementation yet")
+    ("DONE" . "closed, with the evidence that closed them")))
+
+(defun render-work-page (site)
+  "Emit work.html: the work marks by status, each with its page and intent."
+  (let ((*rendering-document* nil)
+        (*page-prefix* "")
+        (*page-kind* "work")
+        (marks '()))
+    (dolist (document (site-documents site))
+      (dolist (figure (document-figures document))
+        (when (heading-keyword figure) (push figure marks))))
+    (setf marks (nreverse marks))
+    (render-page-frame
+     "Work"
+     (lambda ()
+       (spinneret:with-html
+         (:h1 "Work")
+         (:p.lede "The work marks of the wiki: figures whose title starts with a status word.
+They live beside the design they move; this is only a view.")
+         (loop for (status . meaning) in *work-statuses*
+               for these = (remove status marks :key #'heading-keyword :test-not #'string=)
+               when these
+                 do (:section.work-status
+                     (:h2 (:span :class (format nil "mark mark-~(~A~)" status) status)
+                          " " (:span.status-meaning meaning))
+                     (:table.work
+                      (:tbody
+                       (dolist (mark these)
+                         (:tr
+                          (:td.work-title
+                           (:a :href (figure-href (heading-id mark) :site site)
+                               (render-inlines (heading-title mark)))
+                           (:span.work-page (document-name (heading-document mark))))
+                          (:td.work-intent
+                           (let ((excerpt (figure-excerpt mark 260)))
+                             (when excerpt excerpt)))))))))))
+     :body-class "wide")))
 
 (defun call-with-html-output (stream thunk)
   "Call THUNK with Spinneret writing exact, compact HTML to STREAM.  The
@@ -646,8 +694,10 @@ spacing, so both are turned off."
     (dolist (document (site-documents site))
       (write-html-file (merge-pathnames (site-page-name document) directory)
                        (lambda () (render-page document))))
-    (write-html-file (merge-pathnames "figures.html" directory)
-                     (lambda () (render-figures-page site)))
+    (write-html-file (merge-pathnames "pages.html" directory)
+                     (lambda () (render-pages-page site)))
+    (write-html-file (merge-pathnames "work.html" directory)
+                     (lambda () (render-work-page site)))
     (when (site-source-files site)
       (write-html-file (merge-pathnames "source.html" directory)
                        (lambda () (render-source-index site)))

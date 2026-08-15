@@ -230,7 +230,8 @@ lands at images/x.png in the site."
   "The figures index, the source index, and one page per source file."
   (let ((directory (site-output-directory s))
         (root (asdf:system-source-directory s)))
-    (values (list* (merge-pathnames "figures.html" directory)
+    (values (list* (merge-pathnames "pages.html" directory)
+                   (merge-pathnames "work.html" directory)
                    (merge-pathnames "source.html" directory)
                    (loop for pathname in (code-source-files)
                          collect (merge-pathnames
@@ -244,8 +245,10 @@ lands at images/x.png in the site."
   (let ((site (system-site s))
         (directory (site-output-directory s)))
     (let ((*site* site))
-      (write-html-file (merge-pathnames "figures.html" directory)
-                       (lambda () (render-figures-page site)))
+      (write-html-file (merge-pathnames "pages.html" directory)
+                       (lambda () (render-pages-page site)))
+      (write-html-file (merge-pathnames "work.html" directory)
+                       (lambda () (render-work-page site)))
       (write-html-file (merge-pathnames "source.html" directory)
                        (lambda () (render-source-index site)))
       (dolist (file (site-source-files site))
