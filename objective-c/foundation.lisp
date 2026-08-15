@@ -17,6 +17,13 @@
 (define-objective-c-message %objective-c-string-utf8-pointer
     ("UTF8String" :pointer))
 
+(define-objective-c-message %objective-c-string-from-utf8-pointer
+    ("stringWithUTF8String:" :object :ownership :borrowed :class "NSString")
+  (pointer :pointer))
+
+(define-objective-c-message %objective-c-error-localized-description
+    ("localizedDescription" :object :ownership :borrowed :class "NSString"))
+
 (defun retain-objective-c-object (object)
   "Acquire one retain on OBJECT and return a distinct owned wrapper for it."
   (%retain-objective-c-object object))
@@ -48,3 +55,19 @@
   (let ((pointer (%objective-c-string-utf8-pointer object)))
     (unless (cffi:null-pointer-p pointer)
       (cffi:foreign-string-to-lisp pointer))))
+
+(defun lisp-string-to-objective-c (string)
+  "Return an autoreleased NSString containing STRING.
+
+The result is borrowed and must remain inside its surrounding autorelease
+pool.  Native APIs which copy an NSString argument may retain it beyond that
+scope in the ordinary Objective-C way."
+  (check-type string string)
+  (cffi:with-foreign-string (pointer string :encoding :utf-8)
+    (%objective-c-string-from-utf8-pointer
+     (find-objective-c-class "NSString") pointer)))
+
+(defun objective-c-error-description (error)
+  "Copy NSError's localized description into a Lisp string."
+  (when error
+    (objective-c-string (%objective-c-error-localized-description error))))

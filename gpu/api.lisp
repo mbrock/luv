@@ -298,7 +298,8 @@ completed on the GPU."))
 (defstruct (command-encoder-descriptor (:include gpu-descriptor)))
 
 (defstruct (shader-module-descriptor (:include gpu-descriptor))
-  code)
+  code
+  (language :spir-v))
 
 (defstruct gpu-command)
 

@@ -52,7 +52,9 @@
            #:tracing-objective-c-runtime
            #:with-objective-c-trace
            #:with-autorelease-pool
-           #:objective-c-string))
+           #:objective-c-string
+           #:lisp-string-to-objective-c
+           #:objective-c-error-description))
 
 (defpackage #:luv.metal
   (:use #:cl)
@@ -63,6 +65,10 @@
            #:device-registry-id
            #:probe-system-default-device
            #:new-metal-4-command-queue
+           #:new-metal-4-compiler
+           #:compile-metal-4-library
+           #:new-metal-library-function
+           #:metal-function-type
            #:new-command-allocator
            #:new-command-buffer
            #:begin-command-buffer
@@ -81,5 +87,8 @@
            #:next-drawable
            #:drawable-texture
            #:encode-clear-pass
+           #:+language-version-4-0+
+           #:+function-type-vertex+
+           #:+function-type-fragment+
            #:+pixel-format-bgra8-unorm+
            #:+pixel-format-bgra8-unorm-srgb+))

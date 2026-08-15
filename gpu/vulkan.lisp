@@ -980,7 +980,21 @@ wrapper, this finalizer cannot run before theirs have."
     ((device vulkan-gpu-device) (descriptor shader-module-descriptor))
   (with-vulkan-gpu-driver-environment
     (ensure-live-vulkan-object device :create-shader-module)
-    (let ((code (shader-module-descriptor-code descriptor)))
+    (let ((code
+            (case (shader-module-descriptor-language descriptor)
+              (:spir-v (shader-module-descriptor-code descriptor))
+              (:mathematical
+               (let ((specification
+                       (shader-module-descriptor-code descriptor)))
+                 (unless (typep specification
+                                'luv.spir-v:shader-specification)
+                   (reject-gpu-request
+                    descriptor :invalid-mathematical-shader specification))
+                 (luv.spir-v:assemble-shader-specification specification)))
+              (otherwise
+               (reject-gpu-request
+                descriptor :unsupported-shader-language
+                (shader-module-descriptor-language descriptor))))))
       (unless (and (vectorp code)
                    (plusp (length code))
                    (every (lambda (word)

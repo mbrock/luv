@@ -21,12 +21,115 @@
 (defconstant +pixel-format-bgra8-unorm-srgb+ 81)
 (defconstant +load-action-clear+ 2)
 (defconstant +store-action-store+ 1)
+(defconstant +language-version-4-0+ (ash 4 16))
+(defconstant +function-type-vertex+ 1)
+(defconstant +function-type-fragment+ 2)
 
 ;;; Device and Metal 4 submission.
 
 (objc:define-objective-c-message new-metal-4-command-queue
     ("newMTL4CommandQueue" :object :ownership :owned
      :class "MTL4CommandQueue"))
+
+(objc:define-objective-c-message %new-metal-4-compiler-descriptor
+    ("new" :object :ownership :owned :class "MTL4CompilerDescriptor"))
+
+(objc:define-objective-c-message %new-metal-4-library-descriptor
+    ("new" :object :ownership :owned :class "MTL4LibraryDescriptor"))
+
+(objc:define-objective-c-message %new-metal-compile-options
+    ("new" :object :ownership :owned :class "MTLCompileOptions"))
+
+(objc:define-objective-c-message %set-object-label
+    ("setLabel:" :void)
+  (label :object))
+
+(objc:define-objective-c-message %set-library-source
+    ("setSource:" :void)
+  (source :object))
+
+(objc:define-objective-c-message %set-library-name
+    ("setName:" :void)
+  (name :object))
+
+(objc:define-objective-c-message %set-library-options
+    ("setOptions:" :void)
+  (options :object))
+
+(objc:define-objective-c-message %set-language-version
+    ("setLanguageVersion:" :void)
+  (version :uint64))
+
+(objc:define-objective-c-message %new-metal-4-compiler
+    ("newCompilerWithDescriptor:error:" :object :ownership :owned
+     :class "MTL4Compiler")
+  (descriptor :object)
+  (error :pointer))
+
+(objc:define-objective-c-message %new-metal-4-library
+    ("newLibraryWithDescriptor:error:" :object :ownership :owned
+     :class "MTLLibrary")
+  (descriptor :object)
+  (error :pointer))
+
+(objc:define-objective-c-message new-metal-library-function
+    ("newFunctionWithName:" :object :ownership :owned :class "MTLFunction")
+  (name :object))
+
+(objc:define-objective-c-message metal-function-type
+    ("functionType" :uint64))
+
+(defun objective-c-error-pointer-description (storage)
+  (let ((pointer (cffi:mem-ref storage :pointer)))
+    (unless (cffi:null-pointer-p pointer)
+      (objc:objective-c-error-description
+       (objc:wrap-objective-c-object pointer :ownership :borrowed
+                                    :protocol-name "NSError")))))
+
+(defun new-metal-4-compiler (device &key label)
+  "Create one synchronous Metal 4 compiler owned by DEVICE.
+
+Return the owned compiler and NIL on success, or NIL and a copied NSError
+description on native rejection."
+  (objc:with-autorelease-pool ()
+    (objc:with-owned-objective-c-object
+        (descriptor
+          (%new-metal-4-compiler-descriptor
+           (objc:find-objective-c-class "MTL4CompilerDescriptor")))
+      (when label
+        (%set-object-label descriptor (objc:lisp-string-to-objective-c label)))
+      (cffi:with-foreign-object (error :pointer)
+        (setf (cffi:mem-ref error :pointer) (cffi:null-pointer))
+        (let ((compiler (%new-metal-4-compiler device descriptor error)))
+          (values compiler (objective-c-error-pointer-description error)))))))
+
+(defun compile-metal-4-library (compiler source &key name)
+  "Synchronously compile SOURCE as Metal 4 and return an owned MTLLibrary.
+
+The second value is NIL on success or a copied NSError description on native
+rejection.  Source and names cross only as in-memory NSString objects."
+  (check-type source string)
+  (objc:with-autorelease-pool ()
+    (objc:with-owned-objective-c-object
+        (options
+          (%new-metal-compile-options
+           (objc:find-objective-c-class "MTLCompileOptions")))
+      (%set-language-version options +language-version-4-0+)
+      (objc:with-owned-objective-c-object
+          (descriptor
+            (%new-metal-4-library-descriptor
+             (objc:find-objective-c-class "MTL4LibraryDescriptor")))
+        (%set-library-source
+         descriptor (objc:lisp-string-to-objective-c source))
+        (%set-library-options descriptor options)
+        (when name
+          (%set-library-name
+           descriptor (objc:lisp-string-to-objective-c name)))
+        (cffi:with-foreign-object (error :pointer)
+          (setf (cffi:mem-ref error :pointer) (cffi:null-pointer))
+          (let ((library (%new-metal-4-library compiler descriptor error)))
+            (values library
+                    (objective-c-error-pointer-description error))))))))
 
 (objc:define-objective-c-message new-command-allocator
     ("newCommandAllocator" :object :ownership :owned

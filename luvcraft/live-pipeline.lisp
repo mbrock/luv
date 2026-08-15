@@ -71,10 +71,6 @@
          (lowering
            (and specification
                 (spv:compile-shader-specification specification)))
-         (words
-           (and lowering
-                (spv:assemble-spir-v-module
-                 (spv:shader-lowering-module lowering))))
          (device (live-shader-pipeline-device artifact))
          (vertex-module nil)
          (fragment-module nil)
@@ -87,20 +83,20 @@
                      (create
                       device
                        (make-shader-module-descriptor
-                        :label (format nil "~A vertex module"
+                       :label (format nil "~A vertex module"
                                        (live-shader-pipeline-label artifact))
-                       :code
-                       (spv:assemble-spir-v-module
-                        (spv:shader-lowering-module vertex-lowering))))
+                       :language :mathematical
+                       :code vertex-specification))
                      (live-shader-pipeline-vertex-module artifact))
                  fragment-module
-                 (and words
+                 (and specification
                       (create
                        device
                        (make-shader-module-descriptor
                         :label (format nil "~A fragment module"
                                        (live-shader-pipeline-label artifact))
-                        :code words)))
+                        :language :mathematical
+                        :code specification)))
                  pipeline
                  (create
                   device

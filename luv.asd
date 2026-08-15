@@ -323,6 +323,7 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
       (funcall thunk)))
   :depends-on (#:luv/gpu/api
                #:luv/vulkan
+               #:luv/spir-v
                #:cffi
                #+darwin
                #:float-features)
@@ -331,11 +332,12 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
 
 #+darwin
 (asdf:defsystem #:luv/gpu/metal
-  :description "Metal 4 implementation of the small luv GPU clear vocabulary."
+  :description "Metal 4 implementation of luv's first GPU vocabulary."
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on (#:luv/gpu/api
-               #:luv/metal)
+               #:luv/metal
+               #:luv/msl)
   :components ((:module "gpu"
                 :components ((:file "metal")))))
 
@@ -400,6 +402,7 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on (#:luv/canvas/metal
+               #:luv/luvcraft/shaders
                #:rove)
   :components ((:module "tests"
                 :components ((:file "metal"))))

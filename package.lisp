@@ -303,6 +303,8 @@ nothing else does."))
            #:make-texture-view-descriptor
            #:make-sampler-descriptor
            #:make-shader-module-descriptor
+           #:shader-module-descriptor-code
+           #:shader-module-descriptor-language
            #:make-bind-group-layout-descriptor
            #:make-bind-group-descriptor
            #:make-compute-pipeline-descriptor
@@ -327,6 +329,16 @@ nothing else does."))
            #:metal-gpu-queue
            #+darwin
            #:metal-gpu-texture
+           #+darwin
+           #:metal-gpu-shader-module
+           #+darwin
+           #:metal-device-compiler
+           #+darwin
+           #:metal-shader-module-document
+           #+darwin
+           #:metal-shader-module-entry-point
+           #+darwin
+           #:metal-shader-module-function-type
            #:vulkan-provider-application-name
            #:vulkan-provider-debug-callback
            #:vulkan-provider-debug-severities
@@ -682,6 +694,8 @@ nothing else does."))
            #:render-canvas-color
            #+darwin
            #:probe-sdl-metal-clear
+           #+darwin
+           #:probe-metal-shader-library
            #:clear-color-demo
            #:demo-canvas
            #:demo-context
