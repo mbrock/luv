@@ -372,15 +372,19 @@ details.definition > .lisp {
 }
 
 .lisp.source > .toplevel {
-  padding: 0.5rem 0.8rem;
-  margin: 0.6rem 0;
-  background: var(--code-bg);
-  border-radius: 0.4rem;
+  padding: 0;
+  margin: 1.1rem 0;
   scroll-margin-top: 1rem;
 }
 
 .lisp.source > .toplevel:target {
-  outline: 2px solid var(--accent);
+  box-shadow: -0.6rem 0 0 -0.4rem var(--accent);
+}
+
+.lisp.source > .toplevel > .comment.prose {
+  border-left: none;
+  padding-left: 0;
+  max-width: 44rem;
 }
 
 h1.source-title {
@@ -393,41 +397,103 @@ p.source-meta {
   font-size: 0.9rem;
 }
 
-details.toc {
-  font-size: 0.9rem;
-  margin: 1rem 0;
+/* Definitions index: kind badge · name · signature · line */
+
+nav.definitions {
+  margin: 1rem 0 2rem;
+  padding: 0.6rem 0.9rem;
+  background: var(--code-bg);
+  border-radius: 0.4rem;
 }
 
-details.toc > summary {
-  cursor: pointer;
-  color: var(--muted);
-}
-
-details.toc ul {
+nav.definitions ul {
   list-style: none;
   padding-left: 0;
-  columns: 2 14rem;
+  margin: 0;
+  columns: 2 22rem;
+  column-gap: 2rem;
 }
 
-details.toc li {
-  margin: 0.1rem 0;
+li.definition-entry {
+  display: grid;
+  grid-template-columns: 6em minmax(0, 1fr) auto;
+  column-gap: 0.6em;
+  align-items: baseline;
+  margin: 0;
+  padding: 0.12rem 0;
   font-family: system-ui, "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  break-inside: avoid;
 }
 
-details.toc .kind,
+li.definition-entry .kind {
+  font-size: 0.72em;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+li.definition-entry .kind-defclass,
+li.definition-entry .kind-defstruct,
+li.definition-entry .kind-define-condition { color: var(--mark-idea); }
+li.definition-entry .kind-defgeneric { color: var(--accent); }
+li.definition-entry .kind-defmacro { color: var(--mark-wait); }
+li.definition-entry .kind-defvar,
+li.definition-entry .kind-defparameter,
+li.definition-entry .kind-defconstant { color: var(--mark-done); }
+
+li.definition-entry a.name {
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+
+li.definition-entry a.name:hover {
+  color: var(--accent);
+}
+
+li.definition-entry .signature {
+  grid-column: 2;
+  color: var(--muted);
+  font-size: 0.9em;
+  overflow-wrap: anywhere;
+}
+
+li.definition-entry .line {
+  grid-column: 3;
+  grid-row: 1;
+  color: var(--muted);
+  font-size: 0.8em;
+  font-variant-numeric: tabular-nums;
+}
+
 details.definition > summary .kind {
   color: var(--accent);
 }
 
-ul.source-list {
-  list-style: none;
-  padding-left: 0;
-  columns: 2 16rem;
+/* Source index: files expand to their definitions in place */
+
+details.source-file {
+  margin: 0.25rem 0;
 }
 
-ul.source-list .count {
+details.source-file > summary {
+  cursor: pointer;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.9rem;
+}
+
+details.source-file > summary .count {
+  margin-left: 0.6em;
   color: var(--muted);
-  font-size: 0.85em;
+  font-size: 0.8em;
+}
+
+details.source-file > nav.definitions {
+  margin: 0.4rem 0 0.8rem 1.2rem;
 }
 
 a.github {

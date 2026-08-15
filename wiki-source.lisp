@@ -73,21 +73,45 @@ has no page for its file."
 
 ;;; Rendering
 
-(defun render-source-toc (file)
+(defun kind-label (kind)
+  "A short label for a definition KIND: defmethod -> method, define-x -> x."
+  (cond ((string= kind "defun") "function")
+        ((string= kind "defparameter") "parameter")
+        ((string= kind "defconstant") "constant")
+        ((string= kind "defvar") "variable")
+        ((starts-with "define-" kind) (subseq kind 7))
+        ((starts-with "def" kind) (subseq kind 3))
+        (t kind)))
+
+(defun render-definition-entry (definition &key href)
+  "One line of a definitions index: kind badge, name, method signature, line."
+  (spinneret:with-html
+    (:li.definition-entry
+     (:span :class (format nil "kind kind-~A" (definition-kind definition))
+            :title (definition-kind definition)
+            (kind-label (definition-kind definition)))
+     (:a.name :href href (definition-name definition))
+     (let ((specializers (definition-specializers definition)))
+       ;; Trailing T specializers say nothing; drop them.
+       (loop while (and specializers (string= (car (last specializers)) "t"))
+             do (setf specializers (butlast specializers)))
+       (when (or (definition-qualifiers definition) specializers)
+         (:span.signature
+          (format nil "~{~A ~}~@[(~{~A~^ ~})~]"
+                  (definition-qualifiers definition) specializers))))
+     (:span.line (format nil "~D" (definition-line definition))))))
+
+(defun render-source-toc (file &key (prefix ""))
+  "The definitions of FILE as a scannable list linking to their lines."
   (let ((definitions (source-file-definitions file)))
     (when definitions
       (spinneret:with-html
-        (:details.toc
-         (:summary (format nil "~D definition~:P" (length definitions)))
+        (:nav.definitions
          (:ul
           (dolist (definition definitions)
-            (:li (:span.kind (definition-kind definition))
-                 " "
-                 (:a :href (format nil "#L~D" (definition-line definition))
-                     (definition-name definition))
-                 (dolist (qualifier (definition-qualifiers definition))
-                   (spinneret:html " ")
-                   (:span.qualifier qualifier))))))))))
+            (render-definition-entry
+             definition
+             :href (format nil "~A#L~D" prefix (definition-line definition))))))))))
 
 (defun render-source-page (file)
   "Emit the page for FILE: its definitions table and every top-level form
@@ -107,6 +131,7 @@ as dexp boxes, each anchored by its starting line."
             (spinneret:html "system ")
             (:code (source-file-system-name file))
             (spinneret:html " · "))
+          (format nil "~D definition~:P · " (length (source-file-definitions file)))
           (:a :href (concatenate 'string (site-source-url *site*) (source-file-relative-path file))
               "on GitHub"))
          (render-source-toc file)
@@ -141,7 +166,9 @@ Definitions are anchored by line; symbols link to their definitions; "
          (dolist (group groups)
            (:section.source-group
             (:h2 (:code (or (car group) "other")))
-            (:ul.source-list
-             (dolist (file (cdr group))
-               (:li (:a :href (source-page-name file) (source-file-relative-path file))
-                    (:span.count (format nil " ~D" (length (source-file-definitions file))))))))))))))
+            (dolist (file (cdr group))
+              (:details.source-file
+               (:summary
+                (:a :href (source-page-name file) (source-file-relative-path file))
+                (:span.count (format nil "~D" (length (source-file-definitions file)))))
+               (render-source-toc file :prefix (source-page-name file)))))))))))

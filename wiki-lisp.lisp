@@ -283,6 +283,9 @@ not include its trailing newline, so count from the end of its text."
    (name :initarg :name :accessor definition-name
          :documentation "The name as written, e.g. \"foo\" or \"(setf foo)\".")
    (qualifiers :initarg :qualifiers :initform '() :accessor definition-qualifiers)
+   (specializers :initarg :specializers :initform '() :accessor definition-specializers
+                 :documentation "For a method, the specializer texts of its
+required parameters, e.g. (\"block-world\" \"t\").")
    (package :initarg :package :initform nil :accessor definition-package
             :documentation "The IN-PACKAGE in force, as written, or NIL.")
    (pathname :initarg :pathname :accessor definition-pathname)
@@ -336,11 +339,22 @@ whose name starts with DEF or DEFINE- is accepted too.")
              (qualifiers (loop for child in (cddr children)
                                while (typep child 'lisp-symbol)
                                collect (node-text child)))
+             (method-p (string-equal operator "defmethod"))
+             (lambda-list (and method-p (find-if (lambda (c) (typep c 'lisp-list)) (cddr children))))
+             (specializers (and lambda-list
+                                (loop for parameter in (element-children lambda-list)
+                                      until (and (typep parameter 'lisp-symbol)
+                                                 (char= (char (lisp-symbol-name parameter) 0) #\&))
+                                      collect (if (and (typep parameter 'lisp-list)
+                                                       (second (element-children parameter)))
+                                                  (node-text (second (element-children parameter)))
+                                                  "t"))))
              (texts (cons (node-text node) (mapcar #'node-text comments))))
         (make-instance 'definition
                        :kind (string-downcase operator)
                        :name (node-text name-node)
-                       :qualifiers (if (string-equal operator "defmethod") qualifiers '())
+                       :qualifiers (if method-p qualifiers '())
+                       :specializers specializers
                        :package package
                        :pathname pathname
                        :line (node-line node line-starts)
