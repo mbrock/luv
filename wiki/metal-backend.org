@@ -396,7 +396,7 @@ Done when (met):
 - tests record any resource, interface, or type vocabulary that proves
   target-shaped.
 
-* NEXT Join the proofs in one live Metal pipeline
+* DONE Join the proofs in one live Metal pipeline
 :PROPERTIES:
 :ID: PH57K5
 :END:
@@ -439,14 +439,45 @@ native trace includes =setAddress:attributeStride:atIndex:=,
 Completion advances one =MTLSharedEvent= value and drains the retained command
 buffer and allocator back to zero.  #348B7B explains the binding choice.
 
-What remains is the complete block resource relationship.  A Metal bind group
-must own reusable buffer, texture, and sampler table entries; the block pass
-must add depth and mesh buffers; and an edit made after a submitted frame must
-retire its old pipeline asynchronously rather than using the current safe but
-synchronous frontier wait.
+The complete luvcraft frame now crosses the same boundary.  Metal bind groups
+populate =MTL4ArgumentTable= buffer addresses, texture resource IDs, and sampler
+resource IDs from the ordinary layout relationship.  The real frame encodes a
+depth-only shadow pass followed by sky, block, and crosshair pipelines into an
+owned color/depth pair, then copies that color texture into the drawable.  The
+atlas upload and screenshot readback use the existing queue commands rather
+than backend calls in luvcraft.
+
+=MTL_DEBUG_LAYER=1 make metal-smoke= renders the deterministic little world
+through those paths and writes an upright sRGB capture comparable to the
+Vulkan smoke image.  The Metal capture is =1920×1280= because the Metal SDL
+canvas deliberately uses the Retina drawable; Vulkan's hidden reference is
+=960×640=.  Running =./build/luvcraft --metal= keeps the ordinary interactive
+world alive across continuous validated frames and exits through its normal
+window-close lifecycle.  Luvcraft selects a provider, but does not fork its
+world, meshing, input, frame graph, live shader, or capture orchestration.
 
 Done when: redefining the block material compiles MSL, publishes a complete
 Metal pipeline at the owning frame boundary, keeps the previous pipeline after
 an invalid edit, recovers after a valid edit, and renders a pinned capture
 comparable to Vulkan.  Asynchronous compiler tasks, Objective-C blocks, and
 mesh/object stages remain later capabilities.
+
+* NEXT Retire replaced Metal resources without a frontier wait
+:PROPERTIES:
+:ID: JAM5XR
+:END:
+
+Intent: preserve logical frame-boundary publication while removing the
+conservative queue stall from Metal resource destruction.
+
+Evidence: command buffers and allocators already retire behind the
+=MTLSharedEvent= submission frontier, but buffers, textures, samplers, and
+replaced live pipelines currently call =submitted-work-done= before releasing
+native ownership.  That policy is safe and made the complete luvcraft proof
+possible, but a shader edit or chunk replacement can stop the producer until
+all prior GPU work completes.
+
+Done when: logical destroy detaches the resource immediately, physical release
+is queued against the last submission which can reference it, normal frame
+submission reclaims completed entries without waiting, and tests prove that a
+live pipeline replacement remains valid across at least one in-flight frame.

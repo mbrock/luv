@@ -2,6 +2,10 @@
 
 (in-package #:luv)
 
+(defmethod sdl-presentation-api-for ((provider metal-gpu-provider))
+  (declare (ignore provider))
+  :metal)
+
 (defclass metal-canvas-context (canvas-context)
   ((canvas :initarg :canvas :reader context-canvas)
    (provider :initarg :provider :reader metal-canvas-provider)
@@ -30,8 +34,8 @@
 
 (defun metal-pixel-format (format)
   (case format
-    ((nil :bgra8-unorm) luv.metal:+pixel-format-bgra8-unorm+)
-    (:bgra8-unorm-srgb luv.metal:+pixel-format-bgra8-unorm-srgb+)
+    ((nil :bgra8-unorm-srgb) luv.metal:+pixel-format-bgra8-unorm-srgb+)
+    (:bgra8-unorm luv.metal:+pixel-format-bgra8-unorm+)
     (otherwise
      (error 'canvas-error :operation :configure
             :reason :unsupported-format :details format))))
@@ -82,6 +86,9 @@
              (metal-pixel-format (canvas-configuration-format configuration))))
       (luv.metal:set-layer-device layer (metal-native-object device))
       (luv.metal:set-layer-pixel-format layer native-format)
+      ;; Luvcraft renders to an owned color texture and copies the complete
+      ;; frame into the drawable, so drawable textures are not framebuffer-only.
+      (luv.metal:set-layer-framebuffer-only layer 0)
       (synchronize-metal-canvas-drawable-size context)
       (let ((format
               (gpu-metal-pixel-format (luv.metal:layer-pixel-format layer))))
@@ -216,6 +223,7 @@
                      (make-instance
                       'metal-gpu-texture
                       :device device :native-object native-texture
+                      :owned-p nil
                       :size (canvas-extent context)
                       :dimensions :2d :format (canvas-format context)
                       :usage (canvas-configuration-usage

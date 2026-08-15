@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := all
 
-.PHONY: all luvcraft run test parinfer-check shader-validate msl-validate smoke mcluv wiki wiki-cli objective-c-probe metal-clear metal-shader metal-pipeline metal-draw clean
+.PHONY: all luvcraft run test parinfer-check shader-validate msl-validate smoke metal-smoke mcluv wiki wiki-cli objective-c-probe metal-clear metal-shader metal-pipeline metal-draw clean
 
 all: luvcraft
 
@@ -56,6 +56,10 @@ smoke: luvcraft
 	mkdir -p build
 	nix develop -c ./build/luvcraft --smoke-test build/luvcraft-smoke.png
 
+metal-smoke: luvcraft
+	mkdir -p build
+	MTL_DEBUG_LAYER=1 nix develop -c ./build/luvcraft --metal-smoke-test build/luvcraft-metal-smoke.png
+
 mcluv:
 	nix develop -c sbcl --script build-mcluv.lisp
 
@@ -88,7 +92,7 @@ metal-draw:
 	nix develop -c sbcl --script tools/metal-draw.lisp
 
 clean:
-	rm -f ./build/luvcraft ./build/mcluv ./build/luvcraft-smoke.png
+	rm -f ./build/luvcraft ./build/mcluv ./build/luvcraft-smoke.png ./build/luvcraft-metal-smoke.png
 	rm -f ./build/block-world.vert.metal ./build/block-world.vert.air
 	rm -f ./build/block-world.frag.metal ./build/block-world.frag.air
 	rm -f ./build/objective-c-exception-bridge-*.dylib

@@ -72,6 +72,12 @@
              '(:vulkan :resizable :hidden)))
   (ok (equal (luv::sdl-presentation-window-flags :metal)
              '(:metal :high-pixel-density :resizable :hidden)))
+  (ok (eq :vulkan
+          (luv::sdl-presentation-api-for
+           (make-instance 'vulkan-gpu-provider))))
+  (ok (eq :metal
+          (luv::sdl-presentation-api-for
+           (make-instance 'metal-gpu-provider))))
   (let ((canvas (make-sdl-canvas :presentation-api :vulkan)))
     (ok (signals
          (make-canvas-context canvas (make-instance 'metal-gpu-provider))

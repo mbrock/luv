@@ -228,11 +228,23 @@ the frame uniform cannot silently diverge between shader and host."
             (when scene-bind-group (destroy scene-bind-group))
             (when buffer (destroy buffer)))))))
 
-(defun prepare-luvcraft-shadow-map-sampling (session encoder)
+(defgeneric prepare-luvcraft-shadow-map-sampling (session encoder)
+  (:documentation
+   "Prepare the just-rendered shadow map for sampling on ENCODER's backend."))
+
+(defmethod prepare-luvcraft-shadow-map-sampling
+    (session (encoder vulkan-gpu-command-encoder))
   "Move the just-rendered shadow depth texture into sampled-image layout."
   (let ((texture (luvcraft-session-shadow-depth-texture session)))
     (ensure-vulkan-texture-for-command encoder texture session :texture-binding)
     (transition-vulkan-texture encoder texture :shader-read-only-optimal)))
+
+(defmethod prepare-luvcraft-shadow-map-sampling
+    (session (encoder metal-frame-command-encoder))
+  (declare (ignore session encoder))
+  ;; Metal render-pass and argument-table usage describes this relationship;
+  ;; there is no Vulkan-style image layout transition to encode.
+  (values))
 
 (defun encode-luvcraft-frame
     (session surface-texture encoder &key readback-buffer)
@@ -424,6 +436,7 @@ the frame uniform cannot silently diverge between shader and host."
                                          'exposed-face-mesher))
                                 (camera (make-instance 'fly-camera))
                                 player
+                                (provider *gpu-provider*)
                                 (sky-clock (make-instance 'sky-clock))
                                 (sky-profile (make-default-sky-profile))
                                 (shadow-diagnostic-p nil)
@@ -439,24 +452,26 @@ and right click places the selected block.  Number keys select materials,
 middle click picks the targeted material, Shift sprints, and Escape releases
 the pointer.
 
-Pass :VISIBLE-P NIL to keep the SDL window hidden while still exercising the
-real SDL/Vulkan surface and swapchain path.  Pass :FRAMES-PER-SECOND NIL for a
-capture-only demand clock."
-  (let ((canvas (make-sdl-canvas :title title :width width :height height
-                                 :visible-p visible-p))
-        (player (or player (make-player-for-camera camera)))
-        (device nil) (context nil) (resources nil) (pipelines nil) (session nil)
-        (production-system nil)
-        (completed-p nil))
+Pass :PROVIDER to select the Vulkan or Metal relationship without changing
+world, simulation, streaming, or frame orchestration.  Pass :VISIBLE-P NIL to
+keep the SDL window hidden while still exercising the real presentation path.
+Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
+  (let* ((canvas (make-sdl-canvas
+                  :title title :width width :height height
+                  :visible-p visible-p
+                  :presentation-api (sdl-presentation-api-for provider)))
+         (player (or player (make-player-for-camera camera)))
+         (device nil) (context nil) (resources nil) (pipelines nil)
+         (session nil) (production-system nil) (completed-p nil))
     (open-canvas canvas)
     (unwind-protect
          (progn
            (setf device
                  (request-gpu-device
-                  *gpu-provider* (make-device-descriptor :label title))
+                  provider (make-device-descriptor :label title))
                  context
                  (make-canvas-context
-                  canvas *gpu-provider*
+                  canvas provider
                   (make-canvas-configuration :device device)))
            (setf production-system
                  (make-single-worker-production-system
@@ -569,13 +584,6 @@ capture-only demand clock."
                        :label "block world crosshair vertices"
                        :size (* 4 (length crosshair-vertices))
                        :usage '(:vertex)))))
-                  (crosshair-vertex-module
-                    (keep
-                     (create
-                      device
-                      (make-shader-module-descriptor
-                       :label "block world crosshair vertex shader"
-                       :code (spv:block-world-crosshair-vertex-shader)))))
                   (layout
                     (keep
                      (create
@@ -672,9 +680,9 @@ capture-only demand clock."
                     (let ((artifact
                             (make-live-shader-pipeline
                              :role :block-crosshair
+                             :vertex-role :block-crosshair
                              :label "block world crosshair pipeline"
                              :device device :layout layout
-                             :vertex-module crosshair-vertex-module
                              :vertex-buffers
                              '((:array-stride 24
                                 :attributes

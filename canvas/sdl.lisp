@@ -137,6 +137,10 @@
   (:documentation
    "Return the immutable SDL window flags required by PRESENTATION-API."))
 
+(defgeneric sdl-presentation-api-for (provider)
+  (:documentation
+   "Return the SDL presentation policy required by GPU PROVIDER."))
+
 (defmethod sdl-presentation-window-flags ((presentation-api (eql :vulkan)))
   (declare (ignore presentation-api))
   '(:vulkan :resizable :hidden))

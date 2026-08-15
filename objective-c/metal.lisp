@@ -17,10 +17,42 @@
   (blue :double)
   (alpha :double))
 
+(cffi:defcstruct mtl-resource-id
+  (value :uint64))
+
+(cffi:defcstruct mtl-origin
+  (x :uint64)
+  (y :uint64)
+  (z :uint64))
+
+(cffi:defcstruct mtl-size
+  (width :uint64)
+  (height :uint64)
+  (depth :uint64))
+
+(cffi:defcstruct mtl-region
+  ;; MTLRegion is two adjacent three-NSUInteger structures.  Flat fields keep
+  ;; the identical ABI while remaining directly assignable through CFFI.
+  (x :uint64)
+  (y :uint64)
+  (z :uint64)
+  (width :uint64)
+  (height :uint64)
+  (depth :uint64))
+
 (defconstant +pixel-format-bgra8-unorm+ 80)
 (defconstant +pixel-format-bgra8-unorm-srgb+ 81)
+(defconstant +pixel-format-rgba8-unorm+ 70)
+(defconstant +pixel-format-rgba8-unorm-srgb+ 71)
+(defconstant +pixel-format-depth32-float+ 252)
+(defconstant +texture-type-2d+ 2)
+(defconstant +texture-usage-shader-read+ (ash 1 0))
+(defconstant +texture-usage-render-target+ (ash 1 2))
+(defconstant +storage-mode-shared+ 0)
+(defconstant +storage-mode-private+ 2)
 (defconstant +load-action-load+ 1)
 (defconstant +load-action-clear+ 2)
+(defconstant +store-action-dont-care+ 0)
 (defconstant +store-action-store+ 1)
 (defconstant +language-version-4-0+ (ash 4 16))
 (defconstant +function-type-vertex+ 1)
@@ -41,6 +73,13 @@
 (defconstant +compare-function-not-equal+ 5)
 (defconstant +compare-function-greater-equal+ 6)
 (defconstant +compare-function-always+ 7)
+(defconstant +sampler-min-mag-filter-nearest+ 0)
+(defconstant +sampler-min-mag-filter-linear+ 1)
+(defconstant +sampler-mip-filter-not-mipmapped+ 0)
+(defconstant +sampler-mip-filter-nearest+ 1)
+(defconstant +sampler-mip-filter-linear+ 2)
+(defconstant +sampler-address-mode-clamp-to-edge+ 0)
+(defconstant +sampler-address-mode-repeat+ 2)
 
 ;;; Device and Metal 4 submission.
 
@@ -77,6 +116,134 @@
 
 (objc:define-objective-c-message metal-buffer-gpu-address
     ("gpuAddress" :uint64))
+
+(objc:define-objective-c-message %new-metal-texture-descriptor
+    ("new" :object :ownership :owned :class "MTLTextureDescriptor"))
+
+(objc:define-objective-c-message %set-metal-texture-type
+    ("setTextureType:" :void)
+  (type :uint64))
+
+(objc:define-objective-c-message %set-metal-texture-pixel-format
+    ("setPixelFormat:" :void)
+  (format :uint64))
+
+(objc:define-objective-c-message %set-metal-texture-width
+    ("setWidth:" :void)
+  (width :uint64))
+
+(objc:define-objective-c-message %set-metal-texture-height
+    ("setHeight:" :void)
+  (height :uint64))
+
+(objc:define-objective-c-message %set-metal-texture-storage-mode
+    ("setStorageMode:" :void)
+  (mode :uint64))
+
+(objc:define-objective-c-message %set-metal-texture-usage
+    ("setUsage:" :void)
+  (usage :uint64))
+
+(objc:define-objective-c-message %new-metal-texture
+    ("newTextureWithDescriptor:" :object :ownership :owned :class "MTLTexture")
+  (descriptor :object))
+
+(objc:define-objective-c-message metal-texture-resource-id
+    ("gpuResourceID" (:struct mtl-resource-id)))
+
+(objc:define-objective-c-message %replace-metal-texture-region
+    ("replaceRegion:mipmapLevel:withBytes:bytesPerRow:" :void)
+  (region (:struct mtl-region))
+  (mipmap-level :uint64)
+  (bytes :pointer)
+  (bytes-per-row :uint64))
+
+(defun replace-metal-texture-region
+    (texture width height bytes bytes-per-row)
+  "Replace the complete base level of a two-dimensional Metal texture."
+  (%replace-metal-texture-region
+   texture
+   (list 'x 0 'y 0 'z 0 'width width 'height height 'depth 1)
+   0 bytes bytes-per-row))
+
+(objc:define-objective-c-message %new-metal-sampler-descriptor
+    ("new" :object :ownership :owned :class "MTLSamplerDescriptor"))
+
+(objc:define-objective-c-message %set-metal-sampler-min-filter
+    ("setMinFilter:" :void)
+  (filter :uint64))
+
+(objc:define-objective-c-message %set-metal-sampler-mag-filter
+    ("setMagFilter:" :void)
+  (filter :uint64))
+
+(objc:define-objective-c-message %set-metal-sampler-mip-filter
+    ("setMipFilter:" :void)
+  (filter :uint64))
+
+(objc:define-objective-c-message %set-metal-sampler-address-mode-s
+    ("setSAddressMode:" :void)
+  (mode :uint64))
+
+(objc:define-objective-c-message %set-metal-sampler-address-mode-t
+    ("setTAddressMode:" :void)
+  (mode :uint64))
+
+(objc:define-objective-c-message %set-metal-sampler-address-mode-r
+    ("setRAddressMode:" :void)
+  (mode :uint64))
+
+(objc:define-objective-c-message %set-metal-sampler-compare-function
+    ("setCompareFunction:" :void)
+  (function :uint64))
+
+(objc:define-objective-c-message %new-metal-sampler
+    ("newSamplerStateWithDescriptor:" :object :ownership :owned
+     :class "MTLSamplerState")
+  (descriptor :object))
+
+(objc:define-objective-c-message metal-sampler-resource-id
+    ("gpuResourceID" (:struct mtl-resource-id)))
+
+(defun new-metal-texture
+    (device width height pixel-format usage &key (storage-mode +storage-mode-private+)
+                                                label)
+  "Create one owned two-dimensional Metal texture."
+  (objc:with-autorelease-pool ()
+    (objc:with-owned-objective-c-object
+        (descriptor
+          (%new-metal-texture-descriptor
+           (objc:find-objective-c-class "MTLTextureDescriptor")))
+      (%set-metal-texture-type descriptor +texture-type-2d+)
+      (%set-metal-texture-pixel-format descriptor pixel-format)
+      (%set-metal-texture-width descriptor width)
+      (%set-metal-texture-height descriptor height)
+      (%set-metal-texture-storage-mode descriptor storage-mode)
+      (%set-metal-texture-usage descriptor usage)
+      (let ((texture (%new-metal-texture device descriptor)))
+        (when (and texture label)
+          (%set-object-label texture (objc:lisp-string-to-objective-c label)))
+        texture))))
+
+(defun new-metal-sampler
+    (device min-filter mag-filter mip-filter address-mode-s address-mode-t
+     address-mode-r compare-function &key label)
+  "Create one owned Metal sampler state."
+  (objc:with-autorelease-pool ()
+    (objc:with-owned-objective-c-object
+        (descriptor
+          (%new-metal-sampler-descriptor
+           (objc:find-objective-c-class "MTLSamplerDescriptor")))
+      (%set-metal-sampler-min-filter descriptor min-filter)
+      (%set-metal-sampler-mag-filter descriptor mag-filter)
+      (%set-metal-sampler-mip-filter descriptor mip-filter)
+      (%set-metal-sampler-address-mode-s descriptor address-mode-s)
+      (%set-metal-sampler-address-mode-t descriptor address-mode-t)
+      (%set-metal-sampler-address-mode-r descriptor address-mode-r)
+      (%set-metal-sampler-compare-function descriptor compare-function)
+      (when label
+        (%set-object-label descriptor (objc:lisp-string-to-objective-c label)))
+      (%new-metal-sampler device descriptor))))
 
 (objc:define-objective-c-message %new-metal-residency-set-descriptor
     ("new" :object :ownership :owned :class "MTLResidencySetDescriptor"))
@@ -117,6 +284,14 @@
     ("setMaxBufferBindCount:" :void)
   (count :uint64))
 
+(objc:define-objective-c-message %set-argument-table-max-texture-count
+    ("setMaxTextureBindCount:" :void)
+  (count :uint64))
+
+(objc:define-objective-c-message %set-argument-table-max-sampler-count
+    ("setMaxSamplerStateBindCount:" :void)
+  (count :uint64))
+
 (objc:define-objective-c-message %set-argument-table-initialize-bindings
     ("setInitializeBindings:" :void)
   (enabled :uint8))
@@ -135,6 +310,21 @@
     ("setAddress:attributeStride:atIndex:" :void)
   (address :uint64)
   (attribute-stride :uint64)
+  (index :uint64))
+
+(objc:define-objective-c-message set-metal-argument-table-address
+    ("setAddress:atIndex:" :void)
+  (address :uint64)
+  (index :uint64))
+
+(objc:define-objective-c-message set-metal-argument-table-texture
+    ("setTexture:atIndex:" :void)
+  (resource-id (:struct mtl-resource-id))
+  (index :uint64))
+
+(objc:define-objective-c-message set-metal-argument-table-sampler
+    ("setSamplerState:atIndex:" :void)
+  (resource-id (:struct mtl-resource-id))
   (index :uint64))
 
 (objc:define-objective-c-message %new-metal-4-compiler-descriptor
@@ -209,7 +399,9 @@
                   (objective-c-error-pointer-description error)))))))
 
 (defun new-metal-4-argument-table
-    (device max-buffer-count &key label (attribute-strides-p nil))
+    (device max-buffer-count
+     &key (max-texture-count 0) (max-sampler-count 0) label
+       (attribute-strides-p nil))
   "Create an owned Metal 4 argument table with a buffer binding range."
   (objc:with-autorelease-pool ()
     (objc:with-owned-objective-c-object
@@ -217,6 +409,8 @@
           (%new-metal-4-argument-table-descriptor
            (objc:find-objective-c-class "MTL4ArgumentTableDescriptor")))
       (%set-argument-table-max-buffer-count descriptor max-buffer-count)
+      (%set-argument-table-max-texture-count descriptor max-texture-count)
+      (%set-argument-table-max-sampler-count descriptor max-sampler-count)
       (%set-argument-table-initialize-bindings descriptor 1)
       (%set-argument-table-support-attribute-strides
        descriptor (if attribute-strides-p 1 0))
@@ -410,8 +604,9 @@ rejection.  Source and names cross only as in-memory NSString objects."
 
 (defun compile-metal-4-render-pipeline
     (compiler vertex-library vertex-name fragment-library fragment-name
-     vertex-buffers color-format topology &key label)
-  "Synchronously link two MTLLibraries into an owned Metal 4 pipeline state."
+     vertex-buffers color-format topology &key depth-format label)
+  "Synchronously link Metal libraries into an owned Metal 4 pipeline state."
+  (declare (ignore depth-format))
   (objc:with-autorelease-pool ()
     (objc:with-owned-objective-c-object
         (vertex-function
@@ -420,41 +615,54 @@ rejection.  Source and names cross only as in-memory NSString objects."
       (%set-function-library vertex-function vertex-library)
       (%set-function-name
        vertex-function (objc:lisp-string-to-objective-c vertex-name))
-      (objc:with-owned-objective-c-object
-          (fragment-function
-            (%new-metal-4-library-function-descriptor
-             (objc:find-objective-c-class "MTL4LibraryFunctionDescriptor")))
-        (%set-function-library fragment-function fragment-library)
-        (%set-function-name
-         fragment-function (objc:lisp-string-to-objective-c fragment-name))
-        (objc:with-owned-objective-c-object
-            (vertex-descriptor
-              (%new-metal-vertex-descriptor
-               (objc:find-objective-c-class "MTLVertexDescriptor")))
-          (configure-metal-vertex-descriptor vertex-descriptor vertex-buffers)
-          (objc:with-owned-objective-c-object
-              (descriptor
-                (%new-metal-4-render-pipeline-descriptor
-                 (objc:find-objective-c-class
-                  "MTL4RenderPipelineDescriptor")))
-            (when label
-              (%set-object-label
-               descriptor (objc:lisp-string-to-objective-c label)))
-            (%set-vertex-function-descriptor descriptor vertex-function)
-            (%set-fragment-function-descriptor descriptor fragment-function)
-            (%set-pipeline-vertex-descriptor descriptor vertex-descriptor)
-            (%set-input-primitive-topology descriptor topology)
-            (%set-render-pipeline-pixel-format
-             (%render-pipeline-color-attachment-at
-              (%render-pipeline-color-attachments descriptor) 0)
-             color-format)
-            (cffi:with-foreign-object (error :pointer)
-              (setf (cffi:mem-ref error :pointer) (cffi:null-pointer))
-              (let ((pipeline
-                      (%new-metal-4-render-pipeline-state
-                       compiler descriptor nil error)))
-                (values pipeline
-                        (objective-c-error-pointer-description error))))))))))
+      (let ((fragment-function nil))
+        (unwind-protect
+             (progn
+               (when fragment-library
+                 (setf fragment-function
+                       (%new-metal-4-library-function-descriptor
+                        (objc:find-objective-c-class
+                         "MTL4LibraryFunctionDescriptor")))
+                 (%set-function-library fragment-function fragment-library)
+                 (%set-function-name
+                  fragment-function
+                  (objc:lisp-string-to-objective-c fragment-name)))
+               (objc:with-owned-objective-c-object
+                   (vertex-descriptor
+                     (%new-metal-vertex-descriptor
+                      (objc:find-objective-c-class "MTLVertexDescriptor")))
+                 (configure-metal-vertex-descriptor
+                  vertex-descriptor vertex-buffers)
+                 (objc:with-owned-objective-c-object
+                     (descriptor
+                       (%new-metal-4-render-pipeline-descriptor
+                        (objc:find-objective-c-class
+                         "MTL4RenderPipelineDescriptor")))
+                   (when label
+                     (%set-object-label
+                      descriptor (objc:lisp-string-to-objective-c label)))
+                   (%set-vertex-function-descriptor descriptor vertex-function)
+                   (when fragment-function
+                     (%set-fragment-function-descriptor
+                      descriptor fragment-function))
+                   (%set-pipeline-vertex-descriptor
+                    descriptor vertex-descriptor)
+                   (%set-input-primitive-topology descriptor topology)
+                   (when color-format
+                     (%set-render-pipeline-pixel-format
+                      (%render-pipeline-color-attachment-at
+                       (%render-pipeline-color-attachments descriptor) 0)
+                      color-format))
+                   (cffi:with-foreign-object (error :pointer)
+                     (setf (cffi:mem-ref error :pointer) (cffi:null-pointer))
+                     (let ((pipeline
+                             (%new-metal-4-render-pipeline-state
+                              compiler descriptor nil error)))
+                       (values
+                        pipeline
+                        (objective-c-error-pointer-description error)))))))
+          (when fragment-function
+            (objc:release-objective-c-object fragment-function)))))))
 
 (defun new-metal-depth-stencil-state
     (device compare-function depth-write-enabled &key label)
@@ -491,6 +699,10 @@ rejection.  Source and names cross only as in-memory NSString objects."
      :class "MTL4RenderCommandEncoder")
   (descriptor :object))
 
+(objc:define-objective-c-message compute-command-encoder
+    ("computeCommandEncoder" :object :ownership :borrowed
+     :class "MTL4ComputeCommandEncoder"))
+
 (objc:define-objective-c-message set-metal-render-pipeline
     ("setRenderPipelineState:" :void)
   (pipeline :object))
@@ -511,6 +723,33 @@ rejection.  Source and names cross only as in-memory NSString objects."
   (vertex-count :uint64)
   (instance-count :uint64)
   (base-instance :uint64))
+
+(objc:define-objective-c-message copy-metal-texture
+    ("copyFromTexture:toTexture:" :void)
+  (source :object)
+  (destination :object))
+
+(objc:define-objective-c-message %copy-metal-texture-to-buffer
+    ("copyFromTexture:sourceSlice:sourceLevel:sourceOrigin:sourceSize:toBuffer:destinationOffset:destinationBytesPerRow:destinationBytesPerImage:"
+     :void)
+  (source :object)
+  (source-slice :uint64)
+  (source-level :uint64)
+  (source-origin (:struct mtl-origin))
+  (source-size (:struct mtl-size))
+  (destination :object)
+  (destination-offset :uint64)
+  (destination-bytes-per-row :uint64)
+  (destination-bytes-per-image :uint64))
+
+(defun copy-metal-texture-to-buffer
+    (encoder source width height destination bytes-per-row)
+  "Copy a complete two-dimensional Metal texture into a buffer."
+  (%copy-metal-texture-to-buffer
+   encoder source 0 0
+   (list 'x 0 'y 0 'z 0)
+   (list 'width width 'height height 'depth 1)
+   destination 0 bytes-per-row 0))
 
 (objc:define-objective-c-message end-encoding
     ("endEncoding" :void))
@@ -548,6 +787,10 @@ rejection.  Source and names cross only as in-memory NSString objects."
 (objc:define-objective-c-message set-layer-pixel-format
     ("setPixelFormat:" :void)
   (pixel-format :uint64))
+
+(objc:define-objective-c-message set-layer-framebuffer-only
+    ("setFramebufferOnly:" :void)
+  (enabled :uint8))
 
 (objc:define-objective-c-message layer-pixel-format
     ("pixelFormat" :uint64))
@@ -608,28 +851,71 @@ rejection.  Source and names cross only as in-memory NSString objects."
     ("setClearColor:" :void)
   (color (:struct mtl-clear-color)))
 
-(defun new-color-render-command-encoder
-    (command-buffer texture color &key (clear-p t))
-  "Begin one Metal 4 color pass and return its borrowed render encoder."
-  (destructuring-bind (red green blue alpha) (coerce color 'list)
-    (objc:with-owned-objective-c-object
-        (descriptor
-          (%new-render-pass-descriptor
-           (objc:find-objective-c-class "MTL4RenderPassDescriptor")))
-      (let* ((attachments (%render-pass-color-attachments descriptor))
-             (attachment (%color-attachment-at attachments 0)))
-        (%set-color-attachment-texture attachment texture)
-        (%set-color-attachment-load-action
-         attachment (if clear-p +load-action-clear+ +load-action-load+))
-        (%set-color-attachment-store-action attachment +store-action-store+)
-        (when clear-p
+(objc:define-objective-c-message %render-pass-depth-attachment
+    ("depthAttachment" :object :ownership :borrowed
+     :class "MTLRenderPassDepthAttachmentDescriptor"))
+
+(objc:define-objective-c-message %set-depth-attachment-clear-depth
+    ("setClearDepth:" :void)
+  (depth :double))
+
+(defun configure-metal-pass-color-attachment
+    (descriptor texture color clear-p store-p)
+  (when texture
+    (let* ((attachments (%render-pass-color-attachments descriptor))
+           (attachment (%color-attachment-at attachments 0)))
+      (%set-color-attachment-texture attachment texture)
+      (%set-color-attachment-load-action
+       attachment (if clear-p +load-action-clear+ +load-action-load+))
+      (%set-color-attachment-store-action
+       attachment (if store-p +store-action-store+
+                      +store-action-dont-care+))
+      (when clear-p
+        (destructuring-bind (red green blue alpha) (coerce color 'list)
           (%set-color-attachment-clear-color
            attachment
            (list 'red (coerce red 'double-float)
                  'green (coerce green 'double-float)
                  'blue (coerce blue 'double-float)
-                 'alpha (coerce alpha 'double-float))))
-        (render-command-encoder command-buffer descriptor)))))
+                 'alpha (coerce alpha 'double-float))))))))
+
+(defun configure-metal-pass-depth-attachment
+    (descriptor texture clear-depth clear-p store-p)
+  (when texture
+    (let ((attachment (%render-pass-depth-attachment descriptor)))
+      (%set-color-attachment-texture attachment texture)
+      (%set-color-attachment-load-action
+       attachment (if clear-p +load-action-clear+ +load-action-load+))
+      (%set-color-attachment-store-action
+       attachment (if store-p +store-action-store+
+                      +store-action-dont-care+))
+      (when clear-p
+        (%set-depth-attachment-clear-depth
+         attachment (coerce clear-depth 'double-float))))))
+
+(defun new-render-command-encoder
+    (command-buffer &key color-texture
+                          (color #(0.0 0.0 0.0 1.0))
+                          (color-clear-p t) (color-store-p t)
+                          depth-texture (clear-depth 1.0)
+                          (depth-clear-p t) (depth-store-p nil))
+  "Begin one Metal 4 render pass with optional color and depth attachments."
+  (objc:with-owned-objective-c-object
+      (descriptor
+        (%new-render-pass-descriptor
+         (objc:find-objective-c-class "MTL4RenderPassDescriptor")))
+    (configure-metal-pass-color-attachment
+     descriptor color-texture color color-clear-p color-store-p)
+    (configure-metal-pass-depth-attachment
+     descriptor depth-texture clear-depth depth-clear-p depth-store-p)
+    (render-command-encoder command-buffer descriptor)))
+
+(defun new-color-render-command-encoder
+    (command-buffer texture color &key (clear-p t))
+  "Begin one Metal 4 color pass and return its borrowed render encoder."
+  (new-render-command-encoder
+   command-buffer :color-texture texture :color color
+   :color-clear-p clear-p :color-store-p t))
 
 (defun encode-clear-pass (command-buffer texture color)
   "Encode one empty Metal 4 render pass which clears TEXTURE to COLOR."

@@ -76,6 +76,11 @@
            #:new-metal-buffer
            #:metal-buffer-contents
            #:metal-buffer-gpu-address
+           #:new-metal-texture
+           #:metal-texture-resource-id
+           #:replace-metal-texture-region
+           #:new-metal-sampler
+           #:metal-sampler-resource-id
            #:new-metal-residency-set
            #:add-metal-residency-allocation
            #:remove-metal-residency-allocation
@@ -84,6 +89,9 @@
            #:remove-metal-queue-residency-set
            #:new-metal-4-argument-table
            #:set-metal-argument-table-buffer
+           #:set-metal-argument-table-address
+           #:set-metal-argument-table-texture
+           #:set-metal-argument-table-sampler
            #:new-metal-library-function
            #:metal-function-type
            #:new-command-allocator
@@ -91,11 +99,15 @@
            #:begin-command-buffer
            #:end-command-buffer
            #:render-command-encoder
+           #:compute-command-encoder
            #:new-color-render-command-encoder
+           #:new-render-command-encoder
            #:set-metal-render-pipeline
            #:set-metal-depth-stencil-state
            #:set-metal-render-argument-table
            #:draw-metal-primitives
+           #:copy-metal-texture
+           #:copy-metal-texture-to-buffer
            #:end-encoding
            #:wait-for-drawable
            #:commit-command-buffer
@@ -103,6 +115,7 @@
            #:present-drawable
            #:set-layer-device
            #:set-layer-pixel-format
+           #:set-layer-framebuffer-only
            #:layer-pixel-format
            #:set-layer-drawable-size
            #:layer-drawable-size
@@ -126,4 +139,18 @@
            #:+compare-function-greater-equal+
            #:+compare-function-always+
            #:+pixel-format-bgra8-unorm+
-           #:+pixel-format-bgra8-unorm-srgb+))
+           #:+pixel-format-bgra8-unorm-srgb+
+           #:+pixel-format-rgba8-unorm+
+           #:+pixel-format-rgba8-unorm-srgb+
+           #:+pixel-format-depth32-float+
+           #:+texture-usage-shader-read+
+           #:+texture-usage-render-target+
+           #:+storage-mode-shared+
+           #:+storage-mode-private+
+           #:+sampler-min-mag-filter-nearest+
+           #:+sampler-min-mag-filter-linear+
+           #:+sampler-mip-filter-not-mipmapped+
+           #:+sampler-mip-filter-nearest+
+           #:+sampler-mip-filter-linear+
+           #:+sampler-address-mode-clamp-to-edge+
+           #:+sampler-address-mode-repeat+))

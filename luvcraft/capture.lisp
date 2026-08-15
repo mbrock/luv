@@ -144,10 +144,11 @@ are normalized mean magnitude, maximum magnitude, and changed-pixel fraction."
                 (world (make-empty-little-block-world))
                 (mesher (make-instance 'exposed-face-mesher))
                 (camera (make-instance 'fly-camera))
+                (provider *gpu-provider*)
                 (sky-clock (make-instance 'sky-clock
                                           :pinned-day-fraction 0.5))
                 (sky-profile (make-default-sky-profile)))
-  "Open a hidden SDL/Vulkan canvas, render one block-world frame, and save it.
+  "Open a hidden SDL canvas, render one block-world frame, and save it.
 
 The sky clock arrives pinned at noon so captures stay byte-deterministic;
 pass an unpinned clock to photograph another time of day."
@@ -158,6 +159,7 @@ pass an unpinned clock to photograph another time of day."
                  (start-luvcraft
                   :title title :width width :height height
                   :frames-per-second nil :visible-p nil
+                  :provider provider
                   :world world :mesher mesher :camera camera
                   :sky-clock sky-clock
                   :sky-profile sky-profile))
