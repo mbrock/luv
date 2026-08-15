@@ -145,6 +145,7 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
                              (:file "frame-slots")
                              (:file "luv-vulkan-hal")
                              (:file "mathematical-shaders")
+                             (:file "metal-backend")
                              (:file "moppe-legacy")
                              (:file "objective-c-and-metal")
                              (:file "physics-and-simd")

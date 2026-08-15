@@ -1,263 +1,123 @@
-#+title: The moppe legacy: lighting, post, and atmosphere worth transplanting
+#+title: The Moppe legacy: lighting, post, and atmosphere worth transplanting
 #+startup: overview
 
-* What this page is
+* Moppe is evidence, a tuning library, and a legacy
 :PROPERTIES:
 :ID: C4XGYX
 :END:
 
 Moppe (=~/src/moppe=) is the predecessor engine: a C++/Metal terrain world
-with a complete cinematic rendering pipeline.  For luvcraft it plays three
-roles at once.  It is *proof* that the ambitious end state runs well on our
-actual machines; it is a *repository of tuned judgment calls* — hundreds of
-smoothstep edges, blend weights, and bias constants that took real iteration
-to find; and it is a *legacy to improve on*, because its answers are frozen
-in MSL text and duplicated by convention, where luv holds the same material
-as live, inspectable, redefinable Lisp objects.
+with a complete cinematic renderer.  It proves an ambitious end state on the
+actual development machines, preserves hundreds of tuned judgment calls, and
+shows what luv should improve: its answers are frozen in MSL and duplicated by
+convention, where luv can hold shared material meaning as live Lisp objects.
 
-The discipline for reading it follows #H7QK3M: distinguish mechanisms
-observed in moppe's code, claims its comments make, and our reading of what
-luvcraft should adopt or reject.  Moppe is a landmark like WebGPU is a
-landmark — evidence, not authority.
+This page now stays a source-study and transplant inventory.  The native
+backend motivation it originally contained has become executable luv work and
+moved, with its stable figure IDs, to [[file:metal-backend.org][the native Metal 4 backend]].  Read
+Moppe as #H7QK3M advises: observed mechanism, source claim, and luv's possible
+choice are different voices.
 
-* The post stack: what "finished-looking" turns out to be made of
+* The post stack reveals what finished-looking means
 :PROPERTIES:
 :ID: 8VA1EX
 :END:
 
-=moppe/shaders/metal/post.metal= is a complete answer to the question the
-mockup raised: most of what reads as "high quality" is the treatment of the
-frame after the scene is lit.  The observed pipeline, in order:
+=moppe/shaders/metal/post.metal= supplies a concrete observed sequence:
 
-1. *Auto-exposure*: a probe pass averages a few wide taps of the HDR scene
-   into a tiny target the CPU reads back; an adaptation loop tracks it.  The
-   exposure scalar rides a uniform lane.  Notably the bloom bright pass sees
-   the /exposed/ scene, so glow tracks adaptation in matching units.
-2. *Bloom*: a soft-knee bright pass (=smoothstep (0.85, 1.35, luma)=) into a
-   quarter-resolution chain; the 9-tap gaussian is done as five linear
-   samples placed between texel pairs so hardware interpolation evaluates
-   half the kernel.
-3. *Lens character*: chromatic fringe only beyond the image circle's outer
-   third; a warm veil, anamorphic streak, and three tinted ghosts on the
-   sun, gated by a sun-visibility scalar that already folds in occlusion.
-4. *ACES tonemap* (Narkowicz fit), then sRGB encode.
-5. *Colorist grade*: warm print-film CDL, split-toned shadows/highlights,
-   vibrance that saturates muted pixels faster than rich ones, luma-weighted
-   animated grain, vignette.
-6. *EDR path*: on capable displays it re-linearizes and lets only true HDR
-   highlights rise above diffuse white, clamped to live display headroom.
+1. *Auto-exposure* averages wide HDR taps into a tiny CPU-read target and
+   adapts one exposure scalar.  Bloom sees the exposed scene.
+2. *Bloom* uses a soft-knee bright pass and quarter-resolution chain; a
+   =smoothstep (0.85, 1.35, luma)= threshold and five-sample linear-filter
+   trick evaluate the nine-tap Gaussian cheaply.
+3. *Lens character* adds edge-gated chromatic fringe, veil, anamorphic streak,
+   and sun ghosts modulated by visibility.
+4. *ACES tonemap* converts the linear scene, followed by sRGB encoding.
+5. *Color grade* applies warm print-film CDL, split tone, vibrance, grain, and
+   vignette.
+6. *EDR output* re-linearizes and permits true highlights above diffuse white
+   within current display headroom.
 
-Two readings for luvcraft.  First, the sequencing lesson: exposure and
-tonemapping are the foundation everything else composes over, which is
-exactly the order #SKHDR already commits to.  Second, the grade (step 5) is
-where moppe's screenshots get their mood; it is cheap, entirely separable,
-and every constant in it is an art parameter that in luv would be a live
-uniform lane or a hot-replaceable material method rather than a recompile.
+The sequence matters more than any individual effect: exposure and tone
+mapping establish the medium in which bloom and grade make sense.  #SKHDR
+already follows that order.  Moppe's grade is especially attractive because
+it is cheap, separable, and made of constants which can become live uniforms
+or hot-redefined material methods.
 
-* Sun shafts: the highest-glamour transplant
+* Sun shafts are the highest-glamour transplant
 :PROPERTIES:
 :ID: BAP0QU
 :END:
 
-Moppe's =shafts_gather_fragment= marches each view ray at half resolution
-through the *existing shadow map*, jittered by interleaved-gradient noise,
-stopped by scene depth, and weights the gathered lit spans by a
-Henyey-Greenstein forward lobe (g = 0.60) around the sun.  A separate pass
-adds the filtered half-resolution result to the scene.
+Moppe's =shafts_gather_fragment= marches view rays at half resolution through
+the existing shadow map, jitters them with interleaved-gradient noise, stops
+at scene depth, and weights lit spans by a forward Henyey-Greenstein lobe with
+=g = 0.60=.  A separate pass filters and adds the result.
 
-Luvcraft already owns both inputs: a stored shadow depth map (#2WX9PW) and
-an offscreen scene with depth.  The technique needs no new world data, no
-mesh changes, and no new shadow semantics — it is a second consumer of
-products that exist.  God rays through block-tree canopies at a low sun are
-plausibly the single largest visible-quality step per line of code on the
-current path.  It does want the linear-HDR target first (#WLHDRB), so the
-gathered light adds in sensible units.
+Luvcraft already owns both inputs: a stored shadow map (#2WX9PW) and offscreen
+scene depth.  The effect needs no new world representation.  It does need the
+linear-HDR target (#WLHDRB) so gathered light adds in meaningful units.
 
-* The judgment-call library in common.h
+* common.h is a library of judgment calls
 :PROPERTIES:
 :ID: 094ZB1
 :END:
 
-=moppe/shaders/metal/common.h= is the densest artifact: shared helpers whose
-value is not the algorithm but the tuning.  Observed vocabulary worth
-carrying over, roughly in order of immediate applicability:
+=moppe/shaders/metal/common.h= is valuable less for novel algorithms than for
+tuning worth testing:
 
-- =moppe_hemisphere_light=: ambient split into warm earth bounce below and
-  cool sky above (=mix= on normal.y).  One line; luvcraft's flat ambient
-  term would gain depth immediately.
-- =moppe_warmed_fog=: fog warmed toward the sun by two Mie-ish lobes and
-  cooled faintly opposite it (Rayleigh backscatter), so panning across the
-  horizon reads as one atmosphere.  Direct upgrade to the block material's
-  single fog colour.
-- =moppe_sky_radiance=: a deliberately cheap analytic environment radiance
-  varying with reflected direction — zenith/horizon palette plus a solar
-  highlight — used by water.  This is the concrete form of the "analytic
-  sky as environment map" idea for crystal and snow specular: no cubemaps,
-  just the sky function evaluated along the reflected ray.
-- =moppe_sun_visibility=: the tuned PCF recipe — centre-weighted five taps,
-  =pow 1.3= shaping, shadow influence fading with fog distance.  Luvcraft's
-  17-tap disk (#UDVPDW) is already beyond it spatially; the fog fade and
-  response shaping remain worth stealing.
-- =moppe_cloud_transmission=: cloud /shadows/ by projecting each world point
-  along the sun onto one world-stable layer and sampling a cheap wave
-  field.  Ground, trees, and water all darken under the same drifting
-  shape.  Relevant the day luvcraft's sky grows clouds.
-- Wind on three coupled clocks (gust drives bough drives flutter), foliage
-  back-transmission, and world-stable hashed alpha coverage: not yet
-  relevant to rigid blocks, but the answers are written down for when
-  foliage stops being rigid.
+- =moppe_hemisphere_light= splits ambient into warm ground bounce and cool sky;
+- =moppe_warmed_fog= couples fog colour to forward and backward solar lobes;
+- =moppe_sky_radiance= supplies a cheap analytic reflected environment;
+- =moppe_sun_visibility= records centre-weighted PCF, response shaping, and
+  distance fade, including the observed =pow 1.3= response;
+- =moppe_cloud_transmission= projects stable cloud shadow onto world points;
+  and
+- coupled gust, bough, and flutter clocks coordinate foliage motion.
 
-The critique that motivates doing this in luv rather than by porting text:
-the =daylight= / =golden= smoothstep pair is independently recomputed in at
-least four places (sky atmosphere, cloud lighting, warmed fog, sky
-radiance).  It stays consistent by convention only.  In luv that pair is one
-shader-abstraction definition (#DXYHT4 machinery) spliced wherever needed,
-and retuning it is one live redefinition.
+The strongest argument for re-expressing these in luv is duplication.  The
+=daylight= / =golden= pair is recomputed independently in several shaders.  In
+luv it can be one shader abstraction (#DXYHT4) reused with shared meaning and
+one live redefinition point.
 
-* Sky, temporal, and mesh shaders: the wider proof
+* Sky, temporal reconstruction, and mesh shaders bound the proof
 :PROPERTIES:
 :ID: KK6M0T
 :END:
 
-Three further observations bound what our hardware and stack can do.
+Three larger observations describe capabilities rather than immediate ports:
 
-- =sky.metal= renders a three-stop atmosphere (zenith, mid band, horizon),
-  a golden-hour band, two Mie lobes, an fBm cumulus deck plus sheared
-  cirrus, silver linings on thin sun-facing edges, stars, dither, and a
-  horizon blended into the exact fog colour.  Luvcraft's sky (#SKDYCY) is
-  the same shape at smaller scale; the cloud material is the natural next
-  chapter and stays pure sky-shader mathematics.
-- Every scene shader emits motion vectors and a reactive mask
-  (=MoppeTemporalOutput=) feeding MetalFX temporal upscaling.  Relevant to
-  #GKEHPF: moppe's answer to temporal shimmer was full temporal
-  reconstruction; luvcraft is right to first try comparison-sampler
-  filtering, but the motion-vector plumbing pattern is documented here if
-  evidence ever demands the heavier answer.
-- The forest shadow pass runs as a Metal *mesh shader* pipeline
-  (=MTLMeshRenderPipelineDescriptor=, object + mesh functions).  This is
-  existence proof that mesh shaders work today on our machines — through
-  Metal.  MoltenVK does not expose =VK_EXT_mesh_shader=, so the current
-  Vulkan HAL cannot reach them; see #NABRMK.
+- =sky.metal= combines a three-stop atmosphere, golden-hour band, Mie lobes,
+  two cloud layers, stars, dithering, and a fog-matched horizon.  Luvcraft's
+  smaller sky (#SKDYCY) has the same conceptual shape.
+- Scene shaders emit motion vectors and a reactive mask for MetalFX temporal
+  reconstruction.  This records a heavier answer if local filtering no longer
+  controls temporal shimmer.
+- The forest shadow pass is a native Metal object + mesh shader pipeline.
+  It proves the hardware capability while MoltenVK cannot expose the same
+  route.  That observation originally motivated #NABRMK; the resulting luv
+  backend and its remaining shader join now live on the Metal page.
 
-* A Metal HAL beside the Vulkan HAL
-:PROPERTIES:
-:ID: NABRMK
-:END:
-
-The mesh-shader gap makes a second backend more than an aesthetic
-preference: the Vulkan-over-MoltenVK path structurally cannot reach a
-hardware capability every development machine has.  Reading moppe alongside
-luv's stack suggests the port is smaller than it first appears.
-
-- The shader story is the easy half, unusually.  Luv's
-  =shader-specification= objects are already the typed semantic graph above
-  SPIR-V.  An MSL backend can lower that graph directly to target-specific
-  C-like text rather than translating the already SPIR-V-shaped module.
-  Material specifications stay shared; target lowering and its provenance
-  product differ.  #LVKEYO makes that boundary precise.
-- The API choreography — pipeline descriptors, residency, drawable
-  acquisition, depth formats, MetalFX — is worked out in
-  =moppe/render/metal/metal_renderer.mm= (~7000 lines of Objective-C++,
-  itself an argument for driving the Objective-C runtime from Lisp
-  instead).  #JSKLEI develops the bridge as a foreign object system rather
-  than a list of Metal wrappers.  Moppe also has a WebGPU renderer, giving two
-  HAL shapes to compare against #L7C4GM-adjacent boundary questions.
-- The target is Metal 4 directly, not Metal 3 with Metal 4 later.  An
-  earlier draft of this page advised the reverse; #HXUGEA records why that
-  caution was backwards for this codebase.  All development machines run
-  macOS 26+, and no legacy support is wanted.
-- The post stack (#8VA1EX) is deliberately HAL-agnostic: fullscreen passes
-  over offscreen textures work identically on the Vulkan path today and
-  survive a Metal port untouched.  Nothing cinematic needs to wait.
-
-* Metal 4's explicit model matches the Vulkan layer
-:PROPERTIES:
-:ID: HXUGEA
-:END:
-
-The decisive question for a second HAL is not the API's age but whose
-contract matches the machinery luv already owns.  Metal 4's paradigm shift
-— explicit memory, explicit synchronization, no automatic hazard tracking
-— asks the application to provide exactly what luv's Vulkan layer already
-provides, where Metal 3's implicit model would duplicate or fight it.
-
-Observed correspondences:
-
-- Command allocators may be =reset= only after their commands retire on
-  the GPU, with the application proving retirement.  Luv's per-queue
-  completion frontier is precisely that proof, already trusted to gate
-  destruction and reuse on the Vulkan path.
-- =MTLSharedEvent= with monotonic signaled values is nearly one-to-one
-  with the timeline semaphores the frontier is built on.
-- Metal 4 is "concurrent by default" with an explicit stage-to-stage
-  barrier API; luv already encodes explicit image transitions rather than
-  relying on driver tracking.
-- =MTL4ArgumentTable= binds resources by 64-bit GPU resource IDs and GPU
-  addresses with offset arithmetic — closer to the descriptor-set/bind
-  group model luv already generalized than Metal 3's per-draw setter
-  state.
-- Metal 4 command buffers do not retain resources; the application keeps
-  them alive until execution completes.  That is luv's explicit-destroy
-  contract with frontier-deferred reclamation, stated as an API rule.
-- =MTLResidencySet= committed once and attached at queue scope matches
-  residency as a session-level concern rather than per-encoder chatter.
-
-The compilation story is the strongest specific attraction for a live
-system.  =MTL4Compiler= makes compilation an explicit, allocatable object
-separate from the device: runtime library creation from source, async
-pipeline builds with QoS, function-constant specialization as data, and
-pipeline serialization for warm starts.  The live-pipeline artifact can
-own a compiler instance and keep its current transactional
-last-known-good behavior, with Lisp-emitted MSL text entering compilation
-the same way Lisp-assembled SPIR-V does today.  Specialized function
-descriptors offer a natural home for material parameters worth freezing
-into pipeline variants instead of spending uniform lanes.
-
-What Metal 4 does not give back is a safety net: nothing tracks hazards
-for a HAL that forgets a barrier.  For luv this is the correct trade —
-the Vulkan layer already assumes that responsibility, and a backend that
-silently re-tracked hazards underneath the frontier would obscure the
-very guarantees the frontier exists to make inspectable.
+These are forcing examples, not reasons to import Moppe's renderer wholesale.
+The post stack is largely backend-neutral fullscreen work, while mesh stages
+should enter luv's shader language only when a concrete native pipeline makes
+their types and interfaces precise.
 
 * IDEA Transplant the post stack onto the HDR path
 :PROPERTIES:
 :ID: VG8TGG
 :END:
 
-Intent: when #WLHDRB lands the linear-HDR scene target, extend it past
-"tone map plus restrained bloom" toward moppe's observed order: exposure
-(fixed first, adaptive later), ACES, then a small live grade — and treat
-sun shafts (#BAP0QU) as the first post effect after bloom, since both its
-inputs already exist.
+Intent: when #WLHDRB lands the linear-HDR scene target, extend it past tone map
+and restrained bloom toward Moppe's observed order: exposure, ACES, and a
+small live grade.  Treat sun shafts (#BAP0QU) as the first post effect after
+bloom because both inputs already exist.
 
 Evidence to gather:
 
-- A pinned dusk capture with and without the grade stage, compared for the
-  mockup-like mood shift.
-- Frame-time cost of the half-resolution shaft march at representative
-  resolution, alongside the existing ~10.7 ms baseline (#UDVPDW).
+- a pinned dusk capture with and without grade; and
+- representative frame-time cost for the half-resolution shaft march.
 
-Done when: the crystal-at-night and low-sun-forest captures show exposure,
-tonemap, bloom, and shafts composing in linear light, each stage a live
-material with its constants on inspectable uniform lanes.
-
-* TODO Join the MSL lowering to a Metal pipeline
-:PROPERTIES:
-:ID: DR3V60
-:END:
-
-Intent: after the independent bridge and MSL proofs in
-[[file:objective-c-and-metal.org][the native Metal path]], join them as the first complete Metal 4 pipeline
-without changing the mathematical material specifications.
-
-Evidence:
-
-- #3FW8Z5 isolates the typed Objective-C message substrate; #5A7QDE owns the
-  SDL/CAMetalLayer presentation proof; #58IDSR lowers the unchanged block
-  fragment specification directly to MSL.
-- The current Vulkan live-pipeline artifact already specifies the
-  last-known-good and frame-boundary publication behavior to preserve.
-
-Done when: #PH57K5 is complete: the same =shader-specification-for= method
-drives both live backends, an invalid Metal edit preserves the previous
-pipeline, and a pinned Metal capture can be compared with Vulkan.
+Done when: crystal-at-night and low-sun-forest captures show exposure, tone
+mapping, bloom, and shafts composing in linear light, each stage a live
+material with inspectable parameters.

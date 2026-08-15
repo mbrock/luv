@@ -1,0 +1,293 @@
+#+title: The native Metal 4 backend
+#+startup: overview
+
+* Two seams are executable; one join remains
+:PROPERTIES:
+:ID: 4M91DG
+:END:
+
+The native Metal backend is no longer only an architectural proposal.  Luv
+can create a Metal GPU provider, attach it to an SDL-owned =CAMetalLayer=, and
+present a validated Metal 4 clear through the ordinary GPU command vocabulary.
+The remaining backend threshold is shader compilation and pipeline creation:
+the mathematical shader graph still lowers only to SPIR-V.
+
+#+begin_example
+SDL canvas and events
+        |
+        | SDL_MetalView / borrowed CAMetalLayer
+        v
+Metal canvas context ---- Objective-C declarations ---- libobjc + Metal
+        |                              |
+        |                              `---- native ABI help where required
+        v
+luv GPU protocol
+        ^
+        |
+typed shader specification
+        |\
+        | `---- MSL lowering ---- MTL4Compiler ---- Metal pipeline   NEXT
+        `------ SPIR-V lowering - Vulkan pipeline                    WORKING
+#+end_example
+
+The three seams remain independently understandable: SDL owns the host,
+[[file:objective-c-and-metal.org][the Objective-C substrate]] (#M2PDTP) owns the Apple object boundary, and the shader
+language owns target-specific lowering.  They are now staged proofs of one
+backend rather than three reasons to postpone starting it.  #5A7QDE records
+the executable presentation half; #58IDSR and #PH57K5 name the remaining join.
+#NABRMK records why the second backend matters and #HXUGEA why Metal 4 is the
+right native model for it.
+
+* A native Metal backend now stands beside Vulkan
+:PROPERTIES:
+:ID: NABRMK
+:END:
+
+Moppe first supplied the motivation: its Metal renderer proves mesh shaders,
+MetalFX, and a finished post stack on the same Apple hardware, while MoltenVK
+cannot expose every native capability.  That source evidence remains on
+[[file:moppe-legacy.org][the Moppe legacy page]].  The implementation claim now belongs here.
+
+The current backend is deliberately narrow but real:
+
+- =:luv/gpu/api= is the shared semantic seam;
+- =:luv/gpu/metal= supplies Metal provider, device, queue, texture, and frame
+  encoder objects;
+- =:luv/canvas/metal= specializes the canvas × provider relationship;
+- declared Objective-C messages cover the Metal 4 submission and drawable
+  vocabulary needed by one frame; and
+- the cold clear probe validates the complete path on an Apple M2 Pro.
+
+This does not yet establish a portable HAL contract.  It establishes a second
+implementation substantial enough to test one.  In particular, shader module
+artifacts, interface locations, resources, and pipeline publication now have a
+concrete second target against which apparently neutral names can fail.
+#HXUGEA describes the explicit backend mechanisms worth sharing semantically.
+
+* Metal 4's explicit model matches the Vulkan layer
+:PROPERTIES:
+:ID: HXUGEA
+:END:
+
+Metal 4 asks the application to own memory, synchronization, hazards, and
+resource lifetime explicitly.  That is closer to luv's modern Vulkan layer
+than Metal 3's implicit model would be:
+
+- command allocators may be reused only after GPU retirement, the same fact
+  represented by luv's per-queue completion frontier;
+- monotonic =MTLSharedEvent= values correspond to timeline-semaphore frontier
+  values;
+- explicit stage barriers match luv's owned image-transition decisions;
+- =MTL4ArgumentTable= uses GPU addresses and resource IDs rather than hiding
+  bindings in per-draw setter state;
+- Metal 4 command buffers do not retain resources, matching luv's explicit
+  lifetime and deferred-reclamation obligations; and
+- queue-scoped =MTLResidencySet= makes residency a session concern.
+
+The correspondence is a design advantage, not proof that the implementations
+are interchangeable.  Metal supplies no safety net for a missing barrier, and
+its allocator/frontier relationship still needs a real rotating-frame proof.
+The useful standard is semantic parity with explicit backend mechanisms, not
+line-for-line similarity.
+
+* SDL remains the platform shell
+:PROPERTIES:
+:ID: SODRMA
+:END:
+
+The [[file:../canvas/api.lisp][canvas protocol]] separates a native place from its GPU presentation
+relationship.  [[file:../canvas/sdl.lisp][=sdl-canvas=]] owns the window, event translation,
+main-thread dispatch, pointer mode, size, and clock; backend contexts own the
+presentation resources.
+
+SDL 3 provides =SDL_Metal_CreateView=, =SDL_Metal_DestroyView=, and
+=SDL_Metal_GetLayer=.  The resulting =metal-canvas-context= owns the view,
+borrows its =CAMetalLayer=, assigns the configured Metal device, and destroys
+the view before the SDL window.  Those SDL calls are main-thread-only; the
+existing =call-on-sdl-canvas-thread= path already reaches Cocoa's main thread.
+The host selects =:vulkan= or =:metal= as an immutable presentation policy
+before opening, while provider-specialized =make-canvas-context= methods
+validate the relationship.
+
+Replacing SDL with =NSWindow= remains a separate experiment.  It was neither
+necessary for the clear proof nor desirable as hidden scope in the backend.
+
+* The typed shader specification is already the shared IR
+:PROPERTIES:
+:ID: LVKEYO
+:END:
+
+The mathematical shader language already owns backend-independent meaning:
+stages, interfaces, resources, typed expressions, quantity annotations,
+lexical order, and source provenance.  Its current compiler immediately turns
+that graph into SPIR-V IDs, decorations, storage classes, instructions, and a
+=spir-v-module=.  Those objects are therefore a Vulkan lowering product, not a
+necessary interchange format for Metal.
+
+The smaller shape is sibling lowering:
+
+#+begin_example
+                    /--> SPIR-V lowering --> structured SPIR-V --> words
+shader specification
+                    \--> MSL lowering ----> structured document --> text
+#+end_example
+
+Translating SPIR-V back to MSL would preserve a single machinery path at the
+cost of making Vulkan interface choices the architecture of the Metal backend.
+Direct lowering keeps expression-to-output provenance and leaves native
+mesh/object stages available when a real pipeline gives them semantics.
+
+* Target-specific lowering stays open and inspectable
+:PROPERTIES:
+:ID: JDLQPN
+:END:
+
+The CLOS seam is target × source construct, not one growing target switch.
+The intended relationship is illustrated by:
+
+#+begin_src lisp
+(lower-shader-specification msl-target specification)
+(lower-shader-call '+ msl-context expression)
+(lower-shader-call '+ spir-v-context expression)
+#+end_src
+
+Target objects are justified when they carry version, capability, platform,
+or binding-layout policy; an EQL keyword is enough while target choice is only
+a closed setting.  Dense instruction and text data remain data.
+
+The MSL product should be a modest structured document of declarations,
+entry-point parameters, statements, and source occurrences rather than one
+opaque accumulated string or a general C AST.  The shader lab should be able
+to select a Lisp expression and show the MSL it caused just as it shows
+SPIR-V instruction occurrences.  Unsupported target operations should signal
+a source-located shader-language condition rather than silently approximate.
+
+* The Metal 4 compiler belongs to the live backend
+:PROPERTIES:
+:ID: 2X8254
+:END:
+
+The running backend should compile through =MTL4Compiler= rather than make
+=xcrun metal=, temporary files, or subprocess management part of live Lisp.
+The compiler is a device-owned object which accepts source-bearing
+=MTL4LibraryDescriptor= objects and creates library and pipeline products.
+
+The first path should be synchronous: a candidate owns its MSL document,
+source, library, descriptors, and pipeline state until the complete artifact
+can publish at the frame boundary.  The currently installed artifact remains
+untouched on failure.  Only after that transaction works should asynchronous
+compiler tasks, Objective-C blocks, archives, or warm-start serializers enter
+the required path.
+
+=xcrun metal= remains useful as an offline diagnostic and cross-check.  It is
+not the acceptance authority for a live pipeline.
+
+* The second backend tests apparently portable names
+:PROPERTIES:
+:ID: OV1AZO
+:END:
+
+The Metal slice is allowed to reveal target-shaped vocabulary rather than
+declare the existing surface neutral in advance:
+
+- =shader-resource= currently says descriptor set and binding, while Metal 4
+  argument tables distinguish resource categories, IDs, and GPU addresses;
+- interface locations and built-ins become MSL entry-point structures and
+  attributes rather than SPIR-V decorations;
+- =shader-module-descriptor/code= currently implies a vector of SPIR-V words
+  and needs an explicit artifact kind or a compiler-owned boundary;
+- vertex, fragment, and compute form the proved shared stage core, while
+  mesh/object stages should follow a concrete native pipeline; and
+- Metal publication must preserve the existing revision, last-known-good,
+  frame-boundary, and deferred-retirement semantics.
+
+Names should change only when this second implementation supplies evidence.
+#58IDSR is the first deliberate test.
+
+* DONE Present a Metal clear through the existing SDL canvas
+:PROPERTIES:
+:ID: 5A7QDE
+:END:
+
+Intent: prove #SODRMA by adding a =metal-canvas-context= relationship while
+leaving SDL window, input, clock, and main-thread ownership intact.
+
+Evidence:
+
+- [[file:../gpu/metal.lisp][The Metal GPU vocabulary]] implements provider, device, queue, texture, and
+  frame-encoder objects; [[file:../canvas/metal.lisp][the canvas context]] owns one SDL Metal view and
+  borrows its layer.
+- [[file:../objective-c/metal.lisp][Declared messages]] cover =CGSize= and =MTLClearColor= by value plus the
+  Metal 4 allocator, command buffer, render encoder, queue, and drawable
+  vocabulary.  The clear remains an ordinary =gpu-clear-texture-command=.
+- =MTL_DEBUG_LAYER=1 make metal-clear= validated the ordered
+  =beginCommandBufferWithAllocator:=, encode, =endCommandBuffer=,
+  =waitForDrawable:=, =commit:count:=, =signalDrawable:=, and =present= path.
+- The cold probe reported =320×200= logical, =640×400= pixel and drawable
+  sizes, then a closed canvas and destroyed context, view, window, and device.
+- Focused tests cover structure ABI, presentation policy, provider mismatch,
+  and a real owned =MTL4CommandQueue=; the Vulkan smoke image stayed unchanged.
+
+Done when (met): the Metal provider presents a deterministic clear through the
+shared command vocabulary, reports Retina drawable size, tears down in
+ownership order, and leaves the Vulkan path unchanged.
+
+* The first live pipeline is the backend threshold
+:PROPERTIES:
+:ID: DR3V60
+:END:
+
+The backend becomes a complete rendering alternative when one unchanged
+=shader-specification-for= method can feed both target compilers and the Metal
+artifact preserves live publication semantics.
+
+One implementation sequence owns that threshold: #58IDSR proves direct MSL source and
+compiler acceptance; #PH57K5 joins that product to the existing canvas and
+transactional live-pipeline lifecycle.  Moppe remains visual and API evidence,
+not the owner of luv's implementation roadmap.
+
+* NEXT Lower one mathematical shader directly to MSL
+:PROPERTIES:
+:ID: 58IDSR
+:END:
+
+Intent: compile the existing block fragment =shader-specification= through a
+sibling target context, without translating its =spir-v-module= and without
+inventing a new shared IR.
+
+Evidence: the graph already carries types, source forms, resources, semantic
+operations, and provenance.  The block fragment exercises arithmetic,
+swizzles, texture and sampler resources, sampling, and interpolation without
+first requiring mesh-stage design.  #LVKEYO identifies the shared source
+product, #JDLQPN the dispatch seam, #2X8254 the live compiler boundary, and
+#OV1AZO the target-shaped vocabulary this slice must test.
+
+Done when:
+
+- one unchanged =shader-specification-for= method produces deterministic
+  SPIR-V and valid MSL;
+- an =MTL4LibraryDescriptor= carries generated source into the device-owned
+  =MTL4Compiler= without files or subprocesses;
+- expression-to-MSL provenance remains inspectable;
+- unsupported operations report source locations; and
+- tests record any resource, interface, or type vocabulary that proves
+  target-shaped.
+
+* WAIT Join the proofs in one live Metal pipeline
+:PROPERTIES:
+:ID: PH57K5
+:END:
+
+Intent: preserve luvcraft's transactional shader-definition loop while the
+same live mathematical shader methods feed a native Metal render pipeline.
+
+Evidence: this waits on #58IDSR; #5A7QDE already owns presentation.  The
+Vulkan live artifact proves revision tracking, last-known-good retention,
+frame-boundary publication, and deferred retirement.  Metal should specialize
+those ownership points rather than fork the application model.
+
+Done when: redefining the block material compiles MSL, publishes a complete
+Metal pipeline at the owning frame boundary, keeps the previous pipeline after
+an invalid edit, recovers after a valid edit, and renders a pinned capture
+comparable to Vulkan.  Asynchronous compiler tasks, Objective-C blocks, and
+mesh/object stages remain later capabilities.

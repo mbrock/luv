@@ -109,15 +109,18 @@ The following are starting paths rather than a table of settled doctrine.
   and usage declarations buy an implementation.
 - [[file:frame-slots.org][Frame slots as a luv case study]] revisits a recent implementation change
   without promoting it into doctrine.
-- [[file:luv-vulkan-hal.org][Field notes on the current Vulkan HAL]] maps the actual layers, local
-  ownership decisions, missing lifetime proofs, and open design questions in
-  the present code.
+- [[file:luv-vulkan-hal.org][Field notes on the pre-split Vulkan HAL]] preserves a source study of the
+  earlier stack and marks where later ASDF boundaries, completion-frontier
+  work, and the Metal implementation have superseded its snapshot.
 - [[file:mathematical-shaders.org][Mathematical shaders as live Lisp objects]] records the typed expression
   language above the literal SPIR-V assembler, its deterministic CLOS
   lowering, and the McCLIM presentation browser connecting source to SSA.
-- [[file:objective-c-and-metal.org][Objective-C interop and the native Metal path]] separates SDL hosting,
-  a Lisp-shaped Objective-C bridge, direct MSL lowering from the mathematical
-  shader graph, and the small proofs that can join them into a Metal 4 backend.
+- [[file:objective-c-and-metal.org][Objective-C as a foreign object system]] records declared message ABIs,
+  inspectable invocation objects, explicit native ownership, exception
+  conditions, and the dynamically scoped direct-send escape hatch.
+- [[file:metal-backend.org][The native Metal 4 backend]] is the canonical implementation path: the
+  validated SDL/CAMetalLayer clear, its correspondence with the Vulkan model,
+  direct MSL lowering, =MTL4Compiler=, and the remaining live-pipeline join.
 - [[file:completion-frontier.org][The queue frontier and modern-capabilities decision]] records the adoption
   of Vulkan 1.4, timeline semaphores, and a per-queue completion frontier
   that captures command dependencies, defers destruction, and makes public
@@ -141,10 +144,9 @@ The following are starting paths rather than a table of settled doctrine.
   tuples, semantic projective maps, and compact SIMD-friendly representations.
   It records where the built system goes beyond its sources, and carries the
   next design step: the three-way point/absolute/difference character.
-- [[file:moppe-legacy.org][The moppe legacy]] reads the predecessor engine's lighting, post-processing,
-  and atmosphere as proof, tuned judgment calls, and a legacy to improve on:
-  the transplant inventory for luvcraft's cinematic path and the mesh-shader
-  case for a Metal HAL.
+- [[file:moppe-legacy.org][The Moppe legacy]] reads the predecessor engine's lighting, post-processing,
+  atmosphere, temporal reconstruction, and mesh shaders as source evidence
+  and a tuning library.  Backend architecture now lives on the Metal page.
 - [[file:field-notes-mp-units.org][Field notes on mp-units]] studies the abstractions beyond dimension in the
   live mp-units checkout: the point/absolute/delta model, two-axis quantity
   character, and logarithmic quantities as affine structure over a log

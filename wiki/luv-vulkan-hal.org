@@ -86,12 +86,14 @@ boundary, while =:luv/gpu= remains the convenient Vulkan-backed bundle.
 The =LUV= package still exports the generic GPU vocabulary alongside
 =vulkan-gpu-provider= and Vulkan-specific conditions.
 
-The aspiration to support Metal is therefore a direction rather than a tested
-contract.  One particularly important undecided point is shader input:
-=shader-module-descriptor= merely says =code=, while the only backend requires
-a vector of SPIR-V words.  It is not yet clear whether SPIR-V is intended to be
-the HAL shader language, a Vulkan-only input, or the product of some future
-portable shader layer.
+At this page's snapshot, Metal was a direction rather than a tested contract.
+That observation is now historical: #5A7QDE supplies a second provider and
+canvas-context implementation which presents through the shared command
+vocabulary.  It has already confirmed the source seam and exposed the next
+untested boundary.  =shader-module-descriptor= still merely says =code= while
+the Vulkan implementation requires SPIR-V words; #OV1AZO and #58IDSR now use
+the concrete Metal target to decide whether artifact kind belongs in that
+descriptor or behind a compiler-owned boundary.
 
 This arrangement is excellent for rapid vertical slices.  Its present cost is
 that a Vulkan implementation convenience can become part of the apparent HAL
