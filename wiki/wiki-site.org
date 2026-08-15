@@ -342,6 +342,24 @@ select together (dispatch on the relationship, not on one participant).
 - =render-layout (layout list)= draws: the general routine with roles, or a
   clause's name and =.rest= cell so a grid can align columns.
 
+Hand-written layouts are only hints for the standard forms whose lambda
+lists say too little (=let=, =cond=, =defmethod=, =loop=).  For everything
+else, luv's own macros above all, the layout is *derived from the real
+lambda list*, the way SLY's =slynk-indentation= derives indentation from
+macro arglists: =scripts/wiki introspect= loads the systems, resolves every
+operator symbol the corpus uses against its file's =in-package=, records
+its kind and =sb-introspect:function-lambda-list=, and writes
+[[file:arglists.sexp][arglists.sexp]], one readable form per operator, keyed by home package
+(2151 operators today).  From such a lambda list a =derived-layout= knows
+that what precedes =&body= is the head, that a destructuring pattern in a
+position makes that argument a clause (=with-block-content-storage
+((domain palette indices) chunk &body body)=), that =&key= marks where
+pairs begin, and, from SBCL's own parameter names, that =BINDINGS=,
+=DEFINITIONS=, or =SLOT-SPECS= mean a binding grid and =LAMBDA-LIST= or
+=VARS= a lambda list.  The file is committed, so the site renders without
+loading luv, and it is among =render-op='s inputs; run the pass again after
+adding or changing macros.
+
 Two rules apply across layouts.  A trailing run of =:keyword value=
 arguments is drawn pair by pair in a =.pair= container that never breaks
 between key and value; where the pairs are body forms, as in the options

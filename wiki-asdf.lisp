@@ -86,6 +86,11 @@ loading anything."
 (defun code-source-files ()
   (mapcar #'car (code-source-components)))
 
+(defun arglists-file (system)
+  "The introspected operator lambda lists the renderer reads, if present."
+  (let ((pathname (asdf:system-relative-pathname system "wiki/arglists.sexp")))
+    (and (probe-file pathname) (list pathname))))
+
 (defvar *source-cache* (make-hash-table :test 'equal)
   "Pathname namestring -> (write-date . source-file), so an unchanged file
 is not read again within one image.")
@@ -111,6 +116,7 @@ is not read again within one image.")
 
 (defun system-site (system)
   (let ((root (asdf:system-source-directory system)))
+    (load-arglists (merge-pathnames "wiki/arglists.sexp" root))
     (make-site (system-documents system)
                :source-files (code-sources :root root)
                :source-directory root)))
@@ -127,7 +133,8 @@ mentions and backlinks resolve across pages."
 can change the links and backlinks rendered here; so is every source file,
 whose definitions may reference this page's figures."
   (append (mapcar #'asdf:component-pathname (system-org-files (asdf:component-system c)))
-          (code-source-files)))
+          (code-source-files)
+          (arglists-file (asdf:component-system c))))
 
 (defmethod asdf:output-files ((o render-op) (c org-file))
   (values (list (merge-pathnames (make-pathname :name (asdf:component-name c) :type "html")
@@ -164,7 +171,8 @@ lands at images/x.png in the site."
 
 (defmethod asdf:input-files ((o render-op) (s asdf:system))
   (append (mapcar #'asdf:component-pathname (system-org-files s))
-          (code-source-files)))
+          (code-source-files)
+          (arglists-file s)))
 
 (defmethod asdf:output-files ((o render-op) (s asdf:system))
   "The figures index, the source index, and one page per source file."

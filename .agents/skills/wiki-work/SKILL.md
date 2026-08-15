@@ -34,6 +34,8 @@ scripts/wiki defs mesher        # definitions whose name contains a string
 scripts/wiki dangling           # mentions no figure resolves (pages and code)
 scripts/wiki ids 6              # fresh figure IDs no page uses
 scripts/wiki build              # render the site into build/wiki/
+scripts/wiki introspect         # refresh wiki/arglists.sexp (real lambda lists) after
+                                #   adding or changing macros; commit the file
 ```
 
 Start with `marks` and `toc` before choosing what to work on; use `figure`

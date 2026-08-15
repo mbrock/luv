@@ -18,19 +18,29 @@
 (defvar *build-output-translations* nil
   "ASDF_OUTPUT_TRANSLATIONS as seen when the executable was built.")
 
+(defvar *build-sbcl-home* nil
+  "SBCL's home directory at build time, where its contrib modules live.")
+
 (defun capture-asdf-configuration ()
   "Remember the ASDF environment of the build, so that the executable can
 find systems and their compiled files without the sbcl wrapper's
-environment.  Called by build-wiki.lisp before the image is dumped."
+environment, and SBCL's home so that (require :sb-concurrency) and other
+contribs still work from an executable outside SBCL's own directory.
+Called by build-wiki.lisp before the image is dumped."
   (setf *build-source-registry* (uiop:getenv "CL_SOURCE_REGISTRY")
-        *build-output-translations* (uiop:getenv "ASDF_OUTPUT_TRANSLATIONS")))
+        *build-output-translations* (uiop:getenv "ASDF_OUTPUT_TRANSLATIONS")
+        *build-sbcl-home* (sb-int:sbcl-homedir-pathname)))
 
 (defun restore-asdf-configuration ()
-  "Re-establish the build's ASDF configuration in the running executable
-unless the environment provides its own."
-  (when (and *build-output-translations* (null (uiop:getenv "ASDF_OUTPUT_TRANSLATIONS")))
+  "Re-establish the build's ASDF configuration in the running executable.
+The Nix shell sets a smaller CL_SOURCE_REGISTRY of its own (the sbcl wrapper
+adds the packaged systems only for sbcl processes), so the captured
+configuration is used whenever it exists."
+  (when (and *build-sbcl-home* (null (sb-int:sbcl-homedir-pathname)))
+    (setf sb-sys::*sbcl-homedir-pathname* *build-sbcl-home*))
+  (when *build-output-translations*
     (asdf:initialize-output-translations *build-output-translations*))
-  (when (and *build-source-registry* (null (uiop:getenv "CL_SOURCE_REGISTRY")))
+  (when *build-source-registry*
     (asdf:initialize-source-registry *build-source-registry*)))
 
 (defvar *root* nil
@@ -62,6 +72,7 @@ definition, which is harmless."
               (setf documents (append (remove "index" documents :key #'wiki:document-name :test-not #'string=)
                                       (remove "index" documents :key #'wiki:document-name :test #'string=)))
               (when code (ensure-systems))
+              (wiki::load-arglists (merge-pathnames "wiki/arglists.sexp" (root)))
               (wiki:make-site documents
                               :source-files (and code (wiki:code-sources :root (root)))
                               :source-directory (root))))))
@@ -306,6 +317,22 @@ Give page names to restrict."
               do (setf (gethash candidate used) t)
                  (format t "~A~%" candidate)
                  (return)))))
+
+(defparameter *introspection-systems* '("luv" "luv/luvcraft" "luv-wiki")
+  "Systems loaded before gathering operator lambda lists.")
+
+(define-command introspect (&rest systems)
+  "Load the luv systems into this process and write the real lambda lists
+of every operator the sources use to wiki/arglists.sexp, for the renderer's
+derived layouts.  Give system names to load others instead."
+  (ensure-systems)
+  (dolist (name (or systems *introspection-systems*))
+    (format t "~&loading ~A~%" name)
+    (asdf:load-system name))
+  (let* ((files (wiki:code-sources :root (root)))
+         (pathname (merge-pathnames "wiki/arglists.sexp" (root)))
+         (count (luv.wiki.introspect:write-arglists files pathname)))
+    (format t "~&~D operators written to ~A~%" count pathname)))
 
 (define-command build (&rest arguments)
   "Render the site into build/wiki/ with (asdf:make :luv/wiki)."

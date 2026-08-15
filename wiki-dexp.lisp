@@ -17,6 +17,10 @@
 (defvar *lisp-package* nil
   "The package prefix considered current while rendering, hidden on symbols.")
 
+(defun current-package-name ()
+  "The current package as a plain uppercase name, for operator lookups."
+  (and *lisp-package* (string-upcase (string-trim "#:\"" *lisp-package*))))
+
 (defvar *docstring-p* nil
   "True while rendering a string in documentation position.")
 
@@ -97,7 +101,7 @@ clauses, not calls."))
      (setf (gethash name *operator-layouts*) (make-instance ',class ,@initargs))))
 
 (define-layout ("defun" "defmacro" "defgeneric" "deftype" "define-modify-macro") lambda-layout :head-count 2)
-(define-layout ("lambda" "returning" "fn") lambda-layout :head-count 1)
+(define-layout ("lambda") lambda-layout :head-count 1)
 (define-layout ("defmethod") method-layout)
 (define-layout ("let" "let*" "flet" "labels" "macrolet" "symbol-macrolet" "handler-bind")
   bindings-layout :head-count 1 :bindings-index 1)
@@ -108,17 +112,14 @@ clauses, not calls."))
   spec-layout :head-count 1)
 (define-layout ("do" "do*") bindings-layout :head-count 2 :bindings-index 1)
 (define-layout ("defclass" "define-condition") bindings-layout :head-count 3 :bindings-index 3)
-(define-layout ("cond" "case" "ecase" "typecase" "etypecase" "handler-case"
-                "restart-case" "defstruct" "defpackage" "defsystem")
+(define-layout ("case" "ecase" "typecase" "etypecase" "handler-case" "restart-case")
   clauses-layout :head-count 1)
 (define-layout ("cond") clauses-layout :head-count 0)
-(define-layout ("defstruct" "defpackage" "defsystem" "define-application-frame") clauses-layout :head-count 1)
-(define-layout ("defvar" "defparameter" "defconstant" "deftest" "define-command"
-                "define-presentation-type" "declaim" "declare" "block" "prog1"
-                "when" "unless" "if" "unwind-protect" "eval-when" "with-html")
+(define-layout ("defstruct" "defpackage") clauses-layout :head-count 1)
+(define-layout ("defvar" "defparameter" "defconstant" "declaim" "declare" "block"
+                "prog1" "when" "unless" "if" "unwind-protect" "eval-when")
   body-layout :head-count 1)
-(define-layout ("progn" "with-html-string") body-layout :head-count 0)
-(define-layout ("define-presentation-method") body-layout :head-count 2)
+(define-layout ("progn") body-layout :head-count 0)
 (define-layout ("loop") loop-layout)
 
 (defparameter *loop-keywords*
@@ -132,9 +133,15 @@ clauses, not calls."))
 that only follow a naming convention, by inspecting the form: a WITH- form
 has one head argument; a DEF form whose second argument is a list is a
 lambda form; any other DEF form is a name followed by options."
-  (let ((name (string-downcase name))
-        (arguments (argument-children list)))
+  (let* ((name (string-downcase name))
+         (arguments (argument-children list))
+         (head (first arguments))
+         (facts (operator-facts name (or (and (typep head 'lisp-symbol)
+                                              (stringp (lisp-symbol-package head))
+                                              (lisp-symbol-package head))
+                                         (current-package-name)))))
     (or (gethash name *operator-layouts*)
+        (and facts (arglist-layout facts name))
         (cond ((starts-with "with-" name) (make-instance 'body-layout :head-count 1))
               ((and (starts-with "def" name) (typep (third arguments) 'lisp-list))
                (make-instance 'lambda-layout :head-count 2))
@@ -144,7 +151,10 @@ lambda form; any other DEF form is a name followed by options."
 (defgeneric list-layout (list role)
   (:documentation "The LAYOUT for LIST given the ROLE its parent assigned.")
   (:method ((list lisp-list) role)
-    (cond ((role-p role "bindings") (make-instance 'grid-layout))
+    (cond ((and (role-p role "bindings")
+                (some (lambda (c) (typep c 'lisp-list)) (element-children list)))
+           (make-instance 'grid-layout))
+          ((role-p role "bindings") (make-instance 'lambda-list-layout))
           ((role-p role "lambda-list") (make-instance 'lambda-list-layout))
           ((role-p role "clause") (make-instance 'clause-layout))
           ((role-p role "stacked-clause") (make-instance 'stacked-clause-layout))
@@ -223,6 +233,132 @@ under LAYOUT (comments are not counted and never asked), or NIL.")
          "row-start")
         (t nil)))
 
+;;; Layouts derived from real lambda lists (see wiki-introspect.lisp)
+
+(defvar *arglists* (make-hash-table :test 'equal)
+  "(PACKAGE . NAME) -> facts plist gathered by scripts/wiki introspect, and
+NAME -> facts for lookup without a package.")
+
+(defun load-arglists (pathname)
+  "Read the operator facts written by WRITE-ARGLISTS into *ARGLISTS*."
+  (clrhash *arglists*)
+  (when (probe-file pathname)
+    (with-open-file (in pathname)
+      (with-standard-io-syntax
+        (let ((*package* (find-package :cl-user))
+              (*read-eval* nil))
+          (loop for entry = (read in nil nil)
+                while entry
+                do (destructuring-bind ((package . name) &rest facts) entry
+                     (setf (gethash (cons package name) *arglists*) facts)
+                     (unless (gethash name *arglists*)
+                       (setf (gethash name *arglists*) facts))))))))
+  (hash-table-count *arglists*))
+
+(defun operator-facts (name package)
+  "The introspected facts for operator NAME in PACKAGE (a name or NIL)."
+  (let ((name (string-upcase name)))
+    (or (and package (gethash (cons (string-upcase package) name) *arglists*))
+        (gethash name *arglists*))))
+
+(defclass derived-layout (layout)
+  ((kind :initarg :kind :accessor layout-kind)
+   (name :initarg :name :initform nil :accessor layout-name)
+   (head-count :initarg :head-count :initform 0 :accessor layout-head-count)
+   (body-p :initarg :body-p :initform nil :accessor layout-body-p)
+   (pairs-start :initarg :pairs-start :initform nil :accessor layout-pairs-start
+                :documentation "Argument index where &KEY pairs begin, or NIL.")
+   (roles :initarg :roles :initform '() :accessor layout-roles
+          :documentation "Alist of (argument-index . role) from the lambda list:
+a destructuring pattern is a clause, a parameter named BINDINGS or SLOTS
+a binding grid, one named LAMBDA-LIST a lambda list.")
+   (body-role :initarg :body-role :initform "body" :accessor layout-body-role))
+  (:documentation "A layout computed from an operator's real lambda list."))
+
+(defun parameter-role (parameter)
+  "The role a parameter's name or shape suggests for the argument in its
+position: a destructuring pattern is a clause; a name that says BINDINGS or
+SLOTS is a binding grid; LAMBDA-LIST is a lambda list."
+  (cond ((consp parameter) "clause")
+        ((stringp parameter)
+         (cond ((search "LAMBDA-LIST" parameter) "lambda-list")
+               ((search "ARGLIST" parameter) "lambda-list")
+               ((member parameter '("ARGS" "VARS" "VARIABLES" "PARAMETERS") :test #'string=) "lambda-list")
+               ((search "BINDING" parameter) "bindings")
+               ((search "DEFINITIONS" parameter) "bindings")
+               ((search "SLOT" parameter) "bindings")
+               (t nil)))
+        (t nil)))
+
+(defun arglist-layout (facts &optional name)
+  "Derive a layout from FACTS, walking the lambda list at its base level."
+  (let ((kind (getf facts :kind))
+        (lambda-list (getf facts :lambda-list))
+        (index 0)
+        (roles '())
+        (body-p nil)
+        (pairs-start nil)
+        (body-role "body")
+        (state :required))
+    (loop with rest = lambda-list
+          while rest
+          do (let ((parameter (pop rest)))
+               (case parameter
+                 ((:&whole :&environment) (pop rest))
+                 (:&optional (setf state :optional))
+                 (:&aux (return))
+                 (:&key (setf pairs-start (1+ index)) (return))
+                 ((:&rest :&body)
+                  (let ((name (pop rest)))
+                    (when (or (eq parameter :&body) (member kind '(:macro :special-operator)))
+                      (setf body-p (or (eq parameter :&body) (member kind '(:macro :special-operator))))
+                      (when (and (stringp name)
+                                 (or (search "CLAUSE" name) (search "CASE" name)
+                                     (search "SLOT" name)))
+                        (setf body-role "body stacked-clause"))))
+                  ;; Anything after &rest/&body except &key does not count.
+                  (loop while (and rest (not (eq (first rest) :&key))) do (pop rest))
+                  (when (eq (first rest) :&key)
+                    (setf pairs-start (1+ index))
+                    (return)))
+                 (t
+                  (incf index)
+                  (let ((role (parameter-role (if (and (eq state :optional) (consp parameter))
+                                                  (first parameter)
+                                                  parameter))))
+                    (when role (push (cons index role) roles)))))))
+    (make-instance 'derived-layout
+                   :kind kind
+                   :name name
+                   :head-count index
+                   :body-p (and body-p t)
+                   :pairs-start pairs-start
+                   :roles (nreverse roles)
+                   :body-role body-role)))
+
+(defmethod child-role ((layout derived-layout) list index child)
+  (let ((entry (assoc index (layout-roles layout))))
+    (cond ((and entry (typep child 'lisp-list)) (cdr entry))
+          ;; The keyword options of a defining macro stack as rows.
+          ((and (layout-pairs-start layout) (>= index (layout-pairs-start layout))
+                (eq (layout-kind layout) :macro)
+                (layout-name layout) (starts-with "def" (layout-name layout)))
+           "body")
+          ((and (layout-body-p layout) (> index (layout-head-count layout))
+                (or (null (layout-pairs-start layout)) (< index (layout-pairs-start layout))))
+           (if (typep child 'lisp-list) (layout-body-role layout) "body"))
+          ((= index 0) (and (typep child 'lisp-symbol) "operator"))
+          (t nil))))
+
+(defgeneric layout-pairs-index (layout arguments)
+  (:documentation "The argument index where :keyword value pairs begin under
+LAYOUT, or NIL; the default guesses from the arguments themselves.")
+  (:method ((layout layout) arguments)
+    (unless (typep layout '(or loop-layout lambda-list-layout grid-layout))
+      (keyword-pairs-start arguments)))
+  (:method ((layout derived-layout) arguments)
+    (or (layout-pairs-start layout) (call-next-method))))
+
 (defun lambda-list-of (layout list)
   "The lambda list of LIST under LAYOUT, if the layout has one."
   (typecase layout
@@ -271,8 +407,7 @@ drawn where they occur and are not counted.  A trailing run of :keyword
 value pairs is drawn pair by pair, each in a .pair container that keeps
 the key with its value; the pair takes the value's role."
   (let* ((arguments (argument-children list))
-         (pairs-start (unless (typep layout '(or loop-layout lambda-list-layout grid-layout))
-                        (keyword-pairs-start arguments)))
+         (pairs-start (layout-pairs-index layout arguments))
          (index -1)
          (previous nil)
          (remaining (element-children list)))

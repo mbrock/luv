@@ -38,8 +38,18 @@ component and operation that make the wiki a buildable system."
 mentions, definitions, and the site build from a shell."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on (#:luv-wiki)
+  :depends-on (#:luv-wiki
+               #:luv-wiki/introspect)
   :components ((:file "wiki-cli"))
   :build-operation "program-op"
   :build-pathname "build/wiki-cli"
   :entry-point "luv.wiki.cli:main")
+
+(asdf:defsystem #:luv-wiki/introspect
+  :description "Gathers real operator lambda lists from a loaded image for the
+dexp renderer's derived layouts."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on (#:luv-wiki
+               (:require #:sb-introspect))
+  :components ((:file "wiki-introspect")))
