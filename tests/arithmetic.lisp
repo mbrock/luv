@@ -270,3 +270,124 @@
            :distance :dimension :length :unit :metre)))
     (ok (signals (math:interpret-quantity-specification nil target)
                  'math:quantity-operation-error))))
+
+;;; The three-way affine character: point, absolute, difference.  These are
+;;; the executable claims of the V3 operation table in wiki figure #LNRY72.
+
+(math:define-quantity :light-level :kind :proportion :non-negative-p t)
+(math:define-quantity :altitude :kind :length :character :point)
+
+(defun operation-reason (operator &rest specifications)
+  (handler-case
+      (progn (apply #'math:derive-quantity-specification operator specifications)
+             nil)
+    (math:quantity-operation-error (condition)
+      (math:quantity-operation-error-reason condition))))
+
+(deftest non-negative-definitions-default-to-absolute-character
+  (let ((level (math:make-quantity-specification :light-level :unit :one))
+        (altitude (math:make-quantity-specification :altitude :unit :metre))
+        (plain (math:make-quantity-specification :distance :unit :metre)))
+    (ok (eq :absolute (math:quantity-specification-character level)))
+    (ok (math:quantity-specification-absolute-p level))
+    (ok (math:quantity-specification-non-negative-p level))
+    (ok (eq :point (math:quantity-specification-character altitude)))
+    (ok (math:quantity-specification-affine-p altitude))
+    (ok (eq :difference (math:quantity-specification-character plain)))
+    (ok (math:quantity-specification-difference-p plain))
+    ;; The historical :affine-p spelling still means point, and an explicit
+    ;; :affine-p nil on a declared point yields a difference of that quantity.
+    (ok (eq :point
+            (math:quantity-specification-character
+             (math:make-quantity-specification :distance :unit :metre
+                                               :affine-p t))))
+    (ok (eq :difference
+            (math:quantity-specification-character
+             (math:make-quantity-specification :altitude :unit :metre
+                                               :affine-p nil))))
+    (ok (signals (math:make-quantity-specification :distance :unit :metre
+                                                   :affine-p t
+                                                   :character :absolute)
+                 'error))))
+
+(deftest absolute-and-difference-addition-follows-the-cone-rules
+  (let* ((level (math:make-quantity-specification :light-level :unit :one))
+         (delta (math:make-quantity-specification :light-level :unit :one
+                                                  :character :difference))
+         (sum (math:derive-quantity-specification '+ level level))
+         (shifted (math:derive-quantity-specification '+ level delta))
+         (gap (math:derive-quantity-specification '- level level))
+         (reduced (math:derive-quantity-specification '- level delta))
+         (signed (math:derive-quantity-specification '- delta level)))
+    (ok (eq :absolute (math:quantity-specification-character sum)))
+    (ok (eq :absolute (math:quantity-specification-character shifted)))
+    (ok (eq :difference (math:quantity-specification-character gap)))
+    (ok (eq :absolute (math:quantity-specification-character reduced)))
+    (ok (eq :difference (math:quantity-specification-character signed)))
+    ;; A derived difference is anonymous-in-character but named, so it no
+    ;; longer promises non-negativity.
+    (ok (not (math:quantity-specification-non-negative-p gap)))))
+
+(deftest points-mix-with-amounts-and-differences-asymmetrically
+  (let* ((altitude (math:make-quantity-specification :altitude :unit :metre))
+         (height (math:make-quantity-specification :height :unit :metre
+                                                   :character :absolute))
+         (climb (math:make-quantity-specification :altitude :unit :metre
+                                                  :character :difference))
+         (raised (math:derive-quantity-specification '+ altitude climb))
+         (lowered (math:derive-quantity-specification '- altitude climb))
+         (span (math:derive-quantity-specification '- altitude altitude)))
+    (ok (eq :point (math:quantity-specification-character raised)))
+    (ok (eq :point (math:quantity-specification-character lowered)))
+    (ok (eq :difference (math:quantity-specification-character span)))
+    (ok (eq :cannot-add-points (operation-reason '+ altitude altitude)))
+    (ok (eq :cannot-subtract-point-from-amount
+            (operation-reason '- climb altitude)))
+    (ok (eq :cannot-scale-affine-point (operation-reason '* altitude height)))
+    (ok (eq :cannot-negate-point (operation-reason '- altitude)))))
+
+(deftest products-keep-absoluteness-only-when-every-factor-has-it
+  (let* ((level (math:make-quantity-specification :light-level :unit :one))
+         (delta (math:make-quantity-specification :light-level :unit :one
+                                                  :character :difference))
+         (metres (math:make-quantity-specification :distance :unit :metre
+                                                   :character :absolute))
+         (number (math:make-quantity-specification nil))
+         (product (math:derive-quantity-specification '* level metres))
+         (ratio (math:derive-quantity-specification '/ level level))
+         (mixed (math:derive-quantity-specification '* level delta))
+         (rate (math:derive-quantity-specification '/ delta metres))
+         (scaled (math:derive-quantity-specification '* number level))
+         (scaled-delta (math:derive-quantity-specification '* number delta)))
+    (ok (eq :absolute (math:quantity-specification-character product)))
+    (ok (eq :absolute (math:quantity-specification-character ratio)))
+    (ok (eq :difference (math:quantity-specification-character mixed)))
+    (ok (eq :difference (math:quantity-specification-character rate)))
+    ;; A bare number is a scale factor and preserves the other character.
+    (ok (eq :absolute (math:quantity-specification-character scaled)))
+    (ok (eq :difference (math:quantity-specification-character scaled-delta)))))
+
+(deftest negating-an-amount-is-never-an-amount
+  (let ((level (math:make-quantity-specification :light-level :unit :one))
+        (delta (math:make-quantity-specification :light-level :unit :one
+                                                 :character :difference)))
+    (ok (eq :cannot-negate-amount (operation-reason '- level)))
+    (ok (eq :difference
+            (math:quantity-specification-character
+             (math:derive-quantity-specification '- delta))))))
+
+(deftest interpretation-may-promote-a-difference-to-an-absolute
+  (let* ((level (math:make-quantity-specification :light-level :unit :one))
+         (gap (math:derive-quantity-specification '- level level))
+         (altitude (math:make-quantity-specification :altitude :unit :metre))
+         (metres (math:make-quantity-specification :distance :unit :metre)))
+    (ok (eq :absolute
+            (math:quantity-specification-character
+             (math:interpret-quantity-specification gap level))))
+    ;; No other character crossing is an interpretation.
+    (ok (signals (math:interpret-quantity-specification level gap)
+                 'math:quantity-operation-error))
+    (ok (signals (math:interpret-quantity-specification metres altitude)
+                 'math:quantity-operation-error))
+    (ok (signals (math:interpret-quantity-specification altitude metres)
+                 'math:quantity-operation-error))))

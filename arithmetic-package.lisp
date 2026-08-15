@@ -59,6 +59,8 @@
            #:quantity-definition-name
            #:quantity-definition-kind
            #:quantity-definition-components
+           #:quantity-definition-non-negative-p
+           #:quantity-definition-character
            #:quantity-definition-for
            #:define-quantity
            #:quantity-specification
@@ -68,7 +70,11 @@
            #:quantity-specification-unit
            #:quantity-specification-kind
            #:quantity-specification-tensor-order
+           #:quantity-specification-character
            #:quantity-specification-affine-p
+           #:quantity-specification-absolute-p
+           #:quantity-specification-difference-p
+           #:quantity-specification-non-negative-p
            #:quantity-specification=
            #:dimensionless-quantity-specification-p
            #:quantity-projection

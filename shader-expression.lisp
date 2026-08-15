@@ -747,8 +747,8 @@ silent loss of meaning."
                      (math:unit-expression=
                       (math:quantity-specification-unit specification)
                       (math:quantity-specification-unit first))
-                     (eq (math:quantity-specification-affine-p specification)
-                         (math:quantity-specification-affine-p first)))
+                     (eq (math:quantity-specification-character specification)
+                         (math:quantity-specification-character first)))
           (error 'shader-language-error
                  :form source-form
                  :reason :invalid-quantity-operation
@@ -760,7 +760,7 @@ silent loss of meaning."
        :dimension (math:quantity-specification-dimension first)
        :unit (math:quantity-specification-unit first)
        :tensor-order 1
-       :affine-p (math:quantity-specification-affine-p first)))))
+       :character (math:quantity-specification-character first)))))
 
 (defmethod infer-shader-call-quantity-specification
     ((operator (eql 'vec2)) operands source-form)
@@ -1284,9 +1284,23 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
              :details (shader-type-name type)))
     (if (= count 1) 0 1)))
 
+(defun declared-character (affine-p character)
+  "Merge the historical :AFFINE-P and the general :CHARACTER source keywords
+into one designator for PARSE-DECLARATION-QUANTITY-SPECIFICATION."
+  (or character (and affine-p t)))
+
+(defun declared-character-options (character)
+  "Translate a source character designator into constructor options.
+
+NIL leaves the character to the named definition; T is the historical
+:AFFINE-P spelling of a point; a keyword names the character directly."
+  (cond ((null character) nil)
+        ((eq character t) (list :character :point))
+        (t (list :character character))))
+
 (defun parse-declaration-quantity-specification
-    (quantity dimension unit affine-p type source-form)
-  (when (or quantity dimension unit affine-p)
+    (quantity dimension unit character type source-form)
+  (when (or quantity dimension unit character)
     (with-shader-quantity-errors
         (source-form :invalid-quantity-declaration)
       (apply
@@ -1294,8 +1308,8 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
        (append
         (and dimension (list :dimension dimension))
         (list :unit unit
-              :tensor-order (shader-type-tensor-order type source-form)
-              :affine-p affine-p))))))
+              :tensor-order (shader-type-tensor-order type source-form))
+        (declared-character-options character))))))
 
 (defun parse-declaration-quantity-layout
     (components type source-form &optional whole)
@@ -1312,7 +1326,8 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
               (selector &key quantity
                         (dimension nil dimension-supplied-p)
                         (unit nil unit-supplied-p)
-                        (affine-p nil affine-supplied-p))
+                        (affine-p nil affine-supplied-p)
+                        (character nil character-supplied-p))
               component-form
             (unless quantity
               (error 'shader-language-error
@@ -1345,10 +1360,10 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
                        unit
                        (and whole
                             (math:quantity-specification-unit whole)))
-                   (if affine-supplied-p
-                       affine-p
-                       (and whole
-                            (math:quantity-specification-affine-p whole)))
+                   (cond (character-supplied-p character)
+                         (affine-supplied-p (and affine-p :point))
+                         (whole (math:quantity-specification-character whole))
+                         (t nil))
                    projection-type component-form))
                  projections)))))
         (math:make-quantity-layout extent (nreverse projections))))))
@@ -1492,16 +1507,17 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
     ((operator (eql 'interpret)) form environment)
   (declare (ignore operator))
   (destructuring-bind
-      (name operand-form &key quantity dimension unit affine-p) form
+      (name operand-form &key quantity dimension unit affine-p character) form
     (declare (ignore name))
-    (unless (or quantity dimension unit affine-p)
+    (unless (or quantity dimension unit affine-p character)
       (error 'shader-language-error
              :form form :reason :missing-quantity-interpretation))
     (let* ((operand (parse-shader-expression operand-form environment))
            (type (shader-expression-type operand))
            (interpretation
              (parse-declaration-quantity-specification
-              quantity dimension unit affine-p type form)))
+              quantity dimension unit (declared-character affine-p character)
+              type form)))
       (with-shader-quantity-errors
           (form :invalid-quantity-interpretation)
         (math:interpret-quantity-specification
@@ -1552,9 +1568,9 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
 (defun parse-raw-quantity-boundary
     (class form environment &key constant-only-p)
   (destructuring-bind
-      (name operand-form &key quantity dimension unit affine-p) form
+      (name operand-form &key quantity dimension unit affine-p character) form
     (declare (ignore name))
-    (unless (or quantity dimension unit affine-p)
+    (unless (or quantity dimension unit affine-p character)
       (error 'shader-language-error
              :form form :reason :missing-quantity-interpretation))
     (let* ((operand (parse-shader-expression operand-form environment))
@@ -1575,7 +1591,8 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
        :type type
        :quantity-specification
        (parse-declaration-quantity-specification
-        quantity dimension unit affine-p type form)
+        quantity dimension unit (declared-character affine-p character)
+        type form)
        :source-form form))))
 
 (defmethod parse-shader-operator-call
@@ -1609,7 +1626,7 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
 (defun parse-interface-declaration (form direction)
   (destructuring-bind
       (name type &key location built-in quantity dimension unit affine-p
-                       components)
+                       character components)
       form
     (unless (or (and (typep location '(integer 0 *)) (null built-in))
                 (and (null location) built-in))
@@ -1619,7 +1636,8 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
     (let* ((resolved-type (find-shader-type type form))
            (specification
              (parse-declaration-quantity-specification
-              quantity dimension unit affine-p resolved-type form)))
+              quantity dimension unit (declared-character affine-p character)
+              resolved-type form)))
       (make-instance 'shader-interface-variable
                      :name name
                      :type resolved-type
@@ -1636,7 +1654,7 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
   (destructuring-bind
       (name type &key (set 0) binding members
                        sample-quantity sample-dimension sample-unit
-                       sample-affine-p sample-components)
+                       sample-affine-p sample-character sample-components)
       form
     (unless (and (typep set '(integer 0 *))
                  (typep binding '(integer 0 *)))
@@ -1659,7 +1677,8 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
                       collect
                       (destructuring-bind
                           (member-name member-type
-                           &key quantity dimension unit affine-p components)
+                           &key quantity dimension unit affine-p character
+                             components)
                           member-form
                         (let ((resolved-type
                                 (find-shader-type member-type member-form)))
@@ -1674,7 +1693,8 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
                                    :details member-type))
                           (let ((specification
                                   (parse-declaration-quantity-specification
-                                   quantity dimension unit affine-p
+                                   quantity dimension unit
+                                   (declared-character affine-p character)
                                    resolved-type member-form)))
                             (make-instance
                              'shader-uniform-member
@@ -1697,7 +1717,8 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
                  (and sample-type
                       (parse-declaration-quantity-specification
                        sample-quantity sample-dimension sample-unit
-                       sample-affine-p sample-type form))))
+                       (declared-character sample-affine-p sample-character)
+                       sample-type form))))
           (unless (and (shader-type-opaque-kind resolved-type)
                        (not (eq (shader-type-opaque-kind resolved-type)
                                 :uniform-block)))
@@ -1707,7 +1728,7 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
             (error 'shader-language-error
                    :form form :reason :members-on-opaque-resource))
           (when (and (or sample-quantity sample-dimension sample-unit
-                         sample-affine-p sample-components)
+                         sample-affine-p sample-character sample-components)
                      (null sample-type))
             (error 'shader-language-error
                    :form form :reason :sample-semantics-on-non-texture))

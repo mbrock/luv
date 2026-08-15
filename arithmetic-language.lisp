@@ -341,17 +341,24 @@
             (dimension nil dimension-supplied-p)
             (unit nil unit-supplied-p)
             (tensor-order default-tensor-order tensor-order-supplied-p)
-            (affine-p nil affine-p-supplied-p))
+            (affine-p nil affine-p-supplied-p)
+            (character nil character-supplied-p))
       options
     (when (or quantity-supplied-p dimension-supplied-p unit-supplied-p
-              tensor-order-supplied-p affine-p-supplied-p)
+              tensor-order-supplied-p affine-p-supplied-p
+              character-supplied-p)
       (with-arithmetic-quantity-errors
           (source-form :invalid-quantity-declaration)
+        ;; Only a stated character reaches the constructor, so an unstated
+        ;; one falls to the named definition's default rather than being
+        ;; forced to a difference by the source layer.
         (apply
          #'math:make-quantity-specification quantity
          (append
           (and dimension-supplied-p (list :dimension dimension))
-          (list :unit unit :tensor-order tensor-order :affine-p affine-p)))))))
+          (list :unit unit :tensor-order tensor-order)
+          (and affine-p-supplied-p (list :affine-p affine-p))
+          (and character-supplied-p (list :character character))))))))
 
 (defun infer-arithmetic-call-quantity-specification
     (operator operands source-form)

@@ -295,7 +295,44 @@ absolutes.  The moment it does — a light-level delta for temporal filtering,
 an exposure difference, a signed AO adjustment — the missing case becomes a
 silent semantic hole rather than a checked error.  #SYUACW is the probe.
 
-* NEXT Generalize affine-p to a three-valued character
+* Constraints are marks the author places, not costs the compiler hides
+:PROPERTIES:
+:ID: PLRP3A
+:END:
+
+Three positions on the source's runtime machinery, taken so that #LNRY72
+does not silently import mp-units' cost model into a zero-cost lowering:
+
+- *Non-negativity is a compile-time fact by default.*  A =non-negative=
+  specifier participates in the character algebra — it decides what an
+  absolute may become, and it is what a later interpretation may promise —
+  but no lowering emits a check for it.  Runtime enforcement, where wanted,
+  is an explicit optional *safe mode* per definition or per compilation:
+  a Lisp realization can signal; a shader realization has no exception
+  path, so its safe mode would need an intentional channel such as a
+  diagnostic output lane, an NaN/sentinel poison, or a debug-only clamp,
+  and that channel is itself a design to record before assuming it.
+  Silent per-operation clamps in production shaders are exactly the
+  unreasoned checking this rule forbids.
+- *Wrap and clamp are explicit source marks.*  The system should know
+  what a range policy means — that a wrapped coordinate is periodic, that
+  a clamped one saturates — so it can derive and check the result's
+  meaning, but the author says /where/ the wrap or clamp happens.  A
+  =wrap= or =clamp= boundary form in the arithmetic language, carrying its
+  range and yielding a specification the checker understands, is the
+  natural shape; texture addressing modes and periodic sun angles are
+  the first clients.  Range policies attached to origins and enforced at
+  every mutation, as the source does, are not adopted.
+- *Origins and frame projections are central, not peripheral.*  Working
+  in the wrong coordinate space — world, view, clip, light/shadow, screen,
+  texture — is the classic graphics bug, and it is a "same space"
+  question the source answers with origin identity.  The semantic maps
+  of #SM4DFB are already luv's explicit crossings; giving point
+  specifications an origin, so that two positions subtract only when
+  their spaces agree and a map is the only way across, is the next
+  design step after #SYUACW rather than part of it.
+
+* DONE Generalize affine-p to a three-valued character
 :PROPERTIES:
 :ID: SYUACW
 :END:
@@ -303,35 +340,73 @@ silent semantic hole rather than a checked error.  #SYUACW is the probe.
 Intent: replace the boolean =affine-p= on =quantity-specification= with a
 character of =:point=, =:absolute=, or =:difference=, add a
 =:non-negative= specifier at the definition level, and implement the V3
-operation table (#LNRY72) in =additive-pair= and =multiplicative-pair= —
-without changing any generated shader module.
+operation table (#LNRY72) in the arithmetic core — without changing any
+generated shader module.
+
+Evidence:
+
+- =quantity-specification= carries a =character= slot; =affine-p= survives
+  as a reader (character is =:point=) and as a constructor keyword.
+  =quantity-definition= gains =non-negative-p= and a default =character=;
+  =define-quantity= accepts =:non-negative-p= (which defaults the character
+  to =:absolute=) and =:character=, and components inherit both.  An
+  unstated character falls to the definition's default, and every quantity
+  in =luvcraft/quantities.lisp= is unannotated, so every existing
+  specification is a difference exactly as before.
+- =additive-pair= implements the three-way table; =product-character= makes
+  products and quotients absolute only when every factor is; a bare number
+  preserves the other operand's character; =interpret= permits the one
+  deliberate crossing, difference to absolute, and no other.  Negating an
+  absolute signals =:cannot-negate-amount=: luv chose the error branch of
+  the source's open question so demotion is a visible mark.
+- =tests/arithmetic.lisp= gained six executable claims covering the
+  definition defaults and the historical =:affine-p= spelling, cone
+  addition and subtraction, point asymmetries, the multiplicative table,
+  negation, and interpretation-as-promotion.  The full fresh-process suite
+  passes (18 arithmetic, 4 language, 5 lisp, 13 core, 31 spir-v, 34
+  luvcraft), and strict parinfer is clean.
+- The language and shader frontends pass =:affine-p= and the new
+  =:character= keyword only when stated, so definitions can supply
+  defaults; a =declared-character= shim keeps every existing source form
+  valid.  =make shader-validate= in a fresh SBCL regenerated all seven
+  production modules byte-identical to their pre-change hashes with
+  =spirv-val= passing, and =make smoke= at HEAD gives MD5
+  =edc597168a3ec79a04c6d2af53c5b1a5= both with and without the change (the
+  earlier recorded =226c4f…= predates the shadow commits and was stale).
+
+Done when: satisfied — the algebra is in place and inert for the current
+vocabulary.  Annotating luvcraft's amounts, which changes what production
+materials mean, is #9ZK7Q7.
+
+* NEXT Declare luvcraft's amounts absolute and non-negative
+:PROPERTIES:
+:ID: 9ZK7Q7
+:END:
+
+Intent: with the character algebra inert-by-default (#SYUACW), make the
+block-world vocabulary state its truth: =:opacity=, =:ambient-occlusion=,
+=:sky-light-level=, =:block-light-level=, =:material-emission=,
+=:fog-amount=, =:day-factor=, =:linear-rgb=, =:view-distance=,
+=:world-distance=, and =:shadow-filter-radius= are non-negative absolutes;
+=:world-position=, =:shadow-uv=, =:texture-uv=, =:shadow-depth= are points
+by definition rather than by per-site =:affine-p t=.
 
 Evidence to gather:
 
-- =tests/arithmetic.lisp= gains the executable claims: absolute minus
-  absolute is a difference; absolute plus difference stays absolute;
-  absolute times difference is a difference while absolute times absolute
-  and absolute over absolute stay absolute; scaling or negating a point
-  remains an error; negating an absolute is never an absolute (whether it
-  errors or demotes is chosen and recorded, since the source leaves it
-  open); a =dot=-derived magnitude may be interpreted as an absolute.
-- =non-negative= is a definition-level specifier, inherited by component
-  quantities of the same kind, never derived for anonymous results, and
-  consulted by the additive rules; the check-site list from #LNRY72 is
-  the test plan.
-- =luvcraft/quantities.lisp= declares its amounts absolute and non-negative
-  at the definition, and the ABI declarations drop per-site =:affine-p t=
-  where the definition now supplies the character; the seven production
-  shader modules and the smoke MD5 remain byte-identical.
+- Each annotated definition, with the ABI declarations dropping per-site
+  =:affine-p t= where the definition now supplies it.
+- The production materials re-checked: every place they subtract two
+  absolutes or interpret a difference back to an amount is found and either
+  accepted as an explicit promotion or rewritten; the seven modules stay
+  byte-identical since the character is erased at lowering.
 - One deliberately wrong expression — negating =:opacity=, or adding two
-  =:world-position= points — fails at parse time with provenance, where
-  the first is not caught today.
-- A note on backward compatibility for =:affine-p t= as a spelling of
-  =:character :point= during the transition.
+  =:world-position= points — failing at parse time with provenance, where
+  the first is not caught before this mark.
+- The smoke MD5 unchanged from =edc597168a3ec79a04c6d2af53c5b1a5=.
 
-Done when: the specification carries a three-valued character with the V3
-rules, luvcraft's vocabulary states its characters at the definition, the
-new claims are tests, and generated shader code is unchanged.
+Done when: the vocabulary is annotated, the materials compile under the
+stricter algebra with byte-identical output, and the two wrong expressions
+are tests.
 
 * Tensor order is independent of dimension
 :PROPERTIES:

@@ -303,6 +303,11 @@ identity remains visible here; conversions are requested separately."
            (push name seen)
         finally (return nil)))
 
+(deftype quantity-character ()
+  "The affine role of a value: a location, a non-negative amount from a true
+zero, or a signed difference between two of either."
+  '(member :point :absolute :difference))
+
 (defclass quantity-definition ()
   ((name
     :initarg :name
@@ -313,9 +318,23 @@ identity remains visible here; conversions are requested separately."
    (components
     :initarg :components
     :initform nil
-    :reader quantity-definition-components))
+    :reader quantity-definition-components)
+   ;; Non-negativity is a declared fact about the named quantity, never derived
+   ;; from an equation: a defining equation captures dimension, not sign
+   ;; domain.  It makes the quantity's default character :absolute and lets a
+   ;; later interpretation promise a non-negative amount.  No lowering emits a
+   ;; check for it.
+   (non-negative-p
+    :initarg :non-negative-p
+    :initform nil
+    :reader quantity-definition-non-negative-p)
+   (character
+    :initarg :character
+    :initform :difference
+    :reader quantity-definition-character))
   (:documentation
-   "A domain quantity name, its unit kind, and homogeneous components."))
+   "A domain quantity name, its unit kind, homogeneous components, and the
+affine character its specifications take unless a use site says otherwise."))
 
 (defgeneric quantity-definition-for (name)
   (:documentation "Return the inspectable definition of quantity NAME, or NIL."))
@@ -324,7 +343,8 @@ identity remains visible here; conversions are requested separately."
   (declare (ignore name))
   nil)
 
-(defun make-quantity-definition (name kind &optional components)
+(defun make-quantity-definition
+    (name kind &key components non-negative-p (character nil character-supplied-p))
   (unless (and (symbolp name) (symbolp kind)
                (quantity-kind-definition-for kind))
     (error "Quantity ~S needs a defined symbolic kind, not ~S." name kind))
@@ -333,19 +353,41 @@ identity remains visible here; conversions are requested separately."
                (not (member name components)))
     (error "Quantity ~S needs distinct symbolic component names, not ~S."
            name components))
-  (make-instance 'quantity-definition
-                 :name name :kind kind :components (copy-list components)))
+  (let ((character (cond (character-supplied-p character)
+                         (non-negative-p :absolute)
+                         (t :difference))))
+    (unless (typep character 'quantity-character)
+      (error "Quantity ~S needs a character of :POINT, :ABSOLUTE, or :DIFFERENCE, not ~S."
+             name character))
+    (when (and non-negative-p (eq character :point))
+      (error "Quantity ~S cannot be both non-negative and a point." name))
+    (make-instance 'quantity-definition
+                   :name name :kind kind :components (copy-list components)
+                   :non-negative-p (not (null non-negative-p))
+                   :character character)))
 
-(defmacro define-quantity (name &key kind components)
-  "Define quantity NAME and any homogeneous COMPONENTS as members of KIND."
-  `(progn
-     (define-semantic-definition quantity-definition-for ,name
-       (make-quantity-definition ,name ,kind ',components))
-     ,@(loop for component in components
-             collect
-             `(define-semantic-definition quantity-definition-for ,component
-                (make-quantity-definition ,component ,kind)))
-     ',name))
+(defmacro define-quantity (name &key kind components non-negative-p
+                                     (character nil character-supplied-p))
+  "Define quantity NAME and any homogeneous COMPONENTS as members of KIND.
+
+NON-NEGATIVE-P declares a non-negative amount and defaults its character to
+:ABSOLUTE.  CHARACTER may state :POINT, :ABSOLUTE, or :DIFFERENCE explicitly.
+Components inherit both."
+  (let ((character-options
+          (and character-supplied-p `(:character ,character))))
+    `(progn
+       (define-semantic-definition quantity-definition-for ,name
+         (make-quantity-definition ,name ,kind
+                                   :components ',components
+                                   :non-negative-p ,non-negative-p
+                                   ,@character-options))
+       ,@(loop for component in components
+               collect
+               `(define-semantic-definition quantity-definition-for ,component
+                  (make-quantity-definition ,component ,kind
+                                            :non-negative-p ,non-negative-p
+                                            ,@character-options)))
+       ',name)))
 
 (defun unit-designator-quantity-kind (unit)
   "Return the kind constraint of one named UNIT, or NIL for a compound unit."
@@ -497,20 +539,72 @@ identity remains visible here; conversions are requested separately."
     :initarg :tensor-order
     :initform 0
     :reader quantity-specification-tensor-order)
-   (affine-p
-    :initarg :affine-p
-    :initform nil
-    :reader quantity-specification-affine-p))
+   (character
+    :initarg :character
+    :initform :difference
+    :reader quantity-specification-character))
   (:documentation
    "The semantic meaning of a value, separate from its machine representation."))
 
+(defun quantity-specification-affine-p (specification)
+  "Whether SPECIFICATION is an affine point; kept as the historical spelling."
+  (eq (quantity-specification-character specification) :point))
+
+(defun quantity-specification-absolute-p (specification)
+  (eq (quantity-specification-character specification) :absolute))
+
+(defun quantity-specification-difference-p (specification)
+  (eq (quantity-specification-character specification) :difference))
+
+(defun quantity-specification-non-negative-p (specification)
+  "Whether SPECIFICATION's named definition declares a non-negative amount.
+
+Only a named absolute can promise this; anonymous derived results never do."
+  (let* ((name (quantity-specification-name specification))
+         (definition (and name (quantity-definition-for name))))
+    (and definition
+         (quantity-specification-absolute-p specification)
+         (quantity-definition-non-negative-p definition))))
+
+(defun resolve-quantity-character
+    (name character character-supplied-p affine-p affine-p-supplied-p)
+  "Choose a specification character from an explicit CHARACTER, the historical
+AFFINE-P spelling, or the named definition's default."
+  (cond
+    ((and character-supplied-p affine-p-supplied-p
+          (not (eq (eq character :point) (not (null affine-p)))))
+     (error "Quantity ~S was given contradictory :CHARACTER ~S and :AFFINE-P ~S."
+            name character affine-p))
+    (character-supplied-p
+     (unless (typep character 'quantity-character)
+       (error "A quantity character must be :POINT, :ABSOLUTE, or :DIFFERENCE, not ~S."
+              character))
+     character)
+    ((and affine-p-supplied-p affine-p) :point)
+    (t
+     ;; The definition supplies the default.  An explicit :AFFINE-P NIL says
+     ;; only "not a point": a declared absolute stays absolute, a declared
+     ;; point becomes a difference of that quantity.
+     (let* ((definition (and name (quantity-definition-for name)))
+            (default (if definition
+                         (quantity-definition-character definition)
+                         :difference)))
+       (if (and affine-p-supplied-p (eq default :point))
+           :difference
+           default)))))
+
 (defun make-quantity-specification
     (name &key (dimension nil dimension-supplied-p) unit
-               (tensor-order 0) affine-p)
+               (tensor-order 0)
+               (affine-p nil affine-p-supplied-p)
+               (character nil character-supplied-p))
   (unless (typep tensor-order '(integer 0 *))
     (error "A tensor order must be a non-negative integer, not ~S."
            tensor-order))
-  (let* ((unit-expression (make-unit-expression unit))
+  (let* ((character (resolve-quantity-character
+                     name character character-supplied-p
+                     affine-p affine-p-supplied-p))
+         (unit-expression (make-unit-expression unit))
          (unit-declares-dimension-p
            (or (and unit (symbolp unit))
                (not (unitless-p unit-expression))))
@@ -548,17 +642,18 @@ identity remains visible here; conversions are requested separately."
                    :kind (and quantity-definition
                               (quantity-definition-kind quantity-definition))
                    :tensor-order tensor-order
-                   :affine-p (not (null affine-p)))))
+                   :character character)))
 
 (defmethod print-object ((specification quantity-specification) stream)
   (print-unreadable-object (specification stream :type t)
-    (format stream "~S~@[ <~S>~] ~A [~A] order ~D~:[~; point~]"
+    (format stream "~S~@[ <~S>~] ~A [~A] order ~D~@[ ~(~A~)~]"
             (quantity-specification-name specification)
             (quantity-specification-kind specification)
             (quantity-specification-dimension specification)
             (quantity-specification-unit specification)
             (quantity-specification-tensor-order specification)
-            (quantity-specification-affine-p specification))))
+            (let ((character (quantity-specification-character specification)))
+              (and (not (eq character :difference)) character)))))
 
 (defun quantity-specification= (left right)
   (and (eq (quantity-specification-name left)
@@ -569,8 +664,8 @@ identity remains visible here; conversions are requested separately."
                          (quantity-specification-unit right))
        (= (quantity-specification-tensor-order left)
           (quantity-specification-tensor-order right))
-       (eq (quantity-specification-affine-p left)
-           (quantity-specification-affine-p right))))
+       (eq (quantity-specification-character left)
+           (quantity-specification-character right))))
 
 (defun dimensionless-quantity-specification-p
     (specification &optional tensor-order)
@@ -589,13 +684,24 @@ identity remains visible here; conversions are requested separately."
               (dimension (quantity-specification-dimension source))
               (unit (quantity-specification-unit source))
               (tensor-order (quantity-specification-tensor-order source))
-              (affine-p (quantity-specification-affine-p source)))
-  "Copy SOURCE, replacing only the explicitly supplied semantic fields."
+              (character (quantity-specification-character source)
+                         character-supplied-p)
+              (affine-p nil affine-p-supplied-p))
+  "Copy SOURCE, replacing only the explicitly supplied semantic fields.
+
+CHARACTER is the general control; the historical :AFFINE-P keyword still
+sets or clears the point character."
   (make-quantity-specification name
                                :dimension dimension
                                :unit unit
                                :tensor-order tensor-order
-                               :affine-p affine-p))
+                               :character (cond (character-supplied-p character)
+                                                ((and affine-p-supplied-p affine-p)
+                                                 :point)
+                                                ((and affine-p-supplied-p
+                                                      (eq character :point))
+                                                 :difference)
+                                                (t character))))
 
 (defclass quantity-projection ()
   ((positions
@@ -767,21 +873,36 @@ publish ordered component names; no default silently calls one axis the whole."
                             (quantity-specification-unit right))
     (quantity-operation-error operator (list left right)
                               :different-units))
-  (let ((left-point-p (quantity-specification-affine-p left))
-        (right-point-p (quantity-specification-affine-p right)))
-    (ecase operator
-      (+
-       (when (and left-point-p right-point-p)
-         (quantity-operation-error operator (list left right)
-                                   :cannot-add-points))
-       (copy-quantity-specification
-        left :affine-p (or left-point-p right-point-p)))
-      (-
-       (when (and (not left-point-p) right-point-p)
-         (quantity-operation-error operator (list left right)
-                                   :cannot-subtract-point-from-difference))
-       (copy-quantity-specification
-        left :affine-p (and left-point-p (not right-point-p)))))))
+  ;; The affine table over point, absolute, and difference.  A point is a
+  ;; location; an absolute is an amount from a true zero, forming a cone; a
+  ;; difference is signed.  Adding a difference to an absolute keeps the zero
+  ;; anchor, so the result stays absolute; subtracting two absolutes yields a
+  ;; signed difference, and only an explicit interpretation recovers an
+  ;; absolute from it.
+  (let ((left-character (quantity-specification-character left))
+        (right-character (quantity-specification-character right)))
+    (flet ((result (character)
+             (copy-quantity-specification left :character character))
+           (fail (reason)
+             (quantity-operation-error operator (list left right) reason)))
+      (ecase operator
+        (+
+         (cond ((and (eq left-character :point) (eq right-character :point))
+                (fail :cannot-add-points))
+               ((or (eq left-character :point) (eq right-character :point))
+                (result :point))
+               ((or (eq left-character :absolute) (eq right-character :absolute))
+                (result :absolute))
+               (t (result :difference))))
+        (-
+         (cond ((eq left-character :point)
+                (result (if (eq right-character :point) :difference :point)))
+               ((eq right-character :point)
+                (fail :cannot-subtract-point-from-amount))
+               ((and (eq left-character :absolute)
+                     (eq right-character :difference))
+                (result :absolute))
+               (t (result :difference))))))))
 
 (defun product-tensor-order (operator left right)
   (let ((left-order (quantity-specification-tensor-order left))
@@ -793,22 +914,34 @@ publish ordered component names; no default silently calls one axis the whole."
            (quantity-operation-error operator (list left right)
                                      :incompatible-tensor-orders)))))
 
+(defun product-character (left right)
+  "Products and quotients of two absolutes remain absolute; any signed factor
+makes the result a difference.  Points never enter these operations."
+  (if (and (eq (quantity-specification-character left) :absolute)
+           (eq (quantity-specification-character right) :absolute))
+      :absolute
+      :difference))
+
 (defun multiplicative-pair (operator left right)
   (when (or (quantity-specification-affine-p left)
             (quantity-specification-affine-p right))
     (quantity-operation-error operator (list left right)
                               :cannot-scale-affine-point))
+  ;; A bare number is a pure scale factor and preserves the other operand's
+  ;; character, so twice an amount is still an amount.
   (cond ((scalar-number-specification-p left) right)
         ((scalar-number-specification-p right) left)
         (t
-         (derived-specification
-          (multiply-dimensions
-           (quantity-specification-dimension left)
-           (quantity-specification-dimension right))
-          (multiply-unit-expressions
-           (quantity-specification-unit left)
-           (quantity-specification-unit right))
-          (product-tensor-order operator left right)))))
+         (copy-quantity-specification
+          (derived-specification
+           (multiply-dimensions
+            (quantity-specification-dimension left)
+            (quantity-specification-dimension right))
+           (multiply-unit-expressions
+            (quantity-specification-unit left)
+            (quantity-specification-unit right))
+           (product-tensor-order operator left right))
+          :character (product-character left right)))))
 
 (defun compatible-pair (operator left right)
   (unless (quantity-specification= left right)
@@ -825,8 +958,12 @@ publish ordered component names; no default silently calls one axis the whole."
 
 This is a semantic interpretation, never a numerical unit conversion.  An
 already named quantity may only retain its name; anonymous derived results may
-acquire one when their dimension, exact unit, tensor order, and affine
-character agree with INTERPRETATION."
+acquire one when their dimension, exact unit, and tensor order agree with
+INTERPRETATION.  Character must agree too, with one deliberate exception: a
+signed difference may be interpreted as an absolute.  That is the explicit
+promotion the affine algebra otherwise never performs — the author asserts
+the amount is non-negative, and no lowering checks it (#PLRP3A).  Points
+never cross to or from the other characters here."
   (unless (and derived
                (or (null (quantity-specification-name derived))
                    (eq (quantity-specification-name derived)
@@ -839,8 +976,10 @@ character agree with INTERPRETATION."
                 (quantity-specification-unit interpretation))
                (= (quantity-specification-tensor-order derived)
                   (quantity-specification-tensor-order interpretation))
-               (eq (quantity-specification-affine-p derived)
-                   (quantity-specification-affine-p interpretation)))
+               (let ((from (quantity-specification-character derived))
+                     (to (quantity-specification-character interpretation)))
+                 (or (eq from to)
+                     (and (eq from :difference) (eq to :absolute)))))
     (quantity-operation-error 'interpret (list derived interpretation)
                               :incompatible-interpretation))
   interpretation)
@@ -889,8 +1028,15 @@ character.  It is a linear unit conversion, not a semantic interpretation."
     (quantity-operation-error operator operands :missing-operands))
   (if (= (length operands) 1)
       (let ((operand (first operands)))
-        (when (quantity-specification-affine-p operand)
-          (quantity-operation-error operator operands :cannot-negate-point))
+        ;; Negating an amount is never an amount.  The source leaves open
+        ;; whether it errors or demotes to a difference; luv errors, so the
+        ;; demotion is a visible mark (subtract from zero, or interpret) rather
+        ;; than a silent character change.
+        (case (quantity-specification-character operand)
+          (:point
+           (quantity-operation-error operator operands :cannot-negate-point))
+          (:absolute
+           (quantity-operation-error operator operands :cannot-negate-amount)))
         operand)
       (reduce (lambda (left right) (additive-pair operator left right))
               (rest operands) :initial-value (first operands))))
@@ -907,14 +1053,16 @@ character.  It is a linear unit conversion, not a semantic interpretation."
       (quantity-operation-error operator operands :cannot-divide-affine-point))
     (if (scalar-number-specification-p denominator)
         numerator
-        (derived-specification
-         (divide-dimensions
-          (quantity-specification-dimension numerator)
-          (quantity-specification-dimension denominator))
-         (divide-unit-expressions
-          (quantity-specification-unit numerator)
-          (quantity-specification-unit denominator))
-         (product-tensor-order operator numerator denominator)))))
+        (copy-quantity-specification
+         (derived-specification
+          (divide-dimensions
+           (quantity-specification-dimension numerator)
+           (quantity-specification-dimension denominator))
+          (divide-unit-expressions
+           (quantity-specification-unit numerator)
+           (quantity-specification-unit denominator))
+          (product-tensor-order operator numerator denominator))
+         :character (product-character numerator denominator)))))
 
 (defmethod derive-quantity-specification ((operator (eql 'dot)) &rest operands)
   (unless (= (length operands) 2)
