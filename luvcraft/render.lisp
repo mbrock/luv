@@ -260,104 +260,143 @@ the frame uniform cannot silently diverge between shader and host."
   (values))
 
 (defun encode-luvcraft-frame
-    (session surface-texture encoder &key readback-buffer)
+    (session surface-texture encoder &key readback-buffer sample)
   ;; The canvas callback is the ownership boundary for all GPU replacement.
   ;; MOP notifications from SLY workers have only marked these artifacts dirty.
-  (refresh-luvcraft-shaders session)
-  (let* ((products (refresh-luvcraft-mesh session))
+  (with-luvcraft-frame-timing
+      (sample luvcraft-frame-sample-shader-refresh-seconds)
+    (refresh-luvcraft-shaders session))
+  (let* ((products
+           (with-luvcraft-frame-timing
+               (sample luvcraft-frame-sample-mesh-publication-seconds)
+             (refresh-luvcraft-mesh session)))
          (extent (canvas-extent (luvcraft-session-context session)))
          (frame (luvcraft-frame-state session surface-texture)))
-    (write-buffer
-     (luvcraft-frame-uniform-buffer frame)
-     (frame-uniform-data session (first extent) (second extent)))
-    (let ((pass
-            (begin-render-pass
-             encoder
-             (make-render-pass-descriptor
-              :color-attachments nil
-              :depth-stencil-attachment
-              `(:view ,(luvcraft-session-shadow-depth-view session)
-                :depth-load-op :clear :depth-store-op :store
-                :depth-clear-value 1.0)))))
-      (set-pipeline pass (luvcraft-session-shadow-native-pipeline session))
-      (set-bind-group pass 0 (luvcraft-frame-shadow-bind-group frame))
-      (dolist (product products)
-        (let ((mesh (luvcraft-chunk-product-mesh product)))
-          (when (plusp (block-mesh-vertex-count mesh))
-            (set-vertex-buffer
-             pass 0 (luvcraft-chunk-product-vertex-buffer product))
-            (draw pass (block-mesh-vertex-count mesh)))))
-      (end-pass pass))
-    (prepare-luvcraft-shadow-map-sampling session encoder)
-    (let ((pass
-            (begin-render-pass
-             encoder
-             (make-render-pass-descriptor
-              :color-attachments
-              `((:view ,(luvcraft-session-color-view session)
-                 :load-op :clear :store-op :store
-                 :clear-value #(0.43 0.68 0.92 1.0)))
-              :depth-stencil-attachment
-              `(:view ,(luvcraft-session-depth-view session)
-                :depth-load-op :clear :depth-store-op :discard
-                :depth-clear-value 1.0)))))
-      ;; The sky triangle fills the frame before block geometry, with depth
-      ;; writes disabled; the clear value remains only a safe fallback.
-      (set-pipeline pass (luvcraft-session-sky-native-pipeline session))
-      (set-bind-group pass 0 (luvcraft-frame-scene-bind-group frame))
-      (set-vertex-buffer
-       pass 0 (luvcraft-session-sky-vertex-buffer session))
-      (draw pass 3)
-      (set-pipeline pass (luvcraft-session-pipeline session))
-      (dolist (product products)
-        (let ((mesh (luvcraft-chunk-product-mesh product)))
-          (when (plusp (block-mesh-vertex-count mesh))
-            (set-vertex-buffer
-             pass 0 (luvcraft-chunk-product-vertex-buffer product))
-            (draw pass (block-mesh-vertex-count mesh)))))
-      (set-pipeline pass (luvcraft-session-crosshair-native-pipeline session))
-      (set-vertex-buffer
-       pass 0 (luvcraft-session-crosshair-vertex-buffer session))
-      (draw pass +block-world-crosshair-vertex-count+)
-      (end-pass pass))
-    (when readback-buffer
+    (when sample
+      (let ((mesh-vertices 0)
+            (mesh-draws 0))
+        (dolist (product products)
+          (let ((vertices
+                  (block-mesh-vertex-count
+                   (luvcraft-chunk-product-mesh product))))
+            (when (plusp vertices)
+              (incf mesh-draws)
+              (incf mesh-vertices vertices))))
+        (setf (luvcraft-frame-sample-chunk-count sample) (length products)
+              (luvcraft-frame-sample-draw-count sample)
+              (+ 2 (* 2 mesh-draws))
+              (luvcraft-frame-sample-vertex-count sample)
+              (+ +block-world-crosshair-vertex-count+ 3
+                 (* 2 mesh-vertices)))))
+    (with-luvcraft-frame-timing
+        (sample luvcraft-frame-sample-uniform-seconds)
+      (write-buffer
+       (luvcraft-frame-uniform-buffer frame)
+       (frame-uniform-data session (first extent) (second extent))))
+    (with-luvcraft-frame-timing
+        (sample luvcraft-frame-sample-shadow-encode-seconds)
+      (let ((pass
+              (begin-render-pass
+               encoder
+               (make-render-pass-descriptor
+                :color-attachments nil
+                :depth-stencil-attachment
+                `(:view ,(luvcraft-session-shadow-depth-view session)
+                  :depth-load-op :clear :depth-store-op :store
+                  :depth-clear-value 1.0)))))
+        (set-pipeline pass (luvcraft-session-shadow-native-pipeline session))
+        (set-bind-group pass 0 (luvcraft-frame-shadow-bind-group frame))
+        (dolist (product products)
+          (let ((mesh (luvcraft-chunk-product-mesh product)))
+            (when (plusp (block-mesh-vertex-count mesh))
+              (set-vertex-buffer
+               pass 0 (luvcraft-chunk-product-vertex-buffer product))
+              (draw pass (block-mesh-vertex-count mesh)))))
+        (end-pass pass))
+      (prepare-luvcraft-shadow-map-sampling session encoder))
+    (with-luvcraft-frame-timing
+        (sample luvcraft-frame-sample-scene-encode-seconds)
+      (let ((pass
+              (begin-render-pass
+               encoder
+               (make-render-pass-descriptor
+                :color-attachments
+                `((:view ,(luvcraft-session-color-view session)
+                   :load-op :clear :store-op :store
+                   :clear-value #(0.43 0.68 0.92 1.0)))
+                :depth-stencil-attachment
+                `(:view ,(luvcraft-session-depth-view session)
+                  :depth-load-op :clear :depth-store-op :discard
+                  :depth-clear-value 1.0)))))
+        ;; The sky triangle fills the frame before block geometry, with depth
+        ;; writes disabled; the clear value remains only a safe fallback.
+        (set-pipeline pass (luvcraft-session-sky-native-pipeline session))
+        (set-bind-group pass 0 (luvcraft-frame-scene-bind-group frame))
+        (set-vertex-buffer
+         pass 0 (luvcraft-session-sky-vertex-buffer session))
+        (draw pass 3)
+        (set-pipeline pass (luvcraft-session-pipeline session))
+        (dolist (product products)
+          (let ((mesh (luvcraft-chunk-product-mesh product)))
+            (when (plusp (block-mesh-vertex-count mesh))
+              (set-vertex-buffer
+               pass 0 (luvcraft-chunk-product-vertex-buffer product))
+              (draw pass (block-mesh-vertex-count mesh)))))
+        (set-pipeline pass (luvcraft-session-crosshair-native-pipeline session))
+        (set-vertex-buffer
+         pass 0 (luvcraft-session-crosshair-vertex-buffer session))
+        (draw pass +block-world-crosshair-vertex-count+)
+        (end-pass pass)))
+    (with-luvcraft-frame-timing
+        (sample luvcraft-frame-sample-surface-copy-encode-seconds)
+      (when readback-buffer
+        (encode
+         encoder
+         (make-gpu-copy-texture-to-buffer-command
+          :source (luvcraft-session-color-texture session)
+          :destination readback-buffer)))
       (encode
        encoder
-       (make-gpu-copy-texture-to-buffer-command
+       (make-gpu-copy-texture-command
         :source (luvcraft-session-color-texture session)
-        :destination readback-buffer)))
-    (encode
-     encoder
-     (make-gpu-copy-texture-command
-      :source (luvcraft-session-color-texture session)
-      :destination surface-texture))))
+        :destination surface-texture)))))
 
-(defun render-luvcraft-frame (session timestamp)
+(defun render-luvcraft-frame (session timestamp &optional sample)
   (when (luvcraft-session-running-p session)
-    (let* ((last (luvcraft-session-last-frame-time session))
-           (seconds (if last (min 0.1 (max 0.0 (- timestamp last))) 0.0)))
-      (setf (luvcraft-session-last-frame-time session) timestamp)
-      (advance-sky-clock (luvcraft-session-sky-clock session) seconds)
-      (let ((player (luvcraft-session-player session)))
-        (when player
-          (incf (luvcraft-session-physics-accumulator session) seconds)
-          (loop while (>= (luvcraft-session-physics-accumulator session)
-                          +player-physics-step+)
-                do (step-block-world-player
-                    player (luvcraft-session-world session)
-                    (luvcraft-session-camera session)
-                    (luvcraft-session-pressed-keys session)
-                    +player-physics-step+
-                    :jump-p (luvcraft-session-jump-requested-p session))
-                   (setf (luvcraft-session-jump-requested-p session) nil)
-                   (decf (luvcraft-session-physics-accumulator session)
-                         +player-physics-step+))))
-      (maintain-luvcraft-residency session)
-      (evict-luvcraft-products session)
-      (present-canvas-frame
-       (luvcraft-session-context session)
-       (lambda (surface-texture encoder)
-         (encode-luvcraft-frame session surface-texture encoder))))))
+    (with-luvcraft-frame-timing
+        (sample luvcraft-frame-sample-frame-seconds)
+      (with-luvcraft-frame-timing
+          (sample luvcraft-frame-sample-simulation-seconds)
+        (let* ((last (luvcraft-session-last-frame-time session))
+               (seconds
+                 (if last (min 0.1 (max 0.0 (- timestamp last))) 0.0)))
+          (setf (luvcraft-session-last-frame-time session) timestamp)
+          (advance-sky-clock (luvcraft-session-sky-clock session) seconds)
+          (let ((player (luvcraft-session-player session)))
+            (when player
+              (incf (luvcraft-session-physics-accumulator session) seconds)
+              (loop while (>= (luvcraft-session-physics-accumulator session)
+                              +player-physics-step+)
+                    do (step-block-world-player
+                        player (luvcraft-session-world session)
+                        (luvcraft-session-camera session)
+                        (luvcraft-session-pressed-keys session)
+                        +player-physics-step+
+                        :jump-p (luvcraft-session-jump-requested-p session))
+                       (setf (luvcraft-session-jump-requested-p session) nil)
+                       (decf (luvcraft-session-physics-accumulator session)
+                             +player-physics-step+))))))
+      (with-luvcraft-frame-timing
+          (sample luvcraft-frame-sample-streaming-seconds)
+        (maintain-luvcraft-residency session)
+        (evict-luvcraft-products session))
+      (with-luvcraft-frame-timing
+          (sample luvcraft-frame-sample-presentation-seconds)
+        (present-canvas-frame
+         (luvcraft-session-context session)
+         (lambda (surface-texture encoder)
+           (encode-luvcraft-frame
+            session surface-texture encoder :sample sample)))))))
 
 (defmethod handle-canvas-event
     ((session luvcraft-session) canvas (event canvas-key-press-event))

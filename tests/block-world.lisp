@@ -3,6 +3,23 @@
 
 (in-package #:luv/luvcraft/tests)
 
+(deftest frame-performance-summary-is-comparison-friendly
+  (let ((samples (make-array 4)))
+    (dotimes (index 4)
+      (let ((sample (luv::make-luvcraft-frame-sample)))
+        (setf (luv::luvcraft-frame-sample-frame-seconds sample)
+              (/ (1+ index) 1000d0)
+              (aref samples index) sample)))
+    (let ((benchmark
+            (luv::make-luvcraft-frame-benchmark :samples samples)))
+      (multiple-value-bind (median p95 mean maximum)
+          (luv::luvcraft-frame-metric-summary
+           benchmark #'luv::luvcraft-frame-sample-frame-seconds)
+        (ok (= 2.5d0 median))
+        (ok (= 4d0 p95))
+        (ok (= 2.5d0 mean))
+        (ok (= 4d0 maximum))))))
+
 (defclass gated-production-request (luv::production-request)
   ((gate :initarg :gate :reader gated-production-request-gate)
    (value :initarg :value :reader gated-production-request-value)))

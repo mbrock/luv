@@ -642,6 +642,12 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:refresh-luvcraft-shaders
            #:start-luvcraft
            #:stop-luvcraft
+           #:luvcraft-frame-benchmark
+           #:luvcraft-frame-benchmark-samples
+           #:luvcraft-frame-benchmark-completion-seconds
+           #:benchmark-luvcraft-frame-performance
+           #:print-luvcraft-frame-benchmark
+           #:write-luvcraft-frame-benchmark-csv
            #:capture-luvcraft-screenshot
            #:capture-hidden-luvcraft-screenshot
            #:capture-hidden-luvcraft-frames

@@ -1,6 +1,9 @@
 .DEFAULT_GOAL := all
 
-.PHONY: all luvcraft run test parinfer-check shader-validate msl-validate smoke metal-smoke mcluv wiki wiki-cli objective-c-probe metal-clear metal-shader metal-pipeline metal-draw clean
+LUVCRAFT_BENCHMARK_FRAMES ?= 120
+LUVCRAFT_BENCHMARK_CSV ?= build/luvcraft-metal-benchmark.csv
+
+.PHONY: all luvcraft run test parinfer-check shader-validate msl-validate smoke metal-smoke metal-benchmark mcluv wiki wiki-cli objective-c-probe metal-clear metal-shader metal-pipeline metal-draw clean
 
 all: luvcraft
 
@@ -59,6 +62,10 @@ smoke: luvcraft
 metal-smoke: luvcraft
 	mkdir -p build
 	MTL_DEBUG_LAYER=1 nix develop -c ./build/luvcraft --metal-smoke-test build/luvcraft-metal-smoke.png
+
+metal-benchmark: luvcraft
+	mkdir -p build
+	nix develop -c ./build/luvcraft --metal-benchmark $(LUVCRAFT_BENCHMARK_FRAMES) $(LUVCRAFT_BENCHMARK_CSV)
 
 mcluv:
 	nix develop -c sbcl --script build-mcluv.lisp

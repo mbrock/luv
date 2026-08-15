@@ -5,12 +5,13 @@
 (in-package #:luvcraft)
 
 (defun usage (&optional (stream *standard-output*))
-  (format stream "Usage: luvcraft [--help | --metal | --smoke-test PNG | --metal-smoke-test PNG]~%")
+  (format stream "Usage: luvcraft [--help | --metal | --smoke-test PNG | --metal-smoke-test PNG | --metal-benchmark [FRAMES [CSV]]]~%")
   (format stream "~%")
   (format stream "With no arguments, open the interactive block world.~%")
   (format stream "--metal opens the interactive world with the Metal 4 backend.~%")
   (format stream "--smoke-test renders one hidden Vulkan frame and exits.~%")
-  (format stream "--metal-smoke-test renders one hidden Metal 4 frame and exits.~%"))
+  (format stream "--metal-smoke-test renders one hidden Metal 4 frame and exits.~%")
+  (format stream "--metal-benchmark measures a fixed, fully resident Metal world.~%"))
 
 (defun run-interactive (&optional provider)
   "Run luvcraft until its native window closes."
@@ -36,6 +37,19 @@
    pathname :provider (or provider luv:*gpu-provider*))
   (format t "Wrote ~A~%" (truename pathname)))
 
+(defun parse-frame-count (argument)
+  (let ((count (parse-integer argument :junk-allowed t)))
+    (unless (and count (plusp count)
+                 (string= argument (format nil "~D" count)))
+      (error "Frame count must be a positive integer, not ~S." argument))
+    count))
+
+(defun run-metal-benchmark (&optional frame-count pathname)
+  (luv:benchmark-luvcraft-frame-performance
+   :frame-count (if frame-count (parse-frame-count frame-count) 120)
+   :csv-pathname (or (and pathname (pathname pathname))
+                     #P"build/luvcraft-metal-benchmark.csv")))
+
 (defun dispatch (arguments)
   (cond
     ((null arguments)
@@ -54,6 +68,9 @@
      (run-smoke-test
       (pathname (second arguments))
       (make-instance 'luv:metal-gpu-provider)))
+    ((and (<= 1 (length arguments) 3)
+          (string= (first arguments) "--metal-benchmark"))
+     (run-metal-benchmark (second arguments) (third arguments)))
     (t
      (usage *error-output*)
      (error "Invalid luvcraft arguments: ~{~A~^ ~}" arguments))))

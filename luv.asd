@@ -459,11 +459,13 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
                              (:file "mesher")
                              (:file "simulation")
                              (:file "sky")
+                             (:file "frame-performance")
                              (:file "live-pipeline")
                              (:file "app")
                              (:file "streaming")
                              (:file "render")
                              (:file "capture")
+                             (:file "benchmark")
                              (:file "gazetteer"))))
   :in-order-to ((asdf:test-op (asdf:test-op #:luv/luvcraft/tests))))
 
