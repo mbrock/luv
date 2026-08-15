@@ -150,16 +150,18 @@ hardware capability every development machine has.  Reading moppe alongside
 luv's stack suggests the port is smaller than it first appears.
 
 - The shader story is the easy half, unusually.  Luv's
-  =shader-specification= objects lower through a typed graph to SPIR-V —
-  the hard, binary target.  An MSL backend is the same lowering emitting
-  C-like text, a far more forgiving target than SPIR-V assembly.  Material
-  specifications stay backend-neutral; only assembly differs.
+  =shader-specification= objects are already the typed semantic graph above
+  SPIR-V.  An MSL backend can lower that graph directly to target-specific
+  C-like text rather than translating the already SPIR-V-shaped module.
+  Material specifications stay shared; target lowering and its provenance
+  product differ.  #LVKEYO makes that boundary precise.
 - The API choreography — pipeline descriptors, residency, drawable
   acquisition, depth formats, MetalFX — is worked out in
   =moppe/render/metal/metal_renderer.mm= (~7000 lines of Objective-C++,
   itself an argument for driving the Objective-C runtime from Lisp
-  instead).  Moppe also has a WebGPU renderer, giving two HAL shapes to
-  compare against #L7C4GM-adjacent boundary questions.
+  instead).  #JSKLEI develops the bridge as a foreign object system rather
+  than a list of Metal wrappers.  Moppe also has a WebGPU renderer, giving two
+  HAL shapes to compare against #L7C4GM-adjacent boundary questions.
 - The target is Metal 4 directly, not Metal 3 with Metal 4 later.  An
   earlier draft of this page advised the reverse; #HXUGEA records why that
   caution was backwards for this codebase.  All development machines run
@@ -239,25 +241,23 @@ Done when: the crystal-at-night and low-sun-forest captures show exposure,
 tonemap, bloom, and shafts composing in linear light, each stage a live
 material with its constants on inspectable uniform lanes.
 
-* IDEA A Metal backend for the shader lowering
+* TODO Join the MSL lowering to a Metal pipeline
 :PROPERTIES:
 :ID: DR3V60
 :END:
 
-Intent: emit MSL from the existing shader-lowering graph as a second
-assembly target, as the first concrete step toward a Metal 4 HAL
-(#HXUGEA) that can reach mesh shaders; keep material specifications
-backend-neutral.
+Intent: after the independent bridge and MSL proofs in
+[[file:objective-c-and-metal.org][the native Metal path]], join them as the first complete Metal 4 pipeline
+without changing the mathematical material specifications.
 
-Evidence to gather:
+Evidence:
 
-- One material (the block fragment specification) emitted as MSL,
-  compiled — ideally through a runtime =MTL4Compiler= library build to
-  prove the live loop — and diffed behaviorally against the SPIR-V path.
-- A note on which expression-language constructs assume SPIR-V (image
-  ops, builtins) and what the neutral core actually is.
+- #3FW8Z5 isolates the typed Objective-C message substrate; #5A7QDE owns the
+  SDL/CAMetalLayer presentation proof; #58IDSR lowers the unchanged block
+  fragment specification directly to MSL.
+- The current Vulkan live-pipeline artifact already specifies the
+  last-known-good and frame-boundary publication behavior to preserve.
 
-Done when: the same =shader-specification-for= methods drive both
-assemblers, and the wiki records which capabilities (mesh shaders, EDR,
-the explicit compilation API) motivated the split with pointers into
-moppe's working uses.
+Done when: #PH57K5 is complete: the same =shader-specification-for= method
+drives both live backends, an invalid Metal edit preserves the previous
+pipeline, and a pinned Metal capture can be compared with Vulkan.

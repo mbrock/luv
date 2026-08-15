@@ -115,6 +115,9 @@ The following are starting paths rather than a table of settled doctrine.
 - [[file:mathematical-shaders.org][Mathematical shaders as live Lisp objects]] records the typed expression
   language above the literal SPIR-V assembler, its deterministic CLOS
   lowering, and the McCLIM presentation browser connecting source to SSA.
+- [[file:objective-c-and-metal.org][Objective-C interop and the native Metal path]] separates SDL hosting,
+  a Lisp-shaped Objective-C bridge, direct MSL lowering from the mathematical
+  shader graph, and the small proofs that can join them into a Metal 4 backend.
 - [[file:completion-frontier.org][The queue frontier and modern-capabilities decision]] records the adoption
   of Vulkan 1.4, timeline semaphores, and a per-queue completion frontier
   that captures command dependencies, defers destruction, and makes public

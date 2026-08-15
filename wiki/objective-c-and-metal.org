@@ -1,0 +1,479 @@
+#+title: Objective-C interop and the native Metal path
+#+startup: overview
+
+* Three seams, not one backend rewrite
+:PROPERTIES:
+:ID: 4M91DG
+:END:
+
+A native Metal experiment in luv contains three separable questions:
+
+1. Which system owns the window, input, and application event loop?
+2. How does Lisp participate in Apple's Objective-C object system?
+3. How does the mathematical shader language produce Metal Shading Language?
+
+They should meet eventually, but none requires the others to be solved in
+advance.  The smallest useful architecture is:
+
+#+begin_example
+SDL canvas and events
+        |
+        | SDL_MetalView / borrowed CAMetalLayer
+        v
+Metal canvas context ---- Objective-C declarations ---- libobjc + Metal
+        |                              |
+        |                              `---- tiny native help for hard ABI forms
+        v
+luv GPU protocol
+        ^
+        |
+typed shader specification
+        |\
+        | `---- MSL lowering ---- MTL4Compiler
+        `------ SPIR-V lowering - Vulkan
+#+end_example
+
+This is a path beside the working Vulkan backend, not a flag day.  The Vulkan
+renderer remains the executable reference while each seam acquires its own
+proof.  The motivation and Metal 4 correspondence inherited from moppe live in
+#NABRMK and #HXUGEA; this page narrows those observations into work luv can
+start.
+
+* SDL remains the platform shell
+:PROPERTIES:
+:ID: SODRMA
+:END:
+
+The current [[file:../canvas/api.lisp][canvas protocol]] already separates a native place from a GPU
+presentation relationship.  [[file:../canvas/sdl.lisp][=sdl-canvas=]] owns the window, event translation,
+main-thread dispatch, pointer mode, size, and clock.  The Vulkan-specific
+surface and swapchain belong to [[file:../canvas/vulkan.lisp][=vulkan-canvas-context=]].  That division is
+almost exactly what the Metal path needs.
+
+The pinned SDL 3.4.12 headers provide
+[[https://wiki.libsdl.org/SDL3/SDL_Metal_CreateView][=SDL_Metal_CreateView=]], =SDL_Metal_DestroyView=, and
+[[https://wiki.libsdl.org/SDL3/SDL_Metal_GetLayer][=SDL_Metal_GetLayer=]].  On macOS the view is an =NSView= backed by a
+=CAMetalLayer=; SDL returns the layer as a borrowed pointer and leaves assigning
+its Metal device to the application.  These calls are main-thread-only, which
+fits =call-on-sdl-canvas-thread=: on Darwin that path already reaches the Cocoa
+main thread.
+
+The ownership should therefore be concrete:
+
+- =sdl-canvas= continues to own the SDL window and input lifecycle;
+- =metal-canvas-context= owns the =SDL_MetalView= and destroys it before SDL
+  destroys the window;
+- the context borrows the view's =CAMetalLayer= pointer;
+- the Metal device, queue, compiler, drawables, and submission resources are
+  owned according to the GPU/backend lifecycle, not by SDL.
+
+One current detail needs alteration rather than abstraction: =run-sdl-canvas=
+always creates the window with =:vulkan=.  A native canvas should not commit to
+one presentation API before =make-canvas-context= sees a provider.  The first
+experiment can establish whether that flag is harmless to
+=SDL_Metal_CreateView=, but the intended boundary is for Vulkan and Metal
+context creation to request only their own surface machinery.  Replacing SDL
+with =NSWindow= is an independent later experiment; it is not part of proving
+Metal.
+
+* Objective-C is a foreign object system, not a wrapper list
+:PROPERTIES:
+:ID: JSKLEI
+:END:
+
+Apple's [[https://developer.apple.com/metal/cpp/][metal-cpp]] is a direct, header-only C++ mapping of the Objective-C
+Metal API.  It is useful evidence and perhaps a test oracle, but putting a
+handwritten C function in front of every metal-cpp member would make luv own a
+second mechanical spelling of Metal.  The interesting smaller substrate is
+the Objective-C runtime itself: classes, selectors, object pointers, declared
+method signatures, messages, and explicit ownership.
+
+[[https://www.lispworks.com/documentation/lw81/objc/objc-introduction-3.htm][LispWorks' Objective-C interface]] is the conceptual precedent.  Its ordinary
+=invoke= operation accepts an object or class, a complete selector name, and
+arguments.  Its wider interface covers selectors, structures, autorelease
+pools, retain/release, protocols, and even Lisp implementations of
+Objective-C classes and methods.  Luv need not reproduce that mature surface
+before drawing, but it demonstrates that Objective-C can be treated as a
+foreign dynamic object system rather than a library requiring hundreds of
+bespoke wrappers.
+
+The meaningful boundary objects should be inspectable CLOS instances:
+
+- an Objective-C class or protocol declaration names foreign behavior;
+- a method declaration owns the selector and exact argument/result ABI;
+- an Objective-C object wrapper owns or borrows one pointer explicitly;
+- Metal objects specialize luv's GPU protocols while retaining their native
+  identity for inspection.
+
+Selectors themselves are interned runtime identities.  A declaration can
+cache the result of =sel_registerName=, but behavior should remain in ordinary
+generic functions and methods rather than in a hidden registry.  Dense shader
+data, vertex bytes, and argument-table entries remain dense data; they do not
+become CLOS objects per element.
+
+* Declarations generate typed messages
+:PROPERTIES:
+:ID: WB5XQN
+:END:
+
+A pleasant call may eventually read:
+
+#+begin_src lisp
+(objc:invoke encoder
+             "drawPrimitives:vertexStart:vertexCount:"
+             :triangle 0 3)
+#+end_src
+
+The selector string alone is not enough to call =objc_msgSend= correctly.
+The caller must use the exact native argument and result types, including
+structure and vector calling conventions.  The first substrate should
+therefore be declaration-led rather than a magical untyped =send=:
+
+#+begin_src lisp
+(define-objc-message new-command-queue
+    ("newCommandQueue" :object))
+
+(define-objc-message set-device
+    ("setDevice:" :void)
+  (device :object))
+#+end_src
+
+The precise surface is experimental, but the invariant is not: the definition
+site contains the ABI.  A thin definer macro may expand to a selector, a typed
+CFFI call through =objc_msgSend=, documentation, and an ordinary Lisp
+function or method.  Runtime method encodings can validate declarations where
+they are complete; they should not silently replace explicit types at the
+call site.
+
+This is also where luv's existing [[file:../invocation.lisp][invocation protocol]] deserves a small trial.
+A declared Objective-C message could be a reified invocation sent through a
+direct or tracing invoker, just like the owned Vulkan vocabulary.  That would
+make API traces and errors uniform without forcing all Objective-C objects
+into one generic =send= method.  The first proof should decide this with
+working traces, not architecture alone.
+
+Metal declarations should initially be hand-owned and demand-driven, like
+=vulkan/defs.lisp=.  Header generation becomes attractive only after the
+shape of several real declarations is stable.  C entry points such as
+=MTLCreateSystemDefaultDevice= remain ordinary CFFI definitions beside the
+message declarations.
+
+* The hybrid boundary is an explicit escape hatch
+:PROPERTIES:
+:ID: M69ML3
+:END:
+
+The hard part of Objective-C interop is not registering a selector.  It is
+calling every ABI form correctly and receiving callbacks under Lisp's runtime
+and thread rules.  The local macOS 26.5 SDK still documents distinct message
+entry points for architecture-dependent structure and floating-point returns.
+Blocks, SIMD/vector values, variadic methods, =NSError **= results, and
+callbacks on arbitrary queues add separate obligations.
+
+The intended boundary is therefore hybrid:
+
+- direct CFFI calls for classes, selectors, ordinary object/scalar messages,
+  and explicit retain/release/autorelease pools;
+- small native C or Objective-C helpers for a signature CFFI cannot call
+  confidently, block construction and disposal, and callback trampolines;
+- no requirement that the bridge implement every Objective-C ABI form before
+  it can expose a Metal device.
+
+The native companion is an ABI tool, not a second object model.  Each helper
+should name the awkward mechanism it contains.  If the helper surface starts
+mirroring ordinary Metal methods, the boundary has slipped back toward the
+wrapper list this design is meant to avoid.
+
+Ownership must be visible from the first experiment.  A wrapper records
+whether its pointer is borrowed or owned; =retain=, =release=, and an
+autorelease scope are explicit operations.  Asynchronous completion blocks
+can wait.  The first shader-library proof can use
+=MTL4Compiler/newLibraryWithDescriptor:error:= synchronously, avoiding both a
+block callback and cross-thread publication while the basic object lifecycle
+is still being established.
+
+Implementing Objective-C classes in Lisp remains a valuable later capability
+for delegates and Cocoa integration.  It is not on the critical path for SDL
+and Metal, because SDL owns the application and event callbacks and the first
+Metal compilation path can be synchronous.
+
+* The typed shader specification is already the shared IR
+:PROPERTIES:
+:ID: LVKEYO
+:END:
+
+SPIR-V is indeed a typed, structured intermediate representation.  That does
+not make luv's current SPIR-V objects the necessary interchange format between
+the mathematical shader language and Metal.
+
+The current compiler has three levels:
+
+#+begin_example
+shader-specification and shader-expression objects
+        |
+        | compile-shader-specification
+        v
+shader-lowering-context constructing SPIR-V ids and instructions
+        |
+        v
+spir-v-module / basic blocks / instruction occurrences
+        |
+        v
+SPIR-V words
+#+end_example
+
+The first level already owns the backend-independent meaning: stages,
+interfaces, resources, typed expressions, semantic quantity annotations,
+lexical order, and source provenance.  The current
+=compile-shader-specification= then immediately chooses SPIR-V ids,
+decorations, GLSL.std.450 instructions, storage classes, and an
+=spir-v-module=.  In this codebase the SPIR-V object graph is consequently a
+target-specific lowering product, however legitimate an IR SPIR-V is in a
+larger toolchain.
+
+Translating that product back to MSL would be possible, but it would make
+SPIR-V interface choices the architecture of the Metal backend, weaken the
+direct expression-to-output provenance used by the shader lab, and put mesh
+and object stages behind whatever the translator happens to preserve.  The
+smaller design is direct sibling lowering:
+
+#+begin_example
+                    /--> SPIR-V lowering --> structured SPIR-V --> words
+shader specification
+                    \--> MSL lowering ----> structured document --> text
+#+end_example
+
+No new universal conceptual IR is required.  It is accurate to call both
+arrows *lowering*: each replaces semantic source objects with a more
+target-constrained representation.
+
+* Target-specific lowering should remain open and inspectable
+:PROPERTIES:
+:ID: JDLQPN
+:END:
+
+The existing operator compiler is already close to the right CLOS shape.
+=lower-shader-call= dispatches on an operator symbol, while source operators,
+typing, and semantic checks live independently of their SPIR-V instruction.
+A second backend should make the target context an intentional dispatch
+participant:
+
+#+begin_src lisp
+(lower-shader-specification msl-target specification)
+(lower-shader-call '+ msl-context expression)
+(lower-shader-call '+ spir-v-context expression)
+#+end_src
+
+Those names illustrate the relationship rather than settle an API.  Target
+instances are justified if they carry MSL version, platform, capability, or
+binding-layout policy.  EQL-specialized keywords are sufficient while target
+choice is only a closed setting.  The important change is to specialize the
+present lowering machinery as SPIR-V rather than leave backend-specific
+defaults accidentally applicable to every future context.
+
+The MSL product should be more than one accumulated string.  A modest document
+of declarations, entry-point parameters, and statement occurrences can retain
+expression-to-output provenance; source spans can provide the reverse link
+after rendering to text.  It need not imitate SPIR-V basic blocks or become a
+general C AST.  The shader lab should be able to select an expression and show
+the MSL fragment it caused just as it can show SPIR-V instruction occurrences.
+
+One shared source language does not imply a lowest-common-denominator target.
+The ordinary arithmetic, texture sampling, projective maps, and vertex/fragment
+interfaces form a shared core.  Mesh/object stages, Metal function constants,
+or a Vulkan-only operation can extend the same operator and stage protocols
+with explicit target capability checks.  Unsupported lowering should signal a
+source-located shader-language error, not silently approximate the construct.
+
+* The Metal 4 compiler is part of the live backend
+:PROPERTIES:
+:ID: 2X8254
+:END:
+
+The Metal path should not make =xcrun metal=, temporary files, or a subprocess
+part of the running compiler.  Apple's
+[[https://developer.apple.com/documentation/metal/using-the-metal-4-compilation-api][Metal 4 compilation API]] is already a richer application-facing boundary and
+fits luv's live pipeline model unusually well.
+
+The local macOS 26.5 SDK exposes the sequence directly:
+
+#+begin_example
+MTLDevice
+  `-- newCompilerWithDescriptor:error: --> MTL4Compiler
+          |
+          | MTL4LibraryDescriptor { source, options, name }
+          v
+        MTLLibrary
+          |
+          | MTL4 render / mesh / compute pipeline descriptor
+          v
+        pipeline state
+#+end_example
+
+The compiler is a device-owned, labelable object rather than an ambient tool.
+It offers synchronous and asynchronous library and pipeline construction.  An
+asynchronous operation returns an =MTL4CompilerTask= whose status is
+inspectable as none, scheduled, compiling, or finished and which can be waited
+on explicitly.  Pipeline operations accept traditional render, tile, mesh,
+and compute descriptors; separate entry points cover dynamic linking, binary
+functions, and specialization of an intentionally unspecialized pipeline.
+
+That yields a natural ownership split:
+
+- =metal-gpu-device= owns a long-lived =MTL4Compiler= configured for the
+  device/session;
+- a live shader candidate owns its MSL document, source string, library,
+  function descriptors, and pipeline descriptor/state;
+- an asynchronous candidate also owns its compiler task and callback state
+  until publication or failure;
+- the current installed artifact remains untouched until the complete
+  candidate succeeds at the owning frame boundary.
+
+The first proof should use synchronous library and pipeline calls.  That keeps
+Objective-C block construction and cross-thread publication out of the first
+bridge slice without replacing the intended API with a CLI.  Once the same
+transaction works synchronously, a compiler task can become an inspectable
+background state and its completion can enqueue publication on the renderer's
+owner.  The task callback must never publish a pipeline directly from an
+arbitrary Metal queue.
+
+The API also provides its own warm-start path.  A compiler descriptor may own
+an =MTL4PipelineDataSetSerializer= which captures the descriptors and binaries
+of pipelines the compiler creates.  It can serialize a pipeline script or a
+binary archive; task options can later consult compatible =MTL4Archive=
+instances to accelerate repeat builds.  This belongs after the live source
+path works, but it is architecturally better than teaching luv to manage an
+external compiler cache.  The serializer is session/device policy, while each
+shader definition remains ordinary live Lisp state.
+
+=xcrun metal= can still be a useful offline cross-check in CI or when reducing
+an Apple compiler diagnostic.  It is not the runtime backend, not the source
+of truth for successful live publication, and not a reason to write generated
+MSL through temporary files.
+
+* The second backend will test several apparently portable names
+:PROPERTIES:
+:ID: OV1AZO
+:END:
+
+The first MSL slice should be allowed to reveal design changes rather than
+declare the existing surface neutral in advance:
+
+- =shader-resource= currently says =descriptor-set= and =binding=.  These may
+  remain useful group/index semantics, but Metal 4 argument tables separate
+  resource categories and use GPU addresses and resource IDs.  The block
+  fragment shader should prove a mapping before anything is renamed.
+- shader interface locations and built-ins need target-specific MSL attributes
+  and entry-point structures.  They are semantic declarations, not textual
+  substitutions for SPIR-V decorations.
+- =shader-module-descriptor= contains an untyped =code= slot which the Vulkan
+  backend assumes is SPIR-V words.  A second backend should make the artifact
+  kind explicit or move compilation behind a device/compiler boundary; it
+  should not teach callers to guess which representation =code= contains.
+- =shader-entry-execution-model= currently handles only vertex, fragment, and
+  compute.  Emitting an ordinary block fragment shader proves the shared core;
+  it does not prove a mesh-shader language.  Mesh and object stages should be
+  added when a minimal native pipeline supplies their concrete requirements.
+- current live reload builds a complete SPIR-V pair and Vulkan pipeline before
+  publishing it transactionally.  The Metal artifact must retain that same
+  revision, last-known-good, and frame-boundary publication contract even
+  though =MTL4Compiler= offers asynchronous tasks later.
+
+#2X8254 is a particularly good fit for the last point: compilation is an
+explicit part of the backend and can later become observable and archived.
+First use its synchronous path.  Add asynchronous blocks only after the
+ownership and publication path is already correct.
+
+* NEXT Send one declared Objective-C message
+:PROPERTIES:
+:ID: 3FW8Z5
+:END:
+
+Intent: establish the smallest inspectable Objective-C substrate without
+coupling it to canvas presentation or trying to bind all of Metal.
+
+Evidence: the pinned SDK exports =objc_getClass=, =sel_registerName=, and
+=objc_msgSend=; =MTLCreateSystemDefaultDevice= gives the experiment a real
+protocol-typed Metal object.  LispWorks demonstrates the wider architecture,
+but luv needs evidence through SBCL, CFFI, and the pinned arm64 environment.
+
+Done when:
+
+- a small ASDF system loads the Objective-C runtime and Metal framework;
+- a declared, typed message queries an =MTLDevice= property and returns an
+  inspectable Lisp wrapper;
+- an autorelease scope and owned/borrowed pointer distinction have executable
+  tests;
+- a tracing probe records receiver class, selector, argument/result types, and
+  success without dereferencing arbitrary pointers; and
+- the experiment exits cleanly in a fresh non-Emacs process.
+
+* TODO Present a Metal clear through the existing SDL canvas
+:PROPERTIES:
+:ID: 5A7QDE
+:END:
+
+Intent: prove #SODRMA by adding a =metal-canvas-context= relationship while
+leaving SDL window, input, clock, and main-thread ownership intact.
+
+Evidence: SDL 3.4.12 supplies the view/layer lifecycle and the current Vulkan
+context already establishes the backend-specific presentation seam.  The
+remaining uncertainty is the smallest Metal 4-native drawable and submission
+path and whether SDL's currently hardcoded =:vulkan= window flag must move
+before the proof.
+
+Done when: =make-canvas-context= with a Metal provider creates and owns one
+=SDL_MetalView=, assigns the borrowed layer's device, presents a deterministic
+clear through a Metal 4 command path, reports drawable size correctly on
+Retina, closes the view before the window, and leaves the Vulkan path
+unchanged.
+
+* TODO Lower one mathematical shader directly to MSL
+:PROPERTIES:
+:ID: 58IDSR
+:END:
+
+Intent: compile the existing block fragment =shader-specification= through a
+sibling target context, without translating its =spir-v-module= and without
+inventing a new shared IR.
+
+Evidence: the specification graph already carries types, source forms,
+resources, and semantic operations.  Current lowering methods mix that shared
+graph with SPIR-V ids and instructions; #JDLQPN identifies the CLOS seam to
+separate.  The block fragment shader exercises arithmetic, swizzles, texture
+and sampler resources, sampling, and interpolation without first requiring a
+mesh-stage design.
+
+Done when:
+
+- one unchanged =shader-specification-for= method produces valid MSL and the
+  existing deterministic SPIR-V;
+- a =MTL4LibraryDescriptor= carries the generated source directly into the
+  device-owned =MTL4Compiler=, which accepts it without files or subprocesses;
+- =xcrun metal= may cross-check the output offline, but is not a runtime
+  dependency or the acceptance authority;
+- expression-to-MSL provenance is inspectable;
+- tests cover deterministic text, source-located unsupported operations, and
+  the resource/interface mapping; and
+- the wiki records any shader vocabulary that proved target-shaped.
+
+* WAIT Join the proofs in one live Metal pipeline
+:PROPERTIES:
+:ID: PH57K5
+:END:
+
+Intent: preserve luvcraft's transactional shader-definition loop while the
+same live mathematical shader methods feed a native Metal render pipeline.
+
+Evidence: this depends on #5A7QDE for presentation and #58IDSR for shader
+source.  The Vulkan live artifact already proves revision tracking,
+last-known-good retention, frame-boundary publication, and deferred retirement;
+the Metal version should specialize those ownership points rather than fork
+the application model.
+
+Done when: redefining the block material compiles MSL, publishes a complete
+Metal pipeline at the owning frame boundary, keeps the previous pipeline after
+an invalid edit, recovers after a valid edit, and renders a pinned capture
+comparable to the Vulkan reference.  Only after this slice should asynchronous
+compiler tasks, Objective-C blocks, or mesh/object stages become the next
+required bridge capability.
