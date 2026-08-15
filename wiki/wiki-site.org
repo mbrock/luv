@@ -311,6 +311,43 @@ their figures, so the loop closes: the docstring above points back at
 #PLRP3A, and that figure lists this definition under "Referenced from
 code".
 
+* Layouts are objects chosen by operator and role
+:PROPERTIES:
+:ID: BGIM3I
+:END:
+
+The first renderer assigned layout with a table of head counts and a
+growing set of role strings and special cases; =let= bindings drawn as a
+two-column grid, =loop= keywords starting rows, and lambda lists whose
+sublists are =(var default)= clauses made that untenable.  The design that
+replaced it follows clos-design: a =layout= is an object, and a list is
+drawn by the layout that its *operator* and the *role its parent gave it*
+select together (dispatch on the relationship, not on one participant).
+
+- =list-layout (list role)= chooses: a child the parent called
+  =bindings= gets a =grid-layout= whatever its first element; =lambda-list=
+  gets a =lambda-list-layout=; =clause= or =stacked-clause= their clause
+  layouts; otherwise the operator's own layout from a small table
+  (=define-layout=), with =with-=/=define-=/=def= naming conventions as the
+  default and =flow-layout= last.
+- =child-role (layout list index child)= answers the role of each argument
+  (comments are drawn where they occur and never counted): =body-layout=
+  stacks after a head count, =bindings-layout= marks the binding list,
+  =variables-layout= (=multiple-value-bind=) marks a variable list,
+  =spec-layout= (=dolist=, =with-open-file=) marks one clause,
+  =lambda-layout= and =method-layout= find the lambda list, =clauses-layout=
+  (=cond=, =case=, =handler-case=, =defstruct=) makes body forms stacked
+  clauses, =grid-layout= makes children clauses, =loop-layout= gives loop
+  keywords =row-start=.
+- =render-layout (layout list)= draws: the general routine with roles, or a
+  clause's name and =.rest= cell so a grid can align columns.
+
+The stylesheet knows only roles: =.bindings= is a CSS grid, its =.clause=
+children subgrids spanning two columns, =.rest= a flowing cell, =.body= full
+width, =.break= a zero-height row break before a =row-start=.  Adding a
+form's layout is one =define-layout= line or one class with two methods,
+and nothing else changes.
+
 * Reading source without loading it: Eclector
 :PROPERTIES:
 :ID: SKNK2N
@@ -467,10 +504,10 @@ roles assigned in Lisp and painted by the wiki stylesheet, and use it for
 =#+begin_src lisp= blocks first, since the wiki already has those.
 
 Evidence: [[file:../wiki-dexp.lisp][wiki-dexp.lisp]] and the =.lisp= rules in [[file:style.css][style.css]].  A list is
-a flex-wrapping =div.list= with side borders; roles come from an operator
-table (=*operator-head-counts*=) plus =defmethod='s qualifier scan and a
-=*binding-operators*= list, and are emitted as =operator=, =body=,
-=bindings=, and =clause= classes, comments not counting as arguments.  The
+a flex-wrapping =div.list= with side borders; roles come from the layout
+objects of #BGIM3I and are emitted as =operator=, =body=, =bindings=,
+=lambda-list=, =clause=, and =row-start= classes, comments not counting as
+arguments.  The
 stylesheet does =.body { flex-basis: 100% }= and paints operators, keywords,
 strings, numbers, comments, and prefixes.  All =lisp= source blocks in the
 wiki now render structurally, readable at phone width; input that reads to

@@ -264,8 +264,11 @@ LISP-COMMENT, recursively inside lists, so a comment block is one node."
     (nreverse result)))
 
 (defun adjacent-lines-p (a b text)
-  "True when only one newline and indentation separate node A from node B."
-  (let ((between (subseq text (node-end a) (node-start b))))
+  "True when node B starts on the line after the last line of node A, with
+only indentation between: consecutive comment lines.  A's range may or may
+not include its trailing newline, so count from the end of its text."
+  (let* ((a-end (+ (node-start a) (length (node-text a))))
+         (between (subseq text a-end (node-start b))))
     (and (= 1 (count #\Newline between))
          (every (lambda (c) (member c '(#\Newline #\Return #\Space #\Tab))) between))))
 

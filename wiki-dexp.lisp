@@ -24,108 +24,266 @@
   "Symbol names of the lambda list of the form whose docstring is being
 rendered; an uppercase word naming one is a parameter reference.")
 
-(defparameter *operator-head-counts*
-  '(("defun" . 2) ("defmacro" . 2) ("defgeneric" . 2) ("defclass" . 3)
-    ("defstruct" . 1) ("deftype" . 2) ("define-condition" . 3) ("defpackage" . 1)
-    ("defvar" . 1) ("defparameter" . 1) ("defconstant" . 1) ("deftest" . 1)
-    ("defsystem" . 1) ("lambda" . 1) ("let" . 1) ("let*" . 1) ("flet" . 1)
-    ("labels" . 1) ("macrolet" . 1) ("symbol-macrolet" . 1)
-    ("multiple-value-bind" . 2) ("destructuring-bind" . 2)
-    ("when" . 1) ("unless" . 1) ("if" . 1) ("cond" . 0) ("case" . 1) ("ecase" . 1)
-    ("typecase" . 1) ("etypecase" . 1) ("handler-case" . 1) ("handler-bind" . 1)
-    ("restart-case" . 1) ("unwind-protect" . 1) ("progn" . 0) ("prog1" . 1)
-    ("block" . 1) ("dolist" . 1) ("dotimes" . 1) ("do" . 2) ("do*" . 2) ("loop" . 0)
-    ("eval-when" . 1) ("with-slots" . 2) ("with-accessors" . 2)
-    ("with-open-file" . 1) ("with-output-to-string" . 1) ("with-html" . 0)
-    ("with-html-string" . 0) ("define-presentation-method" . 2)
-    ("define-application-frame" . 2) ("define-command" . 1)
-    ("labels" . 1) ("returning" . 1) ("fn" . 1))
-  "For an operator, how many children after it form the head; the rest are
-body forms.  Operators not listed flow inline, except that any WITH- or
-DEF- operator gets a head of one or two respectively.")
+;;; Layouts
+;;;
+;;; A list is drawn according to a LAYOUT object.  The layout is chosen by
+;;; the list's operator and by the role its parent gave it: a LET chooses a
+;;; BINDINGS-LAYOUT for itself, and the child it marks as \"bindings\" is
+;;; drawn by a GRID-LAYOUT no matter what its first element is.  Each layout
+;;; answers CHILD-ROLE for the children and RENDER-LAYOUT for the whole;
+;;; the stylesheet only knows the roles.
 
-(defun operator-head-count (name)
-  "The number of head arguments for operator NAME, or NIL for none."
+(defclass layout () ()
+  (:documentation "How the children of a list are arranged."))
+
+(defclass flow-layout (layout) ()
+  (:documentation "The default: children flow and wrap; the first symbol is
+the operator."))
+
+(defclass body-layout (layout)
+  ((head-count :initarg :head-count :initform 0 :accessor layout-head-count
+               :documentation "How many arguments after the operator are the
+head; the rest are body forms that take the full width."))
+  (:documentation "Head arguments inline, then body forms stacked."))
+
+(defclass bindings-layout (body-layout)
+  ((bindings-index :initarg :bindings-index :initform 1 :accessor layout-bindings-index
+                   :documentation "The index of the argument that is a list of
+bindings, drawn as a two-column grid."))
+  (:documentation "A binding form: LET, FLET, DEFCLASS, DO."))
+
+(defclass variables-layout (body-layout) ()
+  (:documentation "MULTIPLE-VALUE-BIND and friends: the first argument is a
+list of variables drawn like a lambda list."))
+
+(defclass spec-layout (body-layout) ()
+  (:documentation "DOLIST, WITH-OPEN-FILE: the first argument is one
+(var form ...) clause, not a list of bindings."))
+
+(defclass lambda-layout (body-layout) ()
+  (:documentation "A defining or lambda form whose head ends with a lambda
+list: the lambda list's sublists are (var default) clauses."))
+
+(defclass method-layout (lambda-layout) ()
+  (:documentation "DEFMETHOD: the head runs through qualifiers to the lambda list."))
+
+(defclass clauses-layout (body-layout) ()
+  (:documentation "COND, CASE, HANDLER-CASE: body forms are clauses whose
+first element is a key or test, not an operator, and whose rest stacks."))
+
+(defclass grid-layout (layout) ()
+  (:documentation "A list of bindings or slots: each element a clause,
+aligned in two columns, name and rest."))
+
+(defclass clause-layout (layout) ()
+  (:documentation "A binding or slot: a name and the rest, no operator."))
+
+(defclass stacked-clause-layout (clause-layout) ()
+  (:documentation "A COND-style clause: a test, then body forms stacked."))
+
+(defclass lambda-list-layout (layout) ()
+  (:documentation "A lambda list: parameters flow; (var default) sublists are
+clauses, not calls."))
+
+(defclass loop-layout (layout) ()
+  (:documentation "LOOP: its clause keywords start new rows."))
+
+(defvar *operator-layouts* (make-hash-table :test 'equal)
+  "Downcased operator name -> LAYOUT instance.")
+
+(defmacro define-layout (names class &rest initargs)
+  "Give each operator in NAMES (strings) a fresh CLASS layout."
+  `(dolist (name ',(if (listp names) names (list names)))
+     (setf (gethash name *operator-layouts*) (make-instance ',class ,@initargs))))
+
+(define-layout ("defun" "defmacro" "defgeneric" "deftype" "define-modify-macro") lambda-layout :head-count 2)
+(define-layout ("lambda" "returning" "fn") lambda-layout :head-count 1)
+(define-layout ("defmethod") method-layout)
+(define-layout ("let" "let*" "flet" "labels" "macrolet" "symbol-macrolet" "handler-bind")
+  bindings-layout :head-count 1 :bindings-index 1)
+(define-layout ("multiple-value-bind" "destructuring-bind" "with-slots" "with-accessors")
+  variables-layout :head-count 2)
+(define-layout ("dolist" "dotimes" "with-open-file" "with-output-to-string"
+                "with-input-from-string" "with-open-stream" "with-simple-restart")
+  spec-layout :head-count 1)
+(define-layout ("do" "do*") bindings-layout :head-count 2 :bindings-index 1)
+(define-layout ("defclass" "define-condition") bindings-layout :head-count 3 :bindings-index 3)
+(define-layout ("cond" "case" "ecase" "typecase" "etypecase" "handler-case"
+                "restart-case" "defstruct" "defpackage" "defsystem")
+  clauses-layout :head-count 1)
+(define-layout ("cond") clauses-layout :head-count 0)
+(define-layout ("defstruct" "defpackage" "defsystem" "define-application-frame") clauses-layout :head-count 1)
+(define-layout ("defvar" "defparameter" "defconstant" "deftest" "define-command"
+                "define-presentation-type" "declaim" "declare" "block" "prog1"
+                "when" "unless" "if" "unwind-protect" "eval-when" "with-html")
+  body-layout :head-count 1)
+(define-layout ("progn" "with-html-string") body-layout :head-count 0)
+(define-layout ("define-presentation-method") body-layout :head-count 2)
+(define-layout ("loop") loop-layout)
+
+(defparameter *loop-keywords*
+  '("named" "with" "for" "as" "initially" "finally" "repeat" "while" "until"
+    "always" "never" "thereis" "do" "doing" "collect" "collecting" "append"
+    "appending" "nconc" "nconcing" "count" "counting" "sum" "summing" "maximize"
+    "maximizing" "minimize" "minimizing" "when" "if" "unless" "else" "end" "return"))
+
+(defun operator-layout (name)
+  "The layout for operator NAME, from the table or by naming convention."
   (let ((name (string-downcase name)))
-    (cond ((assoc name *operator-head-counts* :test #'string=)
-           (cdr (assoc name *operator-head-counts* :test #'string=)))
-          ((starts-with "with-" name) 1)
-          ((starts-with "define-" name) 2)
-          ((starts-with "def" name) 2)
+    (or (gethash name *operator-layouts*)
+        (cond ((starts-with "with-" name) (make-instance 'body-layout :head-count 1))
+              ((starts-with "define-" name) (make-instance 'body-layout :head-count 2))
+              ((starts-with "def" name) (make-instance 'body-layout :head-count 2))
+              (t (make-instance 'flow-layout))))))
+
+(defgeneric list-layout (list role)
+  (:documentation "The LAYOUT for LIST given the ROLE its parent assigned.")
+  (:method ((list lisp-list) role)
+    (cond ((role-p role "bindings") (make-instance 'grid-layout))
+          ((role-p role "lambda-list") (make-instance 'lambda-list-layout))
+          ((role-p role "clause") (make-instance 'clause-layout))
+          ((role-p role "stacked-clause") (make-instance 'stacked-clause-layout))
+          (t (let ((operator (symbol-node-name (first (element-children list)))))
+               (if operator (operator-layout operator) (make-instance 'flow-layout)))))))
+
+(defun role-p (role name)
+  (and role (member name (uiop:split-string role) :test #'string=)))
+
+(defun argument-children (list)
+  "The children of LIST that count as arguments: everything but comments."
+  (remove-if (lambda (c) (typep c 'lisp-comment)) (element-children list)))
+
+(defgeneric child-role (layout list index child)
+  (:documentation "The role string for CHILD, the INDEXth argument of LIST
+under LAYOUT (comments are not counted and never asked), or NIL.")
+  (:method ((layout layout) list index child)
+    (declare (ignore list))
+    (and (= index 0) (typep child 'lisp-symbol) "operator")))
+
+(defmethod child-role ((layout body-layout) list index child)
+  (cond ((> index (layout-head-count layout)) "body")
+        (t (call-next-method))))
+
+(defmethod child-role ((layout bindings-layout) list index child)
+  (cond ((and (= index (layout-bindings-index layout)) (typep child 'lisp-list)) "bindings")
+        (t (call-next-method))))
+
+(defmethod child-role ((layout variables-layout) list index child)
+  (cond ((and (= index 1) (typep child 'lisp-list)) "lambda-list")
+        (t (call-next-method))))
+
+(defmethod child-role ((layout spec-layout) list index child)
+  (cond ((and (= index 1) (typep child 'lisp-list)) "clause")
+        (t (call-next-method))))
+
+(defmethod child-role ((layout lambda-layout) list index child)
+  (cond ((and (<= index (layout-head-count layout)) (typep child 'lisp-list)) "lambda-list")
+        (t (call-next-method))))
+
+(defmethod child-role ((layout lambda-list-layout) list index child)
+  (declare (ignore list index))
+  (and (typep child 'lisp-list) "clause"))
+
+(defmethod child-role ((layout method-layout) list index child)
+  "Qualifiers precede the lambda list; the first list after the name is it."
+  (let* ((arguments (argument-children list))
+         (lambda-list (position-if (lambda (c) (typep c 'lisp-list)) arguments :start 2)))
+    (cond ((and lambda-list (= index lambda-list)) "lambda-list")
+          ((and lambda-list (> index lambda-list)) "body")
+          ((= index 0) "operator")
           (t nil))))
 
-(defun list-body-start (list)
-  "The index in LIST's children where body forms begin, or NIL if the
-list has no body role.  DEFMETHOD's head runs through its qualifiers and
-lambda list."
-  (let* ((children (element-children list))
-         (operator (symbol-node-name (first children))))
-    (when operator
-      (if (string-equal operator "defmethod")
-          (let ((lambda-list (position-if (lambda (c) (typep c 'lisp-list)) children :start 2)))
-            (and lambda-list (1+ lambda-list)))
-          (let ((count (operator-head-count operator)))
-            (and count (+ 1 count)))))))
+(defmethod child-role ((layout clauses-layout) list index child)
+  (cond ((and (> index (layout-head-count layout)) (typep child 'lisp-list)) "body stacked-clause")
+        (t (call-next-method))))
 
-(defparameter *clause-lists*
-  '(("let" . 1) ("let*" . 1) ("flet" . 1) ("labels" . 1) ("macrolet" . 1)
-    ("symbol-macrolet" . 1) ("with-slots" . 1) ("with-accessors" . 1)
-    ("destructuring-bind" . 1) ("multiple-value-bind" . 1) ("do" . 1) ("do*" . 1)
-    ("handler-bind" . 1) ("defclass" . 3) ("define-condition" . 3)
-    ("defun" . 2) ("defmacro" . 2) ("defgeneric" . 2) ("deftype" . 2) ("lambda" . 1)
-    ("defmethod" . :lambda-list)
-    ("cond" . :body) ("case" . :body) ("ecase" . :body) ("typecase" . :body)
-    ("etypecase" . :body) ("handler-case" . :body) ("restart-case" . :body)
-    ("defstruct" . :body) ("defpackage" . :body) ("defsystem" . :body)
-    ("defgeneric" . :body))
-  "Operators whose argument at the given index is a list of clauses (or
-whose body forms are clauses, marked :body): the first element of a clause
-is a name or key, not an operator.")
+(defmethod child-role ((layout grid-layout) list index child)
+  (declare (ignore list index))
+  (and (typep child 'lisp-list) "clause"))
 
-(defun list-clause-roles (list)
-  "Return (values bindings-index clauses-p): the index of a clause-list
-child, and whether body children of LIST are themselves clauses."
-  (let* ((operator (symbol-node-name (first (element-children list))))
-         (entry (and operator (assoc (string-downcase operator) *clause-lists* :test #'string=))))
-    (cond ((null entry) (values nil nil))
-          ((eq (cdr entry) :body) (values nil t))
-          ((eq (cdr entry) :lambda-list)
-           ;; DEFMETHOD's lambda list follows the name and any qualifiers.
-           (values (position-if (lambda (c) (typep c 'lisp-list))
-                                (element-children list) :start 2)
-                   nil))
-          (t (values (cdr entry) nil)))))
+(defmethod child-role ((layout clause-layout) list index child)
+  (declare (ignore list index child))
+  nil)
 
-(defun render-lisp-children (list)
-  (let ((own-role *lisp-role*)
-        (body-start (list-body-start list)))
-    (multiple-value-bind (bindings-index clauses-p) (list-clause-roles list)
-      ;; Comments do not count as arguments when assigning roles.
-      (loop with i = -1
-            with previous = nil
-            for child in (element-children list)
-            do (unless (typep child 'lisp-comment) (incf i))
-               (let ((*docstring-p*
-                       (and (typep child 'lisp-string)
-                            (or (and body-start (= i body-start) (defining-operator-p (or (symbol-node-name (first (element-children list))) "")))
-                                (and (typep previous 'lisp-symbol)
-                                     (equal (lisp-symbol-package previous) "KEYWORD")
-                                     (string-equal (lisp-symbol-name previous) "documentation")))))
-                     (*lisp-role*
-                       (cond ((typep child 'lisp-comment) nil)
-                             ((and bindings-index (= i bindings-index)) "bindings")
-                             ((and body-start (>= i body-start))
-                              (if clauses-p "body clause" "body"))
-                             ((and (equal own-role "bindings") (typep child 'lisp-list)) "clause")
-                             ((and (= i 0) (typep child 'lisp-symbol)
-                                   (not (member own-role '("clause" "bindings" "body clause")
-                                                :test #'equal)))
-                              "operator")
-                             (t nil))))
-                 (render-html child))
-               (unless (typep child 'lisp-comment) (setf previous child))))))
+(defmethod child-role ((layout stacked-clause-layout) list index child)
+  (declare (ignore list child))
+  (and (> index 0) "body"))
 
+(defmethod child-role ((layout loop-layout) list index child)
+  (declare (ignore list))
+  (cond ((= index 0) "operator")
+        ((and (typep child 'lisp-symbol)
+              (null (lisp-symbol-package child))
+              (member (string-downcase (lisp-symbol-name child)) *loop-keywords* :test #'string=))
+         "row-start")
+        (t nil)))
 
+(defun lambda-list-of (layout list)
+  "The lambda list of LIST under LAYOUT, if the layout has one."
+  (typecase layout
+    (method-layout (find-if (lambda (c) (typep c 'lisp-list)) (nthcdr 2 (argument-children list))))
+    (lambda-layout (let ((head (subseq (argument-children list) 1
+                                       (min (1+ (layout-head-count layout))
+                                            (length (argument-children list))))))
+                     (find-if (lambda (c) (typep c 'lisp-list)) head :from-end t)))
+    (t nil)))
+
+(defun docstring-position-p (layout list index previous child)
+  "True when CHILD is a string in documentation position: the first body
+form of a defining form, or the value after :documentation."
+  (and (typep child 'lisp-string)
+       (or (and (typep layout 'body-layout)
+                (= index (1+ (layout-head-count layout)))
+                (defining-operator-p (or (symbol-node-name (first (element-children list))) "")))
+           (and (typep layout 'method-layout) (equal (child-role layout list index child) "body")
+                (let ((before (nth (1- index) (argument-children list))))
+                  (typep before 'lisp-list)))
+           (and (typep previous 'lisp-symbol)
+                (equal (lisp-symbol-package previous) "KEYWORD")
+                (string-equal (lisp-symbol-name previous) "documentation")))))
+
+(defgeneric render-layout (layout list)
+  (:documentation "Emit the children of LIST arranged by LAYOUT, inside the
+list's own box, which the caller has opened."))
+
+(defun render-children-with-roles (layout list)
+  "Emit every child of LIST with the role LAYOUT assigns it; comments are
+drawn where they occur and are not counted."
+  (let ((index -1)
+        (previous nil))
+    (dolist (child (element-children list))
+      (if (typep child 'lisp-comment)
+          (let ((*lisp-role* nil)) (render-html child))
+          (progn
+            (incf index)
+            (let ((role (child-role layout list index child)))
+              (when (and (role-p role "row-start") (> index 1))
+                (spinneret:with-html (:span.break)))
+              (let ((*docstring-p* (docstring-position-p layout list index previous child))
+                    (*lisp-role* role))
+                (render-html child)))
+            (setf previous child))))))
+
+(defmethod render-layout ((layout layout) list)
+  (render-children-with-roles layout list))
+
+(defmethod render-layout ((layout clause-layout) list)
+  "A clause: its first element in the name column, the rest in one flowing
+cell, so the parent's grid can align them."
+  (let ((children (element-children list)))
+    (let ((*lisp-role* nil))
+      (when children (render-html (first children))))
+    (when (rest children)
+      (spinneret:with-html
+        (:span.rest
+         (let ((*lisp-role* nil))
+           (dolist (child (rest children))
+             (render-html child))))))))
+
+(defmethod render-layout ((layout stacked-clause-layout) list)
+  "A COND-style clause: the test inline, then body forms stacked; drawn by
+the general routine, whose roles do that."
+  (render-children-with-roles layout list))
 
 (defun render-text-with-mentions (text)
   "Write TEXT, turning #ID figure mentions into links like prose does."
@@ -143,27 +301,22 @@ child, and whether body children of LIST are themselves clauses."
   (format nil "~{~A~^ ~}" (remove nil (cons *lisp-role* classes))))
 
 (defmethod render-html ((list lisp-list))
-  (let* ((children (element-children list))
-         (operator (symbol-node-name (first children)))
-         (body-start (list-body-start list))
-         ;; The lambda list of a defining or binding form: the last list
-         ;; among the head arguments.
-         (lambda-list (and body-start
-                           (find-if (lambda (c) (typep c 'lisp-list))
-                                    (subseq children 1 (min body-start (length children)))
-                                    :from-end t)))
+  (let* ((operator (symbol-node-name (first (element-children list))))
+         (layout (list-layout list *lisp-role*))
+         (lambda-list (lambda-list-of layout list))
          (*prose-parameters* (if lambda-list
                                  (append (lambda-list-parameters lambda-list) *prose-parameters*)
                                  *prose-parameters*)))
     (spinneret:with-html
       (:div :class (role-class "list")
-            :data-callee (and operator (string-downcase operator))
-            (render-lisp-children list)))))
+            :data-callee (and operator (not (typep layout '(or clause-layout grid-layout)))
+                              (string-downcase operator))
+            (render-layout layout list)))))
 
 (defmethod render-html ((vector lisp-vector))
   (spinneret:with-html
     (:div :class (role-class "list" "vector")
-          (render-lisp-children vector))))
+          (render-layout (make-instance 'flow-layout) vector))))
 
 (defmethod render-html ((symbol lisp-symbol))
   (let* ((package (lisp-symbol-package symbol))
