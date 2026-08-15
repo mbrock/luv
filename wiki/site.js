@@ -135,6 +135,20 @@
   window.addEventListener("scroll", function () { if (current) place(current); }, { passive: true });
   window.addEventListener("resize", function () { if (current) place(current); });
 
+  // Source sidebar: bring the current file into view within the sidebar's
+  // own scroll box, without moving the page.
+  function revealCurrentFile() {
+    var nav = document.querySelector("aside.source-nav");
+    var currentFile = nav && nav.querySelector("li.current");
+    if (currentFile && nav.scrollTop === 0 && nav.clientHeight > 0 &&
+        currentFile.offsetTop > nav.clientHeight * 0.6) {
+      nav.scrollTop = currentFile.offsetTop - nav.clientHeight / 2;
+    }
+  }
+  revealCurrentFile();
+  // A tab opened in the background has no layout yet; try again when shown.
+  document.addEventListener("visibilitychange", revealCurrentFile);
+
   // Math and diagrams: load KaTeX or Mermaid from the CDN only when the
   // page has something for them to draw.
   function loadStyle(href) {

@@ -61,10 +61,11 @@
   "The DOCUMENTs of SYSTEM's loaded org files."
   (remove nil (mapcar #'org-file-document (system-org-files system))))
 
-(defparameter *code-systems* '("luv" "luvcraft")
+(defparameter *code-systems* '("luv" "luvcraft" "luv-wiki")
   "Primary names of the systems whose source files the site reads for
-definitions and figure mentions.  luv-wiki itself is left out: its
-docstrings and tests use placeholder IDs as examples.")
+definitions and figure mentions.  luv-wiki is among them so the site shows
+how it renders itself; its tests fabricate figure IDs, which is why
+DANGLING-CODE-MENTIONS passes over test systems.")
 
 (defun code-source-components ()
   "Alist of (pathname . system-name) for the cl-source-file components of

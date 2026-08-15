@@ -74,11 +74,22 @@ generic, function, macro, or class before any method, else the first."
                  candidates)
         (first candidates))))
 
+(defun test-definition-p (definition site)
+  "Is DEFINITION in a file of a test system?  Tests fabricate figure IDs
+to exercise the reader, so their mentions are not expected to resolve."
+  (let ((file (definition-source-file definition site)))
+    (and file
+         (source-file-system-name file)
+         (search "/tests" (source-file-system-name file))
+         t)))
+
 (defun dangling-code-mentions (site)
-  "An alist of (definition . ids) for code mentions no figure resolves."
+  "An alist of (definition . ids) for code mentions no figure resolves,
+leaving out the definitions of test systems."
   (loop for definition in (site-definitions site)
-        for dangling = (remove-if (lambda (id) (find-figure id site))
-                                  (definition-mentions definition))
+        for dangling = (and (not (test-definition-p definition site))
+                            (remove-if (lambda (id) (find-figure id site))
+                                       (definition-mentions definition)))
         when dangling collect (cons definition dangling)))
 
 (defun find-figure (id &optional (site *site*))
@@ -399,10 +410,24 @@ summary, and the form drawn as dexp boxes inside."
 (defvar *page-kind* "page"
   "A short word for the status bar: what kind of page is being rendered.")
 
-(defun render-page-frame (title body &key body-class (kind *page-kind*) (status title) (right kind))
+(defun render-crumbs (crumbs)
+  "The breadcrumb trail of the status bar: CRUMBS is a list of (label . href),
+the last one the current page, its href ignored."
+  (spinneret:with-html
+    (:nav.crumbs :aria-label "Breadcrumb"
+      (loop for (crumb . rest) on crumbs
+            for first = t then nil
+            do (unless first (:span.crumb-sep :aria-hidden "true" "›"))
+               (if (and rest (cdr crumb))
+                   (:a.crumb :href (concatenate 'string *page-prefix* (cdr crumb)) (car crumb))
+                   (:span.crumb.current :aria-current "page" (car crumb)))))))
+
+(defun render-page-frame (title body &key body-class (kind *page-kind*)
+                                          (crumbs (list (cons title nil))) (right kind))
   "Emit a whole HTML page with the site chrome around the output of BODY:
-the library band with the site's three doors, a status bar naming the page,
-the main column, and a footer."
+the library band with the site's three doors, a status bar with the page's
+breadcrumb trail on the left and RIGHT (a string, or a function emitting
+markup) on the right, the main column, and a footer."
   (flet ((href (name) (concatenate 'string *page-prefix* name)))
     (spinneret:with-html
       (:doctype)
@@ -439,12 +464,13 @@ the main column, and a footer."
                                           (length (site-systems *site*))
                                           (length (site-source-files *site*))))))))
          (:div.status
-          (:span.status-left status)
+          (:span.status-left (render-crumbs crumbs))
           (:span.status-right
            (cond (*rendering-document*
                   (:a :href (concatenate 'string (site-source-url *site*) "wiki/"
                                          (document-name *rendering-document*) ".org")
                       (concatenate 'string (document-name *rendering-document*) ".org")))
+                 ((functionp right) (funcall right))
                  (t right))))
          (:main (funcall body))
          (:footer.site-footer
@@ -591,7 +617,10 @@ popovers when a mention is hovered or tapped."
                   (loop for figure in (document-figures document)
                         append (loop for definition in (gethash (heading-id figure)
                                                                 (site-code-references *site*))
-                                     append (definition-mentions definition))))))))))
+                                     append (definition-mentions definition)))))))
+     :crumbs (if (string= (document-name document) "index")
+                 (list (cons title nil))
+                 (list (cons "Pages" "pages.html") (cons title nil))))))
 
 (defun render-pages-page (site)
   "Emit pages.html: every wiki page with its headings, each a link to its

@@ -163,7 +163,16 @@
    :min-width 0
    :overflow hidden
    :text-overflow ellipsis
-   :white-space nowrap))
+   :white-space nowrap)
+  (".crumbs"
+   :display inline
+   (".crumb-sep"
+    :margin 0 0.45em
+    :opacity 0.55)
+   ("a.crumb"
+    :opacity 0.75
+    ("&:hover" :opacity 1 :text-decoration underline))
+   (".crumb.current" :opacity 1)))
 
 (define-style main-column
   "The main column; wide pages fill the viewport but their prose keeps a
@@ -175,7 +184,8 @@ readable measure."
   ("body.wide main"
    :max-width none
    :margin 0)
-  (("body.wide main > p" "body.wide main > h1")
+  (("body.wide main > p" "body.wide main > h1"
+    "body.wide article.source-body > p" "body.wide article.source-body > h1")
    :max-width 66ch)
   (".site-footer"
    :max-width 66ch
@@ -403,6 +413,69 @@ forms is a grid of rows (see the stacked group)."
   ("p.source-meta"
    :color --muted
    :font-size 0.9rem))
+
+(define-style source-sidebar
+  "Source pages on wide screens: the sidebar of systems and files on the
+left, sticky under the status bar, the file itself as the main column."
+  ("body.source-page main"
+   :display grid
+   :grid-template-columns 15rem (minmax 0 1fr)
+   :column-gap (clamp 1.5rem 3vw 3rem)
+   :align-items start)
+  ("article.source-body"
+   :min-width 0)
+  (".source-nav"
+   :position sticky
+   :top 2.4rem
+   :max-height (calc (list 100vh (quote -) 2.9rem))
+   :overflow-y auto
+   :padding-right 0.75rem
+   :margin-top 0.55rem
+   :font (display-font 500 0.82rem/1.45)
+   :border-right (hairline)
+   :scrollbar-width thin)
+  (".source-nav-title"
+   :margin 0 0 0.6rem
+   :font (display-font 700 0.72rem/1.4)
+   :text-transform uppercase
+   :letter-spacing 0.06em
+   ("a" :color --muted ("&:hover" :color --accent :text-decoration none)))
+  ("details.source-system"
+   :margin 0
+   ("& > summary"
+    :display flex
+    :align-items baseline
+    :gap 0.5em
+    :padding 0.15rem 0
+    :cursor pointer
+    :list-style none
+    :color (color-mix --ink 85% --muted)
+    ("&::-webkit-details-marker" :display none)
+    ("&::before"
+     :content (quoted "›")
+     :display inline-block
+     :width 0.7em
+     :color --muted
+     :transition transform 0.12s)
+    (".system" :font-weight 700 :overflow-wrap anywhere)
+    (".count" :color --muted :font-size 0.85em)
+    ("&:hover .system" :color --accent))
+   ("&[open] > summary::before" :transform (rotate 90deg))
+   ("& > ul"
+    :list-style none
+    :margin 0.1rem 0 0.5rem
+    :padding 0 0 0 0.7em
+    :border-left 2px solid --rule)
+   ("& > ul > li"
+    :padding 0.05rem 0 0.05rem 0.5em
+    :margin-left -2px
+    :border-left 2px solid transparent
+    ("a" :color --ink :overflow-wrap anywhere)
+    ("a .directory" :color --muted)
+    ("a:hover" :color --accent :text-decoration none)
+    ("&.current"
+     :border-left-color --accent
+     ("a" :color --accent :font-weight 700)))))
 
 (defparameter *definition-kind-colours*
   '((--mark-idea defclass defstruct define-condition)
@@ -646,7 +719,13 @@ table: each pair a subgrid row of its two-column box."
   (:media "screen and (max-width: 90ch)"
    ((".library" ".doors") :grid-template-columns (minmax 0 1fr))
    ("h1" :font-size 1.65rem)
-   ("p" :text-align start)))
+   ("p" :text-align start)
+   ("body.source-page main" :display block)
+   (".source-nav" :display none)
+   ;; The trail keeps its ends: the first crumb and the current page.
+   (("a.crumb:not(:first-of-type)" "a.crumb:not(:first-of-type) + .crumb-sep")
+    :display none)
+   (".status:has(.crumb-sep) .status-right" :display none)))
 
 (define-style figure-cards
   "Figure and definition cards shown beside mentions."

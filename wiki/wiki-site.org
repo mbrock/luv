@@ -592,11 +592,15 @@ drive the =(render backend element)= refactor of #AGTIO4.
 :END:
 
 Once every source file is read into nodes, showing all of it is one more
-render.  Each file of the =luv= and =luvcraft= systems becomes a page under
-=source/=, drawn entirely as dexp boxes: a table of its definitions on top,
-every top-level form anchored by its starting line (=#L956=), the file's
-=in-package= hiding that package's prefix, comment blocks kept as one box
-each.  [[source.html][source.html]] lists the files by system.  The reference graph runs
+render.  Each file of the =luv=, =luvcraft=, and =luv-wiki= systems (the
+wiki reads itself, so how it renders is on the site too) becomes a page
+under =source/=, drawn entirely as dexp boxes: a table of its definitions on
+top, every top-level form anchored by its starting line (=#L956=), the
+file's =in-package= hiding that package's prefix, comment blocks kept as one
+box each.  [[source.html][source.html]] lists the files by system; on a wide screen a source
+page keeps a sidebar of the systems and their files on the left, the
+current file's system open, and the status bar reads as a breadcrumb trail
+(=Source › system › file=; on wiki pages =Pages › title=).  The reference graph runs
 both ways through these pages: any symbol that names a definition anywhere
 in the corpus links to that definition (a defining form is preferred over a
 method), "Referenced from" summaries and =lisp:= links point at the local

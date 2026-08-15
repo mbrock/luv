@@ -10,15 +10,15 @@
   "#+title: A test page
 #+startup: overview
 
-Preamble mentions #ABC123 before any heading.
+Preamble mentions #XYZ123 before any heading.
 
 * First figure
 :PROPERTIES:
-:ID: ABC123
+:ID: XYZ123
 :END:
 
 A paragraph with *bold*, /italic/, =verbatim=, ~code~, a [[https://example.org][link]],
-and a plain [[file:other.org][page link]].  A mention of #DEF456 and a dangling
+and a plain [[file:other.org][page link]].  A mention of #UVW456 and a dangling
 #ZZZ999.  A star * alone and 2 * 3 are not emphasis; nor is foo_bar.
 
 - first item
@@ -44,10 +44,10 @@ and a plain [[file:other.org][page link]].  A mention of #DEF456 and a dangling
 
 ** NEXT A work mark
 :PROPERTIES:
-:ID: DEF456
+:ID: UVW456
 :END:
 
-Intent: mention [[id:ABC123]] with a link.
+Intent: mention [[id:XYZ123]] with a link.
 
 * Second figure without an ID
 
@@ -61,7 +61,7 @@ Nothing here refers to anything.
   (let ((doc (page)))
     (ok (string= (wiki:document-title doc) "A test page"))
     (ok (equal (mapcar #'wiki:heading-id (wiki:document-figures doc))
-               '("ABC123" "DEF456")))
+               '("XYZ123" "UVW456")))
     (let ((mark (second (wiki:document-figures doc))))
       (ok (string= (wiki:heading-keyword mark) "NEXT"))
       (ok (= (wiki:heading-level mark) 2))
@@ -69,19 +69,21 @@ Nothing here refers to anything.
 
 (deftest inline-markup-reads-to-objects
   (let* ((inlines (wiki::read-inlines
-                   "x *bold* /it/ =verb= ~code~ [[https://e.org][L]] #ABC123 2 * 3 foo_bar [[file:a.org::(defun f][=f=]]"))
+                   "x *bold* /it/ =verb= ~code~ [[https://e.org][L]] #XYZ123 2 * 3 foo_bar [[file:a.org::(defun f][=f=]]"))
          (objects (remove-if #'stringp inlines)))
     (ok (equal (mapcar #'type-of objects)
                '(wiki:emphasis wiki:emphasis wiki:emphasis wiki:emphasis
                  wiki:link wiki:mention wiki:link)))
     (ok (equal (mapcar #'wiki:emphasis-kind (subseq objects 0 4))
                '(:bold :italic :verbatim :code)))
-    (ok (string= (wiki:mention-id (sixth objects)) "ABC123"))
+    (ok (string= (wiki:mention-id (sixth objects)) "XYZ123"))
     (let ((link (seventh objects)))
       (ok (string= (wiki:link-protocol link) "file"))
       (ok (string= (wiki:link-path link) "a.org"))
       (ok (string= (wiki:link-search link) "(defun f")))
-    (ok (find " 2 * 3 foo_bar " (remove-if-not #'stringp inlines) :test #'string=))))
+    (ok (find " 2 * 3 foo_bar " (remove-if-not #'stringp inlines) :test #'string=))
+    ;; Six hex digits are a colour, never a figure ID.
+    (ok (every #'stringp (wiki::read-inlines "paper is #111517 and ink #C2CBD0")))))
 
 (deftest blocks-read-in-order
   (let* ((doc (page))
@@ -110,33 +112,33 @@ Nothing here refers to anything.
 (deftest site-indexes-figures-mentions-and-backlinks
   (let* ((doc (page))
          (site (wiki:make-site (list doc))))
-    (ok (eq (wiki:find-figure "ABC123" site) (first (wiki:document-figures doc))))
-    (ok (equal (wiki:document-mentions doc) '("ABC123" "DEF456" "ZZZ999")))
+    (ok (eq (wiki:find-figure "XYZ123" site) (first (wiki:document-figures doc))))
+    (ok (equal (wiki:document-mentions doc) '("XYZ123" "UVW456" "ZZZ999")))
     (ok (equal (wiki:dangling-mentions site) (list (cons doc '("ZZZ999")))))
-    ;; The work mark links to ABC123 with an id: link, so it is a backlink.
-    (ok (equal (mapcar #'wiki:heading-id (gethash "ABC123" (wiki:site-backlinks site)))
-               '("DEF456")))))
+    ;; The work mark links to XYZ123 with an id: link, so it is a backlink.
+    (ok (equal (mapcar #'wiki:heading-id (gethash "XYZ123" (wiki:site-backlinks site)))
+               '("UVW456")))))
 
 (deftest rendering-produces-expected-html
   (let* ((doc (page))
          (site (wiki:make-site (list doc)))
          (html (wiki:render-document-string doc site)))
     (ok (search "<title>A test page</title>" html))
-    (ok (search "<section class=figure id=ABC123>" html))
-    (ok (search "<section class=\"figure work-mark\" id=DEF456>" html))
+    (ok (search "<section class=figure id=XYZ123>" html))
+    (ok (search "<section class=\"figure work-mark\" id=UVW456>" html))
     (ok (search "<span class=\"mark mark-next\">NEXT</span>" html))
     (ok (search "<b>bold</b>," html))
     (ok (search "<code class=verbatim>verbatim</code>" html))
     (ok (search "<a href=\"https://example.org\">link</a>" html))
     (ok (search "<a href=other.html>page link</a>" html))
-    (ok (search "<a class=mention href=#DEF456 title=\"A work mark\">#DEF456</a>" html))
+    (ok (search "<a class=mention href=#UVW456 title=\"A work mark\">#UVW456</a>" html))
     (ok (search "<span class=\"mention dangling\"" html))
     (ok (search "keep &lt; this &amp; that" html))
     (ok (search "<div class=lisp><div class=\"list stacked\" data-callee=defun>" html))
     (ok (search "<table><tr><th>Head A<th>Head B<tr><td>a1<td>" html))
     (ok (search "<ol><li>one<li>two</ol>" html))
-    (ok (search "Mentioned in: <a href=#DEF456>A work mark</a>" html))
-    (ok (search "mention <a class=mention href=#ABC123 title=\"First figure\">#ABC123</a> with" html))
+    (ok (search "Mentioned in: <a href=#UVW456>A work mark</a>" html))
+    (ok (search "mention <a class=mention href=#XYZ123 title=\"First figure\">#XYZ123</a> with" html))
     (ok (search "<h3><span class=\"mark mark-next\">" html))))
 
 (deftest the-loaded-corpus-is-consistent
@@ -169,10 +171,10 @@ Nothing here refers to anything.
 (defparameter *source*
   "(in-package #:luv.example)
 
-;;; A comment before the definition mentions #ABC123.
+;;; A comment before the definition mentions #XYZ123.
 
 (defun frob (x &optional y)
-  \"Frob X.  See #ABC123 and the missing #ZZZ999.\"
+  \"Frob X.  See #XYZ123 and the missing #ZZZ999.\"
   (let ((sum (+ x (or y 1)))
         (name 'frob))
     (list sum name #'car cl:car foo::bar :key #:g #(1 2) `(,x ,@y)
@@ -227,7 +229,7 @@ Nothing here refers to anything.
          (method (wiki:find-definition "frob-method" definitions)))
     (ok (equal (mapcar #'wiki:definition-kind definitions) '("defun" "defmethod" "defclass")))
     (ok (= (wiki:definition-line frob) 5))
-    (ok (equal (wiki:definition-mentions frob) '("ABC123" "ZZZ999")))
+    (ok (equal (wiki:definition-mentions frob) '("XYZ123" "ZZZ999")))
     (ok (= 1 (length (wiki::definition-comments frob))))
     (ok (equal (wiki::definition-package frob) "#:luv.example"))
     (ok (equal (wiki:definition-qualifiers method) '(":around")))
@@ -355,12 +357,12 @@ Nothing here refers to anything.
          (definitions (wiki:file-definitions #p"/example.lisp" *source*))
          (site (wiki:make-site (list doc) :definitions definitions :source-directory #p"/"))
          (html (wiki:render-document-string doc site)))
-    (ok (equal (mapcar #'wiki:definition-name (gethash "ABC123" (wiki:site-code-references site)))
+    (ok (equal (mapcar #'wiki:definition-name (gethash "XYZ123" (wiki:site-code-references site)))
                '("frob")))
     (ok (search "Referenced from code:" html))
     (ok (search "<details class=definition><summary><span class=kind>defun</span> <span class=name>frob</span> <a class=source href=\"https://github.com/mbrock/luv/blob/main/example.lisp#L5\">example.lisp:5</a></summary>" html))
     ;; The mention inside the docstring links to the figure.
-    (ok (search "See <a class=mention href=#ABC123" html))
+    (ok (search "See <a class=mention href=#XYZ123" html))
     (ok (equal (wiki:dangling-code-mentions site) (list (cons (first definitions) '("ZZZ999")))))))
 
 (deftest code-prose-marks-symbol-references

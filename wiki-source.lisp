@@ -3,8 +3,9 @@
 ;;;; A SOURCE-FILE is one Lisp file read by the Eclector client: its text,
 ;;;; top-level nodes, and definitions.  Each becomes a page under source/
 ;;;; drawn entirely as dexp boxes, with every top-level form anchored by
-;;;; its line and a table of its definitions on top; source.html lists the
-;;;; files by system.  Symbols that name a definition anywhere in the corpus
+;;;; its line and a table of its definitions on top, and a sidebar of every
+;;;; system's files beside it; source.html lists the files by system.
+;;;; Symbols that name a definition anywhere in the corpus
 ;;;; link to it, "Referenced from" summaries and lisp: links point into
 ;;;; these pages, and #ID mentions in code point back at the wiki.
 
@@ -137,43 +138,81 @@ methods grouped under their generic."
                       method :href (format nil "~A#L~D" prefix (definition-line method))
                       :name-p nil)))))))))
 
+(defun render-file-path (path)
+  "PATH as a directory part in the muted face and the file name emphasized."
+  (let ((slash (position #\/ path :from-end t)))
+    (spinneret:with-html
+      (when slash (:span.directory (subseq path 0 (1+ slash))))
+      (:span.file (subseq path (if slash (1+ slash) 0))))))
+
+(defun render-source-sidebar (current &optional (site *site*))
+  "The systems and their files as a compact list beside a source page: one
+DETAILS per system, the one holding CURRENT open and CURRENT marked."
+  (spinneret:with-html
+    (:aside.source-nav :aria-label "Source files"
+      (:p.source-nav-title
+       (:a :href (concatenate 'string *page-prefix* "source.html") "Source"))
+      (dolist (entry (site-systems site))
+        (let ((files (system-entry-files entry)))
+          (when files
+            (:details.source-system :open (and (member current files) t)
+              (:summary
+               (:span.system (short-system-name (system-entry-name entry)))
+               (:span.count (format nil "~D" (length files))))
+              (:ul
+               (dolist (file files)
+                 (:li :class (if (eq file current) "current" nil)
+                   (:a :href (concatenate 'string *page-prefix* (source-page-name file))
+                       (render-file-path (source-file-relative-path file)))))))))))))
+
 (defun render-source-page (file)
   "Emit the page for FILE: its definitions table and every top-level form
-as dexp boxes, each anchored by its starting line."
+as dexp boxes, each anchored by its starting line, with the sidebar of all
+files beside it on wide screens."
   (let* ((page (source-page-name file))
          (*page-prefix* (page-prefix-for page))
          (*page-kind* "source-file")
          (*page-definition-cards* (make-hash-table :test 'eq))
          (*rendering-document* nil)
          (line-starts (source-file-line-starts file))
+         (system-name (source-file-system-name file))
          (title (source-file-relative-path file)))
     (render-page-frame
      title
      (lambda ()
        (spinneret:with-html
-         (:h1.source-title title)
-         (:p.source-meta
-          (when (source-file-system-name file)
-            (spinneret:html "system ")
-            (:code (source-file-system-name file))
-            (spinneret:html " · "))
-          (format nil "~D definition~:P · " (length (source-file-definitions file)))
-          (:a :href (concatenate 'string (site-source-url *site*) (source-file-relative-path file))
-              "on GitHub"))
-         (render-source-toc file)
-         (let ((*lisp-package* (source-file-package file)))
-           (:div.lisp.source
-            (dolist (node (source-file-nodes file))
-              (let ((*lisp-role* nil))
-                (:div.toplevel :id (format nil "L~D" (node-line node line-starts))
-                  (render-html node))))))
-         (render-definition-cards)
-         (render-figure-cards
-          (loop for definition in (source-file-definitions file)
-                append (definition-mentions definition)))))
+         (render-source-sidebar file)
+         (:article.source-body
+          (:h1.source-title title)
+          (:p.source-meta
+           (when system-name
+             (spinneret:html "system ")
+             (:code system-name)
+             (spinneret:html " · "))
+           (format nil "~D definition~:P · " (length (source-file-definitions file)))
+           (:a :href (concatenate 'string (site-source-url *site*) (source-file-relative-path file))
+               "on GitHub"))
+          (render-source-toc file)
+          (let ((*lisp-package* (source-file-package file)))
+            (:div.lisp.source
+             (dolist (node (source-file-nodes file))
+               (let ((*lisp-role* nil))
+                 (:div.toplevel :id (format nil "L~D" (node-line node line-starts))
+                   (render-html node))))))
+          (render-definition-cards)
+          (render-figure-cards
+           (loop for definition in (source-file-definitions file)
+                 append (definition-mentions definition))))))
      :body-class "wide source-page"
-     :status title
-     :right (or (source-file-system-name file) "source"))))
+     :crumbs (append (list (cons "Source" "source.html"))
+                     (when system-name
+                       (list (cons system-name
+                                   (concatenate 'string "source.html#" (system-anchor system-name)))))
+                     (list (cons title nil)))
+     :right (lambda ()
+              (spinneret:with-html
+                (:a :href (concatenate 'string (site-source-url *site*) title)
+                    (file-namestring (source-file-pathname file))))))))
 
 (defvar *file-cards* nil
   "While the source index renders: files whose definitions get a card.")
@@ -185,14 +224,12 @@ as dexp boxes, each anchored by its starting line."
 (defun render-file-entry (file)
   "A file's relative path linking to its page, the file name emphasized,
 and a count button that shows the definitions in a popover."
-  (let* ((path (source-file-relative-path file))
-         (slash (position #\/ path :from-end t)))
+  (progn
     (push file *file-cards*)
     (spinneret:with-html
       (:span.file-entry
        (:a.path :href (source-page-name file)
-                (when slash (:span.directory (subseq path 0 (1+ slash))))
-                (:span.file (subseq path (if slash (1+ slash) 0))))
+                (render-file-path (source-file-relative-path file)))
        (:button.count :type "button" :data-card (file-card-id file)
                       :title "definitions"
                       (format nil "~D" (length (source-file-definitions file))))))))
@@ -212,8 +249,17 @@ system that merely depends on everything."
   (remove-if (lambda (entry)
                (let ((name (system-entry-name entry)))
                  (or (search "/tests" name)
-                     (not (find #\/ name)))))
+                     (string= name "luv"))))
              (site-systems site)))
+
+(defun short-system-name (name)
+  "NAME without the leading luv/ that nearly every system shares."
+  (if (starts-with "luv/" name) (subseq name 4) name))
+
+(defun system-anchor (name)
+  "The id of NAME's row in the source index: the name itself, slashes and
+all, since luv/wiki and luv-wiki are different systems."
+  (concatenate 'string "system-" name))
 
 (defun transitive-reduction (edges)
   "EDGES is a list of (from . to).  Return the edges not implied by a longer
@@ -248,7 +294,7 @@ fundamentals at the top."
            (format out "%%{init: {\"flowchart\": {\"nodeSpacing\": 14, \"rankSpacing\": 30, \"curve\": \"basis\"}}}%%~%")
            (format out "flowchart TB~%")
            (dolist (name names)
-             (format out "  ~A[\"~A\"]~%" (node name) (subseq name 4)))
+             (format out "  ~A[\"~A\"]~%" (node name) (short-system-name name)))
            (loop for (from . to) in edges
                  do (format out "  ~A --> ~A~%" (node from) (node to)))))))))
 
@@ -260,28 +306,27 @@ count opens its definitions in a popover."
         (*page-kind* "source")
         (*rendering-document* nil)
         (*file-cards* '()))
-    (flet ((system-anchor (name) (concatenate 'string "system-" (substitute #\- #\/ name))))
-      (render-page-frame
-       "Source"
-       (lambda ()
-         (spinneret:with-html
-           (:h1 "Source")
-           (:p.lede "The systems of luv, fundamentals first.  A file's count opens its
-definitions; symbols in the pages link to their definitions and "
-                    (:code "#ID") " mentions link to figures.")
-           (:p.graph-note "Dependencies between the systems, essential edges only (test
+    (render-page-frame
+     "Source"
+     (lambda ()
+       (spinneret:with-html
+         (:h1 "Source")
+         (:p.lede "The systems of luv and of the wiki that renders it, fundamentals
+first.  A file's count opens its definitions; symbols in the pages link to
+their definitions and " (:code "#ID") " mentions link to figures.")
+         (:p.graph-note "Dependencies between the systems, essential edges only (test
 systems and the aggregate " (:code "luv") " left out); names drop the "
-                          (:code "luv/") " prefix.")
-           (render-system-graph site)
-           (:table.systems
-            (:thead (:tr (:th "system") (:th "description") (:th "files")))
-            (:tbody
-             (dolist (entry (site-systems site))
-               (:tr :id (system-anchor (system-entry-name entry))
-                (:td.system-name (system-entry-name entry))
-                (:td.system-description (or (system-entry-description entry) ""))
-                (:td.system-files
-                 (dolist (file (system-entry-files entry))
-                   (render-file-entry file)))))))
-           (render-file-cards)))
-       :body-class "wide source-index"))))
+                        (:code "luv/") " prefix.")
+         (render-system-graph site)
+         (:table.systems
+          (:thead (:tr (:th "system") (:th "description") (:th "files")))
+          (:tbody
+           (dolist (entry (site-systems site))
+             (:tr :id (system-anchor (system-entry-name entry))
+              (:td.system-name (system-entry-name entry))
+              (:td.system-description (or (system-entry-description entry) ""))
+              (:td.system-files
+               (dolist (file (system-entry-files entry))
+                 (render-file-entry file)))))))
+         (render-file-cards)))
+     :body-class "wide source-index")))

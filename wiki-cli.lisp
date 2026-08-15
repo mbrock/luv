@@ -306,7 +306,8 @@ Give page names to restrict."
 (defparameter *id-characters* "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
 
 (define-command ids (&optional (count "12"))
-  "Print COUNT fresh figure IDs that no page uses (default 12)."
+  "Print COUNT fresh figure IDs that no page uses (default 12); never six
+hex digits, which the reader takes for a colour."
   (let* ((site (site :code nil))
          (used (wiki:site-figures site))
          (state (make-random-state t)))
@@ -315,7 +316,9 @@ Give page names to restrict."
                                           collect (char *id-characters*
                                                         (random (length *id-characters*) state)))
                                     'string)
-            unless (or (gethash candidate used) (find-symbol candidate :keyword))
+            unless (or (gethash candidate used)
+                       (find-symbol candidate :keyword)
+                       (wiki::hex-colour-p candidate 0 6))
               do (setf (gethash candidate used) t)
                  (format t "~A~%" candidate)
                  (return)))))

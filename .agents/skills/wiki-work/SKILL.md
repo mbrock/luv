@@ -54,10 +54,12 @@ durable handle. IDs never change when a heading moves or is retitled.
   stands without the rest of the page.
 - Titles are short noun phrases or claims ("Destroy is logically immediate
   and physically conditional"), not section labels ("Overview").
-- Refer to other figures with the light mention `#ABC123` in prose; use
-  `[[id:ABC123]]` only when a clickable word is better than the ID. Both
+- Refer to other figures with the light mention `#XYZ123` in prose; use
+  `[[id:XYZ123]]` only when a clickable word is better than the ID. Both
   render as links with the target's title as tooltip and both count as
-  backlinks; a bare `[[id:X]]` renders like `#X`.
+  backlinks; a bare `[[id:X]]` renders like `#X`.  An ID is six capitals
+  or digits but never six hex digits: `#111517` in code is a colour, and
+  `scripts/wiki ids` never hands out such an ID.
 - Mention figures generously across pages: the "Mentioned in" lines the site
   shows under each figure are the wiki's map, and they are derived, so
   they cost nothing to keep.

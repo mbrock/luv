@@ -3,7 +3,7 @@
 ;;;; The wiki pages are Org files, but they use a deliberately small and
 ;;;; regular subset: a title keyword, headings with property drawers,
 ;;;; paragraphs, plain and ordered lists, example and source blocks, simple
-;;;; tables, bracket links, the light #ABC123 figure mention, and the six
+;;;; tables, bracket links, the light #XYZ123 figure mention, and the six
 ;;;; inline emphasis markers.  This reader turns that subset into a tree of
 ;;;; CLOS elements.  It is not a general Org parser and does not try to be:
 ;;;; anything it does not recognize is kept as paragraph text, so a page can
@@ -88,7 +88,7 @@
 
 (defclass mention (inline-object)
   ((id :initarg :id :accessor mention-id))
-  (:documentation "A light #ABC123 reference to a figure."))
+  (:documentation "A light #ID reference to a figure: a hash and six capitals or digits."))
 
 (defgeneric reference-id (inline)
   (:documentation "The figure ID an inline object refers to, or NIL.")
@@ -233,8 +233,15 @@
 (defun char-after (string index)
   (and (< (1+ index) (length string)) (char string (1+ index))))
 
+(defun hex-colour-p (string start end)
+  "Are the characters of STRING from START below END all hex digits?  A
+figure ID never is, so that #111517 in a stylesheet stays a colour."
+  (loop for i from start below end
+        always (digit-char-p (char string i) 16)))
+
 (defun mention-end (string start)
-  "If a #ABC123 mention begins at START, return the index after it."
+  "If a #ID mention (six capitals or digits, not all of them hex digits)
+begins at START, return the index after it."
   (let ((end (+ start 7)))
     (when (and (<= end (length string))
                (char= (char string start) #\#)
@@ -242,6 +249,7 @@
                (loop for i from (1+ start) below end
                      for c = (char string i)
                      always (or (digit-char-p c) (upper-case-p c)))
+               (not (hex-colour-p string (1+ start) end))
                (not (and (< end (length string))
                          (alphanumericp (char string end)))))
       end)))
