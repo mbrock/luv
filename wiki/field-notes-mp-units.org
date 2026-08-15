@@ -52,6 +52,30 @@ displacement and velocity need no explicit =delta<>= wrapper because
 they are deltas by nature.  A norm takes a vector delta to a scalar
 absolute; =abs()= takes a signed scalar delta to an absolute.
 
+The multiplicative rules are less obvious than the additive ones and worth
+recording exactly: absolute × absolute and absolute / absolute are absolute
+(products and physical ratios), absolute × difference is a difference (the
+type keeps signedness wherever it cannot prove otherwise), difference /
+difference is a difference (velocity), and points enter no multiplicative
+operation at all.  Non-negativity is an opt-in spec tag inherited by named
+children, checked at three sites (construction, =.absolute()= promotion,
+=absolute ± difference=), and never inferred from a defining equation
+because equations capture dimension rather than sign domain.
+
+Points carry an *origin*, and "same space" is origin identity: the
+=natural_point_origin= of a quantity (auto-attaching =check_non_negative=
+for non-negative specs), a named =absolute_point_origin= that isolates a
+space even from same-quantity points, and =relative_point_origin= as a
+compile-time offset chain within one root (Kelvin, Celsius, Fahrenheit).
+Crossing independent roots requires a registered =frame_projection= —
+runtime callable, both directions explicit, no automatic inverse — which
+is how axis inversions (altitude/depth) and calibrated transforms (world
+to camera) are modeled.  Origins may also carry range policies (wrap,
+reflect, clamp, non-negative halfline) enforced at every mutation, which
+is how latitude, longitude, and headings get their wrapping behavior.
+Points on distinct natural axes never mix even where their differences
+widen to a common ancestor: height point minus width point is an error.
+
 The motivating claim is about defaults: physics notation writes
 absolutes plainly and marks deltas with an explicit Δ, so the library
 makes the absolute the unmarked case (=20 * kg=) and requires

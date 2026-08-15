@@ -217,20 +217,67 @@ point       -   difference  point       point
 absolute    -   error       difference  absolute
 difference  -   error       difference  difference
 
-scale by number:  point error; absolute (non-negative factor) absolute;
-                  difference difference
-negate:           point error; absolute -> difference; difference difference
-abs / norm:       difference -> absolute
+absolute  * absolute    absolute    (energy = power * time)
+absolute  * number      absolute
+absolute  * difference  difference  (area * delta-height = delta-volume)
+difference * number     difference
+absolute  / absolute    absolute    (a physical ratio: efficiency, strain)
+absolute  / difference  difference
+difference / absolute   difference
+difference / difference difference  (velocity = displacement / duration)
+point     * or / any    error
+abs, norm, modulus:     difference -> absolute
 #+end_example
 
 Points keep the rules #P7A4HX already states.  Absolutes and differences mix
 freely in addition because a signed difference shifting an amount does not
-destroy its zero anchor; the result stays absolute, with a contract check
-that a =non-negative= specification does not go below zero.  Subtracting two
-absolutes yields a difference — the case that today collapses into "same
-thing as the operands."  Vector quantities are always differences (there is
-no absolute vector); a norm takes a vector difference to a scalar absolute,
-which is exactly what luv's =dot=-derived magnitudes should be.
+destroy its zero anchor; the result stays absolute.  Subtracting two absolutes
+yields a difference — the case that today collapses into "same thing as the
+operands" — and an absolute is recovered only by an explicit =.absolute()=
+promotion.  A difference times an absolute is a difference: the type
+conservatively keeps signedness wherever it cannot prove otherwise.  Vector
+quantities are always differences (there is no absolute vector); a norm takes
+a vector difference to a scalar absolute, which is exactly what luv's
+=dot=-derived magnitudes should be.
+
+*Non-negativity* is an opt-in specifier on the quantity spec, inherited by
+named children of the same kind and checked at exactly three sites:
+construction of an absolute, =.absolute()= promotion, and
+=absolute ± difference= arithmetic.  It is deliberately *never derived from a
+defining equation*: an equation captures dimension, not sign domain, and many
+signed quantities (thermal expansion coefficient, reactive power) have
+equations whose every factor is non-negative.  Anonymous composed specs are
+therefore never non-negative; only a named quantity carrying the tag is.
+Whether negating a non-negative absolute is an error or an implicit demotion
+to a difference is an open question in the source; only "never an absolute"
+is settled.
+
+*What "same space" means for points* is where the source is deeper than
+luv's proxy.  Two points subtract only when they share an origin root:
+=natural_point_origin= (the quantity's own zero, with =check_non_negative=
+attached automatically when the spec is non-negative), a named
+=absolute_point_origin= (an isolated space — two such origins on the same
+quantity are incompatible), or =relative_point_origin= (a compile-time offset
+chain within one root, so Celsius, Fahrenheit, and Kelvin points all subtract
+through =ice_point= and =absolute_zero=).  Conversions across independent
+roots need a registered =frame_projection=, always explicit and never
+inverted automatically — this is what handles axis-inverting maps such as
+altitude/depth and bearing/azimuth, and runtime-parameter maps such as world
+to camera frame.  Notably, points on distinct natural axes do not mix even
+though their differences widen: =height= point minus =width= point is an
+error while =height= plus =width= differences give =length=.  Luv's
+=same-quantity-space-p= requires equal names, which gets that rule for free;
+what it does not yet have is any notion of /origin/, so a =:world-position=
+point and a hypothetical camera-relative position would be the same space
+today.  The semantic maps of #SM4DFB are luv's =frame_projection=: they
+already state domain and codomain spaces and refuse silent inversion.
+
+The source also attaches *range policies* to origins — =wrap_to_range= for
+longitude and angles, =reflect_in_range= for latitude, =clamp_to_range= for
+sensor bands, the non-negative halfline — enforced at construction, unit
+conversion, arithmetic, and origin change.  Texture coordinates with wrap or
+clamp addressing and periodic sun angles are the same shape; that is a later
+refinement, recorded here rather than folded into #SYUACW.
 
 A second observation from the built system: =affine-p= is a property of a
 specification instance, set at use sites (=:world-position :affine-p t= in
@@ -263,8 +310,15 @@ Evidence to gather:
 
 - =tests/arithmetic.lisp= gains the executable claims: absolute minus
   absolute is a difference; absolute plus difference stays absolute;
-  negating an absolute yields a difference; scaling a point remains an
-  error; a =dot=-derived magnitude may be interpreted as an absolute.
+  absolute times difference is a difference while absolute times absolute
+  and absolute over absolute stay absolute; scaling or negating a point
+  remains an error; negating an absolute is never an absolute (whether it
+  errors or demotes is chosen and recorded, since the source leaves it
+  open); a =dot=-derived magnitude may be interpreted as an absolute.
+- =non-negative= is a definition-level specifier, inherited by component
+  quantities of the same kind, never derived for anonymous results, and
+  consulted by the additive rules; the check-site list from #LNRY72 is
+  the test plan.
 - =luvcraft/quantities.lisp= declares its amounts absolute and non-negative
   at the definition, and the ABI declarations drop per-site =:affine-p t=
   where the definition now supplies the character; the seven production
