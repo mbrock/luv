@@ -55,6 +55,18 @@ local Lisp projects:
 nix develop
 ```
 
+For ordinary repeated work, install the same environment into your user Nix
+profile once:
+
+```sh
+nix profile add .#dev
+```
+
+This installs `luv-env`, which carries the pinned Lisp, native libraries, and
+project environment without evaluating the flake on every invocation.  The
+repository's `./sly`, `scripts/luv`, `scripts/wiki`, and Make targets use it
+automatically.  They fall back to `nix develop` when it is not installed.
+
 From there, load the project in Lisp:
 
 ```lisp

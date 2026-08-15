@@ -8,23 +8,23 @@ LUVCRAFT_BENCHMARK_CSV ?= build/luvcraft-metal-benchmark.csv
 all: luvcraft
 
 luvcraft:
-	nix develop -c sbcl --script build-luvcraft.lisp
+	./scripts/dev sbcl --script build-luvcraft.lisp
 
 run: luvcraft
-	nix develop -c ./build/luvcraft
+	./scripts/dev ./build/luvcraft
 
 test: parinfer-check shader-validate
-	nix develop -c sbcl --non-interactive \
+	./scripts/dev sbcl --non-interactive \
 		--eval '(require :asdf)' \
 		--eval '(asdf:load-asd (truename "luv.asd"))' \
 		--eval '(asdf:test-system :luv)'
 
 parinfer-check:
-	@nix develop -c sh -c 'tmp=$$(mktemp); trap "rm -f $$tmp" EXIT; for file in $$(rg --files -g"*.lisp"); do if ! ./sly parinfer --strict --check "$$file" >"$$tmp" 2>&1; then cat "$$tmp"; exit 1; fi; done; echo "parinfer: strict check passed."'
+	@./scripts/dev sh -c 'tmp=$$(mktemp); trap "rm -f $$tmp" EXIT; for file in $$(rg --files -g"*.lisp"); do if ! ./sly parinfer --strict --check "$$file" >"$$tmp" 2>&1; then cat "$$tmp"; exit 1; fi; done; echo "parinfer: strict check passed."'
 
 shader-validate:
 	mkdir -p build
-	nix develop -c sbcl --non-interactive \
+	./scripts/dev sbcl --non-interactive \
 		--eval '(require :asdf)' \
 		--eval '(asdf:load-asd (truename "luv.asd"))' \
 		--eval '(asdf:load-system :luv/luvcraft/shaders)' \
@@ -35,17 +35,17 @@ shader-validate:
 		--eval '(luv.spir-v:write-spir-v (luv.spir-v:block-world-sky-vertex-shader) #p"build/block-world-sky.vert.spv")' \
 		--eval '(luv.spir-v:write-spir-v (luv.spir-v:block-world-sky-fragment-shader) #p"build/block-world-sky.frag.spv")' \
 		--eval '(luv.spir-v:write-spir-v (luv.spir-v:block-world-shadow-vertex-shader) #p"build/block-world-shadow.vert.spv")'
-	nix develop -c spirv-val --target-env vulkan1.0 build/block-world.vert.spv
-	nix develop -c spirv-val --target-env vulkan1.0 build/block-world.frag.spv
-	nix develop -c spirv-val --target-env vulkan1.0 build/block-world-crosshair.vert.spv
-	nix develop -c spirv-val --target-env vulkan1.0 build/block-world-crosshair.frag.spv
-	nix develop -c spirv-val --target-env vulkan1.0 build/block-world-sky.vert.spv
-	nix develop -c spirv-val --target-env vulkan1.0 build/block-world-sky.frag.spv
-	nix develop -c spirv-val --target-env vulkan1.0 build/block-world-shadow.vert.spv
+	./scripts/dev spirv-val --target-env vulkan1.0 build/block-world.vert.spv
+	./scripts/dev spirv-val --target-env vulkan1.0 build/block-world.frag.spv
+	./scripts/dev spirv-val --target-env vulkan1.0 build/block-world-crosshair.vert.spv
+	./scripts/dev spirv-val --target-env vulkan1.0 build/block-world-crosshair.frag.spv
+	./scripts/dev spirv-val --target-env vulkan1.0 build/block-world-sky.vert.spv
+	./scripts/dev spirv-val --target-env vulkan1.0 build/block-world-sky.frag.spv
+	./scripts/dev spirv-val --target-env vulkan1.0 build/block-world-shadow.vert.spv
 
 msl-validate:
 	mkdir -p build
-	nix develop -c sbcl --non-interactive \
+	./scripts/dev sbcl --non-interactive \
 		--eval '(require :asdf)' \
 		--eval '(asdf:load-asd (truename "luv.asd"))' \
 		--eval '(asdf:load-system :luv/msl)' \
@@ -57,46 +57,46 @@ msl-validate:
 
 smoke: luvcraft
 	mkdir -p build
-	nix develop -c ./build/luvcraft --smoke-test build/luvcraft-smoke.png
+	./scripts/dev ./build/luvcraft --smoke-test build/luvcraft-smoke.png
 
 metal-smoke: luvcraft
 	mkdir -p build
-	MTL_DEBUG_LAYER=1 nix develop -c ./build/luvcraft --metal-smoke-test build/luvcraft-metal-smoke.png
+	MTL_DEBUG_LAYER=1 ./scripts/dev ./build/luvcraft --metal-smoke-test build/luvcraft-metal-smoke.png
 
 metal-benchmark: luvcraft
 	mkdir -p build
-	nix develop -c ./build/luvcraft --metal-benchmark $(LUVCRAFT_BENCHMARK_FRAMES) $(LUVCRAFT_BENCHMARK_CSV)
+	./scripts/dev ./build/luvcraft --metal-benchmark $(LUVCRAFT_BENCHMARK_FRAMES) $(LUVCRAFT_BENCHMARK_CSV)
 
 mcluv:
-	nix develop -c sbcl --script build-mcluv.lisp
+	./scripts/dev sbcl --script build-mcluv.lisp
 
 wiki-cli:
-	nix develop -c sbcl --script build-wiki.lisp
+	./scripts/dev sbcl --script build-wiki.lisp
 
 wiki:
-	nix develop -c sbcl --non-interactive \
+	./scripts/dev sbcl --non-interactive \
 		--eval '(require :asdf)' \
 		--eval '(asdf:load-asd (truename "luv.asd"))' \
 		--eval '(asdf:make :luv/wiki)'
 
 objective-c-probe:
-	nix develop -c sbcl --non-interactive \
+	./scripts/dev sbcl --non-interactive \
 		--eval '(require :asdf)' \
 		--eval '(asdf:load-asd (truename "luv.asd"))' \
 		--eval '(asdf:load-system :luv/metal/probe)' \
 		--eval '(format t "~S~%" (luv.metal:probe-system-default-device))'
 
 metal-clear:
-	nix develop -c sbcl --script tools/metal-clear.lisp
+	./scripts/dev sbcl --script tools/metal-clear.lisp
 
 metal-shader:
-	nix develop -c sbcl --script tools/metal-shader.lisp
+	./scripts/dev sbcl --script tools/metal-shader.lisp
 
 metal-pipeline:
-	nix develop -c sbcl --script tools/metal-pipeline.lisp
+	./scripts/dev sbcl --script tools/metal-pipeline.lisp
 
 metal-draw:
-	nix develop -c sbcl --script tools/metal-draw.lisp
+	./scripts/dev sbcl --script tools/metal-draw.lisp
 
 clean:
 	rm -f ./build/luvcraft ./build/mcluv ./build/luvcraft-smoke.png ./build/luvcraft-metal-smoke.png

@@ -5,7 +5,7 @@ set -eu
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 
 if [ "${LUV_NIX_SHELL:-}" != 1 ]; then
-  exec nix develop "$project_root" --command "$project_root/scripts/luv" "$@"
+  exec "$project_root/scripts/dev" "$project_root/scripts/luv" "$@"
 fi
 
 exec sbcl --script "$project_root/scripts/luv-main.lisp" "$@"

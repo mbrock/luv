@@ -73,8 +73,55 @@
           ]);
           slyRoot =
             "${pkgs.emacsPackages.sly}/share/emacs/site-lisp/elpa/${pkgs.emacsPackages.sly.pname}-${pkgs.emacsPackages.sly.version}";
+          dev = pkgs.writeShellApplication {
+            name = "luv-env";
+            runtimeInputs = [
+              lisp
+              pkgs.libffi
+              pkgs.mesa
+              pkgs.python3
+              pkgs.pkg-config
+              pkgs.sdl3
+              pkgs.spirv-tools
+              pkgs.vulkan-tools
+            ];
+            text = ''
+              export LUV_NIX_SHELL=1
+              export LUV_SLYNK_DIR=${slyRoot}/slynk
+              export CL_SOURCE_REGISTRY=${mcclim}//:${cl-sdl3}//
+              export LD_LIBRARY_PATH=${nativeLibraryPath}''${LD_LIBRARY_PATH:+:}''${LD_LIBRARY_PATH:-}
+
+              ${nixpkgs.lib.optionalString (system == "x86_64-linux") ''
+                export LUV_LAVAPIPE_ICD=${pkgs.mesa}/share/vulkan/icd.d/lvp_icd.x86_64.json
+              ''}
+              ${nixpkgs.lib.optionalString (system == "aarch64-linux") ''
+                export LUV_LAVAPIPE_ICD=${pkgs.mesa}/share/vulkan/icd.d/lvp_icd.aarch64.json
+              ''}
+              ${nixpkgs.lib.optionalString pkgs.stdenv.isDarwin ''
+                export VK_DRIVER_FILES=${pkgs.moltenvk}/share/vulkan/icd.d/MoltenVK_icd.json
+              ''}
+
+              if [[ -z "''${SDL_VIDEODRIVER:-}" \
+                    && -z "''${DISPLAY:-}" \
+                    && -z "''${WAYLAND_DISPLAY:-}" ]]; then
+                export SDL_VIDEODRIVER=offscreen
+              fi
+
+              if [[ -n "''${LUV_LAVAPIPE_ICD:-}" \
+                    && -f "$LUV_LAVAPIPE_ICD" \
+                    && -z "''${VK_DRIVER_FILES:-}" \
+                    && "''${SDL_VIDEODRIVER:-}" == offscreen ]]; then
+                export VK_DRIVER_FILES="$LUV_LAVAPIPE_ICD"
+              fi
+
+              if (( $# == 0 )); then
+                exec sbcl
+              fi
+              exec "$@"
+            '';
+          };
         in
-        { inherit pkgs sbcl lisp nativeLibraryPath slyRoot; };
+        { inherit pkgs sbcl lisp nativeLibraryPath slyRoot dev; };
     in
     {
       packages = forAllSystems (system:
@@ -83,6 +130,7 @@
         in {
           sbcl = env.sbcl;
           lisp = env.lisp;
+          dev = env.dev;
           default = env.lisp;
         });
 

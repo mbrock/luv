@@ -7,7 +7,7 @@ set -eu
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 
 if [ "${LUV_NIX_SHELL:-}" != 1 ]; then
-  exec nix develop "$project_root" --command "$project_root/scripts/wiki" "$@"
+  exec "$project_root/scripts/dev" "$project_root/scripts/wiki" "$@"
 fi
 
 exe="$project_root/build/wiki-cli"
