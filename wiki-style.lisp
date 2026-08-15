@@ -264,8 +264,9 @@ readable measure."
    :border-radius 0.4rem))
 
 (define-style dexp-boxes
-  "Lisp source as dexp boxes: every list is a flex-wrapping box whose side
-borders are its parentheses; body forms take the full width and stack."
+  "Lisp source as dexp boxes: every list is a box whose side borders are
+its parentheses; a list without body forms flows and wraps, one with body
+forms is a grid of rows (see the stacked group)."
   (".lisp"
    :--paren (color-mix (in srgb) (--fg 30%) transparent)
    :font-family --display-font
@@ -519,6 +520,59 @@ borders are its parentheses; body forms take the full width and stack."
    :color --fg)
   (".lisp .prose a.definition-link code.symbol"
    :color --accent))
+
+(define-style stacked
+  "A list with body forms is a grid of rows: the .head row, then one row
+per body form, so the box hugs its widest row instead of stretching to
+its parent (#993QQQ)."
+  (".lisp .list.stacked"
+   :display grid
+   :grid-template-columns (minmax 0 max-content)
+   :width fit-content
+   :max-width 100%
+   ("& > .head"
+    :display flex
+    :flex-wrap wrap
+    :align-items baseline
+    :column-gap 0.5em
+    :min-width 0)
+   ("& > .body"
+    :flex-basis auto
+    :max-width 100%)
+   ("& > .list.body"
+    :width fit-content)))
+
+(define-style clauses
+  "COND, CASE, HANDLER-CASE and other clause forms are tables (#4175NC):
+each clause a row with its key or test in the first column and its
+body forms stacked in the second, aligned across the clauses."
+  (".lisp .list.clauses"
+   :grid-template-columns ((fit-content 50%) (minmax 0 1fr))
+   :column-gap 0.7em
+   ("& > .head, & > .comment"
+    :grid-column (span 2))
+   ("& > .stacked-clause"
+    :display grid
+    :grid-template-columns subgrid
+    :grid-column (span 2)
+    :align-items baseline
+    :width auto
+    ("& > .head"
+     :display flex
+     :flex-wrap wrap
+     :align-items baseline
+     :column-gap 0.5em
+     :min-width 0)
+    ("& > .rest"
+     :display grid
+     :grid-template-columns (minmax 0 max-content)
+     :row-gap 0.05em
+     :min-width 0)
+    ("& > .rest > .body"
+     :flex-basis auto
+     :max-width 100%)
+    ("& > .rest > .list.body"
+     :width fit-content))))
 
 (define-style layouts
   "Layouts: binding grids, clauses, loop rows.  The selectors are the roles

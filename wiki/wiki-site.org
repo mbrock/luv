@@ -381,14 +381,17 @@ and =define-quantity= read as small tables.  And an operator known only by
 its =def= prefix is inspected rather than assumed: a list in second
 position makes it a lambda form, anything else a name followed by options.
 
-The stylesheet knows only roles: =.bindings= is a CSS grid, its =.clause=
-children subgrids spanning two columns, =.rest= a flowing cell, =.pair= an
-inline unit, =.body= full width, =.break= a zero-height row break before a
-=row-start=.  Adding a
-form's layout is one =define-layout= line or one class with two methods,
-and nothing else changes.
+The stylesheet knows only roles: a list with body forms is =.stacked=, a
+grid of rows with the head in a =.head= span (#993QQQ); =.bindings= is a
+CSS grid, its =.clause= children subgrids spanning two columns; a
+=.clauses= form is a two-column table of =.stacked-clause= rows
+(#4175NC); =.rest= a cell, =.pair= an inline unit, =.break= a zero-height
+row break before a =row-start=.  The rules live beside the layouts, as
+style definitions (#UODI74).  Adding a form's layout is one
+=define-layout= line or one class with two methods, and nothing else
+changes.
 
-* NEXT Boxes hug their widest row
+* DONE Boxes hug their widest row
 :PROPERTIES:
 :ID: 993QQQ
 :END:
@@ -409,13 +412,24 @@ and the page reads like a pretty-printer's output — =(unless operands
 (error …))= is exactly as wide as its =error= row.  Row gaps and baseline
 alignment survive unchanged.
 
-/Done when./ =render-children-with-roles= wraps the leading non-body
-children in a =.head= span and marks the list =stacked=; the stylesheet
-draws =.stacked= as that grid; the dexp tests know the head wrapper; the
-source pages show hugging boxes at every depth, and top-level definitions
-still align at the left.
+/Done./ The drawing routine now works in two passes: =layout-items=
+groups a list's children into items (a comment, a child with its role,
+or a keyword pair), and =render-children-with-roles= draws them; when
+any item is a body form the list is =stacked=, its head items in a
+=.head= span and every body item a row (a comment just before the first
+body form is a row too).  The =stacked= style group draws it as a
+one-column grid with =width: fit-content=.  On the shader-expression
+and streaming pages every box hugs its widest row at every depth;
+=(unless operands (error …))= is as wide as its =error= row, a
+=(lambda …)= argument as wide as its longest body row, and top-level
+definitions still start at the left margin.  What remains of the
+flex-wrap intrinsic-width problem is inside flow boxes: a function call
+holding a stacked argument, like =(every (lambda …) types)= as a =cond=
+test, is still sized as if its children stood on one line, so the
+argument after the lambda floats right of a gap; that wants the call
+layout of #ACX8LK.
 
-* NEXT Clauses as tables: cond, case, typecase, handler-case
+* DONE Clauses as tables: cond, case, typecase, handler-case
 :PROPERTIES:
 :ID: 4175NC
 :END:
@@ -435,11 +449,21 @@ first baseline.  Nothing operator-specific is needed beyond what
 =clauses-layout= already marks, and every luv macro whose lambda list
 says =&body clauses= or =cases= gets it through the derived layout.
 
-/Done when./ =clauses-layout= has a =clause-head-count= (1 for =cond=,
-=case=, =typecase=; 2 for =handler-case= and =restart-case=, so =error
-(c)= is the key with its lambda list) and its stacked clauses render as
-key cell and =.rest= cell; the stylesheet aligns them; tests cover a
-=cond= and a =handler-case=; the source pages show the tables.
+/Done./ =clauses-layout= carries a =clause-head-count=, 1 for =cond=,
+=case=, =typecase= and their variants, 2 for =handler-case= and
+=restart-case=; each clause is drawn by a =stacked-clause-layout= with
+that head count (and, for the two-element key, the lambda list marked as
+one) as a =.head= cell and a =.rest= cell of stacked body forms.  The
+=clauses= style group makes the form a two-column grid, =fit-content(50%)=
+for the keys and the remainder for the bodies, each clause a subgrid
+row.  On the source pages =cond= reads as test → result with the results
+aligned, =handler-case= as =error () → "<unprintable>"=, and =defstruct=,
+which already used the clauses layout, became a slot table with names in
+one column and defaults and options in the other for free.  Tests cover
+a =cond= with a multi-form clause and a =handler-case=.  Alongside, the
+=data-callee= attribute is now decided by =layout-callee-p=, a generic
+with methods on the clause, grid, and lambda-list layouts, which also
+stopped lambda lists from claiming their first parameter as a callee.
 
 * DONE The stylesheet as Lisp definitions
 :PROPERTIES:

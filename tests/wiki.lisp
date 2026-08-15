@@ -130,7 +130,7 @@ Nothing here refers to anything.
     (ok (search "<a class=mention href=#DEF456 title=\"A work mark\">#DEF456</a>" html))
     (ok (search "<span class=\"mention dangling\"" html))
     (ok (search "keep &lt; this &amp; that" html))
-    (ok (search "<div class=lisp><div class=list data-callee=defun>" html))
+    (ok (search "<div class=lisp><div class=\"list stacked\" data-callee=defun>" html))
     (ok (search "<table><tr><th>Head A<th>Head B<tr><td>a1<td>" html))
     (ok (search "<ol><li>one<li>two</ol>" html))
     (ok (search "Mentioned in: <a href=#DEF456>A work mark</a>" html))
@@ -286,16 +286,28 @@ Nothing here refers to anything.
                    (wiki:render-lisp-source "(defun f (x) ;; c
   (let ((y 1)) (when x (list y :k \"s\"))))")))))
     (ok (search "<div class=lisp>" html))
-    (ok (search "<div class=list data-callee=defun>" html))
-    (ok (search "<span class=\"operator symbol\" data-symbol-name=DEFUN><span class=name>defun</span></span>" html))
+    ;; A list with body forms is stacked: its head in a .head span, then rows.
+    (ok (search "<div class=\"list stacked\" data-callee=defun><span class=head><span class=\"operator symbol\" data-symbol-name=DEFUN><span class=name>defun</span></span>" html))
     ;; The lambda list is head, the let form is body; the let binding
     ;; (y 1) is a clause whose first symbol is not an operator.
-    (ok (search "<div class=\"body list\" data-callee=let>" html))
+    (ok (search "<div class=\"body list stacked\" data-callee=let>" html))
     (ok (search "<div class=\"bindings list\">" html))
     (ok (search "<div class=\"clause list\"><span class=symbol data-symbol-name=Y><span class=name>y</span></span><span class=rest><span class=number>1</span></span></div>" html))
     (ok (search "<div class=\"comment prose\"><p>c</div>" html))
     (ok (search "<span class=\"symbol keyword\" data-symbol-name=K><span class=package>:</span><span class=name>k</span></span>" html))
     (ok (search "<span class=string>&quot;s&quot;</span>" html))
+    ;; Clause forms are tables: each clause a row with its key in a .head
+    ;; cell and its body in a .rest cell; a handler-case clause's key is the
+    ;; type and its lambda list.
+    (let ((clauses (let ((*print-pretty* nil) (spinneret:*suppress-inserted-spaces* t))
+                     (spinneret:with-html-string
+                       (wiki:render-lisp-source
+                        "(cond ((null x) 1) (t (f) (g))) (handler-case (f) (error (c) c))")))))
+      (ok (search "<div class=\"list clauses stacked\" data-callee=cond><span class=head><span class=\"operator symbol\" data-symbol-name=COND>" clauses))
+      (ok (search "<div class=\"body stacked-clause list\"><span class=head><div class=list data-callee=null>" clauses))
+      (ok (search "</div></span><span class=rest><span class=\"body number\">1</span></span></div>" clauses))
+      (ok (search "<span class=rest><div class=\"body list\" data-callee=f>" clauses))
+      (ok (search "<div class=\"body stacked-clause handler-clause list\"><span class=head><span class=symbol data-symbol-name=ERROR><span class=name>error</span></span><div class=\"lambda-list list\">" clauses)))
     ;; Eclector recovers from unbalanced input, so boxes still appear;
     ;; input that reads to nothing at all falls back to a <pre>.
     (let ((recovered (let ((*print-pretty* nil))

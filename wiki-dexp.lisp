@@ -71,9 +71,14 @@ list: the lambda list's sublists are (var default) clauses."))
 (defclass method-layout (lambda-layout) ()
   (:documentation "DEFMETHOD: the head runs through qualifiers to the lambda list."))
 
-(defclass clauses-layout (body-layout) ()
+(defclass clauses-layout (body-layout)
+  ((clause-head-count :initarg :clause-head-count :initform 1 :accessor layout-clause-head-count
+                      :documentation "How many leading elements of each clause
+are its key: one for COND and CASE, two for HANDLER-CASE, whose clauses
+name a type and then a lambda list."))
   (:documentation "COND, CASE, HANDLER-CASE: body forms are clauses whose
-first element is a key or test, not an operator, and whose rest stacks."))
+first element is a key or test, not an operator, and whose rest stacks;
+drawn as a table of key and rest."))
 
 (defclass grid-layout (layout) ()
   (:documentation "A list of bindings or slots: each element a clause,
@@ -82,8 +87,12 @@ aligned in two columns, name and rest."))
 (defclass clause-layout (layout) ()
   (:documentation "A binding or slot: a name and the rest, no operator."))
 
-(defclass stacked-clause-layout (clause-layout) ()
-  (:documentation "A COND-style clause: a test, then body forms stacked."))
+(defclass stacked-clause-layout (clause-layout)
+  ((head-count :initarg :head-count :initform 1 :accessor layout-head-count)
+   (lambda-list-index :initarg :lambda-list-index :initform nil :accessor layout-lambda-list-index
+                      :documentation "The index of a lambda list among the head
+elements, as in a HANDLER-CASE clause, or NIL."))
+  (:documentation "A COND-style clause: a key or test, then body forms stacked."))
 
 (defclass lambda-list-layout (layout) ()
   (:documentation "A lambda list: parameters flow; (var default) sublists are
@@ -112,8 +121,10 @@ clauses, not calls."))
   spec-layout :head-count 1)
 (define-layout ("do" "do*") bindings-layout :head-count 2 :bindings-index 1)
 (define-layout ("defclass" "define-condition") bindings-layout :head-count 3 :bindings-index 3)
-(define-layout ("case" "ecase" "typecase" "etypecase" "handler-case" "restart-case")
+(define-layout ("case" "ecase" "ccase" "typecase" "etypecase" "ctypecase")
   clauses-layout :head-count 1)
+(define-layout ("handler-case" "restart-case")
+  clauses-layout :head-count 1 :clause-head-count 2)
 (define-layout ("cond") clauses-layout :head-count 0)
 (define-layout ("defstruct" "defpackage") clauses-layout :head-count 1)
 (define-layout ("defvar" "defparameter" "defconstant" "declaim" "declare" "block"
@@ -157,6 +168,8 @@ lambda form; any other DEF form is a name followed by options."
           ((role-p role "bindings") (make-instance 'lambda-list-layout))
           ((role-p role "lambda-list") (make-instance 'lambda-list-layout))
           ((role-p role "clause") (make-instance 'clause-layout))
+          ((role-p role "handler-clause")
+           (make-instance 'stacked-clause-layout :head-count 2 :lambda-list-index 1))
           ((role-p role "stacked-clause") (make-instance 'stacked-clause-layout))
           (t (let ((operator (symbol-node-name (first (element-children list)))))
                (if operator (operator-layout operator list) (make-instance 'flow-layout)))))))
@@ -209,7 +222,10 @@ under LAYOUT (comments are not counted and never asked), or NIL.")
           (t nil))))
 
 (defmethod child-role ((layout clauses-layout) list index child)
-  (cond ((and (> index (layout-head-count layout)) (typep child 'lisp-list)) "body stacked-clause")
+  (cond ((and (> index (layout-head-count layout)) (typep child 'lisp-list))
+         (if (> (layout-clause-head-count layout) 1)
+             "body stacked-clause handler-clause"
+             "body stacked-clause"))
         (t (call-next-method))))
 
 (defmethod child-role ((layout grid-layout) list index child)
@@ -221,8 +237,10 @@ under LAYOUT (comments are not counted and never asked), or NIL.")
   nil)
 
 (defmethod child-role ((layout stacked-clause-layout) list index child)
-  (declare (ignore list child))
-  (and (> index 0) "body"))
+  (declare (ignore list))
+  (cond ((>= index (layout-head-count layout)) "body")
+        ((and (eql index (layout-lambda-list-index layout)) (typep child 'lisp-list)) "lambda-list")
+        (t nil)))
 
 (defmethod child-role ((layout loop-layout) list index child)
   (declare (ignore list))
@@ -401,45 +419,117 @@ earliest such start after the operator wins."
                           always (keyword-symbol-p (nth i arguments))))
             return start)))
 
-(defun render-children-with-roles (layout list)
-  "Emit every child of LIST with the role LAYOUT assigns it.  Comments are
-drawn where they occur and are not counted.  A trailing run of :keyword
-value pairs is drawn pair by pair, each in a .pair container that keeps
-the key with its value; the pair takes the value's role."
+;;; Drawing
+;;;
+;;; The children of a list are first grouped into ITEMs -- a comment, one
+;;; child with its role, or a :keyword value pair -- and then drawn.  A list
+;;; with body items is STACKED: its head items go in a .head row and each
+;;; body item is a row of its own, so the box is a grid of rows and hugs its
+;;; widest row instead of stretching to the parent (#993QQQ).
+
+(defstruct (item (:constructor make-item (kind role node &key value comments index previous)))
+  "One drawn unit of a list: KIND is :comment, :child, or :pair.  ROLE is
+the role the layout gave it (a pair takes its value's role); NODE the
+child or the key; VALUE and COMMENTS the pair's value and the comments
+between key and value; INDEX and PREVIOUS the argument index and previous
+argument, for docstring position."
+  kind role node value comments index previous)
+
+(defun item-body-p (item)
+  (role-p (item-role item) "body"))
+
+(defun layout-items (layout list)
+  "The children of LIST grouped for drawing under LAYOUT.  Comments are
+kept where they occur and are not counted.  A trailing run of :keyword
+value pairs is grouped pair by pair, keeping the key with its value."
   (let* ((arguments (argument-children list))
          (pairs-start (layout-pairs-index layout arguments))
          (index -1)
          (previous nil)
-         (remaining (element-children list)))
-    (flet ((emit (child role)
-             (let ((*docstring-p* (docstring-position-p layout list index previous child))
-                   (*lisp-role* role))
-               (render-html child))))
-      (loop while remaining
-            do (let ((child (pop remaining)))
-                 (cond ((typep child 'lisp-comment)
-                        (let ((*lisp-role* nil)) (render-html child)))
-                       (t
-                        (incf index)
-                        (let ((role (child-role layout list index child)))
-                          (when (and (role-p role "row-start") (> index 1))
-                            (spinneret:with-html (:span.break)))
-                          (if (and pairs-start (>= index pairs-start) (evenp (- index pairs-start))
-                                   (find-if-not (lambda (c) (typep c 'lisp-comment)) remaining))
-                              ;; A key: draw it with its value in one pair.
-                              (let* ((value (find-if-not (lambda (c) (typep c 'lisp-comment)) remaining))
-                                     (value-role (child-role layout list (1+ index) value)))
-                                (spinneret:with-html
-                                  (:span :class (let ((*lisp-role* value-role)) (role-class "pair"))
-                                         (emit child nil)
-                                         ;; Comments between key and value stay in order.
-                                         (loop for c = (pop remaining)
-                                               do (if (typep c 'lisp-comment)
-                                                      (let ((*lisp-role* nil)) (render-html c))
-                                                      (progn (incf index) (emit c nil) (return))))))
-                                (setf previous value))
-                              (progn (emit child role)
-                                     (setf previous child)))))))))))
+         (remaining (element-children list))
+         (items '()))
+    (loop while remaining
+          do (let ((child (pop remaining)))
+               (cond ((typep child 'lisp-comment)
+                      (push (make-item :comment nil child) items))
+                     (t
+                      (incf index)
+                      (let ((role (child-role layout list index child)))
+                        (if (and pairs-start (>= index pairs-start) (evenp (- index pairs-start))
+                                 (find-if-not (lambda (c) (typep c 'lisp-comment)) remaining))
+                            ;; A key: group it with its value.
+                            (let ((comments '())
+                                  (value nil))
+                              (loop for c = (pop remaining)
+                                    do (if (typep c 'lisp-comment)
+                                           (push c comments)
+                                           (progn (setf value c) (return))))
+                              (incf index)
+                              (push (make-item :pair (child-role layout list index value) child
+                                               :value value :comments (nreverse comments)
+                                               :index index :previous previous)
+                                    items)
+                              (setf previous value))
+                            (progn
+                              (push (make-item :child role child :index index :previous previous) items)
+                              (setf previous child))))))))
+    (nreverse items)))
+
+(defun render-item (layout list item)
+  "Draw ITEM of LIST under LAYOUT."
+  (flet ((emit (child role index previous)
+           (let ((*docstring-p* (docstring-position-p layout list index previous child))
+                 (*lisp-role* role))
+             (render-html child))))
+    (ecase (item-kind item)
+      (:comment (let ((*lisp-role* nil)) (render-html (item-node item))))
+      (:child
+       (when (and (role-p (item-role item) "row-start") (> (item-index item) 1))
+         (spinneret:with-html (:span.break)))
+       (emit (item-node item) (item-role item) (item-index item) (item-previous item)))
+      (:pair
+       (spinneret:with-html
+         (:span :class (let ((*lisp-role* (item-role item))) (role-class "pair"))
+                (emit (item-node item) nil (1- (item-index item)) (item-previous item))
+                (dolist (c (item-comments item))
+                  (let ((*lisp-role* nil)) (render-html c)))
+                (emit (item-value item) nil (item-index item) (item-node item))))))))
+
+(defun split-head-items (items)
+  "ITEMS before the first body item as the head, and the rest as rows;
+comments just before the first body item are rows, not head."
+  (let ((position (position-if #'item-body-p items)))
+    (if (null position)
+        (values items '())
+        (progn
+          (loop while (and (> position 0) (eq (item-kind (nth (1- position) items)) :comment))
+                do (decf position))
+          (values (subseq items 0 position) (nthcdr position items))))))
+
+(defun render-children-with-roles (layout list)
+  "Emit every child of LIST with the role LAYOUT assigns it.  When some
+child is a body form the list is stacked: the head children go in a .head
+span and every body form is a row."
+  (let ((items (layout-items layout list)))
+    (if (some #'item-body-p items)
+        (multiple-value-bind (head rows) (split-head-items items)
+          (spinneret:with-html
+            (:span.head (dolist (item head) (render-item layout list item))))
+          (dolist (item rows) (render-item layout list item)))
+        (dolist (item items) (render-item layout list item)))))
+
+(defgeneric layout-classes (layout list)
+  (:documentation "Extra CSS classes for the box of LIST under LAYOUT.")
+  (:method ((layout layout) list)
+    (and (some #'item-body-p (layout-items layout list)) '("stacked")))
+  (:method ((layout clauses-layout) list)
+    (list* "clauses" (call-next-method)))
+  (:method ((layout clause-layout) list)
+    (declare (ignore list))
+    '())
+  (:method ((layout grid-layout) list)
+    (declare (ignore list))
+    '()))
 
 (defmethod render-layout ((layout layout) list)
   (render-children-with-roles layout list))
@@ -458,9 +548,14 @@ cell, so the parent's grid can align them."
              (render-html child))))))))
 
 (defmethod render-layout ((layout stacked-clause-layout) list)
-  "A COND-style clause: the test inline, then body forms stacked; drawn by
-the general routine, whose roles do that."
-  (render-children-with-roles layout list))
+  "A COND-style clause, one row of its parent's clause table (#4175NC): the
+key or test in a .head cell, then the body forms stacked in a .rest cell."
+  (let ((items (layout-items layout list)))
+    (multiple-value-bind (head rows) (split-head-items items)
+      (spinneret:with-html
+        (:span.head (dolist (item head) (render-item layout list item)))
+        (when rows
+          (:span.rest (dolist (item rows) (render-item layout list item))))))))
 
 (defun render-text-with-mentions (text)
   "Write TEXT, turning #ID figure mentions into links like prose does."
@@ -477,6 +572,15 @@ the general routine, whose roles do that."
 (defun role-class (&rest classes)
   (format nil "~{~A~^ ~}" (remove nil (cons *lisp-role* classes))))
 
+(defgeneric layout-callee-p (layout)
+  (:documentation "True when the first symbol of a list under LAYOUT names
+an operator, worth a data-callee attribute; false for clauses, binding
+grids, and lambda lists, whose first element is data.")
+  (:method ((layout layout)) t)
+  (:method ((layout clause-layout)) nil)
+  (:method ((layout grid-layout)) nil)
+  (:method ((layout lambda-list-layout)) nil))
+
 (defmethod render-html ((list lisp-list))
   (let* ((operator (symbol-node-name (first (element-children list))))
          (layout (list-layout list *lisp-role*))
@@ -485,9 +589,8 @@ the general routine, whose roles do that."
                                  (append (lambda-list-parameters lambda-list) *prose-parameters*)
                                  *prose-parameters*)))
     (spinneret:with-html
-      (:div :class (role-class "list")
-            :data-callee (and operator (not (typep layout '(or clause-layout grid-layout)))
-                              (string-downcase operator))
+      (:div :class (apply #'role-class "list" (layout-classes layout list))
+            :data-callee (and operator (layout-callee-p layout) (string-downcase operator))
             (render-layout layout list)))))
 
 (defmethod render-html ((vector lisp-vector))
