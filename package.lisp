@@ -473,6 +473,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:block-kind
            #:block-kind-name
            #:block-kind-face-tiles
+           #:block-kind-named
            #:*crystal-block*
            #:block-solid-p
            #:block-face-tile
@@ -528,6 +529,28 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:record-block-edit
            #:block-edit-at
            #:apply-block-edits-to-chunk
+           #:+luvcraft-save-format-version+
+           #:+little-world-source-version+
+           #:invalid-luvcraft-save
+           #:invalid-luvcraft-save-reason
+           #:block-save-description
+           #:restore-block-save-description
+           #:world-source-save-description
+           #:restore-world-source-save-description
+           #:world-save-description
+           #:restore-world-save-description
+           #:make-luvcraft-save-description
+           #:restore-luvcraft-save-description
+           #:restore-luvcraft-resume-save-description
+           #:read-luvcraft-save
+           #:write-luvcraft-save-description
+           #:world-checkpoint-writer
+           #:world-checkpoint-writer-pathname
+           #:world-checkpoint-writer-condition
+           #:perform-world-checkpoint
+           #:make-world-checkpoint-writer
+           #:request-world-checkpoint
+           #:stop-world-checkpoint-writer
            #:block-mesher
            #:exposed-face-mesher
            #:block-mesh
@@ -606,6 +629,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:luvcraft-session
            #:luvcraft-session-canvas
            #:luvcraft-session-world
+           #:luvcraft-session-checkpoint-writer
            #:luvcraft-session-production-system
            #:luvcraft-session-desired-chunks
            #:luvcraft-session-outstanding-production
@@ -634,6 +658,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:luvcraft-session-meshed-world-revision
            #:luvcraft-session-target
            #:edit-luvcraft-block
+           #:request-luvcraft-session-checkpoint
            #:refresh-luvcraft-mesh
            #:wait-for-luvcraft-products
            #:luvcraft-session-running-p

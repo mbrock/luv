@@ -128,6 +128,16 @@ hang upright."
   "Return the numbered material palette used by luvcraft and its tools."
   (copy-list *placeable-block-kinds*))
 
+(defun block-kind-named (name &optional (error-p t))
+  "Return the shared block kind whose durable semantic name is NAME.
+
+When ERROR-P is true, signal an error rather than returning NIL for an
+unknown name.  Save files and other external descriptions refer to block
+kinds through this vocabulary instead of printing CLOS object identities."
+  (or (find name *placeable-block-kinds* :key #'block-kind-name :test #'eq)
+      (when error-p
+        (error "No block kind is named ~S." name))))
+
 (defconstant +block-atlas-tile-size+ 16)
 (defconstant +block-atlas-tile-count+ 10)
 

@@ -3,8 +3,13 @@
 (in-package #:luv)
 
 (defun benchmark-metal-device-name (device)
+  #-darwin
+  (declare (ignore device))
+  #+darwin
   (luv.objective-c:objective-c-string
-   (luv.metal:device-name (metal-native-object device))))
+   (luv.metal:device-name (metal-native-object device)))
+  #-darwin
+  (error "The Metal benchmark is only available on Darwin."))
 
 (defun run-luvcraft-benchmark-frame (session &optional sample)
   (request-canvas-frame

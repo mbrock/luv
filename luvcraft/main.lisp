@@ -61,33 +61,87 @@
         (ignore-errors (delete-file endpoint))))))
 
 (defun usage (&optional (stream *standard-output*))
-  (format stream "Usage: luvcraft [--help | --metal | --smoke-test PNG | --metal-smoke-test PNG | --metal-benchmark [FRAMES [CSV]]]~%")
+  (format stream "Usage: luvcraft [--metal] [--world FILE]~%")
+  (format stream "       luvcraft [--help | --smoke-test PNG | --metal-smoke-test PNG | --metal-benchmark [FRAMES [CSV]]]~%")
   (format stream "~%")
-  (format stream "With no arguments, open the interactive block world.~%")
+  (format stream "With no arguments, resume the default interactive world.~%")
   (format stream "--metal opens the interactive world with the Metal 4 backend.~%")
+  (format stream "--world loads or creates the named persistent world.~%")
   (format stream "--smoke-test renders one hidden Vulkan frame and exits.~%")
   (format stream "--metal-smoke-test renders one hidden Metal 4 frame and exits.~%")
   (format stream "--metal-benchmark measures a fixed, fully resident Metal world.~%"))
 
-(defun run-interactive (&optional provider)
+(defun default-luvcraft-world-pathname ()
+  (merge-pathnames
+   #P"luvcraft/worlds/default.sexp"
+   (let ((data-home (uiop:getenv "XDG_DATA_HOME")))
+     (if data-home
+         (uiop:ensure-directory-pathname (pathname data-home))
+         (merge-pathnames #P".local/share/" (user-homedir-pathname))))))
+
+(defun load-or-make-luvcraft-world (pathname)
+  (if (probe-file pathname)
+      (progn
+        (format t "Loading luvcraft world from ~A~%" pathname)
+        (luv:read-luvcraft-save pathname))
+      (progn
+        (format t "Creating luvcraft world at ~A~%" pathname)
+        (values (luv:make-empty-little-block-world) nil))))
+
+(defun make-metal-provider ()
+  #+darwin
+  (make-instance 'luv:metal-gpu-provider)
+  #-darwin
+  (error "The Metal backend is only available on Darwin."))
+
+(defun run-interactive (&key provider
+                             (world-pathname
+                               (default-luvcraft-world-pathname)))
   "Run luvcraft until its native window closes."
-  (let ((session nil))
-    (unwind-protect
-         (progn
-           (setf session
-                 (luv:start-luvcraft
-                  :provider (or provider luv:*gpu-provider*)
-                  :title "luvcraft — walk, jump, mine, and build")
-                 *session* session)
-           ;; A native close request ends SDL's event loop.  Wait for complete
-           ;; native teardown before releasing the session-owned GPU resources.
-           (loop until (eq :closed
-                           (luv:canvas-state
-                            (luv:luvcraft-session-canvas session)))
-                 do (sleep 0.05)))
-      (when session
-        (luv:stop-luvcraft session))
-      (setf *session* nil))))
+  (multiple-value-bind (world resume-description)
+      (load-or-make-luvcraft-world world-pathname)
+    (multiple-value-bind (camera player selected-block)
+        (luv:restore-luvcraft-resume-save-description resume-description)
+      (let ((session nil)
+            (writer (luv:make-world-checkpoint-writer world-pathname)))
+        (unwind-protect
+             (progn
+               (setf session
+                     (luv:start-luvcraft
+                      :provider (or provider luv:*gpu-provider*)
+                      :title "luvcraft — walk, jump, mine, and build"
+                      :world world :camera camera :player player
+                      :selected-block selected-block
+                      :checkpoint-writer writer)
+                     *session* session)
+               ;; A native close request ends SDL's event loop.  Wait for complete
+               ;; native teardown before releasing the session-owned GPU resources.
+               (loop until (eq :closed
+                               (luv:canvas-state
+                                (luv:luvcraft-session-canvas session)))
+                     do (sleep 0.05)))
+          (unwind-protect
+               (when session
+                 (luv:request-luvcraft-session-checkpoint session)
+                 (luv:stop-luvcraft session))
+            (luv:stop-world-checkpoint-writer writer)
+            (setf *session* nil)))))))
+
+(defun parse-interactive-options (arguments)
+  (let ((provider nil)
+        (world-pathname (default-luvcraft-world-pathname)))
+    (loop while arguments
+          for argument = (pop arguments)
+          do (cond
+               ((string= argument "--metal")
+                (setf provider (make-metal-provider)))
+               ((string= argument "--world")
+                (unless arguments
+                  (error "--world requires a pathname."))
+                (setf world-pathname (pathname (pop arguments))))
+               (t (return-from parse-interactive-options
+                    (values nil nil nil)))))
+    (values provider world-pathname t)))
 
 (defun run-smoke-test (pathname &optional provider)
   (format t "Rendering ~A~%" pathname)
@@ -110,11 +164,6 @@
 
 (defun dispatch (arguments)
   (cond
-    ((null arguments)
-     (run-interactive))
-    ((and (= (length arguments) 1)
-          (string= (first arguments) "--metal"))
-     (run-interactive (make-instance 'luv:metal-gpu-provider)))
     ((and (= (length arguments) 1)
           (member (first arguments) '("--help" "-h") :test #'string=))
      (usage))
@@ -125,13 +174,18 @@
           (string= (first arguments) "--metal-smoke-test"))
      (run-smoke-test
       (pathname (second arguments))
-      (make-instance 'luv:metal-gpu-provider)))
+      (make-metal-provider)))
     ((and (<= 1 (length arguments) 3)
           (string= (first arguments) "--metal-benchmark"))
      (run-metal-benchmark (second arguments) (third arguments)))
     (t
-     (usage *error-output*)
-     (error "Invalid luvcraft arguments: ~{~A~^ ~}" arguments))))
+     (multiple-value-bind (provider world-pathname interactive-p)
+         (parse-interactive-options arguments)
+       (if interactive-p
+           (run-interactive :provider provider :world-pathname world-pathname)
+           (progn
+             (usage *error-output*)
+             (error "Invalid luvcraft arguments: ~{~A~^ ~}" arguments)))))))
 
 (defun main ()
   (handler-case

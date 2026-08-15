@@ -13,6 +13,8 @@
    (device :initarg :device :reader luvcraft-session-device)
    (context :initarg :context :reader luvcraft-session-context)
    (world :initarg :world :reader luvcraft-session-world)
+   (checkpoint-writer :initarg :checkpoint-writer :initform nil
+                      :reader luvcraft-session-checkpoint-writer)
    (mesher :initarg :mesher :reader luvcraft-session-mesher)
    (production-system :initarg :production-system :initform nil
                       :reader luvcraft-session-production-system)
@@ -105,6 +107,18 @@
    (jump-requested-p :initform nil
                      :accessor luvcraft-session-jump-requested-p)
    (running-p :initform t :accessor luvcraft-session-running-p)))
+
+(defun request-luvcraft-session-checkpoint (session)
+  "Capture SESSION's durable state and submit it to its asynchronous writer."
+  (let ((writer (luvcraft-session-checkpoint-writer session)))
+    (when writer
+      (request-world-checkpoint
+       writer
+       (make-luvcraft-save-description
+        (luvcraft-session-world session)
+        :camera (luvcraft-session-camera session)
+        :player (luvcraft-session-player session)
+        :selected-block (luvcraft-session-selected-block session))))))
 
 (defun luvcraft-session-pipeline (session)
   (live-shader-pipeline-native-pipeline
@@ -200,4 +214,5 @@
                (return-from edit-luvcraft-block (values nil :blocked)))
              (edit-block-at
               (luvcraft-session-selected-block session) world x y z)))
+          (request-luvcraft-session-checkpoint session)
           (values coordinate :edited))))))

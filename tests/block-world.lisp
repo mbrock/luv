@@ -139,6 +139,95 @@
     (ok (eq (world-block-at world 2 14 2) luv::*stone-block*))
     (ok (= (block-edit-overlay-count (little-world-source-edits source)) 2))))
 
+(deftest little-world-save-descriptions-round-trip-semantic-state
+  (let* ((world (make-empty-little-block-world
+                 :chunk-width 12 :chunk-height 20 :chunk-depth 10 :seed 913))
+         (source (block-world-source world))
+         (camera (make-instance 'fly-camera :yaw 1.25 :pitch -0.35))
+         (player (make-instance 'block-world-player
+                                :x -20.5d0 :y 7.25d0 :z 44.0d0)))
+    (record-block-edit (little-world-source-edits source)
+                       luv::*crystal-block* -19 8 44)
+    (record-block-edit (little-world-source-edits source) nil 3 4 -5)
+    (let ((description
+            (make-luvcraft-save-description
+             world :camera camera :player player
+             :selected-block luv::*crystal-block*)))
+      ;; Stable coordinate order makes saves readable and diffs meaningful.
+      (ok (equal
+           (mapcar (lambda (edit) (getf edit :at))
+                   (getf (rest (getf (rest (getf (rest description) :world))
+                                    :source))
+                         :edits))
+           '((-19 8 44) (3 4 -5))))
+      (multiple-value-bind (restored resume)
+          (restore-luvcraft-save-description description)
+        (let* ((restored-space (block-world-space restored))
+               (shape (voxel-space-chunk-shape restored-space))
+               (restored-source (block-world-source restored)))
+          (ok (= (chunk-shape-width shape) 12))
+          (ok (= (chunk-shape-height shape) 20))
+          (ok (= (chunk-shape-depth shape) 10))
+          (ok (= (little-world-source-seed restored-source) 913))
+          (ok (= (block-edit-overlay-count
+                  (little-world-source-edits restored-source))
+                 2))
+          (ok (eq (block-edit-at (little-world-source-edits restored-source)
+                                 -19 8 44)
+                  luv::*crystal-block*))
+          (multiple-value-bind (block present-p)
+              (block-edit-at (little-world-source-edits restored-source)
+                             3 4 -5)
+            (ok present-p)
+            (ok (null block)))
+          (center-little-world-residency restored-source restored -2 4
+                                         :radius 0)
+          (multiple-value-bind (block status)
+              (world-block-at restored -19 8 44)
+            (ok (eq status :resident))
+            (ok (eq block luv::*crystal-block*)))
+          (center-little-world-residency restored-source restored 0 -1
+                                         :radius 0)
+          (multiple-value-bind (block status)
+              (world-block-at restored 3 4 -5)
+            (ok (eq status :resident))
+            (ok (null block))))
+        (multiple-value-bind (restored-camera restored-player selected-block)
+            (restore-luvcraft-resume-save-description resume)
+          (ok (= (camera-yaw restored-camera) 1.25))
+          (ok (= (camera-pitch restored-camera) -0.35))
+          (ok (= (player-x restored-player) -20.5d0))
+          (ok (= (player-y restored-player) 7.25d0))
+          (ok (= (player-z restored-player) 44.0d0))
+          (ok (eq selected-block luv::*crystal-block*)))))))
+
+(deftest world-save-validation-rejects-unknown-meaning
+  (ok (signals
+       (restore-luvcraft-save-description
+        '(:luvcraft-world :format-version 99
+          :world (:block-world) :resume nil))))
+  (ok (signals
+       (restore-block-save-description :block '(:name :missing-material))))
+  (ok (signals
+       (restore-world-source-save-description
+        :little-world '(:source-version 99 :seed 1 :edits ())))))
+
+(deftest asynchronous-world-checkpoints-flush-the-latest-description
+  (uiop:with-temporary-file
+      (:pathname pathname :prefix "luvcraft-checkpoint-" :suffix ".sexp")
+    (let* ((first-world (make-empty-little-block-world :seed 101))
+           (latest-world (make-empty-little-block-world :seed 202))
+           (writer (make-world-checkpoint-writer pathname)))
+      (request-world-checkpoint
+       writer (make-luvcraft-save-description first-world))
+      (request-world-checkpoint
+       writer (make-luvcraft-save-description latest-world))
+      (stop-world-checkpoint-writer writer)
+      (multiple-value-bind (restored resume) (read-luvcraft-save pathname)
+        (ok (null resume))
+        (ok (= (little-world-source-seed (block-world-source restored))
+               202))))))
+
 (deftest little-world-residency-follows-a-bounded-window
   (let* ((world (make-little-block-world :chunk-radius 1 :seed 31))
          (source (block-world-source world)))

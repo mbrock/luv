@@ -466,6 +466,7 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
                              (:file "light")
                              (:file "mesher")
                              (:file "simulation")
+                             (:file "persistence")
                              (:file "sky")
                              (:file "frame-performance")
                              (:file "live-pipeline")

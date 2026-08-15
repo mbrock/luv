@@ -471,6 +471,8 @@ the frame uniform cannot silently diverge between shader and host."
                                          'exposed-face-mesher))
                                 (camera (make-instance 'fly-camera))
                                 player
+                                (selected-block *stone-block*)
+                                checkpoint-writer
                                 (provider *gpu-provider*)
                                 (sky-clock (make-instance 'sky-clock))
                                 (sky-profile (make-default-sky-profile))
@@ -741,9 +743,11 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                      'luvcraft-session
                      :canvas canvas :device device :context context
                      :world world :mesher mesher
+                     :checkpoint-writer checkpoint-writer
                      :production-system production-system
                      :camera (sync-camera-to-player camera player)
                      :player player
+                     :selected-block selected-block
                      :lighting-state lighting-state
                      :sky-clock sky-clock :sky-profile sky-profile
                      :shadow-diagnostic-p shadow-diagnostic-p
