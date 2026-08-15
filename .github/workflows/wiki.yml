@@ -29,8 +29,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@main
-      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - uses: NixOS/nix-installer-action@main
+      - uses: Mic92/hestia@v3
       - name: Render the wiki
         run: make wiki
       - uses: actions/configure-pages@v5
