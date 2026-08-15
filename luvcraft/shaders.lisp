@@ -533,9 +533,27 @@
   (assemble-spir-v-module (block-world-shadow-vertex-module)))
 
 ;;; The crosshair is deliberately another tiny mathematical material rather
-;;; than a magic fixed-function colour.  Its vertex half remains in SHADER.LISP
-;;; because the expression language does not yet pretend that integer vertex
-;;; indexing and position built-ins are ordinary fragment mathematics.
+;;; than a magic fixed-function colour.  Its positions and ink are dense vertex
+;;; data, so the shared graph needs no backend-specific vertex-index operation.
+
+(define-shader-method shader-specification-for
+    block-world-crosshair-vertex-specification
+    ((role (eql :block-crosshair)) (stage (eql :vertex)))
+    (:stage :vertex
+     :inputs ((screen-position :vec3 :location 0)
+              (ink-input :vec3 :location 1))
+     :outputs ((clip-position :vec4 :built-in :position)
+               (ink-output :vec3 :location 0)))
+  (let* ((clip
+           (vec4 (swizzle screen-position :x)
+                 (swizzle screen-position :y)
+                 (swizzle screen-position :z)
+                 1.0)))
+    (set-output clip-position clip)
+    (set-output ink-output ink-input)))
+
+(defun block-world-crosshair-vertex-specification ()
+  (shader-specification-for :block-crosshair :vertex))
 
 (define-shader-method shader-specification-for
     block-world-crosshair-fragment-specification

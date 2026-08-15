@@ -116,8 +116,8 @@ The following are starting paths rather than a table of settled doctrine.
   language above the literal SPIR-V assembler, its deterministic CLOS
   lowering, and the McCLIM presentation browser connecting source to SSA.
 - [[file:objective-c-and-metal.org][Objective-C as a foreign object system]] records declared message ABIs,
-  inspectable invocation objects, explicit native ownership, exception
-  conditions, and the dynamically scoped direct-send escape hatch.
+  direct message sends, explicit native ownership, opt-in trace events, and
+  the diagnostic scope that turns native exceptions into Lisp conditions.
 - [[file:metal-backend.org][The native Metal 4 backend]] is the canonical implementation path: the
   validated SDL/CAMetalLayer clear, its correspondence with the Vulkan model,
   direct MSL lowering, =MTL4Compiler=, and the remaining live-pipeline join.

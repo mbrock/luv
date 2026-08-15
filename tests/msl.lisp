@@ -45,6 +45,11 @@
                 source))
     (ok (search "float3(0.5f, 0.5f, 1.0f)" source))
     (ok (search "float3(0.5f, 0.5f, 0.0f)" source))
+    ;; The shared camera graph uses Vulkan framebuffer orientation.  Metal's
+    ;; target boundary owns the one required clip-space Y conversion.
+    (ok (search
+         "result.clip_position = float4((clip).x, -(clip).y, (clip).z, (clip).w);"
+         source))
     (ok (search "result.shadow_depth_output = shadow_depth;" source))
     (ok (gethash expression
                  (msl:msl-document-expression-occurrences document)))))

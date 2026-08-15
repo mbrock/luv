@@ -2,6 +2,10 @@
 
 (in-package #:luv)
 
+(defmethod sdl-presentation-api-for ((provider vulkan-gpu-provider))
+  (declare (ignore provider))
+  :vulkan)
+
 (defclass vulkan-canvas-context (canvas-context)
   ((canvas
     :initarg :canvas

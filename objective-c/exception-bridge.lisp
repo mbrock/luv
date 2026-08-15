@@ -2,6 +2,10 @@
 
 (in-package #:luv.objective-c)
 
+(declaim (notinline objective-c-message-definition-name
+                    objective-c-message-definition-selector
+                    objective-c-message-definition-selector-pointer))
+
 (defparameter *objective-c-exception-bridge-source-directory*
   #.(uiop:pathname-directory-pathname
      (or *compile-file-truename* *load-truename*))
@@ -83,13 +87,13 @@
       (cffi:foreign-slot-value failure type 'call-stack)))))
 
 (defun call-with-objective-c-exception-boundary
-    (message receiver result result-size arguments argument-sizes argument-count)
-  "Invoke MESSAGE natively, translating any Objective-C exception to Lisp."
+    (definition receiver result result-size arguments argument-sizes argument-count)
+  "Invoke DEFINITION natively, translating any Objective-C exception to Lisp."
   (cffi:with-foreign-object (failure '(:struct objective-c-native-failure))
     (let ((status
             (%invoke-objective-c-message
              (objective-c-pointer receiver)
-             (objective-c-message-selector-pointer (class-of message))
+             (objective-c-message-definition-selector-pointer definition)
              result result-size argument-count arguments argument-sizes
              failure)))
       (unless (zerop status)
@@ -99,10 +103,10 @@
           (error (if (= status 1)
                      'objective-c-exception
                      'objective-c-bridge-error)
-                 :message message
+                 :message (objective-c-message-definition-name definition)
                  :receiver receiver
                  :selector
-                 (objective-c-message-selector (class-of message))
+                 (objective-c-message-definition-selector definition)
                  :name name
                  :reason reason
                  :call-stack call-stack))))))

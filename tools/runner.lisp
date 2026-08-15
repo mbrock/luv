@@ -4,8 +4,10 @@
   (format stream "Usage: luv COMMAND [ARGS...]~%")
   (format stream "~%")
   (format stream "Commands:~%")
-  (format stream "  block-world TARGET [--count N] [--width N] [--height N] [--yaw-step R]~%")
-  (format stream "  gazetteer TARGET-DIR [--view NAME] [--width N] [--height N]~%")
+  (format stream "  block-world TARGET [--backend metal|vulkan] [--count N]~%")
+  (format stream "              [--width N] [--height N] [--yaw-step R]~%")
+  (format stream "  gazetteer TARGET-DIR [--backend metal|vulkan] [--view NAME]~%")
+  (format stream "             [--width N] [--height N]~%")
   (format stream "             [--count N] [--forward-step R] [--yaw-step R]~%")
   (format stream "             [--day-start R] [--day-step R] [--difference-scale R]~%")
   (format stream "             [--shadow-only 1]~%")
@@ -46,6 +48,25 @@
           value)
       (error ()
         (command-line-error "~A must be a real number, got ~S." name string)))))
+
+(defun parse-backend-option (string name)
+  (cond
+    ((string-equal string "vulkan") :vulkan)
+    #+darwin
+    ((string-equal string "metal") :metal)
+    (t
+     (command-line-error
+      "~A must be ~:[vulkan~;metal or vulkan~], got ~S."
+      name #+darwin t #-darwin nil string))))
+
+(defun make-backend-provider (backend)
+  (case backend
+    ((nil) luv:*gpu-provider*)
+    (:vulkan (make-instance 'luv:vulkan-gpu-provider))
+    #+darwin
+    (:metal (make-instance 'luv:metal-gpu-provider))
+    (otherwise
+     (command-line-error "Unsupported GPU backend ~S." backend))))
 
 (defun option-value (arguments option)
   (or (first arguments)
@@ -123,28 +144,15 @@
       (usage *error-output*)
       (uiop:quit 2))))
 
-#+darwin
-(defun run-tool-program-thread (arguments)
-  "Run command work off the process main thread while Cocoa owns that thread."
-  (sb-thread:make-thread
-   (lambda ()
-     (handler-case
-         (progn
-           (dispatch-main arguments)
-           (finish-output *standard-output*)
-           (finish-output *error-output*)
-           (sb-ext:exit :code 0 :abort t))
-       (error (condition)
-         (format *error-output* "luv: ~A~%" condition)
-         (finish-output *error-output*)
-         (sb-ext:exit :code 1 :abort t))))
-   :name "luv tool command")
-  ;; SDL dispatches its Cocoa event loop here through TRIVIAL-MAIN-THREAD.
-  ;; The worker owns command completion and process exit.
-  (loop (sleep 3600)))
-
 (defun main (&optional (arguments (uiop:command-line-arguments)))
-  #+darwin
-  (run-tool-program-thread arguments)
-  #-darwin
-  (dispatch-main arguments))
+  (handler-case
+      (progn
+        (luv:call-with-sdl-main-thread
+         (lambda ()
+           (dispatch-main arguments)))
+        (finish-output *standard-output*)
+        (finish-output *error-output*))
+    (error (condition)
+      (format *error-output* "luv: ~A~%" condition)
+      (finish-output *error-output*)
+      (uiop:quit 1))))

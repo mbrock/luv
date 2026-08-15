@@ -37,13 +37,23 @@
            'metal::%set-layer-drawable-size))
         (clear
           (objc:objective-c-message-description
-           'metal::%set-color-attachment-clear-color)))
+           'metal::%set-color-attachment-clear-color))
+        (argument-buffer
+          (objc:objective-c-message-description
+           'metal:set-metal-argument-table-buffer))
+        (draw
+          (objc:objective-c-message-description
+           'metal:draw-metal-primitives)))
     (ok (equal (getf size :selector) "setDrawableSize:"))
     (ok (equal (second (second (getf size :argument-types)))
                '(:struct metal::cg-size)))
     (ok (equal (getf clear :selector) "setClearColor:"))
     (ok (equal (second (second (getf clear :argument-types)))
-               '(:struct metal::mtl-clear-color)))))
+               '(:struct metal::mtl-clear-color)))
+    (ok (equal (getf argument-buffer :selector)
+               "setAddress:attributeStride:atIndex:"))
+    (ok (equal (getf draw :selector)
+               "drawPrimitives:vertexStart:vertexCount:instanceCount:baseInstance:"))))
 
 (deftest unchecked-messages-preserve-by-value-structure-abi
   (objc:with-autorelease-pool ()
@@ -62,6 +72,12 @@
              '(:vulkan :resizable :hidden)))
   (ok (equal (luv::sdl-presentation-window-flags :metal)
              '(:metal :high-pixel-density :resizable :hidden)))
+  (ok (eq :vulkan
+          (luv::sdl-presentation-api-for
+           (make-instance 'vulkan-gpu-provider))))
+  (ok (eq :metal
+          (luv::sdl-presentation-api-for
+           (make-instance 'metal-gpu-provider))))
   (let ((canvas (make-sdl-canvas :presentation-api :vulkan)))
     (ok (signals
          (make-canvas-context canvas (make-instance 'metal-gpu-provider))
@@ -77,7 +93,15 @@
            (ok (equal
                 (objc:objective-c-object-protocol-name
                  (luv::metal-native-object (device-queue device)))
-                "MTL4CommandQueue")))
+                "MTL4CommandQueue"))
+           (ok (equal
+                (objc:objective-c-object-protocol-name
+                 (luv::metal-device-residency-set device))
+                "MTLResidencySet"))
+           (ok (equal
+                (objc:objective-c-object-protocol-name
+                 (luv::metal-queue-completion-event (device-queue device)))
+                "MTLSharedEvent")))
       (destroy device))))
 
 (deftest metal-device-owns-a-real-metal-4-compiler
@@ -259,3 +283,149 @@
       (when artifact
         (luv::release-live-shader-pipeline artifact))
       (destroy device))))
+
+(deftest metal-buffer-populates-a-native-metal-4-argument-table
+  (let ((device
+          (request-gpu-device (make-instance 'metal-gpu-provider)))
+        (buffer nil)
+        (argument-table nil))
+    (unwind-protect
+         (progn
+           (setf buffer
+                 (create
+                  device
+                  (make-buffer-descriptor
+                   :label "argument table probe"
+                   :size 36 :usage '(:vertex :copy-dst))))
+           (write-buffer
+            buffer
+            (make-array
+             9 :element-type 'single-float
+             :initial-contents
+             '(-0.65 -0.55 0.0
+                0.65 -0.55 0.0
+                0.0 0.70 0.0)))
+           (multiple-value-bind (table diagnostic)
+               (metal:new-metal-4-argument-table
+                (luv::metal-native-object device) 1
+                :label "argument table probe" :attribute-strides-p t)
+             (ok (null diagnostic))
+             (setf argument-table table))
+           (metal:set-metal-argument-table-buffer
+            argument-table
+            (metal:metal-buffer-gpu-address
+             (luv::metal-native-object buffer))
+            12 0)
+           (ok (typep buffer 'metal-gpu-buffer))
+           (ok (plusp
+                (metal:metal-buffer-gpu-address
+                 (luv::metal-native-object buffer))))
+           (ok (equal
+                (objc:objective-c-object-protocol-name argument-table)
+                "MTL4ArgumentTable"))
+           (ok (= 36 (length (read-buffer buffer)))))
+      (when argument-table
+        (objc:release-objective-c-object argument-table))
+      (when buffer (destroy buffer))
+      (destroy device))))
+
+(deftest metal-queue-reclaims-command-memory-at-its-shared-event-frontier
+  (let* ((device
+           (request-gpu-device (make-instance 'metal-gpu-provider)))
+         (queue (device-queue device))
+         (allocator nil)
+         (command-buffer nil)
+         (submitted-p nil))
+    (unwind-protect
+         (progn
+           (setf allocator
+                 (metal:new-command-allocator
+                  (luv::metal-native-object device))
+                 command-buffer
+                 (metal:new-command-buffer
+                  (luv::metal-native-object device)))
+           (metal:begin-command-buffer command-buffer allocator)
+           (metal:end-command-buffer command-buffer)
+           ;; SUBMIT-METAL-COMMAND-BUFFER consumes both owned objects.
+           (setf submitted-p t)
+           (ok (= 1
+                  (luv::submit-metal-command-buffer
+                   queue command-buffer allocator)))
+           (ok (= 1 (length (luv::metal-queue-pending-submissions queue))))
+           (ok (not (objc:objective-c-object-released-p command-buffer)))
+           (ok (not (objc:objective-c-object-released-p allocator)))
+           (submitted-work-done queue)
+           (ok (null (luv::metal-queue-pending-submissions queue)))
+           (ok (objc:objective-c-object-released-p command-buffer))
+           (ok (objc:objective-c-object-released-p allocator)))
+      (unless submitted-p
+        (when command-buffer
+          (objc:release-objective-c-object command-buffer))
+        (when allocator
+          (objc:release-objective-c-object allocator)))
+      (destroy device))))
+
+(deftest metal-submission-signals-its-frontier-when-presentation-raises
+  (let* ((device
+           (request-gpu-device (make-instance 'metal-gpu-provider)))
+         (queue (device-queue device))
+         (allocator nil)
+         (command-buffer nil)
+         (submitted-p nil))
+    (unwind-protect
+         (progn
+           (setf allocator
+                 (metal:new-command-allocator
+                  (luv::metal-native-object device))
+                 command-buffer
+                 (metal:new-command-buffer
+                  (luv::metal-native-object device)))
+           (metal:begin-command-buffer command-buffer allocator)
+           (metal:end-command-buffer command-buffer)
+           (setf submitted-p t)
+           (ok (signals
+                (luv::submit-metal-command-buffer
+                 queue command-buffer allocator
+                 :after-commit (lambda () (error "presentation probe")))
+                'simple-error))
+           (ok (= 1 (length (luv::metal-queue-pending-submissions queue))))
+           (submitted-work-done queue)
+           (ok (null (luv::metal-queue-pending-submissions queue)))
+           (ok (objc:objective-c-object-released-p command-buffer))
+           (ok (objc:objective-c-object-released-p allocator)))
+      (unless submitted-p
+        (when command-buffer
+          (objc:release-objective-c-object command-buffer))
+        (when allocator
+          (objc:release-objective-c-object allocator)))
+      (destroy device))))
+
+(deftest luvcraft-metal-frame-resources-follow-the-drawable-pool
+  (call-with-sdl-main-thread
+   (lambda ()
+     (let ((session nil))
+       (unwind-protect
+            (progn
+              (setf session
+                    (start-luvcraft
+                     :provider (make-instance 'metal-gpu-provider)
+                     :world (luv::make-gazetteer-shadow-yard-world)
+                     :residency-radius 0
+                     :visible-p nil :frames-per-second nil
+                     :width 160 :height 100))
+              (wait-for-luvcraft-products session :minimum 1)
+              (let ((resources-before
+                      (length (luv::luvcraft-session-resources session))))
+                (dotimes (index 8)
+                  (luv::render-luvcraft-frame
+                   session (* index (/ 1d0 60d0))))
+                (submitted-work-done
+                 (device-queue (luv::luvcraft-session-device session)))
+                (let ((state-count
+                        (hash-table-count
+                         (luv::luvcraft-session-frame-states session))))
+                  (ok (<= 1 state-count 3))
+                  (ok (= (length (luv::luvcraft-session-resources session))
+                         (+ resources-before (* 3 state-count)))))))
+         (when session
+           (stop-luvcraft session)))))))

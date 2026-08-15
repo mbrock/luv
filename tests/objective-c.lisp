@@ -46,7 +46,7 @@
         (ok (signals (objc:objective-c-pointer owned-name)
                      'objc:released-objective-c-object))))))
 
-(deftest declared-messages-compose-with-general-invocation-tracing
+(deftest declared-messages-have-opt-in-backend-local-tracing
   (let (trace)
     (objc:with-autorelease-pool ()
       (objc:with-owned-objective-c-object
@@ -56,9 +56,9 @@
           (ok (plusp (metal:device-registry-id device)))
           (ok (stringp
                (objc:objective-c-string (metal:device-name device)))))))
-    (let* ((events (luv.invocation:invocation-trace-events trace))
+    (let* ((events (objc:objective-c-trace-events trace))
            (descriptions
-             (mapcar #'objc:objective-c-invocation-description events))
+             (mapcar #'objc:objective-c-message-event-description events))
            (registry
              (find "registryID" descriptions :test #'equal
                    :key (lambda (description)
@@ -71,7 +71,7 @@
               :objective-c-object)))))
 
 (deftest exception-policy-is-dynamic-and-tracing-is-orthogonal
-  (ok (eq objc:*objective-c-exception-policy* :catch))
+  (ok (eq objc:*objective-c-exception-policy* :unchecked))
   (let (trace)
     (objc:with-autorelease-pool ()
       (objc:with-owned-objective-c-object
@@ -86,11 +86,11 @@
               (ok (stringp
                    (objc:objective-c-string (metal:device-name device)))))
             (ok (eq objc:*objective-c-exception-policy* :unchecked))))))
-    (ok (eq objc:*objective-c-exception-policy* :catch))
-    (let ((events (luv.invocation:invocation-trace-events trace)))
+    (ok (eq objc:*objective-c-exception-policy* :unchecked))
+    (let ((events (objc:objective-c-trace-events trace)))
       (ok (= (length events) 3))
       (dolist (event events)
-        (ok (eq (luv.invocation:invocation-status event) :returned))))))
+        (ok (eq (objc:objective-c-message-event-status event) :returned))))))
 
 (deftest fresh-device-probe-is-bounded-and-printable
   (let ((description (metal:probe-system-default-device)))
@@ -109,7 +109,8 @@
         (objc:with-objective-c-trace (active-trace)
           (setf trace active-trace)
           (handler-case
-              (exception-test-array-object-at-index array 0)
+              (objc:with-objective-c-exception-handling ()
+                (exception-test-array-object-at-index array 0))
             (objc:objective-c-exception (signaled)
               (setf condition signaled)))
           (ok (zerop (exception-test-array-count array))))
@@ -119,19 +120,20 @@
         (ok (equal (objc:objective-c-exception-selector condition)
                    "objectAtIndex:"))
         (ok (eq (objc:objective-c-exception-receiver condition) array))
-        (ok (typep (objc:objective-c-exception-message condition)
-                   'exception-test-array-object-at-index))
+        (ok (eq (objc:objective-c-exception-message condition)
+                'exception-test-array-object-at-index))
         (ok (plusp (length (objc:objective-c-exception-reason condition))))
         (ok (plusp
              (length (objc:objective-c-exception-call-stack condition))))
-        (let ((events (luv.invocation:invocation-trace-events trace)))
+        (let ((events (objc:objective-c-trace-events trace)))
           (ok (= (length events) 2))
-          (ok (eq (luv.invocation:invocation-status (first events))
+          (ok (eq (objc:objective-c-message-event-status (first events))
                   :signaled))
-          (ok (eq (getf (luv.invocation:invocation-condition (first events))
+          (ok (eq (getf (objc:objective-c-message-event-condition
+                          (first events))
                         :type)
                   'objc:objective-c-exception))
-          (ok (eq (luv.invocation:invocation-status (second events))
+          (ok (eq (objc:objective-c-message-event-status (second events))
                   :returned)))))))
 
 (deftest declaration-abi-mismatches-stop-before-the-message-send
@@ -141,7 +143,7 @@
           (make-exception-test-array
            (objc:find-objective-c-class "NSMutableArray")))
       (handler-case
-          (progn
+          (objc:with-objective-c-exception-handling ()
             (malformed-exception-test-array-count array)
             (fail "The malformed declaration returned."))
         (objc:objective-c-bridge-error (condition)

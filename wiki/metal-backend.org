@@ -1,20 +1,20 @@
 #+title: The native Metal 4 backend
 #+startup: overview
 
-* Three seams are executable; one draw join remains
+* The seams now meet in one Metal 4 draw
 :PROPERTIES:
 :ID: 4M91DG
 :END:
 
 The native Metal backend is no longer only an architectural proposal.  Luv
-can create a Metal GPU provider, attach it to an SDL-owned =CAMetalLayer=, and
-present a validated Metal 4 clear through the ordinary GPU command vocabulary.
-The same mathematical shader specification now also crosses the GPU API into
-a device-owned =MTL4Compiler= and becomes a live =MTLLibrary=.  The unchanged
-luvcraft vertex and fragment specifications now link into a real
-=MTLRenderPipelineState= with their vertex layout and depth state.  The
-remaining backend threshold is resource binding, draw encoding, and
-submission-aware retirement in the presented canvas.
+can create a Metal GPU provider, attach it to an SDL-owned =CAMetalLayer=,
+compile two live mathematical shader methods through a device-owned
+=MTL4Compiler=, link them into =MTLRenderPipelineState=, bind a shared
+=MTLBuffer= by GPU address through =MTL4ArgumentTable=, and issue a completed
+draw through the ordinary GPU command vocabulary.  The remaining backend
+threshold is the full block material: uniform, texture, sampler, depth, and
+mesh resources must cross the same path before a pinned capture can be
+compared with Vulkan.
 
 #+begin_example
 SDL canvas and events
@@ -30,7 +30,7 @@ luv GPU protocol
         |
 typed shader specification
         |\
-        | `---- MSL lowering ---- MTL4Compiler ---- Metal pipeline    WORKING
+        | `---- MSL lowering ---- Metal pipeline ---- argument table ---- draw
         `------ SPIR-V lowering - Vulkan pipeline                    WORKING
 #+end_example
 
@@ -39,7 +39,8 @@ The seams remain independently understandable: SDL owns the host,
 language owns target-specific lowering.  They are now staged proofs of one
 backend rather than three reasons to postpone starting it.  #5A7QDE records
 the executable presentation half, #58IDSR the compiler half, and #PH57K5 the
-remaining live draw and retirement join.
+remaining block-material join.  #348B7B records why argument tables implement
+resource binding here rather than decorate a legacy encoder path.
 #NABRMK records why the second backend matters and #HXUGEA why Metal 4 is the
 right native model for it.
 
@@ -56,14 +57,16 @@ cannot expose every native capability.  That source evidence remains on
 The current backend is deliberately narrow but real:
 
 - =:luv/gpu/api= is the shared semantic seam;
-- =:luv/gpu/metal= supplies Metal provider, device, queue, compiler,
-  shader-module, render-pipeline, texture, and frame-encoder objects;
+- =:luv/gpu/metal= supplies Metal provider, device, queue, compiler, buffer,
+  shader-module, render-pipeline, texture, frame-encoder, and render-pass
+  objects;
 - =:luv/canvas/metal= specializes the canvas × provider relationship;
 - declared Objective-C messages cover synchronous Metal 4 library compilation
   as well as the submission and drawable vocabulary needed by one frame; and
 - cold probes validate in-memory luvcraft vertex and fragment libraries, their
-  linked =MTLRenderPipelineState= and =MTLDepthStencilState=, and the complete
-  clear path on an Apple M2 Pro.
+  linked =MTLRenderPipelineState= and =MTLDepthStencilState=, the complete clear
+  path, and a generated live-pipeline triangle through =MTL4ArgumentTable= on
+  an Apple M2 Pro.
 
 This does not yet establish a portable HAL contract.  It establishes a second
 implementation substantial enough to test one.  In particular, shader module
@@ -92,10 +95,39 @@ than Metal 3's implicit model would be:
 - queue-scoped =MTLResidencySet= makes residency a session concern.
 
 The correspondence is a design advantage, not proof that the implementations
-are interchangeable.  Metal supplies no safety net for a missing barrier, and
-its allocator/frontier relationship still needs a real rotating-frame proof.
-The useful standard is semantic parity with explicit backend mechanisms, not
-line-for-line similarity.
+are interchangeable.  Metal supplies no safety net for a missing barrier.  A
+first submitted draw now retains its command buffer and allocator until the
+shared-event frontier passes, then reclaims both; allocator reset and rotating
+frame reuse still need a multi-frame proof.  The useful standard is semantic
+parity with explicit backend mechanisms, not line-for-line similarity.
+
+* Argument tables realize semantic binding groups
+:PROPERTIES:
+:ID: 348B7B
+:END:
+
+Apple's [[https://developer.apple.com/documentation/metal/understanding-the-metal-4-core-api][Metal 4 core API account]] says that Metal 4 encoders do not bind individual
+buffers, textures, and heaps.  The application instead populates an argument
+table and makes it visible to selected pipeline stages.  [[https://developer.apple.com/videos/play/wwdc2025/205/][The Metal 4 introduction]]
+separately places residency in =MTLResidencySet=.  These are source claims
+about the native contract, not reasons to expose Metal tables as luv's
+application model.
+
+Luv's binding group remains the semantic relationship among a layout and its
+resources.  Its Metal realization should own stage-appropriate argument
+tables: buffers become GPU addresses, textures and samplers become resource
+IDs, and residency remains a queue or command-buffer concern.  Vertex arrays
+use the same native table mechanism, but =set-vertex-buffer= still expresses
+their distinct draw relationship and obtains attribute stride from the linked
+pipeline layout.
+
+The first realization is intentionally smaller than that destination.  A
+render pass creates a vertex-stage table for the installed pipeline,
+=set-vertex-buffer= writes one GPU address and stride into it, and =draw=
+snapshots it through =setArgumentTable:atStages:=.  The device's shared
+residency set contains the buffer allocation.  This proves the mechanism, but
+the per-pass table is not yet a reusable Metal bind group; uniform buffers,
+texture resource IDs, and sampler resource IDs are the next extension.
 
 * SDL remains the platform shell
 :PROPERTIES:
@@ -348,8 +380,8 @@ Evidence:
   explicit.  Both Vulkan and Metal now accept =:mathematical= specifications;
   the live luvcraft pipeline hands its unchanged specification to =create=
   instead of assembling words above the backend.
-- Eight Metal tests include real compiler, library, render-pipeline, and depth
-  state objects plus a failed
+- Twelve Metal tests include real compiler, library, render-pipeline, buffer,
+  argument-table, residency-set, shared-event, and depth-state objects plus a failed
   native compilation followed by a successful build on the same compiler.
   The failed candidate retains its =msl-document= and copied native diagnostic.
 
@@ -364,7 +396,7 @@ Done when (met):
 - tests record any resource, interface, or type vocabulary that proves
   target-shaped.
 
-* NEXT Join the proofs in one live Metal pipeline
+* DONE Join the proofs in one live Metal pipeline
 :PROPERTIES:
 :ID: PH57K5
 :END:
@@ -386,8 +418,8 @@ row products, division by =w=, then coordinate scale and offset.  Both stages
 pass Apple's offline compiler.  =make metal-pipeline= then cold-starts the
 device-owned path and reports the expected luvcraft entry points, one 48-byte
 four-attribute vertex buffer, =MTLRenderPipelineState=, and
-=MTLDepthStencilState= on the Apple M2 Pro.  What remains is the resource and
-command side of the join, not shader or pipeline plausibility.
+=MTLDepthStencilState= on the Apple M2 Pro.  Shader and pipeline plausibility
+are no longer the open question.
 
 The live transaction now has native Metal evidence as well.  A focused test
 installs a real =MTLRenderPipelineState= behind =live-shader-pipeline=, replaces
@@ -395,11 +427,57 @@ its fragment method with a deliberately unsupported candidate, and observes
 =:failed= while the first pipeline remains installed and undestroyed.  A
 second valid replacement publishes revision 1 and only then destroys the old
 Metal pipeline.  This proves synchronous last-known-good publication and
-recovery through the shared owner; commands in flight still require the
-submission-aware retirement frontier which the first real draw will expose.
+recovery through the shared owner.
+
+The first real draw now exposes and crosses the command boundary.  With Metal
+API validation enabled, =make metal-draw= defines two mathematical shader
+methods, installs their live pipeline, writes three vertices into a shared
+=MTLBuffer=, and presents through the ordinary =begin-render-pass=,
+=set-pipeline=, =set-vertex-buffer=, =draw=, and =end-pass= vocabulary.  The
+native trace includes =setAddress:attributeStride:atIndex:=,
+=setArgumentTable:atStages:=, and the five-argument =drawPrimitives= selector.
+Completion advances one =MTLSharedEvent= value and drains the retained command
+buffer and allocator back to zero.  #348B7B explains the binding choice.
+
+The complete luvcraft frame now crosses the same boundary.  Metal bind groups
+populate =MTL4ArgumentTable= buffer addresses, texture resource IDs, and sampler
+resource IDs from the ordinary layout relationship.  The real frame encodes a
+depth-only shadow pass followed by sky, block, and crosshair pipelines into an
+owned color/depth pair, then copies that color texture into the drawable.  The
+atlas upload and screenshot readback use the existing queue commands rather
+than backend calls in luvcraft.
+
+=MTL_DEBUG_LAYER=1 make metal-smoke= renders the deterministic little world
+through those paths and writes an upright sRGB capture comparable to the
+Vulkan smoke image.  The Metal capture is =1920×1280= because the Metal SDL
+canvas deliberately uses the Retina drawable; Vulkan's hidden reference is
+=960×640=.  Running =./build/luvcraft --metal= keeps the ordinary interactive
+world alive across continuous validated frames and exits through its normal
+window-close lifecycle.  Luvcraft selects a provider, but does not fork its
+world, meshing, input, frame graph, live shader, or capture orchestration.
 
 Done when: redefining the block material compiles MSL, publishes a complete
 Metal pipeline at the owning frame boundary, keeps the previous pipeline after
 an invalid edit, recovers after a valid edit, and renders a pinned capture
 comparable to Vulkan.  Asynchronous compiler tasks, Objective-C blocks, and
 mesh/object stages remain later capabilities.
+
+* NEXT Retire replaced Metal resources without a frontier wait
+:PROPERTIES:
+:ID: JAM5XR
+:END:
+
+Intent: preserve logical frame-boundary publication while removing the
+conservative queue stall from Metal resource destruction.
+
+Evidence: command buffers and allocators already retire behind the
+=MTLSharedEvent= submission frontier, but buffers, textures, samplers, and
+replaced live pipelines currently call =submitted-work-done= before releasing
+native ownership.  That policy is safe and made the complete luvcraft proof
+possible, but a shader edit or chunk replacement can stop the producer until
+all prior GPU work completes.
+
+Done when: logical destroy detaches the resource immediately, physical release
+is queued against the last submission which can reference it, normal frame
+submission reclaims completed entries without waiting, and tests prove that a
+live pipeline replacement remains valid across at least one in-flight frame.

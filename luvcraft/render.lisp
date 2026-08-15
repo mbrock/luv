@@ -166,7 +166,10 @@ the frame uniform cannot silently diverge between shader and host."
   resource)
 
 (defun luvcraft-frame-state (session surface-texture)
-  (or (gethash surface-texture (luvcraft-session-frame-states session))
+  (let ((key
+          (canvas-frame-resource-key
+           (luvcraft-session-context session) surface-texture)))
+    (or (gethash key (luvcraft-session-frame-states session))
       (let ((buffer nil)
             (scene-bind-group nil)
             (shadow-bind-group nil)
@@ -218,7 +221,7 @@ the frame uniform cannot silently diverge between shader and host."
                         :uniform-buffer buffer
                         :scene-bind-group scene-bind-group
                         :shadow-bind-group shadow-bind-group)))
-                 (setf (gethash surface-texture
+                 (setf (gethash key
                                 (luvcraft-session-frame-states session))
                        state
                        completed-p t)
@@ -226,13 +229,35 @@ the frame uniform cannot silently diverge between shader and host."
           (unless completed-p
             (when shadow-bind-group (destroy shadow-bind-group))
             (when scene-bind-group (destroy scene-bind-group))
-            (when buffer (destroy buffer)))))))
+            (when buffer (destroy buffer))))))))
 
-(defun prepare-luvcraft-shadow-map-sampling (session encoder)
+(defgeneric prepare-luvcraft-shadow-map-sampling (session encoder)
+  (:documentation
+   "Prepare the just-rendered shadow map for sampling on ENCODER's backend."))
+
+(defmethod prepare-luvcraft-shadow-map-sampling
+    (session (encoder vulkan-gpu-command-encoder))
   "Move the just-rendered shadow depth texture into sampled-image layout."
   (let ((texture (luvcraft-session-shadow-depth-texture session)))
     (ensure-vulkan-texture-for-command encoder texture session :texture-binding)
     (transition-vulkan-texture encoder texture :shader-read-only-optimal)))
+
+(defmethod prepare-luvcraft-shadow-map-sampling
+    (session (encoder metal-frame-command-encoder))
+  (declare (ignore session))
+  ;; Metal 4 queues do not perform the ordinary MTLResource hazard tracking.
+  ;; The next render encoder consumes the depth texture in its fragment stage,
+  ;; so install the consumer barrier there, as close to the sampling draws as
+  ;; the MTL4CommandEncoder contract requests.
+  (when (metal-encoder-pending-consumer-barrier encoder)
+    (error 'gpu-invalid-state-error :object encoder
+           :operation :prepare-shadow-sampling
+           :state :consumer-barrier-pending :expected-state :between-passes))
+  (setf (metal-encoder-pending-consumer-barrier encoder)
+        (list luv.metal:+stage-fragment+
+              luv.metal:+stage-fragment+
+              luv.metal:+visibility-device+))
+  (values))
 
 (defun encode-luvcraft-frame
     (session surface-texture encoder &key readback-buffer)
@@ -424,6 +449,7 @@ the frame uniform cannot silently diverge between shader and host."
                                          'exposed-face-mesher))
                                 (camera (make-instance 'fly-camera))
                                 player
+                                (provider *gpu-provider*)
                                 (sky-clock (make-instance 'sky-clock))
                                 (sky-profile (make-default-sky-profile))
                                 (shadow-diagnostic-p nil)
@@ -439,24 +465,29 @@ and right click places the selected block.  Number keys select materials,
 middle click picks the targeted material, Shift sprints, and Escape releases
 the pointer.
 
-Pass :VISIBLE-P NIL to keep the SDL window hidden while still exercising the
-real SDL/Vulkan surface and swapchain path.  Pass :FRAMES-PER-SECOND NIL for a
-capture-only demand clock."
-  (let ((canvas (make-sdl-canvas :title title :width width :height height
-                                 :visible-p visible-p))
-        (player (or player (make-player-for-camera camera)))
-        (device nil) (context nil) (resources nil) (pipelines nil) (session nil)
-        (production-system nil)
-        (completed-p nil))
+Pass :PROVIDER to select the Vulkan or Metal relationship without changing
+world, simulation, streaming, or frame orchestration.  Pass :VISIBLE-P NIL to
+keep the SDL window hidden while still exercising the real presentation path.
+Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
+  (let* ((canvas (make-sdl-canvas
+                  :title title :width width :height height
+                  ;; Keep the native window hidden until its first complete
+                  ;; terrain frame has been presented.  Showing it here would
+                  ;; expose black initialization and sky-only streaming states.
+                  :visible-p nil
+                  :presentation-api (sdl-presentation-api-for provider)))
+         (player (or player (make-player-for-camera camera)))
+         (device nil) (context nil) (resources nil) (pipelines nil)
+         (session nil) (production-system nil) (completed-p nil))
     (open-canvas canvas)
     (unwind-protect
          (progn
            (setf device
                  (request-gpu-device
-                  *gpu-provider* (make-device-descriptor :label title))
+                  provider (make-device-descriptor :label title))
                  context
                  (make-canvas-context
-                  canvas *gpu-provider*
+                  canvas provider
                   (make-canvas-configuration :device device)))
            (setf production-system
                  (make-single-worker-production-system
@@ -569,13 +600,6 @@ capture-only demand clock."
                        :label "block world crosshair vertices"
                        :size (* 4 (length crosshair-vertices))
                        :usage '(:vertex)))))
-                  (crosshair-vertex-module
-                    (keep
-                     (create
-                      device
-                      (make-shader-module-descriptor
-                       :label "block world crosshair vertex shader"
-                       :code (spv:block-world-crosshair-vertex-shader)))))
                   (layout
                     (keep
                      (create
@@ -672,9 +696,9 @@ capture-only demand clock."
                     (let ((artifact
                             (make-live-shader-pipeline
                              :role :block-crosshair
+                             :vertex-role :block-crosshair
                              :label "block world crosshair pipeline"
                              :device device :layout layout
-                             :vertex-module crosshair-vertex-module
                              :vertex-buffers
                              '((:array-stride 24
                                 :attributes
@@ -735,12 +759,19 @@ capture-only demand clock."
                (setf session new-session)
                (update-luvcraft-session-title session)
                (maintain-luvcraft-residency session)
-               ;; Startup does not synchronously generate or mesh the whole
-               ;; residency window.  The first frame may briefly show sky while
-               ;; the nearest immutable products arrive.
                (refresh-luvcraft-mesh session)
-               (setf (canvas-event-handler canvas) session
-                     (canvas-clock canvas)
+               (setf (canvas-event-handler canvas) session)
+               (when visible-p
+                 ;; Preserve asynchronous residency after startup, but do not
+                 ;; publish the window until the nearest immutable mesh and one
+                 ;; complete frame are ready.
+                 (wait-for-luvcraft-products session :minimum 1)
+                 (request-canvas-frame
+                  canvas
+                  (lambda (timestamp)
+                    (render-luvcraft-frame session timestamp)))
+                 (show-canvas canvas))
+               (setf (canvas-clock canvas)
                      (if frames-per-second
                          (make-cadence-clock
                           (lambda (native-canvas timestamp)

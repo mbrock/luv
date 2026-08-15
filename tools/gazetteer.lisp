@@ -8,7 +8,8 @@
   (multiple-value-bind (positionals options)
       (parse-keyword-options
        arguments
-       `(("--view" :view ,#'parse-gazetteer-view-name-option)
+       `(("--backend" :backend ,#'parse-backend-option)
+         ("--view" :view ,#'parse-gazetteer-view-name-option)
          ("--width" :width ,#'parse-integer-option)
          ("--height" :height ,#'parse-integer-option)
          ("--count" :count ,#'parse-integer-option)
@@ -24,7 +25,8 @@
           (view (getf options :view))
           (width (getf options :width))
           (height (getf options :height))
-          (count (getf options :count)))
+          (count (getf options :count))
+          (provider (make-backend-provider (getf options :backend))))
       (when (and count (null view))
         (command-line-error "gazetteer --count requires one --view."))
       (let ((pathnames
@@ -37,10 +39,12 @@
                    :day-step (or (getf options :day-step) 0.0)
                    :difference-scale (getf options :difference-scale)
                    :shadow-diagnostic-p (getf options :shadow-only)
+                   :provider provider
                    :width width :height height)
                   (luv:capture-luvcraft-gazetteer
                    target
                    :views (and view (list view))
+                   :provider provider
                    :width width
                    :height height))))
         (if (getf options :difference-scale)

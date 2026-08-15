@@ -130,6 +130,18 @@
 (defclass canvas-context () ()
   (:documentation "A GPU presentation relationship configured for a canvas."))
 
+(defgeneric canvas-frame-resource-key (context surface-texture)
+  (:documentation
+   "Return the stable presentation slot key for SURFACE-TEXTURE in CONTEXT.
+
+Applications use this to retain per-frame resources without assuming that a
+backend returns the same Lisp wrapper every time it revisits a native drawable."))
+
+(defmethod canvas-frame-resource-key
+    ((context canvas-context) (surface-texture gpu-texture))
+  (declare (ignore context))
+  surface-texture)
+
 ;;; Portable input vocabulary. Native backends translate into these objects;
 ;;; consumers never need to know the SDL event ABI.
 

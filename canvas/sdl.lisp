@@ -84,6 +84,54 @@
   #-(or sbcl darwin)
   `(progn ,@body))
 
+(defun call-with-sdl-main-thread (function)
+  "Call FUNCTION where synchronous SDL canvas work can use the native main thread.
+
+On Darwin, a batch Lisp normally evaluates its toplevel form on the process
+main thread.  Opening a canvas from that continuation would let Cocoa replace
+the continuation with its durable event loop.  This boundary moves FUNCTION
+to a worker while the calling thread runs TRIVIAL-MAIN-THREAD, then restores
+the caller with FUNCTION's values or condition after native teardown.  Calls
+from an existing worker (including SLY and standalone program workers) already
+have a main-thread host and execute directly."
+  (check-type function function)
+  #+darwin
+  (if (not (trivial-main-thread:main-thread-p))
+      (funcall function)
+      (let ((completion (sb-thread:make-semaphore :count 0))
+            (values nil)
+            (failure nil)
+            (runner-started-p nil)
+            (worker nil))
+        (setf worker
+              (sb-thread:make-thread
+               (lambda ()
+                 (unwind-protect
+                      (handler-case
+                          (progn
+                            ;; Establish the runner before FUNCTION can ask a
+                            ;; canvas to replace its task with SDL's event loop.
+                            (trivial-main-thread:call-in-main-thread
+                             (lambda () (values)) :blocking t)
+                            (setf runner-started-p t
+                                  values (multiple-value-list
+                                          (funcall function))))
+                        (error (condition)
+                          (setf failure condition)))
+                   (sb-thread:signal-semaphore completion)
+                   (when runner-started-p
+                     (trivial-main-thread:stop-main-runner))))
+               :name "luv SDL batch operation"))
+        ;; The worker's first main-thread call interrupts this wait and enters
+        ;; the runner.  STOP-MAIN-RUNNER later restores this continuation.
+        (sb-thread:wait-on-semaphore completion)
+        (sb-thread:join-thread worker)
+        (if failure
+            (error failure)
+            (values-list values))))
+  #-darwin
+  (funcall function))
+
 (defgeneric prepare-sdl-canvas-host (canvas)
   (:documentation "Prepare the native application host before SDL_Init."))
 
@@ -136,6 +184,10 @@
 (defgeneric sdl-presentation-window-flags (presentation-api)
   (:documentation
    "Return the immutable SDL window flags required by PRESENTATION-API."))
+
+(defgeneric sdl-presentation-api-for (provider)
+  (:documentation
+   "Return the SDL presentation policy required by GPU PROVIDER."))
 
 (defmethod sdl-presentation-window-flags ((presentation-api (eql :vulkan)))
   (declare (ignore presentation-api))

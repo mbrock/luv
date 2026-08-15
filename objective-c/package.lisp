@@ -1,6 +1,6 @@
 (defpackage #:luv.objective-c
   (:nicknames #:objc)
-  (:use #:cl #:luv.invocation)
+  (:use #:cl)
   (:documentation
    "Declared Objective-C messages, explicit native ownership, and tracing.")
   (:export #:objective-c-error
@@ -37,19 +37,12 @@
            #:*objective-c-exception-policy*
            #:with-unchecked-objective-c-messages
            #:with-objective-c-exception-handling
-           #:objective-c-message-class
-           #:objective-c-message
-           #:objective-c-message-selector
-           #:objective-c-message-result-type
-           #:objective-c-message-result-ownership
-           #:objective-c-message-result-class-name
-           #:objective-c-message-consumes-receiver-p
            #:objective-c-message-description
-           #:objective-c-invocation-description
+           #:objective-c-message-event-description
+           #:objective-c-message-event-status
+           #:objective-c-message-event-condition
+           #:objective-c-trace-events
            #:define-objective-c-message
-           #:objective-c-runtime
-           #:*objective-c-runtime*
-           #:tracing-objective-c-runtime
            #:with-objective-c-trace
            #:with-autorelease-pool
            #:objective-c-string
@@ -65,10 +58,33 @@
            #:device-registry-id
            #:probe-system-default-device
            #:new-metal-4-command-queue
+           #:new-metal-shared-event
+           #:wait-for-metal-shared-event
+           #:metal-shared-event-signaled-value
+           #:signal-metal-event
            #:new-metal-4-compiler
            #:compile-metal-4-library
            #:compile-metal-4-render-pipeline
            #:new-metal-depth-stencil-state
+           #:new-metal-buffer
+           #:metal-buffer-contents
+           #:metal-buffer-gpu-address
+           #:new-metal-texture
+           #:metal-texture-resource-id
+           #:replace-metal-texture-region
+           #:new-metal-sampler
+           #:metal-sampler-resource-id
+           #:new-metal-residency-set
+           #:add-metal-residency-allocation
+           #:remove-metal-residency-allocation
+           #:commit-metal-residency-set
+           #:add-metal-queue-residency-set
+           #:remove-metal-queue-residency-set
+           #:new-metal-4-argument-table
+           #:set-metal-argument-table-buffer
+           #:set-metal-argument-table-address
+           #:set-metal-argument-table-texture
+           #:set-metal-argument-table-sampler
            #:new-metal-library-function
            #:metal-function-type
            #:new-command-allocator
@@ -76,13 +92,27 @@
            #:begin-command-buffer
            #:end-command-buffer
            #:render-command-encoder
+           #:compute-command-encoder
+           #:new-color-render-command-encoder
+           #:new-render-command-encoder
+           #:set-metal-render-pipeline
+           #:set-metal-depth-stencil-state
+           #:set-metal-render-argument-table
+           #:draw-metal-primitives
+           #:copy-metal-texture
+           #:copy-metal-texture-to-buffer
            #:end-encoding
+           #:barrier-after-queue-stages
+           #:+stage-fragment+
+           #:+stage-blit+
+           #:+visibility-device+
            #:wait-for-drawable
            #:commit-command-buffer
            #:signal-drawable
            #:present-drawable
            #:set-layer-device
            #:set-layer-pixel-format
+           #:set-layer-framebuffer-only
            #:layer-pixel-format
            #:set-layer-drawable-size
            #:layer-drawable-size
@@ -93,6 +123,10 @@
            #:+function-type-vertex+
            #:+function-type-fragment+
            #:+primitive-topology-class-triangle+
+           #:+primitive-type-triangle+
+           #:+primitive-type-triangle-strip+
+           #:+render-stage-vertex+
+           #:+render-stage-fragment+
            #:+compare-function-never+
            #:+compare-function-less+
            #:+compare-function-equal+
@@ -102,4 +136,18 @@
            #:+compare-function-greater-equal+
            #:+compare-function-always+
            #:+pixel-format-bgra8-unorm+
-           #:+pixel-format-bgra8-unorm-srgb+))
+           #:+pixel-format-bgra8-unorm-srgb+
+           #:+pixel-format-rgba8-unorm+
+           #:+pixel-format-rgba8-unorm-srgb+
+           #:+pixel-format-depth32-float+
+           #:+texture-usage-shader-read+
+           #:+texture-usage-render-target+
+           #:+storage-mode-shared+
+           #:+storage-mode-private+
+           #:+sampler-min-mag-filter-nearest+
+           #:+sampler-min-mag-filter-linear+
+           #:+sampler-mip-filter-not-mipmapped+
+           #:+sampler-mip-filter-nearest+
+           #:+sampler-mip-filter-linear+
+           #:+sampler-address-mode-clamp-to-edge+
+           #:+sampler-address-mode-repeat+))

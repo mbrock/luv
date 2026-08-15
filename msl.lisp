@@ -745,9 +745,20 @@
           (msl-occurrence-text (msl-variable-statement-value statement))))
 
 (defmethod write-msl-statement ((statement msl-output-statement) stream)
-  (format stream "  result.~A = ~A;~%"
-          (msl-output-statement-field statement)
-          (msl-occurrence-text (msl-output-statement-value statement))))
+  (let* ((origin (msl-output-statement-origin statement))
+         (output (spv:shader-assignment-output origin))
+         (value (msl-occurrence-text
+                 (msl-output-statement-value statement)))
+         (text
+           (if (eq :position (spv:shader-interface-built-in output))
+               ;; The shared camera graph intentionally retains Vulkan's
+               ;; framebuffer-oriented clip Y.  Metal's viewport convention
+               ;; is the target-shaped boundary where that lane is inverted.
+               (format nil "float4((~A).x, -(~A).y, (~A).z, (~A).w)"
+                       value value value value)
+               value)))
+    (format stream "  result.~A = ~A;~%"
+            (msl-output-statement-field statement) text)))
 
 (defun msl-stage-qualifier (stage)
   (ecase stage
