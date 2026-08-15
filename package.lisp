@@ -328,6 +328,8 @@ nothing else does."))
            #+darwin
            #:metal-gpu-queue
            #+darwin
+           #:metal-gpu-buffer
+           #+darwin
            #:metal-gpu-texture
            #+darwin
            #:metal-gpu-shader-module
@@ -345,6 +347,10 @@ nothing else does."))
            #:metal-render-pipeline-depth-stencil-state
            #+darwin
            #:metal-render-pipeline-vertex-buffers
+           #+darwin
+           #:metal-render-pass-encoder
+           #+darwin
+           #:metal-render-pass-argument-table
            #:vulkan-provider-application-name
            #:vulkan-provider-debug-callback
            #:vulkan-provider-debug-severities

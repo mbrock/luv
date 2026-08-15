@@ -65,10 +65,25 @@
            #:device-registry-id
            #:probe-system-default-device
            #:new-metal-4-command-queue
+           #:new-metal-shared-event
+           #:wait-for-metal-shared-event
+           #:metal-shared-event-signaled-value
+           #:signal-metal-event
            #:new-metal-4-compiler
            #:compile-metal-4-library
            #:compile-metal-4-render-pipeline
            #:new-metal-depth-stencil-state
+           #:new-metal-buffer
+           #:metal-buffer-contents
+           #:metal-buffer-gpu-address
+           #:new-metal-residency-set
+           #:add-metal-residency-allocation
+           #:remove-metal-residency-allocation
+           #:commit-metal-residency-set
+           #:add-metal-queue-residency-set
+           #:remove-metal-queue-residency-set
+           #:new-metal-4-argument-table
+           #:set-metal-argument-table-buffer
            #:new-metal-library-function
            #:metal-function-type
            #:new-command-allocator
@@ -76,6 +91,11 @@
            #:begin-command-buffer
            #:end-command-buffer
            #:render-command-encoder
+           #:new-color-render-command-encoder
+           #:set-metal-render-pipeline
+           #:set-metal-depth-stencil-state
+           #:set-metal-render-argument-table
+           #:draw-metal-primitives
            #:end-encoding
            #:wait-for-drawable
            #:commit-command-buffer
@@ -93,6 +113,10 @@
            #:+function-type-vertex+
            #:+function-type-fragment+
            #:+primitive-topology-class-triangle+
+           #:+primitive-type-triangle+
+           #:+primitive-type-triangle-strip+
+           #:+render-stage-vertex+
+           #:+render-stage-fragment+
            #:+compare-function-never+
            #:+compare-function-less+
            #:+compare-function-equal+

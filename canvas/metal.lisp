@@ -193,7 +193,8 @@
     (synchronize-metal-canvas-drawable-size context)
     (let* ((device (context-device context))
            (native-device (metal-native-object device))
-           (queue (metal-native-object (device-queue device)))
+           (queue (device-queue device))
+           (native-queue (metal-native-object queue))
            (drawable (luv.metal:next-drawable (metal-canvas-layer context))))
       (unless drawable
         (error 'canvas-error :canvas (context-canvas context)
@@ -228,21 +229,34 @@
                  (setf (metal-canvas-current-texture context) texture
                        (canvas-context-state context) :in-frame)
                  (funcall function texture encoder)
+                 (when (metal-encoder-active-pass encoder)
+                   (error 'canvas-error :canvas (context-canvas context)
+                          :operation :frame :reason :metal-pass-left-open))
                  (luv.metal:end-command-buffer command-buffer)
                  (setf ended-p t)
-                 (luv.metal:wait-for-drawable queue drawable)
-                 (luv.metal:commit-command-buffer queue command-buffer)
-                 (luv.metal:signal-drawable queue drawable)
-                 (luv.metal:present-drawable drawable)
+                 (luv.metal:wait-for-drawable native-queue drawable)
+                 ;; Submission consumes these objects whether commit succeeds
+                 ;; or raises; after commit QUEUE retains them to its frontier.
+                 (let ((owned-command-buffer command-buffer)
+                       (owned-allocator allocator))
+                   (setf command-buffer nil allocator nil)
+                   (submit-metal-command-buffer
+                    queue owned-command-buffer owned-allocator
+                    :after-commit
+                    (lambda ()
+                      (luv.metal:signal-drawable native-queue drawable)
+                      (luv.metal:present-drawable drawable))))
                  texture))
           (setf (metal-canvas-current-texture context) nil
                 (canvas-context-state context) :configured)
-          (unless ended-p
+          (when (and command-buffer (not ended-p))
             (ignore-errors (luv.metal:end-command-buffer command-buffer)))
           (when texture
             (setf (metal-object-destroyed-p texture) t))
-          (luv.objective-c:release-objective-c-object command-buffer)
-          (luv.objective-c:release-objective-c-object allocator))))))
+          (when command-buffer
+            (luv.objective-c:release-objective-c-object command-buffer))
+          (when allocator
+            (luv.objective-c:release-objective-c-object allocator)))))))
 
 (defmethod call-with-canvas-frame
     ((context metal-canvas-context) function)
@@ -250,7 +264,7 @@
    (context-canvas context)
    (lambda () (call-with-metal-canvas-frame context function))))
 
-(defun metal-clear-submission-selectors (trace)
+(defun metal-submission-selectors (trace)
   (mapcar
    (lambda (event)
      (getf
@@ -267,7 +281,8 @@
     "waitForDrawable:"
     "commit:count:"
     "signalDrawable:"
-    "present"))
+    "present"
+    "signalEvent:value:"))
 
 (defun validate-metal-clear-submission (selectors)
   "Require the Metal 4 drawable operations in their semantic order."
@@ -298,7 +313,7 @@
              (luv.objective-c:with-objective-c-trace (active-trace)
                (setf trace active-trace)
                (apply #'render-canvas-color context (coerce color 'list)))))
-          (let ((selectors (metal-clear-submission-selectors trace)))
+          (let ((selectors (metal-submission-selectors trace)))
             (validate-metal-clear-submission selectors)
             (list
              :device

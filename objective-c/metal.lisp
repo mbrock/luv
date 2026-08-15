@@ -19,6 +19,7 @@
 
 (defconstant +pixel-format-bgra8-unorm+ 80)
 (defconstant +pixel-format-bgra8-unorm-srgb+ 81)
+(defconstant +load-action-load+ 1)
 (defconstant +load-action-clear+ 2)
 (defconstant +store-action-store+ 1)
 (defconstant +language-version-4-0+ (ash 4 16))
@@ -28,6 +29,10 @@
 (defconstant +vertex-step-function-per-vertex+ 1)
 (defconstant +vertex-step-function-per-instance+ 2)
 (defconstant +primitive-topology-class-triangle+ 3)
+(defconstant +primitive-type-triangle+ 3)
+(defconstant +primitive-type-triangle-strip+ 4)
+(defconstant +render-stage-vertex+ (ash 1 0))
+(defconstant +render-stage-fragment+ (ash 1 1))
 (defconstant +compare-function-never+ 0)
 (defconstant +compare-function-less+ 1)
 (defconstant +compare-function-equal+ 2)
@@ -42,6 +47,95 @@
 (objc:define-objective-c-message new-metal-4-command-queue
     ("newMTL4CommandQueue" :object :ownership :owned
      :class "MTL4CommandQueue"))
+
+(objc:define-objective-c-message new-metal-shared-event
+    ("newSharedEvent" :object :ownership :owned :class "MTLSharedEvent"))
+
+(objc:define-objective-c-message wait-for-metal-shared-event
+    ("waitUntilSignaledValue:timeoutMS:" :uint8)
+  (value :uint64)
+  (timeout-milliseconds :uint64))
+
+(objc:define-objective-c-message metal-shared-event-signaled-value
+    ("signaledValue" :uint64))
+
+(objc:define-objective-c-message signal-metal-event
+    ("signalEvent:value:" :void)
+  (event :object)
+  (value :uint64))
+
+;;; Device resources and Metal 4 binding infrastructure.
+
+(objc:define-objective-c-message new-metal-buffer
+    ("newBufferWithLength:options:" :object :ownership :owned
+     :class "MTLBuffer")
+  (length :uint64)
+  (options :uint64))
+
+(objc:define-objective-c-message metal-buffer-contents
+    ("contents" :pointer))
+
+(objc:define-objective-c-message metal-buffer-gpu-address
+    ("gpuAddress" :uint64))
+
+(objc:define-objective-c-message %new-metal-residency-set-descriptor
+    ("new" :object :ownership :owned :class "MTLResidencySetDescriptor"))
+
+(objc:define-objective-c-message %set-residency-set-initial-capacity
+    ("setInitialCapacity:" :void)
+  (capacity :uint64))
+
+(objc:define-objective-c-message %new-metal-residency-set
+    ("newResidencySetWithDescriptor:error:" :object :ownership :owned
+     :class "MTLResidencySet")
+  (descriptor :object)
+  (error :pointer))
+
+(objc:define-objective-c-message add-metal-residency-allocation
+    ("addAllocation:" :void)
+  (allocation :object))
+
+(objc:define-objective-c-message remove-metal-residency-allocation
+    ("removeAllocation:" :void)
+  (allocation :object))
+
+(objc:define-objective-c-message commit-metal-residency-set
+    ("commit" :void))
+
+(objc:define-objective-c-message add-metal-queue-residency-set
+    ("addResidencySet:" :void)
+  (residency-set :object))
+
+(objc:define-objective-c-message remove-metal-queue-residency-set
+    ("removeResidencySet:" :void)
+  (residency-set :object))
+
+(objc:define-objective-c-message %new-metal-4-argument-table-descriptor
+    ("new" :object :ownership :owned :class "MTL4ArgumentTableDescriptor"))
+
+(objc:define-objective-c-message %set-argument-table-max-buffer-count
+    ("setMaxBufferBindCount:" :void)
+  (count :uint64))
+
+(objc:define-objective-c-message %set-argument-table-initialize-bindings
+    ("setInitializeBindings:" :void)
+  (enabled :uint8))
+
+(objc:define-objective-c-message %set-argument-table-support-attribute-strides
+    ("setSupportAttributeStrides:" :void)
+  (enabled :uint8))
+
+(objc:define-objective-c-message %new-metal-4-argument-table
+    ("newArgumentTableWithDescriptor:error:" :object :ownership :owned
+     :class "MTL4ArgumentTable")
+  (descriptor :object)
+  (error :pointer))
+
+(objc:define-objective-c-message set-metal-argument-table-buffer
+    ("setAddress:attributeStride:atIndex:" :void)
+  (address :uint64)
+  (attribute-stride :uint64)
+  (index :uint64))
 
 (objc:define-objective-c-message %new-metal-4-compiler-descriptor
     ("new" :object :ownership :owned :class "MTL4CompilerDescriptor"))
@@ -97,6 +191,41 @@
       (objc:objective-c-error-description
        (objc:wrap-objective-c-object pointer :ownership :borrowed
                                     :protocol-name "NSError")))))
+
+(defun new-metal-residency-set (device &key label (initial-capacity 64))
+  "Create an owned residency set for long-lived Metal allocations."
+  (objc:with-autorelease-pool ()
+    (objc:with-owned-objective-c-object
+        (descriptor
+          (%new-metal-residency-set-descriptor
+           (objc:find-objective-c-class "MTLResidencySetDescriptor")))
+      (%set-residency-set-initial-capacity descriptor initial-capacity)
+      (when label
+        (%set-object-label descriptor (objc:lisp-string-to-objective-c label)))
+      (cffi:with-foreign-object (error :pointer)
+        (setf (cffi:mem-ref error :pointer) (cffi:null-pointer))
+        (let ((residency-set (%new-metal-residency-set device descriptor error)))
+          (values residency-set
+                  (objective-c-error-pointer-description error)))))))
+
+(defun new-metal-4-argument-table
+    (device max-buffer-count &key label (attribute-strides-p nil))
+  "Create an owned Metal 4 argument table with a buffer binding range."
+  (objc:with-autorelease-pool ()
+    (objc:with-owned-objective-c-object
+        (descriptor
+          (%new-metal-4-argument-table-descriptor
+           (objc:find-objective-c-class "MTL4ArgumentTableDescriptor")))
+      (%set-argument-table-max-buffer-count descriptor max-buffer-count)
+      (%set-argument-table-initialize-bindings descriptor 1)
+      (%set-argument-table-support-attribute-strides
+       descriptor (if attribute-strides-p 1 0))
+      (when label
+        (%set-object-label descriptor (objc:lisp-string-to-objective-c label)))
+      (cffi:with-foreign-object (error :pointer)
+        (setf (cffi:mem-ref error :pointer) (cffi:null-pointer))
+        (let ((table (%new-metal-4-argument-table device descriptor error)))
+          (values table (objective-c-error-pointer-description error)))))))
 
 (defun new-metal-4-compiler (device &key label)
   "Create one synchronous Metal 4 compiler owned by DEVICE.
@@ -362,6 +491,27 @@ rejection.  Source and names cross only as in-memory NSString objects."
      :class "MTL4RenderCommandEncoder")
   (descriptor :object))
 
+(objc:define-objective-c-message set-metal-render-pipeline
+    ("setRenderPipelineState:" :void)
+  (pipeline :object))
+
+(objc:define-objective-c-message set-metal-depth-stencil-state
+    ("setDepthStencilState:" :void)
+  (depth-stencil-state :object))
+
+(objc:define-objective-c-message set-metal-render-argument-table
+    ("setArgumentTable:atStages:" :void)
+  (argument-table :object)
+  (stages :uint64))
+
+(objc:define-objective-c-message draw-metal-primitives
+    ("drawPrimitives:vertexStart:vertexCount:instanceCount:baseInstance:" :void)
+  (primitive-type :uint64)
+  (vertex-start :uint64)
+  (vertex-count :uint64)
+  (instance-count :uint64)
+  (base-instance :uint64))
+
 (objc:define-objective-c-message end-encoding
     ("endEncoding" :void))
 
@@ -458,8 +608,9 @@ rejection.  Source and names cross only as in-memory NSString objects."
     ("setClearColor:" :void)
   (color (:struct mtl-clear-color)))
 
-(defun encode-clear-pass (command-buffer texture color)
-  "Encode one empty Metal 4 render pass which clears TEXTURE to COLOR."
+(defun new-color-render-command-encoder
+    (command-buffer texture color &key (clear-p t))
+  "Begin one Metal 4 color pass and return its borrowed render encoder."
   (destructuring-bind (red green blue alpha) (coerce color 'list)
     (objc:with-owned-objective-c-object
         (descriptor
@@ -468,16 +619,24 @@ rejection.  Source and names cross only as in-memory NSString objects."
       (let* ((attachments (%render-pass-color-attachments descriptor))
              (attachment (%color-attachment-at attachments 0)))
         (%set-color-attachment-texture attachment texture)
-        (%set-color-attachment-load-action attachment +load-action-clear+)
+        (%set-color-attachment-load-action
+         attachment (if clear-p +load-action-clear+ +load-action-load+))
         (%set-color-attachment-store-action attachment +store-action-store+)
-        (%set-color-attachment-clear-color
-         attachment
-         (list 'red (coerce red 'double-float)
-               'green (coerce green 'double-float)
-               'blue (coerce blue 'double-float)
-               'alpha (coerce alpha 'double-float)))
-        (let ((encoder (render-command-encoder command-buffer descriptor)))
-          (unless encoder
-            (error "Metal did not create a render command encoder."))
-          (end-encoding encoder)
-          encoder)))))
+        (when clear-p
+          (%set-color-attachment-clear-color
+           attachment
+           (list 'red (coerce red 'double-float)
+                 'green (coerce green 'double-float)
+                 'blue (coerce blue 'double-float)
+                 'alpha (coerce alpha 'double-float))))
+        (render-command-encoder command-buffer descriptor)))))
+
+(defun encode-clear-pass (command-buffer texture color)
+  "Encode one empty Metal 4 render pass which clears TEXTURE to COLOR."
+  (let ((encoder
+          (new-color-render-command-encoder
+           command-buffer texture color :clear-p t)))
+    (unless encoder
+      (error "Metal did not create a render command encoder."))
+    (end-encoding encoder)
+    encoder))
