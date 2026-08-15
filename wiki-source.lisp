@@ -171,7 +171,7 @@ as dexp boxes, each anchored by its starting line."
          (render-figure-cards
           (loop for definition in (source-file-definitions file)
                 append (definition-mentions definition)))))
-     :body-class "source-page"
+     :body-class "wide source-page"
      :status title
      :right (or (source-file-system-name file) "source"))))
 
@@ -186,33 +186,36 @@ as dexp boxes, each anchored by its starting line."
       (:span.count (format nil "~D" (length (source-file-definitions file)))))))
 
 (defun render-source-index (site)
-  "Emit source.html: the ASDF systems of the code in dependency order, each
-with its description, dependencies, and files, the files expandable to their
-definitions."
+  "Emit source.html: the ASDF systems of the code as one dense table in
+dependency order — system, description, dependencies, files — with each
+file expandable to its definitions in place."
   (let ((*page-prefix* "")
         (*page-kind* "source")
         (*rendering-document* nil))
-    (render-page-frame
-     "Source"
-     (lambda ()
-       (spinneret:with-html
-         (:h1 "Source")
-         (:p "The systems of luv in dependency order, fundamentals first, with
-their files.  Open a file to see its definitions; symbols in the pages link
-to their definitions and " (:code "#ID") " mentions link to figures.")
-         (dolist (entry (site-systems site))
-           (:section.system :id (concatenate 'string "system-" (substitute #\- #\/ (system-entry-name entry)))
-            (:h2 (:code (system-entry-name entry)))
-            (when (system-entry-description entry)
-              (:p.description (system-entry-description entry)))
-            (when (system-entry-depends-on entry)
-              (:p.depends "depends on "
-                (loop for name in (system-entry-depends-on entry)
-                      for first = t then nil
-                      do (unless first (spinneret:html ", "))
-                         (:a :href (concatenate 'string "#system-" (substitute #\- #\/ name))
-                             (:code name)))))
-            (dolist (file (system-entry-files entry))
-              (:details.source-file
-               (:summary (render-file-summary file))
-               (render-source-toc file :prefix (source-page-name file)))))))))))
+    (flet ((system-anchor (name) (concatenate 'string "system-" (substitute #\- #\/ name))))
+      (render-page-frame
+       "Source"
+       (lambda ()
+         (spinneret:with-html
+           (:h1 "Source")
+           (:p.lede "The systems of luv in dependency order, fundamentals first.  Open a file
+to see its definitions; symbols in the pages link to their definitions and "
+                    (:code "#ID") " mentions link to figures.")
+           (:table.systems
+            (:thead (:tr (:th "system") (:th "description") (:th "depends on") (:th "files")))
+            (:tbody
+             (dolist (entry (site-systems site))
+               (:tr :id (system-anchor (system-entry-name entry))
+                (:td.system-name (system-entry-name entry))
+                (:td.system-description (or (system-entry-description entry) ""))
+                (:td.system-depends
+                 (loop for name in (system-entry-depends-on entry)
+                       for first = t then nil
+                       do (unless first (spinneret:html ", "))
+                          (:a :href (concatenate 'string "#" (system-anchor name)) name)))
+                (:td.system-files
+                 (dolist (file (system-entry-files entry))
+                   (:details.source-file
+                    (:summary (render-file-summary file))
+                    (render-source-toc file :prefix (source-page-name file)))))))))))
+       :body-class "wide source-index"))))

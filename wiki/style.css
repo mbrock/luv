@@ -171,8 +171,16 @@ main {
   margin: 0 auto;
 }
 
-body.source-page main {
-  max-width: 96ch;
+/* Wide pages fill the viewport; their prose keeps a readable measure. */
+
+body.wide main {
+  max-width: none;
+  margin: 0;
+}
+
+body.wide main > p,
+body.wide main > h1 {
+  max-width: 66ch;
 }
 
 .site-footer {
@@ -285,9 +293,9 @@ code, pre {
 }
 
 code {
-  background: var(--code-bg);
-  padding: 0.05em 0.3em;
-  border-radius: 0.2em;
+  background: none;
+  padding: 0;
+  color: color-mix(in srgb, var(--ink) 80%, var(--accent));
 }
 
 pre {
@@ -463,8 +471,7 @@ details.definition {
 
 details.definition > summary {
   cursor: pointer;
-  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 0.85rem;
+  font-size: 0.9rem;
   color: var(--muted);
 }
 
@@ -522,9 +529,8 @@ details.definition > .lisp {
 }
 
 h1.source-title {
-  font-family: var(--mono-font);
-  font-size: 1.5rem;
-  letter-spacing: -0.02em;
+  font-size: 1.8rem;
+  letter-spacing: -0.04em;
 }
 
 p.source-meta {
@@ -611,7 +617,6 @@ details.source-file {
 
 details.source-file > summary {
   cursor: pointer;
-  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   font-size: 0.9rem;
 }
 
@@ -622,24 +627,65 @@ details.source-file > summary .system {
   font-size: 0.8em;
 }
 
-section.system {
-  margin: 2rem 0;
+/* The systems table */
+
+table.systems {
+  width: 100%;
+  margin: 1rem 0 2rem;
+  font-size: 0.88rem;
+  line-height: 1.35;
 }
 
-section.system > h2 {
-  font-size: 1.15rem;
-  margin-bottom: 0.3rem;
-}
-
-section.system > p.description,
-section.system > p.depends {
-  margin: 0.2rem 0 0.6rem;
+table.systems th {
+  font: 700 0.72rem/1.4 var(--display-font);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
   color: var(--muted);
-  font-size: 0.95rem;
+  padding: 0.3rem 0.9rem 0.3rem 0;
+  border-bottom: 1px solid var(--rule);
 }
 
-section.system > p.depends code {
-  font-size: 0.85em;
+table.systems td {
+  padding: 0.35rem 0.9rem 0.35rem 0;
+  border-bottom: 1px solid var(--rule);
+  vertical-align: top;
+}
+
+table.systems tr:target td {
+  background: color-mix(in srgb, var(--paper) 94%, var(--accent));
+}
+
+td.system-name {
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+td.system-description {
+  max-width: 28rem;
+  color: color-mix(in srgb, var(--ink) 80%, var(--muted));
+}
+
+td.system-depends {
+  max-width: 16rem;
+  color: var(--muted);
+}
+
+td.system-files {
+  min-width: 18rem;
+}
+
+td.system-files details.source-file {
+  margin: 0;
+}
+
+td.system-files details.source-file > summary {
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+td.system-files nav.definitions {
+  margin: 0.3rem 0 0.6rem 0.9rem;
+  padding: 0.4rem 0.7rem;
 }
 
 details.source-file > summary .directory {
@@ -648,6 +694,7 @@ details.source-file > summary .directory {
 
 details.source-file > summary .file {
   color: var(--accent);
+  font-weight: 600;
 }
 
 details.source-file > nav.definitions {
