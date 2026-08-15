@@ -76,6 +76,21 @@
     :initform nil
     :reader arithmetic-parameter-quantity-layout)))
 
+(defmethod math:declaration-representation-type
+    ((parameter arithmetic-parameter))
+  (declare (ignore parameter))
+  nil)
+
+(defmethod math:declaration-quantity-specification
+    ((parameter arithmetic-parameter))
+  (arithmetic-parameter-quantity-specification parameter))
+
+(defmethod math:declaration-quantity-layout ((parameter arithmetic-parameter))
+  (arithmetic-parameter-quantity-layout parameter))
+
+(defmethod math:declaration-source-form ((parameter arithmetic-parameter))
+  (arithmetic-object-source-form parameter))
+
 (defclass arithmetic-binding (arithmetic-named-object)
   ((expression
     :initarg :expression
@@ -336,29 +351,10 @@
 
 (defun parse-source-quantity-specification
     (options source-form &key (default-tensor-order 0))
-  (destructuring-bind
-      (&key (quantity nil quantity-supplied-p)
-            (dimension nil dimension-supplied-p)
-            (unit nil unit-supplied-p)
-            (tensor-order default-tensor-order tensor-order-supplied-p)
-            (affine-p nil affine-p-supplied-p)
-            (character nil character-supplied-p))
-      options
-    (when (or quantity-supplied-p dimension-supplied-p unit-supplied-p
-              tensor-order-supplied-p affine-p-supplied-p
-              character-supplied-p)
-      (with-arithmetic-quantity-errors
-          (source-form :invalid-quantity-declaration)
-        ;; Only a stated character reaches the constructor, so an unstated
-        ;; one falls to the named definition's default rather than being
-        ;; forced to a difference by the source layer.
-        (apply
-         #'math:make-quantity-specification quantity
-         (append
-          (and dimension-supplied-p (list :dimension dimension))
-          (list :unit unit :tensor-order tensor-order)
-          (and affine-p-supplied-p (list :affine-p affine-p))
-          (and character-supplied-p (list :character character))))))))
+  (with-arithmetic-quantity-errors
+      (source-form :invalid-quantity-declaration)
+    (math:make-declared-quantity-specification
+     options :default-tensor-order default-tensor-order)))
 
 (defun infer-arithmetic-call-quantity-specification
     (operator operands source-form)

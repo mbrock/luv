@@ -87,6 +87,14 @@
            #:quantity-layout-projections
            #:quantity-layout=
            #:project-quantity-layout
+           #:make-declared-quantity-specification
+           #:represented-value-declaration
+           #:make-represented-value-declaration
+           #:declaration-representation-type
+           #:declaration-quantity-specification
+           #:declaration-quantity-layout
+           #:declaration-source-form
+           #:declaration-quantity-checked-p
            #:quantity-component-names
            #:project-quantity-specification
            #:quantity-operation-error

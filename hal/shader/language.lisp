@@ -164,6 +164,22 @@
   (:documentation
    "A represented shader value with optional backend-neutral semantic meaning."))
 
+(defmethod math:declaration-representation-type
+    ((declaration shader-variable-declaration))
+  (shader-declaration-type declaration))
+
+(defmethod math:declaration-quantity-specification
+    ((declaration shader-variable-declaration))
+  (shader-declaration-quantity-specification declaration))
+
+(defmethod math:declaration-quantity-layout
+    ((declaration shader-variable-declaration))
+  (shader-declaration-quantity-layout declaration))
+
+(defmethod math:declaration-source-form
+    ((declaration shader-variable-declaration))
+  (shader-object-source-form declaration))
+
 (defclass shader-interface-variable (shader-variable-declaration)
   ((direction
     :initarg :direction
@@ -1304,12 +1320,12 @@ NIL leaves the character to the named definition; T is the historical
   (when (or quantity dimension unit character)
     (with-shader-quantity-errors
         (source-form :invalid-quantity-declaration)
-      (apply
-       #'math:make-quantity-specification quantity
+      (math:make-declared-quantity-specification
        (append
+        (and quantity (list :quantity quantity))
         (and dimension (list :dimension dimension))
-        (list :unit unit
-              :tensor-order (shader-type-tensor-order type source-form))
+        (and unit (list :unit unit))
+        (list :tensor-order (shader-type-tensor-order type source-form))
         (declared-character-options character))))))
 
 (defun parse-declaration-quantity-layout

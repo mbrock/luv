@@ -545,6 +545,60 @@ not in a heap wrapper around every scalar.  A field can have:
 The boundary performs the semantic check; the kernel does not redispatch on
 every lane.  #R9M4PV follows this into the planned physics layout.
 
+* Declarations keep representation and quantity parallel
+:PROPERTIES:
+:ID: OXBSAY
+:END:
+
+A Common Lisp type and a quantity specification answer different questions.
+The type says which values and storage the implementation sees: =vec3=,
+=double-float=, a specialized array, or a shader =:vec3=.  The quantity says
+what the represented value means: world position, velocity, duration, or
+linear colour.  Neither should be encoded as a lossy alias for the other.
+
+This is now one backend-neutral protocol in =luv.arithmetic=.  A declaration
+publishes its representation type, homogeneous quantity specification,
+optional heterogeneous quantity layout, and source form.  Arithmetic
+parameters implement it while deliberately leaving representation open;
+shader interface values implement it with a concrete shader type; and
+=represented-value-declaration= is the ordinary object available to CPU
+storage schemas.  All three use the same quantity-declaration parser.
+
+The declaration is not a wrapper around runtime values and does not make
+=typep= distinguish two equal representations.  It is the inspectable side of
+a later boundary check: compare the storage declaration with an arithmetic
+parameter once, choose a compatible realization, and then execute over raw
+values.  This gives #ADR040 a protocol without moving dispatch into its inner
+loop, and gives #P2KN1D the same pair of parallel judgments on the CPU that the
+shader graph already has.
+
+* NEXT Declare quantities on Lisp storage
+:PROPERTIES:
+:ID: FLRFU8
+:END:
+
+Intent: let CLOS slots and =defstruct= slots state quantity meaning beside
+their ordinary Common Lisp =:type=, using the declaration protocol in
+#OXBSAY.  Use the MOP where a CLOS class definition genuinely carries the
+metadata, but do not make it the only representation of the schema.
+
+Evidence to gather:
+
+- One narrow metaclass with custom direct and effective slot definitions,
+  exact inheritance rules, and live redefinition visible through ordinary
+  MOP inspection.
+- One thin structure definer which removes semantic options before expanding
+  to an ordinary =defstruct= and publishes the same declaration protocol.
+- Readable source declarations on =block-world-player= and
+  =sky-frame-parameters=, with =vec3= and scalar representations unchanged.
+- Tests that inspect both definitions, reject conflicting inherited meaning,
+  and show that construction and access still use raw values without quantity
+  wrappers or per-access semantic dispatch.
+
+Done when: CLOS and structure fields expose equivalent inspectable quantity
+declarations, the two real luvcraft records use them, live and cold tests pass,
+and the next mark can connect those declarations to checked arithmetic.
+
 * A possible Lisp vocabulary
 :PROPERTIES:
 :ID: G4C2ZX

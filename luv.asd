@@ -46,7 +46,8 @@
   :components ((:module "arithmetic"
                 :serial t
                 :components ((:file "package")
-                             (:file "semantics"))))
+                             (:file "semantics")
+                             (:file "declarations"))))
   :in-order-to ((asdf:test-op (asdf:test-op #:luv/arithmetic/tests))))
 
 (asdf:defsystem #:luv/arithmetic/tests

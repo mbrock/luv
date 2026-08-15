@@ -42,6 +42,15 @@
     (ok (eq definition
             (lang:arithmetic-function-definition-for 'fog-shape)))))
 
+(deftest arithmetic-parameters-implement-the-common-declaration-protocol
+  (let* ((definition (lang:arithmetic-function-definition-for 'fog-shape))
+         (parameter (first (lang:arithmetic-function-parameters definition))))
+    (ok (null (math:declaration-representation-type parameter)))
+    (ok (eq :distance
+            (math:quantity-specification-name
+             (math:declaration-quantity-specification parameter))))
+    (ok (math:declaration-quantity-checked-p parameter))))
+
 (deftest arithmetic-functions-reject-semantic-mistakes-before-a-backend
   (ok (signals
        (lang:parse-arithmetic-function-definition

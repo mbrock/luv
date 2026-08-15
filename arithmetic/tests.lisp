@@ -264,6 +264,42 @@
           '(0) 2)
          'math:quantity-operation-error))))
 
+(deftest source-declarations-share-one-quantity-option-parser
+  (let ((point
+          (math:make-declared-quantity-specification
+           '(:quantity :position :unit :metre
+             :tensor-order 1 :character :point)))
+        (anonymous-vector
+          (math:make-declared-quantity-specification
+           '(:unit :one) :default-tensor-order 1)))
+    (ok (null (math:make-declared-quantity-specification nil)))
+    (ok (eq :position (math:quantity-specification-name point)))
+    (ok (eq :point (math:quantity-specification-character point)))
+    (ok (= 1 (math:quantity-specification-tensor-order point)))
+    (ok (null (math:quantity-specification-name anonymous-vector)))
+    (ok (= 1
+           (math:quantity-specification-tensor-order anonymous-vector)))))
+
+(deftest represented-value-declarations-keep-meaning-beside-representation
+  (let* ((specification
+           (math:make-declared-quantity-specification
+            '(:quantity :position :unit :metre
+              :tensor-order 1 :character :point)))
+         (declaration
+           (math:make-represented-value-declaration
+            :representation-type 'vec3
+            :quantity-specification specification
+            :source-form '(position :type vec3
+                                    :quantity (:position :unit :metre)))))
+    (ok (eq 'vec3 (math:declaration-representation-type declaration)))
+    (ok (eq specification
+            (math:declaration-quantity-specification declaration)))
+    (ok (null (math:declaration-quantity-layout declaration)))
+    (ok (math:declaration-quantity-checked-p declaration))
+    (ok (equal '(position :type vec3
+                          :quantity (:position :unit :metre))
+               (math:declaration-source-form declaration)))))
+
 (deftest interpretation-requires-derived-semantics
   (let ((target
           (math:make-quantity-specification

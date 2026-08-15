@@ -864,6 +864,11 @@
          (shadow-depth (seventh outputs))
          (position-quantity
            (spv:shader-declaration-quantity-specification position)))
+    (ok (spv:shader-type=
+         :vec3 (math:declaration-representation-type position)))
+    (ok (eq position-quantity
+            (math:declaration-quantity-specification position)))
+    (ok (math:declaration-quantity-checked-p position))
     (ok (eq :world-position
             (math:quantity-specification-name position-quantity)))
     (ok (math:quantity-specification-affine-p position-quantity))
