@@ -488,7 +488,7 @@ checking, and source reconstruction; the shader frontend extends or consumes
 that protocol rather than duplicating it; existing shader graphs remain
 inspectable and lower identically.
 
-* NEXT Compile checked arithmetic to Lisp
+* DONE Compile checked arithmetic to Lisp
 :PROPERTIES:
 :ID: FTQEQD
 :END:
@@ -496,18 +496,38 @@ inspectable and lower identically.
 Intent: execute arithmetic definitions on the CPU over ordinary Lisp numbers
 and vectors after checking their semantic contracts once.
 
-Evidence: scalar reference code in [[file:../luvcraft/sky.lisp][=luvcraft/sky.lisp=]] and
-[[file:../luvcraft/simulation.lisp][=luvcraft/simulation.lisp=]] already contains useful unchecked arithmetic,
-while #B5L7VG requires semantic objects at boundaries and dense values inside.
-The shader parser's unconditional single-float literal coercion is also
-evidence that CPU and GPU need distinct target artifacts.
+Evidence:
+
+- The separate =:luv/arithmetic/lisp= system depends only on the common
+  arithmetic language.  [[file:../arithmetic-lisp.lisp][=arithmetic-lisp.lisp=]] lowers a checked definition to an
+  ordinary lambda and then uses =COMPILE=; the target function receives and
+  returns ordinary numbers and vectors.
+- =define-lisp-arithmetic-function= is a thin definition form over the common
+  source protocol.  It publishes the same inspectable EQL-method definition
+  as =define-arithmetic-function= and emits a normal =DEFUN= from the checked
+  lowering, so CPU callers use it like ordinary Lisp code.
+- Quantity construction, assumption, interpretation, and representation are
+  compile-time-only boundaries in the emitted lambda.  An explicit unit
+  conversion becomes its exact numeric scale.  Runtime numerical helpers
+  operate over scalars or vector storage without quantity wrappers or
+  per-element CLOS dispatch.
+- Focused tests execute the fog-shaped =let*= directly as a compiled
+  double-float function, add and dot ordinary vectors, translate an affine
+  point by a difference, lower kilometres to metres as an exact factor of
+  1000, and reject both point-plus-point and distance-plus-height before Lisp
+  compilation.
+- A fresh Lisp image loads =:luv/arithmetic/lisp= and runs a standalone CPU
+  definition without loading the SPIR-V package.  Live SLY redefinition
+  replaces both the semantic definition and ordinary function.  =make test=
+  passes with all seven generated shader module hashes unchanged, and
+  =make smoke= retains MD5 =226c4ffdd4515837d5c5a2d9fc415fa4=.
 
 Done when: a Lisp realization lowers a checked definition to a compiled
 function without runtime quantity wrappers; tests prove numerical execution,
 compile-time rejection of a dimensional mistake, affine arithmetic, and an
 explicit unit conversion.
 
-* TODO Share one production computation between CPU and GPU
+* NEXT Share one production computation between CPU and GPU
 :PROPERTIES:
 :ID: D1R2NK
 :END:

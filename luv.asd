@@ -6,6 +6,7 @@
                #:luv/luvcraft)
   :in-order-to ((asdf:test-op (asdf:test-op #:luv/arithmetic/tests)
                               (asdf:test-op #:luv/arithmetic/language/tests)
+                              (asdf:test-op #:luv/arithmetic/lisp/tests)
                               (asdf:test-op #:luv/tests)
                               (asdf:test-op #:luv/spir-v/tests)
                               (asdf:test-op #:luv/luvcraft/tests))))
@@ -68,6 +69,33 @@
                        '#:rove '#:find-suite
                        '#:luv/arithmetic/language/tests))
                (error "luv arithmetic language tests failed"))))
+
+(asdf:defsystem #:luv/arithmetic/lisp
+  :description "Common Lisp realization of checked arithmetic definitions."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on (#:luv/arithmetic/language)
+  :serial t
+  :components ((:file "arithmetic-lisp-package")
+               (:file "arithmetic-lisp"))
+  :in-order-to ((asdf:test-op
+                 (asdf:test-op #:luv/arithmetic/lisp/tests))))
+
+(asdf:defsystem #:luv/arithmetic/lisp/tests
+  :description "Executable claims for the Common Lisp arithmetic realization."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on (#:luv/arithmetic/lisp
+               #:rove)
+  :components ((:module "tests"
+                :components ((:file "arithmetic-lisp"))))
+  :perform (asdf:test-op (operation component)
+             (declare (ignore operation component))
+             (unless (uiop:symbol-call
+                      '#:rove '#:run-suite
+                      (uiop:symbol-call
+                       '#:rove '#:find-suite '#:luv/arithmetic/lisp/tests))
+               (error "luv Common Lisp arithmetic tests failed"))))
 
 (asdf:defsystem #:luv/world
   :description "Finite chunk domains and the resident block-world model."
