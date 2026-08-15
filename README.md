@@ -145,9 +145,10 @@ of durable image.
 ```
 
 Click the block-world window once to capture the pointer. Walk with WASD and
-jump with Space; hold Shift to sprint. The outlined centre crosshair is the
-edit ray: left click removes, right click places, middle click picks, and the
-number keys 1–7 select grass, dirt, stone, wood, leaves, sand, or snow.
+jump with Space; one-block ledges autojump, and Shift sprints. The outlined
+centre crosshair is the edit ray: left click removes, right click places,
+middle click picks, and the number keys 1–7 select grass, dirt, stone, wood,
+leaves, sand, or snow.
 Escape releases the pointer.
 
 Terrain generation and meshing run on one sleeping SBCL worker rather than in

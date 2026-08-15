@@ -342,6 +342,8 @@
       (step-block-world-player player world camera keys (/ 1d0 120d0)))
     (ok (<= (player-x player) 2.700001d0))
     (ok (= (player-velocity-x player) 0d0))
+    (ok (< (abs (- (player-y player) 1d0)) 1d-5))
+    (ok (player-grounded-p player))
     (remhash :d keys)
     ;; Jump is an edge request, not a second form of flying.
     (let ((ground-y (player-y player)))
@@ -354,6 +356,30 @@
       (step-block-world-player player world camera keys (/ 1d0 120d0)))
     (ok (< (abs (- (player-y player) 1d0)) 1d-5))
     (ok (player-grounded-p player))))
+
+(deftest scalar-player-autojumps-a-clear-one-block-ledge
+  (let* ((world (make-block-world :chunk-width 8
+                                  :chunk-height 4
+                                  :chunk-depth 4))
+         (camera (make-instance 'fly-camera :x 1.5 :y 2.62 :z 1.5
+                                            :yaw 0d0 :pitch 0d0))
+         (player (make-instance 'block-world-player :x 1.5d0 :y 1d0
+                                                    :z 1.5d0
+                                                    :grounded-p t))
+         (keys (make-hash-table :test #'eq))
+         (highest-y (player-y player)))
+    (ensure-world-chunk world 0 0 0)
+    (loop for x below 8 do
+      (loop for z below 4 do
+        (setf (world-block-at world x 0 z) luv::*stone-block*)))
+    (setf (world-block-at world 3 1 1) luv::*stone-block*
+          (gethash :d keys) t)
+    (dotimes (step 120)
+      (declare (ignorable step))
+      (step-block-world-player player world camera keys (/ 1d0 120d0))
+      (setf highest-y (max highest-y (player-y player))))
+    (ok (> highest-y 2d0))
+    (ok (> (player-x player) 3.3d0))))
 
 (deftest meshing-and-editing-cross-a-chunk-boundary
   (let ((world (make-block-world :chunk-width 2

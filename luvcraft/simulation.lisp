@@ -211,6 +211,22 @@ FRAME-UNIFORM-DATA from the session's sky clock and profile."
        (< (- (player-z player) (player-half-width player)) (1+ z))
        (> (+ (player-z player) (player-half-width player)) z)))
 
+(defun player-position-clear-p (player world x y z)
+  "Return true when PLAYER's AABB would be clear at X, Y, Z."
+  (multiple-value-bind (minimum-x maximum-x)
+      (player-overlap-indices (- x (player-half-width player))
+                              (+ x (player-half-width player)))
+    (multiple-value-bind (minimum-y maximum-y)
+        (player-overlap-indices y (+ y (player-height player)))
+      (multiple-value-bind (minimum-z maximum-z)
+          (player-overlap-indices (- z (player-half-width player))
+                                  (+ z (player-half-width player)))
+        (loop for block-x from minimum-x to maximum-x never
+          (loop for block-y from minimum-y to maximum-y thereis
+            (loop for block-z from minimum-z to maximum-z
+                  thereis (player-terrain-solid-p
+                           world block-x block-y block-z))))))))
+
 (defun step-block-world-player
     (player world camera pressed-keys seconds &key jump-p)
   "Advance the scalar player controller by one small physics step."
@@ -237,20 +253,40 @@ FRAME-UNIFORM-DATA from the session's sky clock and profile."
            (if (player-grounded-p player)
                (player-ground-acceleration player)
                (player-air-acceleration player)))
-         (maximum-change (* acceleration seconds)))
+         (maximum-change (* acceleration seconds))
+         (grounded-p (player-grounded-p player)))
     (setf (player-velocity-x player)
           (move-toward (player-velocity-x player) target-x maximum-change)
           (player-velocity-z player)
           (move-toward (player-velocity-z player) target-z maximum-change))
-    (when (and jump-p (player-grounded-p player))
+    (when (and jump-p grounded-p)
       (setf (player-velocity-y player) (player-jump-speed player)
             (player-grounded-p player) nil))
+    (let* ((distance-x (* (player-velocity-x player) seconds))
+           (attempted-x (+ (player-x player) distance-x))
+           (collided-x-p (move-player-axis player world :x distance-x))
+           (distance-z (* (player-velocity-z player) seconds))
+           (attempted-z (+ (player-z player) distance-z))
+           (collided-z-p (move-player-axis player world :z distance-z))
+           (step-y (+ (player-y player) 1d0))
+           (clear-above-x-p
+             (and collided-x-p
+                  (player-position-clear-p
+                   player world attempted-x step-y (player-z player))))
+           (clear-above-z-p
+             (and collided-z-p
+                  (player-position-clear-p
+                   player world (player-x player) step-y attempted-z))))
+      (when (and grounded-p
+                 (not jump-p)
+                 (plusp length)
+                 (or clear-above-x-p clear-above-z-p))
+        (setf (player-velocity-y player) (player-jump-speed player)
+              (player-grounded-p player) nil)))
     (decf (player-velocity-y player) (* (player-gravity player) seconds))
     (setf (player-velocity-y player)
           (max -50d0 (player-velocity-y player))
           (player-grounded-p player) nil)
-    (move-player-axis player world :x (* (player-velocity-x player) seconds))
-    (move-player-axis player world :z (* (player-velocity-z player) seconds))
     (move-player-axis player world :y (* (player-velocity-y player) seconds)))
   (sync-camera-to-player camera player)
   player)

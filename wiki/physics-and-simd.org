@@ -30,7 +30,9 @@ owns one position, velocity, shape, and grounded reading.  At 120 Hz a closed
 scalar step accelerates horizontal velocity from input, applies gravity, and
 resolves its AABB axis by axis against candidate voxel cells.  The camera is
 then synchronized to the player's eye height.  Space is an edge-triggered
-jump request rather than upward flight.
+jump request rather than upward flight.  Grounded movement also jumps
+automatically when a horizontal contact has a clear body-sized space one
+block above it; a two-block wall remains a wall.
 
 This is deliberately less machinery than a general rigid-body engine, but it
 establishes several contracts that survive the next representations:
