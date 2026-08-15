@@ -1,0 +1,281 @@
+#+title: Field notes on mp-units: abstractions beyond dimension
+#+startup: overview
+
+* What this page studies
+:PROPERTIES:
+:ID: 6PQKNU
+:END:
+
+These notes study the actively developed mp-units checkout at
+=~/src/mp-units=, read as research literature for luv's own quantity
+system (#P2KN1D, #5N6SOQ).  The most valuable material is not the core
+dimensional analysis — that part is well understood — but the places
+where the library's authors discovered that dimension alone is not
+enough, and what they built instead: the three-abstraction
+point/absolute/delta model, the two-axis quantity character, and the
+affine treatment of logarithmic quantities.  Primary sources are the
+design blog posts in =docs/blog/posts/= (=introducing-absolute-quantities=,
+=why-a-quantity-has-a-character=, =introducing-logarithmic-quantities=),
+read against the framework docs and system headers.
+
+The source-study discipline of #H7QK3M applies: we distinguish
+mechanisms observed in code and docs, claims their authors make, and our
+reading of what luv should adopt, simplify, or reject.  mp-units is
+constrained by C++ — its compile-time computation must live in the
+template system — and part of the value of reading it is separating the
+metrology insights, which transfer, from the encoding contortions,
+which do not (#P2KN1D records why luv's parallel-judgment design escapes
+them).
+
+* Three abstractions: point, absolute, delta
+:PROPERTIES:
+:ID: QFCPRA
+:END:
+
+The V3 design replaces the two-way point/delta split with three
+abstractions, each mapped to a measurement scale and a mathematical
+structure:
+
+| Abstraction | Scale     | Structure          | Example                 |
+|-------------+-----------+--------------------+-------------------------|
+| point       | interval  | affine space       | 20 °C, 100 m altitude   |
+| absolute    | ratio     | convex cone (>= 0) | 100 kg, 293.15 K, 42 m  |
+| delta       | —         | vector space       | 10 K, -5 kg, a velocity |
+
+The observed operation table: absolute + absolute is absolute; absolute
+and delta mix freely (a signed delta shifts an absolute, with a contract
+check where the spec is =non_negative=); point + point is ill-formed;
+point - point is delta; scaling and division are defined for absolutes
+and deltas but not points.  Vector quantities are always deltas — "there
+is no absolute vector quantity" — and named vector quantities like
+displacement and velocity need no explicit =delta<>= wrapper because
+they are deltas by nature.  A norm takes a vector delta to a scalar
+absolute; =abs()= takes a signed scalar delta to an absolute.
+
+The motivating claim is about defaults: physics notation writes
+absolutes plainly and marks deltas with an explicit Δ, so the library
+makes the absolute the unmarked case (=20 * kg=) and requires
+=delta<kg>(20)= and =point<kg>(20)= to be spelled.  The strongest
+motivating bug is the offset-unit trap their V2 permitted: a function
+taking a kelvin delta silently accepted =20 * deg_C= as the number 20
+rather than 293.15, a factor-of-15 error in Carnot-efficiency code with
+no diagnostic.
+
+Our reading for luv: the *absolute* is the missing member of luv's
+existing vocabulary.  The wiki already holds points-are-not-differences
+(#P7A4HX); the ratio-scale absolute with a true zero is a third thing,
+and it is the natural home of most rendering quantities.  Radiance,
+irradiance, roughness, opacity, an AO factor, a light level are all
+absolutes — non-negative amounts from a physical zero — not points and
+not signed differences.  A quantity vocabulary for the shader judgment
+(#T1GYOH) should carry the three-way distinction from the start, because
+shading arithmetic is almost entirely cone arithmetic: sums and
+non-negative scalings of absolutes, with genuine deltas appearing only
+in places like blend factors and reprojection offsets.
+
+* Character: two orthogonal axes, and why the type cannot tell you
+:PROPERTIES:
+:ID: QZNJ3P
+:END:
+
+ISO 80000-1 states that "in deriving the dimension of a quantity, no
+account is taken of its scalar, vector, or tensor character" — the
+standard itself says dimension deliberately discards a property the
+quantity has.  mp-units carries that property as *character*, and after
+a false start as a flat four-value enumeration (real scalar, complex
+scalar, vector, tensor), it landed on two orthogonal axes:
+
+- a *field*: real or complex, matched exactly — a real representation
+  never silently fills a complex slot, because a =double= has nowhere to
+  grow an imaginary part when the first phase-carrying calculation
+  arrives;
+- an *order*: scalar, vector, tensor, rank-ordered — a lower order may
+  fill a higher slot (a signed =double= is a legitimate one-dimensional
+  velocity), never the reverse.
+
+The flat list had quietly baked "real" into vector and tensor, making a
+phasor field vector or a lossy anisotropic permittivity tensor
+inexpressible.  Two axes make all six combinations reachable.  The order
+axis deliberately stops at ISO's three: bivectors and the rest of
+geometric algebra were considered and rejected because no ISQ quantity
+needs them — their rule is that "a character earns its place only when a
+real quantity cannot be expressed without it."
+
+The central argument, developed through documented dead ends, is that
+character belongs to the quantity and cannot be read off the
+representation type:
+
+- *The type is underdetermined.*  =double= backs a real scalar mass, a
+  one-dimensional vector velocity whose sign is its direction, and a
+  degenerate tensor stress measure.  Same type, three characters.
+- *The type lies.*  Eigen and Blaze expose =real()= / =imag()= on real
+  matrices (a real value is a degenerate complex one) and an Eigen
+  column vector is an N×1 matrix exposing two-index access, so
+  surface-driven detection misclassifies both axes.  Their fix reads the
+  field off a scalar *element* reached by indexing, never off the
+  container surface and never through the recursive =value_type= chain
+  (which walks through =std::complex= to =double= and reports complex
+  vectors as real).
+- *Syntactic possibility is not physical legality.*  Multiplying two
+  velocity components compiles and yields neither a scalar nor a vector
+  product; =abs()= is meaningful on a velocity and meaningless on a
+  speed.  The menu of operations a type offers cannot govern which are
+  legal — and at the specification level, where the ISQ defines work as
+  a scalar product of force and displacement, there is no representation
+  in sight at all.
+
+Their canonical motivating case is electrical power: active, reactive,
+apparent, and complex power share one dimension and one unit (VA), and
+an engineer told them a library that cannot make those four
+incompatible "is of no use in his industry."  Kind separates the three
+real powers; character separates complex power from apparent, and in V3
+the defining equation itself (=apparent_power= as =modulus(complex_power)=)
+is well-formed only because the character system knows modulus needs a
+complex operand.
+
+Our reading for luv: this is the strongest available argument for the
+position #P2KN1D already takes — representation and meaning are separate
+judgments, and meaning lives on the declared quantity.  Luv's version is
+structurally easier: the shader DSL's representation types are ours
+(=vec3= does not lie the way Eigen does), and the quantity judgment
+rides the expression graph rather than being recovered from storage.
+The two-axis lesson still lands directly: a =vec3= lane may back a
+direction (a unit delta), a radiance (an absolute scalar triple — a
+color, not a spatial vector), or a position (a point), and luv's
+quantity component should carry tensor order and point/absolute/delta
+independently of the =vec3= representation, exactly as the existing
+tensor-order figure #T2K8MJ anticipated.  The rank-ordering rule (scalar
+fills a vector slot, never the reverse) is worth adopting verbatim; so
+is the refusal to guess when classification is ambiguous.
+
+* Logarithmic quantities as affine structure
+:PROPERTIES:
+:ID: BI6B1K
+:END:
+
+The logarithmic-quantities design (published 2026-07 as a
+request-for-feedback, aligned with IEC 80000-15:2026) is the most
+striking demonstration that the affine vocabulary pays for itself: it
+models decibels with *no new abstraction*, only the existing point and
+delta specialized to the log domain.
+
+The core observations:
+
+- A *level* (=dBm=, =dB SPL=, pH, stellar magnitude) carries a fixed
+  reference; the reference is an affine origin, so a level is a *point*:
+  =point<log<isq::power>>[dBm]=, with 0 dBm at the 1 mW origin.
+- A *gain* ("+3 dB", "2 octaves", "7 semitones") is a multiplicative
+  ratio expressed additively in the log domain, with no reference: a
+  *delta*, spec =log<QS>=.
+- The whole arithmetic follows: level + gain is a level, level - level
+  is a gain, gain + gain composes, and *level + level is ill-formed* —
+  combining two 10 dBm sources is a real operation but a linear-domain
+  one (10 mW + 10 mW = 20 mW ≈ 13 dBm, and only for incoherent sources;
+  coherent ones combine differently), so no =+= may silently pick an
+  answer.  There is no logarithmic absolute, because log(0) = -∞: the
+  log domain has no true zero to anchor one.
+
+=log<QS>= is a separate quantity-kind tree from =QS=; crossing between
+them is never implicit but goes through named functions (=.linear()=,
+=.log_in(unit)=), which read the unit's stored base, multiplier, and
+reference and apply one generic formula pair.  The ISQ kind hierarchy
+lifts into the log domain for free: =log<active_power>= is a kind of
+=log<power>=.
+
+The deepest design decision is where the 10-versus-20 factor lives.  A
+decibel on a power quantity is 10·log₁₀; on a root-power quantity
+(voltage, sound pressure) it is 20·log₁₀, and a plain-number decibel
+must guess — their survey shows nholthaus hardcoding 10 (with a test
+that happily adds two absolute power levels), pint documenting the
+hazard away, and UnitsNet getting the split right but stopping short of
+the affine layer.  mp-units puts a *log coefficient* on the quantity
+kind (default 1; root-power kinds declare 2; pH declares -1, stellar
+magnitude -5/2), and units read it: the dB unit contributes its factor
+10, the kind flips it to 20.  The coefficient is declared, not derived,
+because root-power-ness is not recoverable from dimension —
+voltage²/power is a resistance, not a pure number, so the classification
+is assigned by the standard and must be assigned in the model.
+Consequently *gains carry their domain*: subtracting two dBV points
+yields a voltage-domain gain that linearizes as ×2.0 for +6 dB, where a
+domain-less gain would guess ×3.98.  The cost, stated plainly in the
+post, is that there is no universal decibel that moves any level.
+
+Two more mechanisms worth recording.  *The common-unit rule for bases*:
+two log units share a common unit iff their conversion factor
+(ln B₁ / ln B₂ scaled by multipliers) is rational — octave, semitone,
+and cent inter-convert exactly; octave and decade differ by the
+irrational log₁₀2, so mixing them is ill-formed until an explicit
+=.in()= picks a base.  *Representation gating on the operation, not the
+type*: integer log-domain values are first-class (MIDI semitones,
+integer-dB power control, shannons), and only the boundary crossings
+(=.linear()=, =.log_in()=) demand floating point.
+
+Our reading for luv: the direct applications in rendering are real,
+starting with *exposure*.  Photographic exposure value is a base-2
+log-domain point over luminance (one EV is one stop), and exposure
+compensation is a gain; the ambient-lane exposure in luvcraft's frame
+uniform and any future auto-exposure adaptation loop (#8VA1EX) would be
+cleaner with the level/gain distinction than with raw multipliers —
+adaptation naturally computes in stops.  Gamma and sRGB encoding are
+power-law rather than logarithmic, but the same lesson — the encoding
+lives in a named crossing, never in silent arithmetic — is the sRGB seam
+of #7W7P72.  More broadly, the design is evidence that luv's quantity
+vocabulary should treat scale/encoding as a first-class component with
+explicit crossings (#P2KN1D's third axis), because the log domain shows
+an encoding that changes *which arithmetic is legal*, not just how
+numbers print.  The open-questions section (log(0) floors keyed on the
+unit — digital audio clamps to finite sentinels like -400 dB — and
+reference-in-unit versus reference-on-quantity formatting) is a model of
+design honesty worth imitating in our own wiki work marks.
+
+* Specifiers on the spec: one declaration site for meaning
+:PROPERTIES:
+:ID: MCUKKW
+:END:
+
+A cross-cutting pattern in all three designs: every semantic property
+lands as a declared specifier on the =quantity_spec=, never as a
+property of storage, units, or use sites.  =non_negative= rides the
+spec and turns into contract checks at arithmetic sites.  Character
+(field and order) is a spec property inherited through defining
+equations (=velocity= is vector because =displacement / duration= is).
+The log coefficient is kind-level so a kind cannot mix multipliers, and
+=is_kind= carves a subkind exactly where a semantic boundary must block
+implicit conversion in both directions (=sound_pressure= against the
+power-classified =pressure=; luv's memory of moppe's airspeed versus
+rate-of-climb in #S5V9CN is the same move).
+
+The C++ encoding of this — CRTP structs, variable templates, deducing
+=this= workarounds hidden behind a =QUANTITY_SPEC= macro — is exactly
+the contortion luv does not inherit.  In CLOS the spec is an ordinary
+object; specifiers are slots; derivation through defining equations is a
+method on the expression that builds the derived spec.  What transfers
+is the discipline: one declaration site per meaning, inheritance through
+derivation, explicit narrowings where kinds must not mix.  What does not
+transfer is the machinery.  That is the same conclusion #P2KN1D reached
+for the type-system split, now confirmed across every subsystem we
+read.
+
+* IDEA Exposure as a logarithmic level in the sky model
+:PROPERTIES:
+:ID: 2K8GBI
+:END:
+
+Intent: when the HDR path (#WLHDRB, #VG8TGG) introduces exposure and
+adaptation, model exposure value as a base-2 log-domain point over
+luminance (photographic stops) and exposure compensation as a gain, as
+a small first client of the level/gain vocabulary from #BI6B1K, rather
+than tuning a bare multiplier lane.
+
+Evidence to gather:
+
+- The sky profile expressing its exposure keyframes in EV, with the
+  uniform lane still receiving the linear multiplier through one named
+  crossing.
+- An adaptation probe (moppe-style) whose loop steps in stops and whose
+  clamps are stated in stops, compared for tunability against the raw
+  multiplier form.
+
+Done when: exposure-related art parameters read in stops in the profile
+and the wiki records whether the log-domain vocabulary pulled its
+weight at this scale.

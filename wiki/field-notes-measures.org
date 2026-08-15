@@ -1,0 +1,156 @@
+#+title: Field notes on measures: dim-numbers in 1992 Common Lisp
+#+startup: overview
+
+* What this page studies
+:PROPERTIES:
+:ID: PBADKM
+:END:
+
+The measures package at =~/src/github.com/lispm/measures= is the
+Cunis/Müller lineage of dimensioned numbers for Common Lisp: written by
+Roman Cunis (MAZ Hamburg), described in "A Package for Handling Units
+of Measure in Lisp" (Lisp Pointers 5(2), 1992), extended in the LOOM
+knowledge-representation system, and maintained by Rainer Joswig.  It
+is the closest thing luv's quantity work has to a Lisp ancestor, and it
+is worth reading both for one genuinely clever mechanism and for the
+fork in the road it documents — because its paper names, in 1992, the
+exact goal luv's design now takes, and explains why nobody had reached
+it.
+
+Source-study discipline per #H7QK3M: mechanisms below are observed in
+=source/measures.lisp= and =doc/measures-implementation.text=; the
+historical claims are the paper's own; the readings for luv are ours.
+
+* The prime-ratio encoding of dimension
+:PROPERTIES:
+:ID: 9VMK1N
+:END:
+
+The standard representation of a dimension is an exponent vector over
+base dimensions (length, time, mass, ...).  The package's central trick
+— credited to Thorsten von Stein — replaces the vector with a single
+rational number.  Each elementary measure is assigned a *prime*: metre
+2, second 3, gram 5.  A derived dimension is the product of primes
+raised to the exponent-vector powers, so a ratio encodes the whole
+vector:
+
+#+begin_example
+m      -> 2
+m^3    -> 8
+m/s    -> 2/3
+g.m/s² -> 10/9
+#+end_example
+
+Dimensional algebra then rides Common Lisp's rational arithmetic:
+multiplication of quantities multiplies the ratios, division divides
+them, commensurability is =eql= on ratios, and unique factorization
+guarantees the encoding is injective.  A =dim-number= is a two-slot
+struct — =value= plus =prim-id= — and every operation goes through
+generic wrappers (=dim*=, =dim/=, =dim+= via a macro family) that
+combine values and check or combine prim-ids.  Unknown derived measures
+still print: factoring the ratio back into primes recovers "m/s²" even
+when no named measure exists.  The prime table extends on demand, so
+the space of base dimensions is open-ended without any fixed vector
+width — the paper's stated advantage over vectors, made cheap by Lisp
+bignums.
+
+The encoding has a structural ceiling, visible in the source:
+=dim-sqrt= and =dim-expt= compute the root of the numerator and
+denominator and *signal an error* when the result is not integral —
+"Can't calculate square root from unit m."  A rational cannot hold
+2^(1/2), so fractional dimension exponents are inexpressible.  Real
+quantity systems need them: root-power quantities, fracture toughness
+(Pa·√m), and mp-units' own dBu reference of √(3/5) volt all live on
+rational exponents.  An exponent-vector representation with rational
+entries has no such ceiling.  The trick trades away exactly the corner
+that the logarithmic-quantity work (#BI6B1K) shows to matter.
+
+Our reading: for luv the encoding question is nearly moot — #P2KN1D
+computes dimension algebra at graph-construction time in a compiler we
+own, where a small rational-exponent alist or vector costs nothing per
+compiled kernel.  The trick remains worth remembering as the correct
+*shape* of thought (dimension algebra should be host-arithmetic cheap,
+not object-protocol heavy), and as a caution that a clever encoding can
+silently fix the algebra's limits.
+
+* Runtime objects, reader syntax, and the environment argument
+:PROPERTIES:
+:ID: PFF5E8
+:END:
+
+Everything else in the package follows from one decision the paper
+defends explicitly: dimensionality lives *on the number object at
+runtime*.  =#M10kg= reads as a dim-number; scaled units normalize at
+read time (=90min= and =1.5h= both store 5400 s with base-unit
+representation, an =xdim-number= remembering the preferred display
+unit); printers format in any unit including compound formats like
+"1h:30min:0s"; =defmeasure= declares a measure with its base unit and a
+scale table of exact rationals (the inch is =254/10000= m; the survey
+foot's 2-per-million deviation gets a comment).
+
+The paper's argument for runtime representation is a genuinely Lispy
+one: data-type information belongs on the object, so that inspectors,
+debuggers, pattern matchers, and constraint propagators — tools with no
+prior knowledge of the package — handle dim-numbers like any other
+datum, and so that a *dynamic knowledge-acquisition environment* can
+accept user-entered quantities in user-chosen units with no compilation
+step anywhere in sight.  For LOOM, feeding knowledge bases
+interactively, that argument was decisive.
+
+And the paper is equally explicit about the cost.  Its survey of prior
+art (Gehani 1977, Karr & Loveman 1978, Hilfinger 1988) observes that
+every proposal "ultimately strived" for units as declarative attributes
+a compiler consumes — consistency checked and conversion compiled away,
+zero runtime overhead — and that "none of them actually reached this
+goal": all carried dimension information in the number representation
+and checked at runtime.  The Ada-based designs wanted the clever
+compiler and did not have one to modify.
+
+Our reading: this is the fork in the road, documented at the moment of
+choosing.  Cunis chose the runtime branch for good environmental
+reasons and got REPL ergonomics no compile-time system of his era could
+offer.  Luv sits on the other branch with the advantage neither side
+had in 1992 — the clever compiler exists and is ours (#5N6SOQ), so
+checking happens at kernel compilation while runtime values stay raw
+(#B5L7VG).  What luv should *keep* from the runtime branch is its
+ergonomic layer, relocated to the boundary where semantic objects
+already live: reader/printer convenience and inspectable quantity
+presentation belong at construction, configuration, and display sites
+(a sky profile keyframe in EV, a shadow bias in texels, a McCLIM lab
+pane printing a lane's quantity), never inside lanes.  A =#M=-style
+reader macro on a modern CL is optional sugar; the durable inheritance
+is that presenting a quantity in its author's unit is a
+*presentation-layer* concern, which McCLIM handles better than 1992
+print-functions did.
+
+* What the package never had
+:PROPERTIES:
+:ID: RHX2EE
+:END:
+
+Reading measures after mp-units (#6PQKNU) makes the gaps as instructive
+as the mechanism.  The package models dimension and unit scale — and
+nothing else this wiki's quantity pages care about:
+
+- *No semantic kinds.*  Airspeed and rate-of-climb are both =m/s= and
+  freely mix; there is nothing like #S5V9CN's distinct meanings over
+  one dimension.  The prime-ratio encoding cannot express kinds without
+  inventing fake dimensions, which would poison the algebra.
+- *No affine structure.*  No points, no origins, no absolutes; every
+  dim-number is what mp-units would call a delta with ratio-scale
+  printing.  Temperature offsets, the classic trap, have no safe home.
+- *No character.*  Scalar only; a velocity vector is three dim-numbers
+  or none.
+- *Checking is per-operation forever.*  Every =dim+= dispatches and
+  compares prim-ids at runtime on every call, the cost the 1992 paper
+  accepted and the cost #B5L7VG's boundary-check discipline exists to
+  avoid.
+
+None of this is a criticism of a 1992 package that set out to do
+dimension well in an interactive environment — it did, and its exact
+rational scale tables and open-ended measure vocabulary aged well.  It
+is a measurement of how much of a quantity system lies *beyond*
+dimension: kinds, affine/absolute structure, character, scale-encoding,
+and the compile-time boundary are each separate inventions, which is
+precisely the layered decomposition luv's quantity pages
+(#U4M7KD, #P2KN1D) commit to.

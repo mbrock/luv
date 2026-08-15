@@ -136,6 +136,18 @@ The following are starting paths rather than a table of settled doctrine.
   practice and the Zig Étalon experiment, then follows the resulting semantic
   arithmetic into homogeneous vector components, heterogeneous packed GPU
   tuples, semantic projective maps, and compact SIMD-friendly representations.
+- [[file:moppe-legacy.org][The moppe legacy]] reads the predecessor engine's lighting, post-processing,
+  and atmosphere as proof, tuned judgment calls, and a legacy to improve on:
+  the transplant inventory for luvcraft's cinematic path and the mesh-shader
+  case for a Metal HAL.
+- [[file:field-notes-mp-units.org][Field notes on mp-units]] studies the abstractions beyond dimension in the
+  live mp-units checkout: the point/absolute/delta model, two-axis quantity
+  character, and logarithmic quantities as affine structure over a log
+  domain.
+- [[file:field-notes-measures.org][Field notes on measures]] reads the 1992 Cunis dim-number package — the
+  prime-ratio dimension encoding, the runtime-object fork in the road it
+  documents, and the measure of everything a quantity system needs beyond
+  dimension.
 - [[file:physics-and-simd.org][Physics data and SIMD execution]] identifies the seam for a Catto-inspired
   3D physics experiment: CLOS at semantic boundaries, dense domains and
   columnar numerical state inside the step, and derived collision structures

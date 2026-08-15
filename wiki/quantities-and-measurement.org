@@ -1001,6 +1001,339 @@ coordinate and local cell coordinate into a world position should pass
 through an explicit metric rather than an unrecorded multiplication by an
 assumed block size.
 
+* Rendering is radiometry: PBR as the forcing use case
+:PROPERTIES:
+:ID: T1GYOH
+:END:
+
+Physically based rendering is not merely a texture format; it is the claim
+that shading computes in radiometric quantities.  Those quantities have a
+real dimensional algebra:
+
+#+begin_example
+radiant flux       W
+radiant intensity  W sr^-1
+irradiance         W m^-2
+radiance           W sr^-1 m^-2
+BRDF               sr^-1
+solid angle        sr
+#+end_example
+
+The rendering equation is dimensionally typed: outgoing radiance is emitted
+radiance plus the integral of BRDF (sr^-1) times incoming radiance times a
+projection cosine over solid angle (sr).  The steradians cancel; radiance
+comes out.  Energy conservation is an integral constraint on the BRDF that
+dimension-checking alone cannot prove, but dimension /mismatch/ catches the
+commonest failures first.
+
+The classic shader bugs are, almost without exception, quantity bugs:
+
+- the pi factor: a Lambertian BRDF is albedo/pi per steradian, and dropping
+  or double-counting the pi is a confusion between radiance and irradiance;
+- linear versus sRGB: an encoded colour and a linear radiance have the same
+  representation and dimension but different /units/, and #N3R6WY applies
+  verbatim — moppe's =moppe_srgb= decode-at-point-of-use is its =in_metres=
+  for colour;
+- depth confusions: NDC depth, reversed-Z device depth, and view-space
+  forward distance are three scales for one length-like reading, and
+  moppe's GTAO explicitly converts between two of them before any geometry
+  is trusted;
+- angular confusions: a dot product of unit vectors is a cosine, not an
+  angle; a sun's "angular width" lane may hold radians or a cosine
+  threshold, and nothing in a =float= says which;
+- shadow bias: a receiver bias is a length in light-space depth units,
+  whose correct magnitude is tied to the light projection's depth span —
+  retuning it after a projection change is a unit conversion performed by
+  hand and by eye.
+
+Moppe's own units doctrine stops at the GPU: the atelier creed says numbers
+leave their units only through doors that "open only toward the GPU."
+Inside MSL every quantity is a bare =float= again, and the discipline
+reverts to comments and convention.  That boundary is exactly where luv is
+differently positioned, because on our side of it the shader is still Lisp.
+
+* The frame uniform was an unlabeled quantity ledger
+:PROPERTIES:
+:ID: P6DF7B
+:END:
+
+This figure records the motivating condition as it stood before #SQR8KR
+and #S00PRF: it is kept as the /why/ behind quantity layouts, not as a
+description of the present code.  Today every frame-uniform lane declares
+its quantity through a =quantity-layout= (=projection-vector= is three
+=:projection-scale= lanes plus a =:view-distance= in metres;
+=sun-color-vector= is =:linear-rgb= plus a =:sun-disc-coordinate=), and
+the vertex ABI carries the same meanings.
+
+At the time, the frame uniform's vec4 lanes were documented by comments
+only:
+
+- =sun-vector= carries a unit direction and, in w, a day factor — a
+  proportion;
+- =sun-color-vector= carries a linear radiance-like colour and, in w, an
+  angular width;
+- =ambient-vector= carries a colour and, in w, an exposure;
+- =shadow-control-vector= packs shadow-map texel extents (texture-space
+  lengths), a base bias, and a slope bias (light-space depth lengths) —
+  four readings from three semantic families in one anonymous vec4;
+- the material mixes propagated light levels (normalized 0..15 readings
+  squared through a response curve), an ambient-occlusion proportion, a
+  surface emission intensity, and fog progress — all dimensionless, none
+  interchangeable.
+
+This was precisely the situation #S5V9CN describes on the CPU side: equal
+representation, distinct meanings, guarded by comment and habit.  The
+uniform ABI was already a single declaration site shared between host
+writer and shader reader — declaring only representation, never meaning.
+The layout mechanism in #VC7VFY and #SQR8KR is what turned that one
+declaration site into a semantic one.
+
+* Dimensioned types in the shader DSL
+:PROPERTIES:
+:ID: TZHN8G
+:END:
+
+#I9F3QB anticipated that the derive/interpret rhythm could reach the shader
+compiler.  PBR makes that concrete enough to design against.  The shape
+that fits the existing compiler:
+
+- A shader type becomes a pair of /representation/ and /quantity
+  specification/.  Representation stays what it is today — =:float=,
+  =:vec3= — and remains the only thing lowering and SPIR-V ever see.  The
+  quantity specification rides the typed expression graph and is erased at
+  lowering, so the check has zero GPU cost and no ABI consequence.
+- Operator methods derive specifications mechanically, exactly as they
+  already infer representation: multiplying a BRDF value by a radiance
+  yields a radiance-flavoured product; =dot= of two unit directions yields
+  a cosine kind; =mix= requires its endpoints to share a specification;
+  addition requires equal specifications, so radiance plus an sRGB-encoded
+  colour fails at parse time with provenance pointing at the offending
+  source form.
+- Interpretation stays at named boundaries, following #I9F3QB: a shader
+  abstraction (#DXYHT4 machinery) such as a tonemap declares that it
+  consumes scene radiance and yields display-linear colour; a decode
+  declares sRGB in, linear out.  Inference derives inside; abstraction
+  signatures name and check at the joints.
+- Inputs acquire meaning where they are declared: the uniform member list
+  and vertex/resource declarations grow an optional quantity slot beside
+  the representation.  Because the same member list is spliced into every
+  stage and sizes the host buffer, host-side Lisp and shader-side math
+  would share one semantic declaration — the bridge that moppe could only
+  open toward the GPU becomes checked on both sides, since both sides are
+  Lisp.
+- The shader lab gains an inspection dimension for free: every SSA value
+  already carries provenance to its source expression, so the McCLIM
+  detail pane can report "this lane is radiance" as easily as it reports
+  an inferred =vec3=.
+
+Restraint matters as much as the mechanism.  Most texture lanes and
+intermediate swizzles are honestly anonymous; forcing a specification onto
+every value would reproduce the boxing mistake this page argues against on
+the CPU side.  Unannotated values should flow as today, with
+specifications entering at declared inputs and named abstractions and
+propagating only where derivation is unambiguous.  The first probe should
+be the place the checking pays immediately: the linear-light equation in
+the block material, the sRGB seam around the atlas sample, and the
+tonemap boundary when #WLHDRB lands.
+
+* Types with structure; judgments in parallel
+:PROPERTIES:
+:ID: P2KN1D
+:END:
+
+Two refinements sharpen #TZHN8G into a workable compiler design.
+
+First, the representation types themselves should become structural before
+the quantity layer arrives.  The current =shader-type= is already a CLOS
+class with component-count and image-metadata slots, but its identity is
+nominal: instances are interned under flat keywords, and
+=:depth-texture-2d= multiplies depth-ness and dimensionality into a name
+while the slots restate what the name encoded.  SPIR-V is the evidence for
+the alternative — its own type grammar is compositional
+(=OpTypeVector(element, count)=, =OpTypeImage(sampled-type, dim, depth,
+arrayed, ms, format)=) — so the flat keywords are a lossy projection of
+the IR lowering already emits.  Type identity should be the structure,
+hash-consed so equality stays =eq=; keywords survive as parse-level
+abbreviations.  New texture and vector flavors become parameter values,
+not registry entries.
+
+Second, representation and quantity are two attribute systems walking one
+expression graph, not one entangled type system.  mp-units must encode
+quantity algebra inside C++ templates because templates are the only
+compile-time computation C++ offers; a compiler we own has no such
+constraint.  The representation judgment is total — every expression has
+one, and it is all SPIR-V or SBCL ever sees.  The quantity judgment is
+deliberately partial — a triple of physical dimension, semantic kind, and
+scale/encoding (linear versus sRGB, radians versus degrees, raw 0..15
+light levels versus normalized), where anonymous values propagate
+silently and only conflicts signal, with provenance.  The rules genuinely
+differ per operator: a vec3 times a float is a vec3 representationally,
+while radiance times a proportion is radiance and radiance plus an
+encoded colour is an error.  That asymmetry is why the systems must be
+parallel rather than merged.
+
+* One arithmetic medium, many clients
+:PROPERTIES:
+:ID: 5N6SOQ
+:END:
+
+This figure is the design stance; #SQC5JN is the same idea as ownership
+layers, and #VIZMU6 / #FTQEQD are its realization as the
+=:luv/arithmetic/language= frontend and =:luv/arithmetic/lisp= backend.
+It is kept in the argumentative voice because the commitments below —
+language-owned semantics, driver-owned domain iteration, kernel-signature
+checking — are what the next marks (#D1R2NK, #VKLLPR) are measured against.
+
+The typed expression DSL should compile to CPU Lisp functions as well as
+SPIR-V — and the right way to hold that is not "the shader language
+grows a CPU mirror" but the generalization of #B9M2FX: luv has a typed
+arithmetic language, and the block pipeline was merely its /first
+client/.  The CPU is the second client in its own right.  Pure CPU
+numerical code — physics kernels, lighting response curves, terrain and
+environment mathematics — writes in the same DSL because that is how CPU
+code obtains the same structural representation types and the same
+quantity judgment (#P2KN1D).  One language, several backends; the GPU is
+one of them.
+
+Three commitments follow from taking the language, rather than either
+backend, as primary.
+
+- *The DSL owns its semantics; backends conform.*  Single-float
+  arithmetic, GLSL-flavoured =clamp= / =mix= / =smoothstep= edge
+  behavior, and =fract= conventions are defined once as language
+  semantics.  SPIR-V assembly and SBCL lowering (declared lambda forms,
+  specialized arrays, eventually sb-simd packs) are two implementations
+  required to agree; a divergence is a conformance bug against the
+  language, not a property of one side.  Precision and fast-math
+  divergences will exist — one shared graph makes them enumerable and
+  testable instead of ambient.
+- *Domain iteration belongs to the driver; interior control flow is
+  language growth.*  The language never expresses the parallel loop over
+  the domain — the rasterizer drives the body per-fragment, a compute
+  dispatch per-invocation, and on the CPU an ordinary Lisp loop or field
+  combinator drives it per-lane.  That is what keeps one body portable
+  across drivers.  But iteration and branching /within/ one element's
+  computation are ordinary demand-driven growth, per #SKSHDR's rule that
+  language growth is a normal feature, not an architectural exception.
+  The demand is already named: the sun-shafts raymarch (#BAP0QU) is a
+  data-dependent loop with early exit, and fBm clouds, tap kernels, and
+  blocker search are loop-shaped.  A graded entry suggests itself: the
+  present compile-time unrolling by abstractions (the 17-tap shadow
+  disk); then bounded fold/sum constructs whose unroll-versus-loop
+  lowering is a backend choice with identical semantics; then
+  data-dependent loops with early exit, earned by the shafts client;
+  with =select= preceding divergent =if=.  The quantity judgment extends
+  through control flow rather than around it: a fold's accumulator keeps
+  one specification across iterations, and merge points require their
+  incoming branches to agree — loop-invariance of meaning, checked where
+  values meet.
+- *Kernel signatures are where bundles meet the judgment.*  A bundle
+  column carries a quantity specification (#B5L7VG); a kernel's inputs
+  carry quantity requirements; the driver checks specification against
+  signature once at the boundary, then runs raw lanes.  The quantity
+  system thereby spans storage and computation with one vocabulary and
+  zero runtime tagging — the physics seam #R9M4PV gets dimension-checked
+  impulse and force arithmetic over columnar state, without boxing a
+  value.
+
+The shared-definition payoff remains, now as one client among several.
+Even moppe's discipline could not prevent its CPU-side sky model from
+recomputing the =daylight= / =golden= formulas its shaders derive
+per-pixel; luvcraft's =sky-frame-parameters= has the same seam with the
+sky material.  With one graph and multiple lowerings, "per-frame on the
+CPU into a uniform lane" versus "per-pixel on the GPU" is a placement
+decision about one definition.  The atelier creed's bridge — "numbers
+only past the bridge" — stops being a wall and becomes a per-expression
+choice.  Differential testing also survives as a corollary: any material
+can be evaluated at sample points on the CPU and compared with GPU
+captures, extending the reference/incremental discipline of #SKRELT from
+light propagation to shading.
+
+Liveness comes free in both directions: shader definitions already
+rebuild pipelines through MOP dependents, and a compiled CPU closure is
+one more dependent of the same definition, updating transactionally
+beside the pipeline.
+
+This position supersedes the runtime half of #G4C2ZX: rather than
+quantity-checked generic operations over runtime CL values, the DSL is
+the site of checking, and runtime CL only ever sees raw
+representations.  Checking happens where compilation happens.
+
+* DONE Quantity-carrying shader types
+:PROPERTIES:
+:ID: 7W7P72
+:END:
+
+Intent (as first written): extend the shader expression language's
+inferred types with an optional quantity-specification component,
+derived by operator methods and named at abstraction and resource
+boundaries, erased at lowering.
+
+Evidence: this design was realized under other marks before this one was
+selected.  #9P358P proves semantic arithmetic in the production shadow
+graph; #SQR8KR gives GPU components first-class meaning through quantity
+layouts; #S00PRF carries units through the vertex and camera ABI; and
+#FTQEQD shows the specification is erased at lowering on the Lisp side as
+it is in SPIR-V.  The uniform member list now declares lane meanings that
+host writers and shader readers both see, and production shader modules
+stayed byte-identical while the checks were added.  What this mark's own
+evidence list still lacks is the sRGB seam, split out below as #NC1YZ4.
+
+Done when: satisfied by the marks above; retained so the design rationale
+in #TZHN8G and #P2KN1D stays traceable to its realization.
+
+* TODO Give the sRGB atlas seam an encoded-colour kind
+:PROPERTIES:
+:ID: NC1YZ4
+:END:
+
+Intent: the block material's atlas is an =rgba8-unorm-srgb= texture whose
+=sample= result is decoded to linear by the hardware, and =:linear-rgb=
+already names the linear side; nothing yet names an /encoded/ colour, so
+the classic linear/sRGB mixup (#T1GYOH) is not a checked error.  Add an
+encoded-colour quantity under =:relative-color-signal= (or a sibling
+kind), give texture sample results the kind their format implies, and
+make an explicit decode/encode the only crossing.
+
+Evidence to gather:
+
+- A test where an encoded sample added to a linear light term is rejected
+  at parse time with provenance to the offending source form, while the
+  production block material — which only ever mixes linear terms — is
+  unchanged in generated SPIR-V.
+- A note on whether format-implied decode should be a property of the
+  texture resource declaration or of the =sample= operator.
+
+Done when: encoded and linear colours are distinct quantities, sRGB
+textures yield the encoded kind or a declared decoded kind, and the mixup
+is an executable claim in the shader tests.
+
+* TODO Structural shader-type identity
+:PROPERTIES:
+:ID: RDI1HA
+:END:
+
+Intent: make =shader-type= identity structural — hash-consed composite
+types mirroring SPIR-V's own type grammar, keywords as parse
+abbreviations — per #P2KN1D.  The CPU-lowering half this mark originally
+bundled is done: #FTQEQD compiles checked definitions to Lisp, and
+#D1R2NK is the =NEXT= mark for a real shared production computation.
+This mark keeps only the representation-type half.
+
+Evidence to gather:
+
+- =register-shader-type= still interns flat keywords; =:depth-texture-2d=
+  remains a distinct name rather than an image-type parameter.  Replace
+  the registry with interned structural instances keeping =shader-type==
+  =eq=-cheap.
+- New texture flavors (3D, array, cube, multisample) expressible as
+  parameter values without new registry entries, as the Metal path
+  (#DR3V60) will want.
+
+Done when: type identity is the structure, keywords are abbreviations,
+depth-ness is an image parameter, and existing shader tests and generated
+module hashes are unchanged.
+
 * Questions and executable claims
 :PROPERTIES:
 :ID: Q1D9ST
