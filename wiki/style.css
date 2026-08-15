@@ -543,3 +543,22 @@ body.source-page {
 .lisp .row-start {
   color: var(--accent);
 }
+
+/* Keyword/value pairs stay together; in body position each pair is a row
+   with keys loosely aligned. */
+
+.lisp .pair {
+  display: inline-flex;
+  align-items: baseline;
+  column-gap: 0.5em;
+  min-width: 0;
+}
+
+.lisp .pair.body {
+  display: flex;
+  flex-basis: 100%;
+}
+
+.lisp .pair.body > .symbol:first-child {
+  min-width: 8em;
+}

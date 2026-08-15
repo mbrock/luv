@@ -127,13 +127,18 @@ clauses, not calls."))
     "appending" "nconc" "nconcing" "count" "counting" "sum" "summing" "maximize"
     "maximizing" "minimize" "minimizing" "when" "if" "unless" "else" "end" "return"))
 
-(defun operator-layout (name)
-  "The layout for operator NAME, from the table or by naming convention."
-  (let ((name (string-downcase name)))
+(defun operator-layout (name list)
+  "The layout for operator NAME of LIST, from the table or, for operators
+that only follow a naming convention, by inspecting the form: a WITH- form
+has one head argument; a DEF form whose second argument is a list is a
+lambda form; any other DEF form is a name followed by options."
+  (let ((name (string-downcase name))
+        (arguments (argument-children list)))
     (or (gethash name *operator-layouts*)
         (cond ((starts-with "with-" name) (make-instance 'body-layout :head-count 1))
-              ((starts-with "define-" name) (make-instance 'body-layout :head-count 2))
-              ((starts-with "def" name) (make-instance 'body-layout :head-count 2))
+              ((and (starts-with "def" name) (typep (third arguments) 'lisp-list))
+               (make-instance 'lambda-layout :head-count 2))
+              ((starts-with "def" name) (make-instance 'body-layout :head-count 1))
               (t (make-instance 'flow-layout))))))
 
 (defgeneric list-layout (list role)
@@ -144,7 +149,7 @@ clauses, not calls."))
           ((role-p role "clause") (make-instance 'clause-layout))
           ((role-p role "stacked-clause") (make-instance 'stacked-clause-layout))
           (t (let ((operator (symbol-node-name (first (element-children list)))))
-               (if operator (operator-layout operator) (make-instance 'flow-layout)))))))
+               (if operator (operator-layout operator list) (make-instance 'flow-layout)))))))
 
 (defun role-p (role name)
   (and role (member name (uiop:split-string role) :test #'string=)))
@@ -246,23 +251,60 @@ form of a defining form, or the value after :documentation."
   (:documentation "Emit the children of LIST arranged by LAYOUT, inside the
 list's own box, which the caller has opened."))
 
+(defun keyword-symbol-p (node)
+  (and (typep node 'lisp-symbol) (equal (lisp-symbol-package node) "KEYWORD")))
+
+(defun keyword-pairs-start (arguments)
+  "The index in ARGUMENTS from which the rest is :keyword value pairs, or NIL.
+The tail must have even length and a keyword at every even offset; the
+earliest such start after the operator wins."
+  (let ((n (length arguments)))
+    (loop for start from 1 below n
+          when (and (evenp (- n start))
+                    (loop for i from start below n by 2
+                          always (keyword-symbol-p (nth i arguments))))
+            return start)))
+
 (defun render-children-with-roles (layout list)
-  "Emit every child of LIST with the role LAYOUT assigns it; comments are
-drawn where they occur and are not counted."
-  (let ((index -1)
-        (previous nil))
-    (dolist (child (element-children list))
-      (if (typep child 'lisp-comment)
-          (let ((*lisp-role* nil)) (render-html child))
-          (progn
-            (incf index)
-            (let ((role (child-role layout list index child)))
-              (when (and (role-p role "row-start") (> index 1))
-                (spinneret:with-html (:span.break)))
-              (let ((*docstring-p* (docstring-position-p layout list index previous child))
-                    (*lisp-role* role))
-                (render-html child)))
-            (setf previous child))))))
+  "Emit every child of LIST with the role LAYOUT assigns it.  Comments are
+drawn where they occur and are not counted.  A trailing run of :keyword
+value pairs is drawn pair by pair, each in a .pair container that keeps
+the key with its value; the pair takes the value's role."
+  (let* ((arguments (argument-children list))
+         (pairs-start (unless (typep layout '(or loop-layout lambda-list-layout grid-layout))
+                        (keyword-pairs-start arguments)))
+         (index -1)
+         (previous nil)
+         (remaining (element-children list)))
+    (flet ((emit (child role)
+             (let ((*docstring-p* (docstring-position-p layout list index previous child))
+                   (*lisp-role* role))
+               (render-html child))))
+      (loop while remaining
+            do (let ((child (pop remaining)))
+                 (cond ((typep child 'lisp-comment)
+                        (let ((*lisp-role* nil)) (render-html child)))
+                       (t
+                        (incf index)
+                        (let ((role (child-role layout list index child)))
+                          (when (and (role-p role "row-start") (> index 1))
+                            (spinneret:with-html (:span.break)))
+                          (if (and pairs-start (>= index pairs-start) (evenp (- index pairs-start))
+                                   (find-if-not (lambda (c) (typep c 'lisp-comment)) remaining))
+                              ;; A key: draw it with its value in one pair.
+                              (let* ((value (find-if-not (lambda (c) (typep c 'lisp-comment)) remaining))
+                                     (value-role (child-role layout list (1+ index) value)))
+                                (spinneret:with-html
+                                  (:span :class (let ((*lisp-role* value-role)) (role-class "pair"))
+                                         (emit child nil)
+                                         ;; Comments between key and value stay in order.
+                                         (loop for c = (pop remaining)
+                                               do (if (typep c 'lisp-comment)
+                                                      (let ((*lisp-role* nil)) (render-html c))
+                                                      (progn (incf index) (emit c nil) (return))))))
+                                (setf previous value))
+                              (progn (emit child role)
+                                     (setf previous child)))))))))))
 
 (defmethod render-layout ((layout layout) list)
   (render-children-with-roles layout list))

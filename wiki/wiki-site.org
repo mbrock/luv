@@ -342,9 +342,18 @@ select together (dispatch on the relationship, not on one participant).
 - =render-layout (layout list)= draws: the general routine with roles, or a
   clause's name and =.rest= cell so a grid can align columns.
 
+Two rules apply across layouts.  A trailing run of =:keyword value=
+arguments is drawn pair by pair in a =.pair= container that never breaks
+between key and value; where the pairs are body forms, as in the options
+of a definer, each pair is a row with the keys aligned, so =define-unit=
+and =define-quantity= read as small tables.  And an operator known only by
+its =def= prefix is inspected rather than assumed: a list in second
+position makes it a lambda form, anything else a name followed by options.
+
 The stylesheet knows only roles: =.bindings= is a CSS grid, its =.clause=
-children subgrids spanning two columns, =.rest= a flowing cell, =.body= full
-width, =.break= a zero-height row break before a =row-start=.  Adding a
+children subgrids spanning two columns, =.rest= a flowing cell, =.pair= an
+inline unit, =.body= full width, =.break= a zero-height row break before a
+=row-start=.  Adding a
 form's layout is one =define-layout= line or one class with two methods,
 and nothing else changes.
 
