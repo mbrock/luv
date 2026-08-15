@@ -65,6 +65,43 @@ operation that make the wiki a buildable system.")
    #:render-document-string
    #:write-site
    #:site-page-name
+   ;; Lisp source
+   #:lisp-node
+   #:node-start
+   #:node-end
+   #:node-text
+   #:lisp-list
+   #:lisp-vector
+   #:lisp-symbol
+   #:lisp-symbol-name
+   #:lisp-symbol-package
+   #:lisp-atom
+   #:lisp-string
+   #:lisp-number
+   #:lisp-character
+   #:lisp-prefix
+   #:lisp-conditional
+   #:lisp-comment
+   #:lisp-skipped
+   #:read-lisp-string
+   #:read-lisp-file
+   #:definition
+   #:definition-kind
+   #:definition-name
+   #:definition-qualifiers
+   #:definition-line
+   #:definition-mentions
+   #:definition-node
+   #:file-definitions
+   #:find-definition
+   #:site-definitions
+   #:site-code-references
+   #:dangling-code-mentions
+   #:render-lisp-source
+   #:render-definition
+   #:code-source-files
+   #:code-definitions
+   #:*code-systems*
    ;; ASDF
    #:org-file
    #:org-file-document

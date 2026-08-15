@@ -130,7 +130,7 @@ Nothing here refers to anything.
     (ok (search "<a class=mention href=#DEF456 title=\"A work mark\">#DEF456</a>" html))
     (ok (search "<span class=\"mention dangling\"" html))
     (ok (search "keep &lt; this &amp; that" html))
-    (ok (search "<pre class=src data-language=lisp><code>(defun f (x)" html))
+    (ok (search "<div class=lisp><div class=list data-callee=defun>" html))
     (ok (search "<table><tr><th>Head A<th>Head B<tr><td>a1<td>" html))
     (ok (search "<ol><li>one<li>two</ol>" html))
     (ok (search "Mentioned in: <a href=#DEF456>A work mark</a>" html))
@@ -161,3 +161,110 @@ Nothing here refers to anything.
              (ok (probe-file (merge-pathnames "index.html" directory)))
              (ok (probe-file (merge-pathnames "figures.html" directory))))
         (uiop:delete-directory-tree directory :validate t :if-does-not-exist :ignore)))))
+
+(defparameter *source*
+  "(in-package #:luv.example)
+
+;;; A comment before the definition mentions #ABC123.
+
+(defun frob (x &optional y)
+  \"Frob X.  See #ABC123 and the missing #ZZZ999.\"
+  (let ((sum (+ x (or y 1)))
+        (name 'frob))
+    (list sum name #'car cl:car foo::bar :key #:g #(1 2) `(,x ,@y)
+          #+sbcl :sbcl #-sbcl :other #\\a 1.5 \"s\")))
+
+(defmethod frob-method :around ((x integer) y)
+  (call-next-method))
+
+(defclass widget () ((a :initarg :a)))
+")
+
+(deftest lisp-source-reads-to-nodes-without-interning
+  (let* ((nodes (wiki:read-lisp-string *source*))
+         (defun (find-if (lambda (n) (and (typep n 'wiki:lisp-list)
+                                          (equal (wiki:lisp-symbol-name (first (wiki:element-children n))) "DEFUN")))
+                         nodes)))
+    (ok (typep (second nodes) 'wiki:lisp-comment))
+    (ok defun)
+    (ok (= 5 (length (wiki:element-children defun))))
+    (let* ((let-form (fifth (wiki:element-children defun)))
+           (list-form (third (wiki:element-children let-form)))
+           (children (wiki:element-children list-form)))
+      (ok (typep (second (wiki:element-children let-form)) 'wiki:lisp-list))
+      (ok (typep (fourth children) 'wiki:lisp-prefix))
+      (ok (string= (wiki::lisp-prefix-string (fourth children)) "#'"))
+      (let ((cl-car (fifth children)) (foo-bar (sixth children)) (key (seventh children))
+            (uninterned (eighth children)) (vector (ninth children)) (quasi (tenth children)))
+        (ok (string= (wiki:lisp-symbol-package cl-car) "CL"))
+        (ok (wiki::lisp-symbol-external-p cl-car))
+        (ok (string= (wiki:lisp-symbol-package foo-bar) "FOO"))
+        (ok (not (wiki::lisp-symbol-external-p foo-bar)))
+        (ok (string= (wiki:lisp-symbol-package key) "KEYWORD"))
+        (ok (eq (wiki:lisp-symbol-package uninterned) :uninterned))
+        (ok (typep vector 'wiki:lisp-vector))
+        (ok (string= (wiki::lisp-prefix-string quasi) "`")))
+      (let ((conditionals (remove-if-not (lambda (n) (typep n 'wiki:lisp-conditional)) children)))
+        (ok (= 2 (length conditionals)))
+        ;; One branch is taken on SBCL and keeps its form; the other is
+        ;; kept as text.  Neither is evaluated.
+        (ok (= 1 (count-if #'wiki::lisp-conditional-form conditionals)))
+        (ok (every (lambda (c) (search "sbcl" (wiki:node-text c))) conditionals)))
+      (ok (typep (car (last children 3)) 'wiki:lisp-character))
+      (ok (typep (car (last children 2)) 'wiki:lisp-number))
+      (ok (typep (car (last children)) 'wiki:lisp-string)))
+    ;; Nothing was interned.
+    (ok (null (find-package "LUV.EXAMPLE")))
+    (ok (null (find-symbol "FROB" "LUV.WIKI")))))
+
+(deftest definitions-index-forms-and-mentions
+  (let* ((definitions (wiki:file-definitions #p"/example.lisp" *source*))
+         (frob (wiki:find-definition "frob" definitions))
+         (method (wiki:find-definition "frob-method" definitions)))
+    (ok (equal (mapcar #'wiki:definition-kind definitions) '("defun" "defmethod" "defclass")))
+    (ok (= (wiki:definition-line frob) 5))
+    (ok (equal (wiki:definition-mentions frob) '("ABC123" "ZZZ999")))
+    (ok (= 1 (length (wiki::definition-comments frob))))
+    (ok (equal (wiki::definition-package frob) "#:luv.example"))
+    (ok (equal (wiki:definition-qualifiers method) '(":around")))
+    (ok (wiki:find-definition "luv.example:frob" definitions))
+    (ok (wiki:find-definition "widget" definitions :kind "defclass"))
+    (ok (null (wiki:find-definition "widget" definitions :kind "defun")))))
+
+(deftest dexp-renders-boxes-with-roles
+  (let* ((html (let ((*print-pretty* nil) (spinneret:*suppress-inserted-spaces* t))
+                 (spinneret:with-html-string
+                   (wiki:render-lisp-source "(defun f (x) ;; c
+  (let ((y 1)) (when x (list y :k \"s\"))))")))))
+    (ok (search "<div class=lisp>" html))
+    (ok (search "<div class=list data-callee=defun>" html))
+    (ok (search "<span class=\"operator symbol\" data-symbol-name=DEFUN><span class=name>defun</span></span>" html))
+    ;; The lambda list is head, the let form is body; the let binding
+    ;; (y 1) is a clause whose first symbol is not an operator.
+    (ok (search "<div class=\"body list\" data-callee=let>" html))
+    (ok (search "<div class=\"bindings list\">" html))
+    (ok (search "<div class=\"clause list\" data-callee=y><span class=symbol data-symbol-name=Y>" html))
+    (ok (search "<span class=comment>;; c</span>" html))
+    (ok (search "<span class=\"symbol keyword\" data-symbol-name=K><span class=package>:</span><span class=name>k</span></span>" html))
+    (ok (search "<span class=string>&quot;s&quot;</span>" html))
+    ;; Eclector recovers from unbalanced input, so boxes still appear;
+    ;; input that reads to nothing at all falls back to a <pre>.
+    (let ((recovered (let ((*print-pretty* nil))
+                       (spinneret:with-html-string (wiki:render-lisp-source "(defun (")))))
+      (ok (search "<div class=lisp>" recovered)))
+    (let ((fallback (let ((*print-pretty* nil))
+                      (spinneret:with-html-string (wiki:render-lisp-source "")))))
+      (ok (search "<pre class=src" fallback)))))
+
+(deftest code-references-render-inline
+  (let* ((doc (page))
+         (definitions (wiki:file-definitions #p"/example.lisp" *source*))
+         (site (wiki:make-site (list doc) :definitions definitions :source-directory #p"/"))
+         (html (wiki:render-document-string doc site)))
+    (ok (equal (mapcar #'wiki:definition-name (gethash "ABC123" (wiki:site-code-references site)))
+               '("frob")))
+    (ok (search "Referenced from code:" html))
+    (ok (search "<details class=definition><summary><span class=kind>defun</span> <span class=name>frob</span> <a class=source href=\"https://github.com/mbrock/luv/blob/main/example.lisp#L5\">example.lisp:5</a></summary>" html))
+    ;; The mention inside the docstring links to the figure.
+    (ok (search "See <a class=mention href=#ABC123" html))
+    (ok (equal (wiki:dangling-code-mentions site) (list (cons (first definitions) '("ZZZ999")))))))

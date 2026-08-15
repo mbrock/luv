@@ -212,3 +212,145 @@ figure.image img, img.inline {
   height: auto;
   border-radius: 0.4rem;
 }
+
+/* Lisp source as dexp boxes: every list is a flex-wrapping box whose side
+   borders are its parentheses; body forms take the full width and stack. */
+
+.lisp {
+  --paren: color-mix(in srgb, var(--fg) 30%, transparent);
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+  line-height: 1.6;
+  margin: 1rem 0;
+  padding: 0.6rem 0.8rem;
+  background: var(--code-bg);
+  border-radius: 0.4rem;
+  overflow-x: auto;
+}
+
+.lisp > * {
+  display: block;
+  margin: 0.4rem 0;
+}
+
+.lisp > .comment {
+  display: block;
+}
+
+.lisp .list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 0.5em;
+  row-gap: 0.05em;
+  padding: 0 0.4em;
+  border: 0 solid var(--paren);
+  border-width: 0 1.5px;
+  border-radius: 0.55em;
+  min-width: 0;
+}
+
+.lisp .list > .list {
+  margin: 0.05em 0;
+}
+
+.lisp .body {
+  flex-basis: 100%;
+}
+
+.lisp .operator {
+  color: var(--accent);
+}
+
+.lisp .list > .list.body > .operator,
+.lisp .list > .list > .operator {
+  color: var(--accent);
+}
+
+.lisp .package {
+  opacity: 0.55;
+}
+
+.lisp .keyword {
+  color: var(--mark-idea);
+}
+
+.lisp .string {
+  color: var(--mark-done);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.lisp .number,
+.lisp .character {
+  color: var(--mark-wait);
+}
+
+.lisp .comment {
+  flex-basis: 100%;
+  color: var(--muted);
+  font-style: italic;
+  white-space: pre-wrap;
+}
+
+.lisp .prefixed,
+.lisp .conditional {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.15em;
+  min-width: 0;
+}
+
+.lisp .prefix {
+  color: var(--muted);
+  font-weight: bold;
+}
+
+.lisp .conditional > .list,
+.lisp .conditional > .skipped {
+  border-style: dashed;
+}
+
+.lisp .skipped {
+  color: var(--muted);
+  white-space: pre-wrap;
+}
+
+.lisp .body.prefixed,
+.lisp .body.conditional {
+  display: flex;
+}
+
+/* Code references and lisp: definition blocks */
+
+details.definition {
+  margin: 0.6rem 0;
+}
+
+details.definition > summary {
+  cursor: pointer;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+details.definition > summary .kind {
+  color: var(--accent);
+}
+
+details.definition > summary .name {
+  color: var(--fg);
+}
+
+details.definition > summary a.source {
+  margin-left: 0.5rem;
+  font-size: 0.8rem;
+}
+
+details.definition > .lisp {
+  margin-top: 0.4rem;
+}
+
+.code-references > p.backlinks {
+  margin-bottom: 0.2rem;
+}

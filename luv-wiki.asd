@@ -3,11 +3,14 @@
 component and operation that make the wiki a buildable system."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on (#:spinneret)
+  :depends-on (#:spinneret
+               #:eclector)
   :serial t
   :components ((:file "wiki-package")
                (:file "wiki-org")
                (:file "wiki-html")
+               (:file "wiki-lisp")
+               (:file "wiki-dexp")
                (:file "wiki-asdf"))
   :in-order-to ((asdf:test-op (asdf:test-op #:luv-wiki/tests))))
 

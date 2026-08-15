@@ -61,8 +61,45 @@
   "The DOCUMENTs of SYSTEM's loaded org files."
   (remove nil (mapcar #'org-file-document (system-org-files system))))
 
+(defparameter *code-systems* '("luv" "luvcraft")
+  "Primary names of the systems whose source files the site reads for
+definitions and figure mentions.  luv-wiki itself is left out: its
+docstrings and tests use placeholder IDs as examples.")
+
+(defun code-source-files ()
+  "The pathnames of the cl-source-file components of every registered system
+whose primary name is in *CODE-SYSTEMS*, without loading anything."
+  (let ((files '()))
+    (dolist (name (asdf:registered-systems))
+      (when (member (asdf:primary-system-name name) *code-systems* :test #'string=)
+        (labels ((walk (component)
+                   (typecase component
+                     (asdf:cl-source-file (pushnew (asdf:component-pathname component) files
+                                                   :test #'equal))
+                     (asdf:parent-component (mapc #'walk (asdf:component-children component))))))
+          (walk (asdf:find-system name)))))
+    (sort files #'string< :key #'namestring)))
+
+(defvar *definitions-cache* (make-hash-table :test 'equal)
+  "Pathname namestring -> (write-date . definitions), so an unchanged file
+is not read again within one image.")
+
+(defun code-definitions (&optional (files (code-source-files)))
+  "The DEFINITIONs of FILES, reading each file only when it changed."
+  (loop for pathname in files
+        for key = (namestring pathname)
+        for date = (file-write-date pathname)
+        for cached = (gethash key *definitions-cache*)
+        append (if (and cached (eql (car cached) date))
+                   (cdr cached)
+                   (let ((definitions (file-definitions pathname)))
+                     (setf (gethash key *definitions-cache*) (cons date definitions))
+                     definitions))))
+
 (defun system-site (system)
-  (make-site (system-documents system)))
+  (make-site (system-documents system)
+             :definitions (code-definitions)
+             :source-directory (asdf:system-source-directory system)))
 
 ;;; Rendering
 
@@ -73,8 +110,10 @@ mentions and backlinks resolve across pages."
 
 (defmethod asdf:input-files ((o render-op) (c org-file))
   "Every page is an input to every page: a new figure or mention anywhere
-can change the links and backlinks rendered here."
-  (mapcar #'asdf:component-pathname (system-org-files (asdf:component-system c))))
+can change the links and backlinks rendered here; so is every source file,
+whose definitions may reference this page's figures."
+  (append (mapcar #'asdf:component-pathname (system-org-files (asdf:component-system c)))
+          (code-source-files)))
 
 (defmethod asdf:output-files ((o render-op) (c org-file))
   (values (list (merge-pathnames (make-pathname :name (asdf:component-name c) :type "html")
@@ -110,7 +149,8 @@ lands at images/x.png in the site."
 ;;; The system itself contributes the figures index.
 
 (defmethod asdf:input-files ((o render-op) (s asdf:system))
-  (mapcar #'asdf:component-pathname (system-org-files s)))
+  (append (mapcar #'asdf:component-pathname (system-org-files s))
+          (code-source-files)))
 
 (defmethod asdf:output-files ((o render-op) (s asdf:system))
   (values (list (merge-pathnames "figures.html" (site-output-directory s))) t))
@@ -125,7 +165,15 @@ lands at images/x.png in the site."
       (when dangling
         (warn "Dangling figure mentions:~{~%  ~A: ~{~A~^ ~}~}"
               (loop for (document . ids) in dangling
-                    collect (document-name document) collect ids))))))
+                    collect (document-name document) collect ids))))
+    (let ((dangling (dangling-code-mentions site)))
+      (when dangling
+        (warn "Dangling figure mentions in code:~{~%  ~A: ~{~A~^ ~}~}"
+              (loop for (definition . ids) in dangling
+                    collect (format nil "~A ~A (~A:~D)"
+                                    (definition-kind definition) (definition-name definition)
+                                    (definition-file-name definition) (definition-line definition))
+                    collect ids))))))
 
 
 ;;; A defsystem form names these classes as strings that ASDF reads in its

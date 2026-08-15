@@ -70,10 +70,11 @@ The reader is not a general Org parser.  It reads the subset the wiki actually
 uses, chosen by surveying the pages: =#+title=, headings with property drawers,
 paragraphs, bulleted and numbered lists with wrapped and blank-separated
 items, =example= and =src= blocks, simple tables with an optional header rule,
-bracket links with =file:=, =https:=, =id:= or no scheme, a bare =file:=
-link to an image in the wiki directory as an inline image (a paragraph of
-only that link becomes a figure), the light =#ABC123= mention, and the six
-emphasis markers with Org's pre- and post-character rules.  Anything else stays paragraph text, so an unfamiliar construct can
+bracket links with =file:=, =https:=, =id:=, =lisp:= or no scheme, a bare
+=file:= link to an image in the wiki directory as an inline image (a
+paragraph of only that link becomes a figure, and a paragraph of only a
+=lisp:= link becomes the definition it names), the light =#ABC123= mention,
+and the six emphasis markers with Org's pre- and post-character rules.  Anything else stays paragraph text, so an unfamiliar construct can
 never fail the build; it can only render plainly.
 
 Emphasis rules follow Org: a marker opens only after whitespace or an opening
@@ -269,8 +270,17 @@ The same renderer serves three places: the "Referenced from" backlinks of
 #PF39II, where a figure's code references expand in place; a =lisp:= link
 protocol, =[[lisp:luv.arithmetic:interpret-quantity-specification]]=, that
 resolves against a definition index and shows the definition; and the wiki's
-own =#+begin_src lisp= blocks, which can be read and drawn structurally with
-the =<pre>= as fallback whenever reading fails.
+own =#+begin_src lisp= blocks, which are read and drawn structurally with
+the =<pre>= as fallback whenever reading fails.  A paragraph consisting only
+of a =lisp:= link becomes the definition itself, drawn from luv's source at
+build time:
+
+[[lisp:luv.arithmetic:interpret-quantity-specification]]
+
+Inside a definition, =#ID= mentions in strings and comments are links to
+their figures, so the loop closes: the docstring above points back at
+#PLRP3A, and that figure lists this definition under "Referenced from
+code".
 
 * Reading source without loading it: Eclector
 :PROPERTIES:
@@ -314,7 +324,7 @@ dexp view of live definitions inside luvcraft is not far-fetched.  As with
 the wiki browser, the HTML backend should come first and the CLIM one should
 drive the =(render backend element)= refactor of #AGTIO4.
 
-* NEXT The site shows code references to figures
+* DONE The site shows code references to figures
 :PROPERTIES:
 :ID: PF39II
 :END:
@@ -325,17 +335,24 @@ figure naming the definitions that mention it, each expandable in place to
 the definition drawn by the dexp renderer of #N06GKK, with the GitHub line
 link as the secondary action, so #PLRP3A and #LNRY72 pay off.
 
-Evidence: two such mentions exist today and are invisible to the site.  A
-plain-text scan would already find them; the definition index and renderer
-are what make the reference readable without leaving the page.
+Evidence: =render-op= on the system reads the =cl-source-file= components
+of every registered =luv= and =luvcraft= system (67 files, about 2500
+definitions, under a second) and every page's =input-files= include them, so
+a source edit re-renders the site.  #PLRP3A now shows
+=interpret-quantity-specification= and #LNRY72 shows the
+=define-quantity :light-level= form that follows its section comment, each
+as a =<details>= whose summary is kind, name, and =file:line= source link and
+whose body is the definition as dexp boxes; the =#ID= in the docstring links
+back.  =[[lisp:name]]= links resolve against the same index.  Dangling code
+mentions are warned about like dangling wiki mentions and are covered by a
+test; luv-wiki's own sources are excluded because their docstrings use
+placeholder IDs.
 
 Done when: those two figures show their referencing definitions inline on
 the site, the index and renderer are covered by tests, and a dangling code
-mention is reported like a dangling wiki mention.  A first cut may render the
-definition as a =<pre>= if the dexp renderer is not ready; the mark stays
-open until it is.
+mention is reported like a dangling wiki mention.  All three hold.
 
-* TODO Read luv sources with Eclector into a definition index
+* DONE Read luv sources with Eclector into a definition index
 :PROPERTIES:
 :ID: YFDCSB
 :END:
@@ -344,13 +361,23 @@ Intent: the reader of #SKNK2N as part of =luv-wiki=: an Eclector client that
 produces a token tree with source ranges and comments without interning, and
 a definition index over the =cl-source-file= components ASDF lists.
 
-Evidence: none yet; Eclector and concrete-syntax-tree are in nixpkgs.
+Evidence: [[file:../wiki-lisp.lisp][wiki-lisp.lisp]].  =source-reader= subclasses Eclector's
+=parse-result-client=; =interpret-symbol= returns a token with the package
+prefix as written, quote-like macros and =#.= return marker lists that
+=make-expression-result= turns into =lisp-prefix= nodes, feature expressions
+are evaluated by name against =*features*= with the skipped branch kept as a
+=lisp-conditional= from its source text, and comments arrive through
+=make-skipped-input-result= as =lisp-comment= nodes, inside forms as well as
+between them.  Every luv source file reads without error; the index names
+=interpret-quantity-specification= at =arithmetic.lisp:956= with its
+=#PLRP3A= mention, and no package or symbol is created (the tests check).
 
 Done when: every luv source file reads without error, the index names
 =interpret-quantity-specification= with its line range and its #PLRP3A
 mention, and a reader conditional appears as a token rather than a choice.
+All hold; the last is a =lisp-conditional= node with sign, feature, and form.
 
-* TODO The dexp HTML renderer
+* DONE The dexp HTML renderer
 :PROPERTIES:
 :ID: Z50KYF
 :END:
@@ -359,11 +386,22 @@ Intent: render a token tree from #YFDCSB as dexp boxes per #N06GKK, with
 roles assigned in Lisp and painted by the wiki stylesheet, and use it for
 =#+begin_src lisp= blocks first, since the wiki already has those.
 
-Evidence: none yet; wisp's =render-sexp= and =index.css= are the reference.
+Evidence: [[file:../wiki-dexp.lisp][wiki-dexp.lisp]] and the =.lisp= rules in [[file:style.css][style.css]].  A list is
+a flex-wrapping =div.list= with side borders; roles come from an operator
+table (=*operator-head-counts*=) plus =defmethod='s qualifier scan and a
+=*binding-operators*= list, and are emitted as =operator=, =body=,
+=bindings=, and =clause= classes, comments not counting as arguments.  The
+stylesheet does =.body { flex-basis: 100% }= and paints operators, keywords,
+strings, numbers, comments, and prefixes.  All =lisp= source blocks in the
+wiki now render structurally, readable at phone width; input that reads to
+nothing falls back to =<pre>=.  The screenshot above is not yet reproduced
+from luv's code, but the same shapes are visible in the definitions the
+figures now show; a luv-flavoured version can replace it later.
 
 Done when: the source blocks of the wiki render structurally and readably on
 a phone-width viewport, fall back to =<pre>= on read failure, and the
-screenshot above can be reproduced from luv's own code.
+screenshot above can be reproduced from luv's own code.  The first two hold;
+the third is left as a nice-to-have.
 
 * TODO A wiki browser frame in mcluv
 :PROPERTIES:

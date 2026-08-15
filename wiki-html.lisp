@@ -9,13 +9,19 @@
 
 (defclass site ()
   ((documents :initarg :documents :initform '() :accessor site-documents)
+   (definitions :initarg :definitions :initform '() :accessor site-definitions
+                :documentation "DEFINITIONs read from the source files, if any.")
+   (code-references :initform (make-hash-table :test 'equal) :accessor site-code-references
+                    :documentation "Figure ID -> list of DEFINITIONs mentioning it.")
    (figures :initform (make-hash-table :test 'equal) :accessor site-figures
             :documentation "Figure ID -> HEADING.")
    (backlinks :initform (make-hash-table :test 'equal) :accessor site-backlinks
               :documentation "Figure ID -> list of HEADINGs whose text mentions it.")
    (source-url :initarg :source-url :initform "https://github.com/mbrock/luv/blob/main/"
                :accessor site-source-url
-               :documentation "Base URL for file: links into the repository."))
+               :documentation "Base URL for file: links into the repository.")
+   (source-directory :initarg :source-directory :initform nil :accessor site-source-directory
+                     :documentation "The repository root that SOURCE-URL corresponds to."))
   (:documentation "The whole wiki corpus and its disposable derived indexes."))
 
 (defvar *site* nil
@@ -35,7 +41,15 @@
     (maphash (lambda (id figures)
                (setf (gethash id (site-backlinks site)) (nreverse figures)))
              (site-backlinks site))
+    (setf (site-code-references site) (definition-references (site-definitions site)))
     site))
+
+(defun dangling-code-mentions (site)
+  "An alist of (definition . ids) for code mentions no figure resolves."
+  (loop for definition in (site-definitions site)
+        for dangling = (remove-if (lambda (id) (find-figure id site))
+                                  (definition-mentions definition))
+        when dangling collect (cons definition dangling)))
 
 (defun find-figure (id &optional (site *site*))
   (and site (gethash id (site-figures site))))
@@ -140,10 +154,13 @@ plain text; each element and inline class contributes its own method."))
                             (element-children paragraph))))
     (spinneret:with-html
       ;; A paragraph that is only an image link is a figure of its own.
-      (if (and (= (length inlines) 1) (typep (first inlines) 'link)
-               (image-link-p (first inlines)))
-          (:figure.image (:img :src (link-path (first inlines)) :alt ""))
-          (:p (render-inlines (element-children paragraph)))))))
+      (cond ((and (= (length inlines) 1) (typep (first inlines) 'link)
+                  (image-link-p (first inlines)))
+             (:figure.image (:img :src (link-path (first inlines)) :alt "")))
+            ((and (= (length inlines) 1) (typep (first inlines) 'link)
+                  (link-definition (first inlines)))
+             (render-definition (link-definition (first inlines)) :open t))
+            (t (:p (render-inlines (element-children paragraph))))))))
 
 (defmethod render-html ((list plain-list))
   (spinneret:with-html
@@ -163,9 +180,11 @@ plain text; each element and inline class contributes its own method."))
   (spinneret:with-html (:pre.example (block-text block))))
 
 (defmethod render-html ((block src-block))
-  (spinneret:with-html
-    (:pre.src :data-language (src-block-language block)
-              (:code (block-text block)))))
+  (if (equal (src-block-language block) "lisp")
+      (render-lisp-source (block-text block))
+      (spinneret:with-html
+        (:pre.src :data-language (src-block-language block)
+                  (:code (block-text block))))))
 
 (defmethod render-html ((table table))
   (spinneret:with-html
@@ -236,6 +255,41 @@ repository points at the source on GitHub; anything else is unresolved."
            (concatenate 'string (site-source-url *site*) (subseq path 3)))
           (t nil))))
 
+(defun link-definition (link)
+  "The DEFINITION a lisp: link names, or NIL."
+  (and *site* (equal (link-protocol link) "lisp")
+       (find-definition (link-path link) (site-definitions *site*))))
+
+(defun definition-source-url (definition)
+  (format nil "~A~A#L~D"
+          (site-source-url *site*)
+          (uiop:enough-pathname (definition-pathname definition)
+                                (site-source-directory *site*))
+          (definition-line definition)))
+
+(defmethod link-href ((protocol (eql :lisp)) link)
+  (let ((definition (link-definition link)))
+    (and definition (definition-source-url definition))))
+
+(defun render-definition (definition &key open)
+  "A disclosure block: the definition's head, file, and source link as the
+summary, and the form drawn as dexp boxes inside."
+  (spinneret:with-html
+    (:details.definition :open open
+      (:summary
+       (:span.kind (definition-kind definition))
+       " "
+       (:span.name (definition-name definition))
+       (dolist (qualifier (definition-qualifiers definition))
+         (spinneret:html " ")
+         (:span.qualifier qualifier))
+       " "
+       (:a.source :href (definition-source-url definition)
+                  (format nil "~A:~D" (definition-file-name definition) (definition-line definition))))
+      (render-lisp-nodes (append (definition-comments definition)
+                                 (list (definition-node definition)))
+                         :package (definition-package definition)))))
+
 (defmethod link-href ((protocol null) link)
   "A bare [[target]] with no scheme is a wiki page name if a page exists."
   (let ((name (link-path link)))
@@ -269,7 +323,8 @@ repository points at the source on GitHub; anything else is unresolved."
 
 (defmethod render-html ((heading heading))
   (let* ((id (heading-id heading))
-         (backlinks (and id (gethash id (site-backlinks *site*)))))
+         (backlinks (and id (gethash id (site-backlinks *site*))))
+         (references (and id (gethash id (site-code-references *site*)))))
     (spinneret:with-html
       (:section :id id :class (if (heading-keyword heading) "figure work-mark" "figure")
         (:h* (render-heading-title heading)
@@ -286,6 +341,11 @@ repository points at the source on GitHub; anything else is unresolved."
                   do (unless first (spinneret:html ", "))
                      (:a :href (figure-href (heading-id figure) :from *rendering-document*)
                          (render-inlines (heading-title figure))))))
+        (when references
+          (:div.code-references
+           (:p.backlinks "Referenced from code:")
+           (dolist (definition references)
+             (render-definition definition))))
         (dolist (child (element-children heading))
           (when (typep child 'heading) (render-html child)))))))
 
