@@ -155,16 +155,133 @@ asking to enable Pages on first run.  Not yet observed running.
 Done when: the workflow has succeeded once and the index page is reachable
 at the public URL.
 
-* IDEA A WIKI package of figure symbols
+* A fluid dual system: code contributes to the wiki
+:PROPERTIES:
+:ID: F6B3NI
+:END:
+
+The wiki does not want to become Lisp forms; Org in Emacs is the better
+writing surface, and the reader already gives the corpus to Lisp as objects.
+The interesting direction is the reverse flow: the code contributing to the
+discourse where that is more natural than prose, with less text and more
+references and examples.  Two facts make that cheap.
+
+Figure IDs are already valid, readable symbol names, and index.org anticipated
+a =WIKI= package of them (#F2N8VX).  And code already mentions figures: the
+=interpret-quantity-specification= docstring in [[file:../arithmetic.lisp][arithmetic.lisp]] cites
+#PLRP3A and the tests in
+[[file:../tests/arithmetic.lisp][tests/arithmetic.lisp]] cite #LNRY72 as the table they check.  Nothing yet
+sees those mentions.  Three rungs, cheapest first:
+
+- *The site sees code.*  =render-op= asks ASDF for the =cl-source-file=
+  components of the luv systems (pathnames only, no loading), scans them for
+  =#ID= mentions, and each figure gains a "Referenced from" line beside
+  "Mentioned in", linking to the source line on GitHub.  Backlinks then span
+  discourse and code, which is the point of string figures.
+- *A WIKI package.*  =load-op= interns and exports each figure ID into =WIKI=
+  and hangs the heading off the symbol as documentation or a property.  The
+  figure index becomes the package: apropos, completion, and CLIM =accept=
+  work on figures.  A no-op macro =(wiki:ref LNRY72)= is macroexpanded, so
+  =who-macroexpands= finds every code reference, and it can note
+  =(sb-c:source-location)= at compile time into the same table the scanner
+  fills, with plain text as the fallback so the site never depends on the
+  whole system compiling.  A symbol should mean only an identity; the heading
+  is resolved late through the index, never stored in code.
+- *The reverse direction.*  Wiki prose naming a Lisp symbol could resolve to a
+  definition location when the system is loaded, which is what a McCLIM
+  browser does natively with a symbol presentation and an Edit Definition
+  translator.  Do it there first.
+
+The 2021 "chronicle" experiment, dummy macros over dated =todo=, =hmm=,
+=done= entries so xref finds notes embedded in source, is the same shape as
+work marks with the status words renamed; what it adds is the reminder that
+symbols in a package are the identity mechanism and that macroexpansion is
+free cross-referencing.
+
+* The model a McCLIM browser wants
+:PROPERTIES:
+:ID: AGTIO4
+:END:
+
+The loaded documents on the =org-file= components are already the browser's
+data source.  What the element model still lacks is small and each piece is
+motivated by a browser affordance:
+
+- =figure= and =work-mark= as classes decided at read time, so presentation
+  types map onto classes one to one and each needs one =present= method.
+- Parent links and source line ranges on elements, for "which figure am I
+  in", an Edit Figure command that jumps Emacs to the Org line, and HTML
+  source links that point at the line.
+- Mentions stay IDs, not object pointers; the site or index resolves them.
+- A second renderer, not a second traversal: when a CLIM presenter exists,
+  =render-html= should become =(render backend element)= dispatching on the
+  relationship, with =html= and =clim= backends over one model.  Two
+  consumers justify that; one does not.
+
+The live loop is then: edit Org in Emacs, =(asdf:load-system :luv/wiki)=
+re-reads only the changed page, the browser redisplays.  Mentions become
+presentations that jump on click and offer backlinks on right-click; the
+shader lab's presentation types could accept a figure to attach it to a
+definition.
+
+* NEXT The site shows code references to figures
+:PROPERTIES:
+:ID: PF39II
+:END:
+
+Intent: the first rung of #F6B3NI.  Scan the Lisp sources ASDF knows about
+for =#ID= mentions during =render-op= on the system and render a "Referenced
+from" line per figure with a GitHub line link, so #PLRP3A and #LNRY72 pay off.
+
+Evidence: two such mentions exist today and are invisible to the site.
+
+Done when: those two figures show their source references on the site, the
+scan is covered by a test, and a dangling code mention is reported like a
+dangling wiki mention.
+
+* TODO A wiki browser frame in mcluv
+:PROPERTIES:
+:ID: NPZWLR
+:END:
+
+Intent: a McCLIM application frame over the loaded =luv/wiki= documents, with
+figure and mention presentations, page navigation, and backlinks; the
+exercise that tells us what the model in #AGTIO4 is missing.
+
+Evidence: none yet; the shader lab in [[file:../mcclim/shader-lab.lisp][shader-lab.lisp]] shows the
+presentation-type pattern to follow.
+
+Done when: every wiki page can be read in the frame, clicking a mention jumps
+to its figure, and re-loading =luv/wiki= after an Org edit redisplays.
+
+* WAIT A WIKI package of figure symbols
 :PROPERTIES:
 :ID: MAE5RT
 :END:
 
-Now that the corpus loads as objects, the future notation of #F2N8VX is one
-step away: =load-op= on an =org-file= could intern each figure ID as an
-external symbol of a =WIKI= package and attach the heading as its
-documentation, so ='wiki:D3H7VK= in source resolves at the REPL and =M-.=
-could someday find the page.  It should wait for a real use.
+Intent: the second rung of #F6B3NI: intern figure IDs as external symbols of
+a =WIKI= package at =load-op=, attach the heading, and offer =wiki:ref= for
+xref-visible references from code.
+
+Evidence: waits on #NPZWLR, which should show what accepting or invoking a
+figure symbol ought to do before the notation is fixed.
+
+Done when: ='wiki:LNRY72= names a figure at the REPL, =(wiki:ref LNRY72)= is
+found by xref, and the site's "Referenced from" line uses the compile-time
+table when available.
+
+* IDEA Structural associations through the MOP
+:PROPERTIES:
+:ID: D0NQ54
+:END:
+
+Beyond textual mentions, a metaclass mixin or class option could make the
+association between a class or generic function and its wiki figures
+structural: =(defclass ... (:metaclass documented-class) (:figures LNRY72))=
+or a =wiki:figures= slot on a metaobject, so the browser and the site can ask
+an object which figures explain it and a figure which definitions realize
+it.  clos-design's rule applies: use the MOP only when the definition itself
+carries the meaning.  Vague on purpose until the package and browser exist.
 
 * IDEA Source-anchored file links
 :PROPERTIES:
