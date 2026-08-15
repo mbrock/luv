@@ -406,7 +406,8 @@ the main column, and a footer."
          (:link :rel "preconnect" :href "https://fonts.gstatic.com" :crossorigin "")
          (:link :rel "stylesheet"
                 :href "https://fonts.googleapis.com/css2?family=Public+Sans:ital,wght@0,100..900;1,100..900&display=swap")
-         (:link :rel "stylesheet" :href (href "style.css")))
+         (:link :rel "stylesheet" :href (href "style.css"))
+         (:script :src (href "site.js") :defer t))
         (:body :class body-class
          (:header.library
           (:div.library-heading
@@ -438,6 +439,51 @@ the main column, and a footer."
          (:footer.site-footer
           "Rendered from Org and Lisp by luv.wiki."))))))
 
+(defun figure-excerpt (figure &optional (limit 320))
+  "The opening prose of FIGURE's own section as plain text: paragraphs and
+list items in order until about LIMIT characters, cut at a word boundary."
+  (let ((pieces '())
+        (length 0))
+    (flet ((add (text)
+             (push text pieces)
+             (incf length (length text))))
+      (block collect
+        (dolist (child (element-children figure))
+          (typecase child
+            (paragraph (add (inline-text (element-children child))))
+            (plain-list
+             (dolist (item (element-children child))
+               (let ((paragraph (find-if (lambda (c) (typep c 'paragraph)) (element-children item))))
+                 (when paragraph
+                   (add (concatenate 'string "– " (inline-text (element-children paragraph))))))))
+            (heading (return-from collect)))
+          (when (> length limit) (return-from collect)))))
+    (let ((text (format nil "~{~A~^ ~}" (nreverse pieces))))
+      (cond ((zerop (length text)) nil)
+            ((<= (length text) limit) text)
+            (t (let ((cut (or (position #\Space text :from-end t :end limit) limit)))
+                 (concatenate 'string (subseq text 0 cut) "…")))))))
+
+(defun render-figure-cards (ids)
+  "Emit hidden cards for the figures IDS, which the page's script shows as
+popovers when a mention is hovered or tapped."
+  (let ((figures (remove nil (mapcar (lambda (id) (find-figure id)) (remove-duplicates ids :test #'equal)))))
+    (when figures
+      (spinneret:with-html
+        (:div.figure-cards :hidden t
+          (dolist (figure figures)
+            (let ((id (heading-id figure))
+                  (document (heading-document figure)))
+              (:div.figure-card :id (concatenate 'string "card-" id)
+                (:a.card-title :href (figure-href id :from *rendering-document*)
+                               (render-heading-title figure))
+                (:span.card-meta
+                 (concatenate 'string (document-name document) ".org")
+                 (spinneret:html " · ")
+                 (:span.card-id (concatenate 'string "#" id)))
+                (let ((excerpt (figure-excerpt figure)))
+                  (when excerpt (:p.card-excerpt excerpt)))))))))))
+
 (defun render-page (document)
   "Emit the whole HTML page for DOCUMENT."
   (let ((*rendering-document* document)
@@ -449,7 +495,14 @@ the main column, and a footer."
        (spinneret:with-html
          (:h1 title)
          (dolist (child (element-children document))
-           (render-html child)))))))
+           (render-html child))
+         (render-figure-cards
+          (append (document-mentions document)
+                  ;; Code references shown on this page mention figures too.
+                  (loop for figure in (document-figures document)
+                        append (loop for definition in (gethash (heading-id figure)
+                                                                (site-code-references *site*))
+                                     append (definition-mentions definition))))))))))
 
 (defun render-figures-page (site)
   "Emit an index page listing every figure and its work-mark status."

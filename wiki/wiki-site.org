@@ -118,6 +118,13 @@ consequences shaped the renderer:
 - A bare string at the top of =with-html= is returned, not printed, so text
   is written explicitly with =spinneret:html=.
 
+Mentions carry their target with them: each page embeds a small card per
+figure it mentions (title, page, status, opening prose), and a few lines
+of script in =site.js= show the card as a top-layer =popover= beside the
+mention on hover, focus, or a first tap, placed below the link or above it
+when the viewport is short.  The site stays static and the links stay
+plain links.
+
 Each page is one HTML file: a header linking to the index and the page's Org
 source on GitHub, an =<h1>= from =#+title=, and a =<section>= per heading whose
 =id= is the figure ID, so =page.html#ABC123= is the figure's stable address.

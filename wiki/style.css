@@ -799,3 +799,63 @@ a.github {
     text-align: start;
   }
 }
+
+/* Figure cards shown beside mentions */
+
+.figure-popover {
+  position: absolute;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.16);
+  font: 400 0.92rem/1.4 var(--body-font);
+  overflow: hidden;
+  inset: auto;
+}
+
+.figure-popover:popover-open {
+  display: block;
+}
+
+.figure-card .card-title,
+.figure-popover .card-title {
+  display: block;
+  padding: 0.65rem 0.85rem 0.15rem;
+  font: 700 1rem/1.25 var(--display-font);
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+
+.figure-popover .card-title:hover {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.figure-popover .card-title .mark {
+  font-size: 0.55em;
+  vertical-align: 0.15em;
+}
+
+.figure-popover .card-meta {
+  display: block;
+  padding: 0 0.85rem 0.5rem;
+  color: var(--muted);
+  font: 500 0.8rem/1.3 var(--display-font);
+  border-bottom: 1px solid var(--rule);
+}
+
+.figure-popover .card-id {
+  font-family: var(--mono-font);
+  font-weight: 700;
+}
+
+.figure-popover .card-excerpt {
+  margin: 0;
+  padding: 0.6rem 0.85rem 0.75rem;
+  text-align: start;
+  hyphens: auto;
+  color: color-mix(in srgb, var(--ink) 88%, var(--paper));
+}

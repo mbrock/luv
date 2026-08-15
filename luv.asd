@@ -158,6 +158,7 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
                              (:file "webgpu-shape")
                              (:file "wiki-site")
                              (:static-file "style.css")
+                             (:static-file "site.js")
                              (:static-file "images/dexp.png")))))
 
 (asdf:defsystem #:luv/invocation

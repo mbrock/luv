@@ -165,7 +165,10 @@ as dexp boxes, each anchored by its starting line."
             (dolist (node (source-file-nodes file))
               (let ((*lisp-role* nil))
                 (:div.toplevel :id (format nil "L~D" (node-line node line-starts))
-                  (render-html node))))))))
+                  (render-html node))))))
+         (render-figure-cards
+          (loop for definition in (source-file-definitions file)
+                append (definition-mentions definition)))))
      :body-class "source-page"
      :status title
      :right (or (source-file-system-name file) "source"))))
