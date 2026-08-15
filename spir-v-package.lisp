@@ -222,6 +222,7 @@
            #:acknowledge-shader-definition-change
            #:release-shader-definition-dependent
            #:parse-shader-specification
+           #:lower-shader-specification
            #:compile-shader-specification
            #:shader-lowering
            #:shader-lowering-specification

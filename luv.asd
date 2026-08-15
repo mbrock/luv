@@ -10,6 +10,7 @@
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on (#:luv/examples
+               #:luv/msl
                #:luv/luvcraft)
   :in-order-to ((asdf:test-op (asdf:test-op #:luv/arithmetic/tests)
                               (asdf:test-op #:luv/arithmetic/language/tests)
@@ -20,6 +21,7 @@
                               (asdf:test-op #:luv/metal/tests)
                               (asdf:test-op #:luv/tests)
                               (asdf:test-op #:luv/spir-v/tests)
+                              (asdf:test-op #:luv/msl/tests)
                               (asdf:test-op #:luv/luvcraft/tests)
                               (asdf:test-op #:luv-wiki/tests))))
 
@@ -247,6 +249,33 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
                       (uiop:symbol-call
                        '#:rove '#:find-suite '#:luv/spir-v/tests))
                (error "luv shader tests failed"))))
+
+(asdf:defsystem #:luv/msl
+  :description "Direct Metal Shading Language lowering for mathematical shaders."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on (#:luv/spir-v)
+  :serial t
+  :components ((:file "msl-package")
+               (:file "msl"))
+  :in-order-to ((asdf:test-op (asdf:test-op #:luv/msl/tests))))
+
+(asdf:defsystem #:luv/msl/tests
+  :description "Executable claims for direct mathematical-shader MSL lowering."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on (#:luv/msl
+               #:luv/luvcraft/shaders
+               #:rove)
+  :components ((:module "tests"
+                :components ((:file "msl"))))
+  :perform (asdf:test-op (operation component)
+             (declare (ignore operation component))
+             (unless (uiop:symbol-call
+                      '#:rove '#:run-suite
+                      (uiop:symbol-call
+                       '#:rove '#:find-suite '#:luv/msl/tests))
+               (error "luv MSL tests failed"))))
 
 (asdf:defsystem #:luv/gpu/api
   :description "The backend-neutral, WebGPU-shaped luv GPU API."

@@ -1998,7 +1998,14 @@ A newer concurrent notification remains pending."
    (diagnostics
     :initarg :diagnostics
     :initform nil
-    :reader shader-lowering-diagnostics)))
+   :reader shader-lowering-diagnostics)))
+
+(defgeneric lower-shader-specification (target specification)
+  (:documentation
+   "Lower SPECIFICATION for TARGET without changing its source graph.
+
+TARGET participates in ordinary CLOS dispatch so each backend can own its
+structured product and source provenance.  #JDLQPN"))
 
 (defclass shader-lowering-context ()
   ((type-ids :initform (make-hash-table :test #'eq) :accessor context-type-ids)
@@ -2466,8 +2473,13 @@ Modules whose expressions use no extended mathematics never acquire one."
              (list value (lower-shader-expression context operand)))))))
 
 (defgeneric lower-shader-call (operator context expression)
+  (:argument-precedence-order context operator expression)
   (:documentation
-   "Emit EXPRESSION's instructions into CONTEXT and return its value id."))
+   "Lower EXPRESSION into CONTEXT's target product and return its value.
+
+Target context deliberately precedes operator identity in method selection:
+an operator implemented only for one backend must not capture another
+backend's context before its source-located unsupported-operation method."))
 
 (defmethod lower-shader-call (operator context expression)
   (declare (ignore context))
@@ -2894,6 +2906,11 @@ Modules whose expressions use no extended mathematics never acquire one."
               :instruction-expressions
               (context-instruction-expressions context))))
       lowering)))
+
+(defmethod lower-shader-specification
+    ((target (eql :spir-v)) (specification shader-specification))
+  (declare (ignore target))
+  (compile-shader-specification specification))
 
 (defun shader-module (specification)
   (shader-lowering-module (compile-shader-specification specification)))

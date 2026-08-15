@@ -255,12 +255,32 @@ Intent: compile the existing block fragment =shader-specification= through a
 sibling target context, without translating its =spir-v-module= and without
 inventing a new shared IR.
 
-Evidence: the graph already carries types, source forms, resources, semantic
-operations, and provenance.  The block fragment exercises arithmetic,
-swizzles, texture and sampler resources, sampling, and interpolation without
-first requiring mesh-stage design.  #LVKEYO identifies the shared source
-product, #JDLQPN the dispatch seam, #2X8254 the live compiler boundary, and
-#OV1AZO the target-shaped vocabulary this slice must test.
+Evidence:
+
+- The graph already carries types, source forms, resources, semantic
+  operations, and provenance.  The current block fragment exercises arithmetic,
+  swizzles, colour and depth textures, comparison sampling, uniform data, and
+  interpolation without first requiring mesh-stage design.  #LVKEYO identifies
+  the shared source product, #JDLQPN the dispatch seam, #2X8254 the live compiler
+  boundary, and #OV1AZO the target-shaped vocabulary this slice must test.
+- [[lisp:compile-msl]] now lowers that unchanged specification into an
+  inspectable [[lisp:msl-document]] of structures, parameters, statements, and
+  bidirectional expression occurrences.  The existing SPIR-V compiler is a
+  sibling method on the same =lower-shader-specification= generic.
+- =make msl-validate= wrote the generated source into =build/= and Apple Metal
+  32023.883 accepted it with =-std=metal4.0=.  Five focused tests established
+  deterministic text, unchanged SPIR-V words before and after MSL lowering,
+  the resource interface, and expression-to-source provenance.
+- The first target evidence is small but real: MSL has separate texture,
+  sampler, and buffer index spaces, so the existing binding numbers become
+  =texture(0)=, =sampler(1)=, and =buffer(2)= rather than one descriptor
+  namespace.  A depth texture sample is scalar in MSL, so the target lowering
+  explicitly splats it to the graph's current =vec4= sample type before a
+  swizzle.  Neither observation yet justifies changing the source vocabulary.
+
+The device-owned =MTL4LibraryDescriptor= and =MTL4Compiler= acceptance path
+remains the next part of this mark; offline Metal acceptance is a cross-check,
+not its substitute.
 
 Done when:
 
