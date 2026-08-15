@@ -993,11 +993,17 @@ button.count:hover {
 pre.mermaid.system-graph {
   margin: 0.5rem 0 1.5rem;
   text-align: start;
-  overflow-x: auto;
 }
 
 pre.mermaid.system-graph svg {
-  max-width: none;
+  max-width: 100%;
+  height: auto;
+}
+
+p.graph-note {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin-bottom: 0.2rem;
 }
 
 /* Pages */

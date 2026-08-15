@@ -206,18 +206,51 @@ and a count button that shows the definitions in a popover."
           (:a.card-title :href (source-page-name file) (source-file-relative-path file))
           (render-source-toc file :prefix (source-page-name file)))))))
 
+(defun graph-systems (site)
+  "The systems worth drawing: not test systems and not the aggregate root
+system that merely depends on everything."
+  (remove-if (lambda (entry)
+               (let ((name (system-entry-name entry)))
+                 (or (search "/tests" name)
+                     (not (find #\/ name)))))
+             (site-systems site)))
+
+(defun transitive-reduction (edges)
+  "EDGES is a list of (from . to).  Return the edges not implied by a longer
+path, so a layered drawing shows only the essential dependencies."
+  (let ((successors (make-hash-table :test 'equal)))
+    (loop for (from . to) in edges do (push to (gethash from successors)))
+    (labels ((reaches-p (from to &optional seen)
+               ;; Is there a path FROM -> ... -> TO of length >= 2?
+               (some (lambda (next)
+                       (and (not (member next seen :test #'equal))
+                            (or (and (not (equal next to))
+                                     (member to (gethash next successors) :test #'equal))
+                                (and (not (equal next to))
+                                     (reaches-p next to (cons next seen))))))
+                     (gethash from successors))))
+      (remove-if (lambda (edge) (reaches-p (car edge) (cdr edge))) edges))))
+
 (defun render-system-graph (site)
-  "The systems and their dependencies as a Mermaid flowchart."
-  (spinneret:with-html
-    (:pre.mermaid.system-graph
-     (with-output-to-string (out)
-       (format out "%%{init: {\"flowchart\": {\"useMaxWidth\": false, \"nodeSpacing\": 18, \"rankSpacing\": 36}}}%%~%")
-       (format out "flowchart LR~%")
-       (dolist (entry (site-systems site))
-         (let ((name (system-entry-name entry)))
-           (format out "  ~A[\"~A\"]~%" (substitute #\_ #\/ name) name)
-           (dolist (dependency (system-entry-depends-on entry))
-             (format out "  ~A --> ~A~%" (substitute #\_ #\/ dependency) (substitute #\_ #\/ name)))))))))
+  "The systems and their essential dependencies as a Mermaid flowchart,
+fundamentals at the top."
+  (let* ((entries (graph-systems site))
+         (names (mapcar #'system-entry-name entries))
+         (edges (loop for entry in entries
+                      append (loop for dependency in (system-entry-depends-on entry)
+                                   when (member dependency names :test #'string=)
+                                     collect (cons dependency (system-entry-name entry)))))
+         (edges (transitive-reduction edges)))
+    (flet ((node (name) (substitute #\_ #\/ name)))
+      (spinneret:with-html
+        (:pre.mermaid.system-graph
+         (with-output-to-string (out)
+           (format out "%%{init: {\"flowchart\": {\"nodeSpacing\": 14, \"rankSpacing\": 30, \"curve\": \"basis\"}}}%%~%")
+           (format out "flowchart TB~%")
+           (dolist (name names)
+             (format out "  ~A[\"~A\"]~%" (node name) (subseq name 4)))
+           (loop for (from . to) in edges
+                 do (format out "  ~A --> ~A~%" (node from) (node to)))))))))
 
 (defun render-source-index (site)
   "Emit source.html: the dependency graph of the systems, then one dense
@@ -236,6 +269,9 @@ count opens its definitions in a popover."
            (:p.lede "The systems of luv, fundamentals first.  A file's count opens its
 definitions; symbols in the pages link to their definitions and "
                     (:code "#ID") " mentions link to figures.")
+           (:p.graph-note "Dependencies between the systems, essential edges only (test
+systems and the aggregate " (:code "luv") " left out); names drop the "
+                          (:code "luv/") " prefix.")
            (render-system-graph site)
            (:table.systems
             (:thead (:tr (:th "system") (:th "description") (:th "files")))
