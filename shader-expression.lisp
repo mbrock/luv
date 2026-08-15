@@ -117,14 +117,36 @@
   (let ((count (shader-type-component-count (find-shader-type type))))
     (and count (> count 1))))
 
-(defclass shader-named-object ()
-  ((name
-    :initarg :name
-    :reader shader-object-name)
-   (source-form
-    :initarg :source-form
-    :initform nil
-    :reader shader-object-source-form)))
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  ;; An intermediate live version implemented these compatibility accessors
+  ;; as ordinary functions.  Restore their original generic-function shape
+  ;; before defining delegating methods over the common arithmetic slots.
+  (dolist (name '(shader-object-name shader-object-source-form
+                  shader-binding-expression
+                  shader-expression-quantity-specification
+                  shader-expression-quantity-layout
+                  shader-expression-source-form shader-expression-name
+                  (setf shader-expression-name)
+                  shader-literal-value shader-reference-target
+                  shader-call-operator shader-call-operands
+                  shader-call-parameters shader-quantity-boundary-operand
+                  shader-unit-conversion-operand
+                  shader-unit-conversion-factor))
+    (when (and (fboundp name)
+               (not (typep (fdefinition name) 'generic-function)))
+      (fmakunbound name))))
+
+(defclass shader-named-object (lang:arithmetic-named-object) ())
+
+(defgeneric shader-object-name (object))
+
+(defmethod shader-object-name ((object shader-named-object))
+  (lang:arithmetic-object-name object))
+
+(defgeneric shader-object-source-form (object))
+
+(defmethod shader-object-source-form ((object shader-named-object))
+  (lang:arithmetic-object-source-form object))
 
 (defclass shader-variable-declaration (shader-named-object)
   ((type
@@ -235,30 +257,45 @@ repeating the lane arithmetic as a literal."
         (+ (shader-uniform-member-offset (car (last members))) 16)
         0)))
 
-(defclass shader-binding (shader-named-object)
-  ((expression
-    :initarg :expression
-    :reader shader-binding-expression)))
+(defclass shader-binding
+    (shader-named-object lang:arithmetic-binding)
+  ())
 
-(defclass shader-expression ()
+(defgeneric shader-binding-expression (binding))
+
+(defmethod shader-binding-expression ((binding shader-binding))
+  (lang:arithmetic-binding-expression binding))
+
+(defclass shader-expression (lang:arithmetic-expression)
   ((type
     :initarg :type
-    :reader shader-expression-type)
-   (quantity-specification
-    :initarg :quantity-specification
-    :initform nil
-    :reader shader-expression-quantity-specification)
-   (quantity-layout
-    :initarg :quantity-layout
-    :initform nil
-    :reader shader-expression-quantity-layout)
-   (source-form
-    :initarg :source-form
-    :reader shader-expression-source-form)
-   (name
-    :initarg :name
-    :initform nil
-    :accessor shader-expression-name)))
+    :reader shader-expression-type)))
+
+(defgeneric shader-expression-quantity-specification (expression))
+
+(defmethod shader-expression-quantity-specification
+    ((expression shader-expression))
+  (lang:arithmetic-expression-quantity-specification expression))
+
+(defgeneric shader-expression-quantity-layout (expression))
+
+(defmethod shader-expression-quantity-layout ((expression shader-expression))
+  (lang:arithmetic-expression-quantity-layout expression))
+
+(defgeneric shader-expression-source-form (expression))
+
+(defmethod shader-expression-source-form ((expression shader-expression))
+  (lang:arithmetic-expression-source-form expression))
+
+(defgeneric shader-expression-name (expression))
+
+(defmethod shader-expression-name ((expression shader-expression))
+  (lang:arithmetic-expression-name expression))
+
+(defgeneric (setf shader-expression-name) (name expression))
+
+(defmethod (setf shader-expression-name) (name (expression shader-expression))
+  (setf (lang:arithmetic-expression-name expression) name))
 
 (defgeneric shader-expression-quantity-checked-p (expression)
   (:documentation
@@ -275,27 +312,42 @@ leaves it again while retaining the semantic operand in the expression graph."))
   (declare (ignore expression))
   t)
 
-(defclass shader-literal (shader-expression)
-  ((value
-    :initarg :value
-    :reader shader-literal-value)))
+(defclass shader-literal
+    (shader-expression lang:arithmetic-literal)
+  ())
 
-(defclass shader-reference (shader-expression)
-  ((target
-    :initarg :target
-    :reader shader-reference-target)))
+(defgeneric shader-literal-value (literal))
 
-(defclass shader-call (shader-expression)
-  ((operator
-    :initarg :operator
-    :reader shader-call-operator)
-   (operands
-    :initarg :operands
-   :reader shader-call-operands)
-   (parameters
-    :initarg :parameters
-    :initform nil
-    :reader shader-call-parameters)))
+(defmethod shader-literal-value ((literal shader-literal))
+  (lang:arithmetic-literal-value literal))
+
+(defclass shader-reference
+    (shader-expression lang:arithmetic-reference)
+  ())
+
+(defgeneric shader-reference-target (reference))
+
+(defmethod shader-reference-target ((reference shader-reference))
+  (lang:arithmetic-reference-target reference))
+
+(defclass shader-call
+    (shader-expression lang:arithmetic-call)
+  ())
+
+(defgeneric shader-call-operator (call))
+
+(defmethod shader-call-operator ((call shader-call))
+  (lang:arithmetic-call-operator call))
+
+(defgeneric shader-call-operands (call))
+
+(defmethod shader-call-operands ((call shader-call))
+  (lang:arithmetic-call-operands call))
+
+(defgeneric shader-call-parameters (call))
+
+(defmethod shader-call-parameters ((call shader-call))
+  (lang:arithmetic-call-parameters call))
 
 (defclass shader-map-application (shader-expression)
   ((definition
@@ -310,10 +362,15 @@ leaves it again while retaining the semantic operand in the expression graph."))
   (:documentation
    "A virtual semantic product obtained by applying a represented map."))
 
-(defclass shader-quantity-boundary (shader-expression)
-  ((operand
-    :initarg :operand
-    :reader shader-quantity-boundary-operand)))
+(defclass shader-quantity-boundary
+    (shader-expression lang:arithmetic-quantity-boundary)
+  ())
+
+(defgeneric shader-quantity-boundary-operand (expression))
+
+(defmethod shader-quantity-boundary-operand
+    ((expression shader-quantity-boundary))
+  (lang:arithmetic-quantity-boundary-operand expression))
 
 (defclass shader-interpretation (shader-quantity-boundary) ()
   (:documentation
@@ -343,39 +400,63 @@ leaves it again while retaining the semantic operand in the expression graph."))
 (defun shader-representation-operand (expression)
   (shader-quantity-boundary-operand expression))
 
-(defclass shader-unit-conversion (shader-expression)
-  ((operand
-    :initarg :operand
-    :reader shader-unit-conversion-operand)
-   (factor
-    :initarg :factor
-    :reader shader-unit-conversion-factor))
+(defclass shader-unit-conversion
+    (shader-expression lang:arithmetic-unit-conversion)
+  ()
   (:documentation
    "An explicit linear unit conversion that may emit numerical scaling."))
 
-(defmethod shader-expression-quantity-checked-p ((expression shader-literal))
-  nil)
+(defgeneric shader-unit-conversion-operand (expression))
 
-(defmethod shader-expression-quantity-checked-p ((expression shader-reference))
-  (let ((target (shader-reference-target expression)))
-    (etypecase target
-      (shader-variable-declaration
-       (or (not (null (shader-declaration-quantity-specification target)))
-           (not (null (shader-declaration-quantity-layout target)))))
-      (shader-binding
-       (shader-expression-quantity-checked-p
-        (shader-binding-expression target))))))
+(defmethod shader-unit-conversion-operand
+    ((expression shader-unit-conversion))
+  (lang:arithmetic-unit-conversion-operand expression))
 
-(defmethod shader-expression-quantity-checked-p ((expression shader-call))
-  (or (shader-expression-quantity-specification expression)
-      (shader-expression-quantity-layout expression)
-      (some #'shader-expression-quantity-checked-p
-            (shader-call-operands expression))))
+(defgeneric shader-unit-conversion-factor (expression))
 
-(defmethod shader-expression-quantity-checked-p
+(defmethod shader-unit-conversion-factor
+    ((expression shader-unit-conversion))
+  (lang:arithmetic-unit-conversion-factor expression))
+
+(defmethod lang:arithmetic-reference-target-name
+    ((target shader-named-object))
+  (shader-object-name target))
+
+(defmethod lang:arithmetic-reference-target-quantity-checked-p
+    ((target shader-variable-declaration))
+  (or (shader-declaration-quantity-specification target)
+      (shader-declaration-quantity-layout target)))
+
+(defmethod lang:arithmetic-reference-target-quantity-specification
+    ((target shader-variable-declaration))
+  (shader-declaration-quantity-specification target))
+
+(defmethod lang:arithmetic-reference-target-quantity-layout
+    ((target shader-variable-declaration))
+  (shader-declaration-quantity-layout target))
+
+(defmethod lang:arithmetic-expression-quantity-checked-p
     ((expression shader-map-application))
   (declare (ignore expression))
   t)
+
+(defmethod lang:arithmetic-expression-quantity-checked-p
+    ((expression shader-representation))
+  (declare (ignore expression))
+  nil)
+
+(defmethod shader-expression-quantity-checked-p ((expression shader-literal))
+  (lang:arithmetic-expression-quantity-checked-p expression))
+
+(defmethod shader-expression-quantity-checked-p ((expression shader-reference))
+  (lang:arithmetic-expression-quantity-checked-p expression))
+
+(defmethod shader-expression-quantity-checked-p ((expression shader-call))
+  (lang:arithmetic-expression-quantity-checked-p expression))
+
+(defmethod shader-expression-quantity-checked-p
+    ((expression shader-map-application))
+  (lang:arithmetic-expression-quantity-checked-p expression))
 
 (defmethod shader-expression-materialized-p
     ((expression shader-map-application))
@@ -386,8 +467,7 @@ leaves it again while retaining the semantic operand in the expression graph."))
 
 (defmethod shader-expression-quantity-checked-p
     ((expression shader-quantity-boundary))
-  (declare (ignore expression))
-  t)
+  (lang:arithmetic-expression-quantity-checked-p expression))
 
 (defmethod shader-expression-quantity-checked-p
     ((expression shader-representation))
@@ -395,13 +475,11 @@ leaves it again while retaining the semantic operand in the expression graph."))
   ;; opaque representation-level calculation.  Its operand remains visible in
   ;; the graph, but arithmetic above the node is raw until meaning is assumed
   ;; again at another explicit boundary.
-  (declare (ignore expression))
-  nil)
+  (lang:arithmetic-expression-quantity-checked-p expression))
 
 (defmethod shader-expression-quantity-checked-p
     ((expression shader-unit-conversion))
-  (declare (ignore expression))
-  t)
+  (lang:arithmetic-expression-quantity-checked-p expression))
 
 (defclass shader-output-assignment ()
   ((output
@@ -443,27 +521,25 @@ leaves it again while retaining the semantic operand in the expression graph."))
   (:documentation "Reconstruct the compact mathematical form of EXPRESSION."))
 
 (defmethod shader-expression-form ((expression shader-literal))
-  (shader-literal-value expression))
+  (lang:arithmetic-expression-form expression))
 
 (defmethod shader-expression-form ((expression shader-reference))
-  (shader-object-name (shader-reference-target expression)))
+  (lang:arithmetic-expression-form expression))
 
 (defmethod shader-expression-form ((expression shader-call))
-  ;; The operator is the symbol the author wrote, so the form rebuilds by
-  ;; simple reassembly; trailing parameters cover special syntax like
-  ;; SWIZZLE's component designator.
-  (append (cons (shader-call-operator expression)
-                (mapcar #'shader-expression-form
-                        (shader-call-operands expression)))
-          (shader-call-parameters expression)))
+  (lang:arithmetic-expression-form expression))
 
 (defmethod shader-expression-form ((expression shader-map-application))
-  (shader-expression-source-form expression))
+  (lang:arithmetic-expression-form expression))
 
 (defmethod shader-expression-form ((expression shader-quantity-boundary))
-  (shader-expression-source-form expression))
+  (lang:arithmetic-expression-form expression))
 
 (defmethod shader-expression-form ((expression shader-unit-conversion))
+  (lang:arithmetic-expression-form expression))
+
+(defmethod lang:arithmetic-expression-form
+    ((expression shader-map-application))
   (shader-expression-source-form expression))
 
 (defmethod print-object ((expression shader-expression) stream)
@@ -476,20 +552,24 @@ leaves it again while retaining the semantic operand in the expression graph."))
   (:documentation "The immediate subexpressions EXPRESSION computes from."))
 
 (defmethod shader-expression-children ((expression shader-expression))
-  nil)
+  (lang:arithmetic-expression-children expression))
 
 (defmethod shader-expression-children ((expression shader-call))
-  (shader-call-operands expression))
+  (lang:arithmetic-expression-children expression))
 
 (defmethod shader-expression-children ((expression shader-map-application))
-  (cons (shader-map-application-point expression)
-        (shader-map-application-rows expression)))
+  (lang:arithmetic-expression-children expression))
 
 (defmethod shader-expression-children ((expression shader-quantity-boundary))
-  (list (shader-quantity-boundary-operand expression)))
+  (lang:arithmetic-expression-children expression))
 
 (defmethod shader-expression-children ((expression shader-unit-conversion))
-  (list (shader-unit-conversion-operand expression)))
+  (lang:arithmetic-expression-children expression))
+
+(defmethod lang:arithmetic-expression-children
+    ((expression shader-map-application))
+  (cons (shader-map-application-point expression)
+        (shader-map-application-rows expression)))
 
 (defun shader-specification-expressions (specification)
   "Return the expression graph in source order, without duplicate objects."
@@ -581,22 +661,14 @@ An entirely unannotated graph remains valid legacy shader source.  Once an
 annotation enters a calculation, however, a missing operand specification or
 an operator without a backend-neutral rule is a source error rather than a
 silent loss of meaning."
-  (when (some #'shader-expression-quantity-checked-p operands)
-    (let ((specifications
-            (mapcar #'shader-expression-quantity-specification operands)))
-      (unless (every #'identity specifications)
-        (error 'shader-language-error
-               :form source-form
-               :reason :missing-quantity-specification
-               :details
-               (loop for operand in operands
-                     for specification in specifications
-                     unless specification
-                       collect (shader-expression-form operand))))
-      (with-shader-quantity-errors
-          (source-form :invalid-quantity-operation)
-        (apply #'math:derive-quantity-specification
-               operator specifications)))))
+  (handler-case
+      (lang:infer-arithmetic-call-quantity-specification
+       operator operands source-form)
+    (lang:arithmetic-language-error (condition)
+      (error 'shader-language-error
+             :form (lang:arithmetic-language-error-form condition)
+             :reason (lang:arithmetic-language-error-reason condition)
+             :details (lang:arithmetic-language-error-details condition)))))
 
 (defun require-semantic-operands (operands source-form indices)
   (loop for index in indices

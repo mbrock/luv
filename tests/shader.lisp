@@ -1,7 +1,27 @@
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  ;; LUV.SPIR-V can migrate language words to backend-neutral home packages
+  ;; during a live reload.  Drop imports that still denote their old symbols
+  ;; before DEFPACKAGE imports the current identities.
+  (let ((package (find-package '#:luv/spir-v/tests))
+        (shader-package (find-package '#:luv.spir-v)))
+    (when (and package shader-package)
+      (dolist (name '("DOT" "SAMPLE" "SAMPLE-COMPARE" "MIX"
+                      "VEC2" "VEC3" "VEC4" "SWIZZLE" "CLAMP"
+                      "SMOOTHSTEP" "NORMALIZE" "QUANTITY"
+                      "ASSUME-QUANTITY" "INTERPRET" "REPRESENTATION"
+                      "CONVERT-UNIT" "PROJECT-POINT" "SET-OUTPUT"))
+        (multiple-value-bind (present status) (find-symbol name package)
+          (let ((current (find-symbol name shader-package)))
+            (when (and (member status '(:internal :external))
+                       current
+                       (not (eq present current)))
+              (unintern present package))))))))
+
 (defpackage #:luv/spir-v/tests
   (:use #:cl #:rove)
   (:local-nicknames (#:spv #:luv.spir-v)
-                    (#:math #:luv.arithmetic))
+                    (#:math #:luv.arithmetic)
+                    (#:lang #:luv.arithmetic.language))
   ;; Shader operators are identified by symbol, so specification bodies
   ;; written here must use the shader language's own words.
   (:import-from #:luv.spir-v
@@ -23,7 +43,12 @@
   (ok (eq 'spv:mix 'math:mix))
   (ok (eq 'spv:smoothstep 'math:smoothstep))
   (ok (eq 'spv:step 'math:step))
-  (ok (eq 'spv:normalize 'math:normalize)))
+  (ok (eq 'spv:normalize 'math:normalize))
+  (ok (eq 'spv:quantity 'lang:quantity))
+  (ok (eq 'spv:assume-quantity 'lang:assume-quantity))
+  (ok (eq 'spv:interpret 'lang:interpret))
+  (ok (eq 'spv:representation 'lang:representation))
+  (ok (eq 'spv:convert-unit 'lang:convert-unit)))
 
 (defun binding-named (name specification)
   (find name (spv:shader-specification-bindings specification)
@@ -107,6 +132,13 @@
     (ok (= (length (spv:shader-specification-resources specification)) 6))
     (ok (typep (spv:shader-binding-expression sun-direction)
                'spv:shader-call))
+    (ok (typep (spv:shader-binding-expression sun-direction)
+               'lang:arithmetic-call))
+    (ok (equal
+         (spv:shader-expression-form
+          (spv:shader-binding-expression sun-direction))
+         (lang:arithmetic-expression-form
+          (spv:shader-binding-expression sun-direction))))
     (ok (eq :world-direction
             (math:quantity-specification-name
              (spv:shader-expression-quantity-specification

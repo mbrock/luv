@@ -5,6 +5,7 @@
   :depends-on (#:luv/examples
                #:luv/luvcraft)
   :in-order-to ((asdf:test-op (asdf:test-op #:luv/arithmetic/tests)
+                              (asdf:test-op #:luv/arithmetic/language/tests)
                               (asdf:test-op #:luv/tests)
                               (asdf:test-op #:luv/spir-v/tests)
                               (asdf:test-op #:luv/luvcraft/tests))))
@@ -40,6 +41,34 @@
                        '#:rove '#:find-suite '#:luv/arithmetic/tests))
                (error "luv arithmetic tests failed"))))
 
+(asdf:defsystem #:luv/arithmetic/language
+  :description "Backend-neutral compiled arithmetic definitions and expressions."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on (#:luv/arithmetic)
+  :serial t
+  :components ((:file "arithmetic-language-package")
+               (:file "arithmetic-language"))
+  :in-order-to ((asdf:test-op
+                 (asdf:test-op #:luv/arithmetic/language/tests))))
+
+(asdf:defsystem #:luv/arithmetic/language/tests
+  :description "Executable claims for the backend-neutral arithmetic frontend."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on (#:luv/arithmetic/language
+               #:rove)
+  :components ((:module "tests"
+                :components ((:file "arithmetic-language"))))
+  :perform (asdf:test-op (operation component)
+             (declare (ignore operation component))
+             (unless (uiop:symbol-call
+                      '#:rove '#:run-suite
+                      (uiop:symbol-call
+                       '#:rove '#:find-suite
+                       '#:luv/arithmetic/language/tests))
+               (error "luv arithmetic language tests failed"))))
+
 (asdf:defsystem #:luv/world
   :description "Finite chunk domains and the resident block-world model."
   :version "0.0.1"
@@ -68,7 +97,7 @@
   :description "A small s-expression SPIR-V assembler for luv shaders."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on (#:luv/arithmetic
+  :depends-on (#:luv/arithmetic/language
                #:cffi
                #:closer-mop)
   :serial t

@@ -5,7 +5,9 @@
   ;; until their definitions are reparsed.
   (let ((package (find-package '#:luv.spir-v)))
     (when package
-      (dolist (name '("CLAMP" "MIX" "SMOOTHSTEP" "STEP" "NORMALIZE"))
+      (dolist (name '("CLAMP" "MIX" "SMOOTHSTEP" "STEP" "NORMALIZE"
+                      "QUANTITY" "ASSUME-QUANTITY" "INTERPRET"
+                      "REPRESENTATION" "CONVERT-UNIT"))
         (multiple-value-bind (symbol status) (find-symbol name package)
           (when (and (member status '(:internal :external))
                      (eq (symbol-package symbol) package))
@@ -16,8 +18,12 @@
   (:use #:cl)
   (:import-from #:luv.arithmetic
                 #:dot #:clamp #:mix #:smoothstep #:normalize)
+  (:import-from #:luv.arithmetic.language
+                #:quantity #:assume-quantity #:interpret #:representation
+                #:convert-unit)
   (:shadowing-import-from #:luv.arithmetic #:step)
-  (:local-nicknames (#:math #:luv.arithmetic))
+  (:local-nicknames (#:math #:luv.arithmetic)
+                    (#:lang #:luv.arithmetic.language))
   (:shadow #:function #:load #:return #:variable)
   (:export #:spir-v-error
            #:spir-v-error-form
