@@ -34,8 +34,6 @@ jobs:
       - name: Render the wiki
         run: make wiki
       - uses: actions/configure-pages@v5
-        with:
-          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: build/wiki
