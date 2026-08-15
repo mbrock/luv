@@ -68,4 +68,5 @@ metal-clear:
 
 clean:
 	rm -f ./build/luvcraft ./build/mcluv ./build/luvcraft-smoke.png
+	rm -f ./build/objective-c-exception-bridge-*.dylib
 	rm -rf ./build/wiki ./build/wiki-cli

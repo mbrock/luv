@@ -4,6 +4,14 @@
   (:documentation
    "Declared Objective-C messages, explicit native ownership, and tracing.")
   (:export #:objective-c-error
+           #:objective-c-exception
+           #:objective-c-exception-message
+           #:objective-c-exception-receiver
+           #:objective-c-exception-selector
+           #:objective-c-exception-name
+           #:objective-c-exception-reason
+           #:objective-c-exception-call-stack
+           #:objective-c-bridge-error
            #:unknown-objective-c-class
            #:unknown-objective-c-class-name
            #:released-objective-c-object

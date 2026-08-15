@@ -153,10 +153,10 @@ therefore be declaration-led rather than a magical untyped =send=:
 
 The precise surface is experimental, but the invariant is not: the definition
 site contains the ABI.  A thin definer macro may expand to a selector, a typed
-CFFI call through =objc_msgSend=, documentation, and an ordinary Lisp
-function or method.  Runtime method encodings can validate declarations where
-they are complete; they should not silently replace explicit types at the
-call site.
+foreign-storage crossing through the native exception bridge, documentation,
+and an ordinary Lisp function or method.  Runtime method encodings validate
+the declared sizes before invocation; they do not silently replace the
+explicit types at the call site.
 
 This is also where luv's existing [[file:../invocation.lisp][invocation protocol]] deserves a small trial.
 A declared Objective-C message could be a reified invocation sent through a
@@ -193,24 +193,43 @@ callbacks on arbitrary queues add separate obligations.
 
 The intended boundary is therefore hybrid:
 
-- direct CFFI calls for classes, selectors, ordinary object/scalar messages,
-  and explicit retain/release/autorelease pools;
+- direct CFFI calls for C runtime and framework entry points such as
+  =objc_getClass= and =MTLCreateSystemDefaultDevice=;
+- one native =NSInvocation= catch bridge for declared Objective-C messages,
+  including explicit retain/release/autorelease pools and by-value structures;
 - small native C or Objective-C helpers for a signature CFFI cannot call
   confidently, block construction and disposal, and callback trampolines;
 - no requirement that the bridge implement every Objective-C ABI form before
   it can expose a Metal device.
 
-The clear proof sharpened that boundary.  Loading =cffi-libffi= lets declared
-messages pass and return ordinary structures by value on Apple Silicon;
-=CGSize= and =MTLClearColor= therefore remain first-class message ABI types.
-They exercise the same invocation, tracing, and selector metadata as object and
-scalar messages.  Native help remains reserved for forms such as blocks,
-callbacks, variadics, or vector ABIs which the direct interface has not proved.
+The clear proof sharpened that boundary.  =CGSize= and =MTLClearColor= remain
+first-class message ABI types: the Lisp declaration allocates their exact CFFI
+storage and the native bridge copies those bytes through =NSInvocation=.  They
+exercise the same invocation, tracing, selector metadata, and exception
+boundary as object and scalar messages.  More specialized native help remains
+reserved for forms such as blocks, callbacks, variadics, or vector ABIs which
+the interface has not proved.
 
 The native companion is an ABI tool, not a second object model.  Each helper
 should name the awkward mechanism it contains.  If the helper surface starts
 mirroring ordinary Metal methods, the boundary has slipped back toward the
 wrapper list this design is meant to avoid.
+
+Objective-C exceptions must stop inside that companion.  An =NSException=
+cannot safely unwind through libffi and SBCL frames.  The default
+=objective-c-runtime= therefore sends every declared message inside one native
+=@try= / =@catch= frame and signals an =objective-c-exception= with the reified
+message, receiver, selector, exception name, reason, and copied native call
+stack.  Declaration/signature disagreements instead signal the sibling
+=objective-c-bridge-error= before invoking anything.  Neither condition offers
+a continue-with-a-fabricated-value restart: a throwing message may already
+have performed side effects.
+
+=NSInvocation= is the correctness-first runtime, not a claim about the final
+cost of a draw-heavy path.  Runtime × concrete-message dispatch remains open,
+so measured hot messages can later specialize a cached native implementation.
+Such a path must still keep its own native catch frame; speed is not permission
+to let an Objective-C exception cross Lisp's foreign-call stack.
 
 Ownership must be visible from the first experiment.  A wrapper records
 whether its pointer is borrowed or owned; =retain=, =release=, and an
@@ -439,7 +458,7 @@ Evidence:
   and autorelease scopes.  [[file:../objective-c/metal-probe.lisp][The Metal proof]] returns an owned
   =MTLDevice= wrapper and declares its borrowed =name= and scalar =registryID=
   messages.
-- [[file:../tests/objective-c.lisp][Four cold tests]] cover declaration metadata, native identity, owned versus
+- [[file:../tests/objective-c.lisp][Six cold tests]] cover declaration metadata, native identity, owned versus
   borrowed release behavior, released-object rejection, semantic tracing, and
   the real device probe.
 - =make objective-c-probe= exits normally in a fresh SBCL process with bounded
@@ -459,6 +478,35 @@ Done when (met):
 - a tracing probe records receiver class, selector, argument/result types, and
   success without dereferencing arbitrary pointers; and
 - the experiment exits cleanly in a fresh non-Emacs process.
+
+* DONE Turn Objective-C exceptions into Lisp conditions
+:PROPERTIES:
+:ID: H0UX9P
+:END:
+
+Intent: make every declared message a safe condition boundary so an
+=NSException= never unwinds through CFFI or SBCL frames.
+
+Evidence:
+
+- [[file:../objective-c/exception-bridge.m][The native bridge]] owns one =@try= / =@catch= around =NSInvocation=, checks
+  declared argument and result sizes against =NSMethodSignature=, and copies
+  exception name, reason, and call stack before returning to Lisp.
+- [[file:../objective-c/runtime.lisp][The runtime]] signals =objective-c-exception= with the reified message,
+  receiver, and native description.  ABI mismatches are the sibling
+  =objective-c-bridge-error=; neither condition fabricates a return value.
+- [[file:../tests/objective-c.lisp][The cold tests]] provoke a real =NSRangeException= with out-of-range
+  =NSMutableArray/objectAtIndex:=, observe a =:signaled= trace event, then send
+  =count= successfully in the same image.  A deliberately wrong =count=
+  result size is rejected before invocation.
+- =MTL_DEBUG_LAYER=1 make metal-clear= still presents through the complete
+  Metal 4 selector sequence, including =CGSize= and =MTLClearColor= by value,
+  and destroys the autorelease pool, objects, view, and window cleanly.
+
+Done when (met): a native Objective-C exception becomes an inspectable Lisp
+condition, tracing records it as signaled, the image remains usable afterward,
+declaration ABI errors stop before the send, and the real Metal clear remains
+valid.
 
 * DONE Present a Metal clear through the existing SDL canvas
 :PROPERTIES:

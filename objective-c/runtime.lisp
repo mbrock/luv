@@ -42,6 +42,33 @@
 
 (define-condition objective-c-error (error) ())
 
+(define-condition objective-c-message-error (objective-c-error)
+  ((message :initarg :message :reader objective-c-exception-message)
+   (receiver :initarg :receiver :reader objective-c-exception-receiver)
+   (selector :initarg :selector :reader objective-c-exception-selector)
+   (name :initarg :name :reader objective-c-exception-name)
+   (reason :initarg :reason :reader objective-c-exception-reason)
+   (call-stack :initarg :call-stack :reader objective-c-exception-call-stack)))
+
+(define-condition objective-c-exception (objective-c-message-error)
+  ()
+  (:report
+   (lambda (condition stream)
+     (format stream "Objective-C exception ~A while sending ~A: ~A"
+             (or (objective-c-exception-name condition) "<unnamed>")
+             (objective-c-exception-selector condition)
+             (or (objective-c-exception-reason condition) "<no reason>")))))
+
+(define-condition objective-c-bridge-error (objective-c-message-error)
+  ()
+  (:report
+   (lambda (condition stream)
+     (format stream "Objective-C bridge rejected ~A: ~A"
+             (objective-c-exception-selector condition)
+             (or (objective-c-exception-reason condition) "<no reason>"))))
+  (:documentation
+   "The native boundary could not perform a declared Objective-C message."))
+
 (define-condition unknown-objective-c-class (objective-c-error)
   ((name :initarg :name :reader unknown-objective-c-class-name))
   (:report
@@ -248,14 +275,11 @@
 
 (defclass objective-c-runtime (invoker)
   ()
-  (:documentation "A runtime that sends declared messages through objc_msgSend."))
+  (:documentation
+   "A runtime that sends declared messages through the native catch bridge."))
 
 (defvar *objective-c-runtime* (make-instance 'objective-c-runtime)
   "The invoker through which every declared Objective-C message passes.")
-
-(defun objective-c-message-send-pointer ()
-  (cffi:foreign-symbol-pointer "objc_msgSend"
-                               :library 'objective-c-runtime-library))
 
 (defgeneric check-consumable-objective-c-receiver (receiver)
   (:documentation "Validate that RECEIVER owns the retain a message consumes."))
@@ -274,14 +298,72 @@
        :protocol-name (objective-c-message-result-class-name message-class))
       value))
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun objective-c-message-send-form
+      (message receiver result-type arguments)
+    (let ((result-storage (gensym "RESULT-STORAGE"))
+          (argument-array (gensym "ARGUMENT-ARRAY"))
+          (argument-size-array (gensym "ARGUMENT-SIZE-ARRAY"))
+          (argument-storages
+            (loop repeat (length arguments) collect (gensym "ARGUMENT"))))
+      (labels
+          ((call-form (result result-size)
+             (if arguments
+                 `(cffi:with-foreign-objects
+                      ((,argument-array :pointer ,(length arguments))
+                       (,argument-size-array :size ,(length arguments)))
+                    ,@(loop for storage in argument-storages
+                            for index from 0
+                            for (nil type) in arguments
+                            collect
+                            `(setf
+                              (cffi:mem-aref ,argument-array :pointer ,index)
+                              ,storage
+                              (cffi:mem-aref ,argument-size-array :size ,index)
+                              (cffi:foreign-type-size
+                               ',(objective-c-foreign-type type))))
+                    (call-with-objective-c-exception-boundary
+                     ,message ,receiver ,result ,result-size
+                     ,argument-array ,argument-size-array ,(length arguments)))
+                 `(call-with-objective-c-exception-boundary
+                   ,message ,receiver ,result ,result-size
+                   (cffi:null-pointer) (cffi:null-pointer) 0)))
+           (result-form ()
+             (if (eq result-type :void)
+                 `(progn
+                    ,(call-form '(cffi:null-pointer) 0)
+                    nil)
+                 (let ((foreign-result-type
+                         (objective-c-foreign-type result-type)))
+                   `(cffi:with-foreign-object
+                        (,result-storage ',foreign-result-type)
+                      ,(call-form
+                        result-storage
+                        `(cffi:foreign-type-size ',foreign-result-type))
+                      (cffi:mem-ref ,result-storage ',foreign-result-type)))))
+           (argument-forms (remaining-arguments remaining-storages)
+             (if remaining-arguments
+                 (destructuring-bind ((name type) . tail)
+                     remaining-arguments
+                   `(cffi:with-foreign-object
+                        (,(first remaining-storages)
+                         ',(objective-c-foreign-type type))
+                      (setf
+                       (cffi:mem-ref
+                        ,(first remaining-storages)
+                        ',(objective-c-foreign-type type))
+                       ,(objective-c-argument-form name type))
+                      ,(argument-forms tail (rest remaining-storages))))
+                 (result-form))))
+        (argument-forms arguments argument-storages)))))
+
 (defmacro define-objective-c-message
     (name (selector result-type &key ownership class consumes-receiver)
      &body arguments)
   "Define NAME as an inspectable, ABI-typed class and message-sending function."
   (validate-objective-c-message-declaration
    name result-type ownership consumes-receiver arguments)
-  (let ((argument-names (mapcar #'first arguments))
-        (foreign-result-type (objective-c-foreign-type result-type)))
+  (let ((argument-names (mapcar #'first arguments)))
     `(progn
        (defclass ,name (objective-c-message)
          ,(loop for argument-name in argument-names
@@ -299,17 +381,8 @@
               '(check-consumable-objective-c-receiver receiver))
            (let ((result
                    (with-objective-c-native-environment
-                     (cffi:foreign-funcall-pointer
-                      (objective-c-message-send-pointer) ()
-                      :pointer (objective-c-pointer receiver)
-                      :pointer
-                      (objective-c-message-selector-pointer (class-of message))
-                      ,@(loop for (argument-name argument-type) in arguments
-                              append
-                              (list (objective-c-foreign-type argument-type)
-                                    (objective-c-argument-form
-                                     argument-name argument-type)))
-                      ,foreign-result-type))))
+                     ,(objective-c-message-send-form
+                       'message 'receiver result-type arguments))))
              ,(when consumes-receiver
                 '(setf (objective-c-object-released-p receiver) t))
              (translate-objective-c-result result (class-of message)))))

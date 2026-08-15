@@ -1,8 +1,8 @@
 ;;;; The Metal 4 and CAMetalLayer vocabulary needed by the first frame.
 ;;;;
-;;;; The two small structures are passed by value through cffi-libffi.  They
-;;;; stay declarations in the same message system as scalar and object calls;
-;;;; no per-selector C shim is needed for this ABI shape on Apple Silicon.
+;;;; The two small structures cross as typed foreign storage through the
+;;;; shared NSInvocation bridge.  They stay declarations in the same message
+;;;; system as scalar and object calls; no per-selector shim is needed.
 
 (in-package #:luv.metal)
 

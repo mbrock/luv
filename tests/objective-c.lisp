@@ -5,6 +5,19 @@
 
 (in-package #:luv/objective-c/tests)
 
+(objc:define-objective-c-message make-exception-test-array
+    ("new" :object :ownership :owned :class "NSMutableArray"))
+
+(objc:define-objective-c-message exception-test-array-object-at-index
+    ("objectAtIndex:" :object :ownership :borrowed)
+  (index :uint64))
+
+(objc:define-objective-c-message exception-test-array-count
+    ("count" :uint64))
+
+(objc:define-objective-c-message malformed-exception-test-array-count
+    ("count" :uint32))
+
 (deftest message-definitions-retain-selector-abi-and-ownership
   (let ((description
           (objc:objective-c-message-description 'metal:device-name)))
@@ -63,3 +76,54 @@
     (ok (equal (getf description :protocol) "MTLDevice"))
     (ok (plusp (length (getf description :name))))
     (ok (plusp (getf description :registry-id)))))
+
+(deftest native-exceptions-become-conditions-and-leave-the-image-live
+  (objc:with-autorelease-pool ()
+    (objc:with-owned-objective-c-object
+        (array
+          (make-exception-test-array
+           (objc:find-objective-c-class "NSMutableArray")))
+      (let (condition trace)
+        (objc:with-objective-c-trace (active-trace)
+          (setf trace active-trace)
+          (handler-case
+              (exception-test-array-object-at-index array 0)
+            (objc:objective-c-exception (signaled)
+              (setf condition signaled)))
+          (ok (zerop (exception-test-array-count array))))
+        (ok (typep condition 'objc:objective-c-exception))
+        (ok (equal (objc:objective-c-exception-name condition)
+                   "NSRangeException"))
+        (ok (equal (objc:objective-c-exception-selector condition)
+                   "objectAtIndex:"))
+        (ok (eq (objc:objective-c-exception-receiver condition) array))
+        (ok (typep (objc:objective-c-exception-message condition)
+                   'exception-test-array-object-at-index))
+        (ok (plusp (length (objc:objective-c-exception-reason condition))))
+        (ok (plusp
+             (length (objc:objective-c-exception-call-stack condition))))
+        (let ((events (luv.invocation:invocation-trace-events trace)))
+          (ok (= (length events) 2))
+          (ok (eq (luv.invocation:invocation-status (first events))
+                  :signaled))
+          (ok (eq (getf (luv.invocation:invocation-condition (first events))
+                        :type)
+                  'objc:objective-c-exception))
+          (ok (eq (luv.invocation:invocation-status (second events))
+                  :returned)))))))
+
+(deftest declaration-abi-mismatches-stop-before-the-message-send
+  (objc:with-autorelease-pool ()
+    (objc:with-owned-objective-c-object
+        (array
+          (make-exception-test-array
+           (objc:find-objective-c-class "NSMutableArray")))
+      (handler-case
+          (progn
+            (malformed-exception-test-array-count array)
+            (fail "The malformed declaration returned."))
+        (objc:objective-c-bridge-error (condition)
+          (ok (search "8-byte result"
+                      (objc:objective-c-exception-reason condition)))
+          (ok (not (typep condition 'objc:objective-c-exception)))))
+      (ok (zerop (exception-test-array-count array))))))
