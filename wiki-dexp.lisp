@@ -20,6 +20,10 @@
 (defvar *docstring-p* nil
   "True while rendering a string in documentation position.")
 
+(defvar *prose-parameters* '()
+  "Symbol names of the lambda list of the form whose docstring is being
+rendered; an uppercase word naming one is a parameter reference.")
+
 (defparameter *operator-head-counts*
   '(("defun" . 2) ("defmacro" . 2) ("defgeneric" . 2) ("defclass" . 3)
     ("defstruct" . 1) ("deftype" . 2) ("define-condition" . 3) ("defpackage" . 1)
@@ -139,7 +143,18 @@ child, and whether body children of LIST are themselves clauses."
   (format nil "~{~A~^ ~}" (remove nil (cons *lisp-role* classes))))
 
 (defmethod render-html ((list lisp-list))
-  (let ((operator (symbol-node-name (first (element-children list)))))
+  (let* ((children (element-children list))
+         (operator (symbol-node-name (first children)))
+         (body-start (list-body-start list))
+         ;; The lambda list of a defining or binding form: the last list
+         ;; among the head arguments.
+         (lambda-list (and body-start
+                           (find-if (lambda (c) (typep c 'lisp-list))
+                                    (subseq children 1 (min body-start (length children)))
+                                    :from-end t)))
+         (*prose-parameters* (if lambda-list
+                                 (append (lambda-list-parameters lambda-list) *prose-parameters*)
+                                 *prose-parameters*)))
     (spinneret:with-html
       (:div :class (role-class "list")
             :data-callee (and operator (string-downcase operator))
@@ -187,12 +202,108 @@ child, and whether body children of LIST are themselves clauses."
 (defmethod render-html ((atom lisp-atom))
   (spinneret:with-html (:span :class (role-class "atom") (node-text atom))))
 
+(defclass symbol-reference (inline-object)
+  ((name :initarg :name :accessor symbol-reference-name))
+  (:documentation "An uppercase word in code prose that names a symbol: a
+parameter of the enclosing form or a definition in the corpus."))
+
+(defun symbol-word-p (word)
+  "True when WORD is written the way docstrings write symbols: at least two
+characters, all uppercase letters, digits, or symbol punctuation, with at
+least one letter."
+  (and (>= (length word) 2)
+       (some #'alpha-char-p word)
+       (every (lambda (c) (or (upper-case-p c) (digit-char-p c)
+                              (member c '(#\- #\* #\+ #\% #\/ #\< #\> #\= #\!))))
+              word)))
+
+(defun symbol-reference-p (word)
+  "An uppercase WORD is a symbol reference when it names a parameter of the
+enclosing form, a definition in the corpus, or is a *special* name."
+  (and (symbol-word-p word)
+       (or (member word *prose-parameters* :test #'string-equal)
+           (and *site* (gethash (bare-name word) (site-definition-table *site*)))
+           (and (> (length word) 2) (char= (char word 0) #\*) (char= (char word (1- (length word))) #\*)))))
+
+(defun mark-symbol-references (inlines)
+  "Split the strings among INLINES so that symbol words become
+SYMBOL-REFERENCE objects."
+  (loop for inline in inlines
+        append (if (stringp inline)
+                   (split-symbol-references inline)
+                   (progn
+                     (when (typep inline '(or emphasis link))
+                       (unless (and (typep inline 'emphasis)
+                                    (member (emphasis-kind inline) '(:verbatim :code)))
+                         (setf (element-children inline)
+                               (mark-symbol-references (element-children inline)))))
+                     (list inline)))))
+
+(defun split-symbol-references (string)
+  (let ((result '())
+        (start 0)
+        (i 0)
+        (n (length string)))
+    (flet ((word-char-p (c) (or (alphanumericp c) (member c '(#\- #\* #\+ #\% #\/ #\< #\> #\= #\!)))))
+      (loop while (< i n)
+            do (if (word-char-p (char string i))
+                   (let ((end (or (position-if-not #'word-char-p string :start i) n)))
+                     (let ((word (subseq string i end)))
+                       (when (symbol-reference-p word)
+                         (when (> i start) (push (subseq string start i) result))
+                         (push (make-instance 'symbol-reference :name word) result)
+                         (setf start end)))
+                     (setf i end))
+                   (incf i))))
+    (when (< start n) (push (subseq string start) result))
+    (nreverse result)))
+
+(defmethod render-html ((reference symbol-reference))
+  "Drawn like a symbol in the boxes: lowercase code, linked to its
+definition when the corpus has one."
+  (let* ((name (symbol-reference-name reference))
+         (definition (find-named-definition name))
+         (href (and definition (definition-page-href definition))))
+    (spinneret:with-html
+      (if href
+          (:a.definition-link :href href
+                              :title (format nil "~A ~A, ~A:~D" (definition-kind definition)
+                                             (definition-name definition)
+                                             (definition-file-name definition)
+                                             (definition-line definition))
+                              (:code.symbol (string-downcase name)))
+          (:code.symbol (string-downcase name))))))
+
+(defun mark-prose-references (element)
+  "Turn symbol words in the paragraphs of ELEMENT into references."
+  (map-elements (lambda (e)
+                  (when (typep e 'paragraph)
+                    (setf (element-children e) (mark-symbol-references (element-children e)))))
+                element))
+
 (defun render-code-prose (text)
   "Render TEXT, the content of a docstring or comment, as wiki prose:
-paragraphs, lists, and inline markup, with #ID mentions as links."
+paragraphs, lists, and inline markup, with #ID mentions as links and
+uppercase symbol words as symbol references."
   (let ((*prose-from-code* t))
     (dolist (block (read-blocks (coerce (uiop:split-string text :separator '(#\Newline)) 'vector)))
+      (mark-prose-references block)
       (render-html block))))
+
+(defun lambda-list-parameters (list)
+  "The parameter names in the lambda list LIST (a lisp-list), including
+those inside specializer or default forms and skipping &keywords."
+  (let ((names '()))
+    (labels ((walk (node)
+               (typecase node
+                 (lisp-symbol (let ((name (lisp-symbol-name node)))
+                                (unless (char= (char name 0) #\&) (pushnew name names :test #'string=))))
+                 (lisp-list (let ((first (first (element-children node))))
+                              ;; (var default) or (var specializer): only the first
+                              (when (typep first 'lisp-symbol)
+                                (pushnew (lisp-symbol-name first) names :test #'string=)))))))
+      (mapc #'walk (element-children list)))
+    names))
 
 (defun string-node-content (string)
   "The characters of a string literal STRING, without the quotes and with

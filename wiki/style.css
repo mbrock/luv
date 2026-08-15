@@ -486,3 +486,16 @@ body.source-page {
 .lisp .comment.prose code {
   font-style: normal;
 }
+
+.lisp .prose code.symbol {
+  font-family: system-ui, "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-size: 0.95em;
+  font-style: normal;
+  background: none;
+  padding: 0;
+  color: var(--fg);
+}
+
+.lisp .prose a.definition-link code.symbol {
+  color: var(--accent);
+}

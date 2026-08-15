@@ -268,3 +268,22 @@ Nothing here refers to anything.
     ;; The mention inside the docstring links to the figure.
     (ok (search "See <a class=mention href=#ABC123" html))
     (ok (equal (wiki:dangling-code-mentions site) (list (cons (first definitions) '("ZZZ999")))))))
+
+(deftest code-prose-marks-symbol-references
+  (let* ((definitions (wiki:file-definitions #p"/example.lisp" *source*))
+         (site (wiki:make-site (list (page)) :definitions definitions :source-directory #p"/"))
+         (html (let ((wiki:*site* site) (*print-pretty* nil) (spinneret:*suppress-inserted-spaces* t))
+                 (spinneret:with-html-string
+                   (wiki:render-lisp-source
+                    "(defun g (count &key (limit 3))
+  \"Return COUNT items up to LIMIT, calling FROB on each; GPU acronyms
+and *features* stay text; *special* names are code.\"
+  count)")))))
+    ;; Parameters and definitions become symbol references, lowercase.
+    (ok (search "Return <code class=symbol>count</code> items up to <code class=symbol>limit</code>" html))
+    (ok (search "calling <code class=symbol>frob</code>" html))
+    ;; Unknown acronyms stay prose; *name* reads as code, not bold.
+    (ok (search "GPU acronyms" html))
+    (ok (search "<code>*features*</code>" html))
+    (ok (search "<code>*special*</code>" html))
+    (ok (not (search "<b>" html)))))
