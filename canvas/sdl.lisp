@@ -27,6 +27,12 @@
     :initarg :visible-p
     :initform t
     :accessor canvas-visible-p)
+   (presentation-api
+    :initarg :presentation-api
+    :initform :vulkan
+    :reader sdl-canvas-presentation-api
+    :documentation
+    "The native graphics machinery SDL must select when realizing the window.")
    (window
     :initform nil
     :accessor sdl-canvas-window)
@@ -127,11 +133,26 @@
   (modstate sdl3::keymod)
   (key-event :bool))
 
+(defgeneric sdl-presentation-window-flags (presentation-api)
+  (:documentation
+   "Return the immutable SDL window flags required by PRESENTATION-API."))
+
+(defmethod sdl-presentation-window-flags ((presentation-api (eql :vulkan)))
+  (declare (ignore presentation-api))
+  '(:vulkan :resizable :hidden))
+
+#+darwin
+(defmethod sdl-presentation-window-flags ((presentation-api (eql :metal)))
+  (declare (ignore presentation-api))
+  '(:metal :high-pixel-density :resizable :hidden))
+
 (defun make-sdl-canvas (&key (title "luv canvas") (width 800) (height 600)
-                          x y (visible-p t) (clock (make-demand-clock)))
+                          x y (visible-p t) (clock (make-demand-clock))
+                          (presentation-api :vulkan))
   "Construct an unrealized SDL canvas."
   (make-instance 'sdl-canvas :title title :width width :height height
-                              :x x :y y :visible-p visible-p :clock clock))
+                              :x x :y y :visible-p visible-p :clock clock
+                              :presentation-api presentation-api))
 
 (defmethod canvas-size ((canvas sdl-canvas))
   (if (eq :open (canvas-state canvas))
@@ -624,7 +645,8 @@
                          (sdl3:create-window
                           (canvas-title canvas)
                           (canvas-width canvas) (canvas-height canvas)
-                          '(:vulkan :resizable :hidden))))
+                          (sdl-presentation-window-flags
+                           (sdl-canvas-presentation-api canvas)))))
                    (when (cffi:null-pointer-p window)
                      (error "SDL window creation failed: ~A" (sdl3:get-error)))
                    (setf (sdl-canvas-window canvas) window)

@@ -46,8 +46,29 @@
 (defpackage #:luv.metal
   (:use #:cl)
   (:local-nicknames (#:objc #:luv.objective-c))
-  (:documentation "The first native Metal declarations exercised through Lisp.")
+  (:documentation "Declared Metal and QuartzCore messages exercised through Lisp.")
   (:export #:make-system-default-device
            #:device-name
            #:device-registry-id
-           #:probe-system-default-device))
+           #:probe-system-default-device
+           #:new-metal-4-command-queue
+           #:new-command-allocator
+           #:new-command-buffer
+           #:begin-command-buffer
+           #:end-command-buffer
+           #:render-command-encoder
+           #:end-encoding
+           #:wait-for-drawable
+           #:commit-command-buffer
+           #:signal-drawable
+           #:present-drawable
+           #:set-layer-device
+           #:set-layer-pixel-format
+           #:layer-pixel-format
+           #:set-layer-drawable-size
+           #:layer-drawable-size
+           #:next-drawable
+           #:drawable-texture
+           #:encode-clear-pass
+           #:+pixel-format-bgra8-unorm+
+           #:+pixel-format-bgra8-unorm-srgb+))

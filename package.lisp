@@ -319,6 +319,14 @@ nothing else does."))
            #:make-gpu-dispatch-workgroups-command
            #:make-gpu-draw-command
            #:vulkan-gpu-provider
+           #+darwin
+           #:metal-gpu-provider
+           #+darwin
+           #:metal-gpu-device
+           #+darwin
+           #:metal-gpu-queue
+           #+darwin
+           #:metal-gpu-texture
            #:vulkan-provider-application-name
            #:vulkan-provider-debug-callback
            #:vulkan-provider-debug-severities
@@ -387,7 +395,10 @@ nothing else does."))
            #:get-current-texture
            #:sdl-canvas
            #:make-sdl-canvas
+           #:sdl-canvas-presentation-api
            #:vulkan-canvas-context
+           #+darwin
+           #:metal-canvas-context
            #:canvas-title
            #:canvas-width
            #:canvas-height
@@ -669,6 +680,8 @@ nothing else does."))
            #:open-canvas
            #:present-canvas-frame
            #:render-canvas-color
+           #+darwin
+           #:probe-sdl-metal-clear
            #:clear-color-demo
            #:demo-canvas
            #:demo-context

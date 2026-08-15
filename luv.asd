@@ -15,6 +15,8 @@
                               (asdf:test-op #:luv/arithmetic/lisp/tests)
                               #+darwin
                               (asdf:test-op #:luv/objective-c/tests)
+                              #+darwin
+                              (asdf:test-op #:luv/metal/tests)
                               (asdf:test-op #:luv/tests)
                               (asdf:test-op #:luv/spir-v/tests)
                               (asdf:test-op #:luv/luvcraft/tests)
@@ -170,6 +172,7 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
   :author "Mikael Brockman"
   :depends-on (#:luv/invocation
                #:cffi
+               #:cffi-libffi
                #:closer-mop)
   :serial t
   :components ((:module "objective-c"
@@ -178,13 +181,22 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
                              (:file "foundation")))))
 
 #+darwin
+(asdf:defsystem #:luv/metal
+  :description "The native Metal vocabulary declared through luv's Objective-C system."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on (#:luv/objective-c)
+  :serial t
+  :components ((:module "objective-c"
+                :components ((:file "metal-probe")
+                             (:file "metal")))))
+
+#+darwin
 (asdf:defsystem #:luv/metal/probe
   :description "The smallest native Metal object proof through luv's Objective-C system."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on (#:luv/objective-c)
-  :components ((:module "objective-c"
-                :components ((:file "metal-probe")))))
+  :depends-on (#:luv/metal))
 
 #+darwin
 (asdf:defsystem #:luv/objective-c/tests
@@ -284,6 +296,16 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
   :components ((:module "gpu"
                 :components ((:file "vulkan")))))
 
+#+darwin
+(asdf:defsystem #:luv/gpu/metal
+  :description "Metal 4 implementation of the small luv GPU clear vocabulary."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on (#:luv/gpu/api
+               #:luv/metal)
+  :components ((:module "gpu"
+                :components ((:file "metal")))))
+
 (asdf:defsystem #:luv/gpu
   :description "The luv GPU API with its default Vulkan backend."
   :version "0.0.1"
@@ -321,11 +343,40 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
   :components ((:module "canvas"
                 :components ((:file "vulkan")))))
 
+#+darwin
+(asdf:defsystem #:luv/canvas/metal
+  :description "Metal 4 presentation contexts for SDL canvases."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on (#:luv/canvas/sdl
+               #:luv/gpu/metal)
+  :components ((:module "canvas"
+                :components ((:file "metal")))))
+
 (asdf:defsystem #:luv/canvas
   :description "SDL canvas presentation for the luv GPU API."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on (#:luv/canvas/vulkan))
+  :depends-on (#:luv/canvas/vulkan
+               #+darwin
+               #:luv/canvas/metal))
+
+#+darwin
+(asdf:defsystem #:luv/metal/tests
+  :description "Executable claims for the SDL and Metal 4 presentation seam."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on (#:luv/canvas/metal
+               #:rove)
+  :components ((:module "tests"
+                :components ((:file "metal"))))
+  :perform (asdf:test-op (operation component)
+             (declare (ignore operation component))
+             (unless (uiop:symbol-call
+                      '#:rove '#:run-suite
+                      (uiop:symbol-call
+                       '#:rove '#:find-suite '#:luv/metal/tests))
+               (error "luv Metal tests failed"))))
 
 (asdf:defsystem #:luv/luvcraft/quantities
   :description "Backend-neutral semantic quantities for the luvcraft domain."

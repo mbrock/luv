@@ -22,7 +22,7 @@ SDL canvas and events
         v
 Metal canvas context ---- Objective-C declarations ---- libobjc + Metal
         |                              |
-        |                              `---- tiny native help for hard ABI forms
+        |                              `---- native help only for unsupported ABI forms
         v
 luv GPU protocol
         ^
@@ -67,13 +67,14 @@ The ownership should therefore be concrete:
 - the Metal device, queue, compiler, drawables, and submission resources are
   owned according to the GPU/backend lifecycle, not by SDL.
 
-One current detail needs alteration rather than abstraction: =run-sdl-canvas=
-always creates the window with =:vulkan=.  A native canvas should not commit to
-one presentation API before =make-canvas-context= sees a provider.  The first
-experiment can establish whether that flag is harmless to
-=SDL_Metal_CreateView=, but the intended boundary is for Vulkan and Metal
-context creation to request only their own surface machinery.  Replacing SDL
-with =NSWindow= is an independent later experiment; it is not part of proving
+The window flag is an immutable host policy rather than context state.  SDL
+rejects =:vulkan= and =:metal= together as conflicting graphics flags, so
+=sdl-canvas= now names one =:presentation-api= before it opens.  EQL-specialized
+=sdl-presentation-window-flags= methods keep that small vocabulary open:
+=:vulkan= retains the previous flags exactly, while =:metal= requests Metal and
+high pixel density.  The provider-specialized =make-canvas-context= method then
+validates that relationship before creating native resources.  Replacing SDL
+with =NSWindow= remains an independent experiment; it was not needed to prove
 Metal.
 
 * Objective-C is a foreign object system, not a wrapper list
@@ -198,6 +199,13 @@ The intended boundary is therefore hybrid:
   confidently, block construction and disposal, and callback trampolines;
 - no requirement that the bridge implement every Objective-C ABI form before
   it can expose a Metal device.
+
+The clear proof sharpened that boundary.  Loading =cffi-libffi= lets declared
+messages pass and return ordinary structures by value on Apple Silicon;
+=CGSize= and =MTLClearColor= therefore remain first-class message ABI types.
+They exercise the same invocation, tracing, and selector metadata as object and
+scalar messages.  Native help remains reserved for forms such as blocks,
+callbacks, variadics, or vector ABIs which the direct interface has not proved.
 
 The native companion is an ABI tool, not a second object model.  Each helper
 should name the awkward mechanism it contains.  If the helper surface starts
@@ -452,7 +460,7 @@ Done when (met):
   success without dereferencing arbitrary pointers; and
 - the experiment exits cleanly in a fresh non-Emacs process.
 
-* NEXT Present a Metal clear through the existing SDL canvas
+* DONE Present a Metal clear through the existing SDL canvas
 :PROPERTIES:
 :ID: 5A7QDE
 :END:
@@ -460,19 +468,42 @@ Done when (met):
 Intent: prove #SODRMA by adding a =metal-canvas-context= relationship while
 leaving SDL window, input, clock, and main-thread ownership intact.
 
-Evidence: SDL 3.4.12 supplies the view/layer lifecycle and the current Vulkan
-context already establishes the backend-specific presentation seam.  The
-remaining uncertainty is the smallest Metal 4-native drawable and submission
-path and whether SDL's currently hardcoded =:vulkan= window flag must move
-before the proof.
+Evidence:
 
-Done when: =make-canvas-context= with a Metal provider creates and owns one
+- [[file:../canvas/sdl.lisp][=sdl-canvas=]] now owns the immutable presentation policy without learning
+  Metal behavior.  EQL methods map =:vulkan= to the unchanged Vulkan flags and
+  =:metal= to Metal plus high pixel density; SDL's conflicting-flag rejection
+  is no longer hidden inside context construction.
+- [[file:../gpu/metal.lisp][The Metal GPU vocabulary]] provides semantic provider, device, queue, texture,
+  and frame-encoder objects.  [[file:../canvas/metal.lisp][=metal-canvas-context=]] is the concrete
+  canvas × provider relationship: it owns one =SDL_MetalView=, borrows its
+  =CAMetalLayer=, and assigns the configured device.
+- [[file:../objective-c/metal.lisp][Declared Metal messages]] cover =CGSize= and =MTLClearColor= by value as well
+  as the Metal 4 allocator, command buffer, render encoder, queue, drawable,
+  and layer vocabulary.  The clear remains luv's existing
+  =gpu-clear-texture-command= rather than a canvas-only escape hatch.
+- =MTL_DEBUG_LAYER=1 make metal-clear= completed in a cold process with Metal
+  API validation enabled on the Apple M2 Pro.  Its semantic trace contains the
+  ordered =beginCommandBufferWithAllocator:=, =setClearColor:=,
+  =renderCommandEncoderWithDescriptor:=, =endEncoding=, =endCommandBuffer=,
+  =waitForDrawable:=, =commit:count:=, =signalDrawable:=, and =present= sends.
+- The same probe reported logical size =320×200=, SDL pixel size =640×400=,
+  and layer drawable size =640×400=.  After presentation it reported canvas
+  =:closed=, context =:destroyed=, and view, window, and device all destroyed;
+  =run-sdl-canvas= destroys the context and its view before the SDL window.
+- =make smoke= still renders and exits through Vulkan.  Its PNG SHA-256,
+  =0562804c1a3a4aaed5cc2865d0ca556b92ca231ab339f3310b21a8515b07d2c0=,
+  exactly matches a fresh isolated build of the parent =b7c113d= checkout.
+- [[file:../tests/metal.lisp][Focused tests]] cover structure ABI metadata, the open presentation policy,
+  provider mismatch rejection, and a real owned =MTL4CommandQueue=.
+
+Done when (met): =make-canvas-context= with a Metal provider creates and owns one
 =SDL_MetalView=, assigns the borrowed layer's device, presents a deterministic
 clear through a Metal 4 command path, reports drawable size correctly on
 Retina, closes the view before the window, and leaves the Vulkan path
 unchanged.
 
-* TODO Lower one mathematical shader directly to MSL
+* NEXT Lower one mathematical shader directly to MSL
 :PROPERTIES:
 :ID: 58IDSR
 :END:
