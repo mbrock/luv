@@ -1,45 +1,61 @@
 :root {
-  --fg: #222;
-  --bg: #fdfcf9;
-  --muted: #6b6b6b;
-  --rule: #e2ddd2;
-  --accent: #8a4b1c;
-  --code-bg: #f3efe6;
-  --mark-next: #b3541e;
-  --mark-todo: #6c6c6c;
+  color-scheme: light dark;
+  --paper: white;
+  --ink: black;
+  --muted: #667078;
+  --rule: #ded8ce;
+  --status-bg: black;
+  --status-ink: ivory;
+  --accent: #9a3248;
+  --code-bg: #f4f1ea;
+  --mark-next: #9a3248;
+  --mark-todo: #667078;
   --mark-wait: #8a7a1c;
   --mark-done: #3d7a3d;
   --mark-idea: #5a4d8a;
+  --display-font: "Public Sans", helvetica, arial, sans-serif;
+  --body-font: "Public Sans", helvetica, arial, sans-serif;
+  --mono-font: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  /* Older rules use these names. */
+  --fg: var(--ink);
+  --bg: var(--paper);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --fg: #ddd8cf;
-    --bg: #1c1b19;
-    --muted: #9a958c;
-    --rule: #3a3833;
-    --accent: #e0a070;
-    --code-bg: #26241f;
-    --mark-next: #e78a4e;
-    --mark-todo: #a4a4a4;
+    --paper: #111517;
+    --ink: #c2cbd0;
+    --muted: #8b969d;
+    --rule: #2f383d;
+    --status-bg: #d7d2c4;
+    --status-ink: #111719;
+    --accent: #de6e7c;
+    --code-bg: #171c1f;
+    --mark-next: #de6e7c;
+    --mark-todo: #8b969d;
     --mark-wait: #d9c65a;
     --mark-done: #7ac47a;
     --mark-idea: #a99ad9;
   }
 }
 
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
 html {
-  color: var(--fg);
-  background: var(--bg);
-  font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+  color: var(--ink);
+  background: var(--paper);
+  font-family: var(--body-font);
   font-size: 17px;
-  line-height: 1.55;
+  line-height: 1.45;
+  text-rendering: optimizeLegibility;
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
-  margin: 0 auto;
-  padding: 0 1.25rem 4rem;
-  max-width: 44rem;
+  margin: 0;
+  min-height: 100vh;
 }
 
 a {
@@ -51,39 +67,155 @@ a:hover {
   text-decoration: underline;
 }
 
-.site-header {
-  padding: 1rem 0;
+/* The library band: eyebrow, site name, and the three doors. */
+
+.library {
+  display: grid;
+  grid-template-columns: minmax(10rem, 0.5fr) minmax(0, 1.5fr);
+  gap: 1rem;
+  align-items: center;
+  padding: 0.85rem clamp(1rem, 4vw, 3rem);
   border-bottom: 1px solid var(--rule);
-  font-size: 0.9rem;
+  background: color-mix(in srgb, var(--paper) 94%, var(--accent));
+}
+
+.eyebrow {
+  margin: 0 0 0.1rem;
   color: var(--muted);
+  font: 700 0.72rem/1 var(--display-font);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.library h1 {
+  margin: 0;
+  font: 700 1.25rem/1.1 var(--display-font);
+  letter-spacing: -0.02em;
+}
+
+.library h1 a {
+  color: inherit;
+}
+
+.doors {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.door {
+  display: grid;
+  gap: 0.1rem;
+  min-width: 0;
+  padding: 0.65rem 0.75rem;
+  color: inherit;
+  text-decoration: none;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--paper);
+}
+
+.door:hover, .door:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 70%, var(--rule));
+  text-decoration: none;
+  outline: none;
+}
+
+.door.selected {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.door-title {
+  font: 700 0.95rem/1.2 var(--display-font);
+}
+
+.door-meta {
+  color: var(--muted);
+  font: 500 0.82rem/1.2 var(--display-font);
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+
+/* The status bar, as a Glk grid window: black, monospace, bold. */
+
+.status {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.3rem clamp(1rem, 4vw, 3rem);
+  font: 700 0.9rem/1.5 var(--mono-font);
+  color: var(--status-ink);
+  background: var(--status-bg);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.status a {
+  color: inherit;
+}
+
+.status-left, .status-right {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The main column */
+
+main {
+  max-width: 66ch;
+  padding: clamp(1.5rem, 4vw, 3.25rem) clamp(1rem, 4vw, 3rem) 2.75rem;
+  margin: 0 auto;
+}
+
+body.source-page main {
+  max-width: 96ch;
 }
 
 .site-footer {
-  margin-top: 4rem;
-  padding-top: 1rem;
+  max-width: 66ch;
+  margin: 0 auto;
+  padding: 1rem clamp(1rem, 4vw, 3rem) 3rem;
   border-top: 1px solid var(--rule);
-  font-size: 0.85rem;
+  font: 500 0.82rem/1.4 var(--display-font);
   color: var(--muted);
 }
 
+/* Type */
+
 h1, h2, h3, h4 {
-  font-weight: normal;
-  line-height: 1.2;
+  font-family: var(--display-font);
+  line-height: 1.16;
+  font-weight: 800;
 }
 
 h1 {
-  font-size: 2rem;
-  margin: 2rem 0 1.5rem;
+  font-size: 2.2rem;
+  letter-spacing: -0.06em;
+  margin: 0.5rem 0 1.5rem;
 }
 
 h2 {
-  font-size: 1.45rem;
-  margin: 2.5rem 0 0.75rem;
+  font-size: 1.3rem;
+  letter-spacing: -0.04em;
+  margin: 2.6rem 0 0.75rem;
 }
 
 h3 {
-  font-size: 1.15rem;
+  font-size: 1.1rem;
+  letter-spacing: -0.02em;
   margin: 2rem 0 0.5rem;
+  font-weight: 700;
+}
+
+p {
+  margin: 0 0 1.1rem;
+  hyphens: manual;
+  text-align: justify;
+  text-align-last: start;
 }
 
 section.figure {
@@ -110,8 +242,9 @@ section:target > h2 a.figure-id, section:target > h3 a.figure-id {
 }
 
 .mention {
-  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 0.85em;
+  font-family: var(--mono-font);
+  font-weight: 700;
+  font-size: 0.82em;
 }
 
 .mention.dangling {
@@ -124,13 +257,14 @@ section:target > h2 a.figure-id, section:target > h3 a.figure-id {
 }
 
 .mark {
-  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 0.7em;
-  letter-spacing: 0.05em;
-  padding: 0.1em 0.4em;
+  font-family: var(--mono-font);
+  font-size: 0.6em;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 0.15em 0.45em;
   border-radius: 0.2em;
   vertical-align: middle;
-  color: var(--bg);
+  color: var(--paper);
   background: var(--mark-todo);
 }
 
@@ -146,7 +280,7 @@ p.backlinks {
 }
 
 code, pre {
-  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-family: var(--mono-font);
   font-size: 0.85em;
 }
 
@@ -218,7 +352,7 @@ figure.image img, img.inline {
 
 .lisp {
   --paren: color-mix(in srgb, var(--fg) 30%, transparent);
-  font-family: system-ui, "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-family: var(--display-font);
   font-size: 0.9rem;
   line-height: 1.55;
   margin: 1rem 0;
@@ -276,7 +410,7 @@ figure.image img, img.inline {
 }
 
 .lisp .string {
-  color: var(--mark-done);
+  color: color-mix(in srgb, var(--ink) 60%, var(--mark-done));
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -388,8 +522,9 @@ details.definition > .lisp {
 }
 
 h1.source-title {
-  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 1.4rem;
+  font-family: var(--mono-font);
+  font-size: 1.5rem;
+  letter-spacing: -0.02em;
 }
 
 p.source-meta {
@@ -419,7 +554,7 @@ nav.definitions ul {
 
 li.definition-entry {
   display: contents;
-  font-family: system-ui, "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-family: var(--display-font);
   font-size: 0.85rem;
   line-height: 1.45;
 }
@@ -524,16 +659,14 @@ a.github {
   text-decoration: none;
 }
 
-body.source-page {
-  max-width: 62rem;
-}
 
 /* Docstrings and comments as prose inside the boxes */
 
 .lisp .prose {
   flex-basis: 100%;
   white-space: normal;
-  font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+  font-family: var(--body-font);
+  text-align: start;
   font-size: 0.95em;
   line-height: 1.45;
   max-width: 40rem;
@@ -560,7 +693,7 @@ body.source-page {
 }
 
 .lisp .string.prose {
-  color: var(--mark-done);
+  color: color-mix(in srgb, var(--ink) 75%, var(--mark-done));
   padding-left: 0.6em;
   border-left: 2px solid color-mix(in srgb, var(--mark-done) 40%, transparent);
 }
@@ -577,7 +710,7 @@ body.source-page {
 }
 
 .lisp .prose code.symbol {
-  font-family: system-ui, "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-family: var(--display-font);
   font-size: 0.95em;
   font-style: normal;
   background: none;
@@ -650,4 +783,19 @@ body.source-page {
 
 .lisp .pair.body > .symbol:first-child {
   min-width: 8em;
+}
+
+@media screen and (max-width: 90ch) {
+  .library {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .doors {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  h1 {
+    font-size: 1.65rem;
+  }
+  p {
+    text-align: start;
+  }
 }

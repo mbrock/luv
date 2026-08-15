@@ -387,33 +387,56 @@ summary, and the form drawn as dexp boxes inside."
         (dolist (child (element-children heading))
           (when (typep child 'heading) (render-html child)))))))
 
-(defun render-page-frame (title body &key body-class)
-  "Emit a whole HTML page with the site chrome around the output of BODY."
-  (spinneret:with-html
-    (:doctype)
-    (:html :lang "en"
-      (:head
-       (:meta :charset "utf-8")
-       (:meta :name "viewport" :content "width=device-width, initial-scale=1")
-       (:title title)
-       (:link :rel "stylesheet" :href (concatenate 'string *page-prefix* "style.css")))
-      (:body :class body-class
-       (:header.site-header
-        (:nav
-         (:a :href (concatenate 'string *page-prefix* "index.html") "luv wiki")
-         " · "
-         (:a :href (concatenate 'string *page-prefix* "figures.html") "figures")
-         (when (site-source-files *site*)
-           (spinneret:html " · ")
-           (:a :href (concatenate 'string *page-prefix* "source.html") "source"))
-         (when *rendering-document*
-           (spinneret:html " · ")
-           (:a :href (concatenate 'string (site-source-url *site*) "wiki/"
-                                  (document-name *rendering-document*) ".org")
-               "org"))))
-       (:main (funcall body))
-       (:footer.site-footer
-        "Rendered from Org and Lisp by luv.wiki.")))))
+(defvar *page-kind* "page"
+  "A short word for the status bar: what kind of page is being rendered.")
+
+(defun render-page-frame (title body &key body-class (kind *page-kind*) (status title) (right kind))
+  "Emit a whole HTML page with the site chrome around the output of BODY:
+the library band with the site's three doors, a status bar naming the page,
+the main column, and a footer."
+  (flet ((href (name) (concatenate 'string *page-prefix* name)))
+    (spinneret:with-html
+      (:doctype)
+      (:html :lang "en"
+        (:head
+         (:meta :charset "utf-8")
+         (:meta :name "viewport" :content "width=device-width, initial-scale=1")
+         (:title title)
+         (:link :rel "preconnect" :href "https://fonts.googleapis.com")
+         (:link :rel "preconnect" :href "https://fonts.gstatic.com" :crossorigin "")
+         (:link :rel "stylesheet"
+                :href "https://fonts.googleapis.com/css2?family=Public+Sans:ital,wght@0,100..900;1,100..900&display=swap")
+         (:link :rel "stylesheet" :href (href "style.css")))
+        (:body :class body-class
+         (:header.library
+          (:div.library-heading
+           (:p.eyebrow "luv")
+           (:h1 (:a :href (href "index.html") "Workshop wiki")))
+          (:nav.doors
+           (:a :class (if (equal kind "page") "door selected" "door") :href (href "index.html")
+               (:span.door-title "Pages")
+               (:span.door-meta "design memory, figures, work marks"))
+           (:a :class (if (equal kind "figures") "door selected" "door") :href (href "figures.html")
+               (:span.door-title "Figures")
+               (:span.door-meta "every addressable heading"))
+           (when (site-source-files *site*)
+             (:a :class (if (member kind '("source" "source-file") :test #'equal) "door selected" "door")
+                 :href (href "source.html")
+                 (:span.door-title "Source")
+                 (:span.door-meta (format nil "~D systems, ~D files"
+                                          (length (site-systems *site*))
+                                          (length (site-source-files *site*))))))))
+         (:div.status
+          (:span.status-left status)
+          (:span.status-right
+           (cond (*rendering-document*
+                  (:a :href (concatenate 'string (site-source-url *site*) "wiki/"
+                                         (document-name *rendering-document*) ".org")
+                      (concatenate 'string (document-name *rendering-document*) ".org")))
+                 (t right))))
+         (:main (funcall body))
+         (:footer.site-footer
+          "Rendered from Org and Lisp by luv.wiki."))))))
 
 (defun render-page (document)
   "Emit the whole HTML page for DOCUMENT."
@@ -431,7 +454,8 @@ summary, and the form drawn as dexp boxes inside."
 (defun render-figures-page (site)
   "Emit an index page listing every figure and its work-mark status."
   (let ((*rendering-document* nil)
-        (*page-prefix* ""))
+        (*page-prefix* "")
+        (*page-kind* "figures"))
     (render-page-frame
      "Figures"
      (lambda ()

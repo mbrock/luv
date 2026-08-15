@@ -142,6 +142,7 @@ methods grouped under their generic."
 as dexp boxes, each anchored by its starting line."
   (let* ((page (source-page-name file))
          (*page-prefix* (page-prefix-for page))
+         (*page-kind* "source-file")
          (*rendering-document* nil)
          (line-starts (source-file-line-starts file))
          (title (source-file-relative-path file)))
@@ -165,7 +166,9 @@ as dexp boxes, each anchored by its starting line."
               (let ((*lisp-role* nil))
                 (:div.toplevel :id (format nil "L~D" (node-line node line-starts))
                   (render-html node))))))))
-     :body-class "source-page")))
+     :body-class "source-page"
+     :status title
+     :right (or (source-file-system-name file) "source"))))
 
 (defun render-file-summary (file)
   "The file's relative path with the file name itself emphasized."
@@ -182,6 +185,7 @@ as dexp boxes, each anchored by its starting line."
 with its description, dependencies, and files, the files expandable to their
 definitions."
   (let ((*page-prefix* "")
+        (*page-kind* "source")
         (*rendering-document* nil))
     (render-page-frame
      "Source"
