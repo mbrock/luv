@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := all
 
-.PHONY: all luvcraft run test parinfer-check shader-validate smoke mcluv wiki objective-c-probe metal-clear clean
+.PHONY: all luvcraft run test parinfer-check shader-validate smoke mcluv wiki wiki-cli objective-c-probe metal-clear clean
 
 all: luvcraft
 
@@ -47,6 +47,9 @@ smoke: luvcraft
 mcluv:
 	nix develop -c sbcl --script build-mcluv.lisp
 
+wiki-cli:
+	nix develop -c sbcl --script build-wiki.lisp
+
 wiki:
 	nix develop -c sbcl --non-interactive \
 		--eval '(require :asdf)' \
@@ -65,4 +68,4 @@ metal-clear:
 
 clean:
 	rm -f ./build/luvcraft ./build/mcluv ./build/luvcraft-smoke.png
-	rm -rf ./build/wiki
+	rm -rf ./build/wiki ./build/wiki-cli

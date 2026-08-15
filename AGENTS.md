@@ -25,6 +25,13 @@ skill-aware agent can load it; `.claude/skills` is a symlink there for Claude
 Code. Start with `clos-design` before designing a new subsystem or
 refactoring dispatch code.
 
+# The wiki and scripts/wiki
+
+Design memory lives in the Org wiki (`wiki/*.org`), rendered to
+https://mbrock.github.io/luv/ on every push.  `scripts/wiki marks`,
+`scripts/wiki toc`, `scripts/wiki figure ID`, and `scripts/wiki mentions ID`
+print the corpus from a shell; see the `wiki-work` skill before editing.
+
 # Live Lisp interaction
 
 Prefer `./sly` over `emacsclient` or a second SBCL when exploring, testing, or

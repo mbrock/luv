@@ -144,7 +144,30 @@ touching a page re-renders.  The corpus loads with no dangling mentions.
 Done when: the six tests pass and the site builds from a fresh SBCL.
 Publishing is the next mark.
 
-* NEXT Serve the site from GitHub Pages
+* The wiki from a shell: scripts/wiki
+:PROPERTIES:
+:ID: GB4FT0
+:END:
+
+Agents and people who want the table of contents, the work marks, one
+figure's text, or the places a figure is mentioned should not need Emacs
+or a browser.  =scripts/wiki= is a small executable built with ASDF's
+=program-op= (system =luv-wiki/cli=, entry point =luv.wiki.cli:main=,
+=build/wiki-cli=), rebuilt by its wrapper when the tooling changed and run
+inside the Nix shell.  It reads the same objects the site renders — pages
+through the Org reader, code through the Eclector index — so what it prints
+agrees with the site.  Commands: =toc=, =marks=, =figure=, =page=,
+=mentions=, =defs=, =dangling=, =ids=, =build=; =help= lists them.
+
+Two details of the executable are worth recording.  The Nix =sbcl= wrapper
+supplies =CL_SOURCE_REGISTRY= and =ASDF_OUTPUT_TRANSLATIONS= to SBCL
+processes only, so a dumped image would look for compiled files in the
+wrong place; =build-wiki.lisp= captures that environment before the dump
+and =main= re-establishes it.  And =luv.asd= now loads =luv-wiki.asd= only
+when the system is not already registered, so re-reading =luv.asd= inside
+the executable does not redefine the system it is running from.
+
+* DONE Serve the site from GitHub Pages
 :PROPERTIES:
 :ID: SIWPDS
 :END:
@@ -152,11 +175,16 @@ Publishing is the next mark.
 Intent: publish =build/wiki/= at [[https://mbrock.github.io/luv/][mbrock.github.io/luv]] on every push
 that touches the wiki or its tooling.
 
-Evidence: [[file:../.github/workflows/wiki.yml][wiki.yml]] builds with Nix and deploys with the Pages actions,
-asking to enable Pages on first run.  Not yet observed running.
+Evidence: [[file:../.github/workflows/wiki.yml][wiki.yml]] installs Nix, restores the closure with hestia
+(chunked GitHub Actions cache; about a minute warm, replacing the
+sunsetting magic-nix-cache), runs =make wiki=, and deploys with the Pages
+actions.  Pages had to be enabled once by hand with
+=gh api -X POST repos/mbrock/luv/pages -f build_type=workflow=; the
+workflow token cannot create the site.  The index and source pages are
+reachable at the public URL.
 
 Done when: the workflow has succeeded once and the index page is reachable
-at the public URL.
+at the public URL.  Both hold.
 
 * A fluid dual system: code contributes to the wiki
 :PROPERTIES:

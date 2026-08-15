@@ -287,3 +287,16 @@ and *features* stay text; *special* names are code.\"
     (ok (search "<code>*features*</code>" html))
     (ok (search "<code>*special*</code>" html))
     (ok (not (search "<b>" html)))))
+
+(deftest the-cli-prints-the-corpus
+  (let* ((root (asdf:system-source-directory :luv/wiki))
+         (luv.wiki.cli::*root* root)
+         (luv.wiki.cli::*site* nil)
+         (toc (with-output-to-string (*standard-output*) (luv.wiki.cli:run '("toc" "index"))))
+         (marks (with-output-to-string (*standard-output*) (luv.wiki.cli:run '("marks" "done"))))
+         (figure (with-output-to-string (*standard-output*) (luv.wiki.cli:run '("figure" "F2N8VX")))))
+    (ok (search "The luv workshop wiki  (index.org)" toc))
+    (ok (search "  F2N8VX  String figures" toc))
+    (ok (search "DONE" marks))
+    (ok (search "String figures" figure))
+    (ok (search "Mentioned in:" figure))))

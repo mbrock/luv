@@ -1,0 +1,21 @@
+#!/bin/sh
+# The wiki from a shell: scripts/wiki help.  Builds build/wiki-cli with ASDF
+# when the tooling changed, then runs it in the luv development shell.
+
+set -eu
+
+project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+
+if [ "${LUV_NIX_SHELL:-}" != 1 ]; then
+  exec nix develop "$project_root" --command "$project_root/scripts/wiki" "$@"
+fi
+
+exe="$project_root/build/wiki-cli"
+stale=$(find "$project_root"/wiki-*.lisp "$project_root"/luv-wiki.asd -newer "$exe" 2>/dev/null || true)
+if [ ! -x "$exe" ] || [ -n "$stale" ]; then
+  echo "wiki: building $exe" >&2
+  sbcl --script "$project_root/build-wiki.lisp" >/dev/null 2>&1 \
+    || sbcl --script "$project_root/build-wiki.lisp"
+fi
+
+LUV_ROOT="$project_root" exec "$exe" "$@"

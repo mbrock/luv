@@ -2,7 +2,8 @@
 ;;;; because luv/wiki names it in :defsystem-depends-on, which ASDF cannot
 ;;;; resolve to a system defined in the very file being loaded.
 
-(asdf:load-asd (merge-pathnames "luv-wiki.asd" (or *load-truename* *default-pathname-defaults*)))
+(unless (asdf:registered-system "luv-wiki")
+  (asdf:load-asd (merge-pathnames "luv-wiki.asd" (or *load-truename* *default-pathname-defaults*))))
 
 (asdf:defsystem #:luv
   :description "An experimental Common Lisp atelier for Vulkan."

@@ -20,6 +20,7 @@ component and operation that make the wiki a buildable system."
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on (#:luv-wiki
+               #:luv-wiki/cli
                #:luv/wiki
                #:rove)
   :components ((:module "tests"
@@ -31,3 +32,14 @@ component and operation that make the wiki a buildable system."
                       (uiop:symbol-call
                        '#:rove '#:find-suite '#:luv-wiki/tests))
                (error "luv wiki tests failed"))))
+
+(asdf:defsystem #:luv-wiki/cli
+  :description "The ./wiki command: table of contents, work marks, figures,
+mentions, definitions, and the site build from a shell."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on (#:luv-wiki)
+  :components ((:file "wiki-cli"))
+  :build-operation "program-op"
+  :build-pathname "build/wiki-cli"
+  :entry-point "luv.wiki.cli:main")
