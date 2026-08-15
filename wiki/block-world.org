@@ -463,7 +463,7 @@ pull a later item forward.
   mean, which operations are lawful, and where units enter or leave.
 - [[file:physics-and-simd.org][Physics data and SIMD execution]] asks how a CLOS engine can feed wide
   numerical kernels without turning bodies into tiny dispatching objects.
-- [[file:completion-frontier.org][The queue completion frontier]] remains relevant whenever derived GPU
+- [[file:gpu-architecture.org][The queue completion frontier]] remains relevant whenever derived GPU
   products outlive the Lisp frame that submitted them.
 
 * Questions to keep open

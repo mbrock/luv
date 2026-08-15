@@ -192,9 +192,9 @@ scripts/luv block-world /tmp/luv-block-world-frames/ --count 6
 ## Notes
 
 The workshop wiki starts at [`wiki/index.org`](wiki/index.org). It is the right
-place for longer explanations of WebGPU-shaped semantics, Vulkan lifetime
-decisions, frame slots, the block world, source studies, and other evolving
-design notes. It is also rendered as a static site at
+place for the current GPU architecture and backend proofs, the block world,
+source studies, and other evolving design notes. It is also rendered as a
+static site at
 <https://mbrock.github.io/luv/>; `make wiki` (or `(asdf:make :luv/wiki)`)
 builds it into `build/wiki/`.
 

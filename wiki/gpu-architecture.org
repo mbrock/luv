@@ -1,0 +1,369 @@
+#+title: The GPU API and its backend proofs
+#+startup: overview
+
+* Contract, mechanism, and open proof stay distinct
+:PROPERTIES:
+:ID: V9H2RK
+:END:
+
+This is the current map of luv's GPU layer.  It follows the portable command
+vocabulary through the Vulkan and Metal implementations, with particular
+attention to asynchronous work, ownership, synchronization, and destruction.
+Older implementation snapshots and the sequence of experiments that produced
+this arrangement remain available in Git; they are not separate entry points
+in the living wiki.
+
+Three kinds of statement appear below:
+
+- A *portable contract* is observable through =gpu/api.lisp=, such as the
+  documented asynchronous meaning of =submit=.
+- A *backend proof* is the concrete ownership or synchronization mechanism by
+  which one implementation upholds some part of that contract.
+- An *open proof* is a useful name or operation whose current implementations
+  do not yet establish a complete backend-neutral guarantee.
+
+This distinction matters because a WebGPU-shaped name is not itself a WebGPU
+promise, and a working Vulkan or Metal path is not by itself a portable
+contract.  The source links and limitations on this page are part of the map,
+not footnotes to it.
+
+* The portable GPU API is a tested seam, not a complete contract
+:PROPERTIES:
+:ID: A7N4XP
+:END:
+
+The ASDF systems now make the intended boundaries literal:
+
+#+begin_example
+luv/gpu/api                     descriptors, commands, generic operations
+       |\
+       | +--> luv/gpu/vulkan --> luv/vulkan --> owned Vulkan ABI
+       |
+       `----> luv/gpu/metal ----> luv/metal ---> Objective-C / Metal 4
+
+luv/canvas/api --> luv/canvas/sdl --> backend presentation context
+#+end_example
+
+[[file:../gpu/api.lisp][=gpu/api.lisp=]] contains no Vulkan or Metal calls.  It names providers,
+devices, queues, resources, descriptors, command structs, encoders, passes,
+=finish=, =submit=, =submitted-work-done=, host reads and writes, and explicit
+=destroy=.  Presentation remains in the separate [[file:../canvas/api.lisp][canvas protocol]].
+
+Both backends now render the block world through much of this vocabulary, so
+the seam is no longer hypothetical.  They do not yet implement equal surfaces:
+Vulkan has general command encoders, finished command buffers, and public
+=submit=, while Metal's working command encoder is currently created and
+committed inside the canvas frame path.  The second backend has tested the
+names and exposed their assumptions; it has not certified the whole interface
+as uniformly implemented.
+
+This is a useful small-system boundary.  It permits direct backend composition
+and does not require a capability framework, adapter hierarchy, or lowest
+common denominator before a concrete need appears.
+
+* WebGPU is a landmark, not luv's specification
+:PROPERTIES:
+:ID: W6P3JH
+:END:
+
+Luv began with a deliberately WebGPU-shaped vocabulary because WebGPU makes
+several hard GPU obligations unusually visible: commands are validated future
+actions, usage declarations carry advance information, submission is
+asynchronous, and logical object state is distinct from physical native
+lifetime.  It is a source of questions and worked semantics, not an authority
+that luv implements by resemblance.
+
+Current luv deliberately shares some of that shape:
+
+- command and pass scopes are explicit;
+- finished Vulkan command buffers are one-shot;
+- recorded commands name semantic usages rather than native barriers;
+- =submit= is documented as scheduling rather than completion;
+- =submitted-work-done= names an explicit completion wait; and
+- resource wrappers have explicit invalid states and explicit destruction.
+
+Luv does not currently promise WebGPU's adapter and limit model, validation
+scopes, device-loss model, mapping state machine, deterministic zero
+initialization, browser security boundary, or complete usage-scope rules.
+Those omissions are decisions still to make or work still to prove, not
+implicit inheritance from the borrowed nouns.
+
+The useful reading discipline is therefore: ask what observable promise a
+name makes in luv, then identify the component that owns its proof.  When
+there is no such component, the resemblance is only vocabulary.
+
+* GPU work crosses several timelines
+:PROPERTIES:
+:ID: T4V8QM
+:END:
+
+The caller can finish describing a command before the queue accepts it, and
+the queue can accept it before the GPU finishes executing it.  These are
+orders of events, not necessarily distinct OS threads:
+
+#+begin_src mermaid
+flowchart LR
+  A["application creates and encodes"] --> B["finished command owns recorded work"]
+  B --> C["queue submission owns in-flight work"]
+  C --> D["completion frontier passes submission"]
+  D --> E["backend may retire retained native state"]
+#+end_src
+
+The generic =submit= documentation states the consequence directly: returning
+does not mean GPU completion; the implementation must retain everything the
+work depends on until it completes.  =submitted-work-done= blocks at the
+queue's current completion point when a caller really needs that proof.
+
+This separation is why several tempting equations are wrong.  A Lisp object
+becoming unreachable is not GPU completion.  A wrapper being marked destroyed
+is not necessarily native release.  The end of a presented frame is not a
+general reclamation boundary.  A completion proof also says nothing by itself
+about whether the right memory barriers were encoded.
+
+* Inspectable commands are protocol inputs, not a retained command IR
+:PROPERTIES:
+:ID: D8F3QM
+:END:
+
+The portable command structs and double dispatch through =encode= and
+=enqueue= are a real architectural seam.  Command kinds are separated by
+scope: queue, command encoder, render pass, and compute pass.  Convenience
+functions such as =draw= and =prepare-texture= merely construct those command
+objects.  Unsupported command/encoder pairs fail through the generic
+fallback, so a backend grows by specializing concrete relationships rather
+than extending one opcode switch.
+
+The objects are nevertheless transient inputs.  Vulkan lowers each command
+immediately into a native command buffer; =finish= transfers the command pool,
+temporary native resources, texture-layout facts, and retained wrappers into
+a one-shot =vulkan-gpu-command-buffer=.  It does not preserve the high-level
+command sequence for replay or another lowering.  Metal likewise interprets
+commands immediately in its live frame encoder and currently has no portable
+finished command-buffer product.
+
+That choice is coherent as long as the purpose is legible dispatch,
+validation, tracing, and dependency capture.  A durable backend-independent
+command IR would be a different feature with different ownership and
+transformation requirements; the current structs should not be described as
+one merely because they are inspectable while dispatched.
+
+* Recorded and submitted work must own their dependencies
+:PROPERTIES:
+:ID: L8R2WF
+:END:
+
+One GPU resource participates in several overlapping lifetimes:
+
+1. application code can still reach its Lisp wrapper;
+2. the wrapper is logically valid for new operations;
+3. an encoder or finished command may retain it as a recorded dependency;
+4. a queue submission may retain it for work the GPU can still execute; and
+5. its native object and allocation can finally be released.
+
+Vulkan makes those ownership transfers explicit.  Encode methods retain every
+wrapper referenced by the current command vocabulary: pipelines, bind groups,
+views, samplers, buffers, and textures.  =finish= moves the set into the
+command buffer.  Submission stamps the wrappers with the new submission index
+and keeps the command buffers and their captured resources in a queue-owned
+record until completion.
+
+Metal currently proves a narrower property.  Its shared-event submission
+record retains each committed Metal 4 command buffer and command allocator;
+the device residency set makes allocations resident, and explicit destruction
+of substantial resources waits for the queue frontier before removing or
+releasing them.  The general transitive capture and asynchronous public-submit
+contract proven by Vulkan does not yet exist as the same Lisp-level mechanism
+on Metal.
+
+Garbage collection concerns only the first lifetime.  It cannot replace the
+recorded and submitted ownership edges, and native API retention cannot by
+itself give a Lisp wrapper a useful logical destroyed state.
+
+* Each backend has a completion frontier of a different extent
+:PROPERTIES:
+:ID: T9K4RC
+:END:
+
+Both live backends now represent completed work as a monotonically valued
+queue frontier, but the records attached to that frontier are different.
+
+| | Vulkan | Metal 4 |
+|-
+| Native completion value | timeline semaphore | shared event |
+| Submitted value | queue submission index | queue submission value |
+| Retained until completion | command buffers, captured wrappers, native temporaries, deferred destroys | frame command buffer and allocator |
+| General public =submit= | yes | not yet |
+| Maintenance points | submission and explicit wait | submission and explicit wait |
+
+[[file:../gpu/vulkan.lisp::(defun submit-vulkan-command-buffers][=submit-vulkan-command-buffers=]] signals the queue timeline, installs a
+=vulkan-gpu-submission= record, and returns its index.  Queue maintenance reads
+the semaphore counter and retires the completed prefix.  Vulkan 1.4,
+=vkQueueSubmit2=, timeline semaphores, and synchronization2 are deliberate
+minimums; there is no fence or legacy-submit fallback.
+
+[[file:../gpu/metal.lisp::(defun submit-metal-command-buffer][=submit-metal-command-buffer=]] commits one Metal 4 command buffer, registers
+its command buffer and allocator before presentation can fail, and signals a
+shared event afterward.  Reclamation releases those two native objects when
+the event value passes them.  The current Metal page #NABRMK follows that
+backend's larger compiler and rendering story.
+
+Neither queue polls in the background.  If no later submission or explicit
+wait occurs, a completed record can remain retained until the next maintenance
+point.  That is delayed reclamation, not unsafe reclamation.
+
+* Vulkan destroy is logically immediate and physically conditional
+:PROPERTIES:
+:ID: D3H7VK
+:END:
+
+Vulkan's resource classes implement the cleanest form of =destroy= in the
+current system.  The operation marks the wrapper destroyed immediately, so no
+new command can mention it, then compares its last submitted use with the
+queue frontier.  Native teardown happens immediately if safe or is attached
+to the still-live submission record that last used it.  Retiring that record
+performs the deferred teardown.
+
+This division is essential rather than stylistic.  Native Vulkan destruction
+requires every submitted use to have completed, while a pleasant API should
+not make every explicit destroy drain the queue.  Complete command dependency
+capture is what makes the deferred half safe.
+
+Metal has not yet adopted this exact contract.  Destroying a substantial
+Metal buffer, texture, sampler, shader module, or pipeline conservatively
+waits for the shared-event frontier before releasing the native object; only
+then is the wrapper marked destroyed.  Lightweight semantic wrappers may only
+change logical state.  Thus =destroy= is a shared verb today, but logical
+immediacy is a proven Vulkan property rather than a portable guarantee.
+
+* Explicit destruction is the discipline; collection is only a safety net
+:PROPERTIES:
+:ID: G6C2TX
+:END:
+
+Every backend wrapper has an explicit destroyed state.  That gives a live Lisp
+object an invalid state which later operations can reject; continued CLOS
+reachability does not make a destroyed GPU object usable.
+
+Vulkan wrappers also install finalizers.  Explicit destruction cancels the
+finalizer.  If the collector instead finds a live wrapper, the finalizer warns
+with =gpu-resource-leaked=, records the condition in
+=*leaked-gpu-resources*=, and reclaims the native object.  Submission records
+hold in-flight wrappers strongly, so a collected wrapper is already past the
+frontier.  The finalizer closure captures extracted native handles and the
+device wrapper rather than the resource wrapper itself; this both avoids a
+self-retaining finalizer and keeps the device reachable through child
+teardown.
+
+Metal currently has explicit destruction but not the equivalent finalizer
+audit.  Dropping the last Lisp reference without =destroy= can therefore leak
+native ownership without a warning.  Device destruction waits for its queue,
+but neither backend maintains a general child registry that turns device
+teardown into automatic orderly destruction of every still-live wrapper.
+
+The portable discipline is consequently simple and honest: callers explicitly
+destroy what they create.  Vulkan's collector path is failure recovery and a
+REPL diagnostic, not the normal resource manager.
+
+* Vulkan frame slots are pacing clients of the frontier
+:PROPERTIES:
+:ID: M6P8XW
+:END:
+
+The Vulkan canvas keeps a bounded ring of frame slots.  Each slot owns an
+image-acquisition binary semaphore and, while occupied, the frame's command
+buffer plus its queue submission index.  Reusing a slot waits for the queue
+frontier to reach that index, then destroys the retained command buffer.
+Render-finished semaphores are indexed separately by acquired swapchain image.
+
+The distinction is load-bearing:
+
+- the queue frontier proves when submitted dependencies may retire;
+- binary semaphores coordinate swapchain acquisition and presentation; and
+- the slot count bounds how far CPU frame production can run ahead.
+
+Because Vulkan resource destruction now defers through the general queue
+records, the slot wait is a pacing choice rather than a second lifetime
+system.  A resource can also be used by compute or copy work with no frame at
+all, so “end of frame” is not the general reclamation unit.
+
+Metal presentation has no parallel Lisp frame-slot abstraction.  Its drawable
+pool bounds presentation resources, while the queue's shared-event records
+retain command memory independently.  The native Metal page describes the
+backend-specific frame path and its next reclamation step #JAM5XR.
+
+* Usage names hazards; each backend still owns the synchronization proof
+:PROPERTIES:
+:ID: X2D7MF
+:END:
+
+Descriptors and recorded commands give the backend advance information:
+buffer and texture usage, attachment roles, bindings, copy directions, and the
+semantic destination of =prepare-texture=.  Application code does not emit
+Vulkan stage masks or Metal barriers directly.  That simplicity relocates the
+proof into each backend.
+
+Vulkan currently tracks one scheduled layout for each whole texture.  An
+encoder records the initial layout it assumed and its final layouts; submit
+validates those assumptions against earlier queued work, installs the new
+scheduled state, and emits a synchronization2 image barrier when the layout
+changes.  This fits today's single-mip, single-layer textures.  It is not a
+complete access-hazard model: two uses can remain in =general= while a write
+followed by a read still needs a memory dependency.
+
+Metal emits concrete barriers for the command relationships exercised by the
+renderer, including producer/consumer transitions installed by
+=prepare-texture=.  It likewise does not maintain a general subresource access
+history derived from all usage scopes.
+
+The completion frontier proves that old work has finished.  It does not prove
+that work was ordered correctly while in flight.  Lifetime capture, scheduled
+state, and access hazards are related bookkeeping, but none can stand in for
+the other two.
+
+* Host access is still a deliberately narrow path
+:PROPERTIES:
+:ID: B9Q4LC
+:END:
+
+Both backends create CPU-visible buffers and keep them mapped: Vulkan uses
+host-visible coherent memory; Metal uses shared storage.  =write-buffer=
+copies a one-dimensional =single-float= array into that mapping.  It does not
+wait, acquire a mapped state, track a byte range, or exclude simultaneous GPU
+reads.  Current rendering code supplies the missing rule by rotating
+per-frame or per-drawable buffers and writing only the one safe for the frame.
+
+=read-buffer= is conservative in the other direction: it calls
+=submitted-work-done= for the whole device queue, then copies bytes from the
+mapping.  There is no per-buffer last-use wait or asynchronous mapping
+callback.
+
+This is useful, executable functionality, not yet a general memory model.  In
+particular luv does not currently promise a WebGPU-like mapped/unmapped state
+machine, staging and readback policy, cache policy beyond the chosen storage,
+or deterministic zero initialization.  Those contracts should be added only
+with an owner and a testable exclusion rule.
+
+* The remaining questions are local and testable
+:PROPERTIES:
+:ID: V3N7QJ
+:END:
+
+The architecture no longer needs a speculative rewrite to become clearer.
+Its open proofs are adjacent to working mechanisms:
+
+- give Metal a general finished command buffer and public asynchronous
+  =submit=, or explicitly narrow the portable contract;
+- let Metal retire replaced resources through its frontier instead of waiting
+  in each substantial =destroy= (#JAM5XR);
+- make dependency capture completeness visible when a new command kind is
+  added;
+- grow texture state into the access-hazard model demanded by real workloads;
+- give host writes and reads a resource-specific exclusion protocol;
+- decide what adapter selection, capabilities, device loss, and initialization
+  guarantees luv actually wants; and
+- reclaim completed records during long idle periods only if measurement says
+  the current maintenance points retain too much.
+
+Each item can be proved through one concrete caller and one backend path.  The
+current seams are small enough that this is preferable to importing a generic
+resource manager or treating WebGPU conformance as the design goal.

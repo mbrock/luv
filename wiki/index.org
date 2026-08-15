@@ -101,21 +101,15 @@ The following are starting paths rather than a table of settled doctrine.
 :ID: G4R8PU
 :END:
 
-- [[file:webgpu-shape.org][Why WebGPU has this shape]] begins with the API as a portable contract over
-  asynchronous execution.
-- [[file:resource-lifetimes.org][Resource lifetimes and reclamation]] separates public object state from
-  physical GPU lifetime and follows destruction, mapping, and completion.
-- [[file:commands-and-usage.org][Commands, usage, and hidden synchronization]] asks what command recording
-  and usage declarations buy an implementation.
-- [[file:frame-slots.org][Frame slots as a luv case study]] revisits a recent implementation change
-  without promoting it into doctrine.
+- [[file:gpu-architecture.org][The GPU API and its backend proofs]] is the current architectural map.  It
+  follows the portable command vocabulary through Vulkan and Metal, separates
+  WebGPU influence from luv's actual contract, and names the concrete proofs
+  for dependency capture, completion, destruction, frame pacing,
+  synchronization, and host access.
 - [[file:frame-performance.org][Seeing a frame on the CPU]] separates instrumented CPU zones, drawable
   pacing, submission completion, and eventual GPU timestamps.  It records the
   current luvcraft/Metal trace and the backend-neutral command seam exposed by
   that work.
-- [[file:luv-vulkan-hal.org][Field notes on the pre-split Vulkan HAL]] preserves a source study of the
-  earlier stack and marks where later ASDF boundaries, completion-frontier
-  work, and the Metal implementation have superseded its snapshot.
 - [[file:mathematical-shaders.org][Mathematical shaders as live Lisp objects]] records the typed expression
   language above the literal SPIR-V assembler, its deterministic CLOS
   lowering, and the McCLIM presentation browser connecting source to SSA.
@@ -123,13 +117,8 @@ The following are starting paths rather than a table of settled doctrine.
   direct message sends, explicit native ownership, opt-in trace events, and
   the diagnostic scope that turns native exceptions into Lisp conditions.
 - [[file:metal-backend.org][The native Metal 4 backend]] is the canonical implementation path: the
-  validated SDL/CAMetalLayer clear, its correspondence with the Vulkan model,
-  direct MSL lowering, =MTL4Compiler=, and the remaining live-pipeline join.
-- [[file:completion-frontier.org][The queue frontier and modern-capabilities decision]] records the adoption
-  of Vulkan 1.4, timeline semaphores, and a per-queue completion frontier
-  that captures command dependencies, defers destruction, and makes public
-  submission asynchronous.  Explicit destroy remains the contract; leaked
-  references are warned about and reclaimed by finalizers.
+  SDL/CAMetalLayer frame path, direct MSL lowering, =MTL4Compiler=, argument
+  tables, the live luvcraft pipeline, and its remaining backend-local work.
 
 ** The little block world
 :PROPERTIES:
@@ -184,8 +173,9 @@ The following are starting paths rather than a table of settled doctrine.
   site: the Org subset the reader understands, why the build is an ASDF
   operation on =org-file= components, and the Spinneret rendering choices.
 
-A useful first crossing is from the timeline distinction #T4V8QM to the five
-different senses of lifetime in #L8R2WF, then to the frame-slot episode
-#R3V8HC.  That path explains why “the Lisp object is no longer wanted,” “the
-API object is destroyed,” and “Vulkan may free the allocation” are not the
-same event.
+A useful first crossing is from the timeline distinction #T4V8QM to the
+ownership phases in #L8R2WF, then to Vulkan's logical/physical destruction
+split #D3H7VK and the frame slots that became pacing clients #M6P8XW.  That
+path explains why “the Lisp object is no longer wanted,” “the API object is
+destroyed,” and “the backend may release the allocation” are not the same
+event.
