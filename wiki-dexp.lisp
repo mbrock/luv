@@ -17,6 +17,9 @@
 (defvar *lisp-package* nil
   "The package prefix considered current while rendering, hidden on symbols.")
 
+(defvar *docstring-p* nil
+  "True while rendering a string in documentation position.")
+
 (defparameter *operator-head-counts*
   '(("defun" . 2) ("defmacro" . 2) ("defgeneric" . 2) ("defclass" . 3)
     ("defstruct" . 1) ("deftype" . 2) ("define-condition" . 3) ("defpackage" . 1)
@@ -95,9 +98,16 @@ child, and whether body children of LIST are themselves clauses."
     (multiple-value-bind (bindings-index clauses-p) (list-clause-roles list)
       ;; Comments do not count as arguments when assigning roles.
       (loop with i = -1
+            with previous = nil
             for child in (element-children list)
             do (unless (typep child 'lisp-comment) (incf i))
-               (let ((*lisp-role*
+               (let ((*docstring-p*
+                       (and (typep child 'lisp-string)
+                            (or (and body-start (= i body-start) (defining-operator-p (or (symbol-node-name (first (element-children list))) "")))
+                                (and (typep previous 'lisp-symbol)
+                                     (equal (lisp-symbol-package previous) "KEYWORD")
+                                     (string-equal (lisp-symbol-name previous) "documentation")))))
+                     (*lisp-role*
                        (cond ((typep child 'lisp-comment) nil)
                              ((and bindings-index (= i bindings-index)) "bindings")
                              ((and body-start (>= i body-start))
@@ -108,7 +118,10 @@ child, and whether body children of LIST are themselves clauses."
                                                 :test #'equal)))
                               "operator")
                              (t nil))))
-                 (render-html child))))))
+                 (render-html child))
+               (unless (typep child 'lisp-comment) (setf previous child))))))
+
+
 
 (defun render-text-with-mentions (text)
   "Write TEXT, turning #ID figure mentions into links like prose does."
@@ -174,9 +187,61 @@ child, and whether body children of LIST are themselves clauses."
 (defmethod render-html ((atom lisp-atom))
   (spinneret:with-html (:span :class (role-class "atom") (node-text atom))))
 
+(defun render-code-prose (text)
+  "Render TEXT, the content of a docstring or comment, as wiki prose:
+paragraphs, lists, and inline markup, with #ID mentions as links."
+  (let ((*prose-from-code* t))
+    (dolist (block (read-blocks (coerce (uiop:split-string text :separator '(#\Newline)) 'vector)))
+      (render-html block))))
+
+(defun string-node-content (string)
+  "The characters of a string literal STRING, without the quotes and with
+\\\" and \\\\ escapes undone."
+  (let ((text (node-text string)))
+    (with-output-to-string (out)
+      (loop with i = 1
+            while (< i (1- (length text)))
+            do (let ((c (char text i)))
+                 (if (and (char= c #\\) (< (1+ i) (1- (length text))))
+                     (progn (write-char (char text (1+ i)) out) (incf i 2))
+                     (progn (write-char c out) (incf i))))))))
+
+(defun dedent (text)
+  "Remove the indentation common to every non-blank line after the first."
+  (let* ((lines (uiop:split-string text :separator '(#\Newline)))
+         (rest (remove-if #'blank-line-p (rest lines)))
+         (indent (if rest (reduce #'min (mapcar #'indentation rest)) 0)))
+    (format nil "~{~A~^~%~}"
+            (cons (first lines)
+                  (mapcar (lambda (line) (subseq line (min indent (length line))))
+                          (rest lines))))))
+
 (defmethod render-html ((string lisp-string))
-  (spinneret:with-html
-    (:span :class (role-class "string") (render-text-with-mentions (node-text string)))))
+  (let ((text (node-text string)))
+    (spinneret:with-html
+      (if (or *docstring-p* (find #\Newline text))
+          ;; Documentation, or any multi-line string, is rendered as prose.
+          (:div :class (role-class "string" "prose")
+                (render-code-prose (dedent (string-node-content string))))
+          (:span :class (role-class "string") (render-text-with-mentions text))))))
+
+(defun comment-content (comment)
+  "The text of COMMENT without its ; prefixes or #| |# delimiters."
+  (let ((text (node-text comment)))
+    (if (starts-with "#|" text)
+        (string-trim '(#\Space #\Newline)
+                     (subseq text 2 (max 2 (- (length text) (if (ends-with "|#" text) 2 0)))))
+        (format nil "~{~A~^~%~}"
+                (mapcar (lambda (line)
+                          (let* ((line (string-left-trim '(#\Space #\Tab) line))
+                                 (semis (or (position-if-not (lambda (c) (char= c #\;)) line)
+                                            (length line))))
+                            (string-left-trim '(#\Space) (subseq line semis))))
+                        (uiop:split-string text :separator '(#\Newline)))))))
+
+(defun ends-with (suffix string)
+  (and (>= (length string) (length suffix))
+       (string= suffix string :start2 (- (length string) (length suffix)))))
 
 (defmethod render-html ((number lisp-number))
   (spinneret:with-html (:span :class (role-class "number") (node-text number))))
@@ -210,7 +275,8 @@ child, and whether body children of LIST are themselves clauses."
 
 (defmethod render-html ((comment lisp-comment))
   (spinneret:with-html
-    (:span :class (role-class "comment") (render-text-with-mentions (node-text comment)))))
+    (:div :class (role-class "comment" "prose")
+          (render-code-prose (comment-content comment)))))
 
 (defmethod render-html ((skipped lisp-skipped))
   (spinneret:with-html

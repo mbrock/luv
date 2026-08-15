@@ -244,7 +244,7 @@ Nothing here refers to anything.
     (ok (search "<div class=\"body list\" data-callee=let>" html))
     (ok (search "<div class=\"bindings list\">" html))
     (ok (search "<div class=\"clause list\" data-callee=y><span class=symbol data-symbol-name=Y>" html))
-    (ok (search "<span class=comment>;; c</span>" html))
+    (ok (search "<div class=\"comment prose\"><p>c</div>" html))
     (ok (search "<span class=\"symbol keyword\" data-symbol-name=K><span class=package>:</span><span class=name>k</span></span>" html))
     (ok (search "<span class=string>&quot;s&quot;</span>" html))
     ;; Eclector recovers from unbalanced input, so boxes still appear;

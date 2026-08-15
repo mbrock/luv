@@ -438,3 +438,51 @@ a.github {
 body.source-page {
   max-width: 62rem;
 }
+
+/* Docstrings and comments as prose inside the boxes */
+
+.lisp .prose {
+  flex-basis: 100%;
+  white-space: normal;
+  font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+  font-size: 0.95em;
+  line-height: 1.45;
+  max-width: 40rem;
+}
+
+.lisp .prose p {
+  margin: 0.15em 0 0.35em;
+}
+
+.lisp .prose p:last-child,
+.lisp .prose ul:last-child {
+  margin-bottom: 0.1em;
+}
+
+.lisp .prose ul,
+.lisp .prose ol {
+  margin: 0.2em 0;
+  padding-left: 1.2rem;
+}
+
+.lisp .prose code {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.85em;
+}
+
+.lisp .string.prose {
+  color: var(--mark-done);
+  padding-left: 0.6em;
+  border-left: 2px solid color-mix(in srgb, var(--mark-done) 40%, transparent);
+}
+
+.lisp .comment.prose {
+  color: var(--muted);
+  font-style: italic;
+  padding-left: 0.6em;
+  border-left: 2px solid var(--rule);
+}
+
+.lisp .comment.prose code {
+  font-style: normal;
+}

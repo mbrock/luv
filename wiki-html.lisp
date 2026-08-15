@@ -281,7 +281,7 @@ repository points at the source on GitHub; anything else is unresolved."
   (let* ((path (link-path link))
          (org-p (and (> (length path) 4) (string= ".org" path :start2 (- (length path) 4)))))
     (cond ((and org-p (not (find #\/ path)))
-           (concatenate 'string (subseq path 0 (- (length path) 4)) ".html"))
+           (concatenate 'string *page-prefix* (subseq path 0 (- (length path) 4)) ".html"))
           ((starts-with "../../" path) nil)
           ((starts-with "../" path)
            (concatenate 'string (site-source-url *site*) (subseq path 3)))
@@ -330,7 +330,7 @@ summary, and the form drawn as dexp boxes inside."
   "A bare [[target]] with no scheme is a wiki page name if a page exists."
   (let ((name (link-path link)))
     (when (and *site* (find name (site-documents *site*) :key #'document-name :test #'string=))
-      (concatenate 'string name ".html"))))
+      (concatenate 'string *page-prefix* name ".html"))))
 
 (defmethod render-html ((link link))
   (let* ((protocol (and (link-protocol link)

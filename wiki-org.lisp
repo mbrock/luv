@@ -265,6 +265,10 @@
           ;; a stray "]]" inside it cannot fool us here.
           (values link (+ close 2)))))))
 
+(defvar *prose-from-code* nil
+  "True while reading docstrings and comments as prose: there *name*
+without spaces is a Lisp special variable and reads as code, not bold.")
+
 (defun read-emphasis (string start)
   "If an emphasis span begins at START, return (values emphasis end)."
   (let* ((marker (char string start))
@@ -286,12 +290,17 @@
                            (emphasis-post-char-p (char-after string end)))
                       (let ((inner (subseq string (1+ start) end)))
                         (return
-                          (values (make-instance
-                                   'emphasis
-                                   :kind kind
-                                   :children (if (member kind '(:verbatim :code))
-                                                 (list inner)
-                                                 (read-inlines inner)))
+                          (values (if (and *prose-from-code* (eq kind :bold)
+                                           (notany (lambda (c) (member c '(#\Space #\Tab #\Newline)))
+                                                   inner))
+                                      (make-instance 'emphasis :kind :code
+                                                     :children (list (subseq string start (1+ end))))
+                                      (make-instance
+                                       'emphasis
+                                       :kind kind
+                                       :children (if (member kind '(:verbatim :code))
+                                                     (list inner)
+                                                     (read-inlines inner))))
                                   (1+ end))))))))))
 
 (defun read-inlines (string)
