@@ -178,7 +178,7 @@
    (uiop:ensure-directory-pathname directory)))
 
 (defun capture-luvcraft-gazetteer-view
-    (view directory &key width height)
+    (view directory &key width height (provider *gpu-provider*))
   "Capture one gazetteer VIEW into DIRECTORY and return the PNG pathname."
   (let* ((view (if (typep view 'luvcraft-gazetteer-view)
                    view
@@ -195,6 +195,7 @@
      :title (luvcraft-gazetteer-view-title view)
      :width (or width (luvcraft-gazetteer-view-width view) 960)
      :height (or height (luvcraft-gazetteer-view-height view) 640)
+     :provider provider
      :world world
      :camera camera
      :sky-clock sky-clock
@@ -202,19 +203,21 @@
     pathname))
 
 (defun capture-luvcraft-gazetteer
-    (directory &key views width height)
+    (directory &key views width height (provider *gpu-provider*))
   "Capture VIEWS, or every known gazetteer view, into DIRECTORY."
   (let ((views (if views
                    (mapcar #'find-luvcraft-gazetteer-view views)
                    (luvcraft-gazetteer-views))))
     (loop for view in views
           collect (capture-luvcraft-gazetteer-view
-                   view directory :width width :height height))))
+                   view directory :width width :height height
+                   :provider provider))))
 
 (defun capture-luvcraft-gazetteer-sequence
     (view directory &key (count 4) (forward-step 0.2) (yaw-step 0.0)
                          day-start (day-step 0.0) difference-scale
-                         shadow-diagnostic-p width height)
+                         shadow-diagnostic-p width height
+                         (provider *gpu-provider*))
   "Capture one gazetteer VIEW as a consecutive spatial or temporal sequence."
   (let* ((view (if (typep view 'luvcraft-gazetteer-view)
                    view
@@ -231,6 +234,7 @@
      :day-start day-start :day-step day-step
      :difference-scale difference-scale
      :shadow-diagnostic-p shadow-diagnostic-p
+     :provider provider
      :pathname-prefix
      (string-downcase (symbol-name (luvcraft-gazetteer-view-name view)))
      :title (luvcraft-gazetteer-view-title view)

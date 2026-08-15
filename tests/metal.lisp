@@ -399,3 +399,33 @@
         (when allocator
           (objc:release-objective-c-object allocator)))
       (destroy device))))
+
+(deftest luvcraft-metal-frame-resources-follow-the-drawable-pool
+  (call-with-sdl-main-thread
+   (lambda ()
+     (let ((session nil))
+       (unwind-protect
+            (progn
+              (setf session
+                    (start-luvcraft
+                     :provider (make-instance 'metal-gpu-provider)
+                     :world (luv::make-gazetteer-shadow-yard-world)
+                     :residency-radius 0
+                     :visible-p nil :frames-per-second nil
+                     :width 160 :height 100))
+              (wait-for-luvcraft-products session :minimum 1)
+              (let ((resources-before
+                      (length (luv::luvcraft-session-resources session))))
+                (dotimes (index 8)
+                  (luv::render-luvcraft-frame
+                   session (* index (/ 1d0 60d0))))
+                (submitted-work-done
+                 (device-queue (luv::luvcraft-session-device session)))
+                (let ((state-count
+                        (hash-table-count
+                         (luv::luvcraft-session-frame-states session))))
+                  (ok (<= 1 state-count 3))
+                  (ok (= (length (luv::luvcraft-session-resources session))
+                         (+ resources-before (* 3 state-count)))))))
+         (when session
+           (stop-luvcraft session)))))))

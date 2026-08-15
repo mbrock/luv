@@ -166,7 +166,10 @@ the frame uniform cannot silently diverge between shader and host."
   resource)
 
 (defun luvcraft-frame-state (session surface-texture)
-  (or (gethash surface-texture (luvcraft-session-frame-states session))
+  (let ((key
+          (canvas-frame-resource-key
+           (luvcraft-session-context session) surface-texture)))
+    (or (gethash key (luvcraft-session-frame-states session))
       (let ((buffer nil)
             (scene-bind-group nil)
             (shadow-bind-group nil)
@@ -218,7 +221,7 @@ the frame uniform cannot silently diverge between shader and host."
                         :uniform-buffer buffer
                         :scene-bind-group scene-bind-group
                         :shadow-bind-group shadow-bind-group)))
-                 (setf (gethash surface-texture
+                 (setf (gethash key
                                 (luvcraft-session-frame-states session))
                        state
                        completed-p t)
@@ -226,7 +229,7 @@ the frame uniform cannot silently diverge between shader and host."
           (unless completed-p
             (when shadow-bind-group (destroy shadow-bind-group))
             (when scene-bind-group (destroy scene-bind-group))
-            (when buffer (destroy buffer)))))))
+            (when buffer (destroy buffer))))))))
 
 (defgeneric prepare-luvcraft-shadow-map-sampling (session encoder)
   (:documentation
@@ -241,9 +244,19 @@ the frame uniform cannot silently diverge between shader and host."
 
 (defmethod prepare-luvcraft-shadow-map-sampling
     (session (encoder metal-frame-command-encoder))
-  (declare (ignore session encoder))
-  ;; Metal render-pass and argument-table usage describes this relationship;
-  ;; there is no Vulkan-style image layout transition to encode.
+  (declare (ignore session))
+  ;; Metal 4 queues do not perform the ordinary MTLResource hazard tracking.
+  ;; The next render encoder consumes the depth texture in its fragment stage,
+  ;; so install the consumer barrier there, as close to the sampling draws as
+  ;; the MTL4CommandEncoder contract requests.
+  (when (metal-encoder-pending-consumer-barrier encoder)
+    (error 'gpu-invalid-state-error :object encoder
+           :operation :prepare-shadow-sampling
+           :state :consumer-barrier-pending :expected-state :between-passes))
+  (setf (metal-encoder-pending-consumer-barrier encoder)
+        (list luv.metal:+stage-fragment+
+              luv.metal:+stage-fragment+
+              luv.metal:+visibility-device+))
   (values))
 
 (defun encode-luvcraft-frame

@@ -4,7 +4,8 @@
   (multiple-value-bind (positionals options)
       (parse-keyword-options
        arguments
-       `(("--count" :count ,#'parse-integer-option)
+       `(("--backend" :backend ,#'parse-backend-option)
+         ("--count" :count ,#'parse-integer-option)
          ("--width" :width ,#'parse-integer-option)
          ("--height" :height ,#'parse-integer-option)
          ("--yaw-step" :yaw-step ,#'parse-real-option)))
@@ -14,7 +15,8 @@
           (count (getf options :count))
           (width (or (getf options :width) 960))
           (height (or (getf options :height) 640))
-          (yaw-step (or (getf options :yaw-step) 0.35)))
+          (yaw-step (or (getf options :yaw-step) 0.35))
+          (provider (make-backend-provider (getf options :backend))))
       (if count
           (dolist (pathname
                     (luv:capture-hidden-luvcraft-frames
@@ -22,10 +24,12 @@
                      :count count
                      :width width
                      :height height
+                     :provider provider
                      :yaw-step yaw-step))
             (format t "~A~%" pathname))
           (format t "~A~%"
                   (luv:capture-hidden-luvcraft-screenshot
                    target
                    :width width
-                   :height height))))))
+                   :height height
+                   :provider provider))))))

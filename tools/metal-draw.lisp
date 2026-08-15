@@ -158,19 +158,13 @@
       (when device (luv:destroy device)))
     evidence))
 
-(sb-thread:make-thread
- (lambda ()
-   (handler-case
-       (progn
-         (format t "~S~%" (probe-generated-metal-draw))
-         (finish-output)
-         (sb-ext:exit :code 0 :abort t))
-     (error (condition)
-       (format *error-output* "Metal draw probe failed: ~A~%" condition)
-       (finish-output *error-output*)
-       (sb-ext:exit :code 1 :abort t))))
- :name "luv generated Metal draw probe")
-
-;; SDL owns the Cocoa event loop on this thread.  The worker exits the process
-;; after GPU completion and complete native teardown.
-(loop (sleep 3600))
+(handler-case
+    (progn
+      (format t "~S~%"
+              (luv:call-with-sdl-main-thread
+               #'probe-generated-metal-draw))
+      (finish-output))
+  (error (condition)
+    (format *error-output* "Metal draw probe failed: ~A~%" condition)
+    (finish-output *error-output*)
+    (uiop:quit 1)))

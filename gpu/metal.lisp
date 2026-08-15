@@ -89,6 +89,8 @@
    (command-buffer :initarg :command-buffer
                    :reader metal-encoder-command-buffer)
    (active-pass :initform nil :accessor metal-encoder-active-pass)
+   (pending-consumer-barrier
+    :initform nil :accessor metal-encoder-pending-consumer-barrier)
    (encoded-p :initform nil :accessor metal-encoder-encoded-p)))
 
 (defclass metal-render-pass-encoder (gpu-render-pass-encoder)
@@ -1182,6 +1184,15 @@ compiler boundary of #58IDSR."
         (unless native-encoder
           (error 'metal-gpu-error :operation :begin-render-pass
                  :reason :render-encoder-creation-failed))
+        (let ((barrier (metal-encoder-pending-consumer-barrier encoder)))
+          (when barrier
+            (destructuring-bind
+                (after-queue-stages before-stages visibility-options)
+                barrier
+              (luv.metal:barrier-after-queue-stages
+               native-encoder after-queue-stages before-stages
+               visibility-options))
+            (setf (metal-encoder-pending-consumer-barrier encoder) nil)))
         (let ((pass
                 (make-instance
                  'metal-render-pass-encoder
@@ -1468,6 +1479,11 @@ compiler boundary of #58IDSR."
       (unless native-encoder
         (error 'metal-gpu-error :operation :copy-texture
                :reason :compute-encoder-creation-failed))
+      ;; MTL4CommandQueue ignores ordinary resource hazard tracking.  Make the
+      ;; render-target writes visible before this encoder's blit-stage read.
+      (luv.metal:barrier-after-queue-stages
+       native-encoder luv.metal:+stage-fragment+ luv.metal:+stage-blit+
+       luv.metal:+visibility-device+)
       (luv.metal:copy-metal-texture
        native-encoder (metal-native-object source)
        (metal-native-object destination))
@@ -1510,6 +1526,9 @@ compiler boundary of #58IDSR."
       (unless native-encoder
         (error 'metal-gpu-error :operation :copy-texture-to-buffer
                :reason :compute-encoder-creation-failed))
+      (luv.metal:barrier-after-queue-stages
+       native-encoder luv.metal:+stage-fragment+ luv.metal:+stage-blit+
+       luv.metal:+visibility-device+)
       (luv.metal:copy-metal-texture-to-buffer
        native-encoder (metal-native-object source)
        (first size) (second size)

@@ -109,6 +109,10 @@
            #:copy-metal-texture
            #:copy-metal-texture-to-buffer
            #:end-encoding
+           #:barrier-after-queue-stages
+           #:+stage-fragment+
+           #:+stage-blit+
+           #:+visibility-device+
            #:wait-for-drawable
            #:commit-command-buffer
            #:signal-drawable

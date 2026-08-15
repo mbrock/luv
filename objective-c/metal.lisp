@@ -30,6 +30,11 @@
   (height :uint64)
   (depth :uint64))
 
+;; MTLStages and MTL4VisibilityOptions used by explicit Metal 4 barriers.
+(defconstant +stage-fragment+ (ash 1 1))
+(defconstant +stage-blit+ (ash 1 28))
+(defconstant +visibility-device+ (ash 1 0))
+
 (cffi:defcstruct mtl-region
   ;; MTLRegion is two adjacent three-NSUInteger structures.  Flat fields keep
   ;; the identical ABI while remaining directly assignable through CFFI.
@@ -753,6 +758,12 @@ rejection.  Source and names cross only as in-memory NSString objects."
 
 (objc:define-objective-c-message end-encoding
     ("endEncoding" :void))
+
+(objc:define-objective-c-message barrier-after-queue-stages
+    ("barrierAfterQueueStages:beforeStages:visibilityOptions:" :void)
+  (after-queue-stages :uint64)
+  (before-stages :uint64)
+  (visibility-options :uint64))
 
 (objc:define-objective-c-message wait-for-drawable
     ("waitForDrawable:" :void)

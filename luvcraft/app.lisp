@@ -91,7 +91,7 @@
     :reader luvcraft-session-crosshair-vertex-buffer)
    (crosshair-pipeline :initarg :crosshair-pipeline
                        :reader luvcraft-session-crosshair-pipeline)
-   (frame-states :initform (make-hash-table :test #'eq)
+   (frame-states :initform (make-hash-table :test #'eql)
                  :reader luvcraft-session-frame-states)
    (resources :initarg :resources :initform nil
               :accessor luvcraft-session-resources)

@@ -194,77 +194,94 @@
              :operation :get-current-texture :reason :outside-frame
              :state (canvas-context-state context) :expected-state :in-frame)))
 
+(defmethod canvas-frame-resource-key
+    ((context metal-canvas-context) (surface-texture metal-gpu-texture))
+  (declare (ignore context))
+  ;; CAMetalLayer cycles a bounded native drawable pool, but each NEXTDRAWABLE
+  ;; call is represented by a fresh borrowed Lisp texture wrapper.  Metal 4's
+  ;; resource identity survives those wrappers and becomes reusable only when
+  ;; the layer makes that drawable available again.
+  (getf
+   (luv.metal:metal-texture-resource-id
+    (metal-native-object surface-texture))
+   'luv.metal::value))
+
 (defun call-with-metal-canvas-frame (context function)
   (ensure-metal-canvas-state context :frame :configured)
   (luv.objective-c:with-autorelease-pool ()
-    (synchronize-metal-canvas-drawable-size context)
-    (let* ((device (context-device context))
-           (native-device (metal-native-object device))
-           (queue (device-queue device))
-           (native-queue (metal-native-object queue))
-           (drawable (luv.metal:next-drawable (metal-canvas-layer context))))
-      (unless drawable
-        (error 'canvas-error :canvas (context-canvas context)
-               :operation :frame :reason :no-metal-drawable))
-      (let ((allocator (luv.metal:new-command-allocator native-device))
-            (command-buffer (luv.metal:new-command-buffer native-device))
-            (ended-p nil)
-            (texture nil))
-        (unless (and allocator command-buffer)
-          (when allocator
-            (luv.objective-c:release-objective-c-object allocator))
-          (when command-buffer
-            (luv.objective-c:release-objective-c-object command-buffer))
+    ;; All selectors and resource relationships below have already crossed the
+    ;; Lisp validation boundary.  Keep the inspectable exception bridge for
+    ;; setup and diagnosis, but do established per-frame traffic as direct
+    ;; objc_msgSend calls on the native thread that actually encodes it.
+    (luv.objective-c:with-unchecked-objective-c-messages ()
+      (synchronize-metal-canvas-drawable-size context)
+      (let* ((device (context-device context))
+             (native-device (metal-native-object device))
+             (queue (device-queue device))
+             (native-queue (metal-native-object queue))
+             (drawable (luv.metal:next-drawable (metal-canvas-layer context))))
+        (unless drawable
           (error 'canvas-error :canvas (context-canvas context)
-                 :operation :frame :reason :metal-4-command-resource-failed))
-        (unwind-protect
-             (let ((native-texture (luv.metal:drawable-texture drawable)))
-               (setf texture
-                     (make-instance
-                      'metal-gpu-texture
-                      :device device :native-object native-texture
-                      :owned-p nil
-                      :size (canvas-extent context)
-                      :dimensions :2d :format (canvas-format context)
-                      :usage (canvas-configuration-usage
-                              (canvas-context-configuration context))))
-               (let ((encoder
+                 :operation :frame :reason :no-metal-drawable))
+        (let ((allocator (luv.metal:new-command-allocator native-device))
+              (command-buffer (luv.metal:new-command-buffer native-device))
+              (ended-p nil)
+              (texture nil))
+          (unless (and allocator command-buffer)
+            (when allocator
+              (luv.objective-c:release-objective-c-object allocator))
+            (when command-buffer
+              (luv.objective-c:release-objective-c-object command-buffer))
+            (error 'canvas-error :canvas (context-canvas context)
+                   :operation :frame :reason :metal-4-command-resource-failed))
+          (unwind-protect
+               (let ((native-texture (luv.metal:drawable-texture drawable)))
+                 (setf texture
                        (make-instance
-                        'metal-frame-command-encoder
-                        :context context :texture texture
-                        :command-buffer command-buffer)))
-                 (luv.metal:begin-command-buffer command-buffer allocator)
-                 (setf (metal-canvas-current-texture context) texture
-                       (canvas-context-state context) :in-frame)
-                 (funcall function texture encoder)
-                 (when (metal-encoder-active-pass encoder)
-                   (error 'canvas-error :canvas (context-canvas context)
-                          :operation :frame :reason :metal-pass-left-open))
-                 (luv.metal:end-command-buffer command-buffer)
-                 (setf ended-p t)
-                 (luv.metal:wait-for-drawable native-queue drawable)
-                 ;; Submission consumes these objects whether commit succeeds
-                 ;; or raises; after commit QUEUE retains them to its frontier.
-                 (let ((owned-command-buffer command-buffer)
-                       (owned-allocator allocator))
-                   (setf command-buffer nil allocator nil)
-                   (submit-metal-command-buffer
-                    queue owned-command-buffer owned-allocator
-                    :after-commit
-                    (lambda ()
-                      (luv.metal:signal-drawable native-queue drawable)
-                      (luv.metal:present-drawable drawable))))
-                 texture))
-          (setf (metal-canvas-current-texture context) nil
-                (canvas-context-state context) :configured)
-          (when (and command-buffer (not ended-p))
-            (ignore-errors (luv.metal:end-command-buffer command-buffer)))
-          (when texture
-            (setf (metal-object-destroyed-p texture) t))
-          (when command-buffer
-            (luv.objective-c:release-objective-c-object command-buffer))
-          (when allocator
-            (luv.objective-c:release-objective-c-object allocator)))))))
+                        'metal-gpu-texture
+                        :device device :native-object native-texture
+                        :owned-p nil
+                        :size (canvas-extent context)
+                        :dimensions :2d :format (canvas-format context)
+                        :usage (canvas-configuration-usage
+                                (canvas-context-configuration context))))
+                 (let ((encoder
+                         (make-instance
+                          'metal-frame-command-encoder
+                          :context context :texture texture
+                          :command-buffer command-buffer)))
+                   (luv.metal:begin-command-buffer command-buffer allocator)
+                   (setf (metal-canvas-current-texture context) texture
+                         (canvas-context-state context) :in-frame)
+                   (funcall function texture encoder)
+                   (when (metal-encoder-active-pass encoder)
+                     (error 'canvas-error :canvas (context-canvas context)
+                            :operation :frame :reason :metal-pass-left-open))
+                   (luv.metal:end-command-buffer command-buffer)
+                   (setf ended-p t)
+                   (luv.metal:wait-for-drawable native-queue drawable)
+                   ;; Submission consumes these objects whether commit succeeds
+                   ;; or raises; after commit QUEUE retains them to its frontier.
+                   (let ((owned-command-buffer command-buffer)
+                         (owned-allocator allocator))
+                     (setf command-buffer nil allocator nil)
+                     (submit-metal-command-buffer
+                      queue owned-command-buffer owned-allocator
+                      :after-commit
+                      (lambda ()
+                        (luv.metal:signal-drawable native-queue drawable)
+                        (luv.metal:present-drawable drawable))))
+                   texture))
+            (setf (metal-canvas-current-texture context) nil
+                  (canvas-context-state context) :configured)
+            (when (and command-buffer (not ended-p))
+              (ignore-errors (luv.metal:end-command-buffer command-buffer)))
+            (when texture
+              (setf (metal-object-destroyed-p texture) t))
+            (when command-buffer
+              (luv.objective-c:release-objective-c-object command-buffer))
+            (when allocator
+              (luv.objective-c:release-objective-c-object allocator))))))))
 
 (defmethod call-with-canvas-frame
     ((context metal-canvas-context) function)

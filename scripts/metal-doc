@@ -1,0 +1,68 @@
+#!/bin/sh
+
+set -eu
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/metal-doc COMMAND [ARG]
+
+Read the Metal framework documentation bundled with the selected Xcode SDK.
+
+Commands:
+  path                 Print the Metal header directory.
+  list [PATTERN]       List headers, optionally filtering their names.
+  find TERM            Search declarations and Apple API comments.
+  show HEADER          Print one header, such as MTL4CommandEncoder.h.
+  help                 Show this text.
+EOF
+}
+
+sdk_root=$(xcrun --sdk macosx --show-sdk-path)
+header_root="$sdk_root/System/Library/Frameworks/Metal.framework/Headers"
+
+if [ ! -d "$header_root" ]; then
+  echo "metal-doc: no Metal headers under selected SDK: $sdk_root" >&2
+  exit 1
+fi
+
+command=${1:-help}
+case "$command" in
+  path)
+    [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+    printf '%s\n' "$header_root"
+    ;;
+  list)
+    [ "$#" -le 2 ] || { usage >&2; exit 2; }
+    pattern=${2:-}
+    find -L "$header_root" -maxdepth 1 -type f -name '*.h' -print \
+      | sed 's|.*/||' \
+      | sort \
+      | { if [ -n "$pattern" ]; then rg -i -- "$pattern"; else cat; fi; }
+    ;;
+  find)
+    [ "$#" -eq 2 ] || { usage >&2; exit 2; }
+    rg -n -C 4 --glob '*.h' -- "$2" "$header_root"
+    ;;
+  show)
+    [ "$#" -eq 2 ] || { usage >&2; exit 2; }
+    header=$(basename -- "$2")
+    case "$header" in
+      *.h) ;;
+      *) header="$header.h" ;;
+    esac
+    pathname="$header_root/$header"
+    if [ ! -f "$pathname" ]; then
+      echo "metal-doc: no header named $header" >&2
+      exit 1
+    fi
+    sed -n '1,$p' "$pathname"
+    ;;
+  help|-h|--help)
+    usage
+    ;;
+  *)
+    echo "metal-doc: unknown command: $command" >&2
+    usage >&2
+    exit 2
+    ;;
+esac

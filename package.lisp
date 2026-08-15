@@ -701,6 +701,8 @@ nothing else does."))
            #:canvas-format
            #:canvas-state
            #:canvas-context-state
+           #:canvas-frame-resource-key
+           #:call-with-sdl-main-thread
            #:open-canvas
            #:present-canvas-frame
            #:render-canvas-color

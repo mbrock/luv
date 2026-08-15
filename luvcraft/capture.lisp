@@ -182,12 +182,13 @@ pass an unpinned clock to photograph another time of day."
                  (world (make-empty-little-block-world))
                  (mesher (make-instance 'exposed-face-mesher))
                  (camera (make-instance 'fly-camera))
+                 (provider *gpu-provider*)
                  (sky-clock (make-instance 'sky-clock
                                            :pinned-day-fraction 0.5))
                  (sky-profile (make-default-sky-profile)))
   "Capture COUNT hidden block-world frames into DIRECTORY.
 
-Each frame reuses one hidden SDL/Vulkan canvas, advances CAMERA's yaw by
+Each frame reuses one hidden SDL canvas on PROVIDER, advances CAMERA's yaw by
 YAW-STEP, moves FORWARD-STEP world units along its initial heading, and moves
 the evaluated sky by DAY-STEP day fractions.  DAY-START can replace the
 clock's initial time.  When DIFFERENCE-SCALE is non-NIL, also write amplified
@@ -222,6 +223,7 @@ scenes."
                  (start-luvcraft
                   :title title :width width :height height
                   :frames-per-second nil :visible-p nil
+                  :provider provider
                   :world world :mesher mesher :camera camera
                   :sky-clock sky-clock :sky-profile sky-profile
                   :shadow-diagnostic-p shadow-diagnostic-p))
