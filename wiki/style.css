@@ -410,31 +410,33 @@ nav.definitions ul {
   list-style: none;
   padding-left: 0;
   margin: 0;
-  columns: 2 22rem;
-  column-gap: 2rem;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 0.7em;
+  row-gap: 0.15rem;
+  align-items: baseline;
 }
 
 li.definition-entry {
-  display: grid;
-  grid-template-columns: 6em minmax(0, 1fr) auto;
-  column-gap: 0.6em;
-  align-items: baseline;
-  margin: 0;
-  padding: 0.12rem 0;
+  display: contents;
   font-family: system-ui, "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
   font-size: 0.85rem;
-  line-height: 1.5;
-  break-inside: avoid;
+  line-height: 1.45;
 }
 
 li.definition-entry .kind {
-  font-size: 0.72em;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  font-size: 0.78em;
   color: var(--muted);
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  text-align: right;
+}
+
+li.method-entry .kind {
+  opacity: 0.6;
+}
+
+li.method-entry a.name {
+  padding-left: 1.2em;
 }
 
 li.definition-entry .kind-defclass,
@@ -456,18 +458,10 @@ li.definition-entry a.name:hover {
 }
 
 li.definition-entry .signature {
-  grid-column: 2;
+  margin-left: 0.3em;
   color: var(--muted);
   font-size: 0.9em;
   overflow-wrap: anywhere;
-}
-
-li.definition-entry .line {
-  grid-column: 3;
-  grid-row: 1;
-  color: var(--muted);
-  font-size: 0.8em;
-  font-variant-numeric: tabular-nums;
 }
 
 details.definition > summary .kind {
@@ -486,10 +480,15 @@ details.source-file > summary {
   font-size: 0.9rem;
 }
 
-details.source-file > summary .count {
+details.source-file > summary .count,
+details.source-file > summary .system {
   margin-left: 0.6em;
   color: var(--muted);
   font-size: 0.8em;
+}
+
+section.source-group {
+  margin: 1.4rem 0;
 }
 
 details.source-file > nav.definitions {

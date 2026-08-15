@@ -73,45 +73,69 @@ has no page for its file."
 
 ;;; Rendering
 
-(defun kind-label (kind)
-  "A short label for a definition KIND: defmethod -> method, define-x -> x."
-  (cond ((string= kind "defun") "function")
-        ((string= kind "defparameter") "parameter")
-        ((string= kind "defconstant") "constant")
-        ((string= kind "defvar") "variable")
-        ((starts-with "define-" kind) (subseq kind 7))
-        ((starts-with "def" kind) (subseq kind 3))
-        (t kind)))
+(defun render-definition-entry (definition &key href (name-p t))
+  "One line of a definitions index: kind, name (or only the method signature
+when NAME-P is false, under its generic), with file:line as the tooltip."
+  (let ((specializers (definition-specializers definition)))
+    ;; Trailing T specializers say nothing; drop them.
+    (loop while (and specializers (string= (car (last specializers)) "t"))
+          do (setf specializers (butlast specializers)))
+    (spinneret:with-html
+      (:li :class (if name-p "definition-entry" "definition-entry method-entry")
+       (:span :class (format nil "kind kind-~A" (definition-kind definition))
+              (definition-kind definition))
+       (:a.name :href href
+                :title (format nil "~A:~D" (definition-file-name definition) (definition-line definition))
+                (if name-p
+                    (definition-name definition)
+                    (spinneret:html ""))
+                (when (or (definition-qualifiers definition) specializers)
+                  (:span.signature
+                   (format nil "~{~A ~}~@[(~{~A~^ ~})~]"
+                           (definition-qualifiers definition) specializers))))))))
 
-(defun render-definition-entry (definition &key href)
-  "One line of a definitions index: kind badge, name, method signature, line."
-  (spinneret:with-html
-    (:li.definition-entry
-     (:span :class (format nil "kind kind-~A" (definition-kind definition))
-            :title (definition-kind definition)
-            (kind-label (definition-kind definition)))
-     (:a.name :href href (definition-name definition))
-     (let ((specializers (definition-specializers definition)))
-       ;; Trailing T specializers say nothing; drop them.
-       (loop while (and specializers (string= (car (last specializers)) "t"))
-             do (setf specializers (butlast specializers)))
-       (when (or (definition-qualifiers definition) specializers)
-         (:span.signature
-          (format nil "~{~A ~}~@[(~{~A~^ ~})~]"
-                  (definition-qualifiers definition) specializers))))
-     (:span.line (format nil "~D" (definition-line definition))))))
+(defun group-methods (definitions)
+  "DEFINITIONS in order, but with each method attached to the generic (or
+first method) of the same name: a list of (definition . methods)."
+  (let ((groups '())
+        (index (make-hash-table :test 'equalp)))
+    (dolist (definition definitions)
+      (let ((name (definition-name definition)))
+        (cond ((string= (definition-kind definition) "defgeneric")
+               (let ((existing (gethash name index)))
+                 (if (and existing (string= (definition-kind (car existing)) "defmethod"))
+                     ;; Methods came first: the generic takes over the group.
+                     (setf (car existing) definition
+                           (cdr existing) (cons (car existing) (cdr existing)))
+                     (let ((group (cons definition '())))
+                       (setf (gethash name index) group)
+                       (push group groups)))))
+              ((string= (definition-kind definition) "defmethod")
+               (let ((existing (gethash name index)))
+                 (if existing
+                     (push definition (cdr existing))
+                     (let ((group (cons definition '())))
+                       (setf (gethash name index) group)
+                       (push group groups)))))
+              (t (push (cons definition '()) groups)))))
+    (mapcar (lambda (group) (cons (car group) (reverse (cdr group))))
+            (nreverse groups))))
 
 (defun render-source-toc (file &key (prefix ""))
-  "The definitions of FILE as a scannable list linking to their lines."
+  "The definitions of FILE as a scannable list linking to their lines,
+methods grouped under their generic."
   (let ((definitions (source-file-definitions file)))
     (when definitions
       (spinneret:with-html
         (:nav.definitions
          (:ul
-          (dolist (definition definitions)
-            (render-definition-entry
-             definition
-             :href (format nil "~A#L~D" prefix (definition-line definition))))))))))
+          (loop for (head . methods) in (group-methods definitions)
+                do (render-definition-entry
+                    head :href (format nil "~A#L~D" prefix (definition-line head)))
+                   (dolist (method methods)
+                     (render-definition-entry
+                      method :href (format nil "~A#L~D" prefix (definition-line method))
+                      :name-p nil)))))))))
 
 (defun render-source-page (file)
   "Emit the page for FILE: its definitions table and every top-level form
@@ -144,31 +168,36 @@ as dexp boxes, each anchored by its starting line."
      :body-class "source-page")))
 
 (defun render-source-index (site)
-  "Emit source.html: the files of the corpus grouped by system."
+  "Emit source.html: the files of the corpus, grouped by directory with
+space between groups, each expandable to its definitions."
   (let ((*page-prefix* "")
         (*rendering-document* nil)
         (groups '()))
     (dolist (file (site-source-files site))
-      (let ((group (assoc (source-file-system-name file) groups :test #'equal)))
+      (let* ((path (source-file-relative-path file))
+             (slash (position #\/ path))
+             (directory (if slash (subseq path 0 slash) ""))
+             (group (assoc directory groups :test #'string=)))
         (if group
             (push file (cdr group))
-            (push (list (source-file-system-name file) file) groups))))
+            (push (list directory file) groups))))
     (setf groups (sort (mapcar (lambda (g) (cons (car g) (reverse (cdr g)))) groups)
-                       #'string< :key (lambda (g) (or (car g) ""))))
+                       #'string< :key #'car))
     (render-page-frame
      "Source"
      (lambda ()
        (spinneret:with-html
          (:h1 "Source")
          (:p "Every source file of the systems the wiki reads, drawn as dexp boxes.
-Definitions are anchored by line; symbols link to their definitions; "
-             (:code "#ID") " mentions link to figures.")
+Open a file here to see its definitions; symbols in the pages link to their
+definitions and " (:code "#ID") " mentions link to figures.")
          (dolist (group groups)
            (:section.source-group
-            (:h2 (:code (or (car group) "other")))
             (dolist (file (cdr group))
               (:details.source-file
                (:summary
                 (:a :href (source-page-name file) (source-file-relative-path file))
-                (:span.count (format nil "~D" (length (source-file-definitions file)))))
+                (:span.count (format nil "~D" (length (source-file-definitions file))))
+                (when (source-file-system-name file)
+                  (:span.system (source-file-system-name file))))
                (render-source-toc file :prefix (source-page-name file)))))))))))
