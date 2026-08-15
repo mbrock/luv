@@ -1,0 +1,176 @@
+#+title: The wiki as a static site
+#+startup: overview
+
+* What this page is
+:PROPERTIES:
+:ID: BNH91U
+:END:
+
+The wiki is a set of Org files, and Org is pleasant to write in Emacs but
+awkward to read anywhere else.  This page records how the wiki becomes a
+browsable static site, why the build is expressed in ASDF, and what the
+Org-subset reader deliberately does and does not understand.  It is a
+design page for =luv-wiki=, the Lisp system in [[file:../wiki-org.lisp][wiki-org.lisp]],
+[[file:../wiki-html.lisp][wiki-html.lisp]], and [[file:../wiki-asdf.lisp][wiki-asdf.lisp]], and for the corpus system
+=luv/wiki= in [[file:../luv.asd][luv.asd]] whose components are the pages themselves.
+
+The rendered site lives at [[https://mbrock.github.io/luv/][mbrock.github.io/luv]] once the Pages
+workflow in [[file:../.github/workflows/wiki.yml][wiki.yml]] has run; locally, =make wiki= writes it to
+=build/wiki/=.
+
+* Why ASDF, and how the wiki slots into it
+:PROPERTIES:
+:ID: RYHRUL
+:END:
+
+ASDF describes itself as a tool that "plays a role like make or ant" for Lisp
+systems, and it warns that it is not a general installer.  Underneath, though,
+its model is not Lisp-specific: a *component* has input files, an *operation*
+applied to a component has output files, =perform= does the work, and the plan
+is a dependency graph over (operation, component) actions with timestamps.
+The manual invites extension by subclassing =operation= and =component= and
+defining =perform=, =input-files=, =output-files=, and =component-depends-on=
+methods.  cffi-toolchain uses exactly this to compile =.c= files: a =c-file=
+component whose =compile-op= outputs an object file.
+
+The wiki fits the same shape, and more naturally than a fresh script would:
+
+- An =org-file= is a component of the =luv/wiki= system.  Its =load-op= reads
+  the page into a =document= object and remembers it on the component, so
+  "loading the wiki" means having the corpus in the image as inspectable Lisp
+  objects, which is where the figure vocabulary of #F2N8VX wants to go
+  anyway.  =org-file= inherits from =static-file=, so the ordinary =compile-op=
+  is a no-op and dependency propagation works unchanged.
+- =render-op= is a downward, selfward operation: rendering the system renders
+  each page; rendering a page first loads it and, because =#ABC123= mentions and
+  backlinks cross pages, also depends on the load of the whole system.  Every
+  page's =input-files= are all the pages, so any edit re-renders the site;
+  ASDF's timestamps make an unchanged corpus a no-op.
+- The site is a build product, not a fasl.  =output-files= returns its
+  second value true, which ASDF documents as "do not translate," so pages land
+  in =build/wiki/= rather than the compiled-file cache.  A =static-file= such as
+  the stylesheet is copied by the same operation.
+- =:build-operation "luv.wiki:render-op"= makes =(asdf:make :luv/wiki)= build
+  the site, matching how =luvcraft= is built.
+
+Two ASDF details are worth remembering.  =defsystem-depends-on= cannot name a
+system defined in the same =.asd= file (ASDF reports a circular =define-op=),
+so the tooling is the primary system =luv-wiki= in its own file, and =luv.asd=
+loads that file first.  Class names in a defsystem can be given as strings
+such as ="luv.wiki:org-file"=, which ASDF reads in its own package; that avoids
+interning anything into ASDF's package, which the manual asks extensions not to
+do.
+
+* The Org subset the reader understands
+:PROPERTIES:
+:ID: NS35X9
+:END:
+
+The reader is not a general Org parser.  It reads the subset the wiki actually
+uses, chosen by surveying the pages: =#+title=, headings with property drawers,
+paragraphs, bulleted and numbered lists with wrapped and blank-separated
+items, =example= and =src= blocks, simple tables with an optional header rule,
+bracket links with =file:=, =https:=, =id:= or no scheme, the light =#ABC123=
+mention, and the six emphasis markers with Org's pre- and post-character
+rules.  Anything else stays paragraph text, so an unfamiliar construct can
+never fail the build; it can only render plainly.
+
+Emphasis rules follow Org: a marker opens only after whitespace or an opening
+bracket and closes only before whitespace or punctuation, so =2 * 3=,
+=foo_bar=, and =../src/= are text.  Verbatim and code keep their contents raw.
+Emphasis may cross one line break but not a blank line.  Headings whose title
+starts with one of the work-mark words of #W3K9MK carry that word as a
+=keyword= and render with a status badge.
+
+The element model is CLOS: =document=, =heading=, =paragraph=, =plain-list=,
+=list-item=, =example-block=, =src-block=, and =table= at the block level;
+=emphasis=, =link=, and =mention= inline, with plain strings for text.
+=render-html= is a generic function over those classes, so a new element is
+one class and one method.  =reference-id= is the small protocol that lets both
+mentions and =id:= links count as references when the site indexes backlinks.
+
+The reader was written rather than borrowed.  deepfire's cl-org-mode (2018,
+built on parser-combinators) parses headline, drawer, and block structure but
+leaves section bodies as text and has no inline layer, links, lists, or HTML
+output, so it would have supplied perhaps a hundred lines and cost two
+dependencies and a second parser for the inside of sections.  Its layered
+raw-AST/dressed-object design is a good precedent for the shape used here.
+
+* Spinneret as the HTML layer
+:PROPERTIES:
+:ID: VRKEYI
+:END:
+
+Spinneret's =with-html= compiles keyword forms to tags and passes the value of
+every other body form to its exported generic =spinneret:html=.  Three
+consequences shaped the renderer:
+
+- =ecase= inside =with-html= is misread, because its clause heads look like
+  tags; a small kind-to-tag table with =:tag :name= is used instead.
+- The pretty printer fills text and buffers a space after each write, so a
+  dynamically written ="figure"= came out as ="figure "= inside its =<b>=;
+  output is written with =*print-pretty*= off and
+  =*suppress-inserted-spaces*= on, and rendering methods return no values so
+  Spinneret has nothing to space.
+- A bare string at the top of =with-html= is returned, not printed, so text
+  is written explicitly with =spinneret:html=.
+
+Each page is one HTML file: a header linking to the index and the page's Org
+source on GitHub, an =<h1>= from =#+title=, and a =<section>= per heading whose
+=id= is the figure ID, so =page.html#ABC123= is the figure's stable address.
+Mentions become links with the target's title as a tooltip; dangling ones are
+struck through.  Each figure that is mentioned elsewhere ends with a
+"Mentioned in" line, the disposable backlink index that #F2N8VX anticipates.
+A =figures.html= page lists every figure by page with its work-mark status.
+
+* DONE Render the wiki as a static site from ASDF
+:PROPERTIES:
+:ID: QH1ONS
+:END:
+
+Intent: make the wiki browsable outside Emacs without a second source of
+truth, and express the build as an ASDF operation so it composes with the
+rest of the project.
+
+Evidence: =(asdf:make :luv/wiki)= renders all pages, =figures.html=, and the
+stylesheet into =build/wiki/=; a second =make wiki= rewrites nothing and
+touching a page re-renders.  The corpus loads with no dangling mentions.
+=luv-wiki/tests= covers the reader, the site index, the rendered HTML, and the
+=render-op= output placement.
+
+Done when: the six tests pass and the site builds from a fresh SBCL.
+Publishing is the next mark.
+
+* NEXT Serve the site from GitHub Pages
+:PROPERTIES:
+:ID: SIWPDS
+:END:
+
+Intent: publish =build/wiki/= at [[https://mbrock.github.io/luv/][mbrock.github.io/luv]] on every push
+that touches the wiki or its tooling.
+
+Evidence: [[file:../.github/workflows/wiki.yml][wiki.yml]] builds with Nix and deploys with the Pages actions,
+asking to enable Pages on first run.  Not yet observed running.
+
+Done when: the workflow has succeeded once and the index page is reachable
+at the public URL.
+
+* IDEA A WIKI package of figure symbols
+:PROPERTIES:
+:ID: MAE5RT
+:END:
+
+Now that the corpus loads as objects, the future notation of #F2N8VX is one
+step away: =load-op= on an =org-file= could intern each figure ID as an
+external symbol of a =WIKI= package and attach the heading as its
+documentation, so ='wiki:D3H7VK= in source resolves at the REPL and =M-.=
+could someday find the page.  It should wait for a real use.
+
+* IDEA Source-anchored file links
+:PROPERTIES:
+:ID: MJQDRA
+:END:
+
+Org =file:= links with a =::(defun name= search string presently point at the
+file on GitHub without the search.  A later render step could resolve the
+search to a line number at build time, since the source is in the same tree.

@@ -64,6 +64,7 @@
             lispPackages.closer-mop
             lispPackages.defclass-std
             lispPackages.rove
+            lispPackages.spinneret
           ] ++ nixpkgs.lib.optionals pkgs.stdenv.isDarwin [
             lispPackages.float-features
             lispPackages.trivial-main-thread

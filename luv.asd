@@ -1,3 +1,9 @@
+;;;; The luv systems.  The wiki tooling lives in the sibling luv-wiki.asd
+;;;; because luv/wiki names it in :defsystem-depends-on, which ASDF cannot
+;;;; resolve to a system defined in the very file being loaded.
+
+(asdf:load-asd (merge-pathnames "luv-wiki.asd" (or *load-truename* *default-pathname-defaults*)))
+
 (asdf:defsystem #:luv
   :description "An experimental Common Lisp atelier for Vulkan."
   :version "0.0.1"
@@ -9,7 +15,8 @@
                               (asdf:test-op #:luv/arithmetic/lisp/tests)
                               (asdf:test-op #:luv/tests)
                               (asdf:test-op #:luv/spir-v/tests)
-                              (asdf:test-op #:luv/luvcraft/tests))))
+                              (asdf:test-op #:luv/luvcraft/tests)
+                              (asdf:test-op #:luv-wiki/tests))))
 
 (asdf:defsystem #:luv/packages
   :description "Package definitions for luv's public and internal names."
@@ -111,6 +118,37 @@
   :version "0.0.1"
   :author "Mikael Brockman"
   :components ((:file "parinfer")))
+
+(asdf:defsystem #:luv/wiki
+  :description "The luv workshop wiki.  Loading it reads every page into
+Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :defsystem-depends-on (#:luv-wiki)
+  :depends-on (#:luv-wiki)
+  :build-operation "luv.wiki:render-op"
+  :components ((:module "wiki"
+                :default-component-class "luv.wiki:org-file"
+                :components ((:file "index")
+                             (:file "block-world")
+                             (:file "box3d-architecture")
+                             (:file "commands-and-usage")
+                             (:file "completion-frontier")
+                             (:file "domains-and-bundles")
+                             (:file "field-notes-measures")
+                             (:file "field-notes-mp-units")
+                             (:file "frame-slots")
+                             (:file "luv-vulkan-hal")
+                             (:file "mathematical-shaders")
+                             (:file "moppe-legacy")
+                             (:file "physics-and-simd")
+                             (:file "quantities-and-measurement")
+                             (:file "resource-lifetimes")
+                             (:file "sb-simd")
+                             (:file "sky-and-light")
+                             (:file "webgpu-shape")
+                             (:file "wiki-site")
+                             (:static-file "style.css")))))
 
 (asdf:defsystem #:luv/invocation
   :description "A small protocol for reifying API calls as invocations."

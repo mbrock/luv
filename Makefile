@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := all
 
-.PHONY: all luvcraft run test parinfer-check shader-validate smoke mcluv clean
+.PHONY: all luvcraft run test parinfer-check shader-validate smoke mcluv wiki clean
 
 all: luvcraft
 
@@ -47,5 +47,12 @@ smoke: luvcraft
 mcluv:
 	nix develop -c sbcl --script build-mcluv.lisp
 
+wiki:
+	nix develop -c sbcl --non-interactive \
+		--eval '(require :asdf)' \
+		--eval '(asdf:load-asd (truename "luv.asd"))' \
+		--eval '(asdf:make :luv/wiki)'
+
 clean:
 	rm -f ./build/luvcraft ./build/mcluv ./build/luvcraft-smoke.png
+	rm -rf ./build/wiki

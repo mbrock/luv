@@ -166,6 +166,15 @@ The following are starting paths rather than a table of settled doctrine.
   mirrors, and dispatch model, then records the new project invariant: luv's
   pinned SBCL supplies native SIMD on arm64/NEON and x86-64.
 
+** The wiki itself
+:PROPERTIES:
+:ID: 2RRDHC
+:END:
+
+- [[file:wiki-site.org][The wiki as a static site]] records how these pages become a browsable
+  site: the Org subset the reader understands, why the build is an ASDF
+  operation on =org-file= components, and the Spinneret rendering choices.
+
 A useful first crossing is from the timeline distinction #T4V8QM to the five
 different senses of lifetime in #L8R2WF, then to the frame-slot episode
 #R3V8HC.  That path explains why “the Lisp object is no longer wanted,” “the

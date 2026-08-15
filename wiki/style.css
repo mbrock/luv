@@ -1,0 +1,204 @@
+:root {
+  --fg: #222;
+  --bg: #fdfcf9;
+  --muted: #6b6b6b;
+  --rule: #e2ddd2;
+  --accent: #8a4b1c;
+  --code-bg: #f3efe6;
+  --mark-next: #b3541e;
+  --mark-todo: #6c6c6c;
+  --mark-wait: #8a7a1c;
+  --mark-done: #3d7a3d;
+  --mark-idea: #5a4d8a;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #ddd8cf;
+    --bg: #1c1b19;
+    --muted: #9a958c;
+    --rule: #3a3833;
+    --accent: #e0a070;
+    --code-bg: #26241f;
+    --mark-next: #e78a4e;
+    --mark-todo: #a4a4a4;
+    --mark-wait: #d9c65a;
+    --mark-done: #7ac47a;
+    --mark-idea: #a99ad9;
+  }
+}
+
+html {
+  color: var(--fg);
+  background: var(--bg);
+  font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+  font-size: 17px;
+  line-height: 1.55;
+}
+
+body {
+  margin: 0 auto;
+  padding: 0 1.25rem 4rem;
+  max-width: 44rem;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+.site-header {
+  padding: 1rem 0;
+  border-bottom: 1px solid var(--rule);
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.site-footer {
+  margin-top: 4rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--rule);
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+h1, h2, h3, h4 {
+  font-weight: normal;
+  line-height: 1.2;
+}
+
+h1 {
+  font-size: 2rem;
+  margin: 2rem 0 1.5rem;
+}
+
+h2 {
+  font-size: 1.45rem;
+  margin: 2.5rem 0 0.75rem;
+}
+
+h3 {
+  font-size: 1.15rem;
+  margin: 2rem 0 0.5rem;
+}
+
+section.figure {
+  scroll-margin-top: 1rem;
+}
+
+section:target > h2, section:target > h3, section:target > h4 {
+  background: var(--code-bg);
+  outline: 0.4rem solid var(--code-bg);
+}
+
+a.figure-id {
+  margin-left: 0.6rem;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.7em;
+  color: var(--muted);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+h2:hover a.figure-id, h3:hover a.figure-id, h4:hover a.figure-id,
+section:target > h2 a.figure-id, section:target > h3 a.figure-id {
+  opacity: 1;
+}
+
+.mention {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.85em;
+}
+
+.mention.dangling {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.unresolved-link {
+  border-bottom: 1px dotted var(--muted);
+}
+
+.mark {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.7em;
+  letter-spacing: 0.05em;
+  padding: 0.1em 0.4em;
+  border-radius: 0.2em;
+  vertical-align: middle;
+  color: var(--bg);
+  background: var(--mark-todo);
+}
+
+.mark-next { background: var(--mark-next); }
+.mark-wait { background: var(--mark-wait); }
+.mark-done { background: var(--mark-done); }
+.mark-idea { background: var(--mark-idea); }
+
+p.backlinks {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-top: 1rem;
+}
+
+code, pre {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.85em;
+}
+
+code {
+  background: var(--code-bg);
+  padding: 0.05em 0.3em;
+  border-radius: 0.2em;
+}
+
+pre {
+  background: var(--code-bg);
+  padding: 0.8rem 1rem;
+  overflow-x: auto;
+  line-height: 1.4;
+}
+
+pre code {
+  padding: 0;
+  background: none;
+}
+
+table {
+  border-collapse: collapse;
+  margin: 1rem 0;
+  font-size: 0.92em;
+}
+
+th, td {
+  text-align: left;
+  vertical-align: top;
+  padding: 0.3rem 0.8rem 0.3rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+th {
+  font-weight: normal;
+  color: var(--muted);
+}
+
+ul, ol {
+  padding-left: 1.4rem;
+}
+
+li {
+  margin: 0.25rem 0;
+}
+
+ul.figure-list {
+  list-style: none;
+  padding-left: 0;
+}
+
+ul.figure-list li.level-2 {
+  padding-left: 1.5rem;
+}
