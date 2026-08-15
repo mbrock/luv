@@ -284,6 +284,85 @@
         (luv::release-live-shader-pipeline artifact))
       (destroy device))))
 
+(deftest live-metal-pipeline-replacement-retires-after-its-in-flight-draw
+  (install-metal-live-probe-vertex)
+  (install-metal-live-probe-fragment 0.25)
+  (let* ((device
+           (request-gpu-device (make-instance 'metal-gpu-provider)))
+         (queue (device-queue device))
+         (artifact nil)
+         (texture nil)
+         (vertices nil)
+         (encoder nil)
+         (commands nil)
+         (old-native-pipeline nil))
+    (unwind-protect
+         (progn
+           (setf artifact
+                 (luv::make-live-shader-pipeline
+                  :role :metal-live-probe
+                  :vertex-role :metal-live-probe
+                  :label "in-flight Metal pipeline probe"
+                  :device device :layout nil
+                  :vertex-buffers
+                  '((:array-stride 12
+                     :attributes
+                     ((:shader-location 0 :offset 0 :format :float32x3))))
+                  :target-format :bgra8-unorm
+                  :primitive '(:topology :triangle-list)
+                  :depth-stencil nil)
+                 texture
+                 (create
+                  device
+                  (make-texture-descriptor
+                   :label "in-flight pipeline target"
+                   :size '(16 16) :dimensions :2d :format :bgra8-unorm
+                   :usage '(:render-attachment)))
+                 vertices
+                 (create
+                  device
+                  (make-buffer-descriptor
+                   :label "in-flight pipeline vertices"
+                   :size 36 :usage '(:vertex :copy-dst))))
+           (write-buffer
+            vertices
+            (make-array
+             9 :element-type 'single-float
+             :initial-contents
+             '(-0.7 -0.6 0.0 0.7 -0.6 0.0 0.0 0.7 0.0)))
+           (let ((old-pipeline
+                   (luv::live-shader-pipeline-native-pipeline artifact)))
+             (setf old-native-pipeline (luv::metal-native-object old-pipeline)
+                   encoder (create device (make-command-encoder-descriptor)))
+             (let ((pass
+                     (begin-render-pass
+                      encoder
+                      (make-render-pass-descriptor
+                       :color-attachments
+                       (list (list :view texture :load-op :clear
+                                   :store-op :store
+                                   :clear-value #(0.0 0.0 0.0 1.0)))))))
+               (set-pipeline pass old-pipeline)
+               (set-vertex-buffer pass 0 vertices)
+               (draw pass 3)
+               (end-pass pass))
+             (setf commands (finish encoder))
+             (submit queue commands)
+             (install-metal-live-probe-fragment 0.75)
+             (luv::refresh-live-shader-pipeline artifact)
+             (ok (luv::metal-object-destroyed-p old-pipeline))
+             (ok (not (eq old-pipeline
+                          (luv::live-shader-pipeline-native-pipeline artifact))))
+             (submitted-work-done queue)
+             (ok (objc:objective-c-object-released-p old-native-pipeline))))
+      (install-metal-live-probe-fragment 0.25)
+      (when commands (destroy commands))
+      (when encoder (destroy encoder))
+      (when vertices (destroy vertices))
+      (when texture (destroy texture))
+      (when artifact (luv::release-live-shader-pipeline artifact))
+      (destroy device))))
+
 (deftest metal-buffer-populates-a-native-metal-4-argument-table
   (let ((device
           (request-gpu-device (make-instance 'metal-gpu-provider)))
@@ -329,75 +408,95 @@
       (when buffer (destroy buffer))
       (destroy device))))
 
-(deftest metal-queue-reclaims-command-memory-at-its-shared-event-frontier
+(deftest metal-finish-produces-one-shot-portable-work-with-dependencies
   (let* ((device
            (request-gpu-device (make-instance 'metal-gpu-provider)))
          (queue (device-queue device))
-         (allocator nil)
+         (texture nil)
+         (encoder nil)
          (command-buffer nil)
-         (submitted-p nil))
+         (native-texture nil)
+         (native-command-buffer nil)
+         (allocator nil))
     (unwind-protect
          (progn
-           (setf allocator
-                 (metal:new-command-allocator
-                  (luv::metal-native-object device))
-                 command-buffer
-                 (metal:new-command-buffer
-                  (luv::metal-native-object device)))
-           (metal:begin-command-buffer command-buffer allocator)
-           (metal:end-command-buffer command-buffer)
-           ;; SUBMIT-METAL-COMMAND-BUFFER consumes both owned objects.
-           (setf submitted-p t)
-           (ok (= 1
-                  (luv::submit-metal-command-buffer
-                   queue command-buffer allocator)))
+           (setf texture
+                 (create
+                  device
+                  (make-texture-descriptor
+                   :label "portable Metal work dependency"
+                   :size '(8 8) :dimensions :2d :format :rgba8-unorm
+                   :usage '(:render-attachment)))
+                 native-texture (luv::metal-native-object texture)
+                 encoder
+                 (create device (make-command-encoder-descriptor
+                                 :label "portable Metal work")))
+           (encode encoder
+                   (make-gpu-clear-texture-command
+                    :texture texture :color #(0.25 0.5 0.75 1.0)))
+           (setf command-buffer (finish encoder)
+                 native-command-buffer
+                 (luv::metal-native-object command-buffer)
+                 allocator
+                 (luv::metal-command-buffer-allocator command-buffer))
+           (ok (typep encoder 'metal-gpu-command-encoder))
+           (ok (typep command-buffer 'metal-gpu-command-buffer))
+           (ok (member texture
+                       (luv::metal-command-buffer-resources command-buffer)))
+           (ok (= 1 (submit queue command-buffer)))
+           (ok (eq :submitted
+                   (luv::metal-command-buffer-state command-buffer)))
+           (ok (= 1 (luv::metal-object-last-submission texture)))
+           (ok (signals (submit queue command-buffer)
+                        'gpu-invalid-state-error))
            (ok (= 1 (length (luv::metal-queue-pending-submissions queue))))
-           (ok (not (objc:objective-c-object-released-p command-buffer)))
-           (ok (not (objc:objective-c-object-released-p allocator)))
+           ;; Logical invalidation is immediate. Native retirement follows the
+           ;; shared-event completion frontier without blocking DESTROY.
+           (destroy command-buffer)
+           (setf command-buffer nil)
+           (destroy texture)
+           (setf texture nil)
            (submitted-work-done queue)
            (ok (null (luv::metal-queue-pending-submissions queue)))
-           (ok (objc:objective-c-object-released-p command-buffer))
-           (ok (objc:objective-c-object-released-p allocator)))
-      (unless submitted-p
-        (when command-buffer
-          (objc:release-objective-c-object command-buffer))
-        (when allocator
-          (objc:release-objective-c-object allocator)))
+           (ok (objc:objective-c-object-released-p native-command-buffer))
+           (ok (objc:objective-c-object-released-p allocator))
+           (ok (objc:objective-c-object-released-p native-texture)))
+      (when command-buffer (destroy command-buffer))
+      (when encoder (destroy encoder))
+      (when texture (destroy texture))
       (destroy device))))
 
 (deftest metal-submission-signals-its-frontier-when-presentation-raises
   (let* ((device
            (request-gpu-device (make-instance 'metal-gpu-provider)))
          (queue (device-queue device))
-         (allocator nil)
+         (encoder nil)
          (command-buffer nil)
-         (submitted-p nil))
+         (native-command-buffer nil)
+         (allocator nil))
     (unwind-protect
          (progn
-           (setf allocator
-                 (metal:new-command-allocator
-                  (luv::metal-native-object device))
-                 command-buffer
-                 (metal:new-command-buffer
-                  (luv::metal-native-object device)))
-           (metal:begin-command-buffer command-buffer allocator)
-           (metal:end-command-buffer command-buffer)
-           (setf submitted-p t)
+           (setf encoder
+                 (create device (make-command-encoder-descriptor))
+                 command-buffer (finish encoder)
+                 native-command-buffer
+                 (luv::metal-native-object command-buffer)
+                 allocator
+                 (luv::metal-command-buffer-allocator command-buffer))
            (ok (signals
-                (luv::submit-metal-command-buffer
-                 queue command-buffer allocator
+                (luv::submit-metal-command-buffers
+                 queue (vector command-buffer)
                  :after-commit (lambda () (error "presentation probe")))
                 'simple-error))
            (ok (= 1 (length (luv::metal-queue-pending-submissions queue))))
+           (destroy command-buffer)
+           (setf command-buffer nil)
            (submitted-work-done queue)
            (ok (null (luv::metal-queue-pending-submissions queue)))
-           (ok (objc:objective-c-object-released-p command-buffer))
+           (ok (objc:objective-c-object-released-p native-command-buffer))
            (ok (objc:objective-c-object-released-p allocator)))
-      (unless submitted-p
-        (when command-buffer
-          (objc:release-objective-c-object command-buffer))
-        (when allocator
-          (objc:release-objective-c-object allocator)))
+      (when command-buffer (destroy command-buffer))
+      (when encoder (destroy encoder))
       (destroy device))))
 
 (deftest luvcraft-metal-frame-resources-follow-the-drawable-pool

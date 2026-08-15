@@ -58,8 +58,8 @@ The current backend is deliberately narrow but real:
 
 - =:luv/gpu/api= is the shared semantic seam;
 - =:luv/gpu/metal= supplies Metal provider, device, queue, compiler, buffer,
-  shader-module, render-pipeline, texture, frame-encoder, and render-pass
-  objects;
+  shader-module, render-pipeline, texture, general command-encoder, finished
+  command-buffer, and render-pass objects;
 - =:luv/canvas/metal= specializes the canvas × provider relationship;
 - declared Objective-C messages cover synchronous Metal 4 library compilation
   as well as the submission and drawable vocabulary needed by one frame; and
@@ -68,11 +68,14 @@ The current backend is deliberately narrow but real:
   path, and a generated live-pipeline triangle through =MTL4ArgumentTable= on
   an Apple M2 Pro.
 
-This does not yet establish a portable HAL contract.  It establishes a second
-implementation substantial enough to test one.  In particular, shader module
-artifacts, interface locations, resources, and pipeline publication now have a
-concrete second target against which apparently neutral names can fail.
-#HXUGEA describes the explicit backend mechanisms worth sharing semantically.
+The canvas now uses that same general submission contract rather than a
+frame-owned shortcut: it creates an encoder through =create=, records ordinary
+commands, obtains one-shot work from =finish=, and calls the queue's =submit=.
+Only drawable signaling and presentation remain backend-local.  This is enough
+to make asynchronous submission, dependency ownership, and destruction a
+portable contract for the implemented command vocabulary.  It does not claim
+equal backend feature surfaces or WebGPU conformance.  #HXUGEA describes the
+explicit backend mechanisms shared semantically.
 
 * Metal 4's explicit model matches the Vulkan layer
 :PROPERTIES:
@@ -94,12 +97,14 @@ than Metal 3's implicit model would be:
   lifetime and deferred-reclamation obligations; and
 - queue-scoped =MTLResidencySet= makes residency a session concern.
 
-The correspondence is a design advantage, not proof that the implementations
-are interchangeable.  Metal supplies no safety net for a missing barrier.  A
-first submitted draw now retains its command buffer and allocator until the
-shared-event frontier passes, then reclaims both; allocator reset and rotating
-frame reuse still need a multi-frame proof.  The useful standard is semantic
-parity with explicit backend mechanisms, not line-for-line similarity.
+The correspondence is now represented by the Lisp objects as well as the
+native calls.  A finished =metal-gpu-command-buffer= owns its allocator, native
+command buffer, and every wrapper captured while encoding.  Submission stamps
+those dependencies with a monotonically increasing shared-event value and
+retains them in a queue record until the frontier passes.  Metal supplies no
+safety net for a missing barrier, so this lifetime parity is not a substitute
+for hazard proofs.  The useful standard is semantic parity with explicit
+backend mechanisms, not line-for-line similarity.
 
 * Argument tables realize semantic binding groups
 :PROPERTIES:
@@ -462,7 +467,7 @@ an invalid edit, recovers after a valid edit, and renders a pinned capture
 comparable to Vulkan.  Asynchronous compiler tasks, Objective-C blocks, and
 mesh/object stages remain later capabilities.
 
-* NEXT Retire replaced Metal resources without a frontier wait
+* DONE Retire replaced Metal resources without a frontier wait
 :PROPERTIES:
 :ID: JAM5XR
 :END:
@@ -470,14 +475,18 @@ mesh/object stages remain later capabilities.
 Intent: preserve logical frame-boundary publication while removing the
 conservative queue stall from Metal resource destruction.
 
-Evidence: command buffers and allocators already retire behind the
-=MTLSharedEvent= submission frontier, but buffers, textures, samplers, and
-replaced live pipelines currently call =submitted-work-done= before releasing
-native ownership.  That policy is safe and made the complete luvcraft proof
-possible, but a shader edit or chunk replacement can stop the producer until
-all prior GPU work completes.
+Evidence: every currently supported Metal encode relationship captures its
+buffers, textures, views, samplers, bind groups, and pipelines in the general
+encoder.  =finish= transfers that set and the native allocator to a one-shot
+command buffer.  Public =submit= stamps the command buffer and dependencies
+with a shared-event value and retains them in a queue submission record.
 
-Done when: logical destroy detaches the resource immediately, physical release
-is queued against the last submission which can reference it, normal frame
-submission reclaims completed entries without waiting, and tests prove that a
-live pipeline replacement remains valid across at least one in-flight frame.
+=destroy= now marks substantial wrappers invalid immediately.  It releases
+native ownership at once when the resource has no incomplete use, or attaches
+the native teardown to the last submission which can still reference it.
+Normal submission and =submitted-work-done= reclaim the completed prefix.
+Tests submit general offscreen work, reject a second submit of the same
+command buffer, retire its captured texture and command memory at the frontier,
+and replace a live pipeline while its old pipeline is used by an in-flight
+draw.  The old wrapper becomes invalid at publication and its native pipeline
+is released only after completion.

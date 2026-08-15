@@ -49,13 +49,13 @@ devices, queues, resources, descriptors, command structs, encoders, passes,
 =finish=, =submit=, =submitted-work-done=, host reads and writes, and explicit
 =destroy=.  Presentation remains in the separate [[file:../canvas/api.lisp][canvas protocol]].
 
-Both backends now render the block world through much of this vocabulary, so
-the seam is no longer hypothetical.  They do not yet implement equal surfaces:
-Vulkan has general command encoders, finished command buffers, and public
-=submit=, while Metal's working command encoder is currently created and
-committed inside the canvas frame path.  The second backend has tested the
-names and exposed their assumptions; it has not certified the whole interface
-as uniformly implemented.
+Both backends now render the block world through the same command lifecycle:
+create a general encoder, record commands and passes, =finish= it into a
+one-shot backend command buffer, and asynchronously =submit= that product to a
+queue.  Metal's canvas follows this lifecycle too; its only private extension
+is the drawable signal and presentation handshake after commit.  The backends
+still do not implement equal feature surfaces, but luvcraft no longer needs to
+know which command-submission or lifetime mechanism its selected provider uses.
 
 This is a useful small-system boundary.  It permits direct backend composition
 and does not require a capability framework, adapter hierarchy, or lowest
@@ -133,13 +133,11 @@ objects.  Unsupported command/encoder pairs fail through the generic
 fallback, so a backend grows by specializing concrete relationships rather
 than extending one opcode switch.
 
-The objects are nevertheless transient inputs.  Vulkan lowers each command
-immediately into a native command buffer; =finish= transfers the command pool,
-temporary native resources, texture-layout facts, and retained wrappers into
-a one-shot =vulkan-gpu-command-buffer=.  It does not preserve the high-level
-command sequence for replay or another lowering.  Metal likewise interprets
-commands immediately in its live frame encoder and currently has no portable
-finished command-buffer product.
+The objects are nevertheless transient inputs.  Each backend lowers a command
+immediately into its native command buffer.  =finish= transfers native command
+memory and retained wrappers into either a one-shot
+=vulkan-gpu-command-buffer= or =metal-gpu-command-buffer=; it does not preserve
+the high-level command sequence for replay or another lowering.
 
 That choice is coherent as long as the purpose is legible dispatch,
 validation, tracing, and dependency capture.  A durable backend-independent
@@ -167,13 +165,12 @@ command buffer.  Submission stamps the wrappers with the new submission index
 and keeps the command buffers and their captured resources in a queue-owned
 record until completion.
 
-Metal currently proves a narrower property.  Its shared-event submission
-record retains each committed Metal 4 command buffer and command allocator;
-the device residency set makes allocations resident, and explicit destruction
-of substantial resources waits for the queue frontier before removing or
-releasing them.  The general transitive capture and asynchronous public-submit
-contract proven by Vulkan does not yet exist as the same Lisp-level mechanism
-on Metal.
+Metal now makes the same ownership transfers.  Encode methods capture every
+wrapper referenced by its implemented render, clear, copy, preparation, and
+binding vocabulary.  =finish= moves that set, the native command buffer, and
+its allocator into one-shot work.  Public submission stamps all dependencies
+with a shared-event value and retains them in the queue record.  The residency
+set keeps their allocations resident until deferred destruction removes them.
 
 Garbage collection concerns only the first lifetime.  It cannot replace the
 recorded and submitted ownership edges, and native API retention cannot by
@@ -191,8 +188,8 @@ queue frontier, but the records attached to that frontier are different.
 |-
 | Native completion value | timeline semaphore | shared event |
 | Submitted value | queue submission index | queue submission value |
-| Retained until completion | command buffers, captured wrappers, native temporaries, deferred destroys | frame command buffer and allocator |
-| General public =submit= | yes | not yet |
+| Retained until completion | command buffers, captured wrappers, native temporaries, deferred destroys | command buffers, allocators, captured wrappers, deferred destroys |
+| General public =submit= | yes | yes |
 | Maintenance points | submission and explicit wait | submission and explicit wait |
 
 [[file:../gpu/vulkan.lisp::(defun submit-vulkan-command-buffers][=submit-vulkan-command-buffers=]] signals the queue timeline, installs a
@@ -201,39 +198,33 @@ the semaphore counter and retires the completed prefix.  Vulkan 1.4,
 =vkQueueSubmit2=, timeline semaphores, and synchronization2 are deliberate
 minimums; there is no fence or legacy-submit fallback.
 
-[[file:../gpu/metal.lisp::(defun submit-metal-command-buffer][=submit-metal-command-buffer=]] commits one Metal 4 command buffer, registers
-its command buffer and allocator before presentation can fail, and signals a
-shared event afterward.  Reclamation releases those two native objects when
-the event value passes them.  The current Metal page #NABRMK follows that
-backend's larger compiler and rendering story.
+[[file:../gpu/metal.lisp::(defun submit-metal-command-buffers][=submit-metal-command-buffers=]] commits a batch of finished Metal 4 work,
+registers command memory and captured dependencies before presentation can
+fail, and signals a shared event afterward.  Reclamation drops the retained
+record and performs deferred native teardown when the event value passes it.
+The current Metal page #NABRMK follows that backend's larger compiler and
+rendering story.
 
 Neither queue polls in the background.  If no later submission or explicit
 wait occurs, a completed record can remain retained until the next maintenance
 point.  That is delayed reclamation, not unsafe reclamation.
 
-* Vulkan destroy is logically immediate and physically conditional
+* Destroy is logically immediate and physically conditional
 :PROPERTIES:
 :ID: D3H7VK
 :END:
 
-Vulkan's resource classes implement the cleanest form of =destroy= in the
-current system.  The operation marks the wrapper destroyed immediately, so no
-new command can mention it, then compares its last submitted use with the
-queue frontier.  Native teardown happens immediately if safe or is attached
-to the still-live submission record that last used it.  Retiring that record
-performs the deferred teardown.
+Both resource implementations now give =destroy= this shape.  The operation
+marks the wrapper destroyed immediately, so no new command can mention it,
+then compares its last submitted use with the queue frontier.  Native teardown
+happens immediately if safe or is attached to the still-live submission record
+that last used it.  Retiring that record performs the deferred teardown.
 
-This division is essential rather than stylistic.  Native Vulkan destruction
-requires every submitted use to have completed, while a pleasant API should
-not make every explicit destroy drain the queue.  Complete command dependency
-capture is what makes the deferred half safe.
-
-Metal has not yet adopted this exact contract.  Destroying a substantial
-Metal buffer, texture, sampler, shader module, or pipeline conservatively
-waits for the shared-event frontier before releasing the native object; only
-then is the wrapper marked destroyed.  Lightweight semantic wrappers may only
-change logical state.  Thus =destroy= is a shared verb today, but logical
-immediacy is a proven Vulkan property rather than a portable guarantee.
+This division is essential rather than stylistic.  Native destruction requires
+every submitted use to have completed, while a pleasant API should not make
+every explicit destroy drain the queue.  Complete command dependency capture
+is what makes the deferred half safe.  Lightweight semantic wrappers with no
+independent native ownership still only change logical state.
 
 * Explicit destruction is the discipline; collection is only a safety net
 :PROPERTIES:
@@ -287,9 +278,9 @@ system.  A resource can also be used by compute or copy work with no frame at
 all, so “end of frame” is not the general reclamation unit.
 
 Metal presentation has no parallel Lisp frame-slot abstraction.  Its drawable
-pool bounds presentation resources, while the queue's shared-event records
-retain command memory independently.  The native Metal page describes the
-backend-specific frame path and its next reclamation step #JAM5XR.
+pool bounds presentation resources, while the same general queue submission
+records used by offscreen work retain command memory and dependencies.  This
+keeps drawable pacing separate from the lifetime proof completed by #JAM5XR.
 
 * Usage names hazards; each backend still owns the synchronization proof
 :PROPERTIES:
@@ -351,10 +342,6 @@ with an owner and a testable exclusion rule.
 The architecture no longer needs a speculative rewrite to become clearer.
 Its open proofs are adjacent to working mechanisms:
 
-- give Metal a general finished command buffer and public asynchronous
-  =submit=, or explicitly narrow the portable contract;
-- let Metal retire replaced resources through its frontier instead of waiting
-  in each substantial =destroy= (#JAM5XR);
 - make dependency capture completeness visible when a new command kind is
   added;
 - grow texture state into the access-hazard model demanded by real workloads;

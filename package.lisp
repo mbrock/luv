@@ -307,6 +307,10 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #+darwin
            #:metal-gpu-queue
            #+darwin
+           #:metal-gpu-command-encoder
+           #+darwin
+           #:metal-gpu-command-buffer
+           #+darwin
            #:metal-gpu-buffer
            #+darwin
            #:metal-gpu-texture

@@ -180,7 +180,9 @@ factories for requesting GPU-DEVICE instances."))
     :reader gpu-texture-view-texture)))
 (defclass gpu-sampler (gpu-object) ())
 
-(defclass gpu-command-buffer (gpu-object) ())
+(defclass gpu-command-buffer (gpu-object) ()
+  (:documentation
+   "Finished one-shot work accepted by a GPU queue's SUBMIT operation."))
 
 (defclass gpu-encoder (gpu-object) ()
   (:documentation "Abstract receiver for recorded GPU commands."))
@@ -214,7 +216,8 @@ of some object fulfilling the DESCRIPTOR."))
   (:documentation "Issue a queue-scoped GPU COMMAND onto QUEUE."))
 
 (defgeneric finish (encoder)
-  (:documentation "Asks the ENCODER to seal its work sequence."))
+  (:documentation
+   "Seal ENCODER and return one finished, one-shot GPU command buffer."))
 
 (defgeneric submit (queue work)
   (:documentation "Schedule some command buffers on the QUEUE.
@@ -235,7 +238,11 @@ completed on the GPU."))
    "Wait for BUFFER's device queue and copy mapped bytes back to the host."))
 
 (defgeneric destroy (handle)
-  (:documentation "Destroy the GPU object denoted by HANDLE."))
+  (:documentation
+   "Logically invalidate HANDLE immediately.
+
+Native teardown may be deferred until submitted work which captured HANDLE
+has completed."))
 
 (defmethod submit (queue (buffers vector))
   "Platforms can override this for more efficient batch submission."

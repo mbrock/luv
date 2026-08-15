@@ -1,4 +1,4 @@
-;;;; The deliberately small Metal implementation needed by canvas clearing.
+;;;; The Metal 4 implementation of luv's portable GPU protocol.
 
 (in-package #:luv)
 
@@ -17,7 +17,11 @@
 
 (defclass metal-gpu-object ()
   ((native-object :initarg :native-object :reader metal-native-object)
-   (destroyed-p :initform nil :accessor metal-object-destroyed-p)))
+   (destroyed-p :initform nil :accessor metal-object-destroyed-p)
+   (last-submission
+    :initform 0
+    :accessor metal-object-last-submission
+    :documentation "Newest queue submission which may still use this object.")))
 
 (defclass metal-gpu-device (gpu-device metal-gpu-object)
   ((queue :initform nil :accessor metal-device-queue)
@@ -26,7 +30,7 @@
                   :reader metal-device-residency-set)))
 
 (defstruct metal-submission
-  value command-buffer allocator)
+  value command-buffers resources pending-destroys)
 
 (defclass metal-gpu-queue (gpu-queue metal-gpu-object)
   ((device :initarg :device :reader metal-queue-device)
@@ -34,7 +38,10 @@
                      :reader metal-queue-completion-event)
    (submitted-value :initform 0 :accessor metal-queue-submitted-value)
    (pending-submissions :initform nil
-                        :accessor metal-queue-pending-submissions)))
+                        :accessor metal-queue-pending-submissions)
+   (lock :initform (sb-thread:make-mutex
+                    :name "luv Metal submission queue")
+         :reader metal-queue-lock)))
 
 (defclass metal-gpu-buffer (gpu-buffer metal-gpu-object)
   ((device :initarg :device :reader metal-buffer-device)
@@ -83,15 +90,28 @@
   (:documentation
    "A linked Metal 4 render pipeline and its draw-time depth state."))
 
-(defclass metal-frame-command-encoder (gpu-command-encoder)
-  ((context :initarg :context :reader metal-encoder-context)
-   (texture :initarg :texture :reader metal-encoder-texture)
+(defclass metal-gpu-command-encoder (gpu-command-encoder)
+  ((device :initarg :device :reader metal-command-encoder-device)
+   (allocator :initarg :allocator :accessor metal-encoder-allocator)
    (command-buffer :initarg :command-buffer
-                   :reader metal-encoder-command-buffer)
+                   :accessor metal-encoder-command-buffer)
+   (resources :initform (make-hash-table :test #'eq)
+              :reader metal-encoder-resources)
    (active-pass :initform nil :accessor metal-encoder-active-pass)
    (pending-consumer-barrier
     :initform nil :accessor metal-encoder-pending-consumer-barrier)
-   (encoded-p :initform nil :accessor metal-encoder-encoded-p)))
+   (state :initform :recording :accessor metal-encoder-state)
+   (encoded-p :initform nil :accessor metal-encoder-encoded-p))
+  (:documentation
+   "A general Metal 4 command encoder which owns recording memory until FINISH."))
+
+(defclass metal-gpu-command-buffer (gpu-command-buffer metal-gpu-object)
+  ((device :initarg :device :reader metal-command-buffer-device)
+   (allocator :initarg :allocator :reader metal-command-buffer-allocator)
+   (resources :initarg :resources :reader metal-command-buffer-resources)
+   (state :initform :ready :accessor metal-command-buffer-state))
+  (:documentation
+   "One finished, one-shot Metal 4 command buffer and its recorded dependencies."))
 
 (defclass metal-render-pass-encoder (gpu-render-pass-encoder)
   ((owner :initarg :owner :reader metal-render-pass-owner)
@@ -207,73 +227,240 @@ The first vertex-stage realization is the executable mechanism described by
   (ensure-live-metal-object device :device-queue)
   (metal-device-queue device))
 
-(defun reclaim-completed-metal-submissions (queue)
-  "Release command memory whose Metal 4 shared-event value has completed."
-  (let ((completed
-          (luv.metal:metal-shared-event-signaled-value
-           (metal-queue-completion-event queue)))
-        (pending nil))
-    (dolist (submission (metal-queue-pending-submissions queue))
-      (if (<= (metal-submission-value submission) completed)
-          (progn
-            (luv.objective-c:release-objective-c-object
-             (metal-submission-command-buffer submission))
-            (luv.objective-c:release-objective-c-object
-             (metal-submission-allocator submission)))
-          (push submission pending)))
-    (setf (metal-queue-pending-submissions queue) (nreverse pending)))
+(defun ensure-metal-command-encoder-state (encoder operation)
+  (unless (eq :recording (metal-encoder-state encoder))
+    (error 'gpu-invalid-state-error :object encoder :operation operation
+           :state (metal-encoder-state encoder) :expected-state :recording))
+  encoder)
+
+(defun ensure-no-active-metal-pass (encoder operation)
+  (when (metal-encoder-active-pass encoder)
+    (error 'gpu-invalid-state-error :object encoder :operation operation
+           :state :pass-active :expected-state :between-passes))
+  encoder)
+
+(defun retain-metal-resource (encoder resource)
+  "Retain RESOURCE as a dependency of ENCODER's eventual command buffer."
+  (setf (gethash resource (metal-encoder-resources encoder)) t)
+  resource)
+
+(defun metal-encoder-resource-list (encoder)
+  (loop for resource being the hash-keys of (metal-encoder-resources encoder)
+        collect resource))
+
+(defmethod create
+    ((device metal-gpu-device) (descriptor command-encoder-descriptor))
+  "Allocate and begin one general Metal 4 command buffer."
+  (ensure-live-metal-object device :create-command-encoder)
+  (let ((allocator nil)
+        (command-buffer nil)
+        (completed-p nil))
+    (unwind-protect
+         (progn
+           (setf allocator
+                 (luv.metal:new-command-allocator (metal-native-object device))
+                 command-buffer
+                 (luv.metal:new-command-buffer (metal-native-object device)))
+           (unless (and allocator command-buffer)
+             (error 'metal-gpu-error :operation :create-command-encoder
+                    :reason :command-resource-creation-failed))
+           (luv.metal:begin-command-buffer command-buffer allocator)
+           (let ((encoder
+                   (make-instance
+                    'metal-gpu-command-encoder
+                    :label (gpu-descriptor-label descriptor)
+                    :device device :allocator allocator
+                    :command-buffer command-buffer)))
+             (setf allocator nil command-buffer nil completed-p t)
+             encoder))
+      (unless completed-p
+        (when command-buffer
+          (luv.objective-c:release-objective-c-object command-buffer))
+        (when allocator
+          (luv.objective-c:release-objective-c-object allocator))))))
+
+(defmethod finish ((encoder metal-gpu-command-encoder))
+  "End recording and transfer native memory and dependencies to one-shot work."
+  (ensure-metal-command-encoder-state encoder :finish)
+  (ensure-no-active-metal-pass encoder :finish)
+  (let ((command-buffer (metal-encoder-command-buffer encoder))
+        (allocator (metal-encoder-allocator encoder)))
+    (luv.metal:end-command-buffer command-buffer)
+    (setf (metal-encoder-state encoder) :finished
+          (metal-encoder-command-buffer encoder) nil
+          (metal-encoder-allocator encoder) nil)
+    (make-instance
+     'metal-gpu-command-buffer
+     :label (gpu-object-label encoder)
+     :native-object command-buffer :allocator allocator
+     :device (metal-command-encoder-device encoder)
+     :resources (metal-encoder-resource-list encoder))))
+
+(defgeneric destroy-metal-native (object)
+  (:documentation
+   "Release OBJECT's native Metal ownership after its last use is complete."))
+
+(defun metal-queue-completed-frontier (queue)
+  (luv.metal:metal-shared-event-signaled-value
+   (metal-queue-completion-event queue)))
+
+(defun maintain-metal-queue (queue)
+  "Retire the completed submission prefix and its deferred native releases."
+  (sb-thread:with-recursive-lock ((metal-queue-lock queue))
+    (let ((frontier (metal-queue-completed-frontier queue)))
+      (loop while (and (metal-queue-pending-submissions queue)
+                       (<= (metal-submission-value
+                            (first (metal-queue-pending-submissions queue)))
+                           frontier))
+            do (let ((submission
+                       (pop (metal-queue-pending-submissions queue))))
+                 (dolist (resource
+                          (metal-submission-pending-destroys submission))
+                   (destroy-metal-native resource))))
+      frontier)))
+
+(defun metal-destroy-or-defer (resource device)
+  "Release RESOURCE now or attach its native teardown to its last submission."
+  (let ((queue (metal-device-queue device))
+        (last-use (metal-object-last-submission resource)))
+    (if (or (null queue)
+            (metal-object-destroyed-p device)
+            (zerop last-use))
+        (destroy-metal-native resource)
+        (sb-thread:with-recursive-lock ((metal-queue-lock queue))
+          (let ((submission
+                  (and (> last-use (metal-queue-completed-frontier queue))
+                       (find last-use (metal-queue-pending-submissions queue)
+                             :key #'metal-submission-value))))
+            (if submission
+                (pushnew resource
+                         (metal-submission-pending-destroys submission)
+                         :test #'eq)
+                (destroy-metal-native resource))))))
   (values))
+
+(defun check-metal-command-buffer-for-submit (queue command-buffer)
+  (unless (typep command-buffer 'metal-gpu-command-buffer)
+    (error 'gpu-request-error :operation :submit
+           :descriptor command-buffer :reason :invalid-command-buffer))
+  (ensure-live-metal-object command-buffer :submit)
+  (unless (eq (metal-queue-device queue)
+              (metal-command-buffer-device command-buffer))
+    (error 'gpu-device-mismatch-error
+           :object command-buffer :operation :submit
+           :expected-device (metal-queue-device queue)
+           :actual-device (metal-command-buffer-device command-buffer)))
+  (unless (eq :ready (metal-command-buffer-state command-buffer))
+    (error 'gpu-invalid-state-error
+           :object command-buffer :operation :submit
+           :state (metal-command-buffer-state command-buffer)
+           :expected-state :ready))
+  (dolist (resource (metal-command-buffer-resources command-buffer))
+    (ensure-live-metal-object resource :submit))
+  command-buffer)
+
+(defun collect-metal-submission-resources (command-buffers)
+  (remove-duplicates
+   (loop for command-buffer across command-buffers
+         append (metal-command-buffer-resources command-buffer))
+   :test #'eq))
 
 (defmethod submitted-work-done ((queue metal-gpu-queue))
   "Wait for the Metal 4 shared-event frontier most recently submitted."
   (ensure-live-metal-object queue :submitted-work-done)
-  (let ((value (metal-queue-submitted-value queue)))
+  (let ((value
+          (sb-thread:with-recursive-lock ((metal-queue-lock queue))
+            (metal-queue-submitted-value queue))))
     (when (plusp value)
       (unless (plusp
                (luv.metal:wait-for-metal-shared-event
                 (metal-queue-completion-event queue) value 30000))
         (error 'metal-gpu-error :operation :submitted-work-done
                :reason :completion-timeout :details value))))
-  (reclaim-completed-metal-submissions queue)
+  (maintain-metal-queue queue)
   (values))
 
-(defun submit-metal-command-buffer
-    (queue command-buffer allocator &key after-commit)
-  "Consume, commit, and retain Metal 4 command memory to QUEUE's frontier.
+(defun submit-metal-command-buffers
+    (queue command-buffers &key after-commit)
+  "Commit finished Metal work and retain its dependencies to QUEUE's frontier.
 
 AFTER-COMMIT performs the drawable signal and presentation handshake before
-the completion event is enqueued.  This is the allocator-lifetime proof in
-#PH57K5."
-  (let ((committed-p nil))
-    (handler-case
-        (progn
-          (ensure-live-metal-object queue :submit)
-          (reclaim-completed-metal-submissions queue)
-          (luv.metal:commit-command-buffer
-           (metal-native-object queue) command-buffer)
-          (setf committed-p t)
-          (let ((value (incf (metal-queue-submitted-value queue))))
-            ;; Register ownership before presentation.  If presentation raises,
-            ;; the unwind still queues the completion signal and the queue keeps
-            ;; the allocator alive until that signal crosses the frontier.
-            (push (make-metal-submission
-                   :value value :command-buffer command-buffer
-                   :allocator allocator)
-                  (metal-queue-pending-submissions queue))
-            (unwind-protect
-                 (when after-commit
-                   (funcall after-commit))
-              (luv.metal:signal-metal-event
-               (metal-native-object queue)
-               (metal-queue-completion-event queue) value))
-            value))
-      (error (condition)
-        ;; Before commit there is no GPU ownership to retire.  After commit the
-        ;; pending submission above is the only safe owner of these objects.
-        (unless committed-p
-          (luv.objective-c:release-objective-c-object command-buffer)
-          (luv.objective-c:release-objective-c-object allocator))
-        (error condition)))))
+the completion event is enqueued.  Presentation is the only caller of that
+backend-local extension; ordinary callers use SUBMIT.  #T9K4RC"
+  (ensure-live-metal-object queue :submit)
+  (unless (vectorp command-buffers)
+    (error 'gpu-request-error :operation :submit
+           :descriptor command-buffers :reason :invalid-command-buffers))
+  (when (zerop (length command-buffers))
+    (return-from submit-metal-command-buffers nil))
+  (sb-thread:with-recursive-lock ((metal-queue-lock queue))
+    (maintain-metal-queue queue)
+    (loop for command-buffer across command-buffers
+          do (check-metal-command-buffer-for-submit queue command-buffer))
+    (let* ((resources (collect-metal-submission-resources command-buffers))
+           (native-command-buffers
+             (map 'vector #'metal-native-object command-buffers)))
+      (luv.metal:commit-command-buffers
+       (metal-native-object queue) native-command-buffers)
+      (let ((value (incf (metal-queue-submitted-value queue))))
+        (loop for command-buffer across command-buffers
+              do (setf (metal-command-buffer-state command-buffer) :submitted
+                       (metal-object-last-submission command-buffer) value))
+        (dolist (resource resources)
+          (setf (metal-object-last-submission resource) value))
+        ;; Register queue ownership before presentation can fail.
+        (setf (metal-queue-pending-submissions queue)
+              (nconc (metal-queue-pending-submissions queue)
+                     (list (make-metal-submission
+                            :value value
+                            :command-buffers command-buffers
+                            :resources resources))))
+        (unwind-protect
+             (when after-commit
+               (funcall after-commit))
+          (luv.metal:signal-metal-event
+           (metal-native-object queue)
+           (metal-queue-completion-event queue) value))
+        value))))
+
+(defmethod destroy ((encoder metal-gpu-command-encoder))
+  (when (eq :recording (metal-encoder-state encoder))
+    (when (metal-encoder-active-pass encoder)
+      (ignore-errors (end-pass (metal-encoder-active-pass encoder))))
+    (when (metal-encoder-command-buffer encoder)
+      (ignore-errors
+        (luv.metal:end-command-buffer (metal-encoder-command-buffer encoder)))
+      (luv.objective-c:release-objective-c-object
+       (metal-encoder-command-buffer encoder)))
+    (when (metal-encoder-allocator encoder)
+      (luv.objective-c:release-objective-c-object
+       (metal-encoder-allocator encoder)))
+    (setf (metal-encoder-command-buffer encoder) nil
+          (metal-encoder-allocator encoder) nil))
+  (setf (metal-encoder-state encoder) :destroyed)
+  (values))
+
+(defmethod destroy-metal-native ((command-buffer metal-gpu-command-buffer))
+  (luv.objective-c:release-objective-c-object
+   (metal-native-object command-buffer))
+  (luv.objective-c:release-objective-c-object
+   (metal-command-buffer-allocator command-buffer))
+  (values))
+
+(defmethod destroy ((command-buffer metal-gpu-command-buffer))
+  (unless (metal-object-destroyed-p command-buffer)
+    (setf (metal-object-destroyed-p command-buffer) t
+          (metal-command-buffer-state command-buffer) :destroyed)
+    (metal-destroy-or-defer
+     command-buffer (metal-command-buffer-device command-buffer)))
+  (values))
+
+(defmethod submit
+    ((queue metal-gpu-queue) (command-buffer metal-gpu-command-buffer))
+  (submit-metal-command-buffers queue (vector command-buffer)))
+
+(defmethod submit ((queue metal-gpu-queue) (command-buffers vector))
+  (submit-metal-command-buffers queue command-buffers))
 
 (defmethod destroy ((device metal-gpu-device))
   (unless (metal-object-destroyed-p device)
@@ -388,20 +575,20 @@ the completion event is enqueued.  This is the allocator-lifetime proof in
       (dotimes (index size bytes)
         (setf (aref bytes index) (cffi:mem-aref source :uint8 index))))))
 
+(defmethod destroy-metal-native ((buffer metal-gpu-buffer))
+  (let* ((device (metal-buffer-device buffer))
+         (residency-set (metal-device-residency-set device)))
+    (luv.metal:remove-metal-residency-allocation
+     residency-set (metal-native-object buffer))
+    (luv.metal:commit-metal-residency-set residency-set)
+    (luv.objective-c:release-objective-c-object
+     (metal-native-object buffer)))
+  (values))
+
 (defmethod destroy ((buffer metal-gpu-buffer))
   (unless (metal-object-destroyed-p buffer)
-    (let* ((device (metal-buffer-device buffer))
-           (residency-set (metal-device-residency-set device)))
-      ;; This is deliberately conservative until Metal gets the same deferred
-      ;; physical-retirement queue as Vulkan: logical destroy waits at the
-      ;; shared-event frontier before changing residency or releasing storage.
-      (submitted-work-done (device-queue device))
-      (luv.metal:remove-metal-residency-allocation
-       residency-set (metal-native-object buffer))
-      (luv.metal:commit-metal-residency-set residency-set)
-      (luv.objective-c:release-objective-c-object
-       (metal-native-object buffer))
-      (setf (metal-object-destroyed-p buffer) t)))
+    (setf (metal-object-destroyed-p buffer) t)
+    (metal-destroy-or-defer buffer (metal-buffer-device buffer)))
   (values))
 
 (defun normalize-metal-texture-size (descriptor)
@@ -668,18 +855,21 @@ the completion event is enqueued.  This is the allocator-lifetime proof in
        (cffi:inc-pointer storage offset) bytes-per-row)))
   command)
 
+(defmethod destroy-metal-native ((texture metal-gpu-texture))
+  (when (metal-texture-owned-p texture)
+    (let* ((device (metal-texture-device texture))
+           (residency-set (metal-device-residency-set device)))
+      (luv.metal:remove-metal-residency-allocation
+       residency-set (metal-native-object texture))
+      (luv.metal:commit-metal-residency-set residency-set)
+      (luv.objective-c:release-objective-c-object
+       (metal-native-object texture))))
+  (values))
+
 (defmethod destroy ((texture metal-gpu-texture))
   (unless (metal-object-destroyed-p texture)
-    (when (metal-texture-owned-p texture)
-      (let* ((device (metal-texture-device texture))
-             (residency-set (metal-device-residency-set device)))
-        (submitted-work-done (device-queue device))
-        (luv.metal:remove-metal-residency-allocation
-         residency-set (metal-native-object texture))
-        (luv.metal:commit-metal-residency-set residency-set)
-        (luv.objective-c:release-objective-c-object
-         (metal-native-object texture))))
-    (setf (metal-object-destroyed-p texture) t))
+    (setf (metal-object-destroyed-p texture) t)
+    (metal-destroy-or-defer texture (metal-texture-device texture)))
   (values))
 
 (defmethod destroy ((view metal-gpu-texture-view))
@@ -688,10 +878,13 @@ the completion event is enqueued.  This is the allocator-lifetime proof in
 
 (defmethod destroy ((sampler metal-gpu-sampler))
   (unless (metal-object-destroyed-p sampler)
-    (submitted-work-done (device-queue (metal-sampler-device sampler)))
-    (luv.objective-c:release-objective-c-object
-     (metal-native-object sampler))
-    (setf (metal-object-destroyed-p sampler) t))
+    (setf (metal-object-destroyed-p sampler) t)
+    (metal-destroy-or-defer sampler (metal-sampler-device sampler)))
+  (values))
+
+(defmethod destroy-metal-native ((sampler metal-gpu-sampler))
+  (luv.objective-c:release-objective-c-object
+   (metal-native-object sampler))
   (values))
 
 (defmethod destroy ((layout metal-gpu-bind-group-layout))
@@ -797,9 +990,13 @@ compiler boundary of #58IDSR."
 
 (defmethod destroy ((module metal-gpu-shader-module))
   (unless (metal-object-destroyed-p module)
-    (luv.objective-c:release-objective-c-object
-     (metal-native-object module))
-    (setf (metal-object-destroyed-p module) t))
+    (setf (metal-object-destroyed-p module) t)
+    (metal-destroy-or-defer module (metal-shader-module-device module)))
+  (values))
+
+(defmethod destroy-metal-native ((module metal-gpu-shader-module))
+  (luv.objective-c:release-objective-c-object
+   (metal-native-object module))
   (values))
 
 (defun reject-metal-gpu-request (descriptor reason &optional details)
@@ -980,14 +1177,16 @@ compiler boundary of #58IDSR."
 
 (defmethod destroy ((pipeline metal-gpu-render-pipeline))
   (unless (metal-object-destroyed-p pipeline)
-    (submitted-work-done
-     (device-queue (metal-render-pipeline-device pipeline)))
-    (let ((depth-state (metal-render-pipeline-depth-stencil-state pipeline)))
-      (when depth-state
-        (luv.objective-c:release-objective-c-object depth-state)))
-    (luv.objective-c:release-objective-c-object
-     (metal-native-object pipeline))
-    (setf (metal-object-destroyed-p pipeline) t))
+    (setf (metal-object-destroyed-p pipeline) t)
+    (metal-destroy-or-defer pipeline (metal-render-pipeline-device pipeline)))
+  (values))
+
+(defmethod destroy-metal-native ((pipeline metal-gpu-render-pipeline))
+  (let ((depth-state (metal-render-pipeline-depth-stencil-state pipeline)))
+    (when depth-state
+      (luv.objective-c:release-objective-c-object depth-state)))
+  (luv.objective-c:release-objective-c-object
+   (metal-native-object pipeline))
   (values))
 
 (defun probe-metal-shader-library (specification)
@@ -1144,15 +1343,14 @@ compiler boundary of #58IDSR."
       (list texture load-op store-op clear-depth))))
 
 (defmethod begin-render-pass
-    ((encoder metal-frame-command-encoder) descriptor)
+    ((encoder metal-gpu-command-encoder) descriptor)
   "Begin a Metal 4 color, depth, or color-and-depth pass."
-  (when (metal-encoder-active-pass encoder)
-    (error 'gpu-invalid-state-error :object encoder :operation :begin-render-pass
-           :state :pass-active :expected-state :between-passes))
+  (ensure-metal-command-encoder-state encoder :begin-render-pass)
+  (ensure-no-active-metal-pass encoder :begin-render-pass)
   (let* ((attachments (render-pass-descriptor-color-attachments descriptor))
          (depth-attachment
            (render-pass-descriptor-depth-stencil-attachment descriptor))
-         (device (metal-texture-device (metal-encoder-texture encoder))))
+         (device (metal-command-encoder-device encoder)))
     (unless (and (listp attachments) (<= (length attachments) 1)
                  (or attachments depth-attachment))
       (reject-metal-gpu-request
@@ -1163,6 +1361,16 @@ compiler boundary of #58IDSR."
                    device descriptor (first attachments)))
            (depth (normalize-metal-depth-attachment
                    device descriptor depth-attachment)))
+      (when color
+        (retain-metal-resource encoder (first color))
+        (let ((view (getf (first attachments) :view)))
+          (when (typep view 'metal-gpu-texture-view)
+            (retain-metal-resource encoder view))))
+      (when depth
+        (retain-metal-resource encoder (first depth))
+        (let ((view (getf depth-attachment :view)))
+          (when (typep view 'metal-gpu-texture-view)
+            (retain-metal-resource encoder view))))
       (when (and color depth
                  (not (equal (gpu-texture-size (first color))
                              (gpu-texture-size (first depth)))))
@@ -1202,14 +1410,13 @@ compiler boundary of #58IDSR."
           pass)))))
 
 (defmethod encode
-    ((encoder metal-frame-command-encoder)
+    ((encoder metal-gpu-command-encoder)
      (command gpu-prepare-texture-command))
-  (when (metal-encoder-active-pass encoder)
-    (error 'gpu-invalid-state-error :object encoder :operation :prepare-texture
-           :state :pass-active :expected-state :between-passes))
+  (ensure-metal-command-encoder-state encoder :prepare-texture)
+  (ensure-no-active-metal-pass encoder :prepare-texture)
   (let ((texture (gpu-prepare-texture-command-texture command))
         (usage (gpu-prepare-texture-command-usage command))
-        (device (metal-texture-device (metal-encoder-texture encoder))))
+        (device (metal-command-encoder-device encoder)))
     (unless (and (typep texture 'metal-gpu-texture)
                  (member usage (gpu-texture-usage texture))
                  (eq usage :texture-binding))
@@ -1230,7 +1437,8 @@ compiler boundary of #58IDSR."
     (setf (metal-encoder-pending-consumer-barrier encoder)
           (list luv.metal:+stage-fragment+
                 luv.metal:+stage-fragment+
-                luv.metal:+visibility-device+)))
+                luv.metal:+visibility-device+))
+    (retain-metal-resource encoder texture))
   encoder)
 
 (defun release-metal-render-pass-argument-table (pass)
@@ -1251,7 +1459,8 @@ compiler boundary of #58IDSR."
 (defun configure-metal-pass-bind-group (pass bind-group)
   (let* ((pipeline (metal-render-pass-pipeline pass))
          (layout (and pipeline (metal-render-pipeline-layout pipeline)))
-         (table (metal-render-pass-argument-table pass)))
+         (table (metal-render-pass-argument-table pass))
+         (owner (metal-render-pass-owner pass)))
     (unless pipeline
       (error 'gpu-invalid-state-error :object pass :operation :set-bind-group
              :state :no-pipeline :expected-state :pipeline-bound))
@@ -1265,6 +1474,9 @@ compiler boundary of #58IDSR."
                           :key (lambda (candidate)
                                  (getf candidate :binding))))
              (resource (getf entry :resource)))
+        (retain-metal-resource owner resource)
+        (when (typep resource 'metal-gpu-texture-view)
+          (retain-metal-resource owner (gpu-texture-view-texture resource)))
         (ecase (getf layout-entry :type)
           (:uniform-buffer
            (luv.metal:set-metal-argument-table-address
@@ -1285,6 +1497,7 @@ compiler boundary of #58IDSR."
             (luv.metal:metal-sampler-resource-id
              (metal-native-object resource))
             binding))))))
+  (retain-metal-resource (metal-render-pass-owner pass) bind-group)
   (setf (metal-render-pass-bind-group pass) bind-group)
   bind-group)
 
@@ -1293,11 +1506,12 @@ compiler boundary of #58IDSR."
   (ensure-metal-render-pass-state pass :set-pipeline)
   (let* ((pipeline (gpu-set-pipeline-command-pipeline command))
          (owner (metal-render-pass-owner pass))
-         (device (metal-texture-device (metal-encoder-texture owner))))
+         (device (metal-command-encoder-device owner)))
     (unless (typep pipeline 'metal-gpu-render-pipeline)
       (reject-metal-gpu-request command :incompatible-pipeline pipeline))
     (ensure-metal-object-device
      pipeline (metal-render-pipeline-device pipeline) device :set-pipeline)
+    (retain-metal-resource owner pipeline)
     (release-metal-render-pass-argument-table pass)
     (clrhash (metal-render-pass-vertex-bindings pass))
     (let ((vertex-buffers (metal-render-pipeline-vertex-buffers pipeline)))
@@ -1396,6 +1610,7 @@ compiler boundary of #58IDSR."
      (+ (luv.metal:metal-buffer-gpu-address (metal-native-object buffer))
         offset)
      (getf layout :array-stride) slot)
+    (retain-metal-resource (metal-render-pass-owner pass) buffer)
     (setf (gethash slot (metal-render-pass-vertex-bindings pass)) buffer)
     command))
 
@@ -1456,21 +1671,21 @@ compiler boundary of #58IDSR."
   (values))
 
 (defmethod encode
-    ((encoder metal-frame-command-encoder)
+    ((encoder metal-gpu-command-encoder)
      (command gpu-clear-texture-command))
-  (when (or (metal-encoder-encoded-p encoder)
-            (metal-encoder-active-pass encoder))
-    (error 'gpu-invalid-state-error :object encoder :operation :encode
-           :state :clear-encoded :expected-state :empty))
+  (ensure-metal-command-encoder-state encoder :encode)
+  (ensure-no-active-metal-pass encoder :encode)
   (let ((texture (gpu-clear-texture-command-texture command))
         (color (gpu-clear-texture-command-color command)))
     (unless (typep texture 'metal-gpu-texture)
       (error 'gpu-request-error :operation :encode :descriptor command
              :reason :foreign-texture))
     (ensure-live-metal-object texture :encode)
-    (unless (eq texture (metal-encoder-texture encoder))
-      (error 'gpu-invalid-state-error :object texture :operation :encode
-             :state :outside-frame :expected-state :current-frame))
+    (ensure-metal-object-device
+     texture (metal-texture-device texture)
+     (metal-command-encoder-device encoder) :encode)
+    (unless (member :render-attachment (gpu-texture-usage texture))
+      (reject-metal-gpu-request command :texture-missing-render-usage texture))
     (unless (and (= (length color) 4)
                  (every #'realp color))
       (error 'gpu-request-error :operation :encode :descriptor command
@@ -1479,15 +1694,15 @@ compiler boundary of #58IDSR."
      (metal-encoder-command-buffer encoder)
      (metal-native-object texture)
      color)
+    (retain-metal-resource encoder texture)
     (setf (metal-encoder-encoded-p encoder) t)
     command))
 
 (defmethod encode
-    ((encoder metal-frame-command-encoder)
+    ((encoder metal-gpu-command-encoder)
      (command gpu-copy-texture-command))
-  (when (metal-encoder-active-pass encoder)
-    (error 'gpu-invalid-state-error :object encoder :operation :copy-texture
-           :state :pass-active :expected-state :between-passes))
+  (ensure-metal-command-encoder-state encoder :copy-texture)
+  (ensure-no-active-metal-pass encoder :copy-texture)
   (let ((source (gpu-copy-texture-command-source command))
         (destination (gpu-copy-texture-command-destination command)))
     (unless (and (typep source 'metal-gpu-texture)
@@ -1500,7 +1715,7 @@ compiler boundary of #58IDSR."
                  (member :copy-dst (gpu-texture-usage destination)))
       (reject-metal-gpu-request command :incompatible-copy
                                 (list source destination)))
-    (let ((device (metal-texture-device (metal-encoder-texture encoder))))
+    (let ((device (metal-command-encoder-device encoder)))
       (ensure-metal-object-device
        source (metal-texture-device source) device :copy-texture)
       (ensure-metal-object-device
@@ -1520,16 +1735,16 @@ compiler boundary of #58IDSR."
        native-encoder (metal-native-object source)
        (metal-native-object destination))
       (luv.metal:end-encoding native-encoder))
+    (retain-metal-resource encoder source)
+    (retain-metal-resource encoder destination)
     (setf (metal-encoder-encoded-p encoder) t)
     command))
 
 (defmethod encode
-    ((encoder metal-frame-command-encoder)
+    ((encoder metal-gpu-command-encoder)
      (command gpu-copy-texture-to-buffer-command))
-  (when (metal-encoder-active-pass encoder)
-    (error 'gpu-invalid-state-error :object encoder
-           :operation :copy-texture-to-buffer
-           :state :pass-active :expected-state :between-passes))
+  (ensure-metal-command-encoder-state encoder :copy-texture-to-buffer)
+  (ensure-no-active-metal-pass encoder :copy-texture-to-buffer)
   (let* ((source (gpu-copy-texture-to-buffer-command-source command))
          (destination
            (gpu-copy-texture-to-buffer-command-destination command))
@@ -1546,7 +1761,7 @@ compiler boundary of #58IDSR."
                  (<= (* bytes-per-row (second size))
                      (gpu-buffer-size destination)))
       (reject-metal-gpu-request command :unsupported-texture-readback))
-    (let ((device (metal-texture-device (metal-encoder-texture encoder))))
+    (let ((device (metal-command-encoder-device encoder)))
       (ensure-metal-object-device
        source (metal-texture-device source) device :copy-texture-to-buffer)
       (ensure-metal-object-device
@@ -1566,5 +1781,7 @@ compiler boundary of #58IDSR."
        (first size) (second size)
        (metal-native-object destination) bytes-per-row)
       (luv.metal:end-encoding native-encoder))
+    (retain-metal-resource encoder source)
+    (retain-metal-resource encoder destination)
     (setf (metal-encoder-encoded-p encoder) t)
     command))

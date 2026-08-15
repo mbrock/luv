@@ -781,12 +781,24 @@ rejection.  Source and names cross only as in-memory NSString objects."
 (objc:define-objective-c-message present-drawable
     ("present" :void))
 
+(defun commit-command-buffers (queue command-buffers)
+  "Commit a non-empty vector of ended Metal 4 command buffers to QUEUE."
+  (unless (and (vectorp command-buffers) (plusp (length command-buffers)))
+    (error "Expected a non-empty vector of Metal command buffers, got ~S."
+           command-buffers))
+  (cffi:with-foreign-object
+      (native-command-buffers :pointer (length command-buffers))
+    (loop for command-buffer across command-buffers
+          for index from 0
+          do (setf (cffi:mem-aref native-command-buffers :pointer index)
+                   (objc:objective-c-pointer command-buffer)))
+    (%commit-command-buffers
+     queue native-command-buffers (length command-buffers)))
+  (values))
+
 (defun commit-command-buffer (queue command-buffer)
   "Commit one ended Metal 4 command buffer to QUEUE."
-  (cffi:with-foreign-object (command-buffers :pointer)
-    (setf (cffi:mem-ref command-buffers :pointer)
-          (objc:objective-c-pointer command-buffer))
-    (%commit-command-buffers queue command-buffers 1))
+  (commit-command-buffers queue (vector command-buffer))
   (values))
 
 ;;; SDL's borrowed CAMetalLayer and its current drawable.

@@ -218,7 +218,6 @@
         (with-cpu-trace-zone (:metal/synchronize-drawable)
           (synchronize-metal-canvas-drawable-size context))
         (let* ((device (context-device context))
-               (native-device (metal-native-object device))
                (queue (device-queue device))
                (native-queue (metal-native-object queue))
                (drawable
@@ -228,22 +227,15 @@
           (unless drawable
             (error 'canvas-error :canvas (context-canvas context)
                    :operation :frame :reason :no-metal-drawable))
-          (let ((allocator nil)
+          (let ((encoder nil)
                 (command-buffer nil)
-                (ended-p nil)
                 (texture nil))
             (with-cpu-trace-zone (:metal/allocate-frame-resources)
-              (setf allocator (luv.metal:new-command-allocator native-device)
-                    command-buffer
-                    (luv.metal:new-command-buffer native-device)))
-            (unless (and allocator command-buffer)
-              (when allocator
-                (luv.objective-c:release-objective-c-object allocator))
-              (when command-buffer
-                (luv.objective-c:release-objective-c-object command-buffer))
-              (error 'canvas-error :canvas (context-canvas context)
-                     :operation :frame
-                     :reason :metal-4-command-resource-failed))
+              (setf encoder
+                    (create
+                     device
+                     (make-command-encoder-descriptor
+                      :label "Metal canvas frame"))))
             (unwind-protect
                  (let ((native-texture
                          (luv.metal:drawable-texture drawable)))
@@ -256,49 +248,34 @@
                           :dimensions :2d :format (canvas-format context)
                           :usage (canvas-configuration-usage
                                   (canvas-context-configuration context))))
-                   (let ((encoder
-                           (make-instance
-                            'metal-frame-command-encoder
-                            :context context :texture texture
-                            :command-buffer command-buffer)))
-                     (luv.metal:begin-command-buffer command-buffer allocator)
-                     (setf (metal-canvas-current-texture context) texture
-                           (canvas-context-state context) :in-frame)
-                     (with-cpu-trace-zone (:gpu/encode)
-                       (funcall function texture encoder))
-                     (when (metal-encoder-active-pass encoder)
-                       (error 'canvas-error :canvas (context-canvas context)
-                              :operation :frame
-                              :reason :metal-pass-left-open))
-                     (with-cpu-trace-zone (:gpu/finish-encoding)
-                       (luv.metal:end-command-buffer command-buffer))
-                     (setf ended-p t)
-                     (with-cpu-trace-zone (:metal/wait-for-drawable)
-                       (luv.metal:wait-for-drawable native-queue drawable))
-                     ;; Submission consumes these objects whether commit
-                     ;; succeeds or raises; after commit QUEUE retains them to
-                     ;; its frontier.
-                     (let ((owned-command-buffer command-buffer)
-                           (owned-allocator allocator))
-                       (setf command-buffer nil allocator nil)
-                       (with-cpu-trace-zone (:gpu/submit)
-                         (submit-metal-command-buffer
-                          queue owned-command-buffer owned-allocator
-                          :after-commit
-                          (lambda ()
-                            (luv.metal:signal-drawable native-queue drawable)
-                            (luv.metal:present-drawable drawable)))))
-                     texture))
+                   (setf (metal-canvas-current-texture context) texture
+                         (canvas-context-state context) :in-frame)
+                   (with-cpu-trace-zone (:gpu/encode)
+                     (funcall function texture encoder))
+                   (when (metal-encoder-active-pass encoder)
+                     (error 'canvas-error :canvas (context-canvas context)
+                            :operation :frame
+                            :reason :metal-pass-left-open))
+                   (with-cpu-trace-zone (:gpu/finish-encoding)
+                     (setf command-buffer (finish encoder)))
+                   (with-cpu-trace-zone (:metal/wait-for-drawable)
+                     (luv.metal:wait-for-drawable native-queue drawable))
+                   (with-cpu-trace-zone (:gpu/submit)
+                     (submit-metal-command-buffers
+                      queue (vector command-buffer)
+                      :after-commit
+                      (lambda ()
+                        (luv.metal:signal-drawable native-queue drawable)
+                        (luv.metal:present-drawable drawable))))
+                   texture)
               (setf (metal-canvas-current-texture context) nil
                     (canvas-context-state context) :configured)
-              (when (and command-buffer (not ended-p))
-                (ignore-errors (luv.metal:end-command-buffer command-buffer)))
-              (when texture
-                (setf (metal-object-destroyed-p texture) t))
               (when command-buffer
-                (luv.objective-c:release-objective-c-object command-buffer))
-              (when allocator
-                (luv.objective-c:release-objective-c-object allocator)))))))))
+                (destroy command-buffer))
+              (when encoder
+                (destroy encoder))
+              (when texture
+                (destroy texture)))))))))
 
 (defmethod call-with-canvas-frame
     ((context metal-canvas-context) function)

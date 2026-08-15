@@ -108,6 +108,7 @@
            #:+visibility-device+
            #:wait-for-drawable
            #:commit-command-buffer
+           #:commit-command-buffers
            #:signal-drawable
            #:present-drawable
            #:set-layer-device
