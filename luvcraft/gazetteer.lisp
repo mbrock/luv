@@ -7,11 +7,9 @@
 (defmethod absent-chunk-light-semantics
     ((source gazetteer-open-sky-source) world chunk-key direction)
   (declare (ignore source world chunk-key))
-  (destructuring-bind (dx dy dz) direction
-    (declare (ignore dx dz))
-    (cond ((plusp dy) :open-sky)
-          ((minusp dy) :closed)
-          (t :unknown))))
+  (cond ((plusp (voxel-direction-dy direction)) :open-sky)
+        ((minusp (voxel-direction-dy direction)) :closed)
+        (t :unknown)))
 
 (defclass luvcraft-gazetteer-view ()
   ((name :initarg :name :reader luvcraft-gazetteer-view-name)

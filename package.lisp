@@ -437,6 +437,21 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:local-coordinate-x
            #:local-coordinate-y
            #:local-coordinate-z
+           #:voxel-direction
+           #:make-voxel-direction
+           #:voxel-direction-dx
+           #:voxel-direction-dy
+           #:voxel-direction-dz
+           #:+voxel-negative-x+
+           #:+voxel-positive-x+
+           #:+voxel-negative-y+
+           #:+voxel-positive-y+
+           #:+voxel-negative-z+
+           #:+voxel-positive-z+
+           #:*voxel-face-directions*
+           #:world-coordinate-neighbor
+           #:chunk-coordinate-neighbor
+           #:opposite-voxel-direction
            #:chunk-shape
            #:make-chunk-shape
            #:chunk-shape-width
@@ -460,12 +475,13 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:chunk-domain-local-coordinate-p
            #:chunk-domain-offset
            #:chunk-domain-local-coordinate
+           #:chunk-domain-world-coordinate
            #:chunk-domain-offset-components
            #:chunk-domain-local-components
            #:chunk-domain-world-components
            #:step-chunk-domain-site
-           #:map-chunk-domain-sites
-           #:map-chunk-domain-face
+           #:do-chunk-domain-sites
+           #:do-chunk-domain-face
            #:block-content-column
            #:block-content-column-palette
            #:block-content-column-indices
@@ -501,6 +517,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:with-world-change-transaction
            #:make-block-world
            #:world-chunk-at
+           #:world-chunk-at-coordinate
            #:ensure-world-chunk
            #:install-world-chunk-storage
            #:remove-world-chunk
@@ -590,7 +607,9 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:absent-chunk-light-semantics
            #:relight-block-world
            #:chunk-light-levels-at
+           #:chunk-light-levels-at-coordinate
            #:world-light-at
+           #:world-light-at-coordinate
            #:luvcraft-lighting-state
            #:attach-lighting-state
            #:reconcile-lighting

@@ -385,26 +385,26 @@ normalized to 0..1."
                             :element-type '(unsigned-byte 8)
                             :initial-element 0))
          (face-count 0))
-    (map-chunk-domain-sites
-     (lambda (offset local-x local-y local-z)
-       (when (block-solid-p (aref palette (aref indices offset)))
-         (multiple-value-bind (x y z)
-             (chunk-domain-world-components
-              domain local-x local-y local-z)
-           (let ((mask 0))
-             (loop for face in *block-faces*
-                   for bit from 0
-                   for normal = (block-face-neighbor face)
-                   unless (block-solid-p
-                           (mesher-block-at
-                            mesher samples
-                            (+ x (first normal))
-                            (+ y (second normal))
-                            (+ z (third normal))))
-                     do (setf mask (logior mask (ash 1 bit)))
-                        (incf face-count))
-             (setf (aref masks offset) mask)))))
-     domain)
+    (do-chunk-domain-sites (offset local domain)
+      (when (block-solid-p (aref palette (aref indices offset)))
+        (let* ((coordinate (chunk-domain-world-coordinate domain local))
+               (x (world-coordinate-x coordinate))
+               (y (world-coordinate-y coordinate))
+               (z (world-coordinate-z coordinate))
+               (mask 0))
+          (declare (dynamic-extent coordinate))
+          (loop for face in *block-faces*
+                for bit from 0
+                for normal = (block-face-neighbor face)
+                unless (block-solid-p
+                        (mesher-block-at
+                         mesher samples
+                         (+ x (first normal))
+                         (+ y (second normal))
+                         (+ z (third normal))))
+                  do (setf mask (logior mask (ash 1 bit)))
+                     (incf face-count))
+          (setf (aref masks offset) mask))))
     (values masks face-count)))
 
 (defun mesh-block-storage (mesher samples domain palette indices)
@@ -414,20 +414,21 @@ normalized to 0..1."
     (let ((vertices
             (make-array (* face-count +block-mesh-floats-per-face+)
                         :element-type 'single-float :fill-pointer 0)))
-      (map-chunk-domain-sites
-       (lambda (offset local-x local-y local-z)
-         (let ((mask (aref masks offset)))
-           (unless (zerop mask)
-             (let ((block (aref palette (aref indices offset))))
-               (multiple-value-bind (x y z)
-                   (chunk-domain-world-components
-                    domain local-x local-y local-z)
-                 (loop for face in *block-faces*
-                       for bit from 0
-                       when (logbitp bit mask)
-                         do (emit-block-face-into
-                             mesher samples vertices block face x y z)))))))
-       domain)
+      (do-chunk-domain-sites (offset local domain)
+        (let ((mask (aref masks offset)))
+          (unless (zerop mask)
+            (let* ((block (aref palette (aref indices offset)))
+                   (coordinate
+                     (chunk-domain-world-coordinate domain local))
+                   (x (world-coordinate-x coordinate))
+                   (y (world-coordinate-y coordinate))
+                   (z (world-coordinate-z coordinate)))
+              (declare (dynamic-extent coordinate))
+              (loop for face in *block-faces*
+                    for bit from 0
+                    when (logbitp bit mask)
+                      do (emit-block-face-into
+                          mesher samples vertices block face x y z))))))
       (assert (= (length vertices)
                  (* face-count +block-mesh-floats-per-face+)))
       (make-instance 'block-mesh

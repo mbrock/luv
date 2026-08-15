@@ -133,15 +133,15 @@
       ;; A content edit then changes the field and only the light revision
       ;; and changed light boundaries advance.
       (let ((top-before
-              (chunk-light-field-boundary-revision field 0 1 0))
+              (chunk-light-field-boundary-revision field +voxel-positive-y+))
             (bottom-before
-              (chunk-light-field-boundary-revision field 0 -1 0)))
+              (chunk-light-field-boundary-revision field +voxel-negative-y+)))
         (setf (world-block-at world 8 15 8) luv::*stone-block*)
         (ok (relight-block-world world))
         (ok (= (chunk-light-field-revision field) 2))
-        (ok (= (chunk-light-field-boundary-revision field 0 1 0)
+        (ok (= (chunk-light-field-boundary-revision field +voxel-positive-y+)
                (1+ top-before)))
-        (ok (= (chunk-light-field-boundary-revision field 0 -1 0)
+        (ok (= (chunk-light-field-boundary-revision field +voxel-negative-y+)
                (1+ bottom-before)))))))
 
 ;;; The incremental relighter is judged against the reference solver: after
@@ -153,7 +153,7 @@
                     (luv::capture-light-region world))))
     (loop for chunk in (resident-world-chunks world)
           always
-          (let* ((key (luv::block-chunk-key chunk))
+          (let* ((key (chunk-domain-coordinate (block-chunk-domain chunk)))
                  (entry (gethash key (luv::light-region-entries reference)))
                  (field (block-chunk-light-field chunk)))
             (and field

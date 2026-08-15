@@ -127,9 +127,9 @@ shape and storage order.  Its useful operational vocabulary is approximately:
 #+begin_example
 domain-cardinality
 domain-index / domain-offset
-map-domain-sites
+do-domain-sites
 step-domain-site
-map-domain-face
+do-domain-face
 #+end_example
 
 =step-domain-site= should report either another local site or a boundary
@@ -145,10 +145,49 @@ boundary facts.  Explicit policies assemble the neighborhoods algorithms
 actually mean, following the separation that survived in Moppe's
 =bundle_operations.hh= (#E4N7PX).
 
-The first extraction should retain a component-level path.  Descriptive
-coordinate objects remain excellent for inspectors, edits, ray hits, and
-error reports, while dense traversal must be able to decompose and step
-without allocating a coordinate object or dispatching once per cell.
+Coordinates should be ordinary nominal values throughout the code, including
+dense traversal.  The distinction worth preserving is not "objects outside,
+components inside" but *lifetime*: a queue or hash key needs an
+indefinite-extent coordinate, while a loop-local coordinate can have dynamic
+extent.  Compiler-visible iteration macros can provide the latter without a
+heap allocation or a per-cell call across a compilation-unit boundary.
+
+* Coordinate values can be stack-temporary
+:PROPERTIES:
+:ID: B3UEVE
+:END:
+
+SBCL's stack-allocation rules make =defstruct= a good fit for the small
+spatial values in this layer.  A user-defined structure can be stack allocated
+when its =defstruct= constructor was declared =inline= before the definition
+and the receiving binding is declared =dynamic-extent=.  The declaration is a
+lifetime promise, not an analysis result: the value must not escape through a
+queue, hash table, closure, return value, or retained callback argument.
+
+The manual's x86/x86-64 limitation concerns structures with *raw slots*.
+SBCL defines those as particular unboxed float, complex-float, or word slots,
+and explicitly excludes fixnums from the category.  The coordinate structures
+use ordinary tagged integer slots, so this limitation does not apply on the
+current ARM64 target.
+
+The live SBCL 2.6.7 image confirms the distinction under the project's
+ordinary compiler policy (all qualities at =1=).  In otherwise identical
+one-million-iteration loops, an ordinary three-integer coordinate structure
+reported =48,182,016= bytes through =sb-ext:get-bytes-consed=, while the
+=dynamic-extent= structure reported =0=.  A three-element Common Lisp
+=vector= declared dynamic extent likewise reported =0=.  After warm-up, the
+actual =do-chunk-domain-sites= macro traversed 4,096,000 coordinate values and
+reported =0= bytes consed.
+
+A three-dimensional coordinate certainly has vector-shaped representation,
+but not every such value has vector semantics.  A world coordinate is an
+affine cell address, a chunk coordinate names another lattice, a local
+coordinate is bounded by a domain, and a voxel direction is a displacement.
+Using four =defstruct= types retains those distinctions and named accessors;
+using bare Common Lisp vectors would collapse them back into positional
+components.  Dense storage remains in specialized arrays.  These structures
+name the small values used to address that storage, and dynamic extent makes
+their short lifetime explicit where it matters.
 
 * A chunk window continues a local domain
 :PROPERTIES:
@@ -484,7 +523,7 @@ The following is a sequence to refine from evidence, not a Gantt chart.
    gameplay light step is a unit or a storage encoding; distinguish
    propagation loss from texture opacity.
 
-2. *Extract local spatial operations.*  Give =chunk-domain= allocation-free
+2. *Extract local spatial operations.*  Give =chunk-domain= heap-allocation-free
    world/chunk/local decomposition, primitive stepping with boundary results,
    storage-order traversal, and face enumeration.  Migrate light-region and
    meshing paths without changing their algorithms.
@@ -519,7 +558,7 @@ system.
 :END:
 
 Intent: establish the smallest reusable spatial substrate beneath the current
-light and meshing products.  Add allocation-free decomposition, primitive
+light and meshing products.  Add heap-allocation-free decomposition, primitive
 local stepping with explicit boundary crossings, storage-order site
 enumeration, and face enumeration to =chunk-domain= or one narrowly related
 voxel-domain protocol.  Rewrite =light-region-locate=,
@@ -527,11 +566,11 @@ voxel-domain protocol.  Rewrite =light-region-locate=,
 capture to consume those operations while retaining their representations and
 policies.
 
-Evidence: =voxel-space-decompose-components= now owns scalar Euclidean
-decomposition, while =chunk-domain= owns offset inversion, local-to-world
-mapping, primitive stepping with explicit chunk crossings, storage-order
-enumeration, and face enumeration.  The object-returning coordinate
-operations delegate to that same substrate.
+Evidence: =voxel-space-decompose-components= owns Euclidean decomposition,
+while =chunk-domain= owns offset inversion, local-to-world mapping, primitive
+stepping with explicit chunk crossings, storage-order enumeration, and face
+enumeration.  World, chunk, local, and direction values now give that
+substrate one nominal vocabulary rather than parallel positional triples.
 
 =light-region-locate= and the entry-face adapter no longer contain their own
 division, dense-offset, or face-plane formulas.  Light seeding and boundary
@@ -552,6 +591,35 @@ Done: one owned domain vocabulary now supplies local traversal to both
 lighting and meshing.  No field schema, metaclass, generalized solver, or
 per-cell object was introduced to obtain the deletion.
 
+* DONE Give dense traversal coordinate values
+:PROPERTIES:
+:ID: R3T7YA
+:END:
+
+Intent: replace the positional =x y z= and =dx dy dz= protocols exposed by
+the first extraction with nominal coordinate and direction values.  Make
+dense iteration a macro so those values can be constructed and consumed at
+the call site, and distinguish its borrowed dynamic-extent values from the
+coordinates lighting intentionally retains.
+
+Evidence: =do-chunk-domain-sites= and =do-chunk-domain-face= expand closed
+storage-order loops whose local coordinates are declared =dynamic-extent=.
+The mesher's visibility and emission passes consume those values directly.
+Lighting propagation queues, removal records, dirty-cell sets, arrival and
+departure sets, region keys, face seeding, and boundary re-entry now carry
+=world-coordinate=, =chunk-coordinate=, =local-coordinate=, or
+=voxel-direction= values according to meaning.  A retained coordinate is
+copied out of a dynamic-extent traversal value deliberately.
+
+The current ARM64 stack-allocation evidence is recorded in #B3UEVE.  The
+focused world suite passes 14 tests and the full luvcraft suite passes 41,
+including reference-light convergence, chunk seams, same-key replacement,
+stale mesh products, and immutable halo equivalence.
+
+Done: the compiler-visible dense path and the readable nominal path are now
+the same path.  Components remain available through accessors at arithmetic
+leaves; they are no longer the protocol repeated across lighting and meshing.
+
 * NEXT Name the chunk-window protocol
 :PROPERTIES:
 :ID: L84JCX
@@ -570,8 +638,8 @@ Evidence to gather:
   editing a type switch or copying coordinate arithmetic;
 - the four existing windows remain independently inspectable and retain their
   current storage and ownership;
-- dense light and meshing paths do not acquire coordinate objects or a new
-  per-cell CLOS decision merely to share lookup; and
+- dense light and meshing paths retain stack-temporary coordinate values and
+  do not acquire a new per-cell CLOS decision merely to share lookup; and
 - the light, meshing, production, and deterministic smoke evidence remains
   unchanged.
 

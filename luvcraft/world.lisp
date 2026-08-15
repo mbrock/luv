@@ -2,45 +2,113 @@
 
 (in-package #:luv)
 
-;;; Coordinate values are deliberately distinct even though all three are
-;;; represented by integer triples.  World and chunk coordinates may be
-;;; negative; local coordinates are checked by a particular chunk domain.
+;;; Coordinate values are deliberately distinct even though all three carry
+;;; integer components.  World, chunk, and domain-local addresses are not
+;;; interchangeable.  World and chunk coordinates may be negative; local
+;;; coordinates are checked by a particular chunk domain.
 
+(declaim (inline %make-world-coordinate))
 (defstruct (world-coordinate
              (:constructor %make-world-coordinate (x y z)))
   (x 0 :type integer :read-only t)
   (y 0 :type integer :read-only t)
   (z 0 :type integer :read-only t))
 
+(declaim (inline make-world-coordinate))
 (defun make-world-coordinate (x y z)
   (check-type x integer)
   (check-type y integer)
   (check-type z integer)
   (%make-world-coordinate x y z))
 
+(declaim (inline %make-chunk-coordinate))
 (defstruct (chunk-coordinate
              (:constructor %make-chunk-coordinate (x y z)))
   (x 0 :type integer :read-only t)
   (y 0 :type integer :read-only t)
   (z 0 :type integer :read-only t))
 
+(declaim (inline make-chunk-coordinate))
 (defun make-chunk-coordinate (x y z)
   (check-type x integer)
   (check-type y integer)
   (check-type z integer)
   (%make-chunk-coordinate x y z))
 
+(declaim (inline %make-local-coordinate))
 (defstruct (local-coordinate
              (:constructor %make-local-coordinate (x y z)))
   (x 0 :type integer :read-only t)
   (y 0 :type integer :read-only t)
   (z 0 :type integer :read-only t))
 
+(declaim (inline make-local-coordinate))
 (defun make-local-coordinate (x y z)
   (check-type x integer)
   (check-type y integer)
   (check-type z integer)
   (%make-local-coordinate x y z))
+
+;;; A primitive direction is a displacement, not any of the affine coordinate
+;;; kinds above.  The six shared instances are safe to retain indefinitely;
+;;; temporary coordinates translated by them may instead be DYNAMIC-EXTENT.
+
+(declaim (inline %make-voxel-direction))
+(defstruct (voxel-direction
+             (:constructor %make-voxel-direction (dx dy dz)))
+  (dx 0 :type (integer -1 1) :read-only t)
+  (dy 0 :type (integer -1 1) :read-only t)
+  (dz 0 :type (integer -1 1) :read-only t))
+
+(declaim (inline make-voxel-direction))
+(defun make-voxel-direction (dx dy dz)
+  (unless (and (integerp dx) (integerp dy) (integerp dz)
+               (= 1 (+ (abs dx) (abs dy) (abs dz))))
+    (error "(~S ~S ~S) is not a primitive voxel direction." dx dy dz))
+  (%make-voxel-direction dx dy dz))
+
+(defparameter +voxel-negative-x+ (make-voxel-direction -1 0 0))
+(defparameter +voxel-positive-x+ (make-voxel-direction 1 0 0))
+(defparameter +voxel-negative-y+ (make-voxel-direction 0 -1 0))
+(defparameter +voxel-positive-y+ (make-voxel-direction 0 1 0))
+(defparameter +voxel-negative-z+ (make-voxel-direction 0 0 -1))
+(defparameter +voxel-positive-z+ (make-voxel-direction 0 0 1))
+
+(defparameter *voxel-face-directions*
+  (list +voxel-negative-x+ +voxel-positive-x+
+        +voxel-negative-y+ +voxel-positive-y+
+        +voxel-negative-z+ +voxel-positive-z+))
+
+(declaim (inline world-coordinate-neighbor chunk-coordinate-neighbor))
+(defun world-coordinate-neighbor (coordinate direction)
+  "Translate a world cell address by one primitive DIRECTION."
+  (check-type coordinate world-coordinate)
+  (check-type direction voxel-direction)
+  (make-world-coordinate
+   (+ (world-coordinate-x coordinate) (voxel-direction-dx direction))
+   (+ (world-coordinate-y coordinate) (voxel-direction-dy direction))
+   (+ (world-coordinate-z coordinate) (voxel-direction-dz direction))))
+
+(defun chunk-coordinate-neighbor (coordinate direction)
+  "Translate a chunk address by one primitive DIRECTION."
+  (check-type coordinate chunk-coordinate)
+  (check-type direction voxel-direction)
+  (make-chunk-coordinate
+   (+ (chunk-coordinate-x coordinate) (voxel-direction-dx direction))
+   (+ (chunk-coordinate-y coordinate) (voxel-direction-dy direction))
+   (+ (chunk-coordinate-z coordinate) (voxel-direction-dz direction))))
+
+(defun opposite-voxel-direction (direction)
+  (check-type direction voxel-direction)
+  (cond ((eq direction +voxel-negative-x+) +voxel-positive-x+)
+        ((eq direction +voxel-positive-x+) +voxel-negative-x+)
+        ((eq direction +voxel-negative-y+) +voxel-positive-y+)
+        ((eq direction +voxel-positive-y+) +voxel-negative-y+)
+        ((eq direction +voxel-negative-z+) +voxel-positive-z+)
+        ((eq direction +voxel-positive-z+) +voxel-negative-z+)
+        (t (make-voxel-direction (- (voxel-direction-dx direction))
+                                 (- (voxel-direction-dy direction))
+                                 (- (voxel-direction-dz direction))))))
 
 (defstruct (chunk-shape
              (:constructor %make-chunk-shape (width height depth)))
@@ -110,6 +178,7 @@ the dense traversal counterpart of WORLD-COORDINATE-CHUNK-AND-LOCAL."
             (floor z (chunk-shape-depth shape))
           (values chunk-x chunk-y chunk-z local-x local-y local-z))))))
 
+(declaim (inline world-coordinate-chunk-and-local))
 (defun world-coordinate-chunk-and-local (space coordinate)
   "Decompose COORDINATE by Euclidean division in SPACE.
 
@@ -126,6 +195,7 @@ coordinates."
     (values (make-chunk-coordinate chunk-x chunk-y chunk-z)
             (make-local-coordinate local-x local-y local-z))))
 
+(declaim (inline chunk-local-world-coordinate))
 (defun chunk-local-world-coordinate (space chunk local)
   (check-type space voxel-space)
   (check-type chunk chunk-coordinate)
@@ -207,10 +277,19 @@ coordinates."
              (* (chunk-shape-height shape)
                 z))))))
 
+(declaim (inline chunk-domain-local-coordinate))
 (defun chunk-domain-local-coordinate (domain offset)
   (multiple-value-bind (x y z)
       (chunk-domain-local-components domain offset)
     (make-local-coordinate x y z)))
+
+(declaim (inline chunk-domain-world-coordinate))
+(defun chunk-domain-world-coordinate (domain local)
+  "Return the world coordinate of LOCAL in DOMAIN."
+  (check-type domain chunk-domain)
+  (check-type local local-coordinate)
+  (chunk-local-world-coordinate
+   (chunk-domain-space domain) (chunk-domain-coordinate domain) local))
 
 (defun chunk-domain-local-components (domain offset)
   "Map a dense offset to local scalar components without a row object."
@@ -241,71 +320,118 @@ coordinates."
                   (chunk-shape-depth shape))
                local-z))))
 
-(defun step-chunk-domain-site (domain x y z dx dy dz)
+(declaim (inline step-chunk-domain-site))
+(defun step-chunk-domain-site (domain local direction)
   "Step from one local site in a primitive face direction.
 
-Return the destination OFFSET, wrapped local X, Y, and Z, followed by the
-chunk-crossing DX, DY, and DZ.  A zero crossing stays in DOMAIN; a nonzero
-crossing names the adjacent chunk whose local site has been returned.  The
-operation allocates no coordinate or boundary object."
-  (chunk-domain-offset-components domain x y z)
-  (unless (and (integerp dx) (integerp dy) (integerp dz)
-               (= 1 (+ (abs dx) (abs dy) (abs dz))))
-    (error "(~S ~S ~S) is not a primitive face direction." dx dy dz))
+Return the destination OFFSET and wrapped LOCAL-COORDINATE, followed by
+DIRECTION when the step crosses into that adjacent chunk or NIL when it stays
+inside DOMAIN."
+  (check-type local local-coordinate)
+  (check-type direction voxel-direction)
+  (chunk-domain-offset domain local)
   (let ((shape (voxel-space-chunk-shape (chunk-domain-space domain))))
     (multiple-value-bind (crossing-x local-x)
-        (floor (+ x dx) (chunk-shape-width shape))
+        (floor (+ (local-coordinate-x local)
+                  (voxel-direction-dx direction))
+               (chunk-shape-width shape))
       (multiple-value-bind (crossing-y local-y)
-          (floor (+ y dy) (chunk-shape-height shape))
+          (floor (+ (local-coordinate-y local)
+                    (voxel-direction-dy direction))
+                 (chunk-shape-height shape))
         (multiple-value-bind (crossing-z local-z)
-            (floor (+ z dz) (chunk-shape-depth shape))
-          (values (chunk-domain-offset-components
-                   domain local-x local-y local-z)
-                  local-x local-y local-z
-                  crossing-x crossing-y crossing-z))))))
+            (floor (+ (local-coordinate-z local)
+                      (voxel-direction-dz direction))
+                   (chunk-shape-depth shape))
+          (let ((destination
+                  (make-local-coordinate local-x local-y local-z)))
+            (values (chunk-domain-offset domain destination)
+                    destination
+                    (and (not (zerop (+ (abs crossing-x)
+                                        (abs crossing-y)
+                                        (abs crossing-z))))
+                         direction))))))))
 
-(defun map-chunk-domain-sites (function domain)
-  "Call FUNCTION with OFFSET, X, Y, and Z for every site in storage order.
+(defmacro do-chunk-domain-sites
+    ((offset local domain &optional result) &body body)
+  "Execute BODY for every site in DOMAIN, in dense storage order.
 
-The scalar local coordinates describe dense data without allocating site
-objects or dispatching once per cell."
-  (check-type function function)
-  (check-type domain chunk-domain)
-  (let* ((shape (voxel-space-chunk-shape (chunk-domain-space domain)))
-         (width (chunk-shape-width shape))
-         (height (chunk-shape-height shape))
-         (depth (chunk-shape-depth shape))
-         (offset 0))
-    (dotimes (z depth)
-      (dotimes (y height)
-        (dotimes (x width)
-          (funcall function offset x y z)
-          (incf offset)))))
-  domain)
+LOCAL is a DYNAMIC-EXTENT LOCAL-COORDINATE and must not be retained after
+BODY returns.  This gives dense algorithms a nominal coordinate without one
+heap allocation per site.  See #B3UEVE."
+  (let ((domain-value (gensym "DOMAIN"))
+        (shape (gensym "SHAPE"))
+        (width (gensym "WIDTH"))
+        (height (gensym "HEIGHT"))
+        (depth (gensym "DEPTH"))
+        (x (gensym "X"))
+        (y (gensym "Y"))
+        (z (gensym "Z")))
+    `(let* ((,domain-value ,domain)
+            (,shape (voxel-space-chunk-shape
+                     (chunk-domain-space ,domain-value)))
+            (,width (chunk-shape-width ,shape))
+            (,height (chunk-shape-height ,shape))
+            (,depth (chunk-shape-depth ,shape))
+            (,offset 0))
+       (dotimes (,z ,depth)
+         (dotimes (,y ,height)
+           (dotimes (,x ,width)
+             (let ((,local (make-local-coordinate ,x ,y ,z)))
+               (declare (dynamic-extent ,local))
+               ,@body)
+             (incf ,offset))))
+       ,result)))
 
-(defun map-chunk-domain-face (function domain dx dy dz)
-  "Call FUNCTION with OFFSET, X, Y, and Z for one local boundary face."
-  (check-type function function)
-  (check-type domain chunk-domain)
-  (unless (and (integerp dx) (integerp dy) (integerp dz)
-               (= 1 (+ (abs dx) (abs dy) (abs dz))))
-    (error "(~S ~S ~S) is not a primitive face direction." dx dy dz))
-  (let* ((shape (voxel-space-chunk-shape (chunk-domain-space domain)))
-         (width (chunk-shape-width shape))
-         (height (chunk-shape-height shape))
-         (depth (chunk-shape-depth shape))
-         (x-low (if (= dx 1) (1- width) 0))
-         (x-high (if (= dx -1) 0 (1- width)))
-         (y-low (if (= dy 1) (1- height) 0))
-         (y-high (if (= dy -1) 0 (1- height)))
-         (z-low (if (= dz 1) (1- depth) 0))
-         (z-high (if (= dz -1) 0 (1- depth))))
-    (loop for z from z-low to z-high do
-      (loop for y from y-low to y-high do
-        (loop for x from x-low to x-high do
-          (funcall function
-                   (+ x (* width (+ y (* height z)))) x y z)))))
-  domain)
+(defmacro do-chunk-domain-face
+    ((offset local domain direction &optional result) &body body)
+  "Execute BODY for every site on DIRECTION's boundary face in DOMAIN.
+
+LOCAL is a DYNAMIC-EXTENT LOCAL-COORDINATE and must not be retained after
+BODY returns."
+  (let ((domain-value (gensym "DOMAIN"))
+        (direction-value (gensym "DIRECTION"))
+        (shape (gensym "SHAPE"))
+        (width (gensym "WIDTH"))
+        (height (gensym "HEIGHT"))
+        (depth (gensym "DEPTH"))
+        (x-low (gensym "X-LOW"))
+        (x-high (gensym "X-HIGH"))
+        (y-low (gensym "Y-LOW"))
+        (y-high (gensym "Y-HIGH"))
+        (z-low (gensym "Z-LOW"))
+        (z-high (gensym "Z-HIGH"))
+        (x (gensym "X"))
+        (y (gensym "Y"))
+        (z (gensym "Z")))
+    `(let* ((,domain-value ,domain)
+            (,direction-value ,direction)
+            (,shape (voxel-space-chunk-shape
+                     (chunk-domain-space ,domain-value)))
+            (,width (chunk-shape-width ,shape))
+            (,height (chunk-shape-height ,shape))
+            (,depth (chunk-shape-depth ,shape)))
+       (check-type ,direction-value voxel-direction)
+       (let ((,x-low (if (= (voxel-direction-dx ,direction-value) 1)
+                         (1- ,width) 0))
+             (,x-high (if (= (voxel-direction-dx ,direction-value) -1)
+                          0 (1- ,width)))
+             (,y-low (if (= (voxel-direction-dy ,direction-value) 1)
+                         (1- ,height) 0))
+             (,y-high (if (= (voxel-direction-dy ,direction-value) -1)
+                          0 (1- ,height)))
+             (,z-low (if (= (voxel-direction-dz ,direction-value) 1)
+                         (1- ,depth) 0))
+             (,z-high (if (= (voxel-direction-dz ,direction-value) -1)
+                          0 (1- ,depth))))
+         (loop for ,z from ,z-low to ,z-high do
+           (loop for ,y from ,y-low to ,y-high do
+             (loop for ,x from ,x-low to ,x-high do
+               (let ((,offset (+ ,x (* ,width (+ ,y (* ,height ,z)))))
+                     (,local (make-local-coordinate ,x ,y ,z)))
+                 (declare (dynamic-extent ,local))
+                 ,@body))))
+         ,result))))
 
 ;;; Block content is a narrow semantic field.  The presentable value is a
 ;;; shared Lisp object (or NIL for air); the physical column is a dense u16
@@ -410,23 +536,24 @@ specialized arrays rather than describing individual cells through CLOS."))
     (error "Offset ~D is outside chunk ~S." offset chunk))
   (block-content-at-offset (block-chunk-content chunk) offset))
 
-(defparameter *chunk-neighbor-directions*
-  '((-1 0 0) (1 0 0) (0 -1 0) (0 1 0) (0 0 -1) (0 0 1)))
+(defun chunk-boundary-index (direction)
+  (check-type direction voxel-direction)
+  (let ((dx (voxel-direction-dx direction))
+        (dy (voxel-direction-dy direction))
+        (dz (voxel-direction-dz direction)))
+    (cond ((and (= dx -1) (zerop dy) (zerop dz)) 0)
+          ((and (= dx 1) (zerop dy) (zerop dz)) 1)
+          ((and (zerop dx) (= dy -1) (zerop dz)) 2)
+          ((and (zerop dx) (= dy 1) (zerop dz)) 3)
+          ((and (zerop dx) (zerop dy) (= dz -1)) 4)
+          ((and (zerop dx) (zerop dy) (= dz 1)) 5)
+          (t (error "~S is not a block-face direction." direction)))))
 
-(defun chunk-boundary-index (dx dy dz)
-  (cond ((and (= dx -1) (zerop dy) (zerop dz)) 0)
-        ((and (= dx 1) (zerop dy) (zerop dz)) 1)
-        ((and (zerop dx) (= dy -1) (zerop dz)) 2)
-        ((and (zerop dx) (= dy 1) (zerop dz)) 3)
-        ((and (zerop dx) (zerop dy) (= dz -1)) 4)
-        ((and (zerop dx) (zerop dy) (= dz 1)) 5)
-        (t (error "(~D ~D ~D) is not a block-face direction." dx dy dz))))
-
-(defun block-chunk-boundary-revision (chunk dx dy dz)
-  "Return CHUNK's revision for the boundary facing DX,DY,DZ."
+(defun block-chunk-boundary-revision (chunk direction)
+  "Return CHUNK's revision for the boundary facing DIRECTION."
   (check-type chunk block-chunk)
   (aref (slot-value chunk 'boundary-revisions)
-        (chunk-boundary-index dx dy dz)))
+        (chunk-boundary-index direction)))
 
 (defun note-chunk-boundary-change (chunk x y z)
   (let* ((shape
@@ -468,16 +595,17 @@ specialized arrays rather than describing individual cells through CLOS."))
   block)
 
 (defun map-chunk-blocks (function chunk)
-  "Describe each site to FUNCTION as BLOCK, local X, Y, and Z.
+  "Describe each site to FUNCTION as BLOCK and LOCAL-COORDINATE.
 
 This row-shaped convenience protocol is for presentation and irregular local
 work.  Whole-domain algorithms should use WITH-BLOCK-CONTENT-STORAGE."
   (check-type chunk block-chunk)
   (with-block-content-storage (domain palette indices) chunk
-    (map-chunk-domain-sites
-     (lambda (offset x y z)
-       (funcall function (aref palette (aref indices offset)) x y z))
-     domain))
+    (do-chunk-domain-sites (offset local domain)
+      ;; FUNCTION may retain LOCAL, so pass it an indefinite-extent copy.
+      (funcall function
+               (aref palette (aref indices offset))
+               (copy-local-coordinate local))))
   chunk)
 
 ;;; A block world is the resident environment, not the complete world
@@ -566,6 +694,14 @@ including when FUNCTION exits non-locally after making a partial change."
   "Return the resident chunk at chunk coordinate X,Y,Z and whether it exists."
   (check-type world block-world)
   (gethash (chunk-key x y z) (block-world-chunks world)))
+
+(defun world-chunk-at-coordinate (world coordinate)
+  "Return the resident chunk at CHUNK-COORDINATE and whether it exists."
+  (check-type coordinate chunk-coordinate)
+  (world-chunk-at world
+                  (chunk-coordinate-x coordinate)
+                  (chunk-coordinate-y coordinate)
+                  (chunk-coordinate-z coordinate)))
 
 (defun next-block-world-chunk-incarnation (world)
   (incf (slot-value world 'next-chunk-incarnation)))

@@ -268,39 +268,39 @@ but nothing could regenerate them once evicted."))
   (let ((field (block-chunk-light-field chunk)))
     (if field (chunk-light-field-revision field) -1)))
 
-(defun chunk-light-stamp-boundary-revision (chunk dx dy dz)
+(defun chunk-light-stamp-boundary-revision (chunk direction)
   (let ((field (block-chunk-light-field chunk)))
-    (if field (chunk-light-field-boundary-revision field dx dy dz) -1)))
+    (if field (chunk-light-field-boundary-revision field direction) -1)))
 
 (defun chunk-mesh-dependency-stamp (world chunk)
   "Describe exactly which resident data CHUNK's exposed mesh observes.
 
 Content and light are named as separate revision domains: relighting must
 invalidate a mesh without impersonating an authored edit, and the stamp
-preserves which domain made a product stale."
-  (let* ((coordinate
-           (chunk-domain-coordinate (block-chunk-domain chunk)))
-         (x (chunk-coordinate-x coordinate))
-         (y (chunk-coordinate-y coordinate))
-         (z (chunk-coordinate-z coordinate)))
+  preserves which domain made a product stale."
+  (let ((coordinate
+          (chunk-domain-coordinate (block-chunk-domain chunk))))
     (cons
      (list (block-chunk-key chunk)
            (block-chunk-incarnation chunk)
            (block-chunk-revision chunk)
            (chunk-light-stamp-revision chunk))
-     (loop for (dx dy dz) in *chunk-neighbor-directions*
+     (loop for direction in *voxel-face-directions*
            collect
-           (multiple-value-bind (neighbor present-p)
-               (world-chunk-at world (+ x dx) (+ y dy) (+ z dz))
-             (if present-p
-                 ;; Only the neighbor boundary facing this chunk contributes.
-                 (list (block-chunk-key neighbor)
-                       (block-chunk-incarnation neighbor)
-                       (block-chunk-boundary-revision
-                        neighbor (- dx) (- dy) (- dz))
-                       (chunk-light-stamp-boundary-revision
-                        neighbor (- dx) (- dy) (- dz)))
-                 '(nil)))))))
+           (let ((neighbor-coordinate
+                   (chunk-coordinate-neighbor coordinate direction)))
+             (declare (dynamic-extent neighbor-coordinate))
+             (multiple-value-bind (neighbor present-p)
+                 (world-chunk-at-coordinate world neighbor-coordinate)
+               (if present-p
+                   ;; Only the neighbor boundary facing this chunk contributes.
+                   (let ((facing (opposite-voxel-direction direction)))
+                     (list (block-chunk-key neighbor)
+                           (block-chunk-incarnation neighbor)
+                           (block-chunk-boundary-revision neighbor facing)
+                           (chunk-light-stamp-boundary-revision
+                            neighbor facing)))
+                   '(nil))))))))
 
 (defun luvcraft-session-products-in-order (session)
   (let ((products (luvcraft-session-chunk-products session)))
@@ -371,8 +371,9 @@ preserves which domain made a product stale."
 
 (defun chunk-neighbor-key (key direction)
   (destructuring-bind (x y z) key
-    (destructuring-bind (dx dy dz) direction
-      (chunk-key (+ x dx) (+ y dy) (+ z dz)))))
+    (chunk-key (+ x (voxel-direction-dx direction))
+               (+ y (voxel-direction-dy direction))
+               (+ z (voxel-direction-dz direction)))))
 
 (defun luvcraft-stale-product-components (session)
   "Group stale visible chunk products connected across block faces."
@@ -389,7 +390,7 @@ preserves which domain made a product stale."
                (loop while frontier
                      for key = (pop frontier)
                      do (push key component)
-                        (dolist (direction *chunk-neighbor-directions*)
+                        (dolist (direction *voxel-face-directions*)
                           (let ((neighbor
                                   (chunk-neighbor-key key direction)))
                             (when (gethash neighbor remaining)
