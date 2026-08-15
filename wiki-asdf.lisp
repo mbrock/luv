@@ -66,40 +66,54 @@
 definitions and figure mentions.  luv-wiki itself is left out: its
 docstrings and tests use placeholder IDs as examples.")
 
-(defun code-source-files ()
-  "The pathnames of the cl-source-file components of every registered system
-whose primary name is in *CODE-SYSTEMS*, without loading anything."
+(defun code-source-components ()
+  "Alist of (pathname . system-name) for the cl-source-file components of
+every registered system whose primary name is in *CODE-SYSTEMS*, without
+loading anything."
   (let ((files '()))
     (dolist (name (asdf:registered-systems))
       (when (member (asdf:primary-system-name name) *code-systems* :test #'string=)
         (labels ((walk (component)
                    (typecase component
-                     (asdf:cl-source-file (pushnew (asdf:component-pathname component) files
-                                                   :test #'equal))
+                     (asdf:cl-source-file
+                      (let ((pathname (asdf:component-pathname component)))
+                        (unless (assoc pathname files :test #'equal)
+                          (push (cons pathname name) files))))
                      (asdf:parent-component (mapc #'walk (asdf:component-children component))))))
           (walk (asdf:find-system name)))))
-    (sort files #'string< :key #'namestring)))
+    (sort files #'string< :key (lambda (entry) (namestring (car entry))))))
 
-(defvar *definitions-cache* (make-hash-table :test 'equal)
-  "Pathname namestring -> (write-date . definitions), so an unchanged file
+(defun code-source-files ()
+  (mapcar #'car (code-source-components)))
+
+(defvar *source-cache* (make-hash-table :test 'equal)
+  "Pathname namestring -> (write-date . source-file), so an unchanged file
 is not read again within one image.")
 
-(defun code-definitions (&optional (files (code-source-files)))
-  "The DEFINITIONs of FILES, reading each file only when it changed."
-  (loop for pathname in files
+(defun code-sources (&key (root (uiop:getcwd)))
+  "The SOURCE-FILEs of the code systems, reading a file only when it changed."
+  (loop for (pathname . system-name) in (code-source-components)
         for key = (namestring pathname)
         for date = (file-write-date pathname)
-        for cached = (gethash key *definitions-cache*)
-        append (if (and cached (eql (car cached) date))
-                   (cdr cached)
-                   (let ((definitions (file-definitions pathname)))
-                     (setf (gethash key *definitions-cache*) (cons date definitions))
-                     definitions))))
+        for cached = (gethash key *source-cache*)
+        collect (if (and cached (eql (car cached) date))
+                    (cdr cached)
+                    (let ((file (read-source-file
+                                 pathname
+                                 :relative-path (namestring (uiop:enough-pathname pathname root))
+                                 :system-name system-name)))
+                      (setf (gethash key *source-cache*) (cons date file))
+                      file))))
+
+(defun code-definitions ()
+  "The DEFINITIONs of all code source files."
+  (loop for file in (code-sources) append (source-file-definitions file)))
 
 (defun system-site (system)
-  (make-site (system-documents system)
-             :definitions (code-definitions)
-             :source-directory (asdf:system-source-directory system)))
+  (let ((root (asdf:system-source-directory system)))
+    (make-site (system-documents system)
+               :source-files (code-sources :root root)
+               :source-directory root)))
 
 ;;; Rendering
 
@@ -153,14 +167,30 @@ lands at images/x.png in the site."
           (code-source-files)))
 
 (defmethod asdf:output-files ((o render-op) (s asdf:system))
-  (values (list (merge-pathnames "figures.html" (site-output-directory s))) t))
+  "The figures index, the source index, and one page per source file."
+  (let ((directory (site-output-directory s))
+        (root (asdf:system-source-directory s)))
+    (values (list* (merge-pathnames "figures.html" directory)
+                   (merge-pathnames "source.html" directory)
+                   (loop for pathname in (code-source-files)
+                         collect (merge-pathnames
+                                  (concatenate 'string "source/"
+                                               (namestring (uiop:enough-pathname pathname root))
+                                               ".html")
+                                  directory)))
+            t)))
 
 (defmethod asdf:perform ((o render-op) (s asdf:system))
-  (let ((site (system-site s)))
-    (write-html-file (asdf:output-file o s)
-                     (lambda ()
-                       (let ((*site* site))
-                         (render-figures-page site))))
+  (let ((site (system-site s))
+        (directory (site-output-directory s)))
+    (let ((*site* site))
+      (write-html-file (merge-pathnames "figures.html" directory)
+                       (lambda () (render-figures-page site)))
+      (write-html-file (merge-pathnames "source.html" directory)
+                       (lambda () (render-source-index site)))
+      (dolist (file (site-source-files site))
+        (write-html-file (merge-pathnames (source-page-name file) directory)
+                         (lambda () (render-source-page file)))))
     (let ((dangling (dangling-mentions site)))
       (when dangling
         (warn "Dangling figure mentions:~{~%  ~A: ~{~A~^ ~}~}"

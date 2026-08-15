@@ -242,7 +242,32 @@ otherwise end the read; NAME labels warnings."
         (setf nodes (append (reverse orphans) nodes))
         (when (eq result eof) (return))
         (push result nodes)))
-    (nreverse nodes)))
+    (merge-adjacent-comments (nreverse nodes) text)))
+
+(defun merge-adjacent-comments (nodes text)
+  "Join runs of line comments separated only by a newline into one
+LISP-COMMENT, recursively inside lists, so a comment block is one node."
+  (let ((result '()))
+    (dolist (node nodes)
+      (let ((previous (first result)))
+        (cond ((and (typep node 'lisp-comment) (typep previous 'lisp-comment)
+                    (adjacent-lines-p previous node text))
+               (setf (node-end previous) (node-end node)
+                     (node-text previous) (string-right-trim
+                                           '(#\Newline #\Return)
+                                           (subseq text (node-start previous) (node-end node)))))
+              (t
+               (when (typep node 'lisp-list)
+                 (setf (element-children node)
+                       (merge-adjacent-comments (element-children node) text)))
+               (push node result)))))
+    (nreverse result)))
+
+(defun adjacent-lines-p (a b text)
+  "True when only one newline and indentation separate node A from node B."
+  (let ((between (subseq text (node-end a) (node-start b))))
+    (and (= 1 (count #\Newline between))
+         (every (lambda (c) (member c '(#\Newline #\Return #\Space #\Tab))) between))))
 
 (defun read-lisp-file (pathname)
   (read-lisp-string (uiop:read-file-string pathname) :name (namestring pathname)))
@@ -322,12 +347,10 @@ whose name starts with DEF or DEFINE- is accepted too.")
                        :mentions (remove-duplicates (mapcan #'text-mentions texts)
                                                     :test #'string= :from-end t))))))
 
-(defun file-definitions (pathname &optional (text (uiop:read-file-string pathname)))
-  "The DEFINITIONs of the source file at PATHNAME, in order.  Comments that
-precede a form belong to it, and IN-PACKAGE forms set the package."
-  (let ((nodes (read-lisp-string text :name (namestring pathname)))
-        (line-starts (line-starts text))
-        (package nil)
+(defun nodes-definitions (nodes pathname line-starts)
+  "The DEFINITIONs among the top-level NODES of a file, in order.  Comments
+that precede a form belong to it, and IN-PACKAGE forms set the package."
+  (let ((package nil)
         (pending '())
         (definitions '()))
     (dolist (node nodes)
@@ -342,6 +365,12 @@ precede a form belong to it, and IN-PACKAGE forms set the package."
            (setf pending '())))
         (t (setf pending '()))))
     (nreverse definitions)))
+
+(defun file-definitions (pathname &optional (text (uiop:read-file-string pathname)))
+  "The DEFINITIONs of the source file at PATHNAME, in order."
+  (nodes-definitions (read-lisp-string text :name (namestring pathname))
+                     pathname
+                     (line-starts text)))
 
 (defun definition-references (definitions)
   "A hash table from figure ID to the DEFINITIONs mentioning it."

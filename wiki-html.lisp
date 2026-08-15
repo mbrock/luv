@@ -9,8 +9,12 @@
 
 (defclass site ()
   ((documents :initarg :documents :initform '() :accessor site-documents)
+   (source-files :initarg :source-files :initform '() :accessor site-source-files
+                 :documentation "SOURCE-FILEs of the systems the site browses.")
    (definitions :initarg :definitions :initform '() :accessor site-definitions
                 :documentation "DEFINITIONs read from the source files, if any.")
+   (definition-table :initform (make-hash-table :test 'equalp) :accessor site-definition-table
+                     :documentation "Bare definition name -> list of DEFINITIONs.")
    (code-references :initform (make-hash-table :test 'equal) :accessor site-code-references
                     :documentation "Figure ID -> list of DEFINITIONs mentioning it.")
    (figures :initform (make-hash-table :test 'equal) :accessor site-figures
@@ -41,8 +45,32 @@
     (maphash (lambda (id figures)
                (setf (gethash id (site-backlinks site)) (nreverse figures)))
              (site-backlinks site))
+    (unless (site-definitions site)
+      (setf (site-definitions site)
+            (loop for file in (site-source-files site) append (source-file-definitions file))))
     (setf (site-code-references site) (definition-references (site-definitions site)))
+    (dolist (definition (site-definitions site))
+      (push definition (gethash (bare-name (definition-name definition))
+                                (site-definition-table site))))
+    (maphash (lambda (name list) (setf (gethash name (site-definition-table site)) (nreverse list)))
+             (site-definition-table site))
     site))
+
+(defun bare-name (name)
+  "NAME without any package prefix: \"luv.wiki:foo\" -> \"foo\"."
+  (let ((colon (position #\: name :from-end t)))
+    (if colon (subseq name (1+ colon)) name)))
+
+(defun find-named-definition (name &optional (site *site*))
+  "The best definition for the bare symbol NAME: a defining form of the
+generic, function, macro, or class before any method, else the first."
+  (let ((candidates (and site (gethash (bare-name name) (site-definition-table site)))))
+    (or (find-if (lambda (d) (member (definition-kind d)
+                                     '("defgeneric" "defun" "defmacro" "defclass" "defstruct"
+                                       "defvar" "defparameter" "defconstant" "define-condition")
+                                     :test #'string=))
+                 candidates)
+        (first candidates))))
 
 (defun dangling-code-mentions (site)
   "An alist of (definition . ids) for code mentions no figure resolves."
@@ -64,7 +92,7 @@
       (let ((document (heading-document figure)))
         (if (and from (eq document from))
             (format nil "#~A" id)
-            (format nil "~A#~A" (site-page-name document) id))))))
+            (format nil "~A~A#~A" *page-prefix* (site-page-name document) id))))))
 
 (defun map-inlines (function element)
   "Call FUNCTION on every inline object reachable from block ELEMENT,
@@ -124,6 +152,10 @@ including headings' titles and table cells, but not into subheadings."
 
 (defvar *rendering-document* nil
   "The document whose page is being rendered; makes same-page links relative.")
+
+(defvar *page-prefix* ""
+  "The relative path from the page being rendered back to the site root,
+\"\" for top-level pages and \"../\" or deeper for source pages.")
 
 (defgeneric render-html (element)
   (:documentation
@@ -269,7 +301,8 @@ repository points at the source on GitHub; anything else is unresolved."
 
 (defmethod link-href ((protocol (eql :lisp)) link)
   (let ((definition (link-definition link)))
-    (and definition (definition-source-url definition))))
+    (and definition
+         (or (definition-page-href definition) (definition-source-url definition)))))
 
 (defun render-definition (definition &key open)
   "A disclosure block: the definition's head, file, and source link as the
@@ -284,8 +317,11 @@ summary, and the form drawn as dexp boxes inside."
          (spinneret:html " ")
          (:span.qualifier qualifier))
        " "
-       (:a.source :href (definition-source-url definition)
-                  (format nil "~A:~D" (definition-file-name definition) (definition-line definition))))
+       (:a.source :href (or (definition-page-href definition) (definition-source-url definition))
+                  (format nil "~A:~D" (definition-file-name definition) (definition-line definition)))
+       (when (definition-page-href definition)
+         (spinneret:html " ")
+         (:a.github :href (definition-source-url definition) :title "On GitHub" "↗")))
       (render-lisp-nodes (append (definition-comments definition)
                                  (list (definition-node definition)))
                          :package (definition-package definition)))))
@@ -349,65 +385,70 @@ summary, and the form drawn as dexp boxes inside."
         (dolist (child (element-children heading))
           (when (typep child 'heading) (render-html child)))))))
 
+(defun render-page-frame (title body &key body-class)
+  "Emit a whole HTML page with the site chrome around the output of BODY."
+  (spinneret:with-html
+    (:doctype)
+    (:html :lang "en"
+      (:head
+       (:meta :charset "utf-8")
+       (:meta :name "viewport" :content "width=device-width, initial-scale=1")
+       (:title title)
+       (:link :rel "stylesheet" :href (concatenate 'string *page-prefix* "style.css")))
+      (:body :class body-class
+       (:header.site-header
+        (:nav
+         (:a :href (concatenate 'string *page-prefix* "index.html") "luv wiki")
+         " · "
+         (:a :href (concatenate 'string *page-prefix* "figures.html") "figures")
+         (when (site-source-files *site*)
+           (spinneret:html " · ")
+           (:a :href (concatenate 'string *page-prefix* "source.html") "source"))
+         (when *rendering-document*
+           (spinneret:html " · ")
+           (:a :href (concatenate 'string (site-source-url *site*) "wiki/"
+                                  (document-name *rendering-document*) ".org")
+               "org"))))
+       (:main (funcall body))
+       (:footer.site-footer
+        "Rendered from Org and Lisp by luv.wiki.")))))
+
 (defun render-page (document)
   "Emit the whole HTML page for DOCUMENT."
   (let ((*rendering-document* document)
+        (*page-prefix* "")
         (title (or (document-title document) (document-name document))))
-    (spinneret:with-html
-      (:doctype)
-      (:html :lang "en"
-        (:head
-         (:meta :charset "utf-8")
-         (:meta :name "viewport" :content "width=device-width, initial-scale=1")
-         (:title title)
-         (:link :rel "stylesheet" :href "style.css"))
-        (:body
-         (:header.site-header
-          (:nav
-           (:a :href "index.html" "luv wiki")
-           " · "
-           (:a :href "figures.html" "figures")
-           " · "
-           (:a :href (concatenate 'string (site-source-url *site*) "wiki/"
-                                  (document-name document) ".org")
-               "source")))
-         (:main
-          (:h1 title)
-          (dolist (child (element-children document))
-            (render-html child)))
-         (:footer.site-footer
-          "Rendered from Org by luv.wiki."))))))
+    (render-page-frame
+     title
+     (lambda ()
+       (spinneret:with-html
+         (:h1 title)
+         (dolist (child (element-children document))
+           (render-html child)))))))
 
 (defun render-figures-page (site)
   "Emit an index page listing every figure and its work-mark status."
-  (let ((*rendering-document* nil))
-    (spinneret:with-html
-      (:doctype)
-      (:html :lang "en"
-        (:head
-         (:meta :charset "utf-8")
-         (:meta :name "viewport" :content "width=device-width, initial-scale=1")
-         (:title "Figures")
-         (:link :rel "stylesheet" :href "style.css"))
-        (:body
-         (:header.site-header (:nav (:a :href "index.html" "luv wiki")))
-         (:main
-          (:h1 "Figures")
-          (:p "Every addressable heading in the wiki, by page.  Work marks show their status.")
-          (dolist (document (site-documents site))
-            (let ((figures (document-figures document)))
-              (when figures
-                (:section
-                 (:h2 (:a :href (site-page-name document)
-                          (or (document-title document) (document-name document))))
-                 (:ul.figure-list
-                  (dolist (figure figures)
-                    (:li :class (format nil "level-~D" (heading-level figure))
-                         (:a.figure-id :href (figure-href (heading-id figure) :site site)
-                                       (format nil "#~A" (heading-id figure)))
-                         " "
-                         (render-heading-title figure)))))))))
-         (:footer.site-footer "Rendered from Org by luv.wiki."))))))
+  (let ((*rendering-document* nil)
+        (*page-prefix* ""))
+    (render-page-frame
+     "Figures"
+     (lambda ()
+       (spinneret:with-html
+         (:h1 "Figures")
+         (:p "Every addressable heading in the wiki, by page.  Work marks show their status.")
+         (dolist (document (site-documents site))
+           (let ((figures (document-figures document)))
+             (when figures
+               (:section
+                (:h2 (:a :href (site-page-name document)
+                         (or (document-title document) (document-name document))))
+                (:ul.figure-list
+                 (dolist (figure figures)
+                   (:li :class (format nil "level-~D" (heading-level figure))
+                        (:a.figure-id :href (figure-href (heading-id figure) :site site)
+                                      (format nil "#~A" (heading-id figure)))
+                        " "
+                        (render-heading-title figure)))))))))))))
 
 (defun call-with-html-output (stream thunk)
   "Call THUNK with Spinneret writing exact, compact HTML to STREAM.  The
@@ -441,6 +482,12 @@ spacing, so both are turned off."
                        (lambda () (render-page document))))
     (write-html-file (merge-pathnames "figures.html" directory)
                      (lambda () (render-figures-page site)))
+    (when (site-source-files site)
+      (write-html-file (merge-pathnames "source.html" directory)
+                       (lambda () (render-source-index site)))
+      (dolist (file (site-source-files site))
+        (write-html-file (merge-pathnames (source-page-name file) directory)
+                         (lambda () (render-source-page file)))))
     (when stylesheet
       (uiop:copy-file stylesheet (merge-pathnames "style.css" directory)))
     directory))

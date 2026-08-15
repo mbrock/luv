@@ -101,6 +101,20 @@ operation that make the wiki a buildable system.")
    #:render-definition
    #:code-source-files
    #:code-definitions
+   #:code-sources
+   #:source-file
+   #:source-file-pathname
+   #:source-file-relative-path
+   #:source-file-system-name
+   #:source-file-nodes
+   #:source-file-definitions
+   #:read-source-file
+   #:source-page-name
+   #:site-source-files
+   #:find-named-definition
+   #:definition-page-href
+   #:render-source-page
+   #:render-source-index
    #:*code-systems*
    ;; ASDF
    #:org-file

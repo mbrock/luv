@@ -11,6 +11,7 @@ component and operation that make the wiki a buildable system."
                (:file "wiki-html")
                (:file "wiki-lisp")
                (:file "wiki-dexp")
+               (:file "wiki-source")
                (:file "wiki-asdf"))
   :in-order-to ((asdf:test-op (asdf:test-op #:luv-wiki/tests))))
 

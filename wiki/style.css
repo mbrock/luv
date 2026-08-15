@@ -218,9 +218,9 @@ figure.image img, img.inline {
 
 .lisp {
   --paren: color-mix(in srgb, var(--fg) 30%, transparent);
-  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 0.8rem;
-  line-height: 1.6;
+  font-family: system-ui, "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-size: 0.9rem;
+  line-height: 1.55;
   margin: 1rem 0;
   padding: 0.6rem 0.8rem;
   background: var(--code-bg);
@@ -353,4 +353,88 @@ details.definition > .lisp {
 
 .code-references > p.backlinks {
   margin-bottom: 0.2rem;
+}
+
+/* Source browser */
+
+.lisp a.definition-link {
+  color: inherit;
+}
+
+.lisp a.definition-link:hover {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.lisp.source {
+  background: none;
+  padding: 0;
+}
+
+.lisp.source > .toplevel {
+  padding: 0.5rem 0.8rem;
+  margin: 0.6rem 0;
+  background: var(--code-bg);
+  border-radius: 0.4rem;
+  scroll-margin-top: 1rem;
+}
+
+.lisp.source > .toplevel:target {
+  outline: 2px solid var(--accent);
+}
+
+h1.source-title {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 1.4rem;
+}
+
+p.source-meta {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+details.toc {
+  font-size: 0.9rem;
+  margin: 1rem 0;
+}
+
+details.toc > summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+
+details.toc ul {
+  list-style: none;
+  padding-left: 0;
+  columns: 2 14rem;
+}
+
+details.toc li {
+  margin: 0.1rem 0;
+  font-family: system-ui, "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+details.toc .kind,
+details.definition > summary .kind {
+  color: var(--accent);
+}
+
+ul.source-list {
+  list-style: none;
+  padding-left: 0;
+  columns: 2 16rem;
+}
+
+ul.source-list .count {
+  color: var(--muted);
+  font-size: 0.85em;
+}
+
+a.github {
+  color: var(--muted);
+  text-decoration: none;
+}
+
+body.source-page {
+  max-width: 62rem;
 }

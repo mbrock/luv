@@ -60,24 +60,34 @@ lambda list."
           (let ((count (operator-head-count operator)))
             (and count (+ 1 count)))))))
 
-(defparameter *binding-operators*
-  '("let" "let*" "flet" "labels" "macrolet" "symbol-macrolet" "with-slots"
-    "with-accessors" "destructuring-bind" "multiple-value-bind" "do" "do*"
-    "handler-case" "handler-bind" "restart-case" "cond" "case" "ecase"
-    "typecase" "etypecase")
-  "Operators whose first argument (or, for the case-like ones, whose body
-forms) are clauses rather than calls: their first elements are not operators.")
+(defparameter *clause-lists*
+  '(("let" . 1) ("let*" . 1) ("flet" . 1) ("labels" . 1) ("macrolet" . 1)
+    ("symbol-macrolet" . 1) ("with-slots" . 1) ("with-accessors" . 1)
+    ("destructuring-bind" . 1) ("multiple-value-bind" . 1) ("do" . 1) ("do*" . 1)
+    ("handler-bind" . 1) ("defclass" . 3) ("define-condition" . 3)
+    ("defun" . 2) ("defmacro" . 2) ("defgeneric" . 2) ("deftype" . 2) ("lambda" . 1)
+    ("defmethod" . :lambda-list)
+    ("cond" . :body) ("case" . :body) ("ecase" . :body) ("typecase" . :body)
+    ("etypecase" . :body) ("handler-case" . :body) ("restart-case" . :body)
+    ("defstruct" . :body) ("defpackage" . :body) ("defsystem" . :body)
+    ("defgeneric" . :body))
+  "Operators whose argument at the given index is a list of clauses (or
+whose body forms are clauses, marked :body): the first element of a clause
+is a name or key, not an operator.")
 
 (defun list-clause-roles (list)
-  "Return (values bindings-index clauses-p): the index of a binding list
-child, and whether body children of LIST are clauses."
-  (let ((operator (symbol-node-name (first (element-children list)))))
-    (when (and operator (member (string-downcase operator) *binding-operators* :test #'string=))
-      (if (member (string-downcase operator) '("cond" "case" "ecase" "typecase" "etypecase"
-                                                "handler-case" "restart-case")
-                  :test #'string=)
-          (values nil t)
-          (values 1 nil)))))
+  "Return (values bindings-index clauses-p): the index of a clause-list
+child, and whether body children of LIST are themselves clauses."
+  (let* ((operator (symbol-node-name (first (element-children list))))
+         (entry (and operator (assoc (string-downcase operator) *clause-lists* :test #'string=))))
+    (cond ((null entry) (values nil nil))
+          ((eq (cdr entry) :body) (values nil t))
+          ((eq (cdr entry) :lambda-list)
+           ;; DEFMETHOD's lambda list follows the name and any qualifiers.
+           (values (position-if (lambda (c) (typep c 'lisp-list))
+                                (element-children list) :start 2)
+                   nil))
+          (t (values (cdr entry) nil)))))
 
 (defun render-lisp-children (list)
   (let ((own-role *lisp-role*)
@@ -137,14 +147,29 @@ child, and whether body children of LIST are clauses."
     (spinneret:with-html
       (:span :class (role-class "symbol" (and keyword-p "keyword"))
              :data-symbol-name name
-             (cond (keyword-p
-                    (:span.package ":"))
-                   ((eq package :uninterned)
-                    (:span.package "#:"))
-                   ((not current-p)
-                    (:span.package (string-downcase package)
-                                   (if (lisp-symbol-external-p symbol) ":" "::"))))
-             (:span.name (string-downcase name))))))
+             (let* ((definition (and (not keyword-p) (not (eq package :uninterned))
+                                     (find-named-definition name)))
+                    (href (and definition (definition-page-href definition))))
+               (if href
+                   (:a.definition-link :href href :title (format nil "~A ~A, ~A:~D"
+                                                                 (definition-kind definition)
+                                                                 (definition-name definition)
+                                                                 (definition-file-name definition)
+                                                                 (definition-line definition))
+                       (render-symbol-text symbol package current-p keyword-p))
+                   (render-symbol-text symbol package current-p keyword-p)))))))
+
+(defun render-symbol-text (symbol package current-p keyword-p)
+  "The package prefix, if shown, and the name of SYMBOL."
+  (spinneret:with-html
+    (cond (keyword-p
+           (:span.package ":"))
+          ((eq package :uninterned)
+           (:span.package "#:"))
+          ((not current-p)
+           (:span.package (string-downcase package)
+                          (if (lisp-symbol-external-p symbol) ":" "::"))))
+    (:span.name (string-downcase (lisp-symbol-name symbol)))))
 
 (defmethod render-html ((atom lisp-atom))
   (spinneret:with-html (:span :class (role-class "atom") (node-text atom))))
