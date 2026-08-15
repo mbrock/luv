@@ -24,6 +24,18 @@
 (defconstant +language-version-4-0+ (ash 4 16))
 (defconstant +function-type-vertex+ 1)
 (defconstant +function-type-fragment+ 2)
+(defconstant +vertex-format-float3+ 30)
+(defconstant +vertex-step-function-per-vertex+ 1)
+(defconstant +vertex-step-function-per-instance+ 2)
+(defconstant +primitive-topology-class-triangle+ 3)
+(defconstant +compare-function-never+ 0)
+(defconstant +compare-function-less+ 1)
+(defconstant +compare-function-equal+ 2)
+(defconstant +compare-function-less-equal+ 3)
+(defconstant +compare-function-greater+ 4)
+(defconstant +compare-function-not-equal+ 5)
+(defconstant +compare-function-greater-equal+ 6)
+(defconstant +compare-function-always+ 7)
 
 ;;; Device and Metal 4 submission.
 
@@ -130,6 +142,205 @@ rejection.  Source and names cross only as in-memory NSString objects."
           (let ((library (%new-metal-4-library compiler descriptor error)))
             (values library
                     (objective-c-error-pointer-description error))))))))
+
+;;; Metal 4 render pipeline compilation.
+
+(objc:define-objective-c-message %new-metal-4-render-pipeline-descriptor
+    ("new" :object :ownership :owned
+     :class "MTL4RenderPipelineDescriptor"))
+
+(objc:define-objective-c-message %new-metal-4-library-function-descriptor
+    ("new" :object :ownership :owned
+     :class "MTL4LibraryFunctionDescriptor"))
+
+(objc:define-objective-c-message %new-metal-vertex-descriptor
+    ("new" :object :ownership :owned :class "MTLVertexDescriptor"))
+
+(objc:define-objective-c-message %set-function-library
+    ("setLibrary:" :void)
+  (library :object))
+
+(objc:define-objective-c-message %set-function-name
+    ("setName:" :void)
+  (name :object))
+
+(objc:define-objective-c-message %set-vertex-function-descriptor
+    ("setVertexFunctionDescriptor:" :void)
+  (descriptor :object))
+
+(objc:define-objective-c-message %set-fragment-function-descriptor
+    ("setFragmentFunctionDescriptor:" :void)
+  (descriptor :object))
+
+(objc:define-objective-c-message %set-pipeline-vertex-descriptor
+    ("setVertexDescriptor:" :void)
+  (descriptor :object))
+
+(objc:define-objective-c-message %set-input-primitive-topology
+    ("setInputPrimitiveTopology:" :void)
+  (topology :uint64))
+
+(objc:define-objective-c-message %render-pipeline-color-attachments
+    ("colorAttachments" :object :ownership :borrowed
+     :class "MTL4RenderPipelineColorAttachmentDescriptorArray"))
+
+(objc:define-objective-c-message %render-pipeline-color-attachment-at
+    ("objectAtIndexedSubscript:" :object :ownership :borrowed
+     :class "MTL4RenderPipelineColorAttachmentDescriptor")
+  (index :uint64))
+
+(objc:define-objective-c-message %set-render-pipeline-pixel-format
+    ("setPixelFormat:" :void)
+  (format :uint64))
+
+(objc:define-objective-c-message %vertex-descriptor-layouts
+    ("layouts" :object :ownership :borrowed
+     :class "MTLVertexBufferLayoutDescriptorArray"))
+
+(objc:define-objective-c-message %vertex-layout-at
+    ("objectAtIndexedSubscript:" :object :ownership :borrowed
+     :class "MTLVertexBufferLayoutDescriptor")
+  (index :uint64))
+
+(objc:define-objective-c-message %set-vertex-layout-stride
+    ("setStride:" :void)
+  (stride :uint64))
+
+(objc:define-objective-c-message %set-vertex-layout-step-function
+    ("setStepFunction:" :void)
+  (step-function :uint64))
+
+(objc:define-objective-c-message %vertex-descriptor-attributes
+    ("attributes" :object :ownership :borrowed
+     :class "MTLVertexAttributeDescriptorArray"))
+
+(objc:define-objective-c-message %vertex-attribute-at
+    ("objectAtIndexedSubscript:" :object :ownership :borrowed
+     :class "MTLVertexAttributeDescriptor")
+  (index :uint64))
+
+(objc:define-objective-c-message %set-vertex-attribute-format
+    ("setFormat:" :void)
+  (format :uint64))
+
+(objc:define-objective-c-message %set-vertex-attribute-offset
+    ("setOffset:" :void)
+  (offset :uint64))
+
+(objc:define-objective-c-message %set-vertex-attribute-buffer-index
+    ("setBufferIndex:" :void)
+  (buffer-index :uint64))
+
+(objc:define-objective-c-message %new-metal-4-render-pipeline-state
+    ("newRenderPipelineStateWithDescriptor:compilerTaskOptions:error:"
+     :object :ownership :owned :class "MTLRenderPipelineState")
+  (descriptor :object)
+  (compiler-task-options :object)
+  (error :pointer))
+
+(objc:define-objective-c-message %new-metal-depth-stencil-descriptor
+    ("new" :object :ownership :owned :class "MTLDepthStencilDescriptor"))
+
+(objc:define-objective-c-message %set-depth-compare-function
+    ("setDepthCompareFunction:" :void)
+  (function :uint64))
+
+(objc:define-objective-c-message %set-depth-write-enabled
+    ("setDepthWriteEnabled:" :void)
+  (enabled :uint8))
+
+(objc:define-objective-c-message %new-depth-stencil-state
+    ("newDepthStencilStateWithDescriptor:"
+     :object :ownership :owned :class "MTLDepthStencilState")
+  (descriptor :object))
+
+(defun configure-metal-vertex-descriptor (descriptor vertex-buffers)
+  (let ((layouts (%vertex-descriptor-layouts descriptor))
+        (attributes (%vertex-descriptor-attributes descriptor)))
+    (dolist (buffer vertex-buffers)
+      (let* ((binding (getf buffer :binding))
+             (layout (%vertex-layout-at layouts binding)))
+        (%set-vertex-layout-stride layout (getf buffer :array-stride))
+        (%set-vertex-layout-step-function
+         layout
+         (ecase (getf buffer :step-mode)
+           (:vertex +vertex-step-function-per-vertex+)
+           (:instance +vertex-step-function-per-instance+)))
+        (dolist (attribute (getf buffer :attributes))
+          (let ((native-attribute
+                  (%vertex-attribute-at
+                   attributes (getf attribute :shader-location))))
+            (%set-vertex-attribute-format
+             native-attribute
+             (ecase (getf attribute :format)
+               (:float32x3 +vertex-format-float3+)))
+            (%set-vertex-attribute-offset
+             native-attribute (getf attribute :offset))
+            (%set-vertex-attribute-buffer-index native-attribute binding))))))
+  descriptor)
+
+(defun compile-metal-4-render-pipeline
+    (compiler vertex-library vertex-name fragment-library fragment-name
+     vertex-buffers color-format topology &key label)
+  "Synchronously link two MTLLibraries into an owned Metal 4 pipeline state."
+  (objc:with-autorelease-pool ()
+    (objc:with-owned-objective-c-object
+        (vertex-function
+          (%new-metal-4-library-function-descriptor
+           (objc:find-objective-c-class "MTL4LibraryFunctionDescriptor")))
+      (%set-function-library vertex-function vertex-library)
+      (%set-function-name
+       vertex-function (objc:lisp-string-to-objective-c vertex-name))
+      (objc:with-owned-objective-c-object
+          (fragment-function
+            (%new-metal-4-library-function-descriptor
+             (objc:find-objective-c-class "MTL4LibraryFunctionDescriptor")))
+        (%set-function-library fragment-function fragment-library)
+        (%set-function-name
+         fragment-function (objc:lisp-string-to-objective-c fragment-name))
+        (objc:with-owned-objective-c-object
+            (vertex-descriptor
+              (%new-metal-vertex-descriptor
+               (objc:find-objective-c-class "MTLVertexDescriptor")))
+          (configure-metal-vertex-descriptor vertex-descriptor vertex-buffers)
+          (objc:with-owned-objective-c-object
+              (descriptor
+                (%new-metal-4-render-pipeline-descriptor
+                 (objc:find-objective-c-class
+                  "MTL4RenderPipelineDescriptor")))
+            (when label
+              (%set-object-label
+               descriptor (objc:lisp-string-to-objective-c label)))
+            (%set-vertex-function-descriptor descriptor vertex-function)
+            (%set-fragment-function-descriptor descriptor fragment-function)
+            (%set-pipeline-vertex-descriptor descriptor vertex-descriptor)
+            (%set-input-primitive-topology descriptor topology)
+            (%set-render-pipeline-pixel-format
+             (%render-pipeline-color-attachment-at
+              (%render-pipeline-color-attachments descriptor) 0)
+             color-format)
+            (cffi:with-foreign-object (error :pointer)
+              (setf (cffi:mem-ref error :pointer) (cffi:null-pointer))
+              (let ((pipeline
+                      (%new-metal-4-render-pipeline-state
+                       compiler descriptor nil error)))
+                (values pipeline
+                        (objective-c-error-pointer-description error))))))))))
+
+(defun new-metal-depth-stencil-state
+    (device compare-function depth-write-enabled &key label)
+  "Create an owned MTLDepthStencilState for a Metal render pipeline."
+  (objc:with-autorelease-pool ()
+    (objc:with-owned-objective-c-object
+        (descriptor
+          (%new-metal-depth-stencil-descriptor
+           (objc:find-objective-c-class "MTLDepthStencilDescriptor")))
+      (when label
+        (%set-object-label
+         descriptor (objc:lisp-string-to-objective-c label)))
+      (%set-depth-compare-function descriptor compare-function)
+      (%set-depth-write-enabled descriptor (if depth-write-enabled 1 0))
+      (%new-depth-stencil-state device descriptor))))
 
 (objc:define-objective-c-message new-command-allocator
     ("newCommandAllocator" :object :ownership :owned

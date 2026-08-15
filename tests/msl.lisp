@@ -30,6 +30,22 @@
     (ok (search "shadow_map.sample_compare" source))
     (ok (search "result.color_output = rgba;" source))))
 
+(deftest block-vertex-lowers-projective-map-to-msl
+  (let* ((specification (spv:block-world-vertex-specification))
+         (document (msl:compile-msl specification))
+         (source (msl:msl-document-source document))
+         (binding (binding-named 'shadow-projection specification))
+         (expression (spv:shader-binding-expression binding)))
+    (ok (search "vertex BlockWorldVertexSpecificationOutput" source))
+    (ok (search "float3 shadow_projection =" source))
+    (ok (search "dot(frame_state.shadow_row_x, float4(stage_in.world_position, 1.0f))"
+                source))
+    (ok (search "float3(0.5f, 0.5f, 1.0f)" source))
+    (ok (search "float3(0.5f, 0.5f, 0.0f)" source))
+    (ok (search "result.shadow_depth_output = shadow_depth;" source))
+    (ok (gethash expression
+                 (msl:msl-document-expression-occurrences document)))))
+
 (deftest msl-lowering-is-deterministic-and-does-not-perturb-spir-v
   (let* ((specification (spv:block-world-fragment-specification))
          (spir-v-before (spv:assemble-shader-specification specification))

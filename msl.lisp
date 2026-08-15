@@ -177,12 +177,59 @@
   (spv:lower-shader-call (spv:shader-call-operator expression)
                          context expression))
 
-(defmethod lower-msl-expression
-    ((context msl-lowering-context) (expression spv:shader-map-application))
+(defgeneric lower-msl-shader-map-application
+    (definition context application)
+  (:documentation "Render one semantic shader-map application for MSL."))
+
+(defmethod lower-msl-shader-map-application
+    (definition (context msl-lowering-context)
+     (application spv:shader-map-application))
   (declare (ignore context))
   (error 'spv:shader-language-error
-         :form (spv:shader-expression-source-form expression)
-         :reason :unsupported-msl-projective-map))
+         :form (spv:shader-expression-source-form application)
+         :reason :unsupported-msl-shader-map
+         :details (class-name (class-of definition))))
+
+(defmethod lower-msl-shader-map-application
+    ((definition spv:shader-projective-map-definition)
+     (context msl-lowering-context)
+     (application spv:shader-map-application))
+  (let* ((point
+           (msl-occurrence-text
+            (lower-msl-expression
+             context (spv:shader-map-application-point application))))
+           (rows
+             (mapcar (lambda (row)
+                       (msl-occurrence-text
+                        (lower-msl-expression context row)))
+                     (spv:shader-map-application-rows application)))
+           (homogeneous (format nil "float4(~A, 1.0f)" point))
+           (clip-components
+             (mapcar (lambda (row)
+                       (format nil "dot(~A, ~A)" row homogeneous))
+                     rows))
+           (normalized
+             (format nil "(float3(~{~A~^, ~}) / ~A)"
+                     (subseq clip-components 0 3)
+                     (fourth clip-components)))
+           (scale
+             (format nil "float3(~{~A~^, ~})"
+                     (mapcar #'msl-float-literal
+                             (spv:shader-projective-map-coordinate-scale
+                              definition))))
+           (offset
+             (format nil "float3(~{~A~^, ~})"
+                     (mapcar #'msl-float-literal
+                             (spv:shader-projective-map-coordinate-offset
+                              definition)))))
+    (note-msl-occurrence
+     context application
+     (format nil "((~A * ~A) + ~A)" normalized scale offset))))
+
+(defmethod lower-msl-expression
+    ((context msl-lowering-context) (expression spv:shader-map-application))
+  (lower-msl-shader-map-application
+   (spv:shader-map-application-definition expression) context expression))
 
 (defun lower-msl-quantity-boundary (context expression operand)
   (let ((lowered (lower-msl-expression context operand)))
@@ -585,11 +632,6 @@ This is the sibling target proof described by #58IDSR."
      context specification input-parameter-name)
     (dolist (binding (spv:shader-specification-bindings specification))
       (let ((expression (spv:shader-binding-expression binding)))
-        (unless (spv:shader-expression-materialized-p expression)
-          (error 'spv:shader-language-error
-                 :form (spv:shader-expression-source-form expression)
-                 :reason :unsupported-msl-virtual-binding
-                 :details (spv:shader-object-name binding)))
         (let* ((name (msl-identifier (spv:shader-object-name binding)))
                (value (lower-msl-expression context expression)))
           (setf (gethash binding (msl-context-references context)) name)

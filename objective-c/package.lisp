@@ -67,6 +67,8 @@
            #:new-metal-4-command-queue
            #:new-metal-4-compiler
            #:compile-metal-4-library
+           #:compile-metal-4-render-pipeline
+           #:new-metal-depth-stencil-state
            #:new-metal-library-function
            #:metal-function-type
            #:new-command-allocator
@@ -90,5 +92,14 @@
            #:+language-version-4-0+
            #:+function-type-vertex+
            #:+function-type-fragment+
+           #:+primitive-topology-class-triangle+
+           #:+compare-function-never+
+           #:+compare-function-less+
+           #:+compare-function-equal+
+           #:+compare-function-less-equal+
+           #:+compare-function-greater+
+           #:+compare-function-not-equal+
+           #:+compare-function-greater-equal+
+           #:+compare-function-always+
            #:+pixel-format-bgra8-unorm+
            #:+pixel-format-bgra8-unorm-srgb+))

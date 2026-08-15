@@ -332,6 +332,8 @@ nothing else does."))
            #+darwin
            #:metal-gpu-shader-module
            #+darwin
+           #:metal-gpu-render-pipeline
+           #+darwin
            #:metal-device-compiler
            #+darwin
            #:metal-shader-module-document
@@ -339,6 +341,10 @@ nothing else does."))
            #:metal-shader-module-entry-point
            #+darwin
            #:metal-shader-module-function-type
+           #+darwin
+           #:metal-render-pipeline-depth-stencil-state
+           #+darwin
+           #:metal-render-pipeline-vertex-buffers
            #:vulkan-provider-application-name
            #:vulkan-provider-debug-callback
            #:vulkan-provider-debug-severities
@@ -696,6 +702,7 @@ nothing else does."))
            #:probe-sdl-metal-clear
            #+darwin
            #:probe-metal-shader-library
+           #:probe-metal-render-pipeline
            #:clear-color-demo
            #:demo-canvas
            #:demo-context

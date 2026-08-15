@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := all
 
-.PHONY: all luvcraft run test parinfer-check shader-validate msl-validate smoke mcluv wiki wiki-cli objective-c-probe metal-clear metal-shader clean
+.PHONY: all luvcraft run test parinfer-check shader-validate msl-validate smoke mcluv wiki wiki-cli objective-c-probe metal-clear metal-shader metal-pipeline clean
 
 all: luvcraft
 
@@ -47,7 +47,9 @@ msl-validate:
 		--eval '(asdf:load-asd (truename "luv.asd"))' \
 		--eval '(asdf:load-system :luv/msl)' \
 		--eval '(asdf:load-system :luv/luvcraft/shaders)' \
+		--eval '(luv.msl:write-msl (luv.msl:compile-msl (luv.spir-v:block-world-vertex-specification)) #p"build/block-world.vert.metal")' \
 		--eval '(luv.msl:write-msl (luv.msl:compile-msl (luv.spir-v:block-world-fragment-specification)) #p"build/block-world.frag.metal")'
+	xcrun metal -std=metal4.0 -c build/block-world.vert.metal -o build/block-world.vert.air
 	xcrun metal -std=metal4.0 -c build/block-world.frag.metal -o build/block-world.frag.air
 
 smoke: luvcraft
@@ -79,8 +81,12 @@ metal-clear:
 metal-shader:
 	nix develop -c sbcl --script tools/metal-shader.lisp
 
+metal-pipeline:
+	nix develop -c sbcl --script tools/metal-pipeline.lisp
+
 clean:
 	rm -f ./build/luvcraft ./build/mcluv ./build/luvcraft-smoke.png
+	rm -f ./build/block-world.vert.metal ./build/block-world.vert.air
 	rm -f ./build/block-world.frag.metal ./build/block-world.frag.air
 	rm -f ./build/objective-c-exception-bridge-*.dylib
 	rm -rf ./build/wiki ./build/wiki-cli

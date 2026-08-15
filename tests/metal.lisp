@@ -98,6 +98,67 @@
       (when module (destroy module))
       (destroy device))))
 
+(deftest luvcraft-vertex-and-fragment-link-as-a-metal-4-render-pipeline
+  (let ((device
+          (request-gpu-device (make-instance 'metal-gpu-provider)))
+        (vertex-module nil)
+        (fragment-module nil)
+        (pipeline nil))
+    (unwind-protect
+         (progn
+           (setf vertex-module
+                 (create
+                  device
+                  (make-shader-module-descriptor
+                   :label "block vertex Metal library"
+                   :language :mathematical
+                   :code (luv.spir-v:block-world-vertex-specification)))
+                 fragment-module
+                 (create
+                  device
+                  (make-shader-module-descriptor
+                   :label "block fragment Metal library"
+                   :language :mathematical
+                   :code (luv.spir-v:block-world-fragment-specification)))
+                 pipeline
+                 (create
+                  device
+                  (make-render-pipeline-descriptor
+                   :label "block world Metal 4 pipeline"
+                   :layout nil
+                   :vertex
+                   `(:module ,vertex-module
+                     :buffers
+                     ((:array-stride 48
+                       :attributes
+                       ((:shader-location 0 :offset 0 :format :float32x3)
+                        (:shader-location 1 :offset 12 :format :float32x3)
+                        (:shader-location 2 :offset 24 :format :float32x3)
+                        (:shader-location 3 :offset 36 :format :float32x3)))))
+                   :fragment
+                   `(:module ,fragment-module
+                     :targets ((:format :bgra8-unorm)))
+                   :primitive '(:topology :triangle-list)
+                   :depth-stencil
+                   '(:format :depth32-float
+                     :depth-write-enabled t
+                     :depth-compare :less))))
+           (ok (typep pipeline 'metal-gpu-render-pipeline))
+           (ok (equal
+                (objc:objective-c-object-protocol-name
+                 (luv::metal-native-object pipeline))
+                "MTLRenderPipelineState"))
+           (ok (equal
+                (objc:objective-c-object-protocol-name
+                 (metal-render-pipeline-depth-stencil-state pipeline))
+                "MTLDepthStencilState"))
+           (ok (= 1 (length
+                     (metal-render-pipeline-vertex-buffers pipeline)))))
+      (when pipeline (destroy pipeline))
+      (when fragment-module (destroy fragment-module))
+      (when vertex-module (destroy vertex-module))
+      (destroy device))))
+
 (deftest failed-metal-library-keeps-the-device-compiler-usable
   (let* ((device
            (request-gpu-device (make-instance 'metal-gpu-provider)))

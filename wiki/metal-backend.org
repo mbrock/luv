@@ -1,7 +1,7 @@
 #+title: The native Metal 4 backend
 #+startup: overview
 
-* Two seams are executable; one join remains
+* Three seams are executable; one draw join remains
 :PROPERTIES:
 :ID: 4M91DG
 :END:
@@ -10,8 +10,11 @@ The native Metal backend is no longer only an architectural proposal.  Luv
 can create a Metal GPU provider, attach it to an SDL-owned =CAMetalLayer=, and
 present a validated Metal 4 clear through the ordinary GPU command vocabulary.
 The same mathematical shader specification now also crosses the GPU API into
-a device-owned =MTL4Compiler= and becomes a live =MTLLibrary=.  The remaining
-backend threshold is Metal pipeline creation and draw encoding.
+a device-owned =MTL4Compiler= and becomes a live =MTLLibrary=.  The unchanged
+luvcraft vertex and fragment specifications now link into a real
+=MTLRenderPipelineState= with their vertex layout and depth state.  The
+remaining backend threshold is resource binding, draw encoding, and
+transactional publication into the presented canvas.
 
 #+begin_example
 SDL canvas and events
@@ -27,17 +30,16 @@ luv GPU protocol
         |
 typed shader specification
         |\
-        | `---- MSL lowering ---- MTL4Compiler ---- Metal pipeline
-        |                              WORKING             NEXT
+        | `---- MSL lowering ---- MTL4Compiler ---- Metal pipeline    WORKING
         `------ SPIR-V lowering - Vulkan pipeline                    WORKING
 #+end_example
 
-The three seams remain independently understandable: SDL owns the host,
+The seams remain independently understandable: SDL owns the host,
 [[file:objective-c-and-metal.org][the Objective-C substrate]] (#M2PDTP) owns the Apple object boundary, and the shader
 language owns target-specific lowering.  They are now staged proofs of one
 backend rather than three reasons to postpone starting it.  #5A7QDE records
 the executable presentation half, #58IDSR the compiler half, and #PH57K5 the
-remaining pipeline join.
+remaining live draw and publication join.
 #NABRMK records why the second backend matters and #HXUGEA why Metal 4 is the
 right native model for it.
 
@@ -55,11 +57,12 @@ The current backend is deliberately narrow but real:
 
 - =:luv/gpu/api= is the shared semantic seam;
 - =:luv/gpu/metal= supplies Metal provider, device, queue, compiler,
-  shader-module, texture, and frame-encoder objects;
+  shader-module, render-pipeline, texture, and frame-encoder objects;
 - =:luv/canvas/metal= specializes the canvas × provider relationship;
 - declared Objective-C messages cover synchronous Metal 4 library compilation
   as well as the submission and drawable vocabulary needed by one frame; and
-- cold probes validate an in-memory luvcraft fragment library and the complete
+- cold probes validate in-memory luvcraft vertex and fragment libraries, their
+  linked =MTLRenderPipelineState= and =MTLDepthStencilState=, and the complete
   clear path on an Apple M2 Pro.
 
 This does not yet establish a portable HAL contract.  It establishes a second
@@ -192,6 +195,16 @@ library, entry point, and function type as one inspectable module artifact.
 Native rejection copies =NSError= text into a =metal-gpu-error= without
 poisoning the compiler.
 
+The next compiler boundary is executable too.  =metal-gpu-render-pipeline=
+checks that both shader modules belong to the device and have the required
+stages, translates the HAL's 48-byte vertex layout into an
+=MTLVertexDescriptor=, names both library functions with
+=MTL4LibraryFunctionDescriptor= objects, and synchronously creates an
+=MTLRenderPipelineState=.  Its depth comparison and write policy are retained
+as a draw-time =MTLDepthStencilState=.  The pipeline product no longer retains
+the temporary native descriptors, while its owned native states are released
+explicitly by =destroy=.
+
 =xcrun metal= remains useful as an offline diagnostic and cross-check.  It is
 not the acceptance authority for a live pipeline.
 
@@ -282,10 +295,11 @@ Evidence:
   inspectable [[lisp:msl-document]] of structures, parameters, statements, and
   bidirectional expression occurrences.  The existing SPIR-V compiler is a
   sibling method on the same =lower-shader-specification= generic.
-- =make msl-validate= wrote the generated source into =build/= and Apple Metal
-  32023.883 accepted it with =-std=metal4.0=.  Five focused tests established
+- =make msl-validate= wrote both generated stages into =build/= and Apple Metal
+  32023.883 accepted them with =-std=metal4.0=.  Six focused tests established
   deterministic text, unchanged SPIR-V words before and after MSL lowering,
-  the resource interface, and expression-to-source provenance.
+  the resource interface, projective-map lowering, and expression-to-source
+  provenance.
 - The first target evidence is small but real: MSL has separate texture,
   sampler, and buffer index spaces, so the existing binding numbers become
   =texture(0)=, =sampler(1)=, and =buffer(2)= rather than one descriptor
@@ -301,7 +315,8 @@ Evidence:
   explicit.  Both Vulkan and Metal now accept =:mathematical= specifications;
   the live luvcraft pipeline hands its unchanged specification to =create=
   instead of assembling words above the backend.
-- Seven Metal tests include real compiler and library objects plus a failed
+- Eight Metal tests include real compiler, library, render-pipeline, and depth
+  state objects plus a failed
   native compilation followed by a successful build on the same compiler.
   The failed candidate retains its =msl-document= and copied native diagnostic.
 
@@ -331,6 +346,15 @@ has moved below the HAL boundary.  The Vulkan live artifact proves revision
 tracking, last-known-good retention, frame-boundary publication, and deferred
 retirement.  Metal should specialize those ownership points rather than fork
 the application model.
+
+The middle of that join is now proved.  The vertex target lowers the semantic
+=:world-to-shadow= map into a named =shadow_projection= value: four homogeneous
+row products, division by =w=, then coordinate scale and offset.  Both stages
+pass Apple's offline compiler.  =make metal-pipeline= then cold-starts the
+device-owned path and reports the expected luvcraft entry points, one 48-byte
+four-attribute vertex buffer, =MTLRenderPipelineState=, and
+=MTLDepthStencilState= on the Apple M2 Pro.  What remains is the resource and
+command side of the join, not shader or pipeline plausibility.
 
 Done when: redefining the block material compiles MSL, publishes a complete
 Metal pipeline at the owning frame boundary, keeps the previous pipeline after
