@@ -25,19 +25,6 @@
 (defconstant +luvcraft-shadow-minimum-filter-radius+ 2.0)
 (defconstant +luvcraft-shadow-maximum-filter-radius+ 6.0)
 
-(defun vec3-dot (left right)
-  (+ (* (aref left 0) (aref right 0))
-     (* (aref left 1) (aref right 1))
-     (* (aref left 2) (aref right 2))))
-
-(defun vec3-cross (left right)
-  (vec3 (- (* (aref left 1) (aref right 2))
-           (* (aref left 2) (aref right 1)))
-        (- (* (aref left 2) (aref right 0))
-           (* (aref left 0) (aref right 2)))
-        (- (* (aref left 0) (aref right 1))
-           (* (aref left 1) (aref right 0)))))
-
 (defun make-block-world-crosshair-vertices (width height)
   "Make an outlined pixel-sized crosshair in Vulkan clip coordinates."
   (let ((vertices (make-array 0 :element-type 'single-float
@@ -65,7 +52,12 @@
 
 (defun shadow-frame-rows (camera sky)
   "Pack a texel-stable orthographic light-space transform as four vec4 rows."
-  (let* ((center (vec3 (camera-x camera) (camera-y camera) (camera-z camera)))
+  (let* ((center
+           ;; Preserve the original single-float shadow calculation before
+           ;; the packed frame ABI converts its result.
+           (make-vec3 (coerce (camera-x camera) 'single-float)
+                      (coerce (camera-y camera) 'single-float)
+                      (coerce (camera-z camera) 'single-float)))
          (forward
            (vec3-scale
             (vec3-normalize (sky-frame-parameters-sun-direction sky))
@@ -73,7 +65,7 @@
          ;; The tilted solar orbit never reaches the world-Y pole, so its
          ;; projection is a safe continuous reference.  Switching to world Z
          ;; near noon used to rotate the whole shadow map discontinuously.
-         (basis-up (vec3 0.0 1.0 0.0))
+         (basis-up (make-vec3 0.0 1.0 0.0))
          (right (vec3-normalize (vec3-cross basis-up forward)))
          (up (vec3-cross forward right))
          (extent +luvcraft-shadow-half-extent+)
@@ -87,9 +79,9 @@
            (* (round (/ (vec3-dot center up) world-units-per-texel))
               world-units-per-texel)))
     (flet ((lane (axis scale offset)
-             (list (* (aref axis 0) scale)
-                   (* (aref axis 1) scale)
-                   (* (aref axis 2) scale)
+             (list (* (vec3-x axis) scale)
+                   (* (vec3-y axis) scale)
+                   (* (vec3-z axis) scale)
                    offset)))
       (append
        (lane right (/ extent) (- (/ center-right extent)))
@@ -119,7 +111,7 @@ check in BLOCK-WORLD-CAMERA-UNIFORM-SIZE keeps the two honest."
       (let ((sun (sky-frame-parameters-sun-direction sky)))
         (emit (sky-frame-parameters-fog-near sky)
               (sky-frame-parameters-fog-far sky) 0.0 0.0)
-        (emit (aref sun 0) (aref sun 1) (aref sun 2)
+        (emit (vec3-x sun) (vec3-y sun) (vec3-z sun)
               (sky-frame-parameters-day-factor sky))
         (apply #'emit (append (color (sky-frame-parameters-sun-color sky))
                               (list (sky-frame-parameters-sun-angular-width

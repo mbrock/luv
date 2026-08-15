@@ -151,7 +151,7 @@
       (declare (ignore right up))
       (raycast-block-world
        (luvcraft-session-world session)
-       (vector (camera-x camera) (camera-y camera) (camera-z camera))
+       (camera-position camera)
        forward #'block-solid-p :max-distance max-distance))))
 
 (defun update-luvcraft-session-title (session)

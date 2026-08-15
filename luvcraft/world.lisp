@@ -2,6 +2,80 @@
 
 (in-package #:luv)
 
+;;; VEC3 is the small, transparent CPU representation shared by continuous
+;;; positions and displacements.  Semantic owners name what a value means;
+;;; packed colours and GPU vertex lanes remain dense vectors instead.  #7K8UBF
+
+(declaim (inline %make-vec3))
+(defstruct (vec3
+             (:constructor %make-vec3 (x y z)))
+  (x 0 :type real)
+  (y 0 :type real)
+  (z 0 :type real))
+
+(declaim (inline make-vec3))
+(defun make-vec3 (x y z)
+  (check-type x real)
+  (check-type y real)
+  (check-type z real)
+  (%make-vec3 x y z))
+
+(declaim (inline vec3-component (setf vec3-component)))
+(defun vec3-component (vector axis)
+  "Return VECTOR's component on the closed geometric AXIS vocabulary."
+  (check-type vector vec3)
+  (ecase axis
+    (:x (vec3-x vector))
+    (:y (vec3-y vector))
+    (:z (vec3-z vector))))
+
+(defun (setf vec3-component) (value vector axis)
+  (check-type value real)
+  (check-type vector vec3)
+  (ecase axis
+    (:x (setf (vec3-x vector) value))
+    (:y (setf (vec3-y vector) value))
+    (:z (setf (vec3-z vector) value))))
+
+(declaim (inline vec3-scale vec3-dot vec3-cross vec3-length vec3-normalize))
+(defun vec3-scale (vector scale)
+  (check-type vector vec3)
+  (check-type scale real)
+  (make-vec3 (* (vec3-x vector) scale)
+             (* (vec3-y vector) scale)
+             (* (vec3-z vector) scale)))
+
+(defun vec3-dot (left right)
+  (check-type left vec3)
+  (check-type right vec3)
+  (+ (* (vec3-x left) (vec3-x right))
+     (* (vec3-y left) (vec3-y right))
+     (* (vec3-z left) (vec3-z right))))
+
+(defun vec3-cross (left right)
+  (check-type left vec3)
+  (check-type right vec3)
+  (make-vec3 (- (* (vec3-y left) (vec3-z right))
+                (* (vec3-z left) (vec3-y right)))
+             (- (* (vec3-z left) (vec3-x right))
+                (* (vec3-x left) (vec3-z right)))
+             (- (* (vec3-x left) (vec3-y right))
+                (* (vec3-y left) (vec3-x right)))))
+
+(defun vec3-length (vector)
+  (check-type vector vec3)
+  (sqrt (vec3-dot vector vector)))
+
+(defun vec3-normalize (vector)
+  (check-type vector vec3)
+  (let ((length (vec3-length vector)))
+    (if (plusp length) (vec3-scale vector (/ length)) vector)))
+
+(defun vec3-list (vector)
+  "Return VECTOR's three components as portable external data."
+  (check-type vector vec3)
+  (list (vec3-x vector) (vec3-y vector) (vec3-z vector)))
+
 ;;; Coordinate values are deliberately distinct even though all three carry
 ;;; integer components.  World, chunk, and domain-local addresses are not
 ;;; interchangeable.  World and chunk coordinates may be negative; local
@@ -125,6 +199,7 @@
   (let ((components
           (etypecase extent
             (real (list extent extent extent))
+            (vec3 (vec3-list extent))
             (sequence
              (unless (= (length extent) 3)
                (error "A voxel cell extent needs exactly three components."))
@@ -133,8 +208,9 @@
                      (and (realp component) (plusp component)))
                    components)
       (error "Voxel cell extents must be positive real numbers: ~S" extent))
-    (map 'vector (lambda (component) (coerce component 'double-float))
-         components)))
+    (apply #'make-vec3
+           (mapcar (lambda (component) (coerce component 'double-float))
+                   components))))
 
 (defclass voxel-space ()
   ((id :initarg :id :reader voxel-space-id)
@@ -155,9 +231,9 @@
   (check-type space voxel-space)
   (check-type coordinate world-coordinate)
   (let ((extent (voxel-space-cell-extent space)))
-    (vector (* (world-coordinate-x coordinate) (aref extent 0))
-            (* (world-coordinate-y coordinate) (aref extent 1))
-            (* (world-coordinate-z coordinate) (aref extent 2)))))
+    (make-vec3 (* (world-coordinate-x coordinate) (vec3-x extent))
+               (* (world-coordinate-y coordinate) (vec3-y extent))
+               (* (world-coordinate-z coordinate) (vec3-z extent)))))
 
 (defun voxel-space-decompose-components (space x y z)
   "Decompose a world site into chunk and local scalar components.
@@ -932,30 +1008,25 @@ retains chunk revision, boundary revision, and world invalidation semantics."))
   (block nil :read-only t)
   (distance 0d0 :type double-float :read-only t))
 
-(defun ray-component (sequence index)
-  (unless (and (typep sequence 'sequence) (= (length sequence) 3))
-    (error "A block-world ray needs a three-component sequence: ~S" sequence))
-  (let ((component (elt sequence index)))
-    (check-type component real)
-    (coerce component 'double-float)))
-
 (defun raycast-block-world
     (world origin direction occupied-p &key (max-distance 8d0))
   "Trace a ray through WORLD's resident lattice.
 
 Return a BLOCK-RAY-HIT and :HIT, NIL and :ABSENT when traversal reaches a
-non-resident chunk, or NIL and :MISS.  ORIGIN and DIRECTION are
-three-component sequences in continuous cell coordinates."
+non-resident chunk, or NIL and :MISS.  ORIGIN and DIRECTION are VEC3 values
+in continuous cell coordinates."
   (check-type world block-world)
+  (check-type origin vec3)
+  (check-type direction vec3)
   (check-type max-distance (real 0))
   (unless (functionp occupied-p)
     (error "OCCUPIED-P must be a function."))
-  (let* ((origin-x (ray-component origin 0))
-         (origin-y (ray-component origin 1))
-         (origin-z (ray-component origin 2))
-         (raw-x (ray-component direction 0))
-         (raw-y (ray-component direction 1))
-         (raw-z (ray-component direction 2))
+  (let* ((origin-x (coerce (vec3-x origin) 'double-float))
+         (origin-y (coerce (vec3-y origin) 'double-float))
+         (origin-z (coerce (vec3-z origin) 'double-float))
+         (raw-x (coerce (vec3-x direction) 'double-float))
+         (raw-y (coerce (vec3-y direction) 'double-float))
+         (raw-z (coerce (vec3-z direction) 'double-float))
          (magnitude (sqrt (+ (* raw-x raw-x)
                              (* raw-y raw-y)
                              (* raw-z raw-z)))))

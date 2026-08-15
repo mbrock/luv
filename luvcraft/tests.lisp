@@ -145,7 +145,8 @@
          (source (block-world-source world))
          (camera (make-instance 'fly-camera :yaw 1.25 :pitch -0.35))
          (player (make-instance 'block-world-player
-                                :x -20.5d0 :y 7.25d0 :z 44.0d0)))
+                                :position
+                                (make-vec3 -20.5d0 7.25d0 44.0d0))))
     (record-block-edit (little-world-source-edits source)
                        luv::*crystal-block* -19 8 44)
     (record-block-edit (little-world-source-edits source) nil 3 4 -5)
@@ -200,6 +201,17 @@
           (ok (= (player-y restored-player) 7.25d0))
           (ok (= (player-z restored-player) 44.0d0))
           (ok (eq selected-block luv::*crystal-block*)))))))
+
+(deftest camera-uniform-coerces-vec3-at-the-gpu-boundary
+  (let ((uniform
+          (camera-uniform-data
+           (make-instance 'fly-camera
+                          :position (make-vec3 8d0 11d0 -6d0)
+                          :yaw 1.25d0
+                          :pitch -0.35d0)
+           1280 720)))
+    (ok (typep uniform '(simple-array single-float (20))))
+    (ok (equalp (subseq uniform 0 4) #(8.0 11.0 -6.0 0.0)))))
 
 (deftest world-save-validation-rejects-unknown-meaning
   (ok (signals
@@ -346,11 +358,13 @@
   (let* ((clock (make-instance 'sky-clock :pinned-day-fraction 0.42))
          (sky (sky-frame-parameters clock (make-default-sky-profile)))
          (first-camera
-           (make-instance 'fly-camera :x 0.0d0 :y 0.0d0 :z 0.0d0))
+           (make-instance 'fly-camera :position (make-vec3 0d0 0d0 0d0)))
          (nearby-camera
-           (make-instance 'fly-camera :x 0.01d0 :y 0.0d0 :z 0.01d0))
+           (make-instance 'fly-camera
+                          :position (make-vec3 0.01d0 0d0 0.01d0)))
          (farther-camera
-           (make-instance 'fly-camera :x 0.25d0 :y 0.0d0 :z 0.25d0))
+           (make-instance 'fly-camera
+                          :position (make-vec3 0.25d0 0d0 0.25d0)))
          (first-rows (luv::shadow-frame-rows first-camera sky))
          (nearby-rows (luv::shadow-frame-rows nearby-camera sky))
          (farther-rows (luv::shadow-frame-rows farther-camera sky)))
@@ -406,10 +420,11 @@
   (let* ((world (make-block-world :chunk-width 4
                                   :chunk-height 4
                                   :chunk-depth 4))
-         (camera (make-instance 'fly-camera :x 1.5 :y 4.62 :z 1.5
-                                            :yaw 0d0 :pitch 0d0))
-         (player (make-instance 'block-world-player :x 1.5d0 :y 3d0
-                                                    :z 1.5d0))
+         (camera (make-instance 'fly-camera
+                                :position (make-vec3 1.5 4.62 1.5)
+                                :yaw 0d0 :pitch 0d0))
+         (player (make-instance 'block-world-player
+                                :position (make-vec3 1.5d0 3d0 1.5d0)))
          (keys (make-hash-table :test #'eq)))
     (ensure-world-chunk world 0 0 0)
     (loop for x below 4 do
@@ -450,11 +465,12 @@
   (let* ((world (make-block-world :chunk-width 8
                                   :chunk-height 4
                                   :chunk-depth 4))
-         (camera (make-instance 'fly-camera :x 1.5 :y 2.62 :z 1.5
-                                            :yaw 0d0 :pitch 0d0))
-         (player (make-instance 'block-world-player :x 1.5d0 :y 1d0
-                                                    :z 1.5d0
-                                                    :grounded-p t))
+         (camera (make-instance 'fly-camera
+                                :position (make-vec3 1.5 2.62 1.5)
+                                :yaw 0d0 :pitch 0d0))
+         (player (make-instance 'block-world-player
+                                :position (make-vec3 1.5d0 1d0 1.5d0)
+                                :grounded-p t))
          (keys (make-hash-table :test #'eq))
          (highest-y (player-y player)))
     (ensure-world-chunk world 0 0 0)
@@ -614,7 +630,8 @@
          (session (make-instance 'luvcraft-session
                               :world world
                               :player (make-instance 'block-world-player
-                                                     :x 0d0 :y 0d0 :z 0d0)
+                                                     :position
+                                                     (make-vec3 0d0 0d0 0d0))
                               :production-system system)))
     (unwind-protect
          (progn
@@ -720,7 +737,7 @@
                                   :chunk-height 4
                                   :chunk-depth 4))
          (camera (make-instance 'fly-camera
-                                :x 0.5 :y 1.5 :z 1.5
+                                :position (make-vec3 0.5 1.5 1.5)
                                 :yaw (/ pi 2) :pitch 0.0))
          (session (make-instance 'luvcraft-session
                               :world world
@@ -740,7 +757,8 @@
             (make-instance 'luvcraft-session
                            :world world :camera camera
                            :player (make-instance 'block-world-player
-                                                  :x 2.5d0 :y 1d0 :z 1.5d0)
+                                                  :position
+                                                  (make-vec3 2.5d0 1d0 1.5d0))
                            :selected-block luv::*dirt-block*)))
       (multiple-value-bind (coordinate status)
           (edit-luvcraft-block occupied-session :place)

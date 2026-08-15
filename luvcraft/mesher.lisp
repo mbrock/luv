@@ -336,9 +336,9 @@ normalized to 0..1."
     (mesher samples vertices block face x y z)
   (let* ((corners (block-face-corners face))
          (normal (block-face-neighbor face))
-         (nx (first normal))
-         (ny (second normal))
-         (nz (third normal))
+         (nx (voxel-direction-dx normal))
+         (ny (voxel-direction-dy normal))
+         (nz (voxel-direction-dz normal))
          (tile (block-face-tile block face))
          (size +block-atlas-tile-size+)
          (atlas-width (* size +block-atlas-tile-count+))
@@ -399,9 +399,9 @@ normalized to 0..1."
                 unless (block-solid-p
                         (mesher-block-at
                          mesher samples
-                         (+ x (first normal))
-                         (+ y (second normal))
-                         (+ z (third normal))))
+                         (+ x (voxel-direction-dx normal))
+                         (+ y (voxel-direction-dy normal))
+                         (+ z (voxel-direction-dz normal))))
                   do (setf mask (logior mask (ash 1 bit)))
                      (incf face-count))
           (setf (aref masks offset) mask))))

@@ -109,7 +109,7 @@ SLY can pause it, set a time, change its rate, or pin it without restarting."))
 
 (defstruct (sky-frame-parameters (:constructor %make-sky-frame-parameters))
   (day-fraction 0.0 :type single-float)
-  (sun-direction #(0.0 1.0 0.0) :type (simple-vector 3))
+  (sun-direction (make-vec3 0.0 1.0 0.0) :type vec3)
   (day-factor 1.0 :type single-float)
   (sun-color #(0.0 0.0 0.0) :type (simple-vector 3))
   (sun-angular-width 0.006 :type single-float)
@@ -131,7 +131,9 @@ even at noon."
          (y (coerce (sin angle) 'single-float))
          (z 0.28)
          (length (sqrt (+ (* x x) (* y y) (* z z)))))
-    (vector (/ x length) (/ y length) (coerce (/ z length) 'single-float))))
+    (make-vec3 (/ x length)
+               (/ y length)
+               (coerce (/ z length) 'single-float))))
 
 (defun sky-frame-parameters (clock profile)
   "Evaluate CLOCK against PROFILE once for the coming frame."
@@ -140,7 +142,8 @@ even at noon."
          (sun-direction (sky-sun-direction day-fraction))
          ;; Day factor follows the sun's elevation with a soft twilight band,
          ;; so direct light fades out while the sun crosses the horizon.
-         (day-factor (sky-smoothstep -0.06 0.16 (aref sun-direction 1))))
+         (day-factor (sky-smoothstep -0.06 0.16
+                                     (vec3-y sun-direction))))
     (multiple-value-bind (start end progress)
         (sky-profile-keyframes-around profile day-fraction)
       (%make-sky-frame-parameters

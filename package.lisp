@@ -422,6 +422,18 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:minimize-canvas
            #:restore-canvas
            #:write-rgba-png
+           #:vec3
+           #:make-vec3
+           #:vec3-x
+           #:vec3-y
+           #:vec3-z
+           #:vec3-component
+           #:vec3-scale
+           #:vec3-dot
+           #:vec3-cross
+           #:vec3-length
+           #:vec3-normalize
+           #:vec3-list
            #:world-coordinate
            #:make-world-coordinate
            #:world-coordinate-x
@@ -622,6 +634,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:make-block-texture-atlas
            #:placeable-block-kinds
            #:fly-camera
+           #:camera-position
            #:camera-x
            #:camera-y
            #:camera-z
@@ -643,6 +656,8 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:sky-frame-parameters
            #:frame-uniform-data
            #:block-world-player
+           #:player-position
+           #:player-velocity
            #:player-x
            #:player-y
            #:player-z

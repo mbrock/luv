@@ -98,7 +98,7 @@
     "luvcraft gazetteer - little world noon"
     (lambda () (make-empty-little-block-world :seed 121))
     (lambda () (make-instance 'fly-camera
-                              :x 8.0d0 :y 16.0d0 :z -18.0d0
+                              :position (make-vec3 8d0 16d0 -18d0)
                               :yaw 0.0d0 :pitch -0.42d0))
     0.50)
    (make-luvcraft-gazetteer-view
@@ -107,7 +107,7 @@
     "luvcraft gazetteer - little world dusk"
     (lambda () (make-empty-little-block-world :seed 31))
     (lambda () (make-instance 'fly-camera
-                              :x -7.0d0 :y 12.0d0 :z -8.0d0
+                              :position (make-vec3 -7d0 12d0 -8d0)
                               :yaw 0.42d0 :pitch -0.30d0))
     0.74)
    (make-luvcraft-gazetteer-view
@@ -116,7 +116,7 @@
     "luvcraft gazetteer - shadow forest"
     (lambda () (make-empty-little-block-world :seed 121))
     (lambda () (make-instance 'fly-camera
-                              :x 8.0d0 :y 16.0d0 :z -18.0d0
+                              :position (make-vec3 8d0 16d0 -18d0)
                               :yaw 0.0d0 :pitch -0.42d0))
     0.42
     :width 1512 :height 982)
@@ -126,7 +126,7 @@
     "luvcraft gazetteer - glow floor"
     (lambda () (make-gazetteer-floor-world))
     (lambda () (make-instance 'fly-camera
-                              :x 8.0d0 :y 4.0d0 :z 1.5d0
+                              :position (make-vec3 8d0 4d0 1.5d0)
                               :yaw 0.0d0 :pitch -0.28d0))
     0.90)
    (make-luvcraft-gazetteer-view
@@ -136,7 +136,7 @@
     (lambda () (make-gazetteer-floor-world
                 :chunk-count 2 :crystal-x 16 :crystal-y 1 :crystal-z 8))
     (lambda () (make-instance 'fly-camera
-                              :x 15.5d0 :y 4.2d0 :z 1.2d0
+                              :position (make-vec3 15.5d0 4.2d0 1.2d0)
                               :yaw 0.05d0 :pitch -0.28d0))
     0.90)
    (make-luvcraft-gazetteer-view
@@ -145,7 +145,7 @@
     "luvcraft gazetteer - shadow yard"
     (lambda () (make-gazetteer-shadow-yard-world))
     (lambda () (make-instance 'fly-camera
-                              :x 7.5d0 :y 9.5d0 :z -7.0d0
+                              :position (make-vec3 7.5d0 9.5d0 -7d0)
                               :yaw 0.10d0 :pitch -0.50d0))
     0.36
     :width 960 :height 640

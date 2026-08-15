@@ -10,35 +10,23 @@
 (in-package #:luv)
 
 (defclass fly-camera ()
-  ((x :initarg :x :initform 8.0 :accessor camera-x)
-   (y :initarg :y :initform 11.0 :accessor camera-y)
-   (z :initarg :z :initform -6.0 :accessor camera-z)
+  ((position :initarg :position
+             :initform (make-vec3 8.0 11.0 -6.0)
+             :accessor camera-position)
    (yaw :initarg :yaw :initform 0.0 :accessor camera-yaw)
    (pitch :initarg :pitch :initform -0.28 :accessor camera-pitch)
    (sensitivity :initarg :sensitivity :initform 0.0025
                 :accessor camera-sensitivity)))
 
-(defun vec3 (x y z)
-  (vector (coerce x 'single-float)
-          (coerce y 'single-float)
-          (coerce z 'single-float)))
-
-(defun vec3-scale (vector scale)
-  (vec3 (* (aref vector 0) scale)
-        (* (aref vector 1) scale)
-        (* (aref vector 2) scale)))
-
-(defun vec3-add (&rest vectors)
-  (vec3 (loop for vector in vectors sum (aref vector 0))
-        (loop for vector in vectors sum (aref vector 1))
-        (loop for vector in vectors sum (aref vector 2))))
-
-(defun vec3-length (vector)
-  (sqrt (loop for component across vector sum (* component component))))
-
-(defun vec3-normalize (vector)
-  (let ((length (vec3-length vector)))
-    (if (plusp length) (vec3-scale vector (/ length)) vector)))
+(defun camera-x (camera) (vec3-x (camera-position camera)))
+(defun camera-y (camera) (vec3-y (camera-position camera)))
+(defun camera-z (camera) (vec3-z (camera-position camera)))
+(defun (setf camera-x) (value camera)
+  (setf (vec3-x (camera-position camera)) value))
+(defun (setf camera-y) (value camera)
+  (setf (vec3-y (camera-position camera)) value))
+(defun (setf camera-z) (value camera)
+  (setf (vec3-z (camera-position camera)) value))
 
 (defgeneric camera-basis (camera))
 (defgeneric camera-uniform-data (camera width height))
@@ -46,13 +34,13 @@
 (defmethod camera-basis ((camera fly-camera))
   (let* ((yaw (camera-yaw camera))
          (pitch (camera-pitch camera))
-         (forward (vec3 (* (sin yaw) (cos pitch))
-                        (sin pitch)
-                        (* (cos yaw) (cos pitch))))
-         (right (vec3 (cos yaw) 0.0 (- (sin yaw))))
-         (up (vec3 (- (* (sin pitch) (sin yaw)))
-                   (cos pitch)
-                   (- (* (sin pitch) (cos yaw))))))
+         (forward (make-vec3 (* (sin yaw) (cos pitch))
+                             (sin pitch)
+                             (* (cos yaw) (cos pitch))))
+         (right (make-vec3 (cos yaw) 0.0 (- (sin yaw))))
+         (up (make-vec3 (- (* (sin pitch) (sin yaw)))
+                        (cos pitch)
+                        (- (* (sin pitch) (cos yaw))))))
     (values right up forward)))
 
 (defun camera-key-down-p (keys &rest names)
@@ -69,19 +57,21 @@ FRAME-UNIFORM-DATA from the session's sky clock and profile."
            (focal (/ (tan (/ (* 70.0 (/ pi 180.0)) 2.0))))
            (aspect (/ (coerce width 'single-float) height))
            (projection
-             (vec3 (/ focal aspect) focal (/ far (- far near)))))
-      (make-array
-       20 :element-type 'single-float
-       :initial-contents
-       (list (coerce (camera-x camera) 'single-float)
-             (coerce (camera-y camera) 'single-float)
-             (coerce (camera-z camera) 'single-float) 0.0
-             (aref right 0) (aref right 1) (aref right 2) 0.0
-             (aref up 0) (aref up 1) (aref up 2) 0.0
-             (aref forward 0) (aref forward 1) (aref forward 2) 0.0
-             (aref projection 0) (aref projection 1) (aref projection 2)
-             (coerce (/ (- (* far near)) (- far near))
-                     'single-float))))))
+             (make-vec3 (/ focal aspect) focal (/ far (- far near)))))
+      (flet ((uniform-lane (vector fourth)
+               (list (coerce (vec3-x vector) 'single-float)
+                     (coerce (vec3-y vector) 'single-float)
+                     (coerce (vec3-z vector) 'single-float)
+                     (coerce fourth 'single-float))))
+        (make-array
+         20 :element-type 'single-float
+         :initial-contents
+         (append (uniform-lane (camera-position camera) 0.0)
+                 (uniform-lane right 0.0)
+                 (uniform-lane up 0.0)
+                 (uniform-lane forward 0.0)
+                 (uniform-lane
+                  projection (/ (- (* far near)) (- far near)))))))))
 
 ;;; The first player controller is intentionally a small scalar reference
 ;;; simulation.  Its body is distinct from the view camera, and its AABB
@@ -93,15 +83,12 @@ FRAME-UNIFORM-DATA from the session's sky clock and profile."
 (defconstant +player-collision-epsilon+ 1d-7)
 
 (defclass block-world-player ()
-  ((x :initarg :x :accessor player-x)
-   (y :initarg :y :accessor player-y)
-   (z :initarg :z :accessor player-z)
-   (velocity-x :initarg :velocity-x :initform 0d0
-               :accessor player-velocity-x)
-   (velocity-y :initarg :velocity-y :initform 0d0
-               :accessor player-velocity-y)
-   (velocity-z :initarg :velocity-z :initform 0d0
-               :accessor player-velocity-z)
+  ((position :initarg :position
+             :initform (make-vec3 0d0 0d0 0d0)
+             :accessor player-position)
+   (velocity :initarg :velocity
+             :initform (make-vec3 0d0 0d0 0d0)
+             :accessor player-velocity)
    (half-width :initarg :half-width :initform 0.30d0
                :reader player-half-width)
    (height :initarg :height :initform 1.80d0 :reader player-height)
@@ -119,16 +106,38 @@ FRAME-UNIFORM-DATA from the session's sky clock and profile."
    (grounded-p :initarg :grounded-p :initform nil
                :accessor player-grounded-p)))
 
+(defun player-x (player) (vec3-x (player-position player)))
+(defun player-y (player) (vec3-y (player-position player)))
+(defun player-z (player) (vec3-z (player-position player)))
+(defun player-velocity-x (player) (vec3-x (player-velocity player)))
+(defun player-velocity-y (player) (vec3-y (player-velocity player)))
+(defun player-velocity-z (player) (vec3-z (player-velocity player)))
+(defun (setf player-x) (value player)
+  (setf (vec3-x (player-position player)) value))
+(defun (setf player-y) (value player)
+  (setf (vec3-y (player-position player)) value))
+(defun (setf player-z) (value player)
+  (setf (vec3-z (player-position player)) value))
+(defun (setf player-velocity-x) (value player)
+  (setf (vec3-x (player-velocity player)) value))
+(defun (setf player-velocity-y) (value player)
+  (setf (vec3-y (player-velocity player)) value))
+(defun (setf player-velocity-z) (value player)
+  (setf (vec3-z (player-velocity player)) value))
+
 (defun make-player-for-camera (camera)
   (make-instance 'block-world-player
-                 :x (coerce (camera-x camera) 'double-float)
-                 :y (- (coerce (camera-y camera) 'double-float) 1.62d0)
-                 :z (coerce (camera-z camera) 'double-float)))
+                 :position
+                 (make-vec3
+                  (coerce (camera-x camera) 'double-float)
+                  (- (coerce (camera-y camera) 'double-float) 1.62d0)
+                  (coerce (camera-z camera) 'double-float))))
 
 (defun sync-camera-to-player (camera player)
-  (setf (camera-x camera) (player-x player)
-        (camera-y camera) (+ (player-y player) (player-eye-height player))
-        (camera-z camera) (player-z player))
+  (let ((position (camera-position camera)))
+    (setf (vec3-x position) (player-x player)
+          (vec3-y position) (+ (player-y player) (player-eye-height player))
+          (vec3-z position) (player-z player)))
   camera)
 
 (defun player-terrain-solid-p (world x y z)
@@ -166,25 +175,23 @@ FRAME-UNIFORM-DATA from the session's sky clock and profile."
   "Move PLAYER along AXIS and clamp its AABB against solid voxel cells."
   (when (zerop distance)
     (return-from move-player-axis nil))
-  (let ((position-slot (ecase axis (:x 'x) (:y 'y) (:z 'z)))
-        (velocity-slot
-          (ecase axis
-            (:x 'velocity-x) (:y 'velocity-y) (:z 'velocity-z)))
+  (let ((position (player-position player))
+        (velocity (player-velocity player))
         (collided-p nil))
-    (incf (slot-value player position-slot) distance)
+    (incf (vec3-component position axis) distance)
     (map-player-overlapping-blocks
      (lambda (x y z)
        (let ((coordinate (ecase axis (:x x) (:y y) (:z z))))
          (setf collided-p t
-               (slot-value player position-slot)
+               (vec3-component position axis)
                (if (plusp distance)
-                   (min (slot-value player position-slot)
+                   (min (vec3-component position axis)
                         (- coordinate
                            (ecase axis
                              ((:x :z) (player-half-width player))
                              (:y (player-height player)))
                            +player-collision-epsilon+))
-                   (max (slot-value player position-slot)
+                   (max (vec3-component position axis)
                         (+ coordinate 1d0
                            (ecase axis
                              ((:x :z) (player-half-width player))
@@ -192,7 +199,7 @@ FRAME-UNIFORM-DATA from the session's sky clock and profile."
                            +player-collision-epsilon+))))))
      player world)
     (when collided-p
-      (setf (slot-value player velocity-slot) 0d0)
+      (setf (vec3-component velocity axis) 0d0)
       (when (and (eq axis :y) (minusp distance))
         (setf (player-grounded-p player) t)))
     collided-p))

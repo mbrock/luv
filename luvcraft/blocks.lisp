@@ -63,25 +63,26 @@ The rule is read from the face's own outward normal rather than its name:
 horizontal faces map world X,Z straight across the tile, and lateral faces
 keep the world-horizontal axis as U while flipping world Y into V so tiles
 hang upright."
-  (destructuring-bind (nx ny nz) (block-face-neighbor face)
-    (declare (ignore nx))
-    (cond ((not (zerop ny)) (values (first corner) (third corner)))
-          ((not (zerop nz)) (values (first corner) (- 1 (second corner))))
+  (let ((normal (block-face-neighbor face)))
+    (cond ((not (zerop (voxel-direction-dy normal)))
+           (values (first corner) (third corner)))
+          ((not (zerop (voxel-direction-dz normal)))
+           (values (first corner) (- 1 (second corner))))
           (t (values (third corner) (- 1 (second corner)))))))
 
 (defparameter *block-faces*
   (list
-   (make-block-face :left '(-1 0 0)
+   (make-block-face :left +voxel-negative-x+
                     '((0 0 0) (0 0 1) (0 1 1) (0 1 0)))
-   (make-block-face :right '(1 0 0)
+   (make-block-face :right +voxel-positive-x+
                     '((1 0 1) (1 0 0) (1 1 0) (1 1 1)))
-   (make-block-face :bottom '(0 -1 0)
+   (make-block-face :bottom +voxel-negative-y+
                     '((0 0 1) (0 0 0) (1 0 0) (1 0 1)))
-   (make-block-face :top '(0 1 0)
+   (make-block-face :top +voxel-positive-y+
                     '((0 1 0) (0 1 1) (1 1 1) (1 1 0)))
-   (make-block-face :back '(0 0 -1)
+   (make-block-face :back +voxel-negative-z+
                     '((1 0 0) (0 0 0) (0 1 0) (1 1 0)))
-   (make-block-face :front '(0 0 1)
+   (make-block-face :front +voxel-positive-z+
                     '((0 0 1) (1 0 1) (1 1 1) (0 1 1)))))
 
 (defmethod block-face-tile ((block block-kind) (face block-face))

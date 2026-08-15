@@ -172,7 +172,7 @@
                 (list (chunk-shape-width shape)
                       (chunk-shape-height shape)
                       (chunk-shape-depth shape))
-                :cell-extent (coerce (voxel-space-cell-extent space) 'list))
+                :cell-extent (vec3-list (voxel-space-cell-extent space)))
           :source (world-source-save-description
                    (block-world-source world)))))
 
@@ -213,7 +213,7 @@
 (defun luvcraft-resume-save-description (camera player selected-block)
   (when (and camera player)
     (list :player-position
-          (list (player-x player) (player-y player) (player-z player))
+          (vec3-list (player-position player))
           :look (list :yaw (camera-yaw camera) :pitch (camera-pitch camera))
           :selected-block (block-save-description selected-block))))
 
@@ -250,9 +250,10 @@
           (values
            (make-instance 'fly-camera :yaw yaw :pitch pitch)
            (make-instance 'block-world-player
-                          :x (coerce x 'double-float)
-                          :y (coerce y 'double-float)
-                          :z (coerce z 'double-float))
+                          :position
+                          (make-vec3 (coerce x 'double-float)
+                                     (coerce y 'double-float)
+                                     (coerce z 'double-float)))
            (let ((block (restore-block-value selected)))
              (unless (typep block 'block-kind)
                (invalid-luvcraft-save

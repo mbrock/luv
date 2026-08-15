@@ -116,6 +116,43 @@ that a discrete cell address is not itself a metre-valued world position; the
 space performs that interpretation explicitly.  #M8W6RP already records the
 corresponding quantity distinction.
 
+* Vec3 is a representation, not one spatial meaning
+:PROPERTIES:
+:ID: 7K8UBF
+:END:
+
+The luvcraft source contains several visibly three-component families, but an
+audit shows that they should not all become the same abstraction:
+
+| Family | CPU representation | Meaning lives in |
+|-
+| cell, chunk, and local addresses | distinct integer structures | nominal coordinate type |
+| primitive face steps | =voxel-direction= | displacement type and six shared values |
+| camera/player positions and velocity | =vec3= | owning slot or function name |
+| ray, camera basis, and sun direction | =vec3= | operation and argument name |
+| colours | simple vectors | sky/color calculation |
+| mesh attributes and shader values | specialized arrays and =:vec3= lanes | vertex layout and shader quantity metadata |
+
+The new [[file:../luvcraft/world.lisp][=vec3=]] structure is therefore deliberately modest.  It bundles
+continuous CPU components and supplies component, scale, dot, cross, length,
+and normalization operations.  It does not claim that a point is a velocity,
+that either is already measured in metres, or that an RGB triple belongs to
+spatial algebra.  =camera-position= and =player-velocity= name different
+semantic owners even though both use the same transparent representation.
+
+That distinction gives the readable code the useful part of structification:
+camera and player objects no longer maintain parallel =x=, =y=, and =z= slots;
+rays no longer accept arbitrary sequences; camera basis and shadow calculations
+no longer duplicate positional list arithmetic; persistence converts a =vec3=
+to an external list only at the file boundary.  Axis-specific collision and
+voxel traversal still use component accessors where the axis is the algorithm.
+
+This also keeps the allocation claim narrow.  A retained camera position or
+velocity naturally has indefinite extent.  A short-lived =vec3= may use the
+same inline-constructor and =dynamic-extent= technique documented in #B3UEVE,
+but the migration does not require every vector calculation to prove zero
+allocation before earning a readable value type.
+
 * A chunk domain owns local traversal, not world truth
 :PROPERTIES:
 :ID: E4T0PD
@@ -619,6 +656,35 @@ stale mesh products, and immutable halo equivalence.
 Done: the compiler-visible dense path and the readable nominal path are now
 the same path.  Components remain available through accessors at arithmetic
 leaves; they are no longer the protocol repeated across lighting and meshing.
+
+* DONE Bundle continuous spatial triples
+:PROPERTIES:
+:ID: 7A5HI4
+:END:
+
+Intent: replace the parallel camera/player position and velocity components,
+ad hoc ray sequences, and local camera-basis vector helpers with one small
+continuous CPU representation.  Preserve nominal integer coordinates and
+directions, semantic shader quantities, packed mesh lanes, and colours as
+different concepts and representations.
+
+Evidence: =fly-camera= owns one =camera-position= value; =block-world-player=
+owns =player-position= and =player-velocity= values; raycasting requires a
+=vec3= origin and direction; cell extent and address-to-position mapping use
+=vec3=; the sun and camera basis share the same elementary vector operations.
+Block-face normals now reuse =voxel-direction= instead of becoming generic
+vectors.  Persistence retains its portable list form at the external boundary.
+
+The source audit and boundary rationale are recorded in #7K8UBF.  The focused
+world suite passes 15 tests and the full luvcraft suite passes 42.  A camera
+with double-float CPU components is explicitly covered at the single-float GPU
+uniform boundary.  The standalone smoke render is SHA-256
+=0562804c1a3a4aaed5cc2865d0ca556b92ca231ab339f3310b21a8515b07d2c0=,
+byte-identical to the render from starting commit =07bf2ed=.
+
+Done: related continuous components travel together through the CPU code while
+the program still says which triples are addresses, directions, colours, and
+GPU representations.
 
 * NEXT Name the chunk-window protocol
 :PROPERTIES:
