@@ -18,6 +18,12 @@
 (objc:define-objective-c-message malformed-exception-test-array-count
     ("count" :uint32))
 
+(deftest objective-c-dispatch-entry-is-resolved-once
+  (ok (boundp 'objc::*objective-c-message-send-pointer*))
+  (ok (cffi:pointerp objc::*objective-c-message-send-pointer*))
+  (ok (not (cffi:null-pointer-p objc::*objective-c-message-send-pointer*)))
+  (ok (not (fboundp 'objc::objective-c-message-send-pointer))))
+
 (deftest message-definitions-retain-selector-abi-and-ownership
   (let ((description
           (objc:objective-c-message-description 'metal:device-name)))

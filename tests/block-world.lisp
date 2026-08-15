@@ -3,6 +3,51 @@
 
 (in-package #:luv/luvcraft/tests)
 
+(defclass recording-command-encoder (gpu-command-encoder)
+  ((commands :initform nil :accessor recording-command-encoder-commands)))
+
+(defmethod encode ((encoder recording-command-encoder) command)
+  (push command (recording-command-encoder-commands encoder))
+  encoder)
+
+(deftest cpu-trace-zones-are-nested-reusable-and-bounded
+  (let ((trace (make-cpu-trace :label "test")))
+    (with-cpu-trace (trace)
+      (with-cpu-trace-zone (:outer)
+        (with-cpu-trace-zone (:inner)
+          (values))))
+    (let* ((first-zones (cpu-trace-zones trace))
+           (outer (first first-zones))
+           (inner (second first-zones)))
+      (ok (= 2 (length first-zones)))
+      (ok (eq :outer (cpu-trace-zone-name outer)))
+      (ok (eq :inner (cpu-trace-zone-name inner)))
+      (ok (= -1 (cpu-trace-zone-parent-index outer)))
+      (ok (= 0 (cpu-trace-zone-parent-index inner)))
+      (ok (>= (cpu-trace-zone-seconds outer)
+              (cpu-trace-zone-seconds inner)))
+      (with-cpu-trace (trace)
+        (with-cpu-trace-zone (:again)
+          (values)))
+      (let ((second-zones (cpu-trace-zones trace)))
+        (ok (= 1 (length second-zones)))
+        (ok (eq outer (first second-zones)))
+        (ok (eq :again (cpu-trace-zone-name (first second-zones)))))
+      (let ((text (with-output-to-string (stream)
+                    (print-cpu-trace trace stream))))
+        (ok (search "inclusive" text))
+        (ok (search "again" text))))))
+
+(deftest texture-preparation-is-a-backend-neutral-command
+  (let ((encoder (make-instance 'recording-command-encoder)))
+    (prepare-texture encoder :shadow-depth :texture-binding)
+    (let ((command (first (recording-command-encoder-commands encoder))))
+      (ok (typep command 'gpu-prepare-texture-command))
+      (ok (eq :shadow-depth
+              (luv::gpu-prepare-texture-command-texture command)))
+      (ok (eq :texture-binding
+              (luv::gpu-prepare-texture-command-usage command))))))
+
 (deftest frame-performance-summary-is-comparison-friendly
   (let ((samples (make-array 4)))
     (dotimes (index 4)

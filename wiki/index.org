@@ -109,6 +109,10 @@ The following are starting paths rather than a table of settled doctrine.
   and usage declarations buy an implementation.
 - [[file:frame-slots.org][Frame slots as a luv case study]] revisits a recent implementation change
   without promoting it into doctrine.
+- [[file:frame-performance.org][Seeing a frame on the CPU]] separates instrumented CPU zones, drawable
+  pacing, submission completion, and eventual GPU timestamps.  It records the
+  current luvcraft/Metal trace and the backend-neutral command seam exposed by
+  that work.
 - [[file:luv-vulkan-hal.org][Field notes on the pre-split Vulkan HAL]] preserves a source study of the
   earlier stack and marks where later ASDF boundaries, completion-frontier
   work, and the Metal implementation have superseded its snapshot.

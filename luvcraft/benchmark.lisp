@@ -20,11 +20,12 @@
       csv-pathname (stream *standard-output*))
   "Measure a fixed, fully resident world through the real Metal frame path.
 
-The hidden demand-clock canvas avoids a 60 Hz pacing policy.  All desired
-chunk products arrive before warmup, then FRAME-COUNT consecutive frames reuse
-the same world, pipelines, attachments, and drawable pool.  Per-frame values
-measure CPU orchestration and encoding.  Completion throughput includes final
-shared-event drainage and is intentionally not labelled as GPU time."
+The hidden demand-clock canvas avoids the application's 60 Hz scheduler, but
+CAMetalLayer may still pace drawable availability.  All desired chunk products
+arrive before warmup, then FRAME-COUNT consecutive frames reuse the same world,
+pipelines, attachments, and drawable pool.  Per-frame values measure CPU
+orchestration and encoding.  Completion throughput includes final shared-event
+drainage and is intentionally not labelled as GPU time."
   (check-type frame-count (integer 1))
   (check-type warmup-count (integer 0))
   (check-type width (integer 1))
@@ -64,6 +65,8 @@ shared-event drainage and is intentionally not labelled as GPU time."
                           (units
                             (coerce internal-time-units-per-second
                                     'double-float))
+                          (trace
+                            (make-cpu-trace :label "representative frame"))
                           (benchmark
                             (make-luvcraft-frame-benchmark
                              :backend :metal
@@ -77,7 +80,16 @@ shared-event drainage and is intentionally not labelled as GPU time."
                              :drain-seconds
                              (/ (- finished drain-start) units)
                              :desired-chunk-count desired)))
+                     ;; Warm the reusable zone buffer, then capture one extra
+                     ;; frame after the measured batch so detailed zones and
+                     ;; their first-use allocation cannot perturb its metrics.
+                     (with-cpu-trace (trace)
+                       (run-luvcraft-benchmark-frame session))
+                     (with-cpu-trace (trace)
+                       (run-luvcraft-benchmark-frame session))
                      (print-luvcraft-frame-benchmark benchmark stream)
+                     (format stream "~%")
+                     (print-cpu-trace trace stream)
                      (when csv-pathname
                        (write-luvcraft-frame-benchmark-csv
                         benchmark csv-pathname)

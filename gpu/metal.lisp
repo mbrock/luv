@@ -1201,6 +1201,38 @@ compiler boundary of #58IDSR."
           (setf (metal-encoder-active-pass encoder) pass)
           pass)))))
 
+(defmethod encode
+    ((encoder metal-frame-command-encoder)
+     (command gpu-prepare-texture-command))
+  (when (metal-encoder-active-pass encoder)
+    (error 'gpu-invalid-state-error :object encoder :operation :prepare-texture
+           :state :pass-active :expected-state :between-passes))
+  (let ((texture (gpu-prepare-texture-command-texture command))
+        (usage (gpu-prepare-texture-command-usage command))
+        (device (metal-texture-device (metal-encoder-texture encoder))))
+    (unless (and (typep texture 'metal-gpu-texture)
+                 (member usage (gpu-texture-usage texture))
+                 (eq usage :texture-binding))
+      (reject-metal-gpu-request
+       command :unsupported-texture-preparation
+       (list :texture texture :usage usage)))
+    (ensure-live-metal-object texture :prepare-texture)
+    (ensure-metal-object-device
+     texture (metal-texture-device texture) device :prepare-texture)
+    (when (metal-encoder-pending-consumer-barrier encoder)
+      (error 'gpu-invalid-state-error :object encoder
+             :operation :prepare-texture
+             :state :consumer-barrier-pending
+             :expected-state :between-passes))
+    ;; Metal 4 queues do not perform ordinary MTLResource hazard tracking.
+    ;; The following render encoder consumes this texture in its fragment
+    ;; stage, so install the barrier when that native encoder is created.
+    (setf (metal-encoder-pending-consumer-barrier encoder)
+          (list luv.metal:+stage-fragment+
+                luv.metal:+stage-fragment+
+                luv.metal:+visibility-device+)))
+  encoder)
+
 (defun release-metal-render-pass-argument-table (pass)
   (let ((table (metal-render-pass-argument-table pass)))
     (when table

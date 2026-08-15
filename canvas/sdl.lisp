@@ -397,12 +397,18 @@ have a main-thread host and execute directly."
   (call-sdl-canvas-window-operation canvas :restore #'sdl3:restore-window))
 
 (defmethod request-canvas-frame ((canvas sdl-canvas) function)
-  (call-on-sdl-canvas-thread
-   canvas
-   (lambda ()
-     (funcall function
-              (/ (get-internal-real-time)
-                 (coerce internal-time-units-per-second 'double-float))))))
+  ;; Dynamic bindings do not follow a closure onto another thread.  Preserve
+  ;; the opt-in trace explicitly so a caller can measure the real native frame
+  ;; rather than only the time spent waiting for its request.  #OHNIWM
+  (let ((trace *cpu-trace*))
+    (call-on-sdl-canvas-thread
+     canvas
+     (lambda ()
+       (let ((*cpu-trace* trace))
+         (funcall function
+                  (/ (get-internal-real-time)
+                     (coerce internal-time-units-per-second
+                             'double-float))))))))
 
 (defun canvas-timestamp ()
   (/ (get-internal-real-time)

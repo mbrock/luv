@@ -166,6 +166,19 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
 (defpackage #:luv
   (:use #:cl)
   (:export #:*gpu-provider*
+           #:*cpu-trace*
+           #:cpu-trace
+           #:cpu-trace-zone
+           #:make-cpu-trace
+           #:reset-cpu-trace
+           #:with-cpu-trace
+           #:with-cpu-trace-zone
+           #:cpu-trace-zones
+           #:cpu-trace-zone-name
+           #:cpu-trace-zone-parent-index
+           #:cpu-trace-zone-depth
+           #:cpu-trace-zone-seconds
+           #:print-cpu-trace
            #:gpu-error
            #:gpu-error-operation
            #:gpu-request-error
@@ -230,6 +243,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:gpu-copy-texture-command
            #:gpu-copy-texture-to-buffer-command
            #:gpu-write-texture-command
+           #:gpu-prepare-texture-command
            #:gpu-object-label
            #:request-gpu-device
            #:device-queue
@@ -278,6 +292,8 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:make-gpu-copy-texture-command
            #:make-gpu-copy-texture-to-buffer-command
            #:make-gpu-write-texture-command
+           #:make-gpu-prepare-texture-command
+           #:prepare-texture
            #:make-gpu-set-pipeline-command
            #:make-gpu-set-bind-group-command
            #:make-gpu-set-vertex-buffer-command

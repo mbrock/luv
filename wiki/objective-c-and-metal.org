@@ -221,3 +221,31 @@ Evidence:
 Done when (met): direct sending is the default, a block can dynamically opt
 into catching, tracing and both structure ABI directions still work, and the
 complete framework proof remains valid.
+
+* DONE Resolve the Objective-C dispatch entry once
+:PROPERTIES:
+:ID: WEE1DX
+:END:
+
+Intent: keep direct =objc_msgSend= direct by removing dynamic symbol lookup
+from every declared message.
+
+Evidence:
+
+- SBCL call profiling counted 160,400 calls to
+  =objective-c-message-send-pointer=, CFFI's symbol lookup, and SBCL's dynamic
+  foreign-symbol resolver across 200 steady luvcraft frames: exactly 802
+  resolutions per frame.
+- Resolving the stable libobjc entry once reduced a 600-frame A/B run from
+  13.830 to 8.327 ms/frame and from approximately 497 to 249 KiB allocated per
+  frame.
+- [[file:../objective-c/runtime.lisp][The runtime]] now resolves =objc_msgSend= when it loads and generated direct
+  senders use that pointer.  A cold test requires the pointer to be live and
+  the former per-send resolver function to be absent.
+- The post-change 120-frame live Metal benchmark reported an 8.057 ms CPU
+  median and 119.9 completion-limited frames/s.  Metal API validation accepted
+  the deterministic smoke frame, whose image hash remained unchanged.
+
+Done when (met): no declared direct message performs symbol lookup, cold tests
+exercise the generated path, and the complete Metal frame remains visually
+and API-valid.

@@ -231,44 +231,18 @@ the frame uniform cannot silently diverge between shader and host."
             (when scene-bind-group (destroy scene-bind-group))
             (when buffer (destroy buffer))))))))
 
-(defgeneric prepare-luvcraft-shadow-map-sampling (session encoder)
-  (:documentation
-   "Prepare the just-rendered shadow map for sampling on ENCODER's backend."))
-
-(defmethod prepare-luvcraft-shadow-map-sampling
-    (session (encoder vulkan-gpu-command-encoder))
-  "Move the just-rendered shadow depth texture into sampled-image layout."
-  (let ((texture (luvcraft-session-shadow-depth-texture session)))
-    (ensure-vulkan-texture-for-command encoder texture session :texture-binding)
-    (transition-vulkan-texture encoder texture :shader-read-only-optimal)))
-
-(defmethod prepare-luvcraft-shadow-map-sampling
-    (session (encoder metal-frame-command-encoder))
-  (declare (ignore session))
-  ;; Metal 4 queues do not perform the ordinary MTLResource hazard tracking.
-  ;; The next render encoder consumes the depth texture in its fragment stage,
-  ;; so install the consumer barrier there, as close to the sampling draws as
-  ;; the MTL4CommandEncoder contract requests.
-  (when (metal-encoder-pending-consumer-barrier encoder)
-    (error 'gpu-invalid-state-error :object encoder
-           :operation :prepare-shadow-sampling
-           :state :consumer-barrier-pending :expected-state :between-passes))
-  (setf (metal-encoder-pending-consumer-barrier encoder)
-        (list luv.metal:+stage-fragment+
-              luv.metal:+stage-fragment+
-              luv.metal:+visibility-device+))
-  (values))
-
 (defun encode-luvcraft-frame
     (session surface-texture encoder &key readback-buffer sample)
   ;; The canvas callback is the ownership boundary for all GPU replacement.
   ;; MOP notifications from SLY workers have only marked these artifacts dirty.
   (with-luvcraft-frame-timing
-      (sample luvcraft-frame-sample-shader-refresh-seconds)
+      (sample luvcraft-frame-sample-shader-refresh-seconds
+              :luvcraft/shader-refresh)
     (refresh-luvcraft-shaders session))
   (let* ((products
            (with-luvcraft-frame-timing
-               (sample luvcraft-frame-sample-mesh-publication-seconds)
+               (sample luvcraft-frame-sample-mesh-publication-seconds
+                       :luvcraft/mesh-publication)
              (refresh-luvcraft-mesh session)))
          (extent (canvas-extent (luvcraft-session-context session)))
          (frame (luvcraft-frame-state session surface-texture)))
@@ -289,12 +263,14 @@ the frame uniform cannot silently diverge between shader and host."
               (+ +block-world-crosshair-vertex-count+ 3
                  (* 2 mesh-vertices)))))
     (with-luvcraft-frame-timing
-        (sample luvcraft-frame-sample-uniform-seconds)
+        (sample luvcraft-frame-sample-uniform-seconds
+                :luvcraft/uniform-update)
       (write-buffer
        (luvcraft-frame-uniform-buffer frame)
        (frame-uniform-data session (first extent) (second extent))))
     (with-luvcraft-frame-timing
-        (sample luvcraft-frame-sample-shadow-encode-seconds)
+        (sample luvcraft-frame-sample-shadow-encode-seconds
+                :luvcraft/shadow-pass)
       (let ((pass
               (begin-render-pass
                encoder
@@ -313,9 +289,12 @@ the frame uniform cannot silently diverge between shader and host."
                pass 0 (luvcraft-chunk-product-vertex-buffer product))
               (draw pass (block-mesh-vertex-count mesh)))))
         (end-pass pass))
-      (prepare-luvcraft-shadow-map-sampling session encoder))
+      (prepare-texture
+       encoder (luvcraft-session-shadow-depth-texture session)
+       :texture-binding))
     (with-luvcraft-frame-timing
-        (sample luvcraft-frame-sample-scene-encode-seconds)
+        (sample luvcraft-frame-sample-scene-encode-seconds
+                :luvcraft/scene-pass)
       (let ((pass
               (begin-render-pass
                encoder
@@ -348,7 +327,8 @@ the frame uniform cannot silently diverge between shader and host."
         (draw pass +block-world-crosshair-vertex-count+)
         (end-pass pass)))
     (with-luvcraft-frame-timing
-        (sample luvcraft-frame-sample-surface-copy-encode-seconds)
+        (sample luvcraft-frame-sample-surface-copy-encode-seconds
+                :luvcraft/surface-copy)
       (when readback-buffer
         (encode
          encoder
@@ -364,9 +344,10 @@ the frame uniform cannot silently diverge between shader and host."
 (defun render-luvcraft-frame (session timestamp &optional sample)
   (when (luvcraft-session-running-p session)
     (with-luvcraft-frame-timing
-        (sample luvcraft-frame-sample-frame-seconds)
+        (sample luvcraft-frame-sample-frame-seconds :luvcraft/frame)
       (with-luvcraft-frame-timing
-          (sample luvcraft-frame-sample-simulation-seconds)
+          (sample luvcraft-frame-sample-simulation-seconds
+                  :luvcraft/simulation)
         (let* ((last (luvcraft-session-last-frame-time session))
                (seconds
                  (if last (min 0.1 (max 0.0 (- timestamp last))) 0.0)))
@@ -387,11 +368,13 @@ the frame uniform cannot silently diverge between shader and host."
                        (decf (luvcraft-session-physics-accumulator session)
                              +player-physics-step+))))))
       (with-luvcraft-frame-timing
-          (sample luvcraft-frame-sample-streaming-seconds)
+          (sample luvcraft-frame-sample-streaming-seconds
+                  :luvcraft/streaming)
         (maintain-luvcraft-residency session)
         (evict-luvcraft-products session))
       (with-luvcraft-frame-timing
-          (sample luvcraft-frame-sample-presentation-seconds)
+          (sample luvcraft-frame-sample-presentation-seconds
+                  :luvcraft/presentation)
         (present-canvas-frame
          (luvcraft-session-context session)
          (lambda (surface-texture encoder)

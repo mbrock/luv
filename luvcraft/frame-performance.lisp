@@ -18,20 +18,21 @@
   (draw-count 0 :type fixnum)
   (vertex-count 0 :type fixnum))
 
-(defmacro with-luvcraft-frame-timing ((sample accessor) &body body)
-  "Accumulate BODY's real time into ACCESSOR when SAMPLE is non-NIL."
+(defmacro with-luvcraft-frame-timing ((sample accessor zone) &body body)
+  "Accumulate BODY into SAMPLE and expose it as nested CPU trace ZONE."
   (let ((record (gensym "SAMPLE"))
         (started (gensym "STARTED")))
-    `(let ((,record ,sample))
-       (if ,record
-           (let ((,started (get-internal-real-time)))
-             (unwind-protect
-                  (progn ,@body)
-               (incf (,accessor ,record)
-                     (/ (- (get-internal-real-time) ,started)
-                        (coerce internal-time-units-per-second
-                                'double-float)))))
-           (progn ,@body)))))
+    `(with-cpu-trace-zone (,zone)
+       (let ((,record ,sample))
+         (if ,record
+             (let ((,started (get-internal-real-time)))
+               (unwind-protect
+                    (progn ,@body)
+                 (incf (,accessor ,record)
+                       (/ (- (get-internal-real-time) ,started)
+                          (coerce internal-time-units-per-second
+                                  'double-float)))))
+             (progn ,@body))))))
 
 (defstruct luvcraft-frame-benchmark
   (backend :metal :type keyword)

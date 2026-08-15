@@ -336,9 +336,13 @@ the native NSInvocation exception bridge for an explicit diagnostic scope.")
           (*objective-c-trace* ,trace))
      ,@body))
 
-(defun objective-c-message-send-pointer ()
+(defvar *objective-c-message-send-pointer*
   (cffi:foreign-symbol-pointer "objc_msgSend"
-                               :library 'objective-c-runtime-library))
+                               :library 'objective-c-runtime-library)
+  "The stable libobjc dispatch entry, resolved once when this runtime loads.
+
+Resolving this symbol for every declared message used to put dlsym on the
+per-frame path hundreds of times.  #WEE1DX")
 
 (defgeneric check-consumable-objective-c-receiver (receiver)
   (:documentation "Validate that RECEIVER owns the retain a message consumes."))
@@ -458,7 +462,7 @@ the native NSInvocation exception bridge for an explicit diagnostic scope.")
   (defun unchecked-objective-c-message-send-form
       (definition receiver result-type arguments)
     `(cffi:foreign-funcall-pointer
-      (objective-c-message-send-pointer) ()
+      *objective-c-message-send-pointer* ()
       :pointer (objective-c-pointer ,receiver)
       :pointer
       (objective-c-message-definition-selector-pointer ,definition)

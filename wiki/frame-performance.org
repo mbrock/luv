@@ -1,0 +1,142 @@
+#+title: Seeing a frame on the CPU
+#+startup: overview
+
+* Frame time is several clocks
+:PROPERTIES:
+:ID: P49PBP
+:END:
+
+“The frame took eight milliseconds” is not yet an explanation.  At least four
+intervals can appear under that sentence:
+
+- CPU work in the game and encoder;
+- CPU waiting for a drawable or a completion frontier;
+- wall time between submissions; and
+- execution on the GPU itself.
+
+The first two are visible to a monotonic host clock.  The fourth eventually
+needs backend timestamp queries or a GPU capture; naming a host interval
+=gpu_ms= would not make it GPU time.  Likewise, a hidden demand-driven canvas
+avoids luvcraft's 60 Hz scheduler but does not promise that =CAMetalLayer= will
+make drawables available without pacing.
+
+A statistical profiler and an instrumented trace answer different questions.
+Sampling is valuable when it can observe the actual native frame thread and
+attribute stacks.  Tracy-style zones answer the immediate structural question:
+which named interval surrounded the wait, encoding pass, or submission?  Luv's
+first tool deliberately implements the latter.  It records nested host-clock
+intervals; it does not pretend to sample CPU instructions or time GPU work.
+
+* DONE Trace one real frame with nested CPU zones
+:PROPERTIES:
+:ID: OHNIWM
+:END:
+
+Intent: make a coarse frame explanation one ordinary benchmark away, with an
+opt-in macro whose disabled path neither constructs events nor changes backend
+control flow.
+
+Evidence:
+
+- [[file:../cpu-trace.lisp][The trace buffer]] records a zone name, parent, depth, and monotonic start/end
+  ticks.  =with-cpu-trace-zone= is a thin =unwind-protect= wrapper; buffers
+  reuse event and stack storage after their first capture.
+- [[file:../canvas/sdl.lisp][The SDL request boundary]] explicitly carries the selected trace onto the
+  native frame thread.  Dynamic Lisp bindings alone do not cross that thread
+  handoff.
+- Both presentation backends name the same semantic acquisition, encoding,
+  finish, submit, and present regions.  Backend-only work remains visibly
+  named =:metal/...= or =:vulkan/...= inside its implementation.
+- [[file:../luvcraft/frame-performance.lisp][The existing benchmark phases]] now compose with those zones, so luvcraft
+  contributes simulation, streaming, shader refresh, mesh publication,
+  uniform update, shadow, scene, and surface-copy regions without asking which
+  backend owns the encoder.
+- =benchmark-luvcraft-frame-performance= still measures its ordinary batch
+  without tracing.  It then warms the reusable trace buffer and prints one
+  separate representative frame.
+
+One standalone Apple M2 Pro run measured 60 steady frames at an 8.367 ms CPU
+median and then printed this representative structure:
+
+#+begin_example
+luvcraft/frame                         7.376 ms
+  luvcraft/presentation                7.365 ms
+    canvas/frame                       7.363 ms
+      canvas/acquire-drawable          5.747 ms
+      metal/allocate-frame-resources   0.099 ms
+      gpu/encode                       1.146 ms
+        luvcraft/mesh-publication      0.403 ms
+        luvcraft/shadow-pass           0.383 ms
+        luvcraft/scene-pass            0.223 ms
+      gpu/submit                       0.242 ms
+#+end_example
+
+That single frame is localization evidence, not a distribution.  The adjacent
+fixed metrics retain median, p95, mean, and maximum across the measured batch.
+More zones should be added only when a coarse region earns a focused question.
+
+Done when (met): a real frame produces a bounded nested report across the
+native thread handoff, the untraced benchmark remains the comparison baseline,
+tests prove nesting and storage reuse, and Vulkan and Metal smoke paths remain
+valid.
+
+* The game names usage; backends realize hazards
+:PROPERTIES:
+:ID: T5MQO0
+:END:
+
+Luvcraft used to specialize =prepare-luvcraft-shadow-map-sampling= on Vulkan
+and Metal encoder classes.  That put Vulkan image layout and Metal 4 barrier
+mechanics in the game even though the game knows only one fact: the completed
+shadow depth texture will be sampled by the following pass.
+
+The game now emits =prepare-texture= with =:texture-binding= usage.  Vulkan
+validates the declared usage and records a shader-read layout transition.
+Metal validates the same relationship and installs its consumer barrier when
+the following native render encoder begins.  This is not an assertion that all
+backend mechanics can be identical.  It is a placement rule: application code
+states resource intent, while the backend that owns the hazard model realizes
+it.  The cold Vulkan smoke and Metal API-validated smoke both cross this
+command; the Metal image stayed bit-identical to its pre-change baseline.
+
+* TODO Reuse Metal frame submission resources
+:PROPERTIES:
+:ID: YKITZ8
+:END:
+
+Intent: stop constructing and releasing one =MTL4CommandAllocator= and one
+=MTL4CommandBuffer= for every frame when a bounded frame-slot owner can reuse
+them safely.
+
+Evidence: the current trace exposes =:metal/allocate-frame-resources= as a
+separate region, and source inspection confirms that both native objects are
+created after every drawable acquisition.  The representative frame above
+spent 0.099 ms there.  That one number is not a stable estimate, but it makes
+the ownership experiment measurable.  #JAM5XR is the related lifetime work:
+reuse must follow the shared-event frontier rather than reintroduce a queue
+stall.
+
+Done when: a bounded Metal frame-slot structure owns reusable submission
+resources, the completion frontier prevents early reuse, traces show the
+creation region absent from steady frames, allocation and frame distributions
+improve in a repeated A/B run, and API validation remains clean.
+
+* TODO Separate drawable pacing from encoding distributions
+:PROPERTIES:
+:ID: JBZ4SC
+:END:
+
+Intent: report how much host frame time is runnable encoding work and how much
+is waiting for presentation availability, instead of treating both as one
+“encoding” number.
+
+Evidence: native sampling after #WEE1DX found the frame thread mostly sleeping
+inside =CAMetalLayer nextDrawable=, while the instrumented representative frame
+above localized 5.747 ms to drawable acquisition and 1.146 ms to the inclusive
+encoding region.  These are compatible observations from different windows,
+not a fixed ratio.
+
+Done when: repeated captures summarize drawable-acquisition and encoding
+distributions separately for Metal and Vulkan, the benchmark explains which
+intervals include pacing, and eventual GPU timestamps remain a distinct
+measurement rather than being inferred from host waits.

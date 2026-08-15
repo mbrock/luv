@@ -496,59 +496,67 @@
              :state (canvas-context-state context) :expected-state :in-frame)))
 
 (defun call-with-vulkan-canvas-frame (context function)
-  (ensure-vulkan-canvas-state context :frame :configured)
-  (let* ((device (context-device context))
-         (native-device (vulkan-handle device))
-         (queue (device-queue device))
-         (slot-index (vulkan-canvas-next-frame-slot context))
-         (slot (aref (vulkan-canvas-frame-slots context) slot-index))
-         (encoder nil)
-         (commands nil))
-    (recycle-vulkan-canvas-frame-slot queue slot)
-    (multiple-value-bind (image-index acquire-result)
-        (lvk:acquire-next-image
-         native-device (vulkan-canvas-swapchain context)
-         (vulkan-frame-slot-image-ready slot))
-      (declare (ignore acquire-result))
-      (let ((texture (aref (vulkan-canvas-textures context) image-index))
-            (render-done
-              (aref (vulkan-canvas-render-done context) image-index)))
-        (unwind-protect
-             (progn
-               (setf encoder
-                     (create device (make-command-encoder-descriptor))
-                     (vulkan-canvas-current-texture context) texture
-                     (canvas-context-state context) :in-frame)
-               (funcall function texture encoder)
-               (transition-vulkan-texture encoder texture :present-src-khr)
-               (setf commands (finish encoder))
-               (let ((submission-index
-                       (submit-vulkan-command-buffers
-                        queue (vector commands)
-                        :wait-semaphores
-                        (vector
-                         (list (vulkan-frame-slot-image-ready slot)
-                               '(:transfer)))
-                        :signal-semaphores
-                        (vector (list render-done '(:all-commands)))
-                        :wait-for-completion nil)))
-                 (setf (vulkan-frame-slot-commands slot) commands
-                       (vulkan-frame-slot-submission-index slot)
-                       submission-index
-                       commands nil))
-               (lvk:present
-                (vulkan-handle queue)
-                (vulkan-canvas-swapchain context) image-index
-                :wait-semaphores
-                (vector render-done))
-               (setf (vulkan-canvas-next-frame-slot context)
-                     (mod (1+ slot-index)
-                          (length (vulkan-canvas-frame-slots context))))
-               texture)
-          (setf (vulkan-canvas-current-texture context) nil
-                (canvas-context-state context) :configured)
-          (when commands (destroy commands))
-          (when encoder (destroy encoder)))))))
+  (with-cpu-trace-zone (:canvas/frame)
+    (ensure-vulkan-canvas-state context :frame :configured)
+    (let* ((device (context-device context))
+           (native-device (vulkan-handle device))
+           (queue (device-queue device))
+           (slot-index (vulkan-canvas-next-frame-slot context))
+           (slot (aref (vulkan-canvas-frame-slots context) slot-index))
+           (encoder nil)
+           (commands nil))
+      (with-cpu-trace-zone (:vulkan/recycle-frame-slot)
+        (recycle-vulkan-canvas-frame-slot queue slot))
+      (multiple-value-bind (image-index acquire-result)
+          (with-cpu-trace-zone (:canvas/acquire-drawable)
+            (lvk:acquire-next-image
+             native-device (vulkan-canvas-swapchain context)
+             (vulkan-frame-slot-image-ready slot)))
+        (declare (ignore acquire-result))
+        (let ((texture (aref (vulkan-canvas-textures context) image-index))
+              (render-done
+                (aref (vulkan-canvas-render-done context) image-index)))
+          (unwind-protect
+               (progn
+                 (setf encoder
+                       (create device (make-command-encoder-descriptor))
+                       (vulkan-canvas-current-texture context) texture
+                       (canvas-context-state context) :in-frame)
+                 (with-cpu-trace-zone (:gpu/encode)
+                   (funcall function texture encoder))
+                 (with-cpu-trace-zone (:gpu/finish-encoding)
+                   (transition-vulkan-texture
+                    encoder texture :present-src-khr)
+                   (setf commands (finish encoder)))
+                 (let ((submission-index
+                         (with-cpu-trace-zone (:gpu/submit)
+                           (submit-vulkan-command-buffers
+                            queue (vector commands)
+                            :wait-semaphores
+                            (vector
+                             (list (vulkan-frame-slot-image-ready slot)
+                                   '(:transfer)))
+                            :signal-semaphores
+                            (vector (list render-done '(:all-commands)))
+                            :wait-for-completion nil))))
+                   (setf (vulkan-frame-slot-commands slot) commands
+                         (vulkan-frame-slot-submission-index slot)
+                         submission-index
+                         commands nil))
+                 (with-cpu-trace-zone (:canvas/present)
+                   (lvk:present
+                    (vulkan-handle queue)
+                    (vulkan-canvas-swapchain context) image-index
+                    :wait-semaphores
+                    (vector render-done)))
+                 (setf (vulkan-canvas-next-frame-slot context)
+                       (mod (1+ slot-index)
+                            (length (vulkan-canvas-frame-slots context))))
+                 texture)
+            (setf (vulkan-canvas-current-texture context) nil
+                  (canvas-context-state context) :configured)
+            (when commands (destroy commands))
+            (when encoder (destroy encoder))))))))
 
 (defmethod call-with-canvas-frame
     ((context vulkan-canvas-context) function)

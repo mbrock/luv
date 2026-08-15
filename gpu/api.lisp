@@ -366,6 +366,11 @@ completed on the GPU."))
   data-layout
   size)
 
+(defstruct (gpu-prepare-texture-command
+             (:include gpu-command-encoder-command))
+  texture
+  usage)
+
 (defmethod encode ((encoder gpu-encoder) (command gpu-command))
   (error 'gpu-request-error
          :operation :encode
@@ -417,3 +422,13 @@ completed on the GPU."))
            (make-gpu-write-texture-command
             :destination destination :data data
             :data-layout data-layout :size size)))
+
+(defun prepare-texture (encoder texture usage)
+  "Prepare TEXTURE for semantic USAGE in ENCODER's following commands.
+
+The backend owns any layout transition, hazard barrier, or validation needed
+to realize the usage.  Application code does not dispatch on the backend.
+#T5MQO0"
+  (encode encoder
+          (make-gpu-prepare-texture-command
+           :texture texture :usage usage)))

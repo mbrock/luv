@@ -32,6 +32,13 @@
   :author "Mikael Brockman"
   :components ((:file "package")))
 
+(asdf:defsystem #:luv/trace
+  :description "Low-overhead nested CPU zones for live luv measurements."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on (#:luv/packages)
+  :components ((:file "cpu-trace")))
+
 (asdf:defsystem #:luv/arithmetic
   :description "Semantic specifications and dimensional algebra for compiled arithmetic."
   :version "0.0.1"
@@ -146,6 +153,7 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
                              (:file "field-notes-measures")
                              (:file "field-notes-mp-units")
                              (:file "frame-slots")
+                             (:file "frame-performance")
                              (:file "luv-vulkan-hal")
                              (:file "mathematical-shaders")
                              (:file "metal-backend")
@@ -271,7 +279,7 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
   :description "The backend-neutral, WebGPU-shaped luv GPU API."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on (#:luv/packages)
+  :depends-on (#:luv/trace)
   :components ((:module "gpu"
                 :components ((:file "api")))))
 

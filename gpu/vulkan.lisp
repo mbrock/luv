@@ -1659,6 +1659,23 @@ ownership and cancel this finalizer."
        color)))
   encoder)
 
+(defmethod encode
+    ((encoder vulkan-gpu-command-encoder)
+     (command gpu-prepare-texture-command))
+  (with-vulkan-gpu-driver-environment
+    (ensure-vulkan-command-encoder-state encoder :encode)
+    (ensure-no-active-vulkan-pass encoder :encode)
+    (let* ((usage (gpu-prepare-texture-command-usage command))
+           (texture
+             (ensure-vulkan-texture-for-command
+              encoder (gpu-prepare-texture-command-texture command)
+              command usage)))
+      (ecase usage
+        (:texture-binding
+         (transition-vulkan-texture
+          encoder texture :shader-read-only-optimal)))))
+  encoder)
+
 (defun ensure-compatible-vulkan-copy (command source destination)
   (when (eq source destination)
     (reject-gpu-request command :same-copy-source-and-destination source))
