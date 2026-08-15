@@ -57,20 +57,41 @@
             ]
           );
           # Keep the owned CFFI binding and development tools available to SBCL.
-          lisp = sbcl.withPackages (lispPackages: [
-            lispPackages.alexandria
-            lispPackages.cffi
-            lispPackages.cffi-libffi
-            lispPackages.closer-mop
-            lispPackages.defclass-std
-            lispPackages.eclector
-            lispPackages.named-readtables
-            lispPackages.rove
-            lispPackages.spinneret
-          ] ++ nixpkgs.lib.optionals pkgs.stdenv.isDarwin [
-            lispPackages.float-features
-            lispPackages.trivial-main-thread
-          ]);
+          # McCLIM itself comes from the pinned source above.  Pull only the
+          # packaged McCLIM dependency closure into SBCL, since registering the
+          # packaged McCLIM systems would make ASDF select them before our pin.
+          lisp = sbcl.withPackages (lispPackages:
+            let
+              packageNode = package: {
+                key = package.outPath;
+                inherit package;
+              };
+              mcclimClosure = nixpkgs.lib.genericClosure {
+                startSet = map packageNode lispPackages.mcclim.lispLibs;
+                operator = node:
+                  map packageNode (node.package.lispLibs or [ ]);
+              };
+              mcclimDependencies = map (node: node.package) (
+                builtins.filter
+                  (node: (node.package.src or null) != lispPackages.mcclim.src)
+                  mcclimClosure
+              );
+            in [
+              lispPackages.alexandria
+              lispPackages.cffi
+              lispPackages.cffi-libffi
+              lispPackages.cl-fad
+              lispPackages.closer-mop
+              lispPackages.defclass-std
+              lispPackages.eclector
+              lispPackages.named-readtables
+              lispPackages.rove
+              lispPackages.spinneret
+            ] ++ mcclimDependencies
+              ++ nixpkgs.lib.optionals pkgs.stdenv.isDarwin [
+                lispPackages.float-features
+                lispPackages.trivial-main-thread
+              ]);
           slyRoot =
             "${pkgs.emacsPackages.sly}/share/emacs/site-lisp/elpa/${pkgs.emacsPackages.sly.pname}-${pkgs.emacsPackages.sly.version}";
           dev = pkgs.writeShellApplication {
