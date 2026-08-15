@@ -148,7 +148,8 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
                              (:file "sky-and-light")
                              (:file "webgpu-shape")
                              (:file "wiki-site")
-                             (:static-file "style.css")))))
+                             (:static-file "style.css")
+                             (:static-file "images/dexp.png")))))
 
 (asdf:defsystem #:luv/invocation
   :description "A small protocol for reifying API calls as invocations."

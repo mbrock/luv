@@ -136,7 +136,14 @@ plain text; each element and inline class contributes its own method."))
   (mapc #'render-html (element-children element)))
 
 (defmethod render-html ((paragraph paragraph))
-  (spinneret:with-html (:p (render-inlines (element-children paragraph)))))
+  (let ((inlines (remove-if (lambda (x) (and (stringp x) (blank-line-p x)))
+                            (element-children paragraph))))
+    (spinneret:with-html
+      ;; A paragraph that is only an image link is a figure of its own.
+      (if (and (= (length inlines) 1) (typep (first inlines) 'link)
+               (image-link-p (first inlines)))
+          (:figure.image (:img :src (link-path (first inlines)) :alt ""))
+          (:p (render-inlines (element-children paragraph)))))))
 
 (defmethod render-html ((list plain-list))
   (spinneret:with-html
@@ -208,6 +215,15 @@ or NIL when the link cannot be resolved into the site.")
 (defmethod link-href ((protocol (eql :id)) link)
   (figure-href (link-path link) :from *rendering-document*))
 
+(defparameter *image-types* '("png" "jpg" "jpeg" "gif" "svg" "webp"))
+
+(defun image-link-p (link)
+  "True for a bare file: link to an image inside the wiki directory."
+  (and (equal (link-protocol link) "file")
+       (null (element-children link))
+       (not (starts-with "../" (link-path link)))
+       (member (pathname-type (link-path link)) *image-types* :test #'string-equal)))
+
 (defmethod link-href ((protocol (eql :file)) link)
   "A file: link to another wiki page becomes a page link; a link into the
 repository points at the source on GitHub; anything else is unresolved."
@@ -232,7 +248,9 @@ repository points at the source on GitHub; anything else is unresolved."
          (href (link-href protocol link))
          (description (or (element-children link) (list (link-path link)))))
     (spinneret:with-html
-      (cond ((and (eq protocol :id) (null (element-children link)))
+      (cond ((image-link-p link)
+             (:img.inline :src (link-path link) :alt ""))
+            ((and (eq protocol :id) (null (element-children link)))
              ;; A bare [[id:X]] reads like the light mention #X.
              (render-html (make-instance 'mention :id (link-path link))))
             (href

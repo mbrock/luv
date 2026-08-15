@@ -202,3 +202,13 @@ ul.figure-list {
 ul.figure-list li.level-2 {
   padding-left: 1.5rem;
 }
+
+figure.image {
+  margin: 1.5rem 0;
+}
+
+figure.image img, img.inline {
+  max-width: 100%;
+  height: auto;
+  border-radius: 0.4rem;
+}

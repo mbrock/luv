@@ -70,9 +70,10 @@ The reader is not a general Org parser.  It reads the subset the wiki actually
 uses, chosen by surveying the pages: =#+title=, headings with property drawers,
 paragraphs, bulleted and numbered lists with wrapped and blank-separated
 items, =example= and =src= blocks, simple tables with an optional header rule,
-bracket links with =file:=, =https:=, =id:= or no scheme, the light =#ABC123=
-mention, and the six emphasis markers with Org's pre- and post-character
-rules.  Anything else stays paragraph text, so an unfamiliar construct can
+bracket links with =file:=, =https:=, =id:= or no scheme, a bare =file:=
+link to an image in the wiki directory as an inline image (a paragraph of
+only that link becomes a figure), the light =#ABC123= mention, and the six
+emphasis markers with Org's pre- and post-character rules.  Anything else stays paragraph text, so an unfamiliar construct can
 never fail the build; it can only render plainly.
 
 Emphasis rules follow Org: a marker opens only after whitespace or an opening
@@ -224,20 +225,145 @@ presentations that jump on click and offer backlinks on right-click; the
 shader lab's presentation types could accept a figure to attach it to a
 definition.
 
+* Code views: a dexp renderer for Common Lisp
+:PROPERTIES:
+:ID: N06GKK
+:END:
+
+Source links that leave the page for GitHub are a poor reading experience,
+especially on a phone.  The wiki should show code in place, and the way it
+should show it comes from wisp's structure editor, whose "dexp" renderer draws
+Lisp as nested boxes rather than text with indentation:
+
+[[file:images/dexp.png]]
+
+The mechanism is small and, since flexbox does the work, responsive for
+free.  Every cons is a =div.list= with =display: flex; flex-wrap: wrap= and a
+small column gap; atoms are inline spans.  Forms flow horizontally while they
+fit and wrap when they do not, so there is no line-breaking logic anywhere.
+The parentheses are the box's own left and right borders with rounded
+corners, so a wrapped list becomes a bracket around a paragraph of code, and
+depth is visible as nesting rather than indentation.  Structure is carried in
+attributes, =data-callee= on the list and =data-package= and
+=data-symbol-name= on symbols, and CSS does the rest: body forms of =defun= or
+=let= take full width so they stack; quote, backquote, and unquote hide their
+symbol and paint ='=, =`=, and =,= with =::before=; keywords get their colon
+the same way; the current package's prefix is hidden; the head of a list is
+coloured by =:first-child= with no separate classification pass.  Ordinary
+prose text and code then share one flowing layout, which is what a wiki
+wants.
+
+Two things change in the Common Lisp version.  Dexp renders sexp data, so
+comments and original formatting are gone; the wiki shows source
+definitions and needs a reader that keeps them, see #SKNK2N.  And dexp keeps
+per-operator layout in CSS selectors that cannot see method qualifiers or
+lambda-list keywords; the wiki renderer should assign roles in Lisp, using
+the same table the parinfer checker already keeps in [[file:../parinfer.lisp][parinfer.lisp]]
+(=*binding-form-heads*=, =*clause-form-heads*=, =child-role=), and emit
+=class="head"= or =class="body"= so the stylesheet needs only
+=.list > .body { width: 100% }=.  Everything else transfers verbatim: side
+borders as parentheses, quote glyphs, keyword colons, home-package hiding,
+head colouring, and =;= comments as full-width children.
+
+The same renderer serves three places: the "Referenced from" backlinks of
+#PF39II, where a figure's code references expand in place; a =lisp:= link
+protocol, =[[lisp:luv.arithmetic:interpret-quantity-specification]]=, that
+resolves against a definition index and shows the definition; and the wiki's
+own =#+begin_src lisp= blocks, which can be read and drawn structurally with
+the =<pre>= as fallback whenever reading fails.
+
+* Reading source without loading it: Eclector
+:PROPERTIES:
+:ID: SKNK2N
+:END:
+
+The site is built by =luv-wiki=, which does not and should not load luv
+itself; the Vulkan and SDL systems have no business in a documentation
+build.  So definitions must be read from files without interning their
+symbols or evaluating anything.  Eclector is the ally here: a portable Common
+Lisp reader whose client protocol lets =interpret-symbol= return a token
+(package prefix, name, and whether the package is the file's current one)
+instead of interning, whose parse-result protocol yields source ranges for
+every object, and which reports skipped input, comments and =#+= branches
+included, as results too.  It reads =#'=, =#p=, =#(=, =,@=, and reader
+conditionals correctly, which a hand-rolled tokenizer would not; parinfer's
+tokenizer is deliberately a repair heuristic and stays that.
+
+Reading with Eclector gives a *definition index* beside the figure index:
+for every =cl-source-file= that ASDF lists for the luv systems (pathnames
+only, via =asdf:required-components=), each top-level form with its kind,
+name, qualifiers or specializers, file, line range, comment text, and the
+=#ID= mentions inside it.  Figures ask it who references them; =lisp:= links
+ask it where a name is defined; the McCLIM browser can present it directly.
+Reader conditionals and =#.= are rendered as visible tokens, never
+evaluated.
+
+* Dexp on McCLIM
+:PROPERTIES:
+:ID: CEON0R
+:END:
+
+The token tree from #SKNK2N is a model, like the Org elements, and can be
+drawn by more than one backend.  In McCLIM the natural rendering is the
+same idea in a different medium: a list is an output record with a rounded
+border, its children laid out by =formatting-item-list= or a small flow
+layout, symbols are presentations of a =lisp-symbol= type with translators
+to Edit Definition and to the wiki figures that mention them.  Since McCLIM
+is meant to become a significant part of the 3D world's own interface, a
+dexp view of live definitions inside luvcraft is not far-fetched.  As with
+the wiki browser, the HTML backend should come first and the CLIM one should
+drive the =(render backend element)= refactor of #AGTIO4.
+
 * NEXT The site shows code references to figures
 :PROPERTIES:
 :ID: PF39II
 :END:
 
-Intent: the first rung of #F6B3NI.  Scan the Lisp sources ASDF knows about
-for =#ID= mentions during =render-op= on the system and render a "Referenced
-from" line per figure with a GitHub line link, so #PLRP3A and #LNRY72 pay off.
+Intent: the first rung of #F6B3NI.  Build the definition index of #SKNK2N
+during =render-op= on the system and render a "Referenced from" line per
+figure naming the definitions that mention it, each expandable in place to
+the definition drawn by the dexp renderer of #N06GKK, with the GitHub line
+link as the secondary action, so #PLRP3A and #LNRY72 pay off.
 
-Evidence: two such mentions exist today and are invisible to the site.
+Evidence: two such mentions exist today and are invisible to the site.  A
+plain-text scan would already find them; the definition index and renderer
+are what make the reference readable without leaving the page.
 
-Done when: those two figures show their source references on the site, the
-scan is covered by a test, and a dangling code mention is reported like a
-dangling wiki mention.
+Done when: those two figures show their referencing definitions inline on
+the site, the index and renderer are covered by tests, and a dangling code
+mention is reported like a dangling wiki mention.  A first cut may render the
+definition as a =<pre>= if the dexp renderer is not ready; the mark stays
+open until it is.
+
+* TODO Read luv sources with Eclector into a definition index
+:PROPERTIES:
+:ID: YFDCSB
+:END:
+
+Intent: the reader of #SKNK2N as part of =luv-wiki=: an Eclector client that
+produces a token tree with source ranges and comments without interning, and
+a definition index over the =cl-source-file= components ASDF lists.
+
+Evidence: none yet; Eclector and concrete-syntax-tree are in nixpkgs.
+
+Done when: every luv source file reads without error, the index names
+=interpret-quantity-specification= with its line range and its #PLRP3A
+mention, and a reader conditional appears as a token rather than a choice.
+
+* TODO The dexp HTML renderer
+:PROPERTIES:
+:ID: Z50KYF
+:END:
+
+Intent: render a token tree from #YFDCSB as dexp boxes per #N06GKK, with
+roles assigned in Lisp and painted by the wiki stylesheet, and use it for
+=#+begin_src lisp= blocks first, since the wiki already has those.
+
+Evidence: none yet; wisp's =render-sexp= and =index.css= are the reference.
+
+Done when: the source blocks of the wiki render structurally and readably on
+a phone-width viewport, fall back to =<pre>= on read failure, and the
+screenshot above can be reproduced from luv's own code.
 
 * TODO A wiki browser frame in mcluv
 :PROPERTIES:

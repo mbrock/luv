@@ -94,7 +94,11 @@ can change the links and backlinks rendered here."
   (list (asdf:component-pathname c)))
 
 (defmethod asdf:output-files ((o render-op) (c asdf:static-file))
-  (values (list (merge-pathnames (file-namestring (asdf:component-pathname c))
+  "An asset keeps its path relative to its module, so wiki/images/x.png
+lands at images/x.png in the site."
+  (values (list (merge-pathnames (uiop:enough-pathname
+                                  (asdf:component-pathname c)
+                                  (asdf:component-pathname (asdf:component-parent c)))
                                  (site-output-directory (asdf:component-system c))))
           t))
 

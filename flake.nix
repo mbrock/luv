@@ -63,6 +63,7 @@
             lispPackages.cffi-libffi
             lispPackages.closer-mop
             lispPackages.defclass-std
+            lispPackages.eclector
             lispPackages.rove
             lispPackages.spinneret
           ] ++ nixpkgs.lib.optionals pkgs.stdenv.isDarwin [
