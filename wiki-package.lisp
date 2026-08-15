@@ -43,6 +43,9 @@ operation that make the wiki a buildable system.")
    #:link-search
    #:mention
    #:mention-id
+   #:math
+   #:math-text
+   #:math-display-p
    #:reference-id
    ;; Reading
    #:read-org-file

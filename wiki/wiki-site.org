@@ -71,7 +71,10 @@ The reader is not a general Org parser.  It reads the subset the wiki actually
 uses, chosen by surveying the pages: =#+title=, headings with property drawers,
 paragraphs, bulleted and numbered lists with wrapped and blank-separated
 items, =example= and =src= blocks, simple tables with an optional header rule,
-bracket links with =file:=, =https:=, =id:=, =lisp:= or no scheme, a bare
+TeX math as =$x^2$= or =\(...\)= inline and =\[...\]= or =$$...$$= on
+display (drawn by KaTeX, loaded only when a page has math), Mermaid
+diagrams in =#+begin_src mermaid= blocks (likewise), bracket links with
+=file:=, =https:=, =id:=, =lisp:= or no scheme, a bare
 =file:= link to an image in the wiki directory as an inline image (a
 paragraph of only that link becomes a figure, and a paragraph of only a
 =lisp:= link becomes the definition it names), the light =#ABC123= mention,
@@ -119,11 +122,13 @@ consequences shaped the renderer:
   is written explicitly with =spinneret:html=.
 
 Mentions carry their target with them: each page embeds a small card per
-figure it mentions (title, page, status, opening prose), and a few lines
-of script in =site.js= show the card as a top-layer =popover= beside the
-mention on hover, focus, or a first tap, placed below the link or above it
-when the viewport is short.  The site stays static and the links stay
-plain links.
+figure it mentions (title, page, status, opening prose) and per definition
+it links (kind, name, lambda list, file and line, docstring), and a few
+lines of script in =site.js= show the card as a top-layer =popover= beside
+the link on hover, focus, or a first tap, placed below the link or above it
+when the viewport is short.  The same script loads KaTeX and Mermaid from
+a CDN only for pages that carry math or diagrams.  The site stays static
+and the links stay plain links.
 
 Each page is one HTML file: a header linking to the index and the page's Org
 source on GitHub, an =<h1>= from =#+title=, and a =<section>= per heading whose

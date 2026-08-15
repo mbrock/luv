@@ -143,6 +143,7 @@ as dexp boxes, each anchored by its starting line."
   (let* ((page (source-page-name file))
          (*page-prefix* (page-prefix-for page))
          (*page-kind* "source-file")
+         (*page-definition-cards* (make-hash-table :test 'eq))
          (*rendering-document* nil)
          (line-starts (source-file-line-starts file))
          (title (source-file-relative-path file)))
@@ -166,6 +167,7 @@ as dexp boxes, each anchored by its starting line."
               (let ((*lisp-role* nil))
                 (:div.toplevel :id (format nil "L~D" (node-line node line-starts))
                   (render-html node))))))
+         (render-definition-cards)
          (render-figure-cards
           (loop for definition in (source-file-definitions file)
                 append (definition-mentions definition)))))

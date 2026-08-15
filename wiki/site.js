@@ -22,6 +22,7 @@
   }
 
   function cardFor(link) {
+    if (link.dataset.card) return document.getElementById(link.dataset.card);
     var href = link.getAttribute("href") || "";
     var hash = href.indexOf("#");
     if (hash < 0) return null;
@@ -78,7 +79,7 @@
   }
 
   function isMention(node) {
-    return node && node.closest && node.closest("a.mention[href]");
+    return node && node.closest && node.closest("a.mention[href], a.definition-link[href]");
   }
 
   document.addEventListener("mouseover", function (event) {
@@ -120,4 +121,46 @@
 
   window.addEventListener("scroll", function () { if (current) place(current); }, { passive: true });
   window.addEventListener("resize", function () { if (current) place(current); });
+
+  // Math and diagrams: load KaTeX or Mermaid from the CDN only when the
+  // page has something for them to draw.
+  function loadStyle(href) {
+    var link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = href;
+    document.head.appendChild(link);
+  }
+
+  function loadScript(src, onload) {
+    var script = document.createElement("script");
+    script.src = src;
+    script.defer = true;
+    script.onload = onload;
+    document.head.appendChild(script);
+  }
+
+  var mathNodes = document.querySelectorAll(".math");
+  if (mathNodes.length) {
+    loadStyle("https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css");
+    loadScript("https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js", function () {
+      mathNodes.forEach(function (node) {
+        var tex = node.textContent;
+        try {
+          window.katex.render(tex, node, {
+            displayMode: node.classList.contains("display"),
+            throwOnError: false
+          });
+        } catch (e) { /* leave the TeX source visible */ }
+      });
+    });
+  }
+
+  if (document.querySelector("pre.mermaid")) {
+    loadScript("https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js", function () {
+      var dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      window.mermaid.initialize({ startOnLoad: false, theme: dark ? "dark" : "neutral",
+                                  fontFamily: "Public Sans, sans-serif" });
+      window.mermaid.run({ nodes: document.querySelectorAll("pre.mermaid") });
+    });
+  }
 })();

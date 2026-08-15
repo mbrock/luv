@@ -80,6 +80,12 @@
              :documentation "The description inlines, or NIL for a bare link."))
   (:documentation "An Org bracket link."))
 
+(defclass math (inline-object)
+  ((text :initarg :text :accessor math-text
+         :documentation "The TeX source without delimiters.")
+   (display-p :initarg :display-p :initform nil :accessor math-display-p))
+  (:documentation "Inline $...$ or \\(...\\) math, or display \\[...\\] and $$...$$."))
+
 (defclass mention (inline-object)
   ((id :initarg :id :accessor mention-id))
   (:documentation "A light #ABC123 reference to a figure."))
@@ -129,6 +135,7 @@
                (etypecase x
                  (string (write-string x out))
                  (mention (format out "#~A" (mention-id x)))
+                 (math (write-string (math-text x) out))
                  (link (if (element-children x)
                            (mapc #'walk (element-children x))
                            (write-string (link-path x) out)))
@@ -303,6 +310,31 @@ without spaces is a Lisp special variable and reads as code, not bold.")
                                                      (read-inlines inner))))
                                   (1+ end))))))))))
 
+(defun read-math (string start)
+  "If TeX math begins at START, return (values math end).  Inline math is
+$...$ on one line with no space inside the dollars, or \\(...\\); display
+math is $$...$$ or \\[...\\]."
+  (flet ((delimited (open close display-p &key (same-line nil))
+           (when (starts-with open string :start start)
+             (let* ((body-start (+ start (length open)))
+                    (end (search close string :start2 body-start)))
+               (when (and end (> end body-start)
+                          (or (not same-line)
+                              (not (find #\Newline string :start body-start :end end)))
+                          ;; No space just inside the dollars.
+                          (or (not (string= open "$"))
+                              (and (not (member (char string body-start) '(#\Space #\Tab)))
+                                   (not (member (char string (1- end)) '(#\Space #\Tab)))
+                                   (emphasis-post-char-p (char-after string (1- (+ end (length close))))))))
+                 (values (make-instance 'math :text (subseq string body-start end)
+                                              :display-p display-p)
+                         (+ end (length close))))))))
+    ;; OR would drop the second value; try each form in turn.
+    (loop for (open close display-p same-line)
+            in '(("$$" "$$" t nil) ("\\[" "\\]" t nil) ("\\(" "\\)" nil nil) ("$" "$" nil t))
+          do (multiple-value-bind (math end) (delimited open close display-p :same-line same-line)
+               (when math (return (values math end)))))))
+
 (defun read-inlines (string)
   "Read STRING into a list of strings and inline objects."
   (let ((result '())
@@ -320,6 +352,7 @@ without spaces is a Lisp special variable and reads as code, not bold.")
                  (multiple-value-bind (object end)
                      (case c
                        (#\[ (read-link string i))
+                       ((#\$ #\\) (read-math string i))
                        (#\# (let ((end (mention-end string i)))
                               (and end (values (make-instance 'mention :id (subseq string (1+ i) end)) end))))
                        (t (read-emphasis string i)))

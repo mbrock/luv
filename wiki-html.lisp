@@ -214,11 +214,13 @@ plain text; each element and inline class contributes its own method."))
   (spinneret:with-html (:pre.example (block-text block))))
 
 (defmethod render-html ((block src-block))
-  (if (equal (src-block-language block) "lisp")
-      (render-lisp-source (block-text block))
-      (spinneret:with-html
-        (:pre.src :data-language (src-block-language block)
-                  (:code (block-text block))))))
+  (let ((language (src-block-language block)))
+    (cond ((equal language "lisp") (render-lisp-source (block-text block)))
+          ((equal language "mermaid")
+           ;; Mermaid draws these at load time; the text remains readable.
+           (spinneret:with-html (:pre.mermaid (block-text block))))
+          (t (spinneret:with-html
+               (:pre.src :data-language language (:code (block-text block))))))))
 
 (defmethod render-html ((table table))
   (spinneret:with-html
@@ -241,6 +243,13 @@ plain text; each element and inline class contributes its own method."))
     (spinneret:with-html
       (:tag :name tag :class class
             (render-inlines (element-children emphasis))))))
+
+(defmethod render-html ((math math))
+  "TeX source in a .math element; site.js renders it with KaTeX."
+  (spinneret:with-html
+    (if (math-display-p math)
+        (:div.math.display (math-text math))
+        (:span.math (math-text math)))))
 
 (defmethod render-html ((mention mention))
   (let* ((id (mention-id mention))
@@ -439,6 +448,82 @@ the main column, and a footer."
          (:footer.site-footer
           "Rendered from Org and Lisp by luv.wiki."))))))
 
+(defvar *page-definition-cards* nil
+  "While a page renders: a hash table from DEFINITION to its card id, filled
+by every definition link drawn on the page.")
+
+(defun definition-card-id (definition)
+  "Register DEFINITION for a card on the current page and return the id."
+  (when *page-definition-cards*
+    (or (gethash definition *page-definition-cards*)
+        (setf (gethash definition *page-definition-cards*)
+              (format nil "def-~D" (hash-table-count *page-definition-cards*))))))
+
+(defun definition-docstring (definition)
+  "The documentation string of DEFINITION's form as plain text, or NIL: the
+first string among the arguments after the head, or the value after
+:documentation."
+  (let ((children (element-children (definition-node definition)))
+        (previous nil))
+    (flet ((documentation-keyword-p (node)
+             (and (typep node 'lisp-symbol)
+                  (equal (lisp-symbol-package node) "KEYWORD")
+                  (string-equal (lisp-symbol-name node) "documentation"))))
+      (dolist (child (cddr children))
+        (cond ((and (typep child 'lisp-string)
+                    (or (documentation-keyword-p previous)
+                        (find #\Newline (node-text child))
+                        (not (typep previous 'lisp-list))))
+               (return (string-node-content child)))
+              ;; (:documentation "...") as a DEFCLASS or DEFGENERIC option.
+              ((and (typep child 'lisp-list)
+                    (documentation-keyword-p (first (element-children child)))
+                    (typep (second (element-children child)) 'lisp-string))
+               (return (string-node-content (second (element-children child))))))
+        (unless (typep child 'lisp-comment) (setf previous child))))))
+
+(defun definition-lambda-list-text (definition)
+  "The lambda list of DEFINITION as written in the source, or NIL."
+  (let ((children (element-children (definition-node definition))))
+    (when (member (definition-kind definition)
+                  '("defun" "defmacro" "defgeneric" "defmethod" "define-command" "deftype")
+                  :test #'string=)
+      (let ((list (find-if (lambda (c) (typep c 'lisp-list)) (cddr children))))
+        (and list (node-text list))))))
+
+(defun render-definition-cards ()
+  "Emit hidden cards for the definitions linked on this page."
+  (when (and *page-definition-cards* (plusp (hash-table-count *page-definition-cards*)))
+    (spinneret:with-html
+      (:div.figure-cards :hidden t
+        (maphash
+         (lambda (definition id)
+           (:div.figure-card :id id
+             (:a.card-title :href (or (definition-page-href definition)
+                                      (definition-source-url definition))
+                            (:span.card-kind (definition-kind definition))
+                            " "
+                            (definition-name definition)
+                            (dolist (qualifier (definition-qualifiers definition))
+                              (spinneret:html " ")
+                              (:span.qualifier qualifier)))
+             (let ((lambda-list (definition-lambda-list-text definition)))
+               (when lambda-list
+                 (:code.card-lambda-list lambda-list)))
+             (:span.card-meta
+              (format nil "~A:~D" (definition-file-name definition) (definition-line definition))
+              (when (definition-package definition)
+                (spinneret:html " · ")
+                (:span (string-trim "#:\"" (definition-package definition)))))
+             (let ((docstring (definition-docstring definition)))
+               (when docstring
+                 (:p.card-excerpt
+                  (let ((text (substitute #\Space #\Newline docstring)))
+                    (if (> (length text) 320)
+                        (concatenate 'string (subseq text 0 (or (position #\Space text :from-end t :end 320) 320)) "…")
+                        text)))))))
+         *page-definition-cards*)))))
+
 (defun figure-excerpt (figure &optional (limit 320))
   "The opening prose of FIGURE's own section as plain text: paragraphs and
 list items in order until about LIMIT characters, cut at a word boundary."
@@ -488,6 +573,7 @@ popovers when a mention is hovered or tapped."
   "Emit the whole HTML page for DOCUMENT."
   (let ((*rendering-document* document)
         (*page-prefix* "")
+        (*page-definition-cards* (make-hash-table :test 'eq))
         (title (or (document-title document) (document-name document))))
     (render-page-frame
      title
@@ -496,6 +582,7 @@ popovers when a mention is hovered or tapped."
          (:h1 title)
          (dolist (child (element-children document))
            (render-html child))
+         (render-definition-cards)
          (render-figure-cards
           (append (document-mentions document)
                   ;; Code references shown on this page mention figures too.

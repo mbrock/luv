@@ -81,6 +81,10 @@ mark to `DONE` means writing what was observed, not what was intended.
 The site reads every source file of the `luv` and `luvcraft` systems (with
 Eclector, without loading), so prose and code point at each other:
 
+- Hovering a `#ID` mention shows the figure's card (title, page, opening
+  prose); hovering a symbol that names a definition shows its kind, lambda
+  list, file, and docstring — so a docstring's first paragraph is worth
+  writing well.
 - A `#ID` in a docstring or comment makes that definition appear under the
   figure's "Referenced from code", expanded in place as dexp boxes with the
   mention linking back. Cite figures from code where the code embodies the
@@ -104,6 +108,9 @@ render well everywhere:
   `#+begin_example`, `#+begin_src lisp` (drawn structurally; other
   languages as text), simple tables with a header rule.
 - `*bold*`, `/italic/`, `=verbatim=`, `~code~` with Org's spacing rules.
+- Math: `$x^2$` or `\(…\)` inline, `\[ … \]` or `$$ … $$` display (KaTeX);
+  diagrams as `#+begin_src mermaid` blocks. Prefer a table, a formula, or a
+  diagram over ASCII art in an example block — they render and reflow.
 - Links: `[[file:other.org][text]]` between pages, `[[https://…][text]]`,
   `[[file:../path/to.lisp][text]]` into the repository (GitHub),
   `[[lisp:name]]` to definitions, `[[file:images/x.png]]` alone in a

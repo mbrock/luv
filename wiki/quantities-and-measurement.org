@@ -45,15 +45,15 @@ A dimension is a product of base dimensions raised to integer or rational
 powers.  For the mechanics we presently care about, an exponent vector over
 length, duration, and mass already distinguishes familiar cases:
 
-#+begin_example
-length        L
-duration      T
-velocity      L T^-1
-acceleration  L T^-2
-mass          M
-force         M L T^-2
-impulse       M L T^-1
-#+end_example
+| quantity     | dimension                        |
+|--------------+----------------------------------|
+| length       | $\mathsf{L}$                     |
+| duration     | $\mathsf{T}$                     |
+| velocity     | $\mathsf{L}\,\mathsf{T}^{-1}$    |
+| acceleration | $\mathsf{L}\,\mathsf{T}^{-2}$    |
+| mass         | $\mathsf{M}$                     |
+| force        | $\mathsf{M}\,\mathsf{L}\,\mathsf{T}^{-2}$ |
+| impulse      | $\mathsf{M}\,\mathsf{L}\,\mathsf{T}^{-1}$ |
 
 Multiplication, division, powers, differentiation, and integration transform
 dimensions mechanically.  A compiler or Lisp protocol can establish that a
@@ -77,9 +77,9 @@ lengths, but using water depth as a finite-difference spacing is nonsense.
 
 A *quantity specification* can therefore be thought of as at least:
 
-#+begin_example
-(dimension, semantic meaning, tensor order)
-#+end_example
+\[
+  \text{specification} \;=\; (\text{dimension},\ \text{semantic meaning},\ \text{tensor order})
+\]
 
 Two specifications may have equal dimensions and equal representations while
 remaining unequal specifications.  This is the same principle by which two
@@ -132,11 +132,11 @@ say, opacity into probability.  Other dimension-one units are narrower:
 =radian= belongs to angular measure, =steradian= to solid angular measure, and
 =bit= to storage capacity.  Thus these are three separate questions:
 
-#+begin_example
-quantity specification  opacity, probability, angle, storage capacity
-dimension               one, length, duration, ...
-unit                     percent, one, radian, bit, metre, ...
-#+end_example
+| question               | answers                                    |
+|------------------------+--------------------------------------------|
+| quantity specification | opacity, probability, angle, storage capacity |
+| dimension              | one, length, duration, …                   |
+| unit                   | percent, one, radian, bit, metre, …        |
 
 Luv now models the first useful portion of this.  Unit definitions carry a
 dimension, canonical basis, and magnitude.  =:percent= is =1/100= of =:one=;
@@ -161,12 +161,14 @@ say that radians express angles but not arbitrary dimension-one values.
 An origin-relative position is an affine point, while a displacement is a
 vector-like difference.  The lawful operations are deliberately asymmetric:
 
-#+begin_example
-point - point       -> difference
-point + difference  -> point
-difference + difference -> difference
-point + point       -> not intrinsically meaningful
-#+end_example
+\[
+\begin{aligned}
+  \text{point} - \text{point} &\to \text{difference} \\
+  \text{point} + \text{difference} &\to \text{point} \\
+  \text{difference} + \text{difference} &\to \text{difference} \\
+  \text{point} + \text{point} &\to \text{not intrinsically meaningful}
+\end{aligned}
+\]
 
 Terrain elevation, simulation time, and temperature-like scales can need the
 same distinction.  Treating them as ordinary additive quantities silently
@@ -207,27 +209,36 @@ specifier was dropped in translation.
 The V3 operation table, restated in luv's terms with =affine-p= generalized
 to a three-valued *character*:
 
-#+begin_example
-                point       absolute    difference
-point       +   error       point       point
-absolute    +   point       absolute    absolute
-difference  +   point       absolute    difference
+Addition, by the character of the left and right operands:
 
-point       -   difference  point       point
-absolute    -   error       difference  absolute
-difference  -   error       difference  difference
+| $+$        | point | absolute | difference |
+|------------+-------+----------+------------|
+| point      | error | point    | point      |
+| absolute   | point | absolute | absolute   |
+| difference | point | absolute | difference |
 
-absolute  * absolute    absolute    (energy = power * time)
-absolute  * number      absolute
-absolute  * difference  difference  (area * delta-height = delta-volume)
-difference * number     difference
-absolute  / absolute    absolute    (a physical ratio: efficiency, strain)
-absolute  / difference  difference
-difference / absolute   difference
-difference / difference difference  (velocity = displacement / duration)
-point     * or / any    error
-abs, norm, modulus:     difference -> absolute
-#+end_example
+Subtraction, left minus right:
+
+| $-$        | point      | absolute   | difference |
+|------------+------------+------------+------------|
+| point      | difference | point      | point      |
+| absolute   | error      | difference | absolute   |
+| difference | error      | difference | difference |
+
+Multiplication and division:
+
+| operation                          | result     | example                                  |
+|------------------------------------+------------+------------------------------------------|
+| absolute $\times$ absolute          | absolute   | energy $=$ power $\times$ time            |
+| absolute $\times$ number            | absolute   |                                          |
+| absolute $\times$ difference        | difference | area $\times$ Δheight $=$ Δvolume         |
+| difference $\times$ number          | difference |                                          |
+| absolute $/$ absolute              | absolute   | a physical ratio: efficiency, strain     |
+| absolute $/$ difference            | difference |                                          |
+| difference $/$ absolute            | difference |                                          |
+| difference $/$ difference          | difference | velocity $=$ displacement $/$ duration   |
+| point $\times$ or $/$ anything      | error      |                                          |
+| $\lvert\cdot\rvert$, norm, modulus | absolute   | of a difference                          |
 
 Points keep the rules #P7A4HX already states.  Absolutes and differences mix
 freely in addition because a signed difference shifting an amount does not
@@ -438,11 +449,11 @@ like a scalar with a unit.
 A GPU vector is a representation shape, not necessarily one mathematical
 vector.  Similar vector registers can have different semantic structure:
 
-#+begin_example
-vec3 world direction       xyz = one homogeneous vector quantity
-vec3 packed surface input  xy  = texture sample point; z = ambient occlusion
-vec4 texture result        rgb = linear colour; a = opacity
-#+end_example
+| register                    | lanes                                                |
+|-----------------------------+------------------------------------------------------|
+| =vec3= world direction      | =xyz= one homogeneous vector quantity                |
+| =vec3= packed surface input | =xy= texture sample point; =z= ambient occlusion     |
+| =vec4= texture result       | =rgb= linear colour; =a= opacity                     |
 
 The second and third values are *semantic products*: operational packing puts
 several related values in one register without claiming that arbitrary lane
@@ -582,16 +593,16 @@ shader system.
 
 The intended ownership has three layers:
 
-#+begin_example
-quantity algebra
-  dimensions, units, named meanings, affine character, layouts
-                         |
-compiled arithmetic definitions and expressions
-  source forms, lexical bindings, operator contracts, semantic checking
-                 /                       \
-       Lisp/CPU realization          shader realization
-       raw scalar/vector data        stages, resources, SPIR-V
-#+end_example
+#+begin_src mermaid
+flowchart TB
+  A["quantity algebra<br/><small>dimensions, units, named meanings, affine character, layouts</small>"]
+  B["compiled arithmetic definitions and expressions<br/><small>source forms, lexical bindings, operator contracts, semantic checking</small>"]
+  C["Lisp/CPU realization<br/><small>raw scalar and vector data</small>"]
+  D["shader realization<br/><small>stages, resources, SPIR-V</small>"]
+  A --> B
+  B --> C
+  B --> D
+#+end_src
 
 A shared definition is the durable source-level object.  Each realization may
 produce its own typed expression graph or compiled artifact: shader literals
@@ -1296,18 +1307,25 @@ Physically based rendering is not merely a texture format; it is the claim
 that shading computes in radiometric quantities.  Those quantities have a
 real dimensional algebra:
 
-#+begin_example
-radiant flux       W
-radiant intensity  W sr^-1
-irradiance         W m^-2
-radiance           W sr^-1 m^-2
-BRDF               sr^-1
-solid angle        sr
-#+end_example
+| quantity          | unit                                     |
+|-------------------+------------------------------------------|
+| radiant flux      | $\mathrm{W}$                             |
+| radiant intensity | $\mathrm{W\,sr^{-1}}$                    |
+| irradiance        | $\mathrm{W\,m^{-2}}$                     |
+| radiance          | $\mathrm{W\,sr^{-1}\,m^{-2}}$            |
+| BRDF              | $\mathrm{sr^{-1}}$                       |
+| solid angle       | $\mathrm{sr}$                            |
 
-The rendering equation is dimensionally typed: outgoing radiance is emitted
-radiance plus the integral of BRDF (sr^-1) times incoming radiance times a
-projection cosine over solid angle (sr).  The steradians cancel; radiance
+The rendering equation is dimensionally typed:
+
+\[
+  L_o(\mathbf{x}, \omega_o) \;=\; L_e(\mathbf{x}, \omega_o)
+  \;+\; \int_{\Omega} f_r(\mathbf{x}, \omega_i, \omega_o)\, L_i(\mathbf{x}, \omega_i)\, (\omega_i \cdot \mathbf{n})\, d\omega_i
+\]
+
+Outgoing radiance is emitted radiance plus the integral of the BRDF
+($\mathrm{sr^{-1}}$) times incoming radiance times a projection cosine over
+solid angle ($\mathrm{sr}$).  The steradians cancel; radiance
 comes out.  Energy conservation is an integral constraint on the BRDF that
 dimension-checking alone cannot prove, but dimension /mismatch/ catches the
 commonest failures first.

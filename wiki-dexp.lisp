@@ -509,12 +509,9 @@ the general routine, whose roles do that."
                                      (find-named-definition name)))
                     (href (and definition (definition-page-href definition))))
                (if href
-                   (:a.definition-link :href href :title (format nil "~A ~A, ~A:~D"
-                                                                 (definition-kind definition)
-                                                                 (definition-name definition)
-                                                                 (definition-file-name definition)
-                                                                 (definition-line definition))
-                       (render-symbol-text symbol package current-p keyword-p))
+                   (:a.definition-link :href href
+                                       :data-card (definition-card-id definition)
+                                       (render-symbol-text symbol package current-p keyword-p))
                    (render-symbol-text symbol package current-p keyword-p)))))))
 
 (defun render-symbol-text (symbol package current-p keyword-p)
@@ -596,11 +593,7 @@ definition when the corpus has one."
          (href (and definition (definition-page-href definition))))
     (spinneret:with-html
       (if href
-          (:a.definition-link :href href
-                              :title (format nil "~A ~A, ~A:~D" (definition-kind definition)
-                                             (definition-name definition)
-                                             (definition-file-name definition)
-                                             (definition-line definition))
+          (:a.definition-link :href href :data-card (definition-card-id definition)
                               (:code.symbol (string-downcase name)))
           (:code.symbol (string-downcase name))))))
 
