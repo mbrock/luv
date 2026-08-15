@@ -80,6 +80,15 @@ special variable; subclasses observe or replace calls with methods."))
 
 ;;; Durable snapshots of argument and result values.
 
+(defgeneric snapshot-invocation-object (value)
+  (:documentation
+   "Return durable trace data for one API-specific boundary object."))
+
+(defmethod snapshot-invocation-object (value)
+  (list :object (type-of value)
+        (handler-case (princ-to-string value)
+          (error () "<unprintable>"))))
+
 (defun snapshot-invocation-value (value &optional (depth 0))
   "Copy VALUE into durable, printable trace data without retaining C memory."
   (cond
@@ -97,10 +106,7 @@ special variable; subclasses observe or replace calls with methods."))
           (lambda (item)
             (snapshot-invocation-value item (1+ depth)))
           value))
-    (t
-     (list :object (type-of value)
-           (handler-case (princ-to-string value)
-             (error () "<unprintable>"))))))
+    (t (snapshot-invocation-object value))))
 
 (defun snapshot-invocation-arguments (invocation)
   "Make INVOCATION durable by snapshotting its argument slots in place."

@@ -13,6 +13,8 @@
   :in-order-to ((asdf:test-op (asdf:test-op #:luv/arithmetic/tests)
                               (asdf:test-op #:luv/arithmetic/language/tests)
                               (asdf:test-op #:luv/arithmetic/lisp/tests)
+                              #+darwin
+                              (asdf:test-op #:luv/objective-c/tests)
                               (asdf:test-op #:luv/tests)
                               (asdf:test-op #:luv/spir-v/tests)
                               (asdf:test-op #:luv/luvcraft/tests)
@@ -160,6 +162,46 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
                #:cffi
                #:closer-mop)
   :components ((:file "invocation")))
+
+#+darwin
+(asdf:defsystem #:luv/objective-c
+  :description "A declared, inspectable Objective-C foreign object system."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on (#:luv/invocation
+               #:cffi
+               #:closer-mop)
+  :serial t
+  :components ((:module "objective-c"
+                :components ((:file "package")
+                             (:file "runtime")
+                             (:file "foundation")))))
+
+#+darwin
+(asdf:defsystem #:luv/metal/probe
+  :description "The smallest native Metal object proof through luv's Objective-C system."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on (#:luv/objective-c)
+  :components ((:module "objective-c"
+                :components ((:file "metal-probe")))))
+
+#+darwin
+(asdf:defsystem #:luv/objective-c/tests
+  :description "Executable claims for the Objective-C foreign object system."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on (#:luv/metal/probe
+               #:rove)
+  :components ((:module "tests"
+                :components ((:file "objective-c"))))
+  :perform (asdf:test-op (operation component)
+             (declare (ignore operation component))
+             (unless (uiop:symbol-call
+                      '#:rove '#:run-suite
+                      (uiop:symbol-call
+                       '#:rove '#:find-suite '#:luv/objective-c/tests))
+               (error "luv Objective-C tests failed"))))
 
 (asdf:defsystem #:luv/spir-v
   :description "A small s-expression SPIR-V assembler for luv shaders."

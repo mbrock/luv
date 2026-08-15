@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := all
 
-.PHONY: all luvcraft run test parinfer-check shader-validate smoke mcluv wiki clean
+.PHONY: all luvcraft run test parinfer-check shader-validate smoke mcluv wiki objective-c-probe clean
 
 all: luvcraft
 
@@ -52,6 +52,13 @@ wiki:
 		--eval '(require :asdf)' \
 		--eval '(asdf:load-asd (truename "luv.asd"))' \
 		--eval '(asdf:make :luv/wiki)'
+
+objective-c-probe:
+	nix develop -c sbcl --non-interactive \
+		--eval '(require :asdf)' \
+		--eval '(asdf:load-asd (truename "luv.asd"))' \
+		--eval '(asdf:load-system :luv/metal/probe)' \
+		--eval '(format t "~S~%" (luv.metal:probe-system-default-device))'
 
 clean:
 	rm -f ./build/luvcraft ./build/mcluv ./build/luvcraft-smoke.png

@@ -105,6 +105,17 @@ The meaningful boundary objects should be inspectable CLOS instances:
 - Metal objects specialize luv's GPU protocols while retaining their native
   identity for inspection.
 
+The first substrate now exists in
+[[file:../objective-c/runtime.lisp][=objective-c/runtime.lisp=]].  =objective-c-class= and =objective-c-object=
+are receivers; each object wrapper carries its cached runtime class, optional
+declared protocol, one =:owned= or =:borrowed= claim, and released state.
+=objective-c-message-class= extends the general invocation metaclass with the
+selector, result ABI, result ownership, declared result class, and whether a
+successful send consumes the receiver.  Execution is ordinary multiple
+dispatch over =objective-c-runtime= and the concrete message invocation;
+=tracing-objective-c-runtime= contributes only the general tracing =:around=
+method.
+
 Selectors themselves are interned runtime identities.  A declaration can
 cache the result of =sel_registerName=, but behavior should remain in ordinary
 generic functions and methods rather than in a hidden registry.  Dense shader
@@ -130,10 +141,11 @@ structure and vector calling conventions.  The first substrate should
 therefore be declaration-led rather than a magical untyped =send=:
 
 #+begin_src lisp
-(define-objc-message new-command-queue
-    ("newCommandQueue" :object))
+(define-objective-c-message new-command-queue
+    ("newCommandQueue" :object :ownership :owned
+     :class "MTLCommandQueue"))
 
-(define-objc-message set-device
+(define-objective-c-message set-device
     ("setDevice:" :void)
   (device :object))
 #+end_src
@@ -157,6 +169,14 @@ Metal declarations should initially be hand-owned and demand-driven, like
 shape of several real declarations is stable.  C entry points such as
 =MTLCreateSystemDefaultDevice= remain ordinary CFFI definitions beside the
 message declarations.
+
+The working declarations follow that division.  Foundation owns the small
+=new=, =drain=, =retain=, =release=, and =UTF8String= vocabulary in
+[[file:../objective-c/foundation.lisp][=objective-c/foundation.lisp=]].  The Metal proof owns only
+=MTLCreateSystemDefaultDevice=, =name=, and =registryID= in
+[[file:../objective-c/metal-probe.lisp][=objective-c/metal-probe.lisp=]].  Re-evaluating one declaration replaces
+the ordinary =invoke= method at the same specializer coordinate and updates
+its class metadata without replacing the class identity.
 
 * The hybrid boundary is an explicit escape hatch
 :PROPERTIES:
@@ -191,6 +211,16 @@ can wait.  The first shader-library proof can use
 =MTL4Compiler/newLibraryWithDescriptor:error:= synchronously, avoiding both a
 block callback and cross-thread publication while the basic object lifecycle
 is still being established.
+
+The first implementation makes one wrapper correspond to exactly one claim.
+Retaining a borrowed object returns a distinct owned wrapper around the same
+native identity; releasing a borrowed or already released wrapper signals
+before sending =release=.  =with-owned-objective-c-object= and
+=with-autorelease-pool= express the two ordinary scopes.  Native Apple calls
+also run with SBCL floating-point traps masked: the first cold Metal probe
+otherwise exposed =FLOATING-POINT-OVERFLOW= inside
+=MTLCreateSystemDefaultDevice=, matching the environment already required by
+the SDL and Vulkan crossings.
 
 Implementing Objective-C classes in Lisp remains a valuable later capability
 for delegates and Cocoa integration.  It is not on the critical path for SDL
@@ -384,7 +414,7 @@ explicit part of the backend and can later become observable and archived.
 First use its synchronous path.  Add asynchronous blocks only after the
 ownership and publication path is already correct.
 
-* NEXT Send one declared Objective-C message
+* DONE Send one declared Objective-C message
 :PROPERTIES:
 :ID: 3FW8Z5
 :END:
@@ -392,12 +422,26 @@ ownership and publication path is already correct.
 Intent: establish the smallest inspectable Objective-C substrate without
 coupling it to canvas presentation or trying to bind all of Metal.
 
-Evidence: the pinned SDK exports =objc_getClass=, =sel_registerName=, and
-=objc_msgSend=; =MTLCreateSystemDefaultDevice= gives the experiment a real
-protocol-typed Metal object.  LispWorks demonstrates the wider architecture,
-but luv needs evidence through SBCL, CFFI, and the pinned arm64 environment.
+Evidence:
 
-Done when:
+- [[file:../objective-c/runtime.lisp][The runtime]] defines receiver objects, the declaration metaclass, the
+  runtime × message =invoke= protocol, semantic trace snapshots, conditions,
+  and the thin =define-objective-c-message= definer.
+- [[file:../objective-c/foundation.lisp][The Foundation vocabulary]] provides explicit retain/release, owned-object,
+  and autorelease scopes.  [[file:../objective-c/metal-probe.lisp][The Metal proof]] returns an owned
+  =MTLDevice= wrapper and declares its borrowed =name= and scalar =registryID=
+  messages.
+- [[file:../tests/objective-c.lisp][Four cold tests]] cover declaration metadata, native identity, owned versus
+  borrowed release behavior, released-object rejection, semantic tracing, and
+  the real device probe.
+- =make objective-c-probe= exits normally in a fresh SBCL process with bounded
+  evidence: runtime class =AGXG14SDevice=, protocol =MTLDevice=, name
+  =Apple M2 Pro=, and registry ID =4294968342= on this machine.
+- Re-evaluating the =device-registry-id= declaration through =./sly= preserved
+  the class metaobject (=EQ= true), replaced its method cleanly, and returned
+  the same live registry ID.
+
+Done when (met):
 
 - a small ASDF system loads the Objective-C runtime and Metal framework;
 - a declared, typed message queries an =MTLDevice= property and returns an
@@ -408,7 +452,7 @@ Done when:
   success without dereferencing arbitrary pointers; and
 - the experiment exits cleanly in a fresh non-Emacs process.
 
-* TODO Present a Metal clear through the existing SDL canvas
+* NEXT Present a Metal clear through the existing SDL canvas
 :PROPERTIES:
 :ID: 5A7QDE
 :END:

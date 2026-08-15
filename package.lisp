@@ -18,6 +18,7 @@ of invocations; INVOKE dispatches on both the invoker and the invocation.")
            #:invocation-condition
            #:invoker
            #:invoke
+           #:snapshot-invocation-object
            #:snapshot-invocation-value
            #:snapshot-invocation-arguments
            #:invocation-trace
