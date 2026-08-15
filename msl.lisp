@@ -30,7 +30,11 @@
 (defclass msl-field ()
   ((type :initarg :type :reader msl-field-type)
    (name :initarg :name :reader msl-field-name)
-   (attribute :initarg :attribute :reader msl-field-attribute)))
+   (attribute :initarg :attribute :reader msl-field-attribute)
+   (origin :initarg :origin :reader msl-field-origin))
+  (:documentation
+   "One rendered structure field retaining its shader declaration for
+#YA4KDP."))
 
 (defclass msl-structure-declaration ()
   ((name :initarg :name :reader msl-structure-name)
@@ -39,16 +43,25 @@
 (defclass msl-parameter ()
   ((type :initarg :type :reader msl-parameter-type)
    (name :initarg :name :reader msl-parameter-name)
-   (attribute :initarg :attribute :reader msl-parameter-attribute)))
+   (attribute :initarg :attribute :reader msl-parameter-attribute)
+   (origin :initarg :origin :initform nil :reader msl-parameter-origin))
+  (:documentation
+   "One entry-point parameter and the resource, if any, which produced it."))
 
 (defclass msl-variable-statement ()
   ((type :initarg :type :reader msl-variable-statement-type)
    (name :initarg :name :reader msl-variable-statement-name)
-   (value :initarg :value :reader msl-variable-statement-value)))
+   (value :initarg :value :reader msl-variable-statement-value)
+   (origin :initarg :origin :reader msl-variable-statement-origin))
+  (:documentation
+   "One local declaration retaining its semantic shader binding."))
 
 (defclass msl-output-statement ()
   ((field :initarg :field :reader msl-output-statement-field)
-   (value :initarg :value :reader msl-output-statement-value)))
+   (value :initarg :value :reader msl-output-statement-value)
+   (origin :initarg :origin :reader msl-output-statement-origin))
+  (:documentation
+   "One output assignment retaining its semantic shader assignment."))
 
 (defclass msl-entry-point ()
   ((stage :initarg :stage :reader msl-entry-point-stage)
@@ -138,6 +151,175 @@
     (format nil "~A~Af"
             normalized
             (if (or (find #\. normalized) (find #\e normalized)) "" ".0"))))
+
+(defun msl-semantic-words (name)
+  (substitute #\Space #\- (string-downcase (symbol-name name))))
+
+(defun msl-factor-description (factor)
+  (let ((name (msl-semantic-words (car factor)))
+        (power (cdr factor)))
+    (case power
+      (1 name)
+      (2 (format nil "~A squared" name))
+      (3 (format nil "~A cubed" name))
+      (otherwise (format nil "~A to the ~A power" name power)))))
+
+(defun msl-factor-product-description (factors)
+  (format nil "~{~A~^ times ~}" (mapcar #'msl-factor-description factors)))
+
+(defun msl-tensor-description (order)
+  (case order
+    (0 "scalar")
+    (1 "vector")
+    (otherwise (format nil "tensor of order ~D" order))))
+
+(defun msl-character-description (specification)
+  (case (math:quantity-specification-character specification)
+    (:point "point-valued")
+    (:absolute
+     (if (math:quantity-specification-non-negative-p specification)
+         "non-negative absolute"
+         "absolute"))
+    (:difference "difference-valued")))
+
+(defun msl-quantity-predicate (specification)
+  (let* ((kind (math:quantity-specification-kind specification))
+         (unit-factors
+           (math:unit-expression-factors
+            (math:quantity-specification-unit specification)))
+         (dimension-factors
+           (math:dimension-factors
+            (math:quantity-specification-dimension specification))))
+    (with-output-to-string (stream)
+      (format stream "a ~A ~A"
+              (msl-character-description specification)
+              (msl-tensor-description
+               (math:quantity-specification-tensor-order specification)))
+      (when kind
+        (format stream " in the ~A kind" (msl-semantic-words kind)))
+      (cond
+        ((and (null unit-factors) (null dimension-factors))
+         (write-string ", unitless and dimensionless" stream))
+        (t
+         (if unit-factors
+             (format stream ", measured in ~A units"
+                     (msl-factor-product-description unit-factors))
+             (write-string ", unitless" stream))
+         (if dimension-factors
+             (format stream ", with ~A dimension"
+                     (msl-factor-product-description dimension-factors))
+             (write-string ", and dimensionless" stream)))))))
+
+(defun msl-capitalize-sentence (text)
+  (if (plusp (length text))
+      (concatenate 'string
+                   (string (char-upcase (char text 0)))
+                   (subseq text 1))
+      text))
+
+(defun msl-quantity-sentence (specification)
+  (let ((name (math:quantity-specification-name specification)))
+    (format nil "~A is ~A."
+            (if name
+                (msl-capitalize-sentence (msl-semantic-words name))
+                "This value")
+            (msl-quantity-predicate specification))))
+
+(defun msl-lane-name (positions)
+  (coerce (mapcar (lambda (position) (char "xyzw" position)) positions)
+          'string))
+
+(defun msl-layout-sentences (layout &key sampled-p)
+  (let ((occupied nil)
+        (sentences nil))
+    (dolist (projection (math:quantity-layout-projections layout))
+      (let* ((positions (math:quantity-projection-positions projection))
+             (specification
+               (math:quantity-projection-specification projection))
+             (name (math:quantity-specification-name specification))
+             (lanes (msl-lane-name positions)))
+        (setf occupied (nconc (copy-list positions) occupied))
+        (push
+         (format nil "The ~A~A ~A ~A ~A~A."
+                 (if sampled-p "sampled " "")
+                 lanes
+                 (if (= (length positions) 1) "lane" "lanes")
+                 (if (= (length positions) 1) "holds" "hold")
+                 (if name (msl-semantic-words name) "an unnamed quantity")
+                 (format nil " as ~A" (msl-quantity-predicate specification)))
+         sentences)))
+    (let ((uncovered
+            (loop for position below (math:quantity-layout-extent layout)
+                  unless (member position occupied)
+                    collect position)))
+      (when uncovered
+        (push
+         (format nil "The ~A~A ~A ~A no quantity annotation."
+                 (if sampled-p "sampled " "")
+                 (msl-lane-name uncovered)
+                 (if (= (length uncovered) 1) "lane" "lanes")
+                 (if (= (length uncovered) 1) "has" "have"))
+         sentences)))
+    (nreverse sentences)))
+
+(defgeneric msl-origin-quantity-specification (origin)
+  (:documentation "Return the homogeneous quantity carried by ORIGIN."))
+
+(defmethod msl-origin-quantity-specification ((origin t))
+  nil)
+
+(defmethod msl-origin-quantity-specification
+    ((origin spv:shader-variable-declaration))
+  (spv:shader-declaration-quantity-specification origin))
+
+(defmethod msl-origin-quantity-specification ((origin spv:shader-binding))
+  (spv:shader-expression-quantity-specification
+   (spv:shader-binding-expression origin)))
+
+(defmethod msl-origin-quantity-specification
+    ((origin spv:shader-output-assignment))
+  (spv:shader-expression-quantity-specification
+   (spv:shader-assignment-value origin)))
+
+(defmethod msl-origin-quantity-specification ((origin spv:shader-resource))
+  (spv:shader-resource-sample-quantity-specification origin))
+
+(defgeneric msl-origin-quantity-layout (origin)
+  (:documentation "Return the component quantity layout carried by ORIGIN."))
+
+(defmethod msl-origin-quantity-layout ((origin t))
+  nil)
+
+(defmethod msl-origin-quantity-layout
+    ((origin spv:shader-variable-declaration))
+  (spv:shader-declaration-quantity-layout origin))
+
+(defmethod msl-origin-quantity-layout ((origin spv:shader-binding))
+  (spv:shader-expression-quantity-layout
+   (spv:shader-binding-expression origin)))
+
+(defmethod msl-origin-quantity-layout
+    ((origin spv:shader-output-assignment))
+  (spv:shader-expression-quantity-layout
+   (spv:shader-assignment-value origin)))
+
+(defmethod msl-origin-quantity-layout ((origin spv:shader-resource))
+  (spv:shader-resource-sample-quantity-layout origin))
+
+(defun msl-semantic-sentences (origin &key sampled-p unannotated-p)
+  (let ((specification (msl-origin-quantity-specification origin))
+        (layout (msl-origin-quantity-layout origin)))
+    (cond
+      (specification (list (msl-quantity-sentence specification)))
+      (layout (msl-layout-sentences layout :sampled-p sampled-p))
+      (unannotated-p (list "This numeric value has no quantity annotation.")))))
+
+(defun write-msl-semantic-comments
+    (origin stream indentation &key sampled-p unannotated-p)
+  (dolist (sentence
+           (msl-semantic-sentences
+            origin :sampled-p sampled-p :unannotated-p unannotated-p))
+    (format stream "~A// ~A~%" indentation sentence)))
 
 (defun note-msl-occurrence (context expression text)
   (let ((occurrence
@@ -466,7 +648,8 @@
        :type (msl-type-name (spv:shader-declaration-type declaration)
                             (spv:shader-object-source-form declaration))
        :name (msl-identifier (spv:shader-object-name declaration))
-       :attribute (msl-interface-attribute stage declaration)))
+       :attribute (msl-interface-attribute stage declaration)
+       :origin declaration))
     declarations)))
 
 (defun msl-uniform-structure (resource)
@@ -481,7 +664,7 @@
        :type (msl-type-name (spv:shader-declaration-type member)
                             (spv:shader-object-source-form member))
        :name (msl-identifier (spv:shader-object-name member))
-       :attribute nil))
+       :attribute nil :origin member))
     (spv:shader-uniform-block-members resource))))
 
 (defun msl-resource-parameter (resource)
@@ -501,17 +684,20 @@
         :type (format nil "constant ~A&"
                       (msl-structure-name-for
                        (spv:shader-object-name resource)))
-        :name name :attribute (format nil "[[buffer(~D)]]" binding)))
+        :name name :attribute (format nil "[[buffer(~D)]]" binding)
+        :origin resource))
       (:texture-2d
        (make-instance
         'msl-parameter
         :type (msl-type-name type (spv:shader-object-source-form resource))
-        :name name :attribute (format nil "[[texture(~D)]]" binding)))
+        :name name :attribute (format nil "[[texture(~D)]]" binding)
+        :origin resource))
       (:sampler
        (make-instance
         'msl-parameter
         :type "sampler" :name name
-        :attribute (format nil "[[sampler(~D)]]" binding)))
+        :attribute (format nil "[[sampler(~D)]]" binding)
+        :origin resource))
       (otherwise
        (error 'spv:shader-language-error
               :form (spv:shader-object-source-form resource)
@@ -539,6 +725,8 @@
     ((declaration msl-structure-declaration) stream)
   (format stream "struct ~A {~%" (msl-structure-name declaration))
   (dolist (field (msl-structure-fields declaration))
+    (write-msl-semantic-comments
+     (msl-field-origin field) stream "  " :unannotated-p t)
     (format stream "  ~A ~A~@[ ~A~];~%"
             (msl-field-type field)
             (msl-field-name field)
@@ -548,6 +736,9 @@
 (defgeneric write-msl-statement (statement stream))
 
 (defmethod write-msl-statement ((statement msl-variable-statement) stream)
+  (write-msl-semantic-comments
+   (msl-variable-statement-origin statement) stream "  "
+   :unannotated-p t)
   (format stream "  ~A ~A = ~A;~%"
           (msl-variable-statement-type statement)
           (msl-variable-statement-name statement)
@@ -572,7 +763,13 @@
   (loop for parameter in (msl-entry-point-parameters entry-point)
         for firstp = t then nil
         do (unless firstp
-             (format stream ",~%    "))
+             (format stream ",~%"))
+           (when (msl-parameter-origin parameter)
+             (write-msl-semantic-comments
+              (msl-parameter-origin parameter) stream "    "
+              :sampled-p t))
+           (unless firstp
+             (write-string "    " stream))
            (format stream "~A ~A~@[ ~A~]"
                    (msl-parameter-type parameter)
                    (msl-parameter-name parameter)
@@ -640,7 +837,7 @@ This is the sibling target proof described by #58IDSR."
                  :type (msl-type-name
                         (spv:shader-expression-type expression)
                         (spv:shader-expression-source-form expression))
-                 :name name :value value)
+                 :name name :value value :origin binding)
                 statements))))
     (dolist (statement (spv:shader-specification-statements specification))
       (push (make-instance
@@ -649,7 +846,8 @@ This is the sibling target proof described by #58IDSR."
                      (spv:shader-object-name
                       (spv:shader-assignment-output statement)))
              :value (lower-msl-expression
-                     context (spv:shader-assignment-value statement)))
+                     context (spv:shader-assignment-value statement))
+             :origin statement)
             statements))
     (maphash (lambda (expression occurrences)
                (setf (gethash expression

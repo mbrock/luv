@@ -403,7 +403,7 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on (#:luv/canvas/metal
-               #:luv/luvcraft/shaders
+               #:luv/luvcraft
                #:rove)
   :components ((:module "tests"
                 :components ((:file "metal"))))

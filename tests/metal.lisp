@@ -8,6 +8,29 @@
 (objc:define-objective-c-message make-test-metal-layer
     ("new" :object :ownership :owned :class "CAMetalLayer"))
 
+(defun install-metal-live-probe-vertex ()
+  (eval
+   '(luv.spir-v:define-shader-method
+        luv.spir-v:shader-specification-for
+        metal-live-probe-vertex-specification
+        ((role (eql :metal-live-probe)) (stage (eql :vertex)))
+        (:stage :vertex
+         :inputs ((position :vec3 :location 0))
+         :outputs ((clip-position :vec4 :built-in :position)))
+      (let* ((clip (luv.spir-v:vec4 position 1.0)))
+        (luv.spir-v:set-output clip-position clip)))))
+
+(defun install-metal-live-probe-fragment (red &key invalid-p)
+  (eval
+   `(luv.spir-v:define-shader-method
+        luv.spir-v:shader-specification-for
+        metal-live-probe-fragment-specification
+        ((role (eql :metal-live-probe)) (stage (eql :fragment)))
+        (:stage ,(if invalid-p :compute :fragment)
+         :outputs ((color :vec4 :location 0)))
+      (let* ((rgba (luv.spir-v:vec4 ,red 0.25 0.75 1.0)))
+        (luv.spir-v:set-output color rgba)))))
+
 (deftest metal-messages-retain-structure-abi
   (let ((size
           (objc:objective-c-message-description
@@ -190,4 +213,49 @@
                    :language :mathematical :code specification)))
            (ok (typep module 'metal-gpu-shader-module)))
       (when module (destroy module))
+      (destroy device))))
+
+(deftest live-metal-pipeline-retains-last-good-and-recovers
+  (install-metal-live-probe-vertex)
+  (install-metal-live-probe-fragment 0.25)
+  (let ((device
+          (request-gpu-device (make-instance 'metal-gpu-provider)))
+        (artifact nil))
+    (unwind-protect
+         (progn
+           (setf artifact
+                 (luv::make-live-shader-pipeline
+                  :role :metal-live-probe
+                  :vertex-role :metal-live-probe
+                  :label "live Metal pipeline probe"
+                  :device device :layout nil
+                  :vertex-buffers
+                  '((:array-stride 12
+                     :attributes
+                     ((:shader-location 0 :offset 0 :format :float32x3))))
+                  :target-format :bgra8-unorm
+                  :primitive '(:topology :triangle-list)
+                  :depth-stencil nil))
+           (let ((first-pipeline
+                   (luv::live-shader-pipeline-native-pipeline artifact)))
+             (ok (typep first-pipeline 'metal-gpu-render-pipeline))
+             (ok (eq :installed (live-shader-pipeline-status artifact)))
+             (install-metal-live-probe-fragment 0.5 :invalid-p t)
+             (luv::refresh-live-shader-pipeline artifact)
+             (ok (eq :failed (live-shader-pipeline-status artifact)))
+             (ok (eq first-pipeline
+                     (luv::live-shader-pipeline-native-pipeline artifact)))
+             (ok (not (luv::metal-object-destroyed-p first-pipeline)))
+             (install-metal-live-probe-fragment 0.75)
+             (luv::refresh-live-shader-pipeline artifact)
+             (let ((replacement
+                     (luv::live-shader-pipeline-native-pipeline artifact)))
+               (ok (eq :installed (live-shader-pipeline-status artifact)))
+               (ok (= 1 (live-shader-pipeline-installed-revision artifact)))
+               (ok (not (eq first-pipeline replacement)))
+               (ok (luv::metal-object-destroyed-p first-pipeline))
+               (ok (typep replacement 'metal-gpu-render-pipeline)))))
+      (install-metal-live-probe-fragment 0.25)
+      (when artifact
+        (luv::release-live-shader-pipeline artifact))
       (destroy device))))

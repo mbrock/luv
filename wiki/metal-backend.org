@@ -14,7 +14,7 @@ a device-owned =MTL4Compiler= and becomes a live =MTLLibrary=.  The unchanged
 luvcraft vertex and fragment specifications now link into a real
 =MTLRenderPipelineState= with their vertex layout and depth state.  The
 remaining backend threshold is resource binding, draw encoding, and
-transactional publication into the presented canvas.
+submission-aware retirement in the presented canvas.
 
 #+begin_example
 SDL canvas and events
@@ -39,7 +39,7 @@ The seams remain independently understandable: SDL owns the host,
 language owns target-specific lowering.  They are now staged proofs of one
 backend rather than three reasons to postpone starting it.  #5A7QDE records
 the executable presentation half, #58IDSR the compiler half, and #PH57K5 the
-remaining live draw and publication join.
+remaining live draw and retirement join.
 #NABRMK records why the second backend matters and #HXUGEA why Metal 4 is the
 right native model for it.
 
@@ -168,6 +168,39 @@ opaque accumulated string or a general C AST.  The shader lab should be able
 to select a Lisp expression and show the MSL it caused just as it shows
 SPIR-V instruction occurrences.  Unsupported target operations should signal
 a source-located shader-language condition rather than silently approximate.
+
+* Generated MSL remains a view of semantic objects
+:PROPERTIES:
+:ID: YA4KDP
+:END:
+
+Generated source is useful to read, but it is not a new semantic store.  The
+MSL fields, parameters, local statements, and output statements retain the
+declaration, resource, binding, or assignment which produced them.  Rendering
+asks those existing #C6E3LA objects for their quantity specification or
+component layout and writes a short English explanation beside the ordinary
+Metal representation.  Missing annotations remain visible rather than being
+inferred from a nearby use.
+
+This establishes one more provenance link beneath #58IDSR:
+
+#+begin_example
+shader declaration or binding
+        | identity retained by
+        v
+structured MSL node ---- renders ----> comment + Metal declaration
+        |
+        `---- may later record ----> exact source range
+#+end_example
+
+The existing expression occurrences retain an expression and its rendered
+text, but not yet the final character range in the document.  A useful next
+tooling step is therefore small: let the renderer record half-open ranges for
+fields, statements, comments, and expression occurrences.  The shader lab can
+then move in either direction between a visible piece of generated MSL and the
+live semantic object which explains it.  Type aliases may later improve the
+spelling of homogeneous quantities, but they do not replace this relation and
+cannot describe heterogeneous lane layouts.
 
 * The Metal 4 compiler belongs to the live backend
 :PROPERTIES:
@@ -355,6 +388,15 @@ device-owned path and reports the expected luvcraft entry points, one 48-byte
 four-attribute vertex buffer, =MTLRenderPipelineState=, and
 =MTLDepthStencilState= on the Apple M2 Pro.  What remains is the resource and
 command side of the join, not shader or pipeline plausibility.
+
+The live transaction now has native Metal evidence as well.  A focused test
+installs a real =MTLRenderPipelineState= behind =live-shader-pipeline=, replaces
+its fragment method with a deliberately unsupported candidate, and observes
+=:failed= while the first pipeline remains installed and undestroyed.  A
+second valid replacement publishes revision 1 and only then destroys the old
+Metal pipeline.  This proves synchronous last-known-good publication and
+recovery through the shared owner; commands in flight still require the
+submission-aware retirement frontier which the first real draw will expose.
 
 Done when: redefining the block material compiles MSL, publishes a complete
 Metal pipeline at the owning frame boundary, keeps the previous pipeline after

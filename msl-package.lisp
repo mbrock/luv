@@ -1,6 +1,7 @@
 (defpackage #:luv.msl
   (:use #:cl)
-  (:local-nicknames (#:spv #:luv.spir-v))
+  (:local-nicknames (#:math #:luv.arithmetic)
+                    (#:spv #:luv.spir-v))
   (:documentation
    "Structured Metal Shading Language lowering for luv's shader graph.")
   (:export #:msl-target
@@ -13,6 +14,7 @@
            #:msl-field-type
            #:msl-field-name
            #:msl-field-attribute
+           #:msl-field-origin
            #:msl-structure-declaration
            #:msl-structure-name
            #:msl-structure-fields
@@ -20,13 +22,16 @@
            #:msl-parameter-type
            #:msl-parameter-name
            #:msl-parameter-attribute
+           #:msl-parameter-origin
            #:msl-variable-statement
            #:msl-variable-statement-type
            #:msl-variable-statement-name
            #:msl-variable-statement-value
+           #:msl-variable-statement-origin
            #:msl-output-statement
            #:msl-output-statement-field
            #:msl-output-statement-value
+           #:msl-output-statement-origin
            #:msl-entry-point
            #:msl-entry-point-stage
            #:msl-entry-point-return-type

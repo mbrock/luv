@@ -11,6 +11,9 @@
         :test (lambda (left right)
                 (string-equal (symbol-name left) (symbol-name right)))))
 
+(defun msl-named (name objects name-function)
+  (find name objects :key name-function :test #'string=))
+
 (deftest block-fragment-lowers-directly-to-structured-msl
   (let* ((specification (spv:block-world-fragment-specification))
          (document (msl:compile-msl specification))
@@ -75,6 +78,66 @@
     (ok (some (lambda (occurrence)
                 (search "albedo" (msl:msl-source-occurrence-text occurrence)))
               occurrences))))
+
+(deftest generated-msl-explains-quantities-in-plain-language
+  (let* ((specification (spv:block-world-vertex-specification))
+         (document (msl:compile-msl specification))
+         (source (msl:msl-document-source document))
+         (input (first (spv:shader-specification-inputs specification)))
+         (input-structure (first (msl:msl-document-declarations document)))
+         (field
+           (msl-named "world_position"
+                      (msl:msl-structure-fields input-structure)
+                      #'msl:msl-field-name))
+         (binding (binding-named 'view-z specification))
+         (output
+           (first (spv:shader-specification-statements specification)))
+         (statement
+           (msl-named
+            "view_z"
+            (msl:msl-entry-point-statements
+             (msl:msl-document-entry-point document))
+            (lambda (statement)
+              (and (typep statement 'msl:msl-variable-statement)
+                   (msl:msl-variable-statement-name statement))))))
+    (ok (search
+         "World position is a point-valued vector in the length kind, measured in metre units, with length dimension."
+         source))
+    (ok (search
+         "The xy lanes hold texture uv as a point-valued vector"
+         source))
+    (ok (search "This numeric value has no quantity annotation." source))
+    (ok (search
+         "View distance is a difference-valued scalar in the length kind"
+         source))
+    (ok (eq input (msl:msl-field-origin field)))
+    (ok (eq binding (msl:msl-variable-statement-origin statement)))
+    (ok (eq output
+            (msl:msl-output-statement-origin
+             (find-if (lambda (statement)
+                        (typep statement 'msl:msl-output-statement))
+                      (msl:msl-entry-point-statements
+                       (msl:msl-document-entry-point document))))))))
+
+(deftest texture-parameters-describe-their-sampled-quantity-layout
+  (let* ((specification (spv:block-world-fragment-specification))
+         (document (msl:compile-msl specification))
+         (source (msl:msl-document-source document))
+         (resource
+           (find "BLOCK-ATLAS"
+                 (spv:shader-specification-resources specification)
+                 :key (lambda (resource)
+                        (symbol-name (spv:shader-object-name resource)))
+                 :test #'string=))
+         (parameter
+           (msl-named
+            "block_atlas"
+            (msl:msl-entry-point-parameters
+             (msl:msl-document-entry-point document))
+            #'msl:msl-parameter-name)))
+    (ok (search "The sampled xyz lanes hold linear rgb" source))
+    (ok (search "The sampled w lane holds opacity" source))
+    (ok (eq resource (msl:msl-parameter-origin parameter)))))
 
 (deftest target-context-precedes-operator-identity
   (ok (equal
