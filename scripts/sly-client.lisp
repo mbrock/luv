@@ -29,6 +29,9 @@
 (defparameter *server-start-timeout* 120)
 (defparameter *default-output-limit* (* 256 1024))
 
+(defun attach-only-p ()
+  (not (null (sb-ext:posix-getenv "LUV_SLYNK_ATTACH_ONLY"))))
+
 (defstruct output-budget
   limit
   (written 0)
@@ -256,7 +259,10 @@
 
 (defun ensure-server ()
   (unless (connection-available-p)
-    (start-server :quiet t)))
+    (if (attach-only-p)
+        (error "The requested external Slynk endpoint is not accepting connections on ~A:~D"
+               *host* *port*)
+        (start-server :quiet t))))
 
 (defmacro with-slynk-connection ((stream) &body body)
   `(let ((socket (make-instance 'sb-bsd-sockets:inet-socket
@@ -592,6 +598,14 @@
       (error () nil))))
 
 (defun stop-server ()
+  (when (attach-only-p)
+    (let ((listener-pid (listener-process-id)))
+      (if listener-pid
+          (format t "External Slynk pid ~D is listening on ~A:~D; leaving it running.~%"
+                  listener-pid *host* *port*)
+          (format t "The external Slynk endpoint is not running on ~A:~D.~%"
+                  *host* *port*)))
+    (return-from stop-server nil))
   (let ((connection-p (connection-available-p))
         (pid (pid-file-pid))
         (listener-pid (listener-process-id)))
@@ -620,6 +634,14 @@
        (error "Timed out stopping luv Slynk pid ~D" pid)))))
 
 (defun server-status ()
+  (when (attach-only-p)
+    (let ((listener-pid (listener-process-id)))
+      (if listener-pid
+          (format t "External Slynk is listening on ~A:~D (pid ~D).~%"
+                  *host* *port* listener-pid)
+          (format t "External Slynk is not accepting connections on ~A:~D.~%"
+                  *host* *port*)))
+    (return-from server-status nil))
   (let ((connection-p (connection-available-p))
         (pid (pid-file-pid))
         (listener-pid (listener-process-id)))
@@ -935,6 +957,8 @@
         (terpri)))))
 
 (defun usage (&optional (stream *standard-output*))
+  (format stream
+          "Prefix a client command with --luvcraft to attach to the running standalone game.~%~%")
   (format stream "Usage: ./sly start|stop|status|log~%")
   (format stream "       ./sly eval CODE [--package PACKAGE]~%")
   (format stream "       ./sly parinfer [--check|--diff|--write] [--strict] [--file FILE|CODE|FILE]~%")

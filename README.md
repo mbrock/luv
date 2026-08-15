@@ -89,6 +89,7 @@ needed:
 ```sh
 make              # builds ./build/luvcraft
 ./build/luvcraft   # opens the game window
+./sly --luvcraft eval '(type-of luvcraft:*session*)' # evaluates in that game
 make test          # runs the model and block-world test suites
 make smoke         # runs the built program headlessly and writes a PNG
 ```
@@ -114,6 +115,11 @@ agent or you want the local one-shot SLY client details, read
 ./sly eval '(luv:stop-clear-color-demo *demo*)' --package LUV
 ./sly stop
 ```
+
+Every standalone luvcraft process also embeds its own Slynk listener on an
+available loopback port. While its window is open, `./sly --luvcraft ...`
+attaches to that exact game process; `luvcraft:*session*` is its live session.
+Plain `./sly ...` continues to address the separate durable development image.
 
 In Emacs, this checkout's directory locals define a `luv` SLY implementation
 that enters `nix develop`, loads `sly-init.lisp`, and connects to the same kind

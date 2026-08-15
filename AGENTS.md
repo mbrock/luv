@@ -58,6 +58,12 @@ Useful starting points:
 
 `./sly status`, `./sly start`, and `./sly stop` manage the image when it is
 the `./sly`-managed one (`sly-server.lisp`, which loads `luv` and `luv-wiki`).
+The standalone `./build/luvcraft` embeds a separate Slynk listener.  While it
+is running, use `./sly --luvcraft eval`, `inspect`, `describe`, and the other
+ordinary client commands to work in that exact game process;
+`luvcraft:*session*` names its live session.  Plain `./sly` still targets the
+durable development image.
+
 The image is only as current as the environment it was started in: when it
 cannot find a system or component that the flake now provides (`Component
 SPINNERET not found`), or otherwise reflects an old world (a package or

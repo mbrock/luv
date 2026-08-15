@@ -4,6 +4,33 @@ set -eu
 
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
+if [ "${1:-}" = "--luvcraft" ]; then
+  shift
+  endpoint="$project_root/build/luvcraft.slynk"
+  if [ ! -r "$endpoint" ]; then
+    echo "sly: no running luvcraft Slynk endpoint at $endpoint" >&2
+    exit 1
+  fi
+  if ! read -r luvcraft_pid luvcraft_port < "$endpoint"; then
+    echo "sly: could not read luvcraft Slynk endpoint at $endpoint" >&2
+    exit 1
+  fi
+  case "$luvcraft_pid:$luvcraft_port" in
+    *[!0-9:]*|:*|*:)
+      echo "sly: invalid luvcraft Slynk endpoint at $endpoint" >&2
+      exit 1
+      ;;
+  esac
+  if ! kill -0 "$luvcraft_pid" 2>/dev/null; then
+    rm -f "$endpoint"
+    echo "sly: luvcraft pid $luvcraft_pid is no longer running" >&2
+    exit 1
+  fi
+  export LUV_SLYNK_HOST=127.0.0.1
+  export LUV_SLYNK_PORT="$luvcraft_port"
+  export LUV_SLYNK_ATTACH_ONLY=1
+fi
+
 if [ "${LUV_NIX_SHELL:-}" != 1 ]; then
   exec "$project_root/scripts/dev" "$project_root/sly" "$@"
 fi
