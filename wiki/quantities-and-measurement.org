@@ -177,6 +177,108 @@ at compile time.  In Lisp the important requirement is semantic, not that
 every value be boxed: a point-valued field may still occupy a raw array, while
 its field specification controls the operations made available on it.
 
+* Three affine characters: point, absolute, difference
+:PROPERTIES:
+:ID: LNRY72
+:END:
+
+The two-way split above is mp-units V2, and it is what =affine-p= in
+[[file:../arithmetic.lisp][=arithmetic.lisp=]] implements today: a specification is either a point or
+a difference.  mp-units V3's central discovery (#QFCPRA) is that this misses
+the commonest case.  Most physical equations are written over *absolutes*:
+non-negative amounts measured from a true zero, on a ratio scale, forming a
+convex cone rather than a vector space.  A mass, a duration, a distance-as-size
+are absolutes; so is nearly everything luvcraft's own vocabulary names.
+
+The observation that makes this concrete for luv is in
+[[file:../luvcraft/quantities.lisp][=luvcraft/quantities.lisp=]].  =:opacity=, =:ambient-occlusion=,
+=:sky-light-level=, =:block-light-level=, =:material-emission=,
+=:fog-amount=, =:day-factor=, =:linear-rgb=, =:view-distance=,
+=:world-distance=, =:shadow-filter-radius= are every one a non-negative
+amount from a physical zero.  None is a signed difference, and none is a
+point.  Under the two-way model they are all "differences" by default, so the
+system cannot say that a light level is non-negative, cannot distinguish "the
+difference between two light levels" (signed, a genuine difference) from "a
+light level" (cone), and cannot object to negating an opacity.  Moppe's own
+catalogue — the system's primary source — marks =proportion=, =probability=,
+=standing_water_depth=, and =sediment_volume= as =non_negative=; that
+specifier was dropped in translation.
+
+The V3 operation table, restated in luv's terms with =affine-p= generalized
+to a three-valued *character*:
+
+#+begin_example
+                point       absolute    difference
+point       +   error       point       point
+absolute    +   point       absolute    absolute
+difference  +   point       absolute    difference
+
+point       -   difference  point       point
+absolute    -   error       difference  absolute
+difference  -   error       difference  difference
+
+scale by number:  point error; absolute (non-negative factor) absolute;
+                  difference difference
+negate:           point error; absolute -> difference; difference difference
+abs / norm:       difference -> absolute
+#+end_example
+
+Points keep the rules #P7A4HX already states.  Absolutes and differences mix
+freely in addition because a signed difference shifting an amount does not
+destroy its zero anchor; the result stays absolute, with a contract check
+that a =non-negative= specification does not go below zero.  Subtracting two
+absolutes yields a difference — the case that today collapses into "same
+thing as the operands."  Vector quantities are always differences (there is
+no absolute vector); a norm takes a vector difference to a scalar absolute,
+which is exactly what luv's =dot=-derived magnitudes should be.
+
+A second observation from the built system: =affine-p= is a property of a
+specification instance, set at use sites (=:world-position :affine-p t= in
+the ABI declarations), not of the quantity definition.  The same
+=:view-distance= could be a point in one declaration and a difference in
+another.  mp-units puts affine character on the spec and =non_negative= on
+the kind or spec (#MCUKKW).  The character seems to belong on the
+=quantity-definition= as its default, with a use-site override only for the
+rare quantity that legitimately appears both ways — and =non-negative= as a
+definition-level specifier that the additive rules consult.
+
+Restraint, as with the field axis: the two-way model has been sufficient
+for the shaders shipped so far because shading arithmetic rarely subtracts
+absolutes.  The moment it does — a light-level delta for temporal filtering,
+an exposure difference, a signed AO adjustment — the missing case becomes a
+silent semantic hole rather than a checked error.  #SYUACW is the probe.
+
+* NEXT Generalize affine-p to a three-valued character
+:PROPERTIES:
+:ID: SYUACW
+:END:
+
+Intent: replace the boolean =affine-p= on =quantity-specification= with a
+character of =:point=, =:absolute=, or =:difference=, add a
+=:non-negative= specifier at the definition level, and implement the V3
+operation table (#LNRY72) in =additive-pair= and =multiplicative-pair= —
+without changing any generated shader module.
+
+Evidence to gather:
+
+- =tests/arithmetic.lisp= gains the executable claims: absolute minus
+  absolute is a difference; absolute plus difference stays absolute;
+  negating an absolute yields a difference; scaling a point remains an
+  error; a =dot=-derived magnitude may be interpreted as an absolute.
+- =luvcraft/quantities.lisp= declares its amounts absolute and non-negative
+  at the definition, and the ABI declarations drop per-site =:affine-p t=
+  where the definition now supplies the character; the seven production
+  shader modules and the smoke MD5 remain byte-identical.
+- One deliberately wrong expression — negating =:opacity=, or adding two
+  =:world-position= points — fails at parse time with provenance, where
+  the first is not caught today.
+- A note on backward compatibility for =:affine-p t= as a spelling of
+  =:character :point= during the transition.
+
+Done when: the specification carries a three-valued character with the V3
+rules, luvcraft's vocabulary states its characters at the definition, the
+new claims are tests, and generated shader code is unchanged.
+
 * Tensor order is independent of dimension
 :PROPERTIES:
 :ID: T2K8MJ
@@ -831,6 +933,61 @@ swizzles select the three component values.  It does not materialize an extra
 SPIR-V stays byte-identical.  Future linear, affine, normal, and projective map
 definitions can share this separation: dense coefficients are representation;
 the named map owns meaning.
+
+* Where luv's semantic arithmetic goes beyond its sources
+:PROPERTIES:
+:ID: KXVP6Q
+:END:
+
+The research pages (#6PQKNU, #PBADKM, #C4XGYX) were written in parallel
+with the implementation rather than before it, so this figure records
+the comparison after the fact, in the source-study voice: which of the
+built mechanisms are adoptions, which are extensions with no counterpart
+in the sources, and which source ideas were considered and declined.
+
+Two mechanisms have no counterpart in mp-units, moppe, or measures:
+
+- *Semantic maps* (#SM4DFB).  mp-units gives tensor character and inner
+  products for the values a matrix holds; moppe's =atelier/matrix.hh=
+  converts quantities to raw before a =simd_float4x4=; measures has no
+  vectors at all.  None can say what space a transform accepts, what it
+  produces, or whether homogeneous division belongs to the operation.
+  =define-projective-shader-map= keeps that relation as an inspectable
+  object and lowers it byte-identically.  This is the largest single
+  advance over the source material.
+- *Heterogeneous layouts as semantic products* (#VC7VFY).  mp-units'
+  =vector_components= handles the homogeneous case — a genuine vector
+  quantity opting into typed axis decomposition — and luv adopts that.
+  The extension is the recognition that a GPU register is often /not/ a
+  vector quantity but a packing (texture point plus ambient occlusion),
+  where arbitrary swizzles must be errors and arithmetic on the whole is
+  meaningless.  mp-units' "why a quantity has a character" post argues
+  the type cannot be trusted to reveal character; layouts are the
+  constructive answer for representations we control.
+
+Two source ideas were considered against the built system and declined,
+recorded here so they are not relitigated by accident:
+
+- *A field axis for character.*  mp-units splits character into field
+  (real/complex) and order after discovering phasor vectors and lossy
+  permittivity tensors were inexpressible.  Luv carries order alone.  No
+  rendering or block-world quantity is complex-valued, and mp-units' own
+  rule — "a character earns its place only when a real quantity cannot be
+  expressed without it" — is the reason to wait, exactly as they waited on
+  bivectors.  If a Fourier-domain or phasor client ever appears, the
+  =tensor-order= slot generalizes to a character pair.
+- *Kind upcasting.*  mp-units lets =active_power= flow implicitly into a
+  =power= slot along the kind tree.  Luv's =same-quantity-space-p=
+  requires equal names for addition, so =:view-distance= and
+  =:world-distance= do not add even though both are =:length=.  That is
+  stricter than the source, deliberately: the rendering vocabulary is
+  small, its names are chosen to be exclusive, and an explicit =interpret=
+  is cheap.  =quantity-kind-subkind-p= exists for unit admissibility, not
+  for silent widening.
+
+Two source ideas remain open rather than declined: the ratio-scale
+absolute abstraction (#LNRY72) and log-domain levels for exposure
+(#2K8GBI, waiting on the HDR path).
 
 * DONE Carry semantic units through the vertex and camera ABI
 :PROPERTIES:
