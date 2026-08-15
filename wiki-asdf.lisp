@@ -14,7 +14,7 @@
 ;;;; every page; rendering a page first loads it, and also loads the whole
 ;;;; system, because mentions and backlinks cross pages.  It writes HTML into
 ;;;; the site directory rather than the fasl cache, so its OUTPUT-FILES asks
-;;;; not to be translated.  A static-file such as the stylesheet is simply
+;;;; not to be translated.  A static-file such as an image is simply
 ;;;; copied.  With :BUILD-OPERATION set, (asdf:make :luv/wiki) builds the site.
 
 (in-package #:luv.wiki)
@@ -221,16 +221,25 @@ lands at images/x.png in the site."
 
 ;;; The system itself contributes the figures index.
 
+(defun style-source-files ()
+  "The Lisp files the stylesheet is compiled from, so editing a style
+re-renders the site."
+  (mapcar (lambda (name) (asdf:system-relative-pathname :luv-wiki name))
+          '("wiki-css.lisp" "wiki-style.lisp")))
+
 (defmethod asdf:input-files ((o render-op) (s asdf:system))
   (append (mapcar #'asdf:component-pathname (system-org-files s))
           (code-source-files)
-          (arglists-file s)))
+          (arglists-file s)
+          (style-source-files)))
 
 (defmethod asdf:output-files ((o render-op) (s asdf:system))
-  "The figures index, the source index, and one page per source file."
+  "The stylesheet, the figures index, the source index, and one page per
+source file."
   (let ((directory (site-output-directory s))
         (root (asdf:system-source-directory s)))
-    (values (list* (merge-pathnames "pages.html" directory)
+    (values (list* (merge-pathnames "style.css" directory)
+                   (merge-pathnames "pages.html" directory)
                    (merge-pathnames "work.html" directory)
                    (merge-pathnames "source.html" directory)
                    (loop for pathname in (code-source-files)
@@ -244,6 +253,7 @@ lands at images/x.png in the site."
 (defmethod asdf:perform ((o render-op) (s asdf:system))
   (let ((site (system-site s))
         (directory (site-output-directory s)))
+    (write-stylesheet directory)
     (let ((*site* site))
       (write-html-file (merge-pathnames "pages.html" directory)
                        (lambda () (render-pages-page site)))

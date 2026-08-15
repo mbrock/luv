@@ -687,8 +687,18 @@ spacing, so both are turned off."
     (call-with-html-output out thunk))
   pathname)
 
-(defun write-site (site directory &key stylesheet)
-  "Write every page of SITE, the figures index, and STYLESHEET into DIRECTORY."
+(defun write-stylesheet (directory)
+  "Compile the style definitions and write them as style.css in DIRECTORY."
+  (let ((pathname (merge-pathnames "style.css" directory)))
+    (ensure-directories-exist pathname)
+    (with-open-file (out pathname :direction :output :if-exists :supersede
+                                  :external-format :utf-8)
+      (write-string (stylesheet-text) out))
+    pathname))
+
+(defun write-site (site directory &key (stylesheet t))
+  "Write every page of SITE, the figures index, and, unless STYLESHEET is
+NIL, the compiled stylesheet into DIRECTORY."
   (let ((*site* site)
         (directory (uiop:ensure-directory-pathname directory)))
     (dolist (document (site-documents site))
@@ -705,5 +715,5 @@ spacing, so both are turned off."
         (write-html-file (merge-pathnames (source-page-name file) directory)
                          (lambda () (render-source-page file)))))
     (when stylesheet
-      (uiop:copy-file stylesheet (merge-pathnames "style.css" directory)))
+      (write-stylesheet directory))
     directory))

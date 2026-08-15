@@ -160,7 +160,8 @@ Nothing here refers to anything.
              (wiki:write-site site directory)
              (ok (probe-file (merge-pathnames "index.html" directory)))
              (ok (probe-file (merge-pathnames "pages.html" directory)))
-             (ok (probe-file (merge-pathnames "work.html" directory))))
+             (ok (probe-file (merge-pathnames "work.html" directory)))
+             (ok (probe-file (merge-pathnames "style.css" directory))))
         (uiop:delete-directory-tree directory :validate t :if-does-not-exist :ignore)))))
 
 (defparameter *source*
@@ -231,6 +232,53 @@ Nothing here refers to anything.
     (ok (wiki:find-definition "luv.example:frob" definitions))
     (ok (wiki:find-definition "widget" definitions :kind "defclass"))
     (ok (null (wiki:find-definition "widget" definitions :kind "defun")))))
+
+(deftest the-stylesheet-compiles-from-definitions
+  ;; Values: symbols downcase, --names become var(), lists space-separate,
+  ;; known function heads become calls with comma-separated arguments.
+  (ok (string= (wiki:css '(".a" :color --ink :margin (0 auto)
+                                :padding (0.3rem (clamp 1rem 4vw 3rem))
+                                :grid-template-columns (repeat 3 (minmax 0 1fr))
+                                :background (color-mix (in srgb) (--paper 94%) --accent)))
+               ".a {
+  color: var(--ink);
+  margin: 0 auto;
+  padding: 0.3rem clamp(1rem, 4vw, 3rem);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  background: color-mix(in srgb, var(--paper) 94%, var(--accent));
+}
+
+"))
+  ;; Nesting: descendants, & for the parent, groups crossed with groups,
+  ;; and media queries hoisted around the rule they wrap.
+  (ok (string= (wiki:css '(".door, .card" :display grid
+                           ("&:hover, &.selected" :outline none)
+                           ("h1" :margin 0)
+                           (:media "(max-width: 90ch)" ("&" :display block))))
+               ".door, .card {
+  display: grid;
+}
+
+.door:hover, .door.selected, .card:hover, .card.selected {
+  outline: none;
+}
+
+.door h1, .card h1 {
+  margin: 0;
+}
+
+@media (max-width: 90ch) {
+  .door, .card {
+    display: block;
+  }
+}
+
+"))
+  ;; The whole sheet has the palette first and the layout roles the dexp
+  ;; renderer emits.
+  (let ((text (wiki:stylesheet-text)))
+    (ok (search ":root {" text))
+    (ok (< (search ":root {" text) (search ".lisp .list.bindings" text)))))
 
 (deftest dexp-renders-boxes-with-roles
   (let* ((html (let ((*print-pretty* nil) (spinneret:*suppress-inserted-spaces* t))

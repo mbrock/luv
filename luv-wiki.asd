@@ -7,10 +7,12 @@ component and operation that make the wiki a buildable system."
                #:eclector)
   :serial t
   :components ((:file "wiki-package")
+               (:file "wiki-css")
                (:file "wiki-org")
                (:file "wiki-html")
                (:file "wiki-lisp")
                (:file "wiki-dexp")
+               (:file "wiki-style")
                (:file "wiki-source")
                (:file "wiki-asdf"))
   :in-order-to ((asdf:test-op (asdf:test-op #:luv-wiki/tests))))

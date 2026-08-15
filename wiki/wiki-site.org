@@ -50,7 +50,8 @@ The wiki fits the same shape, and more naturally than a fresh script would:
 - The site is a build product, not a fasl.  =output-files= returns its
   second value true, which ASDF documents as "do not translate," so pages land
   in =build/wiki/= rather than the compiled-file cache.  A =static-file= such as
-  the stylesheet is copied by the same operation.
+  an image is copied by the same operation; the stylesheet is compiled from
+  Lisp definitions (#UODI74) by the system's own render.
 - =:build-operation "luv.wiki:render-op"= makes =(asdf:make :luv/wiki)= build
   the site, matching how =luvcraft= is built.
 
@@ -386,6 +387,126 @@ inline unit, =.body= full width, =.break= a zero-height row break before a
 =row-start=.  Adding a
 form's layout is one =define-layout= line or one class with two methods,
 and nothing else changes.
+
+* NEXT Boxes hug their widest row
+:PROPERTIES:
+:ID: 993QQQ
+:END:
+
+/Intent./ In the rendered source pages a nested body form stretches to
+its parent's full width (=.body= is =flex-basis: 100%=), and worse, a
+wrapping flex box's intrinsic width is the /single-line/ sum of its
+children, so even an argument box like a multi-line =(lambda …)= comes
+out far wider than its tallest row.  Closing parentheses pile up at the
+right margin, far from what they close.  This costs more readability than
+any operator-specific layout, and it needs no operator knowledge to fix.
+
+/Evidence./ Injecting CSS into the built =shader-expression.lisp= page:
+when a list with body forms becomes a grid of rows (a =.head= flex row
+holding the operator and head arguments, then one row per body form)
+with =width: fit-content; max-width: 100%=, every box hugs its widest row
+and the page reads like a pretty-printer's output — =(unless operands
+(error …))= is exactly as wide as its =error= row.  Row gaps and baseline
+alignment survive unchanged.
+
+/Done when./ =render-children-with-roles= wraps the leading non-body
+children in a =.head= span and marks the list =stacked=; the stylesheet
+draws =.stacked= as that grid; the dexp tests know the head wrapper; the
+source pages show hugging boxes at every depth, and top-level definitions
+still align at the left.
+
+* NEXT Clauses as tables: cond, case, typecase, handler-case
+:PROPERTIES:
+:ID: 4175NC
+:END:
+
+/Intent./ A =cond= clause today stacks its test and its result as two
+identical rows, so =(null vectors)= and =(find-shader-type :float)= look
+like siblings and the reader cannot tell test from consequent.  What the
+=let= grid did for bindings (#BGIM3I) should be done for clauses: a
+two-column table, key or test in the first column, result in the second,
+aligned across all clauses of the form.
+
+/Evidence./ The same page with a two-column subgrid on =clauses-layout=
+bodies: =(null vectors) → (find-shader-type :float)=, =(every …) → (first
+vectors)=, =t → (error …)= line up, and a clause with several body forms
+stacks them in the second column.  A tall test keeps the result on its
+first baseline.  Nothing operator-specific is needed beyond what
+=clauses-layout= already marks, and every luv macro whose lambda list
+says =&body clauses= or =cases= gets it through the derived layout.
+
+/Done when./ =clauses-layout= has a =clause-head-count= (1 for =cond=,
+=case=, =typecase=; 2 for =handler-case= and =restart-case=, so =error
+(c)= is the key with its lambda list) and its stacked clauses render as
+key cell and =.rest= cell; the stylesheet aligns them; tests cover a
+=cond= and a =handler-case=; the source pages show the tables.
+
+* DONE The stylesheet as Lisp definitions
+:PROPERTIES:
+:ID: UODI74
+:END:
+
+/Intent./ =wiki/style.css= is 850 lines of hand-written CSS that the
+renderer's roles must agree with by convention.  luv already compiles
+several small languages from S-expressions (#C6E3LA the shader language, #SQC5JN
+the arithmetic language, MSL); the stylesheet should be one more: rules
+written as Lisp definitions in the wiki system, compiled to CSS at build
+time, so a layout class and its rules can live side by side, be
+re-evaluated in the running image, and be read by the same tools as the
+rest of the site.
+
+/Evidence./ The CSS in use needs only a small vocabulary: selectors with
+nesting and =&=, properties with keyword, string, number, and list
+values, =var()= and a handful of functions (=clamp=, =minmax=, =repeat=,
+=color-mix=), one =@media= query for dark mode and one for narrow
+screens.  A compiler for that is a page of Lisp.
+
+/Done./ [[file:../wiki-css.lisp][wiki-css.lisp]] is the compiler: a rule is =(selector . body)=, body
+alternates =:property value= with nested rules whose selectors combine
+with the parent's (=&= standing for it, groups crossed with groups) and
+=(:media "query" …)= blocks hoisted around what they wrap; a value is a
+string verbatim, a number, a symbol downcased with =--name= meaning
+=var(--name)=, or a list, space-separated unless its head names a CSS
+function, when it is a call with comma-separated arguments.  Units read
+as symbols so they are written bare (=2.75rem=, =0.5fr=, =94%=); colours
+are strings because =#f= is a reader macro.  =define-style= names a group
+under a docstring and keeps its position on redefinition; =stylesheet-text=
+compiles the groups in order; =write-stylesheet= is called by =write-site=
+and by =render-op= on the system, whose inputs include the two style
+files.  [[file:../wiki-style.lisp][wiki-style.lisp]] holds the whole sheet in twenty groups.  The
+generated =style.css= was compared to the hand-written file rule by rule
+after normalising whitespace and comments: 186 rules, identical
+declarations, identical order.  The static file is gone; the tests cover
+values, nesting, and media queries.
+
+* TODO Pairs, loop tables, and layouts from arglists alone
+:PROPERTIES:
+:ID: ACX8LK
+:END:
+
+/Intent./ Smaller layout wins in the order they pay: =setf=, =setq=,
+=psetf= as a two-column grid of place and value when there is more than
+one pair; keyword pairs on rows aligned by a subgrid instead of a guessed
+=min-width= for the key; =loop= as a keyword table, each clause a row
+of keyword and rest as Emacs indents it; and function calls whose
+arguments wrap continuing under the first argument.
+
+Underneath, fold =derived-layout= into constructors of the existing
+layout classes so that a table entry and an introspected lambda list
+produce the same objects — =(bindings &body body)= a =bindings-layout=,
+=(keyform &body cases)= a =clauses-layout= — and every refinement above
+applies to both; extend the parameter-name heuristics with =PLACE=,
+=KEYFORM=, =TEST-FORM=, =SPECIALIZED-LAMBDA-LIST=, =OPTIONS=; then trim
+the hand table to true overrides.  Alongside, the renderer's remaining
+=typecase= and =typep= on layout classes (=lambda-list-of=,
+=docstring-position-p=, =layout-pairs-index=, the =data-callee= test)
+become generics with methods on the layouts, and =child-role= answers a
+placement and a child layout rather than a space-separated role string
+that =role-p= parses back, per =clos-design=.
+
+/Done when./ Each item lands as its own small commit with the source
+pages checked in the browser; the layout table is shorter than today;
+=luv-wiki/tests= pass.
 
 * Reading source without loading it: Eclector
 :PROPERTIES:

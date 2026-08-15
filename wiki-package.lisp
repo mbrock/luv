@@ -67,6 +67,10 @@ operation that make the wiki a buildable system.")
    #:render-page
    #:render-document-string
    #:write-site
+   ;; Stylesheet
+   #:define-style
+   #:stylesheet-text
+   #:css
    #:site-page-name
    ;; Lisp source
    #:lisp-node
