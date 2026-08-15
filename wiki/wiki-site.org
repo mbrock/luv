@@ -10,8 +10,8 @@ The wiki is a set of Org files, and Org is pleasant to write in Emacs but
 awkward to read anywhere else.  This page records how the wiki becomes a
 browsable static site, why the build is expressed in ASDF, and what the
 Org-subset reader deliberately does and does not understand.  It is a
-design page for =luv-wiki=, the Lisp system in [[file:../wiki-org.lisp][wiki-org.lisp]],
-[[file:../wiki-html.lisp][wiki-html.lisp]], and [[file:../wiki-asdf.lisp][wiki-asdf.lisp]], and for the corpus system
+design page for =luv-wiki=, the Lisp system in [[file:org.lisp][wiki/org.lisp]],
+[[file:html.lisp][wiki/html.lisp]], and [[file:asdf.lisp][wiki/asdf.lisp]], and for the corpus system
 =luv/wiki= in [[file:../luv.asd][luv.asd]] whose components are the pages themselves.
 
 The rendered site lives at [[https://mbrock.github.io/luv/][mbrock.github.io/luv]] once the Pages
@@ -175,7 +175,7 @@ agrees with the site.  Commands: =toc=, =marks=, =figure=, =page=,
 Two details of the executable are worth recording.  The Nix =sbcl= wrapper
 supplies =CL_SOURCE_REGISTRY= and =ASDF_OUTPUT_TRANSLATIONS= to SBCL
 processes only, so a dumped image would look for compiled files in the
-wrong place; =build-wiki.lisp= captures that environment before the dump
+wrong place; =wiki/build.lisp= captures that environment before the dump
 and =main= re-establishes it.  And =luv.asd= now loads =luv-wiki.asd= only
 when the system is not already registered, so re-reading =luv.asd= inside
 the executable does not redefine the system it is running from.
@@ -212,9 +212,9 @@ references and examples.  Two facts make that cheap.
 
 Figure IDs are already valid, readable symbol names, and index.org anticipated
 a =WIKI= package of them (#F2N8VX).  And code already mentions figures: the
-=interpret-quantity-specification= docstring in [[file:../arithmetic.lisp][arithmetic.lisp]] cites
+=interpret-quantity-specification= docstring in [[file:../arithmetic/semantics.lisp][arithmetic/semantics.lisp]] cites
 #PLRP3A and the tests in
-[[file:../tests/arithmetic.lisp][tests/arithmetic.lisp]] cite #LNRY72 as the table they check.  Nothing yet
+[[file:../arithmetic/tests.lisp][arithmetic/tests.lisp]] cite #LNRY72 as the table they check.  Nothing yet
 sees those mentions.  Three rungs, cheapest first:
 
 - *The site sees code.*  =render-op= asks ASDF for the =cl-source-file=
@@ -301,7 +301,7 @@ comments and original formatting are gone; the wiki shows source
 definitions and needs a reader that keeps them, see #SKNK2N.  And dexp keeps
 per-operator layout in CSS selectors that cannot see method qualifiers or
 lambda-list keywords; the wiki renderer should assign roles in Lisp, using
-the same table the parinfer checker already keeps in [[file:../parinfer.lisp][parinfer.lisp]]
+the same table the parinfer checker already keeps in [[file:../parinfer/implementation.lisp][parinfer/implementation.lisp]]
 (=*binding-form-heads*=, =*clause-form-heads*=, =child-role=), and emit
 =class="head"= or =class="body"= so the stylesheet needs only
 =.list > .body { width: 100% }=.  Everything else transfers verbatim: side
@@ -485,7 +485,7 @@ values, =var()= and a handful of functions (=clamp=, =minmax=, =repeat=,
 =color-mix=), one =@media= query for dark mode and one for narrow
 screens.  A compiler for that is a page of Lisp.
 
-/Done./ [[file:../wiki-css.lisp][wiki-css.lisp]] is the compiler, the package =luv.css=, in three
+/Done./ [[file:css.lisp][wiki/css.lisp]] is the compiler, the package =luv.css=, in three
 parts.  A reader syntax, =luv.css:syntax= (a named readtable that makes
 the digits and the hyphen read a token), reads CSS quantities and
 references as objects: =0.85rem= and =94%= are =dimension= instances,
@@ -503,7 +503,7 @@ with the parent, =&= standing for it, groups as lists of strings crossed
 with groups -- nothing is ever split on a comma -- and =(:media "query"
 …)= is an at-rule, hoisted around what it wraps.  =write-css= is the text
 backend, a generic over the tree, so another backend can walk the same
-objects.  [[file:../wiki-style.lisp][wiki-style.lisp]], package =luv.wiki.style=, holds the sheet:
+objects.  [[file:style.lisp][wiki/style.lisp]], package =luv.wiki.style=, holds the sheet:
 the palette is a table of light and dark values that =(palette scheme)=
 turns into declarations, the mark and definition-kind colours are loops,
 and the layout rows the dexp boxes share (=flowing-row=, =stacked-rows=,
@@ -637,7 +637,7 @@ Intent: make the whole codebase readable from the rendered wiki, per
 #58SVCM, so that following a figure into code and code back into figures
 never leaves the site.
 
-Evidence: [[file:../wiki-source.lisp][wiki-source.lisp]] adds =source-file= objects (path, system, text,
+Evidence: [[file:source.lisp][wiki/source.lisp]] adds =source-file= objects (path, system, text,
 nodes, definitions), =render-source-page=, and =render-source-index=;
 =render-op= on the system lists =source.html= and one page per file among
 its =output-files=.  =find-named-definition= backs symbol links; the mesher
@@ -686,7 +686,7 @@ Intent: the reader of #SKNK2N as part of =luv-wiki=: an Eclector client that
 produces a token tree with source ranges and comments without interning, and
 a definition index over the =cl-source-file= components ASDF lists.
 
-Evidence: [[file:../wiki-lisp.lisp][wiki-lisp.lisp]].  =source-reader= subclasses Eclector's
+Evidence: [[file:lisp.lisp][wiki/lisp.lisp]].  =source-reader= subclasses Eclector's
 =parse-result-client=; =interpret-symbol= returns a token with the package
 prefix as written, quote-like macros and =#.= return marker lists that
 =make-expression-result= turns into =lisp-prefix= nodes, feature expressions
@@ -694,7 +694,7 @@ are evaluated by name against =*features*= with the skipped branch kept as a
 =lisp-conditional= from its source text, and comments arrive through
 =make-skipped-input-result= as =lisp-comment= nodes, inside forms as well as
 between them.  Every luv source file reads without error; the index names
-=interpret-quantity-specification= at =arithmetic.lisp:956= with its
+=interpret-quantity-specification= at =arithmetic/semantics.lisp:956= with its
 =#PLRP3A= mention, and no package or symbol is created (the tests check).
 
 Done when: every luv source file reads without error, the index names
@@ -711,7 +711,7 @@ Intent: render a token tree from #YFDCSB as dexp boxes per #N06GKK, with
 roles assigned in Lisp and painted by the wiki stylesheet, and use it for
 =#+begin_src lisp= blocks first, since the wiki already has those.
 
-Evidence: [[file:../wiki-dexp.lisp][wiki-dexp.lisp]] and the =.lisp= rules in [[file:style.css][style.css]].  A list is
+Evidence: [[file:dexp.lisp][wiki/dexp.lisp]] and the =.lisp= rules in [[file:style.css][style.css]].  A list is
 a flex-wrapping =div.list= with side borders; roles come from the layout
 objects of #BGIM3I and are emitted as =operator=, =body=, =bindings=,
 =lambda-list=, =clause=, and =row-start= classes, comments not counting as

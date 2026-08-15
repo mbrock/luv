@@ -2,7 +2,10 @@
 
 (require :asdf)
 
-(let ((project-root (uiop:pathname-directory-pathname *load-truename*)))
+(let ((project-root
+        (truename
+         (merge-pathnames #P"../"
+                          (uiop:pathname-directory-pathname *load-truename*)))))
   (asdf:load-asd (merge-pathnames #P"luv.asd" project-root)))
 
 (asdf:load-system :luv-wiki/cli)

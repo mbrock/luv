@@ -7,15 +7,17 @@ component and operation that make the wiki a buildable system."
                #:eclector
                #:named-readtables)
   :serial t
-  :components ((:file "wiki-package")
-               (:file "wiki-css")
-               (:file "wiki-org")
-               (:file "wiki-html")
-               (:file "wiki-lisp")
-               (:file "wiki-dexp")
-               (:file "wiki-style")
-               (:file "wiki-source")
-               (:file "wiki-asdf"))
+  :components ((:module "wiki"
+                :serial t
+                :components ((:file "package")
+                             (:file "css")
+                             (:file "org")
+                             (:file "html")
+                             (:file "lisp")
+                             (:file "dexp")
+                             (:file "style")
+                             (:file "source")
+                             (:file "asdf"))))
   :in-order-to ((asdf:test-op (asdf:test-op #:luv-wiki/tests))))
 
 (asdf:defsystem #:luv-wiki/tests
@@ -26,8 +28,8 @@ component and operation that make the wiki a buildable system."
                #:luv-wiki/cli
                #:luv/wiki
                #:rove)
-  :components ((:module "tests"
-                :components ((:file "wiki"))))
+  :components ((:module "wiki"
+                :components ((:file "tests"))))
   :perform (asdf:test-op (operation component)
              (declare (ignore operation component))
              (unless (uiop:symbol-call
@@ -43,7 +45,8 @@ mentions, definitions, and the site build from a shell."
   :author "Mikael Brockman"
   :depends-on (#:luv-wiki
                #:luv-wiki/introspect)
-  :components ((:file "wiki-cli"))
+  :components ((:module "wiki"
+                :components ((:file "cli"))))
   :build-operation "program-op"
   :build-pathname "build/wiki-cli"
   :entry-point "luv.wiki.cli:main")
@@ -55,4 +58,5 @@ dexp renderer's derived layouts."
   :author "Mikael Brockman"
   :depends-on (#:luv-wiki
                (:require #:sb-introspect))
-  :components ((:file "wiki-introspect")))
+  :components ((:module "wiki"
+                :components ((:file "introspect")))))

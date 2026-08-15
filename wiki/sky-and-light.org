@@ -577,7 +577,7 @@ Evidence:
 - =luvcraft/light.lisp= owns reference and incremental solvers.
 - =luvcraft/mesher.lisp= snapshots a one-cell light halo and emits the
   =(sky block emission)= attribute.
-- =tests/light.lisp= checks reference equivalence, mesh light transport, and
+- =luvcraft/light-tests.lisp= checks reference equivalence, mesh light transport, and
   same-key chunk replacement before reconciliation.
 
 Done when: =:luv/luvcraft/tests= passes and the wiki describes the implemented
@@ -597,9 +597,9 @@ Evidence:
   propagated light emission 12, and surface emission 1.2.
 - =luvcraft/app.lisp= and =luvcraft/render.lisp= derive selection titles and
   number-key bounds from =placeable-block-kinds=.
-- =tests/block-world.lisp= covers palette slot 8, key selection, title text,
+- =luvcraft/tests.lisp= covers palette slot 8, key selection, title text,
   atlas size, and the crystal material readings.
-- =tests/light.lisp= covers crystal placement/removal across a chunk boundary,
+- =luvcraft/light-tests.lisp= covers crystal placement/removal across a chunk boundary,
   reference-field convergence, affected light revisions, and mesh emission.
 - The gazetteer =glow-floor= view showed the crystal face glowing and warming
   nearby floor surfaces.
@@ -796,7 +796,7 @@ Evidence:
   3x3 PCF.  A one-tap abstraction in a separate fresh process measured 10.90
   ms/frame.  At this workload the difference is below run noise; these are
   end-to-end frame-loop timings, not GPU-only measurements.
-- =tests/block-world.lisp= proves that a 0.01-world-unit camera translation
+- =luvcraft/tests.lisp= proves that a 0.01-world-unit camera translation
   leaves the first two light-space rows unchanged while a 0.25 translation
   crosses the snap grid.  =hal/shader/tests.lisp= proves nine depth samples and
   valid SPIR-V.

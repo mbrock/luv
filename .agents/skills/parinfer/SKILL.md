@@ -25,7 +25,8 @@ a different tree. Prefer strict mode for repo audits.
 2. Classify the finding:
    - If `git diff -w` would change, inspect the parens and surrounding scope.
    - If only whitespace changes, align indentation with the existing tree.
-   - If parinfer is wrong, preserve the source and improve `parinfer.lisp` or
+   - If parinfer is wrong, preserve the source and improve
+     `parinfer/implementation.lisp` or
      document the false-positive shape here.
 3. Avoid parallel `./sly parinfer` runs while collecting evidence. Sequential
    output is easier to trust.
@@ -44,7 +45,8 @@ a different tree. Prefer strict mode for repo audits.
 
 ## Improving The Tool
 
-Keep parinfer useful by encoding repeated real-world shapes in `parinfer.lisp`
+Keep parinfer useful by encoding repeated real-world shapes in
+`parinfer/implementation.lisp`
 instead of normalizing pain into habit. Good improvements are small heuristics
 with clear evidence from existing files, plus a repo-wide `make parinfer-check`
 run afterward. The tool is allowed to be heuristic, but it should be honest:

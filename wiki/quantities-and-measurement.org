@@ -185,7 +185,7 @@ its field specification controls the operations made available on it.
 :END:
 
 The two-way split above is mp-units V2, and it is what =affine-p= in
-[[file:../arithmetic.lisp][=arithmetic.lisp=]] implements today: a specification is either a point or
+[[file:../arithmetic/semantics.lisp][=arithmetic/semantics.lisp=]] implements today: a specification is either a point or
 a difference.  mp-units V3's central discovery (#QFCPRA) is that this misses
 the commonest case.  Most physical equations are written over *absolutes*:
 non-negative amounts measured from a true zero, on a ratio scale, forming a
@@ -370,7 +370,7 @@ Evidence:
   deliberate crossing, difference to absolute, and no other.  Negating an
   absolute signals =:cannot-negate-amount=: luv chose the error branch of
   the source's open question so demotion is a visible mark.
-- =tests/arithmetic.lisp= gained six executable claims covering the
+- =arithmetic/tests.lisp= gained six executable claims covering the
   definition defaults and the historical =:affine-p= spelling, cone
   addition and subtraction, point asymmetries, the multiplicative table,
   negation, and interpretation-as-promotion.  The full fresh-process suite
@@ -582,7 +582,7 @@ places.
 :ID: SQC5JN
 :END:
 
-The quantity algebra in [[file:../arithmetic.lisp][=arithmetic.lisp=]] is already independent of any execution
+The quantity algebra in [[file:../arithmetic/semantics.lisp][=arithmetic/semantics.lisp=]] is already independent of any execution
 backend, but the compiled language which presently exercises it is still
 named and owned as a shader language.  Its literal, reference, call, binding,
 quantity-boundary, and conversion objects live beside shader stages,
@@ -664,7 +664,7 @@ to every arithmetic client before extracting the expression frontend.
 Evidence:
 
 - =+ - * / dot min max= already derived quantity specifications in
-  [[file:../arithmetic.lisp][=arithmetic.lisp=]], while =clamp=, =step=, =mix=, =smoothstep=,
+  [[file:../arithmetic/semantics.lisp][=arithmetic/semantics.lisp=]], while =clamp=, =step=, =mix=, =smoothstep=,
   =normalize=, and =expt= added methods to that same generic from
   [[file:../hal/shader/language.lisp][=hal/shader/language.lisp=]].  Their contracts did not mention textures,
   stages, SPIR-V, or another shader-only concern.
@@ -698,7 +698,7 @@ provenance.
 Evidence:
 
 - The new =:luv/arithmetic/language= system depends only on
-  =:luv/arithmetic=.  [[file:../arithmetic-language.lisp][=arithmetic-language.lisp=]] owns inspectable parameters,
+  =:luv/arithmetic=.  [[file:../arithmetic/language/frontend.lisp][=arithmetic/language/frontend.lisp=]] owns inspectable parameters,
   lexical bindings, literals, references, calls, quantity boundaries, unit
   conversions, one-expression function definitions, source reconstruction,
   and the EQL-specialized operator/parser protocols.
@@ -741,7 +741,7 @@ and vectors after checking their semantic contracts once.
 Evidence:
 
 - The separate =:luv/arithmetic/lisp= system depends only on the common
-  arithmetic language.  [[file:../arithmetic-lisp.lisp][=arithmetic-lisp.lisp=]] lowers a checked definition to an
+  arithmetic language.  [[file:../arithmetic/lisp/compiler.lisp][=arithmetic/lisp/compiler.lisp=]] lowers a checked definition to an
   ordinary lambda and then uses =COMPILE=; the target function receives and
   returns ordinary numbers and vectors.
 - =define-lisp-arithmetic-function= is a thin definition form over the common
@@ -816,7 +816,7 @@ kernel could also consume.
 
 Evidence:
 
-- [[file:../arithmetic.lisp][=arithmetic.lisp=]] now represents canonical symbolic dimensions and inspectable
+- [[file:../arithmetic/semantics.lisp][=arithmetic/semantics.lisp=]] now represents canonical symbolic dimensions and inspectable
   quantity specifications.  EQL methods on ordinary arithmetic symbols derive
   addition, subtraction, products, quotients, and dot products.
 - Shader inputs, outputs, and uniform members can opt into =:quantity=,
@@ -839,7 +839,7 @@ Evidence:
   =sample= and =sample-compare= boundaries, vector constructors, =clamp=,
   =step=, =mix=, and =smoothstep=.  Once checking begins, an absent rule is an
   error rather than a reason to discard semantic information.
-- =tests/arithmetic.lisp= rejects equal-dimensional but differently named
+- =arithmetic/tests.lisp= rejects equal-dimensional but differently named
   quantities, mismatched exact units, and illegal affine operations.
   =hal/shader/tests.lisp= proves shadow-depth subtraction and compatible =max=,
   rejects point-plus-point, depth-plus-length, metre-plus-kilometre, missing
@@ -882,7 +882,7 @@ at parse time.
 
 Evidence:
 
-- [[file:../arithmetic.lisp][=arithmetic.lisp=]] defines backend-neutral =quantity-layout= and
+- [[file:../arithmetic/semantics.lisp][=arithmetic/semantics.lisp=]] defines backend-neutral =quantity-layout= and
   =quantity-projection= objects; inspectable quantity definitions own the
   ordered component names of homogeneous vectors.
 - [[file:../hal/shader/language.lisp][=hal/shader/language.lisp=]] carries layouts through interface variables,
@@ -918,7 +918,7 @@ keeping conversion policy small and inspectable.
 
 Evidence:
 
-- [[file:../arithmetic.lisp][=arithmetic.lisp=]] now defines inspectable =unit-definition= objects behind
+- [[file:../arithmetic/semantics.lisp][=arithmetic/semantics.lisp=]] now defines inspectable =unit-definition= objects behind
   an open =unit-definition-for= EQL protocol.  The initial vocabulary included
   =:one=, =:metre=, =:kilometre=, =:second=, and =:percent= with dimensions,
   canonical bases, and scales; #V3TSZA subsequently made their admissible
@@ -937,7 +937,7 @@ Evidence:
 - [[file:../mcclim/shader-lab.lisp][The shader workbench]] renders the conversion operand, target specification,
   and scale factor as a selectable expression rather than hiding the change in
   its generated arithmetic.
-- [[file:../tests/arithmetic.lisp][Arithmetic tests]] prove kilometre/metre and percent/one conversion,
+- [[file:../arithmetic/tests.lisp][Arithmetic tests]] prove kilometre/metre and percent/one conversion,
   dimension inference, mismatch rejection, and undefined-unit failure.
   [[file:../hal/shader/tests.lisp][Shader tests]] prove that =50 percent= opacity becomes =1/2 one= opacity
   through an emitted =F-MUL=, and reject raw, dimension-changing, and unknown-
@@ -965,7 +965,7 @@ does not imply either equal meaning or universal unit admissibility.  mp-units
 uses dimension-one subkinds for angles and storage while retaining =one= and
 its scaled forms across the hierarchy.
 
-- [[file:../arithmetic.lisp][=arithmetic.lisp=]] now defines inspectable =quantity-kind-definition= and
+- [[file:../arithmetic/semantics.lisp][=arithmetic/semantics.lisp=]] now defines inspectable =quantity-kind-definition= and
   =quantity-definition= objects behind open EQL protocols.  Kinds form a
   same-dimension parent hierarchy; quantity specifications expose their kind
   without replacing the exact quantity name used by arithmetic.
@@ -985,7 +985,7 @@ its scaled forms across the hierarchy.
   =:sun-disc-coordinate= rather than an angle: its stored value is subtracted
   from a cosine alignment near one.  Giving it radians would make the source
   sound more physical while describing the actual representation less truly.
-- [[file:../tests/arithmetic.lisp][Arithmetic tests]] accept an angle in radians and an opacity-like proportion
+- [[file:../arithmetic/tests.lisp][Arithmetic tests]] accept an angle in radians and an opacity-like proportion
   in percent/one, reject proportion-in-radians, angle-in-steradians, and units
   on unregistered quantities.  [[file:../hal/shader/tests.lisp][Shader tests]] exercise the same failures at
   the source-language boundary and inspect production quantity kinds.

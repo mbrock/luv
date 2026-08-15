@@ -26,7 +26,7 @@
 find systems and their compiled files without the sbcl wrapper's
 environment, and SBCL's home so that (require :sb-concurrency) and other
 contribs still work from an executable outside SBCL's own directory.
-Called by build-wiki.lisp before the image is dumped."
+Called by wiki/build.lisp before the image is dumped."
   (setf *build-source-registry* (uiop:getenv "CL_SOURCE_REGISTRY")
         *build-output-translations* (uiop:getenv "ASDF_OUTPUT_TRANSLATIONS")
         *build-sbcl-home* (sb-int:sbcl-homedir-pathname)))

@@ -28,13 +28,19 @@ The ASDF systems are the useful map:
 :luv/spir-v/tests     expression typing, provenance, and lowering tests
 :luv/luvcraft/shaders the block-world materials as mathematical shaders
 :luv/luvcraft         luvcraft: the interactive block world application
-:luv/examples         small live demos of the canvas protocol
-:luv/tests            renderer-independent model tests
+:luv/examples         small live demos of the HAL protocols
+:luv/tests            renderer-independent world and development-tool tests
 :luv/luvcraft/tests   generation, cross-chunk meshing, and edit tests
 :luv/mcclim           experimental McCLIM backend on luv canvases
 :luv/mcclim/shader-lab McCLIM presentation browser for luvcraft's shaders
 :luv/tools            one-shot command-line tools
 ```
+
+The four root ASDF files are deliberate primary entrypoints: `luv.asd` owns
+the workshop library and its `luv/...` systems, `luvcraft.asd` and `mcluv.asd`
+build the two standalone programs, and `luv-wiki.asd` owns the reusable wiki
+reader and renderer.  Keeping those primary definitions at the root lets ASDF
+discover them normally while their components live with the code they own.
 
 The implementation follows the same contracts physically under
 [`hal/`](hal/).  Shared GPU, canvas, shader, and tracing protocols sit at the
@@ -45,10 +51,18 @@ window and event host.  The general Objective-C foreign object system remains
 separate in [`objective-c/`](objective-c/); Metal depends on it, but does not
 own it.
 
+Backend-neutral quantity semantics and compilation live together under
+[`arithmetic/`](arithmetic/): the semantic algebra at the root, the inspectable
+source language in [`arithmetic/language/`](arithmetic/language/), and its
+ordinary Common Lisp realization in [`arithmetic/lisp/`](arithmetic/lisp/).
+Each layer keeps its executable claims beside its implementation.
+
 Luvcraft — the block world — lives in [`luvcraft/`](luvcraft/), from the
 renderer-independent world model up through terrain generation, meshing,
-player simulation, live shader pipelines, and the interactive application.
-The McCLIM backend and its labs live in [`mcclim/`](mcclim/).
+player simulation, live shader pipelines, tests, command-line tools, and the
+interactive application.  The McCLIM backend and its labs live in
+[`mcclim/`](mcclim/).  The Org design corpus and the Lisp implementation that
+reads and renders it now form one neighborhood under [`wiki/`](wiki/).
 
 The public package is still mostly `LUV`, with `LVK` for the lower Vulkan
 helpers and `SPV` for the SPIR-V pieces.

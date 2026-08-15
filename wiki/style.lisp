@@ -1,8 +1,8 @@
-;;;; The site's stylesheet, as style definitions compiled by wiki-css.lisp.
+;;;; The site's stylesheet, as style definitions compiled by css.lisp.
 ;;;;
 ;;;; Groups follow the page from the outside in: palette, frame, type, the
 ;;;; wiki's own elements, then the dexp code boxes and their layout roles,
-;;;; whose selectors are the roles wiki-dexp.lisp assigns.  Under the CSS
+;;;; whose selectors are the roles dexp.lisp assigns.  Under the CSS
 ;;;; syntax 0.85rem is a quantity and --ink a reference; bare symbols are CSS
 ;;;; words and lists are Lisp, so the palette, the mark colours, and the
 ;;;; definition-kind colours below are computed from tables, and the layout
@@ -671,7 +671,7 @@ body forms stacked in the second, aligned across the clauses."
 
 (define-style layouts
   "Layouts: binding grids, clauses, loop rows.  The selectors are the roles
-wiki-dexp.lisp assigns."
+dexp.lisp assigns."
   (".lisp .list.bindings"
    :display grid
    :grid-template-columns max-content (minmax 0 1fr)

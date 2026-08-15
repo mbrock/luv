@@ -226,7 +226,7 @@ lands at images/x.png in the site."
   "The Lisp files the stylesheet is compiled from, so editing a style
 re-renders the site."
   (mapcar (lambda (name) (asdf:system-relative-pathname :luv-wiki name))
-          '("wiki-css.lisp" "wiki-style.lisp")))
+          '("wiki/css.lisp" "wiki/style.lisp")))
 
 (defmethod asdf:input-files ((o render-op) (s asdf:system))
   (append (mapcar #'asdf:component-pathname (system-org-files s))

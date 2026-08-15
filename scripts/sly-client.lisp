@@ -4,7 +4,7 @@
   (make-pathname :name nil :type nil :defaults *load-truename*))
 
 (load (merge-pathnames
-       #P"../parinfer.lisp"
+       #P"../parinfer/implementation.lisp"
        cl-user::*sly-client-directory*))
 
 (defpackage #:sly-client

@@ -11,15 +11,15 @@ if [ "${LUV_NIX_SHELL:-}" != 1 ]; then
 fi
 
 exe="$project_root/build/wiki-cli"
-stale=$(find "$project_root"/wiki-*.lisp "$project_root"/luv-wiki.asd \
-  "$project_root"/luv.asd -newer "$exe" 2>/dev/null || true)
+stale=$(find "$project_root/wiki" "$project_root/luv-wiki.asd" \
+  "$project_root/luv.asd" -newer "$exe" 2>/dev/null || true)
 if [ ! -x "$exe" ] || [ -n "$stale" ]; then
   echo "wiki: building $exe" >&2
   # PROGRAM-OP otherwise considers its existing output current even though
   # this wrapper has already found a changed project-system input.
   rm -f "$exe"
-  sbcl --script "$project_root/build-wiki.lisp" >/dev/null 2>&1 \
-    || sbcl --script "$project_root/build-wiki.lisp"
+  sbcl --script "$project_root/wiki/build.lisp" >/dev/null 2>&1 \
+    || sbcl --script "$project_root/wiki/build.lisp"
 fi
 
 LUV_ROOT="$project_root" exec "$exe" "$@"

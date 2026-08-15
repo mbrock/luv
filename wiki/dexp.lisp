@@ -264,7 +264,7 @@ stack as rows; a single pair stays inline."
          "row-start")
         (t nil)))
 
-;;; Layouts derived from real lambda lists (see wiki-introspect.lisp)
+;;; Layouts derived from real lambda lists (see introspect.lisp)
 
 (defvar *arglists* (make-hash-table :test 'equal)
   "(PACKAGE . NAME) -> facts plist gathered by scripts/wiki introspect, and

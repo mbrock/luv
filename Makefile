@@ -8,7 +8,7 @@ LUVCRAFT_BENCHMARK_CSV ?= build/luvcraft-metal-benchmark.csv
 all: luvcraft
 
 luvcraft:
-	./scripts/dev sbcl --script build-luvcraft.lisp
+	./scripts/dev sbcl --script luvcraft/build.lisp
 
 run: luvcraft
 	./scripts/dev ./build/luvcraft
@@ -68,10 +68,10 @@ metal-benchmark: luvcraft
 	./scripts/dev ./build/luvcraft --metal-benchmark $(LUVCRAFT_BENCHMARK_FRAMES) $(LUVCRAFT_BENCHMARK_CSV)
 
 mcluv:
-	./scripts/dev sbcl --script build-mcluv.lisp
+	./scripts/dev sbcl --script mcclim/build.lisp
 
 wiki-cli:
-	./scripts/dev sbcl --script build-wiki.lisp
+	./scripts/dev sbcl --script wiki/build.lisp
 
 wiki:
 	./scripts/dev sbcl --non-interactive \

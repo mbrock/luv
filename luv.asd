@@ -43,8 +43,10 @@
   :version "0.0.1"
   :author "Mikael Brockman"
   :serial t
-  :components ((:file "arithmetic-package")
-               (:file "arithmetic"))
+  :components ((:module "arithmetic"
+                :serial t
+                :components ((:file "package")
+                             (:file "semantics"))))
   :in-order-to ((asdf:test-op (asdf:test-op #:luv/arithmetic/tests))))
 
 (asdf:defsystem #:luv/arithmetic/tests
@@ -53,8 +55,8 @@
   :author "Mikael Brockman"
   :depends-on (#:luv/arithmetic
                #:rove)
-  :components ((:module "tests"
-                :components ((:file "arithmetic"))))
+  :components ((:module "arithmetic"
+                :components ((:file "tests"))))
   :perform (asdf:test-op (operation component)
              (declare (ignore operation component))
              (unless (uiop:symbol-call
@@ -69,8 +71,12 @@
   :author "Mikael Brockman"
   :depends-on (#:luv/arithmetic)
   :serial t
-  :components ((:file "arithmetic-language-package")
-               (:file "arithmetic-language"))
+  :components ((:module "arithmetic"
+                :components
+                ((:module "language"
+                  :serial t
+                  :components ((:file "package")
+                               (:file "frontend"))))))
   :in-order-to ((asdf:test-op
                  (asdf:test-op #:luv/arithmetic/language/tests))))
 
@@ -80,8 +86,10 @@
   :author "Mikael Brockman"
   :depends-on (#:luv/arithmetic/language
                #:rove)
-  :components ((:module "tests"
-                :components ((:file "arithmetic-language"))))
+  :components ((:module "arithmetic"
+                :components
+                ((:module "language"
+                  :components ((:file "tests"))))))
   :perform (asdf:test-op (operation component)
              (declare (ignore operation component))
              (unless (uiop:symbol-call
@@ -97,8 +105,12 @@
   :author "Mikael Brockman"
   :depends-on (#:luv/arithmetic/language)
   :serial t
-  :components ((:file "arithmetic-lisp-package")
-               (:file "arithmetic-lisp"))
+  :components ((:module "arithmetic"
+                :components
+                ((:module "lisp"
+                  :serial t
+                  :components ((:file "package")
+                               (:file "compiler"))))))
   :in-order-to ((asdf:test-op
                  (asdf:test-op #:luv/arithmetic/lisp/tests))))
 
@@ -108,8 +120,10 @@
   :author "Mikael Brockman"
   :depends-on (#:luv/arithmetic/lisp
                #:rove)
-  :components ((:module "tests"
-                :components ((:file "arithmetic-lisp"))))
+  :components ((:module "arithmetic"
+                :components
+                ((:module "lisp"
+                  :components ((:file "tests"))))))
   :perform (asdf:test-op (operation component)
              (declare (ignore operation component))
              (unless (uiop:symbol-call
@@ -131,7 +145,8 @@
   :description "The connection-free indentation and parenthesis checker."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :components ((:file "parinfer")))
+  :components ((:module "parinfer"
+                :components ((:file "implementation")))))
 
 (asdf:defsystem #:luv/wiki
   :description "The luv workshop wiki.  Loading it reads every page into
@@ -514,8 +529,8 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
   :author "Mikael Brockman"
   :depends-on (#:luv/canvas
                #:luv/spir-v)
-  :components ((:module "examples"
-                :components ((:file "demo")))))
+  :components ((:module "hal"
+                :components ((:file "examples")))))
 
 (asdf:defsystem #:luv/tests
   :description "Executable claims about luv's renderer-independent models."
@@ -524,9 +539,11 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
   :depends-on (#:luv/world
                #:luv/parinfer
                #:rove)
-  :components ((:module "tests"
-                :components ((:file "world")
-                             (:file "parinfer"))))
+  :serial t
+  :components ((:module "luvcraft"
+                :components ((:file "world-tests")))
+               (:module "parinfer"
+                :components ((:file "tests"))))
   :perform (asdf:test-op (operation component)
              (declare (ignore operation component))
              (unless (uiop:symbol-call
@@ -540,9 +557,10 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
   :author "Mikael Brockman"
   :depends-on (#:luv/luvcraft
                #:rove)
-  :components ((:module "tests"
-                :components ((:file "block-world")
-                             (:file "light"))))
+  :serial t
+  :components ((:module "luvcraft"
+                :components ((:file "tests")
+                             (:file "light-tests"))))
   :perform (asdf:test-op (operation component)
              (declare (ignore operation component))
              (unless (uiop:symbol-call
@@ -561,11 +579,14 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
   :build-pathname "build/luv"
   :entry-point "luv.tools:main"
   :serial t
-  :components ((:module "tools"
-                :components ((:file "package")
-                             (:file "runner")
-                             (:file "block-world")
-                             (:file "gazetteer")))))
+  :components ((:module "luvcraft"
+                :components
+                ((:module "tools"
+                  :serial t
+                  :components ((:file "package")
+                               (:file "runner")
+                               (:file "block-world")
+                               (:file "gazetteer")))))))
 
 (asdf:defsystem #:luv/mcclim
   :description "An experimental McCLIM backend presented by luv."
