@@ -34,13 +34,7 @@
    (sky-samples :initarg :sky-samples :initform nil
                 :reader block-mesh-snapshot-sky-samples)
    (block-light-samples :initarg :block-light-samples :initform nil
-                        :reader block-mesh-snapshot-block-light-samples)
-   (origin-x :initarg :origin-x :reader block-mesh-snapshot-origin-x)
-   (origin-y :initarg :origin-y :reader block-mesh-snapshot-origin-y)
-   (origin-z :initarg :origin-z :reader block-mesh-snapshot-origin-z)
-   (width :initarg :width :reader block-mesh-snapshot-width)
-   (height :initarg :height :reader block-mesh-snapshot-height)
-   (depth :initarg :depth :reader block-mesh-snapshot-depth))
+                        :reader block-mesh-snapshot-block-light-samples))
   (:documentation
    "An immutable dense chunk plus one-cell halo transferred to a CPU worker.
 
@@ -86,12 +80,7 @@ remeshing the world."
 (defstruct (block-mesh-neighborhood
              (:constructor %make-block-mesh-neighborhood))
   "The 3x3x3 resident chunk neighborhood needed by one chunk mesh."
-  (origin-x 0 :type integer)
-  (origin-y 0 :type integer)
-  (origin-z 0 :type integer)
-  (width 16 :type (integer 1))
-  (height 16 :type (integer 1))
-  (depth 16 :type (integer 1))
+  (domain nil :type (or null chunk-domain))
   (chunks (make-array 27 :initial-element nil) :type simple-vector))
 
 (defun block-mesh-neighborhood-index (dx dy dz)
@@ -101,10 +90,6 @@ remeshing the world."
   "Resolve once the chunks every visibility and AO sample can reach."
   (let* ((domain (block-chunk-domain chunk))
          (coordinate (chunk-domain-coordinate domain))
-         (shape (voxel-space-chunk-shape (block-world-space world)))
-         (width (chunk-shape-width shape))
-         (height (chunk-shape-height shape))
-         (depth (chunk-shape-depth shape))
          (chunk-x (chunk-coordinate-x coordinate))
          (chunk-y (chunk-coordinate-y coordinate))
          (chunk-z (chunk-coordinate-z coordinate))
@@ -117,57 +102,70 @@ remeshing the world."
                                 (+ chunk-x dx)
                                 (+ chunk-y dy)
                                 (+ chunk-z dz))))))
-    (%make-block-mesh-neighborhood
-     :origin-x (* chunk-x width)
-     :origin-y (* chunk-y height)
-     :origin-z (* chunk-z depth)
-     :width width :height height :depth depth :chunks chunks)))
+    (%make-block-mesh-neighborhood :domain domain :chunks chunks)))
+
+(declaim (inline block-mesh-neighborhood-locate))
+(defun block-mesh-neighborhood-locate (neighborhood x y z)
+  "Resolve one nearby world site to its resident chunk and dense offset.
+
+The 3x3x3 window owns availability; voxel-space and chunk-domain own the
+decomposition and storage order beneath it.  See #K3KZTG."
+  (let* ((domain (block-mesh-neighborhood-domain neighborhood))
+         (space (chunk-domain-space domain))
+         (center (chunk-domain-coordinate domain)))
+    (multiple-value-bind
+          (chunk-x chunk-y chunk-z local-x local-y local-z)
+        (voxel-space-decompose-components space x y z)
+      (let ((dx (- chunk-x (chunk-coordinate-x center)))
+            (dy (- chunk-y (chunk-coordinate-y center)))
+            (dz (- chunk-z (chunk-coordinate-z center))))
+        (when (and (<= -1 dx 1) (<= -1 dy 1) (<= -1 dz 1))
+          (let ((chunk
+                  (aref (block-mesh-neighborhood-chunks neighborhood)
+                        (block-mesh-neighborhood-index dx dy dz))))
+            (when chunk
+              (values chunk
+                      (chunk-domain-offset-components
+                       (block-chunk-domain chunk)
+                       local-x local-y local-z)))))))))
 
 (declaim (inline block-mesh-neighborhood-block-at))
 (defun block-mesh-neighborhood-block-at (neighborhood x y z)
   "Read a nearby world site with no coordinate objects or hash-key consing."
-  (let ((relative-x (- x (block-mesh-neighborhood-origin-x neighborhood)))
-        (relative-y (- y (block-mesh-neighborhood-origin-y neighborhood)))
-        (relative-z (- z (block-mesh-neighborhood-origin-z neighborhood))))
-    (multiple-value-bind (dx local-x)
-        (floor relative-x (block-mesh-neighborhood-width neighborhood))
-      (multiple-value-bind (dy local-y)
-          (floor relative-y (block-mesh-neighborhood-height neighborhood))
-        (multiple-value-bind (dz local-z)
-            (floor relative-z (block-mesh-neighborhood-depth neighborhood))
-          (if (and (<= -1 dx 1) (<= -1 dy 1) (<= -1 dz 1))
-              (let ((chunk
-                      (aref (block-mesh-neighborhood-chunks neighborhood)
-                            (block-mesh-neighborhood-index dx dy dz))))
-                (if chunk
-                    (values
-                     (block-content-at-offset
-                      (block-chunk-content chunk)
-                      (+ local-x
-                         (* (block-mesh-neighborhood-width neighborhood)
-                            (+ local-y
-                               (* (block-mesh-neighborhood-height neighborhood)
-                                  local-z)))))
-                     :resident)
-                    (values nil :absent)))
-              (values nil :absent)))))))
+  (multiple-value-bind (chunk offset)
+      (block-mesh-neighborhood-locate neighborhood x y z)
+    (if chunk
+        (values (block-content-at-offset
+                 (block-chunk-content chunk) offset)
+                :resident)
+        (values nil :absent))))
+
+(declaim (inline block-mesh-halo-offset-components))
+(defun block-mesh-halo-offset-components (domain x y z)
+  "Return the dense one-cell-halo offset for a world site, or NIL outside."
+  (let* ((shape (voxel-space-chunk-shape (chunk-domain-space domain)))
+         (sample-width (+ 2 (chunk-shape-width shape)))
+         (sample-height (+ 2 (chunk-shape-height shape)))
+         (sample-depth (+ 2 (chunk-shape-depth shape))))
+    (multiple-value-bind (origin-x origin-y origin-z)
+        (chunk-domain-world-components domain 0 0 0)
+      (let ((sample-x (1+ (- x origin-x)))
+            (sample-y (1+ (- y origin-y)))
+            (sample-z (1+ (- z origin-z))))
+        (when (and (<= 0 sample-x) (< sample-x sample-width)
+                   (<= 0 sample-y) (< sample-y sample-height)
+                   (<= 0 sample-z) (< sample-z sample-depth))
+          (+ sample-x
+             (* sample-width
+                (+ sample-y (* sample-height sample-z)))))))))
 
 (declaim (inline block-mesh-snapshot-block-at))
 (defun block-mesh-snapshot-block-at (snapshot x y z)
-  (let ((sample-x (1+ (- x (block-mesh-snapshot-origin-x snapshot))))
-        (sample-y (1+ (- y (block-mesh-snapshot-origin-y snapshot))))
-        (sample-z (1+ (- z (block-mesh-snapshot-origin-z snapshot))))
-        (sample-width (+ 2 (block-mesh-snapshot-width snapshot)))
-        (sample-height (+ 2 (block-mesh-snapshot-height snapshot)))
-        (sample-depth (+ 2 (block-mesh-snapshot-depth snapshot))))
-    (if (and (<= 0 sample-x) (< sample-x sample-width)
-             (<= 0 sample-y) (< sample-y sample-height)
-             (<= 0 sample-z) (< sample-z sample-depth))
-        (let ((index
-                (aref (block-mesh-snapshot-sample-indices snapshot)
-                      (+ sample-x
-                         (* sample-width
-                            (+ sample-y (* sample-height sample-z)))))))
+  (let ((offset (block-mesh-halo-offset-components
+                 (block-mesh-snapshot-domain snapshot) x y z)))
+    (if offset
+        (let ((index (aref (block-mesh-snapshot-sample-indices snapshot)
+                           offset)))
           ;; Zero is absent.  Resident air has its own palette entry.
           (if (zerop index)
               (values nil :absent)
@@ -209,57 +207,29 @@ falling through to BLOCK-SOLID-P."))
         (values sky block :resident))))
 
 (defmethod sample-light-at ((samples block-mesh-neighborhood) x y z)
-  (let ((relative-x (- x (block-mesh-neighborhood-origin-x samples)))
-        (relative-y (- y (block-mesh-neighborhood-origin-y samples)))
-        (relative-z (- z (block-mesh-neighborhood-origin-z samples))))
-    (multiple-value-bind (dx local-x)
-        (floor relative-x (block-mesh-neighborhood-width samples))
-      (multiple-value-bind (dy local-y)
-          (floor relative-y (block-mesh-neighborhood-height samples))
-        (multiple-value-bind (dz local-z)
-            (floor relative-z (block-mesh-neighborhood-depth samples))
-          (let ((chunk (and (<= -1 dx 1) (<= -1 dy 1) (<= -1 dz 1)
-                            (aref (block-mesh-neighborhood-chunks samples)
-                                  (block-mesh-neighborhood-index
-                                   dx dy dz)))))
-            (if chunk
-                (let ((field (block-chunk-light-field chunk))
-                      (offset
-                        (+ local-x
-                           (* (block-mesh-neighborhood-width samples)
-                              (+ local-y
-                                 (* (block-mesh-neighborhood-height
-                                     samples)
-                                    local-z))))))
-                  (if field
-                      (values
-                       (aref (chunk-light-field-sky-levels field) offset)
-                       (aref (chunk-light-field-block-levels field) offset)
-                       :resident)
-                      (values 0 0 :resident)))
-                (values 0 0 :absent))))))))
+  (multiple-value-bind (chunk offset)
+      (block-mesh-neighborhood-locate samples x y z)
+    (if chunk
+        (let ((field (block-chunk-light-field chunk)))
+          (if field
+              (values
+               (aref (chunk-light-field-sky-levels field) offset)
+               (aref (chunk-light-field-block-levels field) offset)
+               :resident)
+              (values 0 0 :resident)))
+        (values 0 0 :absent))))
 
 (defmethod sample-light-at ((samples block-mesh-snapshot) x y z)
-  (let ((sample-x (1+ (- x (block-mesh-snapshot-origin-x samples))))
-        (sample-y (1+ (- y (block-mesh-snapshot-origin-y samples))))
-        (sample-z (1+ (- z (block-mesh-snapshot-origin-z samples))))
-        (sample-width (+ 2 (block-mesh-snapshot-width samples)))
-        (sample-height (+ 2 (block-mesh-snapshot-height samples)))
-        (sample-depth (+ 2 (block-mesh-snapshot-depth samples))))
-    (if (and (<= 0 sample-x) (< sample-x sample-width)
-             (<= 0 sample-y) (< sample-y sample-height)
-             (<= 0 sample-z) (< sample-z sample-depth))
-        (let ((offset (+ sample-x
-                         (* sample-width
-                            (+ sample-y (* sample-height sample-z))))))
-          (if (zerop (aref (block-mesh-snapshot-sample-indices samples)
-                           offset))
-              (values 0 0 :absent)
-              (values
-               (aref (block-mesh-snapshot-sky-samples samples) offset)
-               (aref (block-mesh-snapshot-block-light-samples samples)
-                     offset)
-               :resident)))
+  (let ((offset (block-mesh-halo-offset-components
+                 (block-mesh-snapshot-domain samples) x y z)))
+    (if offset
+        (if (zerop (aref (block-mesh-snapshot-sample-indices samples)
+                         offset))
+            (values 0 0 :absent)
+            (values
+             (aref (block-mesh-snapshot-sky-samples samples) offset)
+             (aref (block-mesh-snapshot-block-light-samples samples) offset)
+             :resident))
         (values 0 0 :absent))))
 
 (defun mesher-block-at (mesher samples x y z)
@@ -399,94 +369,72 @@ normalized to 0..1."
     ((mesher exposed-face-mesher) (world block-world) vertices
      (block block-kind) (face block-face) x y z)
   "Compatibility entry point for tools emitting an individual world face."
-  (let* ((shape (voxel-space-chunk-shape (block-world-space world)))
-         (chunk-x (floor x (chunk-shape-width shape)))
-         (chunk-y (floor y (chunk-shape-height shape)))
-         (chunk-z (floor z (chunk-shape-depth shape)))
-         (chunk (world-chunk-at world chunk-x chunk-y chunk-z)))
-    (unless chunk
-      (error "Cannot emit a face from absent chunk (~D ~D ~D)."
-             chunk-x chunk-y chunk-z))
-    (emit-block-face-into
-     mesher (make-block-mesh-neighborhood world chunk)
-     vertices block face x y z)))
+  (multiple-value-bind (chunk-x chunk-y chunk-z)
+      (voxel-space-decompose-components (block-world-space world) x y z)
+    (let ((chunk (world-chunk-at world chunk-x chunk-y chunk-z)))
+      (unless chunk
+        (error "Cannot emit a face from absent chunk (~D ~D ~D)."
+               chunk-x chunk-y chunk-z))
+      (emit-block-face-into
+       mesher (make-block-mesh-neighborhood world chunk)
+       vertices block face x y z))))
 
 (defun block-storage-face-masks (mesher samples domain palette indices)
   "Return one exposed-face bit mask per site and the exact face count."
-  (let* ((shape (voxel-space-chunk-shape (chunk-domain-space domain)))
-         (width (chunk-shape-width shape))
-         (height (chunk-shape-height shape))
-         (depth (chunk-shape-depth shape))
-         (origin (chunk-domain-origin domain))
-         (origin-x (world-coordinate-x origin))
-         (origin-y (world-coordinate-y origin))
-         (origin-z (world-coordinate-z origin))
-         (masks (make-array (chunk-domain-cardinality domain)
+  (let* ((masks (make-array (chunk-domain-cardinality domain)
                             :element-type '(unsigned-byte 8)
                             :initial-element 0))
-         (face-count 0)
-         (offset 0))
-    (dotimes (local-z depth)
-      (dotimes (local-y height)
-        (dotimes (local-x width)
-          (when (block-solid-p (aref palette (aref indices offset)))
-            (let ((x (+ origin-x local-x))
-                  (y (+ origin-y local-y))
-                  (z (+ origin-z local-z))
-                  (mask 0))
-              (loop for face in *block-faces*
-                    for bit from 0
-                    for normal = (block-face-neighbor face)
-                    unless (block-solid-p
-                            (mesher-block-at
-                             mesher samples
-                             (+ x (first normal))
-                             (+ y (second normal))
-                             (+ z (third normal))))
-                      do (setf mask (logior mask (ash 1 bit)))
-                         (incf face-count))
-              (setf (aref masks offset) mask)))
-          (incf offset))))
+         (face-count 0))
+    (map-chunk-domain-sites
+     (lambda (offset local-x local-y local-z)
+       (when (block-solid-p (aref palette (aref indices offset)))
+         (multiple-value-bind (x y z)
+             (chunk-domain-world-components
+              domain local-x local-y local-z)
+           (let ((mask 0))
+             (loop for face in *block-faces*
+                   for bit from 0
+                   for normal = (block-face-neighbor face)
+                   unless (block-solid-p
+                           (mesher-block-at
+                            mesher samples
+                            (+ x (first normal))
+                            (+ y (second normal))
+                            (+ z (third normal))))
+                     do (setf mask (logior mask (ash 1 bit)))
+                        (incf face-count))
+             (setf (aref masks offset) mask)))))
+     domain)
     (values masks face-count)))
 
 (defun mesh-block-storage (mesher samples domain palette indices)
   "Mesh one immutable or owner-borrowed dense chunk representation."
-  (let* ((shape (voxel-space-chunk-shape (chunk-domain-space domain)))
-         (width (chunk-shape-width shape))
-         (height (chunk-shape-height shape))
-         (depth (chunk-shape-depth shape))
-         (origin (chunk-domain-origin domain))
-         (origin-x (world-coordinate-x origin))
-         (origin-y (world-coordinate-y origin))
-         (origin-z (world-coordinate-z origin)))
-    (multiple-value-bind (masks face-count)
-        (block-storage-face-masks mesher samples domain palette indices)
-      (let ((vertices
-              (make-array (* face-count +block-mesh-floats-per-face+)
-                          :element-type 'single-float :fill-pointer 0))
-            (offset 0))
-        (dotimes (local-z depth)
-          (dotimes (local-y height)
-            (dotimes (local-x width)
-              (let ((mask (aref masks offset)))
-                (unless (zerop mask)
-                  (let ((block (aref palette (aref indices offset)))
-                        (x (+ origin-x local-x))
-                        (y (+ origin-y local-y))
-                        (z (+ origin-z local-z)))
-                    (loop for face in *block-faces*
-                          for bit from 0
-                          when (logbitp bit mask)
-                            do (emit-block-face-into
-                                mesher samples vertices block face x y z)))))
-              (incf offset))))
-        (assert (= (length vertices)
-                   (* face-count +block-mesh-floats-per-face+)))
-        (make-instance 'block-mesh
-                       :vertices vertices
-                       :vertex-count (* face-count
-                                        +block-mesh-vertices-per-face+)
-                       :face-count face-count)))))
+  (multiple-value-bind (masks face-count)
+      (block-storage-face-masks mesher samples domain palette indices)
+    (let ((vertices
+            (make-array (* face-count +block-mesh-floats-per-face+)
+                        :element-type 'single-float :fill-pointer 0)))
+      (map-chunk-domain-sites
+       (lambda (offset local-x local-y local-z)
+         (let ((mask (aref masks offset)))
+           (unless (zerop mask)
+             (let ((block (aref palette (aref indices offset))))
+               (multiple-value-bind (x y z)
+                   (chunk-domain-world-components
+                    domain local-x local-y local-z)
+                 (loop for face in *block-faces*
+                       for bit from 0
+                       when (logbitp bit mask)
+                         do (emit-block-face-into
+                             mesher samples vertices block face x y z)))))))
+       domain)
+      (assert (= (length vertices)
+                 (* face-count +block-mesh-floats-per-face+)))
+      (make-instance 'block-mesh
+                     :vertices vertices
+                     :vertex-count (* face-count
+                                      +block-mesh-vertices-per-face+)
+                     :face-count face-count))))
 
 (defmethod mesh-block-chunk
     ((mesher exposed-face-mesher) (world block-world) (chunk block-chunk))
@@ -551,43 +499,42 @@ normalized to 0..1."
         (dotimes (sample-x sample-width)
           (let ((world-x (+ origin-x (1- sample-x)))
                 (world-y (+ origin-y (1- sample-y)))
-                (world-z (+ origin-z (1- sample-z)))
-                (sample-offset
-                  (+ sample-x
-                     (* sample-width
-                        (+ sample-y (* sample-height sample-z))))))
-            (multiple-value-bind (block status)
-                (block-mesh-neighborhood-block-at
-                 neighborhood world-x world-y world-z)
-              (let ((index
-                      (if (eq status :resident)
-                          (block-mesh-snapshot-palette-index
-                           block palette palette-indices)
-                          0)))
-                (setf (aref sample-indices sample-offset) index)
-                (when (and (<= 1 sample-x width)
-                           (<= 1 sample-y height)
-                           (<= 1 sample-z depth))
-                  (setf (aref target-indices
-                              (+ (1- sample-x)
-                                 (* width
-                                    (+ (1- sample-y)
-                                       (* height (1- sample-z))))))
-                        index))))
-            (multiple-value-bind (sky block-light status)
-                (sample-light-at neighborhood world-x world-y world-z)
-              (declare (ignore status))
-              (setf (aref sky-samples sample-offset) sky
-                    (aref block-light-samples sample-offset)
-                    block-light))))))
+                (world-z (+ origin-z (1- sample-z))))
+            (let ((sample-offset
+                    (block-mesh-halo-offset-components
+                     domain world-x world-y world-z)))
+              (assert sample-offset)
+              (multiple-value-bind (block status)
+                  (block-mesh-neighborhood-block-at
+                   neighborhood world-x world-y world-z)
+                (let ((index
+                        (if (eq status :resident)
+                            (block-mesh-snapshot-palette-index
+                             block palette palette-indices)
+                            0)))
+                  (setf (aref sample-indices sample-offset) index)
+                  (when (and (<= 1 sample-x width)
+                             (<= 1 sample-y height)
+                             (<= 1 sample-z depth))
+                    (setf (aref target-indices
+                                (chunk-domain-offset-components
+                                 domain
+                                 (1- sample-x)
+                                 (1- sample-y)
+                                 (1- sample-z)))
+                          index))))
+              (multiple-value-bind (sky block-light status)
+                  (sample-light-at neighborhood world-x world-y world-z)
+                (declare (ignore status))
+                (setf (aref sky-samples sample-offset) sky
+                      (aref block-light-samples sample-offset)
+                      block-light)))))))
     (make-instance
      'block-mesh-snapshot
      :key (block-chunk-key chunk) :dependency-stamp dependency-stamp
      :domain domain :palette palette :target-indices target-indices
      :sample-indices sample-indices
-     :sky-samples sky-samples :block-light-samples block-light-samples
-     :origin-x origin-x :origin-y origin-y :origin-z origin-z
-     :width width :height height :depth depth)))
+     :sky-samples sky-samples :block-light-samples block-light-samples)))
 
 (defmethod mesh-block-world
     ((mesher exposed-face-mesher) (world block-world))

@@ -175,22 +175,19 @@ resident.  DIRECTION is a (dx dy dz) unit list in chunk coordinates."))
 (declaim (inline light-region-locate))
 (defun light-region-locate (region x y z)
   "Resolve world coordinates to (VALUES ENTRY OFFSET) or NIL when absent."
-  (multiple-value-bind (chunk-x local-x) (floor x (light-region-width region))
-    (multiple-value-bind (chunk-y local-y)
-        (floor y (light-region-height region))
-      (multiple-value-bind (chunk-z local-z)
-          (floor z (light-region-depth region))
-        (let* ((key (list chunk-x chunk-y chunk-z))
-               (entry (or (gethash key (light-region-entries region))
-                          (let ((ensure (light-region-ensure-entry region)))
-                            (and ensure (funcall ensure region key))))))
-          (when entry
-            (values entry
-                    (+ local-x
-                       (* (light-region-width region)
-                          (+ local-y
-                             (* (light-region-height region)
-                                local-z)))))))))))
+  (multiple-value-bind
+        (chunk-x chunk-y chunk-z local-x local-y local-z)
+      (voxel-space-decompose-components
+       (block-world-space (light-region-world region)) x y z)
+    (let* ((key (list chunk-x chunk-y chunk-z))
+           (entry (or (gethash key (light-region-entries region))
+                      (let ((ensure (light-region-ensure-entry region)))
+                        (and ensure (funcall ensure region key))))))
+      (when entry
+        (values entry
+                (chunk-domain-offset-components
+                 (block-chunk-domain (light-region-entry-chunk entry))
+                 local-x local-y local-z))))))
 
 (defun light-region-opacity (entry offset)
   (aref (light-region-entry-opacity-lut entry)
@@ -260,26 +257,16 @@ Returns the number of cells visited, for the runtime's work counters."
                             source world key direction)
                            :unknown)))))
 
-(defun map-entry-face-cells (region entry dx dy dz function)
+(defun map-entry-face-cells (entry dx dy dz function)
   "Call FUNCTION with the world coordinates of each cell on one face."
-  (flet ((limits (delta extent origin)
-           (cond ((= delta -1) (values origin origin))
-                 ((= delta 1)
-                  (values (+ origin extent -1) (+ origin extent -1)))
-                 (t (values origin (+ origin extent -1))))))
-    (multiple-value-bind (x-low x-high)
-        (limits dx (light-region-width region)
-                (light-region-entry-origin-x entry))
-      (multiple-value-bind (y-low y-high)
-          (limits dy (light-region-height region)
-                  (light-region-entry-origin-y entry))
-        (multiple-value-bind (z-low z-high)
-            (limits dz (light-region-depth region)
-                    (light-region-entry-origin-z entry))
-          (loop for z from z-low to z-high do
-            (loop for y from y-low to y-high do
-              (loop for x from x-low to x-high do
-                (funcall function x y z)))))))))
+  (let ((domain (block-chunk-domain (light-region-entry-chunk entry))))
+    (map-chunk-domain-face
+     (lambda (offset local-x local-y local-z)
+       (declare (ignore offset))
+       (multiple-value-bind (x y z)
+           (chunk-domain-world-components domain local-x local-y local-z)
+         (funcall function x y z)))
+     domain dx dy dz)))
 
 (defun seed-open-sky-cell (region x y z downward-p)
   "Admit boundary sky into one cell; return its coordinates when it grew."
@@ -303,7 +290,7 @@ Returns the number of cells visited, for the runtime's work counters."
                         source world key direction)
                        :open-sky))
           (map-entry-face-cells
-           region entry dx dy dz
+           entry dx dy dz
            (lambda (x y z)
              (let ((seed (seed-open-sky-cell region x y z (= dy 1))))
                (when seed (funcall enqueue seed))))))))))
@@ -326,22 +313,18 @@ Returns the number of cells visited, for the runtime's work counters."
        (let ((indices (light-region-entry-indices entry))
              (emission (light-region-entry-emission-lut entry))
              (levels (light-region-entry-block entry))
-             (width (light-region-width region))
-             (height (light-region-height region))
-             (origin-x (light-region-entry-origin-x entry))
-             (origin-y (light-region-entry-origin-y entry))
-             (origin-z (light-region-entry-origin-z entry)))
-         (dotimes (offset (length indices))
-           (let ((level (aref emission (aref indices offset))))
-             (when (plusp level)
-               (setf (aref levels offset) level)
-               (multiple-value-bind (z remainder)
-                   (floor offset (* width height))
-                 (multiple-value-bind (y x) (floor remainder width)
-                   (push (list (+ origin-x x)
-                               (+ origin-y y)
-                               (+ origin-z z))
-                         queue))))))))
+             (domain (block-chunk-domain
+                      (light-region-entry-chunk entry))))
+         (map-chunk-domain-sites
+          (lambda (offset local-x local-y local-z)
+            (let ((level (aref emission (aref indices offset))))
+              (when (plusp level)
+                (setf (aref levels offset) level)
+                (multiple-value-bind (x y z)
+                    (chunk-domain-world-components
+                     domain local-x local-y local-z)
+                  (push (list x y z) queue)))))
+          domain)))
      (light-region-entries region))
     queue))
 
@@ -498,31 +481,33 @@ removal steps performed."
 (defun reseed-cell-open-boundaries (region x y z enqueue)
   "Re-admit boundary sky at one cell which may sit on an open face."
   (multiple-value-bind (entry offset) (light-region-locate region x y z)
-    (declare (ignore offset))
     (when entry
-      (let* ((width (light-region-width region))
-             (height (light-region-height region))
-             (depth (light-region-depth region))
-             (local-x (- x (light-region-entry-origin-x entry)))
-             (local-y (- y (light-region-entry-origin-y entry)))
-             (local-z (- z (light-region-entry-origin-z entry)))
+      (let* ((domain (block-chunk-domain
+                      (light-region-entry-chunk entry)))
              (world (light-region-world region))
              (source (block-world-source world))
              (key (light-region-entry-key entry)))
-        (dolist (direction *chunk-neighbor-directions*)
-          (destructuring-bind (dx dy dz) direction
-            (when (and (or (and (= dx -1) (= local-x 0))
-                           (and (= dx 1) (= local-x (1- width)))
-                           (and (= dy -1) (= local-y 0))
-                           (and (= dy 1) (= local-y (1- height)))
-                           (and (= dz -1) (= local-z 0))
-                           (and (= dz 1) (= local-z (1- depth))))
-                       (not (chunk-neighbor-resident-p world key direction))
-                       (eq (absent-chunk-light-semantics
-                            source world key direction)
-                           :open-sky))
-              (let ((seed (seed-open-sky-cell region x y z (= dy 1))))
-                (when seed (funcall enqueue seed))))))))))
+        (multiple-value-bind (local-x local-y local-z)
+            (chunk-domain-local-components domain offset)
+          (dolist (direction *chunk-neighbor-directions*)
+            (destructuring-bind (dx dy dz) direction
+              (multiple-value-bind
+                    (neighbor-offset neighbor-x neighbor-y neighbor-z
+                     crossing-x crossing-y crossing-z)
+                  (step-chunk-domain-site
+                   domain local-x local-y local-z dx dy dz)
+                (declare (ignore neighbor-offset neighbor-x neighbor-y
+                                 neighbor-z))
+                (when (and (not (zerop (+ (abs crossing-x)
+                                          (abs crossing-y)
+                                          (abs crossing-z))))
+                           (not (chunk-neighbor-resident-p
+                                 world key direction))
+                           (eq (absent-chunk-light-semantics
+                                source world key direction)
+                               :open-sky))
+                  (let ((seed (seed-open-sky-cell region x y z (= dy 1))))
+                    (when seed (funcall enqueue seed))))))))))))
 
 (defclass luvcraft-lighting-state ()
   ((world :initarg :world :reader lighting-state-world)
@@ -590,20 +575,18 @@ first reconcile lights a caller-built world without a separate protocol."
       (let ((indices (light-region-entry-indices entry))
             (emission (light-region-entry-emission-lut entry))
             (levels (light-region-entry-block entry))
-            (width (light-region-width region))
-            (height (light-region-height region)))
-        (dotimes (offset (length indices))
-          (let ((level (aref emission (aref indices offset))))
-            (when (> level (aref levels offset))
-              (setf (aref levels offset) level)
-              (multiple-value-bind (z remainder)
-                  (floor offset (* width height))
-                (multiple-value-bind (y x) (floor remainder width)
-                  (funcall seed-block
-                           (list (+ (light-region-entry-origin-x entry) x)
-                                 (+ (light-region-entry-origin-y entry) y)
-                                 (+ (light-region-entry-origin-z entry)
-                                    z)))))))))
+            (domain (block-chunk-domain
+                     (light-region-entry-chunk entry))))
+        (map-chunk-domain-sites
+         (lambda (offset local-x local-y local-z)
+           (let ((level (aref emission (aref indices offset))))
+             (when (> level (aref levels offset))
+               (setf (aref levels offset) level)
+               (multiple-value-bind (x y z)
+                   (chunk-domain-world-components
+                    domain local-x local-y local-z)
+                 (funcall seed-block (list x y z))))))
+         domain))
       ;; Resident neighbors: their facing boundary cells re-propagate into
       ;; the newcomer.
       (dolist (direction *chunk-neighbor-directions*)
@@ -621,7 +604,7 @@ first reconcile lights a caller-built world without a separate protocol."
                                region neighbor-chunk :from-field-p t))))))
             (when neighbor-entry
               (map-entry-face-cells
-               region neighbor-entry (- dx) (- dy) (- dz)
+               neighbor-entry (- dx) (- dy) (- dz)
                (lambda (cell-x cell-y cell-z)
                  (funcall seed-sky (list cell-x cell-y cell-z))
                  (funcall seed-block
@@ -683,7 +666,7 @@ producer batches is justified by measurement rather than guesswork."
                                   region chunk :from-field-p t))))))
                (when entry
                  (map-entry-face-cells
-                  region entry (- dx) (- dy) (- dz)
+                  entry (- dx) (- dy) (- dz)
                   (lambda (x y z)
                     (multiple-value-bind (cell-entry offset)
                         (light-region-locate region x y z)

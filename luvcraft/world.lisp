@@ -91,6 +91,25 @@
             (* (world-coordinate-y coordinate) (aref extent 1))
             (* (world-coordinate-z coordinate) (aref extent 2)))))
 
+(defun voxel-space-decompose-components (space x y z)
+  "Decompose a world site into chunk and local scalar components.
+
+Return CHUNK-X, CHUNK-Y, CHUNK-Z, LOCAL-X, LOCAL-Y, and LOCAL-Z without
+constructing coordinate objects.  Euclidean division keeps every local
+component non-negative, including for negative world coordinates.  This is
+the dense traversal counterpart of WORLD-COORDINATE-CHUNK-AND-LOCAL."
+  (check-type space voxel-space)
+  (check-type x integer)
+  (check-type y integer)
+  (check-type z integer)
+  (let ((shape (voxel-space-chunk-shape space)))
+    (multiple-value-bind (chunk-x local-x) (floor x (chunk-shape-width shape))
+      (multiple-value-bind (chunk-y local-y)
+          (floor y (chunk-shape-height shape))
+        (multiple-value-bind (chunk-z local-z)
+            (floor z (chunk-shape-depth shape))
+          (values chunk-x chunk-y chunk-z local-x local-y local-z))))))
+
 (defun world-coordinate-chunk-and-local (space coordinate)
   "Decompose COORDINATE by Euclidean division in SPACE.
 
@@ -98,15 +117,14 @@ The local result is always non-negative, including for negative world
 coordinates."
   (check-type space voxel-space)
   (check-type coordinate world-coordinate)
-  (let ((shape (voxel-space-chunk-shape space)))
-    (multiple-value-bind (chunk-x local-x)
-        (floor (world-coordinate-x coordinate) (chunk-shape-width shape))
-      (multiple-value-bind (chunk-y local-y)
-          (floor (world-coordinate-y coordinate) (chunk-shape-height shape))
-        (multiple-value-bind (chunk-z local-z)
-            (floor (world-coordinate-z coordinate) (chunk-shape-depth shape))
-          (values (make-chunk-coordinate chunk-x chunk-y chunk-z)
-                  (make-local-coordinate local-x local-y local-z)))))))
+  (multiple-value-bind (chunk-x chunk-y chunk-z local-x local-y local-z)
+      (voxel-space-decompose-components
+       space
+       (world-coordinate-x coordinate)
+       (world-coordinate-y coordinate)
+       (world-coordinate-z coordinate))
+    (values (make-chunk-coordinate chunk-x chunk-y chunk-z)
+            (make-local-coordinate local-x local-y local-z))))
 
 (defun chunk-local-world-coordinate (space chunk local)
   (check-type space voxel-space)
@@ -190,6 +208,12 @@ coordinates."
                 z))))))
 
 (defun chunk-domain-local-coordinate (domain offset)
+  (multiple-value-bind (x y z)
+      (chunk-domain-local-components domain offset)
+    (make-local-coordinate x y z)))
+
+(defun chunk-domain-local-components (domain offset)
+  "Map a dense offset to local scalar components without a row object."
   (check-type domain chunk-domain)
   (check-type offset (integer 0))
   (unless (< offset (chunk-domain-cardinality domain))
@@ -199,7 +223,89 @@ coordinates."
          (height (chunk-shape-height shape)))
     (multiple-value-bind (z remainder) (floor offset (* width height))
       (multiple-value-bind (y x) (floor remainder width)
-        (make-local-coordinate x y z)))))
+        (values x y z)))))
+
+(defun chunk-domain-world-components (domain local-x local-y local-z)
+  "Map local scalar components to world scalar components without objects."
+  ;; Use the checked offset operation as the single local-bounds authority.
+  (chunk-domain-offset-components domain local-x local-y local-z)
+  (let* ((shape (voxel-space-chunk-shape (chunk-domain-space domain)))
+         (coordinate (chunk-domain-coordinate domain)))
+    (values (+ (* (chunk-coordinate-x coordinate)
+                  (chunk-shape-width shape))
+               local-x)
+            (+ (* (chunk-coordinate-y coordinate)
+                  (chunk-shape-height shape))
+               local-y)
+            (+ (* (chunk-coordinate-z coordinate)
+                  (chunk-shape-depth shape))
+               local-z))))
+
+(defun step-chunk-domain-site (domain x y z dx dy dz)
+  "Step from one local site in a primitive face direction.
+
+Return the destination OFFSET, wrapped local X, Y, and Z, followed by the
+chunk-crossing DX, DY, and DZ.  A zero crossing stays in DOMAIN; a nonzero
+crossing names the adjacent chunk whose local site has been returned.  The
+operation allocates no coordinate or boundary object."
+  (chunk-domain-offset-components domain x y z)
+  (unless (and (integerp dx) (integerp dy) (integerp dz)
+               (= 1 (+ (abs dx) (abs dy) (abs dz))))
+    (error "(~S ~S ~S) is not a primitive face direction." dx dy dz))
+  (let ((shape (voxel-space-chunk-shape (chunk-domain-space domain))))
+    (multiple-value-bind (crossing-x local-x)
+        (floor (+ x dx) (chunk-shape-width shape))
+      (multiple-value-bind (crossing-y local-y)
+          (floor (+ y dy) (chunk-shape-height shape))
+        (multiple-value-bind (crossing-z local-z)
+            (floor (+ z dz) (chunk-shape-depth shape))
+          (values (chunk-domain-offset-components
+                   domain local-x local-y local-z)
+                  local-x local-y local-z
+                  crossing-x crossing-y crossing-z))))))
+
+(defun map-chunk-domain-sites (function domain)
+  "Call FUNCTION with OFFSET, X, Y, and Z for every site in storage order.
+
+The scalar local coordinates describe dense data without allocating site
+objects or dispatching once per cell."
+  (check-type function function)
+  (check-type domain chunk-domain)
+  (let* ((shape (voxel-space-chunk-shape (chunk-domain-space domain)))
+         (width (chunk-shape-width shape))
+         (height (chunk-shape-height shape))
+         (depth (chunk-shape-depth shape))
+         (offset 0))
+    (dotimes (z depth)
+      (dotimes (y height)
+        (dotimes (x width)
+          (funcall function offset x y z)
+          (incf offset)))))
+  domain)
+
+(defun map-chunk-domain-face (function domain dx dy dz)
+  "Call FUNCTION with OFFSET, X, Y, and Z for one local boundary face."
+  (check-type function function)
+  (check-type domain chunk-domain)
+  (unless (and (integerp dx) (integerp dy) (integerp dz)
+               (= 1 (+ (abs dx) (abs dy) (abs dz))))
+    (error "(~S ~S ~S) is not a primitive face direction." dx dy dz))
+  (let* ((shape (voxel-space-chunk-shape (chunk-domain-space domain)))
+         (width (chunk-shape-width shape))
+         (height (chunk-shape-height shape))
+         (depth (chunk-shape-depth shape))
+         (x-low (if (= dx 1) (1- width) 0))
+         (x-high (if (= dx -1) 0 (1- width)))
+         (y-low (if (= dy 1) (1- height) 0))
+         (y-high (if (= dy -1) 0 (1- height)))
+         (z-low (if (= dz 1) (1- depth) 0))
+         (z-high (if (= dz -1) 0 (1- depth))))
+    (loop for z from z-low to z-high do
+      (loop for y from y-low to y-high do
+        (loop for x from x-low to x-high do
+          (funcall function
+                   (+ x (* width (+ y (* height z)))) x y z)))))
+  domain)
 
 ;;; Block content is a narrow semantic field.  The presentable value is a
 ;;; shared Lisp object (or NIL for air); the physical column is a dense u16
@@ -345,23 +451,20 @@ specialized arrays rather than describing individual cells through CLOS."))
   "Set one dense site while retaining chunk and boundary invalidation."
   (check-type chunk block-chunk)
   (check-type offset (integer 0))
-  (let* ((domain (block-chunk-domain chunk))
-         (shape (voxel-space-chunk-shape (chunk-domain-space domain)))
-         (width (chunk-shape-width shape))
-         (height (chunk-shape-height shape)))
+  (let ((domain (block-chunk-domain chunk)))
     (unless (< offset (chunk-domain-cardinality domain))
       (error "Offset ~D is outside chunk ~S." offset chunk))
     (when (set-block-content-at-offset
            (block-chunk-content chunk) offset block)
       (incf (slot-value chunk 'revision))
-      (multiple-value-bind (z remainder) (floor offset (* width height))
-        (multiple-value-bind (y x) (floor remainder width)
-          (note-chunk-boundary-change chunk x y z)
-          ;; The hook receives the edited site so derived domains such as
-          ;; lighting can react to the cell, not merely the chunk.
-          (let ((change-hook (slot-value chunk 'change-hook)))
-            (when change-hook
-              (funcall change-hook chunk x y z)))))))
+      (multiple-value-bind (x y z)
+          (chunk-domain-local-components domain offset)
+        (note-chunk-boundary-change chunk x y z)
+        ;; The hook receives the edited site so derived domains such as
+        ;; lighting can react to the cell, not merely the chunk.
+        (let ((change-hook (slot-value chunk 'change-hook)))
+          (when change-hook
+            (funcall change-hook chunk x y z))))))
   block)
 
 (defun map-chunk-blocks (function chunk)
@@ -371,13 +474,10 @@ This row-shaped convenience protocol is for presentation and irregular local
 work.  Whole-domain algorithms should use WITH-BLOCK-CONTENT-STORAGE."
   (check-type chunk block-chunk)
   (with-block-content-storage (domain palette indices) chunk
-    (let ((shape (voxel-space-chunk-shape (chunk-domain-space domain)))
-          (offset 0))
-      (dotimes (z (chunk-shape-depth shape))
-        (dotimes (y (chunk-shape-height shape))
-          (dotimes (x (chunk-shape-width shape))
-            (funcall function (aref palette (aref indices offset)) x y z)
-            (incf offset))))))
+    (map-chunk-domain-sites
+     (lambda (offset x y z)
+       (funcall function (aref palette (aref indices offset)) x y z))
+     domain))
   chunk)
 
 ;;; A block world is the resident environment, not the complete world

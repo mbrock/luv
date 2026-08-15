@@ -52,6 +52,52 @@
     (ok (signals
          (chunk-domain-offset domain (make-local-coordinate 4 0 0))))))
 
+(deftest chunk-domain-component-traversal
+  (let* ((space (make-voxel-space
+                 :chunk-shape (make-chunk-shape :width 4
+                                                :height 3
+                                                :depth 2)))
+         (domain (make-chunk-domain space (make-chunk-coordinate -2 1 3)))
+         (sites nil)
+         (positive-x-face nil))
+    (multiple-value-bind
+          (chunk-x chunk-y chunk-z local-x local-y local-z)
+        (voxel-space-decompose-components space -5 5 5)
+      (ok (equal (list chunk-x chunk-y chunk-z) '(-2 1 2)))
+      (ok (equal (list local-x local-y local-z) '(3 2 1))))
+    (multiple-value-bind (x y z) (chunk-domain-local-components domain 23)
+      (ok (equal (list x y z) '(3 2 1)))
+      (multiple-value-bind (world-x world-y world-z)
+          (chunk-domain-world-components domain x y z)
+        (ok (equal (list world-x world-y world-z) '(-5 5 7)))))
+    (multiple-value-bind
+          (offset x y z crossing-x crossing-y crossing-z)
+        (step-chunk-domain-site domain 1 1 1 1 0 0)
+      (ok (= offset 18))
+      (ok (equal (list x y z) '(2 1 1)))
+      (ok (equal (list crossing-x crossing-y crossing-z) '(0 0 0))))
+    (multiple-value-bind
+          (offset x y z crossing-x crossing-y crossing-z)
+        (step-chunk-domain-site domain 0 1 1 -1 0 0)
+      (ok (= offset 19))
+      (ok (equal (list x y z) '(3 1 1)))
+      (ok (equal (list crossing-x crossing-y crossing-z) '(-1 0 0))))
+    (map-chunk-domain-sites
+     (lambda (offset x y z)
+       (push (list offset x y z) sites))
+     domain)
+    (ok (= (length sites) 24))
+    (ok (equal (first (last sites)) '(0 0 0 0)))
+    (ok (equal (first sites) '(23 3 2 1)))
+    (map-chunk-domain-face
+     (lambda (offset x y z)
+       (declare (ignore x y z))
+       (push offset positive-x-face))
+     domain 1 0 0)
+    (ok (equal (nreverse positive-x-face) '(3 7 11 15 19 23)))
+    (ok (signals (step-chunk-domain-site domain 0 0 0 1 1 0)))
+    (ok (signals (map-chunk-domain-face #'list domain 0 0 0)))))
+
 (deftest palette-backed-block-content
   (let* ((world (make-block-world :chunk-width 4
                                   :chunk-height 4

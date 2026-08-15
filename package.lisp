@@ -449,6 +449,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:voxel-space-cell-extent
            #:world-coordinate-cell-origin
            #:world-coordinate-chunk-and-local
+           #:voxel-space-decompose-components
            #:chunk-local-world-coordinate
            #:chunk-domain
            #:make-chunk-domain
@@ -459,6 +460,12 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:chunk-domain-local-coordinate-p
            #:chunk-domain-offset
            #:chunk-domain-local-coordinate
+           #:chunk-domain-offset-components
+           #:chunk-domain-local-components
+           #:chunk-domain-world-components
+           #:step-chunk-domain-site
+           #:map-chunk-domain-sites
+           #:map-chunk-domain-face
            #:block-content-column
            #:block-content-column-palette
            #:block-content-column-indices

@@ -513,7 +513,7 @@ unrepresentable.  None requires a universal bundle, a generalized fixed-point
 solver, a sheaf API, per-cell objects, or a broad rewrite of the working light
 system.
 
-* NEXT Make chunk traversal one owned vocabulary
+* DONE Make chunk traversal one owned vocabulary
 :PROPERTIES:
 :ID: K3KZTG
 :END:
@@ -527,19 +527,54 @@ voxel-domain protocol.  Rewrite =light-region-locate=,
 capture to consume those operations while retaining their representations and
 policies.
 
+Evidence: =voxel-space-decompose-components= now owns scalar Euclidean
+decomposition, while =chunk-domain= owns offset inversion, local-to-world
+mapping, primitive stepping with explicit chunk crossings, storage-order
+enumeration, and face enumeration.  The object-returning coordinate
+operations delegate to that same substrate.
+
+=light-region-locate= and the entry-face adapter no longer contain their own
+division, dense-offset, or face-plane formulas.  Light seeding and boundary
+re-entry consume domain site traversal and primitive stepping.  The resolved
+meshing neighborhood now has one locator shared by block and light reads; the
+snapshot has one halo-offset operation shared by capture and both field
+accessors.  Six cached origin/extent slots disappeared from each snapshot,
+while the world, light region, neighborhood, and snapshot remain separate
+inspectable representations.
+
+The full =make test= suite passes, including vertical and lateral light seams,
+open/closed/unknown boundaries, randomized incremental/reference equality,
+same-key replacement, stale mesh products, and immutable halo equivalence.
+=make smoke= produces =edc597168a3ec79a04c6d2af53c5b1a5=, byte-identical
+to the render from starting commit =b9fa93d=.
+
+Done: one owned domain vocabulary now supplies local traversal to both
+lighting and meshing.  No field schema, metaclass, generalized solver, or
+per-cell object was introduced to obtain the deletion.
+
+* NEXT Name the chunk-window protocol
+:PROPERTIES:
+:ID: L84JCX
+:END:
+
+Intent: expose the shared aggregate operation already visible in the live
+world, resolved meshing neighborhood, immutable halo snapshot, and light-region
+atlas.  Give those four concrete representations a small protocol for locating
+a world site or resolving a domain crossing, while keeping availability
+distinct from each subsystem's absent/open/closed/unknown policy.  Preserve
+=sample-block-at= and =sample-light-at= as readable field-specific facades.
+
 Evidence to gather:
 
-- the old floor-division, dense-offset, and face-plane formulas disappear
-  from the migrated consumers rather than moving into weak wrappers;
-- the world, meshing neighborhood, halo snapshot, and light region remain
-  independently inspectable concrete objects;
-- light tests still cover lateral and vertical seams, open/closed/unknown
-  boundaries, incremental/reference equality, revisions, and same-key
-  replacement;
-- meshing and production tests retain stale-snapshot and halo behavior; and
-- =make test= and =make smoke= retain the accepted deterministic render.
+- a fifth window-shaped client can participate by adding methods rather than
+  editing a type switch or copying coordinate arithmetic;
+- the four existing windows remain independently inspectable and retain their
+  current storage and ownership;
+- dense light and meshing paths do not acquire coordinate objects or a new
+  per-cell CLOS decision merely to share lookup; and
+- the light, meshing, production, and deterministic smoke evidence remains
+  unchanged.
 
-Done when: one owned domain vocabulary supplies local traversal to both
-lighting and meshing, the subsystem code reads more directly in its own
-terms, and no field schema, metaclass, generalized solver, or per-cell dispatch
-was needed to obtain the first deletion.
+Done when: location and crossing continuation have one honest protocol across
+the four current windows, subsystem policy remains in semantic facades, and at
+least one remaining window-specific lookup duplication is deleted.
