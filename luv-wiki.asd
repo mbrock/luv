@@ -4,7 +4,8 @@ component and operation that make the wiki a buildable system."
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on (#:spinneret
-               #:eclector)
+               #:eclector
+               #:named-readtables)
   :serial t
   :components ((:file "wiki-package")
                (:file "wiki-css")

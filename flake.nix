@@ -64,6 +64,7 @@
             lispPackages.closer-mop
             lispPackages.defclass-std
             lispPackages.eclector
+            lispPackages.named-readtables
             lispPackages.rove
             lispPackages.spinneret
           ] ++ nixpkgs.lib.optionals pkgs.stdenv.isDarwin [

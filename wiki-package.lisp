@@ -67,10 +67,6 @@ operation that make the wiki a buildable system.")
    #:render-page
    #:render-document-string
    #:write-site
-   ;; Stylesheet
-   #:define-style
-   #:stylesheet-text
-   #:css
    #:site-page-name
    ;; Lisp source
    #:lisp-node
@@ -128,3 +124,42 @@ operation that make the wiki a buildable system.")
    #:org-file-document
    #:render-op
    #:site-output-directory))
+
+(defpackage #:luv.css
+  (:use #:cl)
+  (:shadow #:declaration)
+  (:documentation
+   "A small CSS compiler: a reader syntax for quantities and --references, a
+tree of style groups, rules, at-rules, declarations, selectors, and values
+built by DEFINE-STYLE and RULE, and WRITE-CSS, the text backend over it.")
+  (:export
+   ;; Reader syntax
+   #:syntax
+   ;; Values
+   #:dimension #:dimension-number #:dimension-unit
+   #:slash #:slash-left #:slash-right
+   #:variable-reference #:variable-reference-name #:var
+   #:function-call #:function-call-name #:function-call-arguments
+   #:define-css-function
+   #:clamp #:minmax #:repeat #:fit-content #:calc #:url
+   #:rgb #:rgba #:hsl #:attr #:translate #:scale #:rotate
+   #:color-mix #:font-stack #:comma-list #:quoted
+   ;; Selectors
+   #:selector #:complex-selector #:selector-list #:selector-text
+   #:parse-selector #:combine-selectors
+   ;; The tree
+   #:node #:declaration #:declaration-property #:declaration-values
+   #:container #:container-children
+   #:rule #:rule-selector
+   #:at-rule #:at-rule-name #:at-rule-prelude
+   #:style #:style-name #:style-documentation
+   #:add-child #:add-item
+   #:make-rule #:make-at-rule #:ensure-style #:find-style #:*styles*
+   #:define-style #:declarations #:custom-property
+   ;; Text backend
+   #:write-css #:write-css-value #:css-value-text #:css-text #:stylesheet-text))
+
+(defpackage #:luv.wiki.style
+  (:use #:cl #:luv.css)
+  (:shadowing-import-from #:luv.css #:declaration)
+  (:documentation "The wiki's stylesheet, as LUV.CSS style definitions."))

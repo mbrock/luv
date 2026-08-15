@@ -1,8 +1,10 @@
 (defpackage #:luv-wiki/tests
   (:use #:cl #:rove)
-  (:local-nicknames (#:wiki #:luv.wiki)))
+  (:local-nicknames (#:wiki #:luv.wiki)
+                    (#:css #:luv.css)))
 
 (in-package #:luv-wiki/tests)
+(named-readtables:in-readtable luv.css:syntax)
 
 (defparameter *page*
   "#+title: A test page
@@ -234,29 +236,56 @@ Nothing here refers to anything.
     (ok (null (wiki:find-definition "widget" definitions :kind "defun")))))
 
 (deftest the-stylesheet-compiles-from-definitions
-  ;; Values: symbols downcase, --names become var(), lists space-separate,
-  ;; known function heads become calls with comma-separated arguments.
-  (ok (string= (wiki:css '(".a" :color --ink :margin (0 auto)
-                                :padding (0.3rem (clamp 1rem 4vw 3rem))
-                                :grid-template-columns (repeat 3 (minmax 0 1fr))
-                                :background (color-mix (in srgb) (--paper 94%) --accent)))
-               ".a {
+  ;; The CSS syntax reads quantities, slash pairs, and --references as
+  ;; objects, and everything else as usual.
+  (let ((*readtable* (named-readtables:find-readtable 'css:syntax)))
+    (let ((quantity (read-from-string "0.85rem")))
+      (ok (typep quantity 'css:dimension))
+      (ok (= (css:dimension-number quantity) 0.85))
+      (ok (string= (css:dimension-unit quantity) "rem")))
+    (ok (typep (read-from-string "-0.02em") 'css:dimension))
+    (ok (typep (read-from-string "0.72rem/1") 'css:slash))
+    (ok (string= (css:variable-reference-name (read-from-string "--ink")) "ink"))
+    (ok (eql (read-from-string "17") 17))
+    (ok (eql (read-from-string "1.5") 1.5))
+    (ok (eq (read-from-string "-") '-))
+    (ok (eq (read-from-string "1+") '1+)))
+  ;; Values: symbols are CSS words, quantities and references themselves,
+  ;; lists Lisp: CSS functions build calls, and any function may return
+  ;; values or declarations for the rule.
+  (flet ((gutter () (css:clamp 1rem 4vw 3rem))
+         (hairline () (list 1px 'solid --rule)))
+    (ok (string= (css:css-text
+                  (css:rule ".a" :color --ink :margin 0 auto
+                    :padding 0.3rem (gutter)
+                    :border (hairline)
+                    :grid-template-columns (css:repeat 3 (css:minmax 0 1fr))
+                    :font 700 0.72rem/1 --display-font
+                    :background (css:color-mix --paper 94% --accent)
+                    :font-family (css:font-stack "Public Sans" :helvetica)))
+                 ".a {
   color: var(--ink);
   margin: 0 auto;
   padding: 0.3rem clamp(1rem, 4vw, 3rem);
+  border: 1px solid var(--rule);
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  font: 700 0.72rem/1 var(--display-font);
   background: color-mix(in srgb, var(--paper) 94%, var(--accent));
+  font-family: \"Public Sans\", helvetica;
 }
-
-"))
+")))
   ;; Nesting: descendants, & for the parent, groups crossed with groups,
-  ;; and media queries hoisted around the rule they wrap.
-  (ok (string= (wiki:css '(".door, .card" :display grid
-                           ("&:hover, &.selected" :outline none)
-                           ("h1" :margin 0)
-                           (:media "(max-width: 90ch)" ("&" :display block))))
-               ".door, .card {
-  display: grid;
+  ;; media queries hoisted around the rule they wrap, mixins spliced in.
+  (flet ((row () (css:declarations :display flex :gap 1rem)))
+    (ok (string= (css:css-text
+                  (css:rule (".door" ".card") (row) :outline none
+                    (("&:hover" "&.selected") :outline none)
+                    ("h1" :margin 0)
+                    (:media "(max-width: 90ch)" :display block)))
+                 ".door, .card {
+  display: flex;
+  gap: 1rem;
+  outline: none;
 }
 
 .door:hover, .door.selected, .card:hover, .card.selected {
@@ -272,11 +301,15 @@ Nothing here refers to anything.
     display: block;
   }
 }
-
-"))
+")))
+  ;; The tree is inspectable: a rule's children are declarations and rules.
+  (let ((rule (css:rule ".a" :color --ink ("b" :margin 0))))
+    (ok (typep (first (css:container-children rule)) 'css:declaration))
+    (ok (typep (second (css:container-children rule)) 'css:rule))
+    (ok (string= (css:selector-text (css:rule-selector rule)) ".a")))
   ;; The whole sheet has the palette first and the layout roles the dexp
   ;; renderer emits.
-  (let ((text (wiki:stylesheet-text)))
+  (let ((text (css:stylesheet-text)))
     (ok (search ":root {" text))
     (ok (< (search ":root {" text) (search ".lisp .list.bindings" text)))))
 

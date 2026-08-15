@@ -693,7 +693,7 @@ spacing, so both are turned off."
     (ensure-directories-exist pathname)
     (with-open-file (out pathname :direction :output :if-exists :supersede
                                   :external-format :utf-8)
-      (write-string (stylesheet-text) out))
+      (write-string (luv.css:stylesheet-text) out))
     pathname))
 
 (defun write-site (site directory &key (stylesheet t))

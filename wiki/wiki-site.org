@@ -485,23 +485,32 @@ values, =var()= and a handful of functions (=clamp=, =minmax=, =repeat=,
 =color-mix=), one =@media= query for dark mode and one for narrow
 screens.  A compiler for that is a page of Lisp.
 
-/Done./ [[file:../wiki-css.lisp][wiki-css.lisp]] is the compiler: a rule is =(selector . body)=, body
-alternates =:property value= with nested rules whose selectors combine
-with the parent's (=&= standing for it, groups crossed with groups) and
-=(:media "query" …)= blocks hoisted around what they wrap; a value is a
-string verbatim, a number, a symbol downcased with =--name= meaning
-=var(--name)=, or a list, space-separated unless its head names a CSS
-function, when it is a call with comma-separated arguments.  Units read
-as symbols so they are written bare (=2.75rem=, =0.5fr=, =94%=); colours
-are strings because =#f= is a reader macro.  =define-style= names a group
-under a docstring and keeps its position on redefinition; =stylesheet-text=
-compiles the groups in order; =write-stylesheet= is called by =write-site=
-and by =render-op= on the system, whose inputs include the two style
-files.  [[file:../wiki-style.lisp][wiki-style.lisp]] holds the whole sheet in twenty groups.  The
-generated =style.css= was compared to the hand-written file rule by rule
-after normalising whitespace and comments: 186 rules, identical
-declarations, identical order.  The static file is gone; the tests cover
-values, nesting, and media queries.
+/Done./ [[file:../wiki-css.lisp][wiki-css.lisp]] is the compiler, the package =luv.css=, in three
+parts.  A reader syntax, =luv.css:syntax= (a named readtable that makes
+the digits and the hyphen read a token), reads CSS quantities and
+references as objects: =0.85rem= and =94%= are =dimension= instances,
+=0.72rem/1= a =slash=, =--ink= a =variable-reference=; no number-and-unit
+symbols are interned.  A syntax tree of CLOS instances -- =style=,
+=rule=, =at-rule=, =declaration=, =selector-list= of =complex-selector=
+strings, and the value classes -- is built by the =rule= and
+=define-style= macros, whose bodies alternate =:property= keywords with
+values: bare symbols are CSS words (=grid=, =solid=), strings are written
+verbatim, and lists are Lisp, so =(clamp 1rem 4vw 3rem)= calls the CSS
+function and =(gutter)= or =(palette :dark)= call the sheet's own
+helpers, whose values, declarations, or rules join the enclosing rule
+(=add-item= dispatches on what a form returned).  Nested rules combine
+with the parent, =&= standing for it, groups as lists of strings crossed
+with groups -- nothing is ever split on a comma -- and =(:media "query"
+…)= is an at-rule, hoisted around what it wraps.  =write-css= is the text
+backend, a generic over the tree, so another backend can walk the same
+objects.  [[file:../wiki-style.lisp][wiki-style.lisp]], package =luv.wiki.style=, holds the sheet:
+the palette is a table of light and dark values that =(palette scheme)=
+turns into declarations, the mark and definition-kind colours are loops,
+and the layout rows the dexp boxes share (=flowing-row=, =stacked-rows=,
+=subgrid-row=) are functions returning declarations.  The generated
+=style.css= was diffed against the previous one: identical apart from
+the =--fg=/=--bg= aliases and one repeated font stack, both removed, and
+groups with equal declarations merged.
 
 * TODO Pairs, loop tables, and layouts from arglists alone
 :PROPERTIES:
