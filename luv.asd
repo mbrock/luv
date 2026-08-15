@@ -35,7 +35,8 @@
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on (#:luv/packages)
-  :components ((:file "cpu-trace")))
+  :components ((:module "hal"
+                :components ((:file "trace")))))
 
 (asdf:defsystem #:luv/arithmetic
   :description "Semantic specifications and dimensional algebra for compiled arithmetic."
@@ -184,9 +185,11 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
   :if-feature :darwin
   :depends-on (#:luv/objective-c)
   :serial t
-  :components ((:module "objective-c"
-                :components ((:file "metal-probe")
-                             (:file "metal")))))
+  :components ((:module "hal"
+                :components
+                ((:module "metal"
+                  :components ((:file "probe")
+                               (:file "ffi")))))))
 
 (asdf:defsystem #:luv/metal/probe
   :description "The smallest native Metal object proof through luv's Objective-C system."
@@ -202,8 +205,8 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
   :if-feature :darwin
   :depends-on (#:luv/metal/probe
                #:rove)
-  :components ((:module "tests"
-                :components ((:file "objective-c"))))
+  :components ((:module "objective-c"
+                :components ((:file "tests"))))
   :perform (asdf:test-op (operation component)
              (declare (ignore operation component))
              (unless (uiop:symbol-call
@@ -220,10 +223,17 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
                #:cffi
                #:closer-mop)
   :serial t
-  :components ((:file "spir-v-package")
-               (:file "spir-v")
-               (:file "shader")
-               (:file "shader-expression")))
+  :components
+  ((:module "hal"
+    :components
+    ((:module "vulkan"
+      :components
+      ((:module "spir-v"
+        :components ((:file "package")
+                     (:file "instructions")
+                     (:file "module")))))
+     (:module "shader"
+      :components ((:file "language")))))))
 
 (asdf:defsystem #:luv/spir-v/tests
   :description "Tests for luv's mathematical shader language and lowering."
@@ -231,8 +241,10 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
   :author "Mikael Brockman"
   :depends-on (#:luv/luvcraft/shaders
                #:rove)
-  :components ((:module "tests"
-                :components ((:file "shader"))))
+  :components ((:module "hal"
+                :components
+                ((:module "shader"
+                  :components ((:file "tests"))))))
   :perform (asdf:test-op (operation component)
              (declare (ignore operation component))
              (unless (uiop:symbol-call
@@ -247,8 +259,13 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
   :author "Mikael Brockman"
   :depends-on (#:luv/spir-v)
   :serial t
-  :components ((:file "msl-package")
-               (:file "msl"))
+  :components ((:module "hal"
+                :components
+                ((:module "metal"
+                  :components
+                  ((:module "msl"
+                    :components ((:file "package")
+                                 (:file "lowering"))))))))
   :in-order-to ((asdf:test-op (asdf:test-op #:luv/msl/tests))))
 
 (asdf:defsystem #:luv/msl/tests
@@ -258,8 +275,12 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
   :depends-on (#:luv/msl
                #:luv/luvcraft/shaders
                #:rove)
-  :components ((:module "tests"
-                :components ((:file "msl"))))
+  :components ((:module "hal"
+                :components
+                ((:module "metal"
+                  :components
+                  ((:module "msl"
+                    :components ((:file "tests"))))))))
   :perform (asdf:test-op (operation component)
              (declare (ignore operation component))
              (unless (uiop:symbol-call
@@ -273,8 +294,8 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on (#:luv/trace)
-  :components ((:module "gpu"
-                :components ((:file "api")))))
+  :components ((:module "hal"
+                :components ((:file "gpu")))))
 
 (asdf:defsystem #:luv/vulkan/fundament
   :description "Direct bindings and opt-in tracing for luv's Vulkan vocabulary."
@@ -282,24 +303,30 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
   :author "Mikael Brockman"
   :depends-on (#:luv/packages
                #:cffi)
-  :components ((:module "vulkan"
-                :components ((:file "fundament")))))
+  :components ((:module "hal"
+                :components
+                ((:module "vulkan"
+                  :components ((:file "ffi")))))))
 
 (asdf:defsystem #:luv/vulkan/defs
   :description "The current hand-owned Vulkan ABI declarations."
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on (#:luv/vulkan/fundament)
-  :components ((:module "vulkan"
-                :components ((:file "defs")))))
+  :components ((:module "hal"
+                :components
+                ((:module "vulkan"
+                  :components ((:file "abi")))))))
 
 (asdf:defsystem #:luv/vulkan
   :description "Lisp-shaped helpers built on luv's Vulkan binding."
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on (#:luv/vulkan/defs)
-  :components ((:module "vulkan"
-                :components ((:file "high")))))
+  :components ((:module "hal"
+                :components
+                ((:module "vulkan"
+                  :components ((:file "native")))))))
 
 (asdf:defsystem #:luv/vulkan/tests
   :description "Executable claims for direct Vulkan calls and opt-in tracing."
@@ -307,8 +334,10 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
   :author "Mikael Brockman"
   :depends-on (#:luv/vulkan
                #:rove)
-  :components ((:module "tests"
-                :components ((:file "vulkan"))))
+  :components ((:module "hal"
+                :components
+                ((:module "vulkan"
+                  :components ((:file "tests"))))))
   :perform (asdf:test-op (operation component)
              (declare (ignore operation component))
              (unless (uiop:symbol-call
@@ -333,8 +362,10 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
                #:luv/spir-v
                #:cffi
                (:feature :darwin #:float-features))
-  :components ((:module "gpu"
-                :components ((:file "vulkan")))))
+  :components ((:module "hal"
+                :components
+                ((:module "vulkan"
+                  :components ((:file "gpu")))))))
 
 (asdf:defsystem #:luv/gpu/metal
   :description "Metal 4 implementation of luv's first GPU vocabulary."
@@ -344,8 +375,10 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
   :depends-on (#:luv/gpu/api
                #:luv/metal
                #:luv/msl)
-  :components ((:module "gpu"
-                :components ((:file "metal")))))
+  :components ((:module "hal"
+                :components
+                ((:module "metal"
+                  :components ((:file "gpu")))))))
 
 (asdf:defsystem #:luv/gpu
   :description "The luv GPU API with its default Vulkan backend."
@@ -358,8 +391,8 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on (#:luv/gpu/api)
-  :components ((:module "canvas"
-                :components ((:file "api")))))
+  :components ((:module "hal"
+                :components ((:file "canvas")))))
 
 (asdf:defsystem #:luv/canvas/sdl
   :description "SDL realization of luv's native canvas protocol."
@@ -369,9 +402,11 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
                #:sdl3
                (:feature :darwin #:trivial-main-thread))
   :serial t
-  :components ((:module "canvas"
-                :components ((:file "sdl")
-                             (:file "cocoa" :if-feature :darwin)))))
+  :components ((:module "hal"
+                :components
+                ((:module "sdl"
+                  :components ((:file "canvas")
+                               (:file "cocoa" :if-feature :darwin)))))))
 
 (asdf:defsystem #:luv/canvas/vulkan
   :description "Vulkan presentation contexts for luv canvases."
@@ -379,8 +414,10 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
   :author "Mikael Brockman"
   :depends-on (#:luv/canvas/sdl
                #:luv/gpu/vulkan)
-  :components ((:module "canvas"
-                :components ((:file "vulkan")))))
+  :components ((:module "hal"
+                :components
+                ((:module "vulkan"
+                  :components ((:file "canvas")))))))
 
 (asdf:defsystem #:luv/canvas/metal
   :description "Metal 4 presentation contexts for SDL canvases."
@@ -389,8 +426,10 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
   :if-feature :darwin
   :depends-on (#:luv/canvas/sdl
                #:luv/gpu/metal)
-  :components ((:module "canvas"
-                :components ((:file "metal")))))
+  :components ((:module "hal"
+                :components
+                ((:module "metal"
+                  :components ((:file "canvas")))))))
 
 (asdf:defsystem #:luv/canvas
   :description "SDL canvas presentation for the luv GPU API."
@@ -407,8 +446,10 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
   :depends-on (#:luv/canvas/metal
                #:luv/luvcraft
                #:rove)
-  :components ((:module "tests"
-                :components ((:file "metal"))))
+  :components ((:module "hal"
+                :components
+                ((:module "metal"
+                  :components ((:file "tests"))))))
   :perform (asdf:test-op (operation component)
              (declare (ignore operation component))
              (unless (uiop:symbol-call

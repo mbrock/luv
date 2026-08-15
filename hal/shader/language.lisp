@@ -1,6 +1,7 @@
 ;;; Typed mathematical shader expressions and their deterministic SPIR-V lowering.
 ;;;
-;;; The instruction language in SPIR-V.LISP remains deliberately literal.  This
+;;; The instruction language in hal/vulkan/spir-v/instructions.lisp remains
+;;; deliberately literal.  This
 ;;; layer is the pleasant source language: declarations, bindings, and every
 ;;; expression are CLOS objects which retain their source forms.  Lowering keeps
 ;;; an object-to-object correspondence between those expressions and the CLOS

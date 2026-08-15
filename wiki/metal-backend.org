@@ -139,8 +139,8 @@ texture resource IDs, and sampler resource IDs are the next extension.
 :ID: SODRMA
 :END:
 
-The [[file:../canvas/api.lisp][canvas protocol]] separates a native place from its GPU presentation
-relationship.  [[file:../canvas/sdl.lisp][=sdl-canvas=]] owns the window, event translation,
+The [[file:../hal/canvas.lisp][canvas protocol]] separates a native place from its GPU presentation
+relationship.  [[file:../hal/sdl/canvas.lisp][=sdl-canvas=]] owns the window, event translation,
 main-thread dispatch, pointer mode, size, and clock; backend contexts own the
 presentation resources.
 
@@ -312,10 +312,10 @@ leaving SDL window, input, clock, and main-thread ownership intact.
 
 Evidence:
 
-- [[file:../gpu/metal.lisp][The Metal GPU vocabulary]] implements provider, device, queue, texture, and
-  frame-encoder objects; [[file:../canvas/metal.lisp][the canvas context]] owns one SDL Metal view and
+- [[file:../hal/metal/gpu.lisp][The Metal GPU vocabulary]] implements provider, device, queue, texture, and
+  frame-encoder objects; [[file:../hal/metal/canvas.lisp][the canvas context]] owns one SDL Metal view and
   borrows its layer.
-- [[file:../objective-c/metal.lisp][Declared messages]] cover =CGSize= and =MTLClearColor= by value plus the
+- [[file:../hal/metal/ffi.lisp][Declared messages]] cover =CGSize= and =MTLClearColor= by value plus the
   Metal 4 allocator, command buffer, render encoder, queue, and drawable
   vocabulary.  The clear remains an ordinary =gpu-clear-texture-command=.
 - =MTL_DEBUG_LAYER=1 make metal-clear= validated the ordered

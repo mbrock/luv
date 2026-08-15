@@ -39,7 +39,7 @@ commits/files are the worked examples.
   meant editing the parser's cond, the type-inference case, the lowering
   case, the provenance case, and the shader lab's label case. That shotgun
   surgery is the strongest signal: each table became a generic function and
-  an operator is now one cohesive method cluster (`shader-expression.lisp`).
+  an operator is now one cohesive method cluster (`hal/shader/language.lisp`).
 - **String-matched symbol vocabularies.** Operators were matched by
   STRING-EQUAL on symbol names — identity-free. Names should be symbols
   compared by EQ, with the package system as the namespace.
@@ -139,7 +139,7 @@ GPU, or call back into the mutating generic function while its definition is
 being changed. Rebuild outside the generic-function lock, install the complete
 candidate transactionally at the owning frame boundary, retain the
 last-known-good artifact on failure, and explicitly unsubscribe dependents
-when their owner is released (`shader-expression.lisp`,
+when their owner is released (`hal/shader/language.lisp`,
 `examples/block-world.lisp`).
 
 ## When CASE is right — do not CLOSify these

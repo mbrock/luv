@@ -71,7 +71,7 @@ which make the plan durable.
 :ID: SK9INV
 :END:
 
-- [[file:../shader-expression.lisp][=shader-expression.lisp=]] is already an open compiler.  Operators are symbols,
+- [[file:../hal/shader/language.lisp][=hal/shader/language.lisp=]] is already an open compiler.  Operators are symbols,
   and parsing, typing, lowering, result naming, and documentation are
   EQL-specialized generic functions.  A new operator should be a cohesive
   method cluster, not another central dispatch table.
@@ -83,7 +83,7 @@ which make the plan durable.
   scalar math through =swizzle=.  It still has no branching, loops, matrices,
   boolean values, or general uniform packing.  Uniform blocks intentionally
   consist only of aligned vec4 lanes.
-- [[file:../spir-v.lisp][=spir-v.lisp=]] now models =OpExtInstImport= and =OpExtInst= as structured
+- [[file:../hal/vulkan/spir-v/instructions.lisp][=hal/vulkan/spir-v/instructions.lisp=]] now models =OpExtInstImport= and =OpExtInst= as structured
   module sections in logical-layout order.  Lowering requests =GLSL.std.450=
   once per module when needed, while modules with no extended math acquire no
   import.
@@ -642,7 +642,7 @@ Evidence:
   language accepts =:depth-texture-2d= as a typed resource.
 - =sample= still lowers as ordinary =OpImageSampleImplicitLod=; depth samples
   remain =vec4= in valid SPIR-V and feed scalar depth math through =swizzle=.
-- =tests/shader.lisp= covers a depth-texture sample, =swizzle :x=, and =step=
+- =hal/shader/tests.lisp= covers a depth-texture sample, =swizzle :x=, and =step=
   as the comparison-shaped math a future shadow abstraction can expand to.
 - =make test= and an explicit =spirv-val --target-env vulkan1.0= check on the
   depth-sampling fragment module passed.
@@ -668,7 +668,7 @@ Evidence:
   receiver depth.  =shadow-visibility= is also source vocabulary, composing a
   3x3 grid of those tests.  Neither is a shader operator or a special lowering
   primitive.
-- =tests/shader.lisp= proves the expanded graph lowers through
+- =hal/shader/tests.lisp= proves the expanded graph lowers through
   =OpImageSampleImplicitLod= plus the existing extended =step= path, that
   abstraction redefinition affects fresh parses, and that a bad expansion
   signals during parsing while already parsed graphs remain ordinary data.
@@ -798,7 +798,7 @@ Evidence:
   end-to-end frame-loop timings, not GPU-only measurements.
 - =tests/block-world.lisp= proves that a 0.01-world-unit camera translation
   leaves the first two light-space rows unchanged while a 0.25 translation
-  crosses the snap grid.  =tests/shader.lisp= proves nine depth samples and
+  crosses the snap grid.  =hal/shader/tests.lisp= proves nine depth samples and
   valid SPIR-V.
 
 Done when: both the isolator and representative moving-view evidence are

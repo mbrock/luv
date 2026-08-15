@@ -159,7 +159,7 @@ Evidence:
   trace snapshots, conditions, and =define-objective-c-message=.
 - [[file:../objective-c/foundation.lisp][The Foundation vocabulary]] supplies explicit retain/release, owned scopes,
   autorelease pools, and string conversion.
-- [[file:../objective-c/metal-probe.lisp][The first framework proof]] returns an owned =MTLDevice= and declares its
+- [[file:../hal/metal/probe.lisp][The first framework proof]] returns an owned =MTLDevice= and declares its
   borrowed =name= and scalar =registryID= messages.
 - Cold tests cover metadata, native identity, ownership failures, released
   objects, tracing, and a real device probe; =make objective-c-probe= exits
@@ -186,7 +186,7 @@ Evidence:
   returning to Lisp.
 - [[file:../objective-c/runtime.lisp][The runtime]] signals =objective-c-exception=; ABI disagreement signals the
   sibling =objective-c-bridge-error= before the message is sent.
-- [[file:../tests/objective-c.lisp][Cold tests]] provoke a real =NSRangeException=, observe a =:signaled= trace
+- [[file:../objective-c/tests.lisp][Cold tests]] provoke a real =NSRangeException=, observe a =:signaled= trace
   event, then successfully send another message in the same image.  A wrong
   result size is rejected before the message send.
 - The validated Metal clear still crosses object, scalar, and by-value

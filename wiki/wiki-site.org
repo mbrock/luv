@@ -404,7 +404,7 @@ out far wider than its tallest row.  Closing parentheses pile up at the
 right margin, far from what they close.  This costs more readability than
 any operator-specific layout, and it needs no operator knowledge to fix.
 
-/Evidence./ Injecting CSS into the built =shader-expression.lisp= page:
+/Evidence./ Injecting CSS into the built =hal/shader/language.lisp= page:
 when a list with body forms becomes a grid of rows (a =.head= flex row
 holding the operator and head arguments, then one row per body form)
 with =width: fit-content; max-width: 100%=, every box hugs its widest row

@@ -404,6 +404,6 @@ and *features* stay text; *special* names are code.\"
   ;; ASDF's active SUB-COMPONENTS, so Linux CI can render the Metal sources.
   (let* ((system (asdf:find-system :luv/gpu/metal))
          (root (asdf:system-source-directory :luv/wiki))
-         (metal-source (merge-pathnames "gpu/metal.lisp" root)))
+         (metal-source (merge-pathnames "hal/metal/gpu.lisp" root)))
     (ok (equal :darwin (asdf/component:component-if-feature system)))
     (ok (find metal-source (wiki:code-source-files) :test #'equal))))

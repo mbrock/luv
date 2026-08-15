@@ -7,12 +7,12 @@
 :END:
 
 Luv has two shader languages with deliberately different jobs.  The literal
-language in [[file:../spir-v.lisp][=spir-v.lisp=]] names every result id and every SPIR-V instruction.  It
+language in [[file:../hal/vulkan/spir-v/instructions.lisp][=hal/vulkan/spir-v/instructions.lisp=]] names every result id and every SPIR-V instruction.  It
 is a good machine form, an assembler input, and a debugging view.  It is a bad
 place to state that illumination is ambient light plus a sun contribution or
 that fog linearly combines lit albedo with sky colour.
 
-The expression language in [[file:../shader-expression.lisp][=shader-expression.lisp=]] states those relationships directly.  It
+The expression language in [[file:../hal/shader/language.lisp][=hal/shader/language.lisp=]] states those relationships directly.  It
 does not replace the literal layer.  It lowers into the existing
 =spir-v-module=, =spir-v-function-definition=, =spir-v-basic-block=, and
 =instruction= objects, after which the same =lower-spir-v= and =assemble=

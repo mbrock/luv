@@ -36,6 +36,15 @@ The ASDF systems are the useful map:
 :luv/tools            one-shot command-line tools
 ```
 
+The implementation follows the same contracts physically under
+[`hal/`](hal/).  Shared GPU, canvas, shader, and tracing protocols sit at the
+root; [`hal/vulkan/`](hal/vulkan/) and [`hal/metal/`](hal/metal/) each gather
+one backend's native vocabulary, shader target, GPU realization, presentation
+context, tests, and bring-up probes.  [`hal/sdl/`](hal/sdl/) owns the common
+window and event host.  The general Objective-C foreign object system remains
+separate in [`objective-c/`](objective-c/); Metal depends on it, but does not
+own it.
+
 Luvcraft — the block world — lives in [`luvcraft/`](luvcraft/), from the
 renderer-independent world model up through terrain generation, meshing,
 player simulation, live shader pipelines, and the interactive application.

@@ -15,7 +15,7 @@ in the living wiki.
 
 Three kinds of statement appear below:
 
-- A *portable contract* is observable through =gpu/api.lisp=, such as the
+- A *portable contract* is observable through =hal/gpu.lisp=, such as the
   documented asynchronous meaning of =submit=.
 - A *backend proof* is the concrete ownership or synchronization mechanism by
   which one implementation upholds some part of that contract.
@@ -44,10 +44,10 @@ luv/gpu/api                     descriptors, commands, generic operations
 luv/canvas/api --> luv/canvas/sdl --> backend presentation context
 #+end_example
 
-[[file:../gpu/api.lisp][=gpu/api.lisp=]] contains no Vulkan or Metal calls.  It names providers,
+[[file:../hal/gpu.lisp][=hal/gpu.lisp=]] contains no Vulkan or Metal calls.  It names providers,
 devices, queues, resources, descriptors, command structs, encoders, passes,
 =finish=, =submit=, =submitted-work-done=, host reads and writes, and explicit
-=destroy=.  Presentation remains in the separate [[file:../canvas/api.lisp][canvas protocol]].
+=destroy=.  Presentation remains in the separate [[file:../hal/canvas.lisp][canvas protocol]].
 
 Both backends now render the block world through the same command lifecycle:
 create a general encoder, record commands and passes, =finish= it into a
@@ -192,13 +192,13 @@ queue frontier, but the records attached to that frontier are different.
 | General public =submit= | yes | yes |
 | Maintenance points | submission and explicit wait | submission and explicit wait |
 
-[[file:../gpu/vulkan.lisp::(defun submit-vulkan-command-buffers][=submit-vulkan-command-buffers=]] signals the queue timeline, installs a
+[[file:../hal/vulkan/gpu.lisp::(defun submit-vulkan-command-buffers][=submit-vulkan-command-buffers=]] signals the queue timeline, installs a
 =vulkan-gpu-submission= record, and returns its index.  Queue maintenance reads
 the semaphore counter and retires the completed prefix.  Vulkan 1.4,
 =vkQueueSubmit2=, timeline semaphores, and synchronization2 are deliberate
 minimums; there is no fence or legacy-submit fallback.
 
-[[file:../gpu/metal.lisp::(defun submit-metal-command-buffers][=submit-metal-command-buffers=]] commits a batch of finished Metal 4 work,
+[[file:../hal/metal/gpu.lisp::(defun submit-metal-command-buffers][=submit-metal-command-buffers=]] commits a batch of finished Metal 4 work,
 registers command memory and captured dependencies before presentation can
 fail, and signals a shared event afterward.  Reclamation drops the retained
 record and performs deferred native teardown when the event value passes it.

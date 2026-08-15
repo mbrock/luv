@@ -87,16 +87,16 @@ objective-c-probe:
 		--eval '(format t "~S~%" (luv.metal:probe-system-default-device))'
 
 metal-clear:
-	./scripts/dev sbcl --script tools/metal-clear.lisp
+	./scripts/dev sbcl --script hal/metal/probes/clear.lisp
 
 metal-shader:
-	./scripts/dev sbcl --script tools/metal-shader.lisp
+	./scripts/dev sbcl --script hal/metal/probes/shader.lisp
 
 metal-pipeline:
-	./scripts/dev sbcl --script tools/metal-pipeline.lisp
+	./scripts/dev sbcl --script hal/metal/probes/pipeline.lisp
 
 metal-draw:
-	./scripts/dev sbcl --script tools/metal-draw.lisp
+	./scripts/dev sbcl --script hal/metal/probes/draw.lisp
 
 clean:
 	rm -f ./build/luvcraft ./build/mcluv ./build/luvcraft-smoke.png ./build/luvcraft-metal-smoke.png

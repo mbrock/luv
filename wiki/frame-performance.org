@@ -38,10 +38,10 @@ control flow.
 
 Evidence:
 
-- [[file:../cpu-trace.lisp][The trace buffer]] records a zone name, parent, depth, and monotonic start/end
+- [[file:../hal/trace.lisp][The trace buffer]] records a zone name, parent, depth, and monotonic start/end
   ticks.  =with-cpu-trace-zone= is a thin =unwind-protect= wrapper; buffers
   reuse event and stack storage after their first capture.
-- [[file:../canvas/sdl.lisp][The SDL request boundary]] explicitly carries the selected trace onto the
+- [[file:../hal/sdl/canvas.lisp][The SDL request boundary]] explicitly carries the selected trace onto the
   native frame thread.  Dynamic Lisp bindings alone do not cross that thread
   handoff.
 - Both presentation backends name the same semantic acquisition, encoding,

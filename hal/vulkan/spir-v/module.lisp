@@ -1,6 +1,6 @@
 ;;; Structured shader IR above the deliberately literal SPIR-V assembler.
 ;;;
-;;; SPIR-V.LISP is the small instruction vocabulary and binary encoder.  This
+;;; instructions.lisp is the small instruction vocabulary and binary encoder.  This
 ;;; file gives shaders enough shape to be pleasant live Lisp objects: modules
 ;;; contain functions, functions contain basic blocks, and lowering erases
 ;;; that structure into the linear instruction stream expected by ASSEMBLE.

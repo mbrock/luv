@@ -666,7 +666,7 @@ Evidence:
 - =+ - * / dot min max= already derived quantity specifications in
   [[file:../arithmetic.lisp][=arithmetic.lisp=]], while =clamp=, =step=, =mix=, =smoothstep=,
   =normalize=, and =expt= added methods to that same generic from
-  [[file:../shader-expression.lisp][=shader-expression.lisp=]].  Their contracts did not mention textures,
+  [[file:../hal/shader/language.lisp][=hal/shader/language.lisp=]].  Their contracts did not mention textures,
   stages, SPIR-V, or another shader-only concern.
 - The portable methods and non-CL operator symbols now belong to
   =LUV.ARITHMETIC=.  =LUV.SPIR-V= imports and re-exports those exact symbol
@@ -841,7 +841,7 @@ Evidence:
   error rather than a reason to discard semantic information.
 - =tests/arithmetic.lisp= rejects equal-dimensional but differently named
   quantities, mismatched exact units, and illegal affine operations.
-  =tests/shader.lisp= proves shadow-depth subtraction and compatible =max=,
+  =hal/shader/tests.lisp= proves shadow-depth subtraction and compatible =max=,
   rejects point-plus-point, depth-plus-length, metre-plus-kilometre, missing
   annotations, and unsupported semantic operators, and produces byte-identical
   SPIR-V with and without semantic annotations.
@@ -885,7 +885,7 @@ Evidence:
 - [[file:../arithmetic.lisp][=arithmetic.lisp=]] defines backend-neutral =quantity-layout= and
   =quantity-projection= objects; inspectable quantity definitions own the
   ordered component names of homogeneous vectors.
-- [[file:../shader-expression.lisp][=shader-expression.lisp=]] carries layouts through interface variables,
+- [[file:../hal/shader/language.lisp][=hal/shader/language.lisp=]] carries layouts through interface variables,
   uniform members, references, and texture samples.  =swizzle= accepts only an
   exact declared layout projection or a lawful homogeneous projection.
 - The production block material declares =uv-shade.xy= as texture UV and =z=
@@ -893,7 +893,7 @@ Evidence:
   shadow-control uniform packs; RGB/alpha atlas samples; and scalar depth
   samples.  The sky ray crosses its vertex/fragment interface as one
   =:world-direction= vector whose =y= component has its own quantity name.
-- [[file:../tests/shader.lisp][=tests/shader.lisp=]] proves heterogeneous packed projections, rejects =yz=
+- [[file:../hal/shader/tests.lisp][=hal/shader/tests.lisp=]] proves heterogeneous packed projections, rejects =yz=
   and whole-packed arithmetic, proves named homogeneous axes and texture sample
   channel layouts, distinguishes =quantity=, =assume-quantity=, =interpret=,
   and =representation=, and checks their zero-codegen behavior.
@@ -930,7 +930,7 @@ Evidence:
   and computes source magnitude divided by target magnitude.
 - =convert-quantity-specification-unit= preserves name, physical dimension,
   tensor order, and affine character.  It cannot perform semantic relabelling.
-- [[file:../shader-expression.lisp][=shader-expression.lisp=]] represents =convert-unit= as a first-class typed
+- [[file:../hal/shader/language.lisp][=hal/shader/language.lisp=]] represents =convert-unit= as a first-class typed
   expression with source provenance.  A non-unity factor lowers to an explicit
   scalar or vector multiply; a unity factor remains a visible semantic node
   while safely aliasing its operand.
@@ -939,7 +939,7 @@ Evidence:
   its generated arithmetic.
 - [[file:../tests/arithmetic.lisp][Arithmetic tests]] prove kilometre/metre and percent/one conversion,
   dimension inference, mismatch rejection, and undefined-unit failure.
-  [[file:../tests/shader.lisp][Shader tests]] prove that =50 percent= opacity becomes =1/2 one= opacity
+  [[file:../hal/shader/tests.lisp][Shader tests]] prove that =50 percent= opacity becomes =1/2 one= opacity
   through an emitted =F-MUL=, and reject raw, dimension-changing, and unknown-
   unit conversions.
 - The production shader binaries and their Vulkan validation remain unchanged;
@@ -987,7 +987,7 @@ its scaled forms across the hierarchy.
   sound more physical while describing the actual representation less truly.
 - [[file:../tests/arithmetic.lisp][Arithmetic tests]] accept an angle in radians and an opacity-like proportion
   in percent/one, reject proportion-in-radians, angle-in-steradians, and units
-  on unregistered quantities.  [[file:../tests/shader.lisp][Shader tests]] exercise the same failures at
+  on unregistered quantities.  [[file:../hal/shader/tests.lisp][Shader tests]] exercise the same failures at
   the source-language boundary and inspect production quantity kinds.
 - [[file:../mcclim/shader-lab.lisp][The shader workbench]] now includes the semantic kind in its quantity label,
   keeping name, kind, dimension, unit, tensor order, and affine character
@@ -1161,7 +1161,7 @@ Evidence:
   metre point entered the then-raw homogeneous shadow rows.  It was visible in
   the expression graph and shader workbench, required a semantic operand, and
   had no codegen effect; #U0AHTQ records its semantic replacement.
-- [[file:../tests/shader.lisp][Shader tests]] inspect the affine/non-affine transition, exact metre units,
+- [[file:../hal/shader/tests.lisp][Shader tests]] inspect the affine/non-affine transition, exact metre units,
   interface layouts, representation boundary, and the rejection of a
   representative metre/one mix-up.  The focused suite passes all 28 tests.
 - Vulkan validation passes, and all five generated scene binaries remain
@@ -1195,7 +1195,7 @@ representation.
 
 Evidence:
 
-- [[file:../shader-expression.lisp][=shader-expression.lisp=]] now provides inspectable =shader-map-definition=
+- [[file:../hal/shader/language.lisp][=hal/shader/language.lisp=]] now provides inspectable =shader-map-definition=
   objects behind an open name protocol, a projective definition with coordinate
   scale/offset, a =project-point= expression, and lowering specialized on the
   map definition class.
@@ -1212,7 +1212,7 @@ Evidence:
   =9c99780b969b33eb242976c943463449b2cce4b66f779674a291fc3a4f2aeb34=.
 - [[file:../mcclim/shader-lab.lisp][The shader workbench]] renders the map application as its own selectable
   expression, including the named map, semantic point, and represented rows.
-  [[file:../tests/shader.lisp][Shader tests]] inspect its domain, packed codomain, affine character,
+  [[file:../hal/shader/tests.lisp][Shader tests]] inspect its domain, packed codomain, affine character,
   virtual materialization policy, raw rows, and failure contracts.
 
 Done when: achieved.  A real production matrix application is a checked
