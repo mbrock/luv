@@ -22,6 +22,13 @@
   :type single-float
   :quantity (:quantity :camera-field-of-view :unit :radian)
   :documentation "The block-world camera's 70-degree vertical field of view.")
+(luv.arithmetic:define-quantity-constant
+    +luvcraft-camera-focused-vertical-field-of-view+ 0.87266463
+  :type single-float
+  :quantity (:quantity :camera-field-of-view :unit :radian)
+  :documentation "The 50-degree vertical field of view used during modal focus.")
+
+(defconstant +luvcraft-camera-focus-easing-rate+ 12.0)
 
 (defclass fly-camera ()
   ((position :initarg :position
@@ -36,6 +43,12 @@
    (pitch :initarg :pitch :initform -0.28 :type real
           :quantity (:quantity :camera-pitch :unit :radian)
           :accessor camera-pitch)
+   (field-of-view
+    :initarg :field-of-view
+    :initform +luvcraft-camera-vertical-field-of-view+
+    :type real
+    :quantity (:quantity :camera-field-of-view :unit :radian)
+    :accessor camera-field-of-view)
    (sensitivity :initarg :sensitivity :initform 0.0025
                 :type real
                 :quantity (:quantity :look-sensitivity :unit :radian)
@@ -54,6 +67,7 @@
 
 (defgeneric camera-basis (camera))
 (defgeneric camera-uniform-data (camera width height))
+(defgeneric advance-camera-focus (camera focused-p seconds))
 
 (defmethod camera-basis ((camera fly-camera))
   (let* ((yaw (camera-yaw camera))
@@ -78,7 +92,7 @@ FRAME-UNIFORM-DATA from the session's sky clock and profile."
   (multiple-value-bind (right up forward) (camera-basis camera)
     (let* ((near +luvcraft-camera-near-distance+)
            (far +luvcraft-camera-far-distance+)
-           (focal (/ (tan (/ +luvcraft-camera-vertical-field-of-view+ 2.0))))
+           (focal (/ (tan (/ (camera-field-of-view camera) 2.0))))
            (aspect (/ (coerce width 'single-float) height))
            (projection
              (make-vec3 (/ focal aspect) focal (/ far (- far near)))))
@@ -109,6 +123,19 @@ FRAME-UNIFORM-DATA from the session's sky clock and profile."
                    (luv.arithmetic:declaration-representation-type
                     declaration)))
           data)))))
+
+(defmethod advance-camera-focus ((camera fly-camera) focused-p seconds)
+  "Ease CAMERA toward its focused or ordinary field of view."
+  (let* ((target
+           (if focused-p
+               +luvcraft-camera-focused-vertical-field-of-view+
+               +luvcraft-camera-vertical-field-of-view+))
+         (alpha
+           (- 1.0
+              (exp (- (* +luvcraft-camera-focus-easing-rate+ seconds)))))
+         (current (camera-field-of-view camera)))
+    (setf (camera-field-of-view camera)
+          (+ current (* (- target current) alpha)))))
 
 ;;; The first player controller is intentionally a small scalar reference
 ;;; simulation.  Its body is distinct from the view camera, and its AABB

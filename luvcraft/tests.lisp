@@ -16,8 +16,13 @@
   (values window 37 :available))
 
 (defclass recording-modal-focus ()
-  ((transitions :initform nil :accessor recording-focus-transitions)
+  ((score :initarg :score :initform nil :reader recording-focus-score)
+   (transitions :initform nil :accessor recording-focus-transitions)
    (events :initform nil :accessor recording-focus-events)))
+
+(defmethod luvcraft-focus-score
+    ((focus recording-modal-focus) (session luvcraft-session))
+  (recording-focus-score focus))
 
 (defmethod luvcraft-focus-entered
     ((focus recording-modal-focus) (session luvcraft-session))
@@ -56,6 +61,55 @@
     (ok (equal '(:left :entered) (recording-focus-transitions second)))
     (handle-canvas-event session nil event)
     (ok (gethash :w (luvcraft::luvcraft-session-pressed-keys session)))))
+
+(deftest tab-toggles-the-best-targeted-modal-focus
+  (let ((session (make-instance 'luvcraft-session))
+        (far (make-instance 'recording-modal-focus :score 4.0))
+        (near (make-instance 'recording-modal-focus :score 1.0))
+        (tab (make-instance 'canvas-key-press-event
+                            :timestamp 0 :key-name :tab)))
+    (add-luvcraft-overlay session far)
+    (add-luvcraft-overlay session near)
+    (handle-canvas-event session nil tab)
+    (ok (eq near (luvcraft-session-modal-focus session)))
+    (ok (equal '(:entered) (recording-focus-transitions near)))
+    (handle-canvas-event session nil tab)
+    (ok (null (luvcraft-session-modal-focus session)))
+    (ok (equal '(:left :entered) (recording-focus-transitions near)))
+    (ok (null (recording-focus-transitions far)))))
+
+(deftest tab-focuses-an-aimed-terminal-wall-and-eases-the-view
+  (let* ((world (make-block-world :chunk-width 16
+                                  :chunk-height 16
+                                  :chunk-depth 16))
+         (camera
+           (make-instance 'fly-camera
+                          :position (make-vec3 2.5 3.5 0.5)
+                          :yaw 0.0 :pitch 0.0))
+         (session
+           (make-instance 'luvcraft-session :world world :camera camera))
+         (tab (make-instance 'canvas-key-press-event
+                             :timestamp 0 :key-name :tab)))
+    (ensure-world-chunk world 0 0 0)
+    (place-terminal-block-rectangle world 2 3 4 :back 3 2)
+    (let* ((surface (find-terminal-surface world 2 3 4 :back))
+           (display (make-instance 'terminal-display :surface surface))
+           (ordinary (camera-field-of-view camera))
+           (ordinary-focal (aref (camera-uniform-data camera 960 640) 17)))
+      (add-luvcraft-overlay session display)
+      (handle-canvas-event session nil tab)
+      (ok (eq display (luvcraft-session-modal-focus session)))
+      (luvcraft::advance-camera-focus camera t 0.1d0)
+      (let ((focused (camera-field-of-view camera)))
+        (ok (< focused ordinary))
+        (ok (> (aref (camera-uniform-data camera 960 640) 17)
+               ordinary-focal))
+        (ok (> focused
+               luvcraft::+luvcraft-camera-focused-vertical-field-of-view+))
+        (handle-canvas-event session nil tab)
+        (ok (null (luvcraft-session-modal-focus session)))
+        (luvcraft::advance-camera-focus camera nil 0.1d0)
+        (ok (> (camera-field-of-view camera) focused))))))
 
 (deftest focused-terminal-display-sends-keys-to-its-pty
   (luv.ghostty:with-terminal (ghostty-terminal :columns 32 :rows 4)

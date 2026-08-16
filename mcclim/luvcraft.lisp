@@ -234,6 +234,17 @@
   (luv:handle-canvas-event (widget-overlay-mirror overlay) canvas event)
   t)
 
+(defmethod luvcraft:luvcraft-focus-score
+    ((overlay luvcraft-widget-overlay) session)
+  (declare (ignore session))
+  (destructuring-bind (width height)
+      (luv:canvas-extent
+       (luvcraft::luvcraft-session-context
+        (widget-overlay-session overlay)))
+    (when (luvcraft-widget-texture-coordinate
+           overlay (/ width 2.0) (/ height 2.0))
+      0.0)))
+
 (defmethod luvcraft:release-luvcraft-overlay
     ((overlay luvcraft-widget-overlay))
   (let ((frame (widget-overlay-frame overlay)))

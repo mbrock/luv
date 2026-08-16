@@ -515,11 +515,12 @@ the frame uniform cannot silently diverge between shader and host."
             (draw pass 6 (length (world-text-run-glyphs text)))))
         (dolist (overlay (reverse (luvcraft-session-overlays session)))
           (encode-luvcraft-overlay overlay session pass surface-texture))
-        (set-pipeline pass (luvcraft-session-crosshair-native-pipeline session))
-        (set-bind-group pass 0 (luvcraft-frame-scene-bind-group frame))
-        (set-vertex-buffer
-         pass 0 (luvcraft-session-crosshair-vertex-buffer session))
-        (draw pass +block-world-crosshair-vertex-count+)
+        (unless (luvcraft-session-modal-focus session)
+          (set-pipeline pass (luvcraft-session-crosshair-native-pipeline session))
+          (set-bind-group pass 0 (luvcraft-frame-scene-bind-group frame))
+          (set-vertex-buffer
+           pass 0 (luvcraft-session-crosshair-vertex-buffer session))
+          (draw pass +block-world-crosshair-vertex-count+))
         (end-pass pass)))
     (with-luvcraft-frame-timing
         (sample luvcraft-frame-sample-surface-copy-encode-seconds
@@ -553,6 +554,9 @@ the frame uniform cannot silently diverge between shader and host."
                             (max 0d0 (- timestamp last)))
                        0d0)))
             (setf (luvcraft-session-last-frame-time session) timestamp)
+            (advance-camera-focus
+             (luvcraft-session-camera session)
+             (not (null (luvcraft-session-modal-focus session))) seconds)
             (advance-sky-clock (luvcraft-session-sky-clock session) seconds)
             (advance-block-particles
              (luvcraft-session-particle-system session) seconds)
@@ -599,6 +603,10 @@ the frame uniform cannot silently diverge between shader and host."
 
 (defmethod handle-canvas-event
     ((session luvcraft-session) canvas (event canvas-key-press-event))
+  (when (eq :tab (canvas-key-event-key-name event))
+    (unless (canvas-key-event-repeat-p event)
+      (toggle-luvcraft-session-focus session))
+    (return-from handle-canvas-event nil))
   (when (dispatch-luvcraft-focus-event session canvas event)
     (return-from handle-canvas-event nil))
   (let ((key (canvas-key-event-key-name event)))
@@ -621,6 +629,8 @@ the frame uniform cannot silently diverge between shader and host."
 
 (defmethod handle-canvas-event
     ((session luvcraft-session) canvas (event canvas-key-release-event))
+  (when (eq :tab (canvas-key-event-key-name event))
+    (return-from handle-canvas-event nil))
   (when (dispatch-luvcraft-focus-event session canvas event)
     (return-from handle-canvas-event nil))
   (remhash (canvas-key-event-key-name event)

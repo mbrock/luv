@@ -172,6 +172,14 @@
   (:documentation
    "Handle EVENT while FOCUS owns SESSION's modal player interaction."))
 
+(defgeneric luvcraft-focus-score (focus session)
+  (:documentation
+   "Return a non-negative targeting score when FOCUS can be entered by TAB."))
+
+(defmethod luvcraft-focus-score (focus session)
+  (declare (ignore focus session))
+  nil)
+
 (defun clear-luvcraft-player-input (session)
   (clrhash (luvcraft-session-pressed-keys session))
   (setf (luvcraft-session-jump-requested-p session) nil)
@@ -216,6 +224,26 @@ mounting a vehicle, and other interactions described by #8JCMA5."
     (when focus
       (handle-luvcraft-focus-event focus session canvas event)
       t)))
+
+(defun luvcraft-session-focus-candidate (session)
+  "Return SESSION's best currently targeted focusable overlay, if any."
+  (loop with best = nil
+        with best-score = nil
+        for overlay in (luvcraft-session-overlays session)
+        for score = (luvcraft-focus-score overlay session)
+        when (and score
+                  (or (null best-score) (< score best-score)))
+          do (setf best overlay
+                   best-score score)
+        finally (return best)))
+
+(defun toggle-luvcraft-session-focus (session)
+  "Leave modal focus, or enter the best overlay currently targeted by SESSION."
+  (if (luvcraft-session-modal-focus session)
+      (unfocus-luvcraft-session session)
+      (alexandria:when-let
+          ((candidate (luvcraft-session-focus-candidate session)))
+        (focus-luvcraft-session session candidate))))
 
 (defun dispatch-luvcraft-overlay-event (session canvas event)
   "Offer EVENT to SESSION's frontmost overlay and report consumption."
@@ -294,7 +322,8 @@ mounting a vehicle, and other interactions described by #8JCMA5."
          (number (position block blocks :test #'eq)))
     (when (slot-boundp session 'canvas)
       (setf (canvas-title (luvcraft-session-canvas session))
-            (format nil "~A — [~A] ~(~A~)  ·  1–~D select  ·  shift sprint"
+            (format nil
+                    "~A — [~A] ~(~A~)  ·  1–~D select  ·  shift sprint  ·  tab focus"
                     (luvcraft-session-title-base session)
                     (if number (1+ number) "?")
                     (block-kind-name block)

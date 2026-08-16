@@ -65,6 +65,13 @@ editing, jumping, and material selection are suspended.  Entering or leaving
 focus clears held player input and releases relative-pointer capture, so a
 movement key cannot remain stuck across the boundary.
 
+=Tab= is the temporary world interaction verb.  With no modal focus it chooses
+the best overlay under the centre view: terminal displays recognize a ray hit
+on any block in their authored rectangle, while McCLIM surfaces recognize the
+crosshair inside their projected quadrilateral.  With a modal focus, =Tab=
+leaves it.  Focus narrows the camera from 70 to 50 degrees with a short ease and
+hides the world crosshair; leaving reverses both cues.
+
 This is the same player-facing transition whether the object is a McCLIM
 surface, a Ghostty terminal, an open book, or a mounted boat.  Those objects do
 not need a common UI superclass.  They implement focus-entered, focus-left,
@@ -74,9 +81,9 @@ motion.  Removing a focused overlay or stopping the session leaves focus
 before releasing its resources.
 
 There is deliberately no universal Escape binding in this layer.  Escape is
-meaningful terminal input, while a boat or book may have a world interaction
-verb for dismounting or closing.  The gameplay action which established a
-focus should call [[lisp:unfocus-luvcraft-session]] to reverse it.
+meaningful terminal input.  =Tab= is reserved as the provisional shared world
+interaction verb, and a future named gameplay action can replace its raw key
+binding while continuing to call [[lisp:toggle-luvcraft-session-focus]].
 
 * Ghostty owns terminal semantics, not the surrounding application
 :PROPERTIES:

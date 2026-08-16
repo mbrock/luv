@@ -151,6 +151,7 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:block-surface-emission
            #:block-world-player
            #:camera-basis
+           #:camera-field-of-view
            #:camera-pitch
            #:camera-position
            #:camera-uniform-data
@@ -237,8 +238,10 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:luvcraft-session-desired-chunks
            #:luvcraft-session-lighting-state
            #:luvcraft-session-modal-focus
+           #:luvcraft-session-focus-candidate
            #:luvcraft-focus-entered
            #:luvcraft-focus-left
+           #:luvcraft-focus-score
            #:luvcraft-session-mesh
            #:luvcraft-session-meshed-world-revision
            #:luvcraft-session-outstanding-production
@@ -361,6 +364,7 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:terminal-surface-width
            #:stop-world-checkpoint-writer
            #:unfocus-luvcraft-session
+           #:toggle-luvcraft-session-focus
            #:sync-camera-to-player
            #:wait-for-luvcraft-products
            #:world-checkpoint-writer

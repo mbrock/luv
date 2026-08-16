@@ -932,6 +932,21 @@ and height in world units.  FONT-SCALE is an explicit multiplier on contain."
   (declare (ignore display session canvas event))
   nil)
 
+(defmethod luvcraft-focus-score ((display terminal-display) session)
+  (multiple-value-bind (hit status) (luvcraft-session-target session)
+    (declare (ignore status))
+    (when hit
+      (let ((surface (terminal-display-surface display))
+            (coordinate (block-ray-hit-coordinate hit)))
+        (when (loop for row below (terminal-surface-height surface)
+                    thereis
+                    (loop for column below (terminal-surface-width surface)
+                          thereis
+                          (equalp
+                           coordinate
+                           (terminal-surface-coordinate surface column row))))
+          (block-ray-hit-distance hit))))))
+
 (defun attach-terminal-display-pty (display &rest open-arguments)
   "Attach one owned PTY device to DISPLAY's existing Ghostty terminal."
   (check-type display terminal-display)
