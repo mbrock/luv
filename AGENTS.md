@@ -24,7 +24,11 @@ skills format (`SKILL.md` with name/description frontmatter), so any
 skill-aware agent can load it; `.claude/skills` is a symlink there for Claude
 Code. Start with `luv-development` when entering a checkout, running builds,
 or working with Nix, ASDF, SBCL, or Sly. Start with `clos-design` before
-designing a new subsystem or refactoring dispatch code.
+designing a new subsystem or refactoring dispatch code. Start with
+`luv-systems-design` for performance-sensitive architecture involving dense
+iteration, allocation and extent, materialized fields, SIMD, voxel/chunk
+work, quantities, or the arithmetic language; use it alongside `clos-design`
+when both representation and dispatch are at issue.
 
 # The wiki and scripts/wiki
 
