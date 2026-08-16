@@ -84,6 +84,7 @@
            #:copy-local-coordinate
            #:do-chunk-domain-face
            #:do-chunk-domain-sites
+           #:do-chunk-site-neighbors
            #:do-chunk-window-neighbors
            #:ensure-world-chunk
            #:install-world-chunk-storage
