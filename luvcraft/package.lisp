@@ -13,6 +13,9 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:compile-frontier-program
            #:drain-frontier-realization
            #:frontier-execution-admitted-sites
+           #:frontier-execution-emissions
+           #:frontier-field-role-invalidated-p
+           #:schedule-frontier-realization-site
            #:frontier-field-binding
            #:frontier-field-binding-declaration
            #:frontier-field-binding-name

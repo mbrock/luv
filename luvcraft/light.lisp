@@ -1011,6 +1011,34 @@ producer batches is justified by measurement rather than guesswork."
   (let* ((start (get-internal-real-time))
          (world (lighting-state-world state))
          (region (make-light-candidate world))
+         (visited (reconcile-light-region-using *voxel-light-solver* state region)))
+    (let ((changed (publish-light-region region)))
+      (clrhash (lighting-state-dirty-cells state))
+      (clrhash (lighting-state-arrivals state))
+      (clrhash (lighting-state-departures state))
+      (incf (lighting-state-cells-visited state) visited)
+      (incf (lighting-state-chunks-touched state)
+            (hash-table-count (light-region-entries region)))
+      (incf (lighting-state-publications state))
+      (setf (lighting-state-last-latency-seconds state)
+            (/ (- (get-internal-real-time) start)
+               (coerce internal-time-units-per-second 'double-float)))
+      changed)))
+
+(defgeneric reconcile-light-region-using (solver state region)
+  (:documentation
+   "Settle STATE's dirty cells, departures, and arrivals over candidate
+REGION with the incremental relighter named by SOLVER; return the visits.
+:LEGACY and :FRONTIER share the established reconciler; :COMPILED runs the
+compiled removal and addition programs. #K3WRD3"))
+
+(defmethod reconcile-light-region-using (solver state region)
+  (declare (ignore solver))
+  (reconcile-legacy-light-region state region))
+
+(defun reconcile-legacy-light-region (state region)
+  "The established removal-then-addition reconciler over REGION."
+  (let* ((world (lighting-state-world state))
          (sky-removals
            (make-light-removal-queue
             :sky-light #'light-region-entry-sky :skylight-p t))
@@ -1133,18 +1161,7 @@ producer batches is justified by measurement rather than guesswork."
       (incf visited
             (propagate-light-region
              region #'light-region-entry-block block-seeds nil)))
-    (let ((changed (publish-light-region region)))
-      (clrhash (lighting-state-dirty-cells state))
-      (clrhash (lighting-state-arrivals state))
-      (clrhash (lighting-state-departures state))
-      (incf (lighting-state-cells-visited state) visited)
-      (incf (lighting-state-chunks-touched state)
-            (hash-table-count (light-region-entries region)))
-      (incf (lighting-state-publications state))
-      (setf (lighting-state-last-latency-seconds state)
-            (/ (- (get-internal-real-time) start)
-               (coerce internal-time-units-per-second 'double-float)))
-      changed)))
+    visited))
 
 (defun world-light-at-coordinate (world coordinate)
   "Return (VALUES SKY BLOCK STATE) at COORDINATE, or zeros when absent."
