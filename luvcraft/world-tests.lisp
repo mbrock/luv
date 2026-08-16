@@ -402,3 +402,39 @@
                               (make-vec3 0d0 0d0 0d0)
                               (make-vec3 0d0 0d0 0d0)
                               #'identity :max-distance 8d0)))))
+
+(deftest trusted-site-neighbors-agree-with-checked-window-steps
+  ;; DO-CHUNK-SITE-NEIGHBORS validates a site once and steps primitively;
+  ;; it must expose exactly the offsets, crossings, and window results of the
+  ;; checked DO-CHUNK-WINDOW-NEIGHBORS at every site of a small domain,
+  ;; consulting the window only at crossings.  #FGT96H
+  (let* ((world (make-block-world :chunk-width 4 :chunk-height 3 :chunk-depth 5))
+         (chunk (luvcraft::ensure-world-chunk world 1 -1 2))
+         (neighbor (luvcraft::ensure-world-chunk world 2 -1 2))
+         (domain (block-chunk-domain chunk)))
+    (declare (ignore neighbor))
+    (let ((agreements 0))
+      (dotimes (offset (chunk-domain-cardinality domain))
+        (let ((checked nil) (trusted nil))
+          (let ((local (chunk-domain-local-coordinate domain offset)))
+            (do-chunk-window-neighbors
+                (target destination crossing direction materialization
+                 availability world domain local *voxel-face-directions*)
+              (values destination)
+              (push (list target (and crossing t) direction materialization
+                          availability)
+                    checked)))
+          (do-chunk-site-neighbors
+              (target crossing direction materialization availability
+               world domain offset *voxel-face-directions*)
+            (push (list target (and crossing t) direction materialization
+                        availability)
+                  trusted))
+          (when (equal checked trusted) (incf agreements))))
+      (ok (= agreements (chunk-domain-cardinality domain))))
+    (ok (signals (do-chunk-site-neighbors
+                     (target crossing direction materialization availability
+                      world domain 60 *voxel-face-directions*)
+                   (values target crossing direction materialization
+                           availability))
+                 'error))))

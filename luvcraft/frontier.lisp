@@ -984,9 +984,11 @@ are emitted but not compiled, for inspection. #53Q1II #T2G95K #716UN6"
 
 ;;; Emission.  The generated loop is deliberately plain: raw bucket vectors
 ;;; and counters are bound once at entry and written back at exit; the source
-;;; site's lanes and field values are bound once per pop; a target's lanes
-;;; are the source's own for a local step and are borrowed from the crossing
-;;; materialization otherwise.  Nothing per relation is generic or allocated.
+;;; site's lanes and field values are bound once per pop; the popped site is
+;;; validated once and its six relations are primitive fixnum steps
+;;; (DO-CHUNK-SITE-NEIGHBORS, #FGT96H); a target's lanes are the source's own
+;;; for a local step and are borrowed from the crossing materialization
+;;; otherwise.  Nothing per relation is generic, checked twice, or allocated.
 
 (defun compilation-lowering-environment (compilation &key (source-p t))
   "Map every arithmetic parameter to the emitted form holding its value.
@@ -1160,26 +1162,21 @@ form wherever the law mentions them."
                               ,(substitute-template
                                 (compilation-site-domain compilation)
                                 '((materialization . source))))
-                            (source-local
-                              (chunk-domain-local-coordinate
-                               source-domain source-offset))
                             ,@(loop for lowered in source-needed
                                     append (lane-let-bindings
                                             (lowered-field-binding lowered)
                                             (lowered-field-source-lanes lowered)
                                             'source))
                             ,@source-values)
-                       (declare (dynamic-extent source-local)
-                                ,@(loop for lowered in source-needed
+                       (declare ,@(loop for lowered in source-needed
                                         append (lane-type-declarations
                                                 (lowered-field-binding lowered)
                                                 (lowered-field-source-lanes lowered)))
                                 ,@source-declarations)
-                       (do-chunk-window-neighbors
-                           (target-offset destination crossing direction
+                       (do-chunk-site-neighbors
+                           (target-offset crossing direction
                             materialization availability
-                            window source-domain source-local directions)
-                         (values destination)
+                            window source-domain source-offset directions)
                          (incf relations)
                          (when crossing (incf crossings))
                          (if (eq availability :unavailable)

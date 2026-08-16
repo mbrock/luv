@@ -864,28 +864,40 @@ The measured packed representation now supplies the first client for the
 dynamic columnar-buffer design in #Y0TPND; #LDP5UR keeps that storage
 extraction distinct from a generalized solver.
 
-* NEXT Pay checked adjacency cost once per visited site
+* DONE Pay checked adjacency cost once per visited site
 :PROPERTIES:
 :ID: FGT96H
 :END:
 
-Intent: preserve checked public domain stepping while avoiding the same bounds
-and coordinate type validation for each of a trusted worklist site's six
-neighbors.  The packed frontier already proves its entry and offset; adjacency
-should validate that site once, then keep primitive steps inside the checked
-scope.
+Intent: preserve checked public domain stepping while avoiding the same
+bounds and coordinate type validation for each of a trusted worklist site's
+six neighbors. The packed frontier already proves its entry and offset;
+adjacency should validate that site once, then keep primitive steps inside
+the checked scope.
 
-Evidence: a 195-sample SB-SPROF run of the new 0.18-second solve still placed
-94% of total samples under =propagate-light-region=.  The flat report gave
-=chunk-domain-offset= 19% cumulative samples and placed its component bounds,
-=floor=, and SBCL class/type checks among the largest self-sample entries.
-Source inspection agrees: =with-chunk-domain-step= currently calls the checked
-offset operation once for every direction.
+Evidence: =do-chunk-site-neighbors= is the trusted-scope counterpart of
+=do-chunk-window-neighbors=.  It validates the domain and the popped offset
+once, binds the shape's dimensions, the chunk coordinate, and the site's
+components as fixnums, and steps each direction with primitive floor
+arithmetic; no coordinate object is built and the window is consulted only
+at a crossing.  The compiled frontier kernel (#716UN6) now emits it for
+every popped site, while =step-chunk-domain-site=, =continue-chunk-window-site=,
+and the checked neighbor macro keep their public validation for arbitrary
+callers.  A test walks every site of a 4 by 3 by 5 chunk with both macros
+and requires identical offsets, crossings, materializations, and
+availabilities.  Light fields and visits are unchanged against both oracles;
+on the nine-chunk little world the compiled solver's median fell from
+20.3 ms to 6.1 ms against the legacy solver's 23.9 ms, and a batch of forty
+solves from 813 ms to 242 ms.  The old profile's =chunk-domain-offset= entry
+is gone from the compiled kernel; the remaining sampled cost sits at chunk
+crossings, where the light region's =locate-chunk-window-site= still
+resolves a coordinate key at about 275 ns and 58 bytes per crossing, some
+ten thousand times per solve.
 
-Done when: a hot neighborhood visit validates its source once without weakening
-=step-chunk-domain-site= or arbitrary callers, the crossing-only window
-invariant and light fields remain exact, and the same profile records whether
-the removed checks produce a material latency change.
+Done when: a hot neighborhood visit validates its source once without
+weakening step-chunk-domain-site or arbitrary callers, the crossing-only
+window invariant and light fields remain exact, and the same profile records
+whether the removed checks produce a material latency change.  All hold.
 
 * DONE Attach existing voxel field definitions
 :PROPERTIES:

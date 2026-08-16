@@ -760,10 +760,12 @@ relation either reuses those lanes (a local step) or borrows the crossing
 materialization's (an =if crossing=).  Field values are read into declared
 variables, so the inlined law is fixnum arithmetic over =(unsigned-byte 8)=
 reads.  A =:lazy= binding is instead read where the law mentions it, which
-lets a short-circuiting admission skip an expensive probe.  Nothing per
-relation is generic or allocated; the only allocation left in a warmed drain
-is the window's coordinate key at chunk crossings (#L84JCX), and a test
-bounds it by the crossing count.
+lets a short-circuiting admission skip an expensive probe.  The popped site
+is validated once and its relations are primitive fixnum steps through
+=do-chunk-site-neighbors= (#FGT96H).  Nothing per relation is generic,
+rechecked, or allocated; the only allocation left in a warmed drain is the
+window's coordinate key at chunk crossings (#L84JCX), and a test bounds it by
+the crossing count.
 
 The brightest-first layout takes its bucket count from the relaxed field's
 legal values, so the frontier's priority meaning is the field definition
@@ -993,7 +995,9 @@ fifteen alternating solves of the nine-chunk little world all three programs
 made 30,534 visits; medians were 22.9 ms for the legacy solver, 28.0 ms for
 the handwritten frontier program, and 20.3 ms for the compiled kernel, with
 1.1 MiB allocated by each.  A batch of forty captures took 920, 1150, and
-813 ms respectively.  The emitted form is inspectable and inlines the
+813 ms respectively.  Once the emitted loop stepped through the trusted
+scope of #FGT96H, the compiled median fell further to 6.1 ms and the batch to
+242 ms.  The emitted form is inspectable and inlines the
 checked =light-propagation-loss= law as ordinary fixnum arithmetic; a
 warmed drain over the proof world's 68,000 relations allocates only the
 crossing lookups.  The one supporting arithmetic-language change was a scalar

@@ -470,6 +470,100 @@ actual chunk crossing. #E4T0PD"
              ,window-value ,domain-value ,local-value ,direction
            ,@body)))))
 
+(defmacro do-chunk-site-neighbors
+    ((offset crossing direction materialization availability
+      window domain site-offset directions &optional result)
+     &body body)
+  "Execute BODY for the DIRECTIONS neighboring the site at SITE-OFFSET.
+
+This is the trusted-scope counterpart of DO-CHUNK-WINDOW-NEIGHBORS for a
+site already proved to belong to DOMAIN, such as one popped from a packed
+frontier.  DOMAIN and SITE-OFFSET are validated once; the shape's dimensions
+and the site's components are then bound as fixnums, and each direction is a
+primitive step with no coordinate object and no repeated bounds or type
+check.  OFFSET is the destination's dense offset, CROSSING the direction when
+the step leaves DOMAIN, and MATERIALIZATION with AVAILABILITY are selected
+through LOCATE-CHUNK-WINDOW-SITE only for a crossing.  Public stepping keeps
+its checks; this scope pays them once per visited site. #FGT96H"
+  (let ((window-value (gensym "WINDOW"))
+        (domain-value (gensym "DOMAIN"))
+        (site (gensym "SITE"))
+        (shape (gensym "SHAPE"))
+        (width (gensym "WIDTH"))
+        (height (gensym "HEIGHT"))
+        (depth (gensym "DEPTH"))
+        (chunk (gensym "CHUNK"))
+        (chunk-x (gensym "CHUNK-X"))
+        (chunk-y (gensym "CHUNK-Y"))
+        (chunk-z (gensym "CHUNK-Z"))
+        (site-x (gensym "SITE-X"))
+        (site-y (gensym "SITE-Y"))
+        (site-z (gensym "SITE-Z"))
+        (crossing-x (gensym "CROSSING-X"))
+        (crossing-y (gensym "CROSSING-Y"))
+        (crossing-z (gensym "CROSSING-Z"))
+        (local-x (gensym "LOCAL-X"))
+        (local-y (gensym "LOCAL-Y"))
+        (local-z (gensym "LOCAL-Z"))
+        (local-offset (gensym "LOCAL-OFFSET")))
+    `(let* ((,window-value ,window)
+            (,domain-value ,domain)
+            (,site ,site-offset))
+       (check-type ,domain-value chunk-domain)
+       (check-type ,site (integer 0 #.most-positive-fixnum))
+       (let* ((,shape (voxel-space-chunk-shape
+                       (chunk-domain-space ,domain-value)))
+              (,width (chunk-shape-width ,shape))
+              (,height (chunk-shape-height ,shape))
+              (,depth (chunk-shape-depth ,shape))
+              (,chunk (chunk-domain-coordinate ,domain-value))
+              (,chunk-x (chunk-coordinate-x ,chunk))
+              (,chunk-y (chunk-coordinate-y ,chunk))
+              (,chunk-z (chunk-coordinate-z ,chunk)))
+         (declare (type (integer 1 #.most-positive-fixnum)
+                        ,width ,height ,depth)
+                  (type fixnum ,chunk-x ,chunk-y ,chunk-z))
+         (unless (< ,site (* ,width ,height ,depth))
+           (error "Offset ~D is outside domain ~S." ,site ,domain-value))
+         (multiple-value-bind (,site-z ,site-y)
+             (floor ,site (* ,width ,height))
+           (declare (type fixnum ,site-z ,site-y))
+           (multiple-value-bind (,site-y ,site-x) (floor ,site-y ,width)
+             (declare (type fixnum ,site-y ,site-x))
+             (dolist (,direction ,directions ,result)
+               (multiple-value-bind (,crossing-x ,local-x)
+                   (floor (+ ,site-x (voxel-direction-dx ,direction)) ,width)
+                 (multiple-value-bind (,crossing-y ,local-y)
+                     (floor (+ ,site-y (voxel-direction-dy ,direction))
+                            ,height)
+                   (multiple-value-bind (,crossing-z ,local-z)
+                       (floor (+ ,site-z (voxel-direction-dz ,direction))
+                              ,depth)
+                     (declare (type fixnum ,crossing-x ,crossing-y ,crossing-z
+                                    ,local-x ,local-y ,local-z))
+                     (let ((,local-offset
+                             (+ ,local-x
+                                (* ,width (+ ,local-y (* ,height ,local-z)))))
+                           (,crossing
+                             (and (or (/= 0 ,crossing-x)
+                                      (/= 0 ,crossing-y)
+                                      (/= 0 ,crossing-z))
+                                  ,direction)))
+                       (declare (type fixnum ,local-offset))
+                       (multiple-value-bind
+                             (,materialization ,offset ,availability)
+                           (if ,crossing
+                               (locate-chunk-window-site
+                                ,window-value
+                                (+ (* ,chunk-x ,width) ,site-x
+                                   (voxel-direction-dx ,direction))
+                                (+ (* ,chunk-y ,height) ,site-y
+                                   (voxel-direction-dy ,direction))
+                                (+ (* ,chunk-z ,depth) ,site-z
+                                   (voxel-direction-dz ,direction)))
+                               (values nil ,local-offset :local))
+                         ,@body))))))))))))
+
 (defun continue-chunk-window-site (window domain local direction)
   "Step LOCAL and resolve WINDOW only when the step crosses DOMAIN.
 
