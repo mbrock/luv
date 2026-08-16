@@ -1,7 +1,49 @@
+(defpackage #:luvcraft.frontier
+  (:use #:cl #:luvcraft.world)
+  (:local-nicknames (#:records #:luv.arithmetic.records))
+  (:documentation
+   "Inspectable frontier programs and their packed execution substrates.")
+  (:export #:admit-frontier-site
+           #:bucket-frontier
+           #:bucket-frontier-count
+           #:bucket-frontier-current-priority
+           #:bucket-frontier-empty-p
+           #:bucket-frontier-maximum-priority
+           #:bucket-frontier-peak-count
+           #:bucket-frontier-pop
+           #:bucket-frontier-pops
+           #:bucket-frontier-priority-meaning
+           #:bucket-frontier-push
+           #:bucket-frontier-pushes
+           #:define-frontier-program
+           #:do-voxel-frontier-relations
+           #:execute-frontier-program
+           #:frontier-execution
+           #:frontier-execution-admissions
+           #:frontier-execution-crossings
+           #:frontier-execution-frontier
+           #:frontier-execution-input
+           #:frontier-execution-program
+           #:frontier-execution-relations
+           #:frontier-execution-unavailable
+           #:frontier-execution-visits
+           #:frontier-program-definition
+           #:frontier-program-definition-family
+           #:frontier-program-definition-for
+           #:frontier-program-definition-frontier-layout
+           #:frontier-program-definition-materialization
+           #:frontier-program-definition-name
+           #:frontier-program-definition-neighborhood
+           #:frontier-program-definition-revision
+           #:frontier-program-definition-source-form
+           #:make-bucket-frontier
+           #:make-frontier-execution))
+
 (defpackage #:luvcraft
   (:use #:cl #:luv #:luvcraft.world)
   (:local-nicknames (#:domains #:luv.domains)
                     (#:fields #:luvcraft.world.fields)
+                    (#:frontiers #:luvcraft.frontier)
                     (#:ghostty #:luv.ghostty)
                     (#:math #:luv.arithmetic)
                     (#:records #:luv.arithmetic.records)
@@ -21,6 +63,7 @@
   (:documentation "The interactive block world built on luv.")
   (:export #:*crystal-block*
            #:*terminal-block*
+           #:*voxel-light-solver*
            #:*session*
            #:+little-world-source-version+
            #:+luvcraft-save-format-version+
@@ -83,6 +126,7 @@
            #:chunk-light-field-state
            #:chunk-light-levels-at
            #:chunk-light-levels-at-coordinate
+           #:compare-voxel-light-solvers
            #:chunk-mesh-dependency-stamp
            #:edit-block-at
            #:edit-block-world-source
@@ -212,6 +256,16 @@
            #:trace-luvcraft-streaming-boundary
            #:refresh-luvcraft-shaders
            #:relight-block-world
+           #:solve-frontier-light-region
+           #:solve-light-region-using
+           #:voxel-light-solver-comparison
+           #:voxel-light-solver-comparison-equal-p
+           #:voxel-light-solver-comparison-frontier-executions
+           #:voxel-light-solver-comparison-frontier-seconds
+           #:voxel-light-solver-comparison-frontier-visits
+           #:voxel-light-solver-comparison-legacy-seconds
+           #:voxel-light-solver-comparison-legacy-visits
+           #:voxel-light-solver-comparison-mismatched-keys
            #:rematerialize-little-world-chunk
            #:request-luvcraft-session-checkpoint
            #:request-world-checkpoint

@@ -671,6 +671,23 @@ LOCAL has dynamic extent and must be copied before FUNCTION retains it."
               (seed-region-emitters region :scheduling scheduling) nil))))
     (values region visited)))
 
+(defparameter *voxel-light-solver* :legacy
+  "The from-scratch voxel-light program selected for future captures.
+
+:LEGACY is the established oracle.  :FRONTIER is the greenfield frontier
+program; both produce the same LIGHT-REGION materialization so they can be
+switched and compared without changing publication or consumers. #X7Q90E")
+
+(defgeneric solve-light-region-using
+    (solver region &key &allow-other-keys)
+  (:documentation
+   "Solve captured REGION with the named voxel-light program SOLVER."))
+
+(defmethod solve-light-region-using
+    ((solver (eql :legacy)) (region light-region) &key (scheduling :level))
+  (declare (ignore solver))
+  (solve-light-region region :scheduling scheduling))
+
 ;;; Publication compares complete candidate arrays against the chunk's
 ;;; current field and advances light revisions only: content revisions and
 ;;; the world revision are authored-data facts this derived domain must not
@@ -738,10 +755,12 @@ LOCAL has dynamic extent and must be copied before FUNCTION retains it."
   "From-scratch reference relight of WORLD's resident chunks.
 
 Returns the chunks whose published light changed.  This is the oracle the
-incremental runtime relighter is checked against, and a recovery path when
-incremental state is suspect."
+incremental runtime relighter is checked against by default, and a recovery
+path when incremental state is suspect.  *VOXEL-LIGHT-SOLVER* makes this the
+live publication seam for the frontier experiment."
   (publish-light-region
-   (solve-light-region (capture-light-region world))))
+   (solve-light-region-using
+    *voxel-light-solver* (capture-light-region world))))
 
 ;;; Sparse light accessors, for inspectors and tests.  Dense consumers
 ;;; (the mesher's snapshot halo) read the field arrays directly.

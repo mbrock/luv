@@ -1,6 +1,67 @@
 #+title: Frontiers, memoization, and materialized worlds
 #+startup: overview
 
+* Materialized worlds deserve a frontier language
+:PROPERTIES:
+:ID: X7Q90E
+:END:
+
+This page takes an affirmative position: frontier-shaped computation is a
+real organizing principle for luvcraft, and Common Lisp gives us unusually
+good means to make that principle executable.  The intention is not merely to
+extract a queue utility from lighting.  It is to grow a small /frontier
+language/ in which a derived world can state, at its own semantic level:
+
+| Layer | What becomes sayable |
+|-
+| derived-product lifecycle | capture a source, build and settle a candidate, validate it, publish coherently |
+| frontier maintenance | seed, reserve, expose relations, admit, prioritize, coalesce, commit |
+| local law | what light, water, fire, connectivity, copying, or another materialization actually means |
+
+This is generality as clarification.  A light module should be able to read
+primarily as the law of voxel light: where illumination originates, how a
+face relation attenuates it, how competing contributions join, and what counts
+as fixation.  Packed buckets, chunk crossings, candidate extent, counters,
+and publication remain fully real, but become named machinery rather than
+hundreds of lines interleaved with that law.  The same gain is available to
+fluid motion, fire, components, terminal surfaces, dependency rebuilding, and
+other materialized worlds without pretending that those domains have the
+same transfer rule.
+
+The first executable slice now lives beside the established lighting system.
+=luvcraft/frontier.lisp= defines inspectable frontier programs, retained
+execution evidence, packed finite priority buckets, and a compiler-visible
+voxel-relation traversal.  =luvcraft/frontier-light.lisp= uses that vocabulary
+for a greenfield, from-scratch monotone light program:
+
+#+begin_src lisp
+(frontiers:define-frontier-program voxel-light-addition
+  :family :monotone-max-fixpoint
+  :frontier-layout :brightest-first-buckets
+  :neighborhood :voxel-face-relations
+  :materialization :sky-and-block-light-columns)
+#+end_src
+
+The declaration is an inspectable CLOS definition, while its realization is
+one closed loop over specialized arrays.  On a three-chunk proof world with
+vertical and lateral seams, occlusion, a sky shaft, and competing emitters,
+the new program produces exactly the legacy oracle's sky and block arrays
+with the same number of site visits.  Either program can solve future
+from-scratch captures in a running image, and both can be compared without
+publishing either candidate:
+
+#+begin_src lisp
+(setf luvcraft:*voxel-light-solver* :frontier)
+(luvcraft:compare-voxel-light-solvers
+ (luvcraft:luvcraft-session-world luvcraft:*session*))
+#+end_src
+
+The old solver remains present as oracle and recovery path.  The new program
+begins deliberately with the simpler addition fixpoint; incremental
+invalidation, removal, and residency reconciliation are the next frontier
+program to state.  This lets the abstraction grow under exact differential
+evidence while we enjoy the much clearer conceptual surface immediately.
+
 * Frontier is an operational pattern, not merely a queue
 :PROPERTIES:
 :ID: NXXOQT
@@ -412,13 +473,15 @@ abstraction precisely where #FGT96H says the current profiler is most
 sensitive.  A macro can expose the algebraic phases to source readers while
 expanding the trusted inner loop over primitive arrays.
 
-* The reusable substrate is smaller than a universal solver
+* A frontier language composes meaning with specialized execution
 :PROPERTIES:
 :ID: QHBZJZ
 :END:
 
-The evidence suggests a layered design rather than one =run-frontier-system=
-protocol:
+The unification is real precisely because it is layered.  We do not need one
+generic call per edge, or one object shape for every domain, to possess a
+shared language.  We need stable compositional roles which can be lowered to
+the right concrete execution:
 
 #+begin_src mermaid
 flowchart TB
@@ -430,7 +493,7 @@ flowchart TB
   C --> U["coherent publication"]
 #+end_src
 
-The likely reusable pieces are concrete:
+The reusable words are concrete and already beginning to exist:
 
 - packed frontier ownership, growth, clearing, counters, and retention rules;
 - finite priority-bucket disciplines and perhaps FIFO/LIFO alternatives;
@@ -440,10 +503,12 @@ The likely reusable pieces are concrete:
   materializations; and
 - lifecycle rules for candidate state, stale inputs, and coherent publication.
 
-Client code should continue to own transfer laws, admission predicates,
-removal semantics, stopping conditions, and the interpretation of unavailable
-neighbors.  Those are where light remains light and a terminal wall remains a
-terminal wall.
+Client programs own transfer laws, admission predicates, removal semantics,
+stopping conditions, and the interpretation of unavailable neighbors.  This
+is what makes the abstraction powerful: light remains unmistakably light and
+a terminal wall remains unmistakably a terminal wall, while both can speak in
+the same precise language about frontier, domain, materialization, extent,
+and publication.
 
 * The shared questions are now concrete
 :PROPERTIES:
@@ -470,7 +535,32 @@ code and measurements:
   improvements, invalidations, and cross-chunk steps well enough to compare
   scheduling policies?
 
-The criterion is not whether all clients call the same function.  The
-substrate earns its keep when they share storage and iteration laws, retain
-their own semantics, allocate no per-edge garbage, and become easier to
-observe than their separate predecessors.
+The exciting criterion is semantic compression with mechanical strength:
+clients share storage and iteration laws, retain their own meanings, allocate
+no per-edge garbage, and become easier to read and observe than their separate
+predecessors.  If several modules can become short declarations of their
+world laws while the generated or macro-expanded loops remain excellent,
+that is not abstraction for its own sake.  It is the engine discovering one
+of its native languages.
+
+* DONE Begin frontier light beside the oracle
+:PROPERTIES:
+:ID: DVUZ6H
+:END:
+
+The first greenfield program has its own inspectable declaration, packed
+brightest-first frontier, relation traversal, counters, exact oracle
+comparison, and live selector.  It reuses capture and publication on purpose:
+those shared boundaries make the A/B result exact while the new execution
+model proves itself.
+
+* NEXT Give frontier light its own invalidation program
+:PROPERTIES:
+:ID: K3WRD3
+:END:
+
+State removal and incremental reconsideration in the same vocabulary.  The
+next proof should make invalidation and re-admission explicit, retain stale
+and useful work counters, and converge bit-for-bit with the from-scratch
+frontier program across edits, arrivals, departures, and same-key chunk
+replacement.

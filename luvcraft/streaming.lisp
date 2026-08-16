@@ -58,6 +58,9 @@ presentation; deterministic captures wait for the broader default set."
 
 (defclass block-light-production-request (production-request)
   ((region :initarg :region :reader block-light-production-request-region)
+   (solver :initarg :solver
+           :initform *voxel-light-solver*
+           :reader block-light-production-request-solver)
    (dependency-stamp :initarg :dependency-stamp
                      :reader block-light-production-request-dependency-stamp)))
 
@@ -68,7 +71,9 @@ presentation; deterministic captures wait for the broader default set."
   (with-cpu-trace-zone (:production/light-world)
     (let ((start (get-internal-real-time)))
       (multiple-value-bind (region visited)
-          (solve-light-region (block-light-production-request-region request))
+          (solve-light-region-using
+           (block-light-production-request-solver request)
+           (block-light-production-request-region request))
         (make-block-light-production-payload
          :region region :cells-visited visited
          :elapsed-seconds
@@ -626,6 +631,7 @@ request, keeping residency-scale lighting out of the frame callback."
                     :key production-key :priority -1
                     :dependency-stamp
                     (block-world-light-dependency-stamp world)
+                    :solver *voxel-light-solver*
                     :region (capture-light-region world :immutable-p t))))
             ;; New hooks which fire after this capture accumulate for the next
             ;; request.  A stale or failed result explicitly restores dirtiness.

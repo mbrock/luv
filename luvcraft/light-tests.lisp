@@ -170,6 +170,59 @@
                  (equalp (luvcraft::light-region-entry-block entry)
                          (chunk-light-field-block-levels field)))))))
 
+(deftest frontier-light-is-inspectable-and-exactly-matches-the-oracle
+  (let ((definition
+          (luvcraft.frontier:frontier-program-definition-for
+           'luvcraft::voxel-light-addition)))
+    (ok (typep definition 'luvcraft.frontier:frontier-program-definition))
+    (ok (eq :monotone-max-fixpoint
+            (luvcraft.frontier:frontier-program-definition-family
+             definition)))
+    (ok (eq :brightest-first-buckets
+            (luvcraft.frontier:frontier-program-definition-frontier-layout
+             definition)))
+    (ok (eq :voxel-face-relations
+            (luvcraft.frontier:frontier-program-definition-neighborhood
+             definition))))
+  (let ((world
+          (make-open-sky-test-world
+           '(0 0 0) '(0 1 0) '(1 0 0))))
+    ;; Give the comparison vertical and lateral crossings, occlusion, two
+    ;; competing emitters, and a direct sky shaft in one small world.
+    (dotimes (x 32)
+      (dotimes (z 16)
+        (unless (and (= x 4) (= z 4))
+          (setf (world-block-at world x 15 z) luvcraft::*stone-block*))))
+    (setf (world-block-at world 15 8 8) *test-glow-block*
+          (world-block-at world 18 8 8) *test-dim-glow-block*)
+    (let ((comparison (compare-voxel-light-solvers world)))
+      (ok (voxel-light-solver-comparison-equal-p comparison))
+      (ok (null
+           (voxel-light-solver-comparison-mismatched-keys comparison)))
+      (ok (= (voxel-light-solver-comparison-legacy-visits comparison)
+             (voxel-light-solver-comparison-frontier-visits comparison)))
+      (ok (= 2 (length
+                (voxel-light-solver-comparison-frontier-executions
+                 comparison))))
+      (dolist (execution
+               (voxel-light-solver-comparison-frontier-executions comparison))
+        (ok (plusp
+             (luvcraft.frontier:frontier-execution-visits execution)))
+        (ok (= (* 6
+                  (luvcraft.frontier:frontier-execution-visits execution))
+               (luvcraft.frontier:frontier-execution-relations execution)))
+        (ok (plusp
+             (luvcraft.frontier:frontier-execution-crossings execution)))))))
+
+(deftest frontier-light-can-be-selected-for-real-publication
+  (let ((world (make-open-sky-test-world '(0 0 0) '(1 0 0))))
+    (setf (world-block-at world 15 8 8) *test-glow-block*)
+    (let ((*voxel-light-solver* :frontier))
+      (ok (relight-block-world world)))
+    (ok (light-matches-reference-p world))
+    (ok (= 10 (blocklight-at world 15 8 8)))
+    (ok (= 9 (blocklight-at world 16 8 8)))))
+
 (deftest incremental-edits-converge-to-the-reference-field
   (let* ((world (make-block-world
                  :source (make-instance 'little-world-source :seed 1)))
@@ -227,10 +280,13 @@
              (make-instance
               'luvcraft::block-light-production-request
               :key '(:light) :priority -1
+              :solver :frontier
               :dependency-stamp
               (luvcraft::block-world-light-dependency-stamp world)
               :region (luvcraft::capture-light-region world :immutable-p t)))
            (payload (luvcraft::perform-production-request request)))
+      (ok (eq :frontier
+              (luvcraft::block-light-production-request-solver request)))
       (ok (luvcraft::publish-production-result session request payload))
       (ok (= (blocklight-at world 1 1 1)
              (block-light-emission *test-glow-block*)))
