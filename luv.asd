@@ -580,11 +580,22 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
                 :components ((:file "quantities-package")
                              (:file "quantities")))))
 
+(asdf:defsystem #:luv/luvcraft/arithmetic
+  :description "Backend-neutral arithmetic laws for the luvcraft domain."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on (#:luv/arithmetic/language
+               #:luv/luvcraft/quantities)
+  :serial t
+  :components ((:module "luvcraft"
+                :components ((:file "arithmetic-package")
+                             (:file "arithmetic")))))
+
 (asdf:defsystem #:luv/luvcraft/shaders
   :description "The luvcraft block-world materials as mathematical shaders."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on (#:luv/luvcraft/quantities
+  :depends-on (#:luv/luvcraft/arithmetic
                #:luv/spir-v)
   :components ((:module "luvcraft"
                 :components ((:file "shaders")))))
@@ -598,6 +609,7 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
                #:luv/arithmetic/records
                #:luv/arithmetic/lisp/vec3
                #:luv/luvcraft/quantities
+               #:luv/luvcraft/arithmetic
                #:luv/luvcraft/shaders
                #:sb-concurrency
                #:uiop)

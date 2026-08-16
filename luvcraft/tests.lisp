@@ -83,6 +83,40 @@
              fog-declaration)))
     (ok (typep (luv::sky-frame-parameters-fog-far sky) 'single-float))))
 
+(deftest production-fog-law-is-shared-by-shader-and-cpu
+  (let* ((sky
+           (luv::%make-sky-frame-parameters
+            :fog-near 20.0 :fog-far 100.0))
+         (definition
+           (luv.arithmetic.language:arithmetic-function-definition-for
+            'luvcraft.arithmetic:fog-amount-at-view-distance))
+         (vertex (luv.spir-v:block-world-vertex-specification))
+         (calls
+           (remove-if-not
+            (lambda (expression)
+              (and (typep expression
+                          'luv.arithmetic.language:arithmetic-function-call)
+                   (eq definition
+                       (luv.arithmetic.language:arithmetic-function-call-definition
+                        expression))))
+            (luv.spir-v:shader-specification-expressions vertex))))
+    (ok definition)
+    (ok (= 1 (length calls)))
+    (ok (= 0.0 (luv::sky-fog-amount-at-distance sky 10.0)))
+    (ok (= 0.25 (luv::sky-fog-amount-at-distance sky 60.0)))
+    (ok (= 1.0 (luv::sky-fog-amount-at-distance sky 120.0)))
+    (ok (compiled-function-p luv::*sky-fog-amount-function*))
+    (ok (signals
+         (luv.arithmetic.lisp:bind-lisp-arithmetic-realization
+          luv::*sky-fog-amount-realization*
+          (list
+           luv::*sky-fog-view-distance-declaration*
+           luv::*sky-fog-amount-declaration*
+           (luv.arithmetic.records:record-slot-declaration
+            'luv::sky-frame-parameters 'luv::fog-far))
+          :actual-result-declaration luv::*sky-fog-amount-declaration*)
+         'luv.arithmetic:declaration-compatibility-error))))
+
 (deftest semantic-owner-audit-exposes-camera-sky-material-and-timing-fields
   (dolist (claim
            '((fly-camera luv::yaw :camera-yaw)

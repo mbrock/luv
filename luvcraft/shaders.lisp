@@ -142,19 +142,11 @@
          (view-y (dot relative up))
          (view-z (interpret (dot relative forward)
                             :quantity :view-distance :unit :cell))
-         ;; Fog has explicit near/far semantics: no attenuation before near,
-         ;; full fog at far, quadratic shaping between, clamped where the
-         ;; scene extends past either edge.
          (fog-near (swizzle fog-vector :x))
          (fog-far (swizzle fog-vector :y))
-         (fog-span (- fog-far fog-near))
-         (fog-progress
-           (clamp (/ (- view-z fog-near) fog-span)
-                  (quantity 0.0 :unit :one)
-                  (quantity 1.0 :unit :one)))
          (fog-amount
-           (interpret (* fog-progress fog-progress)
-                      :quantity :fog-amount :unit :one))
+           (luvcraft.arithmetic:fog-amount-at-view-distance
+            view-z fog-near fog-far))
          (x-scale (swizzle projection-vector :x))
          (y-scale (swizzle projection-vector :y))
          (z-scale (swizzle projection-vector :z))

@@ -323,7 +323,6 @@
                  :test (lambda (left right)
                          (string-equal (symbol-name left)
                                        (symbol-name right)))))
-         (fog-progress (binding-named 'fog-progress specification))
          (fog-amount (binding-named 'fog-amount specification))
          (relative (binding-named 'relative specification))
          (view-z (binding-named 'view-z specification))
@@ -352,17 +351,16 @@
                '(0 16 32 48 64 80 96 112 128 144 160 176
                  192 208 224 240 256 272)))
     (ok (= (spv:shader-uniform-block-byte-size resource) 288))
-    (ok (equal (form-names
-                (spv:shader-expression-form
-                 (spv:shader-binding-expression fog-progress)))
-               '("clamp" ("/" ("-" "view-z" "fog-near") "fog-span")
-                 ("quantity" 0.0 "unit" "one")
-                 ("quantity" 1.0 "unit" "one"))))
-    (ok (equal (form-names
-                (spv:shader-expression-form
-                 (spv:shader-binding-expression fog-amount)))
-               '("interpret" ("*" "fog-progress" "fog-progress")
-                 "quantity" "fog-amount" "unit" "one")))
+    (let ((fog-call (spv:shader-binding-expression fog-amount)))
+      (ok (typep fog-call 'spv:shader-function-call))
+      (ok (eq
+           (lang:arithmetic-function-definition-for
+            'luvcraft.arithmetic:fog-amount-at-view-distance)
+           (spv:shader-function-call-definition fog-call)))
+      (ok (equal
+           (form-names (spv:shader-expression-form fog-call))
+           '("fog-amount-at-view-distance"
+             "view-z" "fog-near" "fog-far"))))
     (let ((relative-quantity
             (spv:shader-expression-quantity-specification
              (spv:shader-binding-expression relative)))

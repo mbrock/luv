@@ -1160,7 +1160,7 @@ function without runtime quantity wrappers; tests prove numerical execution,
 compile-time rejection of a dimensional mistake, affine arithmetic, and an
 explicit unit conversion.
 
-* NEXT Share one production computation between CPU and GPU
+* DONE Share one production computation between CPU and GPU
 :PROPERTIES:
 :ID: D1R2NK
 :END:
@@ -1177,10 +1177,30 @@ in #ADR040 supplies another production-shaped test: light-level decoding or a
 named light-response law can connect one semantic field to CPU tooling and GPU
 presentation without asking the arithmetic graph to own light propagation.
 
-Done when: one named definition is invoked by a production shader and by CPU
-Lisp code or a CPU-facing engine test; both realizations enforce the same
-quantity contract; target-specific representations and generated shader code
-remain appropriate to their backends.
+The first shared law is
+=luvcraft.arithmetic:fog-amount-at-view-distance=.  It owns the production
+near/far clamp and quadratic curve as one backend-neutral arithmetic definition
+over =:view-distance=, returning =:fog-amount=.  The block-world vertex shader
+now calls that definition instead of spelling out the formula, and shader
+lowering inlines it into the same target-appropriate scalar operations.
+
+The CPU realization in [[file:../luvcraft/sky.lisp][=luvcraft/sky.lisp=]] compiles the same definition to an
+ordinary =single-float= function.  Definition-time binding checks its ABI
+against the actual =fog-near= and =fog-far= quantity slots on
+=sky-frame-parameters=; =sky-fog-amount-at-distance= then answers the engine
+question with raw Lisp floats and no runtime quantity wrappers.  Tests find
+the named call in the production shader graph, execute the CPU curve below,
+between, and beyond its bounds, and reject substituting a =:fog-amount= slot
+where the shared =:view-distance= contract requires distance.
+
+The definition lives in the small =:luv/luvcraft/arithmetic= system rather
+than the quantity vocabulary or either backend: quantities name meaning,
+while arithmetic graphs own numerical laws.  CPU clients can load that system
+without loading SPIR-V.
+
+Done when: satisfied by the named fog law and its two checked realizations.
+The richer =:world-to-shadow= map should still wait for #ZYCSYZ rather than
+forcing homogeneous GPU representation into the shared arithmetic layer.
 
 * IDEA Lower checked domains to native SIMD kernels
 :PROPERTIES:

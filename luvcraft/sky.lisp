@@ -163,6 +163,54 @@ SLY can pause it, set a time, change its rate, or pin it without restarting.")
   (fog-far 180.0 :type single-float
            :quantity (:quantity :view-distance :unit :cell)))
 
+;;; The shader and CPU side share the definition in LUVCRAFT.QUANTITIES.  This
+;;; binding checks its ordinary single-float ABI against the actual sky-frame
+;;; slots once; calls below receive and return unwrapped numbers.
+(defparameter *sky-fog-view-distance-declaration*
+  (luv.arithmetic:make-represented-value-declaration
+   :representation-type 'single-float
+   :quantity-specification
+   (luv.arithmetic:make-declared-quantity-specification
+    '(:quantity :view-distance :unit :cell))
+   :source-form '(view-distance :type single-float
+                  :quantity (:quantity :view-distance :unit :cell))))
+
+(defparameter *sky-fog-amount-declaration*
+  (luv.arithmetic:make-represented-value-declaration
+   :representation-type 'single-float
+   :quantity-specification
+   (luv.arithmetic:make-declared-quantity-specification
+    '(:quantity :fog-amount :unit :one))
+   :source-form '(fog-amount :type single-float
+                  :quantity (:quantity :fog-amount :unit :one))))
+
+(defparameter *sky-fog-amount-realization*
+  (luv.arithmetic.lisp:make-lisp-arithmetic-realization
+   'luvcraft.arithmetic:fog-amount-at-view-distance
+   :parameter-representation-types
+   '(single-float single-float single-float)
+   :result-representation-type 'single-float))
+
+(defparameter *sky-fog-amount-function*
+  (luv.arithmetic.lisp:bind-lisp-arithmetic-realization
+   *sky-fog-amount-realization*
+   (list
+    *sky-fog-view-distance-declaration*
+    (luv.arithmetic.records:record-slot-declaration
+     'sky-frame-parameters 'fog-near)
+    (luv.arithmetic.records:record-slot-declaration
+     'sky-frame-parameters 'fog-far))
+   :actual-result-declaration *sky-fog-amount-declaration*))
+
+(defun sky-fog-amount-at-distance (sky view-distance)
+  "Return production fog attenuation at VIEW-DISTANCE for evaluated SKY."
+  (check-type sky sky-frame-parameters)
+  (check-type view-distance single-float)
+  (funcall *sky-fog-amount-function*
+           view-distance
+           (sky-frame-parameters-fog-near sky)
+           (sky-frame-parameters-fog-far sky)))
+
 (defun sky-sun-direction (day-fraction)
   "The unit sun direction: rising at 0.25, zenith-adjacent at 0.5.
 
