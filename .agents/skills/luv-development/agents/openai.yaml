@@ -1,0 +1,4 @@
+interface:
+  display_name: "Luv Development"
+  short_description: "Work safely with Luv builds, Nix, Sly, and worktrees"
+  default_prompt: "Diagnose or perform Luv development work using the checkout-specific Nix and Sly workflow."

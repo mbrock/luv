@@ -2,6 +2,9 @@
 
 (require :asdf)
 
+(defparameter cl-user::*luv-project-root*
+  (uiop:pathname-directory-pathname *load-truename*))
+
 (asdf:load-asd (merge-pathnames #P"luv.asd" *load-truename*))
 (asdf:load-system :luv)
 (asdf:load-system :luv-wiki)

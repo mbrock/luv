@@ -1,0 +1,36 @@
+#!/bin/sh
+
+set -eu
+
+project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+common_dir=$(git -C "$project_root" rev-parse --path-format=absolute --git-common-dir)
+primary_root=$(CDPATH= cd -- "$common_dir/.." && pwd)
+overridden=
+
+if [ -n "${LUV_SLYNK_PORT:-}" ]; then
+  port=$LUV_SLYNK_PORT
+  overridden=' (LUV_SLYNK_PORT override)'
+elif [ "$project_root" = "$primary_root" ]; then
+  port=4005
+else
+  checksum=$(printf '%s' "$project_root" | cksum | awk '{print $1}')
+  port=$((41000 + checksum % 20000))
+fi
+
+case "$port" in
+  ''|*[!0-9]*)
+    echo "worktree-port: invalid Slynk port: $port" >&2
+    exit 1
+    ;;
+esac
+if [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+  echo "worktree-port: Slynk port is out of range: $port" >&2
+  exit 1
+fi
+
+if [ "${1:-}" = "--explain" ]; then
+  printf 'checkout: %s\nprimary checkout: %s\nSlynk port: %s%s\n' \
+    "$project_root" "$primary_root" "$port" "$overridden"
+else
+  printf '%s\n' "$port"
+fi

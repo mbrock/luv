@@ -99,7 +99,8 @@ From there, load the project in Lisp:
 
 The project launchers enter that environment themselves, so a one-shot command
 does not depend on whichever `sbcl` happens to be installed by Homebrew or the
-host system:
+host system. `./scripts/dev --status` shows the active provider, pinned SBCL,
+ASDF cache, checkout identity, and checkout-specific Slynk port:
 
 ```sh
 scripts/luv eval '(luv:make-little-block-world)'
@@ -143,10 +144,13 @@ Every standalone luvcraft process also embeds its own Slynk listener on an
 available loopback port. While its window is open, `./sly --luvcraft ...`
 attaches to that exact game process; `luvcraft:*session*` is its live session.
 Plain `./sly ...` continues to address the separate durable development image.
+The primary checkout uses port 4005; each linked worktree derives a stable
+independent port and verifies that the listener loaded that same checkout.
+Concurrent `./sly start` calls are serialized so they cannot orphan the winner.
 
 In Emacs, this checkout's directory locals define a `luv` SLY implementation
-that enters `nix develop`, loads `sly-init.lisp`, and connects to the same kind
-of durable image.
+that enters the same profile-aware `scripts/dev` environment, loads
+`sly-init.lisp`, and opens the checkout-specific durable listener.
 
 ## Demos
 

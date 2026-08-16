@@ -13,10 +13,14 @@
 (in-package #:sly-client)
 
 (require :sb-bsd-sockets)
+(require :sb-posix)
 
 (defparameter *host* (or (sb-ext:posix-getenv "LUV_SLYNK_HOST") "127.0.0.1"))
 (defparameter *port*
   (parse-integer (or (sb-ext:posix-getenv "LUV_SLYNK_PORT") "4005")))
+(defparameter *expected-listener-pid*
+  (let ((value (sb-ext:posix-getenv "LUV_SLYNK_PID")))
+    (and value (parse-integer value :junk-allowed t))))
 (defparameter *project-root*
   (truename
    (merge-pathnames
@@ -26,6 +30,8 @@
   (merge-pathnames #P".sly-server.pid" *project-root*))
 (defparameter *server-log-path*
   (merge-pathnames #P".sly-server.log" *project-root*))
+(defparameter *server-start-lock-path*
+  (merge-pathnames #P".sly-server.start.lock" *project-root*))
 (defparameter *server-start-timeout* 120)
 (defparameter *default-output-limit* (* 256 1024))
 
@@ -196,12 +202,15 @@
            :wait t)))
     (sb-ext:process-exit-code process)))
 
-(defun pid-file-pid ()
-  (with-open-file (stream *server-pid-path* :if-does-not-exist nil)
+(defun pid-from-file (pathname)
+  (with-open-file (stream pathname :if-does-not-exist nil)
     (and stream
          (parse-integer (string-trim '(#\Space #\Tab #\Newline #\Return)
                                      (read-line stream nil ""))
                         :junk-allowed t))))
+
+(defun pid-file-pid ()
+  (pid-from-file *server-pid-path*))
 
 (defun pid-alive-p (pid)
   (and pid
@@ -222,47 +231,95 @@
              lines
              (shell-quote (namestring *server-log-path*))))))
 
+(defun acquire-start-lock ()
+  (loop repeat (* 10 *server-start-timeout*)
+        do (let ((stream
+                   (open *server-start-lock-path*
+                         :direction :output
+                         :if-exists nil
+                         :if-does-not-exist :create)))
+             (if stream
+                 (progn
+                   (unwind-protect
+                        (format stream "~D~%" (sb-posix:getpid))
+                     (close stream))
+                   (return-from acquire-start-lock t))
+                 (let ((owner (pid-from-file *server-start-lock-path*))
+                       (written-at (file-write-date *server-start-lock-path*)))
+                   (cond
+                     ((and owner (not (pid-alive-p owner)))
+                      (ignore-errors (delete-file *server-start-lock-path*)))
+                     ((and (null owner) written-at
+                           (> (- (get-universal-time) written-at) 5))
+                      (ignore-errors (delete-file *server-start-lock-path*)))))))
+           (sleep 0.1)
+        finally (error "Timed out waiting for Slynk startup lock ~A"
+                       *server-start-lock-path*)))
+
+(defun release-start-lock ()
+  (when (eql (pid-from-file *server-start-lock-path*) (sb-posix:getpid))
+    (ignore-errors (delete-file *server-start-lock-path*))))
+
+(defun spawn-server (&key quiet)
+  (remove-stale-pid-file)
+  (let* ((server-path (merge-pathnames #P"sly-server.lisp" *project-root*))
+         (command
+           (format nil
+                   "(cd ~A && exec sbcl --noinform --disable-debugger --load ~A) > ~A 2>&1 & echo $! > ~A"
+                   (shell-quote (namestring *project-root*))
+                   (shell-quote (namestring server-path))
+                   (shell-quote (namestring *server-log-path*))
+                   (shell-quote (namestring *server-pid-path*)))))
+    (unless (probe-file server-path)
+      (error "Missing server bootstrap: ~A" server-path))
+    (unless (zerop (run-shell command))
+      (error "Could not spawn luv Slynk server"))
+    (loop repeat (* 10 *server-start-timeout*)
+          when (connection-available-p)
+            do (progn
+                 (assert-listener-project)
+                 (unless (eql (pid-file-pid) (listener-process-id))
+                   (error "Slynk startup pid ~A does not own port ~D (listener pid ~A)"
+                          (pid-file-pid) *port* (listener-process-id)))
+                 (unless quiet
+                   (format t "luv Slynk is listening on ~A:~D.~%"
+                           *host* *port*))
+                 (return-from spawn-server t))
+          unless (pid-alive-p (pid-file-pid))
+            do (progn
+                 (print-server-log-tail)
+                 (error "luv Slynk server exited during startup"))
+          do (sleep 0.1))
+    (print-server-log-tail)
+    (error "Timed out waiting for luv Slynk on ~A:~D" *host* *port*)))
+
 (defun start-server (&key quiet)
-  (cond
-    ((connection-available-p)
-     (unless quiet
-       (format t "luv Slynk is already listening on ~A:~D.~%" *host* *port*))
-     t)
-    (t
-     (remove-stale-pid-file)
-     (let* ((server-path (merge-pathnames #P"sly-server.lisp" *project-root*))
-            (command
-              (format nil
-                      "(cd ~A && exec sbcl --noinform --disable-debugger --load ~A) > ~A 2>&1 & echo $! > ~A"
-                      (shell-quote (namestring *project-root*))
-                      (shell-quote (namestring server-path))
-                      (shell-quote (namestring *server-log-path*))
-                      (shell-quote (namestring *server-pid-path*)))))
-       (unless (probe-file server-path)
-         (error "Missing server bootstrap: ~A" server-path))
-       (unless (zerop (run-shell command))
-         (error "Could not spawn luv Slynk server"))
-       (loop repeat (* 10 *server-start-timeout*)
-             when (connection-available-p)
-               do (progn
-                    (unless quiet
-                      (format t "luv Slynk is listening on ~A:~D.~%"
-                              *host* *port*))
-                    (return-from start-server t))
-             unless (pid-alive-p (pid-file-pid))
-               do (progn
-                    (print-server-log-tail)
-                    (error "luv Slynk server exited during startup"))
-             do (sleep 0.1))
-       (print-server-log-tail)
-       (error "Timed out waiting for luv Slynk on ~A:~D" *host* *port*)))))
+  (when (connection-available-p)
+    (assert-listener-project)
+    (unless quiet
+      (format t "luv Slynk is already listening on ~A:~D for ~A.~%"
+              *host* *port* *project-root*))
+    (return-from start-server t))
+  (acquire-start-lock)
+  (unwind-protect
+       (if (connection-available-p)
+           (progn
+             (assert-listener-project)
+             (unless quiet
+               (format t "luv Slynk is already listening on ~A:~D for ~A.~%"
+                       *host* *port* *project-root*))
+             t)
+           (spawn-server :quiet quiet))
+    (release-start-lock)))
 
 (defun ensure-server ()
-  (unless (connection-available-p)
-    (if (attach-only-p)
-        (error "The requested external Slynk endpoint is not accepting connections on ~A:~D"
-               *host* *port*)
-        (start-server :quiet t))))
+  (if (connection-available-p)
+      (unless (attach-only-p)
+        (assert-listener-project))
+      (if (attach-only-p)
+          (error "The requested external Slynk endpoint is not accepting connections on ~A:~D"
+                 *host* *port*)
+          (start-server :quiet t))))
 
 (defmacro with-slynk-connection ((stream) &body body)
   `(let ((socket (make-instance 'sb-bsd-sockets:inet-socket
@@ -280,6 +337,12 @@
                    (progn ,@body)
                 (close ,stream))))
        (ignore-errors (sb-bsd-sockets:socket-close socket)))))
+
+(defmacro with-verified-slynk-connection ((stream) &body body)
+  `(with-slynk-connection (,stream)
+     (authenticate ,stream)
+     (assert-stream-listener-project ,stream)
+     ,@body))
 
 (defun eval-request (code package)
   ;; EVAL-AND-GRAB-OUTPUT captures *STANDARD-OUTPUT* itself, but a standalone
@@ -435,8 +498,7 @@
   (read-eval-return stream package))
 
 (defun evaluate (code package)
-  (with-slynk-connection (stream)
-    (authenticate stream)
+  (with-verified-slynk-connection (stream)
     (write-packet stream (eval-request code package))
     (destructuring-bind (output value diagnostic-output)
         (read-eval-return stream package)
@@ -512,8 +574,7 @@
       (and number (= end (length string)) number))))
 
 (defun run-inspector (code package)
-  (with-slynk-connection (stream)
-    (authenticate stream)
+  (with-verified-slynk-connection (stream)
     (let ((state (call-inspector stream package "slynk:init-inspector" code)))
       (loop
         (print-inspector state)
@@ -585,17 +646,59 @@
     (write-diagnostic-output diagnostic-output)
     output))
 
+(defun listener-process-id-on (stream)
+  (parse-integer
+   (string-trim
+    '(#\Space #\Tab #\Newline #\Return)
+    (evaluate-captured-output-on stream "(princ (sb-posix:getpid))"))))
+
 (defun listener-process-id ()
   (when (connection-available-p)
     (handler-case
         (with-slynk-connection (stream)
           (authenticate stream)
-          (parse-integer
-           (string-trim
-            '(#\Space #\Tab #\Newline #\Return)
-            (evaluate-captured-output-on
-             stream "(princ (sb-posix:getpid))"))))
+          (listener-process-id-on stream))
       (error () nil))))
+
+(defun canonical-directory-name (pathname)
+  (namestring (truename pathname)))
+
+(defun listener-project-root-on (stream)
+  (let ((root
+          (string-trim
+           '(#\Space #\Tab #\Newline #\Return)
+           (evaluate-captured-output-on
+            stream
+            "(princ (namestring (truename (or (and (boundp 'cl-user::*luv-project-root*) (symbol-value 'cl-user::*luv-project-root*)) (uiop:pathname-directory-pathname (asdf:system-source-file :luv))))))"))))
+    (and (plusp (length root)) root)))
+
+(defun listener-project-root ()
+  (when (connection-available-p)
+    (handler-case
+        (with-slynk-connection (stream)
+          (authenticate stream)
+          (listener-project-root-on stream))
+      (error () nil))))
+
+(defun listener-for-project-p (&optional (root (listener-project-root)))
+  (and root
+       (string= (canonical-directory-name *project-root*)
+                (canonical-directory-name root))))
+
+(defun assert-stream-listener-project (stream)
+  (let ((root (listener-project-root-on stream))
+        (pid (and *expected-listener-pid* (listener-process-id-on stream))))
+    (unless (listener-for-project-p root)
+      (error "Slynk port ~D belongs to ~A, not this checkout ~A. Set LUV_SLYNK_PORT to an unused port if these checkout-derived ports collided."
+             *port* (or root "an unidentified Lisp image") *project-root*))
+    (when (and *expected-listener-pid* (not (eql pid *expected-listener-pid*)))
+      (error "Slynk port ~D belongs to pid ~A, not expected luvcraft pid ~A"
+             *port* pid *expected-listener-pid*))))
+
+(defun assert-listener-project ()
+  (with-slynk-connection (stream)
+    (authenticate stream)
+    (assert-stream-listener-project stream)))
 
 (defun stop-server ()
   (when (attach-only-p)
@@ -608,8 +711,12 @@
     (return-from stop-server nil))
   (let ((connection-p (connection-available-p))
         (pid (pid-file-pid))
-        (listener-pid (listener-process-id)))
+        (listener-pid (listener-process-id))
+        (listener-root (listener-project-root)))
     (cond
+      ((and connection-p (not (listener-for-project-p listener-root)))
+       (format t "Slynk port ~D belongs to ~A; leaving that checkout running.~%"
+               *port* (or listener-root "an unidentified Lisp image")))
       ((and listener-pid (not (eql pid listener-pid)))
        (ignore-errors (delete-file *server-pid-path*))
        (format t
@@ -644,16 +751,21 @@
     (return-from server-status nil))
   (let ((connection-p (connection-available-p))
         (pid (pid-file-pid))
-        (listener-pid (listener-process-id)))
+        (listener-pid (listener-process-id))
+        (listener-root (listener-project-root)))
     (cond
+      ((and connection-p (not (listener-for-project-p listener-root)))
+       (format t "Slynk port ~D belongs to ~A, not this checkout ~A.~%"
+               *port* (or listener-root "an unidentified Lisp image") *project-root*))
       (listener-pid
        (unless (eql pid listener-pid)
          (ignore-errors (delete-file *server-pid-path*)))
-       (format t "luv Slynk is listening on ~A:~D (pid ~D, ~A).~%"
+       (format t "luv Slynk is listening on ~A:~D (pid ~D, ~A, checkout ~A).~%"
                *host* *port* listener-pid
                (if (eql pid listener-pid)
                    "managed by ./sly"
-                   "Emacs/external")))
+                   "Emacs/external")
+               listener-root))
       (connection-p
        (format t "luv Slynk is listening on ~A:~D (owner unavailable).~%"
                *host* *port*))
@@ -748,8 +860,7 @@
                     (first (getf detail :designator))))))))
 
 (defun run-describe-packages (names)
-  (with-slynk-connection (stream)
-    (authenticate stream)
+  (with-verified-slynk-connection (stream)
     (loop for requested-name in names
           for firstp = t then nil
           unless firstp do (terpri)
@@ -767,8 +878,7 @@
                (print-package-description description details)))))
 
 (defun run-describe-systems (names)
-  (with-slynk-connection (stream)
-    (authenticate stream)
+  (with-verified-slynk-connection (stream)
     (loop for name in names
           for firstp = t then nil
           unless firstp do (terpri)
@@ -783,8 +893,7 @@
                       name)))))
 
 (defun run-describe (names package functionp)
-  (with-slynk-connection (stream)
-    (authenticate stream)
+  (with-verified-slynk-connection (stream)
     (loop for name in names
           for firstp = t then nil
           unless firstp do (terpri)
@@ -815,8 +924,7 @@
                          value))))
 
 (defun run-apropos (patterns package external-only case-sensitive)
-  (with-slynk-connection (stream)
-    (authenticate stream)
+  (with-verified-slynk-connection (stream)
     (dolist (pattern patterns)
       (when (cdr patterns)
         (format t "~&Apropos ~S:~%~%" pattern))
@@ -929,8 +1037,7 @@
           (t (print-xrefs results))))))
 
 (defun run-xref (type names package)
-  (with-slynk-connection (stream)
-    (authenticate stream)
+  (with-verified-slynk-connection (stream)
     (dolist (name names)
       (when (cdr names)
         (format t "~&~A:~%~%" name))
@@ -939,8 +1046,7 @@
         (terpri)))))
 
 (defun run-edit (names package)
-  (with-slynk-connection (stream)
-    (authenticate stream)
+  (with-verified-slynk-connection (stream)
     (dolist (name names)
       (when (cdr names)
         (format t "~&~A:~%~%" name))

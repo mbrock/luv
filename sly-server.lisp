@@ -2,6 +2,8 @@
 
 (require :asdf)
 
+(defparameter cl-user::*luv-project-root* nil)
+
 (defun getenv-or (name default)
   (or (uiop:getenv name) default))
 
@@ -16,6 +18,7 @@
          (uiop:pathname-directory-pathname *load-truename*))
        (slynk-root (required-directory "LUV_SLYNK_DIR"))
        (port (parse-integer (getenv-or "LUV_SLYNK_PORT" "4005"))))
+  (setf cl-user::*luv-project-root* project-root)
   (asdf:initialize-source-registry
    `(:source-registry
      (:tree ,(namestring slynk-root))

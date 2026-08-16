@@ -5,6 +5,25 @@ set -eu
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 
 if command -v luv-env >/dev/null 2>&1; then
+  environment=luv-env
+  provider="profile ($(command -v luv-env))"
+else
+  environment=
+  provider="nix develop fallback"
+fi
+
+if [ "${1:-}" = "--status" ]; then
+  "$project_root/scripts/worktree-port" --explain
+  printf 'environment: %s\n' "$provider"
+  if [ -n "$environment" ]; then
+    luv-env sh -c 'printf "SBCL: %s\nSBCL version: " "$(command -v sbcl)"; sbcl --version; printf "LUV_SLYNK_DIR: %s\nCL_SOURCE_REGISTRY: %s\nASDF cache: %s/.cache/common-lisp\n" "${LUV_SLYNK_DIR:-unset}" "${CL_SOURCE_REGISTRY:-unset}" "$HOME"'
+  else
+    nix develop "$project_root" --command sh -c 'printf "SBCL: %s\nSBCL version: " "$(command -v sbcl)"; sbcl --version; printf "LUV_SLYNK_DIR: %s\nCL_SOURCE_REGISTRY: %s\nASDF cache: %s/.cache/common-lisp\n" "${LUV_SLYNK_DIR:-unset}" "${CL_SOURCE_REGISTRY:-unset}" "$HOME"'
+  fi
+  exit 0
+fi
+
+if [ -n "$environment" ]; then
   exec luv-env "$@"
 fi
 

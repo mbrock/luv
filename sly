@@ -28,7 +28,13 @@ if [ "${1:-}" = "--luvcraft" ]; then
   fi
   export LUV_SLYNK_HOST=127.0.0.1
   export LUV_SLYNK_PORT="$luvcraft_port"
+  export LUV_SLYNK_PID="$luvcraft_pid"
   export LUV_SLYNK_ATTACH_ONLY=1
+fi
+
+if [ -z "${LUV_SLYNK_PORT:-}" ]; then
+  LUV_SLYNK_PORT=$("$project_root/scripts/worktree-port")
+  export LUV_SLYNK_PORT
 fi
 
 if [ "${LUV_NIX_SHELL:-}" != 1 ]; then
