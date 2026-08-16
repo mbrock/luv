@@ -220,7 +220,8 @@
                (render-coordinate :vec2 :location 0)
                (render-atlas-base :vec2 :location 1)
                (render-band-bounds :vec4 :location 2)
-               (render-band-counts :vec2 :location 3))
+               (render-band-counts :vec2 :location 3)
+               (render-color :vec4 :location 4))
      :resources
      ((frame-state :uniform-block :set 0 :binding 2
                    :members #.*frame-uniform-members*)))
@@ -265,7 +266,8 @@
                       (swizzle band-high :xy)))
     (set-output render-band-counts
                 (vec2 (swizzle outline-low :z)
-                      (swizzle outline-high :z)))))
+                      (swizzle outline-high :z)))
+    (set-output render-color (vec4 0.96 0.32 0.48 1.0))))
 
 (defun block-world-text-vertex-specification ()
   (shader-specification-for :slug-world-text :vertex))

@@ -32,6 +32,25 @@
   (:documentation
    "A CPU raster medium whose image will be uploaded to a luv target."))
 
+(defclass luv-gpu-port (luv-port)
+  ()
+  (:documentation
+   "A luv port whose media record McCLIM drawing directly as GPU geometry."))
+
+(defclass luv-gpu-medium (basic-medium)
+  ((vertices
+    :initform (make-array 1024 :element-type 'single-float
+                          :adjustable t :fill-pointer 0)
+    :reader gpu-medium-vertices)
+   (commands
+    :initform (make-array 32 :adjustable t :fill-pointer 0)
+    :reader gpu-medium-commands)
+   (buffering-depth
+    :initform 0
+    :accessor gpu-medium-buffering-depth))
+  (:documentation
+   "An ordered McCLIM drawing stream containing no software pixel surface."))
+
 (defclass luv-frame-manager (standard-frame-manager)
   ()
   (:documentation
@@ -96,6 +115,9 @@
 
 (defmethod find-port-type ((type (eql :luv-raster)))
   (values 'luv-raster-port 'identity))
+
+(defmethod find-port-type ((type (eql :luv-gpu)))
+  (values 'luv-gpu-port 'identity))
 
 (defmethod initialize-instance :after ((port luv-port) &key)
   (ensure-luv-port-pointer port))
@@ -162,11 +184,19 @@ events.  This quiet fallback remains for single-process queue users."
   ;; output synchronizes its dirty contents with the mirror's GPU texture.
   (make-instance 'luv-raster-medium :port port :sheet sheet))
 
+(defmethod make-medium ((port luv-gpu-port) sheet)
+  (make-instance 'luv-gpu-medium :port port :sheet sheet))
+
 (defmethod port-force-output ((port luv-port))
   (declare (ignore port))
   nil)
 
 (defmethod port-force-output ((port luv-raster-port))
+  (dolist (mirror (port-mirrors port))
+    (present-mirror mirror))
+  nil)
+
+(defmethod port-force-output ((port luv-gpu-port))
   (dolist (mirror (port-mirrors port))
     (present-mirror mirror))
   nil)
@@ -178,6 +208,16 @@ events.  This quiet fallback remains for single-process queue users."
 (defmethod medium-force-output :before ((medium luv-raster-medium))
   (alexandria:when-let ((mirror (medium-drawable medium)))
     (present-mirror mirror)))
+
+(defmethod medium-finish-output :before ((medium luv-gpu-medium))
+  (when (zerop (gpu-medium-buffering-depth medium))
+    (alexandria:when-let ((mirror (medium-drawable medium)))
+      (present-mirror mirror))))
+
+(defmethod medium-force-output :before ((medium luv-gpu-medium))
+  (when (zerop (gpu-medium-buffering-depth medium))
+    (alexandria:when-let ((mirror (medium-drawable medium)))
+      (present-mirror mirror))))
 
 (defmethod destroy-port :before ((port luv-port))
   (dolist (mirror (copy-list (port-mirrors port)))

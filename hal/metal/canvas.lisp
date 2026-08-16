@@ -77,7 +77,10 @@
     (when (eq :configured (canvas-context-state context))
       (unconfigure-canvas-context context))
     (ensure-metal-canvas-state context :configure :unconfigured)
-    (unless (equal '(:copy-dst) (canvas-configuration-usage configuration))
+    (unless (and (canvas-configuration-usage configuration)
+                 (every (lambda (usage)
+                          (member usage '(:copy-dst :render-attachment)))
+                        (canvas-configuration-usage configuration)))
       (error 'canvas-error :canvas (context-canvas context)
              :operation :configure :reason :unsupported-usage
              :details (canvas-configuration-usage configuration)))
@@ -86,9 +89,14 @@
              (metal-pixel-format (canvas-configuration-format configuration))))
       (luv.metal:set-layer-device layer (metal-native-object device))
       (luv.metal:set-layer-pixel-format layer native-format)
-      ;; Luvcraft renders to an owned color texture and copies the complete
-      ;; frame into the drawable, so drawable textures are not framebuffer-only.
-      (luv.metal:set-layer-framebuffer-only layer 0)
+      ;; A render-only drawable can remain framebuffer-only. Copy destinations
+      ;; need the broader CAMetalLayer texture contract used by luvcraft.
+      (luv.metal:set-layer-framebuffer-only
+       layer
+       (if (equal '(:render-attachment)
+                  (canvas-configuration-usage configuration))
+           1
+           0))
       (synchronize-metal-canvas-drawable-size context)
       (let ((format
               (gpu-metal-pixel-format (luv.metal:layer-pixel-format layer))))

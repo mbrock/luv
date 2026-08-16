@@ -63,6 +63,14 @@
              (make-application-frame
               'widget-lab :frame-manager manager :enable t))))
     (setf (frame-pretty-name frame) title)
+    (alexandria:when-let*
+        ((sheet (frame-top-level-sheet frame))
+         (mirror (sheet-direct-mirror sheet)))
+      (when (typep mirror 'luv-gpu-mirror)
+        ;; MAKE-APPLICATION-FRAME performs ordinary pane repaints after the
+        ;; mirror is enabled. Publish once more when the complete pane tree and
+        ;; all of its media exist, so no construction-time partial frame wins.
+        (repaint-gpu-mirror mirror)))
     frame))
 
 (defun close-widget-lab (frame)

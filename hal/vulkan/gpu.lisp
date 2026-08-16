@@ -1232,8 +1232,9 @@ wrapper, this finalizer cannot run before theirs have."
             (vulkan-shader-module-device object)))
          device :create-render-pipeline))
       (let* ((render-pass
-               (vulkan-render-pass-for-format
-                device format descriptor depth-format depth-store-op))
+             (vulkan-render-pass-for-format
+                device format descriptor depth-format
+                (or depth-store-op :discard)))
              (pipeline-layout
                (lvk:create-pipeline-layout
                 (vulkan-handle device) (vector (vulkan-handle layout))))

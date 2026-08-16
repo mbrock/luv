@@ -39,6 +39,30 @@ mirror's identity: a later target may be a texture presented on a 3D quad."))
   (:documentation
    "A luv mirror retaining McCLIM's CPU raster image for later upload."))
 
+(defclass luv-gpu-mirror (luv-mirror)
+  ((frame-states
+    :initform (make-hash-table :test #'equal)
+    :reader gpu-mirror-frame-states)
+   (vertex-module :initform nil :accessor gpu-mirror-vertex-module)
+   (fragment-module :initform nil :accessor gpu-mirror-fragment-module)
+   (layout :initform nil :accessor gpu-mirror-layout)
+   (uniform-buffer :initform nil :accessor gpu-mirror-uniform-buffer)
+   (bind-group :initform nil :accessor gpu-mirror-bind-group)
+   (pipeline :initform nil :accessor gpu-mirror-pipeline)
+   (format :initform nil :accessor gpu-mirror-format)
+   (slug-cache :initform nil :accessor gpu-mirror-slug-cache)
+   (text-vertex-module :initform nil
+                       :accessor gpu-mirror-text-vertex-module)
+   (text-fragment-module :initform nil
+                         :accessor gpu-mirror-text-fragment-module)
+   (text-layout :initform nil :accessor gpu-mirror-text-layout)
+   (text-pipeline :initform nil :accessor gpu-mirror-text-pipeline)
+   (text-bind-groups
+    :initform (make-hash-table :test #'eq)
+    :reader gpu-mirror-text-bind-groups))
+  (:documentation
+   "A direct GPU target for an ordered LUV-GPU-MEDIUM drawing stream."))
+
 (defmethod print-object ((mirror luv-mirror) stream)
   (print-unreadable-object (mirror stream :type t :identity t)
     (format stream "~S on ~S" (mirror-sheet mirror) (mirror-target mirror))))
@@ -62,6 +86,10 @@ mirror's identity: a later target may be a texture presented on a 3D quad."))
     (mcclim-render::%set-image-region mirror region)
     mirror))
 
+(defmethod make-luv-mirror ((port luv-gpu-port) sheet target region)
+  (declare (ignore port region))
+  (make-instance 'luv-gpu-mirror :sheet sheet :target target))
+
 (defun canvas-button-to-clim-button (button)
   (ecase button
     (:left +pointer-left-button+)
@@ -84,7 +112,11 @@ Conventional RUN-FRAME-TOP-LEVEL frames consume their own queues instead."
           while event
           do (handle-event (event-sheet event) event))))
 
-(defun service-luv-frame-events (mirror)
+(defgeneric service-luv-frame-events (mirror)
+  (:documentation
+   "Drain callback-only input and publish any resulting visual state."))
+
+(defmethod service-luv-frame-events ((mirror luv-mirror))
   "Service callback-only frames without stealing a real frame loop's queue."
   (let* ((sheet (mirror-sheet mirror))
          (frame (pane-frame sheet)))
@@ -239,6 +271,21 @@ Conventional RUN-FRAME-TOP-LEVEL frames consume their own queues instead."
   (declare (ignore canvas))
   ;; Configuration events are placed ahead of repaint events by McCLIM, so a
   ;; logical resize is laid out before we redraw for the new pixel extent.
+  (let ((sheet (mirror-sheet mirror)))
+    (distribute-event
+     (port sheet)
+     (make-instance 'window-repaint-event
+                    :sheet sheet
+                    :timestamp (luv:canvas-event-timestamp event)
+                    :region +everywhere+))
+    (service-luv-frame-events mirror)))
+
+(defmethod luv:handle-canvas-event
+    ((mirror luv-gpu-mirror) canvas
+     (event luv:canvas-window-pixel-size-changed-event))
+  (declare (ignore canvas))
+  ;; The GPU path has no dirty image to resize, but a new drawable extent still
+  ;; requires McCLIM to rebuild device-coordinate geometry before presentation.
   (let ((sheet (mirror-sheet mirror)))
     (distribute-event
      (port sheet)
@@ -425,9 +472,11 @@ Conventional RUN-FRAME-TOP-LEVEL frames consume their own queues instead."
                         :title (sheet-title sheet)
                         :x (floor x)
                         :y (floor y)
-                        :width (max 1 (ceiling width))
-                        :height (max 1 (ceiling height))
-                        :visible-p nil)))
+                       :width (max 1 (ceiling width))
+                       :height (max 1 (ceiling height))
+                       :presentation-api
+                       (luv:sdl-presentation-api-for luv:*gpu-provider*)
+                       :visible-p nil)))
            (region (make-rectangle* 0 0
                                     (max 1 (ceiling width))
                                     (max 1 (ceiling height))))
@@ -478,6 +527,10 @@ Conventional RUN-FRAME-TOP-LEVEL frames consume their own queues instead."
     ((port luv-raster-port) (sheet mirrored-sheet-mixin))
   ;; Resolve the renderer/base-port diamond explicitly.  Renderer selection
   ;; changes the mirror class, not the native host lifecycle.
+  (call-next-method))
+
+(defmethod realize-mirror
+    ((port luv-gpu-port) (sheet mirrored-sheet-mixin))
   (call-next-method))
 
 (defmethod destroy-mirror ((port luv-port) (sheet mirrored-sheet-mixin))

@@ -417,6 +417,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:sdl-canvas
            #:make-sdl-canvas
            #:sdl-canvas-presentation-api
+           #:sdl-presentation-api-for
            #:vulkan-canvas-context
            #+darwin
            #:metal-canvas-context

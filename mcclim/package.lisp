@@ -15,14 +15,18 @@
 (defpackage #:mcluv
   (:use #:clim-lisp #:clim #:clime #:climb)
   (:local-nicknames (#:luv #:luv)
+                    (#:spv #:luv.spir-v)
                     (#:vec #:luv.arithmetic.lisp.vec3))
   (:export #:luv-port
            #:luv-raster-port
+           #:luv-gpu-port
            #:luv-frame-manager
            #:luv-graft
            #:luv-mirror
            #:luv-raster-mirror
+           #:luv-gpu-mirror
            #:luv-raster-medium
+           #:luv-gpu-medium
            #:luv-pointer
            #:mirror-sheet
            #:mirror-target

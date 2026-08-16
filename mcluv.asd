@@ -4,13 +4,14 @@
   :description "An experimental McCLIM backend presented through luv canvases."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luv" "mcclim-render")
+  :depends-on ("luv" "mcclim-render" "cl-dejavu")
   :serial t
   :components ((:module "mcclim"
                 :serial t
                 :components ((:file "package")
                              (:file "port")
                              (:file "mirror")
+                             (:file "gpu")
                              (:file "widget-lab")
                              (:file "compositor")))))
 

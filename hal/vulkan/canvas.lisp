@@ -331,12 +331,22 @@
       (unconfigure-canvas-context context))
     (ensure-vulkan-canvas-state context :configure :unconfigured)
     (bind-vulkan-canvas-device context configured-device))
-  (unless (equal '(:copy-dst) (canvas-configuration-usage configuration))
+  (unless (and (canvas-configuration-usage configuration)
+               (every (lambda (usage)
+                        (member usage '(:copy-dst :render-attachment)))
+                      (canvas-configuration-usage configuration)))
     (error 'canvas-error :canvas (context-canvas context)
            :operation :configure :reason :unsupported-usage
            :details (canvas-configuration-usage configuration)))
   (with-vulkan-gpu-driver-environment
-    (let* ((native-device (vulkan-handle (context-device context)))
+    (let* ((usage (canvas-configuration-usage configuration))
+           (native-usage
+             (mapcar (lambda (value)
+                       (ecase value
+                         (:copy-dst :transfer-dst)
+                         (:render-attachment :color-attachment)))
+                     usage))
+           (native-device (vulkan-handle (context-device context)))
            (physical-device (vulkan-canvas-physical-device context))
            (surface (vulkan-canvas-surface context))
            (capabilities
@@ -360,11 +370,14 @@
            (frame-slots #())
            (render-done #())
            (completed-p nil))
-      (unless (member :transfer-dst
-                      (lvk:presentation-capabilities-usage capabilities))
+      (unless (every (lambda (value)
+                       (member value
+                               (lvk:presentation-capabilities-usage
+                                capabilities)))
+                     native-usage)
         (error 'canvas-error :canvas (context-canvas context)
                :operation :configure
-               :reason :unsupported-surface-usage :details :copy-dst))
+               :reason :unsupported-surface-usage :details usage))
       (unwind-protect
            (progn
              (setf swapchain
@@ -372,7 +385,7 @@
                     native-device surface vk-format color-space extent
                     :min-image-count
                     (choose-vulkan-canvas-image-count capabilities)
-                    :usage '(:transfer-dst)
+                    :usage native-usage
                     :pre-transform
                     (lvk:presentation-capabilities-current-transform
                      capabilities)
@@ -383,7 +396,7 @@
                         (lambda (image)
                           (make-borrowed-vulkan-texture
                            (context-device context) image extent
-                           gpu-format vk-format))
+                           gpu-format vk-format :usage usage))
                         (lvk:get-swapchain-images native-device swapchain))
                    frame-slots
                    (make-vulkan-canvas-frame-slots
@@ -534,8 +547,16 @@
                             queue (vector commands)
                             :wait-semaphores
                             (vector
-                             (list (vulkan-frame-slot-image-ready slot)
-                                   '(:transfer)))
+                             (list
+                              (vulkan-frame-slot-image-ready slot)
+                              (mapcar
+                               (lambda (usage)
+                                 (ecase usage
+                                   (:copy-dst :transfer)
+                                   (:render-attachment
+                                    :color-attachment-output)))
+                               (canvas-configuration-usage
+                                (canvas-context-configuration context)))))
                             :signal-semaphores
                             (vector (list render-done '(:all-commands)))
                             :wait-for-completion nil))))

@@ -331,7 +331,8 @@ not the band-texture font renderer.  #OWR8OZ"
      :inputs ((render-coordinate :vec2 :location 0)
               (atlas-base :vec2 :location 1)
               (band-bounds :vec4 :location 2)
-              (band-counts :vec2 :location 3))
+              (band-counts :vec2 :location 3)
+              (render-color :vec4 :location 4))
      :resources ((band-data :uint-texture-2d :binding 0)
                  (curve-data :texture-2d :binding 1))
      :outputs ((color-output :vec4 :location 0)))
@@ -479,5 +480,4 @@ not the band-texture font renderer.  #OWR8OZ"
            (slug-combine-band-coverage
             (spv:swizzle horizontal :x) (spv:swizzle horizontal :y)
             (spv:swizzle vertical :x) (spv:swizzle vertical :y))))
-    (spv:set-output
-     color-output (* (spv:vec4 0.96 0.32 0.48 1.0) coverage))))
+    (spv:set-output color-output (* render-color coverage))))
