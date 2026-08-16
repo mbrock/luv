@@ -759,8 +759,10 @@ product declaration (#Q7M4PF), checked against the live block-surface vertex
 shader contract.  Context-dependent removal work now has an explicit semantic
 owner (#K2V9RD).  The fixed frame uniform now has an independently stated CPU
 product checked against the shader's parsed member quantities (#F8U2LA).
-Next: finish the source inventory and decide how ordinary function parameters
-publish boundary meaning without turning direct Lisp into ceremony.
+The remaining fullscreen and overlay vertex products are similarly declared
+and checked (#N6S2CX).  Next: finish the source inventory and decide how
+ordinary function parameters publish boundary meaning without turning direct
+Lisp into ceremony.
 
 ** DONE Describe the repeated block-mesh vertex product
 :PROPERTIES:
@@ -810,6 +812,31 @@ host and shader layouts must compare equal in addition to occupying the same
 288 bytes.  The final four vec4 rows intentionally remain representation for
 the separately declared =:world-to-shadow= semantic map, rather than being
 mislabelled as sixteen homogeneous quantities.
+
+** DONE Declare the fullscreen and overlay vertex products
+:PROPERTIES:
+:ID: N6S2CX
+:END:
+
+The fullscreen sky triangle is a raw nine-float vector repeating one
+=:clip-coordinate= triple.  The crosshair repeats six-float products of clip
+position and absolute linear RGB.  Their constructors check representation,
+stride, vertex count, and semantic equality with the actual location-ordered
+shader inputs before either vector reaches a GPU buffer.
+
+This comparison exposed a pre-existing declaration error in the larger frame
+product: CPU sky colours were correctly absolute linear-RGB signals, while
+their shader uniform projections had defaulted to difference character.  The
+uniform members and independent CPU product now agree on absolute character;
+surface and sky arithmetic explicitly interpret their completed non-negative
+colour contributions as absolute linear radiance before addition and fog
+interpolation.  The cold shader build therefore checks this character all the
+way through, rather than merely comparing interface declarations.  Packing an
+absolute RGB signal with scalar alpha is an explicit =representation= boundary
+followed by an explicit assumption of absolute linear RGBA; it is not called
+an interpretation because the packed constructor deliberately has no derived
+homogeneous semantics.  The DSL does not falsely treat that heterogeneous
+constructor as homogeneous arithmetic.
 
 * A possible Lisp vocabulary
 :PROPERTIES:

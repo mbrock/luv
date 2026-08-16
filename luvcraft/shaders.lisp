@@ -57,17 +57,25 @@
                    (:w :quantity :day-factor :unit :one)))
       (sun-color-vector :vec4   ; sun colour, angular width
                         :components
-                        ((:xyz :quantity :linear-rgb :unit :one)
+                        ((:xyz :quantity :linear-rgb :unit :one
+                               :character :absolute)
                          (:w :quantity :sun-disc-coordinate :unit :one)))
       (zenith-vector :vec4      ; zenith colour, w unused
-                     :components ((:xyz :quantity :linear-rgb :unit :one)))
+                     :components
+                     ((:xyz :quantity :linear-rgb :unit :one
+                            :character :absolute)))
       (horizon-vector :vec4     ; horizon colour, w unused
-                      :components ((:xyz :quantity :linear-rgb :unit :one)))
+                      :components
+                      ((:xyz :quantity :linear-rgb :unit :one
+                             :character :absolute)))
       (ambient-vector :vec4     ; ambient colour, exposure
-                      :components ((:xyz :quantity :linear-rgb :unit :one)))
+                      :components
+                      ((:xyz :quantity :linear-rgb :unit :one
+                             :character :absolute)))
       (fog-color-vector :vec4   ; fog colour, w shadow diagnostic selector
                         :components
-                        ((:xyz :quantity :linear-rgb :unit :one)
+                        ((:xyz :quantity :linear-rgb :unit :one
+                               :character :absolute)
                          (:w :quantity :shadow-diagnostic :unit :one)))
       (shadow-control-vector :vec4 ; texel u/v, base bias, slope bias
                              :components
@@ -219,7 +227,8 @@
      :outputs ((color-output :vec4 :location 0))
      :resources ((block-atlas :texture-2d :set 0 :binding 0
                               :sample-components
-                              ((:rgb :quantity :linear-rgb :unit :one)
+                              ((:rgb :quantity :linear-rgb :unit :one
+                                     :character :absolute)
                                (:a :quantity :opacity :unit :one)))
                  (block-sampler :sampler :set 0 :binding 1)
                  (frame-state :uniform-block :set 0 :binding 2
@@ -343,39 +352,44 @@
          ;; a void; caves stay dark for the right reason.
          (sky-light
            (interpret (* ambient (+ 0.06 (* 1.34 sky-level)) ao)
-                      :quantity :linear-rgb :unit :one))
+                      :quantity :linear-rgb :unit :one
+                      :character :absolute))
          (sun-light
            (interpret
             (* sun-color
                (* n-dot-l sun-visibility day-factor direct-shadow))
-            :quantity :linear-rgb :unit :one))
+            :quantity :linear-rgb :unit :one :character :absolute))
          (torch-color
            (quantity (vec3 1.0 0.82 0.58)
-                     :quantity :linear-rgb :unit :one))
+                     :quantity :linear-rgb :unit :one
+                     :character :absolute))
          (local-light
            (interpret (* torch-color block-level)
-                      :quantity :linear-rgb :unit :one))
+                      :quantity :linear-rgb :unit :one
+                      :character :absolute))
          (albedo
            (swizzle (sample block-atlas block-sampler uv) :rgb))
          (reflected
            (interpret
             (* albedo (+ sky-light sun-light local-light))
-            :quantity :linear-rgb :unit :one))
+            :quantity :linear-rgb :unit :one :character :absolute))
          (radiance
            (+ reflected
               (interpret (* albedo emission-input)
-                         :quantity :linear-rgb :unit :one)))
+                         :quantity :linear-rgb :unit :one
+                         :character :absolute)))
          (fog-color (swizzle fog-color-vector :xyz))
          (fog-amount fog-input)
          (fogged (mix radiance fog-color fog-amount))
          (normal-rgba
-           (interpret (vec4 fogged 1.0)
-                      :quantity :linear-rgba :unit :one))
+           (assume-quantity (vec4 (representation fogged) 1.0)
+                            :quantity :linear-rgba :unit :one
+                            :character :absolute))
          (shadow-diagnostic (swizzle fog-color-vector :w))
          (shadow-rgba
            (interpret
             (vec4 (vec3 direct-shadow direct-shadow direct-shadow) 1.0)
-            :quantity :linear-rgba :unit :one))
+            :quantity :linear-rgba :unit :one :character :absolute))
          (rgba (mix normal-rgba shadow-rgba shadow-diagnostic)))
     (set-output color-output rgba)))
 
@@ -480,9 +494,13 @@
          (glow (* (expt alignment 24.0) 0.35))
          (sun-radiance
            (interpret (* sun-color (+ disc glow) day-factor)
-                      :quantity :linear-rgb :unit :one))
+                      :quantity :linear-rgb :unit :one
+                      :character :absolute))
          (rgb (+ base sun-radiance))
-         (rgba (vec4 rgb 1.0)))
+         (rgba
+           (assume-quantity (vec4 (representation rgb) 1.0)
+                            :quantity :linear-rgba :unit :one
+                            :character :absolute)))
     (set-output color-output rgba)))
 
 (defun block-world-sky-fragment-specification ()
@@ -536,10 +554,15 @@
     block-world-crosshair-vertex-specification
     ((role (eql :block-crosshair)) (stage (eql :vertex)))
     (:stage :vertex
-     :inputs ((screen-position :vec3 :location 0)
-              (ink-input :vec3 :location 1))
+     :inputs ((screen-position :vec3 :location 0
+                               :quantity :clip-coordinate :unit :one)
+              (ink-input :vec3 :location 1
+                         :quantity :linear-rgb :unit :one
+                         :character :absolute))
      :outputs ((clip-position :vec4 :built-in :position)
-               (ink-output :vec3 :location 0)))
+               (ink-output :vec3 :location 0
+                           :quantity :linear-rgb :unit :one
+                           :character :absolute)))
   (let* ((clip
            (vec4 (swizzle screen-position :x)
                  (swizzle screen-position :y)
@@ -555,10 +578,15 @@
     block-world-crosshair-fragment-specification
     ((role (eql :block-crosshair)) (stage (eql :fragment)))
     (:stage :fragment
-     :inputs ((ink-input :vec3 :location 0))
+     :inputs ((ink-input :vec3 :location 0
+                         :quantity :linear-rgb :unit :one
+                         :character :absolute))
      :outputs ((color-output :vec4 :location 0)))
   (let* ((ink ink-input)
-         (rgba (vec4 ink 1.0)))
+         (rgba
+           (assume-quantity (vec4 (representation ink) 1.0)
+                            :quantity :linear-rgba :unit :one
+                            :character :absolute)))
     (set-output color-output rgba)))
 
 (defun block-world-crosshair-fragment-specification ()

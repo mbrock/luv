@@ -280,17 +280,24 @@
                '("interpret"
                  ("*" "albedo"
                   ("+" "sky-light" "sun-light" "local-light"))
-                 "quantity" "linear-rgb" "unit" "one")))
+                 "quantity" "linear-rgb" "unit" "one"
+                 "character" "absolute")))
     (ok (equal (form-names
                 (spv:shader-expression-form
                  (spv:shader-binding-expression radiance)))
                '("+" "reflected"
                  ("interpret" ("*" "albedo" "emission-input")
-                  "quantity" "linear-rgb" "unit" "one"))))
+                  "quantity" "linear-rgb" "unit" "one"
+                  "character" "absolute"))))
     (ok (equal (form-names
                 (spv:shader-expression-form
                  (spv:shader-binding-expression fogged)))
                '("mix" "radiance" "fog-color" "fog-amount")))
+    (dolist (binding (list sky-light reflected radiance fogged))
+      (ok (eq :absolute
+              (math:quantity-specification-character
+               (spv:shader-expression-quantity-specification
+                (spv:shader-binding-expression binding))))))
     (ok (> (length (spv:shader-specification-expressions specification))
            (length (spv:shader-specification-bindings specification))))))
 

@@ -227,36 +227,6 @@
           (ok (luv.world.fields:materialized-field-current-p
                materialization name)))))))
 
-(defun shader-input-product-layout (specification)
-  "Flatten location-ordered shader inputs into one test-side product layout."
-  (let ((offset 0) (projections nil))
-    (dolist (input
-             (sort (copy-list
-                    (luv.spir-v:shader-specification-inputs specification))
-                   #'< :key #'luv.spir-v:shader-interface-location))
-      (let* ((width
-               (luv.spir-v:shader-type-component-count
-                (luv.arithmetic:declaration-representation-type input)))
-             (whole
-               (luv.arithmetic:declaration-quantity-specification input))
-             (layout (luv.arithmetic:declaration-quantity-layout input)))
-        (when whole
-          (push (luv.arithmetic:make-quantity-projection
-                 (loop for position below width collect (+ offset position))
-                 whole)
-                projections))
-        (when layout
-          (dolist (projection
-                   (luv.arithmetic:quantity-layout-projections layout))
-            (push
-             (luv.arithmetic:make-quantity-projection
-              (mapcar (lambda (position) (+ offset position))
-                      (luv.arithmetic:quantity-projection-positions projection))
-              (luv.arithmetic:quantity-projection-specification projection))
-             projections)))
-        (incf offset width)))
-    (luv.arithmetic:make-quantity-layout offset (nreverse projections))))
-
 (deftest block-meshes-carry-a-repeated-product-matching-the-shader-contract
   (let* ((world (make-block-world :chunk-width 2
                                   :chunk-height 2
@@ -269,7 +239,7 @@
          (element
            (luv.arithmetic:repeated-quantity-layout-element-layout layout))
          (shader-layout
-           (shader-input-product-layout
+           (luv::shader-input-product-layout
             (luv.spir-v:shader-specification-for :block-surface :vertex))))
     (ok (eq declaration
             (luv.arithmetic:value-declaration-for :block-mesh-vertices)))
@@ -284,6 +254,31 @@
                         :vertices (make-array 11 :element-type 'single-float)
                         :vertex-count 1 :face-count 0)
          'error))))
+
+(deftest screen-geometry-products-match-their-shader-contracts
+  (dolist (claim
+           `((:sky-vertices
+              ,(luv::make-block-world-sky-vertices)
+              3
+              ,(luv.spir-v:block-world-sky-vertex-specification))
+             (:crosshair-vertices
+              ,(luv::make-block-world-crosshair-vertices 960 640)
+              ,luv::+block-world-crosshair-vertex-count+
+              ,(luv.spir-v:block-world-crosshair-vertex-specification))))
+    (destructuring-bind (name vertices count specification) claim
+      (let* ((declaration (luv.arithmetic:value-declaration-for name))
+             (layout
+               (luv.arithmetic:declaration-quantity-layout declaration)))
+        (ok (typep vertices
+                   (luv.arithmetic:declaration-representation-type
+                    declaration)))
+        (ok (= (length vertices)
+               (* count
+                  (luv.arithmetic:repeated-quantity-layout-stride layout))))
+        (ok
+         (luv.arithmetic:quantity-layout=
+          (luv.arithmetic:repeated-quantity-layout-element-layout layout)
+          (luv::shader-input-product-layout specification)))))))
 
 (deftest light-removal-queues-own-the-meaning-of-unwrapped-levels
   (let* ((coordinate (make-world-coordinate 1 2 3))

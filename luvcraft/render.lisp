@@ -66,7 +66,19 @@
       (rectangle -11.0 -2.25 11.0 2.25 '(0.08 0.09 0.10))
       (rectangle -0.75 -8.0 0.75 8.0 '(0.96 0.98 1.0))
       (rectangle -8.0 -0.75 8.0 0.75 '(0.96 0.98 1.0)))
-    vertices))
+    (ensure-vertex-product-contract
+     vertices :crosshair-vertices +block-world-crosshair-vertex-count+
+     (spv:block-world-crosshair-vertex-specification))))
+
+(defun make-block-world-sky-vertices ()
+  "Make the one fullscreen triangle in normalized clip coordinates."
+  (ensure-vertex-product-contract
+   (make-array
+    9 :element-type 'single-float
+    :initial-contents '(-1.0 -1.0 0.5
+                        3.0 -1.0 0.5
+                        -1.0 3.0 0.5))
+   :sky-vertices 3 (spv:block-world-sky-vertex-specification)))
 
 (defun shadow-frame-rows (camera sky)
   "Pack a texel-stable orthographic light-space transform as four vec4 rows."
@@ -678,12 +690,7 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                                      :mag-filter :nearest
                                      :min-filter :nearest
                                      :mipmap-filter :nearest))))
-                  (sky-vertices
-                    (make-array
-                     9 :element-type 'single-float
-                     :initial-contents '(-1.0 -1.0 0.5
-                                         3.0 -1.0 0.5
-                                         -1.0 3.0 0.5)))
+                  (sky-vertices (make-block-world-sky-vertices))
                   (sky-vertex-buffer
                     (keep
                      (create

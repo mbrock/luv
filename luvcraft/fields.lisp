@@ -89,16 +89,21 @@
                   '(:quantity :world-direction :unit :one :tensor-order 1))
       (projection '(27) '(:quantity :day-factor :unit :one))
       (projection '(28 29 30)
-                  '(:quantity :linear-rgb :unit :one :tensor-order 1))
+                  '(:quantity :linear-rgb :unit :one :tensor-order 1
+                    :character :absolute))
       (projection '(31) '(:quantity :sun-disc-coordinate :unit :one))
       (projection '(32 33 34)
-                  '(:quantity :linear-rgb :unit :one :tensor-order 1))
+                  '(:quantity :linear-rgb :unit :one :tensor-order 1
+                    :character :absolute))
       (projection '(36 37 38)
-                  '(:quantity :linear-rgb :unit :one :tensor-order 1))
+                  '(:quantity :linear-rgb :unit :one :tensor-order 1
+                    :character :absolute))
       (projection '(40 41 42)
-                  '(:quantity :linear-rgb :unit :one :tensor-order 1))
+                  '(:quantity :linear-rgb :unit :one :tensor-order 1
+                    :character :absolute))
       (projection '(44 45 46)
-                  '(:quantity :linear-rgb :unit :one :tensor-order 1))
+                  '(:quantity :linear-rgb :unit :one :tensor-order 1
+                    :character :absolute))
       (projection '(47) '(:quantity :shadow-diagnostic :unit :one))
       (projection '(48 49)
                   '(:quantity :shadow-uv :unit :one :tensor-order 1))
@@ -164,3 +169,117 @@
        (54 55) shadow-filter-radii
        (56 57 58 59 60 61 62 63
         64 65 66 67 68 69 70 71) representation-only-shadow-rows)))))
+
+(defun shader-input-product-layout (specification)
+  "Flatten location-ordered shader inputs into one packed product layout."
+  (let ((offset 0) (projections nil))
+    (dolist (input
+             (sort (copy-list
+                    (spv:shader-specification-inputs specification))
+                   #'< :key #'spv:shader-interface-location))
+      (let* ((width
+               (spv:shader-type-component-count
+                (luv.arithmetic:declaration-representation-type input)))
+             (whole
+               (luv.arithmetic:declaration-quantity-specification input))
+             (layout
+               (luv.arithmetic:declaration-quantity-layout input)))
+        (when whole
+          (push
+           (luv.arithmetic:make-quantity-projection
+            (loop for position below width collect (+ offset position))
+            whole)
+           projections))
+        (when layout
+          (dolist (projection
+                   (luv.arithmetic:quantity-layout-projections layout))
+            (push
+             (luv.arithmetic:make-quantity-projection
+              (mapcar
+               (lambda (position) (+ offset position))
+               (luv.arithmetic:quantity-projection-positions projection))
+              (luv.arithmetic:quantity-projection-specification projection))
+             projections)))
+        (incf offset width)))
+    (luv.arithmetic:make-quantity-layout offset (nreverse projections))))
+
+(defun make-sky-vertex-product-layout ()
+  (luv.arithmetic:make-quantity-layout
+   3
+   (list
+    (luv.arithmetic:make-quantity-projection
+     '(0 1 2)
+     (luv.arithmetic:make-declared-quantity-specification
+      '(:quantity :clip-coordinate :unit :one :tensor-order 1))))))
+
+(defun make-crosshair-vertex-product-layout ()
+  (luv.arithmetic:make-quantity-layout
+   6
+   (list
+    (luv.arithmetic:make-quantity-projection
+     '(0 1 2)
+     (luv.arithmetic:make-declared-quantity-specification
+      '(:quantity :clip-coordinate :unit :one :tensor-order 1)))
+    (luv.arithmetic:make-quantity-projection
+     '(3 4 5)
+     (luv.arithmetic:make-declared-quantity-specification
+      '(:quantity :linear-rgb :unit :one :tensor-order 1
+        :character :absolute))))))
+
+(defmethod luv.arithmetic:value-declaration-for
+    ((name (eql :sky-vertices)))
+  (declare (ignore name))
+  (load-time-value
+   (luv.arithmetic:make-represented-value-declaration
+    :representation-type '(simple-array single-float (9))
+    :quantity-layout
+    (luv.arithmetic:make-repeated-quantity-layout
+     (make-sky-vertex-product-layout) :stride 3)
+    :source-form
+    '(sky-vertices :type (simple-array single-float (9))
+      :repeated-product ((0 1 2) clip-coordinate) :stride 3))))
+
+(defmethod luv.arithmetic:value-declaration-for
+    ((name (eql :crosshair-vertices)))
+  (declare (ignore name))
+  (load-time-value
+   (luv.arithmetic:make-represented-value-declaration
+    :representation-type '(vector single-float)
+    :quantity-layout
+    (luv.arithmetic:make-repeated-quantity-layout
+     (make-crosshair-vertex-product-layout) :stride 6)
+    :source-form
+    '(crosshair-vertices :type (vector single-float)
+      :repeated-product
+      ((0 1 2) clip-coordinate (3 4 5) absolute-linear-rgb)
+      :stride 6))))
+
+(defun ensure-vertex-product-contract
+    (vertices declaration-name vertex-count shader-specification)
+  "Validate raw VERTICES against one declared CPU and shader input product."
+  (let* ((declaration
+           (luv.arithmetic:value-declaration-for declaration-name))
+         (layout (luv.arithmetic:declaration-quantity-layout declaration)))
+    (unless (typep
+             vertices
+             (luv.arithmetic:declaration-representation-type declaration))
+      (error "Vertex data ~S does not satisfy ~S for ~S."
+             (type-of vertices)
+             (luv.arithmetic:declaration-representation-type declaration)
+             declaration-name))
+    (unless (typep layout 'luv.arithmetic:repeated-quantity-layout)
+      (error "Vertex declaration ~S is not a repeated product."
+             declaration-name))
+    (let ((stride
+            (luv.arithmetic:repeated-quantity-layout-stride layout)))
+      (unless (= (length vertices) (* vertex-count stride))
+        (error "Vertex data ~S has ~D lanes for ~D vertices at stride ~D."
+               declaration-name (length vertices) vertex-count stride)))
+    (unless
+        (luv.arithmetic:quantity-layout=
+         (luv.arithmetic:repeated-quantity-layout-element-layout layout)
+         (shader-input-product-layout shader-specification))
+      (error "Vertex semantic ABI mismatch for ~S against shader ~S."
+             declaration-name
+             (spv:shader-object-source-form shader-specification)))
+    vertices))
