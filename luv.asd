@@ -53,6 +53,34 @@
                  (:file "runtime")
                  (:file "foundation")))))
 
+(defsystem "luv/ghostty"
+  :description "A small experimental CFFI binding to libghostty-vt."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("cffi" "cffi-libffi")
+  :serial t
+  :components
+  ((:module "ghostty"
+    :serial t
+    :components ((:static-file "README.md")
+                 (:file "package")
+                 (:file "ffi")
+                 (:file "terminal"))))
+  :in-order-to ((test-op (test-op "luv/ghostty/test"))))
+
+(defsystem "luv/ghostty/test"
+  :description "Proof-of-concept integration tests for libghostty-vt."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("luv/ghostty" "rove")
+  :components ((:file "ghostty/tests"))
+  :perform (test-op (operation component)
+             (declare (ignore operation component))
+             (unless (uiop:symbol-call '#:rove '#:run-suite
+                                       (uiop:symbol-call '#:rove '#:find-suite
+                                                         '#:luv.ghostty.tests))
+               (error "luv/ghostty tests failed"))))
+
 (defsystem "luv/parinfer"
   :description "The connection-free indentation and parenthesis checker."
   :version "0.0.1"
