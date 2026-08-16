@@ -105,6 +105,7 @@
   ((session :initarg :session :reader terminal-display-session)
    (surface :initarg :surface :reader terminal-display-surface)
    (terminal :initarg :terminal :reader terminal-display-terminal)
+   (device :initarg :device :initform nil :accessor terminal-display-device)
    (presentation :initarg :presentation :reader terminal-display-presentation)
    (glyph-cache :initarg :glyph-cache :reader terminal-display-glyph-cache)
    (glyph-run :initarg :glyph-run :reader terminal-display-glyph-run)
@@ -787,6 +788,9 @@ and height in world units.  FONT-SCALE is an explicit multiplier on contain."
   display)
 
 (defmethod release-luvcraft-overlay ((display terminal-display))
+  (when (terminal-display-device display)
+    (termdev:close-pty-device (terminal-display-device display))
+    (setf (terminal-display-device display) nil))
   (maphash (lambda (frame group)
              (declare (ignore frame))
              (destroy group))
@@ -796,6 +800,29 @@ and height in world units.  FONT-SCALE is an explicit multiplier on contain."
   (luv.slug:release-slug-glyph-cache
    (terminal-display-glyph-cache display))
   (ghostty:close-terminal (terminal-display-terminal display))
+  display)
+
+(defmethod handle-luvcraft-focus-event
+    ((display terminal-display) session canvas (event canvas-key-event))
+  (declare (ignore session canvas))
+  (let ((device (terminal-display-device display)))
+    (when device
+      (termdev:send-pty-device-canvas-key-event device event)))
+  t)
+
+(defmethod handle-luvcraft-focus-event
+    ((display terminal-display) session canvas (event canvas-event))
+  (declare (ignore display session canvas event))
+  nil)
+
+(defun attach-terminal-display-pty (display &rest open-arguments)
+  "Attach one owned PTY device to DISPLAY's existing Ghostty terminal."
+  (check-type display terminal-display)
+  (when (terminal-display-device display)
+    (error "Terminal display ~S already has an input device." display))
+  (setf (terminal-display-device display)
+        (apply #'termdev:open-pty-device
+               (terminal-display-terminal display) open-arguments))
   display)
 
 (defun open-terminal-display

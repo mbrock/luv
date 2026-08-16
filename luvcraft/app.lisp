@@ -108,6 +108,7 @@
    (world-text-glyph-cache :initarg :world-text-glyph-cache :initform nil
                            :reader luvcraft-session-world-text-glyph-cache)
    (overlays :initform nil :accessor luvcraft-session-overlays)
+   (modal-focus :initform nil :accessor luvcraft-session-modal-focus)
    (frame-states :initform (make-hash-table :test #'eql)
                  :reader luvcraft-session-frame-states)
    (resources :initarg :resources :initform nil
@@ -153,6 +154,69 @@
   (declare (ignore overlay session canvas event))
   nil)
 
+(defgeneric luvcraft-focus-entered (focus session)
+  (:documentation "Notify FOCUS that SESSION has entered its interaction mode."))
+
+(defmethod luvcraft-focus-entered (focus session)
+  (declare (ignore focus session))
+  nil)
+
+(defgeneric luvcraft-focus-left (focus session)
+  (:documentation "Notify FOCUS that SESSION has left its interaction mode."))
+
+(defmethod luvcraft-focus-left (focus session)
+  (declare (ignore focus session))
+  nil)
+
+(defgeneric handle-luvcraft-focus-event (focus session canvas event)
+  (:documentation
+   "Handle EVENT while FOCUS owns SESSION's modal player interaction."))
+
+(defun clear-luvcraft-player-input (session)
+  (clrhash (luvcraft-session-pressed-keys session))
+  (setf (luvcraft-session-jump-requested-p session) nil)
+  (when (luvcraft-session-pointer-captured-p session)
+    (set-canvas-relative-pointer-mode
+     (luvcraft-session-canvas session) nil)
+    (setf (luvcraft-session-pointer-captured-p session) nil))
+  session)
+
+(defun unfocus-luvcraft-session (session)
+  "Leave SESSION's modal interaction, returning the object which was focused."
+  (let ((focus (luvcraft-session-modal-focus session)))
+    (when focus
+      ;; Publish the unfocused state before the callback so a callback may
+      ;; safely establish another focus without being cleared afterward.
+      (setf (luvcraft-session-modal-focus session) nil)
+      (clear-luvcraft-player-input session)
+      (luvcraft-focus-left focus session))
+    focus))
+
+(defun focus-luvcraft-session (session focus)
+  "Enter modal interaction with FOCUS, suspending ordinary player input.
+
+This is the common session transition behind using a world terminal or book,
+mounting a vehicle, and other interactions described by #8JCMA5."
+  (check-type session luvcraft-session)
+  (when (null focus)
+    (error "Use UNFOCUS-LUVCRAFT-SESSION to leave modal focus."))
+  (unless (eq focus (luvcraft-session-modal-focus session))
+    (unfocus-luvcraft-session session)
+    (clear-luvcraft-player-input session)
+    (setf (luvcraft-session-modal-focus session) focus)
+    (handler-case
+        (luvcraft-focus-entered focus session)
+      (error (condition)
+        (setf (luvcraft-session-modal-focus session) nil)
+        (error condition))))
+  focus)
+
+(defun dispatch-luvcraft-focus-event (session canvas event)
+  (let ((focus (luvcraft-session-modal-focus session)))
+    (when focus
+      (handle-luvcraft-focus-event focus session canvas event)
+      t)))
+
 (defun dispatch-luvcraft-overlay-event (session canvas event)
   "Offer EVENT to SESSION's frontmost overlay and report consumption."
   (some (lambda (overlay)
@@ -168,6 +232,8 @@
   "Stop drawing OVERLAY in SESSION, optionally releasing it."
   (setf (luvcraft-session-overlays session)
         (delete overlay (luvcraft-session-overlays session) :test #'eq))
+  (when (eq overlay (luvcraft-session-modal-focus session))
+    (unfocus-luvcraft-session session))
   (when release-p
     (release-luvcraft-overlay overlay))
   overlay)

@@ -54,6 +54,30 @@ world-overlay relationship is the architectural result; sharing the CPU raster
 machinery would preserve precisely the indirection this experiment is meant to
 remove.
 
+* Modal focus is a player relationship
+:PROPERTIES:
+:ID: 8JCMA5
+:END:
+
+Luvcraft owns one optional modal focus independently of its overlay list.  A
+focused object receives canvas events while ordinary walking, looking, block
+editing, jumping, and material selection are suspended.  Entering or leaving
+focus clears held player input and releases relative-pointer capture, so a
+movement key cannot remain stuck across the boundary.
+
+This is the same player-facing transition whether the object is a McCLIM
+surface, a Ghostty terminal, an open book, or a mounted boat.  Those objects do
+not need a common UI superclass.  They implement focus-entered, focus-left,
+and focused-event methods according to their own semantics; other protocols
+can separately govern rendering, simulation, camera attachment, or vehicle
+motion.  Removing a focused overlay or stopping the session leaves focus
+before releasing its resources.
+
+There is deliberately no universal Escape binding in this layer.  Escape is
+meaningful terminal input, while a boat or book may have a world interaction
+verb for dismounting or closing.  The gameplay action which established a
+focus should call [[lisp:unfocus-luvcraft-session]] to reverse it.
+
 * Ghostty owns terminal semantics, not the surrounding application
 :PROPERTIES:
 :ID: OAFDXL

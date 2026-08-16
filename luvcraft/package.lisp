@@ -47,7 +47,8 @@
                     (#:ghostty #:luv.ghostty)
                     (#:math #:luv.arithmetic)
                     (#:records #:luv.arithmetic.records)
-                    (#:spv #:luv.spir-v))
+                    (#:spv #:luv.spir-v)
+                    (#:termdev #:luv.terminal))
   (:import-from #:luv.arithmetic.lisp.vec3
                 #:make-vec3
                 #:vec3
@@ -132,7 +133,9 @@
            #:edit-block-world-source
            #:edit-luvcraft-block
            #:encode-luvcraft-overlay
+           #:focus-luvcraft-session
            #:handle-luvcraft-overlay-event
+           #:handle-luvcraft-focus-event
            #:emit-block-face
            #:exposed-face-mesher
            #:find-luvcraft-gazetteer-view
@@ -186,6 +189,9 @@
            #:luvcraft-session-crosshair-pipeline
            #:luvcraft-session-desired-chunks
            #:luvcraft-session-lighting-state
+           #:luvcraft-session-modal-focus
+           #:luvcraft-focus-entered
+           #:luvcraft-focus-left
            #:luvcraft-session-mesh
            #:luvcraft-session-meshed-world-revision
            #:luvcraft-session-outstanding-production
@@ -224,6 +230,7 @@
            #:make-world-checkpoint-writer
            #:find-terminal-surface
            #:open-terminal-display
+           #:attach-terminal-display-pty
            #:place-terminal-block-rectangle
            #:materialize-block-world-chunk
            #:materialize-little-world-chunk
@@ -297,6 +304,7 @@
            #:step-block-world-player
            #:stop-luvcraft
            #:terminal-display
+           #:terminal-display-device
            #:terminal-display-surface
            #:terminal-surface
            #:terminal-surface-face
@@ -304,6 +312,7 @@
            #:terminal-surface-origin
            #:terminal-surface-width
            #:stop-world-checkpoint-writer
+           #:unfocus-luvcraft-session
            #:sync-camera-to-player
            #:wait-for-luvcraft-products
            #:world-checkpoint-writer

@@ -15,6 +15,88 @@
   (push (list x y z) (recording-window-locations window))
   (values window 37 :available))
 
+(defclass recording-modal-focus ()
+  ((transitions :initform nil :accessor recording-focus-transitions)
+   (events :initform nil :accessor recording-focus-events)))
+
+(defmethod luvcraft-focus-entered
+    ((focus recording-modal-focus) (session luvcraft-session))
+  (push :entered (recording-focus-transitions focus)))
+
+(defmethod luvcraft-focus-left
+    ((focus recording-modal-focus) (session luvcraft-session))
+  (push :left (recording-focus-transitions focus)))
+
+(defmethod handle-luvcraft-focus-event
+    ((focus recording-modal-focus) (session luvcraft-session) canvas event)
+  (declare (ignore session canvas))
+  (push event (recording-focus-events focus)))
+
+(deftest modal-focus-suspends-player-input-and-owns-events
+  (let ((session (make-instance 'luvcraft-session))
+        (first (make-instance 'recording-modal-focus))
+        (second (make-instance 'recording-modal-focus))
+        (event (make-instance 'canvas-key-press-event
+                              :timestamp 0 :key-name :w)))
+    (setf (gethash :w (luvcraft::luvcraft-session-pressed-keys session)) t
+          (luvcraft::luvcraft-session-jump-requested-p session) t)
+    (ok (eq first (focus-luvcraft-session session first)))
+    (ok (eq first (luvcraft-session-modal-focus session)))
+    (ok (null (gethash :w (luvcraft::luvcraft-session-pressed-keys session))))
+    (ok (not (luvcraft::luvcraft-session-jump-requested-p session)))
+    (handle-canvas-event session nil event)
+    (ok (equal (list event) (recording-focus-events first)))
+    (ok (null (gethash :w (luvcraft::luvcraft-session-pressed-keys session))))
+    (focus-luvcraft-session session second)
+    (ok (equal '(:left :entered) (recording-focus-transitions first)))
+    (ok (equal '(:entered) (recording-focus-transitions second)))
+    (add-luvcraft-overlay session second)
+    (remove-luvcraft-overlay session second :release-p nil)
+    (ok (null (luvcraft-session-modal-focus session)))
+    (ok (equal '(:left :entered) (recording-focus-transitions second)))
+    (handle-canvas-event session nil event)
+    (ok (gethash :w (luvcraft::luvcraft-session-pressed-keys session)))))
+
+(deftest focused-terminal-display-sends-keys-to-its-pty
+  (luv.ghostty:with-terminal (ghostty-terminal :columns 32 :rows 4)
+    (let* ((device
+             (luv.terminal:open-pty-device
+              ghostty-terminal
+              :program "/bin/sh"
+              :arguments
+              (list "-c"
+                    "IFS= read -r line; printf 'focused:%s\r\n' \"$line\"")))
+           (display
+             (make-instance 'terminal-display
+                            :terminal ghostty-terminal :device device))
+           (session (make-instance 'luvcraft-session)))
+      (unwind-protect
+           (progn
+             (focus-luvcraft-session session display)
+             (dolist (event
+                       (list
+                        (make-instance 'canvas-key-press-event
+                                       :timestamp 0 :key-name :o
+                                       :character #\o
+                                       :unshifted-character #\o)
+                        (make-instance 'canvas-key-press-event
+                                       :timestamp 0 :key-name :k
+                                       :character #\k
+                                       :unshifted-character #\k)
+                        (make-instance 'canvas-key-press-event
+                                       :timestamp 0 :key-name :return
+                                       :character #\Return
+                                       :unshifted-character #\Return)))
+               (handle-canvas-event session nil event))
+             (ok (eq :exited
+                     (luv.terminal:wait-for-pty-device device :timeout 3.0)))
+             (ok (search
+                  "focused:ok"
+                  (luv.terminal:call-with-pty-device-terminal
+                   device #'luv.ghostty:terminal-text))))
+        (unfocus-luvcraft-session session)
+        (luv.terminal:close-pty-device device)))))
+
 (deftest block-smash-particles-form-a-bounded-textured-burst
   (let ((system (make-instance 'block-particle-system))
         (coordinate (make-world-coordinate 3 5 -2)))

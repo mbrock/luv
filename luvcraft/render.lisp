@@ -599,6 +599,8 @@ the frame uniform cannot silently diverge between shader and host."
 
 (defmethod handle-canvas-event
     ((session luvcraft-session) canvas (event canvas-key-press-event))
+  (when (dispatch-luvcraft-focus-event session canvas event)
+    (return-from handle-canvas-event nil))
   (let ((key (canvas-key-event-key-name event)))
     (if (eq key :escape)
         (when (luvcraft-session-pointer-captured-p session)
@@ -619,13 +621,16 @@ the frame uniform cannot silently diverge between shader and host."
 
 (defmethod handle-canvas-event
     ((session luvcraft-session) canvas (event canvas-key-release-event))
-  (declare (ignore canvas))
+  (when (dispatch-luvcraft-focus-event session canvas event)
+    (return-from handle-canvas-event nil))
   (remhash (canvas-key-event-key-name event)
            (luvcraft-session-pressed-keys session))
   nil)
 
 (defmethod handle-canvas-event
     ((session luvcraft-session) canvas (event canvas-pointer-button-press-event))
+  (when (dispatch-luvcraft-focus-event session canvas event)
+    (return-from handle-canvas-event nil))
   (when (and (not (luvcraft-session-pointer-captured-p session))
              (dispatch-luvcraft-overlay-event session canvas event))
     (return-from handle-canvas-event nil))
@@ -646,34 +651,34 @@ the frame uniform cannot silently diverge between shader and host."
 (defmethod handle-canvas-event
     ((session luvcraft-session) canvas
      (event canvas-pointer-button-release-event))
-  (unless (luvcraft-session-pointer-captured-p session)
-    (dispatch-luvcraft-overlay-event session canvas event))
+  (unless (dispatch-luvcraft-focus-event session canvas event)
+    (unless (luvcraft-session-pointer-captured-p session)
+      (dispatch-luvcraft-overlay-event session canvas event)))
   nil)
 
 (defmethod handle-canvas-event
     ((session luvcraft-session) canvas (event canvas-pointer-motion-event))
-  (if (luvcraft-session-pointer-captured-p session)
-      (let ((camera (luvcraft-session-camera session)))
-        (incf (camera-yaw camera)
-              (* (canvas-pointer-event-delta-x event)
-                 (camera-sensitivity camera)))
-        (setf (camera-pitch camera)
-              (max -1.5
-                   (min 1.5
-                        (- (camera-pitch camera)
-                           (* (canvas-pointer-event-delta-y event)
-                              (camera-sensitivity camera)))))))
-      (dispatch-luvcraft-overlay-event session canvas event))
+  (cond
+    ((dispatch-luvcraft-focus-event session canvas event))
+    ((luvcraft-session-pointer-captured-p session)
+     (let ((camera (luvcraft-session-camera session)))
+       (incf (camera-yaw camera)
+             (* (canvas-pointer-event-delta-x event)
+                (camera-sensitivity camera)))
+       (setf (camera-pitch camera)
+             (max -1.5
+                  (min 1.5
+                       (- (camera-pitch camera)
+                          (* (canvas-pointer-event-delta-y event)
+                             (camera-sensitivity camera))))))))
+    (t
+     (dispatch-luvcraft-overlay-event session canvas event)))
   nil)
 
 (defmethod handle-canvas-event
     ((session luvcraft-session) canvas (event canvas-window-focus-lost-event))
-  (declare (ignore event))
-  (clrhash (luvcraft-session-pressed-keys session))
-  (setf (luvcraft-session-jump-requested-p session) nil)
-  (when (luvcraft-session-pointer-captured-p session)
-    (set-canvas-relative-pointer-mode canvas nil)
-    (setf (luvcraft-session-pointer-captured-p session) nil))
+  (clear-luvcraft-player-input session)
+  (dispatch-luvcraft-focus-event session canvas event)
   nil)
 
 (defmethod handle-canvas-event
@@ -684,7 +689,7 @@ the frame uniform cannot silently diverge between shader and host."
 
 (defmethod handle-canvas-event
     ((session luvcraft-session) canvas (event canvas-event))
-  (declare (ignore session canvas event))
+  (dispatch-luvcraft-focus-event session canvas event)
   nil)
 
 (defun start-luvcraft (&key
@@ -1088,6 +1093,7 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
   ;; A native close request may already have set this, but the resources still
   ;; belong to the session until this explicit teardown.
   (setf (luvcraft-session-running-p session) nil)
+  (unfocus-luvcraft-session session)
   (let ((canvas (luvcraft-session-canvas session)))
     (when (eq :open (canvas-state canvas))
       (setf (canvas-clock canvas) (make-demand-clock))

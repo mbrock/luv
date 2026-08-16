@@ -204,7 +204,6 @@
 (defmethod luvcraft:handle-luvcraft-overlay-event
     ((overlay luvcraft-widget-overlay) session canvas
      (event luv:canvas-pointer-event))
-  (declare (ignore session))
   (alexandria:when-let
       ((uv (luvcraft-widget-texture-coordinate
             overlay
@@ -215,10 +214,25 @@
               (mirror-texture (widget-overlay-mirror overlay))))
            (x (* (first uv) (first size)))
            (y (* (second uv) (second size))))
+      (when (and (typep event 'luv:canvas-pointer-button-press-event)
+                 (eq :left (luv:canvas-pointer-event-button event)))
+        (luvcraft:focus-luvcraft-session session overlay))
       (luv:handle-canvas-event
        (widget-overlay-mirror overlay) canvas
        (translated-widget-pointer-event event x y))
       t)))
+
+(defmethod luvcraft:handle-luvcraft-focus-event
+    ((overlay luvcraft-widget-overlay) session canvas
+     (event luv:canvas-pointer-event))
+  (luvcraft:handle-luvcraft-overlay-event overlay session canvas event))
+
+(defmethod luvcraft:handle-luvcraft-focus-event
+    ((overlay luvcraft-widget-overlay) session canvas
+     (event luv:canvas-event))
+  (declare (ignore session))
+  (luv:handle-canvas-event (widget-overlay-mirror overlay) canvas event)
+  t)
 
 (defmethod luvcraft:release-luvcraft-overlay
     ((overlay luvcraft-widget-overlay))

@@ -22,6 +22,7 @@
   :author "Mikael Brockman"
   :depends-on ("luv"
                "luv/ghostty"
+               "luv/terminal/canvas"
                "luvcraft/world"
                "cl-dejavu"
                "sb-concurrency"
