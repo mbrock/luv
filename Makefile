@@ -5,7 +5,7 @@ LUVCRAFT_BENCHMARK_CSV ?= build/luvcraft-metal-benchmark.csv
 LUVCRAFT_BENCHMARK_SCENARIO ?= steady
 LUVCRAFT_STREAMING_BENCHMARK_CSV ?= build/luvcraft-metal-streaming-benchmark.csv
 
-.PHONY: all luvcraft run test parinfer-check shader-validate msl-validate smoke metal-smoke metal-benchmark metal-streaming-benchmark mcluv readme-screenshots wiki wiki-cli objective-c-probe metal-clear metal-shader metal-pipeline metal-draw slug-proof clean
+.PHONY: all luvcraft run test parinfer-check shader-validate msl-validate smoke metal-smoke metal-benchmark metal-streaming-benchmark mcluv readme-screenshots wiki wiki-cli objective-c-probe metal-clear metal-shader metal-pipeline metal-draw slug-proof slug-text-proof clean
 
 all: luvcraft
 
@@ -120,6 +120,9 @@ metal-draw:
 slug-proof:
 	./scripts/dev sbcl --script hal/metal/probes/slug-bezier.lisp build/slug-bezier-proof.png
 
+slug-text-proof:
+	./scripts/dev sbcl --script hal/metal/probes/slug-text.lisp build/slug-text-proof.png
+
 clean:
 	rm -f ./build/luvcraft ./build/mcluv ./build/luvcraft-smoke.png ./build/luvcraft-metal-smoke.png
 	rm -f ./build/block-world.vert.metal ./build/block-world.vert.air
@@ -128,5 +131,6 @@ clean:
 	rm -f ./build/slug-bezier.vert.metal ./build/slug-bezier.vert.air
 	rm -f ./build/slug-bezier.frag.metal ./build/slug-bezier.frag.air
 	rm -f ./build/slug-bezier-proof.png
+	rm -f ./build/slug-text-proof.png
 	rm -f ./build/objective-c-exception-bridge-*.dylib
 	rm -rf ./build/wiki ./build/wiki-cli

@@ -1827,8 +1827,8 @@
          (printed (write-to-string forms)))
     (ok (eq :vertex (spv:shader-specification-stage vertex)))
     (ok (eq :fragment (spv:shader-specification-stage fragment)))
-    (ok (= 2 (length (spv:shader-specification-inputs vertex))))
-    (ok (= 1 (length (spv:shader-specification-inputs fragment))))
+    (ok (= 3 (length (spv:shader-specification-inputs vertex))))
+    (ok (= 2 (length (spv:shader-specification-inputs fragment))))
     (ok (typep fragment-value 'spv:shader-function-call))
     (ok (eq 'slug:slug-quadratic-outline
             (spv:shader-object-name
@@ -1860,6 +1860,21 @@
     (ok (find "U-DIV" names :key #'symbol-name :test #'string=))
     (ok (= #x07230203
            (aref (spv:assemble-shader-specification specification) 0)))))
+
+(deftest harfbuzz-shaping-selects-ligatures-and-preserves-clusters
+  (let* ((font (cl-dejavu:font-pathname "DejaVuSans.ttf"))
+         (shaped (slug:shape-slug-text "office" font))
+         (glyphs (slug:slug-shaped-text-glyphs shaped)))
+    (ok (= 2048 (slug:slug-shaped-text-units-per-em shaped)))
+    ;; o, ffi, c, e: the three source characters at byte cluster 1 become one
+    ;; glyph selected by HarfBuzz rather than three cmap lookups.
+    (ok (= 4 (length glyphs)))
+    (ok (equal '(0 1 4 5)
+               (loop for glyph across glyphs
+                     collect (slug:slug-shaped-glyph-cluster glyph))))
+    (ok (= (slug:slug-shaped-text-x-advance shaped)
+           (loop for glyph across glyphs
+                 sum (slug:slug-shaped-glyph-x-advance glyph))))))
 
 (deftest extended-math-signatures-are-explicit-contracts
   (flet ((failure-reason (body)

@@ -48,6 +48,22 @@
            #:slug-serialized-outline-horizontal-band-count
            #:slug-serialized-outline-vertical-band-count
            #:serialize-slug-outline
+           #:slug-shaping-error
+           #:slug-shaping-error-reason
+           #:slug-shaping-error-details
+           #:slug-shaped-glyph
+           #:slug-shaped-glyph-glyph-id
+           #:slug-shaped-glyph-cluster
+           #:slug-shaped-glyph-x-advance
+           #:slug-shaped-glyph-y-advance
+           #:slug-shaped-glyph-x-offset
+           #:slug-shaped-glyph-y-offset
+           #:slug-shaped-text
+           #:slug-shaped-text-glyphs
+           #:slug-shaped-text-units-per-em
+           #:slug-shaped-text-x-advance
+           #:slug-shaped-text-y-advance
+           #:shape-slug-text
            #:slug-glyph
            #:make-slug-glyph
            #:slug-glyph-character
@@ -57,6 +73,7 @@
            #:slug-glyph-units-per-em
            #:slug-outline-from-zpb-glyph
            #:make-slug-glyph-from-zpb-glyph
+           #:load-slug-glyph-index
            #:load-slug-glyph
            #:map-slug-outline-points
            #:normalize-slug-glyph-outline

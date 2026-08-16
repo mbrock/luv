@@ -411,19 +411,54 @@ Done when: several differently sized and holed quadratic outlines render from
 uploaded data without changing shader source, and a CPU winding oracle agrees
 with GPU pixels around extrema, shared endpoints, and contour holes.
 
-* NEXT Render a zpb-ttf glyph through Slug
+* HarfBuzz places a run; Slug draws indexed outlines
+:PROPERTIES:
+:ID: 4G7064
+:END:
+
+Text shaping and outline rendering meet at a deliberately narrow seam.
+[[lisp:shape-slug-text]] gives HarfBuzz the UTF-8 run and font bytes, then
+returns dense records containing glyph IDs, byte clusters, advances, and
+offsets in font units.  It does not ask HarfBuzz to rasterize.  The Slug side
+uses each glyph ID with =zpb-ttf:index-glyph=, normalizes that outline to em
+units, and places its quad from the corresponding HarfBuzz record.
+
+The first run proof keeps resource ownership literal rather than anticipating
+an atlas.  One shared vertex buffer contains six vertices per drawable glyph;
+each slice carries clip position, outline coordinate, and pixels per em.  Each
+glyph temporarily owns its own serialized band texture, curve texture, views,
+and bind group.  The render pass switches bind groups and uses =first-vertex=
+to draw each six-vertex slice.  This is intentionally expensive but makes
+glyph selection, placement, outline data, and draw ownership visible before a
+packing or caching policy hides them.
+
+DejaVu Sans shapes =office affinity= into 11 glyphs rather than 14 drawable
+characters: each =ffi= sequence becomes one ligature glyph.  The regression
+test checks the =office= clusters =(0 1 4 5)=, proving that the three UTF-8
+characters beginning at cluster 1 became one selected glyph.  The cold Metal
+probe then renders the complete shaped run through the same public Slug vertex
+and band-fragment specifications used by the earlier “O” proof:
+
+[[file:images/slug-text-proof.png]]
+
+The image also forced a useful correction that the symmetric “O” could not
+show: target Y had been inverted.  Visual inspection of letters with ascenders
+and descenders caught it, and the fitted text vertices now map font-up to
+image-up.  HarfBuzz 13.2.1 is part of the owned Nix runtime rather than an
+ambient host dependency.
+
+* DONE Shape and draw a HarfBuzz text run through Slug
 :PROPERTIES:
 :ID: DTBI99
 :END:
 
-Intent: reuse McCLIM's Lisp-native TrueType outline boundary while replacing
-its =cl-vectors=/=cl-aa= rasterization with luv's Slug packer and GPU draw.
+Intent: join HarfBuzz shaping to the proven =zpb-ttf= outline boundary and
+render a run as placed Slug glyph quads without a software rasterizer.
 
-Evidence needed: load a known bundled TrueType font through =zpb-ttf=, capture
-its quadratic segments and metrics, pack a glyph containing an inner contour,
-and render it through the same public shader specification on Metal and the
-Vulkan smoke path.  Keep shaping separate: HarfBuzz supplies glyph indexes and
-positions for runs, while this step proves one indexed glyph's outline.
+Evidence: #4G7064 records the owned HarfBuzz binding, =ffi= ligature and
+cluster regression, glyph-ID-to-outline join, one-quad-per-glyph Metal draw,
+and visually inspected =office affinity= image.  The complete luvcraft suite
+passes with the per-vertex pixels-per-em shader input.
 
 The font boundary is now working before any rasterizer.  The shader module in
 =:luv= depends directly on =zpb-ttf= and converts its resolved
@@ -451,11 +486,23 @@ generated SPIR-V has two structured loops and at least six exact image fetches;
 the generated MSL has two unsigned =for= loops with the reusable Slug
 function's lexical locals scoped inside them.
 
-The remaining part of this mark is production evidence rather than basic font
-rendering: exercise the portable draw on the Vulkan backend, compare boundary
-pixels with a small CPU winding oracle, and test dynamic dilation separately.
+Done when: HarfBuzz-selected glyph IDs and placements render as a legible run
+through indexed Slug outlines, including a ligature that cannot be reproduced
+by one cmap lookup per character.
 
-Done when: changing the glyph id changes only uploaded outline/vertex data, not
-shader source; the GPU image is visually inspected and compared with a small
-CPU winding reference; and dynamic dilation is tested separately on geometry
-whose undilated quad actually loses edge coverage.
+* NEXT Compare Slug coverage at glyph edges
+:PROPERTIES:
+:ID: 9G0Z19
+:END:
+
+Intent: distinguish “a shaped run renders” from evidence that Slug's edge
+coverage and geometry expansion are correct across backends.
+
+Evidence needed: exercise the portable draw on Vulkan, compare boundary pixels
+with a small CPU winding oracle, and test dynamic dilation on geometry whose
+undilated quad actually loses edge coverage.  Atlas allocation and outline
+reuse are separate performance work and should follow measurement.
+
+Done when: representative extrema, shared endpoints, holes, and clipped edges
+agree with the oracle on Metal and Vulkan, and dilation demonstrably recovers
+coverage rather than merely enlarging an already sufficient quad.

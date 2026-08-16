@@ -207,24 +207,27 @@ not the band-texture font renderer.  #OWR8OZ"
 (spv:define-shader slug-bezier-vertex-specification
     (:stage :vertex
      :inputs ((position :vec3 :location 0)
-              (outline-coordinate :vec3 :location 1))
+              (outline-coordinate :vec3 :location 1)
+              (pixels-per-em :vec3 :location 2))
      :outputs ((clip-position :vec4 :built-in :position)
-               (render-coordinate :vec2 :location 0)))
+               (render-coordinate :vec2 :location 0)
+               (render-pixels-per-em :vec2 :location 1)))
   (let* ((clip (spv:vec4 (spv:swizzle position :xy) 0.0 1.0)))
     (spv:set-output clip-position clip)
     (spv:set-output render-coordinate
-                    (spv:swizzle outline-coordinate :xy))))
+                    (spv:swizzle outline-coordinate :xy))
+    (spv:set-output render-pixels-per-em
+                    (spv:swizzle pixels-per-em :xy))))
 
 (spv:define-shader slug-bezier-fragment-specification
     (:stage :fragment
-     :inputs ((render-coordinate :vec2 :location 0))
+     :inputs ((render-coordinate :vec2 :location 0)
+              (pixels-per-em :vec2 :location 1))
      :outputs ((color-output :vec4 :location 0)))
-  ;; The quad spans 80 percent of a 256-pixel proof target, hence 204.8
-  ;; pixels per em.  Keeping this literal is the boundary of the fixed proof.
   (spv:set-output
    color-output
    (slug-quadratic-outline
-    render-coordinate (spv:vec2 204.8 204.8)
+    render-coordinate pixels-per-em
     (spv:vec4 0.96 0.32 0.48 1.0)
     (spv:vec2 0.50 0.08) (spv:vec2 0.08 0.38)
     (spv:vec2 0.14 0.70) (spv:vec2 0.18 0.98)
@@ -233,7 +236,8 @@ not the band-texture font renderer.  #OWR8OZ"
 
 (spv:define-shader slug-banded-fragment-specification
     (:stage :fragment
-     :inputs ((render-coordinate :vec2 :location 0))
+     :inputs ((render-coordinate :vec2 :location 0)
+              (pixels-per-em :vec2 :location 1))
      :resources ((band-data :uint-texture-2d :binding 0)
                  (curve-data :texture-2d :binding 1))
      :outputs ((color-output :vec4 :location 0)))
@@ -252,9 +256,6 @@ not the band-texture font renderer.  #OWR8OZ"
          (horizontal-offset (spv:swizzle horizontal-header :y))
          (vertical-count (spv:swizzle vertical-header :x))
          (vertical-offset (spv:swizzle vertical-header :y))
-         ;; This shader's render coordinate is em-normalized, so the 204.8
-         ;; scale is the 80-percent quad on the current 256-pixel proof target.
-         (pixels-per-em (spv:vec2 204.8 204.8))
          (horizontal
            (spv:counted-fold
                (index horizontal-count state (spv:vec2 0.0 0.0))

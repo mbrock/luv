@@ -455,5 +455,6 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:render-metal-slug-bezier-proof
            #:render-metal-slug-outline
            #:render-metal-slug-glyph
+           #:render-metal-slug-text
            #:write-rgba-png
            #:close-canvas))

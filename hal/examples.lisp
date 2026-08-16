@@ -257,10 +257,11 @@ seam is available there without inventing an empty bind-group abstraction."
                    :vertex
                    `(:module ,vertex-module
                      :buffers
-                     ((:array-stride 24
+                     ((:array-stride 36
                        :attributes
                        ((:shader-location 0 :offset 0 :format :float32x3)
-                        (:shader-location 1 :offset 12 :format :float32x3)))))
+                        (:shader-location 1 :offset 12 :format :float32x3)
+                        (:shader-location 2 :offset 24 :format :float32x3)))))
                    :fragment
                    `(:module ,fragment-module
                      :targets ((:format ,format)))))
@@ -276,7 +277,7 @@ seam is available there without inventing an empty bind-group abstraction."
                   device
                   (make-buffer-descriptor
                    :label "Slug proof quad"
-                   :size (* 36 4) :usage '(:vertex :copy-dst)))
+                   :size (* 54 4) :usage '(:vertex :copy-dst)))
                  readback
                  (create
                   device
@@ -286,14 +287,14 @@ seam is available there without inventing an empty bind-group abstraction."
            (write-buffer
             vertices
             (make-array
-             36 :element-type 'single-float
+             54 :element-type 'single-float
              :initial-contents
-             '(-0.8 -0.8 0.0  0.0 1.0 0.0
-                0.8 -0.8 0.0  1.0 1.0 0.0
-                0.8  0.8 0.0  1.0 0.0 0.0
-               -0.8 -0.8 0.0  0.0 1.0 0.0
-                0.8  0.8 0.0  1.0 0.0 0.0
-               -0.8  0.8 0.0  0.0 0.0 0.0)))
+             '(-0.8 -0.8 0.0  0.0 1.0 0.0  204.8 204.8 0.0
+                0.8 -0.8 0.0  1.0 1.0 0.0  204.8 204.8 0.0
+                0.8  0.8 0.0  1.0 0.0 0.0  204.8 204.8 0.0
+               -0.8 -0.8 0.0  0.0 1.0 0.0  204.8 204.8 0.0
+                0.8  0.8 0.0  1.0 0.0 0.0  204.8 204.8 0.0
+               -0.8  0.8 0.0  0.0 0.0 0.0  204.8 204.8 0.0)))
            (setf encoder
                  (create device
                          (make-command-encoder-descriptor
@@ -386,10 +387,11 @@ traversals are data-driven.  Return pixels, width, height, and format."
                    :vertex
                    `(:module ,vertex-module
                      :buffers
-                     ((:array-stride 24
+                     ((:array-stride 36
                        :attributes
                        ((:shader-location 0 :offset 0 :format :float32x3)
-                        (:shader-location 1 :offset 12 :format :float32x3)))))
+                        (:shader-location 1 :offset 12 :format :float32x3)
+                        (:shader-location 2 :offset 24 :format :float32x3)))))
                    :fragment
                    `(:module ,fragment-module
                      :targets ((:format ,format)))))
@@ -459,7 +461,7 @@ traversals are data-driven.  Return pixels, width, height, and format."
                   device
                   (make-buffer-descriptor
                    :label "Slug em-square quad"
-                   :size (* 36 4) :usage '(:vertex :copy-dst)))
+                   :size (* 54 4) :usage '(:vertex :copy-dst)))
                  readback
                  (create
                   device
@@ -469,14 +471,14 @@ traversals are data-driven.  Return pixels, width, height, and format."
            (write-buffer
             vertices
             (make-array
-             36 :element-type 'single-float
+             54 :element-type 'single-float
              :initial-contents
-             '(-0.8 -0.8 0.0  0.0 0.0 0.0
-                0.8 -0.8 0.0  1.0 0.0 0.0
-                0.8  0.8 0.0  1.0 1.0 0.0
-               -0.8 -0.8 0.0  0.0 0.0 0.0
-                0.8  0.8 0.0  1.0 1.0 0.0
-               -0.8  0.8 0.0  0.0 1.0 0.0)))
+             '(-0.8 -0.8 0.0  0.0 0.0 0.0  204.8 204.8 0.0
+                0.8 -0.8 0.0  1.0 0.0 0.0  204.8 204.8 0.0
+                0.8  0.8 0.0  1.0 1.0 0.0  204.8 204.8 0.0
+               -0.8 -0.8 0.0  0.0 0.0 0.0  204.8 204.8 0.0
+                0.8  0.8 0.0  1.0 1.0 0.0  204.8 204.8 0.0
+               -0.8  0.8 0.0  0.0 1.0 0.0  204.8 204.8 0.0)))
            (setf encoder
                  (create device
                          (make-command-encoder-descriptor
@@ -522,3 +524,325 @@ traversals are data-driven.  Return pixels, width, height, and format."
    provider
    (luv.slug:normalize-slug-glyph-outline
     (luv.slug:load-slug-glyph character font-loader))))
+
+(defstruct slug-text-draw
+  glyph-id serialized origin-x origin-y
+  outline-min-x outline-min-y outline-max-x outline-max-y
+  band-texture band-view curve-texture curve-view bind-group)
+
+(defun make-slug-text-draws (shaped font-loader)
+  "Join HarfBuzz placement records to ZPB-TTF outlines by glyph ID."
+  (let* ((units-per-em (luv.slug:slug-shaped-text-units-per-em shaped))
+         (unit (/ 1 units-per-em))
+         (pen-x 0)
+         (pen-y 0)
+         draws)
+    (loop for placement across (luv.slug:slug-shaped-text-glyphs shaped)
+          for glyph-id = (luv.slug:slug-shaped-glyph-glyph-id placement)
+          for glyph = (luv.slug:load-slug-glyph-index glyph-id font-loader)
+          for outline = (luv.slug:normalize-slug-glyph-outline glyph)
+          do (when (luv.slug:slug-outline-contours outline)
+               (let* ((serialized
+                        (luv.slug:serialize-slug-outline
+                         outline :horizontal-band-count 1
+                                 :vertical-band-count 1))
+                      (packed
+                        (luv.slug:slug-serialized-outline-packed-outline
+                         serialized)))
+                 (push
+                  (make-slug-text-draw
+                   :glyph-id glyph-id :serialized serialized
+                   :origin-x (* (+ pen-x
+                                   (luv.slug:slug-shaped-glyph-x-offset
+                                    placement))
+                                unit)
+                   :origin-y (* (+ pen-y
+                                   (luv.slug:slug-shaped-glyph-y-offset
+                                    placement))
+                                unit)
+                   :outline-min-x (luv.slug:slug-packed-outline-min-x packed)
+                   :outline-min-y (luv.slug:slug-packed-outline-min-y packed)
+                   :outline-max-x (luv.slug:slug-packed-outline-max-x packed)
+                   :outline-max-y (luv.slug:slug-packed-outline-max-y packed))
+                  draws)))
+             (incf pen-x (luv.slug:slug-shaped-glyph-x-advance placement))
+             (incf pen-y (luv.slug:slug-shaped-glyph-y-advance placement)))
+    (nreverse draws)))
+
+(defun slug-text-extents (draws shaped font-loader)
+  (let* ((unit (/ 1 (luv.slug:slug-shaped-text-units-per-em shaped)))
+         (advance-x (* unit (luv.slug:slug-shaped-text-x-advance shaped)))
+         (advance-y (* unit (luv.slug:slug-shaped-text-y-advance shaped))))
+    (values
+     (min 0.0
+          (loop for draw in draws
+                minimize (+ (slug-text-draw-origin-x draw)
+                            (slug-text-draw-outline-min-x draw))))
+     (min 0.0 (* unit (zpb-ttf:descender font-loader))
+          (loop for draw in draws
+                minimize (+ (slug-text-draw-origin-y draw)
+                            (slug-text-draw-outline-min-y draw))))
+     (max advance-x
+          (loop for draw in draws
+                maximize (+ (slug-text-draw-origin-x draw)
+                            (slug-text-draw-outline-max-x draw))))
+     (max advance-y (* unit (zpb-ttf:ascender font-loader))
+          (loop for draw in draws
+                maximize (+ (slug-text-draw-origin-y draw)
+                            (slug-text-draw-outline-max-y draw)))))))
+
+(defun make-slug-text-vertices
+    (draws width height min-x min-y max-x max-y)
+  (let* ((margin 24.0)
+         (span-x (max 1/1024 (- max-x min-x)))
+         (span-y (max 1/1024 (- max-y min-y)))
+         (pixels-per-em
+           (min 180.0
+                (/ (- width (* margin 2)) span-x)
+                (/ (- height (* margin 2)) span-y)))
+         (x-offset (/ (- width (* span-x pixels-per-em)) 2))
+         (y-offset (/ (- height (* span-y pixels-per-em)) 2))
+         (padding (/ 1.0 pixels-per-em))
+         (data (make-array (* 54 (length draws))
+                           :element-type 'single-float)))
+    (labels ((clip-x (x)
+               (- (* 2 (/ (+ x-offset (* (- x min-x) pixels-per-em)) width))
+                  1))
+             (clip-y (y)
+               (- 1
+                  (* 2
+                     (/ (+ y-offset (* (- y min-y) pixels-per-em)) height))))
+             (write-vertex (offset clip-x clip-y outline-x outline-y)
+               (let ((values (list clip-x clip-y 0.0
+                                   outline-x outline-y 0.0
+                                   pixels-per-em pixels-per-em 0.0)))
+                 (loop for value in values
+                       for index from offset
+                       do (setf (aref data index)
+                                (coerce value 'single-float))))))
+      (loop for draw in draws
+            for draw-index from 0
+            for base = (* draw-index 54)
+            for outline-left = (- (slug-text-draw-outline-min-x draw) padding)
+            for outline-bottom = (- (slug-text-draw-outline-min-y draw) padding)
+            for outline-right = (+ (slug-text-draw-outline-max-x draw) padding)
+            for outline-top = (+ (slug-text-draw-outline-max-y draw) padding)
+            for layout-left = (+ (slug-text-draw-origin-x draw) outline-left)
+            for layout-bottom = (+ (slug-text-draw-origin-y draw) outline-bottom)
+            for layout-right = (+ (slug-text-draw-origin-x draw) outline-right)
+            for layout-top = (+ (slug-text-draw-origin-y draw) outline-top)
+            for left = (clip-x layout-left)
+            for bottom = (clip-y layout-bottom)
+            for right = (clip-x layout-right)
+            for top = (clip-y layout-top)
+            do (write-vertex base left bottom outline-left outline-bottom)
+               (write-vertex (+ base 9) right bottom outline-right outline-bottom)
+               (write-vertex (+ base 18) right top outline-right outline-top)
+               (write-vertex (+ base 27) left bottom outline-left outline-bottom)
+               (write-vertex (+ base 36) right top outline-right outline-top)
+               (write-vertex (+ base 45) left top outline-left outline-top))
+      data)))
+
+(defun create-metal-slug-texture-pair (device layout draw resources)
+  (let ((serialized (slug-text-draw-serialized draw))
+        (band-texture nil) (curve-texture nil)
+        (band-view nil) (curve-view nil) (bind-group nil)
+        (completed-p nil))
+    (unwind-protect
+         (progn
+           (setf band-texture
+                 (create
+                  device
+                  (make-texture-descriptor
+                   :label "Shaped glyph RG16U bands"
+                   :size (luv.slug:slug-serialized-outline-band-texture-size
+                          serialized)
+                   :dimensions :2d :format :rg16-uint
+                   :usage '(:texture-binding :copy-dst)))
+                 curve-texture
+                 (create
+                  device
+                  (make-texture-descriptor
+                   :label "Shaped glyph RGBA16F curves"
+                   :size (luv.slug:slug-serialized-outline-curve-texture-size
+                          serialized)
+                   :dimensions :2d :format :rgba16-float
+                   :usage '(:texture-binding :copy-dst)))
+                 band-view
+                 (create
+                  device (make-texture-view-descriptor :texture band-texture))
+                 curve-view
+                 (create
+                  device (make-texture-view-descriptor :texture curve-texture))
+                 bind-group
+                 (create
+                  device
+                  (make-bind-group-descriptor
+                   :label "Shaped Slug glyph"
+                   :layout layout
+                   :entries `((:binding 0 :resource ,band-view)
+                              (:binding 1 :resource ,curve-view)))))
+           (write-texture
+            (device-queue device) (make-texture-copy :texture band-texture)
+            (luv.slug:slug-serialized-outline-band-upload-data serialized)
+            (make-texture-data-layout
+             :bytes-per-row
+             (* 4 (luv.slug:slug-serialized-outline-band-width serialized))
+             :rows-per-image
+             (second
+              (luv.slug:slug-serialized-outline-band-texture-size serialized)))
+            (luv.slug:slug-serialized-outline-band-texture-size serialized))
+           (write-texture
+            (device-queue device) (make-texture-copy :texture curve-texture)
+            (luv.slug:slug-serialized-outline-curve-upload-data serialized)
+            (make-texture-data-layout
+             :bytes-per-row
+             (* 8 (luv.slug:slug-serialized-outline-curve-width serialized))
+             :rows-per-image
+             (second
+              (luv.slug:slug-serialized-outline-curve-texture-size serialized)))
+            (luv.slug:slug-serialized-outline-curve-texture-size serialized))
+           (setf (slug-text-draw-band-texture draw) band-texture
+                 (slug-text-draw-band-view draw) band-view
+                 (slug-text-draw-curve-texture draw) curve-texture
+                 (slug-text-draw-curve-view draw) curve-view
+                 (slug-text-draw-bind-group draw) bind-group
+                 completed-p t)
+           (append
+            (list bind-group curve-view band-view curve-texture band-texture)
+            resources))
+      (unless completed-p
+        (dolist (resource
+                  (remove nil
+                          (list bind-group curve-view band-view
+                                curve-texture band-texture)))
+          (destroy resource))))))
+
+(defun render-metal-slug-text (provider string font-pathname)
+  "Shape STRING with HarfBuzz and render one Slug quad per drawable glyph.
+
+The proof target is 768 by 256 pixels.  HarfBuzz owns glyph selection,
+ligatures, clusters, advances, and offsets; ZPB-TTF supplies outlines by the
+resulting glyph IDs.  Return pixels, width, height, format, and shaped text.
+#4G7064"
+  (let ((device nil) (vertex-module nil) (fragment-module nil)
+        (layout nil) (pipeline nil) (target nil) (vertices nil)
+        (readback nil) (encoder nil) (command-buffer nil)
+        (glyph-resources nil)
+        (width 768) (height 256) (format :rgba8-unorm)
+        (shaped (luv.slug:shape-slug-text string font-pathname)))
+    (zpb-ttf:with-font-loader (font-loader font-pathname)
+      (let ((draws (make-slug-text-draws shaped font-loader)))
+        (unless draws
+          (error 'luv.slug:slug-shaping-error :reason :no-drawable-glyphs
+                 :details string))
+        (multiple-value-bind (min-x min-y max-x max-y)
+            (slug-text-extents draws shaped font-loader)
+          (let ((vertex-data
+                  (make-slug-text-vertices
+                   draws width height min-x min-y max-x max-y)))
+            (unwind-protect
+                 (progn
+                   (setf device (request-gpu-device provider)
+                         vertex-module
+                         (create
+                          device
+                          (make-shader-module-descriptor
+                           :label "Shaped Slug vertex" :language :mathematical
+                           :code (luv.slug:slug-bezier-vertex-specification)))
+                         fragment-module
+                         (create
+                          device
+                          (make-shader-module-descriptor
+                           :label "Shaped Slug fragment" :language :mathematical
+                           :code (luv.slug:slug-banded-fragment-specification)))
+                         layout
+                         (create
+                          device
+                          (make-bind-group-layout-descriptor
+                           :label "Shaped Slug outline textures"
+                           :entries '((:binding 0 :type :texture)
+                                      (:binding 1 :type :texture))))
+                         pipeline
+                         (create
+                          device
+                          (make-render-pipeline-descriptor
+                           :label "HarfBuzz shaped Slug text"
+                           :layout layout
+                           :vertex
+                           `(:module ,vertex-module
+                             :buffers
+                             ((:array-stride 36
+                               :attributes
+                               ((:shader-location 0 :offset 0
+                                  :format :float32x3)
+                                (:shader-location 1 :offset 12
+                                  :format :float32x3)
+                                (:shader-location 2 :offset 24
+                                  :format :float32x3)))))
+                           :fragment
+                           `(:module ,fragment-module
+                             :targets ((:format ,format)))))
+                         target
+                         (create
+                          device
+                          (make-texture-descriptor
+                           :label "Shaped Slug text target"
+                           :size (list width height) :dimensions :2d
+                           :format format :usage '(:render-attachment :copy-src)))
+                         vertices
+                         (create
+                          device
+                          (make-buffer-descriptor
+                           :label "Shaped Slug glyph quads"
+                           :size (* (length vertex-data) 4)
+                           :usage '(:vertex :copy-dst)))
+                         readback
+                         (create
+                          device
+                          (make-buffer-descriptor
+                           :label "Shaped Slug text readback"
+                           :size (* width height 4) :usage '(:copy-dst))))
+                   (write-buffer vertices vertex-data)
+                   (dolist (draw draws)
+                     (setf glyph-resources
+                           (create-metal-slug-texture-pair
+                            device layout draw glyph-resources)))
+                   (setf encoder
+                         (create
+                          device
+                          (make-command-encoder-descriptor
+                           :label "Shaped Slug text commands")))
+                   (let ((pass
+                           (begin-render-pass
+                            encoder
+                            (make-render-pass-descriptor
+                             :color-attachments
+                             `((:view ,target :load-op :clear :store-op :store
+                                :clear-value #(0.0 0.0 0.0 1.0)))))))
+                     (set-pipeline pass pipeline)
+                     (set-vertex-buffer pass 0 vertices)
+                     (loop for draw in draws
+                           for first-vertex from 0 by 6
+                           do (set-bind-group
+                               pass 0 (slug-text-draw-bind-group draw))
+                              (draw pass 6 1 first-vertex))
+                     (end-pass pass))
+                   (encode
+                    encoder
+                    (make-gpu-copy-texture-to-buffer-command
+                     :source target :destination readback))
+                   (setf command-buffer (finish encoder))
+                   (submit (device-queue device) command-buffer)
+                   (values (read-buffer readback) width height format shaped))
+              (when command-buffer (destroy command-buffer))
+              (when encoder (destroy encoder))
+              (dolist (resource glyph-resources) (destroy resource))
+              (when readback (destroy readback))
+              (when vertices (destroy vertices))
+              (when target (destroy target))
+              (when pipeline (destroy pipeline))
+              (when layout (destroy layout))
+              (when fragment-module (destroy fragment-module))
+              (when vertex-module (destroy vertex-module))
+              (when device (destroy device)))))))))

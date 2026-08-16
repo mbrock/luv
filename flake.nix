@@ -46,6 +46,7 @@
           nativeLibraryPath = nixpkgs.lib.makeLibraryPath (
             [
               pkgs.libffi
+              pkgs.harfbuzz
               pkgs.mesa
               pkgs.sdl3
               pkgs.sdl3-image
@@ -99,6 +100,7 @@
             runtimeInputs = [
               lisp
               pkgs.libffi
+              pkgs.harfbuzz
               pkgs.mesa
               pkgs.python3
               pkgs.pkg-config
@@ -167,6 +169,7 @@
             packages = [
               env.lisp
               env.pkgs.libffi
+              env.pkgs.harfbuzz
               env.pkgs.mesa
               env.pkgs.python3
               env.pkgs.pkg-config

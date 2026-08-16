@@ -43,6 +43,11 @@
    font-loader
    :character character))
 
+(defun load-slug-glyph-index (glyph-index font-loader)
+  "Capture HarfBuzz GLYPH-INDEX from FONT-LOADER as a Slug glyph."
+  (make-slug-glyph-from-zpb-glyph
+   (zpb-ttf:index-glyph glyph-index font-loader) font-loader))
+
 (defun map-slug-outline-points (function outline)
   "Return an OUTLINE whose points are the result of calling FUNCTION on x/y."
   (labels ((map-point (point)

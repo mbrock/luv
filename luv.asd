@@ -91,6 +91,7 @@
                    (:file "slug-package")
                    (:file "slug-outline")
                    (:file "slug-serialization")
+                   (:file "slug-harfbuzz")
                    (:file "slug-truetype")
                    (:file "slug")))
      (:module "sdl"

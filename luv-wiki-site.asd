@@ -31,4 +31,5 @@
                  (:file "wiki-site")
                  (:static-file "site.js")
                  (:static-file "images/dexp.png")
-                 (:static-file "images/slug-bezier-proof.png")))))
+                 (:static-file "images/slug-bezier-proof.png")
+                 (:static-file "images/slug-text-proof.png")))))
