@@ -592,6 +592,11 @@ them side by side, compose checked views, or materialize a wider persistence
 record.  Lisp aliasing and mutation make a literal port of Moppe's consuming
 =join= operation unnecessary until a real owner wants it.
 
+The proposed terminal viewport #RD8AEI is a compact non-voxel client of the
+same distinction: Ghostty remains the authoritative source, while the renderer
+retains a narrow cell-presentation materialization and derives separate glyph
+and decoration populations from it.
+
 * The first Lisp atelier should stay ordinary
 :PROPERTIES:
 :ID: R3F8YC

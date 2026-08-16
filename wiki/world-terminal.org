@@ -146,6 +146,116 @@ render-state-owned memory.  The renderer can then traverse a stable snapshot
 while PTY input continues.  Borrowed rows and cells remain valid until the next
 render-state update, not indefinitely.
 
+* Viewport cells form a finite domain
+:PROPERTIES:
+:ID: RD8AEI
+:END:
+
+The visible terminal grid is a small, honest client of luv's finite-domain
+vocabulary.  A =terminal-grid-domain= can own the current column and row counts,
+answer =domain-cardinality= with their product, map =(x,y)= to a row-major
+offset, and map an offset back to a cell coordinate.  Row-major order is not
+just convenient storage: Ghostty reports damage and traversal by viewport row,
+so one damaged row is one contiguous domain slice.
+
+Domain identity must mean more than equal cardinality, as #B8R3KF requires.
+An 80 by 24 grid is not the same domain as a 96 by 20 grid even though both
+contain 1920 cells.  Resizing creates a new domain and a new exact
+materialization rather than mutating the meaning underneath existing arrays.
+The world surface's placement and cell extent remain properties of the owning
+terminal surface; they do not change which discrete cell a domain offset names.
+
+This first domain is deliberately only the visible viewport.  Primary screen,
+alternate screen, and scrollback identity remain Ghostty's concern.  A history
+domain should appear only when a real search, selection, or scrollback renderer
+needs one; exposing every terminal concept as a domain in advance would be a
+framework exercise rather than a client-led design.
+
+Conversely, PTY bytes are an ordered stream, not a domain; synchronous effects
+are protocol events, not fields; and a dirty-row report is a transient choice
+of domain slices to republish, not another persistent bundle.  The domain
+vocabulary earns its place specifically where many visible cells share one
+indexing and materialization contract.
+
+* Cell presentation is a derived materialization
+:PROPERTIES:
+:ID: AI83XS
+:END:
+
+The renderer needs data that survives the borrowed =GhosttyRenderState= cell
+iterators, but it does not need a second implementation of terminal semantics.
+A fixed columnar materialization over #RD8AEI should therefore retain only the
+normalized cell presentation consumed by later shaping and drawing.  Ghostty
+remains authoritative; this is a checked cache with an explicit source
+revision, in the sense of #V6T1QS and #A6X2RT.
+
+A tentative physical row is:
+
+#+begin_src lisp
+(records:define-columnar-materialization terminal-cell-presentation
+  (grapheme-start 0 :type (unsigned-byte 32))
+  (grapheme-count 0 :type (unsigned-byte 32))
+  (style-index 0 :type (unsigned-byte 16))
+  (flags 0 :type (unsigned-byte 16))
+  (semantic-content 0 :type (unsigned-byte 8)))
+#+end_src
+
+A =terminal-presentation= product owns this fixed materialization plus one
+replaceable packed UTF-8 arena and normalized-style table per viewport row.
+The lanes contain row-local byte offsets, counts, and indices into those side
+tables, not per-cell strings or style objects.  Row-local side tables match
+Ghostty's damage unit and let one update replace variable-length graphemes
+without an ever-growing global arena or compaction of unrelated rows.  =flags=
+can retain such closed facts as text presence, narrow/wide/spacer role, and
+selection.  Foreground, background, underline, inverse, and decoration policy
+belongs in the style table until a concrete projection chooses packed GPU
+values.  Fields should be added only when a renderer or interaction client
+actually consumes them.
+
+For a dirty row, the bridge reads Ghostty's borrowed cells into temporary row
+storage, builds candidate grapheme and style side tables, copies every lane
+into the row's contiguous domain slice, and publishes the side tables and that
+row's source revision last.  Errors before publication leave the previously
+complete row visible rather than a mixture of old and new lanes.  Full damage
+visits every row; partial damage visits only the reported rows; a clean update
+changes no materialization.  Calling =ghostty_render_state_clean= acknowledges
+the source damage only after the complete candidate has been accepted.
+
+* Draw populations are narrow columnar projections
+:PROPERTIES:
+:ID: BIXI1P
+:END:
+
+The fixed cell materialization is still not a GPU draw list.  One cell can emit
+no glyph, one glyph, or several glyphs for a grapheme; backgrounds may merge
+into spans; underlines and the cursor are different geometry with different
+lifetimes.  Following #Y0TPND, membership policy should remain separate from
+the physical lane layouts.  The first renderer can derive several small
+dynamic columnar buffers:
+
+- a glyph-instance population containing cell position, glyph-resource key,
+  placement, color, and Slug parameters;
+- a rectangle population for backgrounds and selection spans; and
+- a decoration population for underlines, strikes, overlines, and cursor.
+
+Each population has the changing ordinal domain =[0,length)=.  Its definition
+fixes specialized lanes; reset and append policy decides membership; one closed
+projection kernel borrows the raw columns and packs the existing GPU instance
+or vertex ABI.  Device glyph resources remain owned by the Slug cache and are
+named by compact keys inside the population rather than CLOS objects per glyph.
+This is the aggregate-dispatch seam in #J7A2KD: select the terminal renderer
+once, then traverse arrays.
+
+The current generated dynamic buffer supports reset and append but not
+arbitrary replacement of a middle range.  The first terminal should not invent
+a private row allocator to conceal that fact.  On any published damage it can
+rebuild these compact populations from the fixed visible-cell materialization;
+on a clean frame it does nothing.  Typical terminal grids are small enough for
+that to be a useful baseline.  If measurement shows that row-local rebuilds
+matter, the compaction and range vocabulary developed by #34G2K8 can inform a
+shared solution rather than terminal-specific skewed lengths and forwarding
+tables.
+
 * The terminal grid remains authoritative through Slug
 :PROPERTIES:
 :ID: I9U71F
@@ -161,11 +271,13 @@ to an explicit terminal font policy.
 
 The simplest correct first representation is dense data per dirty row:
 
-- cell background and selection spans;
+- the fixed cell presentation in #AI83XS, updated by contiguous row slice;
 - glyph instances keyed by font, glyph ID, style, cell origin, and terminal
   advance;
-- underline, strike, overline, and cursor geometry; and
-- row-owned vertex or instance ranges that can be replaced independently.
+- cell background, selection, underline, strike, overline, and cursor
+  geometry; and
+- narrow draw populations whose first policy may rebuild the visible grid as
+  one batch.
 
 The existing per-device Slug outline cache #U5X6DY is the natural resource
 owner, but the current one-texture-pair-per-glyph draw pattern is only a proof.
@@ -186,13 +298,18 @@ Evidence: the current binding already owns a terminal and feeds arbitrary VT
 bytes; the Nix environment owns the exact shared library.  Ghostty's pinned
 render API supplies dirty-row and cell iteration.  The world overlay seam
 #0U22KN and the working Slug world-text path #QW7P96 already supply placement,
-depth-tested drawing, shaping, and device outline ownership.
+depth-tested drawing, shaping, and device outline ownership.  The finite domain
+#RD8AEI, fixed presentation #AI83XS, and compact projections #BIXI1P give the
+crossing a concrete luv-shaped representation without making cells objects.
 
 Done when: a fixed styled VT fixture produces a visible Slug-rendered row on a
-world plane, including its cell backgrounds and cursor; a second unchanged
-render-state update performs no row rebuild; changing one row rebuilds that
-row; and terminal, render-state, iterator, and GPU resources all have explicit
-release paths.
+world plane, including its cell backgrounds and cursor; Ghostty cells populate
+an exact domain-bound columnar materialization; a second unchanged render-state
+update performs no materialization or draw-population rebuild; changing one row
+publishes only that materialization slice even if the first compact draw policy
+rebuilds the small visible batch; resize replaces the domain coherently; and
+terminal, render-state, iterator, side-table, columnar, and GPU resources all
+have explicit release paths.
 
 * TODO Attach a live PTY after the render boundary works
 :PROPERTIES:
