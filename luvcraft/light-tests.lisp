@@ -201,6 +201,41 @@
     (ok (plusp (luvcraft::lighting-state-publications state)))
     (ok (plusp (luvcraft::lighting-state-cells-visited state)))))
 
+(deftest asynchronous-lighting-publishes-only-a-current-immutable-capture
+  (let* ((world (make-open-sky-test-world '(0 0 0)))
+         (chunk (luvcraft::world-chunk-at world 0 0 0))
+         (state (luvcraft::attach-lighting-state world))
+         (session (make-instance 'luvcraft-session
+                                 :world world :lighting-state state))
+         (stale-request
+           (make-instance
+            'luvcraft::block-light-production-request
+            :key '(:light) :priority -1
+            :dependency-stamp
+            (luvcraft::block-world-light-dependency-stamp world)
+            :region (luvcraft::capture-light-region world :immutable-p t))))
+    ;; The request owns its dense input.  A later edit invalidates publication
+    ;; without changing what the producer is currently solving.
+    (setf (world-block-at world 1 1 1) *test-glow-block*)
+    (let ((payload
+            (luvcraft::perform-production-request stale-request)))
+      (ok (null (luvcraft::publish-production-result
+                 session stale-request payload)))
+      (ok (null (block-chunk-light-field chunk)))
+      (ok (luvcraft::lighting-state-dirty-p state)))
+    (let* ((request
+             (make-instance
+              'luvcraft::block-light-production-request
+              :key '(:light) :priority -1
+              :dependency-stamp
+              (luvcraft::block-world-light-dependency-stamp world)
+              :region (luvcraft::capture-light-region world :immutable-p t)))
+           (payload (luvcraft::perform-production-request request)))
+      (ok (luvcraft::publish-production-result session request payload))
+      (ok (= (blocklight-at world 1 1 1)
+             (block-light-emission *test-glow-block*)))
+      (ok (light-matches-reference-p world)))))
+
 (deftest random-edits-and-residency-match-the-reference-solver
   (let* ((world (make-block-world
                  :source (make-instance 'little-world-source :seed 1)))

@@ -56,6 +56,25 @@ presentation; deterministic captures wait for the broader default set."
       (block-mesh-production-request-absent-neighbor-policy request))
      (block-mesh-production-request-snapshot request))))
 
+(defclass block-light-production-request (production-request)
+  ((region :initarg :region :reader block-light-production-request-region)
+   (dependency-stamp :initarg :dependency-stamp
+                     :reader block-light-production-request-dependency-stamp)))
+
+(defstruct block-light-production-payload
+  region cells-visited elapsed-seconds)
+
+(defmethod perform-production-request ((request block-light-production-request))
+  (with-cpu-trace-zone (:production/light-world)
+    (let ((start (get-internal-real-time)))
+      (multiple-value-bind (region visited)
+          (solve-light-region (block-light-production-request-region request))
+        (make-block-light-production-payload
+         :region region :cells-visited visited
+         :elapsed-seconds
+         (/ (- (get-internal-real-time) start)
+            (coerce internal-time-units-per-second 'double-float)))))))
+
 (defclass block-chunk-load-payload ()
   ((key :initarg :key :reader block-chunk-load-payload-key)
    (palette :initarg :palette :reader block-chunk-load-payload-palette)
@@ -564,6 +583,62 @@ published independently."
                        (schedule-production-request
                         (luvcraft-session-production-system session) request)))))))
 
+(defun block-world-light-dependency-stamp (world)
+  "Name the exact resident content captured by an asynchronous light solve."
+  (sort
+   (loop for chunk in (resident-world-chunks world)
+         collect (list (copy-list (block-chunk-key chunk))
+                       (block-chunk-incarnation chunk)
+                       (block-chunk-revision chunk)))
+   (lambda (left right)
+     (loop for a in (first left)
+           for b in (first right)
+           when (/= a b) return (< a b)
+           finally (return nil)))))
+
+(defun luvcraft-load-production-pending-p (session)
+  (loop for key being the hash-keys of
+          (luvcraft-session-outstanding-production session)
+        thereis (eq (first key) :load)))
+
+(defun mark-luvcraft-lighting-for-retry (state)
+  (dolist (chunk (resident-world-chunks (lighting-state-world state)))
+    (setf (gethash (chunk-domain-coordinate (block-chunk-domain chunk))
+                   (lighting-state-arrivals state))
+          t)))
+
+(defun schedule-luvcraft-lighting (session)
+  "Capture one coalesced immutable relight after the current load batch."
+  (let* ((state (luvcraft-session-lighting-state session))
+         (outstanding (luvcraft-session-outstanding-production session))
+         (production-key '(:light)))
+    (when (and state
+               (lighting-state-dirty-p state)
+               (not (gethash production-key outstanding))
+               (not (luvcraft-load-production-pending-p session)))
+      (let* ((world (lighting-state-world state))
+             (request
+               (make-instance
+                'block-light-production-request
+                :key production-key :priority -1
+                :dependency-stamp (block-world-light-dependency-stamp world)
+                :region (capture-light-region world :immutable-p t))))
+        ;; New hooks which fire after this capture accumulate for the next
+        ;; request.  A stale or failed result explicitly restores dirtiness.
+        (clrhash (lighting-state-dirty-cells state))
+        (clrhash (lighting-state-arrivals state))
+        (clrhash (lighting-state-departures state))
+        (setf (gethash production-key outstanding)
+              (schedule-production-request
+               (luvcraft-session-production-system session) request))))))
+
+(defun luvcraft-lighting-settled-p (session)
+  (let ((state (luvcraft-session-lighting-state session)))
+    (or (null state)
+        (and (not (lighting-state-dirty-p state))
+             (not (gethash '(:light)
+                           (luvcraft-session-outstanding-production session)))))))
+
 (defgeneric publish-production-result (session request value)
   (:documentation
    "Validate and accept one worker product on the render/GPU owning thread.
@@ -616,6 +691,29 @@ here and install its publication cohort later at the frame boundary."))
             (when buffer (destroy buffer))))))))
 
 (defmethod publish-production-result
+    ((session luvcraft-session) (request block-light-production-request) payload)
+  (let* ((state (luvcraft-session-lighting-state session))
+         (world (luvcraft-session-world session))
+         (current-p
+           (equal (block-light-production-request-dependency-stamp request)
+                  (block-world-light-dependency-stamp world))))
+    (if current-p
+        (let ((changed
+                (publish-light-region
+                 (block-light-production-payload-region payload))))
+          (incf (lighting-state-cells-visited state)
+                (block-light-production-payload-cells-visited payload))
+          (incf (lighting-state-chunks-touched state)
+                (hash-table-count
+                 (light-region-entries
+                  (block-light-production-payload-region payload))))
+          (incf (lighting-state-publications state))
+          (setf (lighting-state-last-latency-seconds state)
+                (block-light-production-payload-elapsed-seconds payload))
+          changed)
+        (mark-luvcraft-lighting-for-retry state))))
+
+(defmethod publish-production-result
     ((session luvcraft-session) (request block-chunk-load-request) payload)
   (let* ((key (block-chunk-load-payload-key payload))
          (world (luvcraft-session-world session)))
@@ -643,7 +741,11 @@ here and install its publication cohort later at the frame boundary."))
                (when (eql ticket (production-request-ticket request))
                  (remhash key (luvcraft-session-outstanding-production session))
                  (if (production-result-condition result)
-                     (push result (luvcraft-session-production-errors session))
+                     (progn
+                       (when (typep request 'block-light-production-request)
+                         (mark-luvcraft-lighting-for-retry
+                          (luvcraft-session-lighting-state session)))
+                       (push result (luvcraft-session-production-errors session)))
                      (publish-production-result
                       session request (production-result-value result))))))))
 
@@ -669,12 +771,10 @@ here and install its publication cohort later at the frame boundary."))
     (drain-luvcraft-production session))
   (with-cpu-trace-zone (:streaming/schedule-loads)
     (schedule-luvcraft-chunk-loads session))
-  ;; Lighting reconciles before mesh snapshots are captured, so every
-  ;; snapshot and dependency stamp observes stable published light.
-  (let ((lighting (luvcraft-session-lighting-state session)))
-    (when lighting
-      (with-cpu-trace-zone (:streaming/reconcile-lighting)
-        (reconcile-lighting lighting))))
+  ;; Batch arrivals, then solve a frozen region off-thread.  Publication still
+  ;; precedes mesh capture, so dependency stamps observe complete light fields.
+  (with-cpu-trace-zone (:streaming/schedule-lighting)
+    (schedule-luvcraft-lighting session))
   ;; A result captured before this frame's lighting publication may already
   ;; be stale.  Reject it before deciding whether a complete mesh cohort can
   ;; cross the frame boundary.
@@ -682,8 +782,9 @@ here and install its publication cohort later at the frame boundary."))
     (discard-stale-luvcraft-staged-products session))
   (with-cpu-trace-zone (:streaming/publish-meshes)
     (publish-ready-luvcraft-meshes session))
-  (with-cpu-trace-zone (:streaming/schedule-meshes)
-    (schedule-luvcraft-meshes session))
+  (when (luvcraft-lighting-settled-p session)
+    (with-cpu-trace-zone (:streaming/schedule-meshes)
+      (schedule-luvcraft-meshes session)))
   (setf (luvcraft-session-meshed-world-revision session)
         (block-world-revision (luvcraft-session-world session)))
   (luvcraft-session-products-in-order session))

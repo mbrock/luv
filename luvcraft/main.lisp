@@ -120,7 +120,11 @@
                (loop until (eq :closed
                                (luv:canvas-state
                                 (luvcraft-session-canvas session)))
-                     do (sleep 0.05)))
+                     do (sleep 0.05))
+               (let ((failure
+                       (luv::sdl-canvas-startup-error
+                        (luvcraft-session-canvas session))))
+                 (when failure (error failure))))
           (unwind-protect
                (when session
                  (request-luvcraft-session-checkpoint session)

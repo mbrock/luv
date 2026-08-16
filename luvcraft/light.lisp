@@ -139,7 +139,11 @@ resident."))
 
 (defstruct (light-region (:constructor %make-light-region))
   (world nil)
+  (space nil :type (or null voxel-space))
   (entries (make-hash-table :test #'equalp) :type hash-table)
+  ;; Frozen regions carry the source's answer for every absent boundary so a
+  ;; producer never consults the live world while solving a captured batch.
+  (absent-semantics nil :type (or null hash-table))
   ;; A from-scratch capture enumerates its entries eagerly.  An incremental
   ;; candidate instead materializes entries on first touch, initialized from
   ;; the chunk's current published field, so propagation may wander into any
@@ -197,7 +201,8 @@ resident."))
         (light-removal-queue-items queue))
   queue)
 
-(defun add-light-region-entry (region chunk &key from-field-p)
+(defun add-light-region-entry
+    (region chunk &key from-field-p copy-content-p)
   "Materialize CHUNK's dense capture in REGION and return the new entry."
   (with-block-content-storage (domain palette indices) chunk
     (multiple-value-bind (opacity emission)
@@ -229,22 +234,46 @@ resident."))
                    (luvcraft.world.fields:materialized-field-definition
                     field :block-light)
                    (luvcraft.world.fields:field-definition-for :block-light))
-               :indices (coerce indices
+               :indices (coerce (if copy-content-p (copy-seq indices) indices)
                                 '(simple-array (unsigned-byte 16) (*)))
                :opacity-lut opacity :emission-lut emission
                :sky sky :block block-levels))))))
 
-(defun capture-light-region (world)
-  "Capture every resident chunk of WORLD for a from-scratch relight."
-  (let ((region (%make-light-region :world world)))
+(defun light-region-boundary-key (key direction)
+  (list key (voxel-direction-dx direction) (voxel-direction-dy direction)
+        (voxel-direction-dz direction)))
+
+(defun capture-light-region (world &key immutable-p)
+  "Capture every resident chunk of WORLD for a from-scratch relight.
+
+With IMMUTABLE-P, copy content indices and capture absent-boundary semantics;
+the returned region may then be solved without reading the live world."
+  (let ((region (%make-light-region
+                 :world world :space (block-world-space world)
+                 :absent-semantics
+                 (and immutable-p (make-hash-table :test #'equalp)))))
     (dolist (chunk (resident-world-chunks world))
-      (add-light-region-entry region chunk))
+      (add-light-region-entry region chunk :copy-content-p immutable-p))
+    (when immutable-p
+      (let ((source (block-world-source world)))
+        (maphash
+         (lambda (key entry)
+           (declare (ignore entry))
+           (dolist (direction *voxel-face-directions*)
+             (let ((neighbor (chunk-coordinate-neighbor key direction)))
+               (declare (dynamic-extent neighbor))
+               (unless (gethash neighbor (light-region-entries region))
+                 (setf (gethash (light-region-boundary-key key direction)
+                                (light-region-absent-semantics region))
+                       (absent-chunk-light-semantics
+                        source world key direction))))))
+         (light-region-entries region))))
     region))
 
 (defun make-light-candidate (world)
   "A lazily populated region whose entries start from current fields."
   (%make-light-region
-   :world world
+   :world world :space (block-world-space world)
    :ensure-entry
    (lambda (region key)
      (multiple-value-bind (chunk present-p)
@@ -258,7 +287,7 @@ resident."))
   (multiple-value-bind
         (chunk-x chunk-y chunk-z local-x local-y local-z)
       (voxel-space-decompose-components
-       (block-world-space (light-region-world region)) x y z)
+       (light-region-space region) x y z)
     (let* ((key (make-chunk-coordinate chunk-x chunk-y chunk-z))
            (entry (or (gethash key (light-region-entries region))
                       (let ((ensure (light-region-ensure-entry region)))
@@ -343,19 +372,32 @@ Returns the number of cells visited, for the runtime's work counters."
                                      queue)))))))))))
     visited))
 
-(defun chunk-neighbor-resident-p (world coordinate direction)
+(defun light-region-neighbor-resident-p (region coordinate direction)
   (let ((neighbor (chunk-coordinate-neighbor coordinate direction)))
     (declare (dynamic-extent neighbor))
-    (nth-value 1 (world-chunk-at-coordinate world neighbor))))
+    (if (light-region-absent-semantics region)
+        (nth-value 1 (gethash neighbor (light-region-entries region)))
+        (nth-value 1
+                   (world-chunk-at-coordinate
+                    (light-region-world region) neighbor)))))
+
+(defun light-region-absent-boundary-semantics (region key direction)
+  (let ((captured (light-region-absent-semantics region)))
+    (if captured
+        (gethash (light-region-boundary-key key direction) captured)
+        (let ((world (light-region-world region)))
+          (absent-chunk-light-semantics
+           (block-world-source world) world key direction)))))
 
 (defun light-region-provisional-p (region key)
   "Whether chunk KEY currently borders any :UNKNOWN residency boundary."
-  (let* ((world (light-region-world region))
-         (source (block-world-source world)))
+  (let ((world (light-region-world region)))
+    (declare (ignore world))
     (loop for direction in *voxel-face-directions*
-          thereis (and (not (chunk-neighbor-resident-p world key direction))
-                       (eq (absent-chunk-light-semantics
-                            source world key direction)
+          thereis (and (not (light-region-neighbor-resident-p
+                             region key direction))
+                       (eq (light-region-absent-boundary-semantics
+                            region key direction)
                            :unknown)))))
 
 (defun map-entry-face-sites (entry direction function)
@@ -377,19 +419,17 @@ LOCAL has dynamic extent and must be copied before FUNCTION retains it."
 
 (defun seed-entry-open-boundaries (region key entry enqueue)
   "Seed ENTRY's faces whose absent neighbors are known open sky."
-  (let* ((world (light-region-world region))
-         (source (block-world-source world)))
-    (dolist (direction *voxel-face-directions*)
-      (when (and (not (chunk-neighbor-resident-p world key direction))
-                 (eq (absent-chunk-light-semantics
-                      source world key direction)
-                     :open-sky))
+  (dolist (direction *voxel-face-directions*)
+    (when (and (not (light-region-neighbor-resident-p region key direction))
+               (eq (light-region-absent-boundary-semantics
+                    region key direction)
+                   :open-sky))
         (map-entry-face-sites
          entry direction
          (lambda (offset local)
            (when (seed-open-sky-at-offset
                   entry offset (eq direction +voxel-positive-y+))
-             (funcall enqueue (retain-light-region-site entry local)))))))))
+             (funcall enqueue (retain-light-region-site entry local))))))))
 
 (defun seed-region-sky-boundaries (region)
   "Seed every entry's open-sky boundary light; return the seed queue."
@@ -420,11 +460,14 @@ LOCAL has dynamic extent and must be copied before FUNCTION retains it."
 
 (defun solve-light-region (region)
   "Seed and propagate both light fields to fixation."
-  (propagate-light-region
-   region #'light-region-entry-sky (seed-region-sky-boundaries region) t)
-  (propagate-light-region
-   region #'light-region-entry-block (seed-region-emitters region) nil)
-  region)
+  (let ((visited
+          (+ (propagate-light-region
+              region #'light-region-entry-sky
+              (seed-region-sky-boundaries region) t)
+             (propagate-light-region
+              region #'light-region-entry-block
+              (seed-region-emitters region) nil))))
+    (values region visited)))
 
 ;;; Publication compares complete candidate arrays against the chunk's
 ;;; current field and advances light revisions only: content revisions and
@@ -583,8 +626,6 @@ removal steps performed."
       (light-region-locate region coordinate)
     (when entry
       (let* ((domain (light-region-entry-domain entry))
-             (world (light-region-world region))
-             (source (block-world-source world))
              (key (light-region-entry-key entry))
              (local (chunk-domain-local-coordinate domain offset)))
         (declare (dynamic-extent local))
@@ -593,10 +634,10 @@ removal steps performed."
               (step-chunk-domain-site domain local direction)
             (declare (ignore neighbor-offset neighbor))
             (when (and crossing
-                       (not (chunk-neighbor-resident-p
-                             world key direction))
-                       (eq (absent-chunk-light-semantics
-                            source world key direction)
+                       (not (light-region-neighbor-resident-p
+                             region key direction))
+                       (eq (light-region-absent-boundary-semantics
+                            region key direction)
                            :open-sky)
                        (seed-open-sky-at-offset
                         entry offset (eq direction +voxel-positive-y+)))
