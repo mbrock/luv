@@ -1655,7 +1655,11 @@
          (curve-words
            (slug:slug-serialized-outline-curve-half-words serialized))
          (band-words
-           (slug:slug-serialized-outline-band-uint16-words serialized)))
+           (slug:slug-serialized-outline-band-uint16-words serialized))
+         (curve-upload
+           (slug:slug-serialized-outline-curve-upload-data serialized))
+         (band-upload
+           (slug:slug-serialized-outline-band-upload-data serialized)))
     (ok (= 4096 (slug:slug-serialized-outline-curve-width serialized)))
     (ok (= 4096 (slug:slug-serialized-outline-band-width serialized)))
     (ok (= 5 (slug:slug-serialized-outline-curve-texel-count serialized)))
@@ -1663,6 +1667,18 @@
     ;; The first curve's p3 is the following curve texel's p1.
     (ok (equalp (subseq curve-words 2 4) (subseq curve-words 4 6)))
     (ok (= 12 (slug:slug-serialized-outline-band-texel-count serialized)))
+    (ok (equal '(4096 1)
+               (slug:slug-serialized-outline-curve-texture-size serialized)))
+    (ok (equal '(4096 1)
+               (slug:slug-serialized-outline-band-texture-size serialized)))
+    (ok (nth-value 0
+          (subtypep (array-element-type curve-upload) '(unsigned-byte 64))))
+    (ok (nth-value 0
+          (subtypep (array-element-type band-upload) '(unsigned-byte 32))))
+    (ok (= (row-major-aref curve-upload 0)
+           (loop for index below 4
+                 sum (ash (aref curve-words index) (* index 16)))))
+    (ok (= #x00040002 (row-major-aref band-upload 0)))
     (ok (= 2 (aref band-words 0)))
     (ok (= 4 (aref band-words 1)))
     (ok (equalp #(1 0 3 0) (subseq band-words 8 12)))
@@ -1686,6 +1702,16 @@
       (ok (= 16 (length (slug:slug-packed-outline-curves packed))))
       (ok (member :clockwise orientations))
       (ok (member :counterclockwise orientations))
+      (let* ((normalized (slug:normalize-slug-glyph-outline glyph))
+             (normalized-packed (slug:pack-slug-outline normalized)))
+        (ok (= (slug:slug-packed-outline-min-x normalized-packed)
+               (/ (slug:slug-packed-outline-min-x packed) 2048)))
+        (ok (= (slug:slug-packed-outline-max-x normalized-packed)
+               (/ (slug:slug-packed-outline-max-x packed) 2048)))
+        (ok (= (slug:slug-packed-outline-min-y normalized-packed)
+               (/ (slug:slug-packed-outline-min-y packed) 2048)))
+        (ok (= (slug:slug-packed-outline-max-y normalized-packed)
+               (/ (slug:slug-packed-outline-max-y packed) 2048))))
       (ok (every (lambda (contour)
                    (every (lambda (curve)
                             (not (equalp
@@ -1823,6 +1849,21 @@
            (aref (spv:assemble-shader-specification vertex) 0)))
     (ok (= #x07230203
            (aref (spv:assemble-shader-specification fragment) 0)))))
+
+(deftest slug-bands-are-two-data-driven-structured-traversals
+  (let* ((specification (slug:slug-banded-fragment-specification))
+         (instructions
+           (spv:lower-spir-v (spv:shader-module specification)))
+         (names (mapcar #'spv:instruction-name instructions)))
+    (ok (= 2 (count "LOOP-MERGE" names
+                    :key #'symbol-name :test #'string=)))
+    (ok (>= (count "IMAGE-FETCH" names
+                   :key #'symbol-name :test #'string=)
+            6))
+    (ok (find "U-MOD" names :key #'symbol-name :test #'string=))
+    (ok (find "U-DIV" names :key #'symbol-name :test #'string=))
+    (ok (= #x07230203
+           (aref (spv:assemble-shader-specification specification) 0)))))
 
 (deftest extended-math-signatures-are-explicit-contracts
   (flet ((failure-reason (body)

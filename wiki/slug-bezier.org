@@ -226,7 +226,7 @@ shader path, both backend compilers accept it, root classification has an
 executable table oracle, and a Metal pixel shader produces the expected
 antialiased outline from Bézier data rather than a sampled image.
 
-* The proof deliberately stops before a font renderer
+* The fixed proof delineates the first milestone
 :PROPERTIES:
 :ID: LB46YZ
 :END:
@@ -239,8 +239,10 @@ dilation.  SPIR-V validation proves the portable module, while the executed
 offscreen probe is presently Metal-specific because that backend already has
 a no-resource mathematical-pipeline seam.
 
-This boundary matters: the image proves the hard per-pixel mathematics and the
-DSL capability, not Slug's data-scale performance or a usable text API.
+This boundary matters historically: that image proves the hard per-pixel
+mathematics and the DSL capability, not Slug's data-scale performance or a
+usable text API.  The later data-driven and font proofs below cross this
+boundary without removing the small fixed oracle.
 
 * Full Slug is a structured fold over indexed outline data
 :PROPERTIES:
@@ -290,7 +292,7 @@ tolerance before its Slug encoder.  HarfBuzz 14's experimental
 =libharfbuzz-gpu= is consequently a valuable format and pixel oracle, but the
 first luv path can remain Lisp-native through =zpb-ttf=.
 
-* NEXT Teach the shared language Slug's structured band fold
+* DONE Teach the shared language Slug's structured band fold
 :PROPERTIES:
 :ID: HMNMBU
 :END:
@@ -332,15 +334,32 @@ Metal 4 compiler accept those generated products.  =mod= itself belongs to the
 shared arithmetic vocabulary and executes through Common Lisp's ordinary
 =mod=; the texture resource and exact load remain properly shader-specific.
 
-What remains here is the Slug-shaped traversal itself: conditional winding
-accumulation from loaded curve texels and a sorted-coordinate early-exit form.
+[[file:../hal/shader/slug.lisp][=slug-banded-fragment-specification=]] now supplies the Slug-shaped traversal.
+Two runtime unsigned curve counts control two =counted-fold= values.  Each
+iteration reads its RG16U curve location and two adjacent RGBA16F curve texels,
+creates ordinary lexical =let*= bindings for the reusable axis-contribution
+function, and carries coverage plus maximum weight.  There is no host unrolling
+and no form-generating Slug macro.
+
+This exercised one subtle language rule that the scalar loop probes did not:
+function-local bindings called from a fold belong to that iteration.  Direct
+MSL lowering now materializes them inside the =for= body, while SPIR-V only
+reuses a cached resource load in the basic block that owns it.  The latter rule
+prevents a value defined inside one loop from being reused in another loop
+where it does not dominate.  Regression tests inspect both generated products;
+=spirv-val= and Apple's Metal 4 compiler accept them.
+
+The first correctness shader intentionally uses one complete band per axis.
+Sorted-coordinate early exit and multiple spatial bands are culling
+optimizations over this same value-producing traversal, not prerequisites for
+rendering an arbitrary outline.
 
 Done when: a runtime curve count rather than source unrolling controls the
 number of evaluated quadratics; CPU and GPU results agree at edge,
 shared-endpoint, empty-band, and early-exit cases; and source/lowering tools
 retain the loop, carried values, and emitted block provenance.
 
-* TODO Pack arbitrary quadratic contours into Slug bands
+* DONE Pack arbitrary quadratic contours into Slug bands
 :PROPERTIES:
 :ID: TTE5JG
 :END:
@@ -374,16 +393,25 @@ then all vertical headers, followed by their descending-maximum
 coordinate to prove that packing observes the half-quantized value rather than
 the original Lisp rational.
 
-This first serializer describes one glyph beginning at texture origin zero.
-Atlas allocation and relocation, resource upload, and rendering from those
-resources remain open; those steps must preserve the fixed-width addressing
-assumed by the released pixel shader.
+The portable GPU vocabulary now names the exact storage formats too:
+=:rg16-uint= is four bytes per texel and =:rgba16-float= is eight.  The Metal
+backend maps those names to =MTLPixelFormatRG16Uint= 63 and
+=MTLPixelFormatRGBA16Float= 115; Vulkan maps them to
+=VK_FORMAT_R16G16_UINT= 81 and =VK_FORMAT_R16G16B16A16_SFLOAT= 97.  Both upload
+paths accept the serializer's two-dimensional specialized arrays directly and
+compute row length, byte size, alignment, and foreign element width from the
+format instead of assuming RGBA8.
+
+The first serializer still describes one glyph beginning at texture origin
+zero.  Atlas allocation and relocation remain open, but the complete one-glyph
+data is now uploaded and rendered from those resources while preserving the
+fixed-width addressing assumed by the released pixel shader.
 
 Done when: several differently sized and holed quadratic outlines render from
 uploaded data without changing shader source, and a CPU winding oracle agrees
 with GPU pixels around extrema, shared endpoints, and contour holes.
 
-* TODO Render a zpb-ttf glyph through Slug
+* NEXT Render a zpb-ttf glyph through Slug
 :PROPERTIES:
 :ID: DTBI99
 :END:
@@ -408,9 +436,24 @@ produces two opposite-winding contours, 16 quadratics, a 1612-unit advance, and
 packs through the same arbitrary-outline path.  No =cl-vectors=, =cl-aa=, or
 McCLIM raster object enters this system.
 
-This completes outline acquisition, not the mark: the packed glyph still has
-to be serialized after half quantization, uploaded, and rendered by the
-data-driven shader on Metal and Vulkan.
+The Metal mark now crosses the complete boundary.  =normalize-slug-glyph-outline=
+converts the font-unit points to em units while preserving the TrueType origin.
+[[file:../hal/metal/probes/slug-glyph.lisp][The cold glyph probe]] loads DejaVu Sans “O”, serializes its 16 quadratics and
+two contours, uploads its exact band and curve arrays, binds the two texture
+views, draws the em-square quad through the public mathematical shader
+specifications, reads back the GPU target, and writes this image:
+
+[[file:images/slug-glyph-proof.png]]
+
+Changing the outline changes only the uploaded arrays.  The fragment shader
+contains no “O” points, contour count, or source-unrolled curve calls.  The
+generated SPIR-V has two structured loops and at least six exact image fetches;
+the generated MSL has two unsigned =for= loops with the reusable Slug
+function's lexical locals scoped inside them.
+
+The remaining part of this mark is production evidence rather than basic font
+rendering: exercise the portable draw on the Vulkan backend, compare boundary
+pixels with a small CPU winding oracle, and test dynamic dilation separately.
 
 Done when: changing the glyph id changes only uploaded outline/vertex data, not
 shader source; the GPU image is visually inspected and compared with a small

@@ -325,3 +325,200 @@ seam is available there without inventing an empty bind-group abstraction."
       (when fragment-module (destroy fragment-module))
       (when vertex-module (destroy vertex-module))
       (when device (destroy device)))))
+
+(defun render-metal-slug-outline (provider outline)
+  "Render one em-normalized quadratic OUTLINE through Slug's texture path.
+
+The proof window is the unit em square.  OUTLINE may contain any number of
+closed contours and curves that fit that window; serialization and both axis
+traversals are data-driven.  Return pixels, width, height, and format."
+  (let ((device nil)
+        (vertex-module nil)
+        (fragment-module nil)
+        (layout nil)
+        (pipeline nil)
+        (band-texture nil)
+        (band-view nil)
+        (curve-texture nil)
+        (curve-view nil)
+        (bind-group nil)
+        (target nil)
+        (vertices nil)
+        (readback nil)
+        (encoder nil)
+        (command-buffer nil)
+        (width 256)
+        (height 256)
+        (format :rgba8-unorm)
+        (serialized
+          (luv.slug:serialize-slug-outline
+           outline :horizontal-band-count 1 :vertical-band-count 1)))
+    (unwind-protect
+         (progn
+           (setf device (request-gpu-device provider)
+                 vertex-module
+                 (create
+                  device
+                  (make-shader-module-descriptor
+                   :label "Slug outline vertex"
+                   :language :mathematical
+                   :code (luv.slug:slug-bezier-vertex-specification)))
+                 fragment-module
+                 (create
+                  device
+                  (make-shader-module-descriptor
+                   :label "Slug band traversal fragment"
+                   :language :mathematical
+                   :code (luv.slug:slug-banded-fragment-specification)))
+                 layout
+                 (create
+                  device
+                  (make-bind-group-layout-descriptor
+                   :label "Slug outline texture layout"
+                   :entries '((:binding 0 :type :texture)
+                              (:binding 1 :type :texture))))
+                 pipeline
+                 (create
+                  device
+                  (make-render-pipeline-descriptor
+                   :label "Slug serialized outline pipeline"
+                   :layout layout
+                   :vertex
+                   `(:module ,vertex-module
+                     :buffers
+                     ((:array-stride 24
+                       :attributes
+                       ((:shader-location 0 :offset 0 :format :float32x3)
+                        (:shader-location 1 :offset 12 :format :float32x3)))))
+                   :fragment
+                   `(:module ,fragment-module
+                     :targets ((:format ,format)))))
+                 band-texture
+                 (create
+                  device
+                  (make-texture-descriptor
+                   :label "Slug RG16U bands"
+                   :size
+                   (luv.slug:slug-serialized-outline-band-texture-size
+                    serialized)
+                   :dimensions :2d :format :rg16-uint
+                   :usage '(:texture-binding :copy-dst)))
+                 curve-texture
+                 (create
+                  device
+                  (make-texture-descriptor
+                   :label "Slug RGBA16F curves"
+                   :size
+                   (luv.slug:slug-serialized-outline-curve-texture-size
+                    serialized)
+                   :dimensions :2d :format :rgba16-float
+                   :usage '(:texture-binding :copy-dst))))
+           (write-texture
+            (device-queue device) (make-texture-copy :texture band-texture)
+            (luv.slug:slug-serialized-outline-band-upload-data serialized)
+            (make-texture-data-layout
+             :bytes-per-row
+             (* 4 (luv.slug:slug-serialized-outline-band-width serialized))
+             :rows-per-image
+             (second
+              (luv.slug:slug-serialized-outline-band-texture-size serialized)))
+            (luv.slug:slug-serialized-outline-band-texture-size serialized))
+           (write-texture
+            (device-queue device) (make-texture-copy :texture curve-texture)
+            (luv.slug:slug-serialized-outline-curve-upload-data serialized)
+            (make-texture-data-layout
+             :bytes-per-row
+             (* 8 (luv.slug:slug-serialized-outline-curve-width serialized))
+             :rows-per-image
+             (second
+              (luv.slug:slug-serialized-outline-curve-texture-size serialized)))
+            (luv.slug:slug-serialized-outline-curve-texture-size serialized))
+           (setf band-view
+                 (create
+                  device (make-texture-view-descriptor :texture band-texture))
+                 curve-view
+                 (create
+                  device (make-texture-view-descriptor :texture curve-texture))
+                 bind-group
+                 (create
+                  device
+                  (make-bind-group-descriptor
+                   :label "Slug outline textures"
+                   :layout layout
+                   :entries `((:binding 0 :resource ,band-view)
+                              (:binding 1 :resource ,curve-view))))
+                 target
+                 (create
+                  device
+                  (make-texture-descriptor
+                   :label "Slug outline target"
+                   :size (list width height) :dimensions :2d :format format
+                   :usage '(:render-attachment :copy-src)))
+                 vertices
+                 (create
+                  device
+                  (make-buffer-descriptor
+                   :label "Slug em-square quad"
+                   :size (* 36 4) :usage '(:vertex :copy-dst)))
+                 readback
+                 (create
+                  device
+                  (make-buffer-descriptor
+                   :label "Slug outline readback"
+                   :size (* width height 4) :usage '(:copy-dst))))
+           (write-buffer
+            vertices
+            (make-array
+             36 :element-type 'single-float
+             :initial-contents
+             '(-0.8 -0.8 0.0  0.0 0.0 0.0
+                0.8 -0.8 0.0  1.0 0.0 0.0
+                0.8  0.8 0.0  1.0 1.0 0.0
+               -0.8 -0.8 0.0  0.0 0.0 0.0
+                0.8  0.8 0.0  1.0 1.0 0.0
+               -0.8  0.8 0.0  0.0 1.0 0.0)))
+           (setf encoder
+                 (create device
+                         (make-command-encoder-descriptor
+                          :label "Slug outline commands")))
+           (let ((pass
+                   (begin-render-pass
+                    encoder
+                    (make-render-pass-descriptor
+                     :color-attachments
+                     `((:view ,target :load-op :clear :store-op :store
+                        :clear-value #(0.0 0.0 0.0 1.0)))))))
+             (set-pipeline pass pipeline)
+             (set-bind-group pass 0 bind-group)
+             (set-vertex-buffer pass 0 vertices)
+             (draw pass 6)
+             (end-pass pass))
+           (encode
+            encoder
+            (make-gpu-copy-texture-to-buffer-command
+             :source target :destination readback))
+           (setf command-buffer (finish encoder))
+           (submit (device-queue device) command-buffer)
+           (values (read-buffer readback) width height format))
+      (when command-buffer (destroy command-buffer))
+      (when encoder (destroy encoder))
+      (when readback (destroy readback))
+      (when vertices (destroy vertices))
+      (when target (destroy target))
+      (when bind-group (destroy bind-group))
+      (when curve-view (destroy curve-view))
+      (when band-view (destroy band-view))
+      (when curve-texture (destroy curve-texture))
+      (when band-texture (destroy band-texture))
+      (when pipeline (destroy pipeline))
+      (when layout (destroy layout))
+      (when fragment-module (destroy fragment-module))
+      (when vertex-module (destroy vertex-module))
+      (when device (destroy device)))))
+
+(defun render-metal-slug-glyph (provider character font-loader)
+  "Render CHARACTER from FONT-LOADER through Slug's GPU outline path."
+  (render-metal-slug-outline
+   provider
+   (luv.slug:normalize-slug-glyph-outline
+    (luv.slug:load-slug-glyph character font-loader))))

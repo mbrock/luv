@@ -49,6 +49,8 @@
 (defconstant +pixel-format-bgra8-unorm-srgb+ 81)
 (defconstant +pixel-format-rgba8-unorm+ 70)
 (defconstant +pixel-format-rgba8-unorm-srgb+ 71)
+(defconstant +pixel-format-rg16-uint+ 63)
+(defconstant +pixel-format-rgba16-float+ 115)
 (defconstant +pixel-format-depth32-float+ 252)
 (defconstant +texture-type-2d+ 2)
 (defconstant +texture-usage-shader-read+ (ash 1 0))

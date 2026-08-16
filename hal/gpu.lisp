@@ -264,6 +264,21 @@ has completed."))
 (defstruct (texture-descriptor (:include gpu-descriptor))
   size usage dimensions format)
 
+(defun texture-format-bytes-per-texel (format)
+  "Return the exact storage size of one texel in portable FORMAT."
+  (ecase format
+    ((:rgba8-unorm :rgba8-unorm-srgb
+      :bgra8-unorm :bgra8-unorm-srgb
+      :depth32-float :rg16-uint)
+     4)
+    (:rgba16-float 8)))
+
+(defun texture-format-upload-element-type (format)
+  "The packed array element type accepted by WRITE-TEXTURE for FORMAT."
+  (ecase (texture-format-bytes-per-texel format)
+    (4 '(unsigned-byte 32))
+    (8 '(unsigned-byte 64))))
+
 (defun texture-format-sample-transfer (format)
   "The colour transfer a sampled texture FORMAT applies before shader math.
 

@@ -5,6 +5,12 @@
 
 (in-package #:luv/vulkan/tests)
 
+(deftest slug-formats-retain-the-exact-vulkan-abi-values
+  (ok (= 81 (cffi:foreign-enum-value 'lvk::format :r16g16-uint)))
+  (ok (= 97
+         (cffi:foreign-enum-value
+          'lvk::format :r16g16b16a16-sfloat))))
+
 (deftest definitions-retain-abi-metadata-without-call-classes
   (let ((description (lvk:vulkan-function-description 'vk:create-instance)))
     (ok (equal (getf description :foreign-name) "vkCreateInstance"))

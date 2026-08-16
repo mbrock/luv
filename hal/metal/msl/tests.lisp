@@ -193,6 +193,22 @@
     (ok (search "sqrt(" source))
     (ok (search "result.color_output" source))))
 
+(deftest slug-band-function-lexicals-stay-inside-their-metal-loops
+  (let* ((source
+           (msl:msl-document-source
+            (msl:compile-msl
+             (slug:slug-banded-fragment-specification))))
+         (first-loop (search "for (uint fold_index_1" source))
+         (first-local
+           (search "_local_1_axis_a" source))
+         (first-update
+           (search "fold_state_1 = float2((fold_state_1.x" source)))
+    (ok (search "texture2d<uint> band_data" source))
+    (ok (search "texture2d<float> curve_data" source))
+    (ok first-loop)
+    (ok (search "for (uint fold_index_2" source))
+    (ok (< first-loop first-local first-update))))
+
 (deftest counted-fold-lowers-to-a-direct-metal-loop
   (let* ((specification
            (spv:parse-shader-specification

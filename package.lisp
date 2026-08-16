@@ -268,6 +268,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:make-device-descriptor
            #:make-buffer-descriptor
            #:make-texture-descriptor
+           #:texture-format-bytes-per-texel
            #:texture-format-sample-transfer
            #:make-texture-copy
            #:texture-copy-texture
@@ -780,4 +781,6 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:start-compute-gradient-demo
            #:stop-compute-gradient-demo
            #:render-metal-slug-bezier-proof
+           #:render-metal-slug-outline
+           #:render-metal-slug-glyph
            #:close-canvas))

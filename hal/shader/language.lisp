@@ -2768,6 +2768,8 @@ structured product and source provenance.  #JDLQPN"))
                        :accessor context-uniform-struct-ids)
    (loaded-values :initform (make-hash-table :test #'eq)
                   :accessor context-loaded-values)
+   (loaded-blocks :initform (make-hash-table :test #'eq)
+                  :accessor context-loaded-blocks)
    (loaded-instructions :initform (make-hash-table :test #'eq)
                         :accessor context-loaded-instructions)
    (constant-instructions :initform (make-hash-table :test #'equal)
@@ -3200,7 +3202,9 @@ Modules whose expressions use no extended mathematics never acquire one."
       (shader-variable-declaration
        (multiple-value-bind (value found-p)
            (gethash target (context-loaded-values context))
-         (if found-p
+         (if (and found-p
+                  (eq (gethash target (context-loaded-blocks context))
+                      (context-current-block context)))
              (progn
                (associate-shader-instruction
                 context expression
@@ -3214,6 +3218,8 @@ Modules whose expressions use no extended mathematics never acquire one."
                                       (context-variable-ids context)))))
                     (instruction (car (last (context-instructions context)))))
                (setf (gethash target (context-loaded-values context)) value
+                     (gethash target (context-loaded-blocks context))
+                     (context-current-block context)
                      (gethash target (context-loaded-instructions context))
                      instruction)
                value)))))))

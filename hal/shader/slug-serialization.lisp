@@ -13,8 +13,10 @@
   (band-width +slug-texture-width+ :type (eql 4096))
   curve-half-words
   curve-texel-count
+  curve-upload-data
   band-uint16-words
   band-texel-count
+  band-upload-data
   horizontal-band-count
   vertical-band-count)
 
@@ -81,6 +83,35 @@
         (slug-texel-location (aref curve-offsets curve-index) curve-width)
       (push-slug-band-word-pair x y band-words))))
 
+(defun pack-slug-uint16-words (words start count)
+  (loop for index below count
+        for word-index from start
+        sum (ash (if (< word-index (length words))
+                     (aref words word-index)
+                     0)
+                 (* index 16))))
+
+(defun make-slug-upload-data (words words-per-texel width element-type)
+  (let* ((texel-count (ceiling (length words) words-per-texel))
+         (height (max 1 (ceiling texel-count width)))
+         (data (make-array (list height width)
+                           :element-type element-type
+                           :initial-element 0)))
+    (dotimes (texel texel-count data)
+      (setf (row-major-aref data texel)
+            (pack-slug-uint16-words
+             words (* texel words-per-texel) words-per-texel)))))
+
+(defun slug-serialized-outline-curve-texture-size (serialized)
+  (list (slug-serialized-outline-curve-width serialized)
+        (array-dimension
+         (slug-serialized-outline-curve-upload-data serialized) 0)))
+
+(defun slug-serialized-outline-band-texture-size (serialized)
+  (list (slug-serialized-outline-band-width serialized)
+        (array-dimension
+         (slug-serialized-outline-band-upload-data serialized) 0)))
+
 (defun serialize-slug-outline
     (outline &key horizontal-band-count vertical-band-count)
   "Quantize OUTLINE to RGBA16F, repack bands, and emit Slug's RG16U index data."
@@ -136,7 +167,13 @@
        :packed-outline packed
        :curve-width curve-width :band-width band-width
        :curve-half-words curve-words :curve-texel-count curve-texel
+       :curve-upload-data
+       (make-slug-upload-data
+        curve-words 4 curve-width '(unsigned-byte 64))
        :band-uint16-words band-words
        :band-texel-count (/ (length band-words) 2)
+       :band-upload-data
+       (make-slug-upload-data
+        band-words 2 band-width '(unsigned-byte 32))
        :horizontal-band-count (length horizontal)
        :vertical-band-count (length vertical)))))

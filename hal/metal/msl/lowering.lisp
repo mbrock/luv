@@ -397,10 +397,57 @@
 
 (defmethod lower-msl-expression
     ((context msl-lowering-context) (expression spv:shader-function-call))
-  (let ((result
-          (lower-msl-expression
-           context (spv:shader-function-call-result expression))))
-    (note-msl-occurrence context expression (msl-occurrence-text result))))
+  (let ((outer-statements (drain-msl-pending-statements context))
+        (local-statements nil)
+        (saved-references nil))
+    (unwind-protect
+         (progn
+           (dolist (binding (spv:shader-function-call-bindings expression))
+             (unless (or (typep binding
+                                'spv:shader-function-parameter-binding)
+                         (nth-value 1
+                           (gethash binding
+                                    (msl-context-references context))))
+               (multiple-value-bind (old-reference old-reference-p)
+                   (gethash binding (msl-context-references context))
+                 (push (list binding old-reference old-reference-p)
+                       saved-references))
+               (let* ((binding-expression
+                        (spv:shader-binding-expression binding))
+                      (name
+                        (msl-identifier (spv:shader-object-name binding)))
+                      (value
+                        (lower-msl-expression context binding-expression)))
+                 (setf local-statements
+                       (nconc local-statements
+                              (drain-msl-pending-statements context))
+                       (gethash binding (msl-context-references context)) name)
+                 (setf local-statements
+                       (nconc
+                        local-statements
+                        (list
+                         (make-instance
+                          'msl-variable-statement
+                          :type (msl-type-name
+                                 (spv:shader-expression-type
+                                  binding-expression))
+                          :name name :value value :origin binding)))))))
+           (let ((result
+                   (lower-msl-expression
+                    context (spv:shader-function-call-result expression))))
+             (setf local-statements
+                   (nconc local-statements
+                          (drain-msl-pending-statements context))
+                   (msl-context-pending-statements context)
+                   (nconc outer-statements local-statements))
+             (note-msl-occurrence
+              context expression (msl-occurrence-text result))))
+      (dolist (saved saved-references)
+        (destructuring-bind (binding old-reference old-reference-p) saved
+          (if old-reference-p
+              (setf (gethash binding (msl-context-references context))
+                    old-reference)
+              (remhash binding (msl-context-references context))))))))
 
 (defmethod lower-msl-expression
     ((context msl-lowering-context) (expression spv:shader-conditional))
@@ -443,25 +490,36 @@
               index-name
               (gethash state-binding (msl-context-references context))
               state-name)
-        (let ((local-statements nil))
+        (let ((preheader-statements
+                (drain-msl-pending-statements context))
+              (local-statements nil))
           (dolist (binding
                    (lang:arithmetic-counted-fold-bindings expression))
             (let* ((binding-expression
                      (spv:shader-binding-expression binding))
                    (name (msl-identifier (spv:shader-object-name binding)))
                    (value (lower-msl-expression context binding-expression)))
+              (setf local-statements
+                    (nconc local-statements
+                           (drain-msl-pending-statements context)))
               (setf (gethash binding (msl-context-references context)) name)
-              (push (make-instance
-                     'msl-variable-statement
-                     :type (msl-type-name
-                            (spv:shader-expression-type binding-expression))
-                     :name name :value value :origin binding)
-                    local-statements)))
+              (setf local-statements
+                    (nconc
+                     local-statements
+                     (list
+                      (make-instance
+                       'msl-variable-statement
+                       :type (msl-type-name
+                              (spv:shader-expression-type binding-expression))
+                       :name name :value value :origin binding))))))
           (let ((update
                   (lower-msl-expression
                    context (lang:arithmetic-counted-fold-update expression))))
+            (setf local-statements
+                  (nconc local-statements
+                         (drain-msl-pending-statements context)))
             (setf (msl-context-pending-statements context)
-                  (nconc (msl-context-pending-statements context)
+                  (nconc preheader-statements
                          (list
                           (make-instance
                            'msl-counted-fold-statement
@@ -474,7 +532,7 @@
                             (spv:shader-expression-type
                              (lang:arithmetic-counted-fold-count expression)))
                            :count count
-                           :bindings (nreverse local-statements)
+                           :bindings local-statements
                            :update update :origin expression))))
             (dolist (binding
                      (lang:arithmetic-counted-fold-bindings expression))

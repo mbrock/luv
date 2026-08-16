@@ -621,6 +621,8 @@ backend-local extension; ordinary callers use SUBMIT.  #T9K4RC"
     (:rgba8-unorm-srgb luv.metal:+pixel-format-rgba8-unorm-srgb+)
     (:bgra8-unorm luv.metal:+pixel-format-bgra8-unorm+)
     (:bgra8-unorm-srgb luv.metal:+pixel-format-bgra8-unorm-srgb+)
+    (:rg16-uint luv.metal:+pixel-format-rg16-uint+)
+    (:rgba16-float luv.metal:+pixel-format-rgba16-float+)
     (:depth32-float luv.metal:+pixel-format-depth32-float+)
     (otherwise
      (reject-metal-gpu-request descriptor :unsupported-texture-format format))))
@@ -822,7 +824,16 @@ backend-local extension; ordinary callers use SUBMIT.  #T9K4RC"
          (size (gpu-write-texture-command-size command))
          (data (gpu-write-texture-command-data command))
          (offset (texture-data-layout-offset layout))
-         (bytes-per-row (texture-data-layout-bytes-per-row layout)))
+         (bytes-per-row (texture-data-layout-bytes-per-row layout))
+         (bytes-per-texel
+           (and (typep texture 'metal-gpu-texture)
+                (texture-format-bytes-per-texel
+                 (gpu-texture-format texture))))
+         (element-type
+           (and (typep texture 'metal-gpu-texture)
+                (texture-format-upload-element-type
+                 (gpu-texture-format texture))))
+         (foreign-type (case bytes-per-texel (4 :uint32) (8 :uint64))))
     (unless (and (typep texture 'metal-gpu-texture)
                  (eq (metal-texture-device texture)
                      (metal-queue-device queue))
@@ -832,14 +843,14 @@ backend-local extension; ordinary callers use SUBMIT.  #T9K4RC"
                  (equal size (gpu-texture-size texture))
                  (arrayp data) (= 2 (array-rank data))
                  (nth-value 0
-                   (subtypep (array-element-type data) '(unsigned-byte 32)))
+                   (subtypep (array-element-type data) element-type))
                  (= (array-dimension data 0) (second size))
                  (= (array-dimension data 1) (first size))
                  (typep offset '(unsigned-byte 64))
-                 (zerop (mod offset 4))
+                 (zerop (mod offset bytes-per-texel))
                  (typep bytes-per-row '(integer 1 *))
-                 (>= bytes-per-row (* 4 (first size)))
-                 (zerop (mod bytes-per-row 4)))
+                 (>= bytes-per-row (* bytes-per-texel (first size)))
+                 (zerop (mod bytes-per-row bytes-per-texel)))
       (reject-metal-gpu-request command :unsupported-texture-upload))
     (cffi:with-foreign-object
         (storage :uint8 (+ offset (* bytes-per-row (second size))))
@@ -847,7 +858,7 @@ backend-local extension; ordinary callers use SUBMIT.  #T9K4RC"
         (let ((destination
                 (cffi:inc-pointer storage (+ offset (* row bytes-per-row)))))
           (dotimes (column (first size))
-            (setf (cffi:mem-aref destination :uint32 column)
+            (setf (cffi:mem-aref destination foreign-type column)
                   (row-major-aref
                    data (+ (* row (array-dimension data 1)) column))))))
       (luv.metal:replace-metal-texture-region

@@ -621,6 +621,8 @@ wrapper, this finalizer cannot run before theirs have."
                     (:rgba8-unorm-srgb . :r8g8b8a8-srgb)
                     (:bgra8-unorm . :b8g8r8a8-unorm)
                     (:bgra8-unorm-srgb . :b8g8r8a8-srgb)
+                    (:rg16-uint . :r16g16-uint)
+                    (:rgba16-float . :r16g16b16a16-sfloat)
                     (:depth32-float . :d32-sfloat))))
       (reject-gpu-request
        descriptor :unsupported-texture-format
@@ -1820,7 +1822,8 @@ ownership and cancel this finalizer."
                :actual-usage (gpu-texture-usage texture)))
       (unless (member (gpu-texture-format texture)
                       '(:rgba8-unorm :rgba8-unorm-srgb
-                        :bgra8-unorm :bgra8-unorm-srgb))
+                        :bgra8-unorm :bgra8-unorm-srgb
+                        :rg16-uint :rgba16-float))
         (reject-texture-write
          destination :unsupported-texture-format
          (gpu-texture-format texture)))
@@ -1831,42 +1834,48 @@ ownership and cancel this finalizer."
                        (second (gpu-texture-size texture))))
         (reject-texture-write destination :write-out-of-bounds
                               (list :origin origin :size extent)))
-      (unless (and (arrayp data)
-                   (= 2 (array-rank data))
-                   (nth-value 0
-                     (subtypep (array-element-type data)
-                               '(unsigned-byte 32)))
-                   (>= (array-dimension data 0) (second extent))
-                   (>= (array-dimension data 1) (first extent)))
-        (reject-texture-write destination :unsupported-texture-data data))
-      (let* ((width (first extent))
-             (height (second extent))
-             (offset (texture-data-layout-offset data-layout))
-             (bytes-per-row
-               (or (texture-data-layout-bytes-per-row data-layout)
-                   (* width 4)))
-             (rows-per-image
-               (or (texture-data-layout-rows-per-image data-layout) height)))
-        (unless (and (typep offset '(unsigned-byte 64))
-                     (zerop (mod offset 4))
-                     (typep bytes-per-row '(unsigned-byte 32))
-                     (>= bytes-per-row (* width 4))
-                     (zerop (mod bytes-per-row 4))
-                     (typep rows-per-image '(unsigned-byte 32))
-                     (>= rows-per-image height))
-          (reject-texture-write destination :invalid-data-layout data-layout))
-        (values texture origin extent offset bytes-per-row rows-per-image
-                data destination)))))
+      (let* ((bytes-per-texel
+               (texture-format-bytes-per-texel
+                (gpu-texture-format texture)))
+             (element-type
+               (texture-format-upload-element-type
+                (gpu-texture-format texture))))
+        (unless (and (arrayp data)
+                     (= 2 (array-rank data))
+                     (nth-value 0
+                       (subtypep (array-element-type data) element-type))
+                     (>= (array-dimension data 0) (second extent))
+                     (>= (array-dimension data 1) (first extent)))
+          (reject-texture-write destination :unsupported-texture-data data))
+        (let* ((width (first extent))
+               (height (second extent))
+               (offset (texture-data-layout-offset data-layout))
+               (bytes-per-row
+                 (or (texture-data-layout-bytes-per-row data-layout)
+                     (* width bytes-per-texel)))
+               (rows-per-image
+                 (or (texture-data-layout-rows-per-image data-layout) height)))
+          (unless (and (typep offset '(unsigned-byte 64))
+                       (zerop (mod offset bytes-per-texel))
+                       (typep bytes-per-row '(unsigned-byte 32))
+                       (>= bytes-per-row (* width bytes-per-texel))
+                       (zerop (mod bytes-per-row bytes-per-texel))
+                       (typep rows-per-image '(unsigned-byte 32))
+                       (>= rows-per-image height))
+            (reject-texture-write destination :invalid-data-layout data-layout))
+          (values texture origin extent offset bytes-per-row rows-per-image
+                  bytes-per-texel data destination))))))
 
 (defun copy-texture-words-to-mapped-memory
-    (data pointer width height offset bytes-per-row)
-  (dotimes (row height)
-    (let ((destination
-            (cffi:inc-pointer pointer (+ offset (* row bytes-per-row)))))
-      (dotimes (column width)
-        (setf (cffi:mem-aref destination :uint32 column)
-              (row-major-aref
-               data (+ (* row (array-dimension data 1)) column)))))))
+    (data pointer width height offset bytes-per-row bytes-per-texel)
+  (let ((foreign-type (ecase bytes-per-texel (4 :uint32) (8 :uint64))))
+    (dotimes (row height)
+      (let ((destination
+              (cffi:inc-pointer pointer (+ offset (* row bytes-per-row)))))
+        (dotimes (column width)
+          (setf (cffi:mem-aref destination foreign-type column)
+                (row-major-aref
+                 data (+ (* row (array-dimension data 1)) column))))))))
 
 (defun record-vulkan-texture-write (encoder command)
   "Lower one queue texture write through a private Vulkan command encoder."
@@ -1875,7 +1884,7 @@ ownership and cancel this finalizer."
     (ensure-no-active-vulkan-pass encoder :encode)
     (multiple-value-bind
           (texture origin extent offset bytes-per-row rows-per-image
-                   data destination)
+                   bytes-per-texel data destination)
         (check-vulkan-texture-write
          (vulkan-command-encoder-device encoder) command)
       (declare (ignore rows-per-image destination))
@@ -1884,7 +1893,7 @@ ownership and cancel this finalizer."
              (width (first extent))
              (height (second extent))
              (data-size (+ offset (* (1- height) bytes-per-row)
-                           (* width 4)))
+                           (* width bytes-per-texel)))
              (buffer nil)
              (memory nil)
              (mapped nil)
@@ -1907,7 +1916,7 @@ ownership and cancel this finalizer."
                  (lvk:bind-buffer-memory native-device buffer memory)
                  (setf mapped (lvk:map-memory native-device memory data-size))
                  (copy-texture-words-to-mapped-memory
-                  data mapped width height offset bytes-per-row)
+                  data mapped width height offset bytes-per-row bytes-per-texel)
                  (lvk:unmap-memory native-device memory)
                  (setf mapped nil))
                (ensure-vulkan-texture-for-command
@@ -1919,7 +1928,7 @@ ownership and cancel this finalizer."
                 buffer (vulkan-handle texture) :transfer-dst-optimal
                 width height
                 :buffer-offset offset
-                :buffer-row-length (/ bytes-per-row 4)
+                :buffer-row-length (/ bytes-per-row bytes-per-texel)
                 :buffer-image-height height
                 :x (first origin) :y (second origin))
                (push (list :upload-buffer buffer memory)

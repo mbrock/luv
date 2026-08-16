@@ -1,8 +1,5 @@
-;;; A deliberately fixed-data proof of Slug's quadratic outline calculation.
-;;;
-;;; This proves the mathematical pixel stage in luv's shader language.  It is
-;;; not yet the texture-banded, variable-length font renderer described by the
-;;; reference shaders; that boundary is recorded in #OWR8OZ.
+;;; Slug's quadratic outline calculation, first as a fixed proof and then as
+;;; the data-driven band texture path used by real outlines.
 
 (in-package #:luv.slug)
 
@@ -147,6 +144,21 @@ pixel shader.  #S2F8SA"
       (min (abs xcov) (abs ycov)))
      0.0 1.0)))
 
+(spv:define-shader-function slug-combine-band-coverage
+    (xcov xweight ycov yweight)
+  "Combine the accumulated horizontal and vertical band traversals."
+  (spv:clamp
+   (max
+    (/ (abs (+ (* xcov xweight) (* ycov yweight)))
+       (max (+ xweight yweight) +slug-root-epsilon+))
+    (min (abs xcov) (abs ycov)))
+   0.0 1.0))
+
+(spv:define-shader-function slug-texel-coordinate (address)
+  "Map Slug's fixed-width linear texture ADDRESS to exact uint coordinates."
+  (spv:uvec2 (mod address (spv:uint 4096.0))
+             (/ address (spv:uint 4096.0))))
+
 (spv:define-shader-function slug-quadratic-outline
     (coordinate pixels-per-em color p0 c0 p1 c1 p2 c2 p3 c3)
   "Render one connected four-quadratic contour with Slug's two-ray pixel math.
@@ -218,3 +230,97 @@ not the band-texture font renderer.  #OWR8OZ"
     (spv:vec2 0.14 0.70) (spv:vec2 0.18 0.98)
     (spv:vec2 0.50 0.74) (spv:vec2 0.82 0.98)
     (spv:vec2 0.86 0.70) (spv:vec2 0.92 0.38))))
+
+(spv:define-shader slug-banded-fragment-specification
+    (:stage :fragment
+     :inputs ((render-coordinate :vec2 :location 0))
+     :resources ((band-data :uint-texture-2d :binding 0)
+                 (curve-data :texture-2d :binding 1))
+     :outputs ((color-output :vec4 :location 0)))
+  ;; One band per axis is the complete correctness path for an outline: every
+  ;; serialized curve participates.  Subdividing the same lists into spatial
+  ;; bands is the subsequent culling optimization, not a different algorithm.
+  (let* ((zero (spv:uint 0.0))
+         (horizontal-header-location (spv:uvec2 zero zero))
+         (vertical-header-location
+           (spv:uvec2 (spv:uint 1.0) zero))
+         (horizontal-header
+           (spv:texel-load band-data horizontal-header-location))
+         (vertical-header
+           (spv:texel-load band-data vertical-header-location))
+         (horizontal-count (spv:swizzle horizontal-header :x))
+         (horizontal-offset (spv:swizzle horizontal-header :y))
+         (vertical-count (spv:swizzle vertical-header :x))
+         (vertical-offset (spv:swizzle vertical-header :y))
+         ;; This shader's render coordinate is em-normalized, so the 204.8
+         ;; scale is the 80-percent quad on the current 256-pixel proof target.
+         (pixels-per-em (spv:vec2 204.8 204.8))
+         (horizontal
+           (spv:counted-fold
+               (index horizontal-count state (spv:vec2 0.0 0.0))
+             (let* ((entry-address (+ horizontal-offset index))
+                    (curve-location
+                      (spv:swizzle
+                       (spv:texel-load
+                        band-data
+                        (slug-texel-coordinate entry-address))
+                       :xy))
+                    (next-location
+                      (slug-texel-coordinate
+                       (+ (spv:swizzle curve-location :x)
+                          (* (spv:swizzle curve-location :y)
+                             (spv:uint 4096.0))
+                          (spv:uint 1.0))))
+                    (curve (spv:texel-load curve-data curve-location))
+                    (next (spv:texel-load curve-data next-location))
+                    (p1 (- (spv:swizzle curve :xy) render-coordinate))
+                    (p2 (- (spv:swizzle curve :zw) render-coordinate))
+                    (p3 (- (spv:swizzle next :xy) render-coordinate))
+                    (contribution
+                      (slug-horizontal-contribution
+                       p1 p2 p3 pixels-per-em)))
+               (spv:vec2
+                (+ (spv:swizzle state :x)
+                   (- (spv:swizzle contribution :x)
+                      (spv:swizzle contribution :y)))
+                (max (spv:swizzle state :y)
+                     (spv:swizzle contribution :z)
+                     (spv:swizzle contribution :w))))))
+         (vertical
+           (spv:counted-fold
+               (index vertical-count state (spv:vec2 0.0 0.0))
+             (let* ((entry-address (+ vertical-offset index))
+                    (curve-location
+                      (spv:swizzle
+                       (spv:texel-load
+                        band-data
+                        (slug-texel-coordinate entry-address))
+                       :xy))
+                    (next-location
+                      (slug-texel-coordinate
+                       (+ (spv:swizzle curve-location :x)
+                          (* (spv:swizzle curve-location :y)
+                             (spv:uint 4096.0))
+                          (spv:uint 1.0))))
+                    (curve (spv:texel-load curve-data curve-location))
+                    (next (spv:texel-load curve-data next-location))
+                    (p1 (- (spv:swizzle curve :xy) render-coordinate))
+                    (p2 (- (spv:swizzle curve :zw) render-coordinate))
+                    (p3 (- (spv:swizzle next :xy) render-coordinate))
+                    (contribution
+                      (slug-vertical-contribution
+                       p1 p2 p3 pixels-per-em)))
+               (spv:vec2
+                (+ (spv:swizzle state :x)
+                   (- (spv:swizzle contribution :y)
+                      (spv:swizzle contribution :x)))
+                (max (spv:swizzle state :y)
+                     (spv:swizzle contribution :z)
+                     (spv:swizzle contribution :w))))))
+         (coverage
+           (slug-combine-band-coverage
+            (spv:swizzle horizontal :x) (spv:swizzle horizontal :y)
+            (spv:swizzle vertical :x) (spv:swizzle vertical :y))))
+    (spv:set-output
+     color-output
+     (* (spv:vec4 0.96 0.32 0.48 1.0) coverage))))

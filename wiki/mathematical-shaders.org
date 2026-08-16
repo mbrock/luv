@@ -228,10 +228,12 @@ from an old source abstraction to a typed function without leaving the old
 EQL expansion methods active.  This is definition syntax in the same sense as
 =defun=, not a request for the author to program a source rewriter.
 
-This does not add runtime control flow.  A data-driven Slug renderer still
-needs typed texel loads, integer data, and a structured loop with an early exit.
-Those are execution-language features.  They are separate from the composition
-problem that made the fixed-contour proof manufacture forms.
+At that milestone function definition did not itself add runtime control flow.
+The subsequent data-driven Slug renderer added typed texel loads, integer data,
+shared conditionals, and a structured counted fold as separate language
+features.  That separation remains useful: function source and application do
+not secretly own looping, while a function body can use the same lexical and
+control-flow vocabulary as any other expression body.
 
 The separation above is between ordinary language and syntactic rewriting,
 not between a permanently small “arithmetic language” and a richer shader
@@ -311,6 +313,14 @@ module passes =spirv-val= and the generated Metal 4 source compiles with the
 Metal compiler.  One vector state is enough to carry Slug's four coverage and
 weight accumulators without making multiple assignment part of the portable
 core.
+
+The real Slug traversal established the lexical rule at the next level of
+composition: a shared or shader-specialized reusable function called from a
+fold may introduce its own =let*= bindings, and those values are defined within
+the current iteration.  MSL emits readable locals inside the =for= body;
+SPIR-V emits values in the loop body and restricts load reuse to the owning
+basic block.  This is one account of function application and scope across the
+arithmetic Lisp, MSL, and SPIR-V realizations, not a special Slug lowering.
 
 * Semantic maps are not merely matrix-shaped values
 :PROPERTIES:

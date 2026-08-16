@@ -42,3 +42,30 @@
    (zpb-ttf:find-glyph character font-loader)
    font-loader
    :character character))
+
+(defun map-slug-outline-points (function outline)
+  "Return an OUTLINE whose points are the result of calling FUNCTION on x/y."
+  (labels ((map-point (point)
+             (multiple-value-bind (x y)
+                 (funcall function (slug-point-x point) (slug-point-y point))
+               (make-slug-point :x x :y y)))
+           (map-curve (curve)
+             (make-slug-quadratic
+              :start (map-point (slug-quadratic-start curve))
+              :control (map-point (slug-quadratic-control curve))
+              :end (map-point (slug-quadratic-end curve)))))
+    (make-slug-outline
+     :contours
+     (loop for contour in (slug-outline-contours outline)
+           collect (mapcar #'map-curve contour)))))
+
+(defun normalize-slug-glyph-outline (glyph)
+  "Return GLYPH's outline in em units, preserving its TrueType origin."
+  (let ((units-per-em (slug-glyph-units-per-em glyph)))
+    (unless (plusp units-per-em)
+      (error 'slug-outline-error
+             :reason :invalid-units-per-em :details units-per-em))
+    (map-slug-outline-points
+     (lambda (x y)
+       (values (/ x units-per-em) (/ y units-per-em)))
+     (slug-glyph-outline glyph))))

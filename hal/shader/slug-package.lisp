@@ -39,8 +39,12 @@
            #:slug-serialized-outline-band-width
            #:slug-serialized-outline-curve-half-words
            #:slug-serialized-outline-curve-texel-count
+           #:slug-serialized-outline-curve-upload-data
+           #:slug-serialized-outline-curve-texture-size
            #:slug-serialized-outline-band-uint16-words
            #:slug-serialized-outline-band-texel-count
+           #:slug-serialized-outline-band-upload-data
+           #:slug-serialized-outline-band-texture-size
            #:slug-serialized-outline-horizontal-band-count
            #:slug-serialized-outline-vertical-band-count
            #:serialize-slug-outline
@@ -54,7 +58,10 @@
            #:slug-outline-from-zpb-glyph
            #:make-slug-glyph-from-zpb-glyph
            #:load-slug-glyph
+           #:map-slug-outline-points
+           #:normalize-slug-glyph-outline
            #:slug-root-eligibility
            #:slug-quadratic-outline
            #:slug-bezier-vertex-specification
-           #:slug-bezier-fragment-specification))
+           #:slug-bezier-fragment-specification
+           #:slug-banded-fragment-specification))

@@ -5,6 +5,58 @@
 
 (in-package #:luv/metal/tests)
 
+(deftest slug-formats-have-exact-portable-and-metal-storage
+  (ok (= 4 (texture-format-bytes-per-texel :rg16-uint)))
+  (ok (= 8 (texture-format-bytes-per-texel :rgba16-float)))
+  (ok (= metal:+pixel-format-rg16-uint+
+         (luv::metal-resource-pixel-format
+          :rg16-uint
+          (make-texture-descriptor :format :rg16-uint))))
+  (ok (= metal:+pixel-format-rgba16-float+
+         (luv::metal-resource-pixel-format
+          :rgba16-float
+          (make-texture-descriptor :format :rgba16-float)))))
+
+(deftest metal-slug-textures-accept-their-exact-packed-words
+  (let* ((device
+           (request-gpu-device (make-instance 'metal-gpu-provider)))
+         (queue (device-queue device))
+         (band-texture nil)
+         (curve-texture nil))
+    (unwind-protect
+         (progn
+           (setf band-texture
+                 (create
+                  device
+                  (make-texture-descriptor
+                   :size '(2 1) :dimensions :2d :format :rg16-uint
+                   :usage '(:texture-binding :copy-dst)))
+                 curve-texture
+                 (create
+                  device
+                  (make-texture-descriptor
+                   :size '(2 1) :dimensions :2d :format :rgba16-float
+                   :usage '(:texture-binding :copy-dst))))
+           (write-texture
+            queue (make-texture-copy :texture band-texture)
+            (make-array '(1 2) :element-type '(unsigned-byte 32)
+                               :initial-contents '((#x00020001 #x00040003)))
+            (make-texture-data-layout :bytes-per-row 8 :rows-per-image 1)
+            '(2 1))
+           (write-texture
+            queue (make-texture-copy :texture curve-texture)
+            (make-array
+             '(1 2) :element-type '(unsigned-byte 64)
+                    :initial-contents
+                    '((#x3c00380034003000 #x40003c0038003400)))
+            (make-texture-data-layout :bytes-per-row 16 :rows-per-image 1)
+            '(2 1))
+           (ok (typep band-texture 'luv::metal-gpu-texture))
+           (ok (typep curve-texture 'luv::metal-gpu-texture)))
+      (when curve-texture (destroy curve-texture))
+      (when band-texture (destroy band-texture))
+      (destroy device))))
+
 (objc:define-objective-c-message make-test-metal-layer
     ("new" :object :ownership :owned :class "CAMetalLayer"))
 
