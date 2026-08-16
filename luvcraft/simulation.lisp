@@ -12,11 +12,21 @@
 (defclass fly-camera ()
   ((position :initarg :position
              :initform (make-vec3 8.0 11.0 -6.0)
+             :type vec3
+             :quantity (:quantity :world-position :unit :metre
+                        :tensor-order 1 :character :point)
              :accessor camera-position)
-   (yaw :initarg :yaw :initform 0.0 :accessor camera-yaw)
-   (pitch :initarg :pitch :initform -0.28 :accessor camera-pitch)
+   (yaw :initarg :yaw :initform 0.0 :type real
+        :quantity (:quantity :camera-yaw :unit :radian)
+        :accessor camera-yaw)
+   (pitch :initarg :pitch :initform -0.28 :type real
+          :quantity (:quantity :camera-pitch :unit :radian)
+          :accessor camera-pitch)
    (sensitivity :initarg :sensitivity :initform 0.0025
-                :accessor camera-sensitivity)))
+                :type real
+                :quantity (:quantity :look-sensitivity :unit :radian)
+                :accessor camera-sensitivity))
+  (:metaclass luv.arithmetic.records:quantity-class))
 
 (defun camera-x (camera) (vec3-x (camera-position camera)))
 (defun camera-y (camera) (vec3-y (camera-position camera)))

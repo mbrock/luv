@@ -16,11 +16,21 @@
    ;; One glowing crystal may configure both emissions, but they are
    ;; different facts.
    (light-opacity :initarg :light-opacity :initform 15
+                  :type (integer 0 15)
+                  :quantity (:quantity :block-light-attenuation-step
+                             :unit :one)
                   :reader block-kind-light-opacity)
    (light-emission :initarg :light-emission :initform 0
+                   :type (integer 0 15)
+                   :quantity (:quantity :block-light-emission-step
+                              :unit :one)
                    :reader block-kind-light-emission)
    (surface-emission :initarg :surface-emission :initform 0.0
-                     :reader block-kind-surface-emission)))
+                     :type real
+                     :quantity (:quantity :material-emission :unit :one
+                                :character :absolute)
+                     :reader block-kind-surface-emission))
+  (:metaclass luv.arithmetic.records:quantity-class))
 
 (defgeneric block-solid-p (block))
 (defgeneric block-face-tile (block face))

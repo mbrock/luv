@@ -706,6 +706,33 @@ Done when: every quantity-bearing luvcraft owner is either declared, mapped to
 an explicit boundary, or listed with a concrete unresolved semantic question;
 the migration remains cold-loadable and the full suite passes.
 
+Audit so far:
+
+- Camera position and angles, sky-clock state and keyframes, material lighting
+  facts, and frame-performance durations now declare their semantic quantities.
+  Timing stages retain distinct quantity names even though they all have the
+  duration dimension: simulation time is not presentation time.
+- Voxel, chunk, pixel, and draw extents remain deliberately unannotated where
+  they are categorical indices or counts rather than continuous physical
+  measures.  The raw 0--15 sky/block propagation levels likewise remain
+  distinct from the normalized light proportions sent to the GPU.
+- =voxel-space= exposes a real unresolved boundary.  Its =cell-extent= is a
+  physical length, while ray traversal and many positions are expressed in
+  continuous lattice coordinates.  The default one-unit cells make those
+  values numerically resemble metres, but the declaration design must not
+  silently equate them when cells can have another extent.  Foundational world
+  quantities therefore need ownership below luvcraft before these slots move.
+- Dense light arrays and the interleaved block-mesh vertex buffer are semantic
+  fields with heterogeneous lanes.  Annotating their owner slot with one scalar
+  quantity would be false precision; they need the field/layout side of the
+  declaration protocol.  Quantity-bearing constants and ordinary function
+  parameters similarly remain an explicit frontend question rather than being
+  forced into record declarations.
+
+Next: declare session timestamps/accumulated physics time and production
+durations, then establish the foundational lattice/physical-world vocabulary
+before migrating =voxel-space= and ray hits.
+
 * A possible Lisp vocabulary
 :PROPERTIES:
 :ID: G4C2ZX

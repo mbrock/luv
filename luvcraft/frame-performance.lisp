@@ -2,18 +2,29 @@
 
 (in-package #:luv)
 
-(defstruct (luvcraft-frame-sample
-             (:constructor make-luvcraft-frame-sample ()))
-  (frame-seconds 0d0 :type double-float)
-  (simulation-seconds 0d0 :type double-float)
-  (streaming-seconds 0d0 :type double-float)
-  (presentation-seconds 0d0 :type double-float)
-  (shader-refresh-seconds 0d0 :type double-float)
-  (mesh-publication-seconds 0d0 :type double-float)
-  (uniform-seconds 0d0 :type double-float)
-  (shadow-encode-seconds 0d0 :type double-float)
-  (scene-encode-seconds 0d0 :type double-float)
-  (surface-copy-encode-seconds 0d0 :type double-float)
+(luv.arithmetic.records:define-quantity-struct
+    (luvcraft-frame-sample (:constructor make-luvcraft-frame-sample ()))
+  (frame-seconds 0d0 :type double-float
+                 :quantity (:quantity :frame-cpu-duration :unit :second))
+  (simulation-seconds 0d0 :type double-float
+                      :quantity (:quantity :simulation-duration :unit :second))
+  (streaming-seconds 0d0 :type double-float
+                     :quantity (:quantity :streaming-duration :unit :second))
+  (presentation-seconds 0d0 :type double-float
+                        :quantity (:quantity :presentation-duration :unit :second))
+  (shader-refresh-seconds 0d0 :type double-float
+                          :quantity (:quantity :shader-refresh-duration :unit :second))
+  (mesh-publication-seconds 0d0 :type double-float
+                            :quantity (:quantity :mesh-publication-duration :unit :second))
+  (uniform-seconds 0d0 :type double-float
+                   :quantity (:quantity :uniform-update-duration :unit :second))
+  (shadow-encode-seconds 0d0 :type double-float
+                         :quantity (:quantity :shadow-encode-duration :unit :second))
+  (scene-encode-seconds 0d0 :type double-float
+                        :quantity (:quantity :scene-encode-duration :unit :second))
+  (surface-copy-encode-seconds 0d0 :type double-float
+                               :quantity (:quantity :surface-copy-encode-duration
+                                          :unit :second))
   (chunk-count 0 :type fixnum)
   (draw-count 0 :type fixnum)
   (vertex-count 0 :type fixnum))
@@ -34,15 +45,18 @@
                                   'double-float)))))
              (progn ,@body))))))
 
-(defstruct luvcraft-frame-benchmark
+(luv.arithmetic.records:define-quantity-struct luvcraft-frame-benchmark
   (backend :metal :type keyword)
   (device "" :type string)
   (width 0 :type fixnum)
   (height 0 :type fixnum)
   (warmup-count 0 :type fixnum)
   (samples #() :type vector)
-  (completion-seconds 0d0 :type double-float)
-  (drain-seconds 0d0 :type double-float)
+  (completion-seconds 0d0 :type double-float
+                      :quantity (:quantity :benchmark-completion-duration
+                                 :unit :second))
+  (drain-seconds 0d0 :type double-float
+                 :quantity (:quantity :benchmark-drain-duration :unit :second))
   (desired-chunk-count 0 :type fixnum))
 
 (defun luvcraft-frame-metric-values (benchmark reader)

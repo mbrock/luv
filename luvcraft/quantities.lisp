@@ -70,6 +70,42 @@
   :non-negative-p t)
 (math:define-quantity :frame-duration :kind :duration
   :non-negative-p t)
+(math:define-quantity :frame-cpu-duration :kind :duration
+  :non-negative-p t)
+(math:define-quantity :simulation-duration :kind :duration
+  :non-negative-p t)
+(math:define-quantity :streaming-duration :kind :duration
+  :non-negative-p t)
+(math:define-quantity :presentation-duration :kind :duration
+  :non-negative-p t)
+(math:define-quantity :shader-refresh-duration :kind :duration
+  :non-negative-p t)
+(math:define-quantity :mesh-publication-duration :kind :duration
+  :non-negative-p t)
+(math:define-quantity :uniform-update-duration :kind :duration
+  :non-negative-p t)
+(math:define-quantity :shadow-encode-duration :kind :duration
+  :non-negative-p t)
+(math:define-quantity :scene-encode-duration :kind :duration
+  :non-negative-p t)
+(math:define-quantity :surface-copy-encode-duration :kind :duration
+  :non-negative-p t)
+(math:define-quantity :benchmark-completion-duration :kind :duration
+  :non-negative-p t)
+(math:define-quantity :benchmark-drain-duration :kind :duration
+  :non-negative-p t)
+(math:define-quantity :camera-yaw :kind :angular-measure
+  :character :point)
+(math:define-quantity :camera-pitch :kind :angular-measure
+  :character :point)
+(math:define-quantity :look-sensitivity :kind :angular-measure
+  :non-negative-p t)
+(math:define-quantity :sky-cycle-rate :kind :frequency
+  :non-negative-p t)
+(math:define-quantity :block-light-attenuation-step :kind :sample-count
+  :non-negative-p t)
+(math:define-quantity :block-light-emission-step :kind :sample-count
+  :non-negative-p t)
 (math:define-quantity :day-fraction :kind :normalized-coordinate
   :non-negative-p t)
 (math:define-quantity :sun-angular-width :kind :angular-measure

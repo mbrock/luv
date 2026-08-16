@@ -75,6 +75,29 @@
              fog-declaration)))
     (ok (typep (luv::sky-frame-parameters-fog-far sky) 'single-float))))
 
+(deftest semantic-owner-audit-exposes-camera-sky-material-and-timing-fields
+  (dolist (claim
+           '((fly-camera luv::yaw :camera-yaw)
+             (fly-camera luv::sensitivity :look-sensitivity)
+             (sky-clock luv::rate :sky-cycle-rate)
+             (sky-clock luv::pinned-day-fraction :day-fraction)
+             (luv::sky-keyframe luv::sun-color :linear-rgb)
+             (luv::sky-keyframe luv::fog-far :view-distance)
+             (block-kind luv::light-opacity :block-light-attenuation-step)
+             (block-kind luv::surface-emission :material-emission)
+             (luv::luvcraft-frame-sample luv::simulation-seconds
+              :simulation-duration)
+             (luv::luvcraft-frame-benchmark luv::drain-seconds
+              :benchmark-drain-duration)))
+    (destructuring-bind (record slot quantity) claim
+      (let ((declaration
+              (luv.arithmetic.records:record-slot-declaration record slot)))
+        (ok declaration)
+        (ok (eq quantity
+                (luv.arithmetic:quantity-specification-name
+                 (luv.arithmetic:declaration-quantity-specification
+                  declaration))))))))
+
 (deftest cpu-trace-zones-are-nested-reusable-and-bounded
   (let ((trace (make-cpu-trace :label "test")))
     (with-cpu-trace (trace)

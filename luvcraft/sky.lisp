@@ -12,10 +12,14 @@
 (defclass sky-clock ()
   ((day-fraction
     :initarg :day-fraction :initform 0.40
+    :type real
+    :quantity (:quantity :day-fraction :unit :one)
     :accessor sky-clock-day-fraction
     :documentation "Time of day in [0,1): 0 midnight, 0.25 sunrise, 0.5 noon.")
    (rate
     :initarg :rate :initform (/ 1.0 600.0)
+    :type real
+    :quantity (:quantity :sky-cycle-rate :unit :hertz)
     :accessor sky-clock-rate
     :documentation "Day fractions per real second; the default day is 10 minutes.")
    (paused-p
@@ -23,13 +27,16 @@
     :accessor sky-clock-paused-p)
    (pinned-day-fraction
     :initarg :pinned-day-fraction :initform nil
+    :type (or null real)
+    :quantity (:quantity :day-fraction :unit :one)
     :accessor sky-clock-pinned-day-fraction
     :documentation
     "When set, evaluation reads this fixed time for deterministic capture."))
   (:documentation
    "Mutable time-of-day state owned by a luvcraft session.
 
-SLY can pause it, set a time, change its rate, or pin it without restarting."))
+SLY can pause it, set a time, change its rate, or pin it without restarting.")
+  (:metaclass luv.arithmetic.records:quantity-class))
 
 (defun advance-sky-clock (clock seconds)
   "Advance CLOCK by a bounded frame delta unless it is paused."
@@ -47,17 +54,35 @@ SLY can pause it, set a time, change its rate, or pin it without restarting."))
 ;;; A profile is a cyclic sequence of keyframes over the day fraction.
 ;;; Colours are 3-element single-float vectors; scalars are single floats.
 
-(defstruct (sky-keyframe (:constructor make-sky-keyframe))
-  (day-fraction 0.0 :type single-float)
-  (zenith-color #(0.0 0.0 0.0) :type (simple-vector 3))
-  (horizon-color #(0.0 0.0 0.0) :type (simple-vector 3))
-  (sun-color #(0.0 0.0 0.0) :type (simple-vector 3))
-  (ambient-color #(0.0 0.0 0.0) :type (simple-vector 3))
-  (fog-color #(0.0 0.0 0.0) :type (simple-vector 3))
-  (sun-angular-width 0.006 :type single-float)
-  (exposure 1.0 :type single-float)
-  (fog-near 0.0 :type single-float)
-  (fog-far 180.0 :type single-float))
+(luv.arithmetic.records:define-quantity-struct
+    (sky-keyframe (:constructor make-sky-keyframe))
+  (day-fraction 0.0 :type single-float
+                :quantity (:quantity :day-fraction :unit :one))
+  (zenith-color #(0.0 0.0 0.0) :type (simple-vector 3)
+                 :quantity (:quantity :linear-rgb :unit :one
+                            :tensor-order 1 :character :absolute))
+  (horizon-color #(0.0 0.0 0.0) :type (simple-vector 3)
+                  :quantity (:quantity :linear-rgb :unit :one
+                             :tensor-order 1 :character :absolute))
+  (sun-color #(0.0 0.0 0.0) :type (simple-vector 3)
+             :quantity (:quantity :linear-rgb :unit :one
+                        :tensor-order 1 :character :absolute))
+  (ambient-color #(0.0 0.0 0.0) :type (simple-vector 3)
+                  :quantity (:quantity :linear-rgb :unit :one
+                             :tensor-order 1 :character :absolute))
+  (fog-color #(0.0 0.0 0.0) :type (simple-vector 3)
+             :quantity (:quantity :linear-rgb :unit :one
+                        :tensor-order 1 :character :absolute))
+  (sun-angular-width 0.006 :type single-float
+                     :quantity (:quantity :sun-angular-width :unit :radian))
+  (exposure 1.0 :type single-float
+            :quantity (:quantity :exposure :unit :one))
+  (fog-near 0.0 :type single-float
+            :quantity (:quantity :view-distance :unit :metre
+                       :character :absolute))
+  (fog-far 180.0 :type single-float
+           :quantity (:quantity :view-distance :unit :metre
+                      :character :absolute)))
 
 (defstruct (sky-profile (:constructor %make-sky-profile))
   (keyframes #() :type simple-vector))
