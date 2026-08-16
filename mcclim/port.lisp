@@ -28,9 +28,11 @@
    "A luv port whose media rasterize into MCCLIM-RENDER images."))
 
 (defclass luv-raster-medium (mcclim-render:render-medium-mixin basic-medium)
-  ()
+  ((reliefs
+    :initform (make-array 4 :adjustable t :fill-pointer 0)
+    :reader raster-medium-reliefs))
   (:documentation
-   "A CPU raster medium whose image will be uploaded to a luv target."))
+   "A CPU raster medium whose image and semantic reliefs feed a luv target."))
 
 (defclass luv-gpu-port (luv-port)
   ()
