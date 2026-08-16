@@ -118,6 +118,15 @@
   (dolist (claim
            '((luv::+player-physics-step+ :frame-duration double-float)
              (luv::+player-collision-epsilon+ :world-distance double-float)
+             (luv::+player-step-height+ :world-distance double-float)
+             (luv::+player-terminal-fall-speed+ :world-velocity double-float)
+             (luv::+luvcraft-camera-near-distance+ :view-distance single-float)
+             (luv::+luvcraft-camera-far-distance+ :view-distance single-float)
+             (luv::+luvcraft-camera-vertical-field-of-view+
+              :camera-field-of-view single-float)
+             (luv::+luvcraft-target-reach+ :ray-distance double-float)
+             (luv::+luvcraft-maximum-frame-duration+
+              :frame-duration double-float)
              (luv::+luvcraft-shadow-half-extent+ :world-distance single-float)
              (luv::+luvcraft-shadow-depth-radius+ :world-distance single-float)
              (luv::+luvcraft-shadow-base-bias+ :shadow-depth single-float)

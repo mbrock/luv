@@ -1068,12 +1068,13 @@ retains chunk revision, boundary revision, and world invalidation semantics."))
             :quantity (:quantity :ray-distance :unit :cell)))
 
 (defun raycast-block-world
-    (world origin direction occupied-p &key (max-distance 8d0))
+    (world origin direction occupied-p &key max-distance)
   "Trace a ray through WORLD's resident lattice.
 
 Return a BLOCK-RAY-HIT and :HIT, NIL and :ABSENT when traversal reaches a
 non-resident chunk, or NIL and :MISS.  ORIGIN and DIRECTION are VEC3 values
-in continuous cell coordinates."
+in continuous cell coordinates.  The caller owns and must supply the maximum
+ray distance appropriate to its interaction."
   (check-type world block-world)
   (check-type origin vec3)
   (check-type direction vec3)

@@ -677,7 +677,7 @@ Result:
 Done when: satisfied.  #AVRNHW now broadens the declarations beyond the first
 player and sky records before that review.
 
-* NEXT Audit quantity-bearing Lisp storage
+* DONE Audit quantity-bearing Lisp storage
 :PROPERTIES:
 :ID: AVRNHW
 :END:
@@ -760,9 +760,8 @@ shader contract.  Context-dependent removal work now has an explicit semantic
 owner (#K2V9RD).  The fixed frame uniform now has an independently stated CPU
 product checked against the shader's parsed member quantities (#F8U2LA).
 The remaining fullscreen and overlay vertex products are similarly declared
-and checked (#N6S2CX).  Next: finish the source inventory and decide how
-ordinary function parameters publish boundary meaning without turning direct
-Lisp into ceremony.
+and checked (#N6S2CX).  The completed function-boundary audit is #J4V8QM: it
+found no consumer for a second metadata-only function signature system.
 
 ** DONE Describe the repeated block-mesh vertex product
 :PROPERTIES:
@@ -837,6 +836,48 @@ followed by an explicit assumption of absolute linear RGBA; it is not called
 an interpretation because the packed constructor deliberately has no derived
 homogeneous semantics.  The DSL does not falsely treat that heterogeneous
 constructor as homogeneous arithmetic.
+
+** DONE Keep quantity contracts at owned function boundaries
+:PROPERTIES:
+:ID: J4V8QM
+:END:
+
+The source inventory distinguishes a function which /owns a numerical law/
+from one which merely orchestrates already-owned values.  The former belongs
+in =define-lisp-arithmetic-function= and can bind its raw realization to slot,
+structure, constant, or ABI declarations.  The latter stays an ordinary
+=defun=: a parallel quantity lambda-list would be descriptive metadata with no
+checker or lowering consumer.
+
+The concrete boundary map is:
+
+| Domain | Declared owners and boundaries | Deliberately ordinary values |
+|-
+| camera and simulation | camera/player slots; camera ABI product; checked velocity-times-duration kernel; declared clip distances, vertical FOV, physics step, collision clearance, step height, terminal fall velocity, and maximum frame duration | input state, collision control flow, pixel extents, lattice cell indices |
+| sky | clock and keyframe slots; evaluated frame structure; frame uniform product | interpolation control flow and cyclic =mod= after its inputs are owned |
+| targeting and world traversal | camera position slot; camera-basis direction at the checked camera ABI; declared application reach; ray-hit distance slot | DDA cells, steps, infinities, and occupancy control flow |
+| lighting | field definitions; context-owned removal queues; material slots; reconciliation duration | 0--15 field-domain codes, revisions, counters, and work tickets |
+| meshing and rendering | repeated mesh, sky, and crosshair products; fixed camera/frame products; shader parameter and expression declarations; shadow constants | vertex/count/stride indices, texture dimensions, and raw matrix rows owned by the semantic map |
+| streaming, production, and measurement | production and lighting durations; frame-stage and benchmark structures | chunk radii/counts, priorities, revisions, timeouts used only as operational API controls |
+| persistence and capture | serialized fields are the portable representation of declared world extent, camera look, and player position owners; orbit =day-start=, =day-step=, yaw, and forward step are explicit tool-input boundaries | format versions, image extents, pixel indices, and diagnostic difference scale |
+
+This pass removed the arbitrary eight-cell default from the reusable DDA:
+=raycast-block-world= now requires its caller to supply a maximum distance,
+while =luvcraft-session-target= owns the declared eight-cell player reach.
+Previously anonymous camera projection, frame-clamp, and controller limits are
+also inspectable quantity constants.  Their values remain raw Common Lisp
+numbers; the controller and ray loop remain direct code.
+
+The audit also classifies =world-coordinate=, =chunk-coordinate=,
+=local-coordinate=, =voxel-direction=, chunk shapes, terrain heights, texture
+pixel dimensions, IDs, revisions, tickets, and draw/vertex counts as lattice
+addresses, categorical displacements, indices, or counts.  They must not gain
+continuous quantity units merely because their representation is numeric.
+
+The durable SLY image accepted the new definition and constant declarations.
+Strict Parinfer, shader generation plus =spirv-val=, all 54 luvcraft tests, and
+the complete cold project/wiki suite pass.  The next phase is the exercised
+design review, not a metadata frontend invented in anticipation of a use.
 
 * A possible Lisp vocabulary
 :PROPERTIES:

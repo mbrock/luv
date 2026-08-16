@@ -410,4 +410,4 @@
          (raycast-block-world world
                               (make-vec3 0d0 0d0 0d0)
                               (make-vec3 0d0 0d0 0d0)
-                              #'identity)))))
+                              #'identity :max-distance 8d0)))))

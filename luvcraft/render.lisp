@@ -19,6 +19,10 @@
 (defconstant +block-world-crosshair-vertex-count+ 24)
 (defconstant +luvcraft-shadow-map-size+ 2048)
 (luv.arithmetic:define-quantity-constant
+    +luvcraft-maximum-frame-duration+ 0.1d0
+  :type double-float
+  :quantity (:quantity :frame-duration :unit :second))
+(luv.arithmetic:define-quantity-constant
     +luvcraft-shadow-half-extent+ 64.0
   :type single-float
   :quantity (:quantity :world-distance :unit :cell))
@@ -441,7 +445,10 @@ the frame uniform cannot silently diverge between shader and host."
                   :luvcraft/simulation)
         (let* ((last (luvcraft-session-last-frame-time session))
                (seconds
-                 (if last (min 0.1 (max 0.0 (- timestamp last))) 0.0)))
+                 (if last
+                     (min +luvcraft-maximum-frame-duration+
+                          (max 0d0 (- timestamp last)))
+                     0d0)))
           (setf (luvcraft-session-last-frame-time session) timestamp)
           (advance-sky-clock (luvcraft-session-sky-clock session) seconds)
           (let ((player (luvcraft-session-player session)))

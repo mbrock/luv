@@ -8,6 +8,11 @@
 
 (in-package #:luv)
 
+(luv.arithmetic:define-quantity-constant
+    +luvcraft-target-reach+ 8d0
+  :type double-float
+  :quantity (:quantity :ray-distance :unit :cell))
+
 (defclass luvcraft-session (canvas-event-handler)
   ((canvas :initarg :canvas :reader luvcraft-session-canvas)
    (device :initarg :device :reader luvcraft-session-device)
@@ -151,7 +156,8 @@
   (refresh-live-shader-pipeline (luvcraft-session-crosshair-pipeline session))
   session)
 
-(defun luvcraft-session-target (session &key (max-distance 8d0))
+(defun luvcraft-session-target
+    (session &key (max-distance +luvcraft-target-reach+))
   "Raycast from SESSION's camera through resident block terrain."
   (let ((camera (luvcraft-session-camera session)))
     (multiple-value-bind (right up forward) (camera-basis camera)

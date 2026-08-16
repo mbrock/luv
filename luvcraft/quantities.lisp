@@ -96,6 +96,8 @@
   :character :point)
 (math:define-quantity :camera-pitch :kind :angular-measure
   :character :point)
+(math:define-quantity :camera-field-of-view :kind :angular-measure
+  :non-negative-p t)
 (math:define-quantity :look-sensitivity :kind :angular-measure
   :non-negative-p t)
 (math:define-quantity :sky-cycle-rate :kind :frequency

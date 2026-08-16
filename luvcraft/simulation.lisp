@@ -9,6 +9,20 @@
 
 (in-package #:luv)
 
+(luv.arithmetic:define-quantity-constant
+    +luvcraft-camera-near-distance+ 0.1
+  :type single-float
+  :quantity (:quantity :view-distance :unit :cell :character :absolute))
+(luv.arithmetic:define-quantity-constant
+    +luvcraft-camera-far-distance+ 180.0
+  :type single-float
+  :quantity (:quantity :view-distance :unit :cell :character :absolute))
+(luv.arithmetic:define-quantity-constant
+    +luvcraft-camera-vertical-field-of-view+ 1.2217305
+  :type single-float
+  :quantity (:quantity :camera-field-of-view :unit :radian)
+  :documentation "The block-world camera's 70-degree vertical field of view.")
+
 (defclass fly-camera ()
   ((position :initarg :position
              :initform (make-vec3 8.0 11.0 -6.0)
@@ -62,9 +76,9 @@
 The environment lanes which complete the block are packed by
 FRAME-UNIFORM-DATA from the session's sky clock and profile."
   (multiple-value-bind (right up forward) (camera-basis camera)
-    (let* ((near 0.1)
-           (far 180.0)
-           (focal (/ (tan (/ (* 70.0 (/ pi 180.0)) 2.0))))
+    (let* ((near +luvcraft-camera-near-distance+)
+           (far +luvcraft-camera-far-distance+)
+           (focal (/ (tan (/ +luvcraft-camera-vertical-field-of-view+ 2.0))))
            (aspect (/ (coerce width 'single-float) height))
            (projection
              (make-vec3 (/ focal aspect) focal (/ far (- far near)))))
@@ -110,6 +124,15 @@ FRAME-UNIFORM-DATA from the session's sky clock and profile."
     +player-collision-epsilon+ 1d-7
   :type double-float
   :quantity (:quantity :world-distance :unit :cell))
+(luv.arithmetic:define-quantity-constant
+    +player-step-height+ 1d0
+  :type double-float
+  :quantity (:quantity :world-distance :unit :cell :character :absolute))
+(luv.arithmetic:define-quantity-constant
+    +player-terminal-fall-speed+ -50d0
+  :type double-float
+  :quantity (:quantity :world-velocity
+             :unit ((:cell 1) (:second -1))))
 
 (luv.arithmetic.lisp:define-lisp-arithmetic-function
     %predict-world-position
@@ -382,7 +405,7 @@ FRAME-UNIFORM-DATA from the session's sky clock and profile."
            (distance-z (* (player-velocity-z player) seconds))
            (attempted-z (+ (player-z player) distance-z))
            (collided-z-p (move-player-axis player world :z distance-z))
-           (step-y (+ (player-y player) 1d0))
+           (step-y (+ (player-y player) +player-step-height+))
            (clear-above-x-p
              (and collided-x-p
                   (player-position-clear-p
@@ -399,7 +422,7 @@ FRAME-UNIFORM-DATA from the session's sky clock and profile."
               (player-grounded-p player) nil)))
     (decf (player-velocity-y player) (* (player-gravity player) seconds))
     (setf (player-velocity-y player)
-          (max -50d0 (player-velocity-y player))
+          (max +player-terminal-fall-speed+ (player-velocity-y player))
           (player-grounded-p player) nil)
     (move-player-axis player world :y (* (player-velocity-y player) seconds)))
   (sync-camera-to-player camera player)
