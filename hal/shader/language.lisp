@@ -278,6 +278,11 @@ repeating the lane arithmetic as a literal."
     (shader-named-object lang:arithmetic-binding)
   ())
 
+(defclass shader-function-parameter-binding (shader-binding)
+  ()
+  (:documentation
+   "A lexical alias for one already parsed shader-function argument."))
+
 (defgeneric shader-binding-expression (binding))
 
 (defmethod shader-binding-expression ((binding shader-binding))
@@ -365,6 +370,32 @@ leaves it again while retaining the semantic operand in the expression graph."))
 
 (defmethod shader-call-parameters ((call shader-call))
   (lang:arithmetic-call-parameters call))
+
+(defclass shader-function-definition (shader-named-object)
+  ((parameters
+    :initarg :parameters
+    :reader shader-function-parameters)
+   (body
+    :initarg :body
+    :reader shader-function-body))
+  (:documentation
+   "Reusable shader source parsed into the typed graph at each call site."))
+
+(defclass shader-function-call (shader-expression)
+  ((definition
+    :initarg :definition
+    :reader shader-function-call-definition)
+   (arguments
+    :initarg :arguments
+    :reader shader-function-call-arguments)
+   (bindings
+    :initarg :bindings
+    :reader shader-function-call-bindings)
+   (result
+    :initarg :result
+    :reader shader-function-call-result))
+  (:documentation
+   "An inspectable typed call whose body is inlined during backend lowering."))
 
 (defclass shader-map-application (shader-expression)
   ((definition
@@ -472,6 +503,16 @@ leaves it again while retaining the semantic operand in the expression graph."))
   (lang:arithmetic-expression-quantity-checked-p expression))
 
 (defmethod shader-expression-quantity-checked-p
+    ((expression shader-function-call))
+  (shader-expression-quantity-checked-p
+   (shader-function-call-result expression)))
+
+(defmethod lang:arithmetic-expression-quantity-checked-p
+    ((expression shader-function-call))
+  (shader-expression-quantity-checked-p
+   (shader-function-call-result expression)))
+
+(defmethod shader-expression-quantity-checked-p
     ((expression shader-map-application))
   (lang:arithmetic-expression-quantity-checked-p expression))
 
@@ -546,6 +587,9 @@ leaves it again while retaining the semantic operand in the expression graph."))
 (defmethod shader-expression-form ((expression shader-call))
   (lang:arithmetic-expression-form expression))
 
+(defmethod shader-expression-form ((expression shader-function-call))
+  (shader-expression-source-form expression))
+
 (defmethod shader-expression-form ((expression shader-map-application))
   (lang:arithmetic-expression-form expression))
 
@@ -573,6 +617,10 @@ leaves it again while retaining the semantic operand in the expression graph."))
 
 (defmethod shader-expression-children ((expression shader-call))
   (lang:arithmetic-expression-children expression))
+
+(defmethod shader-expression-children ((expression shader-function-call))
+  (append (shader-function-call-arguments expression)
+          (list (shader-function-call-result expression))))
 
 (defmethod shader-expression-children ((expression shader-map-application))
   (lang:arithmetic-expression-children expression))
@@ -607,10 +655,13 @@ leaves it again while retaining the semantic operand in the expression graph."))
   (and (symbolp left) (symbolp right)
        (string-equal (symbol-name left) (symbol-name right))))
 
+(defun find-shader-environment-value (name environment)
+  (loop for (candidate . value) in environment
+        when (shader-symbol= name candidate)
+          return value))
+
 (defun shader-environment-value (name environment source-form)
-  (or (loop for (candidate . value) in environment
-            when (shader-symbol= name candidate)
-              return value)
+  (or (find-shader-environment-value name environment)
       (error 'shader-language-error
              :form source-form :reason :unknown-name :details name)))
 
@@ -1096,26 +1147,97 @@ never collides with a standard symbol's function documentation:
 (define-shader-operator convert-unit
   "Explicitly express a semantic quantity in another compatible unit.")
 
+;;; Shader functions are typed source composition.  Authors write an ordinary
+;;; expression body, including lexical LET*, and every call is parsed against
+;;; its actual arguments into an inspectable SHADER-FUNCTION-CALL.  Backends
+;;; inline the resulting expression graph; no shader author constructs forms.
+
+(defvar *shader-function-documentation* (make-hash-table :test #'eq))
+
+(defmethod documentation ((name symbol) (type (eql 'shader-function)))
+  (gethash name *shader-function-documentation*))
+
+(defmethod (setf documentation)
+    (new-value (name symbol) (type (eql 'shader-function)))
+  (if new-value
+      (setf (gethash name *shader-function-documentation*) new-value)
+      (progn (remhash name *shader-function-documentation*) nil)))
+
+(defgeneric shader-function-definition-for (name)
+  (:documentation "Return the live typed shader function named by NAME, or NIL."))
+
+(defmethod shader-function-definition-for (name)
+  (declare (ignore name))
+  nil)
+
+(defun make-shader-function-definition (name parameters body)
+  (unless (and (symbolp name)
+               (listp parameters)
+               (every #'symbolp parameters)
+               (= (length parameters)
+                  (length (remove-duplicates parameters :test #'eq))))
+    (error 'shader-language-error
+           :form (list* 'define-shader-function name parameters body)
+           :reason :invalid-shader-function-parameters
+           :details parameters))
+  (unless (= (length body) 1)
+    (error 'shader-language-error
+           :form (list* 'define-shader-function name parameters body)
+           :reason :expected-single-shader-function-body))
+  (make-instance 'shader-function-definition
+                 :name name :parameters parameters :body body
+                 :source-form
+                 (list* 'define-shader-function name parameters body)))
+
+(defmacro define-shader-function (name parameters &body body)
+  "Define a reusable typed shader expression with ordinary source syntax.
+
+The body is parsed at each call site, so argument types and quantity meanings
+flow through the same operator protocol as handwritten shader expressions.
+LET* is lexical inside the function.  The definition macro records source; its
+body does not execute as Lisp and does not return generated S-expressions.
+#RO74NL"
+  (let* ((function-name (gensym "FUNCTION-NAME"))
+         (documentation (and (stringp (first body)) (first body)))
+         (forms (if documentation (rest body) body)))
+    `(progn
+       (forget-shader-abstraction ',name)
+       (defmethod shader-function-definition-for
+           ((,function-name (eql ',name)))
+         (declare (ignore ,function-name))
+         (load-time-value
+          (make-shader-function-definition ',name ',parameters ',forms)))
+       ,@(when documentation
+           `((setf (documentation ',name 'shader-function)
+                   ,documentation)))
+       (note-shader-source-redefinition ',name)
+       ',name)))
+
 ;;; Abstractions are source vocabulary, not core operators.  They rewrite into
-;;; ordinary shader forms before parsing, so the typed graph and SPIR-V lowering
-;;; remain built from the small mathematical operator set above.
+;;; ordinary shader forms before parsing.  Keep them for genuinely syntactic
+;;; generation, such as unrolling host-known data; ordinary reusable
+;;; calculations belong in DEFINE-SHADER-FUNCTION above.
 
 (defvar *shader-abstraction-documentation* (make-hash-table :test #'eq))
 
-(defvar *shader-abstraction-revision* 0)
-(defvar *shader-abstraction-revision-lock*
-  (sb-thread:make-mutex :name "luv shader abstraction revision"))
+(defvar *shader-source-revision* 0)
+(defvar *shader-source-revision-lock*
+  (sb-thread:make-mutex :name "luv shader source revision"))
+
+(defun shader-source-revision ()
+  "Return the revision of reusable shader functions and source abstractions."
+  (sb-thread:with-mutex (*shader-source-revision-lock*)
+    *shader-source-revision*))
 
 (defun shader-abstraction-revision ()
-  "Return the revision of the process-wide source-abstraction vocabulary."
-  (sb-thread:with-mutex (*shader-abstraction-revision-lock*)
-    *shader-abstraction-revision*))
+  "Compatibility name for SHADER-SOURCE-REVISION."
+  (shader-source-revision))
 
-(defun note-shader-abstraction-redefinition (name)
-  "Record that NAME's source expansion may have changed."
+(defun note-shader-source-redefinition (name)
+  "Record that reusable shader source named by NAME may have changed."
   (declare (ignore name))
-  (sb-thread:with-mutex (*shader-abstraction-revision-lock*)
-    (incf *shader-abstraction-revision*)))
+  (sb-thread:with-mutex (*shader-source-revision-lock*)
+    (incf *shader-source-revision*)))
 
 (defmethod documentation ((name symbol) (type (eql 'shader-abstraction)))
   (gethash name *shader-abstraction-documentation*))
@@ -1143,6 +1265,33 @@ never collides with a standard symbol's function documentation:
   (error 'shader-language-error
          :form form :reason :unknown-abstraction :details (first form)))
 
+(defun remove-shader-eql-methods (generic-function-name name)
+  (when (fboundp generic-function-name)
+    (let ((generic-function (fdefinition generic-function-name)))
+      (when (typep generic-function 'generic-function)
+        (dolist (method
+                 (copy-list
+                  (closer-mop:generic-function-methods generic-function)))
+          (let ((specializer
+                  (first (closer-mop:method-specializers method))))
+            (when (and (typep specializer 'closer-mop:eql-specializer)
+                       (eq name
+                           (closer-mop:eql-specializer-object specializer)))
+              (remove-method generic-function method))))))))
+
+(defun forget-shader-abstraction (name)
+  "Remove an old source-rewriter definition when NAME becomes a function."
+  (remove-shader-eql-methods 'shader-abstraction-p name)
+  (remove-shader-eql-methods 'expand-shader-abstraction-call name)
+  (remhash name *shader-abstraction-documentation*)
+  name)
+
+(defun forget-shader-function (name)
+  "Remove an old typed-function definition when NAME becomes an abstraction."
+  (remove-shader-eql-methods 'shader-function-definition-for name)
+  (remhash name *shader-function-documentation*)
+  name)
+
 (defmacro define-shader-abstraction (name lambda-list &body body)
   "Define NAME as a source-level shader abstraction.
 
@@ -1153,6 +1302,7 @@ shader source form made from core operators or other abstractions."
          (documentation (and (stringp (first body)) (first body)))
          (forms (if documentation (rest body) body)))
     `(progn
+       (forget-shader-function ',name)
        (defmethod shader-abstraction-p ((,operator (eql ',name)))
          t)
        (defmethod expand-shader-abstraction-call
@@ -1163,7 +1313,7 @@ shader source form made from core operators or other abstractions."
        ,@(when documentation
            `((setf (documentation ',name 'shader-abstraction)
                    ,documentation)))
-       (note-shader-abstraction-redefinition ',name)
+       (note-shader-source-redefinition ',name)
        ',name)))
 
 (defun expand-shader-source-form (form)
@@ -1277,12 +1427,124 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
                      :quantity-specification projected
                      :source-form form))))
 
-(defun parse-shader-call (form environment)
-  (let ((operator (first form)))
-    (unless (shader-operator-p operator)
+(defvar *shader-function-call-counter* 0)
+(defvar *shader-function-call-stack* nil)
+
+(defun shader-function-binding-name
+    (definition call-index role name &optional ordinal)
+  (let ((function-name (symbol-name (shader-object-name definition)))
+        (binding-name (symbol-name name)))
+    (make-symbol
+     (if ordinal
+         (format nil "~A-~D-~A-~D-~A"
+                 function-name call-index role ordinal binding-name)
+         (format nil "~A-~D-~A-~A"
+                 function-name call-index role binding-name)))))
+
+(defun parse-shader-expression-body
+    (body environment &key binding-name-function)
+  "Parse one expression body, optionally beginning with lexical LET*."
+  (unless (= (length body) 1)
+    (error 'shader-language-error
+           :form body :reason :expected-single-shader-function-body))
+  (let ((form (first body)))
+    (if (and (consp form) (eq (first form) 'let*))
+        (destructuring-bind (operator raw-bindings &rest results) form
+          (declare (ignore operator))
+          (unless (= (length results) 1)
+            (error 'shader-language-error
+                   :form form :reason :expected-single-shader-function-result))
+          (let ((bindings nil)
+                (lexical-environment environment))
+            (dolist (raw-binding raw-bindings)
+              (unless (and (consp raw-binding) (= (length raw-binding) 2)
+                           (symbolp (first raw-binding)))
+                (error 'shader-language-error
+                       :form raw-binding :reason :invalid-binding))
+              (let* ((source-name (first raw-binding))
+                     (name (if binding-name-function
+                               (funcall binding-name-function source-name)
+                               source-name))
+                     (expression
+                       (parse-shader-expression
+                        (second raw-binding) lexical-environment))
+                     (binding
+                       (make-instance 'shader-binding
+                                      :name name :expression expression
+                                      :source-form raw-binding)))
+                (setf (shader-expression-name expression) name)
+                (push binding bindings)
+                (push (cons source-name binding) lexical-environment)))
+            (values (nreverse bindings)
+                    (parse-shader-expression
+                     (first results) lexical-environment))))
+        (values nil (parse-shader-expression form environment)))))
+
+(defun parse-shader-function-call (definition form environment)
+  (let* ((name (shader-object-name definition))
+         (parameters (shader-function-parameters definition))
+         (argument-forms (rest form)))
+    (unless (= (length parameters) (length argument-forms))
       (error 'shader-language-error
-             :form form :reason :unknown-operator :details operator))
-    (parse-shader-operator-call operator form environment)))
+             :form form :reason :shader-function-arity
+             :details (list :expected (length parameters)
+                            :actual (length argument-forms))))
+    (when (member name *shader-function-call-stack* :test #'eq)
+      (error 'shader-language-error
+             :form form :reason :recursive-shader-function
+             :details (reverse (cons name *shader-function-call-stack*))))
+    (let* ((arguments
+             (mapcar (lambda (argument)
+                       (parse-shader-expression argument environment))
+                     argument-forms))
+           (call-index (incf *shader-function-call-counter*))
+           (parameter-bindings
+             (loop for parameter in parameters
+                   for argument in arguments
+                   collect
+                   (make-instance
+                    'shader-function-parameter-binding
+                    :name (shader-function-binding-name
+                           definition call-index "PARAMETER" parameter)
+                    :expression argument
+                    :source-form (list parameter argument))))
+           (function-environment
+             (loop for parameter in parameters
+                   for binding in parameter-bindings
+                   collect (cons parameter binding))))
+      (let ((*shader-function-call-stack*
+              (cons name *shader-function-call-stack*))
+            (local-index 0))
+        (multiple-value-bind (body-bindings result)
+            (parse-shader-expression-body
+             (shader-function-body definition) function-environment
+             :binding-name-function
+             (lambda (local-name)
+               (shader-function-binding-name
+                definition call-index "LOCAL" local-name
+                (incf local-index))))
+          (make-instance
+           'shader-function-call
+           :definition definition :arguments arguments
+           :bindings (append parameter-bindings body-bindings)
+           :result result
+           :type (shader-expression-type result)
+           :quantity-specification
+           (shader-expression-quantity-specification result)
+           :quantity-layout (shader-expression-quantity-layout result)
+           :source-form form))))))
+
+(defun parse-shader-call (form environment)
+  (let* ((operator (first form))
+         (function (and (symbolp operator)
+                        (shader-function-definition-for operator))))
+    (cond ((shader-operator-p operator)
+           (parse-shader-operator-call operator form environment))
+          (function
+           (parse-shader-function-call function form environment))
+          (t
+           (error 'shader-language-error
+                  :form form :reason :unknown-operator :details operator)))))
 
 (defun parse-shader-expression (form environment)
   (cond ((realp form)
@@ -1292,7 +1554,19 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
                         :quantity-specification
                         (math:make-quantity-specification nil)
                         :source-form form))
-        ((symbolp form) (make-shader-reference form environment form))
+        ((symbolp form)
+         (cond ((find-shader-environment-value form environment)
+                (make-shader-reference form environment form))
+               ((and (constantp form) (boundp form)
+                     (realp (symbol-value form)))
+                (make-instance 'shader-literal
+                               :value (coerce (symbol-value form) 'single-float)
+                               :type (find-shader-type :float)
+                               :quantity-specification
+                               (math:make-quantity-specification nil)
+                               :source-form form))
+               (t
+                (make-shader-reference form environment form))))
         ((consp form) (parse-shader-call form environment))
         (t
          (error 'shader-language-error
@@ -1844,6 +2118,36 @@ NIL leaves the character to the named definition; T is the historical
                             statements))))
         (values nil (list (parse-output-assignment form environment outputs))))))
 
+(defun collect-shader-bindings (bindings statements)
+  "Hoist inline-function lexical bindings in dependency order.
+
+The bindings remain typed objects owned by each SHADER-FUNCTION-CALL.  A flat
+entry-block order lets both SPIR-V and direct MSL lowering name their values
+without turning function definitions back into source-form substitution."
+  (let ((seen (make-hash-table :test #'eq))
+        (ordered nil))
+    (labels ((add-binding (binding)
+               (unless (gethash binding seen)
+                 (visit (shader-binding-expression binding))
+                 (setf (gethash binding seen) t)
+                 (push binding ordered)))
+             (visit (expression)
+               (typecase expression
+                 (shader-function-call
+                  (mapc #'visit (shader-function-call-arguments expression))
+                  (dolist (binding (shader-function-call-bindings expression))
+                    (if (typep binding 'shader-function-parameter-binding)
+                        (visit (shader-binding-expression binding))
+                        (add-binding binding)))
+                  (visit (shader-function-call-result expression)))
+                 (t
+                  (mapc #'visit (shader-expression-children expression))))))
+      (dolist (binding bindings)
+        (add-binding binding))
+      (dolist (statement statements)
+        (visit (shader-assignment-value statement))))
+    (nreverse ordered)))
+
 (defun parse-shader-specification (name options body)
   (let* ((stage (getf options :stage))
          (expanded-body (mapcar #'expand-shader-source-form body))
@@ -1867,13 +2171,17 @@ NIL leaves the character to the named definition; T is the historical
     (unless (member stage '(:vertex :fragment :compute))
       (error 'shader-language-error
              :form options :reason :invalid-stage :details stage))
-    (multiple-value-bind (bindings statements)
-        (parse-shader-body expanded-body environment outputs)
-      (make-instance 'shader-specification
-                     :name name :stage stage
-                     :inputs inputs :outputs outputs :resources resources
-                     :bindings bindings :statements statements
-                     :source-form (list* 'define-shader name options body)))))
+    (let ((*shader-function-call-counter* 0)
+          (*shader-function-call-stack* nil))
+      (multiple-value-bind (bindings statements)
+          (parse-shader-body expanded-body environment outputs)
+        (make-instance
+         'shader-specification
+         :name name :stage stage
+         :inputs inputs :outputs outputs :resources resources
+         :bindings (collect-shader-bindings bindings statements)
+         :statements statements
+         :source-form (list* 'define-shader name options body))))))
 
 (defmacro define-shader (name options &body body)
   "Define NAME as a function returning a durable, inspectable shader graph."
@@ -2351,6 +2659,10 @@ Modules whose expressions use no extended mathematics never acquire one."
   (shader-operator-result-name (shader-call-operator expression)))
 
 (defmethod shader-expression-provenance-name
+    ((expression shader-function-call))
+  (shader-object-name (shader-function-call-definition expression)))
+
+(defmethod shader-expression-provenance-name
     ((expression shader-map-application))
   (declare (ignore expression))
   'projected-point)
@@ -2817,6 +3129,13 @@ backend's context before its source-located unsupported-operation method."))
 
 (defmethod lower-shader-expression-value (context (expression shader-call))
   (lower-shader-call (shader-call-operator expression) context expression))
+
+(defmethod lower-shader-expression-value
+    (context (expression shader-function-call))
+  (let* ((result (shader-function-call-result expression))
+         (value (lower-shader-expression context result)))
+    (alias-shader-expression context expression result)
+    value))
 
 (defmethod lower-shader-expression-value
     (context (expression shader-map-application))

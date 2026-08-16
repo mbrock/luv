@@ -127,6 +127,7 @@
            #:define-projective-shader-map
            #:shader-binding
            #:shader-binding-expression
+           #:shader-function-parameter-binding
            #:shader-expression
            #:shader-expression-type
            #:shader-expression-quantity-specification
@@ -143,6 +144,17 @@
            #:shader-call-operator
            #:shader-call-operands
            #:shader-call-parameters
+           #:shader-function-definition
+           #:shader-function
+           #:shader-function-parameters
+           #:shader-function-body
+           #:shader-function-definition-for
+           #:define-shader-function
+           #:shader-function-call
+           #:shader-function-call-definition
+           #:shader-function-call-arguments
+           #:shader-function-call-bindings
+           #:shader-function-call-result
            #:shader-map-application
            #:shader-map-application-definition
            #:shader-map-application-point
@@ -188,6 +200,7 @@
            #:shader-abstraction
            #:define-shader-abstraction
            #:shader-abstraction-p
+           #:shader-source-revision
            #:shader-abstraction-revision
            #:expand-shader-abstraction-call
            #:expand-shader-source-form

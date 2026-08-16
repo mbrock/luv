@@ -65,6 +65,14 @@
 (defgeneric shader-method-probe (role stage))
 (defgeneric shader-abstraction-method-probe (role stage))
 
+(defconstant +shader-function-test-offset+ 0.25)
+
+(spv:define-shader-function typed-shader-function-probe (value scale)
+  "A lexical typed-function probe written without source-form construction."
+  (let* ((shifted (+ value +shader-function-test-offset+))
+         (scaled (* shifted scale)))
+    scaled))
+
 (spv:define-shader-method shader-method-probe shader-method-probe
     ((role (eql :probe)) (stage (eql :fragment)))
     (:stage :fragment
@@ -117,6 +125,107 @@
              (spv:acknowledge-shader-definition-change dependent revision)
              (ok (not (spv:shader-definition-change-pending-p dependent)))))
       (spv:release-shader-definition-dependent dependent))))
+
+(deftest shader-functions-are-typed-calls-with-lexical-bindings
+  (let* ((definition
+           (spv:shader-function-definition-for 'typed-shader-function-probe))
+         (specification
+           (spv:parse-shader-specification
+            'typed-shader-function-specification
+            '(:stage :fragment
+              :inputs ((value :float :location 0)
+                       (scale :float :location 1))
+              :outputs ((result :float :location 0)))
+            '((set-output result
+                          (typed-shader-function-probe value scale)))))
+         (call
+           (spv:shader-assignment-value
+            (first (spv:shader-specification-statements specification))))
+         (lowering (spv:compile-shader-specification specification)))
+    (ok (typep definition 'spv:shader-function-definition))
+    (ok (equal '(value scale) (spv:shader-function-parameters definition)))
+    (ok (search "without source-form construction"
+                (documentation 'typed-shader-function-probe
+                               'spv:shader-function)))
+    (ok (typep call 'spv:shader-function-call))
+    (ok (eq definition (spv:shader-function-call-definition call)))
+    (ok (= 2 (length (spv:shader-function-call-arguments call))))
+    ;; Two parameter aliases and two lexical LET* bindings remain typed
+    ;; objects.  Only computed locals need entry-block declarations.
+    (ok (= 4 (length (spv:shader-function-call-bindings call))))
+    (ok (= 2 (length (spv:shader-specification-bindings specification))))
+    (ok (equal '(typed-shader-function-probe value scale)
+               (spv:shader-expression-form call)))
+    (ok (gethash call
+                 (spv:shader-lowering-expression-instructions lowering)))
+    (ok (= #x07230203
+           (aref (spv:assemble-shader-specification specification) 0)))))
+
+(deftest shader-function-redefinition-affects-only-fresh-parses
+  (labels ((install-addition ()
+             (eval
+              '(spv:define-shader-function redefinable-shader-function
+                   (left right)
+                 (+ left right))))
+           (install-subtraction ()
+             (eval
+              '(spv:define-shader-function redefinable-shader-function
+                   (left right)
+                 (- left right))))
+           (parse-probe ()
+             (spv:parse-shader-specification
+              'redefinable-shader-function-specification
+              '(:stage :fragment
+                :inputs ((left :float :location 0)
+                         (right :float :location 1))
+                :outputs ((result :float :location 0)))
+              '((set-output result
+                            (redefinable-shader-function left right)))))
+           (result-operator (specification)
+             (let ((call
+                     (spv:shader-assignment-value
+                      (first
+                       (spv:shader-specification-statements specification)))))
+               (spv:shader-call-operator
+                (spv:shader-function-call-result call)))))
+    (install-addition)
+    (let ((addition (parse-probe))
+          (revision (spv:shader-source-revision)))
+      (install-subtraction)
+      (let ((subtraction (parse-probe)))
+        (ok (> (spv:shader-source-revision) revision))
+        (ok (eq '+ (result-operator addition)))
+        (ok (eq '- (result-operator subtraction)))
+        (ok (signals
+             (spv:parse-shader-specification
+              'bad-shader-function-arity
+              '(:stage :fragment
+                :inputs ((left :float :location 0))
+                :outputs ((result :float :location 0)))
+              '((set-output result (redefinable-shader-function left))))
+             'spv:shader-language-error))))))
+
+(deftest shader-source-name-can-migrate-from-rewriter-to-typed-function
+  (eval
+   '(spv:define-shader-abstraction source-kind-migration-probe (value)
+      `(+ ,value 1.0)))
+  (ok (spv:shader-abstraction-p 'source-kind-migration-probe))
+  (eval
+   '(spv:define-shader-function source-kind-migration-probe (value)
+      (+ value 1.0)))
+  (ok (not (spv:shader-abstraction-p 'source-kind-migration-probe)))
+  (ok (spv:shader-function-definition-for 'source-kind-migration-probe))
+  (let* ((specification
+           (spv:parse-shader-specification
+            'source-kind-migration-specification
+            '(:stage :fragment
+              :inputs ((value :float :location 0))
+              :outputs ((result :float :location 0)))
+            '((set-output result (source-kind-migration-probe value)))))
+         (call
+           (spv:shader-assignment-value
+            (first (spv:shader-specification-statements specification)))))
+    (ok (typep call 'spv:shader-function-call))))
 
 (deftest shader-source-is-a-typed-clos-graph
   (let* ((specification (spv:block-world-fragment-specification))
@@ -1252,6 +1361,9 @@
 (deftest slug-proof-is-a-pixel-shader-over-quadratic-roots
   (let* ((vertex (slug:slug-bezier-vertex-specification))
          (fragment (slug:slug-bezier-fragment-specification))
+         (fragment-value
+           (spv:shader-assignment-value
+            (first (spv:shader-specification-statements fragment))))
          (lowering (spv:compile-shader-specification fragment))
          (forms
            (mapcar #'spv:instruction-form
@@ -1262,6 +1374,16 @@
     (ok (eq :fragment (spv:shader-specification-stage fragment)))
     (ok (= 2 (length (spv:shader-specification-inputs vertex))))
     (ok (= 1 (length (spv:shader-specification-inputs fragment))))
+    (ok (typep fragment-value 'spv:shader-function-call))
+    (ok (eq 'slug:slug-quadratic-outline
+            (spv:shader-object-name
+             (spv:shader-function-call-definition fragment-value))))
+    (ok (not (spv:shader-abstraction-p 'slug:slug-quadratic-outline)))
+    (ok (spv:shader-function-definition-for
+         'slug:slug-quadratic-outline))
+    (ok (some (lambda (expression)
+                (typep expression 'spv:shader-function-call))
+              (spv:shader-specification-expressions fragment)))
     (ok (search "F-SIGN" printed))
     (ok (search "SQRT" printed))
     (ok (= #x07230203

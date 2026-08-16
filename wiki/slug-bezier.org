@@ -201,16 +201,21 @@ font-data machinery.
 
 Evidence:
 
-- [[file:../hal/shader/slug.lisp][=slug-quadratic-outline=]] accepts a compile-time list of quadratic curves.
-  It implements the eight-class eligibility table, quadratic/linear roots,
-  both ray directions, intersection weights, and the current coverage
-  combination.
+- [[file:../hal/shader/slug.lisp][=slug-quadratic-outline=]] is now a typed shader function over the eight
+  points of a connected four-curve contour.  It composes ordinary typed
+  =slug-axis-contribution=, root-eligibility, and coverage functions with
+  lexical =let*=; no Slug helper constructs or returns shader source forms.
+  The calculation still implements the eight-class eligibility table,
+  quadratic/linear roots, both ray directions, intersection weights, and the
+  current coverage combination.  #RO74NL records the language distinction.
 - The ordinary Lisp function =slug-root-eligibility= exposes the same table to
   focused tests.  All eight classes and the strict treatment of zero are
   checked.
 - The DSL's open operator protocol now admits Common Lisp =signum= and lowers
   it directly to SPIR-V =FSign= and MSL =sign=.  Both generated shaders pass
   =spirv-val= and Apple's Metal 4 compiler.
+- Refactoring from form-generating source abstraction to typed function calls
+  leaves the actual 256 by 256 Metal readback byte-identical.
 - [[file:../hal/metal/probes/slug-bezier.lisp][The cold Metal probe]] draws a two-triangle quad into a 256 by 256 RGBA8
   texture, reads the real GPU result back, and writes this image:
 

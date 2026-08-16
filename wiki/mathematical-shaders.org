@@ -186,6 +186,53 @@ Those maps are intentionally occurrence-based.  “This multiply in this basic
 block came from this expression object” is more useful for a live tool than a
 global table saying that the =f-mul= opcode exists.
 
+* Shader functions are graphs; source abstractions are syntax
+:PROPERTIES:
+:ID: RO74NL
+:END:
+
+Slug exposed a missing layer in the language.  The core operators were typed
+objects and a complete shader could have top-level =let*= bindings, but the
+only reusable source vocabulary was =define-shader-abstraction=.  Its method
+ran as host Lisp before parsing and returned a newly constructed S-expression.
+That is appropriate for a syntactic transformation such as expanding a
+host-known sample stencil.  It is a poor representation of an ordinary
+mathematical function: the author has to manage quotation, invented binding
+names, and source construction outside the typed graph.
+
+=define-shader-function= now fills that gap.  Its body is ordinary shader
+source, not Lisp that returns shader source:
+
+#+begin_src lisp
+(define-shader-function weighted-square (value scale)
+  (let* ((shifted (+ value 0.25))
+         (scaled (* shifted scale)))
+    scaled))
+#+end_src
+
+At each call site the parser first parses the actual arguments, then parses the
+function's lexical =let*= against those typed values.  The result is an
+inspectable =shader-function-call= retaining its live definition, argument
+expressions, local binding objects, typed result, quantity meaning, and source
+call.  Local values are hoisted in deterministic dependency order for the
+single entry block.  SPIR-V and direct MSL lowering inline the result graph and
+associate its emitted occurrences with both the inner expressions and the call.
+
+The definition macro is deliberately thin: it records the unevaluated body at
+an EQL-specialized definition coordinate.  Re-evaluating that coordinate
+changes fresh parses and increments the shared shader-source revision; already
+parsed graphs remain durable objects.  A live SLY check redefined one function
+from addition to subtraction: the existing call still exposed =+=, a fresh
+parse exposed =-=, and the source revision advanced.  Names can also migrate
+from an old source abstraction to a typed function without leaving the old
+EQL expansion methods active.  This is definition syntax in the same sense as
+=defun=, not a request for the author to program a source rewriter.
+
+This does not add runtime control flow.  A data-driven Slug renderer still
+needs typed texel loads, integer data, and a structured loop with an early exit.
+Those are execution-language features.  They are separate from the composition
+problem that made the fixed-contour proof manufacture forms.
+
 * Semantic maps are not merely matrix-shaped values
 :PROPERTIES:
 :ID: 4XAF9Z

@@ -347,17 +347,31 @@
     ((context msl-lowering-context) (expression spv:shader-reference))
   (let* ((target (spv:shader-reference-target expression))
          (text (gethash target (msl-context-references context))))
-    (unless text
-      (error 'spv:shader-language-error
-             :form (spv:shader-expression-source-form expression)
-             :reason :unsupported-msl-reference
-             :details (spv:shader-object-name target)))
-    (note-msl-occurrence context expression text)))
+    (cond (text
+           (note-msl-occurrence context expression text))
+          ((typep target 'spv:shader-function-parameter-binding)
+           (let ((argument
+                   (lower-msl-expression
+                    context (spv:shader-binding-expression target))))
+             (note-msl-occurrence
+              context expression (msl-occurrence-text argument))))
+          (t
+           (error 'spv:shader-language-error
+                  :form (spv:shader-expression-source-form expression)
+                  :reason :unsupported-msl-reference
+                  :details (spv:shader-object-name target))))))
 
 (defmethod lower-msl-expression
     ((context msl-lowering-context) (expression spv:shader-call))
   (spv:lower-shader-call (spv:shader-call-operator expression)
                          context expression))
+
+(defmethod lower-msl-expression
+    ((context msl-lowering-context) (expression spv:shader-function-call))
+  (let ((result
+          (lower-msl-expression
+           context (spv:shader-function-call-result expression))))
+    (note-msl-occurrence context expression (msl-occurrence-text result))))
 
 (defgeneric lower-msl-shader-map-application
     (definition context application)
