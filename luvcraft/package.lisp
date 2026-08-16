@@ -2,6 +2,7 @@
   (:use #:cl #:luv #:luvcraft.world)
   (:local-nicknames (#:domains #:luv.domains)
                     (#:fields #:luvcraft.world.fields)
+                    (#:ghostty #:luv.ghostty)
                     (#:math #:luv.arithmetic)
                     (#:records #:luv.arithmetic.records)
                     (#:spv #:luv.spir-v))
@@ -19,6 +20,7 @@
                 #:vec3-z)
   (:documentation "The interactive block world built on luv.")
   (:export #:*crystal-block*
+           #:*terminal-block*
            #:*session*
            #:+little-world-source-version+
            #:+luvcraft-save-format-version+
@@ -176,6 +178,9 @@
            #:make-sky-keyframe
            #:make-sky-profile
            #:make-world-checkpoint-writer
+           #:find-terminal-surface
+           #:open-terminal-display
+           #:place-terminal-block-rectangle
            #:materialize-block-world-chunk
            #:materialize-little-world-chunk
            #:mesh-block-chunk
@@ -231,6 +236,13 @@
            #:start-luvcraft-tracy
            #:step-block-world-player
            #:stop-luvcraft
+           #:terminal-display
+           #:terminal-display-surface
+           #:terminal-surface
+           #:terminal-surface-face
+           #:terminal-surface-height
+           #:terminal-surface-origin
+           #:terminal-surface-width
            #:stop-world-checkpoint-writer
            #:sync-camera-to-player
            #:wait-for-luvcraft-products

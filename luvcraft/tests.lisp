@@ -466,6 +466,94 @@
     (ok (equalp #(0.0 0.0 0.0) (subseq instances 18 21)))
     (ok (equalp #(1.0 1.0 0.0) (subseq instances 21 24)))))
 
+(deftest terminal-grid-domain-is-an-exact-row-major-viewport
+  (let ((domain (make-instance 'luvcraft::terminal-grid-domain
+                               :columns 80 :rows 24)))
+    (ok (= 1920 (luv.domains:domain-cardinality domain)))
+    (ok (= 0 (luvcraft::terminal-grid-offset domain 0 0)))
+    (ok (= 79 (luvcraft::terminal-grid-offset domain 79 0)))
+    (ok (= 80 (luvcraft::terminal-grid-offset domain 0 1)))
+    (ok (= 1919 (luvcraft::terminal-grid-offset domain 79 23)))
+    (multiple-value-bind (column row)
+        (luvcraft::terminal-grid-coordinate domain 997)
+      (ok (= 37 column))
+      (ok (= 12 row)))
+    (ok (signals (luvcraft::terminal-grid-offset domain 80 0) 'error))
+    (ok (signals (luvcraft::terminal-grid-coordinate domain 1920) 'error))))
+
+(deftest terminal-block-material-rectangles-become-one-display-surface
+  (let ((world (make-block-world :chunk-width 16
+                                 :chunk-height 16
+                                 :chunk-depth 16)))
+    (ensure-world-chunk world 0 0 0)
+    ;; :BACK reads left-to-right in world X from a viewer on negative Z.
+    (place-terminal-block-rectangle world 2 3 4 :back 3 2)
+    (multiple-value-bind (surface status)
+        (find-terminal-surface world 3 4 4 :back)
+      (ok (eq status :rectangle))
+      (ok (= 3 (terminal-surface-width surface)))
+      (ok (= 2 (terminal-surface-height surface)))
+      (ok (= 2 (world-coordinate-x (terminal-surface-origin surface))))
+      (ok (= 3 (world-coordinate-y (terminal-surface-origin surface))))
+      (ok (luvcraft::terminal-surface-current-p surface))
+      (let ((lower-left
+              (luvcraft::terminal-surface-lower-left-point surface 0.0)))
+        (ok (= 2.0 (vec3-x lower-left)))
+        (ok (= 3.0 (vec3-y lower-left)))
+        (ok (= 4.0 (vec3-z lower-left))))
+      ;; One missing voxel leaves an L-shaped component.  The retained screen
+      ;; becomes invalid and rediscovery refuses to pretend it is rectangular.
+      (edit-block-at nil world 3 3 4)
+      (ok (not (luvcraft::terminal-surface-current-p surface)))
+      (multiple-value-bind (split split-status)
+          (find-terminal-surface world 2 3 4 :back)
+        (ok (null split))
+        (ok (eq split-status :non-rectangular))))))
+
+(deftest terminal-grid-fits-the-unified-surface-not-individual-blocks
+  (let* ((world (make-block-world :chunk-width 16
+                                  :chunk-height 16
+                                  :chunk-depth 16))
+         (domain (make-instance 'luvcraft::terminal-grid-domain
+                                :columns 80 :rows 24)))
+    (ensure-world-chunk world 0 0 0)
+    (place-terminal-block-rectangle world 4 6 5 :back 8 5)
+    (let ((surface (find-terminal-surface world 8 8 5 :back)))
+      (multiple-value-bind (scale left bottom width height)
+          (luvcraft::fit-terminal-grid-in-surface
+           domain surface 0.6 1.0 0.12 1.0)
+        (ok (< (abs (- scale (/ 7.76 48.0))) 1e-6))
+        (ok (< (abs (- width 7.76)) 1e-6))
+        (ok (< height 5.0))
+        (ok (< (abs (- left 0.12)) 1e-6))
+        (ok (> bottom 0.12))
+        ;; Eight blocks can carry eighty columns because font fit is a surface
+        ;; projection; no terminal-cell count is attached to one voxel.
+        (ok (= 10 (/ (luvcraft::terminal-grid-domain-columns domain)
+                     (terminal-surface-width surface))))))))
+
+(deftest terminal-display-fixture-really-crosses-ghostty
+  (ghostty:with-terminal (terminal :columns 80 :rows 24)
+    (ghostty:write-terminal terminal (luvcraft::terminal-display-fixture))
+    (let* ((domain (make-instance 'luvcraft::terminal-grid-domain
+                                  :columns 80 :rows 24))
+           (presentation
+             (luvcraft::make-terminal-grid-presentation
+              domain (ghostty:terminal-text terminal))))
+      (ok (char= #\l
+                 (luvcraft::terminal-grid-character presentation 2 1)))
+      (ok (char= #\$
+                 (luvcraft::terminal-grid-character presentation 2 5)))
+      (ok (char= #\┘
+                 (luvcraft::terminal-grid-character presentation 79 23)))
+      (dotimes (row 24)
+        (ok (not (char= #\Space
+                        (luvcraft::terminal-grid-character
+                         presentation 0 row))))
+        (ok (not (char= #\Space
+                        (luvcraft::terminal-grid-character
+                         presentation 79 row))))))))
+
 (deftest light-removal-queues-own-the-meaning-of-unwrapped-levels
   (let* ((world (make-block-world))
          (chunk (luvcraft::ensure-world-chunk world 0 0 0))
@@ -940,7 +1028,7 @@
        (luvcraft::ensure-block-atlas-sample-transfer :rgba8-unorm)
        'error))
   (let ((atlas (make-block-texture-atlas)))
-    (ok (equal (array-dimensions atlas) '(16 160)))
+    (ok (equal (array-dimensions atlas) '(16 176)))
     (ok (subtypep (array-element-type atlas) '(unsigned-byte 32)))
     (ok (= (ldb (byte 8 24) (aref atlas 8 8)) 255))
     (ok (/= (aref atlas 8 8) (aref atlas 8 (+ 8 (* 3 16)))))
@@ -954,9 +1042,11 @@
     (ok (= (block-face-tile luvcraft::*sand-block* (face :top)) 7))
     (ok (= (block-face-tile luvcraft::*snow-block* (face :top)) 8))
     (ok (= (block-face-tile *crystal-block* (face :top)) 9))
+    (ok (= (block-face-tile *terminal-block* (face :front)) 10))
     (ok (= (block-light-emission *crystal-block*) 12))
     (ok (= (block-surface-emission *crystal-block*) 1.2))
-    (ok (= (length (placeable-block-kinds)) 8)))
+    (ok (= (block-surface-emission *terminal-block*) 0.16))
+    (ok (= (length (placeable-block-kinds)) 9)))
   (let ((world (make-block-world :chunk-width 2
                                  :chunk-height 2
                                  :chunk-depth 2)))
@@ -994,9 +1084,10 @@
     (ok (eq (luvcraft-session-selected-block session) luvcraft::*grass-block*))
     (ok (eq (select-luvcraft-block session 7) luvcraft::*snow-block*))
     (ok (eq (select-luvcraft-block session 8) *crystal-block*))
-    (ok (search "1–8 select" (canvas-title canvas)))
-    (ok (search "crystal" (canvas-title canvas)))
-    (ok (null (select-luvcraft-block session 9)))
+    (ok (eq (select-luvcraft-block session 9) *terminal-block*))
+    (ok (search "1–9 select" (canvas-title canvas)))
+    (ok (search "terminal" (canvas-title canvas)))
+    (ok (null (select-luvcraft-block session 10)))
     (handle-canvas-event
      session canvas
      (make-instance 'canvas-key-press-event

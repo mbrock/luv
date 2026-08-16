@@ -120,6 +120,92 @@
     (declare (ignore right))
     (world-text-point (camera-position camera) forward up distance lift 1.0)))
 
+(defun make-world-text-run-from-instances
+    (device target-format string font-pathname shaped glyphs atlas center
+     world-units-per-em instance-data &key (label "world HarfBuzz Slug text"))
+  "Create one owned Slug draw batch from caller-positioned GLYPHS.
+
+The caller owns the semantic placement policy and supplies the dense instance
+records.  This is the shared GPU boundary for ordinary shaped runs and the
+unified terminal surface in #7ZM22R."
+  (let ((vertex-data (make-world-text-quad-vertices))
+        (resources nil)
+        (pipeline nil)
+        (completed-p nil))
+    (flet ((keep (resource) (push resource resources) resource))
+      (unwind-protect
+           (let* ((layout
+                    (keep
+                     (create
+                      device
+                      (make-bind-group-layout-descriptor
+                       :label "world Slug text layout"
+                       :entries '((:binding 0 :type :texture)
+                                  (:binding 1 :type :texture)
+                                  (:binding 2 :type :uniform-buffer))))))
+                  (vertex-buffer
+                    (keep
+                     (create
+                      device
+                      (make-buffer-descriptor
+                       :label "world Slug glyph quads"
+                       :size (* 4 (length vertex-data))
+                       :usage '(:vertex :copy-dst)))))
+                  (instance-buffer
+                    (keep
+                     (create
+                      device
+                      (make-buffer-descriptor
+                       :label "world Slug glyph instances"
+                       :size (* 4 (length instance-data))
+                       :usage '(:vertex :copy-dst))))))
+             (setf pipeline
+                   (make-live-shader-pipeline
+                    :role :slug-world-text
+                    :vertex-role :slug-world-text
+                    :label label
+                    :device device :layout layout
+                    :vertex-buffers
+                    '((:array-stride 12
+                       :attributes
+                       ((:shader-location 0 :offset 0 :format :float32x3)))
+                      (:array-stride 96 :step-mode :instance
+                       :attributes
+                       ((:shader-location 1 :offset 0 :format :float32x3)
+                        (:shader-location 2 :offset 12 :format :float32x3)
+                        (:shader-location 3 :offset 24 :format :float32x3)
+                        (:shader-location 4 :offset 36 :format :float32x3)
+                        (:shader-location 5 :offset 48 :format :float32x3)
+                        (:shader-location 6 :offset 60 :format :float32x3)
+                        (:shader-location 7 :offset 72 :format :float32x3)
+                        (:shader-location 8 :offset 84 :format :float32x3))))
+                    :target-format target-format
+                    :target-blend :premultiplied-alpha
+                    :primitive '(:topology :triangle-list)
+                    :depth-stencil
+                    '(:format :depth32-float
+                      :depth-write-enabled nil
+                      :depth-compare :less)))
+             (write-buffer vertex-buffer vertex-data)
+             (write-buffer instance-buffer instance-data)
+             (let ((run
+                     (make-instance
+                      'world-text-run
+                      :string string :font-pathname font-pathname
+                      :shaped-text shaped :glyphs glyphs :atlas atlas
+                      :center center :world-units-per-em world-units-per-em
+                      :vertex-data vertex-data :vertex-buffer vertex-buffer
+                      :instance-data instance-data
+                      :instance-buffer instance-buffer :layout layout
+                      :pipeline pipeline :resources resources)))
+               (setf completed-p t)
+               run))
+        (unless completed-p
+          (when pipeline
+            (release-live-shader-pipeline pipeline))
+          (dolist (resource resources)
+            (ignore-errors (destroy resource))))))))
+
 (defun make-world-text-run
     (device glyph-cache camera target-format string font-pathname
      &key (distance 8.0) (lift 3.0) (world-units-per-em 0.55))
@@ -129,10 +215,7 @@ The run owns dense placement/model data and its live pipeline; GLYPH-CACHE owns
 font-and-glyph device resources reusable across runs.  See #QW7P96."
   (let* ((shaped (luv.slug:cached-slug-shaped-text
                   glyph-cache font-pathname string))
-         (center (world-text-center-before-camera camera distance lift))
-         (resources nil)
-         (pipeline nil)
-         (completed-p nil))
+         (center (world-text-center-before-camera camera distance lift)))
     (zpb-ttf:with-font-loader (font-loader font-pathname)
       (let ((glyphs
               (luv.slug:make-slug-glyph-placements
@@ -145,100 +228,13 @@ font-and-glyph device resources reusable across runs.  See #QW7P96."
           (multiple-value-bind (right up forward) (camera-basis camera)
             (declare (ignore forward))
             (let* ((atlas (luv.slug:slug-glyph-atlas-for glyph-cache glyphs))
-                   (vertex-data (make-world-text-quad-vertices))
                    (instance-data
                      (make-world-text-instances
                       glyphs atlas center right up world-units-per-em
-                      min-x min-y max-x max-y))
-                   (layout nil)
-                   (vertex-buffer nil)
-                   (instance-buffer nil))
-              (flet ((keep (resource) (push resource resources) resource))
-                (unwind-protect
-                     (progn
-                       (setf layout
-                             (keep
-                              (create
-                               device
-                               (make-bind-group-layout-descriptor
-                                :label "world Slug text layout"
-                                :entries '((:binding 0 :type :texture)
-                                           (:binding 1 :type :texture)
-                                           (:binding 2
-                                            :type :uniform-buffer)))))
-                             vertex-buffer
-                             (keep
-                              (create
-                               device
-                               (make-buffer-descriptor
-                                :label "world Slug glyph quads"
-                                :size (* 4 (length vertex-data))
-                                :usage '(:vertex :copy-dst))))
-                             instance-buffer
-                             (keep
-                              (create
-                               device
-                               (make-buffer-descriptor
-                                :label "world Slug glyph instances"
-                                :size (* 4 (length instance-data))
-                                :usage '(:vertex :copy-dst))))
-                             pipeline
-                             (make-live-shader-pipeline
-                              :role :slug-world-text
-                              :vertex-role :slug-world-text
-                              :label "world HarfBuzz Slug text"
-                              :device device :layout layout
-                              :vertex-buffers
-                              '((:array-stride 12
-                                 :attributes
-                                 ((:shader-location 0 :offset 0
-                                   :format :float32x3)))
-                                (:array-stride 96 :step-mode :instance
-                                 :attributes
-                                 ((:shader-location 1 :offset 0
-                                   :format :float32x3)
-                                  (:shader-location 2 :offset 12
-                                   :format :float32x3)
-                                  (:shader-location 3 :offset 24
-                                   :format :float32x3)
-                                  (:shader-location 4 :offset 36
-                                   :format :float32x3)
-                                  (:shader-location 5 :offset 48
-                                   :format :float32x3)
-                                  (:shader-location 6 :offset 60
-                                   :format :float32x3)
-                                  (:shader-location 7 :offset 72
-                                   :format :float32x3)
-                                  (:shader-location 8 :offset 84
-                                   :format :float32x3))))
-                              :target-format target-format
-                              :target-blend :premultiplied-alpha
-                              :primitive '(:topology :triangle-list)
-                              :depth-stencil
-                              '(:format :depth32-float
-                                :depth-write-enabled nil
-                                :depth-compare :less)))
-                       (write-buffer vertex-buffer vertex-data)
-                       (write-buffer instance-buffer instance-data)
-                       (let ((run
-                               (make-instance
-                                'world-text-run
-                                :string string :font-pathname font-pathname
-                                :shaped-text shaped :glyphs glyphs :atlas atlas
-                                :center center
-                                :world-units-per-em world-units-per-em
-                                :vertex-data vertex-data
-                                :vertex-buffer vertex-buffer
-                                :instance-data instance-data
-                                :instance-buffer instance-buffer :layout layout
-                                :pipeline pipeline :resources resources)))
-                         (setf completed-p t)
-                         run))
-                  (unless completed-p
-                    (when pipeline
-                      (release-live-shader-pipeline pipeline))
-                    (dolist (resource resources)
-                      (ignore-errors (destroy resource)))))))))))))
+                      min-x min-y max-x max-y)))
+              (make-world-text-run-from-instances
+               device target-format string font-pathname shaped glyphs atlas
+               center world-units-per-em instance-data))))))))
 
 (defun make-world-text-frame-bind-groups (run device uniform-buffer)
   "Bind one shared glyph atlas to one drawable-frame uniform."

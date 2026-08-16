@@ -129,10 +129,16 @@ hang upright."
                              :face-tiles '(:all 9)
                              :light-emission 12
                              :surface-emission 1.2))
+(defparameter *terminal-block*
+  (make-instance 'block-kind :name :terminal
+                             :face-tiles '(:all 10)
+                             :surface-emission 0.16)
+  "The graphite display-block material used by world-native terminals.")
 
 (defparameter *placeable-block-kinds*
   (list *grass-block* *dirt-block* *stone-block* *wood-block*
-        *leaf-block* *sand-block* *snow-block* *crystal-block*))
+        *leaf-block* *sand-block* *snow-block* *crystal-block*
+        *terminal-block*))
 
 (defun placeable-block-kinds ()
   "Return the numbered material palette used by luvcraft and its tools."
@@ -149,7 +155,7 @@ kinds through this vocabulary instead of printing CLOS object identities."
         (error "No block kind is named ~S." name))))
 
 (defconstant +block-atlas-tile-size+ 16)
-(defconstant +block-atlas-tile-count+ 10)
+(defconstant +block-atlas-tile-count+ 11)
 (defconstant +block-atlas-texture-format+ :rgba8-unorm-srgb)
 
 (defun block-atlas-byte (value)
@@ -253,6 +259,27 @@ material and rebuild the atlas without touching the rest of the palette."))
      (+ 72 (round variation 3) edge)
      (+ 176 (round variation 2) facet edge)
      (+ 235 variation facet edge))))
+
+(defmethod paint-block-atlas-tile ((tile (eql 10)) x y)
+  "Terminal graphite: a quiet face with a raised per-block bezel."
+  (let* ((outer-edge
+           (if (or (zerop x) (zerop y)
+                   (= x (1- +block-atlas-tile-size+))
+                   (= y (1- +block-atlas-tile-size+)))
+               18
+               0))
+         (inner-edge
+           (if (or (= x 1) (= y 1)
+                   (= x (- +block-atlas-tile-size+ 2))
+                   (= y (- +block-atlas-tile-size+ 2)))
+               6
+               0))
+         (variation (round (block-atlas-variation x y tile) 5))
+         (bezel (+ outer-edge inner-edge)))
+    (pack-block-atlas-rgba
+     (+ 18 variation bezel)
+     (+ 25 variation bezel)
+     (+ 36 variation bezel))))
 
 (defun make-block-texture-atlas ()
   "Return the little world's horizontal RGBA8 atlas as packed pixel words."

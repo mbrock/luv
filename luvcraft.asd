@@ -21,6 +21,7 @@
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on ("luv"
+               "luv/ghostty"
                "luvcraft/world"
                "cl-dejavu"
                "sb-concurrency"
@@ -51,6 +52,7 @@
                  (:file "app")
                  (:file "streaming")
                  (:file "render")
+                 (:file "terminal-wall")
                  (:file "capture")
                  (:file "benchmark")
                  (:file "gazetteer"))))

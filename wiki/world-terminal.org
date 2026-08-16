@@ -256,34 +256,109 @@ matter, the compaction and range vocabulary developed by #34G2K8 can inform a
 shared solution rather than terminal-specific skewed lengths and forwarding
 tables.
 
-* IDEA A luvcraft block for every terminal cell
+* DONE The derived 2 by 2 block wall exposed the wrong abstraction
 :PROPERTIES:
 :ID: SX12U7
 :END:
 
-Intent: exploit the literal grid correspondence for the funniest possible
-alternate terminal projector: every visible TTY cell becomes a shallow
-luvcraft block, with its background on the block body and its Slug glyph on the
-front face.  The cursor can pulse or protrude, and a scrolling terminal becomes
-a wall of blocks changing under program control.
+Intent: test the literal grid correspondence as aggressively as possible.
+Every derived display block carried a =2 x 2= tile of terminal cells, so an
+=80 x 24= viewport became a =40 x 12= wall without losing character
+resolution.
 
-Evidence: the viewport domain #RD8AEI already supplies exactly the two discrete
-coordinates needed to place a regular block wall.  The presentation
-materialization #AI83XS supplies grapheme, width, style, and selection without
-changing Ghostty.  This can therefore be another projection of the same cells,
-beside the flat glyph and rectangle populations in #BIXI1P, rather than a fork
-of the PTY or terminal model.
+The mapping is exact and intentionally dull.  Cell =(column,row)= belongs to
+block =(floor(column/2),floor(row/2))= and quadrant
+=(mod(column,2),mod(row,2))=.  Odd viewport dimensions round the derived block
+extent upward; empty edge quadrants remain empty.  Resize replaces the
+authoritative cell domain and derives a new block extent.  It never changes
+Ghostty's cell coordinates to accommodate the scene.
 
-The blocks should be derived scene geometry, not durable edits to the authored
-voxel world.  Terminal output must not enter the save journal or become terrain
-merely because its projector looks block-shaped; #TR2JNQ keeps that distinction
-between a durable world description and transient materializations explicit.
+Evidence: the exercised =terminal-grid-domain= owns an exact row-major
+=80 x 24= fixture viewport.  Its block projector derives =40 x 12= complete
+shallow cubes, or =17,280= ordinary block vertices, and emits one Slug instance
+for every drawable fixture character.  The cubes use luvcraft's ordinary block
+pipeline and scene uniforms; the glyphs use the existing Slug atlas and live
+Slug pipeline in a second instanced draw.  Since both draws occupy world space
+and the Slug pass retains depth testing, terrain can correctly pass in front of
+the wall without either renderer knowing about the other.
 
-Done when: an optional projector turns a fixed terminal fixture into a stable
-block wall, narrow and wide cells retain their grid occupancy, foreground
-glyphs and background styles remain legible, cursor motion changes its block,
-and switching between flat and block projections leaves Ghostty, PTY flow, and
-the cell materialization untouched.
+The fixture bytes were fed through an actual owned Ghostty terminal.  The
+proof copied Ghostty's plain formatter output into the dense viewport.  That
+copy proved ownership, placement, geometry, resource release, and the 2-by-2
+projection; it did not claim styled cells, grapheme width/spacer roles, cursor
+state, or damage tracking.
+
+This is the ordinary visible Metal session after opening the overlay through
+SLY.  Snow and terrain occlude the lower wall through the shared depth buffer;
+the terminal is neither composited afterward nor pasted into a texture:
+
+[[file:images/terminal-block-wall.png]]
+
+The result is useful negative evidence.  The reduced =0.32=-unit derived
+bodies and their gaps do not belong to the authored voxel lattice, while a
+literal one-world-unit body per tile makes the display absurdly large.  The
+screenshot is therefore historical proof of an exhausted design, not visual
+evidence for the current terminal.  #7ZM22R keeps the successful Ghostty and
+Slug crossings but replaces the derived mini-block wall with real adjacent
+world blocks and one fitted surface-wide terminal grid.
+
+Done: the experiment made the scale and seam failure visible from an ordinary
+player view, and established that the glyph pass can share scene projection
+and depth.  Its block/quadrant mapping is deliberately not retained as the
+terminal architecture.
+
+* Adjacent terminal-material blocks define one unified display surface
+:PROPERTIES:
+:ID: 7ZM22R
+:END:
+
+The current implementation begins with ordinary authored voxel blocks of the
+dedicated terminal material.  When exposed faces of those blocks form a
+maximal coplanar rectangular component, that rectangle has one derived
+=terminal-surface= identity.  Its native chunk meshes remain the solid display
+body: the terminal overlay contributes only a Slug glyph population fitted
+across the whole rectangle.  Consequently adjacent block faces meet exactly
+as ordinary terrain faces do.  There are no derived bodies, inset cells, or
+decorative gaps to make the terminal foreign to the world.
+
+The font grid is independent of block count.  An =80 x 24= viewport can fit
+across an =8 x 5= block rectangle because the surface computes one physical
+width and height, applies a margin, and selects the limiting font scale.  No
+voxel owns ten columns, four rows, or any other permanent cell subdivision.
+The block rectangle gives the magic television its world identity; Ghostty's
+viewport gives its changing screen content a separate finite domain.
+
+Verified now:
+
+- the terminal material is an authored, placeable block kind with its own
+  graphite atlas tile and provisional surface emission;
+- exact row-major viewport indexing and whole-surface fitting have executable
+  tests;
+- adjacency discovery accepts exposed rectangular components and rejects a
+  rectangle after one constituent block is removed;
+- the deterministic fixture crosses an owned Ghostty terminal before its
+  characters become fitted Slug instances; and
+- dependency stamps delay invalidation until the native owner chunk meshes are
+  current, so old block geometry and old glyphs remain one last-known-good
+  visible cohort rather than tearing across a publication boundary.
+
+The present adjacency finder is intentionally a correctness scaffold, not the
+hot maintenance architecture.  It builds coordinate lists and a hash table
+while discovering a surface and rescans its boundary after relevant authored
+chunk revisions.  Opening a display and reconciling a changed dependency are
+cold enough for this proof; doing equivalent allocation or graph discovery per
+frame would be unacceptable.  The frontier vocabulary in #K3PCP3, the compact
+work representation in #RR9ODK, and the publication discipline in #QHBZJZ are
+the route toward one reusable materialized adjacency system shared with light,
+liquids, fire, redstone-like networks, and later terminal-surface maintenance.
+
+Visual acceptance remains open.  The old screenshot above does not prove this
+new geometry looks good.  A fresh visible luvcraft session should place a
+moderately sized rectangle, open the overlay, and inspect it from oblique and
+frontal angles at near, ordinary play, and long distances.  The evidence gate
+is continuous real block geometry, stable depth and orientation, legible
+surface-wide fitting, and no flicker or stale-glyph cohort while editing an
+edge block.
 
 * The terminal grid remains authoritative through Slug
 :PROPERTIES:
@@ -317,14 +392,15 @@ pipeline reuse across rows, font fallback, row/run aggregation, and measured
 edge quality.  Those are renderer iterations, not reasons to obscure the
 initial Ghostty-to-row boundary.
 
-* NEXT Draw one Ghostty row directly in the world
+* NEXT Bridge Ghostty render-state rows into the block wall
 :PROPERTIES:
 :ID: NTQ5KY
 :END:
 
-Intent: replace the formatter as the proof boundary with one world-native
-render-state row, while keeping process and input concerns out of the first
-crossing.
+Intent: replace the formatter fixture bridge in #7ZM22R with world-native
+render-state rows, while keeping process and input concerns out of the first
+crossing.  The unified surface-wide fit and native-body/Slug-overlay split
+remain projections of the resulting cell materialization.
 
 Evidence: the current binding already owns a terminal and feeds arbitrary VT
 bytes; the Nix environment owns the exact shared library.  Ghostty's pinned
@@ -334,8 +410,8 @@ depth-tested drawing, shaping, and device outline ownership.  The finite domain
 #RD8AEI, fixed presentation #AI83XS, and compact projections #BIXI1P give the
 crossing a concrete luv-shaped representation without making cells objects.
 
-Done when: a fixed styled VT fixture produces a visible Slug-rendered row on a
-world plane, including its cell backgrounds and cursor; Ghostty cells populate
+Done when: a fixed styled VT fixture produces visible Slug-rendered rows on the
+block wall, including cell backgrounds and cursor; Ghostty cells populate
 an exact domain-bound columnar materialization; a second unchanged render-state
 update performs no materialization or draw-population rebuild; changing one row
 publishes only that materialization slice even if the first compact draw policy

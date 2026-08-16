@@ -36,4 +36,5 @@
                  (:static-file "images/slug-bezier-proof.png")
                  (:static-file "images/slug-text-proof.png")
                  (:static-file "images/slug-world-text.png")
-                 (:static-file "images/slug-world-text-closeup.png")))))
+                 (:static-file "images/slug-world-text-closeup.png")
+                 (:static-file "images/terminal-block-wall.png")))))
