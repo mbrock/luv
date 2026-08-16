@@ -8,12 +8,55 @@
   ((session :initarg :session :reader widget-overlay-session)
    (frame :initarg :frame :reader widget-overlay-frame)
    (mirror :initarg :mirror :reader widget-overlay-mirror)
+   (center :initarg :center :reader widget-overlay-center)
+   (right-axis :initarg :right-axis :reader widget-overlay-right-axis)
+   (up-axis :initarg :up-axis :reader widget-overlay-up-axis)
    (render-state :initform nil :accessor widget-overlay-render-state)))
 
-(defconstant +lisp-machine-screen-scale+ 0.68)
-(defconstant +lisp-machine-screen-orbit+ 0.12)
-(defconstant +lisp-machine-screen-base-w+ 1.18)
-(defconstant +lisp-machine-screen-perspective+ 0.48)
+(defun world-device-clip-state (overlay session width height)
+  "Return center, right, and up clip vectors for OVERLAY in SESSION's camera."
+  (let* ((camera (luvcraft:luvcraft-session-camera session))
+         (uniforms (luvcraft:camera-uniform-data camera width height))
+         (camera-position (luvcraft:camera-position camera)))
+    (flet ((lane-vector (offset)
+             (vec:make-vec3
+              (aref uniforms offset)
+              (aref uniforms (+ offset 1))
+              (aref uniforms (+ offset 2))))
+           (difference (left right)
+             (vec:make-vec3
+              (- (vec:vec3-x left) (vec:vec3-x right))
+              (- (vec:vec3-y left) (vec:vec3-y right))
+              (- (vec:vec3-z left) (vec:vec3-z right)))))
+      (let ((right (lane-vector 4))
+            (up (lane-vector 8))
+            (forward (lane-vector 12))
+            (x-scale (aref uniforms 16))
+            (y-scale (aref uniforms 17))
+            (z-scale (aref uniforms 18))
+            (z-offset (aref uniforms 19)))
+        (labels ((clip-vector (vector point-p)
+                   (let* ((relative
+                            (if point-p
+                                (difference vector camera-position)
+                                vector))
+                          (view-x (vec:vec3-dot relative right))
+                          (view-y (vec:vec3-dot relative up))
+                          (view-z (vec:vec3-dot relative forward)))
+                     (list (* view-x x-scale)
+                           (- (* view-y y-scale))
+                           (+ (* view-z z-scale)
+                              (if point-p z-offset 0.0))
+                           view-z))))
+          (make-array
+           12 :element-type 'single-float
+           :initial-contents
+           (mapcar
+            (lambda (value) (coerce value 'single-float))
+            (append
+             (clip-vector (widget-overlay-center overlay) t)
+             (clip-vector (widget-overlay-right-axis overlay) nil)
+             (clip-vector (widget-overlay-up-axis overlay) nil)))))))))
 
 (defmethod present-raster-mirror-texture
     ((mirror luv-raster-mirror) context texture
@@ -29,19 +72,11 @@
     (when source
       (ensure-spinning-compositor-resources
        overlay (mirror-context mirror) source :depth-format :depth32-float)
-      (let* ((source-size (luv:gpu-texture-size source))
-             (viewport-size
+      (let* ((viewport-size
                (luv:canvas-extent (luvcraft::luvcraft-session-context session)))
-             (aspect-scale
-               (/ (/ (first source-size) (second source-size))
-                  (/ (first viewport-size) (second viewport-size))))
              (state
-               (spinning-compositor-state
-                overlay
-                (float (/ (get-internal-real-time)
-                          internal-time-units-per-second)
-                       1.0d0)
-                :aspect-scale aspect-scale))
+               (world-device-clip-state
+                overlay session (first viewport-size) (second viewport-size)))
              (frame-state
               (ensure-spinning-compositor-frame-state
                overlay surface-texture)))
@@ -61,18 +96,17 @@
   overlay)
 
 (defun projected-screen-vertex (state width height u v)
-  (let* ((sine (aref state 0))
-         (cosine (aref state 1))
-         (aspect (aref state 2))
-         (center-x (- (* 2.0 u) 1.0))
+  (let* ((center-x (- (* 2.0 u) 1.0))
          (center-y (- (* 2.0 v) 1.0))
-         (clip-x
-           (+ (* center-x +lisp-machine-screen-scale+ aspect cosine)
-              (* sine +lisp-machine-screen-orbit+)))
-         (clip-y (* center-y +lisp-machine-screen-scale+))
-         (clip-w
-           (+ +lisp-machine-screen-base-w+
-              (* center-x sine +lisp-machine-screen-perspective+))))
+         (clip-x (+ (aref state 0)
+                    (* center-x (aref state 4))
+                    (* center-y (aref state 8))))
+         (clip-y (+ (aref state 1)
+                    (* center-x (aref state 5))
+                    (* center-y (aref state 9))))
+         (clip-w (+ (aref state 3)
+                    (* center-x (aref state 7))
+                    (* center-y (aref state 11)))))
     (list (* width 0.5 (+ 1.0 (/ clip-x clip-w)))
           (* height 0.5 (+ 1.0 (/ clip-y clip-w)))
           clip-w u v)))
@@ -116,7 +150,12 @@
 (defun luvcraft-widget-texture-coordinate (overlay x y)
   "Project canvas X,Y through OVERLAY's last rendered screen quadrilateral."
   (let ((state (widget-overlay-render-state overlay)))
-    (when state
+    (when (and state
+               (loop for u in '(0.0 1.0 0.0 1.0)
+                     for v in '(0.0 0.0 1.0 1.0)
+                     always (plusp
+                             (third
+                              (projected-screen-vertex state 1 1 u v)))))
       (destructuring-bind (width height)
           (luv:canvas-extent
            (luvcraft::luvcraft-session-context
@@ -188,9 +227,20 @@
       (destroy-frame frame)))
   overlay)
 
+(defun add-scaled-vector (origin &rest vector-scales)
+  (let ((x (vec:vec3-x origin))
+        (y (vec:vec3-y origin))
+        (z (vec:vec3-z origin)))
+    (loop for (vector scale) on vector-scales by #'cddr
+          do (incf x (* (vec:vec3-x vector) scale))
+             (incf y (* (vec:vec3-y vector) scale))
+             (incf z (* (vec:vec3-z vector) scale)))
+    (vec:make-vec3 x y z)))
+
 (defun open-luvcraft-widget-lab
-    (session &key (title "McCLIM gadget inside luvcraft") (speed 0.08))
-  "Create a real McCLIM gadget frame sampled by SESSION's color pass."
+    (session &key (title "McCLIM gadget inside luvcraft")
+                  (distance 4.0) (width 1.8) (right-offset 2.8))
+  "Create a McCLIM terminal fixed in front of SESSION's current world camera."
   (let* ((frame
            (open-widget-lab
             :title title
@@ -198,13 +248,26 @@
             :context (luvcraft::luvcraft-session-context session)
             :device (luvcraft::luvcraft-session-device session)))
          (mirror (sheet-direct-mirror (frame-top-level-sheet frame)))
-         (overlay
-           (make-instance 'luvcraft-widget-overlay
-                          :session session :frame frame :mirror mirror
-                          :speed speed)))
-    (setf (mirror-compositor mirror) overlay)
-    (luvcraft:add-luvcraft-overlay session overlay)
-    overlay))
+         (source-size (luv:gpu-texture-size (mirror-texture mirror)))
+         (aspect (/ (first source-size) (second source-size)))
+         (camera (luvcraft:luvcraft-session-camera session))
+         (camera-position (luvcraft:camera-position camera)))
+    (multiple-value-bind (right ignored-up forward)
+        (luvcraft:camera-basis camera)
+      (declare (ignore ignored-up))
+      (let ((overlay
+              (make-instance
+               'luvcraft-widget-overlay
+               :session session :frame frame :mirror mirror
+               :center
+               (add-scaled-vector camera-position
+                                  forward distance right right-offset)
+               :right-axis (vec:vec3-scale right (/ width 2.0))
+               :up-axis
+               (vec:make-vec3 0.0 (- (/ width aspect 2.0)) 0.0))))
+        (setf (mirror-compositor mirror) overlay)
+        (luvcraft:add-luvcraft-overlay session overlay)
+        overlay))))
 
 (defun close-luvcraft-widget-lab (overlay)
   "Remove and release an OPEN-LUVCRAFT-WIDGET-LAB overlay."

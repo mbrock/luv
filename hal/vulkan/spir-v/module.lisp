@@ -307,10 +307,9 @@ module share a single import."))
    (gradient-compute-module :width width :height height)))
 
 (defun spinning-texture-vertex-module ()
-  "Make a vertex shader for a vertexless, perspective-spinning texture quad.
+  "Make a vertex shader for a texture quad with a homogeneous clip transform.
 
-Binding 2 is a uniform block containing sine, cosine, and the horizontal
-aspect correction needed to preserve the source texture's shape."
+Binding 2 contains the clip-space center, right axis, and down axis."
   (make-instance
    'spir-v-module
    :entry-points
@@ -324,6 +323,8 @@ aspect correction needed to preserve the source texture's shape."
      (decorate %uv-output location 0)
      (decorate %spin-state-block block)
      (member-decorate %spin-state-block 0 offset 0)
+     (member-decorate %spin-state-block 1 offset 16)
+     (member-decorate %spin-state-block 2 offset 32)
      (decorate %spin-state-buffer descriptor-set 0)
      (decorate %spin-state-buffer binding 2))
    :global-declarations
@@ -332,7 +333,7 @@ aspect correction needed to preserve the source texture's shape."
      (%float type-float 32)
      (%vec2 type-vector %float 2)
      (%vec4 type-vector %float 4)
-     (%spin-state-block type-struct %vec4)
+     (%spin-state-block type-struct %vec4 %vec4 %vec4)
      (%vertex-index-pointer type-pointer input %uint)
      (%position-pointer type-pointer output %vec4)
      (%uv-output-pointer type-pointer output %vec2)
@@ -341,15 +342,9 @@ aspect correction needed to preserve the source texture's shape."
      (%function-type type-function %void)
      (%zero-u constant %uint 0)
      (%one-u constant %uint 1)
-     (%zero constant %float 0.0)
+     (%two-u constant %uint 2)
      (%one constant %float 1.0)
      (%two constant %float 2.0)
-     (%scale constant %float 0.68)
-     (%orbit constant %float 0.12)
-     (%depth-base constant %float 0.45)
-     (%depth-scale constant %float 0.22)
-     (%base-w constant %float 1.18)
-     (%perspective-scale constant %float 0.48)
      (%vertex-index variable %vertex-index-pointer input)
      (%position variable %position-pointer output)
      (%uv-output variable %uv-output-pointer output)
@@ -372,13 +367,18 @@ aspect correction needed to preserve the source texture's shape."
          (%yf convert-u-to-f %float %y-bit)
          (%uv composite-construct %vec2 %xf %yf)
          (store %uv-output %uv)
-         (%state-pointer access-chain
+         (%center-pointer access-chain
                          %spin-state-value-pointer
                          %spin-state-buffer %zero-u)
-         (%state load %vec4 %state-pointer)
-         (%sine composite-extract %float %state 0)
-         (%cosine composite-extract %float %state 1)
-         (%aspect composite-extract %float %state 2)
+         (%right-pointer access-chain
+                         %spin-state-value-pointer
+                         %spin-state-buffer %one-u)
+         (%up-pointer access-chain
+                         %spin-state-value-pointer
+                         %spin-state-buffer %two-u)
+         (%center load %vec4 %center-pointer)
+         (%right load %vec4 %right-pointer)
+         (%up load %vec4 %up-pointer)
          (%x-twice f-mul %float %xf %two)
          (%center-x f-sub %float %x-twice %one)
          (%y-twice f-mul %float %yf %two)
@@ -386,19 +386,10 @@ aspect correction needed to preserve the source texture's shape."
          ;; Keep UV zero at that same top edge so the uploaded CLIM raster
          ;; remains upright.
          (%center-y f-sub %float %y-twice %one)
-         (%scaled-x f-mul %float %center-x %scale)
-         (%aspect-x f-mul %float %scaled-x %aspect)
-         (%rotated-x f-mul %float %aspect-x %cosine)
-         (%orbit-x f-mul %float %sine %orbit)
-         (%clip-x f-add %float %rotated-x %orbit-x)
-         (%clip-y f-mul %float %center-y %scale)
-         (%depth-x f-mul %float %center-x %sine)
-         (%depth-offset f-mul %float %depth-x %depth-scale)
-         (%clip-z f-add %float %depth-base %depth-offset)
-         (%perspective f-mul %float %depth-x %perspective-scale)
-         (%clip-w f-add %float %base-w %perspective)
-         (%clip-position composite-construct
-                         %vec4 %clip-x %clip-y %clip-z %clip-w)
+         (%right-offset vector-times-scalar %vec4 %right %center-x)
+         (%up-offset vector-times-scalar %vec4 %up %center-y)
+         (%center-right f-add %vec4 %center %right-offset)
+         (%clip-position f-add %vec4 %center-right %up-offset)
          (store %position %clip-position)
          (return))))))))
 
@@ -417,6 +408,8 @@ aspect correction needed to preserve the source texture's shape."
      (decorate %color-output location 0)
      (decorate %spin-state-block block)
      (member-decorate %spin-state-block 0 offset 0)
+     (member-decorate %spin-state-block 1 offset 16)
+     (member-decorate %spin-state-block 2 offset 32)
      (decorate %spin-state-buffer descriptor-set 0)
      (decorate %spin-state-buffer binding 2))
    :global-declarations
@@ -425,7 +418,7 @@ aspect correction needed to preserve the source texture's shape."
      (%uint type-int 32 0)
      (%float type-float 32)
      (%vec4 type-vector %float 4)
-     (%spin-state-block type-struct %vec4)
+     (%spin-state-block type-struct %vec4 %vec4 %vec4)
      (%vertex-index-pointer type-pointer input %uint)
      (%position-pointer type-pointer output %vec4)
      (%color-output-pointer type-pointer output %vec4)
@@ -439,20 +432,15 @@ aspect correction needed to preserve the source texture's shape."
      (%zero constant %float 0.0)
      (%one constant %float 1.0)
      (%two constant %float 2.0)
-     (%shadow-x constant %float 0.82)
-     (%shadow-y constant %float 0.86)
-     (%body-x constant %float 0.80)
-     (%body-y constant %float 0.84)
-     (%bezel-x constant %float 0.73)
-     (%bezel-y constant %float 0.74)
-     (%shadow-offset-x constant %float 0.035)
-     (%shadow-offset-y constant %float 0.055)
-     (%body-offset-y constant %float 0.012)
-     (%orbit constant %float 0.12)
-     (%depth-base constant %float 0.46)
-     (%depth-scale constant %float 0.22)
-     (%base-w constant %float 1.18)
-     (%perspective-scale constant %float 0.48)
+     (%shadow-x constant %float 1.2058824)
+     (%shadow-y constant %float 1.2647059)
+     (%body-x constant %float 1.1764706)
+     (%body-y constant %float 1.2352941)
+     (%bezel-x constant %float 1.0735294)
+     (%bezel-y constant %float 1.0882353)
+     (%shadow-offset-x constant %float 0.05147059)
+     (%shadow-offset-y constant %float 0.08088235)
+     (%body-offset-y constant %float 0.01764706)
      (%shadow-r constant %float 0.035)
      (%shadow-g constant %float 0.045)
      (%shadow-b constant %float 0.043)
@@ -506,32 +494,30 @@ aspect correction needed to preserve the source texture's shape."
          (%color composite-construct
                  %vec4 %color-r %color-g %color-b %one)
          (store %color-output %color)
-         (%state-pointer access-chain
+         (%center-pointer access-chain
                          %spin-state-value-pointer
                          %spin-state-buffer %zero-u)
-         (%state load %vec4 %state-pointer)
-         (%sine composite-extract %float %state 0)
-         (%cosine composite-extract %float %state 1)
-         (%aspect composite-extract %float %state 2)
+         (%right-pointer access-chain
+                         %spin-state-value-pointer
+                         %spin-state-buffer %one-u)
+         (%up-pointer access-chain
+                         %spin-state-value-pointer
+                         %spin-state-buffer %two-u)
+         (%center load %vec4 %center-pointer)
+         (%right load %vec4 %right-pointer)
+         (%up load %vec4 %up-pointer)
          (%x-twice f-mul %float %xf %two)
          (%center-x f-sub %float %x-twice %one)
          (%y-twice f-mul %float %yf %two)
          (%center-y f-sub %float %y-twice %one)
          (%scaled-x f-mul %float %center-x %scale-x)
-         (%aspect-x f-mul %float %scaled-x %aspect)
-         (%rotated-x f-mul %float %aspect-x %cosine)
-         (%orbit-x f-mul %float %sine %orbit)
-         (%orbited-x f-add %float %rotated-x %orbit-x)
-         (%clip-x f-add %float %orbited-x %offset-x)
+         (%layer-x f-add %float %scaled-x %offset-x)
          (%scaled-y f-mul %float %center-y %scale-y)
-         (%clip-y f-add %float %scaled-y %offset-y)
-         (%depth-x f-mul %float %center-x %sine)
-         (%depth-offset f-mul %float %depth-x %depth-scale)
-         (%clip-z f-add %float %depth-base %depth-offset)
-         (%perspective f-mul %float %depth-x %perspective-scale)
-         (%clip-w f-add %float %base-w %perspective)
-         (%clip-position composite-construct
-                         %vec4 %clip-x %clip-y %clip-z %clip-w)
+         (%layer-y f-add %float %scaled-y %offset-y)
+         (%right-offset vector-times-scalar %vec4 %right %layer-x)
+         (%up-offset vector-times-scalar %vec4 %up %layer-y)
+         (%center-right f-add %vec4 %center %right-offset)
+         (%clip-position f-add %vec4 %center-right %up-offset)
          (store %position %clip-position)
          (return))))))))
 

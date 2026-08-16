@@ -193,7 +193,7 @@
                         (when depth-format
                           `(:format ,depth-format
                             :depth-write-enabled nil
-                            :depth-compare :always))
+                            :depth-compare :less))
                         :primitive '(:topology :triangle-strip))))
                     (chassis-pipeline
                       (create-resource
@@ -209,7 +209,7 @@
                         (when depth-format
                           `(:format ,depth-format
                             :depth-write-enabled nil
-                            :depth-compare :always))
+                            :depth-compare :less))
                         :primitive '(:topology :triangle-strip)))))
                  (setf (spinning-compositor-device compositor) device
                        (spinning-compositor-source compositor) source
@@ -252,8 +252,8 @@
                      (luv:create
                       device
                       (luv:make-buffer-descriptor
-                       :label "spinning McCLIM uniform state"
-                       :size 16 :usage '(:uniform)))
+                       :label "McCLIM quad transform"
+                       :size 48 :usage '(:uniform)))
                      bind-group
                      (luv:create
                       device
@@ -288,12 +288,16 @@
                   (- timestamp
                      (spinning-compositor-start-time compositor)))))
     (make-array
-     4 :element-type 'single-float
+     12 :element-type 'single-float
      :initial-contents
-     (list (coerce (sin phase) 'single-float)
-           (coerce (cos phase) 'single-float)
-           (coerce aspect-scale 'single-float)
-           0.0f0))))
+     (let ((sine (sin phase))
+           (cosine (cos phase)))
+       (mapcar
+        (lambda (value) (coerce value 'single-float))
+        (list (* sine 0.12) 0.0 0.45 1.18
+              (* 0.68 aspect-scale cosine) 0.0
+              (* 0.22 sine) (* 0.48 sine)
+              0.0 0.68 0.0 0.0))))))
 
 (defun render-spinning-mirror-frame (mirror timestamp)
   (let ((context (mirror-context mirror))

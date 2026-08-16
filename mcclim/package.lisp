@@ -14,7 +14,8 @@
 
 (defpackage #:mcluv
   (:use #:clim-lisp #:clim #:clime #:climb)
-  (:local-nicknames (#:luv #:luv))
+  (:local-nicknames (#:luv #:luv)
+                    (#:vec #:luv.arithmetic.lisp.vec3))
   (:export #:luv-port
            #:luv-raster-port
            #:luv-frame-manager
