@@ -684,9 +684,10 @@ LOCAL has dynamic extent and must be copied before FUNCTION retains it."
 (defparameter *voxel-light-solver* :legacy
   "The from-scratch voxel-light program selected for future captures.
 
-:LEGACY is the established oracle.  :FRONTIER is the greenfield frontier
-program; both produce the same LIGHT-REGION materialization so they can be
-switched and compared without changing publication or consumers. #X7Q90E")
+:LEGACY is the established oracle.  :FRONTIER is the handwritten lowering of
+the greenfield frontier program and :COMPILED its compiled realization; all
+three produce the same LIGHT-REGION materialization so they can be switched
+and compared without changing publication or consumers. #X7Q90E #PJY6E1")
 
 (defgeneric solve-light-region-using
     (solver region &key &allow-other-keys)

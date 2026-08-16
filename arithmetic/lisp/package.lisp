@@ -14,6 +14,9 @@
            #:lisp-dot
            #:lisp-normalize
            #:lisp-arithmetic-operator-function
+           #:*lisp-arithmetic-lowering*
+           #:lisp-scalar-operator-form
+           #:define-lisp-scalar-operator
            #:lower-lisp-arithmetic-expression
            #:lower-arithmetic-function
            #:compile-arithmetic-function

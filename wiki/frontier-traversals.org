@@ -56,12 +56,16 @@ publishing either candidate:
  (luvcraft:luvcraft-session-world luvcraft:*session*))
 #+end_src
 
-#53Q1II states the next paradigm explicitly: these are compiled sparse
-kernels, formed by composing a frontier/control IR with the quantity-checked
+#53Q1II states the paradigm explicitly: these are compiled sparse kernels,
+formed by composing a frontier/control IR with the quantity-checked
 arithmetic IR and lowering the result to a chosen scalar, SIMD, or GPU
-execution plan.  #PJY6E1 is the immediate handoff: compile the present
-monotone light program to closed scalar Lisp while keeping both existing
-solvers as exact oracles.
+execution plan.  #PJY6E1 records the first real compiler path: the same
+=voxel-light-addition= definition now also carries its local law, and
+=compile-frontier-program= closes it over the sky or block field into one
+scalar loop that agrees exactly with both older solvers and runs faster than
+either.  #T2G95K describes the kernel language, #FE0O5R what a family
+contributes, #716UN6 how bindings reach storage, and #55IRJO the terminal
+wall as the second compiled client.
 
 The old solver remains present as oracle and recovery path.  The new program
 begins deliberately with the simpler addition fixpoint; incremental
@@ -660,6 +664,145 @@ source provenance for inspection.  CLOS remains the open control plane for
 definitions and backend protocols, while generated code deliberately contains
 no generic dispatch at the per-site or per-relation grain.
 
+* The kernel language names fields, constants, predicates, and laws
+:PROPERTIES:
+:ID: T2G95K
+:END:
+
+A frontier program is now written as its own semantic source rather than as
+a name attached to a handwritten loop.  Voxel light reads:
+
+#+begin_src lisp
+(frontiers:define-frontier-program voxel-light-addition
+  :family :monotone-max-fixpoint
+  :frontier-layout :brightest-first-buckets
+  :neighborhood :voxel-face-relations
+  :materialization :sky-and-block-light-columns
+  :fields ((level :relaxed t) opacity)
+  :constants (direct-direction)
+  :predicates ((direct (direction= direct-direction)))
+  :transfer (- (level source)
+               (as-field-quantity level
+                 (luvcraft.arithmetic:light-propagation-loss
+                  (opacity target) direct))))
+#+end_src
+
+The clauses divide along the two languages of #53Q1II.  =:fields= names
+roles the program reads or writes at =source= and =target= without saying
+where they live.  =:constants= are values supplied when a realization runs;
+=:predicates= are raw truth values about the exposed relation, such as
+whether its direction is the constant =direct-direction= or whether it
+crosses a chunk.  =:transfer=, =:admission=, and =:priority= are arithmetic
+expressions over =(FIELD ROLE)= reads, predicates, and constants, parsed by
+the arithmetic frontend and quantity checked against the /bound/ fields, so
+the one transfer law is checked once as sky propagation levels and once as
+block propagation levels.  =as-field-quantity= is the explicit boundary at
+which attenuation steps become propagation-level differences; the checker
+refuses the subtraction without it.  =light-propagation-loss= is an ordinary
+=define-lisp-arithmetic-function=: the seeds call it as a function, while the
+kernel inlines its checked definition.
+
+The realization retains everything the reader could want: the parsed
+expressions with their quantity specifications, the emitted =lambda= forms,
+and the compiled functions.  =frontier-realization-drain-form= prints the
+whole loop, and the light tests assert that it contains no arithmetic
+dispatch and no =funcall=.  The reserved words of the language--=source=,
+=target=, =materialization=, =offset=, =value=, =window=, =crossing=,
+=direction==--are recognized by name so programs and bindings can be written
+in their client packages.
+
+* Families own admission, commit, and priority
+:PROPERTIES:
+:ID: FE0O5R
+:END:
+
+The =:family= clause is semantic, not a label.  #DURBKN's dynamics become
+compiler knowledge:
+
+| Family | Requires | Admits a target when | Commits | Schedules at |
+|-
+| =:monotone-max-fixpoint= | one =:relaxed= field and a =:transfer= | the transfer exceeds the field's value | the transfer into the field | the transfer, or a stated =:priority= |
+| =:discover-once= | one =:memo= field and an =:admission= | the memo is clear and the admission holds | the memo | 0, or a stated =:priority= |
+
+A definition is checked against its family when it is defined, so a
+monotone program without a relaxed field fails before any realization.  This
+is why the light program states only its transfer, and the terminal program
+only its admission: strict improvement, brightest-first scheduling, and
+visit-once memoization are what those families /mean/.  Further families
+(invalidate-and-rebuild, A*-style external cost) add methods on
+=frontier-family-law-forms= without touching either client.
+
+* Bindings close a program over storage
+:PROPERTIES:
+:ID: 716UN6
+:END:
+
+=compile-frontier-program= takes the definition, one =frontier-field-binding=
+per role, and a site-domain template.  A binding names the represented-value
+declaration that gives the field its quantity and Lisp type (for light, the
+=:sky-light= voxel field definition and the =light-opacity= slot
+declaration), the lanes it borrows once per materialization, and read and
+write templates over those lanes:
+
+#+begin_src lisp
+(frontiers:make-frontier-field-binding 'opacity
+  :declaration (represented-block-slot-declaration 'light-opacity)
+  :lanes '((losses (light-region-entry-opacity-lut materialization)
+                   :type (simple-array (unsigned-byte 8) (*)))
+           (indices (light-region-entry-indices materialization)
+                    :type (simple-array (unsigned-byte 16) (*))))
+  :read '(aref losses (aref indices offset)))
+#+end_src
+
+The emitted loop binds the raw bucket vectors and counters once, borrows a
+popped source's lanes and reads its field values once per pop, and at each
+relation either reuses those lanes (a local step) or borrows the crossing
+materialization's (an =if crossing=).  Field values are read into declared
+variables, so the inlined law is fixnum arithmetic over =(unsigned-byte 8)=
+reads.  A =:lazy= binding is instead read where the law mentions it, which
+lets a short-circuiting admission skip an expensive probe.  Nothing per
+relation is generic or allocated; the only allocation left in a warmed drain
+is the window's coordinate key at chunk crossings (#L84JCX), and a test
+bounds it by the crossing count.
+
+The brightest-first layout takes its bucket count from the relaxed field's
+legal values, so the frontier's priority meaning is the field definition
+itself.  Realizations are cached per bound field and invalidated by the
+definition's revision, so redefining the program in a running image
+recompiles on next use.
+
+* Terminal walls are the second compiled client
+:PROPERTIES:
+:ID: 55IRJO
+:END:
+
+#K3PCP3 asked for terminal discovery as a deliberately simpler client.  It
+now is one program:
+
+#+begin_src lisp
+(frontiers:define-frontier-program terminal-surface-discovery
+  :family :discover-once
+  :frontier-layout :lifo-stack
+  :neighborhood (:voxel-relations coplanar-directions)
+  :materialization :block-chunks
+  :fields ((visited :memo t) terminal exposed)
+  :constants (material outward absent-neighbor-policy coplanar-directions memo)
+  :admission (and (terminal target) (exposed target))
+  :retain-admissions t)
+#+end_src
+
+Its window is the block world itself, whose chunks are the materializations
+and whose =locate-chunk-window-site= continues a step across a seam.  The
+memo is a per-chunk bit vector owned by one discovery's table; =terminal= is
+an =eq= against the constant material through the chunk's content column;
+=exposed= is a lazy probe of the outward neighbour.  Because the program
+retains admissions, the execution hands back the component as one packed
+buffer of chunk and offset, and =find-terminal-surface= folds that into
+projections and a rectangle test.  The old hash-of-coordinate-lists walk is
+gone; the earlier expectations (rectangle, L-shape, covered, wrong material)
+and a seam-straddling rectangle whose retained component is exactly its
+eighteen blocks are the tests.
+
 * The shared questions are now concrete
 :PROPERTIES:
 :ID: 7U572V
@@ -827,7 +970,7 @@ verdict on the language: both programs visited the same sites and produced
 identical fields, while the new semantic boundaries made their physical cost
 directly comparable.
 
-* NEXT Compile the monotone light kernel to scalar Lisp
+* DONE Compile the monotone light kernel to scalar Lisp
 :PROPERTIES:
 :ID: PJY6E1
 :END:
@@ -839,20 +982,50 @@ program definition drive a scalar execution plan; and emit one closed Lisp
 loop over bound raw storage.  Keep the existing handwritten frontier solver
 and legacy solver unchanged as two independent oracles.
 
-Evidence: the current declaration records =:brightest-first-buckets= but does
-not select or construct that layout, the execution macro exposes its lowered
-temporaries as a dizzying source API, and the hot bucket path still contains
-CLOS accessor calls.  The arithmetic frontend already produces inspectable,
-quantity-checked definitions and ordinary compiled Lisp realizations, while
-the light fields already retain distinct sky and block quantity declarations.
+Evidence: =voxel-light-addition= now carries its fields, constants,
+predicates, and transfer (#T2G95K); =compile-frontier-program= (#716UN6)
+realizes it once over the sky field and once over the block field, and
+=solve-light-region-using :compiled= drives both.  On the three-chunk proof
+world the compiled solver produces the legacy oracle's exact sky and block
+arrays with the same 12,458 visits, and its executions report the same
+visits, relations, and crossings as the handwritten frontier lowering.  On
+fifteen alternating solves of the nine-chunk little world all three programs
+made 30,534 visits; medians were 22.9 ms for the legacy solver, 28.0 ms for
+the handwritten frontier program, and 20.3 ms for the compiled kernel, with
+1.1 MiB allocated by each.  A batch of forty captures took 920, 1150, and
+813 ms respectively.  The emitted form is inspectable and inlines the
+checked =light-propagation-loss= law as ordinary fixnum arithmetic; a
+warmed drain over the proof world's 68,000 relations allocates only the
+crossing lookups.  The one supporting arithmetic-language change was a scalar
+lowering mode plus logical =and=, =or=, and =not=.
 
 Done when: one inspectable source definition can be recompiled in the live
 image; its generated scalar realization contains no per-site generic dispatch
 or allocation; its sky and block fields and visit counts agree exactly with
 both current oracles; its emitted form and compiler output are inspectable;
-and Tracy attributes any remaining cost at the same semantic zones.  SIMD,
-GPU lowering, invalidation, and a final surface syntax are explicitly outside
-this first proof.
+and Tracy attributes any remaining cost at the same semantic zones.  All of
+these hold; SIMD, GPU lowering, invalidation, and a final surface syntax
+remain outside this proof.
+
+* NEXT Compile the sky seeds as boundary transfers
+:PROPERTIES:
+:ID: 581ZQP
+:END:
+
+Intent: let the realization admit a virtual open-sky source through the
+program's own transfer law, so seeding stops restating the loss arithmetic
+in client code and a boundary is just a relation whose source is not a site.
+
+Evidence: =seed-compiled-sky-boundaries= computes =15 - loss= by calling the
+=light-propagation-loss= function and joins the value through the admit
+entry, while emitters already seed by joining a value.  The admit entry
+exists because the compiler can tell which laws need a source; a
+=relate= entry taking source field values and a direction is the same
+emission with the source role bound to arguments.
+
+Done when: sky seeding calls a compiled entry with the source level and the
+inward direction, the transfer law appears once in the program, and the
+compiled solver's fields and visits are unchanged.
 
 * TODO Give frontier light its own invalidation program
 :PROPERTIES:

@@ -592,6 +592,53 @@
         (ok (null split))
         (ok (eq split-status :non-rectangular))))))
 
+(deftest terminal-discovery-is-a-compiled-discover-once-frontier-program
+  (let ((definition
+          (luvcraft.frontier:frontier-program-definition-for
+           'luvcraft::terminal-surface-discovery))
+        (realization (luvcraft::terminal-discovery-realization)))
+    (ok (eq :discover-once
+            (luvcraft.frontier:frontier-program-definition-family definition)))
+    (ok (luvcraft.frontier:frontier-program-definition-retain-admissions-p
+         definition))
+    (ok (luvcraft.frontier:frontier-realization-current-p realization))
+    (ok (functionp
+         (luvcraft.frontier:frontier-realization-drain-function realization)))
+    (ok (functionp
+         (luvcraft.frontier:frontier-realization-admit-function realization))))
+  ;; A rectangle straddling a chunk seam is discovered as one component whose
+  ;; retained admitted sites are exactly its blocks, without any coordinate
+  ;; objects retained per member.
+  (let ((world (make-block-world :chunk-width 16
+                                 :chunk-height 16
+                                 :chunk-depth 16)))
+    (ensure-world-chunk world 0 0 0)
+    (ensure-world-chunk world 1 0 0)
+    (place-terminal-block-rectangle world 13 3 4 :back 6 3)
+    (multiple-value-bind (execution status)
+        (luvcraft::discover-terminal-component
+         world 15 4 4 :back luvcraft:*terminal-block* :air)
+      (ok (eq status :component))
+      (ok (= 18 (luvcraft.frontier:frontier-execution-visits execution)))
+      (ok (= 18 (luvcraft.frontier:frontier-site-buffer-length
+                 (luvcraft.frontier:frontier-execution-admitted-sites
+                  execution))))
+      (ok (plusp (luvcraft.frontier:frontier-execution-crossings execution)))
+      ;; Every popped site exposes its four coplanar relations.
+      (ok (= (* 4 18)
+             (luvcraft.frontier:frontier-execution-relations execution))))
+    (multiple-value-bind (surface status)
+        (find-terminal-surface world 15 4 4 :back)
+      (ok (eq status :rectangle))
+      (ok (= 6 (terminal-surface-width surface)))
+      (ok (= 3 (terminal-surface-height surface)))
+      (ok (= 13 (world-coordinate-x (terminal-surface-origin surface)))))
+    ;; A covered seed and a wrong material report their own statuses.
+    (setf (world-block-at world 15 4 3) luvcraft::*stone-block*)
+    (ok (eq :covered (nth-value 1 (find-terminal-surface world 15 4 4 :back))))
+    (ok (eq :not-terminal
+            (nth-value 1 (find-terminal-surface world 15 4 3 :back))))))
+
 (deftest terminal-grid-fits-the-unified-surface-not-individual-blocks
   (let* ((world (make-block-world :chunk-width 16
                                   :chunk-height 16

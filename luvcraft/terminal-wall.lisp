@@ -210,16 +210,6 @@
    (+ (world-coordinate-z coordinate)
       (* amount (voxel-direction-dz direction)))))
 
-(defun terminal-coordinate-key (coordinate)
-  (list (world-coordinate-x coordinate)
-        (world-coordinate-y coordinate)
-        (world-coordinate-z coordinate)))
-
-(defun terminal-coordinate-projection (coordinate direction)
-  (+ (* (world-coordinate-x coordinate) (voxel-direction-dx direction))
-     (* (world-coordinate-y coordinate) (voxel-direction-dy direction))
-     (* (world-coordinate-z coordinate) (voxel-direction-dz direction))))
-
 (defun terminal-absent-neighbor-solid-p (policy coordinate)
   (ecase policy
     (:air nil)
@@ -248,6 +238,148 @@
                 (not (terminal-absent-neighbor-solid-p
                       absent-neighbor-policy neighbor)))))))))
 
+;;; Discovery is a discover-once frontier program (#K3PCP3): starting from
+;;; one exposed terminal face, admit coplanar neighbours which are the same
+;;; material and exposed, mark each once, and retain the admitted component.
+;;; The compiled realization walks chunk offsets through the world's chunk
+;;; window; no coordinate objects, hash keys, or conses appear per site.
+
+(frontiers:define-frontier-program terminal-surface-discovery
+  :family :discover-once
+  :frontier-layout :lifo-stack
+  :neighborhood (:voxel-relations coplanar-directions)
+  :materialization :block-chunks
+  :fields ((visited :memo t) terminal exposed)
+  :constants (material outward absent-neighbor-policy coplanar-directions memo)
+  :admission (and (terminal target) (exposed target))
+  :retain-admissions t)
+
+(defun terminal-discovery-visited-lane (memo chunk)
+  "The per-chunk visited bits owned by one discovery's MEMO table."
+  (or (gethash chunk memo)
+      (setf (gethash chunk memo)
+            (make-array (chunk-domain-cardinality (block-chunk-domain chunk))
+                        :element-type 'bit :initial-element 0))))
+
+(declaim (inline terminal-site-exposed-p))
+(defun terminal-site-exposed-p (window chunk offset outward policy)
+  "Whether the OUTWARD neighbour of CHUNK/OFFSET leaves that face visible."
+  (let ((domain (block-chunk-domain chunk)))
+    (multiple-value-bind (local-x local-y local-z)
+        (chunk-domain-local-components domain offset)
+      (multiple-value-bind (world-x world-y world-z)
+          (chunk-domain-world-components domain local-x local-y local-z)
+        (multiple-value-bind (neighbor neighbor-offset availability)
+            (locate-chunk-window-site
+             window
+             (+ world-x (voxel-direction-dx outward))
+             (+ world-y (voxel-direction-dy outward))
+             (+ world-z (voxel-direction-dz outward)))
+          (ecase availability
+            (:available
+             (not (block-solid-p
+                   (block-content-at-offset
+                    (block-chunk-content neighbor) neighbor-offset))))
+            (:unavailable
+             (ecase policy
+               (:air t)
+               (:solid nil)
+               (:error
+                (error "Terminal surface reached absent terrain at ~S."
+                       (make-world-coordinate
+                        (+ world-x (voxel-direction-dx outward))
+                        (+ world-y (voxel-direction-dy outward))
+                        (+ world-z (voxel-direction-dz outward)))))))))))))
+
+(defun terminal-discovery-bindings ()
+  (list
+   (frontiers:make-frontier-field-binding
+    'visited
+    :lanes '((bits (terminal-discovery-visited-lane memo materialization)
+                   :type simple-bit-vector))
+    :read '(= 1 (sbit bits offset))
+    :write '(setf (sbit bits offset) 1))
+   (frontiers:make-frontier-field-binding
+    'terminal
+    :lanes '((content (block-chunk-content materialization)))
+    :read '(eq (block-content-at-offset content offset) material))
+   ;; Exposure probes the outward neighbour through the window; it is only
+   ;; worth asking once the site is terminal material, so it reads lazily.
+   (frontiers:make-frontier-field-binding
+    'exposed
+    :read '(terminal-site-exposed-p
+            window materialization offset outward absent-neighbor-policy)
+    :lazy t)))
+
+(defvar *terminal-discovery-realization* nil)
+
+(defun terminal-discovery-realization ()
+  (if (and *terminal-discovery-realization*
+           (frontiers:frontier-realization-current-p
+            *terminal-discovery-realization*))
+      *terminal-discovery-realization*
+      (setf *terminal-discovery-realization*
+            (frontiers:compile-frontier-program
+             'terminal-surface-discovery
+             :bindings (terminal-discovery-bindings)
+             :site-domain '(block-chunk-domain materialization)))))
+
+(defmethod frontiers:note-frontier-program-redefinition
+    ((name (eql 'terminal-surface-discovery)))
+  (declare (ignore name))
+  (setf *terminal-discovery-realization* nil))
+
+(defun discover-terminal-component (world x y z face material absent-neighbor-policy)
+  "Discover the coplanar exposed component of MATERIAL containing X,Y,Z.
+
+Return the retained execution, or NIL and a status when the seed itself is
+not an exposed terminal face."
+  (let* ((frame (terminal-face-frame face))
+         (right (terminal-face-frame-right frame))
+         (up (terminal-face-frame-up frame))
+         (outward (terminal-face-frame-outward frame))
+         (directions (list right (opposite-voxel-direction right)
+                           up (opposite-voxel-direction up)))
+         (realization (terminal-discovery-realization))
+         (frontier (frontiers:make-realization-frontier realization
+                                                        :initial-capacity 64))
+         (execution (frontiers:make-realization-execution
+                     realization world frontier))
+         (memo (make-hash-table :test #'eq)))
+    (multiple-value-bind (chunk offset availability)
+        (locate-chunk-window-site world x y z)
+      (unless (and (eq availability :available)
+                   (eq (block-content-at-offset (block-chunk-content chunk) offset)
+                       material))
+        (return-from discover-terminal-component (values nil :not-terminal)))
+      (unless (terminal-site-exposed-p world chunk offset outward
+                                       absent-neighbor-policy)
+        (return-from discover-terminal-component (values nil :covered)))
+      (flet ((constants ()
+               (list :material material :outward outward
+                     :absent-neighbor-policy absent-neighbor-policy
+                     :coplanar-directions directions :memo memo)))
+        (apply #'frontiers:admit-frontier-realization-site
+               realization world frontier execution chunk offset nil
+               (constants))
+        (apply #'frontiers:drain-frontier-realization
+               realization world frontier execution (constants))))
+    (values execution :component)))
+
+(defun map-execution-admitted-sites (function execution)
+  "Call FUNCTION with the world X, Y, Z of every retained admitted site."
+  (let* ((sites (frontiers:frontier-execution-admitted-sites execution))
+         (chunks (frontiers:frontier-site-buffer-materialization-lane sites))
+         (offsets (frontiers:frontier-site-buffer-offset-lane sites)))
+    (dotimes (index (frontiers:frontier-site-buffer-length sites))
+      (let* ((chunk (aref chunks index))
+             (domain (block-chunk-domain chunk)))
+        (multiple-value-bind (local-x local-y local-z)
+            (chunk-domain-local-components domain (aref offsets index))
+          (multiple-value-bind (x y z)
+              (chunk-domain-world-components domain local-x local-y local-z)
+            (funcall function x y z)))))))
+
 (defun find-terminal-surface (world x y z face
                               &key (material *terminal-block*)
                                    (absent-neighbor-policy :air))
@@ -255,68 +387,53 @@
 
 Return the surface and :RECTANGLE.  A seed which is not terminal, is covered,
 or belongs to a non-rectangular coplanar component instead returns NIL and a
-descriptive status."
-  (let* ((seed (make-world-coordinate x y z))
-         (frame (terminal-face-frame face))
+descriptive status.  Discovery runs the compiled TERMINAL-SURFACE-DISCOVERY
+program; this function only folds the retained component into a rectangle."
+  (let* ((frame (terminal-face-frame face))
          (right (terminal-face-frame-right frame))
-         (up (terminal-face-frame-up frame))
-         (outward (terminal-face-frame-outward frame)))
-    (multiple-value-bind (seed-block availability) (world-block-at world x y z)
-      (unless (and (eq availability :resident) (eq seed-block material))
-        (return-from find-terminal-surface (values nil :not-terminal))))
-    (unless (terminal-face-exposed-p
-             world material seed outward absent-neighbor-policy)
-      (return-from find-terminal-surface (values nil :covered)))
-    (let ((seen (make-hash-table :test #'equal))
-          (pending (list seed))
-          (component nil))
-      (loop while pending
-            for coordinate = (pop pending)
-            for key = (terminal-coordinate-key coordinate)
-            unless (gethash key seen)
-              do (setf (gethash key seen) t)
-                 (when (terminal-face-exposed-p
-                        world material coordinate outward
-                        absent-neighbor-policy)
-                   (push coordinate component)
-                   (dolist (step (list right up))
-                     (push (terminal-coordinate-step coordinate step) pending)
-                     (push (terminal-coordinate-step coordinate step -1)
-                           pending))))
-      (let* ((minimum-u
-               (loop for coordinate in component
-                     minimize (terminal-coordinate-projection coordinate right)))
-             (maximum-u
-               (loop for coordinate in component
-                     maximize (terminal-coordinate-projection coordinate right)))
-             (minimum-v
-               (loop for coordinate in component
-                     minimize (terminal-coordinate-projection coordinate up)))
-             (maximum-v
-               (loop for coordinate in component
-                     maximize (terminal-coordinate-projection coordinate up)))
-             (width (1+ (- maximum-u minimum-u)))
-             (height (1+ (- maximum-v minimum-v)))
-             (origin
-               (find-if
-                (lambda (coordinate)
-                  (and (= minimum-u
-                          (terminal-coordinate-projection coordinate right))
-                       (= minimum-v
-                          (terminal-coordinate-projection coordinate up))))
-                component)))
-        (unless (= (length component) (* width height))
-          (return-from find-terminal-surface
-            (values nil :non-rectangular)))
-        (let ((surface
-                (make-instance
-                 'terminal-surface
-                 :world world :material material
-                 :absent-neighbor-policy absent-neighbor-policy
-                 :face face :origin origin
-                 :block-width width :block-height height)))
-          (initialize-terminal-surface-dependencies surface)
-          (values surface :rectangle))))))
+         (up (terminal-face-frame-up frame)))
+    (multiple-value-bind (execution status)
+        (discover-terminal-component
+         world x y z face material absent-neighbor-policy)
+      (unless execution
+        (return-from find-terminal-surface (values nil status)))
+      (let ((minimum-u most-positive-fixnum) (maximum-u most-negative-fixnum)
+            (minimum-v most-positive-fixnum) (maximum-v most-negative-fixnum)
+            (count 0)
+            (origin-x 0) (origin-y 0) (origin-z 0))
+        (flet ((projection (x y z direction)
+                 (+ (* x (voxel-direction-dx direction))
+                    (* y (voxel-direction-dy direction))
+                    (* z (voxel-direction-dz direction)))))
+          (map-execution-admitted-sites
+           (lambda (x y z)
+             (let ((u (projection x y z right))
+                   (v (projection x y z up)))
+               (incf count)
+               (setf minimum-u (min minimum-u u) maximum-u (max maximum-u u)
+                     minimum-v (min minimum-v v) maximum-v (max maximum-v v))))
+           execution)
+          (map-execution-admitted-sites
+           (lambda (x y z)
+             (when (and (= minimum-u (projection x y z right))
+                        (= minimum-v (projection x y z up)))
+               (setf origin-x x origin-y y origin-z z)))
+           execution))
+        (let ((width (1+ (- maximum-u minimum-u)))
+              (height (1+ (- maximum-v minimum-v))))
+          (unless (= count (* width height))
+            (return-from find-terminal-surface
+              (values nil :non-rectangular)))
+          (let ((surface
+                  (make-instance
+                   'terminal-surface
+                   :world world :material material
+                   :absent-neighbor-policy absent-neighbor-policy
+                   :face face
+                   :origin (make-world-coordinate origin-x origin-y origin-z)
+                   :block-width width :block-height height)))
+            (initialize-terminal-surface-dependencies surface)
+            (values surface :rectangle)))))))
 
 (defun terminal-surface-coordinate (surface column row)
   (let* ((frame (terminal-face-frame (terminal-surface-face surface)))

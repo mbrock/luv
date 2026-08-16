@@ -239,6 +239,67 @@
 (define-lisp-arithmetic-operator > >)
 (define-lisp-arithmetic-operator >= >=)
 (define-lisp-arithmetic-operator = =)
+(define-lisp-arithmetic-operator and and)
+(define-lisp-arithmetic-operator or or)
+(define-lisp-arithmetic-operator not not)
+
+;;; Scalar lowering.  The generic realization above dispatches on numbers
+;;; versus vectors at run time so one compiled function can serve every
+;;; representation.  A hot loop whose operands are known scalars wants the
+;;; ordinary Common Lisp operators instead, so that declared integer or float
+;;; types flow through the emitted arithmetic.  The choice is made once, by
+;;; the caller lowering an expression, and never per operation.
+
+(defvar *lisp-arithmetic-lowering* :generic
+  "How LOWER-LISP-ARITHMETIC-EXPRESSION emits calls: :GENERIC uses the
+representation-dispatching LISP-ADD family; :SCALAR emits CL operators over
+declared scalar operands. #53Q1II")
+
+(defgeneric lisp-scalar-operator-form (operator operands)
+  (:documentation
+   "Return the scalar Lisp form applying OPERATOR to lowered scalar OPERANDS."))
+
+(defmethod lisp-scalar-operator-form (operator operands)
+  (declare (ignore operands))
+  (error 'lisp-arithmetic-error
+         :reason :unsupported-scalar-operator :details operator))
+
+(defmacro define-lisp-scalar-operator (operator lambda-list &body body)
+  "Define OPERATOR's scalar lowering from its lowered operand forms."
+  (let ((operator-variable (gensym "OPERATOR"))
+        (operands (gensym "OPERANDS")))
+    `(defmethod lisp-scalar-operator-form
+         ((,operator-variable (eql ',operator)) ,operands)
+       (declare (ignore ,operator-variable))
+       (destructuring-bind ,lambda-list ,operands
+         ,@body))))
+
+(macrolet ((direct (&rest operators)
+             `(progn
+                ,@(loop for operator in operators
+                        collect
+                        `(define-lisp-scalar-operator ,operator (&rest operands)
+                           (cons ',operator operands))))))
+  (direct + - * / mod min max abs sqrt expt < <= > >= = and or not))
+
+(define-lisp-scalar-operator clamp (value lower upper)
+  `(min (max ,value ,lower) ,upper))
+
+(define-lisp-scalar-operator mix (from to amount)
+  (let ((from-name (gensym "FROM")))
+    `(let ((,from-name ,from))
+       (+ ,from-name (* (- ,to ,from-name) ,amount)))))
+
+(define-lisp-scalar-operator step (edge value)
+  `(if (< ,value ,edge) 0 1))
+
+(define-lisp-scalar-operator smoothstep (lower upper value)
+  (let ((progress (gensym "PROGRESS"))
+        (lower-name (gensym "LOWER")))
+    `(let* ((,lower-name ,lower)
+            (,progress
+              (min (max (/ (- ,value ,lower-name) (- ,upper ,lower-name)) 0) 1)))
+       (* ,progress ,progress (- 3 (* 2 ,progress))))))
 
 (defun lisp-environment-value (target environment expression)
   (or (cdr (assoc target environment :test #'eq))
@@ -268,12 +329,14 @@
            :expression expression
            :reason :unsupported-call-parameters
            :details (lang:arithmetic-call-parameters expression)))
-  (cons
-   (lisp-arithmetic-operator-function
-    (lang:arithmetic-call-operator expression))
-   (mapcar (lambda (operand)
-             (lower-lisp-arithmetic-expression operand environment))
-           (lang:arithmetic-call-operands expression))))
+  (let ((operator (lang:arithmetic-call-operator expression))
+        (operands
+          (mapcar (lambda (operand)
+                    (lower-lisp-arithmetic-expression operand environment))
+                  (lang:arithmetic-call-operands expression))))
+    (ecase *lisp-arithmetic-lowering*
+      (:generic (cons (lisp-arithmetic-operator-function operator) operands))
+      (:scalar (lisp-scalar-operator-form operator operands)))))
 
 (defmethod lower-lisp-arithmetic-expression
     ((expression lang:arithmetic-conditional) environment)
@@ -300,7 +363,9 @@
         (factor (lang:arithmetic-unit-conversion-factor expression)))
     (if (= factor 1)
         operand
-        (list 'lisp-multiply factor operand))))
+        (ecase *lisp-arithmetic-lowering*
+          (:generic (list 'lisp-multiply factor operand))
+          (:scalar (list '* factor operand))))))
 
 (defmethod lower-lisp-arithmetic-expression
     ((expression lang:arithmetic-function-call) environment)
