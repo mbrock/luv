@@ -264,6 +264,15 @@ has completed."))
 (defstruct (texture-descriptor (:include gpu-descriptor))
   size usage dimensions format)
 
+(defun texture-format-sample-transfer (format)
+  "The colour transfer a sampled texture FORMAT applies before shader math.
+
+This describes representation decoding, not a quantity.  Alpha remains
+linear for the sRGB formats; the transfer names their RGB-channel behavior."
+  (if (member format '(:rgba8-unorm-srgb :bgra8-unorm-srgb))
+      :srgb-to-linear
+      :identity))
+
 (defstruct (texture-view-descriptor (:include gpu-descriptor))
   texture)
 

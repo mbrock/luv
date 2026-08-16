@@ -108,6 +108,7 @@
            #:shader-resource-binding
            #:shader-resource-sample-quantity-specification
            #:shader-resource-sample-quantity-layout
+           #:shader-resource-sample-transfer
            #:shader-uniform-block
            #:shader-uniform-block-members
            #:shader-uniform-block-byte-size

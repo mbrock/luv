@@ -216,7 +216,14 @@
    (sample-quantity-layout
     :initarg :sample-quantity-layout
     :initform nil
-    :reader shader-resource-sample-quantity-layout)))
+    :reader shader-resource-sample-quantity-layout)
+   (sample-transfer
+    :initarg :sample-transfer
+    :initform nil
+    :reader shader-resource-sample-transfer))
+  (:documentation
+   "A descriptor resource and, for textures, the represented meaning and
+colour transfer of the value returned by sampling."))
 
 (defclass shader-uniform-block (shader-resource)
   ((members
@@ -2120,7 +2127,8 @@ NIL leaves the character to the named definition; T is the historical
   (destructuring-bind
       (name type &key (set 0) binding members
                        sample-quantity sample-dimension sample-unit
-                       sample-affine-p sample-character sample-components)
+                       sample-affine-p sample-character sample-components
+                       sample-transfer)
       form
     (unless (and (typep set '(integer 0 *))
                  (typep binding '(integer 0 *)))
@@ -2193,8 +2201,13 @@ NIL leaves the character to the named definition; T is the historical
           (when members
             (error 'shader-language-error
                    :form form :reason :members-on-opaque-resource))
+          (unless (member sample-transfer '(nil :identity :srgb-to-linear))
+            (error 'shader-language-error
+                   :form form :reason :invalid-sample-transfer
+                   :details sample-transfer))
           (when (and (or sample-quantity sample-dimension sample-unit
-                         sample-affine-p sample-character sample-components)
+                         sample-affine-p sample-character sample-components
+                         sample-transfer)
                      (null sample-type))
             (error 'shader-language-error
                    :form form :reason :sample-semantics-on-non-texture))
@@ -2206,6 +2219,7 @@ NIL leaves the character to the named definition; T is the historical
                               (parse-declaration-quantity-layout
                                sample-components sample-type form
                                sample-specification))
+                         :sample-transfer sample-transfer
                          :descriptor-set set :binding binding
                          :source-form form)))))
 

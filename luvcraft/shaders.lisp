@@ -227,6 +227,7 @@
                           :quantity :shadow-depth :unit :one))
      :outputs ((color-output :vec4 :location 0))
      :resources ((block-atlas :texture-2d :set 0 :binding 0
+                              :sample-transfer :srgb-to-linear
                               :sample-components
                               ((:rgb :quantity :linear-rgb :unit :one)
                                (:a :quantity :opacity :unit :one)))

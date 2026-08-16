@@ -856,6 +856,7 @@
                                     :quantity :linear-rgb))
               :resources
               ((image :texture-2d :binding 0
+                      :sample-transfer :srgb-to-linear
                       :sample-components
                       ((:rgb :quantity :linear-rgb)
                        (:a :quantity :opacity)))
@@ -868,6 +869,8 @@
          (texel (binding-named 'texel specification))
          (rgb (binding-named 'rgb specification))
          (alpha (binding-named 'alpha specification)))
+    (ok (eq :srgb-to-linear
+            (spv:shader-resource-sample-transfer image)))
     (ok (math:quantity-layout=
          (spv:shader-resource-sample-quantity-layout image)
          (spv:shader-expression-quantity-layout
@@ -880,6 +883,28 @@
             (math:quantity-specification-name
              (spv:shader-expression-quantity-specification
               (spv:shader-binding-expression alpha)))))))
+
+(deftest sample-transfer-metadata-is-texture-only
+  (flet ((reason-for (resource)
+           (handler-case
+               (progn
+                 (spv:parse-shader-specification
+                  'invalid-sample-transfer-probe
+                  `(:stage :fragment
+                    :outputs ((result :float :location 0))
+                    :resources (,resource))
+                  '((set-output result 1.0)))
+                 nil)
+             (spv:shader-language-error (condition)
+               (spv:shader-language-error-reason condition)))))
+    (ok (eq :invalid-sample-transfer
+            (reason-for
+             '(image :texture-2d :binding 0
+                     :sample-transfer :mystery-transfer))))
+    (ok (eq :sample-semantics-on-non-texture
+            (reason-for
+             '(sampler :sampler :binding 0
+                       :sample-transfer :srgb-to-linear))))))
 
 (deftest semantic-boundaries-are-distinct-checked-and-have-no-codegen-effect
   (flet ((probe (annotated-p)

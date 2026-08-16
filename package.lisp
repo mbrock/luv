@@ -268,6 +268,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:make-device-descriptor
            #:make-buffer-descriptor
            #:make-texture-descriptor
+           #:texture-format-sample-transfer
            #:make-texture-copy
            #:texture-copy-texture
            #:texture-copy-mip-level

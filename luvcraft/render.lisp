@@ -38,14 +38,32 @@
     +luvcraft-shadow-slope-bias+ 0.0015
   :type single-float
   :quantity (:quantity :shadow-depth :unit :one :character :difference))
+
 (luv.arithmetic:define-quantity-constant
     +luvcraft-shadow-minimum-filter-radius+ 2.0
   :type single-float
   :quantity (:quantity :shadow-filter-radius :unit :one))
+
 (luv.arithmetic:define-quantity-constant
     +luvcraft-shadow-maximum-filter-radius+ 6.0
   :type single-float
   :quantity (:quantity :shadow-filter-radius :unit :one))
+
+(defun ensure-block-atlas-sample-transfer (format)
+  "Check the host texture format against the block shader's decoded result."
+  (let* ((resource
+           (find 'luv.spir-v::block-atlas
+                 (luv.spir-v:shader-specification-resources
+                  (luv.spir-v:block-world-fragment-specification))
+                 :key #'luv.spir-v:shader-object-name))
+         (expected (texture-format-sample-transfer format))
+         (declared
+           (and resource
+                (luv.spir-v:shader-resource-sample-transfer resource))))
+    (unless (eq expected declared)
+      (error "Block atlas format ~S implies ~S sampling, but the shader declares ~S."
+             format expected declared))
+    format))
 
 (defun make-block-world-crosshair-vertices (width height)
   "Make an outlined pixel-sized crosshair in Vulkan clip coordinates."
@@ -677,6 +695,9 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                     (* +block-atlas-tile-size+ +block-atlas-tile-count+))
                   (atlas-height +block-atlas-tile-size+)
                   (atlas-data (make-block-texture-atlas))
+                  (atlas-format
+                    (ensure-block-atlas-sample-transfer
+                     +block-atlas-texture-format+))
                   (atlas-texture
                     (keep
                      (create
@@ -684,7 +705,7 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                       (make-texture-descriptor
                        :label "block world texture atlas"
                        :size (list atlas-width atlas-height)
-                       :dimensions :2d :format :rgba8-unorm-srgb
+                       :dimensions :2d :format atlas-format
                        :usage '(:copy-dst :texture-binding)))))
                   (atlas-view
                     (keep

@@ -892,6 +892,50 @@ Strict Parinfer, shader generation plus =spirv-val=, all 54 luvcraft tests, and
 the complete cold project/wiki suite pass.  The next phase is the exercised
 design review, not a metadata frontend invented in anticipation of a use.
 
+** DONE Review the exercised quantity architecture
+:PROPERTIES:
+:ID: EYCANR
+:END:
+
+The review happened after the declaration protocol had real CLOS slots,
+structures, constants, dense fields, packed CPU/GPU products, one Lisp
+arithmetic kernel, and all production shader materials as clients.  It keeps
+the central split: Common Lisp and GPU types describe representation;
+quantities describe meaning; layouts describe heterogeneous or repeated
+products; arithmetic graphs own numerical laws.  None is a substitute for
+another.
+
+Three tempting expansions are deliberately rejected by the exercised code.
+There is no quantity wrapper around every value, no quantity lambda-list on
+ordinary orchestration functions, and no representation-specialized Lisp
+compiler yet.  The first two have no consumer.  The third has only one small
+=vec3= kernel and no measured dispatch problem; its current generic operations
+are chosen per arithmetic node, never per vector component or for semantic
+checking.  A native/SIMD realization should begin with a measured kernel, not
+with speculative lowering machinery.
+
+The exercise did justify two changes.  First, point/absolute/difference and
+non-negativity moved to quantity definitions, eliminating repeated ABI
+annotations and exposing real clip/shadow mistakes (#9ZK7Q7).  Second, the
+sRGB audit separated transfer representation from quantity meaning (#NC1YZ4):
+sampled atlas RGB is linear because the texture format performs the decode;
+that fact is not an =encoded-rgb= arithmetic quantity.
+
+The clip-origin failure also identifies the next missing concept without
+pretending it is solved.  =representation=/=assume-quantity= remains a loud,
+inspectable escape where the sky treats zero-origin clip coordinates as
+displacements.  A general identity-valued “point to difference” operator
+would be unsound until quantity definitions can name origins and maps can
+cross them.  #PLRP3A records that future design.  Likewise, the duplicated
+homogeneous shadow projection is real work (#ZYCSYZ), while generic layout
+translation and more metaclasses are not presently earned.
+
+Review result: keep the architecture, with definition-owned character and
+explicit texture-transfer metadata as the improvements learned from use.
+Revisit representation-specialized Lisp lowering only with profiling evidence,
+and revisit point-origin operations together with origin identity rather than
+as a zero-cost convenience operator.
+
 * A possible Lisp vocabulary
 :PROPERTIES:
 :ID: G4C2ZX
@@ -1938,31 +1982,36 @@ evidence list still lacks is the sRGB seam, split out below as #NC1YZ4.
 Done when: satisfied by the marks above; retained so the design rationale
 in #TZHN8G and #P2KN1D stays traceable to its realization.
 
-* TODO Give the sRGB atlas seam an encoded-colour kind
+* DONE Give the sRGB atlas seam explicit transfer meaning
 :PROPERTIES:
 :ID: NC1YZ4
 :END:
 
-Intent: the block material's atlas is an =rgba8-unorm-srgb= texture whose
-=sample= result is decoded to linear by the hardware, and =:linear-rgb=
-already names the linear side; nothing yet names an /encoded/ colour, so
-the classic linear/sRGB mixup (#T1GYOH) is not a checked error.  Add an
-encoded-colour quantity under =:relative-color-signal= (or a sibling
-kind), give texture sample results the kind their format implies, and
-make an explicit decode/encode the only crossing.
+The original intent correctly found a seam but proposed the wrong type.
+=rgba8-unorm-srgb= stores nonlinear RGB bytes; both Metal and Vulkan apply the
+sRGB transfer when the texture is sampled, so the value entering shader math
+is already linear.  Alpha is ordinary normalized opacity.  Labeling that
+sample =encoded-rgb= would make the quantity checker contradict the backend.
 
-Evidence to gather:
+Transfer encoding is therefore representation metadata, parallel to rather
+than inside the quantity hierarchy.  Texture resources may declare
+=:sample-transfer :srgb-to-linear= while their sample component layout says
+=linear-rgb= plus =opacity=.  The block atlas does so.  The host owns one
+=+block-atlas-texture-format+=, =texture-format-sample-transfer= maps its sRGB
+format to the same transfer, and session construction checks the actual
+descriptor format against the shader resource before creating the texture.
 
-- A test where an encoded sample added to a linear light term is rejected
-  at parse time with provenance to the offending source form, while the
-  production block material — which only ever mixes linear terms — is
-  unchanged in generated SPIR-V.
-- A note on whether format-implied decode should be a property of the
-  texture resource declaration or of the =sample= operator.
+Tests inspect the decoded transfer and linear quantities, reject unknown
+transfers and transfer metadata on non-textures, and reject binding the block
+shader contract to =rgba8-unorm=.  Sample-transfer metadata is erased from
+both SPIR-V and MSL lowering; the validated production binaries remain
+byte-identical.
 
-Done when: encoded and linear colours are distinct quantities, sRGB
-textures yield the encoded kind or a declared decoded kind, and the mixup
-is an executable claim in the shader tests.
+Done when: satisfied by keeping encoded bytes at the texture representation
+boundary, declaring the automatic decode, and checking that declaration
+against the real host format.  If luv later performs arithmetic over encoded
+CPU pixels, that /separate client/ can earn an encoded-colour quantity; the
+shader sample cannot.
 
 * TODO Structural shader-type identity
 :PROPERTIES:

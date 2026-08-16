@@ -607,6 +607,15 @@
       (ok (= (block-world-revision world) revision)))))
 
 (deftest block-atlas-and-mesh-vertices-carry-material-readings
+  (ok (eq :srgb-to-linear
+          (texture-format-sample-transfer
+           luv::+block-atlas-texture-format+)))
+  (ok (eq luv::+block-atlas-texture-format+
+          (luv::ensure-block-atlas-sample-transfer
+           luv::+block-atlas-texture-format+)))
+  (ok (signals
+       (luv::ensure-block-atlas-sample-transfer :rgba8-unorm)
+       'error))
   (let ((atlas (make-block-texture-atlas)))
     (ok (equal (array-dimensions atlas) '(16 160)))
     (ok (subtypep (array-element-type atlas) '(unsigned-byte 32)))

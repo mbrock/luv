@@ -150,6 +150,7 @@ kinds through this vocabulary instead of printing CLOS object identities."
 
 (defconstant +block-atlas-tile-size+ 16)
 (defconstant +block-atlas-tile-count+ 10)
+(defconstant +block-atlas-texture-format+ :rgba8-unorm-srgb)
 
 (defun block-atlas-byte (value)
   (max 0 (min 255 (round value))))
