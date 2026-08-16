@@ -256,6 +256,35 @@ matter, the compaction and range vocabulary developed by #34G2K8 can inform a
 shared solution rather than terminal-specific skewed lengths and forwarding
 tables.
 
+* IDEA A luvcraft block for every terminal cell
+:PROPERTIES:
+:ID: SX12U7
+:END:
+
+Intent: exploit the literal grid correspondence for the funniest possible
+alternate terminal projector: every visible TTY cell becomes a shallow
+luvcraft block, with its background on the block body and its Slug glyph on the
+front face.  The cursor can pulse or protrude, and a scrolling terminal becomes
+a wall of blocks changing under program control.
+
+Evidence: the viewport domain #RD8AEI already supplies exactly the two discrete
+coordinates needed to place a regular block wall.  The presentation
+materialization #AI83XS supplies grapheme, width, style, and selection without
+changing Ghostty.  This can therefore be another projection of the same cells,
+beside the flat glyph and rectangle populations in #BIXI1P, rather than a fork
+of the PTY or terminal model.
+
+The blocks should be derived scene geometry, not durable edits to the authored
+voxel world.  Terminal output must not enter the save journal or become terrain
+merely because its projector looks block-shaped; #TR2JNQ keeps that distinction
+between a durable world description and transient materializations explicit.
+
+Done when: an optional projector turns a fixed terminal fixture into a stable
+block wall, narrow and wide cells retain their grid occupancy, foreground
+glyphs and background styles remain legible, cursor motion changes its block,
+and switching between flat and block projections leaves Ghostty, PTY flow, and
+the cell materialization untouched.
+
 * The terminal grid remains authoritative through Slug
 :PROPERTIES:
 :ID: I9U71F
