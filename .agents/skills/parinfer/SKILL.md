@@ -11,6 +11,8 @@ to make suspicious Lisp source cheap to notice and cheap to inspect.
 ## Commands
 
 - Run the same gate as `make test` with `make parinfer-check`.
+- The repo-wide gate checks files sequentially in one batch SBCL process; keep
+  that batching when changing the Make target so startup cost stays negligible.
 - Check one file with `./sly parinfer --strict --check path/to/file.lisp`.
 - Inspect the proposed indentation tree with `./sly parinfer --diff path/to/file.lisp`.
 - Repair only unbalanced source with `./sly parinfer --write path/to/file.lisp`.

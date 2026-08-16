@@ -1068,6 +1068,7 @@
   (format stream "Usage: ./sly start|stop|status|log~%")
   (format stream "       ./sly eval CODE [--package PACKAGE]~%")
   (format stream "       ./sly parinfer [--check|--diff|--write] [--strict] [--file FILE|CODE|FILE]~%")
+  (format stream "       ./sly parinfer --batch --check [--strict] FILE...~%")
   (format stream "       ./sly inspect CODE [--package PACKAGE]~%")
   (format stream "       ./sly describe NAME... [--function] [--package PACKAGE]~%")
   (format stream "       ./sly describe-package PACKAGE...~%")
@@ -1262,6 +1263,30 @@
             (format t "parinfer: ~A unchanged.~%" file)
             0)))))))
 
+(defun run-parinfer-batch (arguments)
+  (let ((strict nil)
+        (files nil))
+    (dolist (argument arguments)
+      (cond
+        ((string= argument "--check"))
+        ((string= argument "--strict")
+         (setf strict t))
+        ((and (> (length argument) 1)
+              (string= argument "--" :end1 2))
+         (error "Unknown parinfer batch option: ~A" argument))
+        (t
+         (push argument files))))
+    (unless files
+      (error "parinfer --batch requires at least one file"))
+    (dolist (file (nreverse files) 0)
+      (let ((status
+              (run-parinfer
+               (append '("--check")
+                       (when strict '("--strict"))
+                       (list file)))))
+        (unless (zerop status)
+          (return status))))))
+
 (defun parse-code-arguments (command arguments)
   (unless arguments
     (error "~A requires Common Lisp source code" command))
@@ -1413,7 +1438,10 @@
          (evaluate code package))
        0)
       ((string= command "parinfer")
-       (run-parinfer arguments))
+       (if (member "--batch" arguments :test #'string=)
+           (run-parinfer-batch
+            (remove "--batch" arguments :test #'string=))
+           (run-parinfer arguments)))
       ((string= command "inspect")
        (ensure-server)
        (multiple-value-bind (code package)

@@ -28,7 +28,7 @@ test: parinfer-check shader-validate
 		--eval '(asdf:test-system :luv-wiki)'
 
 parinfer-check:
-	@./scripts/dev sh -c 'tmp=$$(mktemp); trap "rm -f $$tmp" EXIT; for file in $$(rg --files -g"*.lisp"); do if ! ./sly parinfer --strict --check "$$file" >"$$tmp" 2>&1; then cat "$$tmp"; exit 1; fi; done; echo "parinfer: strict check passed."'
+	@./scripts/dev sh -c 'tmp=$$(mktemp); trap "rm -f $$tmp" EXIT; if ! ./sly parinfer --batch --strict --check $$(rg --files -g"*.lisp") >"$$tmp" 2>&1; then cat "$$tmp"; exit 1; fi; echo "parinfer: strict check passed."'
 
 shader-validate:
 	mkdir -p build
