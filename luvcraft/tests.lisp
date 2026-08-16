@@ -88,7 +88,13 @@
              (luv::luvcraft-frame-sample luv::simulation-seconds
               :simulation-duration)
              (luv::luvcraft-frame-benchmark luv::drain-seconds
-              :benchmark-drain-duration)))
+              :benchmark-drain-duration)
+             (luv::production-result luv::elapsed-seconds
+              :production-duration)
+             (luvcraft-session luv::last-frame-time
+              :monotonic-frame-time)
+             (luvcraft-session luv::physics-accumulator
+              :physics-accumulated-duration)))
     (destructuring-bind (record slot quantity) claim
       (let ((declaration
               (luv.arithmetic.records:record-slot-declaration record slot)))

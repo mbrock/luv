@@ -19,7 +19,10 @@
    (condition :initarg :condition :initform nil
               :reader production-result-condition)
    (elapsed-seconds :initarg :elapsed-seconds
-                    :reader production-result-elapsed-seconds)))
+                    :type double-float
+                    :quantity (:quantity :production-duration :unit :second)
+                    :reader production-result-elapsed-seconds))
+  (:metaclass luv.arithmetic.records:quantity-class))
 
 (defclass single-worker-production-system ()
   ((name :initarg :name :reader production-system-name)

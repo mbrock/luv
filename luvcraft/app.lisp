@@ -101,12 +101,19 @@
                  :reader luvcraft-session-pressed-keys)
    (pointer-captured-p :initform nil
                        :accessor luvcraft-session-pointer-captured-p)
-   (last-frame-time :initform nil :accessor luvcraft-session-last-frame-time)
+   (last-frame-time :initform nil
+                    :type (or null double-float)
+                    :quantity (:quantity :monotonic-frame-time :unit :second)
+                    :accessor luvcraft-session-last-frame-time)
    (physics-accumulator :initform 0d0
+                        :type double-float
+                        :quantity (:quantity :physics-accumulated-duration
+                                   :unit :second)
                         :accessor luvcraft-session-physics-accumulator)
    (jump-requested-p :initform nil
                      :accessor luvcraft-session-jump-requested-p)
-   (running-p :initform t :accessor luvcraft-session-running-p)))
+   (running-p :initform t :accessor luvcraft-session-running-p))
+  (:metaclass luv.arithmetic.records:quantity-class))
 
 (defun request-luvcraft-session-checkpoint (session)
   "Capture SESSION's durable state and submit it to its asynchronous writer."

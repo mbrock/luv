@@ -729,9 +729,14 @@ Audit so far:
   parameters similarly remain an explicit frontend question rather than being
   forced into record declarations.
 
-Next: declare session timestamps/accumulated physics time and production
-durations, then establish the foundational lattice/physical-world vocabulary
-before migrating =voxel-space= and ray hits.
+- Session state now distinguishes the monotonic frame-clock point from the
+  accumulated physics duration, and production results declare their elapsed
+  duration.  Their calculations remain ordinary direct Lisp: record metadata
+  should not be used as a pretext for wrapping a short subtraction before the
+  constant/parameter declaration vocabulary exists.
+
+Next: establish the foundational lattice/physical-world vocabulary before
+migrating =voxel-space= and ray hits.
 
 * A possible Lisp vocabulary
 :PROPERTIES:
