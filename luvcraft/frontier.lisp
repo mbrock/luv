@@ -761,7 +761,7 @@ program VALUE is ignored.  Return whether the site was admitted."
   (:documentation
    "Return (VALUES TEST-FORM COMMIT-FORMS PRIORITY-FORM) for one exposed
 target under FAMILY, given the lowering environment of bound field values.
-CANDIDATE-VARIABLE names the transfer result for monotone families."))
+CANDIDATE-VARIABLE names the transfer result for monotone families. #FE0O5R"))
 
 (defmethod frontier-family-law-forms
     ((family (eql :monotone-max-fixpoint)) compilation candidate
@@ -834,7 +834,7 @@ gives a site's dense offset spatial meaning.  Each field role of the program
 must have one FRONTIER-FIELD-BINDING.  The laws are parsed and quantity
 checked against the bound fields, lowered with scalar arithmetic, and spliced
 into one closed loop over raw buckets and lanes.  With COMPILE NIL the forms
-are emitted but not compiled, for inspection. #53Q1II"
+are emitted but not compiled, for inspection. #53Q1II #T2G95K #716UN6"
   (let* ((definition (if (symbolp program)
                          (or (frontier-program-definition-for program)
                              (error "No frontier program named ~S." program))
