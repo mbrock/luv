@@ -702,6 +702,12 @@ refuses the subtraction without it.  =light-propagation-loss= is an ordinary
 =define-lisp-arithmetic-function=: the seeds call it as a function, while the
 kernel inlines its checked definition.
 
+A realization exposes three entry points besides the drain: =admit=
+seeds a site through the family's law with a supplied value, =relate=
+exposes one relation from a virtual source (#581ZQP), and =schedule= pushes
+a site whose value stands for reconsideration.  Families with a secondary
+effect take a companion frontier (#ZEENY3).
+
 The realization retains everything the reader could want: the parsed
 expressions with their quantity specifications, the emitted =lambda= forms,
 and the compiled functions.  =frontier-realization-drain-form= prints the
@@ -723,14 +729,16 @@ compiler knowledge:
 |-
 | =:monotone-max-fixpoint= | one =:relaxed= field and a =:transfer= | the transfer exceeds the field's value | the transfer into the field | the transfer, or a stated =:priority= |
 | =:discover-once= | one =:memo= field and an =:admission= | the memo is clear and the admission holds | the memo | 0, or a stated =:priority= |
+| =:invalidation= | one =:invalidated= field and an =:admission= (dependency) | the target is lit and depended on the source | zero into the field | the level the target had; an independent lit target is instead handed to the companion frontier |
 
 A definition is checked against its family when it is defined, so a
 monotone program without a relaxed field fails before any realization.  This
 is why the light program states only its transfer, and the terminal program
 only its admission: strict improvement, brightest-first scheduling, and
-visit-once memoization are what those families /mean/.  Further families
-(invalidate-and-rebuild, A*-style external cost) add methods on
-=frontier-family-law-forms= without touching either client.
+visit-once memoization are what those families /mean/.  #ZEENY3 adds the
+third dynamic of #DURBKN.  Further families (A*-style external cost, bounded
+rounds) add methods on =frontier-family-law-forms= without touching any
+client.
 
 * Bindings close a program over storage
 :PROPERTIES:
@@ -804,6 +812,55 @@ projections and a rectangle test.  The old hash-of-coordinate-lists walk is
 gone; the earlier expectations (rectangle, L-shape, covered, wrong material)
 and a seam-straddling rectangle whose retained component is exactly its
 eighteen blocks are the tests.
+
+* Invalidation is a family with a companion frontier
+:PROPERTIES:
+:ID: ZEENY3
+:END:
+
+Removing a source, or a departed neighbour, leaves levels no surviving
+source justifies.  #DURBKN argued that this is a different dynamic from
+addition, not an option on it; it is now the =:invalidation= family, and voxel
+light's removal program reads:
+
+#+begin_src lisp
+(frontiers:define-frontier-program voxel-light-removal
+  :family :invalidation
+  :frontier-layout :brightest-first-buckets
+  :neighborhood :voxel-face-relations
+  :fields ((level :invalidated t))
+  :constants (direct-direction)
+  :predicates ((direct (direction= direct-direction)))
+  :admission (or (< (level target) (level source))
+                 (and direct (= (level target) (level source))))
+  :retain-admissions t)
+#+end_src
+
+Three things distinguish the family.  First, the source's value is not a
+field read: a cleared site's field is already zero, so =(level source)= is
+the priority it was admitted at--the level it /had/.  Second, the family has
+a secondary effect: a lit target that the source did not feed is a surviving
+source, and the drain hands it to a /companion/ frontier--here the addition
+program's--at its own level, counted as an emission.  Third, the retained
+admissions are the cleared set, which the client walks afterwards to
+re-admit emitters and relate open sky (#581ZQP) before draining addition.
+
+The compiled reconciler in =frontier-light.lisp= composes exactly the
+legacy sequence from these words: invalidate dirty cells and departed
+neighbours' faces (=admit= with the old level), drain removal with addition
+as companion, reseed emitters and open sky over the cleared set, seed
+arrivals (=relate= for sky, =admit= for emitters, =schedule= for resident
+neighbours' facing sites, whose values already stand but whose relations
+must be exposed again), then drain addition.  =reconcile-lighting= selects
+it through =*voxel-light-solver* :compiled=.
+
+Evidence is differential and exact: the incremental, random-edit,
+departure, re-arrival, same-key replacement, and cross-chunk crystal tests
+run under both reconcilers against the from-scratch reference; a roofing
+test checks that sky removal clears exactly the sixteen cells of the beam
+and emits survivors.  Over forty ten-edit bursts on six chunks both
+reconcilers visited 121,110 cells; the compiled one settled a burst in a
+median 0.55 ms against the legacy 1.25 ms.
 
 * The shared questions are now concrete
 :PROPERTIES:
@@ -1036,7 +1093,7 @@ Done when: sky seeding calls a compiled entry with the source level and the
 inward direction, the transfer law appears once in the program, and the
 compiled solver's fields and visits are unchanged.  All hold.
 
-* TODO Give frontier light its own invalidation program
+* DONE Give frontier light its own invalidation program
 :PROPERTIES:
 :ID: K3WRD3
 :END:
@@ -1045,12 +1102,21 @@ Intent: state removal and incremental reconsideration in the same compiled
 vocabulary after the monotone kernel establishes its source and lowering
 boundary.
 
-Evidence: the greenfield program currently implements only from-scratch
-monotone addition; the established reconciler remains the oracle for edits,
-arrivals, departures, and same-key chunk replacement.  #DURBKN shows why
-invalidation is a different dynamic family rather than an option on addition.
+Evidence: #ZEENY3.  =voxel-light-removal= is an =:invalidation= program whose
+compiled drain reads like =unlight-light-region= but is emitted from the
+family and the one dependency law; the compiled reconciler composes it with
+the addition program through =admit=, =relate=, =schedule=, and the
+companion frontier.  Removal executions retain the cleared set and count
+visits, relations, crossings, admissions, and emissions (survivors handed
+on).  Under =*voxel-light-solver* :compiled= every incremental test
+converges to the from-scratch reference across edits, emitters appearing
+and vanishing, departures, re-arrivals with fresh edits, same-key chunk
+replacement, and crystals across chunk boundaries; forty random edit bursts
+visit the same 121,110 cells as the legacy reconciler at a median 0.55 ms
+against 1.25 ms.
 
 Done when: invalidation and re-admission are explicit program operations,
 executions retain stale and useful work counters, and the compiled program
 converges bit-for-bit with from-scratch frontier light across each residency
-and edit case above.
+and edit case above.  All hold; the legacy reconciler remains the oracle
+behind =light-matches-reference-p=.

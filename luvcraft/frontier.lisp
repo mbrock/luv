@@ -27,11 +27,15 @@ recognizes its few reserved words by name rather than by symbol identity."
    (relaxed-p :initarg :relaxed-p :initform nil
               :reader frontier-field-role-relaxed-p)
    (memo-p :initarg :memo-p :initform nil :reader frontier-field-role-memo-p)
+   (invalidated-p :initarg :invalidated-p :initform nil
+                  :reader frontier-field-role-invalidated-p)
    (source-form :initarg :source-form :reader frontier-field-role-source-form))
   (:documentation
    "One field a program reads or writes by role name.  RELAXED-P marks the
 best-known-value field of a monotone program; MEMO-P marks the visited
-identity of a discover-once program.  Storage is bound at realization."))
+identity of a discover-once program; INVALIDATED-P marks the field an
+invalidation program clears, whose source value is the level a cleared site
+had.  Storage is bound at realization."))
 
 (defclass frontier-relation-predicate ()
   ((name :initarg :name :reader frontier-relation-predicate-name)
@@ -94,10 +98,12 @@ COMPILE-FRONTIER-PROGRAM lowers it mechanically over bound fields."))
   nil)
 
 (defun parse-frontier-field-role (form)
-  (destructuring-bind (name &key relaxed memo) (if (consp form) form (list form))
+  (destructuring-bind (name &key relaxed memo invalidated)
+      (if (consp form) form (list form))
     (check-type name symbol)
     (make-instance 'frontier-field-role
                    :name name :relaxed-p relaxed :memo-p memo
+                   :invalidated-p invalidated
                    :source-form form)))
 
 (defun parse-frontier-relation-predicate (form)
@@ -179,6 +185,10 @@ COMPILE-FRONTIER-PROGRAM lowers it mechanically over bound fields."))
   (find-if #'frontier-field-role-memo-p
            (frontier-program-definition-fields definition)))
 
+(defun frontier-program-invalidated-field (definition)
+  (find-if #'frontier-field-role-invalidated-p
+           (frontier-program-definition-fields definition)))
+
 ;;; Families are the semantic dynamics of #DURBKN.  Each family knows which
 ;;; roles a program must declare and what its default admission, commit, and
 ;;; priority laws are.  A definition is checked against its family at
@@ -200,6 +210,17 @@ COMPILE-FRONTIER-PROGRAM lowers it mechanically over bound fields."))
            (frontier-program-definition-name definition)))
   (unless (frontier-program-definition-transfer definition)
     (error "A monotone program needs a :TRANSFER law: ~S"
+           (frontier-program-definition-name definition))))
+
+(defmethod frontier-family-check-definition
+    ((family (eql :invalidation)) definition)
+  (declare (ignore family))
+  (unless (= 1 (count-if #'frontier-field-role-invalidated-p
+                         (frontier-program-definition-fields definition)))
+    (error "An invalidation program needs exactly one :INVALIDATED field: ~S"
+           (frontier-program-definition-name definition)))
+  (unless (frontier-program-definition-admission definition)
+    (error "An invalidation program needs an :ADMISSION (dependency) test: ~S"
            (frontier-program-definition-name definition))))
 
 (defmethod frontier-family-check-definition
@@ -316,6 +337,7 @@ the otherwise raw bucket number its meaning."))
    (admissions :initform 0 :accessor frontier-execution-admissions)
    (crossings :initform 0 :accessor frontier-execution-crossings)
    (unavailable :initform 0 :accessor frontier-execution-unavailable)
+   (emissions :initform 0 :accessor frontier-execution-emissions)
    (admitted-sites :initarg :admitted-sites :initform nil
                    :reader frontier-execution-admitted-sites))
   (:documentation
@@ -323,7 +345,9 @@ the otherwise raw bucket number its meaning."))
 
 ADMITTED-SITES is a packed FRONTIER-SITE-BUFFER of every admitted site when
 the program retains admissions, so a discover-once execution can hand its
-component to the client without a cons per member."))
+component to the client without a cons per member, and an invalidation
+execution its cleared set.  EMISSIONS counts sites handed to a companion
+frontier, such as the surviving sources an invalidation discovers."))
 
 (defun make-frontier-execution (program input frontier &key retain-admissions)
   (make-instance
@@ -517,10 +541,14 @@ open sky is the program's own transfer law rather than client arithmetic.
     (frontier-realization-definition realization))))
 
 (defun drain-frontier-realization
-    (realization window frontier execution &rest constants)
-  "Run the compiled program until FRONTIER is empty; return EXECUTION."
+    (realization window frontier execution &rest arguments)
+  "Run the compiled program until FRONTIER is empty; return EXECUTION.
+
+ARGUMENTS are the program's constants as keywords.  A program whose family
+hands sites to a companion frontier, such as invalidation's surviving
+sources, takes that frontier as the first argument before the keywords."
   (apply (frontier-realization-drain-function realization)
-         window frontier execution constants))
+         window frontier execution arguments))
 
 (defun admit-frontier-realization-site
     (realization window frontier execution materialization offset value
@@ -534,6 +562,16 @@ program VALUE is ignored.  Return whether the site was admitted."
       (error "~S cannot admit a site without a source." realization))
     (apply admit window frontier execution materialization offset value
            constants)))
+
+(defun schedule-frontier-realization-site
+    (realization frontier execution materialization offset priority)
+  "Push MATERIALIZATION/OFFSET at PRIORITY for reconsideration, without law.
+
+This is the frontier word for a site whose value already stands but whose
+relations must be exposed again, such as a resident chunk's face when a
+neighbour arrives.  It is not an admission and is not retained."
+  (declare (ignore realization execution))
+  (bucket-frontier-push frontier materialization offset priority))
 
 (defun relate-frontier-realization-site
     (realization window frontier execution materialization offset direction
@@ -725,6 +763,12 @@ same law as an ordinary relation.  Return whether it was admitted. #581ZQP"
     (and role (compilation-lowered-field
                compilation (frontier-field-role-name role)))))
 
+(defun compilation-invalidated-field (compilation)
+  (let ((role (frontier-program-invalidated-field
+               (compilation-definition compilation))))
+    (and role (compilation-lowered-field
+               compilation (frontier-field-role-name role)))))
+
 (defun compilation-memo-field (compilation)
   (let ((role (frontier-program-memo-field
                (compilation-definition compilation))))
@@ -776,16 +820,19 @@ same law as an ordinary relation.  Return whether it was admitted. #581ZQP"
     (lisp:lower-lisp-arithmetic-expression expression lowering-environment)))
 
 (defgeneric frontier-family-law-forms (family compilation candidate-variable
-                                       lowering-environment)
+                                       lowering-environment &key seed-p)
   (:documentation
-   "Return (VALUES TEST-FORM COMMIT-FORMS PRIORITY-FORM) for one exposed
-target under FAMILY, given the lowering environment of bound field values.
-CANDIDATE-VARIABLE names the transfer result for monotone families. #FE0O5R"))
+   "Return (VALUES TEST-FORM COMMIT-FORMS PRIORITY-FORM OTHERWISE-FORMS) for
+one exposed target under FAMILY, given the lowering environment of bound
+field values.  CANDIDATE-VARIABLE names the transfer result for monotone
+families, or the supplied value when SEED-P says the target is being seeded
+rather than reached through a relation.  OTHERWISE-FORMS run when the test
+fails, for families with a secondary effect. #FE0O5R"))
 
 (defmethod frontier-family-law-forms
     ((family (eql :monotone-max-fixpoint)) compilation candidate
-     lowering-environment)
-  (declare (ignore family))
+     lowering-environment &key seed-p)
+  (declare (ignore family seed-p))
   (let* ((relaxed (compilation-relaxed-field compilation))
          (current (lowered-field-target-variable relaxed))
          (admission (compilation-admission compilation))
@@ -801,8 +848,9 @@ CANDIDATE-VARIABLE names the transfer result for monotone families. #FE0O5R"))
          candidate))))
 
 (defmethod frontier-family-law-forms
-    ((family (eql :discover-once)) compilation candidate lowering-environment)
-  (declare (ignore family candidate))
+    ((family (eql :discover-once)) compilation candidate lowering-environment
+     &key seed-p)
+  (declare (ignore family candidate seed-p))
   (let* ((memo (compilation-memo-field compilation))
          (visited (lowered-field-target-variable memo))
          (priority (compilation-priority compilation)))
@@ -814,6 +862,44 @@ CANDIDATE-VARIABLE names the transfer result for monotone families. #FE0O5R"))
      (if priority
          (lower-law compilation priority lowering-environment)
          0))))
+
+(defmethod frontier-family-law-forms
+    ((family (eql :invalidation)) compilation candidate lowering-environment
+     &key seed-p)
+  "Clear a dependent target and re-admit it at the level it had; hand an
+independent lit target to the companion frontier as a surviving source.
+
+The invalidated field's source value is the popped priority: the level the
+cleared source had.  A seed clears the site unconditionally and admits it at
+the supplied value."
+  (declare (ignore family))
+  (let* ((invalidated (compilation-invalidated-field compilation))
+         (current (lowered-field-target-variable invalidated)))
+    (if seed-p
+        (values t
+                (list (field-write-form invalidated 'target-offset 0))
+                candidate
+                nil)
+        (values
+         `(and (plusp ,current)
+               ,(lower-law compilation (compilation-admission compilation)
+                           lowering-environment))
+         (list (field-write-form invalidated 'target-offset 0))
+         current
+         `((when (plusp ,current)
+             (survive target target-offset ,current)))))))
+
+(defgeneric frontier-family-companion-p (family)
+  (:documentation
+   "Whether FAMILY's drain hands sites to a second, companion frontier."))
+
+(defmethod frontier-family-companion-p (family)
+  (declare (ignore family))
+  nil)
+
+(defmethod frontier-family-companion-p ((family (eql :invalidation)))
+  (declare (ignore family))
+  t)
 
 (defun frontier-directions-form (definition)
   (let ((neighborhood (frontier-program-definition-neighborhood definition)))
@@ -827,6 +913,7 @@ CANDIDATE-VARIABLE names the transfer result for monotone families. #FE0O5R"))
           (t (error "Unknown frontier neighborhood ~S." neighborhood)))))
 
 (defun frontier-layout-maximum-priority (definition relaxed-binding)
+  "The finite bucket range: from the relaxed or invalidated field's legal values."
   (let ((layout (frontier-program-definition-frontier-layout definition)))
     (cond ((eq layout :brightest-first-buckets)
            (or (and relaxed-binding
@@ -955,13 +1042,17 @@ are emitted but not compiled, for inspection. #53Q1II #T2G95K #716UN6"
                                "transfer")
         (ensure-law-fits-field (compilation-priority compilation) relaxed
                                "priority")))
-    (let* ((relaxed (compilation-relaxed-field compilation))
+    (let* ((relaxed (or (compilation-relaxed-field compilation)
+                        (compilation-invalidated-field compilation)))
            (relaxed-binding (and relaxed (lowered-field-binding relaxed)))
            (maximum-priority
              (frontier-layout-maximum-priority definition relaxed-binding))
            (drain-form (emit-frontier-drain-form compilation))
            (admit-form (emit-frontier-admit-form compilation))
-           (relate-form (emit-frontier-relate-form compilation)))
+           (relate-form (and (not (frontier-family-companion-p
+                                   (frontier-program-definition-family
+                                    definition)))
+                             (emit-frontier-relate-form compilation))))
       (make-instance
        'frontier-realization
        :definition definition
@@ -980,7 +1071,7 @@ are emitted but not compiled, for inspection. #53Q1II #T2G95K #716UN6"
        :relate-form relate-form
        :drain-function (and compile (compile nil drain-form))
        :admit-function (and compile admit-form (compile nil admit-form))
-       :relate-function (and compile (compile nil relate-form))))))
+       :relate-function (and compile relate-form (compile nil relate-form))))))
 
 ;;; Emission.  The generated loop is deliberately plain: raw bucket vectors
 ;;; and counters are bound once at entry and written back at exit; the source
@@ -1046,11 +1137,23 @@ form wherever the law mentions them."
                                 (find (frontier-field-binding-name binding)
                                       (frontier-program-definition-fields
                                        (compilation-definition compilation))
+                                      :key #'frontier-field-role-name))
+                               (frontier-field-role-invalidated-p
+                                (find (frontier-field-binding-name binding)
+                                      (frontier-program-definition-fields
+                                       (compilation-definition compilation))
                                       :key #'frontier-field-role-name))))))
         (when (or implied (member parameter referenced))
           (push lowered needed)
           (unless (frontier-field-binding-lazy-p binding)
-            (push `(,variable ,(field-read-form lowered role offset-variable))
+            (push `(,variable
+                    ,(if (and (eq role :source)
+                              (eq lowered (compilation-invalidated-field
+                                           compilation)))
+                         ;; A cleared source's value is the level it had,
+                         ;; which is the priority it was admitted at.
+                         'source-priority
+                         (field-read-form lowered role offset-variable)))
                   bindings)
             (let ((type (frontier-field-binding-representation-type binding)))
               (when type
@@ -1058,16 +1161,20 @@ form wherever the law mentions them."
     (values (nreverse bindings) (nreverse declarations) (nreverse needed))))
 
 (defun emit-target-law (compilation candidate-form lowering-environment
-                        &key admit-form)
+                        &key admit-form seed-p)
   "Emit the test, commits, and admission for one exposed target site."
   (let ((candidate (make-symbol "CANDIDATE")))
-    (multiple-value-bind (test commits priority)
+    (multiple-value-bind (test commits priority otherwise)
         (frontier-family-law-forms
          (frontier-program-definition-family (compilation-definition compilation))
-         compilation candidate lowering-environment)
-      (let ((body `(when ,test
-                     ,@commits
-                     ,(funcall admit-form priority))))
+         compilation candidate lowering-environment :seed-p seed-p)
+      (let ((body (if otherwise
+                      `(if ,test
+                           (progn ,@commits ,(funcall admit-form priority))
+                           (progn ,@otherwise))
+                      `(when ,test
+                         ,@commits
+                         ,(funcall admit-form priority)))))
         (if candidate-form
             `(let ((,candidate ,candidate-form)) ,body)
             body)))))
@@ -1083,6 +1190,50 @@ form wherever the law mentions them."
     (incf (frontier-execution-admissions execution) admissions)
     (incf (frontier-execution-crossings execution) crossings)
     (incf (frontier-execution-unavailable execution) unavailable)))
+
+(defun companion-parameters (compilation)
+  (and (frontier-family-companion-p
+        (frontier-program-definition-family (compilation-definition compilation)))
+       '(companion)))
+
+(defun companion-bindings (compilation)
+  (and (companion-parameters compilation)
+       `((companion-buckets (bucket-frontier-buckets companion))
+         (companion-count (bucket-frontier-count companion))
+         (companion-current-priority
+          (bucket-frontier-current-priority companion))
+         (companion-pushes (bucket-frontier-pushes companion))
+         (companion-peak-count (bucket-frontier-peak-count companion))
+         (emissions 0))))
+
+(defun companion-declarations (compilation)
+  (and (companion-parameters compilation)
+       `((type simple-vector companion-buckets)
+         (type fixnum companion-count companion-current-priority
+               companion-pushes companion-peak-count emissions))))
+
+(defun companion-flets (compilation)
+  (and (companion-parameters compilation)
+       `((survive (materialization offset priority)
+           (declare (type fixnum offset priority))
+           (frontier-site-buffer-push (svref companion-buckets priority)
+                                      materialization offset)
+           (incf companion-count)
+           (incf companion-pushes)
+           (incf emissions)
+           (when (> priority companion-current-priority)
+             (setf companion-current-priority priority))
+           (when (> companion-count companion-peak-count)
+             (setf companion-peak-count companion-count))))))
+
+(defun companion-write-back-forms (compilation)
+  (and (companion-parameters compilation)
+       `((setf (bucket-frontier-count companion) companion-count
+               (bucket-frontier-current-priority companion)
+               companion-current-priority
+               (bucket-frontier-pushes companion) companion-pushes
+               (bucket-frontier-peak-count companion) companion-peak-count)
+         (incf (frontier-execution-emissions execution) emissions))))
 
 (defun raw-frontier-bindings ()
   `((buckets (bucket-frontier-buckets frontier))
@@ -1132,16 +1283,21 @@ form wherever the law mentions them."
                                (or (member lowered source-needed)
                                    (member lowered target-needed)))
                              (compilation-fields compilation)))
-        `(lambda (window frontier execution &key ,@constants)
+        `(lambda (window frontier execution
+                  ,@(companion-parameters compilation) &key ,@constants)
            (declare (ignorable window ,@constants))
            (let* (,@(raw-frontier-bindings)
+                  ,@(companion-bindings compilation)
                   (directions ,directions))
              ,(raw-frontier-declarations)
-             (flet (,(admit-flet))
+             (declare ,@(companion-declarations compilation))
+             (flet (,(admit-flet) ,@(companion-flets compilation))
                (declare (inline admit))
                (loop
                  (when (zerop count) (return))
-                 (let ((bucket (svref buckets current-priority)))
+                 (let ((bucket (svref buckets current-priority))
+                       (source-priority current-priority))
+                   (declare (type fixnum source-priority) (ignorable source-priority))
                    (multiple-value-bind (source source-offset present-p)
                        (frontier-site-buffer-pop bucket)
                      (declare (type fixnum source-offset))
@@ -1218,6 +1374,7 @@ form wherever the law mentions them."
                                  (lambda (priority)
                                    `(admit target target-offset ,priority))))))))))
                ,@(counter-write-back-forms)
+               ,@(companion-write-back-forms compilation)
                execution)))))))
 
 (defun emit-frontier-admit-form (compilation)
@@ -1240,11 +1397,14 @@ form wherever the law mentions them."
                    (compilation-predicates compilation)))
          (law-expressions (list (compilation-admission compilation)
                                 (compilation-priority compilation))))
-    (when (some (lambda (expression)
-                  (and expression
-                       (intersection (expression-reference-targets expression)
-                                     source-parameters)))
-                law-expressions)
+    (when (and (not (eq (frontier-program-definition-family
+                         (compilation-definition compilation))
+                        :invalidation))
+               (some (lambda (expression)
+                       (and expression
+                            (intersection (expression-reference-targets expression)
+                                          source-parameters)))
+                     law-expressions))
       (return-from emit-frontier-admit-form nil))
     (multiple-value-bind (target-values target-declarations target-needed)
         (field-value-bindings compilation :target 'target-offset referenced)
@@ -1270,8 +1430,11 @@ form wherever the law mentions them."
            (flet (,(admit-flet))
              (declare (inline admit))
              ,(emit-target-law
-               compilation (and relaxed 'value)
+               compilation
+               (and (or relaxed (compilation-invalidated-field compilation))
+                    'value)
                (compilation-lowering-environment compilation :source-p nil)
+               :seed-p t
                :admit-form
                (lambda (priority)
                  `(progn (admit target target-offset ,priority)

@@ -429,7 +429,7 @@
     (ok (= 10 (blocklight-at world 15 8 8)))
     (ok (= 9 (blocklight-at world 16 8 8)))))
 
-(deftest incremental-edits-converge-to-the-reference-field
+(defun check-incremental-edits-converge ()
   (let* ((world (make-block-world
                  :source (make-instance 'little-world-source :seed 1)))
          (state (luvcraft::attach-lighting-state world)))
@@ -459,6 +459,13 @@
     (ok (null (luvcraft::reconcile-lighting state)))
     (ok (plusp (luvcraft::lighting-state-publications state)))
     (ok (plusp (luvcraft::lighting-state-cells-visited state)))))
+
+(deftest incremental-edits-converge-to-the-reference-field
+  (check-incremental-edits-converge))
+
+(deftest compiled-incremental-edits-converge-to-the-reference-field
+  (let ((*voxel-light-solver* :compiled))
+    (check-incremental-edits-converge)))
 
 (deftest asynchronous-lighting-publishes-only-a-current-immutable-capture
   (let* ((world (make-open-sky-test-world '(0 0 0)))
@@ -515,7 +522,7 @@
     (ok (= (sky-at world 8 14 8) 14))
     (ok (light-matches-reference-p world))))
 
-(deftest random-edits-and-residency-match-the-reference-solver
+(defun check-random-edits-and-residency ()
   (let* ((world (make-block-world
                  :source (make-instance 'little-world-source :seed 1)))
          (state (luvcraft::attach-lighting-state world))
@@ -564,6 +571,58 @@
               (random-block)))
       (luvcraft::reconcile-lighting state)
       (ok (light-matches-reference-p world)))))
+
+(deftest random-edits-and-residency-match-the-reference-solver
+  (check-random-edits-and-residency))
+
+(deftest compiled-random-edits-and-residency-match-the-reference-solver
+  ;; The compiled removal and addition programs must reproduce the reference
+  ;; field across the same edit bursts, departure, and re-arrival. #K3WRD3
+  (let ((*voxel-light-solver* :compiled))
+    (check-random-edits-and-residency)))
+
+(deftest compiled-light-removal-is-an-invalidation-program
+  (let ((definition
+          (luvcraft.frontier:frontier-program-definition-for
+           'luvcraft::voxel-light-removal))
+        (realization (luvcraft::compiled-light-removal-realization :sky-light)))
+    (ok (eq :invalidation
+            (luvcraft.frontier:frontier-program-definition-family definition)))
+    (ok (luvcraft.frontier:frontier-program-definition-retain-admissions-p
+         definition))
+    (ok (functionp
+         (luvcraft.frontier:frontier-realization-drain-function realization)))
+    (ok (functionp
+         (luvcraft.frontier:frontier-realization-admit-function realization))))
+  ;; Roofing a lit column: the sky removal clears exactly the beam beneath
+  ;; the roof (its dependents), hands the beam's lit lateral neighbours to
+  ;; the addition frontier as survivors, and the addition program relights
+  ;; the column from them to the reference field.
+  (let* ((world (make-open-sky-test-world))
+         (state (luvcraft::attach-lighting-state world))
+         (*voxel-light-solver* :compiled))
+    (luvcraft::reconcile-lighting state)
+    (setf (world-block-at world 8 15 8) luvcraft::*stone-block*)
+    (let* ((region (luvcraft::make-light-candidate world)))
+      (multiple-value-bind (executions visits)
+          (luvcraft::reconcile-compiled-lighting state region)
+        (destructuring-bind (sky-removal block-removal sky-addition block-addition)
+            executions
+          (declare (ignore block-removal block-addition))
+          ;; The edited cell plus the fifteen cells of beam beneath it.
+          (ok (= 16 (luvcraft.frontier:frontier-site-buffer-length
+                     (luvcraft.frontier:frontier-execution-admitted-sites
+                      sky-removal))))
+          (ok (= 16 (luvcraft.frontier:frontier-execution-visits sky-removal)))
+          (ok (plusp (luvcraft.frontier:frontier-execution-emissions
+                      sky-removal)))
+          (ok (plusp (luvcraft.frontier:frontier-execution-visits
+                      sky-addition)))
+          (ok (plusp visits))))
+      (luvcraft::publish-light-region region)
+      (clrhash (luvcraft::lighting-state-dirty-cells state)))
+    (ok (light-matches-reference-p world))
+    (ok (= 14 (sky-at world 8 14 8)))))
 
 (deftest same-key-replacement-removes-the-old-chunk-light
   (let* ((world (make-open-sky-test-world '(0 0 0) '(1 0 0)))
