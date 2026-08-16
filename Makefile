@@ -6,7 +6,7 @@ LUVCRAFT_BENCHMARK_SCENARIO ?= steady
 LUVCRAFT_STREAMING_BENCHMARK_CSV ?= build/luvcraft-metal-streaming-benchmark.csv
 TRACY_STREAMING_TRACE ?= build/luvcraft-streaming.tracy
 
-.PHONY: all luvcraft run test parinfer-check shader-validate msl-validate smoke metal-smoke metal-text-closeup metal-benchmark metal-streaming-benchmark tracy-streaming mcluv readme-screenshots wiki wiki-cli objective-c-probe metal-clear metal-shader metal-pipeline metal-draw slug-proof slug-text-proof clean
+.PHONY: all luvcraft run test parinfer-check shader-validate msl-validate smoke metal-smoke metal-text-closeup metal-benchmark metal-streaming-benchmark tracy-streaming mcluv readme-screenshots mcclim-gallery wiki wiki-cli objective-c-probe metal-clear metal-shader metal-pipeline metal-draw slug-proof slug-text-proof clean
 
 all: luvcraft
 
@@ -108,6 +108,9 @@ mcluv:
 
 readme-screenshots:
 	./scripts/dev sbcl --script scripts/readme-screenshots.lisp screenshots
+
+mcclim-gallery:
+	./scripts/dev sbcl --script scripts/mcclim-gallery.lisp build/mcclim-gallery
 
 wiki-cli:
 	./scripts/dev sbcl --script wiki/build.lisp

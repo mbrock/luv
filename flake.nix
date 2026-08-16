@@ -153,10 +153,14 @@
               lispPackages.alexandria
               lispPackages.cffi
               lispPackages.cffi-libffi
+              lispPackages.cl-base64
               lispPackages.cl-fad
+              lispPackages.cl-who
               lispPackages.closer-mop
               lispPackages.defclass-std
               lispPackages.eclector
+              lispPackages.flexi-streams
+              lispPackages.lorem-ipsum
               lispPackages.named-readtables
               lispPackages.rove
               lispPackages.spinneret

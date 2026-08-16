@@ -45,6 +45,9 @@
    (commands
     :initform (make-array 32 :adjustable t :fill-pointer 0)
     :reader gpu-medium-commands)
+   (fallback-statistics
+    :initform (make-hash-table :test #'eq)
+    :reader gpu-medium-fallback-statistics)
    (buffering-depth
     :initform 0
     :accessor gpu-medium-buffering-depth))

@@ -22,6 +22,12 @@
   :depends-on ("mcluv/backend" "luvcraft")
   :components ((:file "mcclim/shader-lab")))
 
+(defsystem "mcluv/gallery"
+  :description "A screenshot gallery and primitive-fallback audit for McCLIM."
+  :version "0.0.1"
+  :depends-on ("mcluv/backend" "clim-examples")
+  :components ((:file "mcclim/gallery")))
+
 (defsystem "mcluv/luvcraft"
   :description "McCLIM gadget textures embedded in a live luvcraft session."
   :version "0.0.1"

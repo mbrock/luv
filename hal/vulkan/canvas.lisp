@@ -333,7 +333,8 @@
     (bind-vulkan-canvas-device context configured-device))
   (unless (and (canvas-configuration-usage configuration)
                (every (lambda (usage)
-                        (member usage '(:copy-dst :render-attachment)))
+                        (member usage
+                                '(:copy-src :copy-dst :render-attachment)))
                       (canvas-configuration-usage configuration)))
     (error 'canvas-error :canvas (context-canvas context)
            :operation :configure :reason :unsupported-usage
@@ -343,6 +344,7 @@
            (native-usage
              (mapcar (lambda (value)
                        (ecase value
+                         (:copy-src :transfer-src)
                          (:copy-dst :transfer-dst)
                          (:render-attachment :color-attachment)))
                      usage))

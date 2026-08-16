@@ -62,6 +62,11 @@
            #:refresh-shader-lab
            #:capture-shader-lab-screenshot
            #:capture-default-shader-lab-screenshot
+           #:capture-gpu-mirror-screenshot
+           #:clear-gpu-medium-fallback-statistics
+           #:gpu-medium-fallback-report
+           #:capture-mcclim-gallery
+           #:*mcclim-gallery-scenes*
            #:open-shader-lab
            #:close-shader-lab
            #:spinning-texture-compositor

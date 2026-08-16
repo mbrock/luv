@@ -79,7 +79,8 @@
     (ensure-metal-canvas-state context :configure :unconfigured)
     (unless (and (canvas-configuration-usage configuration)
                  (every (lambda (usage)
-                          (member usage '(:copy-dst :render-attachment)))
+                          (member usage
+                                  '(:copy-src :copy-dst :render-attachment)))
                         (canvas-configuration-usage configuration)))
       (error 'canvas-error :canvas (context-canvas context)
              :operation :configure :reason :unsupported-usage
@@ -89,8 +90,8 @@
              (metal-pixel-format (canvas-configuration-format configuration))))
       (luv.metal:set-layer-device layer (metal-native-object device))
       (luv.metal:set-layer-pixel-format layer native-format)
-      ;; A render-only drawable can remain framebuffer-only. Copy destinations
-      ;; need the broader CAMetalLayer texture contract used by luvcraft.
+      ;; A render-only drawable can remain framebuffer-only. Copies need the
+      ;; broader CAMetalLayer texture contract used by captures and luvcraft.
       (luv.metal:set-layer-framebuffer-only
        layer
        (if (equal '(:render-attachment)

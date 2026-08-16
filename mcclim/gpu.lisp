@@ -19,6 +19,44 @@
 (defstruct gpu-prepared-text-command
   atlas first-vertex vertex-count)
 
+(defvar *gpu-medium-fallback-source* nil
+  "The semantic primitive currently being decomposed by BASIC-MEDIUM.")
+
+(defvar *suppress-luv-mirror-visibility* nil
+  "When true, frame realization and repaint remain drawable-only and hidden.")
+
+(defun note-gpu-medium-fallback (medium primitive field &optional (amount 1))
+  (let* ((statistics (gpu-medium-fallback-statistics medium))
+         (entry (copy-list (gethash primitive statistics))))
+    (incf (getf entry field 0) amount)
+    (setf (gethash primitive statistics) entry)))
+
+(defun clear-gpu-medium-fallback-statistics (medium)
+  "Forget McCLIM fallback activity previously observed by MEDIUM."
+  (check-type medium luv-gpu-medium)
+  (clrhash (gpu-medium-fallback-statistics medium))
+  medium)
+
+(defun gpu-medium-fallback-report (medium)
+  "Describe which BASIC-MEDIUM fallbacks fed MEDIUM's GPU polygon leaf.
+
+Each entry reports semantic calls, polygon points produced by McCLIM, and GPU
+triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
+  (check-type medium luv-gpu-medium)
+  (let (entries)
+    (maphash (lambda (primitive statistics)
+               (push (list* :primitive primitive statistics) entries))
+             (gpu-medium-fallback-statistics medium))
+    (sort entries #'string< :key (lambda (entry)
+                                  (symbol-name (getf entry :primitive))))))
+
+(defmacro with-gpu-medium-fallback ((medium primitive) &body body)
+  `(progn
+     (note-gpu-medium-fallback ,medium ,primitive :calls)
+     (let ((*gpu-medium-fallback-source*
+             (or *gpu-medium-fallback-source* ,primitive)))
+       ,@body)))
+
 (defclass gpu-mirror-frame-state ()
   ((view :initarg :view :accessor gpu-frame-state-view)
    (vertex-buffer :initarg :vertex-buffer :initform nil
@@ -159,11 +197,55 @@
         (gpu-medium-push-triangle medium a b c color)
         (gpu-medium-push-triangle medium a c d color)))))
 
+;;; BASIC-MEDIUM deliberately implements these primitives in terms of its
+;;; polygon leaf. The around methods retain that useful behavior while making
+;;; the otherwise invisible decomposition measurable by the gallery.
+
+(defmethod medium-draw-point* :around
+    ((medium luv-gpu-medium) x y)
+  (with-gpu-medium-fallback (medium :point)
+    (call-next-method medium x y)))
+
+(defmethod medium-draw-line* :around
+    ((medium luv-gpu-medium) x1 y1 x2 y2)
+  (with-gpu-medium-fallback (medium :line)
+    (call-next-method medium x1 y1 x2 y2)))
+
+(defmethod medium-draw-rectangle* :around
+    ((medium luv-gpu-medium) x1 y1 x2 y2 filled)
+  (with-gpu-medium-fallback (medium :rectangle)
+    (call-next-method medium x1 y1 x2 y2 filled)))
+
+(defmethod medium-draw-ellipse* :around
+    ((medium luv-gpu-medium)
+     cx cy rdx1 rdy1 rdx2 rdy2 eta1 eta2 filled)
+  (with-gpu-medium-fallback (medium :ellipse)
+    (call-next-method
+     medium cx cy rdx1 rdy1 rdx2 rdy2 eta1 eta2 filled)))
+
+(defmethod climi::medium-draw-circle* :around
+    ((medium luv-gpu-medium) cx cy radius eta1 eta2 filled)
+  (with-gpu-medium-fallback (medium :circle)
+    (call-next-method medium cx cy radius eta1 eta2 filled)))
+
+(defmethod medium-draw-bezigon* :around
+    ((medium luv-gpu-medium) coordinates closed filled)
+  (with-gpu-medium-fallback (medium :bezigon)
+    (call-next-method medium coordinates closed filled)))
+
+(defmethod medium-draw-pattern* :around
+    ((medium luv-gpu-medium) pattern x y)
+  (with-gpu-medium-fallback (medium :pattern)
+    (call-next-method medium pattern x y)))
+
 (defmethod medium-draw-polygon*
     ((medium luv-gpu-medium) coordinates closed filled)
   (let ((first-vertex (/ (length (gpu-medium-vertices medium)) 6))
         (points (coordinate-pairs coordinates))
         (color (gpu-medium-color medium)))
+    (note-gpu-medium-fallback
+     medium (or *gpu-medium-fallback-source* :direct-polygon)
+     :polygon-points (length points))
     (if filled
         (gpu-medium-fill-convex-polygon medium points color)
         (let ((thickness
@@ -179,6 +261,9 @@
     (let ((vertex-count
             (- (/ (length (gpu-medium-vertices medium)) 6) first-vertex)))
       (when (plusp vertex-count)
+        (note-gpu-medium-fallback
+         medium (or *gpu-medium-fallback-source* :direct-polygon)
+         :gpu-triangles (/ vertex-count 3))
         (vector-push-extend
          (make-gpu-solid-command
           :first-vertex first-vertex :vertex-count vertex-count)
@@ -199,28 +284,36 @@
         (mapcan #'gpu-sheet-paint-order
                 (reverse (sheet-children sheet)))))
 
-(defun repaint-gpu-mirror (mirror)
-  "Rebuild MIRROR's retained triangle stream as one complete McCLIM frame."
+(defun gpu-sheet-presentation-medium (sheet)
+  "Return SHEET's actual drawing medium, outside any recording context."
+  (if (typep sheet 'output-recording-stream)
+      (with-output-recording-options (sheet :record nil :draw t)
+        (sheet-medium sheet))
+      (sheet-medium sheet)))
+
+(defun compose-gpu-mirror-media (mirror)
+  "Join MIRROR's current pane-local drawing streams in painter order."
   (let* ((sheet (mirror-sheet mirror))
-         (sheets (gpu-sheet-paint-order sheet))
-         (target-medium (sheet-medium sheet))
          (media
            (remove-duplicates
-            (remove nil (mapcar #'sheet-medium sheets)) :test #'eq)))
-    (dolist (medium media)
-      (setf (fill-pointer (gpu-medium-vertices medium)) 0)
-      (setf (fill-pointer (gpu-medium-commands medium)) 0)
-      (incf (gpu-medium-buffering-depth medium)))
-    (unwind-protect
-         (repaint-sheet sheet +everywhere+)
-      (dolist (medium media)
-        (decf (gpu-medium-buffering-depth medium))))
-    ;; Each pane owns a semantic medium, but one mirror owns the ordered GPU
-    ;; frame. The top-level stream is its compact presentation buffer.
-    (dolist (medium (rest media))
+            (remove-if-not
+             (lambda (medium) (typep medium 'luv-gpu-medium))
+             (mapcar #'gpu-sheet-presentation-medium
+                     (gpu-sheet-paint-order sheet)))
+            :test #'eq))
+         (target-medium (gpu-sheet-presentation-medium sheet))
+         (snapshots
+           (mapcar
+            (lambda (medium)
+              (cons (copy-seq (gpu-medium-vertices medium))
+                    (copy-seq (gpu-medium-commands medium))))
+            media)))
+    (setf (fill-pointer (gpu-medium-vertices target-medium)) 0
+          (fill-pointer (gpu-medium-commands target-medium)) 0)
+    (dolist (snapshot snapshots)
       (let ((vertex-offset
               (/ (length (gpu-medium-vertices target-medium)) 6)))
-        (loop for command across (gpu-medium-commands medium)
+        (loop for command across (cdr snapshot)
               do (vector-push-extend
                   (etypecase command
                     (gpu-solid-command
@@ -232,10 +325,34 @@
                       (gpu-solid-command-vertex-count command)))
                     (gpu-text-command command))
                   (gpu-medium-commands target-medium))))
-      (loop for value across (gpu-medium-vertices medium)
+      (loop for value across (car snapshot)
             do (vector-push-extend
                 value (gpu-medium-vertices target-medium))))
-    (present-mirror mirror)))
+    target-medium))
+
+(defun repaint-gpu-mirror (mirror &key (present-p t))
+  "Rebuild MIRROR's retained triangle stream as one complete McCLIM frame."
+  (let* ((sheet (mirror-sheet mirror))
+         (sheets (gpu-sheet-paint-order sheet))
+         (media
+           (remove-duplicates
+            (remove-if-not
+             (lambda (medium) (typep medium 'luv-gpu-medium))
+             (mapcar #'gpu-sheet-presentation-medium sheets))
+            :test #'eq)))
+    (dolist (medium media)
+      (setf (fill-pointer (gpu-medium-vertices medium)) 0)
+      (setf (fill-pointer (gpu-medium-commands medium)) 0)
+      (incf (gpu-medium-buffering-depth medium)))
+    (unwind-protect
+         (repaint-sheet sheet +everywhere+)
+      (dolist (medium media)
+        (decf (gpu-medium-buffering-depth medium))))
+    ;; Each pane owns a semantic medium, but one mirror owns the ordered GPU
+    ;; frame. The top-level stream is its compact presentation buffer.
+    (compose-gpu-mirror-media mirror)
+    (when present-p
+      (present-mirror mirror))))
 
 (defmethod service-luv-frame-events ((mirror luv-gpu-mirror))
   (let* ((sheet (mirror-sheet mirror))
@@ -248,7 +365,8 @@
     ((port luv-gpu-port) (sheet mirrored-sheet-mixin))
   (declare (ignore port))
   (alexandria:when-let ((mirror (sheet-direct-mirror sheet)))
-    (unless (mirror-embedded-p mirror)
+    (unless (or (mirror-embedded-p mirror)
+                *suppress-luv-mirror-visibility*)
       (luv:show-canvas (mirror-target mirror)))))
 
 (defun gpu-text-font-pathname (text-style)
@@ -304,6 +422,13 @@
          (descent (- (gpu-font-metric text-style #'zpb-ttf:descender))))
     (values width (+ ascent descent) width 0 ascent)))
 
+(defmethod text-bounding-rectangle*
+    ((medium luv-gpu-medium) string &key text-style (start 0) end)
+  (multiple-value-bind (width height cursor-dx cursor-dy baseline)
+      (text-size medium string :text-style text-style :start start :end end)
+    (values 0 (- baseline) width (- height baseline)
+            cursor-dx cursor-dy)))
+
 (defmethod medium-draw-text*
     ((medium luv-gpu-medium) string x y start end align-x align-y
      toward-x toward-y transform-glyphs)
@@ -328,10 +453,13 @@
          (gpu-medium-commands medium)))))
   nil)
 
-(defun ensure-gpu-mirror-context (mirror)
+(defun ensure-gpu-mirror-context (mirror &key readback-p)
   (when (mirror-embedded-p mirror)
     (return-from ensure-gpu-mirror-context (mirror-context mirror)))
   (let* ((target (mirror-target mirror))
+         (usage (if readback-p
+                    '(:render-attachment :copy-src)
+                    '(:render-attachment)))
          (device
            (or (mirror-device mirror)
                (setf (mirror-device mirror)
@@ -340,16 +468,20 @@
            (or (mirror-context mirror)
                (setf (mirror-context mirror)
                      (luv:make-canvas-context
-                      target luv:*gpu-provider*
+                     target luv:*gpu-provider*
                       (luv:make-canvas-configuration
-                       :device device :usage '(:render-attachment)))))))
+                       :device device :usage usage))))))
     (multiple-value-bind (width height) (luv:canvas-size target)
-      (unless (equal (list width height) (luv:canvas-extent context))
+      (unless (and
+               (equal (list width height) (luv:canvas-extent context))
+               (equal usage
+                      (luv:canvas-configuration-usage
+                       (luv::canvas-context-configuration context))))
         (luv:configure-canvas-context
          context
          (luv:make-canvas-configuration
           :device device :format (luv:canvas-format context)
-          :usage '(:render-attachment)))))
+          :usage usage))))
     context))
 
 (defun release-gpu-mirror-pipeline (mirror)
@@ -730,72 +862,118 @@
             when prepared do (push prepared commands))
       (values (nreverse commands) text-data))))
 
-(defmethod present-mirror ((mirror luv-gpu-mirror))
+(defun render-gpu-mirror-frame (mirror &key readback-buffer)
   (let* ((target (mirror-target mirror))
          (medium (sheet-medium (mirror-sheet mirror)))
-         (vertices (gpu-medium-vertices medium)))
+         ;; Drawing may continue on the McCLIM side while canvas presentation
+         ;; crosses onto its native frame thread. Upload one immutable frame
+         ;; snapshot so the allocation size and the bytes written cannot drift.
+         (vertices (copy-seq (gpu-medium-vertices medium))))
+    (when (plusp (length (gpu-medium-commands medium)))
+      (let* ((context
+               (ensure-gpu-mirror-context
+                mirror :readback-p (not (null readback-buffer))))
+             (device (luv:context-device context))
+             (byte-count (* 4 (length vertices))))
+        (ensure-gpu-mirror-pipeline mirror context)
+        (multiple-value-bind (commands text-data)
+            (prepare-gpu-frame-commands mirror medium)
+          (luv:present-canvas-frame
+           context
+           (lambda (surface encoder)
+             (let* ((state
+                      (ensure-gpu-mirror-frame-state mirror context surface))
+                    (buffer
+                      (and (plusp byte-count)
+                           (ensure-gpu-frame-vertex-buffer
+                            state device byte-count)))
+                    (text-byte-count (* 4 (length text-data)))
+                    (text-buffer
+                      (and (plusp text-byte-count)
+                           (ensure-gpu-frame-text-buffer
+                            state device text-byte-count)))
+                    (pass
+                      (luv:begin-render-pass
+                       encoder
+                       (luv:make-render-pass-descriptor
+                        :label "direct McCLIM frame"
+                        :color-attachments
+                        `((:view ,(gpu-frame-state-view state)
+                           :load-op :clear :store-op :store
+                           :clear-value #(0.94 0.94 0.94 1.0)))))))
+               (when buffer (luv:write-buffer buffer vertices))
+               (when text-buffer (luv:write-buffer text-buffer text-data))
+               (dolist (command commands)
+                 (etypecase command
+                   (gpu-solid-command
+                    (luv:set-pipeline pass (gpu-mirror-pipeline mirror))
+                    (luv:set-bind-group pass 0 (gpu-mirror-bind-group mirror))
+                    (luv:set-vertex-buffer pass 0 buffer)
+                    (luv:draw
+                     pass (gpu-solid-command-vertex-count command) 1
+                     (gpu-solid-command-first-vertex command)))
+                   (gpu-prepared-text-command
+                    (luv:set-pipeline pass (gpu-mirror-text-pipeline mirror))
+                    (luv:set-bind-group
+                     pass 0
+                     (ensure-gpu-text-bind-group
+                      mirror (gpu-prepared-text-command-atlas command)))
+                    (luv:set-vertex-buffer pass 0 text-buffer)
+                    (luv:draw
+                     pass
+                     (gpu-prepared-text-command-vertex-count command) 1
+                     (gpu-prepared-text-command-first-vertex command)))))
+               (luv:end-pass pass)
+               (when readback-buffer
+                 (luv:encode
+                  encoder
+                  (luv:make-gpu-copy-texture-to-buffer-command
+                   :source surface :destination readback-buffer))))))))))
+  mirror)
+
+(defmethod present-mirror ((mirror luv-gpu-mirror))
+  (let ((target (mirror-target mirror))
+        (medium (sheet-medium (mirror-sheet mirror))))
     (when (and (eq :open (luv:canvas-state target))
                (plusp (length (gpu-medium-commands medium))))
       (luv:request-canvas-frame
        target
        (lambda (timestamp)
          (declare (ignore timestamp))
-         (let* ((context (ensure-gpu-mirror-context mirror))
-                (device (luv:context-device context))
-                (byte-count (* 4 (length vertices))))
-           (ensure-gpu-mirror-pipeline mirror context)
-           (multiple-value-bind (commands text-data)
-               (prepare-gpu-frame-commands mirror medium)
-             (luv:present-canvas-frame
-              context
-              (lambda (surface encoder)
-                (let* ((state
-                         (ensure-gpu-mirror-frame-state
-                          mirror context surface))
-                       (buffer
-                         (and (plusp byte-count)
-                              (ensure-gpu-frame-vertex-buffer
-                               state device byte-count)))
-                       (text-byte-count (* 4 (length text-data)))
-                       (text-buffer
-                         (and (plusp text-byte-count)
-                              (ensure-gpu-frame-text-buffer
-                               state device text-byte-count)))
-                       (pass
-                        (luv:begin-render-pass
-                         encoder
-                         (luv:make-render-pass-descriptor
-                          :label "direct McCLIM frame"
-                          :color-attachments
-                          `((:view ,(gpu-frame-state-view state)
-                             :load-op :clear :store-op :store
-                             :clear-value #(0.94 0.94 0.94 1.0)))))))
-                  (when buffer (luv:write-buffer buffer vertices))
-                  (when text-buffer (luv:write-buffer text-buffer text-data))
-                  (dolist (command commands)
-                    (etypecase command
-                      (gpu-solid-command
-                       (luv:set-pipeline pass (gpu-mirror-pipeline mirror))
-                       (luv:set-bind-group
-                        pass 0 (gpu-mirror-bind-group mirror))
-                       (luv:set-vertex-buffer pass 0 buffer)
-                       (luv:draw
-                        pass (gpu-solid-command-vertex-count command) 1
-                        (gpu-solid-command-first-vertex command)))
-                      (gpu-prepared-text-command
-                       (luv:set-pipeline
-                        pass (gpu-mirror-text-pipeline mirror))
-                       (luv:set-bind-group
-                        pass 0
-                        (ensure-gpu-text-bind-group
-                         mirror (gpu-prepared-text-command-atlas command)))
-                       (luv:set-vertex-buffer pass 0 text-buffer)
-                       (luv:draw
-                        pass
-                        (gpu-prepared-text-command-vertex-count command) 1
-                        (gpu-prepared-text-command-first-vertex command)))))
-                  (luv:end-pass pass))))))))))
+         (render-gpu-mirror-frame mirror)))))
   mirror)
+
+(defun capture-gpu-mirror-screenshot (mirror pathname)
+  "Render direct-GPU MIRROR into its hidden drawable and save a PNG."
+  (check-type mirror luv-gpu-mirror)
+  (let ((target (mirror-target mirror)))
+    (unless (eq :open (luv:canvas-state target))
+      (error "Cannot capture a McCLIM mirror whose canvas is ~S."
+             (luv:canvas-state target)))
+    (ensure-directories-exist pathname)
+    (luv:request-canvas-frame
+     target
+     (lambda (timestamp)
+       (declare (ignore timestamp))
+       (let* ((context (ensure-gpu-mirror-context mirror :readback-p t))
+              (extent (luv:canvas-extent context))
+              (width (first extent))
+              (height (second extent))
+              (buffer
+                (luv:create
+                 (luv:context-device context)
+                 (luv:make-buffer-descriptor
+                  :label "direct McCLIM screenshot readback"
+                  :size (* 4 width height) :usage '(:copy-dst)))))
+         (unwind-protect
+              (progn
+                (render-gpu-mirror-frame mirror :readback-buffer buffer)
+                (let ((pixels (luv:read-buffer buffer))
+                      (format (luv:canvas-format context)))
+                  (luv:write-rgba-png
+                   pathname pixels width height format)
+                  (values pathname pixels width height format)))
+           (luv:destroy buffer)))))))
 
 (defmethod release-mirror-presentation ((mirror luv-gpu-mirror))
   (release-gpu-mirror-pipeline mirror)
