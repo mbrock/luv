@@ -7,6 +7,76 @@
 
 (in-package #:mcluv)
 
+(spv:define-shader spinning-texture-vertex-specification
+    (:stage :vertex
+     :inputs ((vertex-index :uint :built-in :vertex-index))
+     :resources
+     ((state :uniform-block :set 0 :binding 2
+             :members ((center :vec4) (right :vec4) (up :vec4))))
+     :outputs ((clip-position :vec4 :built-in :position)
+               (texture-coordinate :vec2 :location 0)))
+  (let* ((two (spv:uint 2.0))
+         (x-bit (mod vertex-index two))
+         (y-bit (/ vertex-index two))
+         (x (spv:float x-bit))
+         (y (spv:float y-bit))
+         (center-x (- (* x 2.0) 1.0))
+         (center-y (- (* y 2.0) 1.0)))
+    (spv:set-output texture-coordinate (spv:vec2 x y))
+    (spv:set-output
+     clip-position (+ center (* right center-x) (* up center-y)))))
+
+(spv:define-shader spinning-texture-fragment-specification
+    (:stage :fragment
+     :inputs ((texture-coordinate :vec2 :location 0))
+     :resources
+     ((image :texture-2d :set 0 :binding 0 :sample-transfer :identity)
+      (texture-sampler :sampler :set 0 :binding 1))
+     :outputs ((color-output :vec4 :location 0)))
+  (let* ((texel (spv:sample image texture-sampler texture-coordinate)))
+    (spv:set-output color-output texel)))
+
+(spv:define-shader lisp-machine-chassis-vertex-specification
+    (:stage :vertex
+     :inputs ((vertex-index :uint :built-in :vertex-index))
+     :resources
+     ((state :uniform-block :set 0 :binding 2
+             :members ((center :vec4) (right :vec4) (up :vec4))))
+     :outputs ((clip-position :vec4 :built-in :position)
+               (chassis-color :vec4 :location 0)))
+  (let* ((one (spv:uint 1.0))
+         (two (spv:uint 2.0))
+         (four (spv:uint 4.0))
+         (layer (/ vertex-index four))
+         (local-index (mod vertex-index four))
+         (x (spv:float (mod local-index two)))
+         (y (spv:float (/ local-index two)))
+         (shadow-p (< layer one))
+         (body-p (< layer two))
+         (scale-x
+           (if shadow-p 1.2058824 (if body-p 1.1764706 1.0735294)))
+         (scale-y
+           (if shadow-p 1.2647059 (if body-p 1.2352941 1.0882353)))
+         (offset-x (if shadow-p 0.05147059 0.0))
+         (offset-y
+           (if shadow-p 0.08088235 (if body-p 0.01764706 0.0)))
+         (color-r (if shadow-p 0.035 (if body-p 0.50 0.075)))
+         (color-g (if shadow-p 0.045 (if body-p 0.47 0.095)))
+         (color-b (if shadow-p 0.043 (if body-p 0.38 0.085)))
+         (color (spv:vec4 color-r color-g color-b 1.0))
+         (layer-x (+ (* (- (* x 2.0) 1.0) scale-x) offset-x))
+         (layer-y (+ (* (- (* y 2.0) 1.0) scale-y) offset-y)))
+    (spv:set-output chassis-color color)
+    (spv:set-output
+     clip-position (+ center (* right layer-x) (* up layer-y)))))
+
+(spv:define-shader lisp-machine-chassis-fragment-specification
+    (:stage :fragment
+     :inputs ((chassis-color :vec4 :location 0))
+     :outputs ((color-output :vec4 :location 0)))
+  (let* ()
+    (spv:set-output color-output chassis-color)))
+
 (defclass spinning-compositor-frame-state ()
   ((buffer
     :initarg :buffer
@@ -165,22 +235,28 @@
                       (create-resource
                        (luv:make-shader-module-descriptor
                         :label "spinning McCLIM vertex shader"
-                        :code (spv:spinning-texture-vertex-shader))))
+                        :language :mathematical
+                        :code (spinning-texture-vertex-specification))))
                     (fragment-module
                       (create-resource
                        (luv:make-shader-module-descriptor
                         :label "spinning McCLIM fragment shader"
-                        :code (spv:spinning-texture-fragment-shader))))
+                        :language :mathematical
+                        :code (spinning-texture-fragment-specification))))
                     (chassis-vertex-module
                       (create-resource
                        (luv:make-shader-module-descriptor
                         :label "Lisp machine chassis vertex shader"
-                        :code (spv:lisp-machine-chassis-vertex-shader))))
+                        :language :mathematical
+                        :code
+                        (lisp-machine-chassis-vertex-specification))))
                     (chassis-fragment-module
                       (create-resource
                        (luv:make-shader-module-descriptor
                         :label "Lisp machine chassis fragment shader"
-                        :code (spv:lisp-machine-chassis-fragment-shader))))
+                        :language :mathematical
+                        :code
+                        (lisp-machine-chassis-fragment-specification))))
                     (layout
                       (create-resource
                        (luv:make-bind-group-layout-descriptor
@@ -193,10 +269,8 @@
                        (luv:make-render-pipeline-descriptor
                         :label "spinning McCLIM quad"
                         :layout layout
-                        :vertex `(:module ,vertex-module
-                                  :entry-point "main")
+                        :vertex `(:module ,vertex-module)
                         :fragment `(:module ,fragment-module
-                                    :entry-point "main"
                                     :targets ((:format ,format)))
                         :depth-stencil
                         (when depth-format
@@ -209,10 +283,8 @@
                        (luv:make-render-pipeline-descriptor
                         :label "Lisp machine terminal chassis"
                         :layout layout
-                        :vertex `(:module ,chassis-vertex-module
-                                  :entry-point "main")
+                        :vertex `(:module ,chassis-vertex-module)
                         :fragment `(:module ,chassis-fragment-module
-                                    :entry-point "main"
                                     :targets ((:format ,format)))
                         :depth-stencil
                         (when depth-format

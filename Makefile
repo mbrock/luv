@@ -66,7 +66,11 @@ shader-validate:
 		--eval '(luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (mcluv::widget-relief-world-vertex-specification)) #p"build/mcluv-world-relief.vert.spv")' \
 		--eval '(luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (mcluv::widget-relief-world-fragment-specification)) #p"build/mcluv-world-relief.frag.spv")' \
 		--eval '(luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (mcluv::image-roundrect-vertex-specification)) #p"build/mcluv-image.vert.spv")' \
-		--eval '(luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (mcluv::image-roundrect-fragment-specification)) #p"build/mcluv-image.frag.spv")'
+		--eval '(luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (mcluv::image-roundrect-fragment-specification)) #p"build/mcluv-image.frag.spv")' \
+		--eval '(luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (mcluv::spinning-texture-vertex-specification)) #p"build/mcluv-compositor.vert.spv")' \
+		--eval '(luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (mcluv::spinning-texture-fragment-specification)) #p"build/mcluv-compositor.frag.spv")' \
+		--eval '(luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (mcluv::lisp-machine-chassis-vertex-specification)) #p"build/mcluv-chassis.vert.spv")' \
+		--eval '(luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (mcluv::lisp-machine-chassis-fragment-specification)) #p"build/mcluv-chassis.frag.spv")'
 	./scripts/dev spirv-val --target-env vulkan1.0 build/block-world.vert.spv
 	./scripts/dev spirv-val --target-env vulkan1.0 build/block-world.frag.spv
 	./scripts/dev spirv-val --target-env vulkan1.0 build/block-world-crosshair.vert.spv
@@ -88,6 +92,10 @@ shader-validate:
 	./scripts/dev spirv-val --target-env vulkan1.0 build/mcluv-world-relief.frag.spv
 	./scripts/dev spirv-val --target-env vulkan1.0 build/mcluv-image.vert.spv
 	./scripts/dev spirv-val --target-env vulkan1.0 build/mcluv-image.frag.spv
+	./scripts/dev spirv-val --target-env vulkan1.0 build/mcluv-compositor.vert.spv
+	./scripts/dev spirv-val --target-env vulkan1.0 build/mcluv-compositor.frag.spv
+	./scripts/dev spirv-val --target-env vulkan1.0 build/mcluv-chassis.vert.spv
+	./scripts/dev spirv-val --target-env vulkan1.0 build/mcluv-chassis.frag.spv
 
 msl-validate:
 	mkdir -p build
@@ -114,7 +122,11 @@ msl-validate:
 		--eval '(luv.msl:write-msl (luv.msl:compile-msl (mcluv::widget-relief-world-vertex-specification)) #p"build/mcluv-world-relief.vert.metal")' \
 		--eval '(luv.msl:write-msl (luv.msl:compile-msl (mcluv::widget-relief-world-fragment-specification)) #p"build/mcluv-world-relief.frag.metal")' \
 		--eval '(luv.msl:write-msl (luv.msl:compile-msl (mcluv::image-roundrect-vertex-specification)) #p"build/mcluv-image.vert.metal")' \
-		--eval '(luv.msl:write-msl (luv.msl:compile-msl (mcluv::image-roundrect-fragment-specification)) #p"build/mcluv-image.frag.metal")'
+		--eval '(luv.msl:write-msl (luv.msl:compile-msl (mcluv::image-roundrect-fragment-specification)) #p"build/mcluv-image.frag.metal")' \
+		--eval '(luv.msl:write-msl (luv.msl:compile-msl (mcluv::spinning-texture-vertex-specification)) #p"build/mcluv-compositor.vert.metal")' \
+		--eval '(luv.msl:write-msl (luv.msl:compile-msl (mcluv::spinning-texture-fragment-specification)) #p"build/mcluv-compositor.frag.metal")' \
+		--eval '(luv.msl:write-msl (luv.msl:compile-msl (mcluv::lisp-machine-chassis-vertex-specification)) #p"build/mcluv-chassis.vert.metal")' \
+		--eval '(luv.msl:write-msl (luv.msl:compile-msl (mcluv::lisp-machine-chassis-fragment-specification)) #p"build/mcluv-chassis.frag.metal")'
 	xcrun metal -std=metal4.0 -c build/block-world.vert.metal -o build/block-world.vert.air
 	xcrun metal -std=metal4.0 -c build/block-world.frag.metal -o build/block-world.frag.air
 	xcrun metal -std=metal4.0 -c build/block-world-text.vert.metal -o build/block-world-text.vert.air
@@ -131,6 +143,10 @@ msl-validate:
 	xcrun metal -std=metal4.0 -c build/mcluv-world-relief.frag.metal -o build/mcluv-world-relief.frag.air
 	xcrun metal -std=metal4.0 -c build/mcluv-image.vert.metal -o build/mcluv-image.vert.air
 	xcrun metal -std=metal4.0 -c build/mcluv-image.frag.metal -o build/mcluv-image.frag.air
+	xcrun metal -std=metal4.0 -c build/mcluv-compositor.vert.metal -o build/mcluv-compositor.vert.air
+	xcrun metal -std=metal4.0 -c build/mcluv-compositor.frag.metal -o build/mcluv-compositor.frag.air
+	xcrun metal -std=metal4.0 -c build/mcluv-chassis.vert.metal -o build/mcluv-chassis.vert.air
+	xcrun metal -std=metal4.0 -c build/mcluv-chassis.frag.metal -o build/mcluv-chassis.frag.air
 
 smoke: luvcraft
 	mkdir -p build

@@ -875,6 +875,9 @@
     (cond
       ((and (eq direction :output) (eq built-in :position))
        "[[position]]")
+      ((and (eq stage :vertex) (eq direction :input)
+            (eq built-in :vertex-index))
+       "[[vertex_id]]")
       (built-in
        (error 'spv:shader-language-error
               :form source-form :reason :unsupported-msl-built-in
@@ -901,6 +904,15 @@
        :attribute (msl-interface-attribute stage declaration)
        :origin declaration))
     declarations)))
+
+(defun msl-built-in-input-parameter (stage declaration)
+  (make-instance
+   'msl-parameter
+   :type (msl-type-name (spv:shader-declaration-type declaration)
+                        (spv:shader-object-source-form declaration))
+   :name (msl-identifier (spv:shader-object-name declaration))
+   :attribute (msl-interface-attribute stage declaration)
+   :origin declaration))
 
 (defun msl-uniform-structure (resource)
   (make-instance
@@ -957,8 +969,10 @@
     (context specification input-parameter-name)
   (dolist (input (spv:shader-specification-inputs specification))
     (setf (gethash input (msl-context-references context))
-          (format nil "~A.~A" input-parameter-name
-                  (msl-identifier (spv:shader-object-name input)))))
+          (if (spv:shader-interface-built-in input)
+              (msl-identifier (spv:shader-object-name input))
+              (format nil "~A.~A" input-parameter-name
+                      (msl-identifier (spv:shader-object-name input))))))
   (dolist (resource (spv:shader-specification-resources specification))
     (let ((resource-name (msl-identifier (spv:shader-object-name resource))))
       (setf (gethash resource (msl-context-references context)) resource-name)
@@ -1087,10 +1101,16 @@ This is the sibling target proof described by #58IDSR."
                           :target target :specification specification))
          (stage (spv:shader-specification-stage specification))
          (base-name (spv:shader-object-name specification))
+         (ordinary-inputs
+           (remove-if #'spv:shader-interface-built-in
+                      (spv:shader-specification-inputs specification)))
+         (built-in-inputs
+           (remove-if-not #'spv:shader-interface-built-in
+                          (spv:shader-specification-inputs specification)))
          (input-structure
-           (msl-interface-structure
-            base-name "Input" stage
-            (spv:shader-specification-inputs specification)))
+           (when ordinary-inputs
+             (msl-interface-structure
+              base-name "Input" stage ordinary-inputs)))
          (output-structure
            (msl-interface-structure
             base-name "Output" stage
@@ -1101,11 +1121,16 @@ This is the sibling target proof described by #58IDSR."
                    collect (msl-uniform-structure resource)))
          (input-parameter-name "stage_in")
          (parameters
-           (cons
-            (make-instance
-             'msl-parameter
-             :type (msl-structure-name input-structure)
-             :name input-parameter-name :attribute "[[stage_in]]")
+           (append
+            (when input-structure
+              (list
+               (make-instance
+                'msl-parameter
+                :type (msl-structure-name input-structure)
+                :name input-parameter-name :attribute "[[stage_in]]")))
+            (mapcar (lambda (input)
+                      (msl-built-in-input-parameter stage input))
+                    built-in-inputs)
             (mapcar #'msl-resource-parameter
                     (spv:shader-specification-resources specification))))
          (statements nil))
@@ -1159,7 +1184,7 @@ This is the sibling target proof described by #58IDSR."
               'msl-document
               :target target :specification specification
               :declarations
-              (append (list input-structure output-structure)
+              (append (remove nil (list input-structure output-structure))
                       uniform-structures)
               :entry-point entry-point
               :source ""
