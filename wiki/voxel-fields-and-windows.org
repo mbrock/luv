@@ -850,6 +850,9 @@ open boundaries, and randomized agreement with the reference solver.
 The complete =make test= path passes, and the standalone smoke render remains
 byte-identical at SHA-256
 =0c85d4550638418cb88d507c6541a49147aeeea5697175d13904942b65a689ec=.
+The measured packed representation now supplies the first client for the
+dynamic columnar-buffer design in #Y0TPND; #LDP5UR keeps that storage
+extraction distinct from a generalized solver.
 
 * NEXT Pay checked adjacency cost once per visited site
 :PROPERTIES:

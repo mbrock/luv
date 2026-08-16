@@ -1973,7 +1973,9 @@ backend, as primary.
   system thereby spans storage and computation with one vocabulary and
   zero runtime tagging — the physics seam #R9M4PV gets dimension-checked
   impulse and force arithmetic over columnar state, without boxing a
-  value.
+  value.  #327W2B makes the same boundary concrete for dynamically sized
+  columnar buffers whose physical lane types are generated once while a
+  materialization retains its exact row meaning.
 
 The shared-definition payoff remains, now as one client among several.
 Even moppe's discipline could not prevent its CPU-side sky model from

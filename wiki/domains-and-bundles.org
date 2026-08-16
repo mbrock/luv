@@ -221,6 +221,143 @@ share an =(unsigned-byte 4)= representation without becoming semantically
 interchangeable.  Conversely, one vector-valued position field can occupy
 three scalar SIMD lanes without becoming three unrelated meanings.
 
+* A columnar buffer materializes a changing finite domain
+:PROPERTIES:
+:ID: Y0TPND
+:END:
+
+The packed lighting frontier in #QS1ERH is the first small dynamic relative of
+a bundle.  Its current sites are the ordinal domain =[0, length)=; pushing and
+popping changes membership, while three parallel arrays materialize one
+=entry=, =offset=, and =level= reading for every member.  The level buckets
+decide /which/ buffer receives or yields a row.  That scheduling policy is not
+part of the storage representation.
+
+A reusable =columnar-buffer= should therefore own only a closed physical lane
+layout and a small membership contract:
+
+- one logical length and capacity shared by every lane;
+- one specialized vector per lane, with no independent fill pointers which
+  can become skewed;
+- coherent growth which allocates and copies every replacement vector before
+  publishing any of them;
+- append, truncate, reset, indexed access, and allocation-free row iteration;
+- generated concrete operations, so a hot push or visit performs neither
+  schema lookup nor generic dispatch; and
+- retention policy per lane, so removing a row clears object references while
+  bytes and floats need no ceremonial rewrite.
+
+Push validates every incoming Common Lisp representation before modifying a
+lane, writes the row, and publishes the new length last.  Reset clears the
+active prefix of reference-bearing lanes before setting the shared length to
+zero.  A growth failure leaves the old vectors installed.  These rules make
+the correspondence between columns an invariant of the abstraction rather
+than a convention repeated by each client.
+
+Stacks, level buckets, FIFO rings, and eventually swap-dense solver sets can
+compose this storage, but they should remain separate policies.  The first
+substrate need only earn the operations used by lighting.  Stable identities,
+forwarding tables, and swap removal belong to the later body-domain client
+described by #Y5H8KC; fixed-point algebra still waits for its second client as
+in #BA9MCA.
+
+* Row meaning binds once; raw lanes run
+:PROPERTIES:
+:ID: 327W2B
+:END:
+
+A columnar definition has two related descriptions which must not collapse
+into one.
+
+The *physical lane layout* fixes lane names, Common Lisp element types,
+initial values, and reference-clearing policy.  It is sufficiently static for
+a defining macro to generate a concrete structure, specialized arrays, and
+inline operations.  The *row declaration* says what values those lanes mean.
+It consists of represented-value declarations and may group several physical
+lanes into one quantity projection.  Both descriptions are inspectable at the
+aggregate boundary; neither accompanies an individual runtime value.
+
+The existing arithmetic vocabulary already supplies most of the semantic
+half.  A scalar lane can carry a =represented-value-declaration= with a
+representation type and optional =quantity-specification=.  A
+=quantity-layout= can say that three columns together are one
+=:world-position= vector rather than three unrelated scalars.  Lanes such as a
+CLOS =entry= reference or a chunk-domain =offset= remain outside that layout:
+an integer site key is not thereby a dimensionless measured quantity.
+
+Some row declarations are fixed by the definition site.  An awake-body buffer
+might always group three =single-float= lanes as a world position in metres.
+Others are bound by the owner of one materialization.  The lighting buffer's
+=level= lane is physically =(unsigned-byte 8)= in both cases, but a sky-light
+frontier should retain the concrete =:sky-light= field declaration while a
+block-light frontier retains =:block-light=.  Binding either field checks that
+its represented value fits the generated lane and records its exact quantity
+specification and definition revision.  It does not introduce a runtime
+quantity variable or a tag on each byte.
+
+This yields three deliberate checking boundaries:
+
+1. Defining the layout checks lane names, element types, defaults, retention,
+   and the disjoint named projections of any fixed row declaration.
+2. Constructing a buffer checks owner-supplied declarations against its
+   physical lanes and retains the resulting concrete row declaration.
+3. Binding a kernel checks its parameter declarations against that row once,
+   then borrows the raw arrays for a closed loop.
+
+Ordinary =push=, =pop=, and row iteration consequently enforce representation
+types but perform no dimensional dispatch.  Quantity correctness comes from
+the declarations at the producer, materialization, and kernel boundaries,
+just as CPU arithmetic lowering erases checked quantity construction before
+executing ordinary numbers.  An inspector can still show the buffer's schema,
+concrete field bindings, length, capacity, and lanes.
+
+A tentative definition site illustrates the division without settling the
+surface syntax:
+
+#+begin_src lisp
+(define-columnar-buffer light-site-buffer
+  ((entry  :type (or null light-region-entry) :clear-on-remove t)
+   (offset :type (unsigned-byte 32))
+   (level  :type (unsigned-byte 8))))
+
+;; FIELD-DEFINITION supplies LEVEL's concrete represented-value declaration.
+(make-light-site-buffer :declarations `((level ,field-definition)))
+#+end_src
+
+Generated names are preferable to a runtime-configured universal container:
+SBCL can see the element types and inline array access, while the schema and
+its quantity judgments remain ordinary semantic objects.  This is the same
+object-at-the-boundary, dense-data-inside seam as #J7A2KD, now applied to a
+dynamic row domain.
+
+* TODO Extract a quantity-aware columnar buffer
+:PROPERTIES:
+:ID: LDP5UR
+:END:
+
+Intent: extract the synchronized specialized storage proven by the lighting
+frontier into a generated =columnar-buffer= substrate, while making its
+physical lanes and concrete row quantity declaration inspectable.  Keep level
+scheduling, spatial stepping, and fixed-point behavior in lighting.
+
+Evidence: #QS1ERH reduced the retained frontier from about 264 MB to 31.8 MB
+without changing its LIFO visits, and level scheduling then reduced the same
+solve to about 13.3 MB and 0.18 seconds.  The remaining implementation repeats
+three =vector-push-extend= calls and maintains three fill pointers by
+convention.  Existing =represented-value-declaration=, =quantity-layout=, and
+record-slot declarations already prove that Common Lisp representation and
+quantity meaning can be checked together without wrapping runtime values.
+
+Done when: the lighting buckets use one shared length and capacity over
+generated specialized lanes; growth is coherent; pop and reset clear retained
+entries; push, pop, and iteration allocate no row and dispatch on no schema;
+tests reject an incompatible represented declaration and distinguish concrete
+sky-light from block-light bindings; a small split-vector declaration proves
+that several columns can retain one vector quantity; the current lighting
+correctness suites pass; and the packed level profile shows no material
+regression.  Do not add stable ids, swap removal, a generalized solver, or a
+schema metaclass in this iteration.
+
 * Chunk boundaries need an environment
 :PROPERTIES:
 :ID: H2W9DJ
