@@ -15,6 +15,8 @@
 
 (defstruct gpu-analytic-command first-vertex vertex-count clip)
 
+(defstruct gpu-relief-analytic-command first-vertex vertex-count clip)
+
 (defstruct gpu-gradient-analytic-command first-vertex vertex-count clip)
 
 (defstruct gpu-image-command design first-vertex vertex-count clip)
@@ -75,6 +77,10 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
                     :accessor gpu-frame-state-analytic-buffer)
    (analytic-capacity :initarg :analytic-capacity :initform 0
                       :accessor gpu-frame-state-analytic-capacity)
+   (relief-buffer :initarg :relief-buffer :initform nil
+                  :accessor gpu-frame-state-relief-buffer)
+   (relief-capacity :initarg :relief-capacity :initform 0
+                    :accessor gpu-frame-state-relief-capacity)
    (gradient-buffer :initarg :gradient-buffer :initform nil
                     :accessor gpu-frame-state-gradient-buffer)
    (gradient-capacity :initarg :gradient-capacity :initform 0
@@ -289,6 +295,72 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
         :clip (gpu-medium-clip-rectangle medium))
        (gpu-medium-commands medium))
       t)))
+
+(defun gpu-medium-push-relief-analytic-vertex
+    (medium center x-axis y-axis local-x local-y
+     half-width half-height radius color height)
+  (let ((x (+ (first center)
+              (* local-x (first x-axis))
+              (* local-y (first y-axis))))
+        (y (+ (second center)
+              (* local-x (second x-axis))
+              (* local-y (second y-axis)))))
+    (multiple-value-bind (device-x device-y)
+        (transform-position (medium-device-transformation medium) x y)
+      (multiple-value-bind (width height-in-pixels) (gpu-medium-size medium)
+        (let ((vertices (gpu-medium-relief-vertices medium)))
+          (flet ((push-value (value)
+                   (vector-push-extend (coerce value 'single-float) vertices)))
+            (dolist (value
+                      (list (- (* 2 (/ device-x width)) 1)
+                            (- (* 2 (/ device-y height-in-pixels)) 1)
+                            (fourth color)
+                            local-x local-y 0.0
+                            half-width half-height radius
+                            (first color) (second color) (third color)
+                            height 0.0 0.0))
+              (push-value value))))))))
+
+(defun gpu-medium-append-relief-analytic-quad
+    (medium center x-axis y-axis half-width half-height radius color height)
+  (alexandria:when-let
+      ((padding (gpu-medium-analytic-padding medium x-axis y-axis)))
+    (let* ((vertices (gpu-medium-relief-vertices medium))
+           (first-vertex (/ (length vertices) 15))
+           (left (- (+ half-width padding)))
+           (right (+ half-width padding))
+           (top (- (+ half-height padding)))
+           (bottom (+ half-height padding)))
+      (flet ((vertex (x y)
+               (gpu-medium-push-relief-analytic-vertex
+                medium center x-axis y-axis x y half-width half-height radius
+                color height)))
+        (vertex left bottom)
+        (vertex right bottom)
+        (vertex right top)
+        (vertex left bottom)
+        (vertex right top)
+        (vertex left top))
+      (vector-push-extend
+       (make-gpu-relief-analytic-command
+        :first-vertex first-vertex :vertex-count 6
+        :clip (gpu-medium-clip-rectangle medium))
+       (gpu-medium-commands medium))
+      t)))
+
+(defmethod gpu-medium-append-analytic-design
+    ((design relief-design) medium center x-axis y-axis
+     half-width half-height radius)
+  (let ((color
+          (multiple-value-list
+           (color-rgba (design-ink (relief-albedo design) 0 0)))))
+    ;; A construction-time pane may briefly have a singular device transform.
+    ;; Consume the relief primitive in that state instead of decomposing it
+    ;; into polygons that cannot preserve its height channel.
+    (or (gpu-medium-append-relief-analytic-quad
+         medium center x-axis y-axis half-width half-height radius color
+         (relief-height design))
+        t)))
 
 (defun gpu-medium-push-gradient-analytic-vertex
     (medium gradient center x-axis y-axis local-x local-y
@@ -795,12 +867,14 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
               (lambda (medium)
                 (list (copy-seq (gpu-medium-vertices medium))
                       (copy-seq (gpu-medium-analytic-vertices medium))
+                      (copy-seq (gpu-medium-relief-vertices medium))
                       (copy-seq (gpu-medium-gradient-vertices medium))
                       (copy-seq (gpu-medium-image-vertices medium))
                       (copy-seq (gpu-medium-commands medium))))
               media)))
       (setf (fill-pointer (gpu-medium-vertices target-medium)) 0
             (fill-pointer (gpu-medium-analytic-vertices target-medium)) 0
+            (fill-pointer (gpu-medium-relief-vertices target-medium)) 0
             (fill-pointer (gpu-medium-gradient-vertices target-medium)) 0
             (fill-pointer (gpu-medium-image-vertices target-medium)) 0
             (fill-pointer (gpu-medium-commands target-medium)) 0)
@@ -809,11 +883,13 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
                 (/ (length (gpu-medium-vertices target-medium)) 6))
               (analytic-offset
                 (/ (length (gpu-medium-analytic-vertices target-medium)) 12))
+              (relief-offset
+                (/ (length (gpu-medium-relief-vertices target-medium)) 15))
               (gradient-offset
                 (/ (length (gpu-medium-gradient-vertices target-medium)) 21))
               (image-offset
                 (/ (length (gpu-medium-image-vertices target-medium)) 12)))
-          (loop for command across (fifth snapshot)
+          (loop for command across (sixth snapshot)
                 do (vector-push-extend
                     (etypecase command
                       (gpu-solid-command
@@ -832,6 +908,14 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
                         :vertex-count
                         (gpu-analytic-command-vertex-count command)
                         :clip (gpu-analytic-command-clip command)))
+                      (gpu-relief-analytic-command
+                       (make-gpu-relief-analytic-command
+                        :first-vertex
+                        (+ relief-offset
+                           (gpu-relief-analytic-command-first-vertex command))
+                        :vertex-count
+                        (gpu-relief-analytic-command-vertex-count command)
+                        :clip (gpu-relief-analytic-command-clip command)))
                       (gpu-gradient-analytic-command
                        (make-gpu-gradient-analytic-command
                         :first-vertex
@@ -860,8 +944,11 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
                   value (gpu-medium-analytic-vertices target-medium)))
         (loop for value across (third snapshot)
               do (vector-push-extend
-                  value (gpu-medium-gradient-vertices target-medium)))
+                  value (gpu-medium-relief-vertices target-medium)))
         (loop for value across (fourth snapshot)
+              do (vector-push-extend
+                  value (gpu-medium-gradient-vertices target-medium)))
+        (loop for value across (fifth snapshot)
               do (vector-push-extend
                   value (gpu-medium-image-vertices target-medium))))
       target-medium)))
@@ -880,6 +967,7 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
       (dolist (medium media)
         (setf (fill-pointer (gpu-medium-vertices medium)) 0)
         (setf (fill-pointer (gpu-medium-analytic-vertices medium)) 0)
+        (setf (fill-pointer (gpu-medium-relief-vertices medium)) 0)
         (setf (fill-pointer (gpu-medium-gradient-vertices medium)) 0)
         (setf (fill-pointer (gpu-medium-image-vertices medium)) 0)
         (setf (fill-pointer (gpu-medium-commands medium)) 0)
@@ -1044,6 +1132,7 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
   (dolist (resource
             (list (gpu-mirror-pipeline mirror)
                   (gpu-mirror-analytic-pipeline mirror)
+                  (gpu-mirror-relief-pipeline mirror)
                   (gpu-mirror-gradient-analytic-pipeline mirror)
                   (gpu-mirror-image-pipeline mirror)
                   (gpu-mirror-text-pipeline mirror)
@@ -1056,6 +1145,8 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
                   (gpu-mirror-vertex-module mirror)
                   (gpu-mirror-analytic-fragment-module mirror)
                   (gpu-mirror-analytic-vertex-module mirror)
+                  (gpu-mirror-relief-fragment-module mirror)
+                  (gpu-mirror-relief-vertex-module mirror)
                   (gpu-mirror-gradient-analytic-fragment-module mirror)
                   (gpu-mirror-gradient-analytic-vertex-module mirror)
                   (gpu-mirror-image-sampler mirror)
@@ -1070,6 +1161,9 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
         (gpu-mirror-analytic-pipeline mirror) nil
         (gpu-mirror-analytic-fragment-module mirror) nil
         (gpu-mirror-analytic-vertex-module mirror) nil
+        (gpu-mirror-relief-pipeline mirror) nil
+        (gpu-mirror-relief-fragment-module mirror) nil
+        (gpu-mirror-relief-vertex-module mirror) nil
         (gpu-mirror-gradient-analytic-pipeline mirror) nil
         (gpu-mirror-gradient-analytic-fragment-module mirror) nil
         (gpu-mirror-gradient-analytic-vertex-module mirror) nil
@@ -1128,6 +1222,52 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
              (setf (gpu-mirror-analytic-vertex-module mirror) vertex
                    (gpu-mirror-analytic-fragment-module mirror) fragment
                    (gpu-mirror-analytic-pipeline mirror) pipeline
+                   completed-p t))
+        (unless completed-p
+          (dolist (resource (remove nil (list pipeline fragment vertex)))
+            (luv:destroy resource)))))))
+
+(defun ensure-gpu-mirror-relief-pipeline (mirror device format)
+  (unless (gpu-mirror-relief-pipeline mirror)
+    (let ((vertex nil) (fragment nil) (pipeline nil) (completed-p nil))
+      (unwind-protect
+           (progn
+             (setf vertex
+                   (luv:create
+                    device
+                    (luv:make-shader-module-descriptor
+                     :label "McCLIM relief vertex" :language :mathematical
+                     :code (relief-roundrect-vertex-specification)))
+                   fragment
+                   (luv:create
+                    device
+                    (luv:make-shader-module-descriptor
+                     :label "McCLIM relief fragment" :language :mathematical
+                     :code (relief-roundrect-fragment-specification)))
+                   pipeline
+                   (luv:create
+                    device
+                    (luv:make-render-pipeline-descriptor
+                     :label "direct McCLIM analytical relief"
+                     :layout nil
+                     :vertex
+                     `(:module ,vertex
+                       :buffers
+                       ((:array-stride 60
+                         :attributes
+                         ((:shader-location 0 :offset 0 :format :float32x3)
+                          (:shader-location 1 :offset 12 :format :float32x3)
+                          (:shader-location 2 :offset 24 :format :float32x3)
+                          (:shader-location 3 :offset 36 :format :float32x3)
+                          (:shader-location 4 :offset 48 :format :float32x3)))))
+                     :fragment
+                     `(:module ,fragment
+                       :targets
+                       ((:format ,format :blend :premultiplied-alpha)))
+                     :primitive '(:topology :triangle-list))))
+             (setf (gpu-mirror-relief-vertex-module mirror) vertex
+                   (gpu-mirror-relief-fragment-module mirror) fragment
+                   (gpu-mirror-relief-pipeline mirror) pipeline
                    completed-p t))
         (unless completed-p
           (dolist (resource (remove nil (list pipeline fragment vertex)))
@@ -1392,6 +1532,7 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
     ;; Keep live mirrors honest when a new pipeline family is introduced after
     ;; their solid pipeline already exists.
     (ensure-gpu-mirror-analytic-pipeline mirror device format)
+    (ensure-gpu-mirror-relief-pipeline mirror device format)
     (ensure-gpu-mirror-gradient-analytic-pipeline mirror device format)
     (ensure-gpu-mirror-image-pipeline mirror device format)
     (ensure-gpu-mirror-text-pipeline mirror device format)))
@@ -1465,6 +1606,21 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
       (setf (gpu-frame-state-analytic-buffer state) replacement
             (gpu-frame-state-analytic-capacity state) capacity)))
   (gpu-frame-state-analytic-buffer state))
+
+(defun ensure-gpu-frame-relief-buffer (state device byte-count)
+  (when (> byte-count (gpu-frame-state-relief-capacity state))
+    (let* ((capacity (ash 1 (integer-length (max 1 (1- byte-count)))))
+           (replacement
+             (luv:create
+              device
+              (luv:make-buffer-descriptor
+               :label "direct McCLIM relief vertices" :size capacity
+               :usage '(:vertex :copy-dst)))))
+      (alexandria:when-let ((old (gpu-frame-state-relief-buffer state)))
+        (luv:destroy old))
+      (setf (gpu-frame-state-relief-buffer state) replacement
+            (gpu-frame-state-relief-capacity state) capacity)))
+  (gpu-frame-state-relief-buffer state))
 
 (defun ensure-gpu-frame-gradient-buffer (state device byte-count)
   (when (> byte-count (gpu-frame-state-gradient-capacity state))
@@ -1705,6 +1861,7 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
                 (etypecase command
                   (gpu-solid-command command)
                   (gpu-analytic-command command)
+                  (gpu-relief-analytic-command command)
                   (gpu-gradient-analytic-command command)
                   (gpu-image-command
                    (make-gpu-prepared-image-command
@@ -1724,6 +1881,8 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
   (etypecase command
     (gpu-solid-command (gpu-solid-command-clip command))
     (gpu-analytic-command (gpu-analytic-command-clip command))
+    (gpu-relief-analytic-command
+     (gpu-relief-analytic-command-clip command))
     (gpu-gradient-analytic-command
      (gpu-gradient-analytic-command-clip command))
     (gpu-prepared-image-command
@@ -1765,6 +1924,8 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
       (let* ((vertices (copy-seq (gpu-medium-vertices medium)))
              (analytic-vertices
                (copy-seq (gpu-medium-analytic-vertices medium)))
+             (relief-vertices
+               (copy-seq (gpu-medium-relief-vertices medium)))
              (gradient-vertices
                (copy-seq (gpu-medium-gradient-vertices medium)))
              (image-vertices
@@ -1794,6 +1955,11 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
                           (and (plusp analytic-byte-count)
                                (ensure-gpu-frame-analytic-buffer
                                 state device analytic-byte-count)))
+                        (relief-byte-count (* 4 (length relief-vertices)))
+                        (relief-buffer
+                          (and (plusp relief-byte-count)
+                               (ensure-gpu-frame-relief-buffer
+                                state device relief-byte-count)))
                         (gradient-byte-count
                           (* 4 (length gradient-vertices)))
                         (gradient-buffer
@@ -1822,6 +1988,8 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
                    (when buffer (luv:write-buffer buffer vertices))
                    (when analytic-buffer
                      (luv:write-buffer analytic-buffer analytic-vertices))
+                   (when relief-buffer
+                     (luv:write-buffer relief-buffer relief-vertices))
                    (when gradient-buffer
                      (luv:write-buffer gradient-buffer gradient-vertices))
                    (when image-buffer
@@ -1855,6 +2023,16 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
                             (luv:draw
                              pass (gpu-analytic-command-vertex-count command) 1
                              (gpu-analytic-command-first-vertex command)))
+                           (gpu-relief-analytic-command
+                            (luv:set-pipeline
+                             pass (gpu-mirror-relief-pipeline mirror))
+                            (luv:set-vertex-buffer pass 0 relief-buffer)
+                            (luv:draw
+                             pass
+                             (gpu-relief-analytic-command-vertex-count command)
+                             1
+                             (gpu-relief-analytic-command-first-vertex
+                              command)))
                            (gpu-gradient-analytic-command
                             (luv:set-pipeline
                              pass
@@ -1955,6 +2133,8 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
      (alexandria:when-let ((buffer (gpu-frame-state-vertex-buffer state)))
        (luv:destroy buffer))
      (alexandria:when-let ((buffer (gpu-frame-state-analytic-buffer state)))
+       (luv:destroy buffer))
+     (alexandria:when-let ((buffer (gpu-frame-state-relief-buffer state)))
        (luv:destroy buffer))
      (alexandria:when-let ((buffer (gpu-frame-state-gradient-buffer state)))
        (luv:destroy buffer))

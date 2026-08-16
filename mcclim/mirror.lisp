@@ -55,6 +55,11 @@ mirror's identity: a later target may be a texture presented on a 3D quad."))
    (analytic-fragment-module :initform nil
                              :accessor gpu-mirror-analytic-fragment-module)
    (analytic-pipeline :initform nil :accessor gpu-mirror-analytic-pipeline)
+   (relief-vertex-module :initform nil
+                         :accessor gpu-mirror-relief-vertex-module)
+   (relief-fragment-module :initform nil
+                           :accessor gpu-mirror-relief-fragment-module)
+   (relief-pipeline :initform nil :accessor gpu-mirror-relief-pipeline)
    (gradient-analytic-vertex-module
     :initform nil :accessor gpu-mirror-gradient-analytic-vertex-module)
    (gradient-analytic-fragment-module

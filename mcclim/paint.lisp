@@ -2,6 +2,38 @@
 
 (in-package #:mcluv)
 
+(defclass relief-design (design)
+  ((albedo :initarg :albedo :reader relief-albedo)
+   (height :initarg :height :reader relief-height))
+  (:documentation
+   "A paint carrying signed height above its presentation surface.
+
+Positive heights are raised and negative heights are recessed. Ordinary
+McCLIM backends see ALBEDO; relief-aware backends may render the height."))
+
+(defun make-relief-design (albedo height)
+  (check-type albedo design)
+  (check-type height real)
+  (make-instance 'relief-design :albedo albedo :height height))
+
+(defgeneric design-height (design)
+  (:documentation "Return DESIGN's signed displacement in surface units."))
+
+(defmethod design-height ((design design))
+  (declare (ignore design))
+  0)
+
+(defmethod design-height ((design relief-design))
+  (relief-height design))
+
+(defmethod design-ink ((design relief-design) x y)
+  (design-ink (relief-albedo design) x y))
+
+(defmethod transform-region (transformation (design relief-design))
+  (make-relief-design
+   (transform-region transformation (relief-albedo design))
+   (relief-height design)))
+
 (defclass gradient-design (design)
   ((start-color :initarg :start-color :reader gradient-start-color)
    (end-color :initarg :end-color :reader gradient-end-color))
@@ -89,6 +121,66 @@
 (defmethod design-ink ((gradient gradient-design) x y)
   (interpolate-gradient-ink
    gradient (gradient-coordinate gradient x y)))
+
+(spv:define-shader relief-roundrect-vertex-specification
+    (:stage :vertex
+     :inputs ((position :vec3 :location 0)
+              (local-coordinate :vec3 :location 1)
+              (half-size-radius :vec3 :location 2)
+              (color :vec3 :location 3)
+              (relief :vec3 :location 4))
+     :outputs ((clip-position :vec4 :built-in :position)
+               (render-coordinate :vec2 :location 0)
+               (render-half-size-radius :vec3 :location 1)
+               (render-color :vec4 :location 2)
+               (render-height :float :location 3)))
+  (let* ((alpha (spv:swizzle position :z)))
+    (spv:set-output
+     clip-position (spv:vec4 (spv:swizzle position :xy) 0.0 1.0))
+    (spv:set-output render-coordinate (spv:swizzle local-coordinate :xy))
+    (spv:set-output render-half-size-radius half-size-radius)
+    (spv:set-output render-color (spv:vec4 (* color alpha) alpha))
+    (spv:set-output render-height (spv:swizzle relief :x))))
+
+(spv:define-shader relief-roundrect-fragment-specification
+    (:stage :fragment
+     :inputs ((render-coordinate :vec2 :location 0)
+              (half-size-radius :vec3 :location 1)
+              (color :vec4 :location 2)
+              (height :float :location 3))
+     :outputs ((color-output :vec4 :location 0)))
+  (let* ((distance
+           (luv.analytic:roundrect-signed-distance
+            (spv:swizzle render-coordinate :x)
+            (spv:swizzle render-coordinate :y)
+            (spv:swizzle half-size-radius :x)
+            (spv:swizzle half-size-radius :y)
+            (spv:swizzle half-size-radius :z)))
+         (distance-dx (spv:derivative-x distance))
+         (distance-dy (spv:derivative-y distance))
+         (normal-length
+           (max (sqrt (+ (* distance-dx distance-dx)
+                         (* distance-dy distance-dy)))
+                (/ 1.0 65536.0)))
+         (edge-light
+           (* -0.70710678
+              (+ (/ distance-dx normal-length)
+                 (/ distance-dy normal-length))))
+         (absolute-height (abs height))
+         (rim-width (max 1.0 absolute-height))
+         (rim (spv:clamp (+ 1.0 (/ distance rim-width)) 0.0 1.0))
+         (direction (- (* 2.0 (spv:step 0.0 height)) 1.0))
+         (strength (spv:clamp (* absolute-height 0.055) 0.0 0.36))
+         (shade (+ 1.0 (* edge-light rim direction strength)))
+         (coverage
+           (luv.analytic:roundrect-coverage
+            render-coordinate half-size-radius)))
+    (spv:set-output
+     color-output
+     (* (spv:vec4
+         (* (spv:swizzle color :rgb) shade)
+         (spv:swizzle color :a))
+        coverage))))
 
 (spv:define-shader gradient-roundrect-vertex-specification
     (:stage :vertex

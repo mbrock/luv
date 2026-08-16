@@ -68,6 +68,11 @@
            #:radial-gradient
            #:make-linear-gradient
            #:make-radial-gradient
+           #:relief-design
+           #:make-relief-design
+           #:relief-albedo
+           #:relief-height
+           #:design-height
            #:clear-gpu-medium-fallback-statistics
            #:gpu-medium-fallback-report
            #:capture-mcclim-gallery

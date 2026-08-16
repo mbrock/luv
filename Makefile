@@ -59,6 +59,8 @@ shader-validate:
 		--eval '(luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (luv.slug:slug-bezier-fragment-specification)) #p"build/slug-bezier.frag.spv")' \
 		--eval '(luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (mcluv::gradient-roundrect-vertex-specification)) #p"build/mcluv-gradient.vert.spv")' \
 		--eval '(luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (mcluv::gradient-roundrect-fragment-specification)) #p"build/mcluv-gradient.frag.spv")' \
+		--eval '(luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (mcluv::relief-roundrect-vertex-specification)) #p"build/mcluv-relief.vert.spv")' \
+		--eval '(luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (mcluv::relief-roundrect-fragment-specification)) #p"build/mcluv-relief.frag.spv")' \
 		--eval '(luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (mcluv::image-roundrect-vertex-specification)) #p"build/mcluv-image.vert.spv")' \
 		--eval '(luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (mcluv::image-roundrect-fragment-specification)) #p"build/mcluv-image.frag.spv")'
 	./scripts/dev spirv-val --target-env vulkan1.0 build/block-world.vert.spv
@@ -76,6 +78,8 @@ shader-validate:
 	./scripts/dev spirv-val --target-env vulkan1.0 build/slug-bezier.frag.spv
 	./scripts/dev spirv-val --target-env vulkan1.0 build/mcluv-gradient.vert.spv
 	./scripts/dev spirv-val --target-env vulkan1.0 build/mcluv-gradient.frag.spv
+	./scripts/dev spirv-val --target-env vulkan1.0 build/mcluv-relief.vert.spv
+	./scripts/dev spirv-val --target-env vulkan1.0 build/mcluv-relief.frag.spv
 	./scripts/dev spirv-val --target-env vulkan1.0 build/mcluv-image.vert.spv
 	./scripts/dev spirv-val --target-env vulkan1.0 build/mcluv-image.frag.spv
 
@@ -98,6 +102,8 @@ msl-validate:
 		--eval '(luv.msl:write-msl (luv.msl:compile-msl (luv.slug:slug-bezier-fragment-specification)) #p"build/slug-bezier.frag.metal")' \
 		--eval '(luv.msl:write-msl (luv.msl:compile-msl (mcluv::gradient-roundrect-vertex-specification)) #p"build/mcluv-gradient.vert.metal")' \
 		--eval '(luv.msl:write-msl (luv.msl:compile-msl (mcluv::gradient-roundrect-fragment-specification)) #p"build/mcluv-gradient.frag.metal")' \
+		--eval '(luv.msl:write-msl (luv.msl:compile-msl (mcluv::relief-roundrect-vertex-specification)) #p"build/mcluv-relief.vert.metal")' \
+		--eval '(luv.msl:write-msl (luv.msl:compile-msl (mcluv::relief-roundrect-fragment-specification)) #p"build/mcluv-relief.frag.metal")' \
 		--eval '(luv.msl:write-msl (luv.msl:compile-msl (mcluv::image-roundrect-vertex-specification)) #p"build/mcluv-image.vert.metal")' \
 		--eval '(luv.msl:write-msl (luv.msl:compile-msl (mcluv::image-roundrect-fragment-specification)) #p"build/mcluv-image.frag.metal")'
 	xcrun metal -std=metal4.0 -c build/block-world.vert.metal -o build/block-world.vert.air
@@ -110,6 +116,8 @@ msl-validate:
 	xcrun metal -std=metal4.0 -c build/slug-bezier.frag.metal -o build/slug-bezier.frag.air
 	xcrun metal -std=metal4.0 -c build/mcluv-gradient.vert.metal -o build/mcluv-gradient.vert.air
 	xcrun metal -std=metal4.0 -c build/mcluv-gradient.frag.metal -o build/mcluv-gradient.frag.air
+	xcrun metal -std=metal4.0 -c build/mcluv-relief.vert.metal -o build/mcluv-relief.vert.air
+	xcrun metal -std=metal4.0 -c build/mcluv-relief.frag.metal -o build/mcluv-relief.frag.air
 	xcrun metal -std=metal4.0 -c build/mcluv-image.vert.metal -o build/mcluv-image.vert.air
 	xcrun metal -std=metal4.0 -c build/mcluv-image.frag.metal -o build/mcluv-image.frag.air
 

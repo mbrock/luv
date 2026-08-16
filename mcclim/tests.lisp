@@ -66,6 +66,35 @@
     (ok (= 0.5 (mcluv::gradient-coordinate gradient 62.5 60)))
     (ok (= 1.0 (mcluv::gradient-coordinate gradient 50 85)))))
 
+(deftest relief-design-is-a-semantic-height-bearing-ink
+  (let* ((albedo (clim:make-rgb-color 0.2 0.4 0.7))
+         (relief (mcluv:make-relief-design albedo 6.5))
+         (transformed
+           (clim:transform-region
+            (clim:make-translation-transformation 10 20) relief)))
+    (ok (eq albedo (mcluv::design-ink relief 12 14)))
+    (ok (= 6.5 (mcluv:design-height relief)))
+    (ok (= 0 (mcluv:design-height albedo)))
+    (ok (= 6.5 (mcluv:design-height transformed)))
+    (ok (eq albedo (mcluv:relief-albedo transformed)))))
+
+(deftest relief-roundrect-is-one-dense-analytic-command
+  (let ((medium (fresh-gpu-medium)))
+    (setf (clim:medium-ink medium)
+          (mcluv:make-relief-design
+           (clim:make-rgb-color 0.2 0.4 0.7) 7.0))
+    (mcluv::medium-draw-analytic-rounded-rectangle*
+     medium 10 20 110 60 12 t)
+    (ok (= 1 (length (mcluv::gpu-medium-commands medium))))
+    (ok (typep (aref (mcluv::gpu-medium-commands medium) 0)
+               'mcluv::gpu-relief-analytic-command))
+    ;; Six vertices, each containing five packed float32x3 attributes.
+    (ok (= 90 (length (mcluv::gpu-medium-relief-vertices medium))))
+    (ok (= 7.0 (aref (mcluv::gpu-medium-relief-vertices medium) 12)))
+    (ok (zerop (length (mcluv::gpu-medium-vertices medium))))
+    (ok (zerop (length (mcluv::gpu-medium-analytic-vertices medium))))
+    (ok (null (mcluv:gpu-medium-fallback-report medium)))))
+
 (deftest gradient-roundrect-is-one-dense-analytic-command
   (let* ((medium (fresh-gpu-medium))
          (gradient
