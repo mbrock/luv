@@ -570,11 +570,13 @@ each glyph occurrence as an independently bound texture pair.
 [[lisp:create-world-text-glyph-atlas]] concatenates each distinct serialized
 outline into one RG16U band texture and one RGBA16F curve texture.  Its location
 table maps the cached outline object to linear band and curve bases.  Each run
-has a six-vertex unit quad and one 72-byte instance record per drawable glyph:
+has a six-vertex unit quad and one 96-byte instance record per drawable glyph:
 world origin, right/up edge vectors, outline bounds and band counts, and atlas
-bases.  The vertex stage expands these records; the render pass binds the two
-buffers and one atlas group, then calls =draw= once with the glyph count as the
-instance count.
+bases.  The final two lanes separately retain the exact packed band bounds;
+quad geometry can therefore stay padded without changing spatial band
+selection.  The vertex stage expands these records; the render pass binds the
+two buffers and one atlas group, then calls =draw= once with the glyph count as
+the instance count.
 
 The exact default-run comparison is deliberately about owned objects and
 encoded commands, not a noisy whole-frame timing claim:
@@ -589,11 +591,11 @@ encoded commands, not a noisy whole-frame timing claim:
 | glyph textures / views      |            16 / 16 |           2 / 2 |
 | frame text bind groups      |                  8 |               1 |
 | allocated glyph texture data|            384 KiB |          48 KiB |
-| text vertex-buffer data     |          2,376 B   |           864 B |
+| text vertex-buffer data     |          2,376 B   |         1,128 B |
 
 The 24-to-5 encode count includes pipeline, vertex-buffer, bind-group, and draw
 calls.  Texture allocation falls by 87.5 percent because every former glyph
-pair paid the 4096-texel minimum row; vertex data falls by 63.6 percent.  The
+pair paid the 4096-texel minimum row; vertex data falls by 52.5 percent.  The
 new spatial bands intentionally increase used band payload from 202 to 996
 texels while curve payload remains 121 texels: roughly 4.8 KiB of useful data
 inside the 48 KiB allocated atlas.  A 30-frame Apple M2 Pro steady run records
@@ -638,9 +640,9 @@ world-wide instance aggregation wins before adding a generic text manager.
 Done when: projected scale has no CPU estimate or frame upload, fragments
 select real spatial bands, both shader backends validate the derivative path,
 and an ordinary-distance debug-layer world frame is visually intact.  The
-close-up evidence in #9G0Z19 subsequently falsifies edge correctness; this mark
-records the completed derivative and selection mechanism, not a claim that its
-current bounds agree with preprocessing.
+first close-up in #9G0Z19 subsequently falsified the bounds crossing; its
+corrected close-up now verifies that fragment selection agrees with
+preprocessing at the enlarged proof scale.
 
 * NEXT Compare Slug coverage at glyph edges
 :PROPERTIES:
@@ -663,15 +665,23 @@ unobstructed sky background:
 
 [[file:images/slug-world-text-closeup.png]]
 
-This is already falsifying evidence.  The horizontal cuts through =h= and =e=
-and the vertical slivers in =h=, =r=, and =d= coincide with band transitions,
-not font extrema or terrain edges.  The implementation currently sends the
-quad's 0.035-em padded outline bounds to the fragment shader, but
-[[lisp:pack-slug-outline]] partitions the unpadded packed-outline bounds.  The
-shader consequently maps a fragment into a different spatial partition than
-the serializer used to build its curve list.  The next narrow experiment is to
-carry the packed min/max separately from padded quad geometry and require this
-close-up to lose those transition-aligned cuts before widening the oracle.
+The first native close-up was falsifying evidence: horizontal cuts through
+=h= and =e= and vertical slivers in =h=, =r=, and =d= coincided with band
+transitions, not font extrema or terrain edges.  The instance record had sent
+the quad's 0.035-em padded outline bounds to the fragment shader, while
+[[lisp:pack-slug-outline]] partitioned the unpadded packed-outline bounds.  The
+shader consequently mapped fragments into different spatial partitions than
+the serializer used to build their curve lists.
+
+The corrected record carries both meanings.  Padded low/high values still
+expand and parameterize the quad, while two additional attributes carry the
+exact packed min/max used only for band selection.  The image above is the
+same close-up after that change: all transition-aligned cuts have disappeared,
+including the former horizontal break across =h/e= and the vertical breaks in
+=h/r/d=.  A focused regression requires those padded and exact lanes to remain
+distinct.  Metal validation accepts the enlarged Retina world render, and a
+cold Vulkan capture through the same shared specification produces the same
+continuous glyphs at its native 1280 by 360 drawable extent.
 
 The world terminal #NMAD2U is a particularly demanding next client: repeated
 grid-aligned glyphs make edge quality, outline reuse, and batching visible, but

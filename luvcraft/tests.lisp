@@ -451,14 +451,20 @@
            (luv.arithmetic.lisp.vec3:make-vec3 1.0 0.0 0.0)
            (luv.arithmetic.lisp.vec3:make-vec3 0.0 1.0 0.0)
            0.5 0.0 0.0 1.0 1.0))
-    (ok (= 18 (length instances)))
+    (ok (= 24 (length instances)))
     (ok (= 10.0 (aref instances 2)))
     (ok (< (abs (- 0.535 (aref instances 3))) 1e-6))
     (ok (< (abs (- 0.535 (aref instances 7))) 1e-6))
     (ok (= 7.0 (aref instances 11)))
     (ok (= 5.0 (aref instances 14)))
     (ok (= 17.0 (aref instances 15)))
-    (ok (= 29.0 (aref instances 16)))))
+    (ok (= 29.0 (aref instances 16)))
+    ;; Geometry remains padded for antialiasing, while band selection receives
+    ;; the exact bounds used by PACK-SLUG-OUTLINE.
+    (ok (= -0.035 (aref instances 9)))
+    (ok (= 1.035 (aref instances 12)))
+    (ok (equalp #(0.0 0.0 0.0) (subseq instances 18 21)))
+    (ok (equalp #(1.0 1.0 0.0) (subseq instances 21 24)))))
 
 (deftest light-removal-queues-own-the-meaning-of-unwrapped-levels
   (let* ((world (make-block-world))

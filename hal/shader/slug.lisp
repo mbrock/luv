@@ -330,7 +330,7 @@ not the band-texture font renderer.  #OWR8OZ"
     (:stage :fragment
      :inputs ((render-coordinate :vec2 :location 0)
               (atlas-base :vec2 :location 1)
-              (outline-bounds :vec4 :location 2)
+              (band-bounds :vec4 :location 2)
               (band-counts :vec2 :location 3))
      :resources ((band-data :uint-texture-2d :binding 0)
                  (curve-data :texture-2d :binding 1))
@@ -360,17 +360,17 @@ not the band-texture font renderer.  #OWR8OZ"
          (horizontal-position
            (spv:clamp
             (/ (- (spv:swizzle render-coordinate :y)
-                  (spv:swizzle outline-bounds :y))
-               (max (- (spv:swizzle outline-bounds :w)
-                       (spv:swizzle outline-bounds :y))
+                  (spv:swizzle band-bounds :y))
+               (max (- (spv:swizzle band-bounds :w)
+                       (spv:swizzle band-bounds :y))
                     +slug-root-epsilon+))
             0.0 1.0))
          (vertical-position
            (spv:clamp
             (/ (- (spv:swizzle render-coordinate :x)
-                  (spv:swizzle outline-bounds :x))
-               (max (- (spv:swizzle outline-bounds :z)
-                       (spv:swizzle outline-bounds :x))
+                  (spv:swizzle band-bounds :x))
+               (max (- (spv:swizzle band-bounds :z)
+                       (spv:swizzle band-bounds :x))
                     +slug-root-epsilon+))
             0.0 1.0))
          (horizontal-band-candidate

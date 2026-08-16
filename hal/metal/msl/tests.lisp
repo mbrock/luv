@@ -61,14 +61,25 @@
     (ok (search "float(" source))))
 
 (deftest slug-atlas-derivatives-and-band-selection-lower-to-metal
-  (let ((source
+  (let ((fragment-source
           (msl:msl-document-source
            (msl:compile-msl
-            (shaders:block-world-text-fragment-specification)))))
-    (ok (search "dfdx(stage_in.render_coordinate)" source))
-    (ok (search "dfdy(stage_in.render_coordinate)" source))
-    (ok (search "band_base + horizontal_band" source))
-    (ok (search "band_base + horizontal_band_count" source))))
+            (shaders:block-world-text-fragment-specification))))
+        (vertex-source
+          (msl:msl-document-source
+           (msl:compile-msl
+            (shaders:block-world-text-vertex-specification)))))
+    (ok (search "dfdx(stage_in.render_coordinate)" fragment-source))
+    (ok (search "dfdy(stage_in.render_coordinate)" fragment-source))
+    (ok (search "stage_in.render_coordinate.y - stage_in.band_bounds.y"
+                fragment-source))
+    (ok (search "stage_in.render_coordinate.x - stage_in.band_bounds.x"
+                fragment-source))
+    (ok (search "band_base + horizontal_band" fragment-source))
+    (ok (search "band_base + horizontal_band_count" fragment-source))
+    (ok (search
+         "result.render_band_bounds = float4(stage_in.band_low.xy, stage_in.band_high.xy)"
+         vertex-source))))
 
 (deftest block-vertex-lowers-projective-map-to-msl
   (let* ((specification (shaders:block-world-vertex-specification))

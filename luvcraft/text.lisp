@@ -294,7 +294,7 @@
   (let* ((padding 0.035)
          (middle-x (/ (+ min-x max-x) 2))
          (middle-y (/ (+ min-y max-y) 2))
-         (data (make-array (* 18 (length glyphs))
+         (data (make-array (* 24 (length glyphs))
                            :element-type 'single-float)))
     (labels ((difference (end start)
                (make-vec3 (- (vec3-x end) (vec3-x start))
@@ -306,7 +306,7 @@
                      do (setf (aref data index)
                               (coerce value 'single-float)))))
       (loop for glyph in glyphs
-            for base from 0 by 18
+            for base from 0 by 24
             for outline-left = (- (world-text-glyph-outline-min-x glyph)
                                   padding)
             for outline-bottom = (- (world-text-glyph-outline-min-y glyph)
@@ -352,7 +352,13 @@
                       outline-right outline-top
                       (luv.slug:slug-serialized-outline-vertical-band-count
                        serialized)
-                      (first atlas-location) (second atlas-location) 0.0)))
+                      (first atlas-location) (second atlas-location) 0.0
+                      (world-text-glyph-outline-min-x glyph)
+                      (world-text-glyph-outline-min-y glyph)
+                      0.0
+                      (world-text-glyph-outline-max-x glyph)
+                      (world-text-glyph-outline-max-y glyph)
+                      0.0)))
       data)))
 
 (defun world-text-center-before-camera (camera distance lift)
@@ -433,7 +439,7 @@ font-and-glyph device resources reusable across runs.  See #QW7P96."
                                  :attributes
                                  ((:shader-location 0 :offset 0
                                    :format :float32x3)))
-                                (:array-stride 72 :step-mode :instance
+                                (:array-stride 96 :step-mode :instance
                                  :attributes
                                  ((:shader-location 1 :offset 0
                                    :format :float32x3)
@@ -446,6 +452,10 @@ font-and-glyph device resources reusable across runs.  See #QW7P96."
                                   (:shader-location 5 :offset 48
                                    :format :float32x3)
                                   (:shader-location 6 :offset 60
+                                   :format :float32x3)
+                                  (:shader-location 7 :offset 72
+                                   :format :float32x3)
+                                  (:shader-location 8 :offset 84
                                    :format :float32x3))))
                               :target-format target-format
                               :target-blend :premultiplied-alpha

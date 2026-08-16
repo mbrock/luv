@@ -213,11 +213,13 @@
               (world-up-edge :vec3 :location 3)
               (outline-low :vec3 :location 4)
               (outline-high :vec3 :location 5)
-              (atlas-input :vec3 :location 6))
+              (atlas-input :vec3 :location 6)
+              (band-low :vec3 :location 7)
+              (band-high :vec3 :location 8))
      :outputs ((clip-position :vec4 :built-in :position)
                (render-coordinate :vec2 :location 0)
                (render-atlas-base :vec2 :location 1)
-               (render-outline-bounds :vec4 :location 2)
+               (render-band-bounds :vec4 :location 2)
                (render-band-counts :vec2 :location 3))
      :resources
      ((frame-state :uniform-block :set 0 :binding 2
@@ -258,9 +260,9 @@
     (set-output clip-position clip)
     (set-output render-coordinate outline-coordinate)
     (set-output render-atlas-base (swizzle atlas-input :xy))
-    (set-output render-outline-bounds
-                (vec4 (swizzle outline-low :xy)
-                      (swizzle outline-high :xy)))
+    (set-output render-band-bounds
+                (vec4 (swizzle band-low :xy)
+                      (swizzle band-high :xy)))
     (set-output render-band-counts
                 (vec2 (swizzle outline-low :z)
                       (swizzle outline-high :z)))))
