@@ -927,14 +927,24 @@ inspectable escape where the sky treats zero-origin clip coordinates as
 displacements.  A general identity-valued “point to difference” operator
 would be unsound until quantity definitions can name origins and maps can
 cross them.  #PLRP3A records that future design.  Likewise, the duplicated
-homogeneous shadow projection is real work (#ZYCSYZ), while generic layout
-translation and more metaclasses are not presently earned.
+homogeneous shadow projection was real work (#ZYCSYZ), while generic layout
+translation and more metaclasses were not earned.
 
 Review result: keep the architecture, with definition-owned character and
 explicit texture-transfer metadata as the improvements learned from use.
 Revisit representation-specialized Lisp lowering only with profiling evidence,
 and revisit point-origin operations together with origin identity rather than
 as a zero-cost convenience operator.
+
+The follow-up exercise confirmed those boundaries.  #D1R2NK put the fog law
+in the backend-neutral luvcraft arithmetic system and realized it as both an
+ordinary compiled Lisp function bound to real sky slots and an inlined
+production shader call.  #ZYCSYZ stayed shader-specific: it split one
+=:world-to-light= semantic map into homogeneous application and sampling
+projection without inventing a general matrix object or changing either GPU
+binary.  The architecture therefore survived new CPU/GPU and compositional
+clients; its two remaining open marks concern optional native SIMD and
+structural shader representation types, not missing quantity semantics.
 
 * A possible Lisp vocabulary
 :PROPERTIES:
