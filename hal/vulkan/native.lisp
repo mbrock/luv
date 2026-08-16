@@ -1467,6 +1467,17 @@ destroy it before destroying INSTANCE."
     (vk:cmd-set-scissor command-buffer 0 1 scissor))
   (values))
 
+(defun cmd-set-scissor (command-buffer x y width height)
+  (with-vk (scissor rect-2d)
+    (fill-vk
+     (cffi:foreign-slot-pointer scissor '(:struct rect-2d) 'offset)
+     'offset-2d :x x :y y)
+    (fill-vk
+     (cffi:foreign-slot-pointer scissor '(:struct rect-2d) 'extent)
+     'extent-2d :width width :height height)
+    (vk:cmd-set-scissor command-buffer 0 1 scissor))
+  (values))
+
 (defun cmd-end-render-pass (command-buffer)
   (vk:cmd-end-render-pass command-buffer)
   (values))

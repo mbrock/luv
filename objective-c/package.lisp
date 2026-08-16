@@ -98,6 +98,7 @@
            #:set-metal-render-pipeline
            #:set-metal-depth-stencil-state
            #:set-metal-render-argument-table
+           #:set-metal-scissor-rect
            #:draw-metal-primitives
            #:copy-metal-texture
            #:copy-metal-texture-to-buffer

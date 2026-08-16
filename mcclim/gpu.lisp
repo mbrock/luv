@@ -11,15 +11,21 @@
              (format stream "The direct GPU medium does not support ink ~S."
                      (unsupported-gpu-design condition)))))
 
-(defstruct gpu-solid-command first-vertex vertex-count)
+(defstruct gpu-solid-command first-vertex vertex-count clip)
 
-(defstruct gpu-analytic-command first-vertex vertex-count)
+(defstruct gpu-analytic-command first-vertex vertex-count clip)
+
+(defstruct gpu-gradient-analytic-command first-vertex vertex-count clip)
+
+(defstruct gpu-image-command design first-vertex vertex-count clip)
+
+(defstruct gpu-prepared-image-command paint first-vertex vertex-count clip)
 
 (defstruct gpu-text-command
-  string x y font-pathname size color align-x align-y)
+  string x y font-pathname size color align-x align-y clip)
 
 (defstruct gpu-prepared-text-command
-  atlas first-vertex vertex-count)
+  atlas first-vertex vertex-count clip)
 
 (defvar *gpu-medium-fallback-source* nil
   "The semantic primitive currently being decomposed by BASIC-MEDIUM.")
@@ -69,10 +75,25 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
                     :accessor gpu-frame-state-analytic-buffer)
    (analytic-capacity :initarg :analytic-capacity :initform 0
                       :accessor gpu-frame-state-analytic-capacity)
+   (gradient-buffer :initarg :gradient-buffer :initform nil
+                    :accessor gpu-frame-state-gradient-buffer)
+   (gradient-capacity :initarg :gradient-capacity :initform 0
+                      :accessor gpu-frame-state-gradient-capacity)
+   (image-buffer :initarg :image-buffer :initform nil
+                 :accessor gpu-frame-state-image-buffer)
+   (image-capacity :initarg :image-capacity :initform 0
+                   :accessor gpu-frame-state-image-capacity)
    (text-buffer :initarg :text-buffer :initform nil
                 :accessor gpu-frame-state-text-buffer)
    (text-capacity :initarg :text-capacity :initform 0
                   :accessor gpu-frame-state-text-capacity)))
+
+(defclass gpu-cached-image-paint ()
+  ((texture :initarg :texture :reader gpu-image-paint-texture)
+   (view :initarg :view :reader gpu-image-paint-view)
+   (bind-group :initarg :bind-group :reader gpu-image-paint-bind-group)
+   (width :initarg :width :reader gpu-image-paint-width)
+   (height :initarg :height :reader gpu-image-paint-height)))
 
 (spv:define-shader-method spv:shader-specification-for
     mcluv-solid-vertex-specification
@@ -142,6 +163,11 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
     (error ()
       (error 'gpu-medium-unsupported-design :design (medium-ink medium)))))
 
+(defgeneric gpu-medium-append-analytic-design
+    (design medium center x-axis y-axis half-width half-height radius)
+  (:documentation
+   "Append one analytical shape painted by DESIGN, or return NIL."))
+
 (defun gpu-medium-size (medium)
   (let ((mirror (medium-drawable medium)))
     (if mirror
@@ -152,6 +178,25 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
           ;; mirror lock.
           (values (max 1 width) (max 1 height)))
         (values 1 1))))
+
+(defun gpu-medium-clip-rectangle (medium)
+  "Return MEDIUM's rectangular clip in logical device coordinates, or NIL."
+  (let ((region (medium-clipping-region medium)))
+    (unless (region-equal region +everywhere+)
+      (let ((transformation
+              (if (climi::medium-sheet medium)
+                  (compose-transformations
+                   (medium-device-transformation medium)
+                   (medium-transformation medium))
+                  (medium-device-transformation medium))))
+        (with-bounding-rectangle* (left top right bottom)
+            (transform-region transformation region)
+          (multiple-value-bind (width height) (gpu-medium-size medium)
+            (let ((left (max 0.0 (min width left)))
+                  (top (max 0.0 (min height top)))
+                  (right (max 0.0 (min width right)))
+                  (bottom (max 0.0 (min height bottom))))
+              (list left top (max left right) (max top bottom)))))))))
 
 (defun gpu-medium-push-vertex (medium x y color)
   (multiple-value-bind (device-x device-y)
@@ -240,9 +285,187 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
         (vertex left top))
       (vector-push-extend
        (make-gpu-analytic-command
-        :first-vertex first-vertex :vertex-count 6)
+        :first-vertex first-vertex :vertex-count 6
+        :clip (gpu-medium-clip-rectangle medium))
        (gpu-medium-commands medium))
       t)))
+
+(defun gpu-medium-push-gradient-analytic-vertex
+    (medium gradient center x-axis y-axis local-x local-y
+     half-width half-height radius)
+  (let ((x (+ (first center)
+              (* local-x (first x-axis))
+              (* local-y (first y-axis))))
+        (y (+ (second center)
+              (* local-x (second x-axis))
+              (* local-y (second y-axis)))))
+    (multiple-value-bind (device-x device-y)
+        (transform-position (medium-device-transformation medium) x y)
+      (multiple-value-bind (width height) (gpu-medium-size medium)
+        (multiple-value-bind (paint-x paint-y paint-kind)
+            (gradient-render-coordinate gradient x y)
+          (multiple-value-bind (r1 g1 b1 a1)
+              (color-rgba (gradient-start-color gradient))
+            (multiple-value-bind (r2 g2 b2 a2)
+                (color-rgba (gradient-end-color gradient))
+              (let ((vertices (gpu-medium-gradient-vertices medium)))
+                (flet ((push-value (value)
+                         (vector-push-extend
+                          (coerce value 'single-float) vertices)))
+                  (dolist (value
+                            (list (- (* 2 (/ device-x width)) 1)
+                                  (- (* 2 (/ device-y height)) 1)
+                                  0.0
+                                  local-x local-y 0.0
+                                  half-width half-height radius
+                                  paint-x paint-y paint-kind
+                                  r1 g1 b1 r2 g2 b2 a1 a2 0.0))
+                    (push-value value)))))))))))
+
+(defun gpu-medium-append-gradient-analytic-quad
+    (medium gradient center x-axis y-axis half-width half-height radius)
+  (alexandria:when-let
+      ((padding (gpu-medium-analytic-padding medium x-axis y-axis)))
+    (let* ((vertices (gpu-medium-gradient-vertices medium))
+           (first-vertex (/ (length vertices) 21))
+           (left (- (+ half-width padding)))
+           (right (+ half-width padding))
+           (top (- (+ half-height padding)))
+           (bottom (+ half-height padding)))
+      (flet ((vertex (x y)
+               (gpu-medium-push-gradient-analytic-vertex
+                medium gradient center x-axis y-axis x y
+                half-width half-height radius)))
+        (vertex left bottom)
+        (vertex right bottom)
+        (vertex right top)
+        (vertex left bottom)
+        (vertex right top)
+        (vertex left top))
+      (vector-push-extend
+       (make-gpu-gradient-analytic-command
+        :first-vertex first-vertex :vertex-count 6
+        :clip (gpu-medium-clip-rectangle medium))
+       (gpu-medium-commands medium))
+      t)))
+
+(defmethod gpu-medium-append-analytic-design
+    ((design gradient-design) medium center x-axis y-axis
+     half-width half-height radius)
+  (gpu-medium-append-gradient-analytic-quad
+   medium design center x-axis y-axis half-width half-height radius))
+
+(defun gpu-image-paint-source (design)
+  "Return the immutable pixel-bearing design shared by transformed paints."
+  (loop while (typep design 'climi::transformed-design)
+        do (setf design (climi::transformed-design-design design))
+        finally (return design)))
+
+(defun gpu-image-paint-p (design)
+  (let ((source (gpu-image-paint-source design)))
+    (or (typep source 'pattern)
+        (and (typep source 'climi::masked-compositum)
+             (not (typep source 'climi::uniform-compositum))))))
+
+(defun gpu-image-paint-coordinate (design x y)
+  "Map a point in drawing coordinates back into DESIGN's source image."
+  (if (typep design 'climi::transformed-design)
+      (multiple-value-bind (source-x source-y)
+          (transform-position
+           (invert-transformation
+            (climi::transformed-design-transformation design))
+           x y)
+        (gpu-image-paint-coordinate
+         (climi::transformed-design-design design) source-x source-y))
+      (with-bounding-rectangle* (left top right bottom)
+          (bounding-rectangle design)
+        (values (/ (- x left) (max 1 (- right left)))
+                (/ (- y top) (max 1 (- bottom top)))))))
+
+(defun gpu-medium-push-image-vertex
+    (medium design center x-axis y-axis local-x local-y
+     half-width half-height radius)
+  (let ((x (+ (first center)
+              (* local-x (first x-axis))
+              (* local-y (first y-axis))))
+        (y (+ (second center)
+              (* local-x (second x-axis))
+              (* local-y (second y-axis)))))
+    (multiple-value-bind (device-x device-y)
+        (transform-position (medium-device-transformation medium) x y)
+      (multiple-value-bind (width height) (gpu-medium-size medium)
+        (multiple-value-bind (u v)
+            (gpu-image-paint-coordinate design x y)
+          (let ((vertices (gpu-medium-image-vertices medium)))
+            (flet ((push-value (value)
+                     (vector-push-extend
+                      (coerce value 'single-float) vertices)))
+              (dolist (value
+                        (list (- (* 2 (/ device-x width)) 1)
+                              (- (* 2 (/ device-y height)) 1)
+                              0.0
+                              local-x local-y 0.0
+                              half-width half-height radius
+                              u v 1.0))
+                (push-value value)))))))))
+
+(defun gpu-medium-append-image-analytic-quad
+    (medium design center x-axis y-axis half-width half-height radius)
+  (alexandria:when-let
+      ((padding (gpu-medium-analytic-padding medium x-axis y-axis)))
+    (let* ((vertices (gpu-medium-image-vertices medium))
+           (first-vertex (/ (length vertices) 12))
+           (left (- (+ half-width padding)))
+           (right (+ half-width padding))
+           (top (- (+ half-height padding)))
+           (bottom (+ half-height padding)))
+      (flet ((vertex (x y)
+               (gpu-medium-push-image-vertex
+                medium design center x-axis y-axis x y
+                half-width half-height radius)))
+        (vertex left bottom)
+        (vertex right bottom)
+        (vertex right top)
+        (vertex left bottom)
+        (vertex right top)
+        (vertex left top))
+      (vector-push-extend
+      (make-gpu-image-command
+        :design design :first-vertex first-vertex :vertex-count 6
+        :clip (gpu-medium-clip-rectangle medium))
+       (gpu-medium-commands medium))
+      t)))
+
+(defmethod gpu-medium-append-analytic-design
+    ((design pattern) medium center x-axis y-axis
+     half-width half-height radius)
+  (gpu-medium-append-image-analytic-quad
+   medium design center x-axis y-axis half-width half-height radius))
+
+(defmethod gpu-medium-append-analytic-design
+    ((design climi::masked-compositum) medium center x-axis y-axis
+     half-width half-height radius)
+  (if (typep design 'climi::uniform-compositum)
+      (call-next-method)
+      (gpu-medium-append-image-analytic-quad
+       medium design center x-axis y-axis half-width half-height radius)))
+
+(defmethod gpu-medium-append-analytic-design
+    ((design climi::transformed-design) medium center x-axis y-axis
+     half-width half-height radius)
+  (if (gpu-image-paint-p design)
+      (gpu-medium-append-image-analytic-quad
+       medium design center x-axis y-axis half-width half-height radius)
+      (call-next-method)))
+
+(defmethod gpu-medium-append-analytic-design
+    (design medium center x-axis y-axis half-width half-height radius)
+  (handler-case
+      (gpu-medium-append-analytic-quad
+       medium center x-axis y-axis half-width half-height radius
+       (multiple-value-list (color-rgba design)))
+    (error ()
+      (error 'gpu-medium-unsupported-design :design design))))
 
 (defun coordinate-pairs (coordinates)
   (loop for (x y) on (coerce coordinates 'list) by #'cddr
@@ -256,6 +479,78 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
             while (second tail)
             do (gpu-medium-push-triangle
                 medium origin (first tail) (second tail) color)))))
+
+(defgeneric gpu-medium-append-painted-polygon (design medium points)
+  (:documentation
+   "Append one convex polygon using DESIGN's native paint path, or NIL."))
+
+(defmethod gpu-medium-append-painted-polygon (design medium points)
+  (declare (ignore design medium points))
+  nil)
+
+(defun gpu-medium-append-gradient-polygon (medium gradient points)
+  (when (>= (length points) 3)
+    (let* ((vertices (gpu-medium-gradient-vertices medium))
+           (first-vertex (/ (length vertices) 21))
+           (origin (first points)))
+      (flet ((vertex (point)
+               (gpu-medium-push-gradient-analytic-vertex
+                medium gradient '(0.0 0.0) '(1.0 0.0) '(0.0 1.0)
+                (first point) (second point) 0.0 0.0 -1.0)))
+        (loop for tail on (rest points)
+              while (second tail)
+              do (vertex origin)
+                 (vertex (first tail))
+                 (vertex (second tail))))
+      (let ((vertex-count
+              (- (/ (length vertices) 21) first-vertex)))
+        (vector-push-extend
+         (make-gpu-gradient-analytic-command
+          :first-vertex first-vertex :vertex-count vertex-count
+          :clip (gpu-medium-clip-rectangle medium))
+         (gpu-medium-commands medium))
+        vertex-count))))
+
+(defmethod gpu-medium-append-painted-polygon
+    ((design gradient-design) medium points)
+  (gpu-medium-append-gradient-polygon medium design points))
+
+(defun gpu-medium-append-image-polygon (medium design points)
+  (when (>= (length points) 3)
+    (let* ((vertices (gpu-medium-image-vertices medium))
+           (first-vertex (/ (length vertices) 12))
+           (origin (first points)))
+      (flet ((vertex (point)
+               (gpu-medium-push-image-vertex
+                medium design '(0.0 0.0) '(1.0 0.0) '(0.0 1.0)
+                (first point) (second point) 0.0 0.0 -1.0)))
+        (loop for tail on (rest points)
+              while (second tail)
+              do (vertex origin)
+                 (vertex (first tail))
+                 (vertex (second tail))))
+      (let ((vertex-count (- (/ (length vertices) 12) first-vertex)))
+        (vector-push-extend
+         (make-gpu-image-command
+          :design design :first-vertex first-vertex
+          :vertex-count vertex-count
+          :clip (gpu-medium-clip-rectangle medium))
+         (gpu-medium-commands medium))
+        vertex-count))))
+
+(defmethod gpu-medium-append-painted-polygon
+    ((design pattern) medium points)
+  (gpu-medium-append-image-polygon medium design points))
+
+(defmethod gpu-medium-append-painted-polygon
+    ((design climi::masked-compositum) medium points)
+  (unless (typep design 'climi::uniform-compositum)
+    (gpu-medium-append-image-polygon medium design points)))
+
+(defmethod gpu-medium-append-painted-polygon
+    ((design climi::transformed-design) medium points)
+  (when (gpu-image-paint-p design)
+    (gpu-medium-append-image-polygon medium design points)))
 
 (defun gpu-medium-stroke-segment (medium start end thickness color)
   (let* ((dx (- (first end) (first start)))
@@ -295,11 +590,11 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
              (bottom (max y1 y2))
              (half-width (* 0.5 (- right left)))
              (half-height (* 0.5 (- bottom top))))
-        (unless (gpu-medium-append-analytic-quad
-                 medium
+        (unless (gpu-medium-append-analytic-design
+                 (medium-ink medium) medium
                  (list (* 0.5 (+ left right)) (* 0.5 (+ top bottom)))
                  '(1.0 0.0) '(0.0 1.0)
-                 half-width half-height 0.0 (gpu-medium-color medium))
+                 half-width half-height 0.0)
           (with-gpu-medium-fallback (medium :rectangle)
             (call-next-method medium x1 y1 x2 y2 filled))))
       (with-gpu-medium-fallback (medium :rectangle)
@@ -313,9 +608,10 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
     ((medium luv-gpu-medium)
      cx cy rdx1 rdy1 rdx2 rdy2 eta1 eta2 filled)
   (if (and filled (complete-ellipse-p eta1 eta2)
-           (gpu-medium-append-analytic-quad
-            medium (list cx cy) (list rdx1 rdy1) (list rdx2 rdy2)
-            1.0 1.0 1.0 (gpu-medium-color medium)))
+           (gpu-medium-append-analytic-design
+            (medium-ink medium) medium
+            (list cx cy) (list rdx1 rdy1) (list rdx2 rdy2)
+            1.0 1.0 1.0))
       medium
       (with-gpu-medium-fallback (medium :ellipse)
         (call-next-method
@@ -324,9 +620,10 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
 (defmethod climi::medium-draw-circle*
     ((medium luv-gpu-medium) cx cy radius eta1 eta2 filled)
   (if (and filled (complete-ellipse-p eta1 eta2)
-           (gpu-medium-append-analytic-quad
-            medium (list cx cy) (list radius 0.0) (list 0.0 radius)
-            1.0 1.0 1.0 (gpu-medium-color medium)))
+           (gpu-medium-append-analytic-design
+            (medium-ink medium) medium
+            (list cx cy) (list radius 0.0) (list 0.0 radius)
+            1.0 1.0 1.0))
       medium
       (with-gpu-medium-fallback (medium :circle)
         (call-next-method medium cx cy radius eta1 eta2 filled))))
@@ -350,11 +647,10 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
              (bottom (max y1 y2))
              (half-width (* 0.5 (- right left)))
              (half-height (* 0.5 (- bottom top))))
-        (if (gpu-medium-append-analytic-quad
-             medium
+        (if (gpu-medium-append-analytic-design
+             (medium-ink medium) medium
              (list (* 0.5 (+ left right)) (* 0.5 (+ top bottom)))
-             '(1.0 0.0) '(0.0 1.0) half-width half-height radius
-             (gpu-medium-color medium))
+             '(1.0 0.0) '(0.0 1.0) half-width half-height radius)
             medium
             (call-next-method)))
       (call-next-method)))
@@ -407,41 +703,58 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
   (with-gpu-medium-fallback (medium :bezigon)
     (call-next-method medium coordinates closed filled)))
 
-(defmethod medium-draw-pattern* :around
+(defmethod medium-draw-pattern*
     ((medium luv-gpu-medium) pattern x y)
-  (with-gpu-medium-fallback (medium :pattern)
-    (call-next-method medium pattern x y)))
+  (let ((width (pattern-width pattern))
+        (height (pattern-height pattern)))
+    (gpu-medium-append-analytic-design
+     (transform-region (make-translation-transformation x y) pattern)
+     medium
+     (list (+ x (* 0.5 width)) (+ y (* 0.5 height)))
+     '(1.0 0.0) '(0.0 1.0)
+     (* 0.5 width) (* 0.5 height) 0.0))
+  medium)
 
 (defmethod medium-draw-polygon*
     ((medium luv-gpu-medium) coordinates closed filled)
-  (let ((first-vertex (/ (length (gpu-medium-vertices medium)) 6))
-        (points (coordinate-pairs coordinates))
-        (color (gpu-medium-color medium)))
+  (let ((points (coordinate-pairs coordinates)))
     (note-gpu-medium-fallback
      medium (or *gpu-medium-fallback-source* :direct-polygon)
      :polygon-points (length points))
-    (if filled
-        (gpu-medium-fill-convex-polygon medium points color)
-        (let ((thickness
-                (line-style-effective-thickness
-                 (medium-line-style medium) medium)))
-          (loop for (start end) on points
-                while end
-                do (gpu-medium-stroke-segment
-                    medium start end thickness color))
-          (when (and closed (> (length points) 2))
-            (gpu-medium-stroke-segment
-             medium (car (last points)) (first points) thickness color))))
-    (let ((vertex-count
-            (- (/ (length (gpu-medium-vertices medium)) 6) first-vertex)))
-      (when (plusp vertex-count)
-        (note-gpu-medium-fallback
-         medium (or *gpu-medium-fallback-source* :direct-polygon)
-         :gpu-triangles (/ vertex-count 3))
-        (vector-push-extend
-         (make-gpu-solid-command
-          :first-vertex first-vertex :vertex-count vertex-count)
-         (gpu-medium-commands medium)))))
+    (let ((painted-vertex-count
+            (and filled
+                 (gpu-medium-append-painted-polygon
+                  (medium-ink medium) medium points)))
+          (first-vertex (/ (length (gpu-medium-vertices medium)) 6)))
+      (unless painted-vertex-count
+        (let ((color (gpu-medium-color medium)))
+          (if filled
+              (gpu-medium-fill-convex-polygon medium points color)
+              (let ((thickness
+                      (line-style-effective-thickness
+                       (medium-line-style medium) medium)))
+                (loop for (start end) on points
+                      while end
+                      do (gpu-medium-stroke-segment
+                          medium start end thickness color))
+                (when (and closed (> (length points) 2))
+                  (gpu-medium-stroke-segment
+                   medium (car (last points)) (first points)
+                   thickness color))))))
+      (let ((vertex-count
+              (or painted-vertex-count
+                  (- (/ (length (gpu-medium-vertices medium)) 6)
+                     first-vertex))))
+        (when (plusp vertex-count)
+          (note-gpu-medium-fallback
+           medium (or *gpu-medium-fallback-source* :direct-polygon)
+           :gpu-triangles (/ vertex-count 3))
+          (unless painted-vertex-count
+            (vector-push-extend
+             (make-gpu-solid-command
+              :first-vertex first-vertex :vertex-count vertex-count
+              :clip (gpu-medium-clip-rectangle medium))
+             (gpu-medium-commands medium)))))))
   medium)
 
 (defmethod invoke-with-output-buffered
@@ -482,33 +795,61 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
               (lambda (medium)
                 (list (copy-seq (gpu-medium-vertices medium))
                       (copy-seq (gpu-medium-analytic-vertices medium))
+                      (copy-seq (gpu-medium-gradient-vertices medium))
+                      (copy-seq (gpu-medium-image-vertices medium))
                       (copy-seq (gpu-medium-commands medium))))
               media)))
       (setf (fill-pointer (gpu-medium-vertices target-medium)) 0
             (fill-pointer (gpu-medium-analytic-vertices target-medium)) 0
+            (fill-pointer (gpu-medium-gradient-vertices target-medium)) 0
+            (fill-pointer (gpu-medium-image-vertices target-medium)) 0
             (fill-pointer (gpu-medium-commands target-medium)) 0)
       (dolist (snapshot snapshots)
         (let ((vertex-offset
                 (/ (length (gpu-medium-vertices target-medium)) 6))
               (analytic-offset
-                (/ (length (gpu-medium-analytic-vertices target-medium)) 12)))
-          (loop for command across (third snapshot)
+                (/ (length (gpu-medium-analytic-vertices target-medium)) 12))
+              (gradient-offset
+                (/ (length (gpu-medium-gradient-vertices target-medium)) 21))
+              (image-offset
+                (/ (length (gpu-medium-image-vertices target-medium)) 12)))
+          (loop for command across (fifth snapshot)
                 do (vector-push-extend
                     (etypecase command
                       (gpu-solid-command
-                       (make-gpu-solid-command
+                      (make-gpu-solid-command
                         :first-vertex
                         (+ vertex-offset
                            (gpu-solid-command-first-vertex command))
                         :vertex-count
-                        (gpu-solid-command-vertex-count command)))
+                        (gpu-solid-command-vertex-count command)
+                        :clip (gpu-solid-command-clip command)))
                       (gpu-analytic-command
                        (make-gpu-analytic-command
                         :first-vertex
                         (+ analytic-offset
                            (gpu-analytic-command-first-vertex command))
                         :vertex-count
-                        (gpu-analytic-command-vertex-count command)))
+                        (gpu-analytic-command-vertex-count command)
+                        :clip (gpu-analytic-command-clip command)))
+                      (gpu-gradient-analytic-command
+                       (make-gpu-gradient-analytic-command
+                        :first-vertex
+                        (+ gradient-offset
+                           (gpu-gradient-analytic-command-first-vertex
+                            command))
+                        :vertex-count
+                        (gpu-gradient-analytic-command-vertex-count command)
+                        :clip (gpu-gradient-analytic-command-clip command)))
+                      (gpu-image-command
+                       (make-gpu-image-command
+                        :design (gpu-image-command-design command)
+                        :first-vertex
+                        (+ image-offset
+                           (gpu-image-command-first-vertex command))
+                        :vertex-count
+                        (gpu-image-command-vertex-count command)
+                        :clip (gpu-image-command-clip command)))
                       (gpu-text-command command))
                     (gpu-medium-commands target-medium))))
         (loop for value across (first snapshot)
@@ -516,7 +857,13 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
                   value (gpu-medium-vertices target-medium)))
         (loop for value across (second snapshot)
               do (vector-push-extend
-                  value (gpu-medium-analytic-vertices target-medium))))
+                  value (gpu-medium-analytic-vertices target-medium)))
+        (loop for value across (third snapshot)
+              do (vector-push-extend
+                  value (gpu-medium-gradient-vertices target-medium)))
+        (loop for value across (fourth snapshot)
+              do (vector-push-extend
+                  value (gpu-medium-image-vertices target-medium))))
       target-medium)))
 
 (defun repaint-gpu-mirror (mirror &key (present-p t))
@@ -533,6 +880,8 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
       (dolist (medium media)
         (setf (fill-pointer (gpu-medium-vertices medium)) 0)
         (setf (fill-pointer (gpu-medium-analytic-vertices medium)) 0)
+        (setf (fill-pointer (gpu-medium-gradient-vertices medium)) 0)
+        (setf (fill-pointer (gpu-medium-image-vertices medium)) 0)
         (setf (fill-pointer (gpu-medium-commands medium)) 0)
         (incf (gpu-medium-buffering-depth medium)))
       (unwind-protect
@@ -640,7 +989,8 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
           :string text :x device-x :y device-y
           :font-pathname (gpu-text-font-pathname style)
           :size (gpu-text-style-size style) :color color
-          :align-x align-x :align-y align-y)
+          :align-x align-x :align-y align-y
+          :clip (gpu-medium-clip-rectangle medium))
          (gpu-medium-commands medium)))))
   nil)
 
@@ -676,6 +1026,14 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
     context))
 
 (defun release-gpu-mirror-pipeline (mirror)
+  (maphash
+   (lambda (design paint)
+     (declare (ignore design))
+     (luv:destroy (gpu-image-paint-bind-group paint))
+     (luv:destroy (gpu-image-paint-view paint))
+     (luv:destroy (gpu-image-paint-texture paint)))
+   (gpu-mirror-image-paints mirror))
+  (clrhash (gpu-mirror-image-paints mirror))
   (maphash (lambda (atlas group)
              (declare (ignore atlas))
              (luv:destroy group))
@@ -686,6 +1044,8 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
   (dolist (resource
             (list (gpu-mirror-pipeline mirror)
                   (gpu-mirror-analytic-pipeline mirror)
+                  (gpu-mirror-gradient-analytic-pipeline mirror)
+                  (gpu-mirror-image-pipeline mirror)
                   (gpu-mirror-text-pipeline mirror)
                   (gpu-mirror-bind-group mirror)
                   (gpu-mirror-uniform-buffer mirror)
@@ -696,6 +1056,12 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
                   (gpu-mirror-vertex-module mirror)
                   (gpu-mirror-analytic-fragment-module mirror)
                   (gpu-mirror-analytic-vertex-module mirror)
+                  (gpu-mirror-gradient-analytic-fragment-module mirror)
+                  (gpu-mirror-gradient-analytic-vertex-module mirror)
+                  (gpu-mirror-image-sampler mirror)
+                  (gpu-mirror-image-fragment-module mirror)
+                  (gpu-mirror-image-vertex-module mirror)
+                  (gpu-mirror-image-layout mirror)
                   (gpu-mirror-layout mirror)))
     (when resource (luv:destroy resource)))
   (setf (gpu-mirror-pipeline mirror) nil
@@ -704,6 +1070,14 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
         (gpu-mirror-analytic-pipeline mirror) nil
         (gpu-mirror-analytic-fragment-module mirror) nil
         (gpu-mirror-analytic-vertex-module mirror) nil
+        (gpu-mirror-gradient-analytic-pipeline mirror) nil
+        (gpu-mirror-gradient-analytic-fragment-module mirror) nil
+        (gpu-mirror-gradient-analytic-vertex-module mirror) nil
+        (gpu-mirror-image-pipeline mirror) nil
+        (gpu-mirror-image-sampler mirror) nil
+        (gpu-mirror-image-fragment-module mirror) nil
+        (gpu-mirror-image-vertex-module mirror) nil
+        (gpu-mirror-image-layout mirror) nil
         (gpu-mirror-layout mirror) nil
         (gpu-mirror-uniform-buffer mirror) nil
         (gpu-mirror-bind-group mirror) nil
@@ -754,6 +1128,121 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
              (setf (gpu-mirror-analytic-vertex-module mirror) vertex
                    (gpu-mirror-analytic-fragment-module mirror) fragment
                    (gpu-mirror-analytic-pipeline mirror) pipeline
+                   completed-p t))
+        (unless completed-p
+          (dolist (resource (remove nil (list pipeline fragment vertex)))
+            (luv:destroy resource)))))))
+
+(defun ensure-gpu-mirror-image-pipeline (mirror device format)
+  (unless (gpu-mirror-image-pipeline mirror)
+    (let ((vertex nil) (fragment nil) (layout nil) (sampler nil)
+          (pipeline nil) (completed-p nil))
+      (unwind-protect
+           (progn
+             (setf vertex
+                   (luv:create
+                    device
+                    (luv:make-shader-module-descriptor
+                     :label "McCLIM image analytic vertex"
+                     :language :mathematical
+                     :code (image-roundrect-vertex-specification)))
+                   fragment
+                   (luv:create
+                    device
+                    (luv:make-shader-module-descriptor
+                     :label "McCLIM image analytic fragment"
+                     :language :mathematical
+                     :code (image-roundrect-fragment-specification)))
+                   layout
+                   (luv:create
+                    device
+                    (luv:make-bind-group-layout-descriptor
+                     :label "McCLIM image paint layout"
+                     :entries '((:binding 0 :type :texture)
+                                (:binding 1 :type :sampler))))
+                   sampler
+                   (luv:create
+                    device
+                    (luv:make-sampler-descriptor
+                     :label "McCLIM image paint linear sampler"))
+                   pipeline
+                   (luv:create
+                    device
+                    (luv:make-render-pipeline-descriptor
+                     :label "direct McCLIM image paints"
+                     :layout layout
+                     :vertex
+                     `(:module ,vertex
+                       :buffers
+                       ((:array-stride 48
+                         :attributes
+                         ((:shader-location 0 :offset 0 :format :float32x3)
+                          (:shader-location 1 :offset 12 :format :float32x3)
+                          (:shader-location 2 :offset 24 :format :float32x3)
+                          (:shader-location 3 :offset 36 :format :float32x3)))))
+                     :fragment
+                     `(:module ,fragment
+                       :targets
+                       ((:format ,format :blend :premultiplied-alpha)))
+                     :primitive '(:topology :triangle-list))))
+             (setf (gpu-mirror-image-vertex-module mirror) vertex
+                   (gpu-mirror-image-fragment-module mirror) fragment
+                   (gpu-mirror-image-layout mirror) layout
+                   (gpu-mirror-image-sampler mirror) sampler
+                   (gpu-mirror-image-pipeline mirror) pipeline
+                   completed-p t))
+        (unless completed-p
+          (dolist (resource
+                    (remove nil
+                            (list pipeline sampler layout fragment vertex)))
+            (luv:destroy resource)))))))
+
+(defun ensure-gpu-mirror-gradient-analytic-pipeline (mirror device format)
+  (unless (gpu-mirror-gradient-analytic-pipeline mirror)
+    (let ((vertex nil) (fragment nil) (pipeline nil) (completed-p nil))
+      (unwind-protect
+           (progn
+             (setf vertex
+                   (luv:create
+                    device
+                    (luv:make-shader-module-descriptor
+                     :label "McCLIM gradient analytic vertex"
+                     :language :mathematical
+                     :code (gradient-roundrect-vertex-specification)))
+                   fragment
+                   (luv:create
+                    device
+                    (luv:make-shader-module-descriptor
+                     :label "McCLIM gradient analytic fragment"
+                     :language :mathematical
+                     :code (gradient-roundrect-fragment-specification)))
+                   pipeline
+                   (luv:create
+                    device
+                    (luv:make-render-pipeline-descriptor
+                     :label "direct McCLIM gradient analytic shapes"
+                     :layout nil
+                     :vertex
+                     `(:module ,vertex
+                       :buffers
+                       ((:array-stride 84
+                         :attributes
+                         ((:shader-location 0 :offset 0 :format :float32x3)
+                          (:shader-location 1 :offset 12 :format :float32x3)
+                          (:shader-location 2 :offset 24 :format :float32x3)
+                          (:shader-location 3 :offset 36 :format :float32x3)
+                          (:shader-location 4 :offset 48 :format :float32x3)
+                          (:shader-location 5 :offset 60 :format :float32x3)
+                          (:shader-location 6 :offset 72 :format :float32x3)))))
+                     :fragment
+                     `(:module ,fragment
+                       :targets
+                       ((:format ,format :blend :premultiplied-alpha)))
+                     :primitive '(:topology :triangle-list))))
+             (setf (gpu-mirror-gradient-analytic-vertex-module mirror) vertex
+                   (gpu-mirror-gradient-analytic-fragment-module mirror)
+                   fragment
+                   (gpu-mirror-gradient-analytic-pipeline mirror) pipeline
                    completed-p t))
         (unless completed-p
           (dolist (resource (remove nil (list pipeline fragment vertex)))
@@ -903,6 +1392,8 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
     ;; Keep live mirrors honest when a new pipeline family is introduced after
     ;; their solid pipeline already exists.
     (ensure-gpu-mirror-analytic-pipeline mirror device format)
+    (ensure-gpu-mirror-gradient-analytic-pipeline mirror device format)
+    (ensure-gpu-mirror-image-pipeline mirror device format)
     (ensure-gpu-mirror-text-pipeline mirror device format)))
 
 (defun ensure-gpu-mirror-frame-state (mirror context surface)
@@ -974,6 +1465,99 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
       (setf (gpu-frame-state-analytic-buffer state) replacement
             (gpu-frame-state-analytic-capacity state) capacity)))
   (gpu-frame-state-analytic-buffer state))
+
+(defun ensure-gpu-frame-gradient-buffer (state device byte-count)
+  (when (> byte-count (gpu-frame-state-gradient-capacity state))
+    (let* ((capacity (ash 1 (integer-length (max 1 (1- byte-count)))))
+           (replacement
+             (luv:create
+              device
+              (luv:make-buffer-descriptor
+               :label "direct McCLIM gradient vertices" :size capacity
+               :usage '(:vertex :copy-dst)))))
+      (alexandria:when-let ((old (gpu-frame-state-gradient-buffer state)))
+        (luv:destroy old))
+      (setf (gpu-frame-state-gradient-buffer state) replacement
+            (gpu-frame-state-gradient-capacity state) capacity)))
+  (gpu-frame-state-gradient-buffer state))
+
+(defun ensure-gpu-frame-image-buffer (state device byte-count)
+  (when (> byte-count (gpu-frame-state-image-capacity state))
+    (let* ((capacity (ash 1 (integer-length (max 1 (1- byte-count)))))
+           (replacement
+             (luv:create
+              device
+              (luv:make-buffer-descriptor
+               :label "direct McCLIM image paint vertices" :size capacity
+               :usage '(:vertex :copy-dst)))))
+      (alexandria:when-let ((old (gpu-frame-state-image-buffer state)))
+        (luv:destroy old))
+      (setf (gpu-frame-state-image-buffer state) replacement
+            (gpu-frame-state-image-capacity state) capacity)))
+  (gpu-frame-state-image-buffer state))
+
+(defun ensure-gpu-image-paint (mirror design)
+  (let* ((source (gpu-image-paint-source design))
+         (cache (gpu-mirror-image-paints mirror)))
+    (or (gethash source cache)
+        (with-bounding-rectangle* (left top right bottom)
+            (bounding-rectangle source)
+          (let* ((width (max 1 (ceiling (- right left))))
+                 (height (max 1 (ceiling (- bottom top))))
+                 (pixels
+                   (pattern-array
+                    (climi::%collapse-pattern
+                     source left top width height)))
+                 (device (mirror-device mirror))
+                 (texture nil) (view nil) (bind-group nil)
+                 (completed-p nil))
+            (unwind-protect
+                 (progn
+                   ;; ARGB32 integers occupy BGRA bytes on the little-endian
+                   ;; native targets, matching the portable texture format.
+                   (setf texture
+                         (luv:create
+                          device
+                          (luv:make-texture-descriptor
+                           :label "cached McCLIM image paint"
+                           :size (list width height) :dimensions :2d
+                           :format :bgra8-unorm
+                           :usage '(:texture-binding :copy-dst)))
+                         view
+                         (luv:create
+                          device
+                          (luv:make-texture-view-descriptor
+                           :texture texture)))
+                   (luv:write-texture
+                    (luv:device-queue device)
+                    (luv:make-texture-copy :texture texture)
+                    pixels
+                    (luv:make-texture-data-layout
+                     :bytes-per-row (* 4 width)
+                     :rows-per-image height)
+                    (list width height))
+                   (setf bind-group
+                         (luv:create
+                          device
+                          (luv:make-bind-group-descriptor
+                           :label "cached McCLIM image paint bindings"
+                           :layout (gpu-mirror-image-layout mirror)
+                           :entries
+                           `((:binding 0 :resource ,view)
+                             (:binding 1
+                              :resource ,(gpu-mirror-image-sampler mirror))))))
+                   (let ((paint
+                           (make-instance
+                            'gpu-cached-image-paint
+                            :texture texture :view view :bind-group bind-group
+                            :width width :height height)))
+                     (setf (gethash source cache) paint
+                           completed-p t)
+                     paint))
+              (unless completed-p
+                (dolist (resource
+                          (remove nil (list bind-group view texture)))
+                  (luv:destroy resource)))))))))
 
 (defun ensure-gpu-text-bind-group (mirror atlas)
   (or (gethash atlas (gpu-mirror-text-bind-groups mirror))
@@ -1103,7 +1687,8 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
                       (vertex left top outline-left outline-top))))
                 (make-gpu-prepared-text-command
                  :atlas atlas :first-vertex first-vertex
-                 :vertex-count (- (/ (length data) 18) first-vertex))))))))))
+                 :vertex-count (- (/ (length data) 18) first-vertex)
+                 :clip (gpu-text-command-clip command))))))))))
 
 (defun prepare-gpu-frame-commands (mirror medium)
   (luv:with-cpu-trace-zone
@@ -1120,11 +1705,54 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
                 (etypecase command
                   (gpu-solid-command command)
                   (gpu-analytic-command command)
+                  (gpu-gradient-analytic-command command)
+                  (gpu-image-command
+                   (make-gpu-prepared-image-command
+                    :paint
+                    (ensure-gpu-image-paint
+                     mirror (gpu-image-command-design command))
+                    :first-vertex (gpu-image-command-first-vertex command)
+                    :vertex-count (gpu-image-command-vertex-count command)
+                    :clip (gpu-image-command-clip command)))
                   (gpu-text-command
                    (append-gpu-text-command
                     mirror command text-data width height)))
               when prepared do (push prepared commands))
         (values (nreverse commands) text-data)))))
+
+(defun gpu-frame-command-clip (command)
+  (etypecase command
+    (gpu-solid-command (gpu-solid-command-clip command))
+    (gpu-analytic-command (gpu-analytic-command-clip command))
+    (gpu-gradient-analytic-command
+     (gpu-gradient-analytic-command-clip command))
+    (gpu-prepared-image-command
+     (gpu-prepared-image-command-clip command))
+    (gpu-prepared-text-command
+     (gpu-prepared-text-command-clip command))))
+
+(defun set-gpu-frame-scissor (pass mirror surface clip)
+  "Encode CLIP in physical drawable pixels and return whether it is nonempty."
+  (destructuring-bind (surface-width surface-height &rest ignored)
+      (luv:gpu-texture-size surface)
+    (declare (ignore ignored))
+    (multiple-value-bind (logical-width logical-height)
+        (luv:canvas-logical-size (mirror-target mirror))
+      (destructuring-bind (left top right bottom)
+          (or clip (list 0 0 logical-width logical-height))
+        (let* ((scale-x (/ surface-width logical-width))
+               (scale-y (/ surface-height logical-height))
+               (x (max 0 (min surface-width (floor (* left scale-x)))))
+               (y (max 0 (min surface-height (floor (* top scale-y)))))
+               (right
+                 (max x (min surface-width (ceiling (* right scale-x)))))
+               (bottom
+                 (max y (min surface-height (ceiling (* bottom scale-y)))))
+               (width (- right x))
+               (height (- bottom y)))
+          (when (and (plusp width) (plusp height))
+            (luv:set-scissor-rect pass x y width height)
+            t))))))
 
 (defun render-gpu-mirror-frame (mirror &key readback-buffer)
   (let ((medium (sheet-medium (mirror-sheet mirror))))
@@ -1136,7 +1764,11 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
       ;; snapshot so the allocation size and the bytes written cannot drift.
       (let* ((vertices (copy-seq (gpu-medium-vertices medium)))
              (analytic-vertices
-               (copy-seq (gpu-medium-analytic-vertices medium))))
+               (copy-seq (gpu-medium-analytic-vertices medium)))
+             (gradient-vertices
+               (copy-seq (gpu-medium-gradient-vertices medium)))
+             (image-vertices
+               (copy-seq (gpu-medium-image-vertices medium))))
         (when (plusp (length (gpu-medium-commands medium)))
           (let* ((context
                    (ensure-gpu-mirror-context
@@ -1162,6 +1794,17 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
                           (and (plusp analytic-byte-count)
                                (ensure-gpu-frame-analytic-buffer
                                 state device analytic-byte-count)))
+                        (gradient-byte-count
+                          (* 4 (length gradient-vertices)))
+                        (gradient-buffer
+                          (and (plusp gradient-byte-count)
+                               (ensure-gpu-frame-gradient-buffer
+                                state device gradient-byte-count)))
+                        (image-byte-count (* 4 (length image-vertices)))
+                        (image-buffer
+                          (and (plusp image-byte-count)
+                               (ensure-gpu-frame-image-buffer
+                                state device image-byte-count)))
                         (text-byte-count (* 4 (length text-data)))
                         (text-buffer
                           (and (plusp text-byte-count)
@@ -1179,37 +1822,79 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
                    (when buffer (luv:write-buffer buffer vertices))
                    (when analytic-buffer
                      (luv:write-buffer analytic-buffer analytic-vertices))
+                   (when gradient-buffer
+                     (luv:write-buffer gradient-buffer gradient-vertices))
+                   (when image-buffer
+                     (luv:write-buffer image-buffer image-vertices))
                    (when text-buffer
                      (luv:write-buffer text-buffer text-data))
-                   (dolist (command commands)
-                     (etypecase command
-                       (gpu-solid-command
-                        (luv:set-pipeline pass (gpu-mirror-pipeline mirror))
-                        (luv:set-bind-group
-                         pass 0 (gpu-mirror-bind-group mirror))
-                        (luv:set-vertex-buffer pass 0 buffer)
-                        (luv:draw
-                         pass (gpu-solid-command-vertex-count command) 1
-                         (gpu-solid-command-first-vertex command)))
-                       (gpu-analytic-command
-                        (luv:set-pipeline
-                         pass (gpu-mirror-analytic-pipeline mirror))
-                        (luv:set-vertex-buffer pass 0 analytic-buffer)
-                        (luv:draw
-                         pass (gpu-analytic-command-vertex-count command) 1
-                         (gpu-analytic-command-first-vertex command)))
-                       (gpu-prepared-text-command
-                        (luv:set-pipeline
-                         pass (gpu-mirror-text-pipeline mirror))
-                        (luv:set-bind-group
-                         pass 0
-                         (ensure-gpu-text-bind-group
-                          mirror (gpu-prepared-text-command-atlas command)))
-                        (luv:set-vertex-buffer pass 0 text-buffer)
-                        (luv:draw
-                         pass
-                         (gpu-prepared-text-command-vertex-count command) 1
-                         (gpu-prepared-text-command-first-vertex command)))))
+                   (let ((active-clip (list :unset))
+                         (active-clip-visible-p t))
+                     (dolist (command commands)
+                       (let ((clip (gpu-frame-command-clip command)))
+                         (unless (equal clip active-clip)
+                           (setf active-clip clip)
+                           (setf active-clip-visible-p
+                                 (set-gpu-frame-scissor
+                                  pass mirror surface clip))))
+                       (when active-clip-visible-p
+                         (etypecase command
+                           (gpu-solid-command
+                            (luv:set-pipeline
+                             pass (gpu-mirror-pipeline mirror))
+                            (luv:set-bind-group
+                             pass 0 (gpu-mirror-bind-group mirror))
+                            (luv:set-vertex-buffer pass 0 buffer)
+                            (luv:draw
+                             pass (gpu-solid-command-vertex-count command) 1
+                             (gpu-solid-command-first-vertex command)))
+                           (gpu-analytic-command
+                            (luv:set-pipeline
+                             pass (gpu-mirror-analytic-pipeline mirror))
+                            (luv:set-vertex-buffer pass 0 analytic-buffer)
+                            (luv:draw
+                             pass (gpu-analytic-command-vertex-count command) 1
+                             (gpu-analytic-command-first-vertex command)))
+                           (gpu-gradient-analytic-command
+                            (luv:set-pipeline
+                             pass
+                             (gpu-mirror-gradient-analytic-pipeline mirror))
+                            (luv:set-vertex-buffer pass 0 gradient-buffer)
+                            (luv:draw
+                             pass
+                             (gpu-gradient-analytic-command-vertex-count
+                              command)
+                             1
+                             (gpu-gradient-analytic-command-first-vertex
+                              command)))
+                           (gpu-prepared-image-command
+                            (luv:set-pipeline
+                             pass (gpu-mirror-image-pipeline mirror))
+                            (luv:set-bind-group
+                             pass 0
+                             (gpu-image-paint-bind-group
+                              (gpu-prepared-image-command-paint command)))
+                            (luv:set-vertex-buffer pass 0 image-buffer)
+                            (luv:draw
+                             pass
+                             (gpu-prepared-image-command-vertex-count command)
+                             1
+                             (gpu-prepared-image-command-first-vertex command)))
+                           (gpu-prepared-text-command
+                            (luv:set-pipeline
+                             pass (gpu-mirror-text-pipeline mirror))
+                            (luv:set-bind-group
+                             pass 0
+                             (ensure-gpu-text-bind-group
+                              mirror
+                              (gpu-prepared-text-command-atlas command)))
+                            (luv:set-vertex-buffer pass 0 text-buffer)
+                            (luv:draw
+                             pass
+                             (gpu-prepared-text-command-vertex-count command)
+                             1
+                             (gpu-prepared-text-command-first-vertex
+                              command)))))))
                    (luv:end-pass pass)
                    (when readback-buffer
                      (luv:encode
@@ -1270,6 +1955,10 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
      (alexandria:when-let ((buffer (gpu-frame-state-vertex-buffer state)))
        (luv:destroy buffer))
      (alexandria:when-let ((buffer (gpu-frame-state-analytic-buffer state)))
+       (luv:destroy buffer))
+     (alexandria:when-let ((buffer (gpu-frame-state-gradient-buffer state)))
+       (luv:destroy buffer))
+     (alexandria:when-let ((buffer (gpu-frame-state-image-buffer state)))
        (luv:destroy buffer))
      (alexandria:when-let ((buffer (gpu-frame-state-text-buffer state)))
        (luv:destroy buffer))

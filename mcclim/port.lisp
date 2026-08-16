@@ -46,6 +46,14 @@
     :initform (make-array 1024 :element-type 'single-float
                           :adjustable t :fill-pointer 0)
     :reader gpu-medium-analytic-vertices)
+   (gradient-vertices
+    :initform (make-array 1024 :element-type 'single-float
+                          :adjustable t :fill-pointer 0)
+    :reader gpu-medium-gradient-vertices)
+   (image-vertices
+    :initform (make-array 1024 :element-type 'single-float
+                          :adjustable t :fill-pointer 0)
+    :reader gpu-medium-image-vertices)
    (commands
     :initform (make-array 32 :adjustable t :fill-pointer 0)
     :reader gpu-medium-commands)

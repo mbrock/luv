@@ -127,6 +127,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:cmd-begin-color-render-pass
            #:cmd-begin-depth-render-pass
            #:cmd-set-viewport-and-scissor
+           #:cmd-set-scissor
            #:cmd-end-render-pass
            #:cmd-draw
            #:submit-command-buffers
@@ -288,6 +289,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:set-pipeline
            #:set-bind-group
            #:set-vertex-buffer
+           #:set-scissor-rect
            #:dispatch-workgroups
            #:draw
            #:make-device-descriptor

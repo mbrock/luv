@@ -64,6 +64,10 @@
            #:capture-default-shader-lab-screenshot
            #:capture-gpu-mirror-screenshot
            #:draw-analytic-rounded-rectangle*
+           #:linear-gradient
+           #:radial-gradient
+           #:make-linear-gradient
+           #:make-radial-gradient
            #:clear-gpu-medium-fallback-statistics
            #:gpu-medium-fallback-report
            #:capture-mcclim-gallery

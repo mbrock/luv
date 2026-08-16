@@ -55,6 +55,22 @@ mirror's identity: a later target may be a texture presented on a 3D quad."))
    (analytic-fragment-module :initform nil
                              :accessor gpu-mirror-analytic-fragment-module)
    (analytic-pipeline :initform nil :accessor gpu-mirror-analytic-pipeline)
+   (gradient-analytic-vertex-module
+    :initform nil :accessor gpu-mirror-gradient-analytic-vertex-module)
+   (gradient-analytic-fragment-module
+    :initform nil :accessor gpu-mirror-gradient-analytic-fragment-module)
+   (gradient-analytic-pipeline
+    :initform nil :accessor gpu-mirror-gradient-analytic-pipeline)
+   (image-vertex-module
+    :initform nil :accessor gpu-mirror-image-vertex-module)
+   (image-fragment-module
+    :initform nil :accessor gpu-mirror-image-fragment-module)
+   (image-layout :initform nil :accessor gpu-mirror-image-layout)
+   (image-sampler :initform nil :accessor gpu-mirror-image-sampler)
+   (image-pipeline :initform nil :accessor gpu-mirror-image-pipeline)
+   (image-paints
+    :initform (make-hash-table :test #'eq)
+    :reader gpu-mirror-image-paints)
    (slug-cache :initform nil :accessor gpu-mirror-slug-cache)
    (text-vertex-module :initform nil
                        :accessor gpu-mirror-text-vertex-module)

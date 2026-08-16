@@ -2219,6 +2219,27 @@ lowering later without changing this queue-level operation."
 
 (defmethod encode
     ((pass vulkan-gpu-render-pass-encoder)
+     (command gpu-set-scissor-command))
+  (with-vulkan-gpu-driver-environment
+    (ensure-vulkan-render-pass-state pass :set-scissor)
+    (let ((x (gpu-set-scissor-command-x command))
+          (y (gpu-set-scissor-command-y command))
+          (width (gpu-set-scissor-command-width command))
+          (height (gpu-set-scissor-command-height command)))
+      (unless (and (typep x '(unsigned-byte 31))
+                   (typep y '(unsigned-byte 31))
+                   (typep width '(unsigned-byte 32))
+                   (typep height '(unsigned-byte 32)))
+        (reject-gpu-request
+         command :invalid-scissor-rectangle (list x y width height)))
+      (lvk:cmd-set-scissor
+       (vulkan-command-encoder-command-buffer
+        (vulkan-render-pass-command-encoder pass))
+       x y width height)))
+  pass)
+
+(defmethod encode
+    ((pass vulkan-gpu-render-pass-encoder)
      (command gpu-draw-command))
   (with-vulkan-gpu-driver-environment
     (ensure-vulkan-render-pass-state pass :draw)

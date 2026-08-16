@@ -30,6 +30,12 @@
   (height :uint64)
   (depth :uint64))
 
+(cffi:defcstruct mtl-scissor-rect
+  (x :uint64)
+  (y :uint64)
+  (width :uint64)
+  (height :uint64))
+
 ;; MTLStages and MTL4VisibilityOptions used by explicit Metal 4 barriers.
 (defconstant +stage-fragment+ (ash 1 1))
 (defconstant +stage-blit+ (ash 1 28))
@@ -771,6 +777,10 @@ rejection.  Source and names cross only as in-memory NSString objects."
     ("setArgumentTable:atStages:" :void)
   (argument-table :object)
   (stages :uint64))
+
+(objc:define-objective-c-message set-metal-scissor-rect
+    ("setScissorRect:" :void)
+  (rectangle (:struct mtl-scissor-rect)))
 
 (objc:define-objective-c-message draw-metal-primitives
     ("drawPrimitives:vertexStart:vertexCount:instanceCount:baseInstance:" :void)

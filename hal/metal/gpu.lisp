@@ -1628,6 +1628,24 @@ compiler boundary of #58IDSR."
     (setf (gethash slot (metal-render-pass-vertex-bindings pass)) buffer)
     command))
 
+(defmethod encode
+    ((pass metal-render-pass-encoder)
+     (command gpu-set-scissor-command))
+  (ensure-metal-render-pass-state pass :set-scissor)
+  (let ((values
+          (list (gpu-set-scissor-command-x command)
+                (gpu-set-scissor-command-y command)
+                (gpu-set-scissor-command-width command)
+                (gpu-set-scissor-command-height command))))
+    (unless (every (lambda (value) (typep value '(unsigned-byte 64))) values)
+      (reject-metal-gpu-request command :invalid-scissor-rectangle values))
+    (destructuring-bind (x y width height) values
+      (luv.metal:set-metal-scissor-rect
+       (metal-render-pass-native-encoder pass)
+       (list 'luv.metal::x x 'luv.metal::y y
+             'luv.metal::width width 'luv.metal::height height))))
+  command)
+
 (defun metal-primitive-type (pipeline)
   (ecase (metal-render-pipeline-primitive-topology pipeline)
     (:triangle-list luv.metal:+primitive-type-triangle+)

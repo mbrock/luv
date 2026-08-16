@@ -9,6 +9,7 @@
   :components ((:module "mcclim"
                 :serial t
                 :components ((:file "package")
+                             (:file "paint")
                              (:file "port")
                              (:file "mirror")
                              (:file "gpu")

@@ -21,14 +21,21 @@
                      :filled t :ink (make-rgb-color 0.075 0.085 0.12))
     (draw-analytic-rounded-rectangle*
      medium 58 58 430 206 :radius 36 :filled t
-     :ink (make-rgb-color 0.96 0.32 0.48))
+     :ink (make-linear-gradient
+           58 58 430 206
+           (make-rgb-color 1.0 0.30 0.48)
+           (make-rgb-color 0.42 0.34 1.0)))
     (draw-analytic-rounded-rectangle*
      medium 84 82 404 182 :radius 24 :filled t
      :ink (make-rgb-color 0.12 0.14 0.20))
     (draw-text* medium "roundrect in roundrect" 116 143
                 :ink +white+ :text-size 22)
     (draw-ellipse* medium 570 128 92 0 0 54
-                   :filled t :ink (make-rgb-color 0.28 0.82 0.56))
+                   :filled t
+                   :ink (make-radial-gradient
+                         570 128 92
+                         (make-rgb-color 0.72 1.0 0.84)
+                         (make-rgb-color 0.04 0.54 0.31)))
     (draw-ellipse* medium 190 310 105 35 -18 54
                    :filled t :ink (make-rgb-color 0.43 0.58 1.0))
     (draw-circle* medium 450 310 58
@@ -37,8 +44,100 @@
      medium 548 274 680 346 :radius 36 :filled t
      :ink (make-rgb-color 0.73 0.43 0.96))))
 
+(defun gallery-image-pixel (red green blue alpha)
+  (flet ((channel-byte (value)
+           (min 255 (max 0 (round (* 255 value))))))
+    (logior (ash (channel-byte alpha) 24)
+            (ash (channel-byte red) 16)
+            (ash (channel-byte green) 8)
+            (channel-byte blue))))
+
+(defun make-gallery-image-pattern (&optional (width 192) (height 128))
+  (let ((pixels
+          (make-array (list height width)
+                      :element-type '(unsigned-byte 32))))
+    (dotimes (y height)
+      (dotimes (x width)
+        (let* ((u (/ x (max 1.0 (1- width))))
+               (v (/ y (max 1.0 (1- height))))
+               (checker (if (evenp (+ (floor x 24) (floor y 24)))
+                            0.16 0.0)))
+          (setf (aref pixels y x)
+                (gallery-image-pixel
+                 (+ 0.16 (* 0.78 u) checker)
+                 (+ 0.18 (* 0.70 (- 1 u)))
+                 (+ 0.36 (* 0.58 v))
+                 1.0)))))
+    (make-pattern pixels nil)))
+
+(defun make-gallery-opacity-mask (&optional (width 192) (height 128))
+  (let ((opacities
+          (make-array (list height width)
+                      :element-type 'single-float)))
+    (dotimes (y height)
+      (dotimes (x width)
+        (let* ((nx (/ (- (* 2.0 x) width) width))
+               (ny (/ (- (* 2.0 y) height) height))
+               (distance (sqrt (+ (* nx nx) (* ny ny)))))
+          (setf (aref opacities y x)
+                (coerce (max 0.0 (min 1.0 (* 1.8 (- 1.0 distance))))
+                        'single-float)))))
+    (make-stencil opacities)))
+
+(defparameter *gallery-image-pattern* (make-gallery-image-pattern))
+(defparameter *gallery-masked-image-pattern*
+  (compose-in *gallery-image-pattern* (make-gallery-opacity-mask)))
+
+(define-application-frame paint-gallery ()
+  ()
+  (:menu-bar nil)
+  (:panes
+   (canvas :application
+           :display-function 'display-paint-gallery
+           :scroll-bars nil))
+  (:layouts (default canvas)))
+
+(defun display-paint-gallery (frame stream)
+  (declare (ignore frame))
+  (draw-rectangle* stream 0 0 800 480 :filled t
+                   :ink (make-rgb-color 0.055 0.065 0.09))
+  ;; Ordinary DRAW-PATTERN* is a single textured quad. This one also crosses
+  ;; a native rectangular scissor boundary at x=178.
+  (with-drawing-options
+      (stream :clipping-region (make-rectangle* 40 44 178 172))
+    (draw-pattern* stream *gallery-image-pattern* 40 44))
+  ;; The same immutable source texture, affinely stretched and clipped by one
+  ;; analytical roundrect coverage evaluation.
+  (let ((paint
+          (transform-region
+           (make-transformation (/ 440.0 192) 0 0 (/ 180.0 128) 300 36)
+           *gallery-image-pattern*)))
+    (draw-analytic-rounded-rectangle*
+     stream 300 36 740 216 :radius 42 :filled t :ink paint))
+  ;; McCLIM's COMPOSE-IN stencil becomes texture alpha; the ellipse adds its
+  ;; own analytical edge without an offscreen mask surface.
+  (let ((paint
+          (transform-region
+           (make-transformation (/ 300.0 192) 0 0 (/ 190.0 128) 52 266)
+           *gallery-masked-image-pattern*)))
+    (draw-ellipse* stream 202 361 150 0 0 95 :filled t :ink paint))
+  ;; A genuinely affine paint mapping, deliberately skewed inside the clip.
+  (let ((paint
+          (transform-region
+           (make-transformation 1.75 0.45 -0.18 1.35 382 290)
+           *gallery-image-pattern*)))
+    (draw-analytic-rounded-rectangle*
+     stream 382 260 752 446 :radius 30 :filled t :ink paint))
+  (draw-text* stream "rect clip" 40 208 :ink +white+ :text-size 18)
+  (draw-text* stream "rounded + affine" 300 244
+              :ink +white+ :text-size 18)
+  (draw-text* stream "opacity mask" 104 464
+              :ink +white+ :text-size 18))
+
 (defparameter *mcclim-gallery-scenes*
   `((:analytic "Analytic GUI primitives" analytic-shape-gallery 720 420)
+    (:paints "Image paints, masks, and affine placement"
+     paint-gallery 800 480)
     (:calculator "Calculator" clim-demo.calculator:calculator-app 420 520)
     (:gadgets "Gadgets" clim-demo::gadget-test 980 760)
     (:tables "Tables and borders"

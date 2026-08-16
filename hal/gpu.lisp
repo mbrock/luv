@@ -378,6 +378,9 @@ linear for the sRGB formats; the transfer names their RGB-channel behavior."
   min-depth
   max-depth)
 
+(defstruct (gpu-set-scissor-command (:include gpu-render-pass-command))
+  x y width height)
+
 (defstruct (gpu-clear-texture-command
             (:include gpu-command-encoder-command))
   texture
@@ -437,6 +440,11 @@ linear for the sRGB formats; the transfer names their RGB-channel behavior."
   (encode pass-encoder
           (make-gpu-set-vertex-buffer-command
            :slot slot :buffer buffer :offset offset)))
+
+(defun set-scissor-rect (pass-encoder x y width height)
+  (encode pass-encoder
+          (make-gpu-set-scissor-command
+           :x x :y y :width width :height height)))
 
 (defun dispatch-workgroups (pass-encoder x &optional (y 1) (z 1))
   (encode pass-encoder
