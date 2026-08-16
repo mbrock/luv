@@ -731,15 +731,20 @@ Audit so far:
 - Dense light arrays and the interleaved block-mesh vertex buffer are semantic
   fields with heterogeneous lanes.  Annotating their owner slot with one scalar
   quantity would be false precision; they need the field/layout side of the
-  declaration protocol.  Quantity-bearing constants and ordinary function
-  parameters similarly remain an explicit frontend question rather than being
-  forced into record declarations.
-
+  declaration protocol.  The lighting work queue makes the distinction
+  concrete: one =level= slot carries either a raw sky level or a raw block-light
+  level according to the queue which owns it, so the quantity belongs to a
+  field/work-item schema rather than that representation slot in isolation.
+  Quantity-bearing constants and ordinary function parameters similarly remain
+  an explicit frontend question rather than being forced into record
+  declarations.
 - Session state now distinguishes the monotonic frame-clock point from the
   accumulated physics duration, and production results declare their elapsed
-  duration.  Their calculations remain ordinary direct Lisp: record metadata
-  should not be used as a pretext for wrapping a short subtraction before the
-  constant/parameter declaration vocabulary exists.
+  duration.  Lighting state now likewise declares its most recent
+  reconciliation duration, while its counters remain counts.  These
+  calculations remain ordinary direct Lisp: record metadata should not be used
+  as a pretext for wrapping a short subtraction before the constant/parameter
+  declaration vocabulary exists.
 
 Next: give dense fields and packed products declarations with layouts, and
 decide how constants and ordinary function parameters publish boundary

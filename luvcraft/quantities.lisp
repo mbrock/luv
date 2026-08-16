@@ -68,6 +68,8 @@
   :non-negative-p t)
 (math:define-quantity :mesh-publication-duration :kind :duration
   :non-negative-p t)
+(math:define-quantity :lighting-reconciliation-duration :kind :duration
+  :non-negative-p t)
 (math:define-quantity :uniform-update-duration :kind :duration
   :non-negative-p t)
 (math:define-quantity :shadow-encode-duration :kind :duration

@@ -520,8 +520,12 @@ removal steps performed."
    (cells-visited :initform 0 :accessor lighting-state-cells-visited)
    (chunks-touched :initform 0 :accessor lighting-state-chunks-touched)
    (publications :initform 0 :accessor lighting-state-publications)
-   (last-latency-seconds :initform 0d0
-                         :accessor lighting-state-last-latency-seconds))
+   (last-latency-seconds
+    :initform 0d0
+    :type double-float
+    :quantity (:quantity :lighting-reconciliation-duration :unit :second)
+    :accessor lighting-state-last-latency-seconds))
+  (:metaclass luv.arithmetic.records:quantity-class)
   (:documentation
    "Accumulated lighting dirtiness for one world, owned by its session.
 

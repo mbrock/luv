@@ -91,6 +91,8 @@
               :benchmark-drain-duration)
              (luv::production-result luv::elapsed-seconds
               :production-duration)
+             (luv::luvcraft-lighting-state luv::last-latency-seconds
+              :lighting-reconciliation-duration)
              (luvcraft-session luv::last-frame-time
               :monotonic-frame-time)
              (luvcraft-session luv::physics-accumulator
