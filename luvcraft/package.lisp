@@ -39,6 +39,9 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:frontier-realization-maximum-priority
            #:frontier-realization-priority
            #:frontier-realization-priority-meaning
+           #:frontier-realization-relate-form
+           #:frontier-realization-relate-function
+           #:relate-frontier-realization-site
            #:frontier-realization-transfer
            #:frontier-site-buffer
            #:frontier-site-buffer-length

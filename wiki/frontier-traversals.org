@@ -1007,7 +1007,7 @@ and Tracy attributes any remaining cost at the same semantic zones.  All of
 these hold; SIMD, GPU lowering, invalidation, and a final surface syntax
 remain outside this proof.
 
-* NEXT Compile the sky seeds as boundary transfers
+* DONE Compile the sky seeds as boundary transfers
 :PROPERTIES:
 :ID: 581ZQP
 :END:
@@ -1016,16 +1016,21 @@ Intent: let the realization admit a virtual open-sky source through the
 program's own transfer law, so seeding stops restating the loss arithmetic
 in client code and a boundary is just a relation whose source is not a site.
 
-Evidence: =seed-compiled-sky-boundaries= computes =15 - loss= by calling the
-=light-propagation-loss= function and joins the value through the admit
-entry, while emitters already seed by joining a value.  The admit entry
-exists because the compiler can tell which laws need a source; a
-=relate= entry taking source field values and a direction is the same
-emission with the source role bound to arguments.
+Evidence: every realization now also emits a =relate= entry
+(=relate-frontier-realization-site=): the source role's field values arrive
+as keyword arguments named by role, the relation direction as an argument,
+and the crossing predicate is true, after which the target is tested,
+committed, and admitted by exactly the relation body.  Sky seeding calls it
+with =:level 15= and the inward direction of each open face; the loss
+arithmetic no longer appears in =frontier-light.lisp=.  Fields and the
+12,458 proof-world visits are unchanged against both oracles, and a test
+relates one virtual source straight down (15), laterally (14), into an
+opaque cell (not admitted), and dimly into an already-brighter site (not
+admitted).
 
 Done when: sky seeding calls a compiled entry with the source level and the
 inward direction, the transfer law appears once in the program, and the
-compiled solver's fields and visits are unchanged.
+compiled solver's fields and visits are unchanged.  All hold.
 
 * TODO Give frontier light its own invalidation program
 :PROPERTIES:

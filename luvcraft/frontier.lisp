@@ -466,10 +466,13 @@ loop."))
    (priority :initarg :priority :reader frontier-realization-priority)
    (drain-form :initarg :drain-form :reader frontier-realization-drain-form)
    (admit-form :initarg :admit-form :reader frontier-realization-admit-form)
+   (relate-form :initarg :relate-form :reader frontier-realization-relate-form)
    (drain-function :initarg :drain-function
                    :reader frontier-realization-drain-function)
    (admit-function :initarg :admit-function
-                   :reader frontier-realization-admit-function))
+                   :reader frontier-realization-admit-function)
+   (relate-function :initarg :relate-function
+                    :reader frontier-realization-relate-function))
   (:documentation
    "One program compiled over bound fields into closed scalar Lisp.
 
@@ -477,7 +480,10 @@ TRANSFER, ADMISSION, and PRIORITY are the checked arithmetic expression
 graphs; DRAIN-FORM and ADMIT-FORM are the emitted lambda forms; the two
 functions are their compiled realizations.  ADMIT-FUNCTION seeds one site
 through the same admission and commit law as a relation, or is NIL when the
-law needs a source. #53Q1II"))
+law needs a source.  RELATE-FUNCTION exposes one relation from a virtual
+source whose field values are supplied as arguments, so a boundary such as
+open sky is the program's own transfer law rather than client arithmetic.
+#53Q1II #581ZQP"))
 
 (defmethod print-object ((realization frontier-realization) stream)
   (print-unreadable-object (realization stream :type t)
@@ -528,6 +534,19 @@ program VALUE is ignored.  Return whether the site was admitted."
       (error "~S cannot admit a site without a source." realization))
     (apply admit window frontier execution materialization offset value
            constants)))
+
+(defun relate-frontier-realization-site
+    (realization window frontier execution materialization offset direction
+     &rest arguments)
+  "Expose one relation into MATERIALIZATION/OFFSET from a virtual source.
+
+ARGUMENTS supply the program's constants and, keyed by role name, the source
+field values the transfer reads; DIRECTION is the relation's direction as
+seen from that source.  The target is tested, committed, and admitted by the
+same law as an ordinary relation.  Return whether it was admitted. #581ZQP"
+  (apply (frontier-realization-relate-function realization)
+         window frontier execution materialization offset direction
+         arguments))
 
 ;;; ------------------------------------------------------------------------
 ;;; The compiler
@@ -941,7 +960,8 @@ are emitted but not compiled, for inspection. #53Q1II #T2G95K #716UN6"
            (maximum-priority
              (frontier-layout-maximum-priority definition relaxed-binding))
            (drain-form (emit-frontier-drain-form compilation))
-           (admit-form (emit-frontier-admit-form compilation)))
+           (admit-form (emit-frontier-admit-form compilation))
+           (relate-form (emit-frontier-relate-form compilation)))
       (make-instance
        'frontier-realization
        :definition definition
@@ -957,8 +977,10 @@ are emitted but not compiled, for inspection. #53Q1II #T2G95K #716UN6"
        :priority (compilation-priority compilation)
        :drain-form drain-form
        :admit-form admit-form
+       :relate-form relate-form
        :drain-function (and compile (compile nil drain-form))
-       :admit-function (and compile admit-form (compile nil admit-form))))))
+       :admit-function (and compile admit-form (compile nil admit-form))
+       :relate-function (and compile (compile nil relate-form))))))
 
 ;;; Emission.  The generated loop is deliberately plain: raw bucket vectors
 ;;; and counters are bound once at entry and written back at exit; the source
@@ -1253,6 +1275,82 @@ form wherever the law mentions them."
              ,(emit-target-law
                compilation (and relaxed 'value)
                (compilation-lowering-environment compilation :source-p nil)
+               :admit-form
+               (lambda (priority)
+                 `(progn (admit target target-offset ,priority)
+                         (setf admitted-p t)))))
+           ,@(counter-write-back-forms)
+           admitted-p)))))
+
+(defun emit-frontier-relate-form (compilation)
+  "Emit the virtual-source relation entry point.
+
+The source role's field values arrive as keyword arguments named by role, the
+relation direction as an argument, and the crossing predicate is true: a
+virtual source is by definition outside the target's materialization."
+  (let* ((definition (compilation-definition compilation))
+         (constants (mapcar #'lang:arithmetic-object-name
+                            (compilation-constants compilation)))
+         (referenced (compilation-referenced-parameters compilation))
+         (lowering (compilation-lowering-environment compilation))
+         (transfer (compilation-transfer compilation))
+         (candidate-form (and transfer (lower-law compilation transfer lowering)))
+         (source-fields
+           (remove-if-not
+            (lambda (lowered)
+              (member (lowered-field-source-parameter lowered) referenced))
+            (compilation-fields compilation)))
+         (source-arguments
+           (mapcar (lambda (lowered)
+                     (frontier-field-binding-name (lowered-field-binding lowered)))
+                   source-fields)))
+    (multiple-value-bind (target-values target-declarations target-needed)
+        (field-value-bindings compilation :target 'target-offset referenced)
+      `(lambda (window frontier execution materialization target-offset direction
+                &key ,@constants ,@source-arguments)
+         (declare (ignorable window direction ,@constants)
+                  (type fixnum target-offset))
+         (let* (,@(raw-frontier-bindings)
+                (target materialization)
+                ,@(loop for lowered in source-fields
+                        for argument in source-arguments
+                        collect `(,(lowered-field-source-variable lowered)
+                                  ,argument))
+                ,@(loop for lowered in target-needed
+                        append (lane-let-bindings
+                                (lowered-field-binding lowered)
+                                (lowered-field-target-lanes lowered)
+                                'target))
+                ,@(loop for predicate
+                          in (frontier-program-definition-predicates definition)
+                        collect `(,(frontier-relation-predicate-name predicate)
+                                  ,(ecase (frontier-relation-predicate-kind
+                                           predicate)
+                                     (:crossing t)
+                                     (:direction=
+                                      (predicate-form predicate)))))
+                ,@target-values
+                (admitted-p nil))
+           ,(raw-frontier-declarations)
+           (declare ,@(loop for lowered in source-fields
+                            for type = (frontier-field-binding-representation-type
+                                        (lowered-field-binding lowered))
+                            when type
+                              collect `(type ,type
+                                             ,(lowered-field-source-variable
+                                               lowered)))
+                    ,@(loop for lowered in target-needed
+                            append (lane-type-declarations
+                                    (lowered-field-binding lowered)
+                                    (lowered-field-target-lanes lowered)))
+                    ,@target-declarations
+                    (ignorable ,@(mapcar #'frontier-relation-predicate-name
+                                         (frontier-program-definition-predicates
+                                          definition))))
+           (flet (,(admit-flet))
+             (declare (inline admit))
+             ,(emit-target-law
+               compilation candidate-form lowering
                :admit-form
                (lambda (priority)
                  `(progn (admit target target-offset ,priority)
