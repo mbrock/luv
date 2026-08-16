@@ -265,12 +265,4 @@
            #:shader-module
            #:assemble-shader-specification
            #:gradient-compute-module
-           #:gradient-compute-shader
-           #:spinning-texture-vertex-module
-           #:spinning-texture-fragment-module
-           #:spinning-texture-vertex-shader
-           #:spinning-texture-fragment-shader
-           #:lisp-machine-chassis-vertex-module
-           #:lisp-machine-chassis-fragment-module
-           #:lisp-machine-chassis-vertex-shader
-           #:lisp-machine-chassis-fragment-shader))
+           #:gradient-compute-shader))

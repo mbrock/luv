@@ -6,6 +6,18 @@
 (defun fresh-gpu-medium ()
   (make-instance 'mcluv:luv-gpu-medium))
 
+(deftest compositor-shaders-are-shared-mathematical-specifications
+  (dolist (specification
+            (list (mcluv::spinning-texture-vertex-specification)
+                  (mcluv::spinning-texture-fragment-specification)
+                  (mcluv::lisp-machine-chassis-vertex-specification)
+                  (mcluv::lisp-machine-chassis-fragment-specification)))
+    (ok (typep specification 'spv:shader-specification))
+    (ok (> (length (spv:assemble-shader-specification specification)) 5))
+    (ok (search "using namespace metal"
+                (luv.msl:msl-document-source
+                 (luv.msl:compile-msl specification))))))
+
 (deftest filled-rectangles-become-one-analytic-command
   (let ((medium (fresh-gpu-medium)))
     (clim:medium-draw-rectangle* medium 10 20 110 60 t)

@@ -21,6 +21,13 @@
                (+ sum (float word))))))
     (spv:set-output color (spv:vec4 total total total 1.0))))
 
+(spv:define-shader msl-vertex-index-probe
+    (:stage :vertex
+     :inputs ((vertex-index :uint :built-in :vertex-index))
+     :outputs ((clip-position :vec4 :built-in :position)))
+  (let* ((x (spv:float (mod vertex-index (spv:uint 2.0)))))
+    (spv:set-output clip-position (spv:vec4 x 0.0 0.0 1.0))))
+
 (defun msl-binding-named (name specification)
   (find name (spv:shader-specification-bindings specification)
         :key #'spv:shader-object-name
@@ -59,6 +66,15 @@
     (ok (search "% uint(4096.0f)" source))
     (ok (search "/ uint(4096.0f)" source))
     (ok (search "float(" source))))
+
+(deftest vertex-index-is-a-direct-metal-built-in-parameter
+  (let ((source
+          (msl:msl-document-source
+           (msl:compile-msl (msl-vertex-index-probe)))))
+    (ok (search "uint vertex_index [[vertex_id]]" source))
+    (ok (search "vertex_index % uint(2.0f)" source))
+    (ng (search "stage_in.vertex_index" source))
+    (ng (search "[[stage_in]]" source))))
 
 (deftest slug-atlas-derivatives-and-band-selection-lower-to-metal
   (let ((fragment-source
