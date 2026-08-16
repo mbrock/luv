@@ -334,6 +334,22 @@ parallel straight lines, per-axis descending sort, and visible band-length
 statistics.  Exercise an outer contour plus an inner contour before involving a
 font loader.
 
+The CPU-owned model and the first preprocessing boundary are now concrete.
+=slug-outline= keeps closed contours, validates every curve junction, computes
+quadratic contour orientation from the exact area integral, and flattens curves
+in contour order.  Lines use ={p1,p2,p2}=.  =pack-slug-outline= builds
+horizontal and vertical bands with the reference 1/1024 conservative overlap,
+omits curves parallel to the relevant ray, and retains both descending-maximum
+and ascending-minimum orders.  Tests exercise a counterclockwise outer square
+with a clockwise inner hole and reject a disconnected contour.
+
+This is deliberately the pre-serialization contract.  The current bounds and
+band membership use the Lisp coordinates.  Before GPU upload, the curve points
+must be converted to their actual RGBA16F representation and the bounds and
+memberships recomputed from those quantized values; otherwise the CPU could
+exclude a curve which the shader sees crossing a band boundary.  Dense curve
+and band encoding, upload, and rendering from those resources remain open.
+
 Done when: several differently sized and holed quadratic outlines render from
 uploaded data without changing shader source, and a CPU winding oracle agrees
 with GPU pixels around extrema, shared endpoints, and contour holes.

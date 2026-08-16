@@ -355,6 +355,7 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
                 ((:module "shader"
                   :serial t
                   :components ((:file "slug-package")
+                               (:file "slug-outline")
                                (:file "slug")))))))
 
 (asdf:defsystem #:luv/msl

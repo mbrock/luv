@@ -1374,6 +1374,126 @@
              (multiple-value-list
               (slug:slug-root-eligibility 0.0 0.0 0.0)))))
 
+(defun slug-test-point (x y)
+  (slug:make-slug-point :x x :y y))
+
+(defun slug-test-line (x1 y1 x2 y2)
+  (slug:make-slug-line (slug-test-point x1 y1)
+                       (slug-test-point x2 y2)))
+
+(defun slug-test-square (left bottom right top &key clockwise-p)
+  (let ((points
+          (if clockwise-p
+              (list (slug-test-point left bottom)
+                    (slug-test-point left top)
+                    (slug-test-point right top)
+                    (slug-test-point right bottom))
+              (list (slug-test-point left bottom)
+                    (slug-test-point right bottom)
+                    (slug-test-point right top)
+                    (slug-test-point left top)))))
+    (loop for start in points
+          for end in (append (rest points) (list (first points)))
+          collect (slug:make-slug-line start end))))
+
+(defun slug-test-curve-min (curve axis)
+  (let ((reader (ecase axis
+                  (:x #'slug:slug-point-x)
+                  (:y #'slug:slug-point-y))))
+    (apply #'min
+           (mapcar reader
+                   (list (slug:slug-quadratic-start curve)
+                         (slug:slug-quadratic-control curve)
+                         (slug:slug-quadratic-end curve))))))
+
+(defun slug-test-curve-max (curve axis)
+  (let ((reader (ecase axis
+                  (:x #'slug:slug-point-x)
+                  (:y #'slug:slug-point-y))))
+    (apply #'max
+           (mapcar reader
+                   (list (slug:slug-quadratic-start curve)
+                         (slug:slug-quadratic-control curve)
+                         (slug:slug-quadratic-end curve))))))
+
+(defun slug-test-curve-axis-parallel-p (curve axis)
+  (= (slug-test-curve-min curve axis)
+     (slug-test-curve-max curve axis)))
+
+(deftest arbitrary-quadratic-contours-pack-into-sorted-slug-bands
+  (let* ((outer (slug-test-square 0 0 4 4))
+         (inner (slug-test-square 1 1 3 3 :clockwise-p t))
+         (outline (slug:make-slug-outline :contours (list outer inner)))
+         (packed
+           (slug:pack-slug-outline
+            outline :horizontal-band-count 2 :vertical-band-count 2))
+         (curves (slug:slug-packed-outline-curves packed)))
+    (ok (eq :counterclockwise (slug:slug-contour-orientation outer)))
+    (ok (eq :clockwise (slug:slug-contour-orientation inner)))
+    (ok (= 8 (length curves)))
+    (ok (= 0 (slug:slug-packed-outline-min-x packed)))
+    (ok (= 4 (slug:slug-packed-outline-max-y packed)))
+    (ok (every
+         (lambda (band)
+           (let ((indices (slug:slug-band-curve-indices band)))
+             (and
+              ;; Horizontal ray bands omit horizontal curves.
+              (every (lambda (index)
+                       (let ((curve (aref curves index)))
+                         (not (= (slug:slug-point-y
+                                  (slug:slug-quadratic-start curve))
+                                 (slug:slug-point-y
+                                  (slug:slug-quadratic-control curve))
+                                 (slug:slug-point-y
+                                  (slug:slug-quadratic-end curve))))))
+                     indices)
+              ;; Descending maximum x supports the shader's early exit.
+              (apply #'>=
+                     (mapcar
+                      (lambda (index)
+                        (slug-test-curve-max (aref curves index) :x))
+                      indices)))))
+         (slug:slug-packed-outline-horizontal-bands packed)))
+    (ok (every
+         (lambda (band)
+           (let ((descending (slug:slug-band-curve-indices band))
+                 (ascending
+                   (slug:slug-band-ascending-curve-indices band)))
+             (and
+              (every (lambda (index)
+                       (not (slug-test-curve-axis-parallel-p
+                             (aref curves index) :x)))
+                     descending)
+              (apply #'>=
+                     (mapcar (lambda (index)
+                               (slug-test-curve-max
+                                (aref curves index) :y))
+                             descending))
+              (apply #'<=
+                     (mapcar (lambda (index)
+                               (slug-test-curve-min
+                                (aref curves index) :y))
+                             ascending)))))
+         (slug:slug-packed-outline-vertical-bands packed)))
+    (let ((line (first outer)))
+      (ok (equalp (slug:slug-quadratic-control line)
+                  (slug:slug-quadratic-end line))))))
+
+(deftest malformed-slug-contours-report-the-broken-junction
+  (let* ((first (slug-test-line 0 0 1 0))
+         (second (slug-test-line 2 0 0 0))
+         (outline (slug:make-slug-outline
+                   :contours (list (list first second)))))
+    (handler-case
+        (progn
+          (slug:slug-outline-curves outline)
+          (ok nil))
+      (slug:slug-outline-error (condition)
+        (ok (eq :disconnected-contour
+                (slug:slug-outline-error-reason condition)))
+        (ok (equal '(0 0)
+                   (slug:slug-outline-error-details condition)))))))
+
 (deftest shaders-consume-shared-arithmetic-functions-directly
   (let* ((before (spv:shader-source-revision))
          (specification
