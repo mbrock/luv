@@ -9,12 +9,12 @@
 
 ;;; A matrix is representation; this is the meaning of the operation it
 ;;; participates in.  The four dense rows arrive through the frame ABI, but
-;;; applying them is a checked map from an affine metre-valued world point to
+;;; applying them is a checked map from an affine cell-valued lattice point to
 ;;; the deliberately packed shadow sample tuple used by the fragment stage.
 (define-projective-shader-map :world-to-shadow
   :domain-type :vec3
   :domain-quantity :world-position
-  :domain-unit :metre
+  :domain-unit :cell
   :domain-affine-p t
   :codomain-type :vec3
   :codomain-components
@@ -31,7 +31,7 @@
     '((camera-vector :vec4      ; camera position, w unused
                      :components
                      ((:xyz :quantity :world-position
-                            :unit :metre :affine-p t)))
+                            :unit :cell :affine-p t)))
       (right-vector :vec4
                     :components
                     ((:xyz :quantity :world-direction :unit :one)))
@@ -46,11 +46,11 @@
                          ((:x :quantity :projection-scale :unit :one)
                           (:y :quantity :projection-scale :unit :one)
                           (:z :quantity :projection-scale :unit :one)
-                          (:w :quantity :view-distance :unit :metre)))
+                          (:w :quantity :view-distance :unit :cell)))
       (fog-vector :vec4         ; fog near, fog far, unused, unused
                   :components
-                  ((:x :quantity :view-distance :unit :metre)
-                   (:y :quantity :view-distance :unit :metre)))
+                  ((:x :quantity :view-distance :unit :cell)
+                   (:y :quantity :view-distance :unit :cell)))
       (sun-vector :vec4         ; sun direction, day factor
                   :components
                   ((:xyz :quantity :world-direction :unit :one)
@@ -76,10 +76,8 @@
                               (:w :quantity :shadow-depth :unit :one)))
       (shadow-filter-vector :vec4 ; depth span, world/texel, min/max radius
                             :components
-                            ((:x :quantity :world-distance
-                                 :dimension :length :unit :metre)
-                             (:y :quantity :world-distance
-                                 :dimension :length :unit :metre)
+                            ((:x :quantity :world-distance :unit :cell)
+                             (:y :quantity :world-distance :unit :cell)
                              (:z :quantity :shadow-filter-radius :unit :one)
                              (:w :quantity :shadow-filter-radius :unit :one)))
       (shadow-row-x :vec4)      ; light-space clip x from world position
@@ -94,7 +92,7 @@
     (:stage :vertex
      :inputs ((world-position :vec3 :location 0
                               :quantity :world-position
-                              :unit :metre :affine-p t)
+                              :unit :cell :affine-p t)
               (uv-shade-input :vec3 :location 1
                               :components
                               ((:xy :quantity :texture-uv
@@ -139,7 +137,7 @@
          (view-x (dot relative right))
          (view-y (dot relative up))
          (view-z (interpret (dot relative forward)
-                            :quantity :view-distance :unit :metre))
+                            :quantity :view-distance :unit :cell))
          ;; Fog has explicit near/far semantics: no attenuation before near,
          ;; full fog at far, quadratic shaping between, clamped where the
          ;; scene extends past either edge.
@@ -160,7 +158,7 @@
          (clip-x (* view-x x-scale))
          (clip-y (- (* view-y y-scale)))
          (clip-z (+ (interpret (* view-z z-scale)
-                              :quantity :view-distance :unit :metre)
+                              :quantity :view-distance :unit :cell)
                     z-offset))
          (clip (vec4 clip-x clip-y clip-z view-z))
          (shadow-projection
@@ -283,8 +281,7 @@
          (shadow-world-span
            (interpret
             (/ shadow-world-units-per-texel (swizzle shadow-texel-size :x))
-            :quantity :world-distance
-            :dimension :length :unit :metre))
+            :quantity :world-distance :unit :cell))
          (shadow-span-ratio (/ shadow-world-span shadow-depth-span))
          (shadow-depth-gradient
            (interpret
@@ -309,8 +306,7 @@
            (interpret
             (* (* shadow-blocker-separation shadow-depth-span)
                sun-angular-width)
-            :quantity :world-distance
-            :dimension :length :unit :metre))
+            :quantity :world-distance :unit :cell))
          (shadow-filter-radius
            (clamp
             (+ shadow-minimum-radius
@@ -509,7 +505,7 @@
     (:stage :vertex
      :inputs ((world-position :vec3 :location 0
                               :quantity :world-position
-                              :unit :metre :affine-p t))
+                              :unit :cell :affine-p t))
      :outputs ((clip-position :vec4 :built-in :position))
      :resources
      ((frame-state :uniform-block :set 0 :binding 2

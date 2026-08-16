@@ -215,7 +215,14 @@
 (defclass voxel-space ()
   ((id :initarg :id :reader voxel-space-id)
    (chunk-shape :initarg :chunk-shape :reader voxel-space-chunk-shape)
-   (cell-extent :initarg :cell-extent :reader voxel-space-cell-extent)))
+   (cell-extent
+    :initarg :cell-extent
+    :type vec3
+    :quantity (:quantity :voxel-cell-extent
+               :unit ((:metre 1) (:cell -1))
+               :tensor-order 1)
+    :reader voxel-space-cell-extent))
+  (:metaclass luv.arithmetic.records:quantity-class))
 
 (defun make-voxel-space (&key (id (gensym "VOXEL-SPACE-"))
                               (chunk-shape (make-chunk-shape))
@@ -1000,13 +1007,15 @@ retains chunk revision, boundary revision, and world invalidation semantics."))
 ;;; planes are cell boundaries, independently of the physical cell extent.
 ;;; The traversal stops at absent terrain rather than silently seeing air.
 
-(defstruct (block-ray-hit
-             (:constructor %make-block-ray-hit
-                 (coordinate adjacent-coordinate block distance)))
+(luv.arithmetic.records:define-quantity-struct
+    (block-ray-hit
+     (:constructor %make-block-ray-hit
+         (coordinate adjacent-coordinate block distance)))
   (coordinate nil :type world-coordinate :read-only t)
   (adjacent-coordinate nil :type (or null world-coordinate) :read-only t)
   (block nil :read-only t)
-  (distance 0d0 :type double-float :read-only t))
+  (distance 0d0 :type double-float :read-only t
+            :quantity (:quantity :ray-distance :unit :cell)))
 
 (defun raycast-block-world
     (world origin direction occupied-p &key (max-distance 8d0))

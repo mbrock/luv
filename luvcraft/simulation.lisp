@@ -13,7 +13,7 @@
   ((position :initarg :position
              :initform (make-vec3 8.0 11.0 -6.0)
              :type vec3
-             :quantity (:quantity :world-position :unit :metre
+             :quantity (:quantity :world-position :unit :cell
                         :tensor-order 1 :character :point)
              :accessor camera-position)
    (yaw :initarg :yaw :initform 0.0 :type real
@@ -94,67 +94,67 @@ FRAME-UNIFORM-DATA from the session's sky clock and profile."
 
 (luv.arithmetic.lisp:define-lisp-arithmetic-function
     %predict-world-position
-    ((position :quantity :world-position :unit :metre
+    ((position :quantity :world-position :unit :cell
                :tensor-order 1 :character :point)
      (velocity :quantity :world-velocity
-               :unit ((:metre 1) (:second -1)) :tensor-order 1)
+               :unit ((:cell 1) (:second -1)) :tensor-order 1)
      (elapsed :quantity :frame-duration :unit :second))
   (+ position
      (luv.arithmetic.language:interpret
       (* velocity elapsed)
-      :quantity :world-position :unit :metre
+      :quantity :world-position :unit :cell
       :tensor-order 1 :character :difference)))
 
 (defclass block-world-player ()
   ((position :initarg :position
              :initform (make-vec3 0d0 0d0 0d0)
              :type vec3
-             :quantity (:quantity :world-position :unit :metre
+             :quantity (:quantity :world-position :unit :cell
                         :tensor-order 1 :character :point)
              :accessor player-position)
    (velocity :initarg :velocity
              :initform (make-vec3 0d0 0d0 0d0)
              :type vec3
              :quantity (:quantity :world-velocity
-                        :unit ((:metre 1) (:second -1))
+                        :unit ((:cell 1) (:second -1))
                         :tensor-order 1)
              :accessor player-velocity)
    (half-width :initarg :half-width :initform 0.30d0
                :type double-float
-               :quantity (:quantity :player-half-width :unit :metre)
+               :quantity (:quantity :player-half-width :unit :cell)
                :reader player-half-width)
    (height :initarg :height :initform 1.80d0
            :type double-float
-           :quantity (:quantity :player-height :unit :metre)
+           :quantity (:quantity :player-height :unit :cell)
            :reader player-height)
    (eye-height :initarg :eye-height :initform 1.62d0
                :type double-float
-               :quantity (:quantity :player-eye-height :unit :metre)
+               :quantity (:quantity :player-eye-height :unit :cell)
                :reader player-eye-height)
    (walk-speed :initarg :walk-speed :initform 5.0d0
                :type double-float
                :quantity (:quantity :player-walk-speed
-                          :unit ((:metre 1) (:second -1)))
+                          :unit ((:cell 1) (:second -1)))
                :reader player-walk-speed)
    (ground-acceleration :initarg :ground-acceleration :initform 45d0
                         :type double-float
                         :quantity (:quantity :player-acceleration
-                                   :unit ((:metre 1) (:second -2)))
+                                   :unit ((:cell 1) (:second -2)))
                         :reader player-ground-acceleration)
    (air-acceleration :initarg :air-acceleration :initform 14d0
                      :type double-float
                      :quantity (:quantity :player-acceleration
-                                :unit ((:metre 1) (:second -2)))
+                                :unit ((:cell 1) (:second -2)))
                      :reader player-air-acceleration)
    (gravity :initarg :gravity :initform 24d0
             :type double-float
             :quantity (:quantity :gravity-magnitude
-                       :unit ((:metre 1) (:second -2)))
+                       :unit ((:cell 1) (:second -2)))
             :reader player-gravity)
    (jump-speed :initarg :jump-speed :initform 8.0d0
                :type double-float
                :quantity (:quantity :player-jump-speed
-                          :unit ((:metre 1) (:second -1)))
+                          :unit ((:cell 1) (:second -1)))
                :reader player-jump-speed)
    (grounded-p :initarg :grounded-p :initform nil
                :accessor player-grounded-p))

@@ -716,12 +716,18 @@ Audit so far:
   they are categorical indices or counts rather than continuous physical
   measures.  The raw 0--15 sky/block propagation levels likewise remain
   distinct from the normalized light proportions sent to the GPU.
-- =voxel-space= exposes a real unresolved boundary.  Its =cell-extent= is a
-  physical length, while ray traversal and many positions are expressed in
-  continuous lattice coordinates.  The default one-unit cells make those
-  values numerically resemble metres, but the declaration design must not
-  silently equate them when cells can have another extent.  Foundational world
-  quantities therefore need ownership below luvcraft before these slots move.
+- The =voxel-space= boundary is now explicit.  =:cell= is a dimensionless but
+  non-identity unit owned by =luv/world/quantities=: it cannot silently compare
+  equal to =:one= or =:metre=.  Continuous world/player/shader positions are
+  measured in cells, =cell-extent= is a =:voxel-cell-extent= vector measured in
+  metres per cell, and ray hits carry =:ray-distance= in cells.  The application
+  quantity system depends on that foundational vocabulary rather than defining
+  world meaning above its owner.
+- Exercising this boundary corrected the first real design mistake in the
+  migration: the initial player, camera, fog, and shader declarations called
+  lattice values metres because the default cells happen to be one metre.
+  Their representations and numerical behavior are unchanged; only the false
+  equivalence was removed.
 - Dense light arrays and the interleaved block-mesh vertex buffer are semantic
   fields with heterogeneous lanes.  Annotating their owner slot with one scalar
   quantity would be false precision; they need the field/layout side of the
@@ -735,8 +741,9 @@ Audit so far:
   should not be used as a pretext for wrapping a short subtraction before the
   constant/parameter declaration vocabulary exists.
 
-Next: establish the foundational lattice/physical-world vocabulary before
-migrating =voxel-space= and ray hits.
+Next: give dense fields and packed products declarations with layouts, and
+decide how constants and ordinary function parameters publish boundary
+meaning without turning direct Lisp into ceremony.
 
 * A possible Lisp vocabulary
 :PROPERTIES:
@@ -1047,7 +1054,7 @@ Evidence:
   intentionally adopts the separation but requires exact units instead of
   implicit conversion.
 - The production [[file:../luvcraft/shaders.lisp][block fragment graph]] now distinguishes shadow UV points and
-  offsets, shadow-depth points and differences, metre-valued world spans,
+  offsets, shadow-depth points and differences, cell-valued world spans,
   gradients, filter radii, light controls, and linear colour.  Strict checking
   continues from the shadow result through lighting and fog to the final RGBA.
 - The production fragment module remains byte-for-byte identical to the module
@@ -1332,18 +1339,18 @@ absolute abstraction (#LNRY72) and log-domain levels for exposure
 
 Intent: extend the production proof from the heavily annotated fragment and
 sky calculations into the block vertex boundary.  World and camera positions
-should be metre-valued affine vectors; their subtraction should be a metre
+should be cell-valued affine vectors; their subtraction should be a cell
 difference; camera basis vectors should be unit directions; fog near/far
-should be metre distances; and normalized mesh lanes should cross the
+should be cell distances; and normalized mesh lanes should cross the
 vertex/fragment interface with the meanings they already have downstream.
 
 Evidence:
 
 - [[file:../luvcraft/shaders.lisp][=luvcraft/shaders.lisp=]] now declares camera and world positions as affine
-  =:world-position= vectors in metres, the three camera basis lanes as unit
+  =:world-position= vectors in cells, the three camera basis lanes as unit
   =:world-direction= vectors, projection scales in =one=, and fog near/far and
-  projection depth offset as metre-valued =:view-distance= values.
-- Point subtraction derives a non-affine metre vector; its forward projection
+  projection depth offset as cell-valued =:view-distance= values.
+- Point subtraction derives a non-affine cell vector; its forward projection
   is interpreted as view distance, while fog subtraction and division derive
   a dimensionless progress value before interpretation as =:fog-amount=.
 - The mesh ABI publishes texture UV plus ambient occlusion, unit normal, and
@@ -1396,7 +1403,7 @@ Evidence:
   scale/offset, a =project-point= expression, and lowering specialized on the
   map definition class.
 - [[file:../luvcraft/shaders.lisp][The block vertex shader]] applies =:world-to-shadow= directly to an affine
-  =:world-position= in metres.  Its virtual packed codomain projects =:shadow-uv=
+  =:world-position= in cells.  Its virtual packed codomain projects =:shadow-uv=
   and =:shadow-depth= with their affine normalized meanings; the prior
   =representation= and two =assume-quantity= nodes are gone from this path.
 - Undefined maps, raw or wrong-domain points, the wrong number of rows, and
@@ -1561,7 +1568,7 @@ This figure records the motivating condition as it stood before #SQR8KR
 and #S00PRF: it is kept as the /why/ behind quantity layouts, not as a
 description of the present code.  Today every frame-uniform lane declares
 its quantity through a =quantity-layout= (=projection-vector= is three
-=:projection-scale= lanes plus a =:view-distance= in metres;
+=:projection-scale= lanes plus a =:view-distance= in cells;
 =sun-color-vector= is =:linear-rgb= plus a =:sun-disc-coordinate=), and
 the vertex ABI carries the same meanings.
 

@@ -106,14 +106,14 @@
               (and (typep statement 'msl:msl-variable-statement)
                    (msl:msl-variable-statement-name statement))))))
     (ok (search
-         "World position is a point-valued vector in the length kind, measured in metre units, with length dimension."
+         "World position is a point-valued vector in the lattice coordinate kind, measured in cell units, and dimensionless."
          source))
     (ok (search
          "The xy lanes hold texture uv as a point-valued vector"
          source))
     (ok (search "This numeric value has no quantity annotation." source))
     (ok (search
-         "View distance is a difference-valued scalar in the length kind"
+         "View distance is a difference-valued scalar in the lattice coordinate kind, measured in cell units"
          source))
     (ok (eq input (msl:msl-field-origin field)))
     (ok (eq binding (msl:msl-variable-statement-origin statement)))

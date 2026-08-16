@@ -180,11 +180,23 @@
                 ((:module "lisp"
                   :components ((:file "vec3")))))))
 
+(asdf:defsystem #:luv/world/quantities
+  :description "Semantic quantities for cells, lattice space, and its metric."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on (#:luv/arithmetic)
+  :serial t
+  :components ((:module "luvcraft"
+                :components ((:file "world-quantities-package")
+                             (:file "world-quantities")))))
+
 (asdf:defsystem #:luv/world
   :description "Finite chunk domains and the resident block-world model."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on (#:luv/packages)
+  :depends-on (#:luv/packages
+               #:luv/arithmetic/records
+               #:luv/world/quantities)
   :components ((:module "luvcraft"
                 :components ((:file "world"))))
   :in-order-to ((asdf:test-op (asdf:test-op #:luv/tests))))
@@ -526,7 +538,8 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
   :description "Backend-neutral semantic quantities for the luvcraft domain."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on (#:luv/arithmetic)
+  :depends-on (#:luv/arithmetic
+               #:luv/world/quantities)
   :serial t
   :components ((:module "luvcraft"
                 :components ((:file "quantities-package")

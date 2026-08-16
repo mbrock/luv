@@ -244,11 +244,11 @@
               (math:quantity-specification-name relative-quantity)))
       (ok (not (math:quantity-specification-affine-p relative-quantity)))
       (ok (math:unit-expression=
-           :metre (math:quantity-specification-unit relative-quantity)))
+           :cell (math:quantity-specification-unit relative-quantity)))
       (ok (eq :view-distance
               (math:quantity-specification-name view-z-quantity)))
       (ok (math:unit-expression=
-           :metre (math:quantity-specification-unit view-z-quantity))))
+           :cell (math:quantity-specification-unit view-z-quantity))))
     (ok (typep (spv:shader-binding-expression shadow-projection)
                'spv:shader-map-application))))
 
@@ -269,7 +269,7 @@
             (math:quantity-specification-name domain)))
     (ok (math:quantity-specification-affine-p domain))
     (ok (math:unit-expression=
-         :metre (math:quantity-specification-unit domain)))
+         :cell (math:quantity-specification-unit domain)))
     (ok (eq :shadow-uv (math:quantity-specification-name uv)))
     (ok (math:quantity-specification-affine-p uv))
     (ok (eq :shadow-depth (math:quantity-specification-name depth)))
@@ -315,7 +315,7 @@
                (spv:shader-language-error-reason condition)))))
     (let ((world
             '(position :vec3 :location 0
-              :quantity :world-position :unit :metre :affine-p t))
+              :quantity :world-position :unit :cell :affine-p t))
           (raw '(position :vec3 :location 0))
           (direction
             '(position :vec3 :location 0
@@ -590,7 +590,7 @@
             :inputs ((depth :float :location 0
                             :quantity :shadow-depth)
                      (distance :float :location 1
-                               :quantity :world-distance
+                               :quantity :distance
                                :dimension :length))
             :outputs ((result :float :location 0)))
           '((let* ((sum (+ depth distance)))
@@ -873,7 +873,7 @@
             (math:quantity-specification-name position-quantity)))
     (ok (math:quantity-specification-affine-p position-quantity))
     (ok (math:unit-expression=
-         :metre (math:quantity-specification-unit position-quantity)))
+         :cell (math:quantity-specification-unit position-quantity)))
     (ok (spv:shader-declaration-quantity-layout uv-shade))
     (ok (eq :world-direction
             (math:quantity-specification-name
@@ -894,7 +894,7 @@
           '(:stage :vertex
             :inputs
             ((position :vec3 :location 0
-                       :quantity :world-position :unit :metre :affine-p t)
+                       :quantity :world-position :unit :cell :affine-p t)
              (direction :vec3 :location 1
                         :quantity :world-direction :unit :one))
             :outputs ((result :vec3 :location 0)))
@@ -984,7 +984,7 @@
         (ok (math:quantity-specification-affine-p receiver-depth))
         (ok (not (math:quantity-specification-affine-p bias)))
         (ok (math:unit-expression=
-             :metre (math:quantity-specification-unit world-span)))
+             :cell (math:quantity-specification-unit world-span)))
         (ok (eq :shadow-depth-gradient
                 (math:quantity-specification-name gradient)))
         (ok (eq :shadow-depth

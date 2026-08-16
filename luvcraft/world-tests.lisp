@@ -48,6 +48,29 @@
                (chunk-local-world-coordinate space chunk local)
                (make-world-coordinate world-x -1 4))))))))
 
+(deftest lattice-and-metric-storage-declarations-stay-distinct
+  (let* ((extent
+           (luv.arithmetic.records:record-slot-declaration
+            'voxel-space 'luv::cell-extent))
+         (distance
+           (luv.arithmetic.records:record-slot-declaration
+            'block-ray-hit 'luv::distance))
+         (extent-quantity
+           (luv.arithmetic:declaration-quantity-specification extent))
+         (distance-quantity
+           (luv.arithmetic:declaration-quantity-specification distance)))
+    (ok (eq :voxel-cell-extent
+            (luv.arithmetic:quantity-specification-name extent-quantity)))
+    (ok (luv.arithmetic:unit-expression=
+         '((:metre 1) (:cell -1))
+         (luv.arithmetic:quantity-specification-unit extent-quantity)))
+    (ok (eq :ray-distance
+            (luv.arithmetic:quantity-specification-name distance-quantity)))
+    (ok (luv.arithmetic:unit-expression=
+         :cell (luv.arithmetic:quantity-specification-unit distance-quantity)))
+    (ok (not (luv.arithmetic:unitless-p
+              (luv.arithmetic:make-unit-expression :cell))))))
+
 (deftest chunk-domain-indexing
   (let* ((space (make-voxel-space
                  :chunk-shape (make-chunk-shape :width 4

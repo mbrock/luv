@@ -78,10 +78,10 @@ SLY can pause it, set a time, change its rate, or pin it without restarting.")
   (exposure 1.0 :type single-float
             :quantity (:quantity :exposure :unit :one))
   (fog-near 0.0 :type single-float
-            :quantity (:quantity :view-distance :unit :metre
+            :quantity (:quantity :view-distance :unit :cell
                        :character :absolute))
   (fog-far 180.0 :type single-float
-           :quantity (:quantity :view-distance :unit :metre
+           :quantity (:quantity :view-distance :unit :cell
                       :character :absolute)))
 
 (defstruct (sky-profile (:constructor %make-sky-profile))
@@ -162,10 +162,10 @@ SLY can pause it, set a time, change its rate, or pin it without restarting.")
   (exposure 1.0 :type single-float
             :quantity (:quantity :exposure :unit :one))
   (fog-near 0.0 :type single-float
-            :quantity (:quantity :view-distance :unit :metre
+            :quantity (:quantity :view-distance :unit :cell
                        :character :absolute))
   (fog-far 180.0 :type single-float
-           :quantity (:quantity :view-distance :unit :metre
+           :quantity (:quantity :view-distance :unit :cell
                       :character :absolute)))
 
 (defun sky-sun-direction (day-fraction)

@@ -14,18 +14,12 @@
   :dimension nil :parent :dimensionless)
 (math:define-quantity-kind :normalized-gradient
   :dimension nil :parent :dimensionless)
-(math:define-quantity-kind :unit-direction
-  :dimension nil :parent :dimensionless)
 (math:define-quantity-kind :relative-color-signal
   :dimension nil :parent :dimensionless)
 (math:define-quantity-kind :control-signal
   :dimension nil :parent :dimensionless)
 (math:define-quantity-kind :sample-count
   :dimension nil :parent :dimensionless)
-(math:define-quantity-kind :velocity
-  :dimension ((:length 1) (:duration -1)))
-(math:define-quantity-kind :acceleration
-  :dimension ((:length 1) (:duration -2)))
 
 (math:define-quantity :shadow-uv :kind :normalized-coordinate
   :components (:shadow-u :shadow-v))
@@ -34,9 +28,6 @@
 (math:define-quantity :shadow-depth :kind :normalized-coordinate)
 (math:define-quantity :sun-disc-coordinate :kind :normalized-coordinate)
 (math:define-quantity :shadow-depth-gradient :kind :normalized-gradient)
-(math:define-quantity :world-direction :kind :unit-direction
-  :components
-  (:world-x-direction :world-y-direction :world-z-direction))
 (math:define-quantity :linear-rgb :kind :relative-color-signal)
 (math:define-quantity :linear-rgba :kind :relative-color-signal)
 (math:define-quantity :day-factor :kind :proportion)
@@ -48,25 +39,20 @@
 (math:define-quantity :material-emission :kind :proportion)
 (math:define-quantity :shadow-diagnostic :kind :control-signal)
 (math:define-quantity :shadow-filter-radius :kind :sample-count)
-(math:define-quantity :world-distance :kind :length)
-(math:define-quantity :view-distance :kind :length)
-(math:define-quantity :world-position :kind :length
-  :components (:world-x-position :world-y-position :world-z-position))
-(math:define-quantity :world-velocity :kind :velocity
-  :components (:world-x-velocity :world-y-velocity :world-z-velocity))
-(math:define-quantity :player-half-width :kind :length
+(math:define-quantity :view-distance :kind :lattice-coordinate)
+(math:define-quantity :player-half-width :kind :lattice-coordinate
   :non-negative-p t)
-(math:define-quantity :player-height :kind :length
+(math:define-quantity :player-height :kind :lattice-coordinate
   :non-negative-p t)
-(math:define-quantity :player-eye-height :kind :length
+(math:define-quantity :player-eye-height :kind :lattice-coordinate
   :non-negative-p t)
-(math:define-quantity :player-walk-speed :kind :velocity
+(math:define-quantity :player-walk-speed :kind :lattice-velocity
   :non-negative-p t)
-(math:define-quantity :player-jump-speed :kind :velocity
+(math:define-quantity :player-jump-speed :kind :lattice-velocity
   :non-negative-p t)
-(math:define-quantity :player-acceleration :kind :acceleration
+(math:define-quantity :player-acceleration :kind :lattice-acceleration
   :non-negative-p t)
-(math:define-quantity :gravity-magnitude :kind :acceleration
+(math:define-quantity :gravity-magnitude :kind :lattice-acceleration
   :non-negative-p t)
 (math:define-quantity :frame-duration :kind :duration
   :non-negative-p t)
