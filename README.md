@@ -17,10 +17,24 @@ The HAL borrows the useful shape of WebGPU—devices, queues, resources,
 descriptors, encoders, passes, submission—but WebGPU is a landmark, not a
 specification luv is trying to reproduce.
 
-Both backends are tailored to this project. Vulkan is a hand-owned CFFI layer;
-Metal goes straight through a small Objective-C bridge to Metal 4. There is no
-continent of generated bindings in between. SDL3 owns the window, input, and
-native event loop while the GPU backend owns presentation and synchronization.
+Here is enough Lisp to open a canvas, ask for the current backend's device, and
+put some colour on the screen:
+
+```lisp
+(defparameter *canvas* (open-canvas (make-sdl-canvas)))
+(defparameter *device* (request-gpu-device *gpu-provider*))
+(defparameter *context*
+  (make-canvas-context
+   *canvas* *gpu-provider*
+   (make-canvas-configuration :device *device*)))
+
+(render-canvas-color *context* 0.08 0.12 0.18)
+```
+
+Those forms do not know whether the device is Vulkan or Metal. Both backends
+are tailored to this project: Vulkan is a hand-owned CFFI layer; Metal goes
+straight through a small Objective-C bridge to Metal 4. SDL3 owns the window,
+input, and native event loop.
 
 That makes low-level things unusually reachable from Lisp. A command is an
 ordinary inspectable object. A shader method can be redefined in a running
@@ -32,18 +46,68 @@ notes](wiki/gpu-architecture.org), [the Vulkan field
 notes](wiki/luv-vulkan-hal.org), and [the native Metal 4
 notes](wiki/metal-backend.org).
 
-## Arithmetic that knows what its numbers mean
+## Shaders are Lisp, and the numbers mean something
 
-Luv's shader language is also a small mathematical language. Its expressions
-remember representation types, but they can additionally carry dimensions,
-units, affine character, tensor order, and domain meaning. A position is not a
-difference; opacity is not probability; two things do not become
-interchangeable merely because both happen to fit in a `vec3`.
+The arithmetic vocabulary begins with ordinary-looking declarations:
 
-The same arithmetic frontend can lower checked expressions to ordinary Common
-Lisp or feed the shader compilers. Shader methods become SPIR-V for Vulkan and
-structured MSL for Metal 4, while retaining enough provenance for tools to
-connect a source expression with the SSA instructions it produced.
+```lisp
+(math:define-quantity-kind :lattice-velocity
+  :dimension ((:duration -1)))
+
+(math:define-quantity :world-position :kind :lattice-coordinate
+  :character :point
+  :components (:world-x-position :world-y-position :world-z-position))
+
+(math:define-quantity :player-walk-speed :kind :lattice-velocity
+  :non-negative-p t)
+```
+
+So a position is a point rather than a displacement, and a walk speed carries
+inverse-time dimension even if both eventually become plain machine numbers.
+The arithmetic checker rejects expressions that only happen to share a
+representation.
+
+A world law can then be written once:
+
+```lisp
+(lang:define-arithmetic-function fog-amount-at-view-distance
+    ((view-distance :quantity :view-distance :unit :cell)
+     (fog-near :quantity :view-distance :unit :cell)
+     (fog-far :quantity :view-distance :unit :cell))
+  (let* ((fog-span (- fog-far fog-near))
+         (fog-progress
+           (math:clamp (/ (- view-distance fog-near) fog-span)
+                       (lang:quantity 0.0 :unit :one)
+                       (lang:quantity 1.0 :unit :one))))
+    (lang:interpret (* fog-progress fog-progress)
+                    :quantity :fog-amount :unit :one)))
+```
+
+That definition becomes both an ordinary compiled Lisp function and an
+inlined operation in the production shaders. The shader methods themselves are
+also Lisp. This is the complete fragment shader for the crosshair:
+
+```lisp
+(define-shader-method shader-specification-for
+    block-world-crosshair-fragment-specification
+    ((role (eql :block-crosshair)) (stage (eql :fragment)))
+    (:stage :fragment
+     :inputs ((ink-input :vec3 :location 0
+                         :quantity :linear-rgb :unit :one))
+     :outputs ((color-output :vec4 :location 0)))
+  (let ((rgba
+          (assume-quantity
+           (vec4 (representation ink-input)
+                 (representation
+                  (quantity 1.0 :quantity :opacity :unit :one)))
+           :quantity :linear-rgba :unit :one)))
+    (set-output color-output rgba)))
+```
+
+The role and stage are CLOS specializers; the interface and body remain
+inspectable objects. Luv lowers them to SPIR-V for Vulkan or structured MSL for
+Metal 4 and keeps enough provenance to connect an expression to the SSA
+instructions it produced.
 
 [Mathematical shaders](wiki/mathematical-shaders.org) explains the live shader
 objects. [Quantities and measurement](wiki/quantities-and-measurement.org) is
@@ -112,6 +176,29 @@ you might remain inside it and work together there. That part is a direction,
 not a finished feature—but much of the introspective plumbing it would need is
 already becoming real.
 
+## A wiki you can wander through
+
+[mbrock.github.io/luv](https://mbrock.github.io/luv/) is the project's design
+notebook and source browser, rendered from the same repository on every push.
+The pages are made of small, stable *figures*: ideas and work marks that can
+link to one another, collect backlinks, and open as hover cards without losing
+your place.
+
+![A quantity-design figure and its hover card in the luv wiki](screenshots/wiki-quantities.png)
+
+It also renders the whole Lisp source tree as structural boxes rather than a
+flat monospace listing. Symbols link to their definitions; comments and
+docstrings read as prose; references in code lead back to the design figures
+that explain why the code has its present shape.
+
+![The luvcraft lighting source in the rendered source browser](screenshots/wiki-source-browser.png)
+
+You can start with [the quantities and measurement
+page](https://mbrock.github.io/luv/quantities-and-measurement.html), jump into
+[the source index](https://mbrock.github.io/luv/source.html), or simply follow
+whatever link looks interesting. It is intended to be browsed, not read in
+order.
+
 ## Poking it
 
 The universal installation instruction in 2026 is: point Codex at this
@@ -131,7 +218,7 @@ While the game is running, this evaluates inside that exact process:
 ./sly --luvcraft eval '(type-of luvcraft:*session*)'
 ```
 
-And this regenerates every image used by this README from the real renderers:
+And this regenerates the luvcraft and McCLIM images from the real renderers:
 
 ```sh
 make readme-screenshots
