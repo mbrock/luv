@@ -329,8 +329,9 @@ not the band-texture font renderer.  #OWR8OZ"
 (spv:define-shader slug-atlas-fragment-specification
     (:stage :fragment
      :inputs ((render-coordinate :vec2 :location 0)
-              (pixels-per-em :vec2 :location 1)
-              (atlas-base :vec2 :location 2))
+              (atlas-base :vec2 :location 1)
+              (outline-bounds :vec4 :location 2)
+              (band-counts :vec2 :location 3))
      :resources ((band-data :uint-texture-2d :binding 0)
                  (curve-data :texture-2d :binding 1))
      :outputs ((color-output :vec4 :location 0)))
@@ -338,11 +339,63 @@ not the band-texture font renderer.  #OWR8OZ"
          (width (spv:uint 4096.0))
          (band-base (spv:uint (spv:swizzle atlas-base :x)))
          (curve-base (spv:uint (spv:swizzle atlas-base :y)))
+         (horizontal-band-count
+           (spv:uint (spv:swizzle band-counts :x)))
+         (vertical-band-count
+           (spv:uint (spv:swizzle band-counts :y)))
+         (coordinate-dx (spv:derivative-x render-coordinate))
+         (coordinate-dy (spv:derivative-y render-coordinate))
+         (x-gradient
+           (spv:vec2 (spv:swizzle coordinate-dx :x)
+                     (spv:swizzle coordinate-dy :x)))
+         (y-gradient
+           (spv:vec2 (spv:swizzle coordinate-dx :y)
+                     (spv:swizzle coordinate-dy :y)))
+         (pixels-per-em
+           (spv:vec2
+            (/ 1.0 (max (sqrt (spv:dot x-gradient x-gradient))
+                        +slug-root-epsilon+))
+            (/ 1.0 (max (sqrt (spv:dot y-gradient y-gradient))
+                        +slug-root-epsilon+))))
+         (horizontal-position
+           (spv:clamp
+            (/ (- (spv:swizzle render-coordinate :y)
+                  (spv:swizzle outline-bounds :y))
+               (max (- (spv:swizzle outline-bounds :w)
+                       (spv:swizzle outline-bounds :y))
+                    +slug-root-epsilon+))
+            0.0 1.0))
+         (vertical-position
+           (spv:clamp
+            (/ (- (spv:swizzle render-coordinate :x)
+                  (spv:swizzle outline-bounds :x))
+               (max (- (spv:swizzle outline-bounds :z)
+                       (spv:swizzle outline-bounds :x))
+                    +slug-root-epsilon+))
+            0.0 1.0))
+         (horizontal-band-candidate
+           (spv:uint
+            (* horizontal-position (spv:float horizontal-band-count))))
+         (vertical-band-candidate
+           (spv:uint
+            (* vertical-position (spv:float vertical-band-count))))
+         (horizontal-band
+           (if (< horizontal-band-candidate horizontal-band-count)
+               horizontal-band-candidate
+               (- horizontal-band-count one)))
+         (vertical-band
+           (if (< vertical-band-candidate vertical-band-count)
+               vertical-band-candidate
+               (- vertical-band-count one)))
+         (horizontal-header-address (+ band-base horizontal-band))
+         (vertical-header-address
+           (+ band-base horizontal-band-count vertical-band))
          (horizontal-header-location
-           (spv:uvec2 (mod band-base width) (/ band-base width)))
+           (spv:uvec2 (mod horizontal-header-address width)
+                      (/ horizontal-header-address width)))
          (vertical-header-location
-           (spv:uvec2 (mod (+ band-base one) width)
-                      (/ (+ band-base one) width)))
+           (spv:uvec2 (mod vertical-header-address width)
+                      (/ vertical-header-address width)))
          (horizontal-header
            (spv:texel-load band-data horizontal-header-location))
          (vertical-header

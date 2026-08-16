@@ -1230,6 +1230,14 @@ silent loss of meaning."
 (defmethod infer-shader-call-type ((operator (eql 'sqrt)) operands source-form)
   (infer-uniform-extended-type operator operands source-form 1 1))
 
+(defmethod infer-shader-call-type
+    ((operator (eql 'derivative-x)) operands source-form)
+  (infer-uniform-extended-type operator operands source-form 1 1))
+
+(defmethod infer-shader-call-type
+    ((operator (eql 'derivative-y)) operands source-form)
+  (infer-uniform-extended-type operator operands source-form 1 1))
+
 (defmethod infer-shader-call-type ((operator (eql 'expt)) operands source-form)
   (infer-uniform-extended-type operator operands source-form 2 2))
 
@@ -1359,6 +1367,10 @@ never collides with a standard symbol's function documentation:
   "Compare a depth reference through a comparison sampler at a UV coordinate.")
 (define-shader-operator texel-load
   "Load one exact two-dimensional texel at an unsigned integer coordinate.")
+(define-shader-operator derivative-x
+  "Return the horizontal screen-space derivative of a fragment value.")
+(define-shader-operator derivative-y
+  "Return the vertical screen-space derivative of a fragment value.")
 (define-shader-operator uint
   "Convert one scalar float or unsigned value to a 32-bit unsigned integer.")
 (define-shader-operator float
@@ -3655,6 +3667,20 @@ backend's context before its source-located unsupported-operation method."))
 
 (defmethod lower-shader-call ((operator (eql 'sqrt)) context expression)
   (lower-extended-call context expression 'sqrt))
+
+(defmethod lower-shader-call
+    ((operator (eql 'derivative-x)) context expression)
+  (emit-value-instruction
+   context expression (shader-expression-type expression) 'd-pdx
+   (list (lower-shader-expression
+          context (first (shader-call-operands expression))))))
+
+(defmethod lower-shader-call
+    ((operator (eql 'derivative-y)) context expression)
+  (emit-value-instruction
+   context expression (shader-expression-type expression) 'd-pdy
+   (list (lower-shader-expression
+          context (first (shader-call-operands expression))))))
 
 (defmethod lower-shader-call ((operator (eql 'expt)) context expression)
   (lower-extended-call context expression 'pow))

@@ -447,11 +447,7 @@ the frame uniform cannot silently diverge between shader and host."
       (when (plusp particle-vertex-count)
         (write-buffer
          (luvcraft-session-particle-vertex-buffer session)
-         particle-vertices))
-      (when (luvcraft-session-world-text session)
-        (update-world-text-projected-scale
-         (luvcraft-session-world-text session)
-         (luvcraft-session-camera session) (second extent))))
+         particle-vertices)))
     (with-luvcraft-frame-timing
         (sample luvcraft-frame-sample-shadow-encode-seconds
                 :luvcraft/shadow-pass)

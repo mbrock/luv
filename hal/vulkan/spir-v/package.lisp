@@ -6,6 +6,7 @@
   (let ((package (find-package '#:luv.spir-v)))
     (when package
       (dolist (name '("CLAMP" "MIX" "SMOOTHSTEP" "STEP" "NORMALIZE"
+                      "DERIVATIVE-X" "DERIVATIVE-Y"
                       "QUANTITY" "ASSUME-QUANTITY" "INTERPRET"
                       "REPRESENTATION" "CONVERT-UNIT" "COUNTED-FOLD"))
         (multiple-value-bind (symbol status) (find-symbol name package)
@@ -186,6 +187,8 @@
            #:sample
            #:sample-compare
            #:texel-load
+           #:derivative-x
+           #:derivative-y
            #:mix
            #:uint
            #:float

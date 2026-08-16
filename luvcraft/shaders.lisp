@@ -216,8 +216,9 @@
               (atlas-input :vec3 :location 6))
      :outputs ((clip-position :vec4 :built-in :position)
                (render-coordinate :vec2 :location 0)
-               (render-pixels-per-em :vec2 :location 1)
-               (render-atlas-base :vec2 :location 2))
+               (render-atlas-base :vec2 :location 1)
+               (render-outline-bounds :vec4 :location 2)
+               (render-band-counts :vec2 :location 3))
      :resources
      ((frame-state :uniform-block :set 0 :binding 2
                    :members #.*frame-uniform-members*)))
@@ -256,10 +257,13 @@
                      (representation view-z))))
     (set-output clip-position clip)
     (set-output render-coordinate outline-coordinate)
-    (set-output render-pixels-per-em
+    (set-output render-atlas-base (swizzle atlas-input :xy))
+    (set-output render-outline-bounds
+                (vec4 (swizzle outline-low :xy)
+                      (swizzle outline-high :xy)))
+    (set-output render-band-counts
                 (vec2 (swizzle outline-low :z)
-                      (swizzle outline-high :z)))
-    (set-output render-atlas-base (swizzle atlas-input :xy))))
+                      (swizzle outline-high :z)))))
 
 (defun block-world-text-vertex-specification ()
   (shader-specification-for :slug-world-text :vertex))

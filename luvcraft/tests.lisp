@@ -427,14 +427,14 @@
           (luv.arithmetic:repeated-quantity-layout-element-layout layout)
           (luvcraft::shader-input-product-layout specification)))))))
 
-(deftest world-text-model-and-projected-scale-follow-the-camera
-  (let* ((camera
-           (make-instance
-            'fly-camera
-            :position (luv.arithmetic.lisp.vec3:make-vec3 0.0 0.0 0.0)
-            :yaw 0.0 :pitch 0.0))
-         (center (luv.arithmetic.lisp.vec3:make-vec3 0.0 0.0 10.0))
-         (resource (luvcraft::make-world-text-glyph-resource))
+(deftest world-text-model-carries-atlas-band-metadata
+  (let* ((center (luv.arithmetic.lisp.vec3:make-vec3 0.0 0.0 10.0))
+         (serialized
+           (luv.slug::make-slug-serialized-outline
+            :horizontal-band-count 7 :vertical-band-count 5))
+         (resource
+           (luvcraft::make-world-text-glyph-resource
+            :serialized serialized))
          (glyph
            (luvcraft::make-world-text-glyph
             :resource resource
@@ -443,25 +443,7 @@
             :outline-max-x 1.0 :outline-max-y 1.0))
          (locations (make-hash-table :test #'eq))
          (atlas (luvcraft::make-world-text-glyph-atlas :locations locations))
-         (instances nil)
-         (run
-           (make-instance 'luvcraft::world-text-run
-                          :center center :world-units-per-em 0.5))
-         (actual
-           (luvcraft::world-text-projected-pixels-per-em run camera 640))
-         (near-camera
-           (make-instance
-            'fly-camera
-            :position (luv.arithmetic.lisp.vec3:make-vec3 0.0 0.0 5.0)
-            :yaw 0.0 :pitch 0.0))
-         (near
-           (luvcraft::world-text-projected-pixels-per-em
-            run near-camera 640))
-         (expected
-           (/ (* 0.5 320
-                 (/ (tan (/ luvcraft::+luvcraft-camera-vertical-field-of-view+
-                              2.0))))
-              10.0)))
+         (instances nil))
     (setf (gethash resource locations) '(17 29)
           instances
           (luvcraft::make-world-text-instances
@@ -473,10 +455,10 @@
     (ok (= 10.0 (aref instances 2)))
     (ok (< (abs (- 0.535 (aref instances 3))) 1e-6))
     (ok (< (abs (- 0.535 (aref instances 7))) 1e-6))
+    (ok (= 7.0 (aref instances 11)))
+    (ok (= 5.0 (aref instances 14)))
     (ok (= 17.0 (aref instances 15)))
-    (ok (= 29.0 (aref instances 16)))
-    (ok (< (abs (- actual expected)) 1e-5))
-    (ok (< (abs (- near (* 2 expected))) 1e-5))))
+    (ok (= 29.0 (aref instances 16)))))
 
 (deftest light-removal-queues-own-the-meaning-of-unwrapped-levels
   (let* ((world (make-block-world))

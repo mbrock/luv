@@ -69,8 +69,7 @@
       (make-world-text-glyph-resource
        :key key :glyph-id glyph-id
        :serialized
-       (luv.slug:serialize-slug-outline
-        outline :horizontal-band-count 1 :vertical-band-count 1)))))
+       (luv.slug:serialize-slug-outline outline)))))
 
 (defun world-text-glyph-resource-for
     (cache font-pathname glyph-id font-loader)
@@ -335,6 +334,9 @@
             for atlas-location =
               (gethash (world-text-glyph-resource glyph)
                        (world-text-glyph-atlas-locations atlas))
+            for serialized =
+              (world-text-glyph-resource-serialized
+               (world-text-glyph-resource glyph))
             do (write-values
                 base
                 (list (vec3-x origin) (vec3-y origin) (vec3-z origin)
@@ -344,8 +346,12 @@
                       (vec3-x (difference top-edge origin))
                       (vec3-y (difference top-edge origin))
                       (vec3-z (difference top-edge origin))
-                      outline-left outline-bottom 1.0
-                      outline-right outline-top 1.0
+                      outline-left outline-bottom
+                      (luv.slug:slug-serialized-outline-horizontal-band-count
+                       serialized)
+                      outline-right outline-top
+                      (luv.slug:slug-serialized-outline-vertical-band-count
+                       serialized)
                       (first atlas-location) (second atlas-location) 0.0)))
       data)))
 
@@ -493,37 +499,6 @@ font-and-glyph device resources reusable across runs.  See #QW7P96."
            groups)
       (unless completed-p
         (when (aref groups 0) (destroy (aref groups 0)))))))
-
-(defun world-text-projected-pixels-per-em (run camera viewport-height)
-  "Approximate projected em scale at RUN's center for the current camera."
-  (multiple-value-bind (right up forward) (camera-basis camera)
-    (declare (ignore right up))
-    (let* ((center (world-text-run-center run))
-           (camera-position (camera-position camera))
-           (relative
-             (make-vec3 (- (vec3-x center) (vec3-x camera-position))
-                        (- (vec3-y center) (vec3-y camera-position))
-                        (- (vec3-z center) (vec3-z camera-position))))
-           (view-distance (max 0.1 (vec3-dot relative forward)))
-           (focal
-             (/ (tan (/ +luvcraft-camera-vertical-field-of-view+ 2.0)))))
-      (coerce
-       (/ (* (world-text-run-world-units-per-em run)
-             focal viewport-height 0.5)
-          view-distance)
-       'single-float))))
-
-(defun update-world-text-projected-scale (run camera viewport-height)
-  "Update the temporary per-instance scale until fragment derivatives own it."
-  (let ((pixels-per-em
-          (world-text-projected-pixels-per-em run camera viewport-height))
-        (data (world-text-run-instance-data run)))
-    (loop for glyph below (length (world-text-run-glyphs run))
-          for base = (* glyph 18)
-          do (setf (aref data (+ base 11)) pixels-per-em
-                   (aref data (+ base 14)) pixels-per-em))
-    (write-buffer (world-text-run-instance-buffer run) data)
-    pixels-per-em))
 
 (defun world-text-run-native-pipeline (run)
   (live-shader-pipeline-native-pipeline (world-text-run-pipeline run)))

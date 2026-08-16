@@ -1695,6 +1695,15 @@
     (ok (< (abs (- 1/3 (slug:slug-packed-outline-max-x packed)))
            1/1000))))
 
+(deftest slug-serialization-defaults-to-spatial-bands
+  (let ((serialized
+          (slug:serialize-slug-outline
+           (slug:make-slug-outline
+            :contours (list (slug-test-square 0 0 1 1))))))
+    (ok (= 4 (slug:slug-serialized-outline-horizontal-band-count serialized)))
+    (ok (= 4 (slug:slug-serialized-outline-vertical-band-count serialized)))
+    (ok (> (slug:slug-serialized-outline-band-texel-count serialized) 8))))
+
 (deftest zpb-ttf-glyphs-enter-slug-before-software-rasterization
   (zpb-ttf:with-font-loader
       (font-loader (cl-dejavu:font-pathname "DejaVuSans.ttf"))
@@ -1802,6 +1811,23 @@
           (spv:shader-binding-expression
            (binding-named 'header specification)))))
     (dolist (name '(image-fetch u-mod u-div i-add u-less-than convert-u-to-f))
+      (ok (find name names :test #'string-equal)))
+    (ok (= #x07230203
+           (aref (spv:assemble-shader-specification specification) 0)))))
+
+(deftest slug-atlas-uses-fragment-derivatives-and-selected-bands
+  (let* ((specification (slug:slug-atlas-fragment-specification))
+         (module
+           (spv:shader-lowering-module
+            (spv:lower-shader-specification :spir-v specification)))
+         (names
+           (loop for function in (spv:spir-v-module-function-definitions module)
+                 append
+                 (loop for block in (spv:spir-v-function-basic-blocks function)
+                       append (mapcar #'spv:instruction-name
+                                      (spv:spir-v-basic-block-instructions
+                                       block))))))
+    (dolist (name '(d-pdx d-pdy select image-fetch))
       (ok (find name names :test #'string-equal)))
     (ok (= #x07230203
            (aref (spv:assemble-shader-specification specification) 0)))))
