@@ -25,6 +25,14 @@
     'luv:canvas-key-press-event :timestamp 0 :key-name key
     :character character :unshifted-character character)))
 
+(defun wait-for-terminal-text (device needle &key (timeout 1.0))
+  (let ((deadline (+ (get-internal-real-time)
+                     (round (* timeout internal-time-units-per-second)))))
+    (loop for text = (pty-terminal-text device)
+          when (search needle text) do (return text)
+          when (>= (get-internal-real-time) deadline) do (return nil)
+          do (sleep 0.01))))
+
 (deftest pty-child-output-and-input-drive-one-terminal
   (with-pty-test
       (device ghostty-terminal
@@ -39,6 +47,16 @@
       (ok (search "term:xterm-256color" text))
       (ok (search "got:hello" text)))
     (ok (null (terminal:pty-device-condition device)))))
+
+(deftest pty-echo-reaches-the-terminal-before-enter
+  (with-pty-test
+      (device ghostty-terminal
+       :program "/bin/sh"
+       :arguments (list "-c" "IFS= read -r line"))
+    (terminal:send-pty-device-text device "visible-before-enter")
+    (ok (search "visible-before-enter"
+                (wait-for-terminal-text device "visible-before-enter")))
+    (ok (eq :running (terminal:pty-device-state device)))))
 
 (deftest ghostty-query-responses-return-through-the-pty
   (let* ((python "python3")

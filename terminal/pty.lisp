@@ -127,6 +127,19 @@ Encoding happens on the PTY owner against the terminal's then-current modes."
                 (incf count))))
     (values (if (= count capacity) bytes (subseq bytes 0 count)) eof-p)))
 
+(defun enable-native-pty-echo (stream)
+  "Restore the ordinary terminal-driver echo disabled by RUN-PROGRAM :PTY.
+
+Interactive terminal children expect to inherit ECHO initially.  They remain
+free to disable it themselves for password entry, full-screen programs, or
+other private input modes."
+  (let* ((file-descriptor (sb-sys:fd-stream-fd stream))
+         (attributes (sb-posix:tcgetattr file-descriptor)))
+    (setf (sb-posix:termios-lflag attributes)
+          (logior (sb-posix:termios-lflag attributes) sb-posix:echo))
+    (sb-posix:tcsetattr file-descriptor sb-posix:tcsanow attributes))
+  stream)
+
 (defun set-native-pty-size
     (stream columns rows cell-width-pixels cell-height-pixels)
   #-(or darwin linux)
@@ -324,6 +337,7 @@ snapshot work which must not race mutation."
          (completed-p nil))
     (unwind-protect
          (progn
+           (enable-native-pty-echo stream)
            (ghostty:set-terminal-response-function
             terminal
             (lambda (bytes)
