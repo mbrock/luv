@@ -10,6 +10,14 @@
   (push command (recording-command-encoder-commands encoder))
   encoder)
 
+(defclass recording-chunk-window ()
+  ((locations :initform nil :accessor recording-window-locations)))
+
+(defmethod locate-chunk-window-site
+    ((window recording-chunk-window) x y z)
+  (push (list x y z) (recording-window-locations window))
+  (values window 37 :available))
+
 (deftest player-storage-publishes-quantities-without-wrapping-values
   (let* ((position (make-vec3 1d0 2d0 3d0))
          (velocity (make-vec3 4d0 5d0 6d0))
@@ -129,6 +137,57 @@
                 (luv.arithmetic:quantity-specification-name
                  (luv.arithmetic:declaration-quantity-specification
                   declaration))))))))
+
+(deftest chunk-window-protocol-selects-representation-at-crossings
+  (let* ((space (make-voxel-space
+                 :chunk-shape
+                 (make-chunk-shape :width 2 :height 2 :depth 2)))
+         (domain (make-chunk-domain space (make-chunk-coordinate 0 0 0)))
+         (window (make-instance 'recording-chunk-window)))
+    ;; A local step remains pure domain arithmetic: the window is not asked.
+    (multiple-value-bind (offset local crossing materialization availability)
+        (continue-chunk-window-site
+         window domain (make-local-coordinate 0 0 0) +voxel-positive-x+)
+      (ok (= offset 1))
+      (ok (= (local-coordinate-x local) 1))
+      (ok (null crossing))
+      (ok (null materialization))
+      (ok (eq availability :local))
+      (ok (null (recording-window-locations window))))
+    ;; Crossing selects the aggregate once; a fifth window participates by
+    ;; adding a method, with no type switch in the continuation operation.
+    (multiple-value-bind (offset local crossing materialization availability)
+        (continue-chunk-window-site
+         window domain (make-local-coordinate 1 0 0) +voxel-positive-x+)
+      (ok (= offset 37))
+      (ok (= (local-coordinate-x local) 0))
+      (ok (eq crossing +voxel-positive-x+))
+      (ok (eq materialization window))
+      (ok (eq availability :available))
+      (ok (equal (recording-window-locations window) '((2 0 0)))))))
+
+(deftest current-meshing-windows-share-location-availability
+  (let* ((world (make-block-world :chunk-width 2
+                                  :chunk-height 2
+                                  :chunk-depth 2))
+         (chunk (ensure-world-chunk world 0 0 0))
+         (neighborhood (luv::make-block-mesh-neighborhood world chunk))
+         (snapshot
+           (make-block-mesh-snapshot
+            world chunk (chunk-mesh-dependency-stamp world chunk))))
+    (dolist (window (list world neighborhood snapshot))
+      (multiple-value-bind (materialization offset availability)
+          (locate-chunk-window-site window 0 0 0)
+        (ok materialization)
+        ;; Offsets belong to each representation: the live/neighborhood
+        ;; chunks use local dense order, while the snapshot includes a halo.
+        (ok (typep offset '(integer 0)))
+        (ok (eq availability :available)))
+      (multiple-value-bind (materialization offset availability)
+          (locate-chunk-window-site window 20 0 0)
+        (ok (null materialization))
+        (ok (null offset))
+        (ok (eq availability :unavailable))))))
 
 (deftest cpu-trace-zones-are-nested-reusable-and-bounded
   (let ((trace (make-cpu-trace :label "test")))

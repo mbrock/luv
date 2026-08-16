@@ -686,7 +686,7 @@ Done: related continuous components travel together through the CPU code while
 the program still says which triples are addresses, directions, colours, and
 GPU representations.
 
-* NEXT Name the chunk-window protocol
+* DONE Name the chunk-window protocol
 :PROPERTIES:
 :ID: L84JCX
 :END:
@@ -712,3 +712,22 @@ Evidence to gather:
 Done when: location and crossing continuation have one honest protocol across
 the four current windows, subsystem policy remains in semantic facades, and at
 least one remaining window-specific lookup duplication is deleted.
+
+Evidence: =locate-chunk-window-site= now reports only a materialization,
+representation-owned offset, and =:available= or =:unavailable=.  Methods on
+=block-world=, =block-mesh-neighborhood=, =block-mesh-snapshot=, and
+=light-region= retain their hash table, resolved 27-chunk vector, halo arrays,
+and lazy atlas respectively.  =continue-chunk-window-site= performs pure
+=chunk-domain= arithmetic for an interior step and dispatches to the window
+only when the step crosses; its test adds a fifth recording window by one
+method and proves that interior traversal never asks it.
+
+The field-specific =sample-block-at= and =sample-light-at= facades still own
+the meaning of absence.  Hot neighborhood, snapshot, and light-region paths
+call representation-specific inline locators rather than nesting a new CLOS
+decision per sample.  The snapshot locator now supplies both block and light
+sampling, deleting their duplicated halo-presence test, while
+=light-region-locate-components= shares scalar decomposition with the public
+window method and avoids the old temporary local-coordinate value.  The
+luvcraft suite exercises all four windows, boundary continuation, meshing,
+lighting, production, and deterministic world behavior.

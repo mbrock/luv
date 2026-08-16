@@ -168,21 +168,39 @@ resident."))
          (when present-p
            (add-light-region-entry region chunk :from-field-p t)))))))
 
+(declaim (inline light-region-locate-components))
+(defun light-region-locate-components (region x y z)
+  "Resolve scalar world components to ENTRY, OFFSET, and availability."
+  (multiple-value-bind
+        (chunk-x chunk-y chunk-z local-x local-y local-z)
+      (voxel-space-decompose-components
+       (block-world-space (light-region-world region)) x y z)
+    (let* ((key (make-chunk-coordinate chunk-x chunk-y chunk-z))
+           (entry (or (gethash key (light-region-entries region))
+                      (let ((ensure (light-region-ensure-entry region)))
+                        (and ensure (funcall ensure region key))))))
+      (if entry
+          (values entry
+                  (chunk-domain-offset-components
+                   (block-chunk-domain (light-region-entry-chunk entry))
+                   local-x local-y local-z)
+                  :available)
+          (values nil nil :unavailable)))))
+
 (declaim (inline light-region-locate))
 (defun light-region-locate (region coordinate)
   "Resolve a WORLD-COORDINATE to (VALUES ENTRY OFFSET) or NIL when absent."
-  (multiple-value-bind (key local)
-      (world-coordinate-chunk-and-local
-       (block-world-space (light-region-world region)) coordinate)
-    (declare (dynamic-extent key local))
-    (let* ((entry (or (gethash key (light-region-entries region))
-                      (let ((ensure (light-region-ensure-entry region)))
-                        (and ensure (funcall ensure region key))))))
-      (when entry
-        (values entry
-                (chunk-domain-offset
-                 (block-chunk-domain (light-region-entry-chunk entry))
-                 local))))))
+  (multiple-value-bind (entry offset availability)
+      (light-region-locate-components
+       region
+       (world-coordinate-x coordinate)
+       (world-coordinate-y coordinate)
+       (world-coordinate-z coordinate))
+    (declare (ignore availability))
+    (values entry offset)))
+
+(defmethod locate-chunk-window-site ((region light-region) x y z)
+  (light-region-locate-components region x y z))
 
 (defun light-region-opacity (entry offset)
   (aref (light-region-entry-opacity-lut entry)

@@ -435,6 +435,42 @@ inside DOMAIN."
                                         (abs crossing-z))))
                          direction))))))))
 
+(defgeneric locate-chunk-window-site (window x y z)
+  (:documentation
+   "Resolve world site X,Y,Z through WINDOW.
+
+Return (VALUES MATERIALIZATION OFFSET AVAILABILITY).  AVAILABILITY is
+:AVAILABLE or :UNAVAILABLE; field and subsystem policy must interpret that
+fact rather than making the spatial protocol call absence air, solid, zero,
+or open sky.  Implementations keep their existing aggregate representation."))
+
+(defun continue-chunk-window-site (window domain local direction)
+  "Step LOCAL and resolve WINDOW only when the step crosses DOMAIN.
+
+Return the destination OFFSET, wrapped LOCAL-COORDINATE, and crossing as
+STEP-CHUNK-DOMAIN-SITE does, followed by the neighboring MATERIALIZATION and
+its AVAILABILITY.  A local step returns NIL and :LOCAL for the last two values.
+The one generic window decision therefore occurs only at an aggregate
+boundary, never for every site in a dense traversal. #L84JCX"
+  (multiple-value-bind (offset destination crossing)
+      (step-chunk-domain-site domain local direction)
+    (if crossing
+        (multiple-value-bind (world-x world-y world-z)
+            (chunk-domain-world-components
+             domain
+             (local-coordinate-x local)
+             (local-coordinate-y local)
+             (local-coordinate-z local))
+          (multiple-value-bind (materialization located-offset availability)
+              (locate-chunk-window-site
+               window
+               (+ world-x (voxel-direction-dx direction))
+               (+ world-y (voxel-direction-dy direction))
+               (+ world-z (voxel-direction-dz direction)))
+            (values located-offset destination crossing
+                    materialization availability)))
+        (values offset destination nil nil :local))))
+
 (defmacro do-chunk-domain-sites
     ((offset local domain &optional result) &body body)
   "Execute BODY for every site in DOMAIN, in dense storage order.
@@ -909,22 +945,27 @@ retains chunk revision, boundary revision, and world invalidation semantics."))
         (world-coordinate-chunk-and-local (block-world-space world) coordinate)
       (values coordinate chunk-coordinate local-coordinate))))
 
-(defmethod world-block-at ((world block-world) x y z)
-  (multiple-value-bind (world-coordinate chunk-coordinate local-coordinate)
-      (locate-world-coordinate world x y z)
-    (declare (ignore world-coordinate))
+(defmethod locate-chunk-window-site ((world block-world) x y z)
+  (multiple-value-bind
+        (chunk-x chunk-y chunk-z local-x local-y local-z)
+      (voxel-space-decompose-components (block-world-space world) x y z)
     (multiple-value-bind (chunk present-p)
-        (world-chunk-at world
-                        (chunk-coordinate-x chunk-coordinate)
-                        (chunk-coordinate-y chunk-coordinate)
-                        (chunk-coordinate-z chunk-coordinate))
+        (world-chunk-at world chunk-x chunk-y chunk-z)
       (if present-p
-          (values (chunk-block-at chunk
-                                  (local-coordinate-x local-coordinate)
-                                  (local-coordinate-y local-coordinate)
-                                  (local-coordinate-z local-coordinate))
-                  :resident)
-          (values nil :absent)))))
+          (values chunk
+                  (chunk-domain-offset-components
+                   (block-chunk-domain chunk) local-x local-y local-z)
+                  :available)
+          (values nil nil :unavailable)))))
+
+(defmethod world-block-at ((world block-world) x y z)
+  (multiple-value-bind (chunk offset availability)
+      (locate-chunk-window-site world x y z)
+    (ecase availability
+      (:available
+       (values (block-content-at-offset (block-chunk-content chunk) offset)
+               :resident))
+      (:unavailable (values nil :absent)))))
 
 (defmethod (setf world-block-at)
     (block (world block-world) x y z)

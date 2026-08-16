@@ -129,6 +129,14 @@ decomposition and storage order beneath it.  See #K3KZTG."
                        (block-chunk-domain chunk)
                        local-x local-y local-z)))))))))
 
+(defmethod locate-chunk-window-site
+    ((neighborhood block-mesh-neighborhood) x y z)
+  (multiple-value-bind (chunk offset)
+      (block-mesh-neighborhood-locate neighborhood x y z)
+    (if chunk
+        (values chunk offset :available)
+        (values nil nil :unavailable))))
+
 (declaim (inline block-mesh-neighborhood-block-at))
 (defun block-mesh-neighborhood-block-at (neighborhood x y z)
   "Read a nearby world site with no coordinate objects or hash-key consing."
@@ -159,19 +167,32 @@ decomposition and storage order beneath it.  See #K3KZTG."
              (* sample-width
                 (+ sample-y (* sample-height sample-z)))))))))
 
-(declaim (inline block-mesh-snapshot-block-at))
-(defun block-mesh-snapshot-block-at (snapshot x y z)
+(declaim (inline block-mesh-snapshot-locate block-mesh-snapshot-block-at))
+(defun block-mesh-snapshot-locate (snapshot x y z)
+  "Resolve one halo site without aggregate dispatch in the meshing loop."
   (let ((offset (block-mesh-halo-offset-components
                  (block-mesh-snapshot-domain snapshot) x y z)))
-    (if offset
-        (let ((index (aref (block-mesh-snapshot-sample-indices snapshot)
-                           offset)))
-          ;; Zero is absent.  Resident air has its own palette entry.
-          (if (zerop index)
-              (values nil :absent)
-              (values (aref (block-mesh-snapshot-palette snapshot) index)
-                      :resident)))
-        (values nil :absent))))
+    (if (and offset
+             ;; Zero is absent.  Resident air has its own palette entry.
+             (not (zerop (aref (block-mesh-snapshot-sample-indices snapshot)
+                               offset))))
+        (values snapshot offset :available)
+        (values nil nil :unavailable))))
+
+(defun block-mesh-snapshot-block-at (snapshot x y z)
+  (multiple-value-bind (materialization offset availability)
+      (block-mesh-snapshot-locate snapshot x y z)
+    (declare (ignore materialization))
+    (ecase availability
+      (:available
+       (values
+        (aref (block-mesh-snapshot-palette snapshot)
+              (aref (block-mesh-snapshot-sample-indices snapshot) offset))
+        :resident))
+      (:unavailable (values nil :absent)))))
+
+(defmethod locate-chunk-window-site ((snapshot block-mesh-snapshot) x y z)
+  (block-mesh-snapshot-locate snapshot x y z))
 
 (defgeneric sample-block-at (samples x y z)
   (:documentation
@@ -220,17 +241,16 @@ falling through to BLOCK-SOLID-P."))
         (values 0 0 :absent))))
 
 (defmethod sample-light-at ((samples block-mesh-snapshot) x y z)
-  (let ((offset (block-mesh-halo-offset-components
-                 (block-mesh-snapshot-domain samples) x y z)))
-    (if offset
-        (if (zerop (aref (block-mesh-snapshot-sample-indices samples)
-                         offset))
-            (values 0 0 :absent)
-            (values
-             (aref (block-mesh-snapshot-sky-samples samples) offset)
-             (aref (block-mesh-snapshot-block-light-samples samples) offset)
-             :resident))
-        (values 0 0 :absent))))
+  (multiple-value-bind (materialization offset availability)
+      (block-mesh-snapshot-locate samples x y z)
+    (declare (ignore materialization))
+    (ecase availability
+      (:available
+       (values
+        (aref (block-mesh-snapshot-sky-samples samples) offset)
+        (aref (block-mesh-snapshot-block-light-samples samples) offset)
+        :resident))
+      (:unavailable (values 0 0 :absent)))))
 
 (defun mesher-block-at (mesher samples x y z)
   (multiple-value-bind (block status) (sample-block-at samples x y z)

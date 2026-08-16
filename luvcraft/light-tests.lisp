@@ -340,3 +340,18 @@
       (ok (= sky 0))
       (ok (= block 0))
       (ok (eq state :provisional)))))
+
+(deftest light-region-is-a-chunk-window-with-policy-free-availability
+  (let ((world (make-block-world)))
+    (luv::ensure-world-chunk world 0 0 0)
+    (let ((region (luv::capture-light-region world)))
+      (multiple-value-bind (entry offset availability)
+          (locate-chunk-window-site region 0 0 0)
+        (ok entry)
+        (ok (zerop offset))
+        (ok (eq availability :available)))
+      (multiple-value-bind (entry offset availability)
+          (locate-chunk-window-site region 16 0 0)
+        (ok (null entry))
+        (ok (null offset))
+        (ok (eq availability :unavailable))))))

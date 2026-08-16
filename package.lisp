@@ -492,6 +492,8 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:chunk-domain-local-components
            #:chunk-domain-world-components
            #:step-chunk-domain-site
+           #:locate-chunk-window-site
+           #:continue-chunk-window-site
            #:do-chunk-domain-sites
            #:do-chunk-domain-face
            #:block-content-column
