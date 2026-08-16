@@ -135,7 +135,8 @@
               :ink +white+ :text-size 18))
 
 (defparameter *mcclim-gallery-scenes*
-  `((:analytic "Analytic GUI primitives" analytic-shape-gallery 720 420)
+  `((:relief "Height-bearing McCLIM gadgets" widget-lab 360 180)
+    (:analytic "Analytic GUI primitives" analytic-shape-gallery 720 420)
     (:paints "Image paints, masks, and affine placement"
      paint-gallery 800 480)
     (:calculator "Calculator" clim-demo.calculator:calculator-app 420 520)
