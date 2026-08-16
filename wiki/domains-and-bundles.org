@@ -437,6 +437,59 @@ luvcraft tests, 14 wiki tests, and generated SPIR-V validation.  The standalone
 smoke render remains byte-identical at SHA-256
 =0c85d4550638418cb88d507c6541a49147aeeea5697175d13904942b65a689ec=.
 
+* DONE Percolate domain-bound representations through voxel storage
+:PROPERTIES:
+:ID: 1RF48O
+:END:
+
+Intent: make the fixed materialization vocabulary describe the ordinary
+resident and captured voxel fields too, and transfer palette-backed block
+content as one representation rather than as an accidental pair of arrays.
+
+Evidence: resident =chunk-light-field= objects and captured
+=light-region-entry= objects now retain the same generated
+=voxel-light-columns= representation over their respective chunk domains.
+Sky and block levels remain separate u8 lanes with distinct quantity-aware
+field declarations; revisions and boundary state remain on the owning derived
+product rather than being forced into the columns.
+
+Palette-derived propagation loss and emission are another fixed
+materialization.  Their explicit =block-palette-domain= has one site per
+palette code, and their u8 lanes project the dimensional declarations on the
+=block-kind= opacity and emission slots.  Thus the solver performs CLOS
+dispatch once per palette entry and then sees only dense typed lookup arrays.
+
+=block-content-column= now binds its palette and u16 codes to the authoritative
+chunk domain.  Async production transfers that aggregate object; publication
+preserves the arrays while rebinding them to the owner world's fresh resident
+domain.  =materialized-field-representation= and
+=field-representation-domain= make this relationship inspectable without
+claiming that every logical field is exactly one array.
+
+Done when: resident and captured light use one representation type; palette
+properties retain their quantities over an explicit finite domain; block
+content cannot be constructed with a mismatched extent or palette code; async
+loading transfers the representation and preserves single-writer ownership;
+and the complete 149-test luvcraft suite passes.
+
+* NEXT Give dynamic columnar populations explicit compaction
+:PROPERTIES:
+:ID: 34G2K8
+:END:
+
+The block-particle population is the next honest client.  Its block reference,
+position, velocity, size, age, and lifetime naturally form quantity-aware SoA
+lanes, but its update removes arbitrary expired rows while preserving survivor
+order, and overflow discards an oldest prefix.  The current generated dynamic
+buffer owns push, pop, and reset only.
+
+Do not hide a second private length protocol in =particles.lisp=.  First give
+=define-columnar-buffer= checked truncate/prefix-discard and an in-place stable
+compaction vocabulary that moves every lane together and clears removed
+reference lanes.  Then migrate rendering and integration to borrowed lanes,
+decide whether the exported row-object accessor becomes a presentation view,
+and test stable ordering, bounded bursts, expiry, and retained-object release.
+
 * A columnar buffer is not one hot sequence
 :PROPERTIES:
 :ID: IUTMUY

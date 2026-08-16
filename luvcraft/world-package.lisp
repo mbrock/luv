@@ -31,6 +31,7 @@
            #:block-chunk-light-field
            #:block-chunk-revision
            #:block-content-column
+           #:block-content-column-domain
            #:block-content-column-indices
            #:block-content-column-palette
            #:block-content-at-offset

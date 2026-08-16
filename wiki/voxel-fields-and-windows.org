@@ -906,6 +906,14 @@ redefinition visibly stale by object identity rather than silently
 reinterpreting old arrays.  Product revision and boundary stability remain on
 their existing owners, and every per-site lane remains an unwrapped u16 or u8.
 
+The subsequent percolation in #1RF48O makes the representation side equally
+explicit.  =materialized-field-representation= reaches the aggregate storage
+from a field owner, while =field-representation-domain= reaches the finite
+site domain from that storage.  These are deliberately separate from
+=materialized-field-definition=: meaning, representation, domain, and product
+lifecycle remain four inspectable relationships rather than one overloaded
+"field object."
+
 The focused world and luvcraft tests exercise definition redefinition,
 categorical content, distinct light quantities, and propagation of definition
 identity through live light fields, atlas entries, and worker snapshots.

@@ -16,18 +16,15 @@
 
 (defconstant +maximum-light-level+ 15)
 
+(records:define-columnar-materialization voxel-light-columns
+  (sky-level 0 :type (unsigned-byte 8))
+  (block-level 0 :type (unsigned-byte 8)))
+
+(defmethod fields:field-representation-domain ((columns voxel-light-columns))
+  (voxel-light-columns-domain columns))
+
 (defclass chunk-light-field ()
-  ((sky-definition
-    :initarg :sky-definition
-    :initform (luvcraft.world.fields:field-definition-for :sky-light)
-    :reader chunk-light-field-sky-definition)
-   (block-definition
-    :initarg :block-definition
-    :initform (luvcraft.world.fields:field-definition-for :block-light)
-    :reader chunk-light-field-block-definition)
-   (sky-levels :initarg :sky-levels :reader chunk-light-field-sky-levels)
-   (block-levels :initarg :block-levels
-                 :reader chunk-light-field-block-levels)
+  ((columns :initarg :columns :reader chunk-light-field-columns)
    (revision :initform 0 :accessor chunk-light-field-revision)
    ;; -X, +X, -Y, +Y, -Z, +Z, indexed like content boundary revisions.
    (boundary-revisions
@@ -41,6 +38,28 @@ from block content.  STATE is :UNLIT before any solve, :STABLE when every
 boundary was known, and :PROVISIONAL when an unknown residency boundary
 contributed to the result."))
 
+(declaim
+ (inline chunk-light-field-sky-definition
+         chunk-light-field-block-definition
+         chunk-light-field-sky-levels
+         chunk-light-field-block-levels))
+
+(defun chunk-light-field-sky-definition (field)
+  (records:columnar-row-lane-declaration
+   (voxel-light-columns-row-declaration (chunk-light-field-columns field))
+   'sky-level))
+
+(defun chunk-light-field-block-definition (field)
+  (records:columnar-row-lane-declaration
+   (voxel-light-columns-row-declaration (chunk-light-field-columns field))
+   'block-level))
+
+(defun chunk-light-field-sky-levels (field)
+  (voxel-light-columns-sky-level-lane (chunk-light-field-columns field)))
+
+(defun chunk-light-field-block-levels (field)
+  (voxel-light-columns-block-level-lane (chunk-light-field-columns field)))
+
 (defmethod luvcraft.world.fields:materialized-field-definition
     ((field chunk-light-field) (field-name (eql :sky-light)))
   (declare (ignore field-name))
@@ -51,12 +70,26 @@ contributed to the result."))
   (declare (ignore field-name))
   (chunk-light-field-block-definition field))
 
-(defun make-chunk-light-field (cardinality)
-  (flet ((levels ()
-           (make-array cardinality :element-type '(unsigned-byte 8)
-                                   :initial-element 0)))
-    (make-instance 'chunk-light-field
-                   :sky-levels (levels) :block-levels (levels))))
+(defmethod fields:materialized-field-representation
+    ((field chunk-light-field) (field-name (eql :sky-light)))
+  (declare (ignore field-name))
+  (chunk-light-field-columns field))
+
+(defmethod fields:materialized-field-representation
+    ((field chunk-light-field) (field-name (eql :block-light)))
+  (declare (ignore field-name))
+  (chunk-light-field-columns field))
+
+(defun make-chunk-light-field (domain)
+  "Make an unlit resident field whose columns are bound to DOMAIN."
+  (make-instance
+   'chunk-light-field
+   :columns
+   (make-voxel-light-columns
+    domain
+    :declarations
+    `((sky-level . ,(fields:field-definition-for :sky-light))
+      (block-level . ,(fields:field-definition-for :block-light))))))
 
 (defun chunk-light-field-boundary-revision (field direction)
   (aref (chunk-light-field-boundary-revisions field)
@@ -90,20 +123,57 @@ resident."))
 ;;; Palette-indexed light tables: one generic dispatch per palette entry,
 ;;; then dense u8 lookups in every hot loop.
 
-(defun block-palette-light-tables (palette)
-  "Return dense opacity and emission vectors indexed like PALETTE."
-  (let* ((count (length palette))
-         (opacity (make-array count :element-type '(unsigned-byte 8)))
-         (emission (make-array count :element-type '(unsigned-byte 8))))
-    (dotimes (index count)
-      (let ((block (aref palette index)))
-        (setf (aref opacity index)
-              (min +maximum-light-level+
-                   (max 0 (block-light-opacity block)))
-              (aref emission index)
-              (min +maximum-light-level+
-                   (max 0 (block-light-emission block))))))
-    (values opacity emission)))
+(defclass block-palette-domain ()
+  ((palette :initarg :palette :reader block-palette-domain-palette))
+  (:documentation "The finite block-state sites addressed by palette code."))
+
+(defmethod domains:domain-cardinality ((domain block-palette-domain))
+  (length (block-palette-domain-palette domain)))
+
+(records:define-columnar-materialization block-light-properties
+  (propagation-loss 0 :type (unsigned-byte 8))
+  (emission-level 0 :type (unsigned-byte 8)))
+
+(defmethod fields:field-representation-domain
+    ((properties block-light-properties))
+  (block-light-properties-domain properties))
+
+(defun represented-block-slot-declaration (slot-name)
+  "Project BLOCK-KIND's semantic slot metadata into a storage declaration."
+  (let ((slot (records:record-slot-declaration 'block-kind slot-name)))
+    (math:make-represented-value-declaration
+     :representation-type (math:declaration-representation-type slot)
+     :quantity-specification
+     (math:declaration-quantity-specification slot)
+     :source-form (math:declaration-source-form slot))))
+
+(defun block-palette-light-properties (palette)
+  "Materialize propagation loss and emission over PALETTE's entry domain."
+  (let* ((domain (make-instance 'block-palette-domain :palette palette))
+         (properties
+           (make-block-light-properties
+            domain
+            :declarations
+            `((propagation-loss
+               . ,(represented-block-slot-declaration 'light-opacity))
+              (emission-level
+               . ,(represented-block-slot-declaration 'light-emission))))))
+    (records:with-columnar-materialization-storage
+        ((borrowed-domain extent row
+                          (losses propagation-loss)
+                          (emissions emission-level))
+         properties block-light-properties)
+      (declare (ignore row))
+      (assert (eq domain borrowed-domain))
+      (dotimes (index extent)
+        (let ((block (aref palette index)))
+          (setf (aref losses index)
+                (min +maximum-light-level+
+                     (max 0 (block-light-opacity block)))
+                (aref emissions index)
+                (min +maximum-light-level+
+                     (max 0 (block-light-emission block)))))))
+    properties))
 
 ;;; A captured region: every resident chunk's dense content beside fresh
 ;;; work arrays.  The reference solver reads and writes only this capture,
@@ -111,16 +181,51 @@ resident."))
 
 (defstruct (light-region-entry (:constructor %make-light-region-entry))
   (chunk nil)
-  (domain nil :type (or null chunk-domain))
   (key nil :type (or null chunk-coordinate))
   (content-definition nil)
-  (sky-definition nil)
-  (block-definition nil)
   (indices nil :type (or null (simple-array (unsigned-byte 16) (*))))
-  (opacity-lut nil)
-  (emission-lut nil)
-  (sky nil :type (or null (simple-array (unsigned-byte 8) (*))))
-  (block nil :type (or null (simple-array (unsigned-byte 8) (*)))))
+  (block-properties nil :type (or null block-light-properties))
+  (light-columns nil :type (or null voxel-light-columns)))
+
+(declaim
+ (inline light-region-entry-domain
+         light-region-entry-sky-definition
+         light-region-entry-block-definition
+         light-region-entry-opacity-lut
+         light-region-entry-emission-lut
+         light-region-entry-sky
+         light-region-entry-block))
+
+(defun light-region-entry-domain (entry)
+  (voxel-light-columns-domain (light-region-entry-light-columns entry)))
+
+(defun light-region-entry-sky-definition (entry)
+  (records:columnar-row-lane-declaration
+   (voxel-light-columns-row-declaration
+    (light-region-entry-light-columns entry))
+   'sky-level))
+
+(defun light-region-entry-block-definition (entry)
+  (records:columnar-row-lane-declaration
+   (voxel-light-columns-row-declaration
+    (light-region-entry-light-columns entry))
+   'block-level))
+
+(defun light-region-entry-opacity-lut (entry)
+  (block-light-properties-propagation-loss-lane
+   (light-region-entry-block-properties entry)))
+
+(defun light-region-entry-emission-lut (entry)
+  (block-light-properties-emission-level-lane
+   (light-region-entry-block-properties entry)))
+
+(defun light-region-entry-sky (entry)
+  (voxel-light-columns-sky-level-lane
+   (light-region-entry-light-columns entry)))
+
+(defun light-region-entry-block (entry)
+  (voxel-light-columns-block-level-lane
+   (light-region-entry-light-columns entry)))
 
 (defmethod luvcraft.world.fields:materialized-field-definition
     ((entry light-region-entry) (field-name (eql :block-content)))
@@ -136,6 +241,16 @@ resident."))
     ((entry light-region-entry) (field-name (eql :block-light)))
   (declare (ignore field-name))
   (light-region-entry-block-definition entry))
+
+(defmethod fields:materialized-field-representation
+    ((entry light-region-entry) (field-name (eql :sky-light)))
+  (declare (ignore field-name))
+  (light-region-entry-light-columns entry))
+
+(defmethod fields:materialized-field-representation
+    ((entry light-region-entry) (field-name (eql :block-light)))
+  (declare (ignore field-name))
+  (light-region-entry-light-columns entry))
 
 (defstruct (light-region (:constructor %make-light-region))
   (world nil)
@@ -283,39 +398,37 @@ first; LIFO puts every item in bucket zero and preserves the former order.
     (region chunk &key from-field-p copy-content-p)
   "Materialize CHUNK's dense capture in REGION and return the new entry."
   (with-block-content-storage (domain palette indices) chunk
-    (multiple-value-bind (opacity emission)
-        (block-palette-light-tables palette)
-      (let* ((key (chunk-domain-coordinate domain))
-             (cardinality (length indices))
-             (field (and from-field-p (block-chunk-light-field chunk)))
-             (sky (make-array cardinality :element-type '(unsigned-byte 8)
-                                          :initial-element 0))
-             (block-levels (make-array cardinality
-                                       :element-type '(unsigned-byte 8)
-                                       :initial-element 0)))
+    (let* ((key (chunk-domain-coordinate domain))
+           (field (and from-field-p (block-chunk-light-field chunk)))
+           (sky-definition
+             (if field
+                 (fields:materialized-field-definition field :sky-light)
+                 (fields:field-definition-for :sky-light)))
+           (block-definition
+             (if field
+                 (fields:materialized-field-definition field :block-light)
+                 (fields:field-definition-for :block-light)))
+           (light-columns
+             (make-voxel-light-columns
+              domain
+              :declarations `((sky-level . ,sky-definition)
+                              (block-level . ,block-definition))))
+           (sky (voxel-light-columns-sky-level-lane light-columns))
+           (block-levels
+             (voxel-light-columns-block-level-lane light-columns)))
         (when field
           (replace sky (chunk-light-field-sky-levels field))
           (replace block-levels (chunk-light-field-block-levels field)))
         (setf (gethash key (light-region-entries region))
               (%make-light-region-entry
-               :chunk chunk :domain domain :key key
+               :chunk chunk :key key
                :content-definition
                (luvcraft.world.fields:materialized-field-definition
                 (block-chunk-content chunk) :block-content)
-               :sky-definition
-               (if field
-                   (luvcraft.world.fields:materialized-field-definition
-                    field :sky-light)
-                   (luvcraft.world.fields:field-definition-for :sky-light))
-               :block-definition
-               (if field
-                   (luvcraft.world.fields:materialized-field-definition
-                    field :block-light)
-                   (luvcraft.world.fields:field-definition-for :block-light))
                :indices (coerce (if copy-content-p (copy-seq indices) indices)
                                 '(simple-array (unsigned-byte 16) (*)))
-               :opacity-lut opacity :emission-lut emission
-               :sky sky :block block-levels))))))
+               :block-properties (block-palette-light-properties palette)
+               :light-columns light-columns)))))
 
 (defun light-region-boundary-key (key direction)
   (list key (voxel-direction-dx direction) (voxel-direction-dy direction)
@@ -586,7 +699,7 @@ LOCAL has dynamic extent and must be copied before FUNCTION retains it."
                          :stable)))
          (cond
            ((null field)
-            (let ((field (make-chunk-light-field (length new-sky))))
+            (let ((field (make-chunk-light-field domain)))
               (replace (chunk-light-field-sky-levels field) new-sky)
               (replace (chunk-light-field-block-levels field) new-block)
               (setf (chunk-light-field-state field) state

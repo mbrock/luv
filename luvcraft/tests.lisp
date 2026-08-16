@@ -313,6 +313,14 @@
     (let* ((light (block-chunk-light-field chunk))
            (region (luvcraft::capture-light-region world))
            (entry (nth-value 0 (locate-chunk-window-site region 0 0 0)))
+           (resident-representation
+             (luvcraft.world.fields:materialized-field-representation
+              light :sky-light))
+           (captured-representation
+             (luvcraft.world.fields:materialized-field-representation
+              entry :sky-light))
+           (block-properties
+             (luvcraft::light-region-entry-block-properties entry))
            (snapshot
              (make-block-mesh-snapshot
               world chunk (chunk-mesh-dependency-stamp world chunk))))
@@ -328,6 +336,32 @@
                (luv.arithmetic:declaration-quantity-specification block))))
       (ok (signals (luv.arithmetic:ensure-declarations-compatible sky block)
                    'luv.arithmetic:declaration-compatibility-error))
+      (ok (typep resident-representation 'luvcraft::voxel-light-columns))
+      (ok (typep captured-representation 'luvcraft::voxel-light-columns))
+      (ok (not (eq resident-representation captured-representation)))
+      (ok (eq (block-chunk-domain chunk)
+              (luvcraft.world.fields:field-representation-domain
+               resident-representation)))
+      (ok (eq (luvcraft::light-region-entry-domain entry)
+              (luvcraft.world.fields:field-representation-domain
+               captured-representation)))
+      (ok (= (length (luvcraft::light-region-entry-opacity-lut entry))
+             (luv.domains:domain-cardinality
+              (luvcraft.world.fields:field-representation-domain
+               block-properties))))
+      (dolist (lane-and-quantity
+                '((luvcraft::propagation-loss
+                   :block-light-attenuation-step)
+                  (luvcraft::emission-level
+                   :block-light-emission-step)))
+        (destructuring-bind (lane quantity) lane-and-quantity
+          (ok (eq quantity
+                  (luv.arithmetic:quantity-specification-name
+                   (luv.arithmetic:declaration-quantity-specification
+                    (luv.arithmetic.records:columnar-row-lane-declaration
+                     (luvcraft::block-light-properties-row-declaration
+                      block-properties)
+                     lane)))))))
       (dolist (claim `((,light :sky-light)
                        (,light :block-light)
                        (,entry :block-content)

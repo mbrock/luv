@@ -81,6 +81,11 @@
     (ok (eq definition
             (luvcraft.world.fields:materialized-field-definition
              column :block-content)))
+    (ok (eq column
+            (luvcraft.world.fields:materialized-field-representation
+             chunk :block-content)))
+    (ok (eq (block-chunk-domain chunk)
+            (luvcraft.world.fields:field-representation-domain column)))
     (ok (luvcraft.world.fields:materialized-field-current-p
          column :block-content))))
 
@@ -338,21 +343,25 @@
                                   :chunk-height 2
                                   :chunk-depth 2))
          (first (ensure-world-chunk world 0 0 0))
-         (palette (make-array 2 :initial-contents
-                              (list nil :transferred-stone)))
-         (indices (make-array 8 :element-type '(unsigned-byte 16)
-                               :initial-element 0)))
-    (setf (aref indices 3) 1)
-    (remove-world-chunk world 0 0 0)
-    (let ((second (install-world-chunk-storage
-                   world 0 0 0 palette indices)))
-      (ok (> (block-chunk-incarnation second)
-             (block-chunk-incarnation first)))
-      (ok (eq (chunk-block-at-offset second 3) :transferred-stone))
-      (ok (eq (block-content-column-palette (block-chunk-content second))
-              palette))
-      (ok (eq (block-content-column-indices (block-chunk-content second))
-              indices)))))
+         (transferred (block-chunk-content first)))
+    (setf (chunk-block-at-offset first 3) :transferred-stone)
+    (let ((palette (block-content-column-palette transferred))
+          (indices (block-content-column-indices transferred))
+          (source-domain (block-content-column-domain transferred)))
+      (remove-world-chunk world 0 0 0)
+      (let ((second (install-world-chunk-storage
+                     world 0 0 0 transferred)))
+        (ok (> (block-chunk-incarnation second)
+               (block-chunk-incarnation first)))
+        (ok (eq (chunk-block-at-offset second 3) :transferred-stone))
+        (ok (eq (block-content-column-palette (block-chunk-content second))
+                palette))
+        (ok (eq (block-content-column-indices (block-chunk-content second))
+                indices))
+        (ok (not (eq source-domain (block-chunk-domain second))))
+        (ok (eq (block-chunk-domain second)
+                (block-content-column-domain
+                 (block-chunk-content second))))))))
 
 (deftest resident-lattice-raycast
   (let* ((world (make-block-world :chunk-width 4

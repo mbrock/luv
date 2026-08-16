@@ -48,6 +48,17 @@ the aggregate encoding, such as a palette-index column or a u8 level array."))
   (declare (ignore materialization field-name))
   nil)
 
+(defgeneric materialized-field-representation (materialization field-name)
+  (:documentation
+   "Return MATERIALIZATION's retained representation for FIELD-NAME."))
+
+(defmethod materialized-field-representation (materialization field-name)
+  (declare (ignore materialization field-name))
+  nil)
+
+(defgeneric field-representation-domain (representation)
+  (:documentation "Return the finite site domain bound to REPRESENTATION."))
+
 (defun materialized-field-current-p (materialization field-name)
   "Whether MATERIALIZATION still carries FIELD-NAME's live definition object."
   (let ((materialized

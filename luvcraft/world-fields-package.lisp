@@ -10,5 +10,7 @@
            #:voxel-field-definition-revision
            #:field-definition-for
            #:define-voxel-field
+           #:field-representation-domain
            #:materialized-field-definition
+           #:materialized-field-representation
            #:materialized-field-current-p))

@@ -77,8 +77,7 @@ presentation; deterministic captures wait for the broader default set."
 
 (defclass block-chunk-load-payload ()
   ((key :initarg :key :reader block-chunk-load-payload-key)
-   (palette :initarg :palette :reader block-chunk-load-payload-palette)
-   (indices :initarg :indices :reader block-chunk-load-payload-indices)))
+   (content :initarg :content :reader block-chunk-load-payload-content)))
 
 (defclass block-chunk-load-request (production-request)
   ((demand-token :initarg :demand-token
@@ -164,11 +163,9 @@ the session's outstanding-work and cancellation bookkeeping."))
           (destructuring-bind (block x y z) edit
             (setf (world-block-at world x y z) block)))
         (let ((chunk (world-chunk-at world chunk-x chunk-y chunk-z)))
-          (with-block-content-storage (domain palette indices) chunk
-            (declare (ignore domain))
-            (make-instance 'block-chunk-load-payload
-                           :key (list chunk-x chunk-y chunk-z)
-                           :palette palette :indices indices)))))))
+          (make-instance 'block-chunk-load-payload
+                         :key (list chunk-x chunk-y chunk-z)
+                         :content (block-chunk-content chunk)))))))
 
 (defclass luvcraft-chunk-product ()
   ((coordinate :initarg :coordinate
@@ -732,8 +729,7 @@ here and install its publication cohort later at the frame boundary."))
       (destructuring-bind (x y z) key
         (install-world-chunk-storage
          world x y z
-         (block-chunk-load-payload-palette payload)
-         (block-chunk-load-payload-indices payload))))))
+         (block-chunk-load-payload-content payload))))))
 
 (defun drain-luvcraft-production (session)
   "Publish a bounded number of completed CPU products this frame."

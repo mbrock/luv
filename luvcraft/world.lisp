@@ -574,25 +574,62 @@ BODY returns."
 ;;; is for inspectors, sparse interaction, and other genuinely row-shaped work.
 
 (defclass block-content-column ()
-  ((definition
+  ((domain :initarg :domain :reader block-content-column-domain)
+   (definition
     :initarg :definition
     :initform (luvcraft.world.fields:field-definition-for :block-content)
     :reader block-content-column-definition)
    (palette :initarg :palette :reader block-content-column-palette)
    (indices :initarg :indices :reader block-content-column-indices)))
 
+(defmethod initialize-instance :after ((column block-content-column) &key)
+  (let ((domain (block-content-column-domain column))
+        (palette (block-content-column-palette column))
+        (indices (block-content-column-indices column)))
+    (check-type domain chunk-domain)
+    (check-type palette vector)
+    (check-type indices (array (unsigned-byte 16) (*)))
+    (unless (= (length indices) (chunk-domain-cardinality domain))
+      (error "Block content has ~D indices; domain ~S requires ~D."
+             (length indices) domain (chunk-domain-cardinality domain)))
+    (dotimes (offset (length indices))
+      (unless (< (aref indices offset) (length palette))
+        (error "Palette index ~D at offset ~D exceeds palette length ~D."
+               (aref indices offset) offset (length palette))))))
+
+(defmethod fields:field-representation-domain ((column block-content-column))
+  (block-content-column-domain column))
+
 (defmethod luvcraft.world.fields:materialized-field-definition
     ((column block-content-column) (field-name (eql :block-content)))
   (declare (ignore field-name))
   (block-content-column-definition column))
 
-(defun make-block-content-column (cardinality)
+(defmethod fields:materialized-field-representation
+    ((column block-content-column) (field-name (eql :block-content)))
+  (declare (ignore field-name))
+  column)
+
+(defun make-block-content-column (domain &key palette indices)
   (make-instance
    'block-content-column
-   :palette (make-array 1 :adjustable t :fill-pointer 1
-                          :initial-element nil)
-   :indices (make-array cardinality :element-type '(unsigned-byte 16)
-                                   :initial-element 0)))
+   :domain domain
+   :palette (or palette
+                (make-array 1 :adjustable t :fill-pointer 1
+                              :initial-element nil))
+   :indices (or indices
+                (make-array (chunk-domain-cardinality domain)
+                            :element-type '(unsigned-byte 16)
+                            :initial-element 0))))
+
+(defun rebind-block-content-column (column domain)
+  "Bind COLUMN's transferred storage to the authoritative resident DOMAIN."
+  (if (eq (block-content-column-domain column) domain)
+      column
+      (make-block-content-column
+       domain
+       :palette (block-content-column-palette column)
+       :indices (block-content-column-indices column))))
 
 (defun block-content-at-offset (column offset)
   (aref (block-content-column-palette column)
@@ -605,6 +642,11 @@ BODY returns."
 This is the ordinary entry point for whole-domain computation.  Generic
 dispatch chooses a representation once; the caller then traverses the dense
 specialized arrays rather than describing individual cells through CLOS."))
+
+(defmethod borrow-block-content-storage ((column block-content-column))
+  (values (block-content-column-domain column)
+          (block-content-column-palette column)
+          (block-content-column-indices column)))
 
 (defmacro with-block-content-storage
     ((domain palette indices) chunk &body body)
@@ -654,15 +696,17 @@ specialized arrays rather than describing individual cells through CLOS."))
                  :domain domain
                  :incarnation incarnation
                  :change-hook change-hook
-                 :content (or content
-                              (make-block-content-column
-                               (chunk-domain-cardinality domain)))))
+                 :content (if content
+                              (rebind-block-content-column content domain)
+                              (make-block-content-column domain))))
+
+(defmethod fields:materialized-field-representation
+    ((chunk block-chunk) (field-name (eql :block-content)))
+  (declare (ignore field-name))
+  (block-chunk-content chunk))
 
 (defmethod borrow-block-content-storage ((chunk block-chunk))
-  (let ((column (block-chunk-content chunk)))
-    (values (block-chunk-domain chunk)
-            (block-content-column-palette column)
-            (block-content-column-indices column))))
+  (borrow-block-content-storage (block-chunk-content chunk)))
 
 (defun chunk-block-at (chunk x y z)
   (check-type chunk block-chunk)
@@ -884,29 +928,25 @@ including when FUNCTION exits non-locally after making a partial change."
           (note-world-residency-event world x y z :arrived)
           new-chunk))))
 
-(defun install-world-chunk-storage (world x y z palette indices)
-  "Install transferred dense storage as a newly resident chunk.
+(defun install-world-chunk-storage (world x y z content &optional indices)
+  "Install transferred block-content storage as a newly resident chunk.
 
-The caller gives WORLD ownership of PALETTE and INDICES and must not mutate
-them afterward.  Installation is deliberately a single-writer operation: it
-publishes one complete chunk and advances residency/general revisions once."
+The caller gives WORLD ownership of CONTENT and must not mutate it afterward.
+For compatibility, CONTENT may be a palette followed by INDICES, but producers
+should transfer a BLOCK-CONTENT-COLUMN.  Installation rebinds that aggregate to
+the authoritative resident domain and publishes it in one single-writer step."
   (check-type world block-world)
-  (check-type palette vector)
-  (check-type indices (array (unsigned-byte 16) (*)))
   (when (nth-value 1 (world-chunk-at world x y z))
     (error "Chunk (~D ~D ~D) is already resident." x y z))
   (let* ((coordinate (make-chunk-coordinate x y z))
          (domain (make-chunk-domain (block-world-space world) coordinate))
-         (cardinality (chunk-domain-cardinality domain)))
-    (unless (= (length indices) cardinality)
-      (error "Transferred chunk storage has ~D indices; ~D are required."
-             (length indices) cardinality))
-    (dotimes (offset cardinality)
-      (unless (< (aref indices offset) (length palette))
-        (error "Palette index ~D at offset ~D exceeds palette length ~D."
-               (aref indices offset) offset (length palette))))
-    (let* ((content (make-instance 'block-content-column
-                                   :palette palette :indices indices))
+         (transferred
+           (if (typep content 'block-content-column)
+               content
+               (make-block-content-column domain
+                                          :palette content
+                                          :indices indices))))
+    (let* ((content (rebind-block-content-column transferred domain))
            (chunk (make-world-owned-block-chunk
                    world domain :content content)))
       (setf (gethash (chunk-key x y z) (block-world-chunks world)) chunk)
