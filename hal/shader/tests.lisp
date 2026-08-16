@@ -6,7 +6,9 @@
                     (#:math #:luv.arithmetic)
                     (#:lang #:luv.arithmetic.language)
                     (#:msl #:luv.msl)
+                    #+darwin
                     (#:objc #:luv.objective-c)
+                    #+darwin
                     (#:metal #:luv.metal))
   (:import-from #:luv.arithmetic.lisp.vec3
                 #:make-vec3

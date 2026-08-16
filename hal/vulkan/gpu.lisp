@@ -1029,7 +1029,7 @@ wrapper, this finalizer cannot run before theirs have."
       (reject-gpu-request descriptor :unsupported-bind-group-layout entries))
     (first entries)))
 
-(defun sampled-texture-sampler-layout-entries (descriptor)
+(defun texture-sampler-uniform-layout-entries (descriptor)
   (let* ((entries (bind-group-layout-descriptor-entries descriptor))
          (bindings (mapcar (lambda (entry) (getf entry :binding)) entries)))
     (unless (and (listp entries) (plusp (length entries))
@@ -1040,10 +1040,6 @@ wrapper, this finalizer cannot run before theirs have."
                                (typep (getf entry :binding)
                                       '(unsigned-byte 32))))
                         entries)
-                 (find :texture entries
-                       :key (lambda (entry) (getf entry :type)))
-                 (find :sampler entries
-                       :key (lambda (entry) (getf entry :type)))
                  (= (length bindings)
                     (length (remove-duplicates bindings))))
       (reject-gpu-request descriptor :unsupported-bind-group-layout entries))
@@ -1077,7 +1073,7 @@ wrapper, this finalizer cannot run before theirs have."
                      (vulkan-handle device) :binding binding)
             :device device :entries entries)))
         (t
-         (let ((entries (sampled-texture-sampler-layout-entries descriptor)))
+         (let ((entries (texture-sampler-uniform-layout-entries descriptor)))
            (make-instance
             'vulkan-gpu-bind-group-layout
             :label (gpu-descriptor-label descriptor)

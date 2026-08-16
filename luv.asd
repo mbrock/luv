@@ -95,6 +95,11 @@
                    (:file "slug-harfbuzz")
                    (:file "slug-truetype")
                    (:file "slug")))
+     (:module "msl"
+      :pathname "metal/msl"
+      :serial t
+      :components ((:file "package")
+                   (:file "lowering")))
      (:module "sdl"
       :serial t
       :components ((:file "canvas")
@@ -117,10 +122,6 @@
       :components
       ((:file "probe")
        (:file "ffi")
-       (:module "msl"
-        :serial t
-        :components ((:file "package")
-                     (:file "lowering")))
        (:file "gpu")
        (:file "canvas")))
      (:file "examples"))))

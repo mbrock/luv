@@ -5,7 +5,9 @@
                     (#:vec #:luv.arithmetic.lisp.vec3)
                     (#:lvk #:luv.vulkan)
                     (#:math #:luv.arithmetic)
+                    #+darwin
                     (#:metal #:luv.metal)
+                    #+darwin
                     (#:objc #:luv.objective-c)
                     (#:records #:luv.arithmetic.records)
                     (#:vk #:luv.vk))

@@ -34,6 +34,15 @@
          (cffi:foreign-enum-value
           'lvk::blend-factor :one-minus-src-alpha))))
 
+(deftest sampled-texture-layouts-do-not-require-a-sampler
+  (let* ((entries '((:binding 0 :type :texture)
+                    (:binding 1 :type :texture)
+                    (:binding 2 :type :uniform-buffer)))
+         (descriptor
+           (luv:make-bind-group-layout-descriptor :entries entries)))
+    (ok (equal entries
+               (luv::texture-sampler-uniform-layout-entries descriptor)))))
+
 (deftest definitions-retain-abi-metadata-without-call-classes
   (let ((description (lvk:vulkan-function-description 'vk:create-instance)))
     (ok (equal (getf description :foreign-name) "vkCreateInstance"))
