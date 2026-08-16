@@ -50,6 +50,11 @@ mirror's identity: a later target may be a texture presented on a 3D quad."))
    (bind-group :initform nil :accessor gpu-mirror-bind-group)
    (pipeline :initform nil :accessor gpu-mirror-pipeline)
    (format :initform nil :accessor gpu-mirror-format)
+   (analytic-vertex-module :initform nil
+                           :accessor gpu-mirror-analytic-vertex-module)
+   (analytic-fragment-module :initform nil
+                             :accessor gpu-mirror-analytic-fragment-module)
+   (analytic-pipeline :initform nil :accessor gpu-mirror-analytic-pipeline)
    (slug-cache :initform nil :accessor gpu-mirror-slug-cache)
    (text-vertex-module :initform nil
                        :accessor gpu-mirror-text-vertex-module)

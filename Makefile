@@ -21,11 +21,13 @@ test: parinfer-check shader-validate
 		--eval '(require :asdf)' \
 		--eval '(asdf:load-asd (truename "luv.asd"))' \
 		--eval '(asdf:load-asd (truename "luvcraft.asd"))' \
+		--eval '(asdf:load-asd (truename "mcluv.asd"))' \
 		--eval '(asdf:load-asd (truename "luv-wiki.asd"))' \
 		--eval '(asdf:load-asd (truename "luv-wiki-site.asd"))' \
 		--eval '(asdf:test-system :luv)' \
 		--eval '(asdf:test-system :luv/ghostty)' \
 		--eval '(asdf:test-system :luvcraft)' \
+		--eval '(asdf:test-system :mcluv/backend)' \
 		--eval '(asdf:test-system :luv-wiki)'
 
 parinfer-check:

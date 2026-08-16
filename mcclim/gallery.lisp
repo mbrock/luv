@@ -2,8 +2,44 @@
 
 (in-package #:mcluv)
 
+(define-application-frame analytic-shape-gallery ()
+  ()
+  (:menu-bar nil)
+  (:panes
+   (canvas :application
+           :display-function 'display-analytic-shape-gallery
+           :scroll-bars nil))
+  (:layouts (default canvas)))
+
+(defun display-analytic-shape-gallery (frame stream)
+  (declare (ignore frame))
+  ;; This deliberately draws through the ordinary recording stream: the
+  ;; backend extension must survive McCLIM recording and repaint as one
+  ;; semantic command, not rely on reaching into the presentation medium.
+  (let ((medium stream))
+    (draw-rectangle* medium 0 0 720 420
+                     :filled t :ink (make-rgb-color 0.075 0.085 0.12))
+    (draw-analytic-rounded-rectangle*
+     medium 58 58 430 206 :radius 36 :filled t
+     :ink (make-rgb-color 0.96 0.32 0.48))
+    (draw-analytic-rounded-rectangle*
+     medium 84 82 404 182 :radius 24 :filled t
+     :ink (make-rgb-color 0.12 0.14 0.20))
+    (draw-text* medium "roundrect in roundrect" 116 143
+                :ink +white+ :text-size 22)
+    (draw-ellipse* medium 570 128 92 0 0 54
+                   :filled t :ink (make-rgb-color 0.28 0.82 0.56))
+    (draw-ellipse* medium 190 310 105 35 -18 54
+                   :filled t :ink (make-rgb-color 0.43 0.58 1.0))
+    (draw-circle* medium 450 310 58
+                  :filled t :ink (make-rgb-color 1.0 0.63 0.18))
+    (draw-analytic-rounded-rectangle*
+     medium 548 274 680 346 :radius 36 :filled t
+     :ink (make-rgb-color 0.73 0.43 0.96))))
+
 (defparameter *mcclim-gallery-scenes*
-  `((:calculator "Calculator" clim-demo.calculator:calculator-app 420 520)
+  `((:analytic "Analytic GUI primitives" analytic-shape-gallery 720 420)
+    (:calculator "Calculator" clim-demo.calculator:calculator-app 420 520)
     (:gadgets "Gadgets" clim-demo::gadget-test 980 760)
     (:tables "Tables and borders"
      clim-demo.tables-with-borders:tables-with-borders 1280 720)

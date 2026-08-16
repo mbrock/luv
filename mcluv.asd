@@ -13,7 +13,20 @@
                              (:file "mirror")
                              (:file "gpu")
                              (:file "widget-lab")
-                             (:file "compositor")))))
+                             (:file "compositor"))))
+  :in-order-to ((test-op (test-op "mcluv/test"))))
+
+(defsystem "mcluv/test"
+  :description "Executable claims for the direct McCLIM GPU backend."
+  :version "0.0.1"
+  :depends-on ("mcluv/backend" "rove")
+  :components ((:file "mcclim/tests"))
+  :perform (test-op (operation component)
+             (declare (ignore operation component))
+             (unless (uiop:symbol-call '#:rove '#:run-suite
+                                       (uiop:symbol-call '#:rove '#:find-suite
+                                                         '#:mcluv.tests))
+               (error "mcluv tests failed"))))
 
 (defsystem "mcluv/shader-lab"
   :description "A McCLIM presentation browser for luvcraft's live shaders."

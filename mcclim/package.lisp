@@ -63,6 +63,7 @@
            #:capture-shader-lab-screenshot
            #:capture-default-shader-lab-screenshot
            #:capture-gpu-mirror-screenshot
+           #:draw-analytic-rounded-rectangle*
            #:clear-gpu-medium-fallback-statistics
            #:gpu-medium-fallback-report
            #:capture-mcclim-gallery
