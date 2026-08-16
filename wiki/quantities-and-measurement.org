@@ -757,8 +757,10 @@ Audit so far:
 The interleaved block-mesh vertex vector now carries a repeated 12-lane
 product declaration (#Q7M4PF), checked against the live block-surface vertex
 shader contract.  Context-dependent removal work now has an explicit semantic
-owner (#K2V9RD).  Next: decide how ordinary function parameters publish
-boundary meaning without turning direct Lisp into ceremony.
+owner (#K2V9RD).  The fixed frame uniform now has an independently stated CPU
+product checked against the shader's parsed member quantities (#F8U2LA).
+Next: finish the source inventory and decide how ordinary function parameters
+publish boundary meaning without turning direct Lisp into ceremony.
 
 ** DONE Describe the repeated block-mesh vertex product
 :PROPERTIES:
@@ -789,6 +791,25 @@ item.  The item's coordinate slot independently declares a cell-valued affine
 world position.  Tests require the two queues to expose incompatible light
 quantities, retain current field identities, reject an out-of-domain level,
 and leave the ordinary coordinate and integer representations unchanged.
+
+** DONE Check the packed frame product across CPU and shader
+:PROPERTIES:
+:ID: F8U2LA
+:END:
+
+=camera-uniform-data= now publishes the quantity layout of its fixed 20-float
+prefix, and =frame-uniform-data= publishes the full 72-float product.  These
+remain ordinary specialized arrays: their declarations describe the
+cell-valued camera point, basis directions, projection and fog distances,
+sun and colour values, and shadow controls without wrapping any lane.
+
+The host declaration is independent of =*frame-uniform-members*=.  At buffer
+construction, a narrow luvcraft ABI adapter flattens the shader's actual
+byte-offset members and parsed component quantities into float positions; the
+host and shader layouts must compare equal in addition to occupying the same
+288 bytes.  The final four vec4 rows intentionally remain representation for
+the separately declared =:world-to-shadow= semantic map, rather than being
+mislabelled as sixteen homogeneous quantities.
 
 * A possible Lisp vocabulary
 :PROPERTIES:

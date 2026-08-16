@@ -156,19 +156,88 @@ check in BLOCK-WORLD-CAMERA-UNIFORM-SIZE keeps the two honest."
               +luvcraft-shadow-maximum-filter-radius+)
         (apply #'emit (shadow-frame-rows
                        (luvcraft-session-camera session) sky))))
+    (unless (= index (length data))
+      (error "Frame uniform packing emitted ~D of ~D lanes."
+             index (length data)))
+    (let ((declaration
+            (luv.arithmetic:value-declaration-for :frame-uniform-data)))
+      (unless (typep
+               data
+               (luv.arithmetic:declaration-representation-type declaration))
+        (error "Frame uniform data ~S does not satisfy ~S."
+               (type-of data)
+               (luv.arithmetic:declaration-representation-type declaration))))
     data))
+
+(defun frame-shader-uniform-product-layout (block)
+  "Flatten BLOCK's byte-offset members into frame-buffer float positions.
+
+This is deliberately luvcraft's fixed 32-bit-lane ABI adapter, not a claim
+about general uniform-block packing.  The shader owns offsets and member
+quantities; the host independently owns the product it writes."
+  (let ((bytes (spv:shader-uniform-block-byte-size block))
+        (projections nil))
+    (unless (zerop (mod bytes 4))
+      (error "Frame shader uniform size ~D is not a whole float lane count."
+             bytes))
+    (dolist (member (spv:shader-uniform-block-members block))
+      (let* ((byte-offset (spv:shader-uniform-member-offset member))
+             (width
+               (spv:shader-type-component-count
+                (luv.arithmetic:declaration-representation-type member)))
+             (whole
+               (luv.arithmetic:declaration-quantity-specification member))
+             (layout
+               (luv.arithmetic:declaration-quantity-layout member)))
+        (unless (and width (zerop (mod byte-offset 4)))
+          (error "Frame shader member ~S is not a 32-bit scalar-lane value."
+                 (spv:shader-object-name member)))
+        (let ((base (/ byte-offset 4)))
+          (when whole
+            (push
+             (luv.arithmetic:make-quantity-projection
+              (loop for position below width collect (+ base position))
+              whole)
+             projections))
+          (when layout
+            (unless (= width
+                       (luv.arithmetic:quantity-layout-extent layout))
+              (error "Frame shader member ~S has width ~D but layout ~D."
+                     (spv:shader-object-name member) width
+                     (luv.arithmetic:quantity-layout-extent layout)))
+            (dolist (projection
+                     (luv.arithmetic:quantity-layout-projections layout))
+              (push
+               (luv.arithmetic:make-quantity-projection
+                (mapcar
+                 (lambda (position) (+ base position))
+                 (luv.arithmetic:quantity-projection-positions projection))
+                (luv.arithmetic:quantity-projection-specification projection))
+               projections))))))
+    (luv.arithmetic:make-quantity-layout
+     (/ bytes 4) (nreverse projections))))
 
 (defun block-world-camera-uniform-size (session)
   "The frame buffer byte size derived from the shader-visible block layout.
 
 Checked against the host's packed frame data at construction, so growing
 the frame uniform cannot silently diverge between shader and host."
-  (let ((size (spv:shader-uniform-block-byte-size
-               (spv:block-world-camera-uniform-block)))
+  (let* ((block (spv:block-world-camera-uniform-block))
+         (size (spv:shader-uniform-block-byte-size block))
+         (declaration
+           (luv.arithmetic:value-declaration-for :frame-uniform-data))
+         (host-layout
+           (luv.arithmetic:declaration-quantity-layout declaration))
+         (shader-layout (frame-shader-uniform-product-layout block))
         (bytes (* 4 (length (frame-uniform-data session 1 1)))))
     (unless (= size bytes)
       (error "Frame uniform ABI mismatch: the shader block occupies ~D ~
               bytes but the host packs ~D." size bytes))
+    (unless (luv.arithmetic:quantity-layout= host-layout shader-layout)
+      (error "Frame uniform semantic ABI mismatch between ~S and shader ~S."
+             (luv.arithmetic:declaration-source-form declaration)
+             (mapcar #'spv:shader-object-name
+                     (spv:shader-uniform-block-members block))))
     size))
 
 (defun remember-luvcraft-resource (session resource)

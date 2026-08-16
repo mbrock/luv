@@ -1,7 +1,7 @@
 ;;; The first-person view and the scalar reference player simulation.
 ;;;
-;;; Camera mathematics stays small and inspectable: six vec4 values are
-;;; written directly into a std140-compatible uniform block.  The player
+;;; Camera mathematics stays small and inspectable: five vec4 values form the
+;;; prefix of the frame uniform block.  The player
 ;;; controller is intentionally a small scalar reference simulation whose
 ;;; body is distinct from the view camera and whose AABB queries the voxel
 ;;; lattice directly.  This is the behavior later dense body/contact domains
@@ -73,15 +73,28 @@ FRAME-UNIFORM-DATA from the session's sky clock and profile."
                      (coerce (vec3-y vector) 'single-float)
                      (coerce (vec3-z vector) 'single-float)
                      (coerce fourth 'single-float))))
-        (make-array
-         20 :element-type 'single-float
-         :initial-contents
-         (append (uniform-lane (camera-position camera) 0.0)
-                 (uniform-lane right 0.0)
-                 (uniform-lane up 0.0)
-                 (uniform-lane forward 0.0)
-                 (uniform-lane
-                  projection (/ (- (* far near)) (- far near)))))))))
+        (let* ((data
+                 (make-array
+                  20 :element-type 'single-float
+                  :initial-contents
+                  (append (uniform-lane (camera-position camera) 0.0)
+                          (uniform-lane right 0.0)
+                          (uniform-lane up 0.0)
+                          (uniform-lane forward 0.0)
+                          (uniform-lane
+                           projection (/ (- (* far near)) (- far near))))))
+               (declaration
+                 (luv.arithmetic:value-declaration-for
+                  :camera-uniform-data)))
+          (unless (typep
+                   data
+                   (luv.arithmetic:declaration-representation-type
+                    declaration))
+            (error "Camera uniform data ~S does not satisfy ~S."
+                   (type-of data)
+                   (luv.arithmetic:declaration-representation-type
+                    declaration)))
+          data)))))
 
 ;;; The first player controller is intentionally a small scalar reference
 ;;; simulation.  Its body is distinct from the view camera, and its AABB

@@ -511,15 +511,46 @@
           (ok (eq selected-block luv::*crystal-block*)))))))
 
 (deftest camera-uniform-coerces-vec3-at-the-gpu-boundary
-  (let ((uniform
+  (let* ((uniform
           (camera-uniform-data
            (make-instance 'fly-camera
                           :position (make-vec3 8d0 11d0 -6d0)
                           :yaw 1.25d0
                           :pitch -0.35d0)
-           1280 720)))
+           1280 720))
+         (declaration
+           (luv.arithmetic:value-declaration-for :camera-uniform-data)))
     (ok (typep uniform '(simple-array single-float (20))))
+    (ok (typep uniform
+               (luv.arithmetic:declaration-representation-type declaration)))
+    (ok (= 20
+           (luv.arithmetic:quantity-layout-extent
+            (luv.arithmetic:declaration-quantity-layout declaration))))
     (ok (equalp (subseq uniform 0 4) #(8.0 11.0 -6.0 0.0)))))
+
+(deftest frame-uniform-product-matches-the-live-shader-contract
+  (let* ((session
+           (make-instance 'luvcraft-session
+                          :camera (make-instance 'fly-camera)))
+         (data (luv::frame-uniform-data session 1280 720))
+         (declaration
+           (luv.arithmetic:value-declaration-for :frame-uniform-data))
+         (host-layout
+           (luv.arithmetic:declaration-quantity-layout declaration))
+         (block (luv.spir-v:block-world-camera-uniform-block))
+         (shader-layout (luv::frame-shader-uniform-product-layout block)))
+    (ok (eq declaration
+            (luv.arithmetic:value-declaration-for :frame-uniform-data)))
+    (ok (typep data
+               (luv.arithmetic:declaration-representation-type declaration)))
+    (ok (= 72 (luv.arithmetic:quantity-layout-extent host-layout)))
+    (ok (luv.arithmetic:quantity-layout= host-layout shader-layout))
+    (ok (= 288 (luv::block-world-camera-uniform-size session)))
+    ;; Four dense matrix rows are representation for the declared
+    ;; :WORLD-TO-SHADOW map, not sixteen falsely homogeneous quantities.
+    (loop for position from 56 below 72
+          do (ok (null (luv.arithmetic:project-quantity-layout
+                        host-layout (list position)))))))
 
 (deftest world-save-validation-rejects-unknown-meaning
   (ok (signals
