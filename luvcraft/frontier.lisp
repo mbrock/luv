@@ -402,7 +402,8 @@ manually staged lowering which COMPILE-FRONTIER-PROGRAM now generates. #X7Q90E"
    (lanes :initarg :lanes :initform nil :reader frontier-field-binding-lanes)
    (read-template :initarg :read :reader frontier-field-binding-read-template)
    (write-template :initarg :write :initform nil
-                   :reader frontier-field-binding-write-template))
+                   :reader frontier-field-binding-write-template)
+   (lazy-p :initarg :lazy :initform nil :reader frontier-field-binding-lazy-p))
   (:documentation
    "One program field role bound to storage reachable from a materialization.
 
@@ -410,14 +411,17 @@ DECLARATION is the represented-value declaration (often a voxel field
 definition) giving the field its quantity and Lisp representation.  LANES are
 (NAME FORM &key TYPE): storage borrowed once per materialization, where FORM
 mentions the template variable MATERIALIZATION.  READ and WRITE are forms
-over lane names, OFFSET, and (for WRITE) VALUE.  Templates are ordinary
-inspectable data; the compiler substitutes them into the emitted loop."))
+over lane names, MATERIALIZATION, OFFSET, WINDOW, and (for WRITE) VALUE.  A
+LAZY binding is read where the law mentions it rather than once up front, so
+a short-circuiting admission can skip an expensive probe.  Templates are
+ordinary inspectable data; the compiler substitutes them into the emitted
+loop."))
 
-(defun make-frontier-field-binding (name &key declaration lanes read write)
+(defun make-frontier-field-binding (name &key declaration lanes read write lazy)
   (check-type name symbol)
   (make-instance 'frontier-field-binding
                  :name name :declaration declaration :lanes lanes
-                 :read read :write write))
+                 :read read :write write :lazy lazy))
 
 (defun frontier-field-binding-quantity-specification (binding)
   (let ((declaration (frontier-field-binding-declaration binding)))
@@ -648,6 +652,9 @@ program VALUE is ignored.  Return whether the site was admitted."
         when type
           collect `(type ,type ,(cdr (assoc lane-name lanes-alist)))))
 
+(defun role-materialization-variable (role)
+  (ecase role (:source 'source) (:target 'target)))
+
 (defun field-read-form (lowered role offset-variable)
   (let* ((binding (lowered-field-binding lowered))
          (lanes (ecase role
@@ -655,8 +662,10 @@ program VALUE is ignored.  Return whether the site was admitted."
                   (:target (lowered-field-target-lanes lowered)))))
     (substitute-template
      (frontier-field-binding-read-template binding)
-     (append (mapcar (lambda (entry) (cons (car entry) (cdr entry))) lanes)
-             `((offset . ,offset-variable))))))
+     (append lanes
+             `((offset . ,offset-variable)
+               (materialization . ,(role-materialization-variable role))
+               (window . window))))))
 
 (defun field-write-form (lowered offset-variable value-form)
   (let* ((binding (lowered-field-binding lowered))
@@ -667,7 +676,8 @@ program VALUE is ignored.  Return whether the site was admitted."
     (substitute-template
      template
      (append (lowered-field-target-lanes lowered)
-             `((offset . ,offset-variable) (value . ,value-form))))))
+             `((offset . ,offset-variable) (value . ,value-form)
+               (materialization . target) (window . window))))))
 
 (defclass frontier-compilation ()
   ((definition :initarg :definition :reader compilation-definition)
@@ -894,6 +904,15 @@ are emitted but not compiled, for inspection. #53Q1II"
                           :site-domain site-domain)))
     (unless site-domain
       (error "COMPILE-FRONTIER-PROGRAM needs a :SITE-DOMAIN template."))
+    (dolist (lowered fields)
+      (let ((role (find (frontier-field-binding-name
+                         (lowered-field-binding lowered))
+                        roles :key #'frontier-field-role-name)))
+        (when (and (frontier-field-binding-lazy-p (lowered-field-binding lowered))
+                   (or (frontier-field-role-relaxed-p role)
+                       (frontier-field-role-memo-p role)))
+          (error "The ~S field is relaxed or a memo and cannot be bound lazily."
+                 (frontier-field-role-name role)))))
     (dolist (predicate predicates)
       (when (and (eq (frontier-relation-predicate-kind predicate) :direction=)
                  (not (member (frontier-relation-predicate-argument predicate)
@@ -948,14 +967,23 @@ are emitted but not compiled, for inspection. #53Q1II"
 ;;; materialization otherwise.  Nothing per relation is generic or allocated.
 
 (defun compilation-lowering-environment (compilation &key (source-p t))
-  "Map every arithmetic parameter to the emitted variable holding its value."
+  "Map every arithmetic parameter to the emitted form holding its value.
+
+Eager fields are read once into a variable; lazy fields lower to their read
+form wherever the law mentions them."
   (append
    (loop for lowered in (compilation-fields compilation)
+         for lazy = (frontier-field-binding-lazy-p
+                     (lowered-field-binding lowered))
          when source-p
            collect (cons (lowered-field-source-parameter lowered)
-                         (lowered-field-source-variable lowered))
+                         (if lazy
+                             (field-read-form lowered :source 'source-offset)
+                             (lowered-field-source-variable lowered)))
          collect (cons (lowered-field-target-parameter lowered)
-                       (lowered-field-target-variable lowered)))
+                       (if lazy
+                           (field-read-form lowered :target 'target-offset)
+                           (lowered-field-target-variable lowered))))
    (mapcar (lambda (parameter)
              (cons parameter (lang:arithmetic-object-name parameter)))
            (compilation-constants compilation))
@@ -997,11 +1025,12 @@ are emitted but not compiled, for inspection. #53Q1II"
                                       :key #'frontier-field-role-name))))))
         (when (or implied (member parameter referenced))
           (push lowered needed)
-          (push `(,variable ,(field-read-form lowered role offset-variable))
-                bindings)
-          (let ((type (frontier-field-binding-representation-type binding)))
-            (when type
-              (push `(type ,type ,variable) declarations))))))
+          (unless (frontier-field-binding-lazy-p binding)
+            (push `(,variable ,(field-read-form lowered role offset-variable))
+                  bindings)
+            (let ((type (frontier-field-binding-representation-type binding)))
+              (when type
+                (push `(type ,type ,variable) declarations)))))))
     (values (nreverse bindings) (nreverse declarations) (nreverse needed))))
 
 (defun emit-target-law (compilation candidate-form lowering-environment
