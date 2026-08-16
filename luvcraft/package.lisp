@@ -21,6 +21,7 @@
            #:frontier-execution
            #:frontier-execution-admissions
            #:frontier-execution-crossings
+           #:frontier-execution-elapsed-seconds
            #:frontier-execution-frontier
            #:frontier-execution-input
            #:frontier-execution-program

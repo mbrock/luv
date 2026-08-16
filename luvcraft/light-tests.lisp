@@ -206,6 +206,9 @@
                  comparison))))
       (dolist (execution
                (voxel-light-solver-comparison-frontier-executions comparison))
+        (ok (>=
+             (luvcraft.frontier:frontier-execution-elapsed-seconds execution)
+             0d0))
         (ok (plusp
              (luvcraft.frontier:frontier-execution-visits execution)))
         (ok (= (* 6
@@ -213,6 +216,26 @@
                (luvcraft.frontier:frontier-execution-relations execution)))
         (ok (plusp
              (luvcraft.frontier:frontier-execution-crossings execution)))))))
+
+(deftest light-solvers-expose-symmetric-nested-timing-zones
+  (let ((world (make-open-sky-test-world))
+        (trace (make-cpu-trace :label "voxel light solvers")))
+    (with-cpu-trace (trace)
+      (compare-voxel-light-solvers world))
+    (let ((names (mapcar #'cpu-trace-zone-name (cpu-trace-zones trace))))
+      (ok (equal
+           '(:lighting/compare
+             :lighting/legacy
+             :lighting/legacy/seed-sky
+             :lighting/legacy/propagate-sky
+             :lighting/legacy/seed-block
+             :lighting/legacy/propagate-block
+             :lighting/frontier
+             :lighting/frontier/seed-sky
+             :lighting/frontier/propagate-sky
+             :lighting/frontier/seed-block
+             :lighting/frontier/propagate-block)
+           names)))))
 
 (deftest frontier-light-can-be-selected-for-real-publication
   (let ((world (make-open-sky-test-world '(0 0 0) '(1 0 0))))

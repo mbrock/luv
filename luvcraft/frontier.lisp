@@ -158,9 +158,13 @@ the otherwise raw bucket number its meaning."))
    (relations :initform 0 :accessor frontier-execution-relations)
    (admissions :initform 0 :accessor frontier-execution-admissions)
    (crossings :initform 0 :accessor frontier-execution-crossings)
-   (unavailable :initform 0 :accessor frontier-execution-unavailable))
+   (unavailable :initform 0 :accessor frontier-execution-unavailable)
+   (elapsed-seconds
+    :initform 0d0
+    :type double-float
+    :accessor frontier-execution-elapsed-seconds))
   (:documentation
-   "Inspectable counters and retained choices from one frontier execution."))
+   "Inspectable work and timing evidence from one frontier execution."))
 
 (defun make-frontier-execution (program input frontier)
   (make-instance

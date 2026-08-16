@@ -62,6 +62,17 @@ invalidation, removal, and residency reconciliation are the next frontier
 program to state.  This lets the abstraction grow under exact differential
 evidence while we enjoy the much clearer conceptual surface immediately.
 
+The proof carries cost evidence at the same semantic boundaries.  Both
+solvers emit nested CPU/Tracy zones for the whole solve, sky and block
+seeding, and sky and block propagation; each retained frontier execution also
+records elapsed propagation time beside visits, relations, admissions,
+crossings, and peak frontier size.  A/B comparison therefore asks three
+different questions without confusing them: are the fields identical, did
+the programs perform the same semantic work, and where did the physical
+realizations spend time?  The ordinary production worker traverses these same
+zones, so a live Tracy capture observes the selected solver in the actual
+asynchronous world path, not only in a special benchmark.
+
 * Frontier is an operational pattern, not merely a queue
 :PROPERTIES:
 :ID: NXXOQT
@@ -553,6 +564,14 @@ brightest-first frontier, relation traversal, counters, exact oracle
 comparison, and live selector.  It reuses capture and publication on purpose:
 those shared boundaries make the A/B result exact while the new execution
 model proves itself.
+
+A warmed two-chunk live-image snapshot ran seven exact A/B pairs.  Legacy
+solves ranged from =11.7= to =12.3 ms= and frontier solves from =15.7= to
+=16.3 ms= on this machine.  The nested trace localized the present difference
+to frontier sky seeding and propagation.  This is an optimization map, not a
+verdict on the language: both programs visited the same sites and produced
+identical fields, while the new semantic boundaries made their physical cost
+directly comparable.
 
 * NEXT Give frontier light its own invalidation program
 :PROPERTIES:

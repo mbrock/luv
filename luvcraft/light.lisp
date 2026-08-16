@@ -662,13 +662,21 @@ LOCAL has dynamic extent and must be copied before FUNCTION retains it."
 
 (defun solve-light-region (region &key (scheduling :level))
   "Seed and propagate both light fields to fixation."
-  (let ((visited
-          (+ (propagate-light-region
-              region #'light-region-entry-sky
-              (seed-region-sky-boundaries region :scheduling scheduling) t)
+  (let* ((sky-worklist
+           (with-cpu-trace-zone (:lighting/legacy/seed-sky)
+             (seed-region-sky-boundaries region :scheduling scheduling)))
+         (sky-visits
+           (with-cpu-trace-zone (:lighting/legacy/propagate-sky)
              (propagate-light-region
-              region #'light-region-entry-block
-              (seed-region-emitters region :scheduling scheduling) nil))))
+              region #'light-region-entry-sky sky-worklist t)))
+         (block-worklist
+           (with-cpu-trace-zone (:lighting/legacy/seed-block)
+             (seed-region-emitters region :scheduling scheduling)))
+         (block-visits
+           (with-cpu-trace-zone (:lighting/legacy/propagate-block)
+             (propagate-light-region
+              region #'light-region-entry-block block-worklist nil)))
+         (visited (+ sky-visits block-visits)))
     (values region visited)))
 
 (defparameter *voxel-light-solver* :legacy
@@ -686,7 +694,8 @@ switched and compared without changing publication or consumers. #X7Q90E")
 (defmethod solve-light-region-using
     ((solver (eql :legacy)) (region light-region) &key (scheduling :level))
   (declare (ignore solver))
-  (solve-light-region region :scheduling scheduling))
+  (with-cpu-trace-zone (:lighting/legacy)
+    (solve-light-region region :scheduling scheduling)))
 
 ;;; Publication compares complete candidate arrays against the chunk's
 ;;; current field and advances light revisions only: content revisions and
