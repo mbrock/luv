@@ -56,11 +56,12 @@
         (ignore-errors (delete-file endpoint))))))
 
 (defun usage (&optional (stream *standard-output*))
-  (format stream "Usage: luvcraft [--metal] [--world FILE]~%")
+  (format stream "Usage: luvcraft [--metal] [--tracy] [--world FILE]~%")
   (format stream "       luvcraft [--help | --smoke-test PNG | --metal-smoke-test PNG | --metal-benchmark [FRAMES [CSV [SCENARIO]]]]~%")
   (format stream "~%")
   (format stream "With no arguments, resume the default interactive world.~%")
   (format stream "--metal opens the interactive world with the Metal 4 backend.~%")
+  (format stream "--tracy exposes live frame and worker zones to Tracy 0.13.1.~%")
   (format stream "--world loads or creates the named persistent world.~%")
   (format stream "--smoke-test renders one hidden Vulkan frame and exits.~%")
   (format stream "--metal-smoke-test renders one hidden Metal 4 frame and exits.~%")
@@ -89,10 +90,15 @@
   #-darwin
   (error "The Metal backend is only available on Darwin."))
 
-(defun run-interactive (&key provider
+(defun run-interactive (&key provider tracy-p
                              (world-pathname
                                (default-luvcraft-world-pathname)))
   "Run luvcraft until its native window closes."
+  ;; Start before START-LUVCRAFT creates the producer.  Tracy thread names are
+  ;; emitted by the threads themselves as they begin, so attaching later would
+  ;; leave an otherwise useful worker lane anonymous.
+  (when tracy-p
+    (start-luvcraft-tracy))
   (multiple-value-bind (world resume-description)
       (load-or-make-luvcraft-world world-pathname)
     (multiple-value-bind (camera player selected-block)
@@ -124,19 +130,22 @@
 
 (defun parse-interactive-options (arguments)
   (let ((provider nil)
+        (tracy-p nil)
         (world-pathname (default-luvcraft-world-pathname)))
     (loop while arguments
           for argument = (pop arguments)
           do (cond
                ((string= argument "--metal")
                 (setf provider (make-metal-provider)))
+               ((string= argument "--tracy")
+                (setf tracy-p t))
                ((string= argument "--world")
                 (unless arguments
                   (error "--world requires a pathname."))
                 (setf world-pathname (pathname (pop arguments))))
                (t (return-from parse-interactive-options
-                    (values nil nil nil)))))
-    (values provider world-pathname t)))
+                    (values nil nil nil nil)))))
+    (values provider world-pathname tracy-p t)))
 
 (defun run-smoke-test (pathname &optional provider)
   (format t "Rendering ~A~%" pathname)
@@ -182,10 +191,11 @@
      (run-metal-benchmark
       (second arguments) (third arguments) (fourth arguments)))
     (t
-     (multiple-value-bind (provider world-pathname interactive-p)
+     (multiple-value-bind (provider world-pathname tracy-p interactive-p)
          (parse-interactive-options arguments)
        (if interactive-p
-           (run-interactive :provider provider :world-pathname world-pathname)
+           (run-interactive :provider provider :tracy-p tracy-p
+                            :world-pathname world-pathname)
            (progn
              (usage *error-output*)
              (error "Invalid luvcraft arguments: ~{~A~^ ~}" arguments)))))))

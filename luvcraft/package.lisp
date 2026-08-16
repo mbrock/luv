@@ -212,6 +212,7 @@
            #:sky-keyframe
            #:sky-profile
            #:start-luvcraft
+           #:start-luvcraft-tracy
            #:step-block-world-player
            #:stop-luvcraft
            #:stop-world-checkpoint-writer

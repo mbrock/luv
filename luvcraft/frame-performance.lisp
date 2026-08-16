@@ -48,6 +48,44 @@
                                   'double-float)))))
              (progn ,@body))))))
 
+;;; Tracy watches the same frame path live, where the sample struct above
+;;; watches a fixed batch of frames and prints the result.  The two are meant
+;;; to answer different questions: the benchmark says whether a change moved
+;;; the numbers, and Tracy says where a frame that felt wrong actually went.
+
+(defparameter *luvcraft-tracy-plots*
+  '("resident chunks" "pending production" "staged chunks"
+    "drawable chunks" "draws" "vertices")
+  "The per-frame counts luvcraft draws alongside its Tracy zones.")
+
+(defvar *luvcraft-tracy-plots-described-p* nil
+  "Whether the connected viewer has been told how to draw luvcraft's plots.")
+
+(defun start-luvcraft-tracy ()
+  "Start Tracy for luvcraft and answer whether the profiler is running.
+
+Nothing is recorded until a viewer connects, so this is safe to leave on.
+Call it before starting a session if you want the production workers to appear
+under their own names: a thread can only introduce itself to a profiler that
+is already running, and luvcraft's workers introduce themselves as they start."
+  (start-tracy :application-name "luvcraft")
+  (setf *luvcraft-tracy-plots-described-p* nil)
+  *tracy*)
+
+(defun describe-luvcraft-tracy-plots ()
+  "Describe luvcraft's plots to a viewer, once per connection.
+
+Plot configuration reaches only a viewer that is already listening, and a
+capture may begin at any frame, so the description is re-sent on each fresh
+connection rather than once at startup."
+  (let ((connected (tracy-connected-p)))
+    (cond ((and connected (not *luvcraft-tracy-plots-described-p*))
+           (dolist (plot *luvcraft-tracy-plots*)
+             (configure-tracy-plot plot :format :number :step t))
+           (setf *luvcraft-tracy-plots-described-p* t))
+          ((not connected)
+           (setf *luvcraft-tracy-plots-described-p* nil)))))
+
 (luv.arithmetic.records:define-quantity-struct luvcraft-frame-benchmark
   (backend :metal :type keyword)
   (scenario :steady :type keyword)

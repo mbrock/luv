@@ -391,6 +391,43 @@
         (ok (search "inclusive" text))
         (ok (search "again" text))))))
 
+(deftest tracy-source-locations-are-interned-per-zone
+  ;; Tracy tells zones apart by the address of their source location, and
+  ;; recompiling a file re-runs the LOAD-TIME-VALUE that asks for one.  Two
+  ;; requests describing the same zone therefore have to answer with the same
+  ;; pointer, or a recompile in the middle of a capture would split the zone.
+  (let ((first (luv:tracy-source-location "test/zone" :file "tests.lisp"))
+        (again (luv:tracy-source-location "test/zone" :file "tests.lisp"))
+        (other (luv:tracy-source-location "test/other" :file "tests.lisp")))
+    (ok (cffi:pointer-eq first again))
+    (ok (not (cffi:pointer-eq first other)))
+    (ok (string= "canvas/frame" (luv:tracy-zone-name :canvas/frame)))
+    (ok (string= "already a name" (luv:tracy-zone-name "already a name")))))
+
+(deftest tracy-zone-contexts-travel-as-a-single-word
+  ;; The binding spells TracyCZoneCtx as a uint64 rather than as the structure
+  ;; it is, which keeps zone entry and exit out of libffi but makes an ABI
+  ;; claim: that `struct { uint32_t id; int32_t active; }' comes back in the
+  ;; register a word would, id low and active high.  Check it on whatever
+  ;; machine is running rather than trusting it on one nobody has tried.
+  (if (not (luv:tracy-client-available-p))
+      (ok t "This machine has no Tracy client to check the zone ABI against.")
+      (let ((ours (not luv:*tracy*)))
+        (unwind-protect
+             (progn
+               (luv:start-tracy :application-name "luv tests")
+               (let* ((location (luv::tracy-source-location "test/abi"))
+                      (outer (luv::%tracy-emit-zone-begin location 1))
+                      (inner (luv::%tracy-emit-zone-begin location 1))
+                      (active (if (luv:tracy-connected-p) 1 0)))
+                 (luv::%tracy-emit-zone-end inner)
+                 (luv::%tracy-emit-zone-end outer)
+                 ;; A structure returned indirectly would leave the high half
+                 ;; holding whatever the register happened to contain.
+                 (ok (= active (ldb (byte 32 32) outer)))
+                 (ok (= active (ldb (byte 32 32) inner)))))
+          (when ours (luv:stop-tracy))))))
+
 (deftest texture-preparation-is-a-backend-neutral-command
   (let ((encoder (make-instance 'recording-command-encoder)))
     (prepare-texture encoder :shadow-depth :texture-binding)

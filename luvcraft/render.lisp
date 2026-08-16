@@ -359,7 +359,7 @@ the frame uniform cannot silently diverge between shader and host."
              (refresh-luvcraft-mesh session)))
          (extent (canvas-extent (luvcraft-session-context session)))
          (frame (luvcraft-frame-state session surface-texture)))
-    (when sample
+    (when (or sample (tracy-connected-p))
       (let ((mesh-vertices 0)
             (mesh-draws 0))
         (dolist (product products)
@@ -369,21 +369,38 @@ the frame uniform cannot silently diverge between shader and host."
             (when (plusp vertices)
               (incf mesh-draws)
               (incf mesh-vertices vertices))))
-        (setf (luvcraft-frame-sample-resident-chunk-count sample)
-              (length
-               (resident-world-chunks (luvcraft-session-world session)))
-              (luvcraft-frame-sample-pending-production-count sample)
-              (production-system-pending-count
-               (luvcraft-session-production-system session))
-              (luvcraft-frame-sample-staged-chunk-count sample)
-              (hash-table-count
-               (luvcraft-session-staged-chunk-products session))
-              (luvcraft-frame-sample-chunk-count sample) (length products)
-              (luvcraft-frame-sample-draw-count sample)
-              (+ 2 (* 2 mesh-draws))
-              (luvcraft-frame-sample-vertex-count sample)
-              (+ +block-world-crosshair-vertex-count+ 3
-                 (* 2 mesh-vertices)))))
+        (let ((resident-chunks
+                (length
+                 (resident-world-chunks (luvcraft-session-world session))))
+              (pending-production
+                (production-system-pending-count
+                 (luvcraft-session-production-system session)))
+              (staged-chunks
+                (hash-table-count
+                 (luvcraft-session-staged-chunk-products session)))
+              (chunks (length products))
+              (draws (+ 2 (* 2 mesh-draws)))
+              (vertices (+ +block-world-crosshair-vertex-count+ 3
+                           (* 2 mesh-vertices))))
+          (when sample
+            (setf (luvcraft-frame-sample-resident-chunk-count sample)
+                  resident-chunks
+                  (luvcraft-frame-sample-pending-production-count sample)
+                  pending-production
+                  (luvcraft-frame-sample-staged-chunk-count sample)
+                  staged-chunks
+                  (luvcraft-frame-sample-chunk-count sample) chunks
+                  (luvcraft-frame-sample-draw-count sample) draws
+                  (luvcraft-frame-sample-vertex-count sample) vertices))
+          ;; The same counts the benchmark records per sample, drawn
+          ;; against the live timeline so a frame-time spike can be read
+          ;; against the world that produced it.
+          (tracy-plot "resident chunks" resident-chunks)
+          (tracy-plot "pending production" pending-production)
+          (tracy-plot "staged chunks" staged-chunks)
+          (tracy-plot "drawable chunks" chunks)
+          (tracy-plot "draws" draws)
+          (tracy-plot "vertices" vertices))))
     (with-luvcraft-frame-timing
         (sample luvcraft-frame-sample-uniform-seconds
                 :luvcraft/uniform-update)
@@ -465,6 +482,7 @@ the frame uniform cannot silently diverge between shader and host."
 
 (defun render-luvcraft-frame (session timestamp &optional sample)
   (when (luvcraft-session-running-p session)
+    (describe-luvcraft-tracy-plots)
     (with-luvcraft-frame-timing
         (sample luvcraft-frame-sample-frame-seconds :luvcraft/frame)
       (with-luvcraft-frame-timing
@@ -504,7 +522,11 @@ the frame uniform cannot silently diverge between shader and host."
          (luvcraft-session-context session)
          (lambda (surface-texture encoder)
            (encode-luvcraft-frame
-            session surface-texture encoder :sample sample)))))))
+            session surface-texture encoder :sample sample)))))
+    ;; The frame mark closes Tracy's frame outside every zone above, which is
+    ;; what lets the viewer draw a frame-time graph and say which frame a zone
+    ;; belongs to.
+    (tracy-frame-mark)))
 
 (defmethod handle-canvas-event
     ((session luvcraft-session) canvas (event canvas-key-press-event))

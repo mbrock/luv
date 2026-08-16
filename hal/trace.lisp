@@ -84,19 +84,27 @@
        ,@body)))
 
 (defmacro with-cpu-trace-zone ((name) &body body)
-  "Measure BODY as nested zone NAME when CPU tracing is active.
+  "Measure BODY as nested zone NAME for whichever measurement is watching.
 
-The disabled path is one special-variable test and does not allocate.  Active
-traces reuse their zone storage after the first capture.  #OHNIWM"
+Two independent things may be: a Tracy viewer attached to this image, and an
+opt-in CPU-TRACE capture.  Each disabled path is one special-variable test and
+does not allocate, so instrumenting a frame path costs nothing when nobody is
+measuring it.  Active traces reuse their zone storage after the first capture.
+
+The Tracy zone is the outer one.  When only Tracy is watching there is no
+bookkeeping inside it to measure, and when a CPU-TRACE capture is running its
+own cost belongs to the zone it is attributed to rather than being hidden from
+it.  #OHNIWM"
   (let ((trace (gensym "TRACE"))
         (index (gensym "ZONE")))
-    `(let ((,trace *cpu-trace*))
-       (if ,trace
-           (let ((,index (begin-cpu-trace-zone ,trace ,name)))
-             (unwind-protect
-                  (progn ,@body)
-               (end-cpu-trace-zone ,trace ,index)))
-           (progn ,@body)))))
+    `(with-tracy-zone (,name)
+       (let ((,trace *cpu-trace*))
+         (if ,trace
+             (let ((,index (begin-cpu-trace-zone ,trace ,name)))
+               (unwind-protect
+                    (progn ,@body)
+                 (end-cpu-trace-zone ,trace ,index)))
+             (progn ,@body))))))
 
 (defun cpu-trace-zones (trace)
   "Return TRACE's completed zones in start order."

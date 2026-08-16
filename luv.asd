@@ -69,6 +69,7 @@
     :serial t
     :components
     ((:file "package")
+     (:file "tracy")
      (:file "trace")
      (:file "gpu")
      (:file "canvas")

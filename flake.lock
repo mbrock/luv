@@ -54,7 +54,25 @@
       "inputs": {
         "cl-sdl3": "cl-sdl3",
         "mcclim": "mcclim",
-        "nixpkgs": "nixpkgs"
+        "nixpkgs": "nixpkgs",
+        "tracy": "tracy"
+      }
+    },
+    "tracy": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1765493162,
+        "narHash": "sha256-D4aQ5kSfWH9qEUaithR0W/E5pN5on0n9YoBHeMggMSE=",
+        "owner": "wolfpld",
+        "repo": "tracy",
+        "rev": "05cceee0df3b8d7c6fa87e9638af311dbabc63cb",
+        "type": "github"
+      },
+      "original": {
+        "owner": "wolfpld",
+        "ref": "v0.13.1",
+        "repo": "tracy",
+        "type": "github"
       }
     }
   },

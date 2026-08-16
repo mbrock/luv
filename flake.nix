@@ -10,8 +10,15 @@
     url = "git+https://github.com/aiffc/cl-sdl3.git?rev=47c90b54715aba23752b70d382a3eb310172cd34";
     flake = false;
   };
+  # Keep this tag equal to the Tracy profiler you actually run: the client and
+  # the viewer negotiate an exact protocol version and refuse to talk across a
+  # mismatch.
+  inputs.tracy = {
+    url = "github:wolfpld/tracy/v0.13.1";
+    flake = false;
+  };
 
-  outputs = { nixpkgs, mcclim, cl-sdl3, ... }:
+  outputs = { nixpkgs, mcclim, cl-sdl3, tracy, ... }:
     let
       systems = [
         "x86_64-linux"
@@ -43,10 +50,69 @@
               "3000"
             ];
           };
+          # Tracy ships its whole client as one translation unit, so the profiled
+          # build is a single compiler invocation rather than a CMake project.
+          # The options matter more than the build does:
+          #
+          #   ON_DEMAND       only collect while a viewer is attached, so the
+          #                   durable ./sly image does not accumulate a trace
+          #                   nobody asked for
+          #   DELAYED_INIT +  start and stop the profiler explicitly, instead of
+          #   MANUAL_LIFETIME at dlopen time when CFFI happens to load us
+          #   NO_CRASH_HANDLER Tracy installs SIGSEGV/SIGBUS/SIGILL handlers on
+          #                   Linux, and SBCL needs those signals for its GC
+          #                   write barrier and guard pages
+          #   NO_SYSTEM_TRACING keep perf_event sampling out of the Lisp image;
+          #                   macOS has no system tracing to lose anyway
+          tracyClient = pkgs.stdenv.mkDerivation {
+            pname = "tracy-client";
+            version = "0.13.1";
+            src = tracy;
+            dontConfigure = true;
+            buildPhase =
+              let
+                extension = pkgs.stdenv.hostPlatform.extensions.sharedLibrary;
+              in ''
+                runHook preBuild
+                $CXX -std=c++17 -O2 -fPIC -fvisibility=hidden -shared \
+                  -DTRACY_ENABLE \
+                  -DTRACY_ON_DEMAND \
+                  -DTRACY_DELAYED_INIT \
+                  -DTRACY_MANUAL_LIFETIME \
+                  -DTRACY_NO_CRASH_HANDLER \
+                  -DTRACY_NO_SYSTEM_TRACING \
+                  -Ipublic \
+                  public/TracyClient.cpp \
+                  ${nixpkgs.lib.optionalString pkgs.stdenv.isDarwin
+                      "-install_name $out/lib/libTracyClient${extension}"} \
+                  ${nixpkgs.lib.optionalString pkgs.stdenv.isLinux
+                      "-pthread -ldl"} \
+                  -o libTracyClient${extension}
+                runHook postBuild
+              '';
+            installPhase =
+              let
+                extension = pkgs.stdenv.hostPlatform.extensions.sharedLibrary;
+              in ''
+                runHook preInstall
+                install -Dm555 libTracyClient${extension} \
+                  $out/lib/libTracyClient${extension}
+                mkdir -p $out/include
+                cp -r public/tracy $out/include/
+                runHook postInstall
+              '';
+            meta = {
+              description = "Tracy profiler client, built for a live SBCL image";
+              inherit (pkgs.stdenv.hostPlatform) system;
+            };
+          };
+          tracyClientLibrary =
+            "${tracyClient}/lib/libTracyClient${pkgs.stdenv.hostPlatform.extensions.sharedLibrary}";
           nativeLibraryPath = nixpkgs.lib.makeLibraryPath (
             [
               pkgs.libffi
               pkgs.harfbuzz
+              tracyClient
               pkgs.mesa
               pkgs.sdl3
               pkgs.sdl3-image
@@ -111,6 +177,7 @@
             text = ''
               export LUV_NIX_SHELL=1
               export LUV_SLYNK_DIR=${slyRoot}/slynk
+              export LUV_TRACY_CLIENT=${tracyClientLibrary}
               export CL_SOURCE_REGISTRY=${mcclim}//:${cl-sdl3}//
               export LD_LIBRARY_PATH=${nativeLibraryPath}''${LD_LIBRARY_PATH:+:}''${LD_LIBRARY_PATH:-}
 
@@ -144,7 +211,10 @@
             '';
           };
         in
-        { inherit pkgs sbcl lisp nativeLibraryPath slyRoot dev; };
+        {
+          inherit pkgs sbcl lisp nativeLibraryPath slyRoot dev;
+          inherit tracyClient tracyClientLibrary;
+        };
     in
     {
       packages = forAllSystems (system:
@@ -154,6 +224,7 @@
           sbcl = env.sbcl;
           lisp = env.lisp;
           dev = env.dev;
+          tracy-client = env.tracyClient;
           default = env.lisp;
         });
 
@@ -180,6 +251,7 @@
             LD_LIBRARY_PATH = env.nativeLibraryPath;
             LUV_NIX_SHELL = "1";
             LUV_SLYNK_DIR = "${env.slyRoot}/slynk";
+            LUV_TRACY_CLIENT = env.tracyClientLibrary;
             CL_SOURCE_REGISTRY = "${mcclim}//:${cl-sdl3}//";
             shellHook = ''
               if [ -z "''${SDL_VIDEODRIVER:-}" ] \

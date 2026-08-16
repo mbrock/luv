@@ -165,6 +165,19 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
 (defpackage #:luv
   (:use #:cl)
   (:export #:*gpu-provider*
+           #:*tracy*
+           #:start-tracy
+           #:stop-tracy
+           #:tracy-connected-p
+           #:tracy-client-available-p
+           #:with-tracy-zone
+           #:tracy-frame-mark
+           #:tracy-plot
+           #:configure-tracy-plot
+           #:tracy-message
+           #:name-tracy-thread
+           #:tracy-source-location
+           #:tracy-zone-name
            #:*cpu-trace*
            #:cpu-trace
            #:cpu-trace-zone

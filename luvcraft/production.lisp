@@ -89,6 +89,10 @@
        (production-system-request-mailbox system) :work))))
 
 (defun run-production-system (system)
+  ;; Tracy gives every thread that emits a zone its own lane, labelled by the
+  ;; thread id until the thread says otherwise.  Naming the worker here, from
+  ;; inside the thread, is what makes the lane read as the job it is doing.
+  (name-tracy-thread (production-system-name system))
   (loop
     (multiple-value-bind (message received-p)
         (sb-concurrency:receive-message
@@ -102,9 +106,10 @@
              (let* ((start (get-internal-real-time))
                     (value nil)
                     (condition nil))
-               (handler-case
-                   (setf value (perform-production-request request))
-                 (error (caught) (setf condition caught)))
+               (with-cpu-trace-zone (:production/perform)
+                 (handler-case
+                     (setf value (perform-production-request request))
+                   (error (caught) (setf condition caught))))
                (sb-concurrency:send-message
                 (production-system-result-mailbox system)
                 (make-instance
