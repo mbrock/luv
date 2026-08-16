@@ -200,6 +200,7 @@
 (define-lisp-arithmetic-operator - lisp-subtract)
 (define-lisp-arithmetic-operator * lisp-multiply)
 (define-lisp-arithmetic-operator / lisp-divide)
+(define-lisp-arithmetic-operator mod mod)
 (define-lisp-arithmetic-operator dot lisp-dot)
 (define-lisp-arithmetic-operator min lisp-min)
 (define-lisp-arithmetic-operator max lisp-max)
@@ -317,13 +318,26 @@
                   (cons (lang:arithmetic-counted-fold-state-binding expression)
                         state-name)
                   environment))
-         (update
-           (lower-lisp-arithmetic-expression
-            (lang:arithmetic-counted-fold-update expression)
-            fold-environment)))
-    `(let ((,state-name ,initial))
-       (dotimes (,index-name ,count ,state-name)
-         (setf ,state-name ,update)))))
+         (update-environment fold-environment)
+         (update-bindings nil))
+    (dolist (binding (lang:arithmetic-counted-fold-bindings expression))
+      (let ((name
+              (gensym
+               (format nil "~A-" (lang:arithmetic-object-name binding))))
+            (value
+              (lower-lisp-arithmetic-expression
+               (lang:arithmetic-binding-expression binding)
+               update-environment)))
+        (push (list name value) update-bindings)
+        (push (cons binding name) update-environment)))
+    (let ((update
+            (lower-lisp-arithmetic-expression
+             (lang:arithmetic-counted-fold-update expression)
+             update-environment)))
+      `(let ((,state-name ,initial))
+         (dotimes (,index-name ,count ,state-name)
+           (let* ,(nreverse update-bindings)
+             (setf ,state-name ,update)))))))
 
 (defun arithmetic-definition-for-lisp (name)
   (or (lang:arithmetic-function-definition-for name)

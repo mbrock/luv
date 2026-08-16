@@ -70,7 +70,12 @@
    (initial :initarg :initial :reader msl-counted-fold-statement-initial)
    (index-name
     :initarg :index-name :reader msl-counted-fold-statement-index-name)
+   (index-type
+    :initarg :index-type :reader msl-counted-fold-statement-index-type)
    (count :initarg :count :reader msl-counted-fold-statement-count)
+   (bindings
+    :initarg :bindings :initform nil
+    :reader msl-counted-fold-statement-bindings)
    (update :initarg :update :reader msl-counted-fold-statement-update)
    (origin :initarg :origin :reader msl-counted-fold-statement-origin)))
 
@@ -131,11 +136,16 @@
   (case (spv:shader-type-name (spv:find-shader-type type source-form))
     (:bool "bool")
     (:float "float")
+    (:uint "uint")
     (:vec2 "float2")
     (:vec3 "float3")
     (:vec4 "float4")
+    (:uvec2 "uint2")
+    (:uvec3 "uint3")
+    (:uvec4 "uint4")
     (:texture-2d "texture2d<float>")
     (:depth-texture-2d "depth2d<float>")
+    (:uint-texture-2d "texture2d<uint>")
     (:sampler "sampler")
     (otherwise
      (error 'spv:shader-language-error
@@ -433,29 +443,52 @@
               index-name
               (gethash state-binding (msl-context-references context))
               state-name)
-        (let ((update
-                (lower-msl-expression
-                 context (lang:arithmetic-counted-fold-update expression))))
-          (setf (msl-context-pending-statements context)
-                (nconc (msl-context-pending-statements context)
-                       (list
-                        (make-instance
-                         'msl-counted-fold-statement
-                         :type (msl-type-name
-                                (spv:shader-expression-type expression))
-                         :state-name state-name :initial initial
-                         :index-name index-name :count count
-                         :update update :origin expression))))
-          (if old-index-p
-              (setf (gethash index-binding
-                             (msl-context-references context))
-                    old-index)
-              (remhash index-binding (msl-context-references context)))
-          (if old-state-p
-              (setf (gethash state-binding
-                             (msl-context-references context))
-                    old-state)
-              (remhash state-binding (msl-context-references context))))))
+        (let ((local-statements nil))
+          (dolist (binding
+                   (lang:arithmetic-counted-fold-bindings expression))
+            (let* ((binding-expression
+                     (spv:shader-binding-expression binding))
+                   (name (msl-identifier (spv:shader-object-name binding)))
+                   (value (lower-msl-expression context binding-expression)))
+              (setf (gethash binding (msl-context-references context)) name)
+              (push (make-instance
+                     'msl-variable-statement
+                     :type (msl-type-name
+                            (spv:shader-expression-type binding-expression))
+                     :name name :value value :origin binding)
+                    local-statements)))
+          (let ((update
+                  (lower-msl-expression
+                   context (lang:arithmetic-counted-fold-update expression))))
+            (setf (msl-context-pending-statements context)
+                  (nconc (msl-context-pending-statements context)
+                         (list
+                          (make-instance
+                           'msl-counted-fold-statement
+                           :type (msl-type-name
+                                  (spv:shader-expression-type expression))
+                           :state-name state-name :initial initial
+                           :index-name index-name
+                           :index-type
+                           (msl-type-name
+                            (spv:shader-expression-type
+                             (lang:arithmetic-counted-fold-count expression)))
+                           :count count
+                           :bindings (nreverse local-statements)
+                           :update update :origin expression))))
+            (dolist (binding
+                     (lang:arithmetic-counted-fold-bindings expression))
+              (remhash binding (msl-context-references context)))
+            (if old-index-p
+                (setf (gethash index-binding
+                               (msl-context-references context))
+                      old-index)
+                (remhash index-binding (msl-context-references context)))
+            (if old-state-p
+                (setf (gethash state-binding
+                               (msl-context-references context))
+                      old-state)
+                (remhash state-binding (msl-context-references context)))))))
     (note-msl-occurrence context expression state-name)))
 
 (defgeneric lower-msl-shader-map-application
@@ -636,6 +669,7 @@
 (define-msl-infix-operator - "-")
 (define-msl-infix-operator * "*")
 (define-msl-infix-operator / "/")
+(define-msl-infix-operator mod "%")
 (define-msl-infix-operator < "<")
 (define-msl-infix-operator <= "<=")
 (define-msl-infix-operator > ">")
@@ -693,6 +727,23 @@
 (define-msl-vector-constructor spv:vec2)
 (define-msl-vector-constructor spv:vec3)
 (define-msl-vector-constructor spv:vec4)
+(define-msl-vector-constructor spv:uvec2)
+(define-msl-vector-constructor spv:uvec3)
+(define-msl-vector-constructor spv:uvec4)
+
+(defmethod spv:lower-shader-call
+    ((operator (eql 'spv:uint))
+     (context msl-lowering-context)
+     (expression spv:shader-call))
+  (declare (ignore operator))
+  (lower-msl-function-call context expression "uint"))
+
+(defmethod spv:lower-shader-call
+    ((operator (eql 'float))
+     (context msl-lowering-context)
+     (expression spv:shader-call))
+  (declare (ignore operator))
+  (lower-msl-function-call context expression "float"))
 
 (defmethod spv:lower-shader-call
     ((operator (eql 'spv:swizzle))
@@ -744,6 +795,17 @@
      (destructuring-bind (texture sampler coordinate depth-reference) operands
        (format nil "~A.sample_compare(~A, ~A, ~A)"
                texture sampler coordinate depth-reference)))))
+
+(defmethod spv:lower-shader-call
+    ((operator (eql 'spv:texel-load))
+     (context msl-lowering-context)
+     (expression spv:shader-call))
+  (declare (ignore operator))
+  (destructuring-bind (texture coordinate)
+      (mapcar #'msl-occurrence-text
+              (lower-msl-operands context expression))
+    (note-msl-occurrence
+     context expression (format nil "~A.read(~A)" texture coordinate))))
 
 (defun msl-interface-attribute (stage declaration)
   (let ((direction (spv:shader-interface-direction declaration))
@@ -895,11 +957,21 @@
           (msl-counted-fold-statement-state-name statement)
           (msl-occurrence-text
            (msl-counted-fold-statement-initial statement)))
-  (format stream "  for (float ~A = 0.0f; ~A < ~A; ~A += 1.0f) {~%"
-          (msl-counted-fold-statement-index-name statement)
-          (msl-counted-fold-statement-index-name statement)
-          (msl-occurrence-text (msl-counted-fold-statement-count statement))
-          (msl-counted-fold-statement-index-name statement))
+  (let* ((index-type (msl-counted-fold-statement-index-type statement))
+         (unsigned-p (string= index-type "uint")))
+    (format stream "  for (~A ~A = ~A; ~A < ~A; ~A += ~A) {~%"
+            index-type
+            (msl-counted-fold-statement-index-name statement)
+            (if unsigned-p "0u" "0.0f")
+            (msl-counted-fold-statement-index-name statement)
+            (msl-occurrence-text (msl-counted-fold-statement-count statement))
+            (msl-counted-fold-statement-index-name statement)
+            (if unsigned-p "1u" "1.0f")))
+  (dolist (binding (msl-counted-fold-statement-bindings statement))
+    (format stream "    ~A ~A = ~A;~%"
+            (msl-variable-statement-type binding)
+            (msl-variable-statement-name binding)
+            (msl-occurrence-text (msl-variable-statement-value binding))))
   (format stream "    ~A = ~A;~%  }~%"
           (msl-counted-fold-statement-state-name statement)
           (msl-occurrence-text

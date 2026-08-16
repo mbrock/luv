@@ -353,6 +353,10 @@
    (state-binding
     :initarg :state-binding
     :reader arithmetic-counted-fold-state-binding)
+   (bindings
+    :initarg :bindings
+    :initform nil
+    :reader arithmetic-counted-fold-bindings)
    (update
     :initarg :update
     :reader arithmetic-counted-fold-update))
@@ -385,9 +389,12 @@
 
 (defmethod arithmetic-expression-children
     ((expression arithmetic-counted-fold))
-  (list (arithmetic-counted-fold-count expression)
-        (arithmetic-counted-fold-initial expression)
-        (arithmetic-counted-fold-update expression)))
+  (append
+   (list (arithmetic-counted-fold-count expression)
+         (arithmetic-counted-fold-initial expression))
+   (mapcar #'arithmetic-binding-expression
+           (arithmetic-counted-fold-bindings expression))
+   (list (arithmetic-counted-fold-update expression))))
 
 (defgeneric arithmetic-function-definition-for (name)
   (:documentation "Return the live arithmetic definition named by NAME, or NIL."))
@@ -450,6 +457,7 @@
 (define-arithmetic-operator - "Subtraction or unary negation.")
 (define-arithmetic-operator * "Multiplication and scalar scaling.")
 (define-arithmetic-operator / "Division of two represented quantities.")
+(define-arithmetic-operator mod "The non-negative remainder of integer division.")
 (define-arithmetic-operator dot "The inner product of two vectors.")
 (define-arithmetic-operator min "The minimum of compatible quantities.")
 (define-arithmetic-operator max "The maximum of compatible quantities.")
@@ -689,23 +697,23 @@
            (fold-environment
              (list* (cons index-name index-binding)
                     (cons state-name state-binding)
-                    environment))
-           (update
-             (parse-arithmetic-expression update-form fold-environment)))
-      (unless (arithmetic-state-compatible-p initial update)
-        (error 'arithmetic-language-error
-               :form form :reason :counted-fold-state-mismatch
-               :details (list (arithmetic-expression-form initial)
-                              (arithmetic-expression-form update))))
-      (make-instance
-       'arithmetic-counted-fold
-       :count count :initial initial
-       :index-binding index-binding :state-binding state-binding
-       :update update
-       :quantity-specification
-       (arithmetic-expression-quantity-specification initial)
-       :quantity-layout (arithmetic-expression-quantity-layout initial)
-       :source-form form))))
+                    environment)))
+      (multiple-value-bind (update-bindings update)
+          (parse-arithmetic-body (list update-form) fold-environment)
+        (unless (arithmetic-state-compatible-p initial update)
+          (error 'arithmetic-language-error
+                 :form form :reason :counted-fold-state-mismatch
+                 :details (list (arithmetic-expression-form initial)
+                                (arithmetic-expression-form update))))
+        (make-instance
+         'arithmetic-counted-fold
+         :count count :initial initial
+         :index-binding index-binding :state-binding state-binding
+         :bindings update-bindings :update update
+         :quantity-specification
+         (arithmetic-expression-quantity-specification initial)
+         :quantity-layout (arithmetic-expression-quantity-layout initial)
+         :source-form form)))))
 
 (defun parse-arithmetic-conditional (form environment)
   (unless (= 4 (length form))

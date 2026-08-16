@@ -55,6 +55,10 @@
     :initarg :component-count
     :initform nil
     :reader shader-type-component-count)
+   (scalar-kind
+    :initarg :scalar-kind
+    :initform nil
+    :reader shader-type-scalar-kind)
    (opaque-kind
     :initarg :opaque-kind
     :initform nil
@@ -75,20 +79,26 @@
 (defparameter *shader-types* (make-hash-table :test #'eq))
 
 (defun register-shader-type
-    (name &key component-count opaque-kind sample-result-type image-depth-p)
+    (name &key component-count scalar-kind opaque-kind sample-result-type
+               image-depth-p)
   (setf (gethash name *shader-types*)
         (make-instance 'shader-type
                        :name name
                        :component-count component-count
+                       :scalar-kind scalar-kind
                        :opaque-kind opaque-kind
                        :sample-result-type sample-result-type
                        :image-depth-p image-depth-p)))
 
-(register-shader-type :float :component-count 1)
+(register-shader-type :float :component-count 1 :scalar-kind :float)
 (register-shader-type :bool)
-(register-shader-type :vec2 :component-count 2)
-(register-shader-type :vec3 :component-count 3)
-(register-shader-type :vec4 :component-count 4)
+(register-shader-type :vec2 :component-count 2 :scalar-kind :float)
+(register-shader-type :vec3 :component-count 3 :scalar-kind :float)
+(register-shader-type :vec4 :component-count 4 :scalar-kind :float)
+(register-shader-type :uint :component-count 1 :scalar-kind :uint)
+(register-shader-type :uvec2 :component-count 2 :scalar-kind :uint)
+(register-shader-type :uvec3 :component-count 3 :scalar-kind :uint)
+(register-shader-type :uvec4 :component-count 4 :scalar-kind :uint)
 (register-shader-type :texture-2d
                       :opaque-kind :texture-2d
                       :sample-result-type :vec4)
@@ -96,6 +106,9 @@
                       :opaque-kind :texture-2d
                       :sample-result-type :vec4
                       :image-depth-p t)
+(register-shader-type :uint-texture-2d
+                      :opaque-kind :texture-2d
+                      :sample-result-type :uvec4)
 (register-shader-type :sampler :opaque-kind :sampler)
 (register-shader-type :uniform-block :opaque-kind :uniform-block)
 
@@ -113,7 +126,14 @@
   (eq (find-shader-type left) (find-shader-type right)))
 
 (defun shader-float-type-p (type)
-  (shader-type= type :float))
+  (let ((type (find-shader-type type)))
+    (and (eq (shader-type-scalar-kind type) :float)
+         (= (shader-type-component-count type) 1))))
+
+(defun shader-uint-type-p (type)
+  (let ((type (find-shader-type type)))
+    (and (eq (shader-type-scalar-kind type) :uint)
+         (= (shader-type-component-count type) 1))))
 
 (defun shader-vector-type-p (type)
   (let ((count (shader-type-component-count (find-shader-type type))))
@@ -873,6 +893,38 @@ silent loss of meaning."
     (shader-resource-sample-quantity-layout texture)))
 
 (defmethod infer-shader-call-quantity-specification
+    ((operator (eql 'texel-load)) operands source-form)
+  (declare (ignore operator source-form))
+  (let ((texture (shader-reference-target (first operands))))
+    (shader-resource-sample-quantity-specification texture)))
+
+(defmethod infer-shader-call-quantity-layout
+    ((operator (eql 'texel-load)) operands source-form)
+  (declare (ignore operator source-form))
+  (let ((texture (shader-reference-target (first operands))))
+    (shader-resource-sample-quantity-layout texture)))
+
+(defmethod infer-shader-call-quantity-specification
+    ((operator (eql 'uint)) operands source-form)
+  (declare (ignore operator operands source-form))
+  nil)
+
+(defmethod infer-shader-call-quantity-specification
+    ((operator (eql 'float)) operands source-form)
+  (declare (ignore operator operands source-form))
+  nil)
+
+(defmethod infer-shader-call-quantity-layout
+    ((operator (eql 'uint)) operands source-form)
+  (declare (ignore operator operands source-form))
+  nil)
+
+(defmethod infer-shader-call-quantity-layout
+    ((operator (eql 'float)) operands source-form)
+  (declare (ignore operator operands source-form))
+  nil)
+
+(defmethod infer-shader-call-quantity-specification
     ((operator (eql 'sample-compare)) operands source-form)
   (declare (ignore operator))
   (let ((coordinate (third operands))
@@ -971,11 +1023,16 @@ silent loss of meaning."
   (require-numeric-operands operator operands source-form)
   (let* ((types (mapcar #'shader-expression-type operands))
          (vectors (remove-if-not #'shader-vector-type-p types)))
-    (cond ((null vectors) (find-shader-type :float))
-          ((every (lambda (type)
-                    (or (shader-float-type-p type)
-                        (shader-type= type (first vectors))))
-                  types)
+    (cond ((every (lambda (type) (shader-type= type (first types)))
+                  (rest types))
+           (first types))
+          ((and vectors
+                (eq :float
+                    (shader-type-scalar-kind (first vectors)))
+                (every (lambda (type)
+                         (or (shader-float-type-p type)
+                             (shader-type= type (first vectors))))
+                       types))
            (first vectors))
           (t
            (error 'shader-language-error
@@ -990,6 +1047,8 @@ silent loss of meaning."
              :form source-form :reason :division-arity))
     (cond ((shader-type= (first types) (second types)) (first types))
           ((and (shader-vector-type-p (first types))
+                (eq :float
+                    (shader-type-scalar-kind (first types)))
                 (shader-float-type-p (second types)))
            (first types))
           (t
@@ -997,25 +1056,27 @@ silent loss of meaning."
                   :form source-form :reason :incompatible-division-types
                   :details (mapcar #'shader-type-name types))))))
 
-(defun infer-scalar-float-comparison-type (operands source-form)
+(defun infer-scalar-comparison-type (operands source-form)
   (require-shader-types
    (lambda (types)
      (and (= 2 (length types))
-          (every (lambda (type) (shader-type= type :float)) types)))
+          (= 1 (shader-type-component-count (first types)))
+          (member (shader-type-scalar-kind (first types)) '(:float :uint))
+          (shader-type= (first types) (second types))))
    operands source-form :invalid-scalar-comparison)
   (find-shader-type :bool))
 
-(defmacro define-scalar-float-comparison-type (operator)
+(defmacro define-scalar-comparison-type (operator)
   `(defmethod infer-shader-call-type
        ((operator (eql ',operator)) operands source-form)
      (declare (ignore operator))
-     (infer-scalar-float-comparison-type operands source-form)))
+     (infer-scalar-comparison-type operands source-form)))
 
-(define-scalar-float-comparison-type <)
-(define-scalar-float-comparison-type <=)
-(define-scalar-float-comparison-type >)
-(define-scalar-float-comparison-type >=)
-(define-scalar-float-comparison-type =)
+(define-scalar-comparison-type <)
+(define-scalar-comparison-type <=)
+(define-scalar-comparison-type >)
+(define-scalar-comparison-type >=)
+(define-scalar-comparison-type =)
 
 (defun swizzle-components (designator source-form)
   (let* ((name (string-downcase (symbol-name designator)))
@@ -1033,9 +1094,11 @@ silent loss of meaning."
              :details designator))
     indices))
 
-(defun vector-type-for-width (width source-form)
+(defun vector-type-for-width (width source-form &optional (scalar-kind :float))
   (find-shader-type
-   (ecase width (1 :float) (2 :vec2) (3 :vec3) (4 :vec4))
+   (ecase scalar-kind
+     (:float (ecase width (1 :float) (2 :vec2) (3 :vec3) (4 :vec4)))
+     (:uint (ecase width (1 :uint) (2 :uvec2) (3 :uvec3) (4 :uvec4))))
    source-form))
 
 (defun vector-constructor-width (operands source-form)
@@ -1052,6 +1115,7 @@ silent loss of meaning."
    (lambda (types)
      (and (= (length types) 2)
           (shader-vector-type-p (first types))
+          (eq :float (shader-type-scalar-kind (first types)))
           (shader-type= (first types) (second types))))
    operands source-form :invalid-dot-product)
   (find-shader-type :float))
@@ -1068,6 +1132,45 @@ silent loss of meaning."
   (find-shader-type
    (shader-type-sample-result-type
     (shader-expression-type (first operands)))))
+
+(defmethod infer-shader-call-type
+    ((operator (eql 'texel-load)) operands source-form)
+  (require-shader-types
+   (lambda (types)
+     (and (= (length types) 2)
+          (eq (shader-type-opaque-kind (first types)) :texture-2d)
+          (shader-type-sample-result-type (first types))
+          (shader-type= (second types) :uvec2)))
+   operands source-form :invalid-texel-load)
+  (find-shader-type
+   (shader-type-sample-result-type
+    (shader-expression-type (first operands)))))
+
+(defmethod infer-shader-call-type ((operator (eql 'uint)) operands source-form)
+  (require-shader-types
+   (lambda (types)
+     (and (= (length types) 1)
+          (= 1 (shader-type-component-count (first types)))
+          (member (shader-type-scalar-kind (first types)) '(:float :uint))))
+   operands source-form :invalid-uint-conversion)
+  (find-shader-type :uint))
+
+(defmethod infer-shader-call-type ((operator (eql 'float)) operands source-form)
+  (require-shader-types
+   (lambda (types)
+     (and (= (length types) 1)
+          (= 1 (shader-type-component-count (first types)))
+          (member (shader-type-scalar-kind (first types)) '(:float :uint))))
+   operands source-form :invalid-float-conversion)
+  (find-shader-type :float))
+
+(defmethod infer-shader-call-type ((operator (eql 'mod)) operands source-form)
+  (require-shader-types
+   (lambda (types)
+     (and (= (length types) 2)
+          (every #'shader-uint-type-p types)))
+   operands source-form :invalid-unsigned-remainder)
+  (find-shader-type :uint))
 
 (defmethod infer-shader-call-type
     ((operator (eql 'sample-compare)) operands source-form)
@@ -1087,7 +1190,7 @@ silent loss of meaning."
    (lambda (types)
      (and (= (length types) 3)
           (shader-type= (first types) (second types))
-          (shader-numeric-type-p (first types))
+          (eq :float (shader-type-scalar-kind (first types)))
           (shader-float-type-p (third types))))
    operands source-form :invalid-mix)
   (shader-expression-type (first operands)))
@@ -1103,7 +1206,13 @@ silent loss of meaning."
     (error 'shader-language-error
            :form source-form :reason :wrong-operand-count
            :details (list operator (length operands))))
-  (infer-uniform-arithmetic-type operator operands source-form))
+  (let ((type (infer-uniform-arithmetic-type
+               operator operands source-form)))
+    (unless (eq :float (shader-type-scalar-kind type))
+      (error 'shader-language-error
+             :form source-form :reason :invalid-extended-math-type
+             :details (shader-type-name type)))
+    type))
 
 (defmethod infer-shader-call-type ((operator (eql 'min)) operands source-form)
   (infer-uniform-extended-type operator operands source-form 2 nil))
@@ -1138,7 +1247,9 @@ silent loss of meaning."
     ((operator (eql 'normalize)) operands source-form)
   (require-shader-types
    (lambda (types)
-     (and (= (length types) 1) (shader-vector-type-p (first types))))
+     (and (= (length types) 1)
+          (shader-vector-type-p (first types))
+          (eq :float (shader-type-scalar-kind (first types)))))
    operands source-form :invalid-normalize)
   (shader-expression-type (first operands)))
 
@@ -1156,6 +1267,36 @@ silent loss of meaning."
 
 (defmethod infer-shader-call-type ((operator (eql 'vec4)) operands source-form)
   (infer-vector-constructor-type :vec4 4 operands source-form))
+
+(defmethod infer-shader-call-type ((operator (eql 'uvec2)) operands source-form)
+  (let ((type (infer-vector-constructor-type :uvec2 2 operands source-form)))
+    (unless (every (lambda (operand)
+                     (eq :uint (shader-type-scalar-kind
+                                (shader-expression-type operand))))
+                   operands)
+      (error 'shader-language-error
+             :form source-form :reason :invalid-unsigned-vector-constituent))
+    type))
+
+(defmethod infer-shader-call-type ((operator (eql 'uvec3)) operands source-form)
+  (let ((type (infer-vector-constructor-type :uvec3 3 operands source-form)))
+    (unless (every (lambda (operand)
+                     (eq :uint (shader-type-scalar-kind
+                                (shader-expression-type operand))))
+                   operands)
+      (error 'shader-language-error
+             :form source-form :reason :invalid-unsigned-vector-constituent))
+    type))
+
+(defmethod infer-shader-call-type ((operator (eql 'uvec4)) operands source-form)
+  (let ((type (infer-vector-constructor-type :uvec4 4 operands source-form)))
+    (unless (every (lambda (operand)
+                     (eq :uint (shader-type-scalar-kind
+                                (shader-expression-type operand))))
+                   operands)
+      (error 'shader-language-error
+             :form source-form :reason :invalid-unsigned-vector-constituent))
+    type))
 
 ;;; Operators are named by ordinary symbols, treating the shader language as
 ;;; a small compiled subset of Common Lisp plus a vector library.  Where CL
@@ -1216,6 +1357,14 @@ never collides with a standard symbol's function documentation:
   "Sample a two-dimensional texture through a sampler at a UV coordinate.")
 (define-shader-operator sample-compare
   "Compare a depth reference through a comparison sampler at a UV coordinate.")
+(define-shader-operator texel-load
+  "Load one exact two-dimensional texel at an unsigned integer coordinate.")
+(define-shader-operator uint
+  "Convert one scalar float or unsigned value to a 32-bit unsigned integer.")
+(define-shader-operator float
+  "Convert one scalar float or unsigned value to a 32-bit float.")
+(define-shader-operator mod
+  "Return the unsigned remainder of two scalar integer values.")
 (define-shader-operator mix
   "Linear interpolation from one value toward another by a scalar amount.")
 (define-shader-operator vec2
@@ -1224,6 +1373,12 @@ never collides with a standard symbol's function documentation:
   "Construct a three-component vector from scalars and vectors of total width 3.")
 (define-shader-operator vec4
   "Construct a four-component vector from scalars and vectors of total width 4.")
+(define-shader-operator uvec2
+  "Construct a two-component unsigned vector from unsigned constituents.")
+(define-shader-operator uvec3
+  "Construct a three-component unsigned vector from unsigned constituents.")
+(define-shader-operator uvec4
+  "Construct a four-component unsigned vector from unsigned constituents.")
 (define-shader-operator swizzle
   "Select and reorder vector components by a designator such as :XYZ or :RGB.")
 (define-shader-operator min
@@ -1551,7 +1706,10 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
                      :operator 'swizzle
                      :operands (list operand)
                      :parameters (list designator)
-                     :type (vector-type-for-width (length indices) form)
+                     :type (vector-type-for-width
+                            (length indices) form
+                            (shader-type-scalar-kind
+                             (shader-expression-type operand)))
                      :quantity-specification projected
                      :source-form form))))
 
@@ -1678,12 +1836,20 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
              :form form :reason :invalid-counted-fold-bindings))
     (let* ((count (parse-shader-expression count-form environment))
            (initial (parse-shader-expression initial-form environment))
+           (count-type (shader-expression-type count))
            (index-binding
              (make-instance 'shader-binding
                             :name index-name
                             :expression
-                            (parse-shader-expression 0.0 environment)
-                            :source-form (list index-name 0.0)))
+                            (make-instance
+                             'shader-literal
+                             :value (if (shader-uint-type-p count-type) 0 0.0)
+                             :type count-type
+                             :quantity-specification
+                             (and (shader-float-type-p count-type)
+                                  (math:make-quantity-specification nil))
+                             :source-form (list index-name 0))
+                            :source-form (list index-name 0)))
            (state-binding
              (make-instance 'shader-binding
                             :name state-name :expression initial
@@ -1691,27 +1857,29 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
            (fold-environment
              (list* (cons index-name index-binding)
                     (cons state-name state-binding)
-                    environment))
-           (update (parse-shader-expression update-form fold-environment)))
-      (unless (shader-type= (shader-expression-type count) :float)
-        (error 'shader-language-error
-               :form count-form :reason :counted-fold-count-type))
-      (unless (and (shader-type=
-                    (shader-expression-type initial)
-                    (shader-expression-type update))
-                   (lang:arithmetic-state-compatible-p initial update))
-        (error 'shader-language-error
-               :form form :reason :counted-fold-state-mismatch))
-      (make-instance
-       'shader-counted-fold
-       :count count :initial initial
-       :index-binding index-binding :state-binding state-binding
-       :update update
-       :type (shader-expression-type initial)
-       :quantity-specification
-       (shader-expression-quantity-specification initial)
-       :quantity-layout (shader-expression-quantity-layout initial)
-       :source-form form))))
+                    environment)))
+      (multiple-value-bind (update-bindings update)
+          (parse-shader-expression-body (list update-form) fold-environment)
+        (unless (or (shader-float-type-p count-type)
+                    (shader-uint-type-p count-type))
+          (error 'shader-language-error
+                 :form count-form :reason :counted-fold-count-type))
+        (unless (and (shader-type=
+                      (shader-expression-type initial)
+                      (shader-expression-type update))
+                     (lang:arithmetic-state-compatible-p initial update))
+          (error 'shader-language-error
+                 :form form :reason :counted-fold-state-mismatch))
+        (make-instance
+         'shader-counted-fold
+         :count count :initial initial
+         :index-binding index-binding :state-binding state-binding
+         :bindings update-bindings :update update
+         :type (shader-expression-type initial)
+         :quantity-specification
+         (shader-expression-quantity-specification initial)
+         :quantity-layout (shader-expression-quantity-layout initial)
+         :source-form form)))))
 
 (defun parse-shader-conditional (form environment)
   (unless (= 4 (length form))
@@ -1854,7 +2022,9 @@ NIL leaves the character to the named definition; T is the historical
                          :details overlap)))
               (setf occupied (append positions occupied))
               (let ((projection-type
-                      (vector-type-for-width (length positions) component-form)))
+                      (vector-type-for-width
+                       (length positions) component-form
+                       (shader-type-scalar-kind type))))
                 (push
                  (math:make-quantity-projection
                   positions
@@ -2683,16 +2853,29 @@ structured product and source provenance.  #JDLQPN"))
                   (list id 'type-bool))
                  ((eq kind :texture-2d)
                   (list id 'type-image
-                        (ensure-shader-type-id context :float)
+                        (ensure-shader-type-id
+                         context
+                         (ecase
+                             (shader-type-scalar-kind
+                              (find-shader-type
+                               (shader-type-sample-result-type type)))
+                           (:float :float)
+                           (:uint :uint)))
                         '2d
                         (if (shader-type-image-depth-p type) 1 0)
                         0 0 1 'unknown))
                  ((eq kind :sampler) (list id 'type-sampler))
                  ((= (shader-type-component-count type) 1)
-                  (list id 'type-float 32))
+                  (ecase (shader-type-scalar-kind type)
+                    (:float (list id 'type-float 32))
+                    (:uint (list id 'type-int 32 0))))
                  (t
                   (list id 'type-vector
-                        (ensure-shader-type-id context :float)
+                        (ensure-shader-type-id
+                         context
+                         (ecase (shader-type-scalar-kind type)
+                           (:float :float)
+                           (:uint :uint)))
                         (shader-type-component-count type)))))
           id))))
 
@@ -2798,12 +2981,7 @@ structured product and source provenance.  #JDLQPN"))
   "Return an internal unsigned constant used for structural addressing."
   (let ((key (list :uint value)))
     (or (gethash key (context-constant-ids context))
-        (let ((type-id (or (gethash :uint (context-type-ids context))
-                           (let ((id (reserve-shader-id context "UINT")))
-                             (setf (gethash :uint (context-type-ids context)) id)
-                             (append-context-form 'type-declarations context
-                                                  (list id 'type-int 32 0))
-                             id)))
+        (let ((type-id (ensure-shader-type-id context :uint))
               (id (reserve-shader-id context
                                      (format nil "UINT-~D" value))))
           (setf (gethash key (context-constant-ids context)) id)
@@ -3045,16 +3223,22 @@ Modules whose expressions use no extended mathematics never acquire one."
    "The SPIR-V instruction computing one binary step of OPERATOR."))
 
 (defmethod binary-arithmetic-instruction ((operator (eql '+)) left-type right-type)
-  (declare (ignore left-type right-type))
-  'f-add)
+  (declare (ignore right-type))
+  (ecase (shader-type-scalar-kind left-type)
+    (:float 'f-add)
+    (:uint 'i-add)))
 
 (defmethod binary-arithmetic-instruction ((operator (eql '-)) left-type right-type)
-  (declare (ignore left-type right-type))
-  'f-sub)
+  (declare (ignore right-type))
+  (ecase (shader-type-scalar-kind left-type)
+    (:float 'f-sub)
+    (:uint 'i-sub)))
 
 (defmethod binary-arithmetic-instruction ((operator (eql '/)) left-type right-type)
-  (declare (ignore left-type right-type))
-  'f-div)
+  (declare (ignore right-type))
+  (ecase (shader-type-scalar-kind left-type)
+    (:float 'f-div)
+    (:uint 'u-div)))
 
 (defmethod binary-arithmetic-instruction ((operator (eql '*)) left-type right-type)
   (if (or (and (shader-vector-type-p left-type)
@@ -3062,7 +3246,9 @@ Modules whose expressions use no extended mathematics never acquire one."
           (and (shader-float-type-p left-type)
                (shader-vector-type-p right-type)))
       'vector-times-scalar
-      'f-mul))
+      (ecase (shader-type-scalar-kind left-type)
+        (:float 'f-mul)
+        (:uint 'i-mul))))
 
 (defun emit-binary-arithmetic
     (context expression operator result-type left-id left-type right-id right-type)
@@ -3130,12 +3316,12 @@ backend's context before its source-located unsupported-operation method."))
                context expression operator
                (cond ((shader-vector-type-p value-type) value-type)
                      ((shader-vector-type-p operand-type) operand-type)
-                     (t (find-shader-type :float)))
+                     (t (shader-expression-type expression)))
                value value-type operand-value operand-type)
               value-type
               (cond ((shader-vector-type-p value-type) value-type)
                     ((shader-vector-type-p operand-type) operand-type)
-                    (t (find-shader-type :float))))))))
+                    (t (shader-expression-type expression))))))))
 
 (defmethod lower-shader-call ((operator (eql '+)) context expression)
   (lower-chained-arithmetic context expression))
@@ -3146,10 +3332,21 @@ backend's context before its source-located unsupported-operation method."))
 (defmethod lower-shader-call ((operator (eql '-)) context expression)
   (let ((operands (shader-call-operands expression)))
     (if (= (length operands) 1)
-        (emit-value-instruction
-         context expression (shader-expression-type expression) 'f-negate
-         (list (lower-shader-expression context (first operands))))
+        (if (shader-float-type-p (shader-expression-type expression))
+            (emit-value-instruction
+             context expression (shader-expression-type expression) 'f-negate
+             (list (lower-shader-expression context (first operands))))
+            (error 'shader-language-error
+                   :form (shader-expression-source-form expression)
+                   :reason :unsigned-negation))
         (lower-chained-arithmetic context expression))))
+
+(defmethod lower-shader-call ((operator (eql 'mod)) context expression)
+  (destructuring-bind (left right) (shader-call-operands expression)
+    (emit-value-instruction
+     context expression :uint 'u-mod
+     (list (lower-shader-expression context left)
+           (lower-shader-expression context right)))))
 
 (defmethod lower-shader-call ((operator (eql '/)) context expression)
   (let ((operands (shader-call-operands expression)))
@@ -3174,19 +3371,31 @@ backend's context before its source-located unsupported-operation method."))
            reciprocal-id float-type))
         (lower-chained-arithmetic context expression))))
 
-(defun comparison-instruction (operator)
-  (ecase operator
-    (< 'f-ord-less-than)
-    (<= 'f-ord-less-than-equal)
-    (> 'f-ord-greater-than)
-    (>= 'f-ord-greater-than-equal)
-    (= 'f-ord-equal)))
+(defun comparison-instruction (operator operand-type)
+  (ecase (shader-type-scalar-kind operand-type)
+    (:float
+     (ecase operator
+       (< 'f-ord-less-than)
+       (<= 'f-ord-less-than-equal)
+       (> 'f-ord-greater-than)
+       (>= 'f-ord-greater-than-equal)
+       (= 'f-ord-equal)))
+    (:uint
+     (ecase operator
+       (< 'u-less-than)
+       (<= 'u-less-than-equal)
+       (> 'u-greater-than)
+       (>= 'u-greater-than-equal)
+       (= 'i-equal)))))
 
 (defmacro define-comparison-lowering (operator)
   `(defmethod lower-shader-call
        ((operator (eql ',operator)) context expression)
      (emit-value-instruction
-      context expression :bool (comparison-instruction operator)
+      context expression :bool
+      (comparison-instruction
+       operator (shader-expression-type
+                 (first (shader-call-operands expression))))
       (mapcar (lambda (operand)
                 (lower-shader-expression context operand))
               (shader-call-operands expression)))))
@@ -3401,6 +3610,31 @@ backend's context before its source-located unsupported-operation method."))
 (defmethod lower-shader-call ((operator (eql 'vec4)) context expression)
   (lower-vector-constructor context expression))
 
+(defmethod lower-shader-call ((operator (eql 'uvec2)) context expression)
+  (lower-vector-constructor context expression))
+
+(defmethod lower-shader-call ((operator (eql 'uvec3)) context expression)
+  (lower-vector-constructor context expression))
+
+(defmethod lower-shader-call ((operator (eql 'uvec4)) context expression)
+  (lower-vector-constructor context expression))
+
+(defmethod lower-shader-call ((operator (eql 'uint)) context expression)
+  (let* ((operand (first (shader-call-operands expression)))
+         (value (lower-shader-expression context operand)))
+    (if (shader-uint-type-p (shader-expression-type operand))
+        (progn (alias-shader-expression context expression operand) value)
+        (emit-value-instruction context expression :uint 'convert-f-to-u
+                                (list value)))))
+
+(defmethod lower-shader-call ((operator (eql 'float)) context expression)
+  (let* ((operand (first (shader-call-operands expression)))
+         (value (lower-shader-expression context operand)))
+    (if (shader-float-type-p (shader-expression-type operand))
+        (progn (alias-shader-expression context expression operand) value)
+        (emit-value-instruction context expression :float 'convert-u-to-f
+                                (list value)))))
+
 (defmethod lower-shader-call ((operator (eql 'min)) context expression)
   (lower-chained-extended-call context expression 'f-min))
 
@@ -3450,6 +3684,13 @@ backend's context before its source-located unsupported-operation method."))
        context expression (shader-expression-type expression)
        'image-sample-implicit-lod
        (list sampled-id coordinate-id)))))
+
+(defmethod lower-shader-call ((operator (eql 'texel-load)) context expression)
+  (destructuring-bind (texture coordinate) (shader-call-operands expression)
+    (emit-value-instruction
+     context expression (shader-expression-type expression) 'image-fetch
+     (list (lower-shader-expression context texture)
+           (lower-shader-expression context coordinate)))))
 
 (defmethod lower-shader-call
     ((operator (eql 'sample-compare)) context expression)
@@ -3509,11 +3750,15 @@ backend's context before its source-located unsupported-operation method."))
 
 (defmethod lower-shader-expression-value
     (context (expression shader-counted-fold))
-  (let* ((preheader
+  (let* ((count-expression
+           (lang:arithmetic-counted-fold-count expression))
+         (count-type (shader-expression-type count-expression))
+         (unsigned-p (shader-uint-type-p count-type))
+         (preheader
            (spir-v-basic-block-label (context-current-block context)))
          (count
            (lower-shader-expression
-            context (lang:arithmetic-counted-fold-count expression)))
+            context count-expression))
          (initial
            (lower-shader-expression
             context (lang:arithmetic-counted-fold-initial expression)))
@@ -3525,14 +3770,18 @@ backend's context before its source-located unsupported-operation method."))
          (index-id (fresh-shader-id context 'fold-index))
          (state-id (fresh-shader-id context 'fold-state))
          (next-index-id (fresh-shader-id context 'fold-next-index))
-         (zero (ensure-shader-constant context 0.0))
-         (one (ensure-shader-constant context 1.0)))
+         (zero (if unsigned-p
+                   (ensure-shader-uint-constant context 0)
+                   (ensure-shader-constant context 0.0)))
+         (one (if unsigned-p
+                  (ensure-shader-uint-constant context 1)
+                  (ensure-shader-constant context 1.0))))
     (emit-shader-instruction context expression (list 'branch header-label))
     (let ((header (begin-shader-basic-block context header-label)))
       (let ((condition-id (fresh-shader-id context 'fold-condition)))
         (emit-shader-instruction
          context expression
-         (list condition-id 'f-ord-less-than
+         (list condition-id (if unsigned-p 'u-less-than 'f-ord-less-than)
                (ensure-bool-type-id context) index-id count))
         (emit-shader-instruction
          context expression
@@ -3555,13 +3804,13 @@ backend's context before its source-located unsupported-operation method."))
         (begin-shader-basic-block context continue-label)
         (emit-shader-instruction
          context expression
-         (list next-index-id 'f-add
-               (ensure-shader-type-id context :float) index-id one))
+         (list next-index-id (if unsigned-p 'i-add 'f-add)
+               (ensure-shader-type-id context count-type) index-id one))
         (emit-shader-instruction context expression (list 'branch header-label))
         (let ((index-phi
                 (parse-instruction
                  (list index-id 'phi
-                       (ensure-shader-type-id context :float)
+                       (ensure-shader-type-id context count-type)
                        zero preheader next-index-id continue-label)))
               (state-phi
                 (parse-instruction

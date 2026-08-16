@@ -88,6 +88,7 @@
            #:shader-type
            #:shader-type-name
            #:shader-type-component-count
+           #:shader-type-scalar-kind
            #:shader-type-opaque-kind
            #:shader-type-sample-result-type
            #:shader-type-image-depth-p
@@ -184,7 +185,13 @@
            #:dot
            #:sample
            #:sample-compare
+           #:texel-load
            #:mix
+           #:uint
+           #:float
+           #:uvec2
+           #:uvec3
+           #:uvec4
            #:vec2
            #:vec3
            #:vec4
@@ -200,6 +207,7 @@
            #:project-point
            #:project-sample
            #:convert-unit
+           #:mod
            #:counted-fold
            #:set-output
            #:shader-operator

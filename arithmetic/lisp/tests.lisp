@@ -56,6 +56,12 @@
   (counted-fold (index count sum 0)
     (if (< index limit) (+ sum index) sum)))
 
+(lisp:define-lisp-arithmetic-function cpu-folded-remainders ((count))
+  (counted-fold (index count sum 0)
+    (let* ((next (+ index 1))
+           (remainder (mod next 3)))
+      (+ sum remainder))))
+
 (defun tree-contains-any-object-p (tree objects)
   (cond ((atom tree) (member tree objects :test #'eql))
         ((consp tree)
@@ -96,6 +102,13 @@
                         'cpu-triangular-number)
                        10)))
     (ok (tree-contains-any-object-p lambda-expression '(dotimes)))))
+
+(deftest counted-fold-lexicals-lower-inside-the-ordinary-loop
+  (let ((lambda-expression
+          (lisp:lower-arithmetic-function 'cpu-folded-remainders)))
+    (ok (= 6 (cpu-folded-remainders 5)))
+    (ok (tree-contains-any-object-p lambda-expression '(let*)))
+    (ok (tree-contains-any-object-p lambda-expression '(mod)))))
 
 (deftest shared-conditionals-retain-ordinary-lisp-branching
   (let ((lambda-expression

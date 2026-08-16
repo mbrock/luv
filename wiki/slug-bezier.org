@@ -309,19 +309,31 @@ oracle.
 The neutral loop skeleton is now present: =counted-fold= accepts a runtime
 count and one carried scalar or vector state, executes as =dotimes= on the CPU,
 as an ordinary =for= loop in direct Metal, and as validated structured SPIR-V
-with phi-carried index and state.  The remaining work in this mark is the
-Slug-shaped data boundary: integer/index representations, exact curve loads,
-conditional accumulation, and the sorted-coordinate early exit.  Those needs
-now extend one shared fold rather than motivating a shader-only control
-language.
+with phi-carried index and state.  Its update is an expression body rather than
+an artificially single call: a leading =let*= produces per-iteration lexical
+bindings in the common AST, an inner Lisp =let*=, loop-local SSA values, and
+named locals inside the emitted Metal loop.
 
-Conditional accumulation is shared now too.  =if= is a first-class value node
+Conditional accumulation is shared too.  =if= is a first-class value node
 in the common expression graph, with checked scalar comparisons =<=, =<==,
 =>=, =>==, and ===.  Lisp retains ordinary branch semantics; SPIR-V emits the
 ordered comparison plus =OpSelect=; and direct Metal emits a ternary inside the
 same =for= loop.  A bounded triangular fold executes on the CPU and compiles
-from the same shape on both GPU targets.  Integer/index representations, exact
-loads, and an early-exit form remain rather than being hidden inside this node.
+from the same shape on both GPU targets.
+
+The shader representation layer now supplies =uint= and =uvec2/3/4= values plus
+an exact =texel-load= extension.  A count loaded from a =uint-texture-2d=
+selects an unsigned fold index automatically; address addition, unsigned
+division and the common =mod= operation stay typed throughout.  The same probe
+emits =OpImageFetch=, =OpULessThan=, =OpUDiv=, =OpUMod=, =OpIAdd=, and
+=OpConvertUToF= in SPIR-V, while Metal emits =texture2d<uint>.read(uint2)= and a
+=for (uint ...)= loop with readable address locals.  Both =spirv-val= and the
+Metal 4 compiler accept those generated products.  =mod= itself belongs to the
+shared arithmetic vocabulary and executes through Common Lisp's ordinary
+=mod=; the texture resource and exact load remain properly shader-specific.
+
+What remains here is the Slug-shaped traversal itself: conditional winding
+accumulation from loaded curve texels and a sorted-coordinate early-exit form.
 
 Done when: a runtime curve count rather than source unrolling controls the
 number of evaluated quadratics; CPU and GPU results agree at edge,

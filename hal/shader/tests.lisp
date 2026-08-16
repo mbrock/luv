@@ -6,6 +6,7 @@
         (shader-package (find-package '#:luv.spir-v)))
     (when (and package shader-package)
       (dolist (name '("DOT" "SAMPLE" "SAMPLE-COMPARE" "MIX"
+                      "TEXEL-LOAD" "UINT" "UVEC2"
                       "VEC2" "VEC3" "VEC4" "SWIZZLE" "CLAMP"
                       "SMOOTHSTEP" "NORMALIZE" "QUANTITY"
                       "ASSUME-QUANTITY" "INTERPRET" "REPRESENTATION"
@@ -27,7 +28,8 @@
   ;; Shader operators are identified by symbol, so specification bodies
   ;; written here must use the shader language's own words.
   (:import-from #:luv.spir-v
-                #:dot #:sample #:sample-compare #:mix
+                #:dot #:sample #:sample-compare #:texel-load #:mix
+                #:uint #:uvec2
                 #:vec2 #:vec3 #:vec4 #:swizzle
                 #:clamp #:smoothstep #:normalize
                 #:quantity #:assume-quantity #:interpret #:representation
@@ -77,6 +79,27 @@
 (lang:define-arithmetic-function shared-shader-function-probe ((value))
   (let* ((shifted (+ value 0.25)))
     (* shifted shifted)))
+
+(spv:define-shader unsigned-texel-fold-probe
+    (:stage :fragment
+     :resources ((band-data :uint-texture-2d :binding 0)
+                 (curve-data :texture-2d :binding 1))
+     :outputs ((color :vec4 :location 0)))
+  (let* ((origin (uvec2 (uint 0.0) (uint 0.0)))
+         (header (texel-load band-data origin))
+         (count (swizzle header :x))
+         (offset (swizzle header :y))
+         (seed (swizzle (texel-load curve-data origin) :x))
+         (total
+           (counted-fold (index count sum seed)
+             (let* ((address (+ offset index))
+                    (location
+                      (uvec2 (mod address (uint 4096.0))
+                             (/ address (uint 4096.0))))
+                    (word
+                      (swizzle (texel-load band-data location) :x)))
+               (+ sum (float word))))))
+    (set-output color (vec4 total total total 1.0))))
 
 (lang:define-arithmetic-function shared-fold-probe ((count))
   (counted-fold (index count sum 0.0)
@@ -1726,6 +1749,28 @@
     (ok (= #x07230203
            (aref (spv:assemble-shader-specification specification) 0)))))
 
+(deftest exact-unsigned-texel-loads-flow-through-shared-folds
+  (let* ((specification (unsigned-texel-fold-probe))
+         (module
+           (spv:shader-lowering-module
+            (spv:lower-shader-specification :spir-v specification)))
+         (names
+           (loop for function in (spv:spir-v-module-function-definitions module)
+                 append
+                 (loop for block in (spv:spir-v-function-basic-blocks function)
+                       append (mapcar #'spv:instruction-name
+                                      (spv:spir-v-basic-block-instructions
+                                       block))))))
+    (ok (spv:shader-type=
+         :uvec4
+         (spv:shader-expression-type
+          (spv:shader-binding-expression
+           (binding-named 'header specification)))))
+    (dolist (name '(image-fetch u-mod u-div i-add u-less-than convert-u-to-f))
+      (ok (find name names :test #'string-equal)))
+    (ok (= #x07230203
+           (aref (spv:assemble-shader-specification specification) 0)))))
+
 (deftest shared-conditionals-lower-inside-structured-spir-v-folds
   (let* ((specification
            (spv:parse-shader-specification
@@ -1787,7 +1832,9 @@
                   'bad-extended-math
                   '(:stage :fragment
                     :inputs ((value :vec3 :location 0)
-                             (scale :float :location 1))
+                             (scale :float :location 1)
+                             (word :uint :location 2)
+                             (uvalue :uvec2 :location 3))
                     :outputs ((color :vec3 :location 0)))
                   body)
                  nil)
@@ -1802,7 +1849,18 @@
     (ok (eq (failure-reason '((set-output color (min value))))
             :wrong-operand-count))
     (ok (eq (failure-reason '((set-output color (expt value))))
-            :wrong-operand-count))))
+            :wrong-operand-count))
+    ;; Unsigned traversal values do not leak into float-only operations.
+    (ok (eq (failure-reason '((set-output color (* uvalue scale))))
+            :incompatible-product-types))
+    (ok (eq (failure-reason '((set-output color (dot uvalue uvalue))))
+            :invalid-dot-product))
+    (ok (eq (failure-reason '((set-output color (mix word word scale))))
+            :invalid-mix))
+    (ok (eq (failure-reason '((set-output color (normalize uvalue))))
+            :invalid-normalize))
+    (ok (eq (failure-reason '((set-output color (min word word))))
+            :invalid-extended-math-type))))
 
 (deftest extended-operations-retain-expression-provenance
   (let* ((specification

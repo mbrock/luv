@@ -35,6 +35,12 @@
   (counted-fold (index count sum 0)
     (if (< index limit) (+ sum index) sum)))
 
+(lang:define-arithmetic-function folded-remainders ((count))
+  (counted-fold (index count sum 0)
+    (let* ((next (+ index 1))
+           (remainder (mod next 3)))
+      (+ sum remainder))))
+
 (deftest arithmetic-functions-retain-checked-source-graphs
   (let* ((definition (lang:arithmetic-function-definition-for 'fog-shape))
          (bindings (lang:arithmetic-function-bindings definition))
@@ -111,6 +117,17 @@
              (lang:arithmetic-counted-fold-state-binding fold))))
     (ok (equal '(counted-fold (index count sum 0) (+ sum index))
                (lang:arithmetic-expression-form fold)))))
+
+(deftest counted-fold-updates-own-shared-lexical-bindings
+  (let* ((fold
+           (lang:arithmetic-function-result
+            (lang:arithmetic-function-definition-for 'folded-remainders)))
+         (bindings (lang:arithmetic-counted-fold-bindings fold)))
+    (ok (equal '(next remainder)
+               (mapcar #'lang:arithmetic-object-name bindings)))
+    (ok (eq 'mod
+            (lang:arithmetic-call-operator
+             (lang:arithmetic-binding-expression (second bindings)))))))
 
 (deftest conditionals-and-comparisons-are-shared-expression-nodes
   (let* ((fold

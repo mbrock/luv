@@ -6,6 +6,27 @@
 
 (in-package #:luv/msl/tests)
 
+(spv:define-shader msl-unsigned-texel-fold-probe
+    (:stage :fragment
+     :resources ((band-data :uint-texture-2d :binding 0)
+                 (curve-data :texture-2d :binding 1))
+     :outputs ((color :vec4 :location 0)))
+  (let* ((origin (spv:uvec2 (spv:uint 0.0) (spv:uint 0.0)))
+         (header (spv:texel-load band-data origin))
+         (count (spv:swizzle header :x))
+         (offset (spv:swizzle header :y))
+         (seed (spv:swizzle (spv:texel-load curve-data origin) :x))
+         (total
+           (spv:counted-fold (index count sum seed)
+             (let* ((address (+ offset index))
+                    (location
+                      (spv:uvec2 (mod address (spv:uint 4096.0))
+                                 (/ address (spv:uint 4096.0))))
+                    (word
+                      (spv:swizzle (spv:texel-load band-data location) :x)))
+               (+ sum (float word))))))
+    (spv:set-output color (spv:vec4 total total total 1.0))))
+
 (defun binding-named (name specification)
   (find name (spv:shader-specification-bindings specification)
         :key #'spv:shader-object-name
@@ -33,6 +54,17 @@
     (ok (search "depth2d<float> shadow_map [[texture(3)]]" source))
     (ok (search "shadow_map.sample_compare" source))
     (ok (search "result.color_output = rgba;" source))))
+
+(deftest exact-unsigned-texel-fold-lowers-directly-to-metal
+  (let ((source
+          (msl:msl-document-source
+           (msl:compile-msl (msl-unsigned-texel-fold-probe)))))
+    (ok (search "texture2d<uint> band_data [[texture(0)]]" source))
+    (ok (search "band_data.read" source))
+    (ok (search "for (uint fold_index_1 = 0u;" source))
+    (ok (search "% uint(4096.0f)" source))
+    (ok (search "/ uint(4096.0f)" source))
+    (ok (search "float(" source))))
 
 (deftest block-vertex-lowers-projective-map-to-msl
   (let* ((specification (spv:block-world-vertex-specification))

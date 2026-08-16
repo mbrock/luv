@@ -68,6 +68,7 @@
            #:arithmetic-counted-fold-initial
            #:arithmetic-counted-fold-index-binding
            #:arithmetic-counted-fold-state-binding
+           #:arithmetic-counted-fold-bindings
            #:arithmetic-counted-fold-update
            #:arithmetic-state-compatible-p
            #:arithmetic-function-expressions
@@ -86,4 +87,5 @@
            #:interpret
            #:representation
            #:convert-unit
+           #:mod
            #:counted-fold))
