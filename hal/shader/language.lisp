@@ -3581,8 +3581,16 @@ structured product and source provenance.  #JDLQPN"))
                  :accessor context-constant-ids)
    (variable-ids :initform (make-hash-table :test #'eq)
                  :accessor context-variable-ids)
+   (direct-values :initform (make-hash-table :test #'eq)
+                  :accessor context-direct-values)
+   (array-type-ids :initform (make-hash-table :test #'equal)
+                   :accessor context-array-type-ids)
    (uniform-struct-ids :initform (make-hash-table :test #'eq)
                        :accessor context-uniform-struct-ids)
+   (task-payload-variable :initform nil
+                          :accessor context-task-payload-variable)
+   (mesh-primitive-indices-variable
+    :initform nil :accessor context-mesh-primitive-indices-variable)
    (loaded-values :initform (make-hash-table :test #'eq)
                   :accessor context-loaded-values)
    (loaded-blocks :initform (make-hash-table :test #'eq)
@@ -3729,6 +3737,42 @@ structured product and source provenance.  #JDLQPN"))
           (setf (gethash key (context-pointer-ids context)) id)
           (append-context-form 'type-declarations context
                                (list id 'type-pointer storage-class value-id))
+          id))))
+
+(defun ensure-pointer-to-type-id (context storage-class value-id name)
+  (let ((key (list storage-class value-id)))
+    (or (gethash key (context-pointer-ids context))
+        (let ((id (reserve-shader-id context name)))
+          (setf (gethash key (context-pointer-ids context)) id)
+          (append-context-form 'type-declarations context
+                               (list id 'type-pointer storage-class value-id))
+          id))))
+
+(defun ensure-array-type-id (context element-type element-count)
+  (let* ((element-type (find-shader-type element-type))
+         (key (list element-type element-count)))
+    (or (gethash key (context-array-type-ids context))
+        (let* ((element-id (ensure-shader-type-id context element-type))
+               (length-id
+                 (reserve-shader-id
+                  context
+                  (format nil "ARRAY-LENGTH-~D-~A"
+                          element-count (shader-type-name element-type))))
+               (id (reserve-shader-id
+                    context
+                    (format nil "~A-ARRAY-~D"
+                            (shader-type-name element-type) element-count))))
+          (setf (gethash key (context-array-type-ids context)) id)
+          ;; Array lengths are type operands, so keep their constants directly
+          ;; beside the derived type instead of in the later value-constant
+          ;; section.
+          (append-context-form
+           'type-declarations context
+           (list length-id 'constant
+                 (ensure-shader-type-id context :uint) element-count))
+          (append-context-form
+           'type-declarations context
+           (list id 'type-array element-id length-id))
           id))))
 
 (defun ensure-uniform-block-type-id (context block)
@@ -3879,6 +3923,127 @@ Modules whose expressions use no extended mathematics never acquire one."
               (shader-resource-binding declaration)))))
     variable-id))
 
+(defun register-workgroup-size-value (context declaration workgroup-size)
+  (let* ((type-id (ensure-shader-type-id context :uvec3))
+         (value-id (reserve-shader-id context
+                                      (shader-object-name declaration))))
+    (append-context-form
+     'constant-declarations context
+     (list* value-id 'constant-composite type-id
+            (mapcar (lambda (extent)
+                      (ensure-shader-uint-constant context extent))
+                    workgroup-size)))
+    (append-context-form
+     'annotations context
+     (list 'decorate value-id 'built-in '(enum built-in workgroup-size)))
+    (setf (gethash declaration (context-direct-values context)) value-id)
+    value-id))
+
+(defun ensure-task-payload-type-id (context payload)
+  (or (gethash payload (context-uniform-struct-ids context))
+      (let ((id (reserve-shader-id
+                 context
+                 (format nil "~A-PAYLOAD-TYPE"
+                         (shader-object-name payload)))))
+        (setf (gethash payload (context-uniform-struct-ids context)) id)
+        (append-context-form
+         'type-declarations context
+         (list* id 'type-struct
+                (mapcar
+                 (lambda (field)
+                   (let ((element-count
+                           (shader-task-payload-field-element-count field)))
+                     (if element-count
+                         (ensure-array-type-id
+                          context (shader-declaration-type field) element-count)
+                         (ensure-shader-type-id
+                          context (shader-declaration-type field)))))
+                 (shader-task-payload-fields payload))))
+        id)))
+
+(defun register-task-payload (context payload)
+  (let* ((type-id (ensure-task-payload-type-id context payload))
+         (pointer-id
+           (ensure-pointer-to-type-id
+            context 'task-payload-workgroup-ext type-id
+            (format nil "~A-PAYLOAD-POINTER" (shader-object-name payload))))
+         (variable-id
+           (reserve-shader-id
+            context (format nil "~A-PAYLOAD" (shader-object-name payload)))))
+    (append-context-form
+     'variable-declarations context
+     (list variable-id 'variable pointer-id 'task-payload-workgroup-ext))
+    (setf (context-task-payload-variable context) variable-id
+          (context-interfaces context)
+          (nconc (context-interfaces context) (list variable-id)))
+    variable-id))
+
+(defun mesh-output-array-size (mesh-output per-primitive-p)
+  (if per-primitive-p
+      (shader-mesh-output-max-primitives mesh-output)
+      (shader-mesh-output-max-vertices mesh-output)))
+
+(defun register-mesh-output-variable
+    (context declaration mesh-output per-primitive-p)
+  (let* ((element-type (shader-declaration-type declaration))
+         (array-type-id
+           (ensure-array-type-id
+            context element-type
+            (mesh-output-array-size mesh-output per-primitive-p)))
+         (pointer-id
+           (ensure-pointer-to-type-id
+            context 'output array-type-id
+            (format nil "~A-OUTPUT-ARRAY-POINTER"
+                    (shader-object-name declaration))))
+         (variable-id
+           (reserve-shader-id context (shader-object-name declaration))))
+    (setf (gethash declaration (context-variable-ids context)) variable-id)
+    (append-context-form 'variable-declarations context
+                         (list variable-id 'variable pointer-id 'output))
+    (append-context-form
+     'annotations context
+     (if (shader-interface-built-in declaration)
+         (list 'decorate variable-id 'built-in
+               (list 'enum 'built-in
+                     (shader-interface-built-in declaration)))
+         (list 'decorate variable-id 'location
+               (shader-interface-location declaration))))
+    (when per-primitive-p
+      (append-context-form 'annotations context
+                           (list 'decorate variable-id 'per-primitive-ext)))
+    (setf (context-interfaces context)
+          (nconc (context-interfaces context) (list variable-id)))
+    variable-id))
+
+(defun register-mesh-outputs (context mesh-output)
+  (dolist (declaration (shader-mesh-output-vertex-outputs mesh-output))
+    (register-mesh-output-variable context declaration mesh-output nil))
+  (dolist (declaration (shader-mesh-output-primitive-outputs mesh-output))
+    (register-mesh-output-variable context declaration mesh-output t))
+  (let* ((topology (shader-mesh-output-topology mesh-output))
+         (index-type (mesh-topology-index-type topology))
+         (array-type-id
+           (ensure-array-type-id
+            context index-type
+            (shader-mesh-output-max-primitives mesh-output)))
+         (pointer-id
+           (ensure-pointer-to-type-id
+            context 'output array-type-id "PRIMITIVE-INDICES-POINTER"))
+         (variable-id (reserve-shader-id context "PRIMITIVE-INDICES")))
+    (append-context-form 'variable-declarations context
+                         (list variable-id 'variable pointer-id 'output))
+    (append-context-form
+     'annotations context
+     (list 'decorate variable-id 'built-in
+           (list 'enum 'built-in
+                 (ecase topology
+                   (:points 'primitive-point-indices-ext)
+                   (:lines 'primitive-line-indices-ext)
+                   (:triangles 'primitive-triangle-indices-ext)))))
+    (setf (context-mesh-primitive-indices-variable context) variable-id
+          (context-interfaces context)
+          (nconc (context-interfaces context) (list variable-id)))))
+
 (defun associate-shader-instruction (context expression instruction)
   (let ((forward (context-expression-instructions context))
         (reverse (context-instruction-expressions context)))
@@ -3954,6 +4119,10 @@ Modules whose expressions use no extended mathematics never acquire one."
   'projected-sample)
 
 (defmethod shader-expression-provenance-name
+    ((expression shader-payload-element))
+  (shader-object-name (shader-payload-element-field expression)))
+
+(defmethod shader-expression-provenance-name
     ((expression shader-interpretation))
   (declare (ignore expression))
   'interpretation)
@@ -3986,60 +4155,86 @@ Modules whose expressions use no extended mathematics never acquire one."
 
 (defun lower-shader-reference (context expression)
   (let ((target (shader-reference-target expression)))
-    (etypecase target
-      (shader-binding
-       (multiple-value-bind (fold-value fold-value-p)
-           (gethash target (context-fold-values context))
-         (if fold-value-p
-             fold-value
-             (let* ((source (shader-binding-expression target))
-                    (value (lower-shader-expression context source)))
-               (alias-shader-expression context expression source)
-               value))))
-      (shader-uniform-member
-       (let* ((block (shader-uniform-member-block target))
-              (type (shader-declaration-type target))
-              (pointer
-                (fresh-shader-id context
-                                 (format nil "~A-POINTER"
-                                         (shader-object-name target))))
-              (value
-                (fresh-shader-id context (shader-object-name target))))
-         (emit-shader-instruction
-          context expression
-          (list pointer 'access-chain
-                (ensure-pointer-type-id context 'uniform type)
-                (gethash block (context-variable-ids context))
-                (ensure-shader-uint-constant
-                 context (shader-uniform-member-index target))))
-         (emit-shader-instruction
-          context expression
-          (list value 'load (ensure-shader-type-id context type) pointer))
-         value))
-      (shader-variable-declaration
-       (multiple-value-bind (value found-p)
-           (gethash target (context-loaded-values context))
-         (if (and found-p
-                  (eq (gethash target (context-loaded-blocks context))
-                      (context-current-block context)))
-             (progn
-               (associate-shader-instruction
-                context expression
-                (gethash target (context-loaded-instructions context)))
-               value)
+    (multiple-value-bind (direct direct-p)
+        (gethash target (context-direct-values context))
+      (if direct-p
+          direct
+          (etypecase target
+            (shader-binding
+             (multiple-value-bind (fold-value fold-value-p)
+                 (gethash target (context-fold-values context))
+               (if fold-value-p
+                   fold-value
+                   (let* ((source (shader-binding-expression target))
+                          (value (lower-shader-expression context source)))
+                     (alias-shader-expression context expression source)
+                     value))))
+            (shader-task-payload-field
              (let* ((type (shader-declaration-type target))
+                    (pointer
+                      (fresh-shader-id
+                       context
+                       (format nil "~A-POINTER" (shader-object-name target))))
                     (value
-                      (emit-value-instruction
-                       context expression type 'load
-                       (list (gethash target
-                                      (context-variable-ids context)))))
-                    (instruction (car (last (context-instructions context)))))
-               (setf (gethash target (context-loaded-values context)) value
-                     (gethash target (context-loaded-blocks context))
-                     (context-current-block context)
-                     (gethash target (context-loaded-instructions context))
-                     instruction)
-               value)))))))
+                      (fresh-shader-id context (shader-object-name target))))
+               (emit-shader-instruction
+                context expression
+                (list pointer 'access-chain
+                      (ensure-pointer-type-id
+                       context 'task-payload-workgroup-ext type)
+                      (context-task-payload-variable context)
+                      (ensure-shader-uint-constant
+                       context (shader-task-payload-field-index target))))
+               (emit-shader-instruction
+                context expression
+                (list value 'load (ensure-shader-type-id context type) pointer))
+               value))
+            (shader-uniform-member
+             (let* ((block (shader-uniform-member-block target))
+                    (type (shader-declaration-type target))
+                    (pointer
+                      (fresh-shader-id context
+                                       (format nil "~A-POINTER"
+                                               (shader-object-name target))))
+                    (value
+                      (fresh-shader-id context (shader-object-name target))))
+               (emit-shader-instruction
+                context expression
+                (list pointer 'access-chain
+                      (ensure-pointer-type-id context 'uniform type)
+                      (gethash block (context-variable-ids context))
+                      (ensure-shader-uint-constant
+                       context (shader-uniform-member-index target))))
+               (emit-shader-instruction
+                context expression
+                (list value 'load (ensure-shader-type-id context type) pointer))
+               value))
+            (shader-variable-declaration
+             (multiple-value-bind (value found-p)
+                 (gethash target (context-loaded-values context))
+               (if (and found-p
+                        (eq (gethash target (context-loaded-blocks context))
+                            (context-current-block context)))
+                   (progn
+                     (associate-shader-instruction
+                      context expression
+                      (gethash target (context-loaded-instructions context)))
+                     value)
+                   (let* ((type (shader-declaration-type target))
+                          (value
+                            (emit-value-instruction
+                             context expression type 'load
+                             (list (gethash
+                                    target (context-variable-ids context)))))
+                          (instruction
+                            (car (last (context-instructions context)))))
+                     (setf (gethash target (context-loaded-values context)) value
+                           (gethash target (context-loaded-blocks context))
+                           (context-current-block context)
+                           (gethash target
+                                    (context-loaded-instructions context))
+                           instruction)
+                     value)))))))))
 
 (defgeneric binary-arithmetic-instruction (operator left-type right-type)
   (:documentation
@@ -4563,6 +4758,26 @@ backend's context before its source-located unsupported-operation method."))
 (defmethod lower-shader-expression-value (context (expression shader-reference))
   (lower-shader-reference context expression))
 
+(defmethod lower-shader-expression-value
+    (context (expression shader-payload-element))
+  (let* ((field (shader-payload-element-field expression))
+         (type (shader-declaration-type field))
+         (pointer (fresh-shader-id
+                   context
+                   (format nil "~A-ELEMENT-POINTER"
+                           (shader-object-name field))))
+         (index (lower-shader-expression
+                 context (shader-payload-element-index expression))))
+    (emit-shader-instruction
+     context expression
+     (list pointer 'access-chain
+           (ensure-pointer-type-id context 'task-payload-workgroup-ext type)
+           (context-task-payload-variable context)
+           (ensure-shader-uint-constant
+            context (shader-task-payload-field-index field))
+           index))
+    (emit-value-instruction context expression type 'load (list pointer))))
+
 (defmethod lower-shader-expression-value (context (expression shader-call))
   (lower-shader-call (shader-call-operator expression) context expression))
 
@@ -4708,11 +4923,187 @@ backend's context before its source-located unsupported-operation method."))
       (setf (gethash expression (context-expression-values context))
             (lower-shader-expression-value context expression))))
 
+(defgeneric lower-shader-statement (context statement)
+  (:documentation "Lower one semantic shader effect into SPIR-V control/data flow."))
+
+(defmethod lower-shader-statement
+    (context (statement shader-output-assignment))
+  (let* ((expression (shader-assignment-value statement))
+         (value (lower-shader-expression context expression))
+         (output-id
+           (gethash (shader-assignment-output statement)
+                    (context-variable-ids context))))
+    (emit-shader-instruction context expression (list 'store output-id value))))
+
+(defmethod lower-shader-statement
+    (context (statement shader-conditional-statement))
+  (let ((condition
+          (lower-shader-expression
+           context (shader-conditional-statement-condition statement)))
+        (body-label (fresh-shader-id context 'conditional-body))
+        (merge-label (fresh-shader-id context 'conditional-merge)))
+    (emit-shader-instruction
+     context (shader-conditional-statement-condition statement)
+     (list 'selection-merge merge-label 'none))
+    (emit-shader-instruction
+     context (shader-conditional-statement-condition statement)
+     (list 'branch-conditional condition body-label merge-label))
+    (begin-shader-basic-block context body-label)
+    (dolist (child (shader-conditional-statement-statements statement))
+      (lower-shader-statement context child))
+    (emit-shader-instruction context nil (list 'branch merge-label))
+    (begin-shader-basic-block context merge-label)))
+
+(defmethod lower-shader-statement
+    (context (statement shader-mesh-output-counts))
+  (let ((vertex-expression
+          (shader-mesh-output-vertex-count statement)))
+    (emit-shader-instruction
+     context vertex-expression
+     (list 'set-mesh-outputs-ext
+           (lower-shader-expression context vertex-expression)
+           (lower-shader-expression
+            context (shader-mesh-output-primitive-count statement))))))
+
+(defun lower-shader-array-store
+    (context declaration index expression storage-class)
+  (let ((pointer
+          (fresh-shader-id
+           context
+           (format nil "~A-ELEMENT-POINTER"
+                   (shader-object-name declaration)))))
+    (emit-shader-instruction
+     context expression
+     (list pointer 'access-chain
+           (ensure-pointer-type-id
+            context storage-class (shader-declaration-type declaration))
+           (gethash declaration (context-variable-ids context))
+           index))
+    (emit-shader-instruction
+     context expression
+     (list 'store pointer (lower-shader-expression context expression)))))
+
+(defmethod lower-shader-statement
+    (context (statement shader-mesh-vertex-store))
+  (let ((index
+          (lower-shader-expression
+           context (shader-mesh-vertex-store-index statement))))
+    (dolist (pair (shader-mesh-vertex-store-values statement))
+      (lower-shader-array-store context (car pair) index (cdr pair) 'output))))
+
+(defmethod lower-shader-statement
+    (context (statement shader-mesh-primitive-store))
+  (let* ((index-expression (shader-mesh-primitive-store-index statement))
+         (index (lower-shader-expression context index-expression))
+         (indices-expression (shader-mesh-primitive-store-indices statement))
+         (indices-pointer (fresh-shader-id context 'primitive-indices-pointer)))
+    (emit-shader-instruction
+     context indices-expression
+     (list indices-pointer 'access-chain
+           (ensure-pointer-type-id
+            context 'output (shader-expression-type indices-expression))
+           (context-mesh-primitive-indices-variable context)
+           index))
+    (emit-shader-instruction
+     context indices-expression
+     (list 'store indices-pointer
+           (lower-shader-expression context indices-expression)))
+    (dolist (pair (shader-mesh-primitive-store-values statement))
+      (lower-shader-array-store context (car pair) index (cdr pair) 'output))))
+
+(defmethod lower-shader-statement
+    (context (statement shader-task-payload-store))
+  (let* ((field (shader-task-payload-store-field statement))
+         (expression (shader-task-payload-store-value statement))
+         (pointer
+           (fresh-shader-id
+            context
+            (format nil "~A-POINTER" (shader-object-name field))))
+         (indices
+           (append
+            (list (ensure-shader-uint-constant
+                   context (shader-task-payload-field-index field)))
+            (when (shader-task-payload-store-index statement)
+              (list
+               (lower-shader-expression
+                context (shader-task-payload-store-index statement)))))))
+    (emit-shader-instruction
+     context expression
+     (list* pointer 'access-chain
+            (ensure-pointer-type-id
+             context 'task-payload-workgroup-ext
+             (shader-declaration-type field))
+            (context-task-payload-variable context)
+            indices))
+    (emit-shader-instruction
+     context expression
+     (list 'store pointer (lower-shader-expression context expression)))))
+
+(defmethod lower-shader-statement
+    (context (statement shader-emit-mesh-workgroups))
+  (let* ((expression (shader-emit-mesh-workgroups-counts statement))
+         (counts (lower-shader-expression context expression))
+         (type (ensure-shader-type-id context :uint))
+         (components
+           (loop for component below 3
+                 collect
+                 (let ((id (fresh-shader-id context 'mesh-group-count)))
+                   (emit-shader-instruction
+                    context expression
+                    (list id 'composite-extract type counts component))
+                   id))))
+    (emit-shader-instruction
+     context expression
+     (append (list 'emit-mesh-tasks-ext) components
+             (when (context-task-payload-variable context)
+               (list (context-task-payload-variable context)))))))
+
 (defun shader-entry-execution-model (stage)
   (ecase stage
     (:vertex 'vertex)
     (:fragment 'fragment)
-    (:compute 'gl-compute)))
+    (:compute 'gl-compute)
+    (:task 'task-ext)
+    (:mesh 'mesh-ext)))
+
+(defun mesh-topology-execution-mode (topology)
+  (ecase topology
+    (:points 'output-points)
+    (:lines 'output-lines-ext)
+    (:triangles 'output-triangles-ext)))
+
+(defun shader-execution-modes (specification main-id)
+  (let ((stage (shader-specification-stage specification)))
+    (case stage
+      (:fragment
+       (list (make-instance 'spir-v-execution-mode
+                            :function main-id :name 'origin-upper-left)))
+      ((:task :mesh)
+       (append
+        (list
+         (make-instance
+          'spir-v-execution-mode
+          :function main-id :name 'local-size
+          :literals (shader-specification-workgroup-size specification)))
+        (when (eq stage :mesh)
+          (let ((mesh-output
+                  (shader-specification-mesh-output specification)))
+            (list
+             (make-instance
+              'spir-v-execution-mode
+              :function main-id
+              :name (mesh-topology-execution-mode
+                     (shader-mesh-output-topology mesh-output)))
+             (make-instance
+              'spir-v-execution-mode
+              :function main-id :name 'output-vertices
+              :literals (list
+                         (shader-mesh-output-max-vertices mesh-output)))
+             (make-instance
+              'spir-v-execution-mode
+              :function main-id :name 'output-primitives-ext
+              :literals (list
+                         (shader-mesh-output-max-primitives mesh-output)))))))))))
 
 (defun compile-shader-specification (specification)
   "Lower SPECIFICATION and retain bidirectional expression/instruction links."
@@ -4725,11 +5116,22 @@ backend's context before its source-located unsupported-operation method."))
     (begin-shader-basic-block context entry-id)
     (append-context-form 'type-declarations context
                          (list function-type-id 'type-function void-id))
+    (dolist (declaration (shader-specification-inputs specification))
+      (if (eq :workgroup-size (shader-interface-built-in declaration))
+          (register-workgroup-size-value
+           context declaration
+           (shader-specification-workgroup-size specification))
+          (register-shader-variable context declaration)))
     (dolist (declaration
-             (append (shader-specification-inputs specification)
-                     (shader-specification-outputs specification)
+             (append (shader-specification-outputs specification)
                      (shader-specification-resources specification)))
       (register-shader-variable context declaration))
+    (when (shader-specification-task-payload specification)
+      (register-task-payload
+       context (shader-specification-task-payload specification)))
+    (when (shader-specification-mesh-output specification)
+      (register-mesh-outputs
+       context (shader-specification-mesh-output specification)))
     ;; LET* is part of the language contract, not merely pretty syntax.  Emit
     ;; binding computations in source order so the resulting basic block reads
     ;; alongside the specification and retains ordinary Lisp evaluation order.
@@ -4738,17 +5140,26 @@ backend's context before its source-located unsupported-operation method."))
         (when (shader-expression-materialized-p expression)
           (lower-shader-expression context expression))))
     (dolist (statement (shader-specification-statements specification))
-      (let* ((value-expression (shader-assignment-value statement))
-             (value (lower-shader-expression context value-expression))
-             (output-id
-               (gethash (shader-assignment-output statement)
-                        (context-variable-ids context))))
-        (emit-shader-instruction context value-expression
-                                 (list 'store output-id value))))
-    (emit-shader-instruction context nil '(return))
+      (lower-shader-statement context statement))
+    (unless (eq :task (shader-specification-stage specification))
+      (emit-shader-instruction context nil '(return)))
     (let* ((module
              (make-instance
               'spir-v-module
+              :version
+              (if (member (shader-specification-stage specification)
+                          '(:task :mesh))
+                  #x00010400
+                  #x00010000)
+              :capabilities
+              (if (member (shader-specification-stage specification)
+                          '(:task :mesh))
+                  '(shader mesh-shading-ext)
+                  '(shader))
+              :extensions
+              (when (member (shader-specification-stage specification)
+                            '(:task :mesh))
+                '("SPV_EXT_mesh_shader"))
               :extended-instruction-imports
               (context-extended-instruction-imports context)
               :entry-points
@@ -4759,11 +5170,7 @@ backend's context before its source-located unsupported-operation method."))
                       (shader-specification-stage specification))
                      :function main-id
                      :interfaces (context-interfaces context)))
-              :execution-modes
-              (when (eq (shader-specification-stage specification) :fragment)
-                (list (make-instance 'spir-v-execution-mode
-                                     :function main-id
-                                     :name 'origin-upper-left)))
+              :execution-modes (shader-execution-modes specification main-id)
               :annotations (context-annotations context)
               :global-declarations
               (append (context-type-declarations context)

@@ -243,6 +243,7 @@
            #:parse-shader-operator-call
            #:infer-shader-call-type
            #:lower-shader-call
+           #:lower-shader-statement
            #:lower-shader-map-component-values
            #:shader-operator-result-name
            #:binary-arithmetic-instruction
