@@ -41,6 +41,12 @@
   :depends-on ("mcluv/backend" "clim-examples")
   :components ((:file "mcclim/gallery")))
 
+(defsystem "mcluv/roundrect-benchmark"
+  :description "A Tracy A/B of native and decomposed McCLIM roundrects."
+  :version "0.0.1"
+  :depends-on ("mcluv/backend")
+  :components ((:file "mcclim/roundrect-benchmark")))
+
 (defsystem "mcluv/luvcraft"
   :description "McCLIM gadget textures embedded in a live luvcraft session."
   :version "0.0.1"

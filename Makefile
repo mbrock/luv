@@ -5,8 +5,9 @@ LUVCRAFT_BENCHMARK_CSV ?= build/luvcraft-metal-benchmark.csv
 LUVCRAFT_BENCHMARK_SCENARIO ?= steady
 LUVCRAFT_STREAMING_BENCHMARK_CSV ?= build/luvcraft-metal-streaming-benchmark.csv
 TRACY_STREAMING_TRACE ?= build/luvcraft-streaming.tracy
+TRACY_MCCLIM_ROUNDRECT_TRACE ?= build/mcclim-roundrect.tracy
 
-.PHONY: all luvcraft run test parinfer-check shader-validate msl-validate smoke metal-smoke metal-text-closeup metal-benchmark metal-streaming-benchmark tracy-streaming mcluv readme-screenshots mcclim-gallery wiki wiki-cli objective-c-probe metal-clear metal-shader metal-pipeline metal-draw roundrect-proof slug-proof slug-text-proof clean
+.PHONY: all luvcraft run test parinfer-check shader-validate msl-validate smoke metal-smoke metal-text-closeup metal-benchmark metal-streaming-benchmark tracy-streaming tracy-mcclim-roundrect mcluv readme-screenshots mcclim-gallery wiki wiki-cli objective-c-probe metal-clear metal-shader metal-pipeline metal-draw roundrect-proof slug-proof slug-text-proof clean
 
 all: luvcraft
 
@@ -112,6 +113,9 @@ metal-streaming-benchmark:
 
 tracy-streaming: luvcraft
 	./scripts/trace-luvcraft-streaming $(TRACY_STREAMING_TRACE)
+
+tracy-mcclim-roundrect:
+	./scripts/trace-mcclim-roundrect $(TRACY_MCCLIM_ROUNDRECT_TRACE)
 
 mcluv:
 	./scripts/dev sbcl --script mcclim/build.lisp

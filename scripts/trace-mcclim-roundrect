@@ -1,0 +1,154 @@
+#!/bin/sh
+
+set -eu
+
+project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+
+if [ "${LUV_NIX_SHELL:-}" != 1 ]; then
+  exec "$project_root/scripts/dev" "$0" "$@"
+fi
+
+if [ "$#" -gt 3 ]; then
+  echo "Usage: scripts/trace-mcclim-roundrect [OUTPUT.tracy] [SHAPES] [REPETITIONS]" >&2
+  exit 2
+fi
+
+cd "$project_root"
+mkdir -p build
+
+output=${1:-build/mcclim-roundrect.tracy}
+shapes=${2:-256}
+repetitions=${3:-30}
+tracy_port=${LUV_MCCLIM_TRACY_PORT:-8097}
+case "$output" in
+  /*) ;;
+  *) output="$project_root/$output" ;;
+esac
+mkdir -p "$(dirname -- "$output")"
+
+run_dir=$(mktemp -d "$project_root/build/mcclim-roundrect.XXXXXX")
+ready="$run_dir/ready"
+log="$output.log"
+zones="${output%.tracy}.zones.csv"
+benchmark_pid=
+
+stop_benchmark() {
+  if [ -n "$benchmark_pid" ] && kill -0 "$benchmark_pid" 2>/dev/null; then
+    kill "$benchmark_pid" 2>/dev/null || true
+    wait "$benchmark_pid" 2>/dev/null || true
+  fi
+  rm -rf "$run_dir"
+}
+trap stop_benchmark EXIT HUP INT TERM
+
+TRACY_PORT="$tracy_port" sbcl --script scripts/mcclim-roundrect-tracy.lisp \
+  "$ready" "$shapes" "$repetitions" >"$log" 2>&1 &
+benchmark_pid=$!
+
+attempts=0
+while [ ! -r "$ready" ]; do
+  if ! kill -0 "$benchmark_pid" 2>/dev/null; then
+    echo "trace-mcclim-roundrect: benchmark exited during warmup; see $log" >&2
+    exit 1
+  fi
+  attempts=$((attempts + 1))
+  if [ "$attempts" -ge 600 ]; then
+    echo "trace-mcclim-roundrect: timed out during warmup; see $log" >&2
+    exit 1
+  fi
+  sleep 0.05
+done
+
+tracy-capture -p "$tracy_port" -o "$output" -f -s 10 >/dev/null &
+capture_pid=$!
+
+if ! wait "$benchmark_pid"; then
+  echo "trace-mcclim-roundrect: benchmark failed; see $log" >&2
+  exit 1
+fi
+benchmark_pid=
+
+wait "$capture_pid"
+tracy-csvexport -u "$output" >"$zones"
+
+for zone in mcluv/analytic-sample mcluv/decomposed-sample; do
+  if ! rg -q "^${zone}," "$zones"; then
+    echo "trace-mcclim-roundrect: missing zone $zone; see $log" >&2
+    exit 1
+  fi
+done
+
+awk -F, -v expected="$repetitions" '
+  NR > 1 && ($1 == "mcluv/analytic-sample" ||
+             $1 == "mcluv/decomposed-sample") {
+    count[$1]++
+    milliseconds = $5 / 1000000
+    total[$1] += milliseconds
+    if (milliseconds > maximum[$1]) maximum[$1] = milliseconds
+  }
+  END {
+    analytic = "mcluv/analytic-sample"
+    decomposed = "mcluv/decomposed-sample"
+    if (count[analytic] != expected || count[decomposed] != expected) {
+      printf "trace-mcclim-roundrect: expected %d samples per route, got %d and %d\n",
+             expected, count[analytic], count[decomposed] > "/dev/stderr"
+      exit 1
+    }
+    printf "%s: %d samples, %.3f ms mean, %.3f ms max\n",
+           analytic, count[analytic], total[analytic] / count[analytic],
+           maximum[analytic]
+    printf "%s: %d samples, %.3f ms mean, %.3f ms max\n",
+           decomposed, count[decomposed], total[decomposed] / count[decomposed],
+           maximum[decomposed]
+    printf "decomposed / analytic mean: %.2fx\n",
+           (total[decomposed] / count[decomposed]) / (total[analytic] / count[analytic])
+  }
+' "$zones"
+
+awk -F, '
+  NR == FNR && NR > 1 &&
+  ($1 == "mcluv/analytic-sample" || $1 == "mcluv/decomposed-sample") {
+    roots++
+    root_name[roots] = $1
+    root_start[roots] = $4
+    root_end[roots] = $4 + $5
+    next
+  }
+  NR == FNR { next }
+  FNR > 1 &&
+  ($1 == "mcluv/redisplay" || $1 == "mcluv/repaint" ||
+   $1 == "mcluv/compose" || $1 == "mcluv/frame" ||
+   $1 == "mcluv/prepare" || $1 == "canvas/frame" ||
+   $1 == "gpu/encode" || $1 == "metal/wait-for-drawable") {
+    for (i = 1; i <= roots; i++)
+      if ($4 >= root_start[i] && $4 + $5 <= root_end[i]) {
+        key = root_name[i] SUBSEP $1
+        count[key]++
+        total[key] += $5 / 1000000
+        break
+      }
+  }
+  END {
+    root[1] = "mcluv/analytic-sample"
+    root[2] = "mcluv/decomposed-sample"
+    zone[1] = "mcluv/redisplay"
+    zone[2] = "mcluv/repaint"
+    zone[3] = "mcluv/compose"
+    zone[4] = "mcluv/frame"
+    zone[5] = "mcluv/prepare"
+    zone[6] = "canvas/frame"
+    zone[7] = "gpu/encode"
+    zone[8] = "metal/wait-for-drawable"
+    for (route = 1; route <= 2; route++) {
+      printf "%s breakdown:\n", root[route]
+      for (part = 1; part <= 8; part++) {
+        key = root[route] SUBSEP zone[part]
+        printf "  %-24s %8.3f ms mean\n",
+               zone[part], total[key] / count[key]
+      }
+    }
+  }
+' "$zones" "$zones"
+
+sed -n '/^Analytic stream:/,/^Decomposed stream:/p' "$log"
+printf 'Trace: %s\nZones: %s\n' "$output" "$zones"
