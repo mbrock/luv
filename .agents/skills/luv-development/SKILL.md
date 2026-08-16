@@ -63,6 +63,30 @@ Never kill an image reported as belonging to another checkout or as Emacs/extern
 
 A cold checkout-local load and a full program image build are different timings: ASDF compilation writes under `~/.cache/common-lisp/.../<absolute-checkout-path>/`, while `program-op` also writes a large executable core. Report the phase and elapsed time when diagnosing regressions.
 
+## Verify native windows
+
+Computer Use currently fails to enumerate or attach to some visible windows
+owned by unbundled command-line SBCL processes, including SDL/Cocoa windows.
+Do not treat its missing app/window state as evidence that such a window is
+absent, and do not spend time trying alternate Computer Use app names.
+
+Use macOS screenshots instead. First capture the displays, inspect the actual
+pixels to find the window and its screen coordinates, then make a bounded
+capture when useful:
+
+```sh
+/usr/sbin/screencapture -x build/native-window-desktop.png
+/usr/sbin/screencapture -x -R<X>,<Y>,<WIDTH>,<HEIGHT> build/native-window.png
+```
+
+`-R` uses logical screen coordinates, while the resulting image may have twice
+those dimensions on a Retina display. Verify the title, contents, and visible
+frame from the screenshot itself; a Dock icon, live process, Cocoa event-loop
+stack, or loaded graphics driver is not visible-window proof. Keep using
+Computer Use for ordinary bundled apps where it can actually observe the
+target, but prefer `screencapture` for these Lisp-hosted native windows until
+the attachment failure is understood.
+
 ## Finish
 
 Run only quick checks relevant to the change. Stop temporary checkout-managed images if their state is no longer useful. Commit and push coherent work according to `AGENTS.md`, without deleting caches or unrelated user files merely to make the tree look clean.
