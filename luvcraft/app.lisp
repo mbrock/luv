@@ -145,6 +145,20 @@
   (declare (ignore overlay))
   nil)
 
+(defgeneric handle-luvcraft-overlay-event (overlay session canvas event)
+  (:documentation
+   "Handle EVENT projected onto OVERLAY, returning true when consumed."))
+
+(defmethod handle-luvcraft-overlay-event (overlay session canvas event)
+  (declare (ignore overlay session canvas event))
+  nil)
+
+(defun dispatch-luvcraft-overlay-event (session canvas event)
+  "Offer EVENT to SESSION's frontmost overlay and report consumption."
+  (some (lambda (overlay)
+          (handle-luvcraft-overlay-event overlay session canvas event))
+        (luvcraft-session-overlays session)))
+
 (defun add-luvcraft-overlay (session overlay)
   "Draw OVERLAY in subsequent SESSION frames and return it."
   (pushnew overlay (luvcraft-session-overlays session) :test #'eq)

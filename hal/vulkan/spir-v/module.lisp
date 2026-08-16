@@ -309,7 +309,8 @@ module share a single import."))
 (defun spinning-texture-vertex-module ()
   "Make a vertex shader for a vertexless, perspective-spinning texture quad.
 
-Binding 2 is a uniform block whose first vector contains sine and cosine."
+Binding 2 is a uniform block containing sine, cosine, and the horizontal
+aspect correction needed to preserve the source texture's shape."
   (make-instance
    'spir-v-module
    :entry-points
@@ -343,7 +344,7 @@ Binding 2 is a uniform block whose first vector contains sine and cosine."
      (%zero constant %float 0.0)
      (%one constant %float 1.0)
      (%two constant %float 2.0)
-     (%scale constant %float 0.82)
+     (%scale constant %float 0.68)
      (%orbit constant %float 0.12)
      (%depth-base constant %float 0.45)
      (%depth-scale constant %float 0.22)
@@ -377,6 +378,7 @@ Binding 2 is a uniform block whose first vector contains sine and cosine."
          (%state load %vec4 %state-pointer)
          (%sine composite-extract %float %state 0)
          (%cosine composite-extract %float %state 1)
+         (%aspect composite-extract %float %state 2)
          (%x-twice f-mul %float %xf %two)
          (%center-x f-sub %float %x-twice %one)
          (%y-twice f-mul %float %yf %two)
@@ -385,7 +387,8 @@ Binding 2 is a uniform block whose first vector contains sine and cosine."
          ;; remains upright.
          (%center-y f-sub %float %y-twice %one)
          (%scaled-x f-mul %float %center-x %scale)
-         (%rotated-x f-mul %float %scaled-x %cosine)
+         (%aspect-x f-mul %float %scaled-x %aspect)
+         (%rotated-x f-mul %float %aspect-x %cosine)
          (%orbit-x f-mul %float %sine %orbit)
          (%clip-x f-add %float %rotated-x %orbit-x)
          (%clip-y f-mul %float %center-y %scale)
@@ -397,6 +400,177 @@ Binding 2 is a uniform block whose first vector contains sine and cosine."
          (%clip-position composite-construct
                          %vec4 %clip-x %clip-y %clip-z %clip-w)
          (store %position %clip-position)
+         (return))))))))
+
+(defun lisp-machine-chassis-vertex-module ()
+  "Make three nested perspective quads behind a sampled Lisp-machine screen."
+  (make-instance
+   'spir-v-module
+   :entry-points
+   (list (make-instance
+          'spir-v-entry-point :execution-model 'vertex
+          :function '%main
+          :interfaces '(%vertex-index %position %color-output)))
+   :annotations
+   '((decorate %vertex-index built-in (enum built-in vertex-index))
+     (decorate %position built-in (enum built-in position))
+     (decorate %color-output location 0)
+     (decorate %spin-state-block block)
+     (member-decorate %spin-state-block 0 offset 0)
+     (decorate %spin-state-buffer descriptor-set 0)
+     (decorate %spin-state-buffer binding 2))
+   :global-declarations
+   '((%void type-void)
+     (%bool type-bool)
+     (%uint type-int 32 0)
+     (%float type-float 32)
+     (%vec4 type-vector %float 4)
+     (%spin-state-block type-struct %vec4)
+     (%vertex-index-pointer type-pointer input %uint)
+     (%position-pointer type-pointer output %vec4)
+     (%color-output-pointer type-pointer output %vec4)
+     (%spin-state-block-pointer type-pointer uniform %spin-state-block)
+     (%spin-state-value-pointer type-pointer uniform %vec4)
+     (%function-type type-function %void)
+     (%zero-u constant %uint 0)
+     (%one-u constant %uint 1)
+     (%two-u constant %uint 2)
+     (%four-u constant %uint 4)
+     (%zero constant %float 0.0)
+     (%one constant %float 1.0)
+     (%two constant %float 2.0)
+     (%shadow-x constant %float 0.82)
+     (%shadow-y constant %float 0.86)
+     (%body-x constant %float 0.80)
+     (%body-y constant %float 0.84)
+     (%bezel-x constant %float 0.73)
+     (%bezel-y constant %float 0.74)
+     (%shadow-offset-x constant %float 0.035)
+     (%shadow-offset-y constant %float 0.055)
+     (%body-offset-y constant %float 0.012)
+     (%orbit constant %float 0.12)
+     (%depth-base constant %float 0.46)
+     (%depth-scale constant %float 0.22)
+     (%base-w constant %float 1.18)
+     (%perspective-scale constant %float 0.48)
+     (%shadow-r constant %float 0.035)
+     (%shadow-g constant %float 0.045)
+     (%shadow-b constant %float 0.043)
+     (%body-r constant %float 0.50)
+     (%body-g constant %float 0.47)
+     (%body-b constant %float 0.38)
+     (%bezel-r constant %float 0.075)
+     (%bezel-g constant %float 0.095)
+     (%bezel-b constant %float 0.085)
+     (%vertex-index variable %vertex-index-pointer input)
+     (%position variable %position-pointer output)
+     (%color-output variable %color-output-pointer output)
+     (%spin-state-buffer variable %spin-state-block-pointer uniform))
+   :function-definitions
+   (list
+    (make-instance
+     'spir-v-function-definition
+     :result-id '%main :return-type '%void
+     :function-type '%function-type
+     :basic-blocks
+     (list
+      (make-instance
+       'spir-v-basic-block :label '%entry
+       :instructions
+       '((%vertex load %uint %vertex-index)
+         (%layer u-div %uint %vertex %four-u)
+         (%local u-mod %uint %vertex %four-u)
+         (%x-bit bitwise-and %uint %local %one-u)
+         (%y-bit shift-right-logical %uint %local %one-u)
+         (%xf convert-u-to-f %float %x-bit)
+         (%yf convert-u-to-f %float %y-bit)
+         (%shadow-p u-less-than %bool %layer %one-u)
+         (%body-p u-less-than %bool %layer %two-u)
+         (%non-shadow-x select %float %body-p %body-x %bezel-x)
+         (%scale-x select %float %shadow-p %shadow-x %non-shadow-x)
+         (%non-shadow-y select %float %body-p %body-y %bezel-y)
+         (%scale-y select %float %shadow-p %shadow-y %non-shadow-y)
+         (%non-shadow-offset-x select %float %body-p %zero %zero)
+         (%offset-x select %float
+                    %shadow-p %shadow-offset-x %non-shadow-offset-x)
+         (%non-shadow-offset-y select %float
+                    %body-p %body-offset-y %zero)
+         (%offset-y select %float
+                    %shadow-p %shadow-offset-y %non-shadow-offset-y)
+         (%non-shadow-r select %float %body-p %body-r %bezel-r)
+         (%non-shadow-g select %float %body-p %body-g %bezel-g)
+         (%non-shadow-b select %float %body-p %body-b %bezel-b)
+         (%color-r select %float %shadow-p %shadow-r %non-shadow-r)
+         (%color-g select %float %shadow-p %shadow-g %non-shadow-g)
+         (%color-b select %float %shadow-p %shadow-b %non-shadow-b)
+         (%color composite-construct
+                 %vec4 %color-r %color-g %color-b %one)
+         (store %color-output %color)
+         (%state-pointer access-chain
+                         %spin-state-value-pointer
+                         %spin-state-buffer %zero-u)
+         (%state load %vec4 %state-pointer)
+         (%sine composite-extract %float %state 0)
+         (%cosine composite-extract %float %state 1)
+         (%aspect composite-extract %float %state 2)
+         (%x-twice f-mul %float %xf %two)
+         (%center-x f-sub %float %x-twice %one)
+         (%y-twice f-mul %float %yf %two)
+         (%center-y f-sub %float %y-twice %one)
+         (%scaled-x f-mul %float %center-x %scale-x)
+         (%aspect-x f-mul %float %scaled-x %aspect)
+         (%rotated-x f-mul %float %aspect-x %cosine)
+         (%orbit-x f-mul %float %sine %orbit)
+         (%orbited-x f-add %float %rotated-x %orbit-x)
+         (%clip-x f-add %float %orbited-x %offset-x)
+         (%scaled-y f-mul %float %center-y %scale-y)
+         (%clip-y f-add %float %scaled-y %offset-y)
+         (%depth-x f-mul %float %center-x %sine)
+         (%depth-offset f-mul %float %depth-x %depth-scale)
+         (%clip-z f-add %float %depth-base %depth-offset)
+         (%perspective f-mul %float %depth-x %perspective-scale)
+         (%clip-w f-add %float %base-w %perspective)
+         (%clip-position composite-construct
+                         %vec4 %clip-x %clip-y %clip-z %clip-w)
+         (store %position %clip-position)
+         (return))))))))
+
+(defun lisp-machine-chassis-fragment-module ()
+  "Pass the procedural chassis color through to the attachment."
+  (make-instance
+   'spir-v-module
+   :entry-points
+   (list (make-instance
+          'spir-v-entry-point :execution-model 'fragment
+          :function '%main :interfaces '(%color-input %color-output)))
+   :execution-modes
+   (list (make-instance 'spir-v-execution-mode
+                        :function '%main :name 'origin-upper-left))
+   :annotations
+   '((decorate %color-input location 0)
+     (decorate %color-output location 0))
+   :global-declarations
+   '((%void type-void)
+     (%float type-float 32)
+     (%vec4 type-vector %float 4)
+     (%color-input-pointer type-pointer input %vec4)
+     (%color-output-pointer type-pointer output %vec4)
+     (%function-type type-function %void)
+     (%color-input variable %color-input-pointer input)
+     (%color-output variable %color-output-pointer output))
+   :function-definitions
+   (list
+    (make-instance
+     'spir-v-function-definition
+     :result-id '%main :return-type '%void
+     :function-type '%function-type
+     :basic-blocks
+     (list
+      (make-instance
+       'spir-v-basic-block :label '%entry
+       :instructions
+       '((%color load %vec4 %color-input)
+         (store %color-output %color)
          (return))))))))
 
 (defun spinning-texture-fragment-module ()
@@ -458,3 +632,9 @@ Binding 2 is a uniform block whose first vector contains sine and cosine."
 
 (defun spinning-texture-fragment-shader ()
   (assemble-spir-v-module (spinning-texture-fragment-module)))
+
+(defun lisp-machine-chassis-vertex-shader ()
+  (assemble-spir-v-module (lisp-machine-chassis-vertex-module)))
+
+(defun lisp-machine-chassis-fragment-shader ()
+  (assemble-spir-v-module (lisp-machine-chassis-fragment-module)))

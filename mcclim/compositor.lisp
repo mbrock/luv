@@ -53,12 +53,21 @@
    (fragment-module
     :initform nil
     :accessor spinning-compositor-fragment-module)
+   (chassis-vertex-module
+    :initform nil
+    :accessor spinning-compositor-chassis-vertex-module)
+   (chassis-fragment-module
+    :initform nil
+    :accessor spinning-compositor-chassis-fragment-module)
    (layout
     :initform nil
     :accessor spinning-compositor-layout)
    (pipeline
     :initform nil
     :accessor spinning-compositor-pipeline)
+   (chassis-pipeline
+    :initform nil
+    :accessor spinning-compositor-chassis-pipeline)
    (frame-states
     :initform (make-hash-table :test #'eq)
     :reader spinning-compositor-frame-states)))
@@ -66,7 +75,10 @@
 (defun spinning-compositor-resources (compositor)
   (remove nil
           (list (spinning-compositor-pipeline compositor)
+                (spinning-compositor-chassis-pipeline compositor)
                 (spinning-compositor-layout compositor)
+                (spinning-compositor-chassis-fragment-module compositor)
+                (spinning-compositor-chassis-vertex-module compositor)
                 (spinning-compositor-fragment-module compositor)
                 (spinning-compositor-vertex-module compositor)
                 (spinning-compositor-sampler compositor)
@@ -94,8 +106,11 @@
         (spinning-compositor-sampler compositor) nil
         (spinning-compositor-vertex-module compositor) nil
         (spinning-compositor-fragment-module compositor) nil
+        (spinning-compositor-chassis-vertex-module compositor) nil
+        (spinning-compositor-chassis-fragment-module compositor) nil
         (spinning-compositor-layout compositor) nil
-        (spinning-compositor-pipeline compositor) nil)
+        (spinning-compositor-pipeline compositor) nil
+        (spinning-compositor-chassis-pipeline compositor) nil)
   compositor)
 
 (defmethod release-raster-mirror-compositor
@@ -147,6 +162,16 @@
                        (luv:make-shader-module-descriptor
                         :label "spinning McCLIM fragment shader"
                         :code (spv:spinning-texture-fragment-shader))))
+                    (chassis-vertex-module
+                      (create-resource
+                       (luv:make-shader-module-descriptor
+                        :label "Lisp machine chassis vertex shader"
+                        :code (spv:lisp-machine-chassis-vertex-shader))))
+                    (chassis-fragment-module
+                      (create-resource
+                       (luv:make-shader-module-descriptor
+                        :label "Lisp machine chassis fragment shader"
+                        :code (spv:lisp-machine-chassis-fragment-shader))))
                     (layout
                       (create-resource
                        (luv:make-bind-group-layout-descriptor
@@ -169,6 +194,22 @@
                           `(:format ,depth-format
                             :depth-write-enabled nil
                             :depth-compare :always))
+                        :primitive '(:topology :triangle-strip))))
+                    (chassis-pipeline
+                      (create-resource
+                       (luv:make-render-pipeline-descriptor
+                        :label "Lisp machine terminal chassis"
+                        :layout layout
+                        :vertex `(:module ,chassis-vertex-module
+                                  :entry-point "main")
+                        :fragment `(:module ,chassis-fragment-module
+                                    :entry-point "main"
+                                    :targets ((:format ,format)))
+                        :depth-stencil
+                        (when depth-format
+                          `(:format ,depth-format
+                            :depth-write-enabled nil
+                            :depth-compare :always))
                         :primitive '(:topology :triangle-strip)))))
                  (setf (spinning-compositor-device compositor) device
                        (spinning-compositor-source compositor) source
@@ -183,8 +224,14 @@
                        vertex-module
                        (spinning-compositor-fragment-module compositor)
                        fragment-module
+                       (spinning-compositor-chassis-vertex-module compositor)
+                       chassis-vertex-module
+                       (spinning-compositor-chassis-fragment-module compositor)
+                       chassis-fragment-module
                        (spinning-compositor-layout compositor) layout
                        (spinning-compositor-pipeline compositor) pipeline
+                       (spinning-compositor-chassis-pipeline compositor)
+                       chassis-pipeline
                        completed-p t)))
           (unless completed-p
             (dolist (resource created)
@@ -233,7 +280,8 @@
             (when bind-group (luv:destroy bind-group))
             (when buffer (luv:destroy buffer)))))))
 
-(defun spinning-compositor-state (compositor timestamp)
+(defun spinning-compositor-state
+    (compositor timestamp &key (aspect-scale 1.0))
   (unless (spinning-compositor-start-time compositor)
     (setf (spinning-compositor-start-time compositor) timestamp))
   (let ((phase (* 2 pi (spinning-compositor-speed compositor)
@@ -244,7 +292,8 @@
      :initial-contents
      (list (coerce (sin phase) 'single-float)
            (coerce (cos phase) 'single-float)
-           0.0f0 0.0f0))))
+           (coerce aspect-scale 'single-float)
+           0.0f0))))
 
 (defun render-spinning-mirror-frame (mirror timestamp)
   (let ((context (mirror-context mirror))
@@ -271,6 +320,21 @@
                        `((:view ,(spinning-compositor-output-view compositor)
                           :load-op :clear :store-op :store
                           :clear-value #(0.025 0.025 0.04 1.0)))))))
+               (luv:encode
+                pass
+                (luv:make-gpu-set-pipeline-command
+                 :pipeline (spinning-compositor-chassis-pipeline compositor)))
+               (luv:encode
+                pass
+                (luv:make-gpu-set-bind-group-command
+                 :index 0
+                 :bind-group
+                 (spinning-frame-state-bind-group frame-state)))
+               (dotimes (layer 3)
+                 (luv:encode
+                  pass
+                  (luv:make-gpu-draw-command
+                   :vertex-count 4 :first-vertex (* layer 4))))
                (luv:encode
                 pass
                 (luv:make-gpu-set-pipeline-command

@@ -630,6 +630,9 @@ the frame uniform cannot silently diverge between shader and host."
 
 (defmethod handle-canvas-event
     ((session luvcraft-session) canvas (event canvas-pointer-button-press-event))
+  (when (and (not (luvcraft-session-pointer-captured-p session))
+             (dispatch-luvcraft-overlay-event session canvas event))
+    (return-from handle-canvas-event nil))
   (let ((button (canvas-pointer-event-button event)))
     (cond
       ((not (luvcraft-session-pointer-captured-p session))
@@ -645,19 +648,26 @@ the frame uniform cannot silently diverge between shader and host."
   nil)
 
 (defmethod handle-canvas-event
+    ((session luvcraft-session) canvas
+     (event canvas-pointer-button-release-event))
+  (unless (luvcraft-session-pointer-captured-p session)
+    (dispatch-luvcraft-overlay-event session canvas event))
+  nil)
+
+(defmethod handle-canvas-event
     ((session luvcraft-session) canvas (event canvas-pointer-motion-event))
-  (declare (ignore canvas))
-  (when (luvcraft-session-pointer-captured-p session)
-    (let ((camera (luvcraft-session-camera session)))
-      (incf (camera-yaw camera)
-            (* (canvas-pointer-event-delta-x event)
-               (camera-sensitivity camera)))
-      (setf (camera-pitch camera)
-            (max -1.5
-                 (min 1.5
-                      (- (camera-pitch camera)
-                         (* (canvas-pointer-event-delta-y event)
-                            (camera-sensitivity camera))))))))
+  (if (luvcraft-session-pointer-captured-p session)
+      (let ((camera (luvcraft-session-camera session)))
+        (incf (camera-yaw camera)
+              (* (canvas-pointer-event-delta-x event)
+                 (camera-sensitivity camera)))
+        (setf (camera-pitch camera)
+              (max -1.5
+                   (min 1.5
+                        (- (camera-pitch camera)
+                           (* (canvas-pointer-event-delta-y event)
+                              (camera-sensitivity camera)))))))
+      (dispatch-luvcraft-overlay-event session canvas event))
   nil)
 
 (defmethod handle-canvas-event

@@ -83,6 +83,7 @@
            #:edit-block-world-source
            #:edit-luvcraft-block
            #:encode-luvcraft-overlay
+           #:handle-luvcraft-overlay-event
            #:emit-block-face
            #:exposed-face-mesher
            #:find-luvcraft-gazetteer-view
