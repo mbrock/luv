@@ -214,9 +214,6 @@
                  comparison))))
       (dolist (execution
                (voxel-light-solver-comparison-frontier-executions comparison))
-        (ok (>=
-             (luvcraft.frontier:frontier-execution-elapsed-seconds execution)
-             0d0))
         (ok (plusp
              (luvcraft.frontier:frontier-execution-visits execution)))
         (ok (= (* 6
@@ -224,6 +221,23 @@
                (luvcraft.frontier:frontier-execution-relations execution)))
         (ok (plusp
              (luvcraft.frontier:frontier-execution-crossings execution)))))))
+
+(deftest bucket-frontier-admission-does-not-construct-a-type-per-site
+  (let ((frontier
+          (luvcraft.frontier:make-bucket-frontier
+           :maximum-priority 15 :initial-capacity 8192))
+        (observation (make-runtime-observation)))
+    ;; Warm CLOS accessor caches outside the measured extent.
+    (luvcraft.frontier:bucket-frontier-push frontier nil 0 7)
+    (luvcraft.frontier:bucket-frontier-pop frontier)
+    (with-runtime-observation (observation)
+      (dotimes (offset 8192)
+        (luvcraft.frontier:bucket-frontier-push frontier nil offset 7))
+      (dotimes (offset 8192)
+        (declare (ignore offset))
+        (luvcraft.frontier:bucket-frontier-pop frontier)))
+    ;; The former dynamic TYPEP specifier allocated three conses per push.
+    (ok (< (runtime-observation-bytes-consed observation) 4096))))
 
 (deftest light-solvers-expose-symmetric-nested-timing-zones
   (let ((world (make-open-sky-test-world))
@@ -236,13 +250,17 @@
              :lighting/legacy
              :lighting/legacy/seed-sky
              :lighting/legacy/propagate-sky
+             :lighting/legacy/drain-sites
              :lighting/legacy/seed-block
              :lighting/legacy/propagate-block
+             :lighting/legacy/drain-sites
              :lighting/frontier
              :lighting/frontier/seed-sky
              :lighting/frontier/propagate-sky
+             :lighting/frontier/drain-sites
              :lighting/frontier/seed-block
-             :lighting/frontier/propagate-block)
+             :lighting/frontier/propagate-block
+             :lighting/frontier/drain-sites)
            names)))))
 
 (deftest frontier-light-can-be-selected-for-real-publication

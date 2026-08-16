@@ -112,10 +112,14 @@ the otherwise raw bucket number its meaning."))
 (defun bucket-frontier-push (frontier materialization offset priority)
   "Admit one MATERIALIZATION/OFFSET site at finite PRIORITY."
   (check-type offset (unsigned-byte 32))
-  (unless (typep priority
-                 `(integer 0 ,(bucket-frontier-maximum-priority frontier)))
-    (error "Frontier priority ~S is outside 0..~D."
-           priority (bucket-frontier-maximum-priority frontier)))
+  (let ((maximum-priority (bucket-frontier-maximum-priority frontier)))
+    ;; A runtime-constructed `(INTEGER 0 ,maximum-priority) type specifier
+    ;; conses once per admission.  Spell the same open-protocol check as
+    ;; primitive predicates so the packed frontier remains allocation-free.
+    (unless (and (integerp priority)
+                 (<= 0 priority maximum-priority))
+      (error "Frontier priority ~S is outside 0..~D."
+             priority maximum-priority)))
   (frontier-site-buffer-push
    (aref (bucket-frontier-buckets frontier) priority)
    materialization offset)
@@ -158,13 +162,9 @@ the otherwise raw bucket number its meaning."))
    (relations :initform 0 :accessor frontier-execution-relations)
    (admissions :initform 0 :accessor frontier-execution-admissions)
    (crossings :initform 0 :accessor frontier-execution-crossings)
-   (unavailable :initform 0 :accessor frontier-execution-unavailable)
-   (elapsed-seconds
-    :initform 0d0
-    :type double-float
-    :accessor frontier-execution-elapsed-seconds))
+   (unavailable :initform 0 :accessor frontier-execution-unavailable))
   (:documentation
-   "Inspectable work and timing evidence from one frontier execution."))
+   "Inspectable semantic work evidence from one frontier execution."))
 
 (defun make-frontier-execution (program input frontier)
   (make-instance

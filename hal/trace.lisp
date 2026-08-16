@@ -209,8 +209,12 @@ attributes concurrent runtime activity during the observed extent too."
               ,@body)
          (remove-measurement-gc-hook ,hook)))))
 
-(defmacro with-cpu-trace-zone ((name) &body body)
+(defmacro with-cpu-trace-zone
+    ((name &key (tracy-value nil tracy-value-supplied-p)) &body body)
   "Measure BODY as nested zone NAME for whichever measurement is watching.
+
+TRACY-VALUE, when supplied, is attached to the Tracy zone at exit.  It does
+not affect the bounded CPU trace, whose zones retain time and runtime costs.
 
 Two independent things may be: a Tracy viewer attached to this image, and an
 opt-in CPU-TRACE capture.  Each disabled path is one special-variable test and
@@ -223,7 +227,9 @@ own cost belongs to the zone it is attributed to rather than being hidden from
 it.  #OHNIWM"
   (let ((trace (gensym "TRACE"))
         (index (gensym "ZONE")))
-    `(with-tracy-zone (,name)
+    `(with-tracy-zone
+         (,name ,@(when tracy-value-supplied-p
+                    `(:value ,tracy-value)))
        (let ((,trace *cpu-trace*))
          (if ,trace
              (let ((,index (begin-cpu-trace-zone ,trace ,name)))

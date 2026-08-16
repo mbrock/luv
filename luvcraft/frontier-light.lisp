@@ -53,35 +53,33 @@
   (declare (ignore program))
   (let ((execution
           (frontiers:make-frontier-execution
-           'voxel-light-addition region frontier))
-        (start (get-internal-real-time)))
-    (unwind-protect
-         (frontiers:do-voxel-frontier-relations
-             (entry offset queued-level
-              neighbor neighbor-offset direction destination crossing
-              availability frontier region (light-region-entry-domain entry)
-              *voxel-face-directions*
-              :execution execution :result execution)
-           (values queued-level destination crossing availability)
-           (when neighbor
-             (let ((level (aref (funcall field-reader entry) offset)))
-               (when (plusp level)
-                 (let* ((opacity
-                          (light-region-opacity neighbor neighbor-offset))
-                        (loss
-                          (if (and skylight-p
-                                   (eq direction +voxel-negative-y+))
-                              opacity
-                              (+ 1 opacity)))
-                        (candidate (- level loss))
-                        (levels (funcall field-reader neighbor)))
-                   (when (> candidate (aref levels neighbor-offset))
-                     (setf (aref levels neighbor-offset) candidate)
-                     (frontiers:admit-frontier-site
-                      execution neighbor neighbor-offset candidate)))))))
-      (setf (frontiers:frontier-execution-elapsed-seconds execution)
-            (/ (- (get-internal-real-time) start)
-               (coerce internal-time-units-per-second 'double-float))))))
+           'voxel-light-addition region frontier)))
+    (with-cpu-trace-zone
+        (:lighting/frontier/drain-sites
+         :tracy-value (frontiers:frontier-execution-visits execution))
+      (frontiers:do-voxel-frontier-relations
+          (entry offset queued-level
+           neighbor neighbor-offset direction destination crossing
+           availability frontier region (light-region-entry-domain entry)
+           *voxel-face-directions*
+           :execution execution :result execution)
+        (values queued-level destination crossing availability)
+        (when neighbor
+          (let ((level (aref (funcall field-reader entry) offset)))
+            (when (plusp level)
+              (let* ((opacity
+                       (light-region-opacity neighbor neighbor-offset))
+                     (loss
+                       (if (and skylight-p
+                                (eq direction +voxel-negative-y+))
+                           opacity
+                           (+ 1 opacity)))
+                     (candidate (- level loss))
+                     (levels (funcall field-reader neighbor)))
+                (when (> candidate (aref levels neighbor-offset))
+                  (setf (aref levels neighbor-offset) candidate)
+                  (frontiers:admit-frontier-site
+                   execution neighbor neighbor-offset candidate))))))))))
 
 (defun solve-frontier-light-region (region)
   "Solve REGION from scratch with the greenfield frontier-light program.
@@ -176,11 +174,27 @@ the retained frontier executions.  Neither candidate is published. #DVUZ6H"
           (solve-light-region-using :legacy legacy-region)))
       (setf legacy-seconds
             (runtime-observation-elapsed-seconds legacy-observation))
+      (tracy-plot "lighting legacy allocated bytes"
+                  (runtime-observation-bytes-consed legacy-observation))
+      (tracy-plot "lighting legacy GC ms"
+                  (* 1000d0
+                     (runtime-observation-gc-seconds legacy-observation)))
+      (tracy-plot "lighting legacy collections"
+                  (runtime-observation-garbage-collections
+                   legacy-observation))
       (with-runtime-observation (frontier-observation)
         (multiple-value-setq (frontier-region frontier-visits executions)
           (solve-light-region-using :frontier frontier-region)))
       (setf frontier-seconds
             (runtime-observation-elapsed-seconds frontier-observation))
+      (tracy-plot "lighting frontier allocated bytes"
+                  (runtime-observation-bytes-consed frontier-observation))
+      (tracy-plot "lighting frontier GC ms"
+                  (* 1000d0
+                     (runtime-observation-gc-seconds frontier-observation)))
+      (tracy-plot "lighting frontier collections"
+                  (runtime-observation-garbage-collections
+                   frontier-observation))
       (let ((mismatches
               (light-regions-mismatched-keys legacy-region frontier-region)))
         (make-voxel-light-solver-comparison

@@ -64,17 +64,18 @@ evidence while we enjoy the much clearer conceptual surface immediately.
 
 The proof carries cost evidence at the same semantic boundaries.  Both
 solvers emit nested CPU/Tracy zones for the whole solve, sky and block
-seeding, and sky and block propagation; each retained frontier execution also
-records elapsed propagation time beside visits, relations, admissions,
-crossings, and peak frontier size.  The CPU trace and the retained A/B result
-now also record allocated bytes, garbage-collection time, and the exact number
-of collections crossing each dynamic extent.  A/B comparison therefore asks
+seeding, propagation, and frontier draining.  Each retained frontier execution
+records semantic evidence--visits, relations, admissions, crossings, and peak
+frontier size--while Tracy owns interactive temporal structure.  The CPU trace
+and the retained A/B result record allocated bytes, garbage-collection time,
+and the number of automatic collections crossing each dynamic extent.  A/B
+comparison therefore asks
 four different questions without confusing them: are the fields identical,
 did the programs perform the same semantic work, where did the physical
 realizations spend time, and how much memory pressure did they create?  The
 ordinary production worker traverses these same zones, so a live Tracy capture
 observes the selected solver in the actual asynchronous world path, not only
-in a special benchmark.
+in a special benchmark.  #J5KRQ9 explains how these instruments compose.
 
 The first terrain measurement is already useful specialization evidence.  On
 fifteen alternating solves of the same nine-chunk captured world, both
@@ -85,15 +86,15 @@ allocation.  A sustained batch of forty equivalent captures made the memory
 pressure tangible: 51 MiB allocated by the legacy solver and 102 MiB by the
 frontier solver, with one garbage collection crossing each batch.
 
-This is exactly the kind of result the frontier language is meant to expose
-rather than conceal.  Allocation profiling places the difference in the sky
-solve and frontier execution paths.  It is not explained by a larger logical
-frontier: after sky seeding, both implementations contain 2,304 sites and have
-the same bucket capacities, including the one bucket grown from 256 to 4,096
-entries.  The next physical question is therefore sharper and more exciting:
-which temporary representation or compiler escape in the general execution
-path accounts for those extra bytes, and can we specialize it away while
-leaving the clearer semantic program intact?
+That original result is retained here because the ensuing explanation is a
+small demonstration of the language paying for itself.  The fields and visit
+counts excluded semantic divergence; matching 2,304-site seed frontiers and
+identical bucket capacities excluded different growth.  Phase allocation then
+isolated the excess to admission, where one runtime-constructed type specifier
+allocated three conses on every push.  #GJZL85 records the fix and the reversal
+of the allocation result.  The remaining time difference now exposes a clean
+representation question, including the sealed-dispatch possibility in
+#U84XNW, rather than an indistinct mixture of algorithm and garbage collection.
 
 * Frontier is an operational pattern, not merely a queue
 :PROPERTIES:
@@ -575,6 +576,115 @@ predecessors.  If several modules can become short declarations of their
 world laws while the generated or macro-expanded loops remain excellent,
 that is not abstraction for its own sake.  It is the engine discovering one
 of its native languages.
+
+* Tracy aligns temporal structure with semantic work
+:PROPERTIES:
+:ID: J5KRQ9
+:END:
+
+=with-cpu-trace-zone= is one instrumentation vocabulary with two independent
+observers.  Its outer observer is a real Tracy zone.  When Tracy is stopped,
+the path is one special-variable test.  When Tracy is running, a literal zone
+uses an interned foreign source location and one begin/end FFI pair.  The
+inner observer is luv's bounded =cpu-trace= tree, enabled only around an
+explicit retained capture.  It samples host time, allocated bytes, and GC
+clocks at zone boundaries.  The frontier code does not maintain a third
+per-execution stopwatch: retained executions keep semantic counters, while
+Tracy and the explicit A/B observation own time.
+
+This division follows the instruments' actual powers:
+
+| Instrument | Best question |
+|-
+| Tracy zones | which temporal region was active, nested under which thread and frame? |
+| Tracy zone values | how much semantic work did this particular interval perform? |
+| Tracy plots | how did allocation or GC observations change along the capture timeline? |
+| runtime observation | how many process-wide bytes and collections crossed one explicit A/B extent? |
+| SB-SPROF allocation mode | which sampled Lisp call stacks were active at allocation-region refills? |
+| source and disassembly | which exact form allocates, dispatches, or escapes? |
+
+The drain zones now attach their visit count through Tracy's zone-value API.
+The A/B comparator emits legacy/frontier allocated-byte, GC-millisecond, and
+collection-count plots.  A thirty-pair capture therefore showed every sky
+drain beside the value =30,534=, and the steady allocation samples for both
+solvers converged to =1,179,696= bytes after #GJZL85.  A separate sixty-pair
+capture measured mean sky propagation at =23.03 ms= legacy and =27.63 ms=
+frontier.  Tracy thus says both /when/ and /how much semantic work/; the
+allocation plot rules out GC as the steady explanation for the remaining
+time gap.
+
+Tracy also has a C memory-allocation API, but using it honestly would require
+allocator-level object addresses and matching frees.  SBCL owns a moving
+generational heap, so emitting a fake Tracy allocation for each sampled byte
+delta would manufacture object identities and lifetimes that do not exist.
+For Lisp heap attribution, zone-level byte deltas plus SB-SPROF and compiler
+inspection are the sounder composition.
+
+* Fast generic functions can specialize a sealed semantic domain
+:PROPERTIES:
+:ID: U84XNW
+:END:
+
+[[https://github.com/marcoheisig/fast-generic-functions/tree/6e9d690ec08dacf9ab4e14aa39a084ef7c7edabb][Marco Heisig's =fast-generic-functions=]]
+turns a CLOS generic function into a compiler-specializable one.  A client
+defines the generic function with =fast-generic-function= as its metaclass,
+seals a chosen argument domain after installing methods, and supplies enough
+static argument type information at call sites.  On SBCL, the library
+installs IR1 transforms.  The default optimized call bypasses the
+discriminating function and calls a compiled effective method directly; when
+every applicable method declares the =inlineable= method property, it can
+inline the complete effective method.
+
+This is a beautiful fit for /closed physical realization beneath an open
+semantic boundary/, but sealing has exact consequences.  No method may later
+change behavior inside the sealed domain.  User-defined standard classes must
+participate through a sealable metaclass and externalizable prototype
+instances.  The project itself recommends putting definitions, methods, and
+sealing in separate load stages and measuring with sealing disabled as an
+A/B control.
+
+The current light result makes its relevance precise:
+
+- Sealing =execute-frontier-program= would save only two dispatches per solve;
+  it cannot explain several milliseconds.
+- =bucket-frontier-push= and =bucket-frontier-pop= are ordinary functions, but
+  their CLOS slot readers and writers are generic functions in the per-site
+  path.  Disassembly of push contains nine accessor FDEFN calls and is 1,044
+  bytes, versus 644 bytes for the struct-backed legacy push.
+- A queue-only run of 1.8 million warmed push/pop operations took =80.14 ms=
+  through =bucket-frontier= and =18.15 ms= through the legacy structure.
+  Both perform the same finite-bucket discipline; the generic frontier now
+  allocates zero bytes in that loop.
+
+There are therefore two excellent proof candidates.  One makes the frontier
+accessors fast generic functions and seals the =bucket-frontier= domain.  The
+other binds the CLOS owner's raw buckets and counters once, runs a
+compiler-visible drain over local primitive state, and writes the counters
+back at the boundary.  The former tests whether sealed CLOS can itself be the
+zero-overhead physical language; the latter preserves unrestricted live CLOS
+at the boundary.  Comparing their generated code, live redefinition behavior,
+and whole-solver Tracy capture is more informative than choosing by taste.
+
+* DONE Remove the per-admission type construction
+:PROPERTIES:
+:ID: GJZL85
+:END:
+
+Intent: explain and remove the frontier solver's measured allocation excess
+without weakening the semantic frontier API.
+
+Evidence: =bucket-frontier-push= constructed
+=`(integer 0 ,maximum-priority)= for every runtime =typep=.  Three conses per
+admission predicted approximately 108 KiB for the 2,304 initial sky sites and
+1.27 MiB for propagation, matching the phase measurements.  Replacing it with
+integer and range predicates changed forty terrain sky propagations from
+=88.18 MiB= to =37.24 MiB=; the legacy batch used =37.56 MiB=.  Frontier
+seeding fell to =6.82 MiB= versus legacy's =8.37 MiB=.  A focused warmed test
+now admits and removes 8,192 sites under a 4 KiB allocation ceiling.
+
+Done when: allocation attribution predicts the measured delta, the physical
+fix preserves exact field and visit equality, and a regression rejects a
+return of per-site type construction.
 
 * DONE Begin frontier light beside the oracle
 :PROPERTIES:

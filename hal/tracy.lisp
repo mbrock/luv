@@ -87,6 +87,10 @@
 (cffi:defcfun ("___tracy_emit_zone_end" %tracy-emit-zone-end) :void
   (context :uint64))
 
+(cffi:defcfun ("___tracy_emit_zone_value" %tracy-emit-zone-value) :void
+  (context :uint64)
+  (value :uint64))
+
 (cffi:defcfun ("___tracy_set_thread_name" %tracy-set-thread-name) :void
   (name :pointer))
 
@@ -237,8 +241,14 @@ connects.  Leaving it started is the intended state for a durable image."
 
 ;;; Zones.
 
-(defmacro with-tracy-zone ((name &key (color 0)) &body body)
+(defmacro with-tracy-zone
+    ((name &key (color 0) (value nil value-supplied-p)) &body body)
   "Measure BODY as a Tracy zone named NAME.
+
+When VALUE is supplied, evaluate it as the zone exits and attach the resulting
+unsigned integer to the zone.  This is useful for semantic work counts such as
+sites visited: Tracy can then distinguish a slower realization from one which
+simply performed more work.
 
 A literal NAME -- a string or a keyword, which is every zone luv writes by
 hand -- gets one lazily initialized source-location cell per macro expansion.
@@ -272,6 +282,8 @@ table on every entry."
                         1))))
             (unwind-protect
                  (progn ,@body)
+              ,@(when value-supplied-p
+                  `((%tracy-emit-zone-value ,context ,value)))
               (%tracy-emit-zone-end ,context)))
          (progn ,@body))))
 

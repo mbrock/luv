@@ -522,44 +522,46 @@ the returned region may then be solved without reading the live world."
 
 Returns the number of cells visited, for the runtime's work counters."
   (let ((visited 0))
-    (loop until (light-worklist-empty-p queue)
-          do (multiple-value-bind (entry offset queued-level present-p)
-                 (light-worklist-pop queue)
-               (declare (ignore queued-level present-p))
-               (let* ((domain (light-region-entry-domain entry))
-                      (local (chunk-domain-local-coordinate domain offset)))
-                 (declare (dynamic-extent local))
-                 (incf visited)
-                 (let ((level (aref (funcall field-reader entry) offset)))
-                   (when (plusp level)
-                     (do-chunk-window-neighbors
-                         (neighbor-offset destination crossing direction
-                          materialization availability
-                          region domain local *voxel-face-directions*)
-                       (values destination)
-                       (let ((neighbor
-                               (ecase availability
-                                 (:local entry)
-                                 (:available materialization)
-                                 (:unavailable nil))))
-                         (when neighbor
-                           (let* ((opacity
-                                    (light-region-opacity
-                                     neighbor neighbor-offset))
-                                  (loss
-                                    (if (and skylight-p
-                                             (eq direction
-                                                 +voxel-negative-y+))
-                                        opacity
-                                        (+ 1 opacity)))
-                                  (candidate (- level loss))
-                                  (levels (funcall field-reader neighbor)))
-                             (when (> candidate
-                                      (aref levels neighbor-offset))
-                               (setf (aref levels neighbor-offset) candidate)
-                               (light-worklist-push
-                                queue neighbor neighbor-offset
-                                candidate)))))))))))
+    (with-cpu-trace-zone
+        (:lighting/legacy/drain-sites :tracy-value visited)
+      (loop until (light-worklist-empty-p queue)
+            do (multiple-value-bind (entry offset queued-level present-p)
+                   (light-worklist-pop queue)
+                 (declare (ignore queued-level present-p))
+                 (let* ((domain (light-region-entry-domain entry))
+                        (local (chunk-domain-local-coordinate domain offset)))
+                   (declare (dynamic-extent local))
+                   (incf visited)
+                   (let ((level (aref (funcall field-reader entry) offset)))
+                     (when (plusp level)
+                       (do-chunk-window-neighbors
+                           (neighbor-offset destination crossing direction
+                            materialization availability
+                            region domain local *voxel-face-directions*)
+                         (values destination)
+                         (let ((neighbor
+                                 (ecase availability
+                                   (:local entry)
+                                   (:available materialization)
+                                   (:unavailable nil))))
+                           (when neighbor
+                             (let* ((opacity
+                                      (light-region-opacity
+                                       neighbor neighbor-offset))
+                                    (loss
+                                      (if (and skylight-p
+                                               (eq direction
+                                                   +voxel-negative-y+))
+                                          opacity
+                                          (+ 1 opacity)))
+                                    (candidate (- level loss))
+                                    (levels (funcall field-reader neighbor)))
+                               (when (> candidate
+                                        (aref levels neighbor-offset))
+                                 (setf (aref levels neighbor-offset) candidate)
+                                 (light-worklist-push
+                                  queue neighbor neighbor-offset
+                                  candidate))))))))))))
     visited))
 
 (defun light-region-neighbor-resident-p (region coordinate direction)
