@@ -2,6 +2,7 @@
   (:use #:cl #:luv #:luvcraft.world)
   (:local-nicknames (#:fields #:luvcraft.world.fields)
                     (#:math #:luv.arithmetic)
+                    (#:records #:luv.arithmetic.records)
                     (#:spv #:luv.spir-v))
   (:import-from #:luv.arithmetic.lisp.vec3
                 #:make-vec3

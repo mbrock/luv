@@ -464,6 +464,22 @@
             (luv.arithmetic:quantity-specification-name
              (luv.arithmetic:declaration-quantity-specification
               (luvcraft::light-removal-queue-field-definition block)))))
+    (ok (eq (luvcraft::light-removal-queue-field-definition sky)
+            (luv.arithmetic.records:columnar-row-lane-declaration
+             (luvcraft::light-worklist-bucket-row-declaration
+              (aref
+               (luvcraft::light-worklist-buckets
+                (luvcraft::light-removal-queue-worklist sky))
+               0))
+             'luvcraft::level)))
+    (ok (eq (luvcraft::light-removal-queue-field-definition block)
+            (luv.arithmetic.records:columnar-row-lane-declaration
+             (luvcraft::light-worklist-bucket-row-declaration
+              (aref
+               (luvcraft::light-worklist-buckets
+                (luvcraft::light-removal-queue-worklist block))
+               0))
+             'luvcraft::level)))
     (multiple-value-bind (queued-entry queued-offset level present-p)
         (luvcraft::light-worklist-pop
          (luvcraft::light-removal-queue-worklist sky))
@@ -485,7 +501,7 @@
     (luvcraft::light-worklist-push lifo entry 1 3)
     (luvcraft::light-worklist-push lifo entry 2 12)
     (let* ((bucket (aref (luvcraft::light-worklist-buckets lifo) 0))
-           (entries (luvcraft::light-worklist-bucket-entries bucket)))
+           (entries (luvcraft::light-worklist-bucket-entry-lane bucket)))
       (multiple-value-bind (popped popped-offset popped-level present-p)
           (luvcraft::light-worklist-pop lifo)
         (ok present-p)
@@ -503,7 +519,7 @@
                 always (null (row-major-aref entries index))))
       (luvcraft::light-worklist-push lifo entry 4 5)
       (ok (eq entries
-              (luvcraft::light-worklist-bucket-entries
+              (luvcraft::light-worklist-bucket-entry-lane
                (aref (luvcraft::light-worklist-buckets lifo) 0)))))
     (dolist (item '((1 3) (2 12) (3 12) (4 5)))
       (luvcraft::light-worklist-push level entry (first item) (second item)))
@@ -516,7 +532,7 @@
         (ok (= (second expected) popped-level))))
     (ok (luvcraft::light-worklist-empty-p level))
     (loop for bucket across (luvcraft::light-worklist-buckets level)
-          for entries = (luvcraft::light-worklist-bucket-entries bucket)
+          for entries = (luvcraft::light-worklist-bucket-entry-lane bucket)
           do (ok (loop for index below (array-total-size entries)
                        always (null (row-major-aref entries index)))))
     (multiple-value-bind (popped offset popped-level present-p)

@@ -150,38 +150,55 @@ resident."))
   ;; resident chunk without precomputing the affected set.
   (ensure-entry nil :type (or null function)))
 
-(defstruct (light-worklist-bucket
-             (:constructor %make-light-worklist-bucket))
-  ;; Parallel vectors keep hot work items dense: ENTRY supplies the semantic
-  ;; chunk boundary, while OFFSET and LEVEL are unboxed site data.
-  (entries (make-array 256 :initial-element nil
-                           :adjustable t :fill-pointer 0)
-           :type vector :read-only t)
-  (offsets (make-array 256 :element-type '(unsigned-byte 32)
-                           :adjustable t :fill-pointer 0)
-           :type vector :read-only t)
-  (levels (make-array 256 :element-type '(unsigned-byte 8)
-                          :adjustable t :fill-pointer 0)
-          :type vector :read-only t))
+(records:define-columnar-buffer light-worklist-bucket
+  ;; ENTRY supplies the semantic chunk boundary, while OFFSET and LEVEL are
+  ;; unboxed site data.  The generated buffer owns their shared extent.
+  (entry nil :type (or null light-region-entry) :clear-on-remove t)
+  (offset 0 :type (unsigned-byte 32))
+  (level 0 :type (unsigned-byte 8)))
 
 (defstruct (light-worklist (:constructor %make-light-worklist))
   (scheduling :lifo :type (member :lifo :level) :read-only t)
-  (buckets (let ((buckets (make-array (1+ +maximum-light-level+))))
-             (dotimes (level (length buckets) buckets)
-               (setf (aref buckets level) (%make-light-worklist-bucket))))
-           :type simple-vector :read-only t)
+  (field-definition nil
+                    :type (or null
+                              luvcraft.world.fields:voxel-field-definition)
+                    :read-only t)
+  (buckets #() :type simple-vector :read-only t)
   (maximum-level -1 :type fixnum)
   (count 0 :type fixnum))
 
-(defun make-light-worklist (&key (scheduling :lifo))
+(defun make-light-worklist (&key (scheduling :lifo) field-definition)
   "Make a reusable packed lighting frontier with LIFO or level scheduling.
 
 Both modes retain ENTRY plus dense OFFSET and LEVEL lanes, never a cons or
 coordinate object per item.  LEVEL scheduling consumes brighter buckets
 first; LIFO puts every item in bucket zero and preserves the former order.
-#QS1ERH"
+#QS1ERH.  FIELD-DEFINITION binds LEVEL's exact quantity meaning once. #LDP5UR"
   (check-type scheduling (member :lifo :level))
-  (%make-light-worklist :scheduling scheduling))
+  (check-type field-definition
+              (or null luvcraft.world.fields:voxel-field-definition))
+  (let* ((buffer-definition
+           (records:columnar-buffer-definition-for 'light-worklist-bucket))
+         (row-declaration
+           (records:make-columnar-row-declaration
+            buffer-definition
+            (and field-definition `((level . ,field-definition)))))
+         (buckets (make-array (1+ +maximum-light-level+))))
+    (dotimes (level (length buckets))
+      (setf (aref buckets level)
+            (make-light-worklist-bucket
+             :capacity 256 :row-declaration row-declaration)))
+    (%make-light-worklist
+     :scheduling scheduling :field-definition field-definition
+     :buckets buckets)))
+
+(defmethod luvcraft.world.fields:materialized-field-definition
+    ((worklist light-worklist) field-name)
+  (let ((definition (light-worklist-field-definition worklist)))
+    (and definition
+         (eq field-name
+             (luvcraft.world.fields:voxel-field-definition-name definition))
+         definition)))
 
 (declaim (inline light-worklist-empty-p light-worklist-push))
 (defun light-worklist-empty-p (worklist)
@@ -197,9 +214,7 @@ first; LIFO puts every item in bucket zero and preserves the former order.
              (:lifo 0)
              (:level level)))
          (bucket (aref (light-worklist-buckets worklist) bucket-level)))
-    (vector-push-extend entry (light-worklist-bucket-entries bucket))
-    (vector-push-extend offset (light-worklist-bucket-offsets bucket))
-    (vector-push-extend level (light-worklist-bucket-levels bucket))
+    (light-worklist-bucket-push bucket entry offset level)
     (incf (light-worklist-count worklist))
     (setf (light-worklist-maximum-level worklist)
           (max bucket-level (light-worklist-maximum-level worklist)))
@@ -210,29 +225,21 @@ first; LIFO puts every item in bucket zero and preserves the former order.
   (when (light-worklist-empty-p worklist)
     (return-from light-worklist-pop (values nil nil nil nil)))
   (let* ((bucket-level (light-worklist-maximum-level worklist))
-         (bucket (aref (light-worklist-buckets worklist) bucket-level))
-         (entries (light-worklist-bucket-entries bucket))
-         (offsets (light-worklist-bucket-offsets bucket))
-         (levels (light-worklist-bucket-levels bucket))
-         (position (1- (fill-pointer entries)))
-         (entry (aref entries position))
-         (offset (aref offsets position))
-         (level (aref levels position)))
-    (setf (aref entries position) nil
-          (fill-pointer entries) position
-          (fill-pointer offsets) position
-          (fill-pointer levels) position)
-    (decf (light-worklist-count worklist))
-    (when (zerop position)
-      (loop for candidate downfrom (1- bucket-level) to 0
-            when (plusp
-                  (fill-pointer
-                   (light-worklist-bucket-entries
-                    (aref (light-worklist-buckets worklist) candidate))))
-              do (setf (light-worklist-maximum-level worklist) candidate)
-                 (return)
-            finally (setf (light-worklist-maximum-level worklist) -1)))
-    (values entry offset level t)))
+         (bucket (aref (light-worklist-buckets worklist) bucket-level)))
+    (multiple-value-bind (entry offset level present-p)
+        (light-worklist-bucket-pop bucket)
+      (unless present-p
+        (error "Lighting worklist count disagrees with bucket ~D." bucket-level))
+      (decf (light-worklist-count worklist))
+      (when (zerop (light-worklist-bucket-length bucket))
+        (loop for candidate downfrom (1- bucket-level) to 0
+              when (plusp
+                    (light-worklist-bucket-length
+                     (aref (light-worklist-buckets worklist) candidate)))
+                do (setf (light-worklist-maximum-level worklist) candidate)
+                   (return)
+              finally (setf (light-worklist-maximum-level worklist) -1)))
+      (values entry offset level t))))
 
 (defstruct (light-removal-queue
              (:constructor %make-light-removal-queue))
@@ -253,7 +260,8 @@ first; LIFO puts every item in bucket zero and preserves the former order.
     (%make-light-removal-queue
      :field-name field-name :field-definition definition :field-reader field-reader
      :skylight-p skylight-p
-     :worklist (make-light-worklist :scheduling scheduling))))
+     :worklist (make-light-worklist
+                :scheduling scheduling :field-definition definition))))
 
 (defmethod luvcraft.world.fields:materialized-field-definition
     ((queue light-removal-queue) field-name)
@@ -504,7 +512,10 @@ LOCAL has dynamic extent and must be copied before FUNCTION retains it."
 
 (defun seed-region-sky-boundaries (region &key (scheduling :level))
   "Seed every entry's open-sky boundary light; return the seed queue."
-  (let ((queue (make-light-worklist :scheduling scheduling)))
+  (let ((queue
+          (make-light-worklist
+           :scheduling scheduling
+           :field-definition (fields:field-definition-for :sky-light))))
     (maphash (lambda (key entry)
                (seed-entry-open-boundaries
                 region key entry
@@ -516,7 +527,10 @@ LOCAL has dynamic extent and must be copied before FUNCTION retains it."
 
 (defun seed-region-emitters (region &key (scheduling :level))
   "Seed every emitting cell at its configured blocklight level."
-  (let ((queue (make-light-worklist :scheduling scheduling)))
+  (let ((queue
+          (make-light-worklist
+           :scheduling scheduling
+           :field-definition (fields:field-definition-for :block-light))))
     (maphash
      (lambda (key entry)
        (declare (ignore key))
@@ -842,8 +856,14 @@ producer batches is justified by measurement rather than guesswork."
          (block-removals
            (make-light-removal-queue
             :block-light #'light-region-entry-block))
-         (sky-seeds (make-light-worklist :scheduling :level))
-         (block-seeds (make-light-worklist :scheduling :level))
+         (sky-seeds
+           (make-light-worklist
+            :scheduling :level
+            :field-definition (fields:field-definition-for :sky-light)))
+         (block-seeds
+           (make-light-worklist
+            :scheduling :level
+            :field-definition (fields:field-definition-for :block-light)))
          (visited 0))
     (flet ((seed-sky (entry offset level)
              (light-worklist-push sky-seeds entry offset level))

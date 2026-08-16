@@ -16,7 +16,8 @@
      (:module "records"
       :serial t
       :components ((:file "package")
-                   (:file "records")))
+                   (:file "records")
+                   (:file "columnar")))
      (:module "language"
       :serial t
       :components ((:file "package")
@@ -136,6 +137,7 @@
   :components
   ((:file "arithmetic/tests")
    (:file "arithmetic/records/tests")
+   (:file "arithmetic/records/columnar-tests")
    (:file "arithmetic/language/tests")
    (:file "arithmetic/lisp/tests")
    (:file "objective-c/tests" :if-feature :darwin)

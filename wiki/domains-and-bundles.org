@@ -330,7 +330,7 @@ its quantity judgments remain ordinary semantic objects.  This is the same
 object-at-the-boundary, dense-data-inside seam as #J7A2KD, now applied to a
 dynamic row domain.
 
-* TODO Extract a quantity-aware columnar buffer
+* DONE Extract a quantity-aware columnar buffer
 :PROPERTIES:
 :ID: LDP5UR
 :END:
@@ -340,13 +340,28 @@ frontier into a generated =columnar-buffer= substrate, while making its
 physical lanes and concrete row quantity declaration inspectable.  Keep level
 scheduling, spatial stepping, and fixed-point behavior in lighting.
 
-Evidence: #QS1ERH reduced the retained frontier from about 264 MB to 31.8 MB
-without changing its LIFO visits, and level scheduling then reduced the same
-solve to about 13.3 MB and 0.18 seconds.  The remaining implementation repeats
-three =vector-push-extend= calls and maintains three fill pointers by
-convention.  Existing =represented-value-declaration=, =quantity-layout=, and
-record-slot declarations already prove that Common Lisp representation and
-quantity meaning can be checked together without wrapping runtime values.
+Evidence: =define-columnar-buffer= now publishes an inspectable physical
+definition and generates an ordinary structure, specialized lanes, one shared
+length and capacity, coherent allocate-copy-publish growth, and inline push and
+pop operations.  Push checks every representation before writing and advances
+the length last.  Pop and reset clear only declared reference-bearing lanes.
+The row macros expand into direct array access without constructing a row or
+dispatching on a runtime schema.
+
+A =columnar-row-declaration= binds concrete represented-value declarations to
+those lanes once.  Fixed named lane groups lower to the existing
+=quantity-layout= vocabulary; a two-column test retains one =:position= vector
+quantity.  Dynamic bindings reject incompatible representations.  The
+lighting worklist binds its =level= lane to the retained =:sky-light= or
+=:block-light= field definition, so equal u8 storage does not erase their
+different quantity names or definition revisions.
+
+The generated =light-worklist-bucket= replaces three adjustable vectors and
+independent fill pointers.  Level buckets and their brighter-first policy stay
+in lighting.  On SBCL 2.6.6, five warmed runs of the same seed-121 81-chunk
+solve visited exactly 340,050 sites, took 0.177--0.181 seconds, and consed
+13,126,672--13,137,168 bytes.  This matches or slightly improves the recorded
+0.180--0.181 seconds and about 13.3 MB before extraction.
 
 Done when: the lighting buckets use one shared length and capacity over
 generated specialized lanes; growth is coherent; pop and reset clear retained
@@ -357,6 +372,12 @@ that several columns can retain one vector quantity; the current lighting
 correctness suites pass; and the packed level profile shows no material
 regression.  Do not add stable ids, swap removal, a generalized solver, or a
 schema metaclass in this iteration.
+
+Done: all conditions above are satisfied without adding the deferred policies.
+The full =make test= path passes, including strict Parinfer, 61 luv tests, 149
+luvcraft tests, the wiki suite, and generated SPIR-V validation.  The standalone
+smoke render remains byte-identical at SHA-256
+=0c85d4550638418cb88d507c6541a49147aeeea5697175d13904942b65a689ec=.
 
 * Chunk boundaries need an environment
 :PROPERTIES:
