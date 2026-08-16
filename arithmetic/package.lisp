@@ -88,6 +88,11 @@
            #:quantity-layout=
            #:project-quantity-layout
            #:make-declared-quantity-specification
+           #:declaration-compatibility-error
+           #:declaration-compatibility-error-actual
+           #:declaration-compatibility-error-expected
+           #:declaration-compatibility-error-reason
+           #:ensure-declarations-compatible
            #:represented-value-declaration
            #:make-represented-value-declaration
            #:declaration-representation-type

@@ -68,6 +68,8 @@
   :non-negative-p t)
 (math:define-quantity :gravity-magnitude :kind :acceleration
   :non-negative-p t)
+(math:define-quantity :frame-duration :kind :duration
+  :non-negative-p t)
 (math:define-quantity :day-fraction :kind :normalized-coordinate
   :non-negative-p t)
 (math:define-quantity :sun-angular-width :kind :angular-measure

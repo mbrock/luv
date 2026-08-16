@@ -169,6 +169,17 @@
                        '#:rove '#:find-suite '#:luv/arithmetic/lisp/tests))
                (error "luv Common Lisp arithmetic tests failed"))))
 
+(asdf:defsystem #:luv/arithmetic/lisp/vec3
+  :description "Luv VEC3 realization of checked Common Lisp arithmetic."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on (#:luv/arithmetic/lisp
+               #:luv/world)
+  :components ((:module "arithmetic"
+                :components
+                ((:module "lisp"
+                  :components ((:file "vec3")))))))
+
 (asdf:defsystem #:luv/world
   :description "Finite chunk domains and the resident block-world model."
   :version "0.0.1"
@@ -537,6 +548,7 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
   :depends-on (#:luv/world
                #:luv/canvas
                #:luv/arithmetic/records
+               #:luv/arithmetic/lisp/vec3
                #:luv/luvcraft/quantities
                #:luv/luvcraft/shaders
                #:sb-concurrency

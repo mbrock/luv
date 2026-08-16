@@ -58,25 +58,31 @@
                      (aref left index)
                      (aref right index))))))
 
-(defun lisp-binary-operation (function left right)
-  (cond ((and (numberp left) (numberp right))
-         (funcall function left right))
-        ((and (vectorp left) (vectorp right))
-         (map-lisp-vectors function left right))
-        ((and (vectorp left) (numberp right))
-         (map-lisp-vector
-          (lambda (component)
-            (funcall function component right))
-          left))
-        ((and (numberp left) (vectorp right))
-         (map-lisp-vector
-          (lambda (component)
-            (funcall function left component))
-          right))
-        (t
-         (error 'lisp-arithmetic-error
-                :reason :unsupported-runtime-representations
-                :details (list (type-of left) (type-of right))))))
+(defgeneric lisp-binary-operation (function left right)
+  (:documentation
+   "Apply scalar FUNCTION componentwise to two Lisp representations."))
+
+(defmethod lisp-binary-operation (function (left number) (right number))
+  (funcall function left right))
+
+(defmethod lisp-binary-operation (function (left vector) (right vector))
+  (map-lisp-vectors function left right))
+
+(defmethod lisp-binary-operation (function (left vector) (right number))
+  (map-lisp-vector
+   (lambda (component) (funcall function component right))
+   left))
+
+(defmethod lisp-binary-operation (function (left number) (right vector))
+  (map-lisp-vector
+   (lambda (component) (funcall function left component))
+   right))
+
+(defmethod lisp-binary-operation (function left right)
+  (declare (ignore function))
+  (error 'lisp-arithmetic-error
+         :reason :unsupported-runtime-representations
+         :details (list (type-of left) (type-of right))))
 
 (defun reduce-lisp-operation (function operands identity)
   (if operands
@@ -118,15 +124,18 @@
 (defun lisp-expt (base exponent)
   (lisp-binary-operation #'expt base exponent))
 
-(defun lisp-dot (left right)
-  (unless (and (vectorp left) (vectorp right))
-    (error 'lisp-arithmetic-error
-           :reason :dot-requires-vectors
-           :details (list (type-of left) (type-of right))))
+(defgeneric lisp-dot (left right))
+
+(defmethod lisp-dot ((left vector) (right vector))
   (let ((length (lisp-vector-length left right))
         (result 0))
     (dotimes (index length result)
       (incf result (* (aref left index) (aref right index))))))
+
+(defmethod lisp-dot (left right)
+  (error 'lisp-arithmetic-error
+         :reason :dot-requires-vectors
+         :details (list (type-of left) (type-of right))))
 
 (defun lisp-clamp (value lower upper)
   (lisp-binary-operation
@@ -162,13 +171,16 @@
     (lisp-multiply progress progress
                    (lisp-subtract 3 (lisp-multiply 2 progress)))))
 
-(defun lisp-normalize (vector)
-  (unless (vectorp vector)
-    (error 'lisp-arithmetic-error
-           :reason :normalize-requires-vector
-           :details (type-of vector)))
+(defgeneric lisp-normalize (vector))
+
+(defmethod lisp-normalize ((vector vector))
   (let ((magnitude (sqrt (lisp-dot vector vector))))
     (lisp-divide vector magnitude)))
+
+(defmethod lisp-normalize (vector)
+  (error 'lisp-arithmetic-error
+         :reason :normalize-requires-vector
+         :details (type-of vector)))
 
 (defgeneric lisp-arithmetic-operator-function (operator)
   (:documentation
@@ -313,3 +325,78 @@
 (defmethod compile-arithmetic-function
     ((definition lang:arithmetic-function-definition))
   (compile nil (lower-arithmetic-function definition)))
+
+(defclass lisp-arithmetic-realization ()
+  ((definition
+    :initarg :definition
+    :reader lisp-arithmetic-realization-definition)
+   (parameter-declarations
+    :initarg :parameter-declarations
+    :reader lisp-arithmetic-realization-parameter-declarations)
+   (result-declaration
+    :initarg :result-declaration
+    :reader lisp-arithmetic-realization-result-declaration)
+   (function
+    :initarg :function
+    :reader lisp-arithmetic-realization-function))
+  (:documentation
+   "One checked arithmetic definition compiled for explicit Lisp types."))
+
+(defun make-lisp-arithmetic-realization
+    (definition &key parameter-representation-types result-representation-type)
+  "Compile DEFINITION and state the Lisp representations chosen for its ABI."
+  (when (symbolp definition)
+    (setf definition (arithmetic-definition-for-lisp definition)))
+  (check-type definition lang:arithmetic-function-definition)
+  (let ((parameters (lang:arithmetic-function-parameters definition)))
+    (unless (= (length parameters)
+               (length parameter-representation-types))
+      (error 'lisp-arithmetic-error
+             :definition definition
+             :reason :parameter-representation-arity
+             :details (list (length parameters)
+                            (length parameter-representation-types))))
+    (make-instance
+     'lisp-arithmetic-realization
+     :definition definition
+     :parameter-declarations
+     (mapcar
+      (lambda (parameter representation-type)
+        (math:make-represented-value-declaration
+         :representation-type representation-type
+         :quantity-specification
+         (lang:arithmetic-parameter-quantity-specification parameter)
+         :quantity-layout
+         (lang:arithmetic-parameter-quantity-layout parameter)
+         :source-form (lang:arithmetic-object-source-form parameter)))
+      parameters parameter-representation-types)
+     :result-declaration
+     (let ((result (lang:arithmetic-function-result definition)))
+       (math:make-represented-value-declaration
+        :representation-type result-representation-type
+        :quantity-specification
+        (lang:arithmetic-expression-quantity-specification result)
+        :quantity-layout (lang:arithmetic-expression-quantity-layout result)
+        :source-form (lang:arithmetic-expression-source-form result)))
+     :function (compile-arithmetic-function definition))))
+
+(defun bind-lisp-arithmetic-realization
+    (realization actual-parameter-declarations
+     &key actual-result-declaration)
+  "Check one storage ABI against REALIZATION and return its raw Lisp function."
+  (let ((expected
+          (lisp-arithmetic-realization-parameter-declarations realization)))
+    (unless (= (length actual-parameter-declarations) (length expected))
+      (error 'lisp-arithmetic-error
+             :definition
+             (lisp-arithmetic-realization-definition realization)
+             :reason :storage-declaration-arity
+             :details (list (length actual-parameter-declarations)
+                            (length expected))))
+    (mapc #'math:ensure-declarations-compatible
+          actual-parameter-declarations expected))
+  (when actual-result-declaration
+    (math:ensure-declarations-compatible
+     actual-result-declaration
+     (lisp-arithmetic-realization-result-declaration realization)))
+  (lisp-arithmetic-realization-function realization))

@@ -621,7 +621,7 @@ Result:
 Done when: satisfied.  #GZ53LD now connects these declarations to checked CPU
 arithmetic at an explicit boundary.
 
-* NEXT Check storage declarations against Lisp arithmetic
+* DONE Check storage declarations against Lisp arithmetic
 :PROPERTIES:
 :ID: GZ53LD
 :END:
@@ -645,9 +645,66 @@ Evidence to gather:
 - Live and cold tests showing that the boundary composes with the Lisp compiler
   completed in #FTQEQD and leaves the shader realization independent.
 
-Done when: a real quantity-bearing luvcraft record crosses into checked Lisp
-arithmetic through its declared schema, a semantic mismatch is proven, and the
-runtime values remain ordinary numbers and vectors.
+Result:
+
+- =ensure-declarations-compatible= compares an actual storage declaration with
+  a realization ABI.  Quantity specifications and layouts must agree exactly;
+  a concrete Common Lisp representation must be a known subtype of the
+  expected representation.  Its condition retains both source forms and
+  distinguishes semantic from representation failure.
+- =lisp-arithmetic-realization= joins one backend-neutral checked definition to
+  explicit parameter and result representation types.  Binding it to storage
+  performs the compatibility checks once and returns the already compiled raw
+  Lisp function.  No quantity objects travel through that function.
+- The numerical Lisp protocol now admits representation extensions.
+  =:luv/arithmetic/lisp/vec3= implements componentwise binary operations, dot,
+  and normalization for luv's transparent =vec3= without making the portable
+  arithmetic system depend on the block world.
+- =%predict-world-position= derives displacement from world velocity and frame
+  duration, explicitly interprets the derived vector as a world-position
+  difference, and adds it lawfully to a position point.  Its =vec3= realization
+  is bound to =block-world-player='s actual position and velocity slots plus a
+  declared =double-float= duration boundary.  The resulting
+  =predict-player-position= passes the raw slot objects to compiled arithmetic;
+  tests prove the value, input identity, and rejection of velocity substituted
+  for position before numerical execution.
+- A cold image passes 21 core arithmetic, 6 Lisp realization, and 44 luvcraft
+  tests.  The present Lisp realization still chooses representation methods at
+  each arithmetic operation, though never per component and never for semantic
+  checking.  Whether real kernels warrant representation-specialized lowering
+  is deliberately left for the exercised-design review rather than assumed.
+
+Done when: satisfied.  #AVRNHW now broadens the declarations beyond the first
+player and sky records before that review.
+
+* NEXT Audit quantity-bearing Lisp storage
+:PROPERTIES:
+:ID: AVRNHW
+:END:
+
+Intent: inventory luvcraft's classes, structures, arrays, constants, and
+function boundaries which carry physical or domain quantities, then migrate
+the semantic owners in coherent groups.  The audit must preserve distinctions
+between continuous quantities, categorical voxel coordinates, counts, IDs,
+and packed representation lanes; comprehensiveness does not mean attaching a
+unit to every number.
+
+Evidence to gather:
+
+- A source-led inventory of remaining unannotated quantity-bearing storage and
+  APIs, grouped by simulation, camera, sky, lighting, meshing/render ABI,
+  streaming, and measurement rather than one undifferentiated grep list.
+- Declarations on the next coherent real owners, with exact quantity names and
+  point/absolute/difference character where the code already establishes it.
+- Checked CPU arithmetic at boundaries where it improves the code's semantic
+  vocabulary; ordinary direct Lisp remains where a compiled definition would
+  merely obscure a small local calculation.
+- Focused tests and pushed checkpoints for each group, plus a running list of
+  ambiguous values that require a domain decision instead of a guessed unit.
+
+Done when: every quantity-bearing luvcraft owner is either declared, mapped to
+an explicit boundary, or listed with a concrete unresolved semantic question;
+the migration remains cold-loadable and the full suite passes.
 
 * A possible Lisp vocabulary
 :PROPERTIES:

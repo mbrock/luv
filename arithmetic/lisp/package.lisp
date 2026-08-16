@@ -10,8 +10,18 @@
            #:lisp-arithmetic-error-expression
            #:lisp-arithmetic-error-reason
            #:lisp-arithmetic-error-details
+           #:lisp-binary-operation
+           #:lisp-dot
+           #:lisp-normalize
            #:lisp-arithmetic-operator-function
            #:lower-lisp-arithmetic-expression
            #:lower-arithmetic-function
            #:compile-arithmetic-function
-           #:define-lisp-arithmetic-function))
+           #:define-lisp-arithmetic-function
+           #:lisp-arithmetic-realization
+           #:lisp-arithmetic-realization-definition
+           #:lisp-arithmetic-realization-parameter-declarations
+           #:lisp-arithmetic-realization-result-declaration
+           #:lisp-arithmetic-realization-function
+           #:make-lisp-arithmetic-realization
+           #:bind-lisp-arithmetic-realization))

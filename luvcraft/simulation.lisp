@@ -82,6 +82,19 @@ FRAME-UNIFORM-DATA from the session's sky clock and profile."
 (defconstant +player-physics-step+ (/ 1d0 120d0))
 (defconstant +player-collision-epsilon+ 1d-7)
 
+(luv.arithmetic.lisp:define-lisp-arithmetic-function
+    %predict-world-position
+    ((position :quantity :world-position :unit :metre
+               :tensor-order 1 :character :point)
+     (velocity :quantity :world-velocity
+               :unit ((:metre 1) (:second -1)) :tensor-order 1)
+     (elapsed :quantity :frame-duration :unit :second))
+  (+ position
+     (luv.arithmetic.language:interpret
+      (* velocity elapsed)
+      :quantity :world-position :unit :metre
+      :tensor-order 1 :character :difference)))
+
 (defclass block-world-player ()
   ((position :initarg :position
              :initform (make-vec3 0d0 0d0 0d0)
@@ -136,6 +149,40 @@ FRAME-UNIFORM-DATA from the session's sky clock and profile."
    (grounded-p :initarg :grounded-p :initform nil
                :accessor player-grounded-p))
   (:metaclass luv.arithmetic.records:quantity-class))
+
+(defparameter *player-frame-duration-declaration*
+  (luv.arithmetic:make-represented-value-declaration
+   :representation-type 'double-float
+   :quantity-specification
+   (luv.arithmetic:make-declared-quantity-specification
+    '(:quantity :frame-duration :unit :second))
+   :source-form '(seconds :type double-float
+                  :quantity (:frame-duration :unit :second))))
+
+(defparameter *predict-player-position-realization*
+  (luv.arithmetic.lisp:make-lisp-arithmetic-realization
+   '%predict-world-position
+   :parameter-representation-types '(vec3 vec3 double-float)
+   :result-representation-type 'vec3))
+
+(defparameter *predict-player-position-function*
+  (let ((position
+          (luv.arithmetic.records:record-slot-declaration
+           'block-world-player 'position))
+        (velocity
+          (luv.arithmetic.records:record-slot-declaration
+           'block-world-player 'velocity)))
+    (luv.arithmetic.lisp:bind-lisp-arithmetic-realization
+     *predict-player-position-realization*
+     (list position velocity *player-frame-duration-declaration*)
+     :actual-result-declaration position)))
+
+(defun predict-player-position (player seconds)
+  "Predict unobstructed motion through the checked storage boundary. #GZ53LD"
+  (check-type player block-world-player)
+  (check-type seconds double-float)
+  (funcall *predict-player-position-function*
+           (player-position player) (player-velocity player) seconds))
 
 (defun player-x (player) (vec3-x (player-position player)))
 (defun player-y (player) (vec3-y (player-position player)))

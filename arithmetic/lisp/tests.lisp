@@ -69,6 +69,32 @@
                 (funcall add left right)))
     (ok (= 32.0d0 (funcall dot left right)))))
 
+(deftest lisp-realizations-bind-storage-contracts-once
+  (let* ((realization
+           (lisp:make-lisp-arithmetic-realization
+            'add-vectors
+            :parameter-representation-types '(vector vector)
+            :result-representation-type 'vector))
+         (expected
+           (lisp:lisp-arithmetic-realization-parameter-declarations
+            realization))
+         (function
+           (lisp:bind-lisp-arithmetic-realization realization expected)))
+    (ok (compiled-function-p function))
+    (ok (equalp #(4d0 6d0)
+                (funcall function #(1d0 2d0) #(3d0 4d0))))
+    (ok (signals
+         (lisp:bind-lisp-arithmetic-realization
+          realization
+          (list
+           (math:make-represented-value-declaration
+            :representation-type 'real
+            :quantity-specification
+            (math:declaration-quantity-specification (first expected))
+            :source-form '(bad-scalar-slot))
+           (second expected)))
+         'math:declaration-compatibility-error))))
+
 (deftest affine-arithmetic-is-checked-once-and-executes-numerically
   (let* ((definition
            (lang:arithmetic-function-definition-for 'move-distance-point))

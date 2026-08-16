@@ -12,7 +12,9 @@
 
 (deftest player-storage-publishes-quantities-without-wrapping-values
   (let* ((position (make-vec3 1d0 2d0 3d0))
-         (player (make-instance 'block-world-player :position position))
+         (velocity (make-vec3 4d0 5d0 6d0))
+         (player (make-instance 'block-world-player
+                                :position position :velocity velocity))
          (position-declaration
            (luv.arithmetic.records:record-slot-declaration
             'block-world-player 'luv::position))
@@ -37,7 +39,19 @@
              velocity-declaration))))
     (ok (null
          (luv.arithmetic.records:record-slot-declaration
-          'block-world-player 'luv::grounded-p)))))
+          'block-world-player 'luv::grounded-p)))
+    (let ((predicted (luv::predict-player-position player 0.5d0)))
+      (ok (equalp (make-vec3 3d0 4.5d0 6d0) predicted))
+      (ok (eq position (player-position player)))
+      (ok (eq velocity (player-velocity player))))
+    (ok (compiled-function-p luv::*predict-player-position-function*))
+    (ok (signals
+         (luv.arithmetic.lisp:bind-lisp-arithmetic-realization
+          luv::*predict-player-position-realization*
+          (list velocity-declaration velocity-declaration
+                luv::*player-frame-duration-declaration*)
+          :actual-result-declaration position-declaration)
+         'luv.arithmetic:declaration-compatibility-error))))
 
 (deftest sky-frame-structure-publishes-quantities-without-changing-layout
   (let* ((sky (sky-frame-parameters

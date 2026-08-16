@@ -300,6 +300,42 @@
                           :quantity (:position :unit :metre))
                (math:declaration-source-form declaration)))))
 
+(deftest represented-value-compatibility-checks-meaning-and-representation
+  (let* ((distance
+           (math:make-declared-quantity-specification
+            '(:quantity :distance :unit :metre)))
+         (height
+           (math:make-declared-quantity-specification
+            '(:quantity :height :unit :metre)))
+         (expected
+           (math:make-represented-value-declaration
+            :representation-type 'real
+            :quantity-specification distance
+            :source-form '(parameter distance)))
+         (actual
+           (math:make-represented-value-declaration
+            :representation-type 'double-float
+            :quantity-specification distance
+            :source-form '(slot distance)))
+         (wrong-meaning
+           (math:make-represented-value-declaration
+            :representation-type 'double-float
+            :quantity-specification height
+            :source-form '(slot height)))
+         (wrong-representation
+           (math:make-represented-value-declaration
+            :representation-type 'string
+            :quantity-specification distance
+            :source-form '(slot label))))
+    (ok (eq actual
+            (math:ensure-declarations-compatible actual expected)))
+    (ok (signals (math:ensure-declarations-compatible
+                  wrong-meaning expected)
+                 'math:declaration-compatibility-error))
+    (ok (signals (math:ensure-declarations-compatible
+                  wrong-representation expected)
+                 'math:declaration-compatibility-error))))
+
 (deftest interpretation-requires-derived-semantics
   (let ((target
           (math:make-quantity-specification

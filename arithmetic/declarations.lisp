@@ -18,6 +18,25 @@
 (defgeneric declaration-source-form (declaration)
   (:documentation "Return the source form which established DECLARATION."))
 
+(define-condition declaration-compatibility-error (error)
+  ((actual
+    :initarg :actual
+    :reader declaration-compatibility-error-actual)
+   (expected
+    :initarg :expected
+    :reader declaration-compatibility-error-expected)
+   (reason
+    :initarg :reason
+    :reader declaration-compatibility-error-reason))
+  (:report
+   (lambda (condition stream)
+     (format stream "Declaration ~S is incompatible with ~S: ~A."
+             (declaration-source-form
+              (declaration-compatibility-error-actual condition))
+             (declaration-source-form
+              (declaration-compatibility-error-expected condition))
+             (declaration-compatibility-error-reason condition)))))
+
 (defclass represented-value-declaration ()
   ((representation-type
     :initarg :representation-type
@@ -68,6 +87,42 @@ one quantity may acquire different representations in different backends.
   "Whether DECLARATION states homogeneous or component quantity meaning."
   (or (declaration-quantity-specification declaration)
       (declaration-quantity-layout declaration)))
+
+(defun ensure-declarations-compatible (actual expected)
+  "Require ACTUAL storage to satisfy EXPECTED represented-value meaning.
+
+Quantity specifications and layouts agree exactly.  A NIL expected
+representation leaves representation choice open; otherwise ACTUAL's Common
+Lisp type must be a known subtype.  Return ACTUAL on success. #GZ53LD"
+  (flet ((fail (reason)
+           (error 'declaration-compatibility-error
+                  :actual actual :expected expected :reason reason)))
+    (let ((actual-type (declaration-representation-type actual))
+          (expected-type (declaration-representation-type expected)))
+      (when expected-type
+        (unless actual-type
+          (fail :missing-representation-type))
+        (multiple-value-bind (subtype-p known-p)
+            (subtypep actual-type expected-type)
+          (unless (and known-p subtype-p)
+            (fail :incompatible-representation-types)))))
+    (let ((actual-specification
+            (declaration-quantity-specification actual))
+          (expected-specification
+            (declaration-quantity-specification expected)))
+      (unless (or (and (null actual-specification)
+                       (null expected-specification))
+                  (and actual-specification expected-specification
+                       (quantity-specification=
+                        actual-specification expected-specification)))
+        (fail :incompatible-quantity-specifications)))
+    (let ((actual-layout (declaration-quantity-layout actual))
+          (expected-layout (declaration-quantity-layout expected)))
+      (unless (or (and (null actual-layout) (null expected-layout))
+                  (and actual-layout expected-layout
+                       (quantity-layout= actual-layout expected-layout)))
+        (fail :incompatible-quantity-layouts)))
+    actual))
 
 (defun make-declared-quantity-specification
     (options &key (default-tensor-order 0))
