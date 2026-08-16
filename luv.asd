@@ -1,10 +1,18 @@
 (in-package #:asdf-user)
 
+(defsystem "luv/domains"
+  :description "Minimal shared protocols for finite domains."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :serial t
+  :components ((:file "domains/package")
+               (:file "domains/domains")))
+
 (defsystem "luv/arithmetic"
   :description "Semantic quantities and their inspectable Lisp and shader arithmetic."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("closer-mop")
+  :depends-on ("closer-mop" "luv/domains")
   :serial t
   :components
   ((:module "arithmetic"

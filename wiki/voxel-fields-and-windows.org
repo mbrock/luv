@@ -280,7 +280,7 @@ The proposed vocabulary names structures that already work:
 |-
 | =block-world= | live resident world | coordinate decomposition, resident lookup, absent status |
 | =block-mesh-neighborhood= | resolved $3\times3\times3$ window | relative chunk decomposition and repeated dense offsets |
-| =block-mesh-snapshot= | immutable one-cell halo | expanded-halo coordinates and repeated sample offsets |
+| =block-mesh-snapshot= | immutable one-cell halo | explicit halo domain, expanded coordinates, and one fixed columnar materialization |
 | =light-region= | eager or lazy solver atlas | boundary-only region resolution, entry-local offsets, and lazy entry capture |
 
 The duplication is visible in current source rather than inferred from equal
@@ -290,7 +290,9 @@ then use =continue-chunk-window-site= so interior neighbors stay in domain
 arithmetic.  =map-entry-face-sites= delegates face offsets to
 =do-chunk-domain-face=.  In [[file:../luvcraft/mesher.lisp][=luvcraft/mesher.lisp=]], block and light access through
 the resolved neighborhood share relative decomposition and offset arithmetic,
-while the immutable snapshot shares expanded-halo addressing for both fields.
+while the immutable snapshot shares one =block-mesh-halo-domain= and generated
+columnar materialization across content-code, sky-level, and block-level
+storage (#LC5ULQ).
 
 This is an unusually good refactoring target because the algorithms around
 the arithmetic are already distinct and tested.  The work can remove spatial

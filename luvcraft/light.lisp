@@ -177,11 +177,11 @@ first; LIFO puts every item in bucket zero and preserves the former order.
   (check-type scheduling (member :lifo :level))
   (check-type field-definition
               (or null luvcraft.world.fields:voxel-field-definition))
-  (let* ((buffer-definition
-           (records:columnar-buffer-definition-for 'light-worklist-bucket))
+  (let* ((layout-definition
+           (records:columnar-layout-definition-for 'light-worklist-bucket))
          (row-declaration
            (records:make-columnar-row-declaration
-            buffer-definition
+            layout-definition
             (and field-definition `((level . ,field-definition)))))
          (buckets (make-array (1+ +maximum-light-level+))))
     (dotimes (level (length buckets))

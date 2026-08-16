@@ -170,8 +170,8 @@ A useful tentative contract for luv is:
 bundle
   domain
   closed schema of semantic field specifications
-  one column representation per field
-  exactly domain-size logical values per column
+  one representation object or projection per logical field
+  exactly domain-size logical values in every representation
 #+end_example
 
 The schema should be closed by a class or other inspectable definition.  A
@@ -221,7 +221,14 @@ share an =(unsigned-byte 4)= representation without becoming semantically
 interchangeable.  Conversely, one vector-valued position field can occupy
 three scalar SIMD lanes without becoming three unrelated meanings.
 
-* A columnar buffer materializes a changing finite domain
+The representation line is deliberately not "one field equals one array."
+A dense scalar field can use one array, but a constant field may store one
+value, a palette field needs a palette plus codes, a bit field packs many
+readings into a word, and one vector quantity may project through several SoA
+lanes.  The checked materialization says how logical fields project into those
+physical representations; kernels borrow whichever raw pieces they require.
+
+* Columnar layout, materialization, and policy are separate
 :PROPERTIES:
 :ID: Y0TPND
 :END:
@@ -233,8 +240,16 @@ popping changes membership, while three parallel arrays materialize one
 decide /which/ buffer receives or yields a row.  That scheduling policy is not
 part of the storage representation.
 
-A reusable =columnar-buffer= should therefore own only a closed physical lane
-layout and a small membership contract:
+A reusable columnar substrate therefore has three parts:
+
+#+begin_example
+layout           physical lanes plus fixed and bound row meaning
+materialization  one domain plus concrete storage satisfying that layout
+policy           how membership and ownership change
+#+end_example
+
+A dynamic =columnar-buffer= combines the layout with a changing ordinal
+domain and append/pop/reset policy.  Its storage contract is:
 
 - one logical length and capacity shared by every lane;
 - one specialized vector per lane, with no independent fill pointers which
@@ -260,6 +275,12 @@ substrate need only earn the operations used by lighting.  Stable identities,
 forwarding tables, and swap removal belong to the later body-domain client
 described by #Y5H8KC; fixed-point algebra still waits for its second client as
 in #BA9MCA.
+
+A fixed materialization instead receives an explicit finite domain, asks its
+=domain-cardinality= once, and allocates exact specialized lanes.  It has no
+capacity or independent membership mutation.  Both policies retain the same
+=columnar-layout-definition= and =columnar-row-declaration= vocabulary, so
+semantic checks stay at the aggregate boundary while array loops remain raw.
 
 * Row meaning binds once; raw lanes run
 :PROPERTIES:
@@ -379,6 +400,43 @@ luvcraft tests, the wiki suite, and generated SPIR-V validation.  The standalone
 smoke render remains byte-identical at SHA-256
 =0c85d4550638418cb88d507c6541a49147aeeea5697175d13904942b65a689ec=.
 
+* DONE Bind fixed columnar materializations to finite domains
+:PROPERTIES:
+:ID: LC5ULQ
+:END:
+
+Intent: make the dynamic lighting buffer one storage policy over reusable
+columnar layout metadata, add a fixed domain-bound policy, and prove the split
+with the meshing snapshot rather than a synthetic universal bundle.
+
+Evidence: =columnar-layout-definition= now describes physical lanes and row
+meaning independently of storage policy.  =define-columnar-buffer= still
+generates the growing frontier operations, while
+=define-columnar-materialization= generates an exact set of specialized lanes
+whose extent comes from =luv.domains:domain-cardinality=.  The matching borrow
+macro binds domain, extent, row declaration, and selected precisely typed
+arrays once for an ordinary scalar or SIMD kernel.
+
+The one-cell meshing halo is now a concrete =block-mesh-halo-domain= and its
+content code, sky level, and block level arrays are one generated fixed
+materialization.  Sky and block lanes retain the existing distinct quantity
+definitions.  The content u16 lane intentionally does /not/ claim to be the
+logical =:block-content= field: it is a code projected through the snapshot's
+palette, demonstrating why a field cannot always equal one array.  The
+snapshot keeps its domain, palette, logical content definition, and columnar
+storage together across the worker boundary.
+
+Done when: dynamic buffers use domain-independent layout metadata; a minimal
+finite-domain cardinality protocol allocates fixed lanes; fixed borrowing
+retains exact array types and row meaning; the meshing halo is the second real
+client; sky and block definitions remain distinguishable; direct and snapshot
+meshes remain bit-identical; and the normal test and smoke paths pass.
+
+Done: the cold =make test= path passes with strict Parinfer, 63 luv tests, 149
+luvcraft tests, 14 wiki tests, and generated SPIR-V validation.  The standalone
+smoke render remains byte-identical at SHA-256
+=0c85d4550638418cb88d507c6541a49147aeeea5697175d13904942b65a689ec=.
+
 * A columnar buffer is not one hot sequence
 :PROPERTIES:
 :ID: IUTMUY
@@ -400,11 +458,13 @@ element: ten sums of 1,048,579 floats took 0.425--0.458 seconds, versus
 =reduce= could recover that loop, but then the useful abstraction is the
 kernel itself, not generic sequence iteration.
 
-The production seam is therefore =with-columnar-buffer-storage=.  It binds
-the active length, retained row declaration, and selected lanes with precise
-=simple-array= types.  Tooling may later layer =SB-SEQUENCE= views over that
-boundary when a concrete client wants them; scalar and SIMD kernels borrow the
-arrays directly.  #VKLLPR records the first native pack experiment.
+The production seams are therefore =with-columnar-buffer-storage= for a
+changing ordinal domain and =with-columnar-materialization-storage= for a
+fixed explicit domain.  They bind the active extent, retained row declaration,
+and selected lanes with precise =simple-array= types.  Tooling may later layer
+=SB-SEQUENCE= views over that boundary when a concrete client wants them;
+scalar and SIMD kernels borrow the arrays directly.  #VKLLPR records the first
+native pack experiment.
 
 * Chunk boundaries need an environment
 :PROPERTIES:

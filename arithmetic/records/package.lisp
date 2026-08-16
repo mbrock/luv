@@ -1,6 +1,7 @@
 (defpackage #:luv.arithmetic.records
   (:use #:cl)
-  (:local-nicknames (#:math #:luv.arithmetic))
+  (:local-nicknames (#:domains #:luv.domains)
+                    (#:math #:luv.arithmetic))
   (:export #:quantity-class
            #:quantity-slot-conflict
            #:quantity-slot-conflict-class
@@ -21,21 +22,23 @@
            #:columnar-lane-definition-name
            #:columnar-lane-definition-initial-element
            #:columnar-lane-definition-clear-on-remove-p
-           #:columnar-buffer-definition
-           #:columnar-buffer-definition-name
-           #:columnar-buffer-definition-lanes
-           #:columnar-buffer-definition-quantity-layout
-           #:columnar-buffer-definition-source-form
-           #:columnar-buffer-definition-for
-           #:columnar-buffer-lane-definition
+           #:columnar-layout-definition
+           #:columnar-layout-definition-name
+           #:columnar-layout-definition-lanes
+           #:columnar-layout-definition-quantity-layout
+           #:columnar-layout-definition-source-form
+           #:columnar-layout-definition-for
+           #:columnar-layout-lane-definition
            #:columnar-row-declaration
-           #:columnar-row-declaration-buffer-definition
+           #:columnar-row-declaration-layout-definition
            #:columnar-row-declaration-lane-declarations
            #:columnar-row-declaration-quantity-layout
            #:columnar-row-declaration-revision
            #:columnar-row-lane-declaration
            #:make-columnar-row-declaration
            #:define-columnar-buffer
+           #:define-columnar-materialization
            #:do-columnar-buffer-rows
            #:with-columnar-buffer-storage
+           #:with-columnar-materialization-storage
            #:with-columnar-buffer-row))

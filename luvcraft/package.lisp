@@ -1,6 +1,7 @@
 (defpackage #:luvcraft
   (:use #:cl #:luv #:luvcraft.world)
-  (:local-nicknames (#:fields #:luvcraft.world.fields)
+  (:local-nicknames (#:domains #:luv.domains)
+                    (#:fields #:luvcraft.world.fields)
                     (#:math #:luv.arithmetic)
                     (#:records #:luv.arithmetic.records)
                     (#:spv #:luv.spir-v))

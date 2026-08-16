@@ -18,7 +18,7 @@
   (:report
    (lambda (condition stream)
      (format stream "Columnar declaration for ~S lane ~S is invalid: ~A."
-             (columnar-buffer-definition-name
+             (columnar-layout-definition-name
               (columnar-declaration-error-definition condition))
              (columnar-declaration-error-lane-name condition)
              (columnar-declaration-error-reason condition)))))
@@ -48,26 +48,26 @@
            (columnar-lane-definition-initial-element lane)
            (math:declaration-representation-type lane))))
 
-(defclass columnar-buffer-definition ()
+(defclass columnar-layout-definition ()
   ((name
     :initarg :name
-    :reader columnar-buffer-definition-name)
+    :reader columnar-layout-definition-name)
    (lanes
     :initarg :lanes
-    :reader columnar-buffer-definition-lanes)
+    :reader columnar-layout-definition-lanes)
    (quantity-layout
     :initarg :quantity-layout
-    :reader columnar-buffer-definition-quantity-layout)
+    :reader columnar-layout-definition-quantity-layout)
    (source-form
     :initarg :source-form
-    :reader columnar-buffer-definition-source-form))
+    :reader columnar-layout-definition-source-form))
   (:documentation
    "The physical lanes and fixed row meaning generated for a columnar type."))
 
 (defmethod initialize-instance :after
-    ((definition columnar-buffer-definition) &key)
-  (let ((lanes (columnar-buffer-definition-lanes definition))
-        (layout (columnar-buffer-definition-quantity-layout definition)))
+    ((definition columnar-layout-definition) &key)
+  (let ((lanes (columnar-layout-definition-lanes definition))
+        (layout (columnar-layout-definition-quantity-layout definition)))
     (unless (and (consp lanes)
                  (every (lambda (lane)
                           (typep lane 'columnar-lane-definition))
@@ -77,29 +77,29 @@
                      (remove-duplicates
                       lanes :key #'columnar-lane-definition-name :test #'eq))))
       (error "Columnar definition ~S needs distinct physical lanes."
-             (columnar-buffer-definition-name definition)))
+             (columnar-layout-definition-name definition)))
     (when (and layout
                (/= (length lanes) (math:quantity-layout-extent layout)))
       (error "Columnar definition ~S has ~D lanes but a ~D-lane quantity layout."
-             (columnar-buffer-definition-name definition)
+             (columnar-layout-definition-name definition)
              (length lanes) (math:quantity-layout-extent layout)))))
 
-(defgeneric columnar-buffer-definition-for (name)
-  (:documentation "Return the inspectable columnar definition named by NAME."))
+(defgeneric columnar-layout-definition-for (name)
+  (:documentation "Return the inspectable physical row layout named by NAME."))
 
-(defmethod columnar-buffer-definition-for (name)
+(defmethod columnar-layout-definition-for (name)
   (declare (ignore name))
   nil)
 
-(defun columnar-buffer-lane-definition (definition lane-name)
+(defun columnar-layout-lane-definition (definition lane-name)
   "Return DEFINITION's physical LANE-NAME description, or NIL."
-  (find lane-name (columnar-buffer-definition-lanes definition)
+  (find lane-name (columnar-layout-definition-lanes definition)
         :key #'columnar-lane-definition-name :test #'eq))
 
 (defclass columnar-row-declaration ()
-  ((buffer-definition
-    :initarg :buffer-definition
-    :reader columnar-row-declaration-buffer-definition)
+  ((layout-definition
+    :initarg :layout-definition
+    :reader columnar-row-declaration-layout-definition)
    (lane-declarations
     :initarg :lane-declarations
     :reader columnar-row-declaration-lane-declarations)
@@ -140,9 +140,9 @@ the aggregate boundary. #327W2B"))
   declaration)
 
 (defun fixed-columnar-lane-quantity-p (definition lane-name)
-  (let ((layout (columnar-buffer-definition-quantity-layout definition))
+  (let ((layout (columnar-layout-definition-quantity-layout definition))
         (position
-          (position lane-name (columnar-buffer-definition-lanes definition)
+          (position lane-name (columnar-layout-definition-lanes definition)
                     :key #'columnar-lane-definition-name :test #'eq)))
     (and layout position
          (find-if
@@ -157,13 +157,13 @@ the aggregate boundary. #327W2B"))
 DECLARATIONS is an alist from lane names to represented-value declarations.
 Representation compatibility and duplicate semantic ownership are checked
 once; returned rows retain the concrete declarations without wrapping values."
-  (check-type definition columnar-buffer-definition)
+  (check-type definition columnar-layout-definition)
   (let ((seen nil)
         (bindings nil))
     (dolist (binding declarations)
       (destructuring-bind (lane-name . declaration) binding
         (let ((physical
-                (columnar-buffer-lane-definition definition lane-name)))
+                (columnar-layout-lane-definition definition lane-name)))
           (unless physical
             (signal-columnar-declaration-error
              definition lane-name declaration :unknown-lane))
@@ -181,14 +181,14 @@ once; returned rows retain the concrete declarations without wrapping values."
            definition lane-name declaration physical)
           (push lane-name seen)
           (push (cons lane-name declaration) bindings))))
-    (dolist (lane (columnar-buffer-definition-lanes definition))
+    (dolist (lane (columnar-layout-definition-lanes definition))
       (unless (member (columnar-lane-definition-name lane) seen :test #'eq)
         (push (cons (columnar-lane-definition-name lane) lane) bindings)))
     (make-instance
      'columnar-row-declaration
-     :buffer-definition definition
+     :layout-definition definition
      :lane-declarations (nreverse bindings)
-     :quantity-layout (columnar-buffer-definition-quantity-layout definition))))
+     :quantity-layout (columnar-layout-definition-quantity-layout definition))))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defun columnar-generated-symbol (name control &rest arguments)
@@ -279,11 +279,11 @@ operate on raw specialized arrays with one shared length and capacity. #LDP5UR"
         (error "Columnar lane names must be distinct: ~S" lane-names))
       `(progn
          (eval-when (:compile-toplevel :load-toplevel :execute)
-           (defmethod columnar-buffer-definition-for ((buffer-name (eql ',name)))
-             (declare (ignore buffer-name))
+           (defmethod columnar-layout-definition-for ((layout-name (eql ',name)))
+             (declare (ignore layout-name))
              (load-time-value
               (make-instance
-               'columnar-buffer-definition
+               'columnar-layout-definition
                :name ',name
                :lanes
                (list
@@ -315,12 +315,12 @@ operate on raw specialized arrays with one shared length and capacity. #LDP5UR"
            (check-type capacity (integer 0 #.most-positive-fixnum))
            (when (and declarations row-declaration)
              (error "Supply DECLARATIONS or ROW-DECLARATION, not both."))
-           (let* ((definition (columnar-buffer-definition-for ',name))
+           (let* ((definition (columnar-layout-definition-for ',name))
                   (row
                     (or row-declaration
                         (make-columnar-row-declaration definition declarations))))
              (unless (eq definition
-                         (columnar-row-declaration-buffer-definition row))
+                         (columnar-row-declaration-layout-definition row))
                (signal-columnar-declaration-error
                 definition nil row :foreign-row-declaration))
              (,internal-constructor
@@ -406,6 +406,94 @@ operate on raw specialized arrays with one shared length and capacity. #LDP5UR"
 
          ',name))))
 
+(defmacro define-columnar-materialization
+    (name-and-options &body lane-descriptions)
+  "Define fixed columnar storage whose exact extent comes from one DOMAIN.
+
+Each lane has the same syntax as DEFINE-COLUMNAR-BUFFER.  The generated
+MAKE-NAME constructor takes DOMAIN first, asks DOMAIN-CARDINALITY for its exact
+extent, checks the row declaration once, and allocates one specialized array
+per lane.  The domain, row meaning, and arrays then travel together."
+  (multiple-value-bind (name quantities)
+      (parse-columnar-name-and-quantities name-and-options)
+    (let* ((lanes (mapcar #'parse-columnar-lane lane-descriptions))
+           (lane-names (mapcar (lambda (lane) (getf lane :name)) lanes))
+           (internal-constructor
+             (columnar-generated-symbol name "%%MAKE-~A" name))
+           (constructor (columnar-generated-symbol name "MAKE-~A" name))
+           (domain-slot (columnar-generated-symbol name "DOMAIN"))
+           (row-slot (columnar-generated-symbol name "ROW-DECLARATION"))
+           (domain-reader
+             (columnar-generated-symbol name "~A-DOMAIN" name))
+           (lane-slots
+             (mapcar (lambda (lane)
+                       (columnar-generated-symbol
+                        name "~A-LANE" (getf lane :name)))
+                     lanes))
+           (source-form
+             `(define-columnar-materialization
+                  ,name-and-options ,@lane-descriptions))
+           (layout-form (columnar-quantity-layout-form quantities lanes)))
+      (unless (= (length lane-names)
+                 (length (remove-duplicates lane-names :test #'eq)))
+        (error "Columnar lane names must be distinct: ~S" lane-names))
+      `(progn
+         (eval-when (:compile-toplevel :load-toplevel :execute)
+           (defmethod columnar-layout-definition-for
+               ((layout-name (eql ',name)))
+             (declare (ignore layout-name))
+             (load-time-value
+              (make-instance
+               'columnar-layout-definition
+               :name ',name
+               :lanes
+               (list
+                ,@(loop for lane in lanes
+                        collect
+                        `(make-instance
+                          'columnar-lane-definition
+                          :name ',(getf lane :name)
+                          :representation-type ',(getf lane :type)
+                          :initial-element ,(getf lane :initial-element)
+                          :clear-on-remove-p ,(getf lane :clear-on-remove-p)
+                          :source-form ',(getf lane :source-form))))
+               :quantity-layout ,layout-form
+               :source-form ',source-form))))
+
+         (defstruct
+             (,name
+              (:constructor ,internal-constructor
+                  (,domain-slot ,row-slot ,@lane-slots))
+              (:copier nil))
+           (,domain-slot nil :type t :read-only t)
+           (,row-slot nil :type columnar-row-declaration :read-only t)
+           ,@(loop for slot in lane-slots
+                   collect `(,slot #() :type vector :read-only t)))
+
+         (defun ,constructor (domain &key declarations row-declaration)
+           (when (and declarations row-declaration)
+             (error "Supply DECLARATIONS or ROW-DECLARATION, not both."))
+           (let* ((extent (domains:domain-cardinality domain))
+                  (definition (columnar-layout-definition-for ',name))
+                  (row
+                    (or row-declaration
+                        (make-columnar-row-declaration definition declarations))))
+             (check-type extent (integer 0 #.most-positive-fixnum))
+             (unless (eq definition
+                         (columnar-row-declaration-layout-definition row))
+               (signal-columnar-declaration-error
+                definition nil row :foreign-row-declaration))
+             (,internal-constructor
+              domain row
+              ,@(loop for lane in lanes
+                      collect
+                      `(make-array
+                        extent :element-type ',(getf lane :type)
+                        :initial-element ,(getf lane :initial-element))))))
+
+         (declaim (inline ,domain-reader))
+         ',name))))
+
 (defmacro with-columnar-buffer-storage
     ((bindings buffer buffer-type) &body body)
   "Borrow BUFFER-TYPE's active extent, row declaration, and raw lane arrays.
@@ -416,9 +504,9 @@ This is the checked aggregate boundary for closed scalar or SIMD kernels;
 the kernel traverses the borrowed arrays without row objects. #VKLLPR"
   (destructuring-bind (length-binding row-binding &rest array-bindings)
       bindings
-    (let* ((definition (columnar-buffer-definition-for buffer-type))
+    (let* ((definition (columnar-layout-definition-for buffer-type))
            (lanes (and definition
-                       (columnar-buffer-definition-lanes definition))))
+                       (columnar-layout-definition-lanes definition))))
       (unless definition
         (error "There is no columnar buffer definition named ~S." buffer-type))
       (let ((resolved-bindings
@@ -462,12 +550,75 @@ the kernel traverses the borrowed arrays without row objects. #VKLLPR"
                                   ,variable)))
                ,@body)))))))
 
+(defmacro with-columnar-materialization-storage
+    ((bindings materialization materialization-type) &body body)
+  "Borrow a fixed materialization's domain, extent, row, and raw lane arrays.
+
+BINDINGS is (DOMAIN EXTENT ROW-DECLARATION (ARRAY LANE-NAME) ...).  The
+materialization is evaluated once and each array receives its precise
+specialized array type."
+  (destructuring-bind
+      (domain-binding extent-binding row-binding &rest array-bindings)
+      bindings
+    (let* ((definition
+             (columnar-layout-definition-for materialization-type))
+           (lanes (and definition
+                       (columnar-layout-definition-lanes definition))))
+      (unless definition
+        (error "There is no columnar layout definition named ~S."
+               materialization-type))
+      (let ((resolved-bindings
+              (loop for binding in array-bindings
+                    collect
+                    (destructuring-bind (variable lane-name) binding
+                      (let ((lane
+                              (find lane-name lanes
+                                    :key #'columnar-lane-definition-name
+                                    :test #'eq)))
+                        (unless lane
+                          (error "There is no ~S lane in ~S."
+                                 lane-name materialization-type))
+                        (list variable lane))))))
+        (let ((materialization-value (gensym "MATERIALIZATION")))
+          `(let ((,materialization-value ,materialization))
+             (let* ((,domain-binding
+                      (,(columnar-generated-symbol
+                         materialization-type "~A-DOMAIN"
+                         materialization-type)
+                       ,materialization-value))
+                    (,extent-binding
+                      (domains:domain-cardinality ,domain-binding))
+                    (,row-binding
+                      (,(columnar-generated-symbol
+                         materialization-type "~A-ROW-DECLARATION"
+                         materialization-type)
+                       ,materialization-value))
+                    ,@(loop for (variable lane) in resolved-bindings
+                            collect
+                            `(,variable
+                              (,(columnar-generated-symbol
+                                 materialization-type "~A-~A-LANE"
+                                 materialization-type
+                                 (columnar-lane-definition-name lane))
+                               ,materialization-value))))
+               (declare (type fixnum ,extent-binding)
+                        (type columnar-row-declaration ,row-binding)
+                        ,@(loop for (variable lane) in resolved-bindings
+                                collect
+                                `(type
+                                  (simple-array
+                                   ,(upgraded-array-element-type
+                                     (math:declaration-representation-type lane))
+                                   (*))
+                                  ,variable)))
+               ,@body)))))))
+
 (defmacro with-columnar-buffer-row
     ((bindings buffer index buffer-type) &body body)
   "Bind one BUFFER-TYPE row's raw lane values at INDEX without allocation."
-  (let* ((definition (columnar-buffer-definition-for buffer-type))
+  (let* ((definition (columnar-layout-definition-for buffer-type))
          (lanes (and definition
-                     (columnar-buffer-definition-lanes definition))))
+                     (columnar-layout-definition-lanes definition))))
     (unless definition
       (error "There is no columnar buffer definition named ~S." buffer-type))
     (unless (= (length bindings) (length lanes))

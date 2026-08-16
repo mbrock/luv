@@ -50,6 +50,32 @@
       (error "Cannot combine block meshes carrying different vertex layouts."))
     declaration))
 
+(defclass block-mesh-halo-domain ()
+  ((chunk-domain :initarg :chunk-domain
+                 :reader block-mesh-halo-domain-chunk-domain))
+  (:documentation
+   "The sites in one chunk plus the one-cell sampling halo around it."))
+
+(defun make-block-mesh-halo-domain (chunk-domain)
+  (check-type chunk-domain chunk-domain)
+  (make-instance 'block-mesh-halo-domain :chunk-domain chunk-domain))
+
+(defmethod domains:domain-cardinality ((domain block-mesh-halo-domain))
+  (let* ((chunk-domain (block-mesh-halo-domain-chunk-domain domain))
+         (shape (voxel-space-chunk-shape
+                 (chunk-domain-space chunk-domain))))
+    (* (+ 2 (chunk-shape-width shape))
+       (+ 2 (chunk-shape-height shape))
+       (+ 2 (chunk-shape-depth shape)))))
+
+(records:define-columnar-materialization block-mesh-halo-fields
+  ;; CONTENT-INDEX is a projection through PALETTE, not the logical
+  ;; :BLOCK-CONTENT declaration itself.  The light lanes already have direct
+  ;; represented field declarations and bind those below.
+  (content-index 0 :type (unsigned-byte 16))
+  (sky-level 0 :type (unsigned-byte 8))
+  (block-level 0 :type (unsigned-byte 8)))
+
 (defclass block-mesh-snapshot ()
   ((key :initarg :key :reader block-mesh-snapshot-key)
    (dependency-stamp :initarg :dependency-stamp
@@ -57,26 +83,51 @@
    (domain :initarg :domain :reader block-mesh-snapshot-domain)
    (content-definition :initarg :content-definition
                        :reader block-mesh-snapshot-content-definition)
-   (sky-definition :initarg :sky-definition
-                   :reader block-mesh-snapshot-sky-definition)
-   (block-light-definition :initarg :block-light-definition
-                           :reader block-mesh-snapshot-block-light-definition)
    (palette :initarg :palette :reader block-mesh-snapshot-palette)
    (target-indices :initarg :target-indices
                    :reader block-mesh-snapshot-target-indices)
-   (sample-indices :initarg :sample-indices
-                   :reader block-mesh-snapshot-sample-indices)
-   ;; Published light copied for the same one-cell halo as block samples.
-   (sky-samples :initarg :sky-samples :initform nil
-                :reader block-mesh-snapshot-sky-samples)
-   (block-light-samples :initarg :block-light-samples :initform nil
-                        :reader block-mesh-snapshot-block-light-samples))
+   (halo-fields :initarg :halo-fields
+                :reader block-mesh-snapshot-halo-fields))
   (:documentation
    "An immutable dense chunk plus one-cell halo transferred to a CPU worker.
 
 The snapshot owns compact u16 columns, but its small palette contains the same
 shared semantic block descriptors used by the world.  Cell identity does not
 cross the thread boundary, and the worker never observes live chunk storage."))
+
+(declaim
+ (inline block-mesh-snapshot-halo-domain
+         block-mesh-snapshot-sample-indices
+         block-mesh-snapshot-sky-samples
+         block-mesh-snapshot-block-light-samples))
+
+(defun block-mesh-snapshot-halo-domain (snapshot)
+  (block-mesh-halo-fields-domain
+   (block-mesh-snapshot-halo-fields snapshot)))
+
+(defun block-mesh-snapshot-sample-indices (snapshot)
+  (block-mesh-halo-fields-content-index-lane
+   (block-mesh-snapshot-halo-fields snapshot)))
+
+(defun block-mesh-snapshot-sky-samples (snapshot)
+  (block-mesh-halo-fields-sky-level-lane
+   (block-mesh-snapshot-halo-fields snapshot)))
+
+(defun block-mesh-snapshot-block-light-samples (snapshot)
+  (block-mesh-halo-fields-block-level-lane
+   (block-mesh-snapshot-halo-fields snapshot)))
+
+(defun block-mesh-snapshot-sky-definition (snapshot)
+  (records:columnar-row-lane-declaration
+   (block-mesh-halo-fields-row-declaration
+    (block-mesh-snapshot-halo-fields snapshot))
+   'sky-level))
+
+(defun block-mesh-snapshot-block-light-definition (snapshot)
+  (records:columnar-row-lane-declaration
+   (block-mesh-halo-fields-row-declaration
+    (block-mesh-snapshot-halo-fields snapshot))
+   'block-level))
 
 (defmethod luvcraft.world.fields:materialized-field-definition
     ((snapshot block-mesh-snapshot) (field-name (eql :block-content)))
@@ -200,9 +251,10 @@ decomposition and storage order beneath it.  See #K3KZTG."
         (values nil :absent))))
 
 (declaim (inline block-mesh-halo-offset-components))
-(defun block-mesh-halo-offset-components (domain x y z)
+(defun block-mesh-halo-offset-components (halo-domain x y z)
   "Return the dense one-cell-halo offset for a world site, or NIL outside."
-  (let* ((shape (voxel-space-chunk-shape (chunk-domain-space domain)))
+  (let* ((domain (block-mesh-halo-domain-chunk-domain halo-domain))
+         (shape (voxel-space-chunk-shape (chunk-domain-space domain)))
          (sample-width (+ 2 (chunk-shape-width shape)))
          (sample-height (+ 2 (chunk-shape-height shape)))
          (sample-depth (+ 2 (chunk-shape-depth shape))))
@@ -222,7 +274,7 @@ decomposition and storage order beneath it.  See #K3KZTG."
 (defun block-mesh-snapshot-locate (snapshot x y z)
   "Resolve one halo site without aggregate dispatch in the meshing loop."
   (let ((offset (block-mesh-halo-offset-components
-                 (block-mesh-snapshot-domain snapshot) x y z)))
+                 (block-mesh-snapshot-halo-domain snapshot) x y z)))
     (if (and offset
              ;; Zero is absent.  Resident air has its own palette entry.
              (not (zerop (aref (block-mesh-snapshot-sample-indices snapshot)
@@ -534,6 +586,7 @@ normalized to 0..1."
 (defun make-block-mesh-snapshot (world chunk dependency-stamp)
   "Copy CHUNK and its one-cell halo into immutable worker-owned columns."
   (let* ((domain (block-chunk-domain chunk))
+         (halo-domain (make-block-mesh-halo-domain domain))
          (shape (voxel-space-chunk-shape (chunk-domain-space domain)))
          (width (chunk-shape-width shape))
          (height (chunk-shape-height shape))
@@ -551,76 +604,78 @@ normalized to 0..1."
                                 :initial-contents '(nil nil)))
          (palette-indices (make-hash-table :test #'eq))
          (target-indices
-           (make-array (chunk-domain-cardinality domain)
+           (make-array (domains:domain-cardinality domain)
                        :element-type '(unsigned-byte 16)))
-         (sample-indices
-           (make-array (* sample-width sample-height sample-depth)
-                       :element-type '(unsigned-byte 16)))
-         (sky-samples
-           (make-array (* sample-width sample-height sample-depth)
-                       :element-type '(unsigned-byte 8)
-                       :initial-element 0))
-         (block-light-samples
-           (make-array (* sample-width sample-height sample-depth)
-                       :element-type '(unsigned-byte 8)
-                       :initial-element 0))
+         (content-definition
+           (fields:materialized-field-definition
+            (block-chunk-content chunk) :block-content))
+         (light-field (block-chunk-light-field chunk))
+         (sky-definition
+           (if light-field
+               (fields:materialized-field-definition light-field :sky-light)
+               (fields:field-definition-for :sky-light)))
+         (block-light-definition
+           (if light-field
+               (fields:materialized-field-definition light-field :block-light)
+               (fields:field-definition-for :block-light)))
+         (halo-fields
+           (make-block-mesh-halo-fields
+            halo-domain
+            :declarations `((sky-level . ,sky-definition)
+                            (block-level . ,block-light-definition))))
          (neighborhood (make-block-mesh-neighborhood world chunk)))
     (setf (gethash nil palette-indices) 1)
-    (dotimes (sample-z sample-depth)
-      (dotimes (sample-y sample-height)
-        (dotimes (sample-x sample-width)
-          (let ((world-x (+ origin-x (1- sample-x)))
-                (world-y (+ origin-y (1- sample-y)))
-                (world-z (+ origin-z (1- sample-z))))
-            (let ((sample-offset
-                    (block-mesh-halo-offset-components
-                     domain world-x world-y world-z)))
-              (assert sample-offset)
-              (multiple-value-bind (block status)
-                  (block-mesh-neighborhood-block-at
-                   neighborhood world-x world-y world-z)
-                (let ((index
-                        (if (eq status :resident)
-                            (block-mesh-snapshot-palette-index
-                             block palette palette-indices)
-                            0)))
-                  (setf (aref sample-indices sample-offset) index)
-                  (when (and (<= 1 sample-x width)
-                             (<= 1 sample-y height)
-                             (<= 1 sample-z depth))
-                    (setf (aref target-indices
-                                (chunk-domain-offset-components
-                                 domain
-                                 (1- sample-x)
-                                 (1- sample-y)
-                                 (1- sample-z)))
-                          index))))
-              (multiple-value-bind (sky block-light status)
-                  (sample-light-at neighborhood world-x world-y world-z)
-                (declare (ignore status))
-                (setf (aref sky-samples sample-offset) sky
-                      (aref block-light-samples sample-offset)
-                      block-light)))))))
+    (records:with-columnar-materialization-storage
+        ((borrowed-domain extent row
+                          (sample-indices content-index)
+                          (sky-samples sky-level)
+                          (block-light-samples block-level))
+         halo-fields block-mesh-halo-fields)
+      (declare (ignore row))
+      (assert (eq borrowed-domain halo-domain))
+      (assert (= extent (* sample-width sample-height sample-depth)))
+      (dotimes (sample-z sample-depth)
+        (dotimes (sample-y sample-height)
+          (dotimes (sample-x sample-width)
+            (let ((world-x (+ origin-x (1- sample-x)))
+                  (world-y (+ origin-y (1- sample-y)))
+                  (world-z (+ origin-z (1- sample-z))))
+              (let ((sample-offset
+                      (block-mesh-halo-offset-components
+                       halo-domain world-x world-y world-z)))
+                (assert sample-offset)
+                (multiple-value-bind (block status)
+                    (block-mesh-neighborhood-block-at
+                     neighborhood world-x world-y world-z)
+                  (let ((index
+                          (if (eq status :resident)
+                              (block-mesh-snapshot-palette-index
+                               block palette palette-indices)
+                              0)))
+                    (setf (aref sample-indices sample-offset) index)
+                    (when (and (<= 1 sample-x width)
+                               (<= 1 sample-y height)
+                               (<= 1 sample-z depth))
+                      (setf (aref target-indices
+                                  (chunk-domain-offset-components
+                                   domain
+                                   (1- sample-x)
+                                   (1- sample-y)
+                                   (1- sample-z)))
+                            index))))
+                (multiple-value-bind (sky block-light status)
+                    (sample-light-at neighborhood world-x world-y world-z)
+                  (declare (ignore status))
+                  (setf (aref sky-samples sample-offset) sky
+                        (aref block-light-samples sample-offset)
+                        block-light))))))))
     (make-instance
      'block-mesh-snapshot
      :key (block-chunk-key chunk) :dependency-stamp dependency-stamp
      :domain domain
-     :content-definition
-     (luvcraft.world.fields:materialized-field-definition
-      (block-chunk-content chunk) :block-content)
-     :sky-definition
-     (let ((field (block-chunk-light-field chunk)))
-       (if field
-           (luvcraft.world.fields:materialized-field-definition field :sky-light)
-           (luvcraft.world.fields:field-definition-for :sky-light)))
-     :block-light-definition
-     (let ((field (block-chunk-light-field chunk)))
-       (if field
-           (luvcraft.world.fields:materialized-field-definition field :block-light)
-           (luvcraft.world.fields:field-definition-for :block-light)))
+     :content-definition content-definition
      :palette palette :target-indices target-indices
-     :sample-indices sample-indices
-     :sky-samples sky-samples :block-light-samples block-light-samples)))
+     :halo-fields halo-fields)))
 
 (defmethod mesh-block-world
     ((mesher exposed-face-mesher) (world block-world))

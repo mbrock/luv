@@ -238,12 +238,14 @@ coordinates."
   (check-type coordinate chunk-coordinate)
   (make-instance 'chunk-domain :space space :coordinate coordinate))
 
-(defun chunk-domain-cardinality (domain)
-  (check-type domain chunk-domain)
+(defmethod domains:domain-cardinality ((domain chunk-domain))
   (let ((shape (voxel-space-chunk-shape (chunk-domain-space domain))))
     (* (chunk-shape-width shape)
        (chunk-shape-height shape)
        (chunk-shape-depth shape))))
+
+(defun chunk-domain-cardinality (domain)
+  (domains:domain-cardinality domain))
 
 (defun chunk-domain-origin (domain)
   (chunk-local-world-coordinate

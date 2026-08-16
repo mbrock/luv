@@ -1,6 +1,7 @@
 (defpackage #:luvcraft.world
   (:use #:cl)
-  (:local-nicknames (#:fields #:luvcraft.world.fields)
+  (:local-nicknames (#:domains #:luv.domains)
+                    (#:fields #:luvcraft.world.fields)
                     (#:math #:luv.arithmetic))
   (:import-from #:luv.arithmetic.lisp.vec3
                 #:make-vec3
