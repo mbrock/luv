@@ -70,6 +70,10 @@
 (defconstant +primitive-topology-class-triangle+ 3)
 (defconstant +primitive-type-triangle+ 3)
 (defconstant +primitive-type-triangle-strip+ 4)
+(defconstant +blend-state-enabled+ 1)
+(defconstant +blend-factor-one+ 1)
+(defconstant +blend-factor-one-minus-source-alpha+ 5)
+(defconstant +blend-operation-add+ 0)
 (defconstant +render-stage-vertex+ (ash 1 0))
 (defconstant +render-stage-fragment+ (ash 1 1))
 (defconstant +compare-function-never+ 0)
@@ -523,6 +527,34 @@ rejection.  Source and names cross only as in-memory NSString objects."
     ("setPixelFormat:" :void)
   (format :uint64))
 
+(objc:define-objective-c-message %set-render-pipeline-blending-state
+    ("setBlendingState:" :void)
+  (state :uint64))
+
+(objc:define-objective-c-message %set-source-rgb-blend-factor
+    ("setSourceRGBBlendFactor:" :void)
+  (factor :uint64))
+
+(objc:define-objective-c-message %set-destination-rgb-blend-factor
+    ("setDestinationRGBBlendFactor:" :void)
+  (factor :uint64))
+
+(objc:define-objective-c-message %set-rgb-blend-operation
+    ("setRgbBlendOperation:" :void)
+  (operation :uint64))
+
+(objc:define-objective-c-message %set-source-alpha-blend-factor
+    ("setSourceAlphaBlendFactor:" :void)
+  (factor :uint64))
+
+(objc:define-objective-c-message %set-destination-alpha-blend-factor
+    ("setDestinationAlphaBlendFactor:" :void)
+  (factor :uint64))
+
+(objc:define-objective-c-message %set-alpha-blend-operation
+    ("setAlphaBlendOperation:" :void)
+  (operation :uint64))
+
 (objc:define-objective-c-message %vertex-descriptor-layouts
     ("layouts" :object :ownership :borrowed
      :class "MTLVertexBufferLayoutDescriptorArray"))
@@ -611,7 +643,7 @@ rejection.  Source and names cross only as in-memory NSString objects."
 
 (defun compile-metal-4-render-pipeline
     (compiler vertex-library vertex-name fragment-library fragment-name
-     vertex-buffers color-format topology &key depth-format label)
+     vertex-buffers color-format topology &key depth-format blend label)
   "Synchronously link Metal libraries into an owned Metal 4 pipeline state."
   (declare (ignore depth-format))
   (objc:with-autorelease-pool ()
@@ -656,10 +688,27 @@ rejection.  Source and names cross only as in-memory NSString objects."
                     descriptor vertex-descriptor)
                    (%set-input-primitive-topology descriptor topology)
                    (when color-format
-                     (%set-render-pipeline-pixel-format
-                      (%render-pipeline-color-attachment-at
-                       (%render-pipeline-color-attachments descriptor) 0)
-                      color-format))
+                     (let ((attachment
+                             (%render-pipeline-color-attachment-at
+                              (%render-pipeline-color-attachments descriptor)
+                              0)))
+                       (%set-render-pipeline-pixel-format
+                        attachment color-format)
+                       (when blend
+                         (%set-render-pipeline-blending-state
+                          attachment +blend-state-enabled+)
+                         (%set-source-rgb-blend-factor
+                          attachment +blend-factor-one+)
+                         (%set-destination-rgb-blend-factor
+                          attachment +blend-factor-one-minus-source-alpha+)
+                         (%set-rgb-blend-operation
+                          attachment +blend-operation-add+)
+                         (%set-source-alpha-blend-factor
+                          attachment +blend-factor-one+)
+                         (%set-destination-alpha-blend-factor
+                          attachment +blend-factor-one-minus-source-alpha+)
+                         (%set-alpha-blend-operation
+                          attachment +blend-operation-add+))))
                    (cffi:with-foreign-object (error :pointer)
                      (setf (cffi:mem-ref error :pointer) (cffi:null-pointer))
                      (let ((pipeline

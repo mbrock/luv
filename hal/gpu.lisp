@@ -318,6 +318,8 @@ linear for the sRGB formats; the transfer names their RGB-channel behavior."
   layout entries)
 
 (defstruct (render-pipeline-descriptor (:include gpu-descriptor))
+  "A render pipeline.  Each fragment target may name :BLEND
+:PREMULTIPLIED-ALPHA; omitted blending retains opaque replacement semantics."
   layout vertex fragment (primitive '(:topology :triangle-list)) depth-stencil)
 
 (defstruct (render-pass-descriptor (:include gpu-descriptor))

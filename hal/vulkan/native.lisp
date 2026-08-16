@@ -867,7 +867,7 @@ destroy it before destroying INSTANCE."
     (device vertex-module fragment-module layout render-pass
      &key (vertex-entry-point "main") (fragment-entry-point "main")
           (topology :triangle-strip) vertex-buffers
-          depth-compare depth-write-enabled)
+          depth-compare depth-write-enabled blend)
   (labels
       ((create-with-shader-names (vertex-name fragment-name)
          (let ((stage-count (if fragment-module 2 1)))
@@ -985,12 +985,14 @@ destroy it before destroying INSTANCE."
                                 (with-vk
                                     (blend-attachment
                                      pipeline-color-blend-attachment-state
-                                     :blend-enable 0
+                                     :blend-enable (if blend 1 0)
                                      :src-color-blend-factor :one
-                                     :dst-color-blend-factor :zero
+                                     :dst-color-blend-factor
+                                     (if blend :one-minus-src-alpha :zero)
                                      :color-blend-op :add
                                      :src-alpha-blend-factor :one
-                                     :dst-alpha-blend-factor :zero
+                                     :dst-alpha-blend-factor
+                                     (if blend :one-minus-src-alpha :zero)
                                      :alpha-blend-op :add
                                      :color-write-mask '(:r :g :b :a))
                                   (create-with-blend 1 blend-attachment))

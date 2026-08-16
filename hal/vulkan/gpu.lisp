@@ -1192,6 +1192,7 @@ wrapper, this finalizer cannot run before theirs have."
            (fragment-module (getf fragment :module))
            (targets (getf fragment :targets))
            (format (getf (first targets) :format))
+           (blend (getf (first targets) :blend))
            (depth-stencil
              (render-pipeline-descriptor-depth-stencil descriptor))
            (depth-format (and depth-stencil (getf depth-stencil :format)))
@@ -1212,7 +1213,8 @@ wrapper, this finalizer cannot run before theirs have."
                    (or (and (typep fragment-module
                                     'vulkan-gpu-shader-module)
                             (= 1 (length targets))
-                            format)
+                            format
+                            (member blend '(nil :premultiplied-alpha)))
                        (and (null fragment-module)
                             (null targets)
                             depth-stencil))
@@ -1255,7 +1257,8 @@ wrapper, this finalizer cannot run before theirs have."
                       :topology topology
                       :vertex-buffers vertex-buffers
                       :depth-compare depth-compare
-                      :depth-write-enabled depth-write-enabled)
+                      :depth-write-enabled depth-write-enabled
+                      :blend blend)
                      completed-p t)
                (make-instance
                 'vulkan-gpu-render-pipeline

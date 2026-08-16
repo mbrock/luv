@@ -171,7 +171,8 @@
 
 (cffi:defcenum (blend-factor :uint32)
   (:zero 0)
-  (:one 1))
+  (:one 1)
+  (:one-minus-src-alpha 7))
 
 (cffi:defcenum (blend-op :uint32)
   (:add 0))

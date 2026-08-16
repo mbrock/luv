@@ -231,7 +231,9 @@
                         (:shader-location 3 :offset 36 :format :float32x3)))))
                    :fragment
                    `(:module ,fragment-module
-                     :targets ((:format :bgra8-unorm)))
+                     :targets
+                     ((:format :bgra8-unorm
+                       :blend :premultiplied-alpha)))
                    :primitive '(:topology :triangle-list)
                    :depth-stencil
                    '(:format :depth32-float

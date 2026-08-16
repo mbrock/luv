@@ -29,6 +29,11 @@
          (cffi:foreign-enum-value
           'lvk::format :r16g16b16a16-sfloat))))
 
+(deftest premultiplied-alpha-retains-the-exact-vulkan-blend-factor
+  (ok (= 7
+         (cffi:foreign-enum-value
+          'lvk::blend-factor :one-minus-src-alpha))))
+
 (deftest definitions-retain-abi-metadata-without-call-classes
   (let ((description (lvk:vulkan-function-description 'vk:create-instance)))
     (ok (equal (getf description :foreign-name) "vkCreateInstance"))

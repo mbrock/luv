@@ -1086,6 +1086,7 @@ compiler boundary of #58IDSR."
          (targets (getf fragment :targets))
          (format (and (= (length targets) 1)
                       (getf (first targets) :format)))
+         (blend (getf (first targets) :blend))
          (primitive (render-pipeline-descriptor-primitive descriptor))
          (topology (or (getf primitive :topology) :triangle-list))
          (depth-stencil
@@ -1108,7 +1109,8 @@ compiler boundary of #58IDSR."
                           (string= fragment-entry-point
                                    (metal-shader-module-entry-point
                                     fragment-module))
-                          format)
+                          format
+                          (member blend '(nil :premultiplied-alpha)))
                      (and (null fragment-module) (null format) depth-stencil))
                  (member topology '(:triangle-list :triangle-strip))
                  (or (null depth-stencil)
@@ -1148,6 +1150,7 @@ compiler boundary of #58IDSR."
                   :depth-format
                   (and depth-format
                        (metal-resource-pixel-format depth-format descriptor))
+                  :blend blend
                   :label (gpu-descriptor-label descriptor))
                (unless pipeline
                  (error 'metal-gpu-error

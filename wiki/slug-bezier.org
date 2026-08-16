@@ -444,8 +444,12 @@ and band-fragment specifications used by the earlier “O” proof:
 The image also forced a useful correction that the symmetric “O” could not
 show: target Y had been inverted.  Visual inspection of letters with ascenders
 and descenders caught it, and the fitted text vertices now map font-up to
-image-up.  HarfBuzz 13.2.1 is part of the owned Nix runtime rather than an
-ambient host dependency.
+image-up.  Its blue background is also a composition check: the Slug fragment
+emits premultiplied color and coverage, and the render target explicitly uses
+=one= / =one-minus-source-alpha= blending instead of relying on the black
+background that concealed transparent quad pixels in the first proof.
+HarfBuzz 13.2.1 is part of the owned Nix runtime rather than an ambient host
+dependency.
 
 * DONE Shape and draw a HarfBuzz text run through Slug
 :PROPERTIES:

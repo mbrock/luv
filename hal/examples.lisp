@@ -782,7 +782,9 @@ resulting glyph IDs.  Return pixels, width, height, format, and shaped text.
                                   :format :float32x3)))))
                            :fragment
                            `(:module ,fragment-module
-                             :targets ((:format ,format)))))
+                             :targets
+                             ((:format ,format
+                               :blend :premultiplied-alpha)))))
                          target
                          (create
                           device
@@ -819,7 +821,7 @@ resulting glyph IDs.  Return pixels, width, height, format, and shaped text.
                             (make-render-pass-descriptor
                              :color-attachments
                              `((:view ,target :load-op :clear :store-op :store
-                                :clear-value #(0.0 0.0 0.0 1.0)))))))
+                                :clear-value #(0.04 0.12 0.20 1.0)))))))
                      (set-pipeline pass pipeline)
                      (set-vertex-buffer pass 0 vertices)
                      (loop for draw in draws
