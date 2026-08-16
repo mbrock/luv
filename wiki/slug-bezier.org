@@ -527,13 +527,38 @@ is the ordinary world smoke path, not an isolated text target:
 The label's transparent quad exterior preserves sky and blocks; the pipeline's
 =:less= comparison puts terrain in front whenever their projections overlap.
 Frame metrics also count its current six vertices and one draw per drawable
-glyph.  That cost is intentionally still literal: each glyph occurrence owns
-a texture pair and each frame slot owns matching bind groups, providing the
-baseline the cache and atlas iterations must remove.
+glyph.  The cache iteration below removes repeated outline ownership, while
+the atlas iteration must still remove this literal bind-and-draw baseline.
 
 Done when: a HarfBuzz-shaped run is legible in the real scene, changes screen
 position and scale with its camera relationship, obeys terrain depth, and
 survives a full Metal-validation frame without a bind-state or lifetime error.
+
+* DONE Cache shaping and device glyph outlines
+:PROPERTIES:
+:ID: U5X6DY
+:END:
+
+Intent: make text runs cheap to reconstruct without hiding GPU lifetime inside
+glyph occurrences.
+
+[[lisp:make-world-text-glyph-cache]] is owned by the luvcraft session and tied
+to one device.  It retains HarfBuzz results by canonical font path and exact
+string, and retains normalized, serialized, uploaded Slug outlines by canonical
+font path and HarfBuzz glyph ID.  A run now owns only placement, dense vertex
+data, layout, and pipeline; stopping the session destroys frame bind groups,
+then runs, then the cache, then the device.
+
+Repeated occurrences share the same resource object and each drawable frame
+creates only one bind group for that cached object.  The default
+="hello, world"= proof has 11 drawable occurrences but only 8 cached outline
+texture pairs.  A second identical run reuses both the =slug-shaped-text= and
+all eight device resources.  The Metal regression constructs both runs and
+checks those identities before exercising the ownership-order teardown.
+
+Done when: duplicate glyph IDs within a run and across runs resolve to the same
+per-device outline, identical shaping is not repeated, and Metal teardown is
+clean.
 
 * NEXT Compare Slug coverage at glyph edges
 :PROPERTIES:

@@ -100,6 +100,8 @@
                        :reader luvcraft-session-crosshair-pipeline)
    (world-text :initarg :world-text :initform nil
                :reader luvcraft-session-world-text)
+   (world-text-glyph-cache :initarg :world-text-glyph-cache :initform nil
+                           :reader luvcraft-session-world-text-glyph-cache)
    (frame-states :initform (make-hash-table :test #'eql)
                  :reader luvcraft-session-frame-states)
    (resources :initarg :resources :initform nil

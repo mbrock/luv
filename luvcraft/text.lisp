@@ -1,15 +1,24 @@
 ;;; HarfBuzz-shaped Slug text as world-owned render geometry.
 ;;;
-;;; A WORLD-TEXT-RUN is the semantic ownership boundary.  Placement and vertex
-;;; data stay dense; the temporary one-outline-texture-pair-per-occurrence path
-;;; remains deliberately visible until the shared atlas iteration replaces it.
+;;; A WORLD-TEXT-RUN is the semantic placement boundary.  A per-device cache
+;;; retains HarfBuzz results and one uploaded outline per font/glyph pair until
+;;; the shared-atlas iteration packs those resources more tightly.
 
 (in-package #:luvcraft)
 
 (defstruct world-text-glyph
-  glyph-id serialized origin-x origin-y
-  outline-min-x outline-min-y outline-max-x outline-max-y
-  band-view curve-view)
+  glyph-id resource origin-x origin-y
+  outline-min-x outline-min-y outline-max-x outline-max-y)
+
+(defstruct world-text-glyph-resource
+  key glyph-id serialized band-texture band-view curve-texture curve-view)
+
+(defclass world-text-glyph-cache ()
+  ((device :initarg :device :reader world-text-glyph-cache-device)
+   (entries :initform (make-hash-table :test #'equal)
+            :reader world-text-glyph-cache-entries)
+   (shaped-texts :initform (make-hash-table :test #'equal)
+                 :reader world-text-glyph-cache-shaped-texts)))
 
 (defclass world-text-run ()
   ((string :initarg :string :reader world-text-run-string)
@@ -27,7 +36,139 @@
    (pipeline :initarg :pipeline :reader world-text-run-pipeline)
    (resources :initarg :resources :reader world-text-run-resources)))
 
-(defun make-world-text-glyphs (shaped font-loader)
+(defun make-world-text-glyph-cache (device)
+  (make-instance 'world-text-glyph-cache :device device))
+
+(defun world-text-font-key (font-pathname)
+  (namestring (truename font-pathname)))
+
+(defun world-text-shaped-text-for (cache font-pathname string)
+  "Return one durable HarfBuzz result for a canonical font and exact string."
+  (let* ((key (list (world-text-font-key font-pathname) string))
+         (shaped-texts (world-text-glyph-cache-shaped-texts cache)))
+    (or (gethash key shaped-texts)
+        (setf (gethash key shaped-texts)
+              (luv.slug:shape-slug-text string font-pathname)))))
+
+(defun create-world-text-glyph-resource
+    (cache key glyph-id font-loader)
+  (let* ((device (world-text-glyph-cache-device cache))
+         (glyph (luv.slug:load-slug-glyph-index glyph-id font-loader))
+         (outline (luv.slug:normalize-slug-glyph-outline glyph)))
+    (when (luv.slug:slug-outline-contours outline)
+      (let* ((serialized
+               (luv.slug:serialize-slug-outline
+                outline :horizontal-band-count 1 :vertical-band-count 1))
+             (band-texture nil)
+             (curve-texture nil)
+             (band-view nil)
+             (curve-view nil)
+             (completed-p nil))
+        (unwind-protect
+             (progn
+               (setf band-texture
+                     (create
+                      device
+                      (make-texture-descriptor
+                       :label "cached world glyph RG16U bands"
+                       :size
+                       (luv.slug:slug-serialized-outline-band-texture-size
+                        serialized)
+                       :dimensions :2d :format :rg16-uint
+                       :usage '(:texture-binding :copy-dst)))
+                     curve-texture
+                     (create
+                      device
+                      (make-texture-descriptor
+                       :label "cached world glyph RGBA16F curves"
+                       :size
+                       (luv.slug:slug-serialized-outline-curve-texture-size
+                        serialized)
+                       :dimensions :2d :format :rgba16-float
+                       :usage '(:texture-binding :copy-dst)))
+                     band-view
+                     (create
+                      device
+                      (make-texture-view-descriptor :texture band-texture))
+                     curve-view
+                     (create
+                      device
+                      (make-texture-view-descriptor :texture curve-texture)))
+               (write-texture
+                (device-queue device)
+                (make-texture-copy :texture band-texture)
+                (luv.slug:slug-serialized-outline-band-upload-data serialized)
+                (make-texture-data-layout
+                 :bytes-per-row
+                 (* 4
+                    (luv.slug:slug-serialized-outline-band-width serialized))
+                 :rows-per-image
+                 (second
+                  (luv.slug:slug-serialized-outline-band-texture-size
+                   serialized)))
+                (luv.slug:slug-serialized-outline-band-texture-size serialized))
+               (write-texture
+                (device-queue device)
+                (make-texture-copy :texture curve-texture)
+                (luv.slug:slug-serialized-outline-curve-upload-data serialized)
+                (make-texture-data-layout
+                 :bytes-per-row
+                 (* 8
+                    (luv.slug:slug-serialized-outline-curve-width serialized))
+                 :rows-per-image
+                 (second
+                  (luv.slug:slug-serialized-outline-curve-texture-size
+                   serialized)))
+                (luv.slug:slug-serialized-outline-curve-texture-size
+                 serialized))
+               (let ((resource
+                       (make-world-text-glyph-resource
+                        :key key :glyph-id glyph-id :serialized serialized
+                        :band-texture band-texture :band-view band-view
+                        :curve-texture curve-texture :curve-view curve-view)))
+                 (setf completed-p t)
+                 resource))
+          (unless completed-p
+            (dolist (resource
+                      (remove nil
+                              (list curve-view band-view
+                                    curve-texture band-texture)))
+              (destroy resource))))))))
+
+(defun world-text-glyph-resource-for
+    (cache font-pathname glyph-id font-loader)
+  "Return one device resource for a canonical font and HarfBuzz glyph ID."
+  (let* ((key (list (world-text-font-key font-pathname) glyph-id))
+         (entries (world-text-glyph-cache-entries cache)))
+    (multiple-value-bind (value present-p) (gethash key entries)
+      (if present-p
+          (unless (eq value :empty) value)
+          (let ((resource
+                  (create-world-text-glyph-resource
+                   cache key glyph-id font-loader)))
+            (setf (gethash key entries) (or resource :empty))
+            resource)))))
+
+(defun world-text-glyph-cache-resource-count (cache)
+  (loop for resource being the hash-values of
+          (world-text-glyph-cache-entries cache)
+        count (not (eq resource :empty))))
+
+(defun release-world-text-glyph-cache (cache)
+  (maphash
+   (lambda (key resource)
+     (declare (ignore key))
+     (unless (eq resource :empty)
+       (destroy (world-text-glyph-resource-curve-view resource))
+       (destroy (world-text-glyph-resource-band-view resource))
+       (destroy (world-text-glyph-resource-curve-texture resource))
+       (destroy (world-text-glyph-resource-band-texture resource))))
+   (world-text-glyph-cache-entries cache))
+  (clrhash (world-text-glyph-cache-entries cache))
+  (clrhash (world-text-glyph-cache-shaped-texts cache))
+  (values))
+
+(defun make-world-text-glyphs (shaped font-loader cache font-pathname)
   "Join HarfBuzz placements to normalized Slug outlines by selected glyph ID."
   (let* ((unit (/ 1 (luv.slug:slug-shaped-text-units-per-em shaped)))
          (pen-x 0)
@@ -35,19 +176,17 @@
          glyphs)
     (loop for placement across (luv.slug:slug-shaped-text-glyphs shaped)
           for glyph-id = (luv.slug:slug-shaped-glyph-glyph-id placement)
-          for glyph = (luv.slug:load-slug-glyph-index glyph-id font-loader)
-          for outline = (luv.slug:normalize-slug-glyph-outline glyph)
-          do (when (luv.slug:slug-outline-contours outline)
+          for resource = (world-text-glyph-resource-for
+                          cache font-pathname glyph-id font-loader)
+          do (when resource
                (let* ((serialized
-                        (luv.slug:serialize-slug-outline
-                         outline :horizontal-band-count 1
-                                 :vertical-band-count 1))
+                        (world-text-glyph-resource-serialized resource))
                       (packed
                         (luv.slug:slug-serialized-outline-packed-outline
                          serialized)))
                  (push
                   (make-world-text-glyph
-                   :glyph-id glyph-id :serialized serialized
+                   :glyph-id glyph-id :resource resource
                    :origin-x (* (+ pen-x
                                    (luv.slug:slug-shaped-glyph-x-offset
                                     placement))
@@ -154,19 +293,22 @@
     (world-text-point (camera-position camera) forward up distance lift 1.0)))
 
 (defun make-world-text-run
-    (device camera target-format string font-pathname
+    (device glyph-cache camera target-format string font-pathname
      &key (distance 8.0) (lift 3.0) (world-units-per-em 0.55))
   "Shape STRING once and create a depth-tested world text run on DEVICE.
 
-The run's dense model-space data, live pipeline, and temporary glyph resources
-are one inspectable world-rendering owner.  See #QW7P96."
-  (let* ((shaped (luv.slug:shape-slug-text string font-pathname))
+The run owns dense placement/model data and its live pipeline; GLYPH-CACHE owns
+font-and-glyph device resources reusable across runs.  See #QW7P96."
+  (let* ((shaped (world-text-shaped-text-for
+                  glyph-cache font-pathname string))
          (center (world-text-center-before-camera camera distance lift))
          (resources nil)
          (pipeline nil)
          (completed-p nil))
     (zpb-ttf:with-font-loader (font-loader font-pathname)
-      (let ((glyphs (make-world-text-glyphs shaped font-loader)))
+      (let ((glyphs
+              (make-world-text-glyphs
+               shaped font-loader glyph-cache font-pathname)))
         (unless glyphs
           (error 'luv.slug:slug-shaping-error
                  :reason :no-drawable-glyphs :details string))
@@ -223,77 +365,6 @@ are one inspectable world-rendering owner.  See #QW7P96."
                               '(:format :depth32-float
                                 :depth-write-enabled nil
                                 :depth-compare :less)))
-                       (dolist (glyph glyphs)
-                         (let* ((serialized
-                                  (world-text-glyph-serialized glyph))
-                                (band-texture
-                                  (keep
-                                   (create
-                                    device
-                                    (make-texture-descriptor
-                                     :label "world glyph RG16U bands"
-                                     :size
-                                     (luv.slug:slug-serialized-outline-band-texture-size
-                                      serialized)
-                                     :dimensions :2d :format :rg16-uint
-                                     :usage '(:texture-binding :copy-dst)))))
-                                (curve-texture
-                                  (keep
-                                   (create
-                                    device
-                                    (make-texture-descriptor
-                                     :label "world glyph RGBA16F curves"
-                                     :size
-                                     (luv.slug:slug-serialized-outline-curve-texture-size
-                                      serialized)
-                                     :dimensions :2d :format :rgba16-float
-                                     :usage '(:texture-binding :copy-dst)))))
-                                (band-view
-                                  (keep
-                                   (create
-                                    device
-                                    (make-texture-view-descriptor
-                                     :texture band-texture))))
-                                (curve-view
-                                  (keep
-                                   (create
-                                    device
-                                    (make-texture-view-descriptor
-                                     :texture curve-texture)))))
-                           (setf (world-text-glyph-band-view glyph) band-view
-                                 (world-text-glyph-curve-view glyph) curve-view)
-                           (write-texture
-                            (device-queue device)
-                            (make-texture-copy :texture band-texture)
-                            (luv.slug:slug-serialized-outline-band-upload-data
-                             serialized)
-                            (make-texture-data-layout
-                             :bytes-per-row
-                             (* 4
-                                (luv.slug:slug-serialized-outline-band-width
-                                 serialized))
-                             :rows-per-image
-                             (second
-                              (luv.slug:slug-serialized-outline-band-texture-size
-                               serialized)))
-                            (luv.slug:slug-serialized-outline-band-texture-size
-                             serialized))
-                           (write-texture
-                            (device-queue device)
-                            (make-texture-copy :texture curve-texture)
-                            (luv.slug:slug-serialized-outline-curve-upload-data
-                             serialized)
-                            (make-texture-data-layout
-                             :bytes-per-row
-                             (* 8
-                                (luv.slug:slug-serialized-outline-curve-width
-                                 serialized))
-                             :rows-per-image
-                             (second
-                              (luv.slug:slug-serialized-outline-curve-texture-size
-                               serialized)))
-                            (luv.slug:slug-serialized-outline-curve-texture-size
-                             serialized))))
                        (write-buffer vertex-buffer vertex-data)
                        (let ((run
                                (make-instance
@@ -317,29 +388,38 @@ are one inspectable world-rendering owner.  See #QW7P96."
   "Bind each temporary glyph texture pair to one drawable-frame uniform."
   (let* ((glyphs (world-text-run-glyphs run))
          (groups (make-array (length glyphs) :initial-element nil))
+         (groups-by-resource (make-hash-table :test #'eq))
          (completed-p nil))
     (unwind-protect
          (progn
            (loop for glyph in glyphs
                  for index from 0
-                 do (setf
-                     (aref groups index)
-                     (create
-                      device
-                      (make-bind-group-descriptor
-                       :label "world Slug glyph frame bindings"
-                       :layout (world-text-run-layout run)
-                       :entries
-                       `((:binding 0
-                          :resource ,(world-text-glyph-band-view glyph))
-                         (:binding 1
-                          :resource ,(world-text-glyph-curve-view glyph))
-                         (:binding 2 :resource ,uniform-buffer))))))
+                 for resource = (world-text-glyph-resource glyph)
+                 do (setf (aref groups index)
+                          (or (gethash resource groups-by-resource)
+                              (setf
+                               (gethash resource groups-by-resource)
+                               (create
+                                device
+                                (make-bind-group-descriptor
+                                 :label "cached world glyph frame bindings"
+                                 :layout (world-text-run-layout run)
+                                 :entries
+                                 `((:binding 0
+                                    :resource ,(world-text-glyph-resource-band-view
+                                                resource))
+                                   (:binding 1
+                                    :resource ,(world-text-glyph-resource-curve-view
+                                                resource))
+                                   (:binding 2
+                                    :resource ,uniform-buffer))))))))
            (setf completed-p t)
            groups)
       (unless completed-p
-        (loop for group across groups
-              when group do (destroy group))))))
+        (maphash (lambda (resource group)
+                   (declare (ignore resource))
+                   (destroy group))
+                 groups-by-resource)))))
 
 (defun world-text-projected-pixels-per-em (run camera viewport-height)
   "Approximate projected em scale at RUN's center for the current camera."

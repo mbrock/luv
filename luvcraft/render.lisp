@@ -337,8 +337,10 @@ the frame uniform cannot silently diverge between shader and host."
                (remember-luvcraft-resource session buffer)
                (remember-luvcraft-resource session scene-bind-group)
                (remember-luvcraft-resource session shadow-bind-group)
-               (loop for group across world-text-bind-groups
-                     do (remember-luvcraft-resource session group))
+               (dolist (group
+                         (remove-duplicates
+                          (coerce world-text-bind-groups 'list) :test #'eq))
+                 (remember-luvcraft-resource session group))
                (let ((state
                        (make-instance
                         'luvcraft-frame-state
@@ -352,8 +354,10 @@ the frame uniform cannot silently diverge between shader and host."
                        completed-p t)
                  state))
           (unless completed-p
-            (loop for group across world-text-bind-groups
-                  do (destroy group))
+            (dolist (group
+                      (remove-duplicates
+                       (coerce world-text-bind-groups 'list) :test #'eq))
+              (destroy group))
             (when shadow-bind-group (destroy shadow-bind-group))
             (when scene-bind-group (destroy scene-bind-group))
             (when buffer (destroy buffer))))))))
@@ -383,7 +387,7 @@ the frame uniform cannot silently diverge between shader and host."
             (when (plusp vertices)
               (incf mesh-draws)
               (incf mesh-vertices vertices))))
-        (let ((resident-chunks
+        (let* ((resident-chunks
                 (length
                  (resident-world-chunks (luvcraft-session-world session))))
               (pending-production
@@ -703,6 +707,7 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
          (player (or player (make-player-for-camera camera)))
          (camera (sync-camera-to-player camera player))
          (device nil) (context nil) (resources nil) (pipelines nil)
+         (world-text-glyph-cache nil)
          (world-text-run nil)
          (session nil) (production-system nil) (completed-p nil))
     (open-canvas canvas)
@@ -938,11 +943,16 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                                :depth-compare :always))))
                       (push artifact pipelines)
                       artifact))
-                  (text-run
+                  (text-glyph-cache
                     (when world-text-string
+                      (setf world-text-glyph-cache
+                            (make-world-text-glyph-cache device))))
+                  (text-run
+                    (when text-glyph-cache
                       (setf world-text-run
                             (make-world-text-run
-                             device camera (canvas-format context)
+                             device text-glyph-cache camera
+                             (canvas-format context)
                              world-text-string world-text-font-pathname))))
                   (new-session
                     (make-instance
@@ -978,6 +988,7 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                      :crosshair-vertex-buffer crosshair-vertex-buffer
                      :crosshair-pipeline crosshair-pipeline
                      :world-text text-run
+                     :world-text-glyph-cache text-glyph-cache
                      :resources resources)))
                (write-buffer sky-vertex-buffer sky-vertices)
                (write-buffer crosshair-vertex-buffer crosshair-vertices)
@@ -1025,6 +1036,9 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
           (ignore-errors (destroy resource)))
         (when world-text-run
           (ignore-errors (release-world-text-run world-text-run)))
+        (when world-text-glyph-cache
+          (ignore-errors
+            (release-world-text-glyph-cache world-text-glyph-cache)))
         (close-canvas canvas)
         (when device (destroy device))))))
 
@@ -1056,6 +1070,9 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
     (setf (luvcraft-session-resources session) nil)
     (when (luvcraft-session-world-text session)
       (release-world-text-run (luvcraft-session-world-text session)))
+    (when (luvcraft-session-world-text-glyph-cache session)
+      (release-world-text-glyph-cache
+       (luvcraft-session-world-text-glyph-cache session)))
     (close-canvas canvas))
   (destroy (luvcraft-session-device session))
   (values))
