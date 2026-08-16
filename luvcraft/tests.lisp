@@ -10,6 +10,57 @@
   (push command (recording-command-encoder-commands encoder))
   encoder)
 
+(deftest player-storage-publishes-quantities-without-wrapping-values
+  (let* ((position (make-vec3 1d0 2d0 3d0))
+         (player (make-instance 'block-world-player :position position))
+         (position-declaration
+           (luv.arithmetic.records:record-slot-declaration
+            'block-world-player 'luv::position))
+         (velocity-declaration
+           (luv.arithmetic.records:record-slot-declaration
+            'block-world-player 'luv::velocity)))
+    (ok (eq position (player-position player)))
+    (ok (eq 'vec3
+            (luv.arithmetic:declaration-representation-type
+             position-declaration)))
+    (ok (eq :world-position
+            (luv.arithmetic:quantity-specification-name
+             (luv.arithmetic:declaration-quantity-specification
+              position-declaration))))
+    (ok (eq :point
+            (luv.arithmetic:quantity-specification-character
+             (luv.arithmetic:declaration-quantity-specification
+              position-declaration))))
+    (ok (= 1
+           (luv.arithmetic:quantity-specification-tensor-order
+            (luv.arithmetic:declaration-quantity-specification
+             velocity-declaration))))
+    (ok (null
+         (luv.arithmetic.records:record-slot-declaration
+          'block-world-player 'luv::grounded-p)))))
+
+(deftest sky-frame-structure-publishes-quantities-without-changing-layout
+  (let* ((sky (sky-frame-parameters
+               (make-instance 'sky-clock)
+               (make-default-sky-profile)))
+         (direction (luv::sky-frame-parameters-sun-direction sky))
+         (direction-declaration
+           (luv.arithmetic.records:record-slot-declaration
+            'luv::sky-frame-parameters 'luv::sun-direction))
+         (fog-declaration
+           (luv.arithmetic.records:record-slot-declaration
+            'luv::sky-frame-parameters 'luv::fog-far)))
+    (ok (typep sky 'luv::sky-frame-parameters))
+    (ok (typep direction 'vec3))
+    (ok (eq :world-direction
+            (luv.arithmetic:quantity-specification-name
+             (luv.arithmetic:declaration-quantity-specification
+              direction-declaration))))
+    (ok (eq 'single-float
+            (luv.arithmetic:declaration-representation-type
+             fog-declaration)))
+    (ok (typep (luv::sky-frame-parameters-fog-far sky) 'single-float))))
+
 (deftest cpu-trace-zones-are-nested-reusable-and-bounded
   (let ((trace (make-cpu-trace :label "test")))
     (with-cpu-trace (trace)

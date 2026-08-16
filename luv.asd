@@ -13,6 +13,7 @@
                #:luv/msl
                #:luv/luvcraft)
   :in-order-to ((asdf:test-op (asdf:test-op #:luv/arithmetic/tests)
+                              (asdf:test-op #:luv/arithmetic/records/tests)
                               (asdf:test-op #:luv/arithmetic/language/tests)
                               (asdf:test-op #:luv/arithmetic/lisp/tests)
                               (asdf:test-op #:luv/objective-c/tests)
@@ -49,6 +50,41 @@
                              (:file "semantics")
                              (:file "declarations"))))
   :in-order-to ((asdf:test-op (asdf:test-op #:luv/arithmetic/tests))))
+
+(asdf:defsystem #:luv/arithmetic/records
+  :description "Quantity declarations on Common Lisp classes and structures."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on (#:luv/arithmetic
+               #:closer-mop)
+  :serial t
+  :components ((:module "arithmetic"
+                :components
+                ((:module "records"
+                  :serial t
+                  :components ((:file "package")
+                               (:file "records"))))))
+  :in-order-to ((asdf:test-op
+                 (asdf:test-op #:luv/arithmetic/records/tests))))
+
+(asdf:defsystem #:luv/arithmetic/records/tests
+  :description "Executable claims for quantity-bearing Lisp records."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on (#:luv/arithmetic/records
+               #:rove)
+  :components ((:module "arithmetic"
+                :components
+                ((:module "records"
+                  :components ((:file "tests"))))))
+  :perform (asdf:test-op (operation component)
+             (declare (ignore operation component))
+             (unless (uiop:symbol-call
+                      '#:rove '#:run-suite
+                      (uiop:symbol-call
+                       '#:rove '#:find-suite
+                       '#:luv/arithmetic/records/tests))
+               (error "luv arithmetic record tests failed"))))
 
 (asdf:defsystem #:luv/arithmetic/tests
   :description "Executable claims for backend-neutral semantic arithmetic."
@@ -500,6 +536,7 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
   :author "Mikael Brockman"
   :depends-on (#:luv/world
                #:luv/canvas
+               #:luv/arithmetic/records
                #:luv/luvcraft/quantities
                #:luv/luvcraft/shaders
                #:sb-concurrency

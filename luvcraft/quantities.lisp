@@ -22,6 +22,10 @@
   :dimension nil :parent :dimensionless)
 (math:define-quantity-kind :sample-count
   :dimension nil :parent :dimensionless)
+(math:define-quantity-kind :velocity
+  :dimension ((:length 1) (:duration -1)))
+(math:define-quantity-kind :acceleration
+  :dimension ((:length 1) (:duration -2)))
 
 (math:define-quantity :shadow-uv :kind :normalized-coordinate
   :components (:shadow-u :shadow-v))
@@ -48,6 +52,28 @@
 (math:define-quantity :view-distance :kind :length)
 (math:define-quantity :world-position :kind :length
   :components (:world-x-position :world-y-position :world-z-position))
+(math:define-quantity :world-velocity :kind :velocity
+  :components (:world-x-velocity :world-y-velocity :world-z-velocity))
+(math:define-quantity :player-half-width :kind :length
+  :non-negative-p t)
+(math:define-quantity :player-height :kind :length
+  :non-negative-p t)
+(math:define-quantity :player-eye-height :kind :length
+  :non-negative-p t)
+(math:define-quantity :player-walk-speed :kind :velocity
+  :non-negative-p t)
+(math:define-quantity :player-jump-speed :kind :velocity
+  :non-negative-p t)
+(math:define-quantity :player-acceleration :kind :acceleration
+  :non-negative-p t)
+(math:define-quantity :gravity-magnitude :kind :acceleration
+  :non-negative-p t)
+(math:define-quantity :day-fraction :kind :normalized-coordinate
+  :non-negative-p t)
+(math:define-quantity :sun-angular-width :kind :angular-measure
+  :non-negative-p t)
+(math:define-quantity :exposure :kind :control-signal
+  :non-negative-p t)
 (math:define-quantity :projection-scale :kind :control-signal)
 (math:define-quantity :clip-coordinate :kind :normalized-coordinate
   :components

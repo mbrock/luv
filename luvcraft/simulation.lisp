@@ -85,26 +85,57 @@ FRAME-UNIFORM-DATA from the session's sky clock and profile."
 (defclass block-world-player ()
   ((position :initarg :position
              :initform (make-vec3 0d0 0d0 0d0)
+             :type vec3
+             :quantity (:quantity :world-position :unit :metre
+                        :tensor-order 1 :character :point)
              :accessor player-position)
    (velocity :initarg :velocity
              :initform (make-vec3 0d0 0d0 0d0)
+             :type vec3
+             :quantity (:quantity :world-velocity
+                        :unit ((:metre 1) (:second -1))
+                        :tensor-order 1)
              :accessor player-velocity)
    (half-width :initarg :half-width :initform 0.30d0
+               :type double-float
+               :quantity (:quantity :player-half-width :unit :metre)
                :reader player-half-width)
-   (height :initarg :height :initform 1.80d0 :reader player-height)
+   (height :initarg :height :initform 1.80d0
+           :type double-float
+           :quantity (:quantity :player-height :unit :metre)
+           :reader player-height)
    (eye-height :initarg :eye-height :initform 1.62d0
+               :type double-float
+               :quantity (:quantity :player-eye-height :unit :metre)
                :reader player-eye-height)
    (walk-speed :initarg :walk-speed :initform 5.0d0
+               :type double-float
+               :quantity (:quantity :player-walk-speed
+                          :unit ((:metre 1) (:second -1)))
                :reader player-walk-speed)
    (ground-acceleration :initarg :ground-acceleration :initform 45d0
+                        :type double-float
+                        :quantity (:quantity :player-acceleration
+                                   :unit ((:metre 1) (:second -2)))
                         :reader player-ground-acceleration)
    (air-acceleration :initarg :air-acceleration :initform 14d0
+                     :type double-float
+                     :quantity (:quantity :player-acceleration
+                                :unit ((:metre 1) (:second -2)))
                      :reader player-air-acceleration)
-   (gravity :initarg :gravity :initform 24d0 :reader player-gravity)
+   (gravity :initarg :gravity :initform 24d0
+            :type double-float
+            :quantity (:quantity :gravity-magnitude
+                       :unit ((:metre 1) (:second -2)))
+            :reader player-gravity)
    (jump-speed :initarg :jump-speed :initform 8.0d0
+               :type double-float
+               :quantity (:quantity :player-jump-speed
+                          :unit ((:metre 1) (:second -1)))
                :reader player-jump-speed)
    (grounded-p :initarg :grounded-p :initform nil
-               :accessor player-grounded-p)))
+               :accessor player-grounded-p))
+  (:metaclass luv.arithmetic.records:quantity-class))
 
 (defun player-x (player) (vec3-x (player-position player)))
 (defun player-y (player) (vec3-y (player-position player)))

@@ -107,19 +107,41 @@ SLY can pause it, set a time, change its rate, or pin it without restarting."))
 ;;; One evaluated frame of environment state.  CPU trigonometry is right for
 ;;; a single sun direction; per-pixel sky shaping stays in the shader.
 
-(defstruct (sky-frame-parameters (:constructor %make-sky-frame-parameters))
-  (day-fraction 0.0 :type single-float)
-  (sun-direction (make-vec3 0.0 1.0 0.0) :type vec3)
-  (day-factor 1.0 :type single-float)
-  (sun-color #(0.0 0.0 0.0) :type (simple-vector 3))
-  (sun-angular-width 0.006 :type single-float)
-  (zenith-color #(0.0 0.0 0.0) :type (simple-vector 3))
-  (horizon-color #(0.0 0.0 0.0) :type (simple-vector 3))
-  (ambient-color #(0.0 0.0 0.0) :type (simple-vector 3))
-  (fog-color #(0.0 0.0 0.0) :type (simple-vector 3))
-  (exposure 1.0 :type single-float)
-  (fog-near 0.0 :type single-float)
-  (fog-far 180.0 :type single-float))
+(luv.arithmetic.records:define-quantity-struct
+    (sky-frame-parameters (:constructor %make-sky-frame-parameters))
+  (day-fraction 0.0 :type single-float
+                :quantity (:quantity :day-fraction :unit :one))
+  (sun-direction (make-vec3 0.0 1.0 0.0) :type vec3
+                 :quantity (:quantity :world-direction :unit :one
+                            :tensor-order 1))
+  (day-factor 1.0 :type single-float
+              :quantity (:quantity :day-factor :unit :one
+                         :character :absolute))
+  (sun-color #(0.0 0.0 0.0) :type (simple-vector 3)
+             :quantity (:quantity :linear-rgb :unit :one
+                        :tensor-order 1 :character :absolute))
+  (sun-angular-width 0.006 :type single-float
+                     :quantity (:quantity :sun-angular-width :unit :radian))
+  (zenith-color #(0.0 0.0 0.0) :type (simple-vector 3)
+                 :quantity (:quantity :linear-rgb :unit :one
+                            :tensor-order 1 :character :absolute))
+  (horizon-color #(0.0 0.0 0.0) :type (simple-vector 3)
+                  :quantity (:quantity :linear-rgb :unit :one
+                             :tensor-order 1 :character :absolute))
+  (ambient-color #(0.0 0.0 0.0) :type (simple-vector 3)
+                  :quantity (:quantity :linear-rgb :unit :one
+                             :tensor-order 1 :character :absolute))
+  (fog-color #(0.0 0.0 0.0) :type (simple-vector 3)
+             :quantity (:quantity :linear-rgb :unit :one
+                        :tensor-order 1 :character :absolute))
+  (exposure 1.0 :type single-float
+            :quantity (:quantity :exposure :unit :one))
+  (fog-near 0.0 :type single-float
+            :quantity (:quantity :view-distance :unit :metre
+                       :character :absolute))
+  (fog-far 180.0 :type single-float
+           :quantity (:quantity :view-distance :unit :metre
+                      :character :absolute)))
 
 (defun sky-sun-direction (day-fraction)
   "The unit sun direction: rising at 0.25, zenith-adjacent at 0.5.

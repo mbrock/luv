@@ -572,7 +572,7 @@ values.  This gives #ADR040 a protocol without moving dispatch into its inner
 loop, and gives #P2KN1D the same pair of parallel judgments on the CPU that the
 shader graph already has.
 
-* NEXT Declare quantities on Lisp storage
+* DONE Declare quantities on Lisp storage
 :PROPERTIES:
 :ID: FLRFU8
 :END:
@@ -595,9 +595,59 @@ Evidence to gather:
   and show that construction and access still use raw values without quantity
   wrappers or per-access semantic dispatch.
 
-Done when: CLOS and structure fields expose equivalent inspectable quantity
-declarations, the two real luvcraft records use them, live and cold tests pass,
-and the next mark can connect those declarations to checked arithmetic.
+Result:
+
+- =quantity-class= uses custom direct and effective slot definitions only for
+  annotated slots.  It retains =:quantity= beside the ordinary MOP =:type=,
+  propagates equal declarations through inheritance, permits independent Lisp
+  type refinement, and reports contradictory inherited quantities when CLOS
+  computes the effective slot.  Redefining a class replaces the visible
+  declaration in the ordinary live MOP.
+- =define-quantity-struct= removes =:quantity= before emitting an ordinary
+  =defstruct=.  One replaceable EQL method publishes the structure schema, so
+  reevaluation does not leave obsolete per-slot methods behind.  Both
+  frontends implement the declaration protocol from #OXBSAY.
+- =block-world-player= now states world position, velocity, body dimensions,
+  speeds, and accelerations beside its unchanged =vec3= and =double-float=
+  representations.  =sky-frame-parameters= similarly states its evaluated
+  direction, colour, angle, exposure, and fog meanings beside the same
+  =defstruct= layout and accessors.
+- Five focused record tests cover MOP inspection, inheritance, live
+  redefinition, semantic conflict, and raw structure access.  Two luvcraft
+  tests inspect the real records and construct ordinary raw values.  A cold
+  durable image loads the changed metaclass definition, and all 44 luvcraft
+  tests pass.
+
+Done when: satisfied.  #GZ53LD now connects these declarations to checked CPU
+arithmetic at an explicit boundary.
+
+* NEXT Check storage declarations against Lisp arithmetic
+:PROPERTIES:
+:ID: GZ53LD
+:END:
+
+Intent: make a declared CLOS or structure field usable as an input or output
+of one checked arithmetic definition without wrapping each runtime value.
+The boundary should compare the stored representation and quantity declaration
+with the arithmetic parameter once, choose the existing Lisp realization, and
+then call ordinary compiled code over the raw =vec3= or scalar.
+
+Evidence to gather:
+
+- One small compatibility judgment which distinguishes representation failure
+  from quantity failure and preserves useful source provenance from both sides.
+- One real =block-world-player= calculation, likely integration of velocity
+  over a duration into position, whose storage declarations supply the
+  arithmetic contract rather than restating it in adapter code.
+- A deliberately mismatched slot or parameter rejected before the numerical
+  function runs, while the successful path passes the original raw objects and
+  performs no per-component semantic dispatch.
+- Live and cold tests showing that the boundary composes with the Lisp compiler
+  completed in #FTQEQD and leaves the shader realization independent.
+
+Done when: a real quantity-bearing luvcraft record crosses into checked Lisp
+arithmetic through its declared schema, a semantic mismatch is proven, and the
+runtime values remain ordinary numbers and vectors.
 
 * A possible Lisp vocabulary
 :PROPERTIES:
