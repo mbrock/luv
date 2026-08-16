@@ -14,7 +14,9 @@
    (scene-bind-group :initarg :scene-bind-group
                      :reader luvcraft-frame-scene-bind-group)
    (shadow-bind-group :initarg :shadow-bind-group
-                      :reader luvcraft-frame-shadow-bind-group)))
+                      :reader luvcraft-frame-shadow-bind-group)
+   (world-text-bind-groups :initarg :world-text-bind-groups :initform #()
+                           :reader luvcraft-frame-world-text-bind-groups)))
 
 (defconstant +block-world-crosshair-vertex-count+ 24)
 (defconstant +luvcraft-shadow-map-size+ 2048)
@@ -286,6 +288,7 @@ the frame uniform cannot silently diverge between shader and host."
       (let ((buffer nil)
             (scene-bind-group nil)
             (shadow-bind-group nil)
+            (world-text-bind-groups #())
             (completed-p nil))
         (unwind-protect
              (progn
@@ -324,22 +327,33 @@ the frame uniform cannot silently diverge between shader and host."
                       (make-bind-group-descriptor
                        :label "block world shadow-pass bindings"
                        :layout (luvcraft-session-shadow-layout session)
-                       :entries `((:binding 2 :resource ,buffer)))))
+                       :entries `((:binding 2 :resource ,buffer))))
+                     world-text-bind-groups
+                     (if (luvcraft-session-world-text session)
+                         (make-world-text-frame-bind-groups
+                          (luvcraft-session-world-text session)
+                          (luvcraft-session-device session) buffer)
+                         #()))
                (remember-luvcraft-resource session buffer)
                (remember-luvcraft-resource session scene-bind-group)
                (remember-luvcraft-resource session shadow-bind-group)
+               (loop for group across world-text-bind-groups
+                     do (remember-luvcraft-resource session group))
                (let ((state
                        (make-instance
                         'luvcraft-frame-state
                         :uniform-buffer buffer
                         :scene-bind-group scene-bind-group
-                        :shadow-bind-group shadow-bind-group)))
+                        :shadow-bind-group shadow-bind-group
+                        :world-text-bind-groups world-text-bind-groups)))
                  (setf (gethash key
                                 (luvcraft-session-frame-states session))
                        state
                        completed-p t)
                  state))
           (unless completed-p
+            (loop for group across world-text-bind-groups
+                  do (destroy group))
             (when shadow-bind-group (destroy shadow-bind-group))
             (when scene-bind-group (destroy scene-bind-group))
             (when buffer (destroy buffer))))))))
@@ -379,8 +393,15 @@ the frame uniform cannot silently diverge between shader and host."
                 (hash-table-count
                  (luvcraft-session-staged-chunk-products session)))
               (chunks (length products))
-              (draws (+ 2 (* 2 mesh-draws)))
+              (text-glyph-count
+                (if (luvcraft-session-world-text session)
+                    (length
+                     (world-text-run-glyphs
+                      (luvcraft-session-world-text session)))
+                    0))
+              (draws (+ 2 text-glyph-count (* 2 mesh-draws)))
               (vertices (+ +block-world-crosshair-vertex-count+ 3
+                           (* 6 text-glyph-count)
                            (* 2 mesh-vertices))))
           (when sample
             (setf (luvcraft-frame-sample-resident-chunk-count sample)
@@ -410,7 +431,11 @@ the frame uniform cannot silently diverge between shader and host."
                 :luvcraft/uniform-update)
       (write-buffer
        (luvcraft-frame-uniform-buffer frame)
-       (frame-uniform-data session (first extent) (second extent))))
+       (frame-uniform-data session (first extent) (second extent)))
+      (when (luvcraft-session-world-text session)
+        (update-world-text-projected-scale
+         (luvcraft-session-world-text session)
+         (luvcraft-session-camera session) (second extent))))
     (with-luvcraft-frame-timing
         (sample luvcraft-frame-sample-shadow-encode-seconds
                 :luvcraft/shadow-pass)
@@ -464,7 +489,17 @@ the frame uniform cannot silently diverge between shader and host."
               (set-vertex-buffer
                pass 0 (luvcraft-chunk-product-vertex-buffer product))
               (draw pass (block-mesh-vertex-count mesh)))))
+        (when (luvcraft-session-world-text session)
+          (let ((text (luvcraft-session-world-text session)))
+            (set-pipeline pass (world-text-run-native-pipeline text))
+            (set-vertex-buffer pass 0 (world-text-run-vertex-buffer text))
+            (loop for bind-group across
+                    (luvcraft-frame-world-text-bind-groups frame)
+                  for first-vertex from 0 by 6
+                  do (set-bind-group pass 0 bind-group)
+                     (draw pass 6 1 first-vertex))))
         (set-pipeline pass (luvcraft-session-crosshair-native-pipeline session))
+        (set-bind-group pass 0 (luvcraft-frame-scene-bind-group frame))
         (set-vertex-buffer
          pass 0 (luvcraft-session-crosshair-vertex-buffer session))
         (draw pass +block-world-crosshair-vertex-count+)
@@ -639,6 +674,9 @@ the frame uniform cannot silently diverge between shader and host."
                                 (sky-clock (make-instance 'sky-clock))
                                 (sky-profile (make-default-sky-profile))
                                 (shadow-diagnostic-p nil)
+                                (world-text-string "hello, world")
+                                (world-text-font-pathname
+                                  (cl-dejavu:font-pathname "DejaVuSans.ttf"))
                                 (residency-radius 4)
                                 (publication-limit 2)
                                 (load-schedule-limit 4)
@@ -663,7 +701,9 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                   :visible-p nil
                   :presentation-api (luv::sdl-presentation-api-for provider)))
          (player (or player (make-player-for-camera camera)))
+         (camera (sync-camera-to-player camera player))
          (device nil) (context nil) (resources nil) (pipelines nil)
+         (world-text-run nil)
          (session nil) (production-system nil) (completed-p nil))
     (open-canvas canvas)
     (unwind-protect
@@ -898,6 +938,12 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                                :depth-compare :always))))
                       (push artifact pipelines)
                       artifact))
+                  (text-run
+                    (when world-text-string
+                      (setf world-text-run
+                            (make-world-text-run
+                             device camera (canvas-format context)
+                             world-text-string world-text-font-pathname))))
                   (new-session
                     (make-instance
                      'luvcraft-session
@@ -905,7 +951,7 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                      :world world :mesher mesher
                      :checkpoint-writer checkpoint-writer
                      :production-system production-system
-                     :camera (sync-camera-to-player camera player)
+                     :camera camera
                      :player player
                      :selected-block selected-block
                      :lighting-state lighting-state
@@ -931,6 +977,7 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                      :sky-pipeline sky-pipeline
                      :crosshair-vertex-buffer crosshair-vertex-buffer
                      :crosshair-pipeline crosshair-pipeline
+                     :world-text text-run
                      :resources resources)))
                (write-buffer sky-vertex-buffer sky-vertices)
                (write-buffer crosshair-vertex-buffer crosshair-vertices)
@@ -976,6 +1023,8 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
           (ignore-errors (release-live-shader-pipeline pipeline)))
         (dolist (resource resources)
           (ignore-errors (destroy resource)))
+        (when world-text-run
+          (ignore-errors (release-world-text-run world-text-run)))
         (close-canvas canvas)
         (when device (destroy device))))))
 
@@ -1005,6 +1054,8 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
     (dolist (resource (luvcraft-session-resources session))
       (destroy resource))
     (setf (luvcraft-session-resources session) nil)
+    (when (luvcraft-session-world-text session)
+      (release-world-text-run (luvcraft-session-world-text session)))
     (close-canvas canvas))
   (destroy (luvcraft-session-device session))
   (values))

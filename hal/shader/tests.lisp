@@ -1404,7 +1404,17 @@
       (ok (= (aref fragment 0) #x07230203)))
     (let ((vertex (shaders:block-world-shadow-vertex-shader)))
       (ok (> (length vertex) 5))
-      (ok (= (aref vertex 0) #x07230203)))))
+      (ok (= (aref vertex 0) #x07230203)))
+    (let ((vertex
+            (spv:assemble-shader-specification
+             (shaders:block-world-text-vertex-specification)))
+          (fragment
+            (spv:assemble-shader-specification
+             (shaders:block-world-text-fragment-specification))))
+      (ok (> (length vertex) 5))
+      (ok (> (length fragment) 5))
+      (ok (= (aref vertex 0) #x07230203))
+      (ok (= (aref fragment 0) #x07230203)))))
 
 (deftest every-scene-stage-declares-the-same-frame-uniform-block
   ;; Identical member order and offsets at binding 2 are the ABI contract
@@ -1425,7 +1435,8 @@
                    (shaders:block-world-fragment-specification)
                    (shaders:block-world-sky-vertex-specification)
                    (shaders:block-world-sky-fragment-specification)
-                   (shaders:block-world-shadow-vertex-specification)))
+                   (shaders:block-world-shadow-vertex-specification)
+                   (shaders:block-world-text-vertex-specification)))
            (blocks (mapcar #'frame-block specifications))
            (reference (member-layout (first blocks))))
       (ok (every (lambda (block) (typep block 'spv:shader-uniform-block))

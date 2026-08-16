@@ -98,6 +98,8 @@
     :reader luvcraft-session-crosshair-vertex-buffer)
    (crosshair-pipeline :initarg :crosshair-pipeline
                        :reader luvcraft-session-crosshair-pipeline)
+   (world-text :initarg :world-text :initform nil
+               :reader luvcraft-session-world-text)
    (frame-states :initform (make-hash-table :test #'eql)
                  :reader luvcraft-session-frame-states)
    (resources :initarg :resources :initform nil
@@ -154,6 +156,9 @@
   (refresh-live-shader-pipeline (luvcraft-session-shadow-pipeline session))
   (refresh-live-shader-pipeline (luvcraft-session-sky-pipeline session))
   (refresh-live-shader-pipeline (luvcraft-session-crosshair-pipeline session))
+  (when (luvcraft-session-world-text session)
+    (refresh-live-shader-pipeline
+     (world-text-run-pipeline (luvcraft-session-world-text session))))
   session)
 
 (defun luvcraft-session-target

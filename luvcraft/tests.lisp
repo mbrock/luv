@@ -329,6 +329,48 @@
           (luv.arithmetic:repeated-quantity-layout-element-layout layout)
           (luvcraft::shader-input-product-layout specification)))))))
 
+(deftest world-text-model-and-projected-scale-follow-the-camera
+  (let* ((camera
+           (make-instance
+            'fly-camera
+            :position (luv.arithmetic.lisp.vec3:make-vec3 0.0 0.0 0.0)
+            :yaw 0.0 :pitch 0.0))
+         (center (luv.arithmetic.lisp.vec3:make-vec3 0.0 0.0 10.0))
+         (glyph
+           (luvcraft::make-world-text-glyph
+            :origin-x 0.0 :origin-y 0.0
+            :outline-min-x 0.0 :outline-min-y 0.0
+            :outline-max-x 1.0 :outline-max-y 1.0))
+         (vertices
+           (luvcraft::make-world-text-vertices
+            (list glyph) center
+            (luv.arithmetic.lisp.vec3:make-vec3 1.0 0.0 0.0)
+            (luv.arithmetic.lisp.vec3:make-vec3 0.0 1.0 0.0)
+            0.5 0.0 0.0 1.0 1.0))
+         (run
+           (make-instance 'luvcraft::world-text-run
+                          :center center :world-units-per-em 0.5))
+         (actual
+           (luvcraft::world-text-projected-pixels-per-em run camera 640))
+         (near-camera
+           (make-instance
+            'fly-camera
+            :position (luv.arithmetic.lisp.vec3:make-vec3 0.0 0.0 5.0)
+            :yaw 0.0 :pitch 0.0))
+         (near
+           (luvcraft::world-text-projected-pixels-per-em
+            run near-camera 640))
+         (expected
+           (/ (* 0.5 320
+                 (/ (tan (/ luvcraft::+luvcraft-camera-vertical-field-of-view+
+                              2.0))))
+              10.0)))
+    (ok (= 54 (length vertices)))
+    (ok (every (lambda (index) (= 10.0 (aref vertices index)))
+               '(2 11 20 29 38 47)))
+    (ok (< (abs (- actual expected)) 1e-5))
+    (ok (< (abs (- near (* 2 expected))) 1e-5))))
+
 (deftest light-removal-queues-own-the-meaning-of-unwrapped-levels
   (let* ((world (make-block-world))
          (chunk (luvcraft::ensure-world-chunk world 0 0 0))

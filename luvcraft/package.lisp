@@ -254,6 +254,8 @@
            #:block-world-sky-vertex-module
            #:block-world-sky-vertex-shader
            #:block-world-sky-vertex-specification
+           #:block-world-text-fragment-specification
+           #:block-world-text-vertex-specification
            #:block-world-vertex-lowering
            #:block-world-vertex-module
            #:block-world-vertex-shader

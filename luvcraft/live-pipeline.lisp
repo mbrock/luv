@@ -23,6 +23,8 @@
                    :reader live-shader-pipeline-vertex-buffers)
    (target-format :initarg :target-format
                   :reader live-shader-pipeline-target-format)
+   (target-blend :initarg :target-blend :initform nil
+                 :reader live-shader-pipeline-target-blend)
    (primitive :initarg :primitive :reader live-shader-pipeline-primitive)
    (depth-stencil :initarg :depth-stencil
                   :reader live-shader-pipeline-depth-stencil)
@@ -111,7 +113,9 @@
                         `(:module ,fragment-module
                           :targets
                           ((:format
-                            ,(live-shader-pipeline-target-format artifact)))))
+                            ,(live-shader-pipeline-target-format artifact)
+                           :blend
+                            ,(live-shader-pipeline-target-blend artifact)))))
                    :primitive (live-shader-pipeline-primitive artifact)
                    :depth-stencil
                    (live-shader-pipeline-depth-stencil artifact)))
@@ -171,7 +175,7 @@
 
 (defun make-live-shader-pipeline
     (&key role (stage :fragment) vertex-role label device layout vertex-module
-          vertex-buffers target-format primitive depth-stencil)
+          vertex-buffers target-format target-blend primitive depth-stencil)
   (let* ((generic-function (fdefinition 'spv:shader-specification-for))
          (abstraction-revision (spv:shader-abstraction-revision))
          (dependent
@@ -188,6 +192,7 @@
             :vertex-role vertex-role :vertex-dependent vertex-dependent
             :layout layout :vertex-module vertex-module
             :vertex-buffers vertex-buffers :target-format target-format
+            :target-blend target-blend
             :primitive primitive :depth-stencil depth-stencil
             :dependent dependent))
          (completed-p nil))

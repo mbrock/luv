@@ -22,6 +22,7 @@
   :author "Mikael Brockman"
   :depends-on ("luv"
                "luvcraft/world"
+               "cl-dejavu"
                "sb-concurrency"
                "uiop")
   :serial t
@@ -45,6 +46,7 @@
                  (:file "sky")
                  (:file "frame-performance")
                  (:file "live-pipeline")
+                 (:file "text")
                  (:file "app")
                  (:file "streaming")
                  (:file "render")

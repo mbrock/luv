@@ -44,6 +44,7 @@ shader-validate:
 		--eval '(luv.spir-v:write-spir-v (luvcraft.shaders:block-world-sky-vertex-shader) #p"build/block-world-sky.vert.spv")' \
 		--eval '(luv.spir-v:write-spir-v (luvcraft.shaders:block-world-sky-fragment-shader) #p"build/block-world-sky.frag.spv")' \
 		--eval '(luv.spir-v:write-spir-v (luvcraft.shaders:block-world-shadow-vertex-shader) #p"build/block-world-shadow.vert.spv")' \
+		--eval '(luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (luvcraft.shaders:block-world-text-vertex-specification)) #p"build/block-world-text.vert.spv")' \
 		--eval '(luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (luv.slug:slug-bezier-vertex-specification)) #p"build/slug-bezier.vert.spv")' \
 		--eval '(luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (luv.slug:slug-bezier-fragment-specification)) #p"build/slug-bezier.frag.spv")'
 	./scripts/dev spirv-val --target-env vulkan1.0 build/block-world.vert.spv
@@ -53,6 +54,7 @@ shader-validate:
 	./scripts/dev spirv-val --target-env vulkan1.0 build/block-world-sky.vert.spv
 	./scripts/dev spirv-val --target-env vulkan1.0 build/block-world-sky.frag.spv
 	./scripts/dev spirv-val --target-env vulkan1.0 build/block-world-shadow.vert.spv
+	./scripts/dev spirv-val --target-env vulkan1.0 build/block-world-text.vert.spv
 	./scripts/dev spirv-val --target-env vulkan1.0 build/slug-bezier.vert.spv
 	./scripts/dev spirv-val --target-env vulkan1.0 build/slug-bezier.frag.spv
 
@@ -65,10 +67,12 @@ msl-validate:
 		--eval '(asdf:load-system :luvcraft)' \
 		--eval '(luv.msl:write-msl (luv.msl:compile-msl (luvcraft.shaders:block-world-vertex-specification)) #p"build/block-world.vert.metal")' \
 		--eval '(luv.msl:write-msl (luv.msl:compile-msl (luvcraft.shaders:block-world-fragment-specification)) #p"build/block-world.frag.metal")' \
+		--eval '(luv.msl:write-msl (luv.msl:compile-msl (luvcraft.shaders:block-world-text-vertex-specification)) #p"build/block-world-text.vert.metal")' \
 		--eval '(luv.msl:write-msl (luv.msl:compile-msl (luv.slug:slug-bezier-vertex-specification)) #p"build/slug-bezier.vert.metal")' \
 		--eval '(luv.msl:write-msl (luv.msl:compile-msl (luv.slug:slug-bezier-fragment-specification)) #p"build/slug-bezier.frag.metal")'
 	xcrun metal -std=metal4.0 -c build/block-world.vert.metal -o build/block-world.vert.air
 	xcrun metal -std=metal4.0 -c build/block-world.frag.metal -o build/block-world.frag.air
+	xcrun metal -std=metal4.0 -c build/block-world-text.vert.metal -o build/block-world-text.vert.air
 	xcrun metal -std=metal4.0 -c build/slug-bezier.vert.metal -o build/slug-bezier.vert.air
 	xcrun metal -std=metal4.0 -c build/slug-bezier.frag.metal -o build/slug-bezier.frag.air
 

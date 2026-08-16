@@ -494,6 +494,47 @@ Done when: HarfBuzz-selected glyph IDs and placements render as a legible run
 through indexed Slug outlines, including a ligature that cannot be reproduced
 by one cmap lookup per character.
 
+* DONE Put a shaped run into the moving world
+:PROPERTIES:
+:ID: QW7P96
+:END:
+
+Intent: cross #4G7064 from an isolated target into the actual luvcraft scene,
+with world placement, camera projection, scene depth, and alpha composition all
+participating in the same frame as terrain.
+
+[[lisp:make-world-text-run]] is now a semantic owner around dense HarfBuzz
+placement and vertex data.  Its initial model transform fixes the text plane in
+world space from the camera's initial right and up basis.  The
+=:slug-world-text= vertex stage then applies the scene frame uniform's camera
+view and perspective projection; the existing Slug fragment stage still owns
+coverage.  The pipeline uses =:less= depth testing with depth writes disabled
+and premultiplied-alpha blending.  It is encoded after opaque chunks and before
+the always-visible crosshair.
+
+The temporary scale path projects the run center each frame.  It combines the
+world-units-per-em model scale, camera focal length, viewport height, and
+current view distance, then updates the dense pixels-per-em lanes.  This makes
+camera approach and retreat behave correctly enough for the world proof while
+remaining an explicit precursor to fragment derivatives.
+
+Evidence: the Metal validation layer accepts the complete hidden luvcraft
+frame, including its pipeline-layout transitions and teardown.  This capture
+is the ordinary world smoke path, not an isolated text target:
+
+[[file:images/slug-world-text.png]]
+
+The label's transparent quad exterior preserves sky and blocks; the pipeline's
+=:less= comparison puts terrain in front whenever their projections overlap.
+Frame metrics also count its current six vertices and one draw per drawable
+glyph.  That cost is intentionally still literal: each glyph occurrence owns
+a texture pair and each frame slot owns matching bind groups, providing the
+baseline the cache and atlas iterations must remove.
+
+Done when: a HarfBuzz-shaped run is legible in the real scene, changes screen
+position and scale with its camera relationship, obeys terrain depth, and
+survives a full Metal-validation frame without a bind-state or lifetime error.
+
 * NEXT Compare Slug coverage at glyph edges
 :PROPERTIES:
 :ID: 9G0Z19
