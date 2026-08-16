@@ -30,6 +30,7 @@ test: parinfer-check shader-validate
 		--eval '(asdf:test-system :luv/ghostty)' \
 		--eval '(asdf:test-system :luvcraft)' \
 		--eval '(asdf:test-system :mcluv/backend)' \
+		--eval '(asdf:test-system :mcluv/luvcraft-test)' \
 		--eval '(asdf:test-system :luv-wiki)'
 
 parinfer-check:

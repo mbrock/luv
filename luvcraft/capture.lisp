@@ -1,9 +1,13 @@
-;;; Offscreen luvcraft captures for smoke tests and CI-ish environments.
+;;; Direct luvcraft framebuffer capture for live use, smoke tests, and CI.
 
 (in-package #:luvcraft)
 
 (defun capture-luvcraft-screenshot (session pathname)
-  "Render SESSION once, read its real color attachment, and write a PNG."
+  "Render SESSION once on its canvas thread and write its color attachment to PNG.
+
+This works for both live and hidden sessions.  The call returns only after GPU
+readback and compressed PNG writing have completed; it does not inspect the
+host window or depend on the window being visible."
   (unless (eq :open (canvas-state (luvcraft-session-canvas session)))
     (error "Cannot capture a closed luvcraft session."))
   (wait-for-luvcraft-products session)

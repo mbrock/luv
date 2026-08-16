@@ -1066,6 +1066,7 @@
   (format stream
           "Prefix a client command with --luvcraft to attach to the running standalone game.~%~%")
   (format stream "Usage: ./sly start|stop|status|log~%")
+  (format stream "       ./sly --luvcraft screenshot PNG~%")
   (format stream "       ./sly eval CODE [--package PACKAGE]~%")
   (format stream "       ./sly parinfer [--check|--diff|--write] [--strict] [--file FILE|CODE|FILE]~%")
   (format stream "       ./sly parinfer --batch --check [--strict] FILE...~%")
@@ -1302,6 +1303,27 @@
                (t (error "Unknown option: ~A" option))))
     (values code package)))
 
+(defun run-luvcraft-screenshot (arguments)
+  (unless (attach-only-p)
+    (error "screenshot targets the standalone game; use ./sly --luvcraft screenshot PNG"))
+  (unless (= (length arguments) 1)
+    (error "screenshot requires exactly one PNG pathname"))
+  (let* ((pathname
+           (merge-pathnames (pathname (first arguments)) (truename ".")))
+         (code
+           (format nil
+                   "(progn
+                      (unless luvcraft:*session*
+                        (error \"The standalone luvcraft has no live session.\"))
+                      (multiple-value-bind (pathname pixels width height format)
+                          (luvcraft:capture-luvcraft-screenshot
+                           luvcraft:*session* ~S)
+                        (declare (ignore pixels))
+                        (list (namestring (truename pathname))
+                              width height format)))"
+                   pathname)))
+    (evaluate code "LUVCRAFT")))
+
 (defun parse-names (command arguments)
   (unless arguments
     (error "~A requires at least one name" command))
@@ -1430,6 +1452,10 @@
        (when arguments
          (error "log does not accept arguments"))
        (print-server-log-tail)
+       0)
+      ((string= command "screenshot")
+       (ensure-server)
+       (run-luvcraft-screenshot arguments)
        0)
       ((string= command "eval")
        (ensure-server)

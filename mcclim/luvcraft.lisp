@@ -334,7 +334,7 @@
             (luv:set-bind-group
              pass 0 (spinning-frame-state-bind-group frame-state))
             (luv:set-vertex-buffer pass 0 buffer)
-            (luv:draw pass (/ (length relief-vertices) 8)))))))
+            (luv:draw pass (/ (length relief-vertices) 9)))))))
   overlay)
 
 (defun projected-screen-vertex (state width height u v)
@@ -504,17 +504,10 @@
              (incf z (* (vec:vec3-z vector) scale)))
     (vec:make-vec3 x y z)))
 
-(defun open-luvcraft-widget-lab
-    (session &key (title "McCLIM gadget inside luvcraft")
-                  (distance 4.0) (width 1.8) (right-offset 2.8))
-  "Create a McCLIM terminal fixed in front of SESSION's current world camera."
-  (let* ((frame
-           (open-widget-lab
-            :title title
-            :target (luvcraft:luvcraft-session-canvas session)
-            :context (luvcraft::luvcraft-session-context session)
-            :device (luvcraft::luvcraft-session-device session)))
-         (mirror (sheet-direct-mirror (frame-top-level-sheet frame)))
+(defun embed-luvcraft-frame
+    (session frame &key (distance 4.0) (width 1.8) (right-offset 2.8))
+  "Embed enabled McCLIM FRAME in front of SESSION's current camera."
+  (let* ((mirror (sheet-direct-mirror (frame-top-level-sheet frame)))
          (source-size (luv:gpu-texture-size (mirror-texture mirror)))
          (aspect (/ (first source-size) (second source-size)))
          (camera (luvcraft:luvcraft-session-camera session))
@@ -537,9 +530,39 @@
         (luvcraft:add-luvcraft-overlay session overlay)
         overlay))))
 
+(defun open-luvcraft-widget-lab
+    (session &key (title "McCLIM gadget inside luvcraft")
+                  (distance 4.0) (width 1.8) (right-offset 2.8))
+  "Create a McCLIM terminal fixed in front of SESSION's current world camera."
+  (embed-luvcraft-frame
+   session
+   (open-widget-lab
+    :title title
+    :target (luvcraft:luvcraft-session-canvas session)
+    :context (luvcraft::luvcraft-session-context session)
+    :device (luvcraft::luvcraft-session-device session))
+   :distance distance :width width :right-offset right-offset))
+
+(defun open-luvcraft-surveyor-map
+    (session &key (title "surveyor map")
+                  (distance 3.2) (width 3.2) (right-offset 0.0))
+  "Create and embed a live-world McCLIM surveyor map for SESSION."
+  (embed-luvcraft-frame
+   session
+   (open-surveyor-map
+    session :title title
+    :target (luvcraft:luvcraft-session-canvas session)
+    :context (luvcraft::luvcraft-session-context session)
+    :device (luvcraft::luvcraft-session-device session))
+   :distance distance :width width :right-offset right-offset))
+
 (defun close-luvcraft-widget-lab (overlay)
   "Remove and release an OPEN-LUVCRAFT-WIDGET-LAB overlay."
   (check-type overlay luvcraft-widget-overlay)
   (luvcraft:remove-luvcraft-overlay
    (widget-overlay-session overlay) overlay)
   nil)
+
+(defun close-luvcraft-surveyor-map (overlay)
+  "Remove and release an OPEN-LUVCRAFT-SURVEYOR-MAP overlay."
+  (close-luvcraft-widget-lab overlay))

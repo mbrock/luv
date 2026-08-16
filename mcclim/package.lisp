@@ -88,6 +88,13 @@
            #:luvcraft-widget-overlay
            #:open-luvcraft-widget-lab
            #:close-luvcraft-widget-lab
+           #:surveyor-map
+           #:surveyor-map-mode
+           #:surveyor-map-snapshot
+           #:open-surveyor-map
+           #:close-surveyor-map
+           #:open-luvcraft-surveyor-map
+           #:close-luvcraft-surveyor-map
            #:open-listener
            #:main))
 

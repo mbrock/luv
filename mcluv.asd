@@ -59,7 +59,21 @@
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on ("mcluv/backend" "luvcraft")
-  :components ((:file "mcclim/luvcraft")))
+  :serial t
+  :components ((:file "mcclim/surveyor")
+               (:file "mcclim/luvcraft")))
+
+(defsystem "mcluv/luvcraft-test"
+  :description "Executable claims for McCLIM instruments embedded in luvcraft."
+  :version "0.0.1"
+  :depends-on ("mcluv/luvcraft" "rove")
+  :components ((:file "mcclim/surveyor-tests"))
+  :perform (test-op (operation component)
+             (declare (ignore operation component))
+             (unless (uiop:symbol-call '#:rove '#:run-suite
+                                       (uiop:symbol-call '#:rove '#:find-suite
+                                                         '#:mcluv.surveyor-tests))
+               (error "mcluv surveyor tests failed"))))
 
 (defsystem "mcluv/listener"
   :description "The McCLIM Listener running on the mcluv backend."

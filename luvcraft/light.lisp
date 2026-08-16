@@ -793,6 +793,23 @@ live publication seam for the frontier experiment."
     (declare (dynamic-extent local))
     (chunk-light-levels-at-coordinate chunk local)))
 
+(defun world-light-levels-at (world x y z)
+  "Return sparse SKY, BLOCK, and STATE readings at world site X,Y,Z.
+
+This is the inspector-scale light counterpart to WORLD-BLOCK-AT. Dense light
+consumers should bind a chunk field once rather than resolving every site."
+  (multiple-value-bind (chunk offset availability)
+      (locate-chunk-window-site world x y z)
+    (ecase availability
+      (:available
+       (let ((field (block-chunk-light-field chunk)))
+         (if field
+             (values (aref (chunk-light-field-sky-levels field) offset)
+                     (aref (chunk-light-field-block-levels field) offset)
+                     (chunk-light-field-state field))
+             (values 0 0 :unlit))))
+      (:unavailable (values 0 0 :unavailable)))))
+
 ;;; The incremental runtime relighter.  Content edits and residency events
 ;;; accumulate in a LUVCRAFT-LIGHTING-STATE through the world's hooks; a
 ;;; reconcile pass runs removal then addition queues over a lazily captured

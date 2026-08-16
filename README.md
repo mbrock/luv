@@ -218,6 +218,13 @@ While the game is running, this evaluates inside that exact process:
 ./sly --luvcraft eval '(type-of luvcraft:*session*)'
 ```
 
+And this captures the next rendered frame straight from luvcraft's GPU color
+attachment—no window focus or operating-system screenshot automation involved:
+
+```sh
+./sly --luvcraft screenshot build/screenshot.png
+```
+
 This builds a standalone Metal game, waits for quiet streaming, and writes a
 Tracy capture containing a half-second baseline followed by one natural chunk
 boundary crossing:

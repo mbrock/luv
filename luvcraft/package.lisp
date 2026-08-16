@@ -150,6 +150,7 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:block-solid-p
            #:block-surface-emission
            #:block-world-player
+           #:block-world-source
            #:camera-basis
            #:camera-field-of-view
            #:camera-pitch
@@ -374,6 +375,8 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:world-light-at-coordinate
            #:world-save-description
            #:world-source-save-description
+           #:world-block-at
+           #:world-light-levels-at
            #:write-luvcraft-frame-benchmark-csv
            #:write-luvcraft-save-description))
 
