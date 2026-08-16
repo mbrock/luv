@@ -3,6 +3,14 @@
 
 (in-package #:luv/tests)
 
+(luv.world.fields:define-voxel-field :test-voxel-reading
+  :site-kind :voxel-cell
+  :value-type double-float
+  :quantity (:quantity :distance :unit :metre)
+  :missing-value :unavailable
+  :legal-values double-float
+  :representation :test-v1)
+
 (defun coordinate= (left right)
   (and (= (world-coordinate-x left) (world-coordinate-x right))
        (= (world-coordinate-y left) (world-coordinate-y right))
@@ -70,6 +78,50 @@
          :cell (luv.arithmetic:quantity-specification-unit distance-quantity)))
     (ok (not (luv.arithmetic:unitless-p
               (luv.arithmetic:make-unit-expression :cell))))))
+
+(deftest voxel-field-definitions-separate-meaning-from-storage-policy
+  (let* ((world (make-block-world :chunk-width 2
+                                  :chunk-height 2
+                                  :chunk-depth 2))
+         (chunk (ensure-world-chunk world 0 0 0))
+         (column (block-chunk-content chunk))
+         (definition
+           (luv.world.fields:field-definition-for :block-content)))
+    (ok (eq :block-content
+            (luv.world.fields:voxel-field-definition-name definition)))
+    (ok (eq :voxel-cell
+            (luv.world.fields:voxel-field-definition-site-kind definition)))
+    (ok (eq :palette-u16
+            (luv.world.fields:voxel-field-definition-representation-policy
+             definition)))
+    (ok (null
+         (luv.arithmetic:declaration-quantity-specification definition)))
+    (ok (eq definition
+            (luv.world.fields:materialized-field-definition
+             column :block-content)))
+    (ok (luv.world.fields:materialized-field-current-p
+         column :block-content))))
+
+(deftest field-redefinition-has-visible-definition-identity
+  (let* ((old (luv.world.fields:field-definition-for :test-voxel-reading))
+         (old-revision
+           (luv.world.fields:voxel-field-definition-revision old)))
+    (handler-bind ((warning #'muffle-warning))
+      (eval
+       '(luv.world.fields:define-voxel-field :test-voxel-reading
+          :site-kind :voxel-cell
+          :value-type double-float
+          :quantity (:quantity :distance :unit :metre)
+          :missing-value :unavailable
+          :legal-values double-float
+          :representation :test-v2)))
+    (let ((new (luv.world.fields:field-definition-for :test-voxel-reading)))
+      (ok (not (eq old new)))
+      (ok (not (eq old-revision
+                   (luv.world.fields:voxel-field-definition-revision new))))
+      (ok (eq :test-v2
+              (luv.world.fields:voxel-field-definition-representation-policy
+               new))))))
 
 (deftest chunk-domain-indexing
   (let* ((space (make-voxel-space

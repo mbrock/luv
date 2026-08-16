@@ -190,13 +190,24 @@
                 :components ((:file "world-quantities-package")
                              (:file "world-quantities")))))
 
+(asdf:defsystem #:luv/world/fields
+  :description "Inspectable field definitions for distributed voxel facts."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on (#:luv/arithmetic)
+  :serial t
+  :components ((:module "luvcraft"
+                :components ((:file "world-fields-package")
+                             (:file "world-fields")))))
+
 (asdf:defsystem #:luv/world
   :description "Finite chunk domains and the resident block-world model."
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on (#:luv/packages
                #:luv/arithmetic/records
-               #:luv/world/quantities)
+               #:luv/world/quantities
+               #:luv/world/fields)
   :components ((:module "luvcraft"
                 :components ((:file "world"))))
   :in-order-to ((asdf:test-op (asdf:test-op #:luv/tests))))
@@ -585,7 +596,8 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
                #:uiop)
   :serial t
   :components ((:module "luvcraft"
-                :components ((:file "production")
+                :components ((:file "fields")
+                             (:file "production")
                              (:file "png")
                              (:file "blocks")
                              (:file "terrain")

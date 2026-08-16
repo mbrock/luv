@@ -189,6 +189,44 @@
         (ok (null offset))
         (ok (eq availability :unavailable))))))
 
+(deftest voxel-light-fields-retain-distinct-quantity-definitions
+  (let* ((sky (luv.world.fields:field-definition-for :sky-light))
+         (block (luv.world.fields:field-definition-for :block-light))
+         (world (make-block-world :chunk-width 2
+                                  :chunk-height 2
+                                  :chunk-depth 2))
+         (chunk (ensure-world-chunk world 0 0 0)))
+    (relight-block-world world)
+    (let* ((light (block-chunk-light-field chunk))
+           (region (luv::capture-light-region world))
+           (entry (nth-value 0 (locate-chunk-window-site region 0 0 0)))
+           (snapshot
+             (make-block-mesh-snapshot
+              world chunk (chunk-mesh-dependency-stamp world chunk))))
+      (ok (equal '(unsigned-byte 8)
+                 (luv.arithmetic:declaration-representation-type sky)))
+      (ok (equal (luv.arithmetic:declaration-representation-type sky)
+                 (luv.arithmetic:declaration-representation-type block)))
+      (ok (eq :sky-propagation-level
+              (luv.arithmetic:quantity-specification-name
+               (luv.arithmetic:declaration-quantity-specification sky))))
+      (ok (eq :block-propagation-level
+              (luv.arithmetic:quantity-specification-name
+               (luv.arithmetic:declaration-quantity-specification block))))
+      (ok (signals (luv.arithmetic:ensure-declarations-compatible sky block)
+                   'luv.arithmetic:declaration-compatibility-error))
+      (dolist (claim `((,light :sky-light)
+                       (,light :block-light)
+                       (,entry :block-content)
+                       (,entry :sky-light)
+                       (,entry :block-light)
+                       (,snapshot :block-content)
+                       (,snapshot :sky-light)
+                       (,snapshot :block-light)))
+        (destructuring-bind (materialization name) claim
+          (ok (luv.world.fields:materialized-field-current-p
+               materialization name)))))))
+
 (deftest cpu-trace-zones-are-nested-reusable-and-bounded
   (let ((trace (make-cpu-trace :label "test")))
     (with-cpu-trace (trace)

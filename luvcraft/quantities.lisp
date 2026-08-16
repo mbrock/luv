@@ -37,6 +37,10 @@
 (math:define-quantity :sky-light-level :kind :proportion)
 (math:define-quantity :block-light-level :kind :proportion)
 (math:define-quantity :material-emission :kind :proportion)
+(math:define-quantity :sky-propagation-level :kind :sample-count
+  :non-negative-p t)
+(math:define-quantity :block-propagation-level :kind :sample-count
+  :non-negative-p t)
 (math:define-quantity :shadow-diagnostic :kind :control-signal)
 (math:define-quantity :shadow-filter-radius :kind :sample-count)
 (math:define-quantity :view-distance :kind :lattice-coordinate)

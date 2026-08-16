@@ -25,6 +25,12 @@
    (dependency-stamp :initarg :dependency-stamp
                      :reader block-mesh-snapshot-dependency-stamp)
    (domain :initarg :domain :reader block-mesh-snapshot-domain)
+   (content-definition :initarg :content-definition
+                       :reader block-mesh-snapshot-content-definition)
+   (sky-definition :initarg :sky-definition
+                   :reader block-mesh-snapshot-sky-definition)
+   (block-light-definition :initarg :block-light-definition
+                           :reader block-mesh-snapshot-block-light-definition)
    (palette :initarg :palette :reader block-mesh-snapshot-palette)
    (target-indices :initarg :target-indices
                    :reader block-mesh-snapshot-target-indices)
@@ -41,6 +47,21 @@
 The snapshot owns compact u16 columns, but its small palette contains the same
 shared semantic block descriptors used by the world.  Cell identity does not
 cross the thread boundary, and the worker never observes live chunk storage."))
+
+(defmethod luv.world.fields:materialized-field-definition
+    ((snapshot block-mesh-snapshot) (field-name (eql :block-content)))
+  (declare (ignore field-name))
+  (block-mesh-snapshot-content-definition snapshot))
+
+(defmethod luv.world.fields:materialized-field-definition
+    ((snapshot block-mesh-snapshot) (field-name (eql :sky-light)))
+  (declare (ignore field-name))
+  (block-mesh-snapshot-sky-definition snapshot))
+
+(defmethod luv.world.fields:materialized-field-definition
+    ((snapshot block-mesh-snapshot) (field-name (eql :block-light)))
+  (declare (ignore field-name))
+  (block-mesh-snapshot-block-light-definition snapshot))
 
 (defgeneric mesh-block-world (mesher world))
 (defgeneric mesh-block-chunk (mesher world chunk))
@@ -553,7 +574,21 @@ normalized to 0..1."
     (make-instance
      'block-mesh-snapshot
      :key (block-chunk-key chunk) :dependency-stamp dependency-stamp
-     :domain domain :palette palette :target-indices target-indices
+     :domain domain
+     :content-definition
+     (luv.world.fields:materialized-field-definition
+      (block-chunk-content chunk) :block-content)
+     :sky-definition
+     (let ((field (block-chunk-light-field chunk)))
+       (if field
+           (luv.world.fields:materialized-field-definition field :sky-light)
+           (luv.world.fields:field-definition-for :sky-light)))
+     :block-light-definition
+     (let ((field (block-chunk-light-field chunk)))
+       (if field
+           (luv.world.fields:materialized-field-definition field :block-light)
+           (luv.world.fields:field-definition-for :block-light)))
+     :palette palette :target-indices target-indices
      :sample-indices sample-indices
      :sky-samples sky-samples :block-light-samples block-light-samples)))
 

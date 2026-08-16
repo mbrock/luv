@@ -561,8 +561,17 @@ BODY returns."
 ;;; is for inspectors, sparse interaction, and other genuinely row-shaped work.
 
 (defclass block-content-column ()
-  ((palette :initarg :palette :reader block-content-column-palette)
+  ((definition
+    :initarg :definition
+    :initform (luv.world.fields:field-definition-for :block-content)
+    :reader block-content-column-definition)
+   (palette :initarg :palette :reader block-content-column-palette)
    (indices :initarg :indices :reader block-content-column-indices)))
+
+(defmethod luv.world.fields:materialized-field-definition
+    ((column block-content-column) (field-name (eql :block-content)))
+  (declare (ignore field-name))
+  (block-content-column-definition column))
 
 (defun make-block-content-column (cardinality)
   (make-instance

@@ -728,15 +728,18 @@ Audit so far:
   lattice values metres because the default cells happen to be one metre.
   Their representations and numerical behavior are unchanged; only the false
   equivalence was removed.
-- Dense light arrays and the interleaved block-mesh vertex buffer are semantic
-  fields with heterogeneous lanes.  Annotating their owner slot with one scalar
-  quantity would be false precision; they need the field/layout side of the
-  declaration protocol.  The lighting work queue makes the distinction
-  concrete: one =level= slot carries either a raw sky level or a raw block-light
-  level according to the queue which owns it, so the quantity belongs to a
-  field/work-item schema rather than that representation slot in isolation.
-  Ordinary function parameters remain an explicit frontend question rather
-  than being forced into record declarations.
+- Dense block, sky-light, and block-light columns now have ordinary voxel field
+  definitions (#SIYGXO).  Raw u8 sky and block propagation levels carry
+  distinct quantity specifications while normalized GPU light proportions
+  retain their earlier meanings.  Field definition identities travel with
+  live columns, solver-atlas copies, and immutable worker snapshots without
+  wrapping their lanes.  The interleaved block-mesh vertex buffer remains a
+  heterogeneous repeated product rather than one scalar field.  The lighting
+  work queue likewise has one =level= representation whose sky or block
+  meaning comes from the owning queue; these need product/work-item layouts,
+  not false scalar slot annotations.  Ordinary function parameters remain an
+  explicit frontend question rather than being forced into record
+  declarations.
 - Session state now distinguishes the monotonic frame-clock point from the
   accumulated physics duration, and production results declare their elapsed
   duration.  Lighting state now likewise declares its most recent
@@ -751,9 +754,9 @@ Audit so far:
   Structural counts such as shadow-map resolution, mesh stride, vertex count,
   and format version remain ordinary constants.
 
-Next: give dense fields and packed products declarations with layouts, and
-decide how ordinary function parameters publish boundary meaning without
-turning direct Lisp into ceremony.
+Next: give packed products declarations with repeated layouts, and decide how
+ordinary function parameters publish boundary meaning without turning direct
+Lisp into ceremony.
 
 * A possible Lisp vocabulary
 :PROPERTIES:

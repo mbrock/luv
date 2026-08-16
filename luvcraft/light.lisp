@@ -17,7 +17,15 @@
 (defconstant +maximum-light-level+ 15)
 
 (defclass chunk-light-field ()
-  ((sky-levels :initarg :sky-levels :reader chunk-light-field-sky-levels)
+  ((sky-definition
+    :initarg :sky-definition
+    :initform (luv.world.fields:field-definition-for :sky-light)
+    :reader chunk-light-field-sky-definition)
+   (block-definition
+    :initarg :block-definition
+    :initform (luv.world.fields:field-definition-for :block-light)
+    :reader chunk-light-field-block-definition)
+   (sky-levels :initarg :sky-levels :reader chunk-light-field-sky-levels)
    (block-levels :initarg :block-levels
                  :reader chunk-light-field-block-levels)
    (revision :initform 0 :accessor chunk-light-field-revision)
@@ -32,6 +40,16 @@
 from block content.  STATE is :UNLIT before any solve, :STABLE when every
 boundary was known, and :PROVISIONAL when an unknown residency boundary
 contributed to the result."))
+
+(defmethod luv.world.fields:materialized-field-definition
+    ((field chunk-light-field) (field-name (eql :sky-light)))
+  (declare (ignore field-name))
+  (chunk-light-field-sky-definition field))
+
+(defmethod luv.world.fields:materialized-field-definition
+    ((field chunk-light-field) (field-name (eql :block-light)))
+  (declare (ignore field-name))
+  (chunk-light-field-block-definition field))
 
 (defun make-chunk-light-field (cardinality)
   (flet ((levels ()
@@ -94,11 +112,29 @@ resident."))
 (defstruct (light-region-entry (:constructor %make-light-region-entry))
   (chunk nil)
   (key nil :type (or null chunk-coordinate))
+  (content-definition nil)
+  (sky-definition nil)
+  (block-definition nil)
   (indices nil :type (or null (simple-array (unsigned-byte 16) (*))))
   (opacity-lut nil)
   (emission-lut nil)
   (sky nil :type (or null (simple-array (unsigned-byte 8) (*))))
   (block nil :type (or null (simple-array (unsigned-byte 8) (*)))))
+
+(defmethod luv.world.fields:materialized-field-definition
+    ((entry light-region-entry) (field-name (eql :block-content)))
+  (declare (ignore field-name))
+  (light-region-entry-content-definition entry))
+
+(defmethod luv.world.fields:materialized-field-definition
+    ((entry light-region-entry) (field-name (eql :sky-light)))
+  (declare (ignore field-name))
+  (light-region-entry-sky-definition entry))
+
+(defmethod luv.world.fields:materialized-field-definition
+    ((entry light-region-entry) (field-name (eql :block-light)))
+  (declare (ignore field-name))
+  (light-region-entry-block-definition entry))
 
 (defstruct (light-region (:constructor %make-light-region))
   (world nil)
@@ -136,6 +172,19 @@ resident."))
         (setf (gethash key (light-region-entries region))
               (%make-light-region-entry
                :chunk chunk :key key
+               :content-definition
+               (luv.world.fields:materialized-field-definition
+                (block-chunk-content chunk) :block-content)
+               :sky-definition
+               (if field
+                   (luv.world.fields:materialized-field-definition
+                    field :sky-light)
+                   (luv.world.fields:field-definition-for :sky-light))
+               :block-definition
+               (if field
+                   (luv.world.fields:materialized-field-definition
+                    field :block-light)
+                   (luv.world.fields:field-definition-for :block-light))
                :indices (coerce indices
                                 '(simple-array (unsigned-byte 16) (*)))
                :opacity-lut opacity :emission-lut emission

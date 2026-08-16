@@ -731,3 +731,34 @@ sampling, deleting their duplicated halo-presence test, while
 window method and avoids the old temporary local-coordinate value.  The
 luvcraft suite exercises all four windows, boundary continuation, meshing,
 lighting, production, and deterministic world behavior.
+
+* DONE Attach existing voxel field definitions
+:PROPERTIES:
+:ID: SIYGXO
+:END:
+
+Intent: describe the existing block-content, sky-light, and block-light
+columns without changing their representations or conflating field identity,
+per-site quantity, aggregate encoding, product state, and provenance.
+
+Evidence: =luv.world.fields= owns a small =voxel-field-definition= which is
+also a backend-neutral represented-value declaration.  A definition names its
+field and site kind, value type and optional quantity, unavailable-value
+semantics, legal value type, aggregate representation policy, source form, and
+identity token.  =:block-content= remains a palette-u16 categorical field.
+=:sky-light= and =:block-light= share u8 level storage but carry distinct
+=:sky-propagation-level= and =:block-propagation-level= quantities; attempting
+to substitute their declarations fails even though their representations are
+equal.
+
+Existing =block-content-column= and =chunk-light-field= objects retain the
+definition identities current when their arrays are materialized.  The
+=light-region-entry= capture and immutable =block-mesh-snapshot= copy those
+identities with their bytes.  =materialized-field-current-p= makes live
+redefinition visibly stale by object identity rather than silently
+reinterpreting old arrays.  Product revision and boundary stability remain on
+their existing owners, and every per-site lane remains an unwrapped u16 or u8.
+
+The focused world and luvcraft tests exercise definition redefinition,
+categorical content, distinct light quantities, and propagation of definition
+identity through live light fields, atlas entries, and worker snapshots.
