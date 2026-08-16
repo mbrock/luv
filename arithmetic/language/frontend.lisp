@@ -96,6 +96,11 @@
     :initarg :expression
     :reader arithmetic-binding-expression)))
 
+(defclass arithmetic-function-parameter-binding (arithmetic-binding)
+  ()
+  (:documentation
+   "A lexical alias binding one function argument inside an application."))
+
 (defclass arithmetic-literal (arithmetic-expression)
   ((value
     :initarg :value
@@ -258,7 +263,20 @@
     ((expression arithmetic-unit-conversion))
   (list (arithmetic-unit-conversion-operand expression)))
 
-(defclass arithmetic-function-definition (arithmetic-named-object)
+(defclass arithmetic-function-source (arithmetic-named-object)
+  ((parameter-forms
+    :initarg :parameter-forms
+    :reader arithmetic-function-parameter-forms)
+   (parameter-names
+    :initarg :parameter-names
+    :reader arithmetic-function-parameter-names)
+   (body
+    :initarg :body
+    :reader arithmetic-function-body))
+  (:documentation
+   "The shared source identity of a reusable expression-language function."))
+
+(defclass arithmetic-function-definition (arithmetic-function-source)
   ((parameters
     :initarg :parameters
     :reader arithmetic-function-parameters)
@@ -271,6 +289,53 @@
     :reader arithmetic-function-result))
   (:documentation
    "A checked arithmetic source definition awaiting an execution backend."))
+
+(defclass arithmetic-function-call (arithmetic-expression)
+  ((definition
+    :initarg :definition
+    :reader arithmetic-function-call-definition)
+   (arguments
+    :initarg :arguments
+    :reader arithmetic-function-call-arguments)
+   (bindings
+    :initarg :bindings
+    :reader arithmetic-function-call-bindings)
+   (result
+    :initarg :result
+    :reader arithmetic-function-call-result))
+  (:documentation
+   "One inspectable application of shared function source to checked values."))
+
+(defmethod arithmetic-expression-quantity-checked-p
+    ((expression arithmetic-function-call))
+  (arithmetic-expression-quantity-checked-p
+   (arithmetic-function-call-result expression)))
+
+(defmethod arithmetic-expression-form ((expression arithmetic-function-call))
+  (arithmetic-expression-source-form expression))
+
+(defmethod arithmetic-expression-children
+    ((expression arithmetic-function-call))
+  (append
+   (arithmetic-function-call-arguments expression)
+   (mapcar #'arithmetic-binding-expression
+           (arithmetic-function-call-bindings expression))
+   (list (arithmetic-function-call-result expression))))
+
+(defgeneric arithmetic-function-definition-for (name)
+  (:documentation "Return the live arithmetic definition named by NAME, or NIL."))
+
+(defmethod arithmetic-function-definition-for (name)
+  (declare (ignore name))
+  nil)
+
+(defgeneric note-arithmetic-function-redefinition (name)
+  (:documentation
+   "Notify loaded realizations that reusable arithmetic source changed."))
+
+(defmethod note-arithmetic-function-redefinition (name)
+  (declare (ignore name))
+  nil)
 
 (defun arithmetic-function-expressions (definition)
   "Return DEFINITION's expression graph in source order without duplicates."
@@ -497,11 +562,17 @@
                          :source-form form))))))
 
 (defun parse-arithmetic-call (form environment)
-  (let ((operator (first form)))
-    (unless (arithmetic-operator-p operator)
-      (error 'arithmetic-language-error
-             :form form :reason :unknown-operator :details operator))
-    (parse-arithmetic-operator-call operator form environment)))
+  (let* ((operator (first form))
+         (function
+           (and (symbolp operator)
+                (arithmetic-function-definition-for operator))))
+    (cond ((arithmetic-operator-p operator)
+           (parse-arithmetic-operator-call operator form environment))
+          (function
+           (parse-arithmetic-function-call function form environment))
+          (t
+           (error 'arithmetic-language-error
+                  :form form :reason :unknown-operator :details operator)))))
 
 (defun parse-arithmetic-expression (form environment)
   (cond ((realp form)
@@ -564,6 +635,94 @@
                      (first results) lexical-environment))))
         (values nil (parse-arithmetic-expression form environment)))))
 
+(defvar *arithmetic-function-call-stack* nil)
+
+(defun ensure-arithmetic-function-argument-compatible
+    (parameter argument source-form)
+  (let ((expected-specification
+          (arithmetic-parameter-quantity-specification parameter))
+        (actual-specification
+          (arithmetic-expression-quantity-specification argument))
+        (expected-layout
+          (arithmetic-parameter-quantity-layout parameter))
+        (actual-layout
+          (arithmetic-expression-quantity-layout argument)))
+    (unless (or (null expected-specification)
+                (and actual-specification
+                     (math:quantity-specification=
+                      actual-specification expected-specification)))
+      (error 'arithmetic-language-error
+             :form source-form
+             :reason :function-argument-quantity-mismatch
+             :details
+             (list :parameter (arithmetic-object-name parameter)
+                   :expected expected-specification
+                   :actual actual-specification)))
+    (unless (or (null expected-layout)
+                (and actual-layout
+                     (math:quantity-layout= actual-layout expected-layout)))
+      (error 'arithmetic-language-error
+             :form source-form
+             :reason :function-argument-layout-mismatch
+             :details
+             (list :parameter (arithmetic-object-name parameter)
+                   :expected expected-layout
+                   :actual actual-layout)))
+    argument))
+
+(defun parse-arithmetic-function-call (definition form environment)
+  "Parse a call by specializing shared function source to its actual values."
+  (let* ((name (arithmetic-object-name definition))
+         (parameters (arithmetic-function-parameters definition))
+         (argument-forms (rest form)))
+    (unless (= (length parameters) (length argument-forms))
+      (error 'arithmetic-language-error
+             :form form :reason :arithmetic-function-arity
+             :details (list :expected (length parameters)
+                            :actual (length argument-forms))))
+    (when (member name *arithmetic-function-call-stack* :test #'eq)
+      (error 'arithmetic-language-error
+             :form form :reason :recursive-arithmetic-function
+             :details
+             (reverse (cons name *arithmetic-function-call-stack*))))
+    (let* ((arguments
+             (mapcar (lambda (argument-form)
+                       (parse-arithmetic-expression argument-form environment))
+                     argument-forms))
+           (parameter-bindings
+             (loop for parameter in parameters
+                   for argument in arguments
+                   do (ensure-arithmetic-function-argument-compatible
+                       parameter argument form)
+                   collect
+                   (make-instance
+                    'arithmetic-function-parameter-binding
+                    :name (arithmetic-object-name parameter)
+                    :expression argument
+                    :source-form
+                    (list (arithmetic-object-name parameter) argument))))
+           (function-environment
+             (loop for parameter in parameters
+                   for binding in parameter-bindings
+                   collect
+                   (cons (arithmetic-object-name parameter) binding))))
+      (let ((*arithmetic-function-call-stack*
+              (cons name *arithmetic-function-call-stack*)))
+        (multiple-value-bind (body-bindings result)
+            (parse-arithmetic-body
+             (arithmetic-function-body definition) function-environment)
+          (make-instance
+           'arithmetic-function-call
+           :definition definition
+           :arguments arguments
+           :bindings (append parameter-bindings body-bindings)
+           :result result
+           :quantity-specification
+           (arithmetic-expression-quantity-specification result)
+           :quantity-layout
+           (arithmetic-expression-quantity-layout result)
+           :source-form form))))))
+
 (defun parse-arithmetic-function-definition (name parameter-forms body)
   "Parse one backend-neutral arithmetic function definition."
   (let* ((parameters (mapcar #'parse-arithmetic-parameter parameter-forms))
@@ -572,29 +731,30 @@
                      (cons (arithmetic-object-name parameter) parameter))
                    parameters)))
     (multiple-value-bind (bindings result)
-        (parse-arithmetic-body body environment)
+        (let ((*arithmetic-function-call-stack*
+                (cons name *arithmetic-function-call-stack*)))
+          (parse-arithmetic-body body environment))
       (make-instance
        'arithmetic-function-definition
        :name name
+       :parameter-forms parameter-forms
+       :parameter-names (mapcar #'arithmetic-object-name parameters)
+       :body body
        :parameters parameters
        :bindings bindings
        :result result
        :source-form
        (list* 'define-arithmetic-function name parameter-forms body)))))
 
-(defgeneric arithmetic-function-definition-for (name)
-  (:documentation "Return the live arithmetic definition named by NAME, or NIL."))
-
-(defmethod arithmetic-function-definition-for (name)
-  (declare (ignore name))
-  nil)
-
 (defmacro define-arithmetic-function (name parameters &body body)
   "Define one inspectable arithmetic function through an EQL method."
   (let ((function-name (gensym "FUNCTION-NAME")))
-    `(defmethod arithmetic-function-definition-for
-         ((,function-name (eql ',name)))
-       (declare (ignore ,function-name))
-       (load-time-value
-        (parse-arithmetic-function-definition
-         ',name ',parameters ',body)))))
+    `(progn
+       (defmethod arithmetic-function-definition-for
+           ((,function-name (eql ',name)))
+         (declare (ignore ,function-name))
+         (load-time-value
+          (parse-arithmetic-function-definition
+           ',name ',parameters ',body)))
+       (note-arithmetic-function-redefinition ',name)
+       ',name)))

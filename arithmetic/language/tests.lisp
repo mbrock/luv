@@ -20,6 +20,13 @@
     (interpret (* fog-progress fog-progress)
                :quantity :proportion :unit :one)))
 
+(lang:define-arithmetic-function square-offset ((value))
+  (let* ((shifted (+ value 1.0)))
+    (* shifted shifted)))
+
+(lang:define-arithmetic-function composed-arithmetic ((value))
+  (+ (square-offset value) 2.0))
+
 (deftest arithmetic-functions-retain-checked-source-graphs
   (let* ((definition (lang:arithmetic-function-definition-for 'fog-shape))
          (bindings (lang:arithmetic-function-bindings definition))
@@ -41,6 +48,47 @@
            (length bindings)))
     (ok (eq definition
             (lang:arithmetic-function-definition-for 'fog-shape)))))
+
+(deftest reusable-functions-are-part-of-the-common-expression-graph
+  (let* ((definition
+           (lang:arithmetic-function-definition-for 'composed-arithmetic))
+         (call
+           (first (lang:arithmetic-call-operands
+                   (lang:arithmetic-function-result definition)))))
+    (ok (typep call 'lang:arithmetic-function-call))
+    (ok (eq 'square-offset
+            (lang:arithmetic-object-name
+             (lang:arithmetic-function-call-definition call))))
+    (ok (= 1 (length (lang:arithmetic-function-call-arguments call))))
+    (ok (= 2 (length (lang:arithmetic-function-call-bindings call))))
+    (ok (typep (first (lang:arithmetic-function-call-bindings call))
+               'lang:arithmetic-function-parameter-binding))
+    (ok (equal '(square-offset value)
+               (lang:arithmetic-expression-form call)))))
+
+(deftest common-functions-reject-bad-applications
+  (ok (signals
+       (lang:parse-arithmetic-function-definition
+        'bad-arity '((value)) '((square-offset value value)))
+       'lang:arithmetic-language-error))
+  (ok (eq :arithmetic-function-arity
+          (handler-case
+              (progn
+                (lang:parse-arithmetic-function-definition
+                 'bad-arity '((value)) '((square-offset value value)))
+                nil)
+            (lang:arithmetic-language-error (condition)
+              (lang:arithmetic-language-error-reason condition)))))
+  (lang:define-arithmetic-function recursion-probe ((value))
+    (+ value 1.0))
+  (ok (eq :recursive-arithmetic-function
+          (handler-case
+              (progn
+                (lang:parse-arithmetic-function-definition
+                 'recursion-probe '((value)) '((recursion-probe value)))
+                nil)
+            (lang:arithmetic-language-error (condition)
+              (lang:arithmetic-language-error-reason condition))))))
 
 (deftest arithmetic-parameters-implement-the-common-declaration-protocol
   (let* ((definition (lang:arithmetic-function-definition-for 'fog-shape))

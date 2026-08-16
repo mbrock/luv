@@ -263,6 +263,30 @@
         operand
         (list 'lisp-multiply factor operand))))
 
+(defmethod lower-lisp-arithmetic-expression
+    ((expression lang:arithmetic-function-call) environment)
+  (let ((call-environment environment)
+        (lambda-bindings nil))
+    (dolist (binding (lang:arithmetic-function-call-bindings expression))
+      (let* ((value
+               (lower-lisp-arithmetic-expression
+                (lang:arithmetic-binding-expression binding)
+                (if (typep binding
+                           'lang:arithmetic-function-parameter-binding)
+                    environment
+                    call-environment)))
+             (name
+               (gensym
+                (format nil "~A-"
+                        (lang:arithmetic-object-name binding)))))
+        (push (list name value) lambda-bindings)
+        (push (cons binding name) call-environment)))
+    (let ((result
+            (lower-lisp-arithmetic-expression
+             (lang:arithmetic-function-call-result expression)
+             call-environment)))
+      `(let* ,(nreverse lambda-bindings) ,result))))
+
 (defun arithmetic-definition-for-lisp (name)
   (or (lang:arithmetic-function-definition-for name)
       (error 'lisp-arithmetic-error
@@ -310,7 +334,8 @@
            (lang:parse-arithmetic-function-definition name parameters body))
          (lambda-expression (lower-arithmetic-function definition)))
     `(progn
-       (lang:define-arithmetic-function ,name ,parameters ,@body)
+       (eval-when (:compile-toplevel :load-toplevel :execute)
+         (lang:define-arithmetic-function ,name ,parameters ,@body))
        (defun ,name ,(second lambda-expression)
          ,@(cddr lambda-expression))
        ',name)))

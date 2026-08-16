@@ -144,9 +144,16 @@
 (defmethod shader-object-name ((object shader-named-object))
   (lang:arithmetic-object-name object))
 
+(defmethod shader-object-name ((object lang:arithmetic-function-source))
+  (lang:arithmetic-object-name object))
+
 (defgeneric shader-object-source-form (object))
 
 (defmethod shader-object-source-form ((object shader-named-object))
+  (lang:arithmetic-object-source-form object))
+
+(defmethod shader-object-source-form
+    ((object lang:arithmetic-function-source))
   (lang:arithmetic-object-source-form object))
 
 (defclass shader-variable-declaration (shader-named-object)
@@ -278,7 +285,8 @@ repeating the lane arithmetic as a literal."
     (shader-named-object lang:arithmetic-binding)
   ())
 
-(defclass shader-function-parameter-binding (shader-binding)
+(defclass shader-function-parameter-binding
+    (shader-binding lang:arithmetic-function-parameter-binding)
   ()
   (:documentation
    "A lexical alias for one already parsed shader-function argument."))
@@ -371,31 +379,48 @@ leaves it again while retaining the semantic operand in the expression graph."))
 (defmethod shader-call-parameters ((call shader-call))
   (lang:arithmetic-call-parameters call))
 
-(defclass shader-function-definition (shader-named-object)
-  ((parameters
-    :initarg :parameters
-    :reader shader-function-parameters)
-   (body
-    :initarg :body
-    :reader shader-function-body))
+(defclass shader-function-definition (lang:arithmetic-function-source)
+  ()
   (:documentation
    "Reusable shader source parsed into the typed graph at each call site."))
 
-(defclass shader-function-call (shader-expression)
-  ((definition
-    :initarg :definition
-    :reader shader-function-call-definition)
-   (arguments
-    :initarg :arguments
-    :reader shader-function-call-arguments)
-   (bindings
-    :initarg :bindings
-    :reader shader-function-call-bindings)
-   (result
-    :initarg :result
-    :reader shader-function-call-result))
+(defgeneric shader-function-parameters (definition))
+
+(defmethod shader-function-parameters
+    ((definition lang:arithmetic-function-source))
+  (lang:arithmetic-function-parameter-names definition))
+
+(defgeneric shader-function-body (definition))
+
+(defmethod shader-function-body
+    ((definition lang:arithmetic-function-source))
+  (lang:arithmetic-function-body definition))
+
+(defclass shader-function-call
+    (shader-expression lang:arithmetic-function-call)
+  ()
   (:documentation
    "An inspectable typed call whose body is inlined during backend lowering."))
+
+(defgeneric shader-function-call-definition (call))
+
+(defmethod shader-function-call-definition ((call shader-function-call))
+  (lang:arithmetic-function-call-definition call))
+
+(defgeneric shader-function-call-arguments (call))
+
+(defmethod shader-function-call-arguments ((call shader-function-call))
+  (lang:arithmetic-function-call-arguments call))
+
+(defgeneric shader-function-call-bindings (call))
+
+(defmethod shader-function-call-bindings ((call shader-function-call))
+  (lang:arithmetic-function-call-bindings call))
+
+(defgeneric shader-function-call-result (call))
+
+(defmethod shader-function-call-result ((call shader-function-call))
+  (lang:arithmetic-function-call-result call))
 
 (defclass shader-map-application (shader-expression)
   ((definition
@@ -1185,7 +1210,10 @@ never collides with a standard symbol's function documentation:
            :form (list* 'define-shader-function name parameters body)
            :reason :expected-single-shader-function-body))
   (make-instance 'shader-function-definition
-                 :name name :parameters parameters :body body
+                 :name name
+                 :parameter-forms parameters
+                 :parameter-names parameters
+                 :body body
                  :source-form
                  (list* 'define-shader-function name parameters body)))
 
@@ -1238,6 +1266,12 @@ body does not execute as Lisp and does not return generated S-expressions.
   (declare (ignore name))
   (sb-thread:with-mutex (*shader-source-revision-lock*)
     (incf *shader-source-revision*)))
+
+(defmethod lang:note-arithmetic-function-redefinition ((name symbol))
+  "Prefer newly shared source over any shader-only source of the same name."
+  (when (fboundp 'forget-shader-function)
+    (forget-shader-function name))
+  (note-shader-source-redefinition name))
 
 (defmethod documentation ((name symbol) (type (eql 'shader-abstraction)))
   (gethash name *shader-abstraction-documentation*))
@@ -1537,7 +1571,9 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
 (defun parse-shader-call (form environment)
   (let* ((operator (first form))
          (function (and (symbolp operator)
-                        (shader-function-definition-for operator))))
+                        (or (shader-function-definition-for operator)
+                            (lang:arithmetic-function-definition-for
+                             operator)))))
     (cond ((shader-operator-p operator)
            (parse-shader-operator-call operator form environment))
           (function

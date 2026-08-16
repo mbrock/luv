@@ -242,22 +242,108 @@ a no-resource mathematical-pipeline seam.
 This boundary matters: the image proves the hard per-pixel mathematics and the
 DSL capability, not Slug's data-scale performance or a usable text API.
 
-* NEXT Move curve and band lists into shader-visible data
+* Full Slug is a structured fold over indexed outline data
+:PROPERTIES:
+:ID: ZXTZ5J
+:END:
+
+The 2026 reference pixel shader makes the next language requirements concrete.
+For each horizontal and vertical band it loads a curve count and list offset,
+iterates the indexed curves, loads two curve texels, exits when the sorted
+maximum coordinate cannot reach the pixel, conditionally accumulates the two
+eligible roots, and carries coverage and weight forward.  The required source
+vocabulary is therefore:
+
+- signed and unsigned scalar/vector values, conversions, comparisons, and the
+  small bit operations used by packed glyph metadata;
+- exact indexed texture or buffer loads rather than filtered sampling;
+- fragment derivatives for pixels-per-em and flat glyph metadata;
+- a counted loop carrying several named values, conditional updates, and an
+  early termination condition; and
+- the existing floating-point quadratic and coverage functions.
+
+This is not a reason to embed MSL statements or SPIR-V branches in the source
+language.  The loop is a value-producing fold in #8RQOF0.  Its result is the
+four-value coverage state; target lowering chooses mutable locals in MSL and
+structured loop/header/continue/merge blocks with phi values in SPIR-V.
+
+* McCLIM already exposes the TrueType contour boundary
+:PROPERTIES:
+:ID: 7IVPIE
+:END:
+
+McCLIM's native TrueType renderer is a useful source path even though luv will
+not use its software rasterizer.  =mcclim-native-ttf.lisp= obtains a glyph with
+=zpb-ttf:find-glyph= and walks it with =do-contours= and
+=do-contour-segments=.  Each visit supplies start point, optional quadratic
+control point, and end point; consecutive off-curve TrueType points have already
+acquired their implicit on-curve midpoint.  McCLIM then turns those segments
+into =cl-vectors= paths and sweeps them into an alpha bitmap.  Luv can branch at
+the earlier segment boundary and pack the exact quadratic outline instead.
+
+TrueType =glyf= contours therefore need no curve fitting.  Lines use the Slug
+encoding ={p1,p2,p2}=.  Cubic outlines, such as CFF/CFF2 or arbitrary vector
+paths, are a preprocessing concern: subdivide and approximate them with
+quadratics under an explicit font-unit error bound.  Current HarfBuzz GPU code
+uses exactly this shape, adapting FontTools =cu2qu= with a default half-font-unit
+tolerance before its Slug encoder.  HarfBuzz 14's experimental
+=libharfbuzz-gpu= is consequently a valuable format and pixel oracle, but the
+first luv path can remain Lisp-native through =zpb-ttf=.
+
+* NEXT Teach the shared language Slug's structured band fold
 :PROPERTIES:
 :ID: HMNMBU
 :END:
 
-Intent: turn the fixed-contour proof into a data-driven glyph renderer without
-burying Slug's concrete texture contracts in a generic scene abstraction.
+Intent: add the smallest shared control-flow and indexed-data vocabulary that
+states one Slug band traversal without burying its concrete data contract in a
+generic scene abstraction.
 
-Evidence needed: add the integer and texel-load vocabulary required by the
-RGBA16F curve and RG16U band textures, structured iteration with the sorted
-curve early-out, and a small font-outline packer.  Preserve the current fixed
-proof as the arithmetic oracle.  Add dynamic dilation only with a test where
-the undilated quad demonstrably loses edge coverage.
+Evidence needed: after shared function application #YZS04W, add represented
+integer/index values, exact loads, comparison and conditional expressions, and
+a counted value-producing loop with early termination.  Execute a CPU
+realization over a small curve array, lower the same body to valid MSL and
+SPIR-V structured control flow, and keep the current fixed shader as the pixel
+oracle.
 
-Done when: a glyph with an inner contour renders from uploaded band data on
-both backends, GPU pixels compare against a small CPU winding reference at
-edge and shared-endpoint cases, the live Metal draw and a Vulkan smoke both
-cross the same public shader specification, and captured band lengths make the
-cost visible.
+Done when: a runtime curve count rather than source unrolling controls the
+number of evaluated quadratics; CPU and GPU results agree at edge,
+shared-endpoint, empty-band, and early-exit cases; and source/lowering tools
+retain the loop, carried values, and emitted block provenance.
+
+* TODO Pack arbitrary quadratic contours into Slug bands
+:PROPERTIES:
+:ID: TTE5JG
+:END:
+
+Intent: turn arbitrary connected quadratic contours into dense curve and band
+data suitable for the shared Slug fold.
+
+Evidence needed: a Lisp outline model preserving contour boundaries and
+orientation, line-to-quadratic encoding, conservative band overlap, omission of
+parallel straight lines, per-axis descending sort, and visible band-length
+statistics.  Exercise an outer contour plus an inner contour before involving a
+font loader.
+
+Done when: several differently sized and holed quadratic outlines render from
+uploaded data without changing shader source, and a CPU winding oracle agrees
+with GPU pixels around extrema, shared endpoints, and contour holes.
+
+* TODO Render a zpb-ttf glyph through Slug
+:PROPERTIES:
+:ID: DTBI99
+:END:
+
+Intent: reuse McCLIM's Lisp-native TrueType outline boundary while replacing
+its =cl-vectors=/=cl-aa= rasterization with luv's Slug packer and GPU draw.
+
+Evidence needed: load a known bundled TrueType font through =zpb-ttf=, capture
+its quadratic segments and metrics, pack a glyph containing an inner contour,
+and render it through the same public shader specification on Metal and the
+Vulkan smoke path.  Keep shaping separate: HarfBuzz supplies glyph indexes and
+positions for runs, while this step proves one indexed glyph's outline.
+
+Done when: changing the glyph id changes only uploaded outline/vertex data, not
+shader source; the GPU image is visually inspected and compared with a small
+CPU winding reference; and dynamic dilation is tested separately on geometry
+whose undilated quad actually loses edge coverage.

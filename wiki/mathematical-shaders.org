@@ -233,6 +233,66 @@ needs typed texel loads, integer data, and a structured loop with an early exit.
 Those are execution-language features.  They are separate from the composition
 problem that made the fixed-contour proof manufacture forms.
 
+The separation above is between ordinary language and syntactic rewriting,
+not between a permanently small “arithmetic language” and a richer shader
+language.  =let*=, reusable calls, conditionals, and well-structured iteration
+are ordinary program structure.  A CPU realization and a shader realization
+may choose different representations and effects, but should not acquire two
+unrelated accounts of function source, lexical scope, arity, or recursion.
+
+* One source language can have target-owned effects
+:PROPERTIES:
+:ID: 8RQOF0
+:END:
+
+The extracted arithmetic frontend already owns literals, references, calls,
+lexical bindings, quantity boundaries, unit conversion, and a checked
+=arithmetic-function-definition=.  Shader expressions subclass those common
+objects.  The first =define-shader-function= implementation nevertheless
+introduced a second function-definition protocol: an arithmetic definition is
+a graph parsed once from declared parameters, while a shader definition stores
+an unparsed body and specializes it against represented arguments at each call.
+The distinction in checking time is real; the duplicate meaning of “function”
+is not desirable.
+
+The intended convergence is one inspectable function-source and application
+protocol with target realizations.  Common definitions retain semantic
+parameter contracts and can be compiled to ordinary Lisp.  A shader realization
+adds concrete scalar/vector types, resource effects, stage legality, inlining,
+SSA names, and instruction provenance.  Texture loads, derivatives, and output
+assignments remain shader operations, but they live in the same extensible body
+language instead of forcing a separate account of lexical structure.  A future
+CPU realization may define useful meanings for some of those operations without
+making them part of the portable core.
+
+Structured control flow belongs at this shared source level too.  Slug's full
+pixel calculation is naturally a counted fold over a band of curve indexes:
+four accumulators advance together, conditionals admit eligible roots, and a
+sorted geometric bound terminates the fold early.  SPIR-V realizes that as
+structured blocks and phi values; MSL realizes it as an ordinary loop.  The
+source object should say what the loop computes, not encode either target's
+control-flow machinery.
+
+* NEXT Share function application across arithmetic and shader realizations
+:PROPERTIES:
+:ID: YZS04W
+:END:
+
+Intent: make one portable arithmetic definition callable both by compiled Lisp
+and from a shader body, sharing source identity, parameter normalization, arity,
+lexical bindings, recursion rejection, and application provenance.
+
+Evidence needed: move Slug's two scalar root-eligibility functions to the
+common definition protocol, execute them through the Lisp realization, consume
+the same definitions inside =slug-axis-contribution=, and retain identical
+SPIR-V, MSL, and Metal proof pixels.  Keep resource operations and represented
+shader typing target-owned.
+
+Done when: there is one source definition for each eligibility calculation,
+both CPU and shader call graphs contain an inspectable application object, live
+redefinition is observed by fresh realizations, and the old independent shader
+definition is unnecessary for these portable functions.
+
 * Semantic maps are not merely matrix-shaped values
 :PROPERTIES:
 :ID: 4XAF9Z

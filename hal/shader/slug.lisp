@@ -17,20 +17,18 @@ pixel shader.  #S2F8SA"
   (let ((s1 (if (plusp y1) 1 0))
         (s2 (if (plusp y2) 1 0))
         (s3 (if (plusp y3) 1 0)))
-    (values (+ (* s1 (- 1 (* s2 s3)))
-               (* (- 1 s1) s2 (- 1 s3)))
-            (+ (* s3 (- 1 (* s1 s2)))
-               (* (- 1 s3) s2 (- 1 s1))))))
+    (values (slug-first-root-eligibility s1 s2 s3)
+            (slug-second-root-eligibility s1 s2 s3))))
 
-(spv:define-shader-function slug-first-root-eligibility (s1 s2 s3)
-  "Return Slug's first root-eligibility mask from three sign masks."
-  (+ (* s1 (- 1.0 (* s2 s3)))
-     (* (- 1.0 s1) s2 (- 1.0 s3))))
+(arith-lisp:define-lisp-arithmetic-function
+    slug-first-root-eligibility ((s1) (s2) (s3))
+  (+ (* s1 (- 1 (* s2 s3)))
+     (* (- 1 s1) s2 (- 1 s3))))
 
-(spv:define-shader-function slug-second-root-eligibility (s1 s2 s3)
-  "Return Slug's second root-eligibility mask from three sign masks."
-  (+ (* s3 (- 1.0 (* s1 s2)))
-     (* (- 1.0 s3) s2 (- 1.0 s1))))
+(arith-lisp:define-lisp-arithmetic-function
+    slug-second-root-eligibility ((s1) (s2) (s3))
+  (+ (* s3 (- 1 (* s1 s2)))
+     (* (- 1 s3) s2 (- 1 s1))))
 
 (spv:define-shader-function slug-axis-contribution
     (p1-axis p2-axis p3-axis p1-other p2-other p3-other pixels-per-em)

@@ -347,7 +347,8 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
   :description "A fixed-outline proof of Slug quadratic rendering in mathematical shaders."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on (#:luv/spir-v)
+  :depends-on (#:luv/spir-v
+               #:luv/arithmetic/lisp)
   :serial t
   :components ((:module "hal"
                 :components

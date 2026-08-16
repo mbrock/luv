@@ -45,12 +45,23 @@
            #:arithmetic-reference-target-quantity-checked-p
            #:arithmetic-reference-target-quantity-specification
            #:arithmetic-reference-target-quantity-layout
+           #:arithmetic-function-source
+           #:arithmetic-function-parameter-forms
+           #:arithmetic-function-parameter-names
+           #:arithmetic-function-body
            #:arithmetic-function-definition
            #:arithmetic-function-parameters
            #:arithmetic-function-bindings
            #:arithmetic-function-result
+           #:arithmetic-function-parameter-binding
+           #:arithmetic-function-call
+           #:arithmetic-function-call-definition
+           #:arithmetic-function-call-arguments
+           #:arithmetic-function-call-bindings
+           #:arithmetic-function-call-result
            #:arithmetic-function-expressions
            #:arithmetic-function-definition-for
+           #:note-arithmetic-function-redefinition
            #:define-arithmetic-function
            #:parse-arithmetic-function-definition
            #:parse-arithmetic-expression

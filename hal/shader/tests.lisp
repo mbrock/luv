@@ -73,6 +73,10 @@
          (scaled (* shifted scale)))
     scaled))
 
+(lang:define-arithmetic-function shared-shader-function-probe ((value))
+  (let* ((shifted (+ value 0.25)))
+    (* shifted shifted)))
+
 (spv:define-shader-method shader-method-probe shader-method-probe
     ((role (eql :probe)) (stage (eql :fragment)))
     (:stage :fragment
@@ -1364,6 +1368,42 @@
   (ok (equal '(0 0)
              (multiple-value-list
               (slug:slug-root-eligibility 0.0 0.0 0.0)))))
+
+(deftest shaders-consume-shared-arithmetic-functions-directly
+  (let* ((before (spv:shader-source-revision))
+         (specification
+           (spv:parse-shader-specification
+            'shared-function-fragment
+            '(:stage :fragment
+              :inputs ((value :float :location 0))
+              :outputs ((result :float :location 0)))
+            '((set-output result
+                          (shared-shader-function-probe value)))))
+         (call
+           (spv:shader-assignment-value
+            (first (spv:shader-specification-statements specification)))))
+    (ok (typep call 'spv:shader-function-call))
+    (ok (typep call 'lang:arithmetic-function-call))
+    (ok (typep (spv:shader-function-call-definition call)
+               'lang:arithmetic-function-definition))
+    (ok (= #x07230203
+           (aref (spv:assemble-shader-specification specification) 0)))
+    (lang:note-arithmetic-function-redefinition
+     'shared-shader-function-probe)
+    (ok (> (spv:shader-source-revision) before))))
+
+(deftest shared-source-retires-an-older-shader-only-definition
+  (eval '(spv:define-shader-function shared-source-migration-probe (value)
+           (+ value 1.0)))
+  (ok (spv:shader-function-definition-for
+       'shared-source-migration-probe))
+  (eval '(lang:define-arithmetic-function
+             shared-source-migration-probe ((value))
+           (+ value 2.0)))
+  (ok (null (spv:shader-function-definition-for
+             'shared-source-migration-probe)))
+  (ok (lang:arithmetic-function-definition-for
+       'shared-source-migration-probe)))
 
 (deftest slug-proof-is-a-pixel-shader-over-quadratic-roots
   (let* ((vertex (slug:slug-bezier-vertex-specification))

@@ -40,6 +40,13 @@
     ((distance :quantity :distance :unit :kilometre))
   (convert-unit distance :unit :metre))
 
+(lisp:define-lisp-arithmetic-function offset-square ((value))
+  (let* ((shifted (+ value 1.0d0)))
+    (* shifted shifted)))
+
+(lisp:define-lisp-arithmetic-function twice-offset-square ((value))
+  (+ (offset-square value) (offset-square value)))
+
 (defun tree-contains-any-object-p (tree objects)
   (cond ((atom tree) (member tree objects :test #'eql))
         ((consp tree)
@@ -59,6 +66,18 @@
          (tree-contains-any-object-p
           lambda-expression
           (list 'lang:quantity 'lang:interpret 'lang:convert-unit))))))
+
+(deftest shared-function-calls-lower-and-execute-as-ordinary-lisp
+  (let ((lambda-expression
+          (lisp:lower-arithmetic-function 'twice-offset-square)))
+    (ok (= 18.0d0 (twice-offset-square 2.0d0)))
+    (ok (= 18.0d0
+           (funcall (lisp:compile-arithmetic-function
+                     'twice-offset-square)
+                    2.0d0)))
+    (ok (tree-contains-any-object-p lambda-expression '(let*)))
+    (ok (not (tree-contains-any-object-p
+              lambda-expression '(offset-square))))))
 
 (deftest ordinary-vectors-execute-without-semantic-wrappers
   (let ((add (lisp:compile-arithmetic-function 'add-vectors))
