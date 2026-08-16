@@ -13,6 +13,21 @@
   #+linux #x5414
   #-(or darwin linux) 0)
 
+(defparameter +pty-child-launcher-source+
+  (format nil
+          "import fcntl, os, signal, sys, termios~%
+pid = os.fork()~%
+if pid:~%
+    signal.signal(signal.SIGHUP, signal.SIG_IGN)~%
+    _, status = os.waitpid(pid, 0)~%
+    code = os.waitstatus_to_exitcode(status)~%
+    os._exit(code if code >= 0 else 128 - code)~%
+os.setsid()~%
+fcntl.ioctl(0, termios.TIOCSCTTY, 0)~%
+os.tcsetpgrp(0, os.getpgrp())~%
+os.execvpe(sys.argv[1], sys.argv[1:], os.environ)~%")
+  "One-shot child setup which turns SBCL's PTY slave into /dev/tty.")
+
 (defclass pty-device ()
   ((terminal :initarg :terminal :reader pty-device-terminal)
    (process :initarg :process :reader pty-device-process)
@@ -319,13 +334,18 @@ snapshot work which must not race mutation."
   (check-type terminal ghostty:terminal)
   (unless (ghostty:terminal-open-p terminal)
     (error "Cannot attach a PTY to closed terminal ~S." terminal))
-  (let* ((options
+  (let* ((launcher-program "python3")
+         (launcher-arguments
+           (list* "-c" +pty-child-launcher-source+ program arguments))
+         (options
            (append
             (list :pty t :wait nil :search t :external-format :latin-1)
             (when directory (list :directory directory))
             (list :environment
                   (environment-with-terminal-capabilities environment term))))
-         (process (apply #'sb-ext:run-program program arguments options))
+         (process
+           (apply #'sb-ext:run-program
+                  launcher-program launcher-arguments options))
          (stream (sb-ext:process-pty process))
          (device
            (make-instance

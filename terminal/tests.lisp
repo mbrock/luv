@@ -58,6 +58,17 @@
                 (wait-for-terminal-text device "visible-before-enter")))
     (ok (eq :running (terminal:pty-device-state device)))))
 
+(deftest pty-child-owns-a-controlling-terminal
+  (with-pty-test
+      (device ghostty-terminal
+       :program "/bin/sh"
+       :arguments
+       (list "-c"
+             "test -c /dev/tty && printf 'controlling-tty-ok\\r\\n' > /dev/tty"))
+    (ok (eq :exited (terminal:wait-for-pty-device device :timeout 3.0)))
+    (ok (zerop (terminal:pty-device-exit-code device)))
+    (ok (search "controlling-tty-ok" (pty-terminal-text device)))))
+
 (deftest ghostty-query-responses-return-through-the-pty
   (let* ((python "python3")
          (script
