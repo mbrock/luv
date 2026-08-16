@@ -628,6 +628,6 @@
                          (luvcraft::luvcraft-session-frame-states session))))
                   (ok (<= 1 state-count 3))
                   (ok (= (length (luvcraft::luvcraft-session-resources session))
-                         (+ resources-before (* 3 state-count)))))))
+                         (+ resources-before (* 4 state-count)))))))
          (when session
            (stop-luvcraft session)))))))

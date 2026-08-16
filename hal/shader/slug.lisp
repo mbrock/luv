@@ -338,11 +338,15 @@ not the band-texture font renderer.  #OWR8OZ"
          (width (spv:uint 4096.0))
          (band-base (spv:uint (spv:swizzle atlas-base :x)))
          (curve-base (spv:uint (spv:swizzle atlas-base :y)))
+         (horizontal-header-location
+           (spv:uvec2 (mod band-base width) (/ band-base width)))
+         (vertical-header-location
+           (spv:uvec2 (mod (+ band-base one) width)
+                      (/ (+ band-base one) width)))
          (horizontal-header
-           (spv:texel-load band-data (slug-texel-coordinate band-base)))
+           (spv:texel-load band-data horizontal-header-location))
          (vertical-header
-           (spv:texel-load band-data
-                           (slug-texel-coordinate (+ band-base one))))
+           (spv:texel-load band-data vertical-header-location))
          (horizontal-count (spv:swizzle horizontal-header :x))
          (horizontal-offset (spv:swizzle horizontal-header :y))
          (vertical-count (spv:swizzle vertical-header :x))
@@ -351,18 +355,23 @@ not the band-texture font renderer.  #OWR8OZ"
            (spv:counted-fold
                (index horizontal-count state (spv:vec2 0.0 0.0))
              (let* ((entry-address (+ band-base horizontal-offset index))
+                    (entry-location
+                      (spv:uvec2 (mod entry-address width)
+                                 (/ entry-address width)))
                     (local-location
                       (spv:swizzle
-                       (spv:texel-load
-                        band-data (slug-texel-coordinate entry-address))
+                       (spv:texel-load band-data entry-location)
                        :xy))
                     (curve-address
                       (+ curve-base
                          (spv:swizzle local-location :x)
                          (* (spv:swizzle local-location :y) width)))
-                    (curve-location (slug-texel-coordinate curve-address))
+                    (curve-location
+                      (spv:uvec2 (mod curve-address width)
+                                 (/ curve-address width)))
                     (next-location
-                      (slug-texel-coordinate (+ curve-address one)))
+                      (spv:uvec2 (mod (+ curve-address one) width)
+                                 (/ (+ curve-address one) width)))
                     (curve (spv:texel-load curve-data curve-location))
                     (next (spv:texel-load curve-data next-location))
                     (p1 (- (spv:swizzle curve :xy) render-coordinate))
@@ -382,18 +391,23 @@ not the band-texture font renderer.  #OWR8OZ"
            (spv:counted-fold
                (index vertical-count state (spv:vec2 0.0 0.0))
              (let* ((entry-address (+ band-base vertical-offset index))
+                    (entry-location
+                      (spv:uvec2 (mod entry-address width)
+                                 (/ entry-address width)))
                     (local-location
                       (spv:swizzle
-                       (spv:texel-load
-                        band-data (slug-texel-coordinate entry-address))
+                       (spv:texel-load band-data entry-location)
                        :xy))
                     (curve-address
                       (+ curve-base
                          (spv:swizzle local-location :x)
                          (* (spv:swizzle local-location :y) width)))
-                    (curve-location (slug-texel-coordinate curve-address))
+                    (curve-location
+                      (spv:uvec2 (mod curve-address width)
+                                 (/ curve-address width)))
                     (next-location
-                      (slug-texel-coordinate (+ curve-address one)))
+                      (spv:uvec2 (mod (+ curve-address one) width)
+                                 (/ (+ curve-address one) width)))
                     (curve (spv:texel-load curve-data curve-location))
                     (next (spv:texel-load curve-data next-location))
                     (p1 (- (spv:swizzle curve :xy) render-coordinate))
