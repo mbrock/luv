@@ -33,6 +33,17 @@
            #:slug-packed-outline-horizontal-bands
            #:slug-packed-outline-vertical-bands
            #:pack-slug-outline
+           #:slug-serialized-outline
+           #:slug-serialized-outline-packed-outline
+           #:slug-serialized-outline-curve-width
+           #:slug-serialized-outline-band-width
+           #:slug-serialized-outline-curve-half-words
+           #:slug-serialized-outline-curve-texel-count
+           #:slug-serialized-outline-band-uint16-words
+           #:slug-serialized-outline-band-texel-count
+           #:slug-serialized-outline-horizontal-band-count
+           #:slug-serialized-outline-vertical-band-count
+           #:serialize-slug-outline
            #:slug-glyph
            #:make-slug-glyph
            #:slug-glyph-character

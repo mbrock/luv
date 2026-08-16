@@ -1600,6 +1600,31 @@
         (ok (equal '(0 0)
                    (slug:slug-outline-error-details condition)))))))
 
+(deftest slug-texture-serialization-repacks-the-actual-half-values
+  (let* ((contour (slug-test-square 0 0 1/3 1))
+         (serialized
+           (slug:serialize-slug-outline
+            (slug:make-slug-outline :contours (list contour))
+            :horizontal-band-count 2 :vertical-band-count 2))
+         (packed (slug:slug-serialized-outline-packed-outline serialized))
+         (curve-words
+           (slug:slug-serialized-outline-curve-half-words serialized))
+         (band-words
+           (slug:slug-serialized-outline-band-uint16-words serialized)))
+    (ok (= 4096 (slug:slug-serialized-outline-curve-width serialized)))
+    (ok (= 4096 (slug:slug-serialized-outline-band-width serialized)))
+    (ok (= 5 (slug:slug-serialized-outline-curve-texel-count serialized)))
+    (ok (= 20 (length curve-words)))
+    ;; The first curve's p3 is the following curve texel's p1.
+    (ok (equalp (subseq curve-words 2 4) (subseq curve-words 4 6)))
+    (ok (= 12 (slug:slug-serialized-outline-band-texel-count serialized)))
+    (ok (= 2 (aref band-words 0)))
+    (ok (= 4 (aref band-words 1)))
+    (ok (equalp #(1 0 3 0) (subseq band-words 8 12)))
+    (ok (not (= 1/3 (slug:slug-packed-outline-max-x packed))))
+    (ok (< (abs (- 1/3 (slug:slug-packed-outline-max-x packed)))
+           1/1000))))
+
 (deftest zpb-ttf-glyphs-enter-slug-before-software-rasterization
   (zpb-ttf:with-font-loader
       (font-loader (cl-dejavu:font-pathname "DejaVuSans.ttf"))

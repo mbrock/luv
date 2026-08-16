@@ -351,12 +351,21 @@ omits curves parallel to the relevant ray, and retains both descending-maximum
 and ascending-minimum orders.  Tests exercise a counterclockwise outer square
 with a clockwise inner hole and reject a disconnected contour.
 
-This is deliberately the pre-serialization contract.  The current bounds and
-band membership use the Lisp coordinates.  Before GPU upload, the curve points
-must be converted to their actual RGBA16F representation and the bounds and
-memberships recomputed from those quantized values; otherwise the CPU could
-exclude a curve which the shader sees crossing a band boundary.  Dense curve
-and band encoding, upload, and rendering from those resources remain open.
+The serialization boundary now preserves the released shader's exact texture
+contract.  Luv first rounds every point through binary16, decodes those actual
+shader-visible values, and only then recomputes bounds, bands, and sort keys.
+The 4096-wide RGBA16F curve texture stores one ={p1,p2}= texel per quadratic;
+the following texel supplies the shared =p3=, with one endpoint sentinel after
+each contour.  The 4096-wide RG16U band texture stores all horizontal headers,
+then all vertical headers, followed by their descending-maximum
+=(curve-texture-x, curve-texture-y)= lists.  Tests deliberately use a one-third
+coordinate to prove that packing observes the half-quantized value rather than
+the original Lisp rational.
+
+This first serializer describes one glyph beginning at texture origin zero.
+Atlas allocation and relocation, resource upload, and rendering from those
+resources remain open; those steps must preserve the fixed-width addressing
+assumed by the released pixel shader.
 
 Done when: several differently sized and holed quadratic outlines render from
 uploaded data without changing shader source, and a CPU winding oracle agrees

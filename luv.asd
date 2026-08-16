@@ -350,6 +350,7 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
   :author "Mikael Brockman"
   :depends-on (#:luv/spir-v
                #:luv/arithmetic/lisp
+               #:ieee-floats
                #:zpb-ttf)
   :serial t
   :components ((:module "hal"
@@ -358,6 +359,7 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
                   :serial t
                   :components ((:file "slug-package")
                                (:file "slug-outline")
+                               (:file "slug-serialization")
                                (:file "slug-truetype")
                                (:file "slug")))))))
 
