@@ -61,6 +61,9 @@
                      :accessor luvcraft-session-residency-center)
    (selected-block :initarg :selected-block :initform *stone-block*
                    :accessor luvcraft-session-selected-block)
+   (particle-system :initarg :particle-system
+                    :initform (make-instance 'block-particle-system)
+                    :reader luvcraft-session-particle-system)
    (title-base :initarg :title-base :initform "luvcraft"
                :reader luvcraft-session-title-base)
    (atlas-texture :initarg :atlas-texture
@@ -98,6 +101,8 @@
     :reader luvcraft-session-crosshair-vertex-buffer)
    (crosshair-pipeline :initarg :crosshair-pipeline
                        :reader luvcraft-session-crosshair-pipeline)
+   (particle-vertex-buffer :initarg :particle-vertex-buffer
+                           :reader luvcraft-session-particle-vertex-buffer)
    (world-text :initarg :world-text :initform nil
                :reader luvcraft-session-world-text)
    (world-text-glyph-cache :initarg :world-text-glyph-cache :initform nil
@@ -254,7 +259,10 @@
             (return-from edit-luvcraft-block (values nil :absent)))
           (ecase action
             (:remove
-             (edit-block-at nil world x y z))
+             (edit-block-at nil world x y z)
+             (smash-block-particles
+              (luvcraft-session-particle-system session)
+              old-block coordinate))
             (:place
              (when old-block
                (return-from edit-luvcraft-block (values nil :blocked)))

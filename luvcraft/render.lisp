@@ -376,7 +376,12 @@ the frame uniform cannot silently diverge between shader and host."
                        :luvcraft/mesh-publication)
              (refresh-luvcraft-mesh session)))
          (extent (canvas-extent (luvcraft-session-context session)))
-         (frame (luvcraft-frame-state session surface-texture)))
+         (frame (luvcraft-frame-state session surface-texture))
+         (particle-vertices
+           (block-particle-vertices
+            (luvcraft-session-particle-system session)))
+         (particle-vertex-count
+           (/ (length particle-vertices) +block-mesh-floats-per-vertex+)))
     (when (or sample (tracy-connected-p))
       (let ((mesh-vertices 0)
             (mesh-draws 0))
@@ -403,9 +408,11 @@ the frame uniform cannot silently diverge between shader and host."
                      (world-text-run-glyphs
                       (luvcraft-session-world-text session)))
                     0))
-              (draws (+ 2 text-glyph-count (* 2 mesh-draws)))
+              (draws (+ 2 text-glyph-count (* 2 mesh-draws)
+                        (if (plusp particle-vertex-count) 1 0)))
               (vertices (+ +block-world-crosshair-vertex-count+ 3
                            (* 6 text-glyph-count)
+                           particle-vertex-count
                            (* 2 mesh-vertices))))
           (when sample
             (setf (luvcraft-frame-sample-resident-chunk-count sample)
@@ -436,6 +443,10 @@ the frame uniform cannot silently diverge between shader and host."
       (write-buffer
        (luvcraft-frame-uniform-buffer frame)
        (frame-uniform-data session (first extent) (second extent)))
+      (when (plusp particle-vertex-count)
+        (write-buffer
+         (luvcraft-session-particle-vertex-buffer session)
+         particle-vertices))
       (when (luvcraft-session-world-text session)
         (update-world-text-projected-scale
          (luvcraft-session-world-text session)
@@ -493,6 +504,10 @@ the frame uniform cannot silently diverge between shader and host."
               (set-vertex-buffer
                pass 0 (luvcraft-chunk-product-vertex-buffer product))
               (draw pass (block-mesh-vertex-count mesh)))))
+        (when (plusp particle-vertex-count)
+          (set-vertex-buffer
+           pass 0 (luvcraft-session-particle-vertex-buffer session))
+          (draw pass particle-vertex-count))
         (when (luvcraft-session-world-text session)
           (let ((text (luvcraft-session-world-text session)))
             (set-pipeline pass (world-text-run-native-pipeline text))
@@ -543,6 +558,8 @@ the frame uniform cannot silently diverge between shader and host."
                        0d0)))
             (setf (luvcraft-session-last-frame-time session) timestamp)
             (advance-sky-clock (luvcraft-session-sky-clock session) seconds)
+            (advance-block-particles
+             (luvcraft-session-particle-system session) seconds)
             (let ((player (luvcraft-session-player session)))
               (when player
                 (incf (luvcraft-session-physics-accumulator session) seconds)
@@ -831,6 +848,14 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                        :label "block world crosshair vertices"
                        :size (* 4 (length crosshair-vertices))
                        :usage '(:vertex)))))
+                  (particle-vertex-buffer
+                    (keep
+                     (create
+                      device
+                      (make-buffer-descriptor
+                       :label "block smash particle vertices"
+                       :size +block-particle-buffer-size+
+                       :usage '(:vertex)))))
                   (layout
                     (keep
                      (create
@@ -989,6 +1014,7 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                      :sky-pipeline sky-pipeline
                      :crosshair-vertex-buffer crosshair-vertex-buffer
                      :crosshair-pipeline crosshair-pipeline
+                     :particle-vertex-buffer particle-vertex-buffer
                      :world-text text-run
                      :world-text-glyph-cache text-glyph-cache
                      :resources resources)))

@@ -41,6 +41,7 @@
                  (:file "terrain")
                  (:file "light")
                  (:file "mesher")
+                 (:file "particles")
                  (:file "simulation")
                  (:file "persistence")
                  (:file "sky")

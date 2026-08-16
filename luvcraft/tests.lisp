@@ -15,6 +15,39 @@
   (push (list x y z) (recording-window-locations window))
   (values window 37 :available))
 
+(deftest block-smash-particles-form-a-bounded-textured-burst
+  (let ((system (make-instance 'block-particle-system))
+        (coordinate (make-world-coordinate 3 5 -2)))
+    (smash-block-particles system luvcraft::*dirt-block* coordinate)
+    (ok (= luvcraft::+block-particle-burst-size+
+           (block-particle-count system)))
+    (let ((vertices (luvcraft::block-particle-vertices system)))
+      (ok (= (length vertices)
+             (* (block-particle-count system)
+                luvcraft::+block-particle-vertices-per-particle+
+                luvcraft::+block-mesh-floats-per-vertex+)))
+      (ok (typep vertices '(array single-float (*)))))
+    (dotimes (index 20)
+      (declare (ignorable index))
+      (smash-block-particles system luvcraft::*stone-block* coordinate))
+    (ok (= luvcraft::+maximum-block-particles+
+           (block-particle-count system)))))
+
+(deftest block-smash-particles-rise-fall-and-expire
+  (let* ((system (make-instance 'block-particle-system))
+         (coordinate (make-world-coordinate 0 0 0)))
+    (smash-block-particles system luvcraft::*grass-block* coordinate)
+    (let* ((particle (aref (block-particle-system-particles system) 0))
+           (initial-y (luvcraft::block-particle-y particle))
+           (initial-velocity-y
+             (luvcraft::block-particle-velocity-y particle)))
+      (luvcraft::advance-block-particles system 0.05)
+      (ok (> (luvcraft::block-particle-y particle) initial-y))
+      (ok (< (luvcraft::block-particle-velocity-y particle)
+             initial-velocity-y)))
+    (luvcraft::advance-block-particles system 1.0)
+    (ok (zerop (block-particle-count system)))))
+
 (deftest vec3-is-imported-from-its-arithmetic-representation-package
   (dolist (package-name '("LUVCRAFT.WORLD" "LUVCRAFT"))
     (multiple-value-bind (symbol status)

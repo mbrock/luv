@@ -48,6 +48,9 @@
            #:block-mesh-vertex-declaration
            #:block-mesh-vertices
            #:block-mesher
+           #:block-particle-count
+           #:block-particle-system
+           #:block-particle-system-particles
            #:block-save-description
            #:block-solid-p
            #:block-surface-emission
@@ -137,6 +140,7 @@
            #:luvcraft-session-meshed-world-revision
            #:luvcraft-session-outstanding-production
            #:luvcraft-session-overlays
+           #:luvcraft-session-particle-system
            #:luvcraft-session-player
            #:luvcraft-session-production-errors
            #:luvcraft-session-production-system
@@ -210,6 +214,7 @@
            #:restore-world-source-save-description
            #:sample-light-at
            #:select-luvcraft-block
+           #:smash-block-particles
            #:sky-clock
            #:sky-clock-day-fraction
            #:sky-clock-paused-p
