@@ -706,6 +706,9 @@ the frame uniform cannot silently diverge between shader and host."
                                 (world-text-string "hello, world")
                                 (world-text-font-pathname
                                   (cl-dejavu:font-pathname "DejaVuSans.ttf"))
+                                (world-text-distance 8.0)
+                                (world-text-lift 3.0)
+                                (world-text-units-per-em 0.55)
                                 (residency-radius 4)
                                 (publication-limit 2)
                                 (load-schedule-limit 4)
@@ -986,7 +989,11 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                             (make-world-text-run
                              device text-glyph-cache camera
                              (canvas-format context)
-                             world-text-string world-text-font-pathname))))
+                             world-text-string world-text-font-pathname
+                             :distance world-text-distance
+                             :lift world-text-lift
+                             :world-units-per-em
+                             world-text-units-per-em))))
                   (new-session
                     (make-instance
                      'luvcraft-session

@@ -637,7 +637,10 @@ world-wide instance aggregation wins before adding a generic text manager.
 
 Done when: projected scale has no CPU estimate or frame upload, fragments
 select real spatial bands, both shader backends validate the derivative path,
-and a debug-layer world frame is visually intact.
+and an ordinary-distance debug-layer world frame is visually intact.  The
+close-up evidence in #9G0Z19 subsequently falsifies edge correctness; this mark
+records the completed derivative and selection mechanism, not a claim that its
+current bounds agree with preprocessing.
 
 * NEXT Compare Slug coverage at glyph edges
 :PROPERTIES:
@@ -651,6 +654,24 @@ Evidence needed: exercise the portable draw on Vulkan, compare boundary pixels
 with a small CPU winding oracle, and test dynamic dilation on geometry whose
 undilated quad actually loses edge coverage.  Atlas allocation and outline
 reuse are separate performance work and should follow measurement.
+
+[[lisp:capture-hidden-luvcraft-text-closeup]] renders a 1280 by 360 logical
+Metal frame with the text enlarged in world space, producing a 2560 by 720
+Retina image without post-render scaling.  The elevated camera leaves enough
+world context to exercise the real depth path while giving the outline an
+unobstructed sky background:
+
+[[file:images/slug-world-text-closeup.png]]
+
+This is already falsifying evidence.  The horizontal cuts through =h= and =e=
+and the vertical slivers in =h=, =r=, and =d= coincide with band transitions,
+not font extrema or terrain edges.  The implementation currently sends the
+quad's 0.035-em padded outline bounds to the fragment shader, but
+[[lisp:pack-slug-outline]] partitions the unpadded packed-outline bounds.  The
+shader consequently maps a fragment into a different spatial partition than
+the serializer used to build its curve list.  The next narrow experiment is to
+carry the packed min/max separately from padded quad geometry and require this
+close-up to lose those transition-aligned cuts before widening the oracle.
 
 The world terminal #NMAD2U is a particularly demanding next client: repeated
 grid-aligned glyphs make edge quality, outline reuse, and batching visible, but

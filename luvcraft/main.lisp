@@ -57,7 +57,7 @@
 
 (defun usage (&optional (stream *standard-output*))
   (format stream "Usage: luvcraft [--metal] [--tracy] [--world FILE]~%")
-  (format stream "       luvcraft [--help | --smoke-test PNG | --metal-smoke-test PNG | --metal-benchmark [FRAMES [CSV [SCENARIO]]]]~%")
+  (format stream "       luvcraft [--help | --smoke-test PNG | --metal-smoke-test PNG | --metal-text-closeup PNG | --metal-benchmark [FRAMES [CSV [SCENARIO]]]]~%")
   (format stream "~%")
   (format stream "With no arguments, resume the default interactive world.~%")
   (format stream "--metal opens the interactive world with the Metal 4 backend.~%")
@@ -65,6 +65,7 @@
   (format stream "--world loads or creates the named persistent world.~%")
   (format stream "--smoke-test renders one hidden Vulkan frame and exits.~%")
   (format stream "--metal-smoke-test renders one hidden Metal 4 frame and exits.~%")
+  (format stream "--metal-text-closeup renders the enlarged Slug world-text proof.~%")
   (format stream "--metal-benchmark measures steady or streaming Metal frames.~%"))
 
 (defun default-luvcraft-world-pathname ()
@@ -157,6 +158,12 @@
    pathname :provider (or provider luv:*gpu-provider*))
   (format t "Wrote ~A~%" (truename pathname)))
 
+(defun run-metal-text-closeup (pathname)
+  (format t "Rendering Slug text close-up ~A~%" pathname)
+  (capture-hidden-luvcraft-text-closeup
+   pathname :provider (make-metal-provider))
+  (format t "Wrote ~A~%" (truename pathname)))
+
 (defun parse-frame-count (argument)
   (let ((count (parse-integer argument :junk-allowed t)))
     (unless (and count (plusp count)
@@ -190,6 +197,9 @@
      (run-smoke-test
       (pathname (second arguments))
       (make-metal-provider)))
+    ((and (= (length arguments) 2)
+          (string= (first arguments) "--metal-text-closeup"))
+     (run-metal-text-closeup (pathname (second arguments))))
     ((and (<= 1 (length arguments) 4)
           (string= (first arguments) "--metal-benchmark"))
      (run-metal-benchmark

@@ -114,6 +114,9 @@ are normalized mean magnitude, maximum magnitude, and changed-pixel fraction."
                 (mesher (make-instance 'exposed-face-mesher))
                 (camera (make-instance 'fly-camera))
                 (provider *gpu-provider*)
+                (world-text-distance 8.0)
+                (world-text-lift 3.0)
+                (world-text-units-per-em 0.55)
                 (sky-clock (make-instance 'sky-clock
                                           :pinned-day-fraction 0.5))
                 (sky-profile (make-default-sky-profile)))
@@ -130,11 +133,35 @@ pass an unpinned clock to photograph another time of day."
                   :frames-per-second nil :visible-p nil
                   :provider provider
                   :world world :mesher mesher :camera camera
+                  :world-text-distance world-text-distance
+                  :world-text-lift world-text-lift
+                  :world-text-units-per-em world-text-units-per-em
                   :sky-clock sky-clock
                   :sky-profile sky-profile))
            (capture-luvcraft-screenshot session pathname))
       (when session
         (stop-luvcraft session)))))
+
+(defun capture-hidden-luvcraft-text-closeup
+    (pathname &key (provider *gpu-provider*))
+  "Render a native-resolution close-up of the world Slug text proof.
+
+The wide viewport and enlarged world-space text make outline, band-selection,
+and coverage defects visible without scaling up a smaller raster afterward.
+#9G0Z19"
+  (capture-hidden-luvcraft-screenshot
+   pathname
+   :title "luv Slug world text close-up"
+   :width 1280 :height 360
+   :provider provider
+   :camera
+   (make-instance
+    'fly-camera
+    :position (make-vec3 8.0 24.0 -6.0)
+    :yaw 0.0 :pitch 0.02)
+   :world-text-distance 6.0
+   :world-text-lift 2.2
+   :world-text-units-per-em 3.4))
 
 (defun capture-hidden-luvcraft-frames
     (directory &key

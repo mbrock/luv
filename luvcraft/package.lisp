@@ -67,6 +67,7 @@
            #:camera-z
            #:capture-hidden-luvcraft-frames
            #:capture-hidden-luvcraft-screenshot
+           #:capture-hidden-luvcraft-text-closeup
            #:capture-luvcraft-gazetteer
            #:capture-luvcraft-gazetteer-sequence
            #:capture-luvcraft-gazetteer-view
