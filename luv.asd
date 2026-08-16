@@ -97,6 +97,7 @@
                "closer-mop"
                "ieee-floats"
                "sdl3"
+               "zpng"
                "zpb-ttf"
                (:feature :darwin "float-features")
                (:feature :darwin "trivial-main-thread"))

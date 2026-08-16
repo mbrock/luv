@@ -160,6 +160,7 @@
               lispPackages.named-readtables
               lispPackages.rove
               lispPackages.spinneret
+              lispPackages.zpng
             ] ++ mcclimDependencies
               ++ nixpkgs.lib.optionals pkgs.stdenv.isDarwin [
                 lispPackages.float-features

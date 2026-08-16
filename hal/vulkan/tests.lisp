@@ -1,5 +1,15 @@
 (in-package #:luv.tests)
 
+(deftest renderer-readbacks-use-compressed-png-output
+  (let ((pixels (make-array (* 64 64 4)
+                            :element-type '(unsigned-byte 8)
+                            :initial-element 255)))
+    (uiop:with-temporary-file
+        (:pathname pathname :prefix "luv-readback-" :suffix ".png")
+      (luv:write-rgba-png pathname pixels 64 64 :rgba8-unorm)
+      (with-open-file (stream pathname :element-type '(unsigned-byte 8))
+        (ok (< (file-length stream) 1024))))))
+
 (deftest cadence-clock-wakes-before-deadlines-and-preserves-phase
   (let* ((timestamps nil)
          (clock
