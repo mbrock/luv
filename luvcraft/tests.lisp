@@ -433,16 +433,16 @@
            (luv.slug::make-slug-serialized-outline
             :horizontal-band-count 7 :vertical-band-count 5))
          (resource
-           (luvcraft::make-world-text-glyph-resource
+           (luv.slug::make-slug-device-glyph
             :serialized serialized))
          (glyph
-           (luvcraft::make-world-text-glyph
+           (luv.slug:make-slug-glyph-placement
             :resource resource
             :origin-x 0.0 :origin-y 0.0
             :outline-min-x 0.0 :outline-min-y 0.0
             :outline-max-x 1.0 :outline-max-y 1.0))
          (locations (make-hash-table :test #'eq))
-         (atlas (luvcraft::make-world-text-glyph-atlas :locations locations))
+         (atlas (luv.slug:make-slug-glyph-atlas :locations locations))
          (instances nil))
     (setf (gethash resource locations) '(17 29)
           instances

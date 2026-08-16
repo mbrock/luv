@@ -982,7 +982,7 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                   (text-glyph-cache
                     (when world-text-string
                       (setf world-text-glyph-cache
-                            (make-world-text-glyph-cache device))))
+                            (luv.slug:make-slug-glyph-cache device))))
                   (text-run
                     (when text-glyph-cache
                       (setf world-text-run
@@ -1079,7 +1079,7 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
           (ignore-errors (release-world-text-run world-text-run)))
         (when world-text-glyph-cache
           (ignore-errors
-            (release-world-text-glyph-cache world-text-glyph-cache)))
+            (luv.slug:release-slug-glyph-cache world-text-glyph-cache)))
         (close-canvas canvas)
         (when device (destroy device))))))
 
@@ -1115,7 +1115,7 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
     (when (luvcraft-session-world-text session)
       (release-world-text-run (luvcraft-session-world-text session)))
     (when (luvcraft-session-world-text-glyph-cache session)
-      (release-world-text-glyph-cache
+      (luv.slug:release-slug-glyph-cache
        (luvcraft-session-world-text-glyph-cache session)))
     (close-canvas canvas))
   (destroy (luvcraft-session-device session))

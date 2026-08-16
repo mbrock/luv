@@ -77,6 +77,35 @@
            #:load-slug-glyph
            #:map-slug-outline-points
            #:normalize-slug-glyph-outline
+           #:slug-device-glyph
+           #:slug-device-glyph-key
+           #:slug-device-glyph-glyph-id
+           #:slug-device-glyph-serialized
+           #:slug-glyph-placement
+           #:make-slug-glyph-placement
+           #:slug-glyph-placement-glyph-id
+           #:slug-glyph-placement-resource
+           #:slug-glyph-placement-origin-x
+           #:slug-glyph-placement-origin-y
+           #:slug-glyph-placement-outline-min-x
+           #:slug-glyph-placement-outline-min-y
+           #:slug-glyph-placement-outline-max-x
+           #:slug-glyph-placement-outline-max-y
+           #:slug-glyph-atlas
+           #:make-slug-glyph-atlas
+           #:slug-glyph-atlas-locations
+           #:slug-glyph-atlas-band-texel-count
+           #:slug-glyph-atlas-curve-texel-count
+           #:slug-glyph-atlas-band-view
+           #:slug-glyph-atlas-curve-view
+           #:slug-glyph-cache
+           #:make-slug-glyph-cache
+           #:cached-slug-shaped-text
+           #:make-slug-glyph-placements
+           #:slug-text-extents
+           #:slug-glyph-atlas-for
+           #:slug-glyph-cache-resource-count
+           #:release-slug-glyph-cache
            #:slug-atlas-fragment-specification
            #:slug-root-eligibility
            #:slug-quadratic-outline

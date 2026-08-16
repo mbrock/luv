@@ -131,6 +131,7 @@
                    (:file "slug-serialization")
                    (:file "slug-harfbuzz")
                    (:file "slug-truetype")
+                   (:file "slug-cache")
                    (:file "slug")))
      (:module "msl"
       :pathname "metal/msl"

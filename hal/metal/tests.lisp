@@ -55,7 +55,7 @@
 (deftest world-text-cache-reuses-shaping-and-device-glyphs
   (let* ((device
            (request-gpu-device (make-instance 'metal-gpu-provider)))
-         (cache (luvcraft::make-world-text-glyph-cache device))
+         (cache (luv.slug:make-slug-glyph-cache device))
          (font (cl-dejavu:font-pathname "DejaVuSans.ttf"))
          (camera (make-instance 'fly-camera))
          (first nil)
@@ -76,34 +76,34 @@
                      (luvcraft::world-text-run-shaped-text second)))
              (ok (eq (luvcraft::world-text-run-atlas first)
                      (luvcraft::world-text-run-atlas second)))
-             (ok (< (luvcraft::world-text-glyph-atlas-band-texel-count
+             (ok (< (luv.slug:slug-glyph-atlas-band-texel-count
                      (luvcraft::world-text-run-atlas first))
                     4096))
-             (ok (< (luvcraft::world-text-glyph-atlas-curve-texel-count
+             (ok (< (luv.slug:slug-glyph-atlas-curve-texel-count
                      (luvcraft::world-text-run-atlas first))
                     4096))
-             (ok (< (luvcraft::world-text-glyph-cache-resource-count cache)
+             (ok (< (luv.slug:slug-glyph-cache-resource-count cache)
                     (length first-glyphs)))
              (dolist (glyph first-glyphs)
-               (let ((glyph-id (luvcraft::world-text-glyph-glyph-id glyph)))
+               (let ((glyph-id (luv.slug:slug-glyph-placement-glyph-id glyph)))
                  (multiple-value-bind (resource present-p)
                      (gethash glyph-id resources-by-glyph)
                    (if present-p
                        (progn
                          (setf saw-repeated-glyph-p t)
                          (ok (eq resource
-                                 (luvcraft::world-text-glyph-resource glyph))))
+                                 (luv.slug:slug-glyph-placement-resource glyph))))
                        (setf (gethash glyph-id resources-by-glyph)
-                             (luvcraft::world-text-glyph-resource glyph))))))
+                             (luv.slug:slug-glyph-placement-resource glyph))))))
              (ok saw-repeated-glyph-p)
              (loop for first-glyph in first-glyphs
                    for second-glyph in second-glyphs
-                   do (ok (eq (luvcraft::world-text-glyph-resource first-glyph)
-                              (luvcraft::world-text-glyph-resource
+                   do (ok (eq (luv.slug:slug-glyph-placement-resource first-glyph)
+                              (luv.slug:slug-glyph-placement-resource
                                second-glyph))))))
       (when second (luvcraft::release-world-text-run second))
       (when first (luvcraft::release-world-text-run first))
-      (luvcraft::release-world-text-glyph-cache cache)
+      (luv.slug:release-slug-glyph-cache cache)
       (destroy device))))
 
 (objc:define-objective-c-message make-test-metal-layer
