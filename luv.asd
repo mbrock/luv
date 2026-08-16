@@ -330,6 +330,7 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
   :author "Mikael Brockman"
   :depends-on (#:luv/luvcraft/shaders
                #:luv/slug
+               #:cl-dejavu
                #:rove)
   :components ((:module "hal"
                 :components
@@ -344,11 +345,12 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
                (error "luv shader tests failed"))))
 
 (asdf:defsystem #:luv/slug
-  :description "A fixed-outline proof of Slug quadratic rendering in mathematical shaders."
+  :description "Slug quadratic outline preprocessing and mathematical shaders."
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on (#:luv/spir-v
-               #:luv/arithmetic/lisp)
+               #:luv/arithmetic/lisp
+               #:zpb-ttf)
   :serial t
   :components ((:module "hal"
                 :components
@@ -356,6 +358,7 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
                   :serial t
                   :components ((:file "slug-package")
                                (:file "slug-outline")
+                               (:file "slug-truetype")
                                (:file "slug")))))))
 
 (asdf:defsystem #:luv/msl

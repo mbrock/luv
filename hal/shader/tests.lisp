@@ -1570,6 +1570,30 @@
         (ok (equal '(0 0)
                    (slug:slug-outline-error-details condition)))))))
 
+(deftest zpb-ttf-glyphs-enter-slug-before-software-rasterization
+  (zpb-ttf:with-font-loader
+      (font-loader (cl-dejavu:font-pathname "DejaVuSans.ttf"))
+    (let* ((glyph (slug:load-slug-glyph #\O font-loader))
+           (outline (slug:slug-glyph-outline glyph))
+           (contours (slug:slug-outline-contours outline))
+           (packed (slug:pack-slug-outline outline))
+           (orientations
+             (mapcar #'slug:slug-contour-orientation contours)))
+      (ok (char= #\O (slug:slug-glyph-character glyph)))
+      (ok (= 2048 (slug:slug-glyph-units-per-em glyph)))
+      (ok (= 1612 (slug:slug-glyph-advance-width glyph)))
+      (ok (= 2 (length contours)))
+      (ok (= 16 (length (slug:slug-packed-outline-curves packed))))
+      (ok (member :clockwise orientations))
+      (ok (member :counterclockwise orientations))
+      (ok (every (lambda (contour)
+                   (every (lambda (curve)
+                            (not (equalp
+                                  (slug:slug-quadratic-control curve)
+                                  (slug:slug-quadratic-end curve))))
+                          contour))
+                 contours)))))
+
 (deftest shaders-consume-shared-arithmetic-functions-directly
   (let* ((before (spv:shader-source-revision))
          (specification

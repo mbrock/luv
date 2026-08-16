@@ -368,6 +368,21 @@ and render it through the same public shader specification on Metal and the
 Vulkan smoke path.  Keep shaping separate: HarfBuzz supplies glyph indexes and
 positions for runs, while this step proves one indexed glyph's outline.
 
+The font boundary is now working before any rasterizer.  The =luv/slug= system
+depends directly on =zpb-ttf= and converts its resolved
+=(start,control,end)= segments into luv contours; a nil control becomes the
+standard Slug line quadratic.  A =slug-glyph= also retains advance width, left
+side bearing, and units per em, and the converter accepts an already selected
+zpb glyph so a later HarfBuzz glyph index need not be turned back into a
+character.  The reproducible test font is =cl-dejavu='s DejaVu Sans: its “O”
+produces two opposite-winding contours, 16 quadratics, a 1612-unit advance, and
+packs through the same arbitrary-outline path.  No =cl-vectors=, =cl-aa=, or
+McCLIM raster object enters this system.
+
+This completes outline acquisition, not the mark: the packed glyph still has
+to be serialized after half quantization, uploaded, and rendered by the
+data-driven shader on Metal and Vulkan.
+
 Done when: changing the glyph id changes only uploaded outline/vertex data, not
 shader source; the GPU image is visually inspected and compared with a small
 CPU winding reference; and dynamic dilation is tested separately on geometry

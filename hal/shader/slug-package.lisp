@@ -33,6 +33,16 @@
            #:slug-packed-outline-horizontal-bands
            #:slug-packed-outline-vertical-bands
            #:pack-slug-outline
+           #:slug-glyph
+           #:make-slug-glyph
+           #:slug-glyph-character
+           #:slug-glyph-outline
+           #:slug-glyph-advance-width
+           #:slug-glyph-left-side-bearing
+           #:slug-glyph-units-per-em
+           #:slug-outline-from-zpb-glyph
+           #:make-slug-glyph-from-zpb-glyph
+           #:load-slug-glyph
            #:slug-root-eligibility
            #:slug-quadratic-outline
            #:slug-bezier-vertex-specification
