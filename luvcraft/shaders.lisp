@@ -277,9 +277,12 @@
 (defun block-world-text-vertex-specification ()
   (shader-specification-for :slug-world-text :vertex))
 
-;;; Terminal cell backgrounds are solid world quads placed like glyph quads.
-;;; They share the text run's frame bind group and reuse the crosshair's flat
-;;; ink fragment stage.
+;;; Terminal cell backgrounds are analytic world rectangles.  The instance
+;;; carries the exact painted rectangle; the vertex stage inflates the quad by
+;;; a small margin and hands the fragment stage a rectangle-local coordinate,
+;;; where the same signed-distance coverage as the GUI round-rects resolves the
+;;; edge against the screen gradient.  They share the text run's frame bind
+;;; group and premultiplied blending.
 
 (define-shader-method shader-specification-for
     terminal-cell-vertex-specification
@@ -292,16 +295,24 @@
               (ink-input :vec3 :location 4
                          :quantity :linear-rgb :unit :one))
      :outputs ((clip-position :vec4 :built-in :position)
-               (ink-output :vec3 :location 0
-                           :quantity :linear-rgb :unit :one))
+               (render-coordinate :vec2 :location 0)
+               (render-half-size-radius :vec3 :location 1)
+               (render-color :vec4 :location 2))
      :resources
      ((frame-state :uniform-block :set 0 :binding 2
                    :members #.*frame-uniform-members*)))
-  (let* ((world-position
+  (let* ((width (sqrt (dot world-right-edge world-right-edge)))
+         (height (sqrt (dot world-up-edge world-up-edge)))
+         ;; Inflate by a fraction of the row height on every side so the
+         ;; antialiased edge has room to fall off outside the exact rectangle.
+         (margin (* height 0.08))
+         (u (- (* (swizzle quad-corner :x) (+ width (* 2.0 margin))) margin))
+         (v (- (* (swizzle quad-corner :y) (+ height (* 2.0 margin))) margin))
+         (world-position
            (assume-quantity
             (+ world-origin
-               (* world-right-edge (swizzle quad-corner :x))
-               (* world-up-edge (swizzle quad-corner :y)))
+               (* world-right-edge (/ u width))
+               (* world-up-edge (/ v height)))
             :quantity :world-position :unit :cell))
          (camera (swizzle camera-vector :xyz))
          (right (swizzle right-vector :xyz))
@@ -326,12 +337,23 @@
                      (representation clip-z)
                      (representation view-z))))
     (set-output clip-position clip)
-    (set-output ink-output ink-input)))
+    (set-output render-coordinate
+                (vec2 (- u (* width 0.5)) (- v (* height 0.5))))
+    (set-output render-half-size-radius
+                (vec3 (* width 0.5) (* height 0.5) 0.0))
+    (set-output render-color (vec4 (representation ink-input) 1.0))))
 
-(defmethod shader-specification-for
+(define-shader-method shader-specification-for
+    terminal-cell-fragment-specification
     ((role (eql :terminal-cell)) (stage (eql :fragment)))
-  (declare (ignore role stage))
-  (shader-specification-for :block-crosshair :fragment))
+    (:stage :fragment
+     :inputs ((render-coordinate :vec2 :location 0)
+              (half-size-radius :vec3 :location 1)
+              (color :vec4 :location 2))
+     :outputs ((color-output :vec4 :location 0)))
+  (let* ((coverage
+           (luv.analytic:roundrect-coverage render-coordinate half-size-radius)))
+    (set-output color-output (* color coverage))))
 
 (defmethod shader-specification-for
     ((role (eql :slug-world-text)) (stage (eql :fragment)))

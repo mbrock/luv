@@ -58,7 +58,7 @@
 (defparameter *terminal-display-bold-font-pathname*
   (luvcraft-font-pathname "MonaspaceNeon-Bold.ttf"))
 
-(defparameter *terminal-display-default-foreground* #xF5528A
+(defparameter *terminal-display-default-foreground* #xF4EFE1
   "Packed sRGB #xRRGGBB used for cells without an explicit foreground.")
 
 ;;; The frame records screen-right, screen-up, and outward in voxel axes.  EQL
@@ -955,9 +955,11 @@ and height in world units.  FONT-SCALE is an explicit multiplier on contain."
 
 (defun make-terminal-display-cell-instances
     (presentation surface font-loader margin font-scale)
-  "Build one solid quad record per cell which paints its own background.
+  "Build one background record per same-coloured run of cells in a row.
 
-Each record is origin, right edge, up edge, and linear RGB: 12 floats."
+Each record is origin, right edge, up edge, and linear RGB: 12 floats.  The
+edges span the exact painted rectangle; the shader pads the quad itself and
+resolves the analytic edge, so adjacent runs meet without seams."
   (multiple-value-bind (font-height font-advance) (terminal-font-metrics font-loader)
     (let* ((domain (terminal-grid-presentation-domain presentation))
            (frame (terminal-face-frame (terminal-surface-face surface)))
@@ -973,30 +975,38 @@ Each record is origin, right edge, up edge, and linear RGB: 12 floats."
         (declare (ignore grid-width))
         (let ((cell-width (* font-advance scale))
               (cell-height (* font-height scale)))
-          (dotimes (row (terminal-grid-domain-rows domain))
-            (dotimes (column (terminal-grid-domain-columns domain))
-              (multiple-value-bind (foreground background)
-                  (terminal-presentation-cell-style presentation column row)
-                (declare (ignore foreground))
-                (when background
-                  (let ((corner
-                          (terminal-offset-point
-                           origin
-                           right (+ left (* column cell-width))
-                           up (+ bottom grid-height
-                                 (- (* (1+ row) cell-height))))))
-                    (multiple-value-bind (red green blue)
-                        (packed-color-linear-components background)
-                      (incf count)
-                      (push (list (vec3-x corner) (vec3-y corner) (vec3-z corner)
-                                  (* (vec3-x right) cell-width)
-                                  (* (vec3-y right) cell-width)
-                                  (* (vec3-z right) cell-width)
-                                  (* (vec3-x up) cell-height)
-                                  (* (vec3-y up) cell-height)
-                                  (* (vec3-z up) cell-height)
-                                  red green blue)
-                            values)))))))))
+          (flet ((emit (row start end background)
+                   (let ((corner
+                           (terminal-offset-point
+                            origin
+                            right (+ left (* start cell-width))
+                            up (+ bottom grid-height
+                                  (- (* (1+ row) cell-height)))))
+                         (width (* (- end start) cell-width)))
+                     (multiple-value-bind (red green blue)
+                         (packed-color-linear-components background)
+                       (incf count)
+                       (push (list (vec3-x corner) (vec3-y corner) (vec3-z corner)
+                                   (* (vec3-x right) width)
+                                   (* (vec3-y right) width)
+                                   (* (vec3-z right) width)
+                                   (* (vec3-x up) cell-height)
+                                   (* (vec3-y up) cell-height)
+                                   (* (vec3-z up) cell-height)
+                                   red green blue)
+                             values)))))
+            (dotimes (row (terminal-grid-domain-rows domain))
+              (let ((run-start nil) (run-color nil))
+                (dotimes (column (terminal-grid-domain-columns domain))
+                  (multiple-value-bind (foreground background)
+                      (terminal-presentation-cell-style presentation column row)
+                    (declare (ignore foreground))
+                    (unless (eql background run-color)
+                      (when run-color (emit row run-start column run-color))
+                      (setf run-start column run-color background))))
+                (when run-color
+                  (emit row run-start (terminal-grid-domain-columns domain)
+                        run-color)))))))
       (let ((data (make-array (* 12 count) :element-type 'single-float))
             (index 0))
         (dolist (record (nreverse values))
@@ -1097,6 +1107,7 @@ frame bind group so both draw against the same camera uniform."))
                       (:shader-location 3 :offset 24 :format :float32x3)
                       (:shader-location 4 :offset 36 :format :float32x3))))
                   :target-format (canvas-format (luvcraft-session-context session))
+                  :target-blend :premultiplied-alpha
                   :primitive '(:topology :triangle-list)
                   :depth-stencil
                   '(:format :depth32-float
