@@ -3,7 +3,7 @@
 LUVCRAFT_BENCHMARK_FRAMES ?= 120
 LUVCRAFT_BENCHMARK_CSV ?= build/luvcraft-metal-benchmark.csv
 
-.PHONY: all luvcraft run test parinfer-check shader-validate msl-validate smoke metal-smoke metal-benchmark mcluv wiki wiki-cli objective-c-probe metal-clear metal-shader metal-pipeline metal-draw slug-proof clean
+.PHONY: all luvcraft run test parinfer-check shader-validate msl-validate smoke metal-smoke metal-benchmark mcluv readme-screenshots wiki wiki-cli objective-c-probe metal-clear metal-shader metal-pipeline metal-draw slug-proof clean
 
 all: luvcraft
 
@@ -83,6 +83,9 @@ metal-benchmark: luvcraft
 
 mcluv:
 	./scripts/dev sbcl --script mcclim/build.lisp
+
+readme-screenshots:
+	./scripts/dev sbcl --script scripts/readme-screenshots.lisp screenshots
 
 wiki-cli:
 	./scripts/dev sbcl --script wiki/build.lisp

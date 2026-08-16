@@ -1,226 +1,141 @@
 # luv
 
-`luv` is an experimental Common Lisp GPU workshop: a WebGPU-shaped API,
-a hand-owned CFFI Vulkan layer, an SDL canvas host, a tiny SPIR-V assembler,
-and a few live demos that keep the whole thing honest.
+![A snowy forest in luvcraft](screenshots/shadow-forest.png)
 
-It is not trying to be a packaged engine yet. It is a place to make GPU,
-windowing, shader, canvas, and eventually game-shaped ideas tangible from a
-live Lisp image.
+`luv` is a Common Lisp GPU workshop. It has a WebGPU-ish hardware abstraction
+layer with hand-built Vulkan and native Metal 4 backends, an SDL3 canvas host,
+a mathematical shader language, a little voxel world called **luvcraft**, and
+a McCLIM backend for putting live Lisp tools on GPU surfaces.
 
-## What's here
+It is all rather experimental. The point is not to hide graphics programming
+behind an enormous engine. The point is to make the interesting machinery small
+enough to inspect, change, and keep running while we change it.
 
-The systems are the useful map; modules inside them follow the
-directory tree instead of pretending that every implementation layer is an
-independently loadable product:
+## A GPU system we can understand
 
-```text
-:luv                 GPU, shader, native-canvas, Vulkan, and Metal atelier
-:luvcraft/world      renderer-independent voxel coordinates and resident data
-:luvcraft            the interactive block-world application
-:luvcraft/tools      one-shot block-world and gazetteer tools
-:luvcraft/program    the standalone game and its live Slynk endpoint
-:mcluv/backend       McCLIM presented through luv canvases
-:mcluv/shader-lab    McCLIM browser for luvcraft's live shaders
-:mcluv               the standalone Listener and shader lab
-:luv-wiki            reusable Org reader and site renderer
-:luv-wiki-site       this repository's Org corpus and rendered site
-```
+The HAL borrows the useful shape of WebGPU—devices, queues, resources,
+descriptors, encoders, passes, submission—but WebGPU is a landmark, not a
+specification luv is trying to reproduce.
 
-The five root ASDF files are deliberate ownership boundaries. `luv.asd`,
-`luvcraft.asd`, and `mcluv.asd` own the HAL, game, and McCLIM application;
-`luv-wiki.asd` owns the reusable wiki machinery, while `luv-wiki-site.asd`
-owns the corpus that uses its custom ASDF component. Keeping those primary
-definitions at the root lets ASDF discover them normally while their
-components live with the code they own.
+Both backends are tailored to this project. Vulkan is a hand-owned CFFI layer;
+Metal goes straight through a small Objective-C bridge to Metal 4. There is no
+continent of generated bindings in between. SDL3 owns the window, input, and
+native event loop while the GPU backend owns presentation and synchronization.
 
-The implementation follows the same contracts physically under
-[`hal/`](hal/).  Shared GPU, canvas, shader, and tracing protocols sit at the
-root; [`hal/vulkan/`](hal/vulkan/) and [`hal/metal/`](hal/metal/) each gather
-one backend's native vocabulary, shader target, GPU realization, presentation
-context, tests, and bring-up probes.  [`hal/sdl/`](hal/sdl/) owns the common
-window and event host.  The general Objective-C foreign object system remains
-separate in [`objective-c/`](objective-c/); Metal depends on it, but does not
-own it.
+That makes low-level things unusually reachable from Lisp. A command is an
+ordinary inspectable object. A shader method can be redefined in a running
+image. A queue submission has an explicit lifetime story. When an abstraction
+is wrong, we can follow it all the way down and change it.
 
-Backend-neutral quantity semantics and compilation live together under
-[`arithmetic/`](arithmetic/): the semantic algebra at the root, the inspectable
-source language in [`arithmetic/language/`](arithmetic/language/), and its
-ordinary Common Lisp realization in [`arithmetic/lisp/`](arithmetic/lisp/).
-Each layer keeps its executable claims beside its implementation.
+The longer version lives in [the GPU architecture
+notes](wiki/gpu-architecture.org), [the Vulkan field
+notes](wiki/luv-vulkan-hal.org), and [the native Metal 4
+notes](wiki/metal-backend.org).
 
-Luvcraft — the block world — lives in [`luvcraft/`](luvcraft/), from the
-renderer-independent world model up through terrain generation, meshing,
-player simulation, live shader pipelines, tests, command-line tools, and the
-interactive application.  The McCLIM backend and its labs live in
-[`mcclim/`](mcclim/).  The Org design corpus and the Lisp implementation that
-reads and renders it now form one neighborhood under [`wiki/`](wiki/).
+## Arithmetic that knows what its numbers mean
 
-The packages express the same boundaries: `LUV` is the GPU and canvas HAL,
-`LUVCRAFT.WORLD` is the renderer-independent voxel model, `LUVCRAFT` is the
-game, `LUVCRAFT.SHADERS` owns its shaders, and `MCLUV` owns the McCLIM
-application. Lower layers retain focused packages such as `LUV.SPIR-V`,
-`LUV.MSL`, and `LUV.OBJECTIVE-C`.
+Luv's shader language is also a small mathematical language. Its expressions
+remember representation types, but they can additionally carry dimensions,
+units, affine character, tensor order, and domain meaning. A position is not a
+difference; opacity is not probability; two things do not become
+interchangeable merely because both happen to fit in a `vec3`.
 
-## Quick Start
+The same arithmetic frontend can lower checked expressions to ordinary Common
+Lisp or feed the shader compilers. Shader methods become SPIR-V for Vulkan and
+structured MSL for Metal 4, while retaining enough provenance for tools to
+connect a source expression with the SSA instructions it produced.
 
-The flake pins nixpkgs and provides the project's SBCL 2.6.7, including
-`sb-simd` on both arm64/NEON and x86-64, alongside SDL3, Vulkan tools,
-MoltenVK on macOS, Mesa/lavapipe for offscreen Linux captures, and the pinned
-local Lisp projects:
+[Mathematical shaders](wiki/mathematical-shaders.org) explains the live shader
+objects. [Quantities and measurement](wiki/quantities-and-measurement.org) is
+the more ambitious account of what the arithmetic system is trying to keep
+honest.
 
-```sh
-nix develop
-```
+## Luvcraft is where the abstractions have to survive
 
-For ordinary repeated work, install the same environment into your user Nix
-profile once:
+![A luminous crystal in the luvcraft screenshot gazetteer](screenshots/glow-floor.png)
 
-```sh
-nix profile add .#dev
-```
+Luvcraft is an editable, procedural block world—not because the world needs
+another Minecraft clone, but because a game is a good way to stop a rendering
+API from becoming a collection of attractive diagrams.
 
-This installs `luv-env`, which carries the pinned Lisp, native libraries, and
-project environment without evaluating the flake on every invocation.  The
-repository's `./sly`, `scripts/luv`, `scripts/wiki`, and Make targets use it
-automatically.  They fall back to `nix develop` when it is not installed.
+There is terrain generation, chunk streaming, meshing, collision, block
+editing, a moving sky, shadows, block light, textured materials, persistence,
+and live shader replacement. CPU work crosses explicit ownership boundaries;
+GPU objects stay on the render thread; stale asynchronous results are thrown
+away instead of becoming mysterious scenery.
 
-From there, load the project in Lisp:
+The checked-in pictures come from a small screenshot *gazetteer*: named worlds,
+cameras, and times of day rendered through the same hidden SDL/GPU path as the
+real application. They are visual fixtures as well as illustrations. See [the
+block-world notes](wiki/block-world.org) for the current proof and the possible
+worlds beyond it.
 
-```lisp
-(asdf:load-asd (truename "luv.asd"))
-(asdf:load-system :luv)
-```
+## McCLIM, on the GPU, inside the world
 
-The project launchers enter that environment themselves, so a one-shot command
-does not depend on whichever `sbcl` happens to be installed by Homebrew or the
-host system. `./scripts/dev --status` shows the active provider, pinned SBCL,
-ASDF cache, checkout identity, and checkout-specific Slynk port:
+![The McCLIM shader browser rendered by luv](screenshots/mcclim-shader-lab.png)
 
-```sh
-scripts/luv eval '(luvcraft:make-little-block-world)'
-scripts/luv block-world /tmp/luv-block-world.png
-```
+CLIM—the Common Lisp Interface Manager—is an old and still unusual way to build
+interfaces around semantic objects and commands rather than a pile of inert
+pixels. [McCLIM](https://mcclim.common-lisp.dev/) is its open-source Common Lisp
+implementation.
 
-For the standalone interactive block world, no Emacs or running Lisp image is
-needed:
+Luv has a custom McCLIM backend. Today it can take McCLIM's raster output,
+upload it to a GPU texture, and present or composite that texture through the
+same canvas system. The shader browser above is a real McCLIM application: the
+materials, mathematical expressions, definitions, and lowered instructions are
+presentations you can point at and inspect.
 
-```sh
-make              # builds ./build/luvcraft
-./build/luvcraft   # opens the game window
-./sly --luvcraft eval '(type-of luvcraft:*session*)' # evaluates in that game
-make test          # runs the model and block-world test suites
-make smoke         # runs the built program headlessly and writes a PNG
-```
+The next step is more peculiar: bypass the software rasterizer, retain the
+actual CLIM geometry, and render curves and glyphs directly on the GPU. From
+there, a listener, inspector, map, or editor does not have to live in a separate
+desktop window. It can be a screen, panel, instrument, or object in the 3D
+world.
 
-The world model can be loaded and tested without SDL or Vulkan:
+## Live hacking, including by agents
 
-```lisp
-(asdf:load-asd (truename "luvcraft.asd"))
-(asdf:load-system :luvcraft/world)
-(asdf:test-system :luvcraft)
-```
+Common Lisp already assumes that a program can stay alive while you inspect and
+redefine it. Luv leans into that. `./sly` talks to a durable development image;
+every standalone luvcraft process also advertises its own Slynk endpoint, so an
+agent can inspect the exact running game, follow cross-references, redefine a
+shader, and watch the dependency machinery publish a replacement pipeline.
 
-## Live Workflow
+The repository is arranged for that style of work. [AGENTS.md](AGENTS.md) gives
+an agent the concrete operating rules, while the [workshop wiki](wiki/index.org)
+keeps architecture, source studies, experiments, and unfinished questions in a
+form that both people and agents can navigate from the terminal.
 
-This project is meant to be poked through a durable Lisp image. If you are an
-agent or you want the local one-shot SLY client details, read
-[`AGENTS.md`](AGENTS.md). The short version:
+The larger ambition is to stop treating agents as creatures permanently
+outside the application. Luvcraft could contain terminals and simulated
+devices through which you talk to them, or NPC-like avatars with tools and a
+place in the world. Instead of leaving the world to ask an agent to change it,
+you might remain inside it and work together there. That part is a direction,
+not a finished feature—but much of the introspective plumbing it would need is
+already becoming real.
+
+## Poking it
+
+The universal installation instruction in 2026 is: point Codex at this
+repository and say **set this thing up**. The project-specific facts it needs
+are in [AGENTS.md](AGENTS.md).
+
+Once the environment exists, the short human version is:
 
 ```sh
-./sly start
-./sly eval '(defparameter *demo* (luv:start-clear-color-demo))' --package LUV
-./sly inspect '*demo*' --package LUV
-./sly eval '(luv:stop-clear-color-demo *demo*)' --package LUV
-./sly stop
+make
+./build/luvcraft
 ```
 
-Every standalone luvcraft process also embeds its own Slynk listener on an
-available loopback port. While its window is open, `./sly --luvcraft ...`
-attaches to that exact game process; `luvcraft:*session*` is its live session.
-Plain `./sly ...` continues to address the separate durable development image.
-The primary checkout uses port 4005; each linked worktree derives a stable
-independent port and verifies that the listener loaded that same checkout.
-Concurrent `./sly start` calls are serialized so they cannot orphan the winner.
-
-In Emacs, this checkout's directory locals define a `luv` SLY implementation
-that enters the same profile-aware `scripts/dev` environment, loads
-`sly-init.lisp`, and opens the checkout-specific durable listener.
-
-## Demos
-
-```lisp
-(defparameter *demo* (luv:start-clear-color-demo))
-(luv:stop-clear-color-demo *demo*)
-
-(defparameter *compute* (luv:start-compute-gradient-demo))
-(luv:stop-compute-gradient-demo *compute*)
-
-(defparameter *world* (luvcraft:start-luvcraft))
-(luvcraft:capture-luvcraft-screenshot *world* #P"/tmp/luv-block-world.png")
-(luvcraft:stop-luvcraft *world*)
-
-(asdf:load-asd (truename "mcluv.asd"))
-(asdf:load-system :mcluv/shader-lab)
-(defparameter *shader-lab* (mcluv:open-shader-lab))
-(mcluv:refresh-shader-lab *shader-lab*)
-(multiple-value-bind (status report)
-    (mcluv:shader-lab-health *shader-lab*)
-  (list status
-        (mcluv:shader-lab-health-report-mirror-count report)
-        (mcluv:shader-lab-health-report-canvas-state report)))
-;; => (:responsive 1 :open)
-(mcluv:close-shader-lab *shader-lab*)
-```
-
-Click the block-world window once to capture the pointer. Walk with WASD and
-jump with Space; one-block ledges autojump, and Shift sprints. The outlined
-centre crosshair is the edit ray: left click removes, right click places,
-middle click picks, and the number keys 1–7 select grass, dirt, stone, wood,
-leaves, sand, or snow.
-Escape releases the pointer.
-
-Terrain generation and meshing run on one sleeping SBCL worker rather than in
-the frame callback. The world/canvas thread remains the only writer of
-residency and the only owner of Vulkan objects: it sends immutable dense chunk
-or mesh snapshots, validates incarnation/revision tokens on return, then
-publishes only a small number of CPU/GPU products per frame. Rapid travel
-coalesces work by chunk key instead of accumulating a history-sized queue.
-Prebuilt worlds keep caller-owned residency while using the same asynchronous
-meshing and render-thread publication path.
-
-The shader lab is also a luvcraft material workbench. Its live atlas cards and
-shader-definition tabs are McCLIM presentations; click between block geometry,
-block surface, and crosshair methods to recompile their current CLOS definitions,
-then select expressions or SSA occurrences to follow the compiler's provenance
-in either direction. Refresh and health checks use bounded event-loop
-acknowledgements. Health also verifies the frame state, owning process,
-registered mirror, native canvas, and event handler; a stuck command loop
-reports `:unresponsive` with a best-effort thread backtrace.
-
-The block-world vertex and fragment methods are hot-replaced at their CLOS
-role/stage coordinates. Luvcraft notices either MOP revision on its next frame,
-builds a coherent vertex-plus-fragment candidate pipeline, and publishes it only
-after Vulkan creation succeeds. A broken edit is retained as a diagnostic while
-the last good pipeline continues rendering. The current Cocoa host supports one
-native canvas, so close luvcraft before opening the standalone shader lab.
-
-The hidden screenshot path is useful in CI-ish or server-ish environments:
+While the game is running, this evaluates inside that exact process:
 
 ```sh
-scripts/luv block-world /tmp/luv-block-world.png
-scripts/luv block-world /tmp/luv-block-world-frames/ --count 6
+./sly --luvcraft eval '(type-of luvcraft:*session*)'
 ```
 
-## Notes
+And this regenerates every image used by this README from the real renderers:
 
-The workshop wiki starts at [`wiki/index.org`](wiki/index.org). It is the right
-place for the current GPU architecture and backend proofs, the block world,
-source studies, and other evolving design notes. It is also rendered as a
-static site at
-<https://mbrock.github.io/luv/>; `make wiki` (or `(asdf:make :luv-wiki-site)`)
-builds it into `build/wiki/`.
+```sh
+make readme-screenshots
+```
 
-The current implementation is deliberately incomplete. The Vulkan binding grows
-when the higher-level experiments need a new capability, and the design should
-stay easy to change while the shape is still being discovered.
+This is a workshop, not an authority, and it is very much still under
+construction.

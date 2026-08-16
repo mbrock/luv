@@ -133,15 +133,16 @@
                           :dependent dependent :pipeline pipeline)))
     (refresh-shader-definition-entry entry :force t)))
 
-(defun make-static-shader-definition-entry (specification)
+(defun make-static-shader-definition-entry (specification &key label)
   (let ((entry
           (make-instance
            'shader-definition-entry
            :role (luv.spir-v:shader-object-name specification)
            :stage (luv.spir-v:shader-specification-stage specification)
-           :label (string-upcase
-                   (symbol-name
-                    (luv.spir-v:shader-object-name specification)))
+           :label (or label
+                      (string-upcase
+                       (symbol-name
+                        (luv.spir-v:shader-object-name specification))))
            :specification specification)))
     (refresh-shader-definition-entry entry :force t)))
 
@@ -963,6 +964,129 @@
         (cond (condition (values frame :unresponsive condition))
               (completed-p (values frame :refreshed nil))
               (t (values frame :unresponsive nil))))))
+
+(defun capture-raster-mirror-screenshot (mirror pathname)
+  "Read MIRROR's uploaded GPU texture and write it to PATHNAME as a PNG."
+  (check-type mirror luv-raster-mirror)
+  (let* ((target (mirror-target mirror))
+         (context (mirror-context mirror))
+         (texture (mirror-texture mirror)))
+    (unless (eq :open (luv:canvas-state target))
+      (error "Cannot capture a McCLIM mirror whose canvas is ~S."
+             (luv:canvas-state target)))
+    (unless (and context texture)
+      (error "Cannot capture a McCLIM mirror before its first presentation."))
+    (ensure-directories-exist pathname)
+    (luv:request-canvas-frame
+     target
+     (lambda (timestamp)
+       (declare (ignore timestamp))
+       (let* ((device (luv:context-device context))
+              (queue (luv:device-queue device))
+              (size (luv:gpu-texture-size texture))
+              (width (first size))
+              (height (second size))
+              (format (luv:gpu-texture-format texture))
+              (buffer nil)
+              (encoder nil)
+              (commands nil))
+         (unwind-protect
+              (progn
+                (setf buffer
+                      (luv:create
+                       device
+                       (luv:make-buffer-descriptor
+                        :label "McCLIM screenshot readback"
+                        :size (* 4 width height)
+                        :usage '(:copy-dst)))
+                      encoder
+                      (luv:create
+                       device
+                       (luv:make-command-encoder-descriptor
+                        :label "McCLIM screenshot commands")))
+                (luv:encode
+                 encoder
+                 (luv:make-gpu-copy-texture-to-buffer-command
+                  :source texture :destination buffer))
+                (setf commands (luv:finish encoder))
+                (luv:submit queue commands)
+                (let ((pixels (luv:read-buffer buffer)))
+                  (luv:write-rgba-png
+                   pathname pixels width height format)
+                  (values pathname pixels width height format)))
+           (when commands (luv:destroy commands))
+           (when encoder (luv:destroy encoder))
+           (when buffer (luv:destroy buffer))))))))
+
+(defun capture-shader-lab-screenshot
+    (frame pathname &key (timeout 10.0))
+  "Redisplay FRAME and capture its actual luv-backed McCLIM texture."
+  (check-type frame shader-lab)
+  (multiple-value-bind (completed-p result condition)
+      (call-in-shader-lab-process
+       frame
+       (lambda ()
+         (redisplay-frame-panes frame :force-p t)
+         (let* ((sheet (frame-top-level-sheet frame))
+                (mirror (and sheet (sheet-direct-mirror sheet))))
+           (unless (typep mirror 'luv-raster-mirror)
+             (error "Shader lab has no luv raster mirror to capture."))
+           (present-mirror mirror)
+           (capture-raster-mirror-screenshot mirror pathname)))
+       timeout)
+    (cond (condition (error condition))
+          ((not completed-p)
+           (error "Shader lab screenshot timed out after ~,2F seconds."
+                  timeout))
+          (t result))))
+
+(defun capture-default-shader-lab-screenshot
+    (pathname &key specification
+                   (server-path '(:luv))
+                   (title "Luv mathematical shader browser"))
+  "Open a callback-only shader lab, capture it, and tear it down."
+  (let* ((definitions
+           (if specification
+               (list
+                (make-static-shader-definition-entry specification)
+                (make-static-shader-definition-entry
+                 (luvcraft.shaders:block-world-crosshair-fragment-specification)
+                 :label "CROSSHAIR INK"))
+               (list
+                (make-static-shader-definition-entry
+                 (luvcraft.shaders:block-world-vertex-specification)
+                 :label "BLOCK GEOMETRY")
+                (make-static-shader-definition-entry
+                 (luvcraft.shaders:block-world-fragment-specification)
+                 :label "BLOCK SURFACE")
+                (make-static-shader-definition-entry
+                 (luvcraft.shaders:block-world-crosshair-fragment-specification)
+                 :label "CROSSHAIR INK"))))
+         (current-definition
+           (if specification (first definitions) (second definitions)))
+         (port (find-port :server-path server-path))
+         (manager (or (first (climi::frame-managers port))
+                      (make-instance 'luv-frame-manager :port port)))
+         (frame nil))
+    (unwind-protect
+         (progn
+           ;; This frame only needs to paint once.  Avoid starting a durable
+           ;; command loop merely to photograph its real mirror texture.
+           (setf frame
+                 (make-application-frame
+                  'shader-lab
+                  :frame-manager manager
+                  :definitions definitions
+                  :current-definition current-definition
+                  :lowering
+                  (shader-definition-entry-lowering current-definition)
+                  :enable t))
+           (setf (frame-pretty-name frame) title)
+           (capture-shader-lab-screenshot frame pathname))
+      (when frame
+        (destroy-frame frame))
+      (dolist (definition definitions)
+        (release-shader-definition-entry definition)))))
 
 (defun open-shader-lab
     (&key specification specifications pipelines

@@ -54,6 +54,8 @@
            #:shader-lab-health-report-problems
            #:shader-lab-health-report-backtrace
            #:refresh-shader-lab
+           #:capture-shader-lab-screenshot
+           #:capture-default-shader-lab-screenshot
            #:open-shader-lab
            #:close-shader-lab
            #:spinning-texture-compositor
