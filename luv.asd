@@ -87,7 +87,7 @@
   :description "Owned terminal devices for luv's libghostty-vt terminal."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luv/ghostty" "sb-concurrency" "sb-posix" "uiop")
+  :depends-on ("luv/ghostty" "cffi" "sb-concurrency" "sb-posix" "uiop")
   :serial t
   :components
   ((:module "terminal"

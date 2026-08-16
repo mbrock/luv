@@ -2,38 +2,44 @@
 
 (in-package #:luv.terminal)
 
+(cffi:define-foreign-library pty-library
+  (:darwin (:or "libutil.dylib" "/usr/lib/libutil.dylib"))
+  (:unix (:or "libutil.so.1" "libutil.so")))
+
+(cffi:use-foreign-library pty-library)
+
 (cffi:defcstruct pty-window-size
   (rows :uint16)
   (columns :uint16)
   (width-pixels :uint16)
   (height-pixels :uint16))
 
+(cffi:defcfun ("forkpty" %forkpty) :int
+  (master :pointer)
+  (name :pointer)
+  (terminal-attributes :pointer)
+  (window-size :pointer))
+
+(cffi:defcfun ("chdir" %chdir) :int
+  (path :pointer))
+
+(cffi:defcfun ("execve" %execve) :int
+  (path :pointer)
+  (arguments :pointer)
+  (environment :pointer))
+
+(cffi:defcfun ("_exit" %exit) :void
+  (status :int))
+
 (defconstant +pty-set-window-size-request+
   #+darwin #x80087467
   #+linux #x5414
   #-(or darwin linux) 0)
 
-(defparameter +pty-child-launcher-source+
-  (format nil
-          "import fcntl, os, signal, struct, sys, termios~%
-rows, cols = int(sys.argv[1]), int(sys.argv[2])~%
-del sys.argv[1:3]~%
-if rows > 0 and cols > 0:~%
-    fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack('HHHH', rows, cols, 0, 0))~%
-pid = os.fork()~%
-if pid:~%
-    signal.signal(signal.SIGHUP, signal.SIG_IGN)~%
-    _, status = os.waitpid(pid, 0)~%
-    code = os.waitstatus_to_exitcode(status)~%
-    os._exit(code if code >= 0 else 128 - code)~%
-os.setsid()~%
-fcntl.ioctl(0, termios.TIOCSCTTY, 0)~%
-os.tcsetpgrp(0, os.getpgrp())~%
-os.execvpe(sys.argv[1], sys.argv[1:], os.environ)~%")
-  "One-shot child setup which turns SBCL's PTY slave into /dev/tty.
-
-The first two arguments are the initial window rows and columns, so the child
-observes the terminal's real size before it ever runs.")
+(defclass pty-child ()
+  ((pid :initarg :pid :reader pty-child-pid)
+   (status :initform :running :accessor pty-child-status)
+   (exit-code :initform nil :accessor pty-child-exit-code)))
 
 (defclass pty-device ()
   ((terminal :initarg :terminal :reader pty-device-terminal)
@@ -235,8 +241,23 @@ other private input modes."
       (when (eq :stop (perform-pty-device-message device message))
         (return :stop)))))
 
+(defun update-pty-child-status (child &optional no-hang-p)
+  (when (eq :running (pty-child-status child))
+    (multiple-value-bind (pid status)
+        (sb-posix:waitpid (pty-child-pid child)
+                          (if no-hang-p sb-posix:wnohang 0))
+      (when (plusp pid)
+        (cond
+          ((sb-posix:wifexited status)
+           (setf (pty-child-status child) :exited
+                 (pty-child-exit-code child) (sb-posix:wexitstatus status)))
+          ((sb-posix:wifsignaled status)
+           (setf (pty-child-status child) :signaled
+                 (pty-child-exit-code child) (sb-posix:wtermsig status)))))))
+  (pty-child-status child))
+
 (defun process-finished-p (process)
-  (not (member (sb-ext:process-status process) '(:running :stopped))))
+  (not (eq :running (update-pty-child-status process t))))
 
 (defun wait-for-process-exit (process timeout)
   (let ((deadline (+ (get-internal-real-time)
@@ -258,22 +279,22 @@ other private input modes."
         (ghostty:close-key-encoder (pty-device-key-encoder device)))
       (setf (pty-device-key-encoder device) nil))
     (ignore-errors (close stream))
-    (when (member (sb-ext:process-status process) '(:running :stopped))
-      (ignore-errors (sb-ext:process-kill process sb-posix:sighup))
+    (when (eq :running (update-pty-child-status process t))
+      (ignore-errors (sb-posix:kill (pty-child-pid process) sb-posix:sighup))
       (unless (wait-for-process-exit process 0.25)
-        (ignore-errors (sb-ext:process-kill process sb-posix:sigterm))
+        (ignore-errors (sb-posix:kill (pty-child-pid process) sb-posix:sigterm))
         (unless (wait-for-process-exit process 0.25)
-          (ignore-errors (sb-ext:process-kill process sb-posix:sigkill))
+          (ignore-errors (sb-posix:kill (pty-child-pid process) sb-posix:sigkill))
           (wait-for-process-exit process 0.25))))
-    (let ((status (sb-ext:process-status process)))
+    (let ((status (update-pty-child-status process t)))
       (sb-thread:with-mutex ((pty-device-lock device))
         (setf (%pty-device-exit-code device)
               (and (member status '(:exited :signaled))
-                   (sb-ext:process-exit-code process)))
+                   (pty-child-exit-code process)))
         (unless (eq (%pty-device-state device) :failed)
           (setf (%pty-device-state device)
                 (if close-requested-p :closed :exited)))))
-    (ignore-errors (sb-ext:process-close process))))
+    process))
 
 (defun run-pty-device (device)
   (let ((close-requested-p nil))
@@ -327,6 +348,131 @@ other private input modes."
         (set-variable "COLORTERM" "truecolor")))
     result))
 
+(defun environment-variable (name environment)
+  (loop with prefix = (concatenate 'string name "=")
+        for entry in environment
+        when (and (>= (length entry) (length prefix))
+                  (string= prefix entry :end2 (length prefix)))
+          do (return (subseq entry (length prefix)))))
+
+(defun executable-file-p (path)
+  (handler-case
+      (zerop (sb-posix:access path sb-posix:x-ok))
+    (sb-posix:syscall-error () nil)))
+
+(defun resolve-pty-program (program environment directory)
+  (let* ((program (namestring program))
+         (working-directory
+           (merge-pathnames
+            (uiop:ensure-directory-pathname (or directory "."))
+            (uiop:getcwd))))
+    (labels ((under-working-directory (path)
+               (namestring
+                (if (uiop:absolute-pathname-p path)
+                    path
+                    (merge-pathnames path working-directory)))))
+      (if (find #\/ program)
+          (under-working-directory program)
+          (or (loop for path in (uiop:split-string
+                                 (or (environment-variable "PATH" environment)
+                                     "/usr/local/bin:/usr/bin:/bin")
+                                 :separator '(#\:))
+                    for directory = (if (zerop (length path)) "." path)
+                    for candidate = (under-working-directory
+                                     (merge-pathnames
+                                      program
+                                      (uiop:ensure-directory-pathname directory)))
+                    when (executable-file-p candidate) return candidate)
+              (error "Executable ~S was not found in PATH." program))))))
+
+(defun allocate-foreign-string-vector (strings)
+  (let ((vector (cffi:foreign-alloc :pointer :count (1+ (length strings))))
+        (pointers nil))
+    (handler-case
+        (progn
+          (loop for string in strings
+                for index from 0
+                for pointer = (cffi:foreign-string-alloc string :encoding :utf-8)
+                do (push pointer pointers)
+                   (setf (cffi:mem-aref vector :pointer index) pointer))
+          (setf (cffi:mem-aref vector :pointer (length strings))
+                (cffi:null-pointer))
+          (values vector pointers))
+      (error (condition)
+        (mapc #'cffi:foreign-string-free pointers)
+        (cffi:foreign-free vector)
+        (error condition)))))
+
+(defun free-foreign-string-vector (vector pointers)
+  (mapc #'cffi:foreign-string-free pointers)
+  (cffi:foreign-free vector))
+
+(defun launch-pty-child (program arguments directory environment columns rows)
+  "Fork PROGRAM under a fresh controlling PTY and return its child and stream."
+  (let* ((program-path (resolve-pty-program program environment directory))
+         (directory-path (and directory (namestring directory)))
+         (program-pointer (cffi:foreign-string-alloc program-path :encoding :utf-8))
+         (directory-pointer
+           (and directory-path
+                (cffi:foreign-string-alloc directory-path :encoding :utf-8)))
+         (argument-vector nil)
+         (argument-pointers nil)
+         (environment-vector nil)
+         (environment-pointers nil))
+    (unwind-protect
+         (progn
+           (multiple-value-setq (argument-vector argument-pointers)
+             (allocate-foreign-string-vector
+              (cons (namestring program) arguments)))
+           (multiple-value-setq (environment-vector environment-pointers)
+             (allocate-foreign-string-vector environment))
+           (cffi:with-foreign-objects
+               ((master :int) (size '(:struct pty-window-size)))
+             (setf (cffi:foreign-slot-value
+                    size '(:struct pty-window-size) 'rows) rows
+                   (cffi:foreign-slot-value
+                    size '(:struct pty-window-size) 'columns) columns
+                   (cffi:foreign-slot-value
+                    size '(:struct pty-window-size) 'width-pixels) 0
+                   (cffi:foreign-slot-value
+                    size '(:struct pty-window-size) 'height-pixels) 0)
+             (let ((pid (%forkpty master (cffi:null-pointer)
+                                  (cffi:null-pointer) size)))
+               (cond
+                 ((minusp pid)
+                  (error "forkpty failed."))
+                 ((zerop pid)
+                  ;; Everything the child needs was allocated before FORKPTY;
+                  ;; cross the post-fork window with only libc calls.
+                  (when (and directory-pointer
+                             (minusp (%chdir directory-pointer)))
+                    (%exit 126))
+                  (%execve program-pointer argument-vector environment-vector)
+                  (%exit 127))
+                 (t
+                  (let ((master-fd (cffi:mem-ref master :int)))
+                    (handler-case
+                        (values
+                         (make-instance 'pty-child :pid pid)
+                         (sb-sys:make-fd-stream
+                          master-fd
+                          :input t :output t :dual-channel-p t
+                          :element-type 'base-char
+                          :external-format :latin-1
+                          :buffering :none :auto-close t
+                          :name (format nil "PTY for ~A" program)))
+                      (error (condition)
+                        (ignore-errors (sb-posix:close master-fd))
+                        (ignore-errors (sb-posix:kill pid sb-posix:sigterm))
+                        (ignore-errors (sb-posix:waitpid pid 0))
+                        (error condition)))))))))
+      (when environment-vector
+        (free-foreign-string-vector environment-vector environment-pointers))
+      (when argument-vector
+        (free-foreign-string-vector argument-vector argument-pointers))
+      (when directory-pointer (cffi:foreign-string-free directory-pointer))
+      (cffi:foreign-string-free program-pointer))))
+
 (defun open-pty-device
     (terminal &key
                 (program (or (uiop:getenv "SHELL") "/bin/sh"))
@@ -341,29 +487,23 @@ snapshot work which must not race mutation."
   (check-type terminal ghostty:terminal)
   (unless (ghostty:terminal-open-p terminal)
     (error "Cannot attach a PTY to closed terminal ~S." terminal))
-  (let* ((launcher-program "python3")
-         (launcher-arguments
-           (multiple-value-bind (columns rows) (ghostty:terminal-size terminal)
-             (list* "-c" +pty-child-launcher-source+
-                    (princ-to-string rows) (princ-to-string columns)
-                    program arguments)))
-         (options
-           (append
-            (list :pty t :wait nil :search t :external-format :latin-1)
-            (when directory (list :directory directory))
-            (list :environment
-                  (environment-with-terminal-capabilities environment term))))
-         (process
-           (apply #'sb-ext:run-program
-                  launcher-program launcher-arguments options))
-         (stream (sb-ext:process-pty process))
+  (let* ((child-environment
+           (environment-with-terminal-capabilities environment term))
+         (process nil)
+         (stream nil)
          (device
-           (make-instance
-            'pty-device
-            :terminal terminal :process process :stream stream
-            :mailbox (sb-concurrency:make-mailbox :name "luv PTY commands")
-            :lock (sb-thread:make-mutex :name "luv PTY terminal")
-            :on-output on-output))
+           (multiple-value-bind (columns rows) (ghostty:terminal-size terminal)
+             (multiple-value-bind (child pty-stream)
+                 (launch-pty-child
+                  program arguments directory child-environment columns rows)
+               (setf process child
+                     stream pty-stream)
+               (make-instance
+                'pty-device
+                :terminal terminal :process process :stream stream
+                :mailbox (sb-concurrency:make-mailbox :name "luv PTY commands")
+                :lock (sb-thread:make-mutex :name "luv PTY terminal")
+                :on-output on-output))))
          (completed-p nil))
     (unwind-protect
          (progn
@@ -383,10 +523,12 @@ snapshot work which must not race mutation."
            device)
       (unless completed-p
         (ignore-errors (ghostty:set-terminal-response-function terminal nil))
-        (ignore-errors (close stream))
-        (when (member (sb-ext:process-status process) '(:running :stopped))
-          (ignore-errors (sb-ext:process-kill process sb-posix:sigterm)))
-        (ignore-errors (sb-ext:process-close process))))))
+        (when stream (ignore-errors (close stream)))
+        (when (and process
+                   (eq :running (update-pty-child-status process t)))
+          (ignore-errors
+            (sb-posix:kill (pty-child-pid process) sb-posix:sigterm))
+          (ignore-errors (update-pty-child-status process)))))))
 
 (defun wait-for-pty-device (device &key (timeout 5.0))
   "Wait for DEVICE's owner to finish; return its state or :TIMEOUT."
