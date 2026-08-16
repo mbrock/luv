@@ -145,6 +145,8 @@
                        :reader terminal-display-default-foreground)
    (cell-run :initarg :cell-run :initform nil
              :accessor terminal-display-cell-run)
+   (screen-run :initarg :screen-run :initform nil
+               :accessor terminal-display-screen-run)
    (margin :initarg :margin :initform 0.12
            :reader terminal-display-margin)
    (font-scale :initarg :font-scale :initform 1.0
@@ -1015,6 +1017,34 @@ resolves the analytic edge, so adjacent runs meet without seams."
             (incf index)))
         data))))
 
+(defun make-terminal-display-screen-instances (surface)
+  "Build the one screen-panel record spanning the whole display surface.
+
+The record shares the cell run's layout: origin, right edge, up edge, then
+the outward face normal in the lane the cell run uses for ink.  The panel
+sits just below the cell backgrounds so both they and the glyphs win the
+depth test against it while it hides the block tiles behind the screen."
+  (let* ((frame (terminal-face-frame (terminal-surface-face surface)))
+         (right (voxel-direction-vec3 (terminal-face-frame-right frame)))
+         (up (voxel-direction-vec3 (terminal-face-frame-up frame)))
+         (outward (voxel-direction-vec3 (terminal-face-frame-outward frame)))
+         (origin (terminal-surface-lower-left-point surface 0.003))
+         (width (terminal-surface-physical-width surface))
+         (height (terminal-surface-physical-height surface))
+         (data (make-array 12 :element-type 'single-float))
+         (values (list (vec3-x origin) (vec3-y origin) (vec3-z origin)
+                       (* (vec3-x right) width)
+                       (* (vec3-y right) width)
+                       (* (vec3-z right) width)
+                       (* (vec3-x up) height)
+                       (* (vec3-y up) height)
+                       (* (vec3-z up) height)
+                       (vec3-x outward) (vec3-y outward) (vec3-z outward))))
+    (loop for value in values
+          for index from 0
+          do (setf (aref data index) (coerce value 'single-float)))
+    data))
+
 (defun make-terminal-display-glyph-population
     (presentation surface glyph-cache glyphs-by-character
      font-pathname bold-font-pathname margin font-scale)
@@ -1068,7 +1098,14 @@ resolves the analytic edge, so adjacent runs meet without seams."
    "Solid background quads behind terminal cells, sharing the glyph run's
 frame bind group so both draw against the same camera uniform."))
 
-(defun make-terminal-cell-run (session glyph-run instances)
+(defun make-terminal-cell-run (session glyph-run instances
+                               &key (role :terminal-cell)
+                                    (label "terminal cell backgrounds"))
+  "Build an analytic world-rectangle run of ROLE over 48-byte instances.
+
+The default ROLE draws cell backgrounds; :TERMINAL-SCREEN draws the one
+screen panel from MAKE-TERMINAL-DISPLAY-SCREEN-INSTANCES with the same
+vertex layout."
   (let* ((device (luvcraft-session-device session))
          (vertex-data (make-world-text-quad-vertices))
          (vertex-buffer nil)
@@ -1091,9 +1128,9 @@ frame bind group so both draw against the same camera uniform."))
                           :usage '(:vertex :copy-dst)))
                  pipeline
                  (make-live-shader-pipeline
-                  :role :terminal-cell
-                  :vertex-role :terminal-cell
-                  :label "terminal cell backgrounds"
+                  :role role
+                  :vertex-role role
+                  :label label
                   :device device
                   :layout (world-text-run-layout glyph-run)
                   :vertex-buffers
@@ -1183,6 +1220,15 @@ frame bind group so both draw against the same camera uniform."))
 
 (defmethod refresh-luvcraft-overlay
     ((display terminal-display) (session luvcraft-session))
+  ;; The wall's shaders are as live as the block world's: a redefined
+  ;; :terminal-screen or :terminal-cell method rebuilds here, at the frame
+  ;; boundary, keeping the last good pipeline on failure.
+  (refresh-live-shader-pipeline
+   (world-text-run-pipeline (terminal-display-glyph-run display)))
+  (dolist (run (list (terminal-display-cell-run display)
+                     (terminal-display-screen-run display)))
+    (when run
+      (refresh-live-shader-pipeline (terminal-cell-run-pipeline run))))
   (when (terminal-display-dirty-p display)
     ;; Clearing before the snapshot preserves an output notification which
     ;; races after this point; that later notification requests another frame
@@ -1256,7 +1302,16 @@ frame bind group so both draw against the same camera uniform."))
          (terminal-display-surface display) session)
     (let ((frame (luvcraft-frame-state session surface-texture))
           (glyph-run (terminal-display-glyph-run display))
-          (cell-run (terminal-display-cell-run display)))
+          (cell-run (terminal-display-cell-run display))
+          (screen-run (terminal-display-screen-run display)))
+      (when (and screen-run (plusp (terminal-cell-run-count screen-run)))
+        (set-pipeline pass (live-shader-pipeline-native-pipeline
+                            (terminal-cell-run-pipeline screen-run)))
+        (set-vertex-buffer pass 0 (terminal-cell-run-vertex-buffer screen-run))
+        (set-vertex-buffer pass 1 (terminal-cell-run-instance-buffer screen-run))
+        (set-bind-group pass 0
+                        (terminal-display-frame-bind-group display frame))
+        (draw pass 6 (terminal-cell-run-count screen-run)))
       (when (and cell-run (plusp (terminal-cell-run-count cell-run)))
         (set-pipeline pass (live-shader-pipeline-native-pipeline
                             (terminal-cell-run-pipeline cell-run)))
@@ -1279,6 +1334,9 @@ frame bind group so both draw against the same camera uniform."))
     (termdev:close-pty-device (terminal-display-device display))
     (setf (terminal-display-device display) nil))
   (clear-terminal-display-frame-bind-groups display)
+  (when (terminal-display-screen-run display)
+    (release-terminal-cell-run (terminal-display-screen-run display))
+    (setf (terminal-display-screen-run display) nil))
   (when (terminal-display-cell-run display)
     (release-terminal-cell-run (terminal-display-cell-run display))
     (setf (terminal-display-cell-run display) nil))
@@ -1441,6 +1499,7 @@ ROWS-PER-BLOCK rows per block height."
           (glyph-cache nil)
           (glyph-run nil)
           (cell-run nil)
+          (screen-run nil)
           (display nil)
           (completed-p nil))
       (unwind-protect
@@ -1466,12 +1525,19 @@ ROWS-PER-BLOCK rows per block height."
                   session presentation surface glyph-cache
                   glyphs-by-character font-pathname bold-font-pathname
                   margin font-scale))
+               (setf screen-run
+                     (make-terminal-cell-run
+                      session glyph-run
+                      (make-terminal-display-screen-instances surface)
+                      :role :terminal-screen
+                      :label "terminal screen panel"))
                (setf display
                      (make-instance
                       'terminal-display
                       :session session :surface surface :terminal terminal
                       :presentation presentation :glyph-cache glyph-cache
                       :glyph-run glyph-run :cell-run cell-run
+                      :screen-run screen-run
                       :font-pathname font-pathname
                       :bold-font-pathname bold-font-pathname
                       :default-foreground default-foreground
@@ -1482,6 +1548,8 @@ ROWS-PER-BLOCK rows per block height."
              (setf completed-p t)
              display)
         (unless completed-p
+          (when screen-run
+            (ignore-errors (release-terminal-cell-run screen-run)))
           (when cell-run
             (ignore-errors (release-terminal-cell-run cell-run)))
           (when glyph-run

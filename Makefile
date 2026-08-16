@@ -55,6 +55,10 @@ shader-validate:
 		--eval '(luv.spir-v:write-spir-v (luvcraft.shaders:block-world-shadow-vertex-shader) #p"build/block-world-shadow.vert.spv")' \
 		--eval '(luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (luvcraft.shaders:block-world-text-vertex-specification)) #p"build/block-world-text.vert.spv")' \
 		--eval '(luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (luvcraft.shaders:block-world-text-fragment-specification)) #p"build/block-world-text.frag.spv")' \
+		--eval '(luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (luv.spir-v:shader-specification-for :terminal-cell :vertex)) #p"build/terminal-cell.vert.spv")' \
+		--eval '(luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (luv.spir-v:shader-specification-for :terminal-cell :fragment)) #p"build/terminal-cell.frag.spv")' \
+		--eval '(luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (luv.spir-v:shader-specification-for :terminal-screen :vertex)) #p"build/terminal-screen.vert.spv")' \
+		--eval '(luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (luv.spir-v:shader-specification-for :terminal-screen :fragment)) #p"build/terminal-screen.frag.spv")' \
 		--eval '(luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (luv.analytic:roundrect-vertex-specification)) #p"build/analytic-roundrect.vert.spv")' \
 		--eval '(luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (luv.analytic:roundrect-fragment-specification)) #p"build/analytic-roundrect.frag.spv")' \
 		--eval '(luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (luv.slug:slug-bezier-vertex-specification)) #p"build/slug-bezier.vert.spv")' \
@@ -80,6 +84,10 @@ shader-validate:
 	./scripts/dev spirv-val --target-env vulkan1.0 build/block-world-shadow.vert.spv
 	./scripts/dev spirv-val --target-env vulkan1.0 build/block-world-text.vert.spv
 	./scripts/dev spirv-val --target-env vulkan1.0 build/block-world-text.frag.spv
+	./scripts/dev spirv-val --target-env vulkan1.0 build/terminal-cell.vert.spv
+	./scripts/dev spirv-val --target-env vulkan1.0 build/terminal-cell.frag.spv
+	./scripts/dev spirv-val --target-env vulkan1.0 build/terminal-screen.vert.spv
+	./scripts/dev spirv-val --target-env vulkan1.0 build/terminal-screen.frag.spv
 	./scripts/dev spirv-val --target-env vulkan1.0 build/analytic-roundrect.vert.spv
 	./scripts/dev spirv-val --target-env vulkan1.0 build/analytic-roundrect.frag.spv
 	./scripts/dev spirv-val --target-env vulkan1.0 build/slug-bezier.vert.spv
@@ -111,6 +119,10 @@ msl-validate:
 		--eval '(luv.msl:write-msl (luv.msl:compile-msl (luvcraft.shaders:block-world-fragment-specification)) #p"build/block-world.frag.metal")' \
 		--eval '(luv.msl:write-msl (luv.msl:compile-msl (luvcraft.shaders:block-world-text-vertex-specification)) #p"build/block-world-text.vert.metal")' \
 		--eval '(luv.msl:write-msl (luv.msl:compile-msl (luvcraft.shaders:block-world-text-fragment-specification)) #p"build/block-world-text.frag.metal")' \
+		--eval '(luv.msl:write-msl (luv.msl:compile-msl (luv.spir-v:shader-specification-for :terminal-cell :vertex)) #p"build/terminal-cell.vert.metal")' \
+		--eval '(luv.msl:write-msl (luv.msl:compile-msl (luv.spir-v:shader-specification-for :terminal-cell :fragment)) #p"build/terminal-cell.frag.metal")' \
+		--eval '(luv.msl:write-msl (luv.msl:compile-msl (luv.spir-v:shader-specification-for :terminal-screen :vertex)) #p"build/terminal-screen.vert.metal")' \
+		--eval '(luv.msl:write-msl (luv.msl:compile-msl (luv.spir-v:shader-specification-for :terminal-screen :fragment)) #p"build/terminal-screen.frag.metal")' \
 		--eval '(luv.msl:write-msl (luv.msl:compile-msl (luv.analytic:roundrect-vertex-specification)) #p"build/analytic-roundrect.vert.metal")' \
 		--eval '(luv.msl:write-msl (luv.msl:compile-msl (luv.analytic:roundrect-fragment-specification)) #p"build/analytic-roundrect.frag.metal")' \
 		--eval '(luv.msl:write-msl (luv.msl:compile-msl (luv.slug:slug-bezier-vertex-specification)) #p"build/slug-bezier.vert.metal")' \
@@ -131,6 +143,10 @@ msl-validate:
 	xcrun metal -std=metal4.0 -c build/block-world.frag.metal -o build/block-world.frag.air
 	xcrun metal -std=metal4.0 -c build/block-world-text.vert.metal -o build/block-world-text.vert.air
 	xcrun metal -std=metal4.0 -c build/block-world-text.frag.metal -o build/block-world-text.frag.air
+	xcrun metal -std=metal4.0 -c build/terminal-cell.vert.metal -o build/terminal-cell.vert.air
+	xcrun metal -std=metal4.0 -c build/terminal-cell.frag.metal -o build/terminal-cell.frag.air
+	xcrun metal -std=metal4.0 -c build/terminal-screen.vert.metal -o build/terminal-screen.vert.air
+	xcrun metal -std=metal4.0 -c build/terminal-screen.frag.metal -o build/terminal-screen.frag.air
 	xcrun metal -std=metal4.0 -c build/analytic-roundrect.vert.metal -o build/analytic-roundrect.vert.air
 	xcrun metal -std=metal4.0 -c build/analytic-roundrect.frag.metal -o build/analytic-roundrect.frag.air
 	xcrun metal -std=metal4.0 -c build/slug-bezier.vert.metal -o build/slug-bezier.vert.air

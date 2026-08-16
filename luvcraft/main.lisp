@@ -1,8 +1,5 @@
 (in-package #:luvcraft)
 
-(defvar *session* nil
-  "The session owned by the running standalone luvcraft, or NIL.")
-
 (defun executable-directory ()
   (uiop:pathname-directory-pathname (truename sb-ext:*runtime-pathname*)))
 
@@ -69,23 +66,6 @@
   (format stream "--metal-text-closeup renders the enlarged Slug world-text proof.~%")
   (format stream "--metal-benchmark measures steady or streaming Metal frames.~%"))
 
-(defun default-luvcraft-world-pathname ()
-  (merge-pathnames
-   #P"luvcraft/worlds/default.sexp"
-   (let ((data-home (uiop:getenv "XDG_DATA_HOME")))
-     (if data-home
-         (uiop:ensure-directory-pathname (pathname data-home))
-         (merge-pathnames #P".local/share/" (user-homedir-pathname))))))
-
-(defun load-or-make-luvcraft-world (pathname)
-  (if (probe-file pathname)
-      (progn
-        (format t "Loading luvcraft world from ~A~%" pathname)
-        (read-luvcraft-save pathname))
-      (progn
-        (format t "Creating luvcraft world at ~A~%" pathname)
-        (values (make-empty-little-block-world) nil))))
-
 (defun make-metal-provider ()
   #+darwin
   (make-instance 'luv:metal-gpu-provider)
@@ -102,40 +82,22 @@
   ;; Start before START-LUVCRAFT creates the producer.  Tracy thread names are
   ;; emitted by the threads themselves as they begin, so attaching later would
   ;; leave an otherwise useful worker lane anonymous.
-  (when tracy-p
-    (start-luvcraft-tracy))
-  (multiple-value-bind (world resume-description)
-      (load-or-make-luvcraft-world world-pathname)
-    (multiple-value-bind (camera player selected-block)
-        (restore-luvcraft-resume-save-description resume-description)
-      (let ((session nil)
-            (writer (make-world-checkpoint-writer world-pathname)))
-        (unwind-protect
-             (progn
-               (setf session
-                     (start-luvcraft
-                      :provider (or provider luv:*gpu-provider*)
-                      :title "luvcraft — walk, jump, mine, and build"
-                      :world world :camera camera :player player
-                      :selected-block selected-block
-                      :checkpoint-writer writer)
-                     *session* session)
-               ;; A native close request ends SDL's event loop.  Wait for complete
-               ;; native teardown before releasing the session-owned GPU resources.
-               (loop until (eq :closed
-                               (luv:canvas-state
-                                (luvcraft-session-canvas session)))
-                     do (sleep 0.05))
-               (let ((failure
-                       (luv::sdl-canvas-startup-error
-                        (luvcraft-session-canvas session))))
-                 (when failure (error failure))))
-          (unwind-protect
-               (when session
-                 (request-luvcraft-session-checkpoint session)
-                 (stop-luvcraft session))
-            (stop-world-checkpoint-writer writer)
-            (setf *session* nil)))))))
+  (play :provider (or provider luv:*gpu-provider*)
+        :tracy-p tracy-p
+        :world-pathname world-pathname)
+  (unwind-protect
+       (let ((session *session*))
+         ;; A native close request ends SDL's event loop.  Wait for complete
+         ;; native teardown before releasing the session-owned GPU resources.
+         (loop until (eq :closed
+                         (luv:canvas-state
+                          (luvcraft-session-canvas session)))
+               do (sleep 0.05))
+         (let ((failure
+                 (luv::sdl-canvas-startup-error
+                  (luvcraft-session-canvas session))))
+           (when failure (error failure))))
+    (stop-playing)))
 
 (defun parse-interactive-options (arguments)
   (let ((provider nil)

@@ -55,6 +55,7 @@
                  (:file "app")
                  (:file "streaming")
                  (:file "render")
+                 (:file "play")
                  (:file "terminal-wall")
                  (:file "capture")
                  (:file "benchmark")

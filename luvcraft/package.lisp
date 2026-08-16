@@ -116,6 +116,8 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:*terminal-block*
            #:*voxel-light-solver*
            #:*session*
+           #:play
+           #:stop-playing
            #:+little-world-source-version+
            #:+luvcraft-save-format-version+
            #:absent-chunk-light-semantics

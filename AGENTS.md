@@ -1,3 +1,21 @@
+# The one Lisp
+
+Everything happens in one durable SBCL image per checkout, and the game
+normally runs inside it:
+
+```sh
+./sly start                                  # boot the image (luv, luvcraft, luv-wiki)
+./sly eval '(luvcraft:play)'                 # open the real game window in it
+./sly screenshot build/frame.png             # what the game is showing right now
+./sly eval '(luvcraft:stop-playing)'         # checkpoint and close the game
+./sly stop && ./sly start                    # if the image is wrecked, just restart it
+```
+
+`./sly eval`, `inspect`, `describe`, `apropos`, `edit`, and `xref` all talk to
+that same process (`./sly --help` lists them), so code can be redefined while
+the game runs.  `luvcraft:*session*` is the live game.  Do not start a second
+Lisp or run `build/luvcraft` alongside it — one process, one window.
+
 # Working style
 
 This is a fast-moving experimental project. Optimize for iteration speed,
@@ -63,11 +81,9 @@ Useful starting points:
 
 `./sly status`, `./sly start`, and `./sly stop` manage the image when it is
 the `./sly`-managed one (`sly-server.lisp`, which loads `luv` and `luv-wiki`).
-The standalone `./build/luvcraft` embeds a separate Slynk listener.  While it
-is running, use `./sly --luvcraft eval`, `inspect`, `describe`, and the other
-ordinary client commands to work in that exact game process;
-`luvcraft:*session*` names its live session.  Plain `./sly` still targets the
-durable development image.
+The standalone `./build/luvcraft` (for shipping and `make smoke`) embeds its
+own Slynk listener; `./sly --luvcraft ...` attaches to it.  Do not run it
+alongside the durable image while developing: one Lisp, one game window.
 
 The image is only as current as the environment it was started in: when it
 cannot find a system or component that the flake now provides (`Component

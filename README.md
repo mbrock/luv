@@ -11,6 +11,24 @@ It is all rather experimental. The point is not to hide graphics programming
 behind an enormous engine. The point is to make the interesting machinery small
 enough to inspect, change, and keep running while we change it.
 
+## The one Lisp
+
+Everything happens in one durable SBCL image per checkout, and the game
+normally runs inside it:
+
+```sh
+./sly start                                  # boot the image (luv, luvcraft, luv-wiki)
+./sly eval '(luvcraft:play)'                 # open the real game window in it
+./sly screenshot build/frame.png             # what the game is showing right now
+./sly eval '(luvcraft:stop-playing)'         # checkpoint and close the game
+./sly stop && ./sly start                    # if the image is wrecked, just restart it
+```
+
+`./sly eval`, `inspect`, `describe`, `apropos`, `edit`, and `xref` all talk to
+that same process (`./sly --help` lists them), so code can be redefined while
+the game runs.  `luvcraft:*session*` is the live game.  Do not start a second
+Lisp or run `build/luvcraft` alongside it — one process, one window.
+
 ## A GPU system we can understand
 
 The HAL borrows the useful shape of WebGPU—devices, queues, resources,

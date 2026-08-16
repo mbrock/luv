@@ -7,6 +7,32 @@ description: Use when starting or diagnosing development in a luv checkout or wo
 
 Keep the checkout, environment, compiled artifacts, and live Lisp image aligned. Treat an unexplained pause as a process to inspect, not a reason to launch more SBCLs.
 
+## The one Lisp
+
+One durable image per checkout; the game normally runs inside it.  This is
+the whole workflow — do not invent another:
+
+```sh
+./sly start                                  # boot the image
+./sly eval '(luvcraft:play)'                 # open the game window in it
+./sly screenshot build/frame.png             # what the game shows right now
+./sly eval '(luvcraft:stop-playing)'         # checkpoint and close the game
+./sly stop && ./sly start                    # image wrecked?  just restart it
+```
+
+- Work in small evals against `luvcraft:*session*`; redefine code with
+  `./sly eval '(load "luvcraft/foo.lisp")'`.  Shader methods rebuild their
+  pipelines live at the next frame; a `defclass` change is fine too — the
+  image survives errors, unlike the standalone binary.
+- Never pipe `./sly eval` through `tail`/`head`: an error opens the Slynk
+  debugger prompt on stdin, which then looks like a hang.
+- Learn the tools before improvising: `./sly --help`, `./sly describe`,
+  `apropos`, `edit`, `xref`, `inspect`.
+- `build/luvcraft` (`make luvcraft`) is the standalone executable for
+  shipping and CI (`make smoke`); `./sly --luvcraft ...` attaches to it.
+  Do not run it alongside the image while developing — two windows, two
+  states, confusion.
+
 ## Start in a checkout
 
 1. Run `git status --short --branch` and preserve unrelated work.
@@ -63,29 +89,13 @@ Never kill an image reported as belonging to another checkout or as Emacs/extern
 
 A cold checkout-local load and a full program image build are different timings: ASDF compilation writes under `~/.cache/common-lisp/.../<absolute-checkout-path>/`, while `program-op` also writes a large executable core. Report the phase and elapsed time when diagnosing regressions.
 
-## Verify native windows
+## Verify what the game shows
 
-Computer Use currently fails to enumerate or attach to some visible windows
-owned by unbundled command-line SBCL processes, including SDL/Cocoa windows.
-Do not treat its missing app/window state as evidence that such a window is
-absent, and do not spend time trying alternate Computer Use app names.
-
-Use macOS screenshots instead. First capture the displays, inspect the actual
-pixels to find the window and its screen coordinates, then make a bounded
-capture when useful:
-
-```sh
-/usr/sbin/screencapture -x build/native-window-desktop.png
-/usr/sbin/screencapture -x -R<X>,<Y>,<WIDTH>,<HEIGHT> build/native-window.png
-```
-
-`-R` uses logical screen coordinates, while the resulting image may have twice
-those dimensions on a Retina display. Verify the title, contents, and visible
-frame from the screenshot itself; a Dock icon, live process, Cocoa event-loop
-stack, or loaded graphics driver is not visible-window proof. Keep using
-Computer Use for ordinary bundled apps where it can actually observe the
-target, but prefer `screencapture` for these Lisp-hosted native windows until
-the attachment failure is understood.
+`./sly screenshot build/frame.png` renders the playing game's frame once
+and writes the PNG; read the PNG.  Move the camera or open overlays with
+small evals first.  Named hidden views (no window) live in
+`luvcraft/gazetteer.lisp`: `scripts/luv gazetteer build/gazetteer`.
+Do not screenshot the desktop.
 
 ## Finish
 

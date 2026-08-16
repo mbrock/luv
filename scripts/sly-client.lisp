@@ -765,7 +765,8 @@
                (if (eql pid listener-pid)
                    "managed by ./sly"
                    "Emacs/external")
-               listener-root))
+               listener-root)
+       (print-game-status))
       (connection-p
        (format t "luv Slynk is listening on ~A:~D (owner unavailable).~%"
                *host* *port*))
@@ -775,6 +776,28 @@
       (t
        (ignore-errors (delete-file *server-pid-path*))
        (format t "luv Slynk is not running.~%")))))
+
+(defun print-game-status ()
+  "Say whether luvcraft:play has a live game window in the image."
+  (let ((answer
+          (ignore-errors
+           (with-slynk-connection (stream)
+             (authenticate stream)
+             (evaluate-captured-output-on
+              stream
+              "(let ((session-symbol
+                       (and (find-package :luvcraft)
+                            (find-symbol \"*SESSION*\" :luvcraft))))
+                 (princ (if (and session-symbol
+                                 (boundp session-symbol)
+                                 (symbol-value session-symbol))
+                          :playing :idle)))"
+              "CL-USER")))))
+    (format t "~A~%"
+            (cond ((null answer) "Game state unknown (image busy or not loaded).")
+                  ((search "PLAYING" (string-upcase (princ-to-string answer)))
+                   "A game is playing: ./sly screenshot PNG, ./sly eval '(luvcraft:stop-playing)'.")
+                  (t "No game is playing: ./sly eval '(luvcraft:play)' starts one.")))))
 
 (defun evaluate-output-on (stream code &optional (package "CL-USER"))
   (write-result-string (evaluate-captured-output-on stream code package)))
@@ -1063,10 +1086,13 @@
         (terpri)))))
 
 (defun usage (&optional (stream *standard-output*))
-  (format stream
-          "Prefix a client command with --luvcraft to attach to the running standalone game.~%~%")
+  (format stream "The one Lisp: ./sly start, then ./sly eval '(luvcraft:play)' opens the game~%")
+  (format stream "in it; ./sly screenshot PNG captures its frame; ./sly eval~%")
+  (format stream "'(luvcraft:stop-playing)' closes it; ./sly stop && ./sly start if it is wrecked.~%")
+  (format stream "Prefix a client command with --luvcraft only to attach to a separate~%")
+  (format stream "standalone build/luvcraft process.~%~%")
   (format stream "Usage: ./sly start|stop|status|log~%")
-  (format stream "       ./sly --luvcraft screenshot PNG~%")
+  (format stream "       ./sly screenshot PNG~%")
   (format stream "       ./sly eval CODE [--package PACKAGE]~%")
   (format stream "       ./sly parinfer [--check|--diff|--write] [--strict] [--file FILE|CODE|FILE]~%")
   (format stream "       ./sly parinfer --batch --check [--strict] FILE...~%")
@@ -1304,8 +1330,6 @@
     (values code package)))
 
 (defun run-luvcraft-screenshot (arguments)
-  (unless (attach-only-p)
-    (error "screenshot targets the standalone game; use ./sly --luvcraft screenshot PNG"))
   (unless (= (length arguments) 1)
     (error "screenshot requires exactly one PNG pathname"))
   (let* ((pathname
@@ -1314,7 +1338,7 @@
            (format nil
                    "(progn
                       (unless luvcraft:*session*
-                        (error \"The standalone luvcraft has no live session.\"))
+                        (error \"No game is playing here; ./sly eval '(luvcraft:play)' first.\"))
                       (multiple-value-bind (pathname pixels width height format)
                           (luvcraft:capture-luvcraft-screenshot
                            luvcraft:*session* ~S)

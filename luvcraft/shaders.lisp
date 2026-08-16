@@ -355,6 +355,133 @@
            (luv.analytic:roundrect-coverage render-coordinate half-size-radius)))
     (set-output color-output (* color coverage))))
 
+;;; The terminal screen panel is one analytic world rectangle spanning the
+;;; whole display surface, drawn beneath the cell backgrounds and glyphs.  Its
+;;; material is the "magic television" glass of #7ZM22R rendered as a
+;;; view-dependent surface rather than an atlas tile: dark glass with a
+;;; Fresnel sky reflection and a sun glint, a bezel band with a lit inner
+;;; lip, and an inset-style vignette; a faint phosphor floor keeps the screen
+;;; readable as a screen at night.  It shares the cell run's instance layout,
+;;; with the fourth vector carrying the outward face normal.
+
+(define-shader-method shader-specification-for
+    terminal-screen-vertex-specification
+    ((role (eql :terminal-screen)) (stage (eql :vertex)))
+    (:stage :vertex
+     :inputs ((quad-corner :vec3 :location 0)
+              (world-origin :vec3 :location 1)
+              (world-right-edge :vec3 :location 2)
+              (world-up-edge :vec3 :location 3)
+              (normal-input :vec3 :location 4))
+     :outputs ((clip-position :vec4 :built-in :position)
+               (render-coordinate :vec2 :location 0)
+               (render-half-size :vec2 :location 1)
+               (render-world-position :vec3 :location 2)
+               (render-normal :vec3 :location 3))
+     :resources
+     ((frame-state :uniform-block :set 0 :binding 2
+                   :members #.*frame-uniform-members*)))
+  (let* ((width (sqrt (dot world-right-edge world-right-edge)))
+         (height (sqrt (dot world-up-edge world-up-edge)))
+         (u (* (swizzle quad-corner :x) width))
+         (v (* (swizzle quad-corner :y) height))
+         (world-position
+           (assume-quantity
+            (+ world-origin
+               (* world-right-edge (swizzle quad-corner :x))
+               (* world-up-edge (swizzle quad-corner :y)))
+            :quantity :world-position :unit :cell))
+         (camera (swizzle camera-vector :xyz))
+         (right (swizzle right-vector :xyz))
+         (up (swizzle up-vector :xyz))
+         (forward (swizzle forward-vector :xyz))
+         (relative (- world-position camera))
+         (view-x (dot relative right))
+         (view-y (dot relative up))
+         (view-z (interpret (dot relative forward)
+                            :quantity :view-distance :unit :cell))
+         (x-scale (swizzle projection-vector :x))
+         (y-scale (swizzle projection-vector :y))
+         (z-scale (swizzle projection-vector :z))
+         (z-offset (swizzle projection-vector :w))
+         (clip-x (* view-x x-scale))
+         (clip-y (- (* view-y y-scale)))
+         (clip-z (+ (interpret (* view-z z-scale)
+                              :quantity :view-distance :unit :cell)
+                    z-offset))
+         (clip (vec4 (representation clip-x)
+                     (representation clip-y)
+                     (representation clip-z)
+                     (representation view-z))))
+    (set-output clip-position clip)
+    (set-output render-coordinate
+                (vec2 (- u (* width 0.5)) (- v (* height 0.5))))
+    (set-output render-half-size (vec2 (* width 0.5) (* height 0.5)))
+    (set-output render-world-position (representation world-position))
+    (set-output render-normal normal-input)))
+
+(define-shader-method shader-specification-for
+    terminal-screen-fragment-specification
+    ((role (eql :terminal-screen)) (stage (eql :fragment)))
+    (:stage :fragment
+     :inputs ((render-coordinate :vec2 :location 0)
+              (half-size :vec2 :location 1)
+              (world-position :vec3 :location 2)
+              (normal-input :vec3 :location 3))
+     :outputs ((color-output :vec4 :location 0))
+     :resources
+     ((frame-state :uniform-block :set 0 :binding 2
+                   :members #.*frame-uniform-members*)))
+  (let* ((camera (representation (swizzle camera-vector :xyz)))
+         (sun-direction (representation (swizzle sun-vector :xyz)))
+         (day-factor (representation (swizzle sun-vector :w)))
+         (sun-color (representation (swizzle sun-color-vector :xyz)))
+         (zenith (representation (swizzle zenith-vector :xyz)))
+         (horizon (representation (swizzle horizon-vector :xyz)))
+         (ambient (representation (swizzle ambient-vector :xyz)))
+         (normal (normalize normal-input))
+         (view (normalize (- camera world-position)))
+         (n-dot-v (max 0.0 (dot normal view)))
+         (n-dot-l (max 0.0 (dot normal sun-direction)))
+         ;; Schlick Fresnel for coated display glass: a low floor rising
+         ;; toward grazing, so a frontal view stays black and an oblique one
+         ;; picks up the sky.
+         (fresnel (+ 0.018 (* 0.982 (expt (- 1.0 n-dot-v) 5.0))))
+         ;; The mirrored view ray samples the same two-colour sky gradient
+         ;; the sky dome draws, so the glass reflects the day it stands in.
+         (reflected (- (* normal (* 2.0 (dot normal view))) view))
+         (sky-height (smoothstep -0.04 0.45 (swizzle reflected :y)))
+         (sky-reflection (* (mix horizon zenith sky-height) (* fresnel 0.8)))
+         ;; A tight glint plus a broad sheen from the sun; both are held
+         ;; back at normal incidence so the screen reads as glass, not chrome.
+         (half-vector (normalize (+ sun-direction view)))
+         (n-dot-h (max 0.0 (dot normal half-vector)))
+         (glint (* (expt n-dot-h 160.0) 2.0))
+         (sheen (* (expt n-dot-h 20.0) 0.12))
+         (specular
+           (* sun-color (* (+ glint sheen) day-factor (+ 0.3 fresnel))))
+         ;; Rectangle geometry: distance to the panel edge in world cells.
+         (edge-distance
+           (min (- (swizzle half-size :x) (abs (swizzle render-coordinate :x)))
+                (- (swizzle half-size :y) (abs (swizzle render-coordinate :y)))))
+         (bezel-width 0.11)
+         (screen-mask (smoothstep bezel-width (+ bezel-width 0.012) edge-distance))
+         ;; The screen sits behind the bezel: shade falls in from the lip.
+         (inset-shade (smoothstep 0.0 0.45 (- edge-distance bezel-width)))
+         (vignette (mix 0.30 1.0 inset-shade))
+         (irradiance (+ ambient (* sun-color (* n-dot-l day-factor))))
+         (glass-albedo (vec3 0.008 0.009 0.011))
+         (phosphor (vec3 0.004 0.009 0.007))
+         (screen-color
+           (* (+ (* glass-albedo irradiance) phosphor sky-reflection specular)
+              vignette))
+         ;; The bezel is a matte dark frame with a lit inner lip.
+         (lip (smoothstep (- bezel-width 0.03) bezel-width edge-distance))
+         (bezel-albedo (mix (vec3 0.02 0.02 0.022) (vec3 0.09 0.09 0.10) lip))
+         (bezel-color (+ (* bezel-albedo irradiance) (* specular 0.15)))
+         (rgb (mix bezel-color screen-color screen-mask)))
+    (set-output color-output (vec4 rgb 1.0))))
+
 (defmethod shader-specification-for
     ((role (eql :slug-world-text)) (stage (eql :fragment)))
   (declare (ignore role stage))
