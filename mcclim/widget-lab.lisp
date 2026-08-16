@@ -19,6 +19,8 @@
       (draw-rectangle* pane left top right bottom
                        :ink (make-rgb-color 0.10 0.115 0.13))
       (with-sheet-medium (medium pane)
+        (when (typep medium 'luv-raster-medium)
+          (clear-raster-medium-reliefs medium))
         (draw-analytic-rounded-rectangle*
          medium (+ left inset) (+ top inset offset)
          (- right inset) (- bottom inset (- offset))
@@ -81,7 +83,7 @@
     ;; callback, so ask for another after changing its label.
     (dispatch-repaint gadget +everywhere+)))
 
-(defun open-widget-lab (&key (server-path '(:luv-gpu))
+(defun open-widget-lab (&key (server-path '(:luv))
                              (title "McCLIM widgets on luv")
                              target context device)
   "Create, adopt, and enable a tiny interactive McCLIM gadget frame."

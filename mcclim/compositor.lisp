@@ -13,7 +13,13 @@
     :reader spinning-frame-state-buffer)
    (bind-group
     :initarg :bind-group
-    :reader spinning-frame-state-bind-group)))
+    :reader spinning-frame-state-bind-group)
+   (relief-buffer
+    :initform nil
+    :accessor spinning-frame-state-relief-buffer)
+   (relief-capacity
+    :initform 0
+    :accessor spinning-frame-state-relief-capacity)))
 
 (defclass spinning-texture-compositor ()
   ((speed
@@ -90,6 +96,9 @@
   (maphash
    (lambda (surface state)
      (declare (ignore surface))
+     (alexandria:when-let
+         ((buffer (spinning-frame-state-relief-buffer state)))
+       (luv:destroy buffer))
      (luv:destroy (spinning-frame-state-bind-group state))
      (luv:destroy (spinning-frame-state-buffer state)))
    (spinning-compositor-frame-states compositor))
@@ -253,7 +262,7 @@
                       device
                       (luv:make-buffer-descriptor
                        :label "McCLIM quad transform"
-                       :size 48 :usage '(:uniform)))
+                       :size 64 :usage '(:uniform)))
                      bind-group
                      (luv:create
                       device

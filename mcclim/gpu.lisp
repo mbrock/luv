@@ -29,6 +29,8 @@
 (defstruct gpu-prepared-text-command
   atlas first-vertex vertex-count clip)
 
+(defstruct surface-relief x1 y1 x2 y2 radius height)
+
 (defvar *gpu-medium-fallback-source* nil
   "The semantic primitive currently being decomposed by BASIC-MEDIUM.")
 
@@ -709,6 +711,32 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
     (medium x1 y1 x2 y2 radius filled)
   (draw-rounded-rectangle*
    medium x1 y1 x2 y2 :radius radius :filled filled))
+
+(defun clear-raster-medium-reliefs (medium)
+  (setf (fill-pointer (raster-medium-reliefs medium)) 0)
+  medium)
+
+(defmethod medium-draw-analytic-rounded-rectangle*
+    ((medium luv-raster-medium) x1 y1 x2 y2 radius filled)
+  (when (and filled (typep (medium-ink medium) 'relief-design))
+    (let ((transformation (medium-device-transformation medium)))
+      (with-bounding-rectangle* (left top right bottom)
+          (transform-region transformation (make-rectangle* x1 y1 x2 y2))
+        (multiple-value-bind (radius-xx radius-xy)
+            (transform-distance transformation radius 0)
+          (multiple-value-bind (radius-yx radius-yy)
+              (transform-distance transformation 0 radius)
+            (vector-push-extend
+             (make-surface-relief
+              :x1 left :y1 top :x2 right :y2 bottom
+              :radius
+              (min (sqrt (+ (* radius-xx radius-xx)
+                            (* radius-xy radius-xy)))
+                   (sqrt (+ (* radius-yx radius-yx)
+                            (* radius-yy radius-yy))))
+              :height (relief-height (medium-ink medium)))
+             (raster-medium-reliefs medium)))))))
+  (call-next-method))
 
 (defmethod medium-draw-analytic-rounded-rectangle*
     ((medium luv-gpu-medium) x1 y1 x2 y2 radius filled)

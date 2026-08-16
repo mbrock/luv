@@ -11,10 +11,129 @@
    (center :initarg :center :reader widget-overlay-center)
    (right-axis :initarg :right-axis :reader widget-overlay-right-axis)
    (up-axis :initarg :up-axis :reader widget-overlay-up-axis)
-   (render-state :initform nil :accessor widget-overlay-render-state)))
+   (normal-axis :initarg :normal-axis :reader widget-overlay-normal-axis)
+   (height-scale :initarg :height-scale :initform 2.0
+                 :reader widget-overlay-height-scale)
+   (render-state :initform nil :accessor widget-overlay-render-state)
+   (relief-layout :initform nil :accessor widget-overlay-relief-layout)
+   (relief-vertex-module :initform nil
+                         :accessor widget-overlay-relief-vertex-module)
+   (relief-fragment-module :initform nil
+                           :accessor widget-overlay-relief-fragment-module)
+   (relief-pipeline :initform nil :accessor widget-overlay-relief-pipeline)))
+
+(spv:define-shader widget-relief-world-vertex-specification
+    (:stage :vertex
+     :inputs ((position :vec3 :location 0)
+              (homogeneous-texture-coordinate :vec3 :location 1)
+              (shade-padding :vec3 :location 2))
+     :outputs ((clip-position :vec4 :built-in :position)
+               (render-texture-coordinate :vec2 :location 0)
+               (render-shade :float :location 1)))
+  (let* ()
+    (spv:set-output
+     clip-position
+     (spv:vec4 position (spv:swizzle homogeneous-texture-coordinate :x)))
+    (spv:set-output
+     render-texture-coordinate
+     (spv:swizzle homogeneous-texture-coordinate :yz))
+    (spv:set-output render-shade
+                    (spv:swizzle shade-padding :x))))
+
+(spv:define-shader widget-relief-world-fragment-specification
+    (:stage :fragment
+     :inputs ((texture-coordinate :vec2 :location 0)
+              (shade :float :location 1))
+     :resources
+     ((image :texture-2d :binding 0 :sample-transfer :identity)
+      (texture-sampler :sampler :binding 1))
+     :outputs ((color-output :vec4 :location 0)))
+  (let* ((texel (spv:sample image texture-sampler texture-coordinate)))
+    (spv:set-output
+     color-output
+     (spv:vec4 (* (spv:swizzle texel :rgb) shade)
+               (spv:swizzle texel :a)))))
+
+(defun clear-widget-overlay-relief-resources (overlay)
+  (dolist (resource
+            (list (widget-overlay-relief-pipeline overlay)
+                  (widget-overlay-relief-fragment-module overlay)
+                  (widget-overlay-relief-vertex-module overlay)))
+    (when resource (luv:destroy resource)))
+  (setf (widget-overlay-relief-layout overlay) nil
+        (widget-overlay-relief-pipeline overlay) nil
+        (widget-overlay-relief-fragment-module overlay) nil
+        (widget-overlay-relief-vertex-module overlay) nil)
+  overlay)
+
+(defmethod release-raster-mirror-compositor :before
+    ((overlay luvcraft-widget-overlay))
+  (clear-widget-overlay-relief-resources overlay))
+
+(defun ensure-widget-overlay-relief-pipeline (overlay format depth-format)
+  (let ((layout (spinning-compositor-layout overlay)))
+    (unless (and (eq layout (widget-overlay-relief-layout overlay))
+                 (widget-overlay-relief-pipeline overlay))
+      (clear-widget-overlay-relief-resources overlay)
+      (let* ((device (spinning-compositor-device overlay))
+             (vertex
+               (luv:create
+                device
+                (luv:make-shader-module-descriptor
+                 :label "McCLIM world relief vertex" :language :mathematical
+                 :code (widget-relief-world-vertex-specification))))
+             (fragment
+               (luv:create
+                device
+                (luv:make-shader-module-descriptor
+                 :label "McCLIM world relief fragment" :language :mathematical
+                 :code (widget-relief-world-fragment-specification))))
+             (pipeline
+               (luv:create
+                device
+                (luv:make-render-pipeline-descriptor
+                 :label "extruded McCLIM surface relief"
+                 :layout layout
+                 :vertex
+                 `(:module ,vertex
+                   :buffers
+                   ((:array-stride 36
+                     :attributes
+                     ((:shader-location 0 :offset 0 :format :float32x3)
+                      (:shader-location 1 :offset 12 :format :float32x3)
+                      (:shader-location 2 :offset 24 :format :float32x3)))))
+                 :fragment
+                 `(:module ,fragment
+                   :targets ((:format ,format)))
+                 :depth-stencil
+                 (when depth-format
+                   `(:format ,depth-format
+                     :depth-write-enabled t :depth-compare :less))
+                 :primitive '(:topology :triangle-list)))))
+        (setf (widget-overlay-relief-layout overlay) layout
+              (widget-overlay-relief-vertex-module overlay) vertex
+              (widget-overlay-relief-fragment-module overlay) fragment
+              (widget-overlay-relief-pipeline overlay) pipeline))))
+  overlay)
+
+(defun ensure-widget-relief-frame-buffer (overlay frame-state byte-count)
+  (when (> byte-count (spinning-frame-state-relief-capacity frame-state))
+    (let* ((capacity (ash 1 (integer-length (max 1 (1- byte-count)))))
+           (replacement
+             (luv:create
+              (spinning-compositor-device overlay)
+              (luv:make-buffer-descriptor
+               :label "extruded McCLIM relief vertices" :size capacity
+               :usage '(:vertex :copy-dst)))))
+      (alexandria:when-let
+          ((old (spinning-frame-state-relief-buffer frame-state)))
+        (luv:destroy old))
+      (setf (spinning-frame-state-relief-buffer frame-state) replacement
+            (spinning-frame-state-relief-capacity frame-state) capacity)))
+  (spinning-frame-state-relief-buffer frame-state))
 
 (defun world-device-clip-state (overlay session width height)
-  "Return center, right, and up clip vectors for OVERLAY in SESSION's camera."
+  "Return center, right, up, and normal clip vectors for OVERLAY's surface."
   (let* ((camera (luvcraft:luvcraft-session-camera session))
          (uniforms (luvcraft:camera-uniform-data camera width height))
          (camera-position (luvcraft:camera-position camera)))
@@ -49,14 +168,120 @@
                               (if point-p z-offset 0.0))
                            view-z))))
           (make-array
-           12 :element-type 'single-float
+           16 :element-type 'single-float
            :initial-contents
            (mapcar
             (lambda (value) (coerce value 'single-float))
             (append
-             (clip-vector (widget-overlay-center overlay) t)
-             (clip-vector (widget-overlay-right-axis overlay) nil)
-             (clip-vector (widget-overlay-up-axis overlay) nil)))))))))
+              (clip-vector (widget-overlay-center overlay) t)
+              (clip-vector (widget-overlay-right-axis overlay) nil)
+              (clip-vector (widget-overlay-up-axis overlay) nil)
+              (clip-vector (widget-overlay-normal-axis overlay) nil)))))))))
+
+(defun widget-overlay-reliefs (overlay)
+  (let ((sheet (mirror-sheet (widget-overlay-mirror overlay))))
+    (loop for child in (gpu-sheet-paint-order sheet)
+          for medium = (gpu-sheet-presentation-medium child)
+          when (typep medium 'luv-raster-medium)
+            append (coerce (raster-medium-reliefs medium) 'list))))
+
+(defun surface-relief-perimeter (relief &optional (corner-segments 5))
+  (let* ((left (surface-relief-x1 relief))
+         (top (surface-relief-y1 relief))
+         (right (surface-relief-x2 relief))
+         (bottom (surface-relief-y2 relief))
+         (radius
+           (min (surface-relief-radius relief)
+                (* 0.5 (- right left)) (* 0.5 (- bottom top))))
+         points)
+    (dolist (corner
+              (list (list (- right radius) (+ top radius) (* -0.5 pi))
+                    (list (- right radius) (- bottom radius) 0.0)
+                    (list (+ left radius) (- bottom radius) (* 0.5 pi))
+                    (list (+ left radius) (+ top radius) pi)))
+      (destructuring-bind (center-x center-y start-angle) corner
+        (dotimes (index corner-segments)
+          (let ((angle
+                  (+ start-angle
+                     (* (* 0.5 pi) (/ index corner-segments)))))
+            (push (list (+ center-x (* radius (cos angle)))
+                        (+ center-y (* radius (sin angle))))
+                  points)))))
+    (nreverse points)))
+
+(defun append-widget-relief-vertex
+    (vertices state width height pixel-height x y shade)
+  (let* ((u (/ x width))
+         (v (/ y height))
+         (local-x (- (* 2.0 u) 1.0))
+         (local-y (- (* 2.0 v) 1.0)))
+    (flet ((push-value (value)
+             (vector-push-extend (coerce value 'single-float) vertices)))
+      (let ((clip
+              (loop for lane below 4
+                    collect
+                    (+ (aref state lane)
+                       (* local-x (aref state (+ 4 lane)))
+                       (* local-y (aref state (+ 8 lane)))
+                       (* pixel-height (aref state (+ 12 lane)))))))
+        (dolist (value (subseq clip 0 3)) (push-value value))
+        (push-value (fourth clip)))
+      (push-value u)
+      (push-value v)
+      (push-value shade)
+      (push-value 0.0)
+      (push-value 0.0))))
+
+(defun widget-overlay-relief-vertices (overlay state width height)
+  "Build the small world-space mesh derived from OVERLAY's relief commands."
+  (let ((vertices
+          (make-array 256 :element-type 'single-float
+                          :adjustable t :fill-pointer 0))
+        (pixel-world-scale
+          (* (widget-overlay-height-scale overlay)
+             (/ (* 2.0 (vec:vec3-length (widget-overlay-right-axis overlay)))
+                width))))
+    (dolist (relief (widget-overlay-reliefs overlay))
+      ;; Negative ink height remains an analytical recess. Geometry drops to
+      ;; the base plane until the compositor can cut a matching surface hole.
+      (let* ((world-height
+               (* pixel-world-scale (max 0.0 (surface-relief-height relief))))
+             (points (surface-relief-perimeter relief))
+             (center-x
+               (* 0.5
+                  (+ (surface-relief-x1 relief)
+                     (surface-relief-x2 relief))))
+             (center-y
+               (* 0.5
+                  (+ (surface-relief-y1 relief)
+                     (surface-relief-y2 relief)))))
+        (when (plusp world-height)
+          (loop for tail on points
+                for point = (first tail)
+                for next = (or (second tail) (first points))
+                do
+                   ;; The top reuses the exact McCLIM texture, so text and
+                   ;; other overpaint move with the physical control.
+                   (append-widget-relief-vertex
+                    vertices state width height world-height
+                    center-x center-y 1.0)
+                   (append-widget-relief-vertex
+                    vertices state width height world-height
+                    (first point) (second point) 1.0)
+                   (append-widget-relief-vertex
+                    vertices state width height world-height
+                    (first next) (second next) 1.0)
+                   ;; Two side-wall triangles, shaded independently of the
+                   ;; analytical top face.
+                   (dolist (vertex
+                             (list (list point 0.0) (list next 0.0)
+                                   (list next world-height)
+                                   (list point 0.0) (list next world-height)
+                                   (list point world-height)))
+                     (append-widget-relief-vertex
+                      vertices state width height (second vertex)
+                      (first (first vertex)) (second (first vertex)) 0.56))))))
+    vertices))
 
 (defmethod present-raster-mirror-texture
     ((mirror luv-raster-mirror) context texture
@@ -79,7 +304,11 @@
                 overlay session (first viewport-size) (second viewport-size)))
              (frame-state
               (ensure-spinning-compositor-frame-state
-               overlay surface-texture)))
+               overlay surface-texture))
+             (source-size (luv:gpu-texture-size source))
+             (relief-vertices
+               (widget-overlay-relief-vertices
+                overlay state (first source-size) (second source-size))))
         (setf (widget-overlay-render-state overlay) state)
         (luv:write-buffer
          (spinning-frame-state-buffer frame-state) state)
@@ -92,7 +321,20 @@
         (luv:set-pipeline pass (spinning-compositor-pipeline overlay))
         (luv:set-bind-group
          pass 0 (spinning-frame-state-bind-group frame-state))
-        (luv:draw pass 4))))
+        (luv:draw pass 4)
+        (when (plusp (length relief-vertices))
+          (ensure-widget-overlay-relief-pipeline
+           overlay (luv:gpu-texture-format surface-texture) :depth32-float)
+          (let* ((byte-count (* 4 (length relief-vertices)))
+                 (buffer
+                   (ensure-widget-relief-frame-buffer
+                    overlay frame-state byte-count)))
+            (luv:write-buffer buffer relief-vertices)
+            (luv:set-pipeline pass (widget-overlay-relief-pipeline overlay))
+            (luv:set-bind-group
+             pass 0 (spinning-frame-state-bind-group frame-state))
+            (luv:set-vertex-buffer pass 0 buffer)
+            (luv:draw pass (/ (length relief-vertices) 8)))))))
   overlay)
 
 (defun projected-screen-vertex (state width height u v)
@@ -289,7 +531,8 @@
                                   forward distance right right-offset)
                :right-axis (vec:vec3-scale right (/ width 2.0))
                :up-axis
-               (vec:make-vec3 0.0 (- (/ width aspect 2.0)) 0.0))))
+               (vec:make-vec3 0.0 (- (/ width aspect 2.0)) 0.0)
+               :normal-axis (vec:vec3-scale forward -1.0))))
         (setf (mirror-compositor mirror) overlay)
         (luvcraft:add-luvcraft-overlay session overlay)
         overlay))))
