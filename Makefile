@@ -4,8 +4,9 @@ LUVCRAFT_BENCHMARK_FRAMES ?= 120
 LUVCRAFT_BENCHMARK_CSV ?= build/luvcraft-metal-benchmark.csv
 LUVCRAFT_BENCHMARK_SCENARIO ?= steady
 LUVCRAFT_STREAMING_BENCHMARK_CSV ?= build/luvcraft-metal-streaming-benchmark.csv
+TRACY_STREAMING_TRACE ?= build/luvcraft-streaming.tracy
 
-.PHONY: all luvcraft run test parinfer-check shader-validate msl-validate smoke metal-smoke metal-benchmark metal-streaming-benchmark mcluv readme-screenshots wiki wiki-cli objective-c-probe metal-clear metal-shader metal-pipeline metal-draw slug-proof slug-text-proof clean
+.PHONY: all luvcraft run test parinfer-check shader-validate msl-validate smoke metal-smoke metal-benchmark metal-streaming-benchmark tracy-streaming mcluv readme-screenshots wiki wiki-cli objective-c-probe metal-clear metal-shader metal-pipeline metal-draw slug-proof slug-text-proof clean
 
 all: luvcraft
 
@@ -85,6 +86,9 @@ metal-benchmark: luvcraft
 
 metal-streaming-benchmark:
 	$(MAKE) metal-benchmark LUVCRAFT_BENCHMARK_SCENARIO=streaming LUVCRAFT_BENCHMARK_CSV=$(LUVCRAFT_STREAMING_BENCHMARK_CSV)
+
+tracy-streaming: luvcraft
+	./scripts/trace-luvcraft-streaming $(TRACY_STREAMING_TRACE)
 
 mcluv:
 	./scripts/dev sbcl --script mcclim/build.lisp

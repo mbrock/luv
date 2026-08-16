@@ -1,0 +1,155 @@
+#!/bin/sh
+
+set -eu
+
+project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+
+if [ "${LUV_NIX_SHELL:-}" != 1 ]; then
+  exec "$project_root/scripts/dev" "$0" "$@"
+fi
+
+if [ "$#" -gt 1 ]; then
+  echo "Usage: scripts/trace-luvcraft-streaming [OUTPUT.tracy]" >&2
+  exit 2
+fi
+
+cd "$project_root"
+mkdir -p build
+
+output=${1:-build/luvcraft-streaming.tracy}
+case "$output" in
+  /*) ;;
+  *) output="$project_root/$output" ;;
+esac
+output_dir=$(dirname -- "$output")
+mkdir -p "$output_dir"
+
+endpoint="$project_root/build/luvcraft.slynk"
+if [ -r "$endpoint" ]; then
+  read -r existing_pid existing_port < "$endpoint" || true
+  if [ -n "${existing_pid:-}" ] && kill -0 "$existing_pid" 2>/dev/null; then
+    echo "trace-luvcraft-streaming: luvcraft is already running as pid $existing_pid" >&2
+    exit 1
+  fi
+  rm -f "$endpoint"
+fi
+
+run_dir=$(mktemp -d "$project_root/build/luvcraft-streaming.XXXXXX")
+world="$run_dir/world.sexp"
+log="$output.log"
+game_pid=
+capture_pid=
+
+stop_game() {
+  if [ -n "$capture_pid" ] && kill -0 "$capture_pid" 2>/dev/null; then
+    kill "$capture_pid" 2>/dev/null || true
+    wait "$capture_pid" 2>/dev/null || true
+  fi
+  if [ -n "$game_pid" ] && kill -0 "$game_pid" 2>/dev/null; then
+    "$project_root/sly" --luvcraft eval \
+      '(request-canvas-frame (luvcraft-session-canvas *session*) (lambda (timestamp) (declare (ignore timestamp)) (close-canvas (luvcraft-session-canvas *session*))))' \
+      --package LUVCRAFT </dev/null >/dev/null 2>&1 || true
+    attempts=0
+    while kill -0 "$game_pid" 2>/dev/null && [ "$attempts" -lt 100 ]; do
+      sleep 0.05
+      attempts=$((attempts + 1))
+    done
+    if kill -0 "$game_pid" 2>/dev/null; then
+      kill "$game_pid" 2>/dev/null || true
+    fi
+    wait "$game_pid" 2>/dev/null || true
+  fi
+  rm -rf "$run_dir"
+}
+trap stop_game EXIT HUP INT TERM
+
+"$project_root/build/luvcraft" --metal --tracy --world "$world" >"$log" 2>&1 &
+game_pid=$!
+
+attempts=0
+while [ ! -r "$endpoint" ]; do
+  if ! kill -0 "$game_pid" 2>/dev/null; then
+    echo "trace-luvcraft-streaming: luvcraft exited during startup; see $log" >&2
+    exit 1
+  fi
+  attempts=$((attempts + 1))
+  if [ "$attempts" -ge 400 ]; then
+    echo "trace-luvcraft-streaming: timed out waiting for luvcraft; see $log" >&2
+    exit 1
+  fi
+  sleep 0.05
+done
+
+echo "Waiting for initial streaming to become quiescent..."
+"$project_root/sly" --luvcraft eval \
+  '(progn
+     (loop repeat 300
+           until *session*
+           do (sleep 0.1)
+           finally (unless *session*
+                     (error "Luvcraft session did not start within 30 seconds.")))
+     (wait-for-luvcraft-streaming-quiescence *session* :timeout 30d0))' \
+  --package LUVCRAFT </dev/null >/dev/null
+
+echo "Capturing 0.5 seconds of quiet play, then one chunk-boundary event..."
+tracy-capture -o "$output" -f -s 5 >/dev/null &
+capture_pid=$!
+
+"$project_root/sly" --luvcraft eval \
+  '(trace-luvcraft-streaming-boundary *session* :baseline-seconds 0.5d0 :timeout 4d0)' \
+  --package LUVCRAFT </dev/null >/dev/null
+
+if ! wait "$capture_pid"; then
+  echo "trace-luvcraft-streaming: Tracy capture failed" >&2
+  exit 1
+fi
+capture_pid=
+
+messages="$run_dir/messages.csv"
+zones="$run_dir/zones.csv"
+tracy-csvexport -m "$output" >"$messages"
+tracy-csvexport -u "$output" >"$zones"
+
+for marker in \
+  "streaming trace: quiescent baseline begins" \
+  "streaming trace: chunk boundary crossed" \
+  "streaming trace: publication complete"
+do
+  if ! rg -q "^${marker}," "$messages"; then
+    echo "trace-luvcraft-streaming: missing Tracy marker: $marker" >&2
+    exit 1
+  fi
+done
+
+baseline_ns=$(awk -F, '$1 == "streaming trace: quiescent baseline begins" { print $2; exit }' "$messages")
+crossing_ns=$(awk -F, '$1 == "streaming trace: chunk boundary crossed" { print $2; exit }' "$messages")
+complete_ns=$(awk -F, '$1 == "streaming trace: publication complete" { print $2; exit }' "$messages")
+load_count=$(awk -F, '$1 == "production/load-chunk" { count++ } END { print count + 0 }' "$zones")
+
+if [ "$load_count" -lt 1 ]; then
+  echo "trace-luvcraft-streaming: capture contains no chunk-load zone" >&2
+  exit 1
+fi
+
+awk -v baseline="$baseline_ns" -v crossing="$crossing_ns" 'BEGIN {
+  quiet_ms = (crossing - baseline) / 1000000
+  if (quiet_ms < 450 || quiet_ms > 750) {
+    printf "trace-luvcraft-streaming: expected about 500 ms of quiescence, got %.3f ms\n", quiet_ms > "/dev/stderr"
+    exit 1
+  }
+}'
+
+awk -F, -v begin="$crossing_ns" -v end="$complete_ns" \
+  -v loads="$load_count" -v output="$output" '
+  NR > 1 && $1 == "luvcraft/frame" && $4 >= begin && $4 <= end {
+    frames++
+    milliseconds = $5 / 1000000
+    if (milliseconds > 16.6667) misses++
+    if (milliseconds > maximum) maximum = milliseconds
+  }
+  END {
+    printf "Trace: %s\n", output
+    printf "Chunk loads: %d\n", loads
+    printf "Streaming window: %d frames, %d over 16.67 ms, %.3f ms maximum CPU frame\n", frames, misses, maximum
+  }
+' "$zones"

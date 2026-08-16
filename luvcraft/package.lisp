@@ -191,6 +191,8 @@
            #:read-luvcraft-save
            #:reconcile-lighting
            #:refresh-luvcraft-mesh
+           #:wait-for-luvcraft-streaming-quiescence
+           #:trace-luvcraft-streaming-boundary
            #:refresh-luvcraft-shaders
            #:relight-block-world
            #:rematerialize-little-world-chunk

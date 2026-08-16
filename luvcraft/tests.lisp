@@ -404,6 +404,20 @@
     (ok (string= "canvas/frame" (luv:tracy-zone-name :canvas/frame)))
     (ok (string= "already a name" (luv:tracy-zone-name "already a name")))))
 
+(deftest streaming-trace-quiescence-requires-a-complete-publication-frontier
+  (let ((quiet '(:center (0 0) :desired 81 :outstanding 0 :staged 0
+                 :products 81 :lighting-dirty-p nil :errors 0)))
+    (ok (luvcraft::luvcraft-streaming-trace-state-quiescent-p quiet))
+    (ok (luvcraft::luvcraft-streaming-trace-state-quiescent-p quiet '(0 0)))
+    (ok (not (luvcraft::luvcraft-streaming-trace-state-quiescent-p
+              quiet '(1 0))))
+    (dolist (busy '((:outstanding 1) (:staged 1) (:products 80)
+                    (:lighting-dirty-p t) (:errors 1)))
+      (let ((state (copy-list quiet)))
+        (setf (getf state (first busy)) (second busy))
+        (ok (not (luvcraft::luvcraft-streaming-trace-state-quiescent-p
+                  state)))))))
+
 (deftest tracy-zone-contexts-travel-as-a-single-word
   ;; The binding spells TracyCZoneCtx as a uint64 rather than as the structure
   ;; it is, which keeps zone entry and exit out of libffi but makes an ABI

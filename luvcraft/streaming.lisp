@@ -687,3 +687,108 @@ here and install its publication cohort later at the frame boundary."))
   (setf (luvcraft-session-meshed-world-revision session)
         (block-world-revision (luvcraft-session-world session)))
   (luvcraft-session-products-in-order session))
+
+(defun luvcraft-streaming-trace-state (session)
+  "Snapshot the owner-side streaming state on the canvas thread."
+  (let ((state nil))
+    (request-canvas-frame
+     (luvcraft-session-canvas session)
+     (lambda (timestamp)
+       (declare (ignore timestamp))
+       (let ((lighting (luvcraft-session-lighting-state session)))
+         (setf state
+               (list :center (copy-list
+                              (luvcraft-session-residency-center session))
+                     :desired (hash-table-count
+                               (luvcraft-session-desired-chunks session))
+                     :outstanding (hash-table-count
+                                   (luvcraft-session-outstanding-production
+                                    session))
+                     :staged (hash-table-count
+                              (luvcraft-session-staged-chunk-products session))
+                     :products (hash-table-count
+                                (luvcraft-session-chunk-products session))
+                     :lighting-dirty-p
+                     (and lighting (lighting-state-dirty-p lighting))
+                     :errors (length
+                              (luvcraft-session-production-errors session)))))))
+    state))
+
+(defun luvcraft-streaming-trace-state-quiescent-p (state &optional center)
+  (and (zerop (getf state :errors))
+       (getf state :center)
+       (or (null center) (equal center (getf state :center)))
+       (plusp (getf state :desired))
+       (= (getf state :desired) (getf state :products))
+       (zerop (getf state :outstanding))
+       (zerop (getf state :staged))
+       (not (getf state :lighting-dirty-p))))
+
+(defun wait-for-luvcraft-streaming-quiescence
+    (session &key center (timeout 30d0))
+  "Wait until SESSION has no unpublished streaming or lighting work.
+
+When CENTER is supplied, also wait for the residency window to reach it.
+This is intended for repeatable live profiling orchestration, not frame code."
+  (let ((deadline (+ (get-internal-real-time)
+                     (round (* timeout internal-time-units-per-second))))
+        (state nil))
+    (loop
+      (setf state (luvcraft-streaming-trace-state session))
+      (when (plusp (getf state :errors))
+        (error "Luvcraft production failed while waiting for quiescence: ~S"
+               state))
+      (when (luvcraft-streaming-trace-state-quiescent-p state center)
+        (return state))
+      (when (>= (get-internal-real-time) deadline)
+        (error "Streaming did not become quiescent within ~,2F seconds: ~S"
+               timeout state))
+      (sleep 0.01))))
+
+(defun wait-for-luvcraft-tracy-connection (&key (timeout 10d0))
+  (let ((deadline (+ (get-internal-real-time)
+                     (round (* timeout internal-time-units-per-second)))))
+    (loop until (tracy-connected-p)
+          do (when (>= (get-internal-real-time) deadline)
+               (error "No Tracy capture connected within ~,2F seconds."
+                      timeout))
+             (sleep 0.01))))
+
+(defun trace-luvcraft-streaming-boundary
+    (session &key (baseline-seconds 0.5d0) (timeout 10d0))
+  "Trace quiet play followed by one natural +X residency-window advance.
+
+The Tracy client must be enabled.  This waits for a connected capture and a
+fully quiescent session, marks the baseline, leaves the game untouched for
+BASELINE-SECONDS, then moves the player just across the next chunk boundary.
+It returns only after the resulting loads, lighting, and meshes are published."
+  (unless *tracy*
+    (error "Start luvcraft with --tracy before tracing streaming."))
+  (wait-for-luvcraft-tracy-connection :timeout timeout)
+  (let* ((before (wait-for-luvcraft-streaming-quiescence
+                  session :timeout timeout))
+         (old-center (getf before :center))
+         (new-center (list (1+ (first old-center)) (second old-center))))
+    (tracy-message "streaming trace: quiescent baseline begins"
+                   :color #x54C878)
+    (sleep baseline-seconds)
+    (request-canvas-frame
+     (luvcraft-session-canvas session)
+     (lambda (timestamp)
+       (declare (ignore timestamp))
+       (let* ((world (luvcraft-session-world session))
+              (shape (voxel-space-chunk-shape (block-world-space world)))
+              (player (luvcraft-session-player session)))
+         (setf (player-x player)
+               (+ (* (first new-center) (chunk-shape-width shape)) 0.5d0)
+               (player-velocity-x player) 0d0
+               (player-velocity-y player) 0d0
+               (player-velocity-z player) 0d0)
+         (sync-camera-to-player (luvcraft-session-camera session) player)
+         (tracy-message "streaming trace: chunk boundary crossed"
+                        :color #xFFB347))))
+    (let ((after (wait-for-luvcraft-streaming-quiescence
+                  session :center new-center :timeout timeout)))
+      (tracy-message "streaming trace: publication complete"
+                     :color #x54C878)
+      after)))
