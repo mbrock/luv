@@ -155,6 +155,7 @@
            #:shader-function-call-arguments
            #:shader-function-call-bindings
            #:shader-function-call-result
+           #:shader-conditional
            #:shader-counted-fold
            #:shader-map-application
            #:shader-map-application-definition

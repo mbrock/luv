@@ -51,6 +51,11 @@
   (counted-fold (index count sum 0)
     (+ sum index)))
 
+(lisp:define-lisp-arithmetic-function cpu-bounded-triangular-number
+    ((count) (limit))
+  (counted-fold (index count sum 0)
+    (if (< index limit) (+ sum index) sum)))
+
 (defun tree-contains-any-object-p (tree objects)
   (cond ((atom tree) (member tree objects :test #'eql))
         ((consp tree)
@@ -91,6 +96,13 @@
                         'cpu-triangular-number)
                        10)))
     (ok (tree-contains-any-object-p lambda-expression '(dotimes)))))
+
+(deftest shared-conditionals-retain-ordinary-lisp-branching
+  (let ((lambda-expression
+          (lisp:lower-arithmetic-function 'cpu-bounded-triangular-number)))
+    (ok (= 10 (cpu-bounded-triangular-number 10 5)))
+    (ok (tree-contains-any-object-p lambda-expression '(if)))
+    (ok (tree-contains-any-object-p lambda-expression '(<)))))
 
 (deftest ordinary-vectors-execute-without-semantic-wrappers
   (let ((add (lisp:compile-arithmetic-function 'add-vectors))

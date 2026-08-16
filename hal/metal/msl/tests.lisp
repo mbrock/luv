@@ -179,6 +179,25 @@
     (ok (search "fold_state_1 = (fold_state_1 + fold_index_1);" source))
     (ok (search "result.result = fold_state_1;" source))))
 
+(deftest shared-conditionals-lower-inside-direct-metal-folds
+  (let* ((specification
+           (spv:parse-shader-specification
+            'metal-conditional-fold-probe
+            '(:stage :fragment
+              :inputs ((count :float :location 0)
+                       (limit :float :location 1))
+              :outputs ((result :float :location 0)))
+            '((spv:set-output result
+                              (spv:counted-fold
+                                  (index count sum 0.0)
+                                (if (< index limit)
+                                    (+ sum index)
+                                    sum))))))
+         (source
+           (msl:msl-document-source (msl:compile-msl specification))))
+    (ok (search "fold_index_1 < stage_in.limit" source))
+    (ok (search "? (fold_state_1 + fold_index_1) : fold_state_1" source))))
+
 (deftest unsupported-msl-boundaries-retain-source-reasons
   (flet ((reason-for (specification)
            (handler-case

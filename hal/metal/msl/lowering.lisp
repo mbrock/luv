@@ -129,6 +129,7 @@
 
 (defun msl-type-name (type &optional source-form)
   (case (spv:shader-type-name (spv:find-shader-type type source-form))
+    (:bool "bool")
     (:float "float")
     (:vec2 "float2")
     (:vec3 "float3")
@@ -392,6 +393,24 @@
     (note-msl-occurrence context expression (msl-occurrence-text result))))
 
 (defmethod lower-msl-expression
+    ((context msl-lowering-context) (expression spv:shader-conditional))
+  (let ((condition
+          (lower-msl-expression
+           context (lang:arithmetic-conditional-condition expression)))
+        (consequent
+          (lower-msl-expression
+           context (lang:arithmetic-conditional-consequent expression)))
+        (alternative
+          (lower-msl-expression
+           context (lang:arithmetic-conditional-alternative expression))))
+    (note-msl-occurrence
+     context expression
+     (format nil "(~A ? ~A : ~A)"
+             (msl-occurrence-text condition)
+             (msl-occurrence-text consequent)
+             (msl-occurrence-text alternative)))))
+
+(defmethod lower-msl-expression
     ((context msl-lowering-context) (expression spv:shader-counted-fold))
   (let* ((ordinal (incf (msl-context-fold-counter context)))
          (state-name (format nil "fold_state_~D" ordinal))
@@ -594,6 +613,11 @@
 (define-msl-infix-operator - "-")
 (define-msl-infix-operator * "*")
 (define-msl-infix-operator / "/")
+(define-msl-infix-operator < "<")
+(define-msl-infix-operator <= "<=")
+(define-msl-infix-operator > ">")
+(define-msl-infix-operator >= ">=")
+(define-msl-infix-operator = "==")
 
 (defmacro define-msl-function-operator (operator name)
   `(defmethod spv:lower-shader-call

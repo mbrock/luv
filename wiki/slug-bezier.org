@@ -315,6 +315,14 @@ conditional accumulation, and the sorted-coordinate early exit.  Those needs
 now extend one shared fold rather than motivating a shader-only control
 language.
 
+Conditional accumulation is shared now too.  =if= is a first-class value node
+in the common expression graph, with checked scalar comparisons =<=, =<==,
+=>=, =>==, and ===.  Lisp retains ordinary branch semantics; SPIR-V emits the
+ordered comparison plus =OpSelect=; and direct Metal emits a ternary inside the
+same =for= loop.  A bounded triangular fold executes on the CPU and compiles
+from the same shape on both GPU targets.  Integer/index representations, exact
+loads, and an early-exit form remain rather than being hidden inside this node.
+
 Done when: a runtime curve count rather than source unrolling controls the
 number of evaluated quadratics; CPU and GPU results agree at edge,
 shared-endpoint, empty-band, and early-exit cases; and source/lowering tools

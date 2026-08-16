@@ -29,6 +29,10 @@
            #:arithmetic-call-operator
            #:arithmetic-call-operands
            #:arithmetic-call-parameters
+           #:arithmetic-conditional
+           #:arithmetic-conditional-condition
+           #:arithmetic-conditional-consequent
+           #:arithmetic-conditional-alternative
            #:arithmetic-quantity-boundary
            #:arithmetic-quantity-boundary-operand
            #:arithmetic-quantity-construction

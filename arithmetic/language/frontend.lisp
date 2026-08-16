@@ -123,6 +123,18 @@
     :initform nil
     :reader arithmetic-call-parameters)))
 
+(defclass arithmetic-conditional (arithmetic-expression)
+  ((condition
+    :initarg :condition
+    :reader arithmetic-conditional-condition)
+   (consequent
+    :initarg :consequent
+    :reader arithmetic-conditional-consequent)
+   (alternative
+    :initarg :alternative
+    :reader arithmetic-conditional-alternative))
+  (:documentation "A value conditional shared by every arithmetic realization."))
+
 (defclass arithmetic-quantity-boundary (arithmetic-expression)
   ((operand
     :initarg :operand
@@ -205,6 +217,13 @@
             (arithmetic-call-operands expression))))
 
 (defmethod arithmetic-expression-quantity-checked-p
+    ((expression arithmetic-conditional))
+  (or (arithmetic-expression-quantity-checked-p
+       (arithmetic-conditional-consequent expression))
+      (arithmetic-expression-quantity-checked-p
+       (arithmetic-conditional-alternative expression))))
+
+(defmethod arithmetic-expression-quantity-checked-p
     ((expression arithmetic-quantity-boundary))
   (declare (ignore expression))
   t)
@@ -235,6 +254,15 @@
                         (arithmetic-call-operands expression)))
           (arithmetic-call-parameters expression)))
 
+(defmethod arithmetic-expression-form ((expression arithmetic-conditional))
+  (list 'if
+        (arithmetic-expression-form
+         (arithmetic-conditional-condition expression))
+        (arithmetic-expression-form
+         (arithmetic-conditional-consequent expression))
+        (arithmetic-expression-form
+         (arithmetic-conditional-alternative expression))))
+
 (defmethod arithmetic-expression-form
     ((expression arithmetic-quantity-boundary))
   (arithmetic-expression-source-form expression))
@@ -254,6 +282,12 @@
 
 (defmethod arithmetic-expression-children ((expression arithmetic-call))
   (arithmetic-call-operands expression))
+
+(defmethod arithmetic-expression-children
+    ((expression arithmetic-conditional))
+  (list (arithmetic-conditional-condition expression)
+        (arithmetic-conditional-consequent expression)
+        (arithmetic-conditional-alternative expression)))
 
 (defmethod arithmetic-expression-children
     ((expression arithmetic-quantity-boundary))
@@ -425,6 +459,11 @@
 (define-arithmetic-operator step "Compare compatible quantities and produce dimensionless values.")
 (define-arithmetic-operator normalize "Normalize a dimensionless vector.")
 (define-arithmetic-operator expt "Raise a dimensionless value to a dimensionless power.")
+(define-arithmetic-operator < "Test whether one compatible scalar is less than another.")
+(define-arithmetic-operator <= "Test whether one compatible scalar is at most another.")
+(define-arithmetic-operator > "Test whether one compatible scalar is greater than another.")
+(define-arithmetic-operator >= "Test whether one compatible scalar is at least another.")
+(define-arithmetic-operator = "Test whether two compatible scalars are equal.")
 (define-arithmetic-operator quantity "Construct a meaningful literal.")
 (define-arithmetic-operator assume-quantity "State external meaning for a raw value.")
 (define-arithmetic-operator interpret "Name a compatible derived quantity.")
@@ -456,6 +495,11 @@
 
 (defun infer-arithmetic-call-quantity-specification
     (operator operands source-form)
+  (when (member operator '(< <= > >= =) :test #'eq)
+    (unless (= 2 (length operands))
+      (error 'arithmetic-language-error
+             :form source-form :reason :comparison-arity
+             :details (length operands))))
   (when (some #'arithmetic-expression-quantity-checked-p operands)
     (let ((specifications
             (mapcar #'arithmetic-expression-quantity-specification operands)))
@@ -469,7 +513,12 @@
                        collect (arithmetic-expression-form operand))))
       (with-arithmetic-quantity-errors
           (source-form :invalid-quantity-operation)
-        (apply #'math:derive-quantity-specification operator specifications)))))
+        (if (member operator '(< <= > >= =) :test #'eq)
+            (progn
+              (apply #'math:derive-quantity-specification '- specifications)
+              nil)
+            (apply #'math:derive-quantity-specification
+                   operator specifications))))))
 
 (defgeneric parse-arithmetic-operator-call (operator form environment)
   (:documentation "Parse one arithmetic call into an inspectable expression."))
@@ -658,6 +707,26 @@
        :quantity-layout (arithmetic-expression-quantity-layout initial)
        :source-form form))))
 
+(defun parse-arithmetic-conditional (form environment)
+  (unless (= 4 (length form))
+    (error 'arithmetic-language-error
+           :form form :reason :conditional-arity))
+  (let ((condition (parse-arithmetic-expression (second form) environment))
+        (consequent (parse-arithmetic-expression (third form) environment))
+        (alternative (parse-arithmetic-expression (fourth form) environment)))
+    (unless (arithmetic-state-compatible-p consequent alternative)
+      (error 'arithmetic-language-error
+             :form form :reason :conditional-branch-mismatch
+             :details (list (arithmetic-expression-form consequent)
+                            (arithmetic-expression-form alternative))))
+    (make-instance
+     'arithmetic-conditional
+     :condition condition :consequent consequent :alternative alternative
+     :quantity-specification
+     (arithmetic-expression-quantity-specification consequent)
+     :quantity-layout (arithmetic-expression-quantity-layout consequent)
+     :source-form form)))
+
 (defun parse-arithmetic-call (form environment)
   (let* ((operator (first form))
          (function
@@ -665,6 +734,8 @@
                 (arithmetic-function-definition-for operator))))
     (cond ((eq operator 'counted-fold)
            (parse-arithmetic-counted-fold form environment))
+          ((eq operator 'if)
+           (parse-arithmetic-conditional form environment))
           ((arithmetic-operator-p operator)
            (parse-arithmetic-operator-call operator form environment))
           (function

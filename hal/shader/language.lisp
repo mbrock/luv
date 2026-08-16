@@ -85,6 +85,7 @@
                        :image-depth-p image-depth-p)))
 
 (register-shader-type :float :component-count 1)
+(register-shader-type :bool)
 (register-shader-type :vec2 :component-count 2)
 (register-shader-type :vec3 :component-count 3)
 (register-shader-type :vec4 :component-count 4)
@@ -402,6 +403,11 @@ leaves it again while retaining the semantic operand in the expression graph."))
   (:documentation
    "An inspectable typed call whose body is inlined during backend lowering."))
 
+(defclass shader-conditional
+    (shader-expression lang:arithmetic-conditional)
+  ()
+  (:documentation "A typed value conditional from the shared language."))
+
 (defclass shader-counted-fold
     (shader-expression lang:arithmetic-counted-fold)
   ()
@@ -539,6 +545,10 @@ leaves it again while retaining the semantic operand in the expression graph."))
    (shader-function-call-result expression)))
 
 (defmethod shader-expression-quantity-checked-p
+    ((expression shader-conditional))
+  (lang:arithmetic-expression-quantity-checked-p expression))
+
+(defmethod shader-expression-quantity-checked-p
     ((expression shader-counted-fold))
   (shader-expression-quantity-checked-p
    (lang:arithmetic-counted-fold-initial expression)))
@@ -625,6 +635,9 @@ leaves it again while retaining the semantic operand in the expression graph."))
 
 (defmethod shader-expression-form ((expression shader-function-call))
   (shader-expression-source-form expression))
+
+(defmethod shader-expression-form ((expression shader-conditional))
+  (lang:arithmetic-expression-form expression))
 
 (defmethod shader-expression-form ((expression shader-counted-fold))
   (shader-expression-source-form expression))
@@ -944,6 +957,26 @@ silent loss of meaning."
                   :form source-form :reason :incompatible-division-types
                   :details (mapcar #'shader-type-name types))))))
 
+(defun infer-scalar-float-comparison-type (operands source-form)
+  (require-shader-types
+   (lambda (types)
+     (and (= 2 (length types))
+          (every (lambda (type) (shader-type= type :float)) types)))
+   operands source-form :invalid-scalar-comparison)
+  (find-shader-type :bool))
+
+(defmacro define-scalar-float-comparison-type (operator)
+  `(defmethod infer-shader-call-type
+       ((operator (eql ',operator)) operands source-form)
+     (declare (ignore operator))
+     (infer-scalar-float-comparison-type operands source-form)))
+
+(define-scalar-float-comparison-type <)
+(define-scalar-float-comparison-type <=)
+(define-scalar-float-comparison-type >)
+(define-scalar-float-comparison-type >=)
+(define-scalar-float-comparison-type =)
+
 (defun swizzle-components (designator source-form)
   (let* ((name (string-downcase (symbol-name designator)))
          (indices
@@ -1165,6 +1198,11 @@ never collides with a standard symbol's function documentation:
   "The componentwise square root of one scalar or vector.")
 (define-shader-operator expt
   "Raise a value to a power, componentwise over one uniform type.")
+(define-shader-operator < "Test two scalar floats for ordered less-than.")
+(define-shader-operator <= "Test two scalar floats for ordered less-or-equal.")
+(define-shader-operator > "Test two scalar floats for ordered greater-than.")
+(define-shader-operator >= "Test two scalar floats for ordered greater-or-equal.")
+(define-shader-operator = "Test two scalar floats for ordered equality.")
 (define-shader-operator clamp
   "Constrain a value between uniformly typed lower and upper bounds.")
 (define-shader-operator smoothstep
@@ -1633,6 +1671,32 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
        :quantity-layout (shader-expression-quantity-layout initial)
        :source-form form))))
 
+(defun parse-shader-conditional (form environment)
+  (unless (= 4 (length form))
+    (error 'shader-language-error :form form :reason :conditional-arity))
+  (let ((condition (parse-shader-expression (second form) environment))
+        (consequent (parse-shader-expression (third form) environment))
+        (alternative (parse-shader-expression (fourth form) environment)))
+    (unless (shader-type= (shader-expression-type condition) :bool)
+      (error 'shader-language-error
+             :form (second form) :reason :conditional-condition-type
+             :details (shader-type-name (shader-expression-type condition))))
+    (unless (and (shader-type= (shader-expression-type consequent)
+                               (shader-expression-type alternative))
+                 (lang:arithmetic-state-compatible-p consequent alternative))
+      (error 'shader-language-error
+             :form form :reason :conditional-branch-mismatch
+             :details (list (shader-expression-form consequent)
+                            (shader-expression-form alternative))))
+    (make-instance
+     'shader-conditional
+     :condition condition :consequent consequent :alternative alternative
+     :type (shader-expression-type consequent)
+     :quantity-specification
+     (shader-expression-quantity-specification consequent)
+     :quantity-layout (shader-expression-quantity-layout consequent)
+     :source-form form)))
+
 (defun parse-shader-call (form environment)
   (let* ((operator (first form))
          (function (and (symbolp operator)
@@ -1641,6 +1705,8 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
                              operator)))))
     (cond ((eq operator 'counted-fold)
            (parse-shader-counted-fold form environment))
+          ((eq operator 'if)
+           (parse-shader-conditional form environment))
           ((shader-operator-p operator)
            (parse-shader-operator-call operator form environment))
           (function
@@ -2539,7 +2605,9 @@ structured product and source provenance.  #JDLQPN"))
           (setf (gethash type (context-type-ids context)) id)
           (append-context-form
            'type-declarations context
-           (cond ((eq kind :texture-2d)
+           (cond ((shader-type= type :bool)
+                  (list id 'type-bool))
+                 ((eq kind :texture-2d)
                   (list id 'type-image
                         (ensure-shader-type-id context :float)
                         '2d
@@ -2563,12 +2631,15 @@ structured product and source provenance.  #JDLQPN"))
     id))
 
 (defun ensure-bool-type-id (context)
-  (or (gethash :bool (context-type-ids context))
+  (let ((type (find-shader-type :bool)))
+    (or (gethash type (context-type-ids context))
+        (gethash :bool (context-type-ids context))
       (let ((id (reserve-shader-id context "BOOL")))
-        (setf (gethash :bool (context-type-ids context)) id)
+        (setf (gethash :bool (context-type-ids context)) id
+              (gethash type (context-type-ids context)) id)
         (append-context-form 'type-declarations context
                              (list id 'type-bool))
-        id)))
+        id))))
 
 (defun ensure-pointer-type-id (context storage-class value-type)
   (let* ((value-id (ensure-shader-type-id context value-type))
@@ -2797,6 +2868,11 @@ Modules whose expressions use no extended mathematics never acquire one."
   (shader-object-name (shader-function-call-definition expression)))
 
 (defmethod shader-expression-provenance-name
+    ((expression shader-conditional))
+  (declare (ignore expression))
+  'conditional)
+
+(defmethod shader-expression-provenance-name
     ((expression shader-map-application))
   (declare (ignore expression))
   'projected-point)
@@ -3018,6 +3094,29 @@ backend's context before its source-located unsupported-operation method."))
            vector-id (shader-expression-type vector)
            reciprocal-id float-type))
         (lower-chained-arithmetic context expression))))
+
+(defun comparison-instruction (operator)
+  (ecase operator
+    (< 'f-ord-less-than)
+    (<= 'f-ord-less-than-equal)
+    (> 'f-ord-greater-than)
+    (>= 'f-ord-greater-than-equal)
+    (= 'f-ord-equal)))
+
+(defmacro define-comparison-lowering (operator)
+  `(defmethod lower-shader-call
+       ((operator (eql ',operator)) context expression)
+     (emit-value-instruction
+      context expression :bool (comparison-instruction operator)
+      (mapcar (lambda (operand)
+                (lower-shader-expression context operand))
+              (shader-call-operands expression)))))
+
+(define-comparison-lowering <)
+(define-comparison-lowering <=)
+(define-comparison-lowering >)
+(define-comparison-lowering >=)
+(define-comparison-lowering =)
 
 (defmethod lower-shader-call ((operator (eql 'mix)) context expression)
   (destructuring-bind (from to amount) (shader-call-operands expression)
@@ -3274,6 +3373,18 @@ backend's context before its source-located unsupported-operation method."))
          (value (lower-shader-expression context result)))
     (alias-shader-expression context expression result)
     value))
+
+(defmethod lower-shader-expression-value
+    (context (expression shader-conditional))
+  (emit-value-instruction
+   context expression (shader-expression-type expression) 'select
+   (list
+    (lower-shader-expression
+     context (lang:arithmetic-conditional-condition expression))
+    (lower-shader-expression
+     context (lang:arithmetic-conditional-consequent expression))
+    (lower-shader-expression
+     context (lang:arithmetic-conditional-alternative expression)))))
 
 (defmethod lower-shader-expression-value
     (context (expression shader-counted-fold))

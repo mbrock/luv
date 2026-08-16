@@ -209,6 +209,11 @@
 (define-lisp-arithmetic-operator step lisp-step)
 (define-lisp-arithmetic-operator normalize lisp-normalize)
 (define-lisp-arithmetic-operator expt lisp-expt)
+(define-lisp-arithmetic-operator < <)
+(define-lisp-arithmetic-operator <= <=)
+(define-lisp-arithmetic-operator > >)
+(define-lisp-arithmetic-operator >= >=)
+(define-lisp-arithmetic-operator = =)
 
 (defun lisp-environment-value (target environment expression)
   (or (cdr (assoc target environment :test #'eq))
@@ -244,6 +249,15 @@
    (mapcar (lambda (operand)
              (lower-lisp-arithmetic-expression operand environment))
            (lang:arithmetic-call-operands expression))))
+
+(defmethod lower-lisp-arithmetic-expression
+    ((expression lang:arithmetic-conditional) environment)
+  `(if ,(lower-lisp-arithmetic-expression
+         (lang:arithmetic-conditional-condition expression) environment)
+       ,(lower-lisp-arithmetic-expression
+         (lang:arithmetic-conditional-consequent expression) environment)
+       ,(lower-lisp-arithmetic-expression
+         (lang:arithmetic-conditional-alternative expression) environment)))
 
 (defmethod lower-lisp-arithmetic-expression
     ((expression lang:arithmetic-quantity-boundary) environment)

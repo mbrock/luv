@@ -302,6 +302,8 @@
   (:opcode 89) (:result :typed) (:operands :id :id :id))
 (define-instruction image-write (image coordinate texel)
   (:opcode 99) (:operands :id :id :id))
+(define-instruction select (condition true-object false-object)
+  (:opcode 169) (:result :typed) (:operands :id :id :id))
 (define-typed-binary-instructions
   (f-add 129)
   (f-sub 131)
@@ -310,8 +312,12 @@
   (dot 148)
   (shift-right-logical 194)
   (bitwise-and 199))
-(define-instruction f-ord-less-than (left right)
-  (:opcode 184) (:result :typed) (:operands :id :id))
+(define-typed-binary-instructions
+  (f-ord-equal 180)
+  (f-ord-less-than 184)
+  (f-ord-greater-than 186)
+  (f-ord-less-than-equal 188)
+  (f-ord-greater-than-equal 190))
 (define-instruction vector-times-scalar (vector scalar)
   (:opcode 142)
   (:result :typed)

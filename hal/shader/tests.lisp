@@ -82,6 +82,11 @@
   (counted-fold (index count sum 0.0)
     (+ sum index)))
 
+(lang:define-arithmetic-function shared-conditional-fold-probe
+    ((count) (limit))
+  (counted-fold (index count sum 0.0)
+    (if (< index limit) (+ sum index) sum)))
+
 (spv:define-shader-method shader-method-probe shader-method-probe
     ((role (eql :probe)) (stage (eql :fragment)))
     (:stage :fragment
@@ -1646,6 +1651,26 @@
     (ok (find "LOOP-MERGE" names :key #'symbol-name :test #'string=))
     (ok (find "BRANCH-CONDITIONAL" names
               :key #'symbol-name :test #'string=))
+    (ok (= #x07230203
+           (aref (spv:assemble-shader-specification specification) 0)))))
+
+(deftest shared-conditionals-lower-inside-structured-spir-v-folds
+  (let* ((specification
+           (spv:parse-shader-specification
+            'conditional-fold-fragment
+            '(:stage :fragment
+              :inputs ((count :float :location 0)
+                       (limit :float :location 1))
+              :outputs ((result :float :location 0)))
+            '((set-output result
+                          (shared-conditional-fold-probe count limit)))))
+         (names
+           (mapcar #'spv:instruction-name
+                   (spv:lower-spir-v
+                    (spv:shader-module specification)))))
+    (ok (find "F-ORD-LESS-THAN" names
+              :key #'symbol-name :test #'string=))
+    (ok (find "SELECT" names :key #'symbol-name :test #'string=))
     (ok (= #x07230203
            (aref (spv:assemble-shader-specification specification) 0)))))
 

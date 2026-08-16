@@ -31,6 +31,10 @@
   (counted-fold (index count sum 0)
     (+ sum index)))
 
+(lang:define-arithmetic-function bounded-triangular-number ((count) (limit))
+  (counted-fold (index count sum 0)
+    (if (< index limit) (+ sum index) sum)))
+
 (deftest arithmetic-functions-retain-checked-source-graphs
   (let* ((definition (lang:arithmetic-function-definition-for 'fog-shape))
          (bindings (lang:arithmetic-function-bindings definition))
@@ -107,6 +111,18 @@
              (lang:arithmetic-counted-fold-state-binding fold))))
     (ok (equal '(counted-fold (index count sum 0) (+ sum index))
                (lang:arithmetic-expression-form fold)))))
+
+(deftest conditionals-and-comparisons-are-shared-expression-nodes
+  (let* ((fold
+           (lang:arithmetic-function-result
+            (lang:arithmetic-function-definition-for
+             'bounded-triangular-number)))
+         (conditional (lang:arithmetic-counted-fold-update fold)))
+    (ok (typep conditional 'lang:arithmetic-conditional))
+    (ok (equal '(if (< index limit) (+ sum index) sum)
+               (lang:arithmetic-expression-form conditional)))
+    (ok (typep (lang:arithmetic-conditional-condition conditional)
+               'lang:arithmetic-call))))
 
 (deftest arithmetic-parameters-implement-the-common-declaration-protocol
   (let* ((definition (lang:arithmetic-function-definition-for 'fog-shape))
