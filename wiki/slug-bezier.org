@@ -644,6 +644,48 @@ first close-up in #9G0Z19 subsequently falsified the bounds crossing; its
 corrected close-up now verifies that fragment selection agrees with
 preprocessing at the enlarged proof scale.
 
+* DONE One distance function draws the roundrect family analytically
+:PROPERTIES:
+:ID: LDAHBP
+:END:
+
+Intent: reuse the proof discipline learned from Slug without pretending that a
+fixed GUI primitive is an arbitrary outline.
+
+The distinction is now executable.  Slug's first proof #OWR8OZ puts reusable
+pixel mathematics in a typed function, exposes it through tiny portable shader
+specifications, inspects both generated targets, and finally demands a real GPU
+readback.  The roundrect proof follows exactly that path while omitting curve
+textures, bands, winding traversal, and device outline identity.
+
+[[lisp:roundrect-signed-distance]] is one shared arithmetic definition.  It
+executes as an ordinary Lisp function for the scalar oracle and lowers into the
+same mathematical shader graph for both backends.  A radius of zero is a
+rectangle; radius equal to the shorter half-extent yields capsules and circles.
+The shared arithmetic vocabulary gained raw =abs= and =sqrt= realization on
+this evidence, without claiming quantity semantics for either operation.
+
+[[lisp:roundrect-coverage]] evaluates that distance in the fragment shader,
+uses =derivative-x= and =derivative-y= to measure its screen-space gradient,
+and maps the signed result through a one-pixel coverage ramp.  One padded quad
+record carries clip position, local coordinate, half-size plus radius, opacity,
+and premultiplied colour.  The cold Metal proof sends four such records through
+one resource-free pipeline: a roundrect, a capsule, a circle, and a rotated
+affine ellipse.
+
+[[file:images/analytic-roundrect-proof.png]]
+
+Evidence: the Lisp distance oracle checks straight edges, circle points, and
+radius normalization.  The generated SPIR-V contains both fragment derivative
+instructions and validates under =spirv-val=.  Generated MSL contains direct
+=dfdx=, =dfdy=, and =sqrt= calls and compiles under Metal 4.  The image above is
+a 768 by 480 native Metal render and readback, not a software reconstruction.
+The complete luv, luvcraft, and wiki suites pass.
+
+Done when (met): one shared distance definition produces exact scalar oracle
+values, both backend products compile, and a real GPU draw preserves smooth
+coverage across a card, capsule, circle, and non-uniform rotated transform.
+
 * NEXT Compare Slug coverage at glyph edges
 :PROPERTIES:
 :ID: 9G0Z19

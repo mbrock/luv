@@ -127,6 +127,8 @@
      (:module "shader"
       :serial t
       :components ((:file "language")
+                   (:file "analytic-package")
+                   (:file "analytic")
                    (:file "slug-package")
                    (:file "slug-outline")
                    (:file "slug-serialization")

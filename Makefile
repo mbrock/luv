@@ -6,7 +6,7 @@ LUVCRAFT_BENCHMARK_SCENARIO ?= steady
 LUVCRAFT_STREAMING_BENCHMARK_CSV ?= build/luvcraft-metal-streaming-benchmark.csv
 TRACY_STREAMING_TRACE ?= build/luvcraft-streaming.tracy
 
-.PHONY: all luvcraft run test parinfer-check shader-validate msl-validate smoke metal-smoke metal-text-closeup metal-benchmark metal-streaming-benchmark tracy-streaming mcluv readme-screenshots mcclim-gallery wiki wiki-cli objective-c-probe metal-clear metal-shader metal-pipeline metal-draw slug-proof slug-text-proof clean
+.PHONY: all luvcraft run test parinfer-check shader-validate msl-validate smoke metal-smoke metal-text-closeup metal-benchmark metal-streaming-benchmark tracy-streaming mcluv readme-screenshots mcclim-gallery wiki wiki-cli objective-c-probe metal-clear metal-shader metal-pipeline metal-draw roundrect-proof slug-proof slug-text-proof clean
 
 all: luvcraft
 
@@ -47,6 +47,8 @@ shader-validate:
 		--eval '(luv.spir-v:write-spir-v (luvcraft.shaders:block-world-shadow-vertex-shader) #p"build/block-world-shadow.vert.spv")' \
 		--eval '(luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (luvcraft.shaders:block-world-text-vertex-specification)) #p"build/block-world-text.vert.spv")' \
 		--eval '(luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (luvcraft.shaders:block-world-text-fragment-specification)) #p"build/block-world-text.frag.spv")' \
+		--eval '(luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (luv.analytic:roundrect-vertex-specification)) #p"build/analytic-roundrect.vert.spv")' \
+		--eval '(luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (luv.analytic:roundrect-fragment-specification)) #p"build/analytic-roundrect.frag.spv")' \
 		--eval '(luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (luv.slug:slug-bezier-vertex-specification)) #p"build/slug-bezier.vert.spv")' \
 		--eval '(luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (luv.slug:slug-bezier-fragment-specification)) #p"build/slug-bezier.frag.spv")'
 	./scripts/dev spirv-val --target-env vulkan1.0 build/block-world.vert.spv
@@ -58,6 +60,8 @@ shader-validate:
 	./scripts/dev spirv-val --target-env vulkan1.0 build/block-world-shadow.vert.spv
 	./scripts/dev spirv-val --target-env vulkan1.0 build/block-world-text.vert.spv
 	./scripts/dev spirv-val --target-env vulkan1.0 build/block-world-text.frag.spv
+	./scripts/dev spirv-val --target-env vulkan1.0 build/analytic-roundrect.vert.spv
+	./scripts/dev spirv-val --target-env vulkan1.0 build/analytic-roundrect.frag.spv
 	./scripts/dev spirv-val --target-env vulkan1.0 build/slug-bezier.vert.spv
 	./scripts/dev spirv-val --target-env vulkan1.0 build/slug-bezier.frag.spv
 
@@ -72,12 +76,16 @@ msl-validate:
 		--eval '(luv.msl:write-msl (luv.msl:compile-msl (luvcraft.shaders:block-world-fragment-specification)) #p"build/block-world.frag.metal")' \
 		--eval '(luv.msl:write-msl (luv.msl:compile-msl (luvcraft.shaders:block-world-text-vertex-specification)) #p"build/block-world-text.vert.metal")' \
 		--eval '(luv.msl:write-msl (luv.msl:compile-msl (luvcraft.shaders:block-world-text-fragment-specification)) #p"build/block-world-text.frag.metal")' \
+		--eval '(luv.msl:write-msl (luv.msl:compile-msl (luv.analytic:roundrect-vertex-specification)) #p"build/analytic-roundrect.vert.metal")' \
+		--eval '(luv.msl:write-msl (luv.msl:compile-msl (luv.analytic:roundrect-fragment-specification)) #p"build/analytic-roundrect.frag.metal")' \
 		--eval '(luv.msl:write-msl (luv.msl:compile-msl (luv.slug:slug-bezier-vertex-specification)) #p"build/slug-bezier.vert.metal")' \
 		--eval '(luv.msl:write-msl (luv.msl:compile-msl (luv.slug:slug-bezier-fragment-specification)) #p"build/slug-bezier.frag.metal")'
 	xcrun metal -std=metal4.0 -c build/block-world.vert.metal -o build/block-world.vert.air
 	xcrun metal -std=metal4.0 -c build/block-world.frag.metal -o build/block-world.frag.air
 	xcrun metal -std=metal4.0 -c build/block-world-text.vert.metal -o build/block-world-text.vert.air
 	xcrun metal -std=metal4.0 -c build/block-world-text.frag.metal -o build/block-world-text.frag.air
+	xcrun metal -std=metal4.0 -c build/analytic-roundrect.vert.metal -o build/analytic-roundrect.vert.air
+	xcrun metal -std=metal4.0 -c build/analytic-roundrect.frag.metal -o build/analytic-roundrect.frag.air
 	xcrun metal -std=metal4.0 -c build/slug-bezier.vert.metal -o build/slug-bezier.vert.air
 	xcrun metal -std=metal4.0 -c build/slug-bezier.frag.metal -o build/slug-bezier.frag.air
 
@@ -137,6 +145,9 @@ metal-pipeline:
 metal-draw:
 	./scripts/dev sbcl --script hal/metal/probes/draw.lisp
 
+roundrect-proof:
+	./scripts/dev sbcl --script hal/metal/probes/analytic-roundrect.lisp build/analytic-roundrect-proof.png
+
 slug-proof:
 	./scripts/dev sbcl --script hal/metal/probes/slug-bezier.lisp build/slug-bezier-proof.png
 
@@ -148,9 +159,13 @@ clean:
 	rm -f ./build/block-world.vert.metal ./build/block-world.vert.air
 	rm -f ./build/block-world.frag.metal ./build/block-world.frag.air
 	rm -f ./build/slug-bezier.vert.spv ./build/slug-bezier.frag.spv
+	rm -f ./build/analytic-roundrect.vert.spv ./build/analytic-roundrect.frag.spv
+	rm -f ./build/analytic-roundrect.vert.metal ./build/analytic-roundrect.vert.air
+	rm -f ./build/analytic-roundrect.frag.metal ./build/analytic-roundrect.frag.air
 	rm -f ./build/slug-bezier.vert.metal ./build/slug-bezier.vert.air
 	rm -f ./build/slug-bezier.frag.metal ./build/slug-bezier.frag.air
 	rm -f ./build/slug-bezier-proof.png
+	rm -f ./build/analytic-roundrect-proof.png
 	rm -f ./build/slug-text-proof.png
 	rm -f ./build/objective-c-exception-bridge-*.dylib
 	rm -rf ./build/wiki ./build/wiki-cli

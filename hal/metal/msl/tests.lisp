@@ -208,6 +208,17 @@
     (ok (search "sqrt(" source))
     (ok (search "result.color_output" source))))
 
+(deftest analytic-roundrect-lowers-to-direct-metal-distance-mathematics
+  (let* ((document
+           (msl:compile-msl
+            (luv.analytic:roundrect-fragment-specification)))
+         (source (msl:msl-document-source document)))
+    (ok (search "fragment RoundrectFragmentSpecificationOutput" source))
+    (ok (search "dfdx(" source))
+    (ok (search "dfdy(" source))
+    (ok (search "sqrt(" source))
+    (ok (search "result.color_output" source))))
+
 (deftest slug-band-function-lexicals-stay-inside-their-metal-loops
   (let* ((source
            (msl:msl-document-source

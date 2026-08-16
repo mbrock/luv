@@ -38,6 +38,9 @@
 (lisp:define-lisp-arithmetic-function twice-offset-square ((value))
   (+ (offset-square value) (offset-square value)))
 
+(lisp:define-lisp-arithmetic-function absolute-square-root ((value))
+  (sqrt (abs value)))
+
 (lisp:define-lisp-arithmetic-function cpu-triangular-number ((count))
   (counted-fold (index count sum 0)
     (+ sum index)))
@@ -116,6 +119,11 @@
     (ok (equalp #(5.0d0 7.0d0 9.0d0)
                 (funcall add left right)))
     (ok (= 32.0d0 (funcall dot left right)))))
+
+(deftest raw-unary-operators-execute-componentwise
+  (ok (= 2.0d0 (absolute-square-root -4.0d0)))
+  (ok (equalp #(2.0d0 3.0d0)
+              (absolute-square-root #(-4.0d0 9.0d0)))))
 
 (deftest vec3-is-owned-and-realized-by-the-lisp-arithmetic-backend
   (let* ((vector (vec:make-vec3 3d0 4d0 0d0))

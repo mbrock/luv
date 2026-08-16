@@ -461,6 +461,8 @@
 (define-arithmetic-operator dot "The inner product of two vectors.")
 (define-arithmetic-operator min "The minimum of compatible quantities.")
 (define-arithmetic-operator max "The maximum of compatible quantities.")
+(define-arithmetic-operator abs "The componentwise absolute value of a raw value.")
+(define-arithmetic-operator sqrt "The componentwise square root of a raw value.")
 (define-arithmetic-operator clamp "Constrain a quantity between compatible bounds.")
 (define-arithmetic-operator mix "Interpolate compatible quantities by a scalar amount.")
 (define-arithmetic-operator smoothstep "Produce dimensionless progress across compatible edges.")

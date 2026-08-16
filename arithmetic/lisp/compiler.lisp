@@ -84,6 +84,22 @@
          :reason :unsupported-runtime-representations
          :details (list (type-of left) (type-of right))))
 
+(defgeneric lisp-unary-operation (function value)
+  (:documentation
+   "Apply scalar FUNCTION componentwise to one Lisp representation."))
+
+(defmethod lisp-unary-operation (function (value number))
+  (funcall function value))
+
+(defmethod lisp-unary-operation (function (value vector))
+  (map-lisp-vector function value))
+
+(defmethod lisp-unary-operation (function value)
+  (declare (ignore function))
+  (error 'lisp-arithmetic-error
+         :reason :unsupported-runtime-representation
+         :details (type-of value)))
+
 (defun reduce-lisp-operation (function operands identity)
   (if operands
       (reduce (lambda (left right)
@@ -120,6 +136,12 @@
   (unless operands
     (error 'lisp-arithmetic-error :reason :maximum-requires-operands))
   (reduce-lisp-operation #'max operands nil))
+
+(defun lisp-abs (value)
+  (lisp-unary-operation #'abs value))
+
+(defun lisp-sqrt (value)
+  (lisp-unary-operation #'sqrt value))
 
 (defun lisp-expt (base exponent)
   (lisp-binary-operation #'expt base exponent))
@@ -204,6 +226,8 @@
 (define-lisp-arithmetic-operator dot lisp-dot)
 (define-lisp-arithmetic-operator min lisp-min)
 (define-lisp-arithmetic-operator max lisp-max)
+(define-lisp-arithmetic-operator abs lisp-abs)
+(define-lisp-arithmetic-operator sqrt lisp-sqrt)
 (define-lisp-arithmetic-operator clamp lisp-clamp)
 (define-lisp-arithmetic-operator mix lisp-mix)
 (define-lisp-arithmetic-operator smoothstep lisp-smoothstep)

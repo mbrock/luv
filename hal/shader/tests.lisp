@@ -2,6 +2,7 @@
   (:use #:cl #:rove #:luv #:luvcraft #:luvcraft.world)
   (:local-nicknames (#:spv #:luv.spir-v)
                     (#:shaders #:luvcraft.shaders)
+                    (#:analytic #:luv.analytic)
                     (#:slug #:luv.slug)
                     (#:math #:luv.arithmetic)
                     (#:lang #:luv.arithmetic.language)
@@ -1851,6 +1852,55 @@
     (ok (find "SELECT" names :key #'symbol-name :test #'string=))
     (ok (= #x07230203
            (aref (spv:assemble-shader-specification specification) 0)))))
+
+(deftest analytic-roundrect-distance-covers-the-fixed-shape-family
+  (flet ((near (left right)
+           (< (abs (- left right)) 1.0e-5)))
+    ;; A two-by-one roundrect is one unit inside at its centre and exactly on
+    ;; its straight right edge.
+    (ok (near -1.0
+              (analytic:roundrect-signed-distance 0.0 0.0 2.0 1.0 0.25)))
+    (ok (near 0.0
+              (analytic:roundrect-signed-distance 2.0 0.0 2.0 1.0 0.25)))
+    ;; Radius equal to both half-extents is the ordinary circle distance.
+    (ok (near 0.0
+              (analytic:roundrect-signed-distance 0.6 0.8 1.0 1.0 1.0)))
+    (ok (near 1.0
+              (analytic:roundrect-signed-distance 2.0 0.0 1.0 1.0 1.0)))
+    ;; Excessive and negative radii are normalized at the semantic boundary.
+    (ok (near 0.0
+              (analytic:roundrect-signed-distance 1.0 0.0 1.0 0.5 8.0)))
+    (ok (near 0.0
+              (analytic:roundrect-signed-distance 1.0 0.0 1.0 0.5 -1.0)))))
+
+(deftest analytic-roundrect-proof-shares-distance-and-derivative-coverage
+  (let* ((vertex (analytic:roundrect-vertex-specification))
+         (fragment (analytic:roundrect-fragment-specification))
+         (coverage (binding-named 'coverage fragment))
+         (forms
+           (write-to-string
+            (mapcar #'spv:instruction-form
+                    (spv:lower-spir-v
+                     (spv:shader-module fragment))))))
+    (ok (eq :vertex (spv:shader-specification-stage vertex)))
+    (ok (eq :fragment (spv:shader-specification-stage fragment)))
+    (ok (= 4 (length (spv:shader-specification-inputs vertex))))
+    (ok (= 3 (length (spv:shader-specification-inputs fragment))))
+    (ok (typep (spv:shader-binding-expression coverage)
+               'spv:shader-function-call))
+    (ok (eq 'analytic:roundrect-coverage
+            (spv:shader-object-name
+             (spv:shader-function-call-definition
+              (spv:shader-binding-expression coverage)))))
+    (ok (lang:arithmetic-function-definition-for
+         'analytic:roundrect-signed-distance))
+    (ok (search "D-PDX" forms))
+    (ok (search "D-PDY" forms))
+    (ok (search "SQRT" forms))
+    (ok (= #x07230203
+           (aref (spv:assemble-shader-specification vertex) 0)))
+    (ok (= #x07230203
+           (aref (spv:assemble-shader-specification fragment) 0)))))
 
 (deftest slug-proof-is-a-pixel-shader-over-quadratic-roots
   (let* ((vertex (slug:slug-bezier-vertex-specification))

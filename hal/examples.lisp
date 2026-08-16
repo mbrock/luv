@@ -327,6 +327,159 @@ seam is available there without inventing an empty bind-group abstraction."
       (when vertex-module (destroy vertex-module))
       (when device (destroy device)))))
 
+(defun append-analytic-roundrect-quad
+    (data center x-axis y-axis half-size radius color
+     &key (alpha 1.0) (padding 0.08))
+  "Append one padded analytic-roundrect quad to interleaved proof DATA."
+  (let* ((half-width (first half-size))
+         (half-height (second half-size))
+         (extent-x (+ half-width padding))
+         (extent-y (+ half-height padding))
+         (corners
+           (list (list (- extent-x) (- extent-y))
+                 (list extent-x (- extent-y))
+                 (list extent-x extent-y)
+                 (list (- extent-x) (- extent-y))
+                 (list extent-x extent-y)
+                 (list (- extent-x) extent-y))))
+    (dolist (corner corners)
+      (destructuring-bind (local-x local-y) corner
+        (let ((clip-x
+                (+ (first center)
+                   (* local-x (first x-axis))
+                   (* local-y (first y-axis))))
+              (clip-y
+                (+ (second center)
+                   (* local-x (second x-axis))
+                   (* local-y (second y-axis)))))
+          (dolist (value
+                    (list clip-x clip-y alpha
+                          local-x local-y 0.0
+                          half-width half-height radius
+                          (first color) (second color) (third color)))
+            (vector-push-extend (coerce value 'single-float) data))))))
+  data)
+
+(defun render-metal-analytic-roundrect-proof (provider)
+  "Render one parameterized analytic roundrect family on Metal.
+
+The four instances are a roundrect, capsule, circle, and affinely transformed
+ellipse.  They share one resource-free mathematical pipeline and differ only
+in dense vertex parameters."
+  (let ((device nil)
+        (vertex-module nil)
+        (fragment-module nil)
+        (pipeline nil)
+        (target nil)
+        (vertex-buffer nil)
+        (readback nil)
+        (encoder nil)
+        (command-buffer nil)
+        (width 768)
+        (height 480)
+        (format :rgba8-unorm)
+        (data (make-array 0 :element-type 'single-float
+                            :adjustable t :fill-pointer 0)))
+    (append-analytic-roundrect-quad
+     data '(-0.36 0.43) '(0.34 0.0) '(0.0 0.34)
+     '(1.0 0.48) 0.24 '(0.96 0.32 0.48))
+    (append-analytic-roundrect-quad
+     data '(0.42 0.43) '(0.34 0.0) '(0.0 0.34)
+     '(0.85 0.28) 0.28 '(1.0 0.63 0.18))
+    (append-analytic-roundrect-quad
+     data '(-0.38 -0.32) '(0.18 0.0) '(0.0 0.18)
+     '(1.0 1.0) 1.0 '(0.28 0.82 0.56))
+    (append-analytic-roundrect-quad
+     data '(0.36 -0.32) '(0.28 0.10) '(-0.07 0.18)
+     '(1.0 1.0) 1.0 '(0.43 0.58 1.0))
+    (unwind-protect
+         (progn
+           (setf device (request-gpu-device provider)
+                 vertex-module
+                 (create
+                  device
+                  (make-shader-module-descriptor
+                   :label "analytic roundrect proof vertex"
+                   :language :mathematical
+                   :code (luv.analytic:roundrect-vertex-specification)))
+                 fragment-module
+                 (create
+                  device
+                  (make-shader-module-descriptor
+                   :label "analytic roundrect proof fragment"
+                   :language :mathematical
+                   :code (luv.analytic:roundrect-fragment-specification)))
+                 pipeline
+                 (create
+                  device
+                  (make-render-pipeline-descriptor
+                   :label "analytic roundrect family proof"
+                   :layout nil
+                   :vertex
+                   `(:module ,vertex-module
+                     :buffers
+                     ((:array-stride 48
+                       :attributes
+                       ((:shader-location 0 :offset 0 :format :float32x3)
+                        (:shader-location 1 :offset 12 :format :float32x3)
+                        (:shader-location 2 :offset 24 :format :float32x3)
+                        (:shader-location 3 :offset 36 :format :float32x3)))))
+                   :fragment
+                   `(:module ,fragment-module
+                     :targets
+                     ((:format ,format :blend :premultiplied-alpha)))))
+                 target
+                 (create
+                  device
+                  (make-texture-descriptor
+                   :label "analytic roundrect proof target"
+                   :size (list width height) :dimensions :2d :format format
+                   :usage '(:render-attachment :copy-src)))
+                 vertex-buffer
+                 (create
+                  device
+                  (make-buffer-descriptor
+                   :label "analytic roundrect proof quads"
+                   :size (* (length data) 4) :usage '(:vertex :copy-dst)))
+                 readback
+                 (create
+                  device
+                  (make-buffer-descriptor
+                   :label "analytic roundrect proof readback"
+                   :size (* width height 4) :usage '(:copy-dst))))
+           (write-buffer vertex-buffer data)
+           (setf encoder
+                 (create device
+                         (make-command-encoder-descriptor
+                          :label "analytic roundrect proof commands")))
+           (let ((pass
+                   (begin-render-pass
+                    encoder
+                    (make-render-pass-descriptor
+                     :color-attachments
+                     `((:view ,target :load-op :clear :store-op :store
+                        :clear-value #(0.035 0.04 0.055 1.0)))))))
+             (set-pipeline pass pipeline)
+             (set-vertex-buffer pass 0 vertex-buffer)
+             (draw pass (/ (length data) 12))
+             (end-pass pass))
+           (encode
+            encoder
+            (make-gpu-copy-texture-to-buffer-command
+             :source target :destination readback))
+           (setf command-buffer (finish encoder))
+           (submit (device-queue device) command-buffer)
+           (values (read-buffer readback) width height format))
+      (when command-buffer (destroy command-buffer))
+      (when encoder (destroy encoder))
+      (when readback (destroy readback))
+      (when vertex-buffer (destroy vertex-buffer))
+      (when target (destroy target))
+      (when pipeline (destroy pipeline))
+      (when fragment-module (destroy fragment-module))
+      (when vertex-module (destroy vertex-module))
+      (when device (destroy device)))))
+
 (defun render-metal-slug-outline (provider outline)
   "Render one em-normalized quadratic OUTLINE through Slug's texture path.
 
