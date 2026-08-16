@@ -1,0 +1,111 @@
+#!/bin/sh
+
+set -eu
+
+project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+
+if [ "${LUV_NIX_SHELL:-}" != 1 ]; then
+  exec "$project_root/scripts/dev" "$0" "$@"
+fi
+
+if [ "$#" -gt 3 ]; then
+  echo "Usage: scripts/trace-mcclim-paints [OUTPUT.tracy] [SHAPES] [REPETITIONS]" >&2
+  exit 2
+fi
+
+cd "$project_root"
+mkdir -p build
+
+output=${1:-build/mcclim-paints.tracy}
+shapes=${2:-256}
+repetitions=${3:-30}
+tracy_port=${LUV_MCCLIM_PAINT_TRACY_PORT:-8098}
+case "$output" in
+  /*) ;;
+  *) output="$project_root/$output" ;;
+esac
+mkdir -p "$(dirname -- "$output")"
+
+run_dir=$(mktemp -d "$project_root/build/mcclim-paints.XXXXXX")
+ready="$run_dir/ready"
+log="$output.log"
+zones="${output%.tracy}.zones.csv"
+benchmark_pid=
+capture_pid=
+
+stop_benchmark() {
+  if [ -n "$capture_pid" ] && kill -0 "$capture_pid" 2>/dev/null; then
+    kill "$capture_pid" 2>/dev/null || true
+    wait "$capture_pid" 2>/dev/null || true
+  fi
+  if [ -n "$benchmark_pid" ] && kill -0 "$benchmark_pid" 2>/dev/null; then
+    kill "$benchmark_pid" 2>/dev/null || true
+    wait "$benchmark_pid" 2>/dev/null || true
+  fi
+  rm -rf "$run_dir"
+}
+trap stop_benchmark EXIT HUP INT TERM
+
+TRACY_PORT="$tracy_port" sbcl --script scripts/mcclim-paints-tracy.lisp \
+  "$ready" "$shapes" "$repetitions" >"$log" 2>&1 &
+benchmark_pid=$!
+
+attempts=0
+while [ ! -r "$ready" ]; do
+  if ! kill -0 "$benchmark_pid" 2>/dev/null; then
+    echo "trace-mcclim-paints: benchmark exited during warmup; see $log" >&2
+    exit 1
+  fi
+  attempts=$((attempts + 1))
+  if [ "$attempts" -ge 600 ]; then
+    echo "trace-mcclim-paints: timed out during warmup; see $log" >&2
+    exit 1
+  fi
+  sleep 0.05
+done
+
+tracy-capture -p "$tracy_port" -o "$output" -f -s 15 >/dev/null &
+capture_pid=$!
+
+if ! wait "$benchmark_pid"; then
+  echo "trace-mcclim-paints: benchmark failed; see $log" >&2
+  exit 1
+fi
+benchmark_pid=
+
+wait "$capture_pid"
+capture_pid=
+tracy-csvexport -u "$output" >"$zones"
+
+awk -F, -v expected="$repetitions" '
+  NR > 1 && ($1 == "mcluv/solid-paint-sample" ||
+             $1 == "mcluv/gradient-paint-sample" ||
+             $1 == "mcluv/image-paint-sample") {
+    count[$1]++
+    milliseconds = $5 / 1000000
+    total[$1] += milliseconds
+    if (milliseconds > maximum[$1]) maximum[$1] = milliseconds
+  }
+  END {
+    names[1] = "mcluv/solid-paint-sample"
+    names[2] = "mcluv/gradient-paint-sample"
+    names[3] = "mcluv/image-paint-sample"
+    for (i = 1; i <= 3; i++) {
+      name = names[i]
+      if (count[name] != expected) {
+        printf "trace-mcclim-paints: expected %d %s samples, got %d\n",
+               expected, name, count[name] > "/dev/stderr"
+        exit 1
+      }
+      printf "%s: %d samples, %.3f ms mean, %.3f ms max\n",
+             name, count[name], total[name] / count[name], maximum[name]
+    }
+    printf "gradient / solid mean: %.2fx\n",
+           total[names[2]] / total[names[1]]
+    printf "image / solid mean: %.2fx\n",
+           total[names[3]] / total[names[1]]
+  }
+' "$zones"
+
+sed -n '/^Paint streams:/p;/^Paint cache:/p' "$log"
+printf 'Trace: %s\nZones: %s\n' "$output" "$zones"

@@ -6,8 +6,9 @@ LUVCRAFT_BENCHMARK_SCENARIO ?= steady
 LUVCRAFT_STREAMING_BENCHMARK_CSV ?= build/luvcraft-metal-streaming-benchmark.csv
 TRACY_STREAMING_TRACE ?= build/luvcraft-streaming.tracy
 TRACY_MCCLIM_ROUNDRECT_TRACE ?= build/mcclim-roundrect.tracy
+TRACY_MCCLIM_PAINT_TRACE ?= build/mcclim-paints.tracy
 
-.PHONY: all luvcraft run test parinfer-check shader-validate msl-validate smoke metal-smoke metal-text-closeup metal-benchmark metal-streaming-benchmark tracy-streaming tracy-mcclim-roundrect mcluv readme-screenshots mcclim-gallery wiki wiki-cli objective-c-probe metal-clear metal-shader metal-pipeline metal-draw roundrect-proof slug-proof slug-text-proof clean
+.PHONY: all luvcraft run test parinfer-check shader-validate msl-validate smoke metal-smoke metal-text-closeup metal-benchmark metal-streaming-benchmark tracy-streaming tracy-mcclim-roundrect tracy-mcclim-paints mcluv readme-screenshots mcclim-gallery wiki wiki-cli objective-c-probe metal-clear metal-shader metal-pipeline metal-draw roundrect-proof slug-proof slug-text-proof clean
 
 all: luvcraft
 
@@ -40,7 +41,9 @@ shader-validate:
 		--eval '(require :asdf)' \
 		--eval '(asdf:load-asd (truename "luv.asd"))' \
 		--eval '(asdf:load-asd (truename "luvcraft.asd"))' \
+		--eval '(asdf:load-asd (truename "mcluv.asd"))' \
 		--eval '(asdf:load-system :luvcraft)' \
+		--eval '(asdf:load-system :mcluv/backend)' \
 		--eval '(luv.spir-v:write-spir-v (luvcraft.shaders:block-world-vertex-shader) #p"build/block-world.vert.spv")' \
 		--eval '(luv.spir-v:write-spir-v (luvcraft.shaders:block-world-fragment-shader) #p"build/block-world.frag.spv")' \
 		--eval '(luv.spir-v:write-spir-v (luvcraft.shaders:block-world-crosshair-vertex-shader) #p"build/block-world-crosshair.vert.spv")' \
@@ -53,7 +56,11 @@ shader-validate:
 		--eval '(luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (luv.analytic:roundrect-vertex-specification)) #p"build/analytic-roundrect.vert.spv")' \
 		--eval '(luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (luv.analytic:roundrect-fragment-specification)) #p"build/analytic-roundrect.frag.spv")' \
 		--eval '(luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (luv.slug:slug-bezier-vertex-specification)) #p"build/slug-bezier.vert.spv")' \
-		--eval '(luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (luv.slug:slug-bezier-fragment-specification)) #p"build/slug-bezier.frag.spv")'
+		--eval '(luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (luv.slug:slug-bezier-fragment-specification)) #p"build/slug-bezier.frag.spv")' \
+		--eval '(luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (mcluv::gradient-roundrect-vertex-specification)) #p"build/mcluv-gradient.vert.spv")' \
+		--eval '(luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (mcluv::gradient-roundrect-fragment-specification)) #p"build/mcluv-gradient.frag.spv")' \
+		--eval '(luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (mcluv::image-roundrect-vertex-specification)) #p"build/mcluv-image.vert.spv")' \
+		--eval '(luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (mcluv::image-roundrect-fragment-specification)) #p"build/mcluv-image.frag.spv")'
 	./scripts/dev spirv-val --target-env vulkan1.0 build/block-world.vert.spv
 	./scripts/dev spirv-val --target-env vulkan1.0 build/block-world.frag.spv
 	./scripts/dev spirv-val --target-env vulkan1.0 build/block-world-crosshair.vert.spv
@@ -67,6 +74,10 @@ shader-validate:
 	./scripts/dev spirv-val --target-env vulkan1.0 build/analytic-roundrect.frag.spv
 	./scripts/dev spirv-val --target-env vulkan1.0 build/slug-bezier.vert.spv
 	./scripts/dev spirv-val --target-env vulkan1.0 build/slug-bezier.frag.spv
+	./scripts/dev spirv-val --target-env vulkan1.0 build/mcluv-gradient.vert.spv
+	./scripts/dev spirv-val --target-env vulkan1.0 build/mcluv-gradient.frag.spv
+	./scripts/dev spirv-val --target-env vulkan1.0 build/mcluv-image.vert.spv
+	./scripts/dev spirv-val --target-env vulkan1.0 build/mcluv-image.frag.spv
 
 msl-validate:
 	mkdir -p build
@@ -74,7 +85,9 @@ msl-validate:
 		--eval '(require :asdf)' \
 		--eval '(asdf:load-asd (truename "luv.asd"))' \
 		--eval '(asdf:load-asd (truename "luvcraft.asd"))' \
+		--eval '(asdf:load-asd (truename "mcluv.asd"))' \
 		--eval '(asdf:load-system :luvcraft)' \
+		--eval '(asdf:load-system :mcluv/backend)' \
 		--eval '(luv.msl:write-msl (luv.msl:compile-msl (luvcraft.shaders:block-world-vertex-specification)) #p"build/block-world.vert.metal")' \
 		--eval '(luv.msl:write-msl (luv.msl:compile-msl (luvcraft.shaders:block-world-fragment-specification)) #p"build/block-world.frag.metal")' \
 		--eval '(luv.msl:write-msl (luv.msl:compile-msl (luvcraft.shaders:block-world-text-vertex-specification)) #p"build/block-world-text.vert.metal")' \
@@ -82,7 +95,11 @@ msl-validate:
 		--eval '(luv.msl:write-msl (luv.msl:compile-msl (luv.analytic:roundrect-vertex-specification)) #p"build/analytic-roundrect.vert.metal")' \
 		--eval '(luv.msl:write-msl (luv.msl:compile-msl (luv.analytic:roundrect-fragment-specification)) #p"build/analytic-roundrect.frag.metal")' \
 		--eval '(luv.msl:write-msl (luv.msl:compile-msl (luv.slug:slug-bezier-vertex-specification)) #p"build/slug-bezier.vert.metal")' \
-		--eval '(luv.msl:write-msl (luv.msl:compile-msl (luv.slug:slug-bezier-fragment-specification)) #p"build/slug-bezier.frag.metal")'
+		--eval '(luv.msl:write-msl (luv.msl:compile-msl (luv.slug:slug-bezier-fragment-specification)) #p"build/slug-bezier.frag.metal")' \
+		--eval '(luv.msl:write-msl (luv.msl:compile-msl (mcluv::gradient-roundrect-vertex-specification)) #p"build/mcluv-gradient.vert.metal")' \
+		--eval '(luv.msl:write-msl (luv.msl:compile-msl (mcluv::gradient-roundrect-fragment-specification)) #p"build/mcluv-gradient.frag.metal")' \
+		--eval '(luv.msl:write-msl (luv.msl:compile-msl (mcluv::image-roundrect-vertex-specification)) #p"build/mcluv-image.vert.metal")' \
+		--eval '(luv.msl:write-msl (luv.msl:compile-msl (mcluv::image-roundrect-fragment-specification)) #p"build/mcluv-image.frag.metal")'
 	xcrun metal -std=metal4.0 -c build/block-world.vert.metal -o build/block-world.vert.air
 	xcrun metal -std=metal4.0 -c build/block-world.frag.metal -o build/block-world.frag.air
 	xcrun metal -std=metal4.0 -c build/block-world-text.vert.metal -o build/block-world-text.vert.air
@@ -91,6 +108,10 @@ msl-validate:
 	xcrun metal -std=metal4.0 -c build/analytic-roundrect.frag.metal -o build/analytic-roundrect.frag.air
 	xcrun metal -std=metal4.0 -c build/slug-bezier.vert.metal -o build/slug-bezier.vert.air
 	xcrun metal -std=metal4.0 -c build/slug-bezier.frag.metal -o build/slug-bezier.frag.air
+	xcrun metal -std=metal4.0 -c build/mcluv-gradient.vert.metal -o build/mcluv-gradient.vert.air
+	xcrun metal -std=metal4.0 -c build/mcluv-gradient.frag.metal -o build/mcluv-gradient.frag.air
+	xcrun metal -std=metal4.0 -c build/mcluv-image.vert.metal -o build/mcluv-image.vert.air
+	xcrun metal -std=metal4.0 -c build/mcluv-image.frag.metal -o build/mcluv-image.frag.air
 
 smoke: luvcraft
 	mkdir -p build
@@ -116,6 +137,9 @@ tracy-streaming: luvcraft
 
 tracy-mcclim-roundrect:
 	./scripts/trace-mcclim-roundrect $(TRACY_MCCLIM_ROUNDRECT_TRACE)
+
+tracy-mcclim-paints:
+	./scripts/trace-mcclim-paints $(TRACY_MCCLIM_PAINT_TRACE)
 
 mcluv:
 	./scripts/dev sbcl --script mcclim/build.lisp

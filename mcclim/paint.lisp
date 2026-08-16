@@ -179,14 +179,14 @@
               (opacity :float :location 3))
      :resources
      ((image :texture-2d :binding 0 :sample-transfer :identity)
-      (sampler :sampler :binding 1))
+      (texture-sampler :sampler :binding 1))
      :outputs ((color-output :vec4 :location 0)))
   (let* ((u (spv:swizzle texture-coordinate :x))
          (v (spv:swizzle texture-coordinate :y))
          (inside-texture
            (* (spv:step 0.0 u) (spv:step u 1.0)
               (spv:step 0.0 v) (spv:step v 1.0)))
-         (texel (spv:sample image sampler texture-coordinate))
+         (texel (spv:sample image texture-sampler texture-coordinate))
          (alpha (* (spv:swizzle texel :a) opacity))
          (coverage
            (spv:mix

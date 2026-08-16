@@ -48,6 +48,12 @@
   :depends-on ("mcluv/backend")
   :components ((:file "mcclim/roundrect-benchmark")))
 
+(defsystem "mcluv/paint-benchmark"
+  :description "A Tracy comparison of solid, gradient, and image GUI paints."
+  :version "0.0.1"
+  :depends-on ("mcluv/backend")
+  :components ((:file "mcclim/paint-benchmark")))
+
 (defsystem "mcluv/luvcraft"
   :description "McCLIM gadget textures embedded in a live luvcraft session."
   :version "0.0.1"

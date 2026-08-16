@@ -73,6 +73,7 @@
            #:capture-mcclim-gallery
            #:*mcclim-gallery-scenes*
            #:run-roundrect-tracy-benchmark
+           #:run-paint-tracy-benchmark
            #:open-shader-lab
            #:close-shader-lab
            #:spinning-texture-compositor
