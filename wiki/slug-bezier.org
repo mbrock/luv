@@ -512,11 +512,10 @@ coverage.  The pipeline uses =:less= depth testing with depth writes disabled
 and premultiplied-alpha blending.  It is encoded after opaque chunks and before
 the always-visible crosshair.
 
-The temporary scale path projects the run center each frame.  It combines the
-world-units-per-em model scale, camera focal length, viewport height, and
-current view distance, then updates the dense pixels-per-em lanes.  This makes
-camera approach and retreat behave correctly enough for the world proof while
-remaining an explicit precursor to fragment derivatives.
+The fragment stage now derives pixels-per-em from the horizontal and vertical
+screen derivatives of the interpolated outline coordinate.  Perspective,
+rotation, and camera distance therefore participate at the actual fragment;
+there is no run-center approximation or per-frame instance-buffer rewrite.
 
 Evidence: the Metal validation layer accepts the complete hidden luvcraft
 frame, including its pipeline-layout transitions and teardown.  This capture
@@ -526,9 +525,9 @@ is the ordinary world smoke path, not an isolated text target:
 
 The label's transparent quad exterior preserves sky and blocks; the pipeline's
 =:less= comparison puts terrain in front whenever their projections overlap.
-Frame metrics also count its current six vertices and one draw per drawable
-glyph.  The cache iteration below removes repeated outline ownership, while
-the atlas iteration must still remove this literal bind-and-draw baseline.
+Frame metrics count six unit-quad vertices instanced across the run in one
+draw.  The cache and atlas iterations below remove the original literal
+bind-and-draw-per-glyph baseline.
 
 Done when: a HarfBuzz-shaped run is legible in the real scene, changes screen
 position and scale with its camera relationship, obeys terrain depth, and
@@ -544,21 +543,101 @@ glyph occurrences.
 
 [[lisp:make-world-text-glyph-cache]] is owned by the luvcraft session and tied
 to one device.  It retains HarfBuzz results by canonical font path and exact
-string, and retains normalized, serialized, uploaded Slug outlines by canonical
-font path and HarfBuzz glyph ID.  A run now owns only placement, dense vertex
-data, layout, and pipeline; stopping the session destroys frame bind groups,
-then runs, then the cache, then the device.
+string, and retains normalized, serialized Slug outlines by canonical font
+path and HarfBuzz glyph ID.  Atlas objects own the uploaded textures; a run
+owns placement, dense instance data, layout, and pipeline.  Stopping the
+session destroys frame bind groups, then runs, then atlas textures, then the
+device.
 
-Repeated occurrences share the same resource object and each drawable frame
-creates only one bind group for that cached object.  The default
-="hello, world"= proof has 11 drawable occurrences but only 8 cached outline
-texture pairs.  A second identical run reuses both the =slug-shaped-text= and
-all eight device resources.  The Metal regression constructs both runs and
-checks those identities before exercising the ownership-order teardown.
+Repeated occurrences share the same serialized resource object.  The default
+="hello, world"= proof has 11 drawable occurrences but only 8 cached outlines.
+A second identical run reuses the =slug-shaped-text=, all eight outlines, and
+the matching atlas.  Metal regressions construct both runs and exercise the
+ownership-order teardown.
 
 Done when: duplicate glyph IDs within a run and across runs resolve to the same
 per-device outline, identical shaping is not repeated, and Metal teardown is
 clean.
+
+* DONE Pack one atlas and issue one instanced text draw
+:PROPERTIES:
+:ID: AT7L3S
+:END:
+
+Intent: remove the command and allocation multiplication caused by treating
+each glyph occurrence as an independently bound texture pair.
+
+[[lisp:create-world-text-glyph-atlas]] concatenates each distinct serialized
+outline into one RG16U band texture and one RGBA16F curve texture.  Its location
+table maps the cached outline object to linear band and curve bases.  Each run
+has a six-vertex unit quad and one 72-byte instance record per drawable glyph:
+world origin, right/up edge vectors, outline bounds and band counts, and atlas
+bases.  The vertex stage expands these records; the render pass binds the two
+buffers and one atlas group, then calls =draw= once with the glyph count as the
+instance count.
+
+The exact default-run comparison is deliberately about owned objects and
+encoded commands, not a noisy whole-frame timing claim:
+
+| text cost, ="hello, world"= | cached glyph pairs | atlas instances |
+|-----------------------------+--------------------+-----------------|
+| drawable / unique glyphs    |             11 / 8 |          11 / 8 |
+| text draws per frame        |                 11 |               1 |
+| text bind calls per frame   |                 11 |               1 |
+| text encode calls           |                 24 |               5 |
+| per-frame text buffer writes|                  1 |               0 |
+| glyph textures / views      |            16 / 16 |           2 / 2 |
+| frame text bind groups      |                  8 |               1 |
+| allocated glyph texture data|            384 KiB |          48 KiB |
+| text vertex-buffer data     |          2,376 B   |           864 B |
+
+The 24-to-5 encode count includes pipeline, vertex-buffer, bind-group, and draw
+calls.  Texture allocation falls by 87.5 percent because every former glyph
+pair paid the 4096-texel minimum row; vertex data falls by 63.6 percent.  The
+new spatial bands intentionally increase used band payload from 202 to 996
+texels while curve payload remains 121 texels: roughly 4.8 KiB of useful data
+inside the 48 KiB allocated atlas.  A 30-frame Apple M2 Pro steady run records
+165 whole-scene draws, 0.173 ms median scene encoding, and 0.011 ms median
+uniform update.  It is a current-path health measurement, not an A/B timing,
+because upstream terrain, particles, overlays, and lighting changed across the
+saved pre-atlas commit.
+
+Done when: repeated glyphs share atlas storage, one run emits one instanced
+draw and one bind call, the backend validation layer accepts the frame, and the
+ordinary world capture remains legible.
+
+* DONE Select spatial bands and scale coverage from fragment derivatives
+:PROPERTIES:
+:ID: D4R1VX
+:END:
+
+The shared shader language now carries =derivative-x= and =derivative-y=
+through direct Metal =dfdx/dfdy= and SPIR-V =OpDPdx/OpDPdy=.  The fragment
+shader forms a screen gradient for each em axis and takes its reciprocal length
+as pixels-per-em.  The same fragment normalizes its x/y outline coordinate,
+chooses one of the serialized horizontal and vertical bands, and relocates
+that band's local curve addresses through the atlas bases.  Default outlines
+use =min(curve-count, 16)= bands per axis rather than the one-band correctness
+fallback.
+
+The generated MSL and SPIR-V are compiled and validated in the normal build,
+unit tests require derivative instructions and selected header addressing,
+and the Metal debug layer renders the multi-band world capture above.  The
+default eight outlines use band counts from 4 through 16; the inspected atlas
+contains 996 band texels and 121 curve texels.
+
+The remaining efficiency goblins are now explicit.  Atlases and live pipelines
+are shared only by runs with the same exact glyph set, so many overlapping
+labels can duplicate storage and pipeline state.  Tiny sets still pay one
+4096-wide texture row.  The sorted band lists do not yet early-exit their GPU
+fold, and multiple runs are not coalesced into a world-wide draw or culled as a
+batch.  A terminal-scale client should next move atlas pages and pipeline
+ownership into the per-device cache, then measure whether page locality or
+world-wide instance aggregation wins before adding a generic text manager.
+
+Done when: projected scale has no CPU estimate or frame upload, fragments
+select real spatial bands, both shader backends validate the derivative path,
+and a debug-layer world frame is visually intact.
 
 * NEXT Compare Slug coverage at glyph edges
 :PROPERTIES:

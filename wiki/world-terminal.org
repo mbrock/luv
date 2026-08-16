@@ -309,10 +309,13 @@ The simplest correct first representation is dense data per dirty row:
   one batch.
 
 The existing per-device Slug outline cache #U5X6DY is the natural resource
-owner, but the current one-texture-pair-per-glyph draw pattern is only a proof.
-A terminal will quickly make atlas allocation, batched glyph instances, font
-fallback, and measured edge quality visible.  Those are renderer iterations,
-not reasons to obscure the initial Ghostty-to-row boundary.
+owner.  The atlas and instancing pass #AT7L3S has replaced the former
+one-texture-pair and one-draw-per-glyph proof, while #D4R1VX selects spatial
+bands and derives coverage scale in the fragment.  A terminal will now make
+the next limits visible: atlas pages shared across overlapping glyph sets,
+pipeline reuse across rows, font fallback, row/run aggregation, and measured
+edge quality.  Those are renderer iterations, not reasons to obscure the
+initial Ghostty-to-row boundary.
 
 * NEXT Draw one Ghostty row directly in the world
 :PROPERTIES:
