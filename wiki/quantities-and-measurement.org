@@ -1218,11 +1218,30 @@ Intent: eventually let a field or simulation phase select a scalar or SB-SIMD
 realization of the same semantic operation once per dense kernel.
 
 Evidence: #B5L7VG and the native SIMD study describe the representation seam,
-but a scalar Lisp realization and a real shared computation should establish
-the frontend contract first.
+and #LDP5UR now supplies generated quantity-aware SoA storage.  The first
+executable probe uses =with-columnar-buffer-storage= to borrow two
+=single-float= position lanes with their retained row declaration.  Separate
+scalar and SB-SIMD kernels compute the same squared-position reduction, with
+AVX/SSE selected once on x86-64 and NEON available on arm64; an odd row count
+exercises the scalar tail.
 
-Done when: promoted only after #FTQEQD and #D1R2NK expose a real dense kernel
-whose scalar reference and storage layout are stable enough to compare.
+On SBCL 2.6.6 x86-64 with AVX2 available, five warmed pairs of 100 reductions
+over 1,048,579 rows took 0.060--0.061 seconds scalar and 0.008--0.009 seconds
+through eight-wide AVX, with zero steady-state consing.  Disassembly shows two
+=VMOVUPS= loads, two =VMULPS= operations, and pack additions in the loop.  This
+is real native execution over generated columnar lanes, not autovectorization.
+
+The probe also exposed the semantic issue a real kernel must settle: the
+scalar result was =4.1941624e9= while the pack reduction was =4.1923423e9=.
+Both are deterministic, but SIMD reassociation changes a long single-float
+sum.  A future shared arithmetic kernel needs an explicit reduction-order or
+error contract rather than assuming the scalar oracle will be bit-identical.
+#IUTMUY records why =SB-SEQUENCE= is useful around this storage but not as its
+hot traversal protocol.
+
+Done when: promoted when a real domain computation, rather than this storage
+oracle, owns a stable scalar definition, reduction contract, and columnar
+layout worth accelerating.
 
 * DONE Prove semantic arithmetic in the shadow graph
 :PROPERTIES:

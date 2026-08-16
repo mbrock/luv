@@ -33,6 +33,13 @@
     (ok (eq distance
             (records:columnar-row-lane-declaration
              (test-columnar-buffer-row-declaration buffer) 'distance)))
+    (records:with-columnar-buffer-storage
+        ((length row (objects object) (distances distance))
+         buffer test-columnar-buffer)
+      (ok (= 2 length))
+      (ok (eq row (test-columnar-buffer-row-declaration buffer)))
+      (ok (eq objects (test-columnar-buffer-object-lane buffer)))
+      (ok (eq distances (test-columnar-buffer-distance-lane buffer))))
     (let ((readings nil))
       (records:do-columnar-buffer-rows
           ((object value) buffer test-columnar-buffer)

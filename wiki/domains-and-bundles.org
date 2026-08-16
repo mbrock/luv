@@ -374,10 +374,37 @@ regression.  Do not add stable ids, swap removal, a generalized solver, or a
 schema metaclass in this iteration.
 
 Done: all conditions above are satisfied without adding the deferred policies.
-The full =make test= path passes, including strict Parinfer, 61 luv tests, 149
+The full =make test= path passes, including strict Parinfer, 62 luv tests, 149
 luvcraft tests, the wiki suite, and generated SPIR-V validation.  The standalone
 smoke render remains byte-identical at SHA-256
 =0c85d4550638418cb88d507c6541a49147aeeea5697175d13904942b65a689ec=.
+
+* A columnar buffer is not one hot sequence
+:PROPERTIES:
+:ID: IUTMUY
+:END:
+
+SBCL's extensible sequence protocol can make an active lane view behave like
+an ordinary sequence.  A small probe subclassed =sequence=, supplied
+=sb-sequence:length= and =sb-sequence:elt= methods, and then worked with both
+=cl:length= and =sb-sequence:reduce=.  Such a view could be pleasant for
+inspectors, generic algorithms, and REPL tools because it presents only the
+active prefix while retaining the buffer's own capacity underneath.
+
+It is not the hot representation of a columnar row.  An element of the whole
+buffer is a heterogeneous product, so =elt= would have to allocate a row,
+return an aliasing cursor, or invent another tuple representation.  Even the
+homogeneous single-lane probe pays generic iterator and operation calls per
+element: ten sums of 1,048,579 floats took 0.425--0.458 seconds, versus
+0.006--0.007 seconds for a typed loop over the borrowed array.  Specializing
+=reduce= could recover that loop, but then the useful abstraction is the
+kernel itself, not generic sequence iteration.
+
+The production seam is therefore =with-columnar-buffer-storage=.  It binds
+the active length, retained row declaration, and selected lanes with precise
+=simple-array= types.  Tooling may later layer =SB-SEQUENCE= views over that
+boundary when a concrete client wants them; scalar and SIMD kernels borrow the
+arrays directly.  #VKLLPR records the first native pack experiment.
 
 * Chunk boundaries need an environment
 :PROPERTIES:

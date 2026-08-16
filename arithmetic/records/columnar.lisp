@@ -406,6 +406,62 @@ operate on raw specialized arrays with one shared length and capacity. #LDP5UR"
 
          ',name))))
 
+(defmacro with-columnar-buffer-storage
+    ((bindings buffer buffer-type) &body body)
+  "Borrow BUFFER-TYPE's active extent, row declaration, and raw lane arrays.
+
+BINDINGS is (LENGTH ROW-DECLARATION (ARRAY LANE-NAME) ...).  The buffer is
+evaluated once, and every array receives its precise specialized array type.
+This is the checked aggregate boundary for closed scalar or SIMD kernels;
+the kernel traverses the borrowed arrays without row objects. #VKLLPR"
+  (destructuring-bind (length-binding row-binding &rest array-bindings)
+      bindings
+    (let* ((definition (columnar-buffer-definition-for buffer-type))
+           (lanes (and definition
+                       (columnar-buffer-definition-lanes definition))))
+      (unless definition
+        (error "There is no columnar buffer definition named ~S." buffer-type))
+      (let ((resolved-bindings
+              (loop for binding in array-bindings
+                    collect
+                    (destructuring-bind (variable lane-name) binding
+                      (let ((lane
+                              (find lane-name lanes
+                                    :key #'columnar-lane-definition-name
+                                    :test #'eq)))
+                        (unless lane
+                          (error "There is no ~S lane in ~S."
+                                 lane-name buffer-type))
+                        (list variable lane))))))
+        (let ((buffer-value (gensym "BUFFER")))
+          `(let ((,buffer-value ,buffer))
+             (let ((,length-binding
+                     (,(columnar-generated-symbol
+                        buffer-type "~A-LENGTH" buffer-type)
+                      ,buffer-value))
+                   (,row-binding
+                     (,(columnar-generated-symbol
+                        buffer-type "~A-ROW-DECLARATION" buffer-type)
+                      ,buffer-value))
+                   ,@(loop for (variable lane) in resolved-bindings
+                           collect
+                           `(,variable
+                             (,(columnar-generated-symbol
+                                buffer-type "~A-~A-LANE" buffer-type
+                                (columnar-lane-definition-name lane))
+                              ,buffer-value))))
+               (declare (type fixnum ,length-binding)
+                        (type columnar-row-declaration ,row-binding)
+                        ,@(loop for (variable lane) in resolved-bindings
+                                collect
+                                `(type
+                                  (simple-array
+                                   ,(upgraded-array-element-type
+                                     (math:declaration-representation-type lane))
+                                   (*))
+                                  ,variable)))
+               ,@body)))))))
+
 (defmacro with-columnar-buffer-row
     ((bindings buffer index buffer-type) &body body)
   "Bind one BUFFER-TYPE row's raw lane values at INDEX without allocation."

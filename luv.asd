@@ -132,12 +132,14 @@
   :description "Executable claims for luv's arithmetic, native bindings, and HAL."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luv" "luv/parinfer" "rove")
+  :depends-on ("luv" "luv/parinfer" "rove"
+               #+sbcl (:require #:sb-simd))
   :serial t
   :components
   ((:file "arithmetic/tests")
    (:file "arithmetic/records/tests")
    (:file "arithmetic/records/columnar-tests")
+   (:file "arithmetic/records/columnar-simd-tests" :if-feature :sbcl)
    (:file "arithmetic/language/tests")
    (:file "arithmetic/lisp/tests")
    (:file "objective-c/tests" :if-feature :darwin)

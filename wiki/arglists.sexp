@@ -362,6 +362,7 @@
 (("COMMON-LISP" . "UNLESS") :kind :macro :lambda-list ("TEST" :&body "FORMS"))
 (("COMMON-LISP" . "UNREAD-CHAR") :kind :function :lambda-list ("CHARACTER" :&optional ("STREAM" "*STANDARD-INPUT*")))
 (("COMMON-LISP" . "UNWIND-PROTECT") :kind :special-operator :lambda-list ("PROTECTED" :&body "CLEANUP"))
+(("COMMON-LISP" . "UPGRADED-ARRAY-ELEMENT-TYPE") :kind :function :lambda-list ("SPEC" :&optional "ENVIRONMENT"))
 (("COMMON-LISP" . "UPPER-CASE-P") :kind :function :lambda-list ("CHAR"))
 (("COMMON-LISP" . "USER-HOMEDIR-PATHNAME") :kind :function :lambda-list (:&optional "HOST"))
 (("COMMON-LISP" . "VALUES") :kind :function :lambda-list (:&rest "VALUES"))

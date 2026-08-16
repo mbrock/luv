@@ -37,4 +37,5 @@
            #:make-columnar-row-declaration
            #:define-columnar-buffer
            #:do-columnar-buffer-rows
+           #:with-columnar-buffer-storage
            #:with-columnar-buffer-row))
