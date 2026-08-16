@@ -15,6 +15,14 @@
                  :name :test-dim-glow :face-tiles '(:all 3)
                  :light-emission 6))
 
+(defvar *light-region-window-lookups* nil)
+
+(defmethod locate-chunk-window-site :around
+    ((region luv::light-region) x y z)
+  (when *light-region-window-lookups*
+    (incf *light-region-window-lookups*))
+  (call-next-method))
+
 (defun make-open-sky-test-world (&rest chunk-keys)
   "A world whose absent +Y boundary is open sky, with all-air chunks."
   (let ((world (make-block-world
@@ -340,6 +348,90 @@
       (ok (= sky 0))
       (ok (= block 0))
       (ok (eq state :provisional)))))
+
+(deftest light-hot-traversal-locates-only-at-domain-crossings
+  (let ((world (make-block-world :chunk-width 3
+                                 :chunk-height 3
+                                 :chunk-depth 3)))
+    (let* ((chunk (luv::ensure-world-chunk world 0 0 0))
+           (region (luv::capture-light-region world))
+           (key (chunk-domain-coordinate (block-chunk-domain chunk)))
+           (entry (gethash key (luv::light-region-entries region)))
+           (domain (luv::light-region-entry-domain entry))
+           (levels (luv::light-region-entry-block entry)))
+      (labels ((visit (x y z)
+                 (fill levels 0)
+                 (let* ((local (make-local-coordinate x y z))
+                        (offset (chunk-domain-offset domain local))
+                        (*light-region-window-lookups* 0))
+                   (setf (aref levels offset) 1)
+                   (values
+                    (luv::propagate-light-region
+                     region #'luv::light-region-entry-block
+                     (list (luv::%make-light-region-site entry local)) nil)
+                    *light-region-window-lookups*))))
+        (multiple-value-bind (visited lookups) (visit 1 1 1)
+          (ok (= visited 1))
+          (ok (zerop lookups)))
+        (multiple-value-bind (visited lookups) (visit 0 1 1)
+          (ok (= visited 1))
+          (ok (= lookups 1)))))))
+
+(deftest unlighting-locates-only-at-domain-crossings
+  (let ((world (make-block-world :chunk-width 3
+                                 :chunk-height 3
+                                 :chunk-depth 3)))
+    (let* ((chunk (luv::ensure-world-chunk world 0 0 0))
+           (region (luv::capture-light-region world))
+           (key (chunk-domain-coordinate (block-chunk-domain chunk)))
+           (entry (gethash key (luv::light-region-entries region))))
+      (labels ((visit (x y z)
+                 (let* ((local (make-local-coordinate x y z))
+                        (queue
+                          (luv::make-light-removal-queue
+                           :block-light #'luv::light-region-entry-block))
+                        (*light-region-window-lookups* 0))
+                   (luv::enqueue-light-removal queue entry local 1)
+                   (multiple-value-bind (sources visited)
+                       (luv::unlight-light-region region queue)
+                     (declare (ignore sources))
+                     (values visited *light-region-window-lookups*)))))
+        (multiple-value-bind (visited lookups) (visit 1 1 1)
+          (ok (= visited 1))
+          (ok (zerop lookups)))
+        (multiple-value-bind (visited lookups) (visit 0 1 1)
+          (ok (= visited 1))
+          (ok (= lookups 1)))))))
+
+(deftest light-boundary-change-comparison-uses-domain-faces
+  (let ((world (make-block-world :chunk-width 3
+                                 :chunk-height 4
+                                 :chunk-depth 5)))
+    (let* ((chunk (luv::ensure-world-chunk world 0 0 0))
+           (region (luv::capture-light-region world))
+           (key (chunk-domain-coordinate (block-chunk-domain chunk)))
+           (domain (luv::light-region-entry-domain
+                    (gethash key (luv::light-region-entries region))))
+           (old (make-array (chunk-domain-cardinality domain)
+                            :element-type '(unsigned-byte 8)
+                            :initial-element 0))
+           (new (copy-seq old)))
+      (labels ((changed-directions ()
+                 (loop for direction in luv::*voxel-face-directions*
+                       when (luv::light-boundary-plane-changed-p
+                             domain old new direction)
+                         collect direction)))
+        (setf (aref new
+                    (chunk-domain-offset
+                     domain (make-local-coordinate 1 1 1)))
+              1)
+        (ok (null (changed-directions)))
+        (fill new 0)
+        (setf (aref new 0) 1)
+        (ok (equal (changed-directions)
+                   (list +voxel-negative-x+
+                         +voxel-negative-y+
+                         +voxel-negative-z+)))))))
 
 (deftest light-region-is-a-chunk-window-with-policy-free-availability
   (let ((world (make-block-world)))

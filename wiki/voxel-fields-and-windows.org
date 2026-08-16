@@ -269,15 +269,16 @@ The proposed vocabulary names structures that already work:
 | =block-world= | live resident world | coordinate decomposition, resident lookup, absent status |
 | =block-mesh-neighborhood= | resolved $3\times3\times3$ window | relative chunk decomposition and repeated dense offsets |
 | =block-mesh-snapshot= | immutable one-cell halo | expanded-halo coordinates and repeated sample offsets |
-| =light-region= | eager or lazy solver atlas | world decomposition, chunk keys, offsets, faces, and lazy entry capture |
+| =light-region= | eager or lazy solver atlas | boundary-only region resolution, entry-local offsets, and lazy entry capture |
 
 The duplication is visible in current source rather than inferred from equal
-array lengths.  [[file:../luvcraft/light.lisp][=light-region-locate=]] performs three floor divisions, constructs a
-chunk key, resolves an entry, and rebuilds the dense offset.
-=map-entry-face-cells= separately reconstructs boundary planes.  In
-[[file:../luvcraft/mesher.lisp][=luvcraft/mesher.lisp=]], block and light access through the resolved neighborhood
-repeat the relative decomposition and offset arithmetic, while the immutable
-snapshot repeats expanded-halo addressing for both fields.
+array lengths.  [[file:../luvcraft/light.lisp][=light-region-locate=]] remains the cold adapter from retained world
+coordinates, but propagation and unlighting retain an entry and local site,
+then use =continue-chunk-window-site= so interior neighbors stay in domain
+arithmetic.  =map-entry-face-sites= delegates face offsets to
+=do-chunk-domain-face=.  In [[file:../luvcraft/mesher.lisp][=luvcraft/mesher.lisp=]], block and light access through
+the resolved neighborhood share relative decomposition and offset arithmetic,
+while the immutable snapshot shares expanded-halo addressing for both fields.
 
 This is an unusually good refactoring target because the algorithms around
 the arithmetic are already distinct and tested.  The work can remove spatial
@@ -609,7 +610,7 @@ stepping with explicit chunk crossings, storage-order enumeration, and face
 enumeration.  World, chunk, local, and direction values now give that
 substrate one nominal vocabulary rather than parallel positional triples.
 
-=light-region-locate= and the entry-face adapter no longer contain their own
+=light-region-locate= and =map-entry-face-sites= no longer contain their own
 division, dense-offset, or face-plane formulas.  Light seeding and boundary
 re-entry consume domain site traversal and primitive stepping.  The resolved
 meshing neighborhood now has one locator shared by block and light reads; the
@@ -731,6 +732,26 @@ sampling, deleting their duplicated halo-presence test, while
 window method and avoids the old temporary local-coordinate value.  The
 luvcraft suite exercises all four windows, boundary continuation, meshing,
 lighting, production, and deterministic world behavior.
+
+The lighting runtime now carries =light-region-entry= plus a retained
+=local-coordinate= in both addition and removal frontiers.  An exact regression
+records zero =locate-chunk-window-site= calls for an interior six-neighbor visit
+and one call for a site on one face, for both propagation and unlighting.
+World coordinates remain the identity of dirty and removed cells only at the
+colder reconciliation boundary.  Each entry retains its =chunk-domain=;
+publication compares faces with =do-chunk-domain-face=, including a non-cubic
+$3\times4\times5$ test, and =light-region='s redundant width, height, and depth
+caches are gone.
+
+On the fixed 27-chunk, seed-121 SLY fixture, five warmed solves still visit
+214,056 sites.  Median consing fell from 87,965,440 to about 74.9 million bytes
+(about 15%), while median elapsed time rose from 0.178 seconds to 0.198--0.208
+seconds on the same machine.  A sampled run placed 9 of 18 inclusive samples
+in =continue-chunk-window-site=, so this round records an allocation win and a
+boundary-lookup invariant, not a latency win.  The focused luvcraft suite
+passes 58 tests, strict parinfer accepts every touched Lisp file, and a smoke
+capture from the production SLY image remains byte-identical at
+=edc597168a3ec79a04c6d2af53c5b1a5=.
 
 * DONE Attach existing voxel field definitions
 :PROPERTIES:
