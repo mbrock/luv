@@ -56,14 +56,15 @@
         (ignore-errors (delete-file endpoint))))))
 
 (defun usage (&optional (stream *standard-output*))
-  (format stream "Usage: luvcraft [--metal] [--tracy] [--world FILE]~%")
-  (format stream "       luvcraft [--help | --smoke-test PNG | --metal-smoke-test PNG | --metal-text-closeup PNG | --metal-benchmark [FRAMES [CSV [SCENARIO]]]]~%")
+  (format stream "Usage: luvcraft [--metal | --vulkan] [--tracy] [--world FILE]~%")
+  (format stream "       luvcraft [--help | --smoke-test PNG | --vulkan-smoke-test PNG | --metal-smoke-test PNG | --metal-text-closeup PNG | --metal-benchmark [FRAMES [CSV [SCENARIO]]]]~%")
   (format stream "~%")
-  (format stream "With no arguments, resume the default interactive world.~%")
-  (format stream "--metal opens the interactive world with the Metal 4 backend.~%")
+  (format stream "With no arguments, resume the world using Metal 4 on macOS and Vulkan elsewhere.~%")
+  (format stream "--metal and --vulkan explicitly select an interactive backend.~%")
   (format stream "--tracy exposes live frame and worker zones to Tracy 0.13.1.~%")
   (format stream "--world loads or creates the named persistent world.~%")
-  (format stream "--smoke-test renders one hidden Vulkan frame and exits.~%")
+  (format stream "--smoke-test renders one hidden frame with the platform default and exits.~%")
+  (format stream "--vulkan-smoke-test renders one hidden Vulkan frame and exits.~%")
   (format stream "--metal-smoke-test renders one hidden Metal 4 frame and exits.~%")
   (format stream "--metal-text-closeup renders the enlarged Slug world-text proof.~%")
   (format stream "--metal-benchmark measures steady or streaming Metal frames.~%"))
@@ -90,6 +91,9 @@
   (make-instance 'luv:metal-gpu-provider)
   #-darwin
   (error "The Metal backend is only available on Darwin."))
+
+(defun make-vulkan-provider ()
+  (make-instance 'luv:vulkan-gpu-provider))
 
 (defun run-interactive (&key provider tracy-p
                              (world-pathname
@@ -142,6 +146,8 @@
           do (cond
                ((string= argument "--metal")
                 (setf provider (make-metal-provider)))
+               ((string= argument "--vulkan")
+                (setf provider (make-vulkan-provider)))
                ((string= argument "--tracy")
                 (setf tracy-p t))
                ((string= argument "--world")
@@ -197,6 +203,11 @@
      (run-smoke-test
       (pathname (second arguments))
       (make-metal-provider)))
+    ((and (= (length arguments) 2)
+          (string= (first arguments) "--vulkan-smoke-test"))
+     (run-smoke-test
+      (pathname (second arguments))
+      (make-vulkan-provider)))
     ((and (= (length arguments) 2)
           (string= (first arguments) "--metal-text-closeup"))
      (run-metal-text-closeup (pathname (second arguments))))

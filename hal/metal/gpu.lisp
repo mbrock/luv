@@ -15,6 +15,11 @@
 (defclass metal-gpu-provider (gpu-provider) ()
   (:documentation "A provider for the system's preferred Metal device."))
 
+;; Metal is the native default on Apple hosts.  Preserve an explicit provider
+;; installed by an embedding application before luv finishes loading.
+(unless *gpu-provider*
+  (setf *gpu-provider* (make-instance 'metal-gpu-provider)))
+
 (defclass metal-gpu-object ()
   ((native-object :initarg :native-object :reader metal-native-object)
    (destroyed-p :initform nil :accessor metal-object-destroyed-p)

@@ -86,6 +86,10 @@
   (declare (ignore provider))
   nil)
 
+;; Vulkan is luv's portable default.  On Darwin, leave the choice open until
+;; the native Metal module has loaded so Apple hosts do not accidentally run
+;; through MoltenVK merely because the Vulkan backend appears first in ASDF.
+#-darwin
 (unless *gpu-provider*
   (setf *gpu-provider* (make-instance 'vulkan-gpu-provider)))
 

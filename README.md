@@ -212,6 +212,10 @@ make
 ./build/luvcraft
 ```
 
+On macOS the bare executable uses the native Metal 4 backend. Pass `--vulkan`
+when an explicit MoltenVK comparison is useful; other platforms continue to
+default to Vulkan.
+
 While the game is running, this evaluates inside that exact process:
 
 ```sh

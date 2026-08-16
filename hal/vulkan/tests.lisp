@@ -1,5 +1,11 @@
 (in-package #:luv.tests)
 
+(deftest default-provider-prefers-the-native-apple-backend
+  #+darwin
+  (ok (typep luv:*gpu-provider* 'luv:metal-gpu-provider))
+  #-darwin
+  (ok (typep luv:*gpu-provider* 'luv:vulkan-gpu-provider)))
+
 (deftest renderer-readbacks-use-compressed-png-output
   (let ((pixels (make-array (* 64 64 4)
                             :element-type '(unsigned-byte 8)

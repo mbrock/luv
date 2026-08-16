@@ -458,10 +458,12 @@ than backend calls in luvcraft.
 through those paths and writes an upright sRGB capture comparable to the
 Vulkan smoke image.  The Metal capture is =1920×1280= because the Metal SDL
 canvas deliberately uses the Retina drawable; Vulkan's hidden reference is
-=960×640=.  Running =./build/luvcraft --metal= keeps the ordinary interactive
-world alive across continuous validated frames and exits through its normal
-window-close lifecycle.  Luvcraft selects a provider, but does not fork its
-world, meshing, input, frame graph, live shader, or capture orchestration.
+=960×640=.  On macOS, running bare =./build/luvcraft= now selects Metal 4 as
+the platform default, keeps the ordinary interactive world alive across
+continuous validated frames, and exits through its normal window-close
+lifecycle.  =--vulkan= remains the explicit MoltenVK comparison path.
+Luvcraft selects a provider, but does not fork its world, meshing, input,
+frame graph, live shader, or capture orchestration.
 
 Done when: redefining the block material compiles MSL, publishes a complete
 Metal pipeline at the owning frame boundary, keeps the previous pipeline after
