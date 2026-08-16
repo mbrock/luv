@@ -735,11 +735,11 @@ Audit so far:
   live columns, solver-atlas copies, and immutable worker snapshots without
   wrapping their lanes.  The interleaved block-mesh vertex buffer remains a
   heterogeneous repeated product rather than one scalar field.  The lighting
-  work queue likewise has one =level= representation whose sky or block
-  meaning comes from the owning queue; these need product/work-item layouts,
-  not false scalar slot annotations.  Ordinary function parameters remain an
-  explicit frontend question rather than being forced into record
-  declarations.
+  work item likewise has one =level= representation whose sky or block meaning
+  comes from the owning queue.  The queue now retains that exact field
+  definition (#K2V9RD), rather than falsely annotating the raw slot in
+  isolation.  Ordinary function parameters remain an explicit frontend
+  question rather than being forced into record declarations.
 - Session state now distinguishes the monotonic frame-clock point from the
   accumulated physics duration, and production results declare their elapsed
   duration.  Lighting state now likewise declares its most recent
@@ -756,9 +756,9 @@ Audit so far:
 
 The interleaved block-mesh vertex vector now carries a repeated 12-lane
 product declaration (#Q7M4PF), checked against the live block-surface vertex
-shader contract.  Next: resolve context-dependent work-item products, and
-decide how ordinary function parameters publish boundary meaning without
-turning direct Lisp into ceremony.
+shader contract.  Context-dependent removal work now has an explicit semantic
+owner (#K2V9RD).  Next: decide how ordinary function parameters publish
+boundary meaning without turning direct Lisp into ceremony.
 
 ** DONE Describe the repeated block-mesh vertex product
 :PROPERTIES:
@@ -774,6 +774,21 @@ Construction checks the physical vector representation and exact
 identity rather than silently relabeling copied lanes.  A luvcraft test
 flattens the actual four location-ordered vertex-stage inputs and requires its
 quantity layout to equal the CPU product.
+
+** DONE Put contextual light-removal meaning on its queue
+:PROPERTIES:
+:ID: K2V9RD
+:END:
+
+The two removal frontiers are now small =light-removal-queue= structures.
+Each retains the exact =:sky-light= or =:block-light= field definition, dense
+field reader, sky propagation policy, raw item list, and removed-cell set.
+Items are admitted only through the queue, so their unwrapped u8 level is
+never created without its semantic owner; no tag or wrapper is added to each
+item.  The item's coordinate slot independently declares a cell-valued affine
+world position.  Tests require the two queues to expose incompatible light
+quantities, retain current field identities, reject an out-of-domain level,
+and leave the ordinary coordinate and integer representations unchanged.
 
 * A possible Lisp vocabulary
 :PROPERTIES:

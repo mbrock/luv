@@ -285,6 +285,39 @@
                         :vertex-count 1 :face-count 0)
          'error))))
 
+(deftest light-removal-queues-own-the-meaning-of-unwrapped-levels
+  (let* ((coordinate (make-world-coordinate 1 2 3))
+         (sky
+           (luv::make-light-removal-queue
+            :sky-light #'luv::light-region-entry-sky :skylight-p t))
+         (block
+           (luv::make-light-removal-queue
+            :block-light #'luv::light-region-entry-block))
+         (coordinate-declaration
+           (luv.arithmetic.records:record-slot-declaration
+            'luv::light-removal 'luv::coordinate)))
+    (luv::enqueue-light-removal sky coordinate 12)
+    (ok (eq :world-position
+            (luv.arithmetic:quantity-specification-name
+             (luv.arithmetic:declaration-quantity-specification
+              coordinate-declaration))))
+    (ok (luv.world.fields:materialized-field-current-p sky :sky-light))
+    (ok (luv.world.fields:materialized-field-current-p block :block-light))
+    (ok (null
+         (luv.world.fields:materialized-field-definition sky :block-light)))
+    (ok (eq :sky-propagation-level
+            (luv.arithmetic:quantity-specification-name
+             (luv.arithmetic:declaration-quantity-specification
+              (luv::light-removal-queue-field-definition sky)))))
+    (ok (eq :block-propagation-level
+            (luv.arithmetic:quantity-specification-name
+             (luv.arithmetic:declaration-quantity-specification
+              (luv::light-removal-queue-field-definition block)))))
+    (let ((item (first (luv::light-removal-queue-items sky))))
+      (ok (eq coordinate (luv::light-removal-coordinate item)))
+      (ok (= 12 (luv::light-removal-level item))))
+    (ok (signals (luv::enqueue-light-removal sky coordinate 16) 'error))))
+
 (deftest cpu-trace-zones-are-nested-reusable-and-bounded
   (let ((trace (make-cpu-trace :label "test")))
     (with-cpu-trace (trace)

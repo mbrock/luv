@@ -148,10 +148,49 @@ resident."))
   ;; resident chunk without precomputing the affected set.
   (ensure-entry nil :type (or null function)))
 
-(defstruct (light-removal
-             (:constructor make-light-removal (coordinate level)))
-  (coordinate nil :type world-coordinate :read-only t)
+(luv.arithmetic.records:define-quantity-struct
+    (light-removal
+     (:constructor %make-light-removal (coordinate level)))
+  (coordinate nil :type world-coordinate :read-only t
+              :quantity (:quantity :world-position :unit :cell
+                         :tensor-order 1 :affine-p t))
+  ;; LEVEL's sky/block quantity is owned by the queue which admits the item.
   (level 0 :type (unsigned-byte 8) :read-only t))
+
+(defstruct (light-removal-queue
+             (:constructor %make-light-removal-queue))
+  (field-name nil :type keyword :read-only t)
+  (field-definition nil :type luv.world.fields:voxel-field-definition
+                        :read-only t)
+  (field-reader nil :type function :read-only t)
+  (skylight-p nil :type boolean :read-only t)
+  (items nil :type list)
+  (removed (make-hash-table :test #'equalp) :type hash-table :read-only t))
+
+(defun make-light-removal-queue (field-name field-reader &key skylight-p)
+  "Make a removal frontier whose raw levels retain one field's exact meaning."
+  (let ((definition (luv.world.fields:field-definition-for field-name)))
+    (unless definition
+      (error "There is no voxel field definition named ~S." field-name))
+    (%make-light-removal-queue
+     :field-name field-name :field-definition definition
+     :field-reader field-reader :skylight-p skylight-p)))
+
+(defmethod luv.world.fields:materialized-field-definition
+    ((queue light-removal-queue) field-name)
+  (and (eq field-name (light-removal-queue-field-name queue))
+       (light-removal-queue-field-definition queue)))
+
+(defun enqueue-light-removal (queue coordinate level)
+  "Admit one unwrapped removal item under QUEUE's retained field definition."
+  (unless (typep level
+                 (luv.world.fields:voxel-field-definition-legal-value-type
+                  (light-removal-queue-field-definition queue)))
+    (error "Light removal level ~S is illegal for field ~S."
+           level (light-removal-queue-field-name queue)))
+  (push (%make-light-removal coordinate level)
+        (light-removal-queue-items queue))
+  queue)
 
 (defun add-light-region-entry (region chunk &key from-field-p)
   "Materialize CHUNK's dense capture in REGION and return the new entry."
@@ -508,16 +547,19 @@ incremental state is suspect."
 ;;; the way re-enters the addition queue, so the max fixpoint is restored
 ;;; from true sources only.
 
-(defun unlight-light-region (region field-reader queue skylight-p removed)
-  "Clear light reachable from LIGHT-REMOVAL records in QUEUE.
+(defun unlight-light-region (region queue)
+  "Clear light reachable from LIGHT-REMOVAL records owned by QUEUE.
 
-Marks cleared cells in the REMOVED table and returns (VALUES SOURCES
+Marks cleared cells in QUEUE's removed table and returns (VALUES SOURCES
 VISITED): surviving brighter cells to re-propagate from, and the number of
 removal steps performed."
-  (let ((sources nil)
+  (let ((field-reader (light-removal-queue-field-reader queue))
+        (skylight-p (light-removal-queue-skylight-p queue))
+        (removed (light-removal-queue-removed queue))
+        (sources nil)
         (visited 0))
-    (loop while queue
-          do (let* ((removal (pop queue))
+    (loop while (light-removal-queue-items queue)
+          do (let* ((removal (pop (light-removal-queue-items queue)))
                     (coordinate (light-removal-coordinate removal))
                     (level (light-removal-level removal)))
                (incf visited)
@@ -540,8 +582,7 @@ removal steps performed."
                                         neighbor-coordinate)))
                                  (setf (aref levels offset) 0
                                        (gethash retained removed) t)
-                                 (push (make-light-removal retained value)
-                                       queue))
+                                 (enqueue-light-removal queue retained value))
                                (push (copy-world-coordinate
                                       neighbor-coordinate)
                                      sources))))))))))
@@ -684,9 +725,12 @@ producer batches is justified by measurement rather than guesswork."
   (let* ((start (get-internal-real-time))
          (world (lighting-state-world state))
          (region (make-light-candidate world))
-         (sky-removals nil) (block-removals nil)
-         (sky-removed (make-hash-table :test #'equalp))
-         (block-removed (make-hash-table :test #'equalp))
+         (sky-removals
+           (make-light-removal-queue
+            :sky-light #'light-region-entry-sky :skylight-p t))
+         (block-removals
+           (make-light-removal-queue
+            :block-light #'light-region-entry-block))
          (sky-seeds nil) (block-seeds nil)
          (visited 0))
     (flet ((seed-sky (cell) (push cell sky-seeds))
@@ -704,10 +748,12 @@ producer batches is justified by measurement rather than guesswork."
                      (aref (light-region-entry-block entry) offset)))
                (setf (aref (light-region-entry-sky entry) offset) 0
                      (aref (light-region-entry-block entry) offset) 0
-                     (gethash cell sky-removed) t
-                     (gethash cell block-removed) t)
-               (push (make-light-removal cell old-sky) sky-removals)
-               (push (make-light-removal cell old-block) block-removals)))))
+                     (gethash cell
+                              (light-removal-queue-removed sky-removals)) t
+                     (gethash cell
+                              (light-removal-queue-removed block-removals)) t)
+               (enqueue-light-removal sky-removals cell old-sky)
+               (enqueue-light-removal block-removals cell old-block)))))
        (lighting-state-dirty-cells state))
       ;; A departed neighbor may have been feeding the retained faces.
       (maphash
@@ -737,25 +783,26 @@ producer batches is justified by measurement rather than guesswork."
                             (aref (light-region-entry-block entry) offset)))
                       (when (plusp old-sky)
                         (setf (aref (light-region-entry-sky entry) offset) 0
-                              (gethash coordinate sky-removed) t)
-                        (push (make-light-removal coordinate old-sky)
-                              sky-removals))
+                              (gethash coordinate
+                                       (light-removal-queue-removed
+                                        sky-removals)) t)
+                        (enqueue-light-removal
+                         sky-removals coordinate old-sky))
                       (when (plusp old-block)
                         (setf (aref (light-region-entry-block entry) offset) 0
-                              (gethash coordinate block-removed) t)
-                        (push (make-light-removal coordinate old-block)
-                              block-removals))))))))))
+                              (gethash coordinate
+                                       (light-removal-queue-removed
+                                        block-removals)) t)
+                        (enqueue-light-removal
+                         block-removals coordinate old-block))))))))))
        (lighting-state-departures state))
       ;; Removal to exhaustion, collecting surviving sources.
       (multiple-value-bind (sources count)
-          (unlight-light-region
-           region #'light-region-entry-sky sky-removals t sky-removed)
+          (unlight-light-region region sky-removals)
         (setf sky-seeds (nconc sources sky-seeds))
         (incf visited count))
       (multiple-value-bind (sources count)
-          (unlight-light-region
-           region #'light-region-entry-block block-removals nil
-           block-removed)
+          (unlight-light-region region block-removals)
         (setf block-seeds (nconc sources block-seeds))
         (incf visited count))
       ;; Every cleared cell whose block emits re-seeds its own emission:
@@ -775,13 +822,13 @@ producer batches is justified by measurement rather than guesswork."
                  (setf (aref (light-region-entry-block entry) offset)
                        level)
                  (seed-block cell))))))
-       block-removed)
+       (light-removal-queue-removed block-removals))
       ;; Cells cleared by sky removal may sit on an open boundary whose
       ;; direct light must be re-admitted.
       (maphash (lambda (cell present)
                  (declare (ignore present))
                  (reseed-cell-open-boundaries region cell #'seed-sky))
-               sky-removed)
+               (light-removal-queue-removed sky-removals))
       ;; Arrivals solve their own chunk and import neighbor boundaries.
       (maphash (lambda (key present)
                  (declare (ignore present))
