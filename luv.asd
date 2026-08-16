@@ -65,7 +65,8 @@
     :components ((:static-file "README.md")
                  (:file "package")
                  (:file "ffi")
-                 (:file "terminal"))))
+                 (:file "terminal")
+                 (:file "key"))))
   :in-order-to ((test-op (test-op "luv/ghostty/test"))))
 
 (defsystem "luv/ghostty/test"
@@ -94,11 +95,18 @@
                  (:file "pty"))))
   :in-order-to ((test-op (test-op "luv/terminal/test"))))
 
+(defsystem "luv/terminal/canvas"
+  :description "Portable canvas key events projected into a terminal device."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("luv" "luv/terminal")
+  :components ((:file "terminal/canvas")))
+
 (defsystem "luv/terminal/test"
   :description "Executable PTY ownership and terminal-driving claims."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luv/terminal" "rove" "uiop")
+  :depends-on ("luv/terminal/canvas" "rove" "uiop")
   :components ((:file "terminal/tests"))
   :perform (test-op (operation component)
              (declare (ignore operation component))

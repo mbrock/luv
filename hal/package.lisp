@@ -390,6 +390,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:canvas-key-event-key-name
            #:canvas-key-event-modifiers
            #:canvas-key-event-character
+           #:canvas-key-event-unshifted-character
            #:canvas-key-event-repeat-p
            #:canvas-key-press-event
            #:canvas-key-release-event

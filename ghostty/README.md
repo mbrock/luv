@@ -2,7 +2,8 @@
 
 This experimental `luv/ghostty` ASDF system binds enough of libghostty-vt to
 create a terminal, feed its VT parser, format the active screen as plain text,
-and release all native resources explicitly.
+encode physical key events against its live terminal modes, and release all
+native resources explicitly.
 
 The luv Nix environment pins and builds Ghostty's maintained
 `libghostty-vt-releasesafe` derivation. Enter it through the usual development
@@ -27,4 +28,14 @@ From Lisp:
 (ghostty:with-terminal (terminal :columns 80 :rows 24)
   (ghostty:write-terminal terminal "Hello from Ghostty!")
   (ghostty:terminal-text terminal))
+```
+
+The reusable key encoder stays separate from the terminal's ownership:
+
+```lisp
+(ghostty:with-terminal (terminal)
+  (ghostty:with-key-encoder (encoder)
+    (ghostty:encode-key-event
+     encoder terminal :press :a
+     :modifiers '(:control) :text "a" :unshifted-codepoint 97)))
 ```

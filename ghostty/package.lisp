@@ -18,4 +18,10 @@
            #:set-terminal-response-function
            #:terminal-callback-condition
            #:terminal-text
-           #:with-terminal))
+           #:with-terminal
+           #:key-encoder
+           #:make-key-encoder
+           #:key-encoder-open-p
+           #:close-key-encoder
+           #:encode-key-event
+           #:with-key-encoder))

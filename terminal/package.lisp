@@ -9,6 +9,8 @@
            #:pty-device-condition
            #:send-pty-device-bytes
            #:send-pty-device-text
+           #:send-pty-device-key
+           #:send-pty-device-canvas-key-event
            #:resize-pty-device
            #:call-with-pty-device-terminal
            #:wait-for-pty-device

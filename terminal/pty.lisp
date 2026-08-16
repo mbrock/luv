@@ -20,6 +20,7 @@
    (mailbox :initarg :mailbox :reader pty-device-mailbox)
    (lock :initarg :lock :reader pty-device-lock)
    (on-output :initarg :on-output :initform nil :reader pty-device-on-output)
+   (key-encoder :initform nil :accessor pty-device-key-encoder)
    (state :initform :starting :accessor %pty-device-state)
    (exit-code :initform nil :accessor %pty-device-exit-code)
    (condition :initform nil :accessor %pty-device-condition)
@@ -65,6 +66,22 @@ The worker, mailbox, and terminal lock realize the single-owner flow in
 (defun send-pty-device-text (device text)
   "UTF-8 encode TEXT and enqueue it for DEVICE's child process."
   (send-pty-device-bytes device (sb-ext:string-to-octets text :external-format :utf-8)))
+
+(defun send-pty-device-key
+    (device action key
+     &key modifiers consumed-modifiers text unshifted-codepoint composing-p)
+  "Enqueue one semantic Ghostty key event for DEVICE's child process.
+
+Encoding happens on the PTY owner against the terminal's then-current modes."
+  (check-type device pty-device)
+  (check-type text (or null string))
+  (unless (member (pty-device-state device) '(:starting :running))
+    (error "PTY device ~S is not accepting input." device))
+  (sb-concurrency:send-message
+   (pty-device-mailbox device)
+   (list :key action key (copy-list modifiers) (copy-list consumed-modifiers)
+         (and text (copy-seq text)) unshifted-codepoint composing-p))
+  device)
 
 (defun resize-pty-device
     (device columns rows &key (cell-width-pixels 0) (cell-height-pixels 0))
@@ -136,6 +153,28 @@ The worker, mailbox, and terminal lock realize the single-owner flow in
     (:write
      (write-pty-stream-bytes (pty-device-stream device) (second message))
      :continue)
+    (:key
+     (destructuring-bind
+         (operation action key modifiers consumed-modifiers text
+          unshifted-codepoint composing-p)
+         message
+       (declare (ignore operation))
+       (let ((bytes
+               (sb-thread:with-mutex ((pty-device-lock device))
+                 (let ((encoder
+                         (or (pty-device-key-encoder device)
+                             (setf (pty-device-key-encoder device)
+                                   (ghostty:make-key-encoder)))))
+                   (ghostty:encode-key-event
+                    encoder (pty-device-terminal device) action key
+                    :modifiers modifiers
+                    :consumed-modifiers consumed-modifiers
+                    :text text
+                    :unshifted-codepoint unshifted-codepoint
+                    :composing-p composing-p)))))
+         (when (plusp (length bytes))
+           (write-pty-stream-bytes (pty-device-stream device) bytes))))
+     :continue)
     (:resize
      (destructuring-bind
          (operation columns rows cell-width-pixels cell-height-pixels) message
@@ -179,6 +218,10 @@ The worker, mailbox, and terminal lock realize the single-owner flow in
       (sb-thread:with-mutex ((pty-device-lock device))
         (ghostty:set-terminal-response-function
          (pty-device-terminal device) nil)))
+    (when (pty-device-key-encoder device)
+      (ignore-errors
+        (ghostty:close-key-encoder (pty-device-key-encoder device)))
+      (setf (pty-device-key-encoder device) nil))
     (ignore-errors (close stream))
     (when (member (sb-ext:process-status process) '(:running :stopped))
       (ignore-errors (sb-ext:process-kill process sb-posix:sighup))

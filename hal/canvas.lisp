@@ -194,12 +194,16 @@ backend returns the same Lisp wrapper every time it revisits a native drawable."
     :initarg :character
     :initform nil
     :reader canvas-key-event-character)
+   (unshifted-character
+    :initarg :unshifted-character
+    :initform nil
+    :reader canvas-key-event-unshifted-character)
    (repeat-p
     :initarg :repeat-p
     :initform nil
     :reader canvas-key-event-repeat-p))
   (:documentation
-   "A portable physical-key event with logical modifier names."))
+   "A portable physical-key event with logical modifiers and layout text."))
 
 (defclass canvas-key-press-event (canvas-key-event) ())
 (defclass canvas-key-release-event (canvas-key-event) ())

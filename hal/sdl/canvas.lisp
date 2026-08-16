@@ -508,7 +508,9 @@ have a main-thread host and execute directly."
             (list (and (present-p :lshift :rshift) :shift)
                   (and (present-p :lctrl :rctrl :ctrl) :control)
                   (and (present-p :lalt :ralt :alt) :meta)
-                  (and (present-p :lgui :rgui :gui) :super)))))
+                  (and (present-p :lgui :rgui :gui) :super)
+                  (and (present-p :caps) :caps-lock)
+                  (and (present-p :num) :num-lock)))))
 
 (defun sdl-key-character (scancode modifiers)
   "Return SCANCODE's character under SDL's current layout and MODIFIERS."
@@ -537,6 +539,7 @@ have a main-thread host and execute directly."
                           :key-name key-name
                           :modifiers (sdl-key-modifiers modifiers)
                           :character (sdl-key-character scancode modifiers)
+                          :unshifted-character (sdl-key-character scancode nil)
                           :repeat-p
                           (cffi:foreign-slot-value
                            event type 'sdl3::%repeat))))))))

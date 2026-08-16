@@ -48,6 +48,43 @@ is NIL, LUV_GHOSTTY_LIBRARY is consulted before the platform soname search."
   (:columns 1)
   (:rows 2))
 
+(cffi:defcenum (key-action :int)
+  (:release 0)
+  (:press 1)
+  (:repeat 2))
+
+;; Ghostty's physical keys follow the W3C KeyboardEvent.code order.  Keep this
+;; list in header order: libghostty-vt deliberately exposes it as a C enum.
+(cffi:defcenum (physical-key :int)
+  (:unidentified 0)
+  :backquote :backslash :bracket-left :bracket-right :comma
+  :digit-0 :digit-1 :digit-2 :digit-3 :digit-4
+  :digit-5 :digit-6 :digit-7 :digit-8 :digit-9
+  :equal :intl-backslash :intl-ro :intl-yen
+  :a :b :c :d :e :f :g :h :i :j :k :l :m
+  :n :o :p :q :r :s :t :u :v :w :x :y :z
+  :minus :period :quote :semicolon :slash
+  :alt-left :alt-right :backspace :caps-lock :context-menu
+  :control-left :control-right :enter :meta-left :meta-right
+  :shift-left :shift-right :space :tab :convert :kana-mode :non-convert
+  :delete :end :help :home :insert :page-down :page-up
+  :arrow-down :arrow-left :arrow-right :arrow-up
+  :num-lock
+  :numpad-0 :numpad-1 :numpad-2 :numpad-3 :numpad-4
+  :numpad-5 :numpad-6 :numpad-7 :numpad-8 :numpad-9
+  :numpad-add :numpad-backspace :numpad-clear :numpad-clear-entry
+  :numpad-comma :numpad-decimal :numpad-divide :numpad-enter
+  :numpad-equal :numpad-memory-add :numpad-memory-clear
+  :numpad-memory-recall :numpad-memory-store :numpad-memory-subtract
+  :numpad-multiply :numpad-paren-left :numpad-paren-right
+  :numpad-subtract :numpad-separator :numpad-up :numpad-down
+  :numpad-right :numpad-left :numpad-begin :numpad-home :numpad-end
+  :numpad-insert :numpad-delete :numpad-page-up :numpad-page-down
+  :escape
+  :f1 :f2 :f3 :f4 :f5 :f6 :f7 :f8 :f9 :f10 :f11 :f12 :f13
+  :f14 :f15 :f16 :f17 :f18 :f19 :f20 :f21 :f22 :f23 :f24 :f25
+  :fn :fn-lock :print-screen :scroll-lock :pause)
+
 (cffi:defcstruct formatter-screen-extra
   (size :size)
   (cursor :bool)
@@ -127,3 +164,53 @@ is NIL, LUV_GHOSTTY_LIBRARY is consulted before the platform soname search."
   (allocator :pointer)
   (pointer :pointer)
   (length :size))
+
+(cffi:defcfun ("ghostty_key_encoder_new" %key-encoder-new) ghostty-result
+  (allocator :pointer)
+  (encoder :pointer))
+
+(cffi:defcfun ("ghostty_key_encoder_free" %key-encoder-free) :void
+  (encoder :pointer))
+
+(cffi:defcfun ("ghostty_key_encoder_setopt_from_terminal"
+               %key-encoder-setopt-from-terminal) :void
+  (encoder :pointer)
+  (terminal :pointer))
+
+(cffi:defcfun ("ghostty_key_encoder_encode" %key-encoder-encode)
+    ghostty-result
+  (encoder :pointer)
+  (event :pointer)
+  (output :pointer)
+  (output-size :size)
+  (output-length :pointer))
+
+(cffi:defcfun ("ghostty_key_event_new" %key-event-new) ghostty-result
+  (allocator :pointer)
+  (event :pointer))
+
+(cffi:defcfun ("ghostty_key_event_free" %key-event-free) :void
+  (event :pointer))
+
+(cffi:defcfun ("ghostty_key_event_set_action" %key-event-set-action) :void
+  (event :pointer) (action key-action))
+
+(cffi:defcfun ("ghostty_key_event_set_key" %key-event-set-key) :void
+  (event :pointer) (key physical-key))
+
+(cffi:defcfun ("ghostty_key_event_set_mods" %key-event-set-mods) :void
+  (event :pointer) (modifiers :uint16))
+
+(cffi:defcfun ("ghostty_key_event_set_consumed_mods"
+               %key-event-set-consumed-mods) :void
+  (event :pointer) (modifiers :uint16))
+
+(cffi:defcfun ("ghostty_key_event_set_composing" %key-event-set-composing) :void
+  (event :pointer) (composing :bool))
+
+(cffi:defcfun ("ghostty_key_event_set_utf8" %key-event-set-utf8) :void
+  (event :pointer) (text :pointer) (length :size))
+
+(cffi:defcfun ("ghostty_key_event_set_unshifted_codepoint"
+               %key-event-set-unshifted-codepoint) :void
+  (event :pointer) (codepoint :uint32))

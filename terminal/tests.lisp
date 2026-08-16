@@ -18,6 +18,13 @@
 (defun pty-terminal-text (device)
   (terminal:call-with-pty-device-terminal device #'ghostty:terminal-text))
 
+(defun send-canvas-key (device key &optional character)
+  (terminal:send-pty-device-canvas-key-event
+   device
+   (make-instance
+    'luv:canvas-key-press-event :timestamp 0 :key-name key
+    :character character :unshifted-character character)))
+
 (deftest pty-child-output-and-input-drive-one-terminal
   (with-pty-test
       (device ghostty-terminal
@@ -44,6 +51,22 @@
       (ok (eq :exited (terminal:wait-for-pty-device device :timeout 3.0)))
       (ok (search "query-ok:1b5b313b3152" (pty-terminal-text device)))
       (ok (null (terminal:pty-device-condition device))))))
+
+(deftest portable-canvas-keys-reach-the-pty-child
+  (with-pty-test
+      (device ghostty-terminal
+       :program "/bin/sh"
+       :arguments
+       (list "-c"
+             "printf 'key-ready\r\n'; IFS= read -r line; printf 'key:%s\r\n' \"$line\""))
+    (send-canvas-key device :h #\h)
+    (send-canvas-key device :i #\i)
+    (send-canvas-key device :return #\Return)
+    (ok (eq :exited (terminal:wait-for-pty-device device :timeout 3.0)))
+    (let ((text (pty-terminal-text device)))
+      (ok (search "key-ready" text))
+      (ok (search "key:hi" text)))
+    (ok (null (terminal:pty-device-condition device)))))
 
 (deftest resize-coordinates-the-kernel-pty-and-ghostty-grid
   (with-pty-test
