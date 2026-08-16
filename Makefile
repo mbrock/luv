@@ -91,11 +91,7 @@ wiki-cli:
 	./scripts/dev sbcl --script wiki/build.lisp
 
 wiki:
-	./scripts/dev sbcl --non-interactive \
-		--eval '(require :asdf)' \
-		--eval '(asdf:load-asd (truename "luv-wiki.asd"))' \
-		--eval '(asdf:load-asd (truename "luv-wiki-site.asd"))' \
-		--eval '(asdf:make :luv-wiki-site)'
+	./scripts/wiki build
 
 objective-c-probe:
 	./scripts/dev sbcl --non-interactive \

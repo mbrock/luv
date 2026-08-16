@@ -17,7 +17,8 @@ design page for =luv-wiki=, the Lisp system in [[file:org.lisp][wiki/org.lisp]],
 The rendered site lives at [[https://mbrock.github.io/luv/][mbrock.github.io/luv]] once the Pages
 workflow in [[file:../.github/workflows/wiki.yml][wiki.yml]] has run; locally, =make wiki= writes it to
 =build/wiki/=.  Besides the pages it carries a figure index and, per
-#58SVCM, the whole source of the luv systems as browsable dexp pages.
+#58SVCM, the whole source of the repository's five primary system families as
+browsable dexp pages.
 
 * Why ASDF, and how the wiki slots into it
 :PROPERTIES:
@@ -172,13 +173,15 @@ through the Org reader, code through the Eclector index — so what it prints
 agrees with the site.  Commands: =toc=, =marks=, =figure=, =page=,
 =mentions=, =defs=, =dangling=, =ids=, =build=; =help= lists them.
 
-Two details of the executable are worth recording.  The Nix =sbcl= wrapper
+Three details of the executable are worth recording.  The Nix =sbcl= wrapper
 supplies =CL_SOURCE_REGISTRY= and =ASDF_OUTPUT_TRANSLATIONS= to SBCL
 processes only, so a dumped image would look for compiled files in the
 wrong place; =wiki/build.lisp= captures that environment before the dump
-and =main= re-establishes it.  And =luv.asd= now loads =luv-wiki.asd= only
-when the system is not already registered, so re-reading =luv.asd= inside
-the executable does not redefine the system it is running from.
+and =main= re-establishes it.  The =build= command registers =luv.asd=,
+=luvcraft.asd=, =mcluv.asd=, =luv-wiki.asd=, and =luv-wiki-site.asd= before
+asking ASDF to render, so the source browser sees every component tree without
+loading the GPU, game, or native systems.  =make wiki= uses that command rather
+than a partial fresh image that knows only the two wiki ASD files.
 
 * DONE Serve the site from GitHub Pages
 :PROPERTIES:
@@ -191,7 +194,8 @@ that touches the wiki or its tooling.
 Evidence: [[file:../.github/workflows/wiki.yml][wiki.yml]] installs Nix, restores the closure with hestia
 (chunked GitHub Actions cache; about a minute warm, replacing the
 sunsetting magic-nix-cache), runs =make wiki=, and deploys with the Pages
-actions.  Pages had to be enabled once by hand with
+actions.  Lisp and ASD changes trigger the workflow because they can change
+the derived source browser even when no Org page changed.  Pages had to be enabled once by hand with
 =gh api -X POST repos/mbrock/luv/pages -f build_type=workflow=; the
 workflow token cannot create the site.  The index and source pages are
 reachable at the public URL.
@@ -600,8 +604,8 @@ drive the =(render backend element)= refactor of #AGTIO4.
 :END:
 
 Once every source file is read into nodes, showing all of it is one more
-render.  Each file of the =luv=, =luvcraft=, and =luv-wiki= systems (the
-wiki reads itself, so how it renders is on the site too) becomes a page
+render.  Each Common Lisp file owned by the five root ASD files -- =luv=,
+=luvcraft=, =mcluv=, =luv-wiki=, and =luv-wiki-site= -- becomes a page
 under =source/=, drawn entirely as dexp boxes: a table of its definitions on
 top, every top-level form anchored by its starting line (=#L956=), the
 file's =in-package= hiding that package's prefix, comment blocks kept as one
@@ -643,7 +647,10 @@ nodes, definitions), =render-source-page=, and =render-source-index=;
 its =output-files=.  =find-named-definition= backs symbol links; the mesher
 page alone carries a few hundred.  Adjacent comment lines are merged into
 one node, and clause lists (=let= bindings, =defclass= slots, lambda lists,
-=cond= clauses) do not colour their first element as an operator.
+=cond= clauses) do not colour their first element as an operator.  The canonical
+=make wiki= path registers all five root ASD files before rendering, and the
+Pages workflow watches Lisp and ASD changes, so a clean build cannot silently
+collapse the index to the wiki tooling alone.
 
 Done when: every source file has a page reachable from the site header,
 definitions are anchored and linked from symbols, and code references open

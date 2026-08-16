@@ -1,5 +1,5 @@
-# Render the Org wiki with (asdf:make :luv/wiki) and publish build/wiki/ to
-# GitHub Pages at https://mbrock.github.io/luv/.
+# Render the Org wiki and its ASDF-derived source browser, then publish
+# build/wiki/ to GitHub Pages at https://mbrock.github.io/luv/.
 
 name: wiki
 
@@ -7,10 +7,11 @@ on:
   push:
     branches: [main]
     paths:
+      - "**/*.lisp"
+      - "*.asd"
       - "wiki/**"
-      - "wiki-*.lisp"
-      - "luv-wiki.asd"
-      - "luv.asd"
+      - "Makefile"
+      - "scripts/wiki"
       - "flake.*"
       - ".github/workflows/wiki.yml"
   workflow_dispatch:
