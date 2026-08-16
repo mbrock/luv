@@ -12,6 +12,7 @@
     :default-component-class "luv.wiki:org-file"
     :components ((:file "index")
                  (:file "block-world")
+                 (:file "world-terminal")
                  (:file "box3d-architecture")
                  (:file "domains-and-bundles")
                  (:file "field-notes-measures")

@@ -1,0 +1,211 @@
+#+title: A terminal in the little world
+#+startup: overview
+
+* A terminal is a world-native interactive surface
+:PROPERTIES:
+:ID: NMAD2U
+:END:
+
+The luv terminal should be an object in the little world, not a conventional
+terminal window captured into a texture.  Its rectangular cell grid has a
+position, orientation, depth relationship, and input surface in the scene.
+Ghostty supplies terminal semantics; luv's Slug path supplies glyph outlines;
+the ordinary scene pass supplies projection, depth, composition, and eventual
+lighting policy.
+
+This is a stronger version of the existing McCLIM gadget experiment.  The
+gadget proves that a live interactive surface can share luvcraft's canvas and
+GPU device, occupy a perspective-projected quadrilateral, and receive pointer
+events translated back through that quadrilateral.  It still paints a CPU
+raster mirror and samples the resulting texture.  The terminal should retain
+the placement and event lesson while replacing the raster mirror with native
+cell, decoration, and Slug glyph draws.
+
+The result is not merely sharper terminal text.  A world-native renderer can
+reuse scene depth, animate or transform the surface without rerasterizing a
+bitmap, update only changed rows, and keep text as inspectable terminal cells
+until draw data is built.  The shaped world-text proof #QW7P96 and its
+per-device outline cache #U5X6DY show that the necessary outline path already
+participates in a real frame.
+
+* The McCLIM gadget leaves a useful interaction seam
+:PROPERTIES:
+:ID: 0U22KN
+:END:
+
+[[lisp:open-luvcraft-widget-lab]] constructs an embedded McCLIM frame against
+the world session's existing canvas, context, and device.
+[[lisp:encode-luvcraft-overlay]] lets that object contribute draws to the open
+scene pass, while [[lisp:handle-luvcraft-overlay-event]] lets the frontmost
+overlay consume an input event.  The gadget implementation also performs the
+perspective-correct inverse mapping from a canvas pointer coordinate to a
+coordinate on its world plane.
+
+Those are semantic boundaries worth keeping open.  A terminal surface can be
+another overlay implementation with its own placement, focus, input, and
+release methods.  The terminal's rows, cells, glyph instances, and generated
+vertices should remain dense data inside that object rather than acquiring
+individual CLOS identity.  One dispatch per overlay or frame is useful; one
+dispatch per terminal cell would put the extensibility boundary in the hot
+loop.
+
+The first terminal need not inherit from a McCLIM mirror or frame.  Reusing the
+world-overlay relationship is the architectural result; sharing the CPU raster
+machinery would preserve precisely the indirection this experiment is meant to
+remove.
+
+* Ghostty owns terminal semantics, not the surrounding application
+:PROPERTIES:
+:ID: OAFDXL
+:END:
+
+The =luv/ghostty= spike pins Ghostty revision
+=26df373ec83fb1cebb4fee0a8394144ae984a9b8= and creates, feeds, formats, and
+releases a =GhosttyTerminal=.  The next layer should continue to treat
+libghostty-vt as a semantic engine rather than an application framework.
+
+| Owner | State and responsibility |
+|-------+--------------------------|
+| world terminal | placement, focus, lifecycle, and participation in luvcraft's overlay protocols |
+| PTY owner | child process, master descriptor, readiness, writes, exit, and shutdown |
+| =GhosttyTerminal= | VT parser, primary and alternate screens, scrollback, modes, cursor, selection, and protocol effects |
+| =GhosttyRenderState= | renderer-owned visible snapshot, colors, cursor presentation, and dirty rows |
+| Slug terminal renderer | device glyph cache, dense row geometry, decorations, pipelines, and draw encoding |
+
+This split follows libghostty-vt's own C surface.  Its
+[[https://github.com/ghostty-org/ghostty/blob/26df373ec83fb1cebb4fee0a8394144ae984a9b8/include/ghostty/vt/terminal.h][terminal API]]
+accepts VT bytes and exposes effects, but does not create a PTY, event loop, or
+render thread.  Its
+[[https://github.com/ghostty-org/ghostty/blob/26df373ec83fb1cebb4fee0a8394144ae984a9b8/include/ghostty/vt/render.h][render-state API]]
+copies the visible state needed by a custom renderer.  Ghostty labels the C API
+work in progress, so the Nix revision pin is also the binding's ABI boundary;
+updating it should be an intentional tested change.
+
+* PTY traffic has one serialized owner
+:PROPERTIES:
+:ID: K3KFGZ
+:END:
+
+libghostty-vt does not pull bytes from a process.  Luv creates a PTY, starts a
+child, reads the master descriptor when ready, and passes each byte slice to
+=ghostty_terminal_vt_write=.  Feeding bytes mutates the terminal immediately.
+It does not emit a damage callback; the host merely requests a later render
+update and lets the render state say whether anything visible changed.
+
+#+begin_src mermaid
+flowchart LR
+  P[PTY master readable] --> R[owner reads bytes]
+  R --> V[Ghostty VT write]
+  V --> E[synchronous effects]
+  V --> F[request a frame]
+  E --> Q[copy replies into PTY write queue]
+  K[key, mouse, paste, focus] --> I[Ghostty input encoders]
+  I --> Q
+  Q --> P
+  F --> S[update render state]
+  S --> D[draw dirty rows with Slug]
+#+end_src
+
+Effects such as bell, title changes, clipboard requests, and terminal-generated
+query responses are synchronous callbacks made inside the VT write.  The
+=WRITE_PTY= effect is therefore a route back to the PTY, not the incoming data
+path.  A callback must copy borrowed bytes and enqueue them quickly; it must not
+recursively feed the same terminal or block the PTY reader.
+
+Keyboard and mouse encoders read the terminal's current modes before producing
+bytes for the PTY.  Resizing similarly crosses both sides: resize Ghostty with
+the new cell and pixel dimensions, and apply =TIOCSWINSZ= to the PTY.  A first
+implementation can serialize all of this in one owner thread.  If PTY reading
+later moves to a worker, every access to the mutable terminal still needs one
+explicit lock or owner queue.
+
+* Render state is the frame boundary
+:PROPERTIES:
+:ID: XNMV61
+:END:
+
+=GhosttyRenderState= is the retained renderer-facing object that the formatter
+spike deliberately avoided.  Updating it from the terminal yields a global
+dirty state of clean, partial, or full.  A partial update exposes dirty rows in
+viewport order; a full update makes every row effective damage.  Each row then
+offers reusable cell iteration, a bulk raw-cell view, wrapping and selection
+information.  Each cell exposes its grapheme, style, resolved colors, wide-cell
+role, semantic content, and selection state.
+
+This is row damage rather than an arbitrary pixel rectangle.  That fits a
+terminal renderer well: regenerate the dense instances for each dirty row and
+leave other row ranges untouched.  Cursor and palette changes live in the
+same snapshot and can promote the frame to full damage when necessary.  After
+a complete successful draw, luv calls =ghostty_render_state_clean=; updating
+does not implicitly acknowledge the damage.
+
+The two-phase update is the thread boundary if one becomes necessary.  Under
+the terminal lock, =ghostty_render_state_begin_update= copies what it needs.
+After unlocking, =ghostty_render_state_end_update= completes work using only
+render-state-owned memory.  The renderer can then traverse a stable snapshot
+while PTY input continues.  Borrowed rows and cells remain valid until the next
+render-state update, not indefinitely.
+
+* The terminal grid remains authoritative through Slug
+:PROPERTIES:
+:ID: I9U71F
+:END:
+
+Ghostty supplies grapheme clusters and cell occupancy, but not shaped glyphs.
+Luv must join those cells to the HarfBuzz and Slug boundary in #4G7064 without
+allowing proportional shaping to reflow the terminal.  Cell coordinates and
+narrow, wide, or spacer roles remain authoritative.  A wide spacer tail emits
+no glyph; backgrounds and decorations use cell-aligned geometry; a grapheme's
+outline is placed at its declared cell origin and clipped or scaled according
+to an explicit terminal font policy.
+
+The simplest correct first representation is dense data per dirty row:
+
+- cell background and selection spans;
+- glyph instances keyed by font, glyph ID, style, cell origin, and terminal
+  advance;
+- underline, strike, overline, and cursor geometry; and
+- row-owned vertex or instance ranges that can be replaced independently.
+
+The existing per-device Slug outline cache #U5X6DY is the natural resource
+owner, but the current one-texture-pair-per-glyph draw pattern is only a proof.
+A terminal will quickly make atlas allocation, batched glyph instances, font
+fallback, and measured edge quality visible.  Those are renderer iterations,
+not reasons to obscure the initial Ghostty-to-row boundary.
+
+* NEXT Draw one Ghostty row directly in the world
+:PROPERTIES:
+:ID: NTQ5KY
+:END:
+
+Intent: replace the formatter as the proof boundary with one world-native
+render-state row, while keeping process and input concerns out of the first
+crossing.
+
+Evidence: the current binding already owns a terminal and feeds arbitrary VT
+bytes; the Nix environment owns the exact shared library.  Ghostty's pinned
+render API supplies dirty-row and cell iteration.  The world overlay seam
+#0U22KN and the working Slug world-text path #QW7P96 already supply placement,
+depth-tested drawing, shaping, and device outline ownership.
+
+Done when: a fixed styled VT fixture produces a visible Slug-rendered row on a
+world plane, including its cell backgrounds and cursor; a second unchanged
+render-state update performs no row rebuild; changing one row rebuilds that
+row; and terminal, render-state, iterator, and GPU resources all have explicit
+release paths.
+
+* TODO Attach a live PTY after the render boundary works
+:PROPERTIES:
+:ID: 9OFAII
+:END:
+
+Intent: make the world terminal interactive without folding process ownership
+or callback reentrancy into its renderer.
+
+Evidence needed: a small PTY owner feeds reads through the serialized flow in
+#K3KFGZ, copies Ghostty's synchronous reply bytes into its write queue, encodes
+keys from current terminal modes, and coordinates resize and child exit.
+
+Done when: an ordinary shell can start, paint a prompt, receive text and
+special keys, answer a terminal query, resize, exit, and release its descriptor
+and child without blocking the world frame loop.

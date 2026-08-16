@@ -573,6 +573,11 @@ with a small CPU winding oracle, and test dynamic dilation on geometry whose
 undilated quad actually loses edge coverage.  Atlas allocation and outline
 reuse are separate performance work and should follow measurement.
 
+The world terminal #NMAD2U is a particularly demanding next client: repeated
+grid-aligned glyphs make edge quality, outline reuse, and batching visible, but
+the terminal should consume this evidence rather than silently becoming its
+oracle.
+
 Done when: representative extrema, shared endpoints, holes, and clipped edges
 agree with the oracle on Metal and Vulkan, and dilation demonstrably recovers
 coverage rather than merely enlarging an already sufficient quad.

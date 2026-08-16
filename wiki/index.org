@@ -132,6 +132,10 @@ The following are starting paths rather than a table of settled doctrine.
 - [[file:block-world.org][The little block world and its possible worlds]] is the game-shaped starting
   path: what exists now, what kind of world it might become, and an order of
   experiments intended to stay fun.
+- [[file:world-terminal.org][A terminal in the little world]] joins libghostty-vt's terminal semantics and
+  dirty render snapshots to luv's Slug text path and the existing world-overlay
+  interaction seam.  Its first slice draws one fixed terminal row directly in
+  the scene before attaching a live PTY.
 - [[file:domains-and-bundles.org][Domains, bundles, and materialized worlds]] studies why CLOS and
   structure-of-arrays storage are compatible, and what chunking, level of
   detail, procedural generation, and streaming ask of the object model.
