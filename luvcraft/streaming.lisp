@@ -608,7 +608,12 @@ published independently."
           t)))
 
 (defun schedule-luvcraft-lighting (session)
-  "Capture one coalesced immutable relight after the current load batch."
+  "Reconcile cell edits incrementally or schedule a residency-wide relight.
+
+Authored edits normally touch one settled cell and are much cheaper to
+reconcile against the published field than to solve every resident chunk from
+scratch.  Chunk arrivals and departures still use a coalesced immutable worker
+request, keeping residency-scale lighting out of the frame callback."
   (let* ((state (luvcraft-session-lighting-state session))
          (outstanding (luvcraft-session-outstanding-production session))
          (production-key '(:light)))
@@ -616,21 +621,25 @@ published independently."
                (lighting-state-dirty-p state)
                (not (gethash production-key outstanding))
                (not (luvcraft-load-production-pending-p session)))
-      (let* ((world (lighting-state-world state))
-             (request
-               (make-instance
-                'block-light-production-request
-                :key production-key :priority -1
-                :dependency-stamp (block-world-light-dependency-stamp world)
-                :region (capture-light-region world :immutable-p t))))
-        ;; New hooks which fire after this capture accumulate for the next
-        ;; request.  A stale or failed result explicitly restores dirtiness.
-        (clrhash (lighting-state-dirty-cells state))
-        (clrhash (lighting-state-arrivals state))
-        (clrhash (lighting-state-departures state))
-        (setf (gethash production-key outstanding)
-              (schedule-production-request
-               (luvcraft-session-production-system session) request))))))
+      (if (lighting-state-residency-dirty-p state)
+          (let* ((world (lighting-state-world state))
+                 (request
+                   (make-instance
+                    'block-light-production-request
+                    :key production-key :priority -1
+                    :dependency-stamp
+                    (block-world-light-dependency-stamp world)
+                    :region (capture-light-region world :immutable-p t))))
+            ;; New hooks which fire after this capture accumulate for the next
+            ;; request.  A stale or failed result explicitly restores dirtiness.
+            (clrhash (lighting-state-dirty-cells state))
+            (clrhash (lighting-state-arrivals state))
+            (clrhash (lighting-state-departures state))
+            (setf (gethash production-key outstanding)
+                  (schedule-production-request
+                   (luvcraft-session-production-system session) request)))
+          (with-cpu-trace-zone (:streaming/reconcile-cell-lighting)
+            (reconcile-lighting state))))))
 
 (defun luvcraft-lighting-settled-p (session)
   (let ((state (luvcraft-session-lighting-state session)))

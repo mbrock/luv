@@ -236,6 +236,23 @@
              (block-light-emission *test-glow-block*)))
       (ok (light-matches-reference-p world)))))
 
+(deftest settled-cell-edits-use-the-incremental-relighter
+  (let* ((world (make-open-sky-test-world '(0 0 0)))
+         (state (luvcraft::attach-lighting-state world))
+         (session (make-instance 'luvcraft-session
+                                 :world world :lighting-state state)))
+    ;; Initial residency is a global concern.  Settle it before modeling the
+    ;; ordinary player edit path in an already visible world.
+    (ok (luvcraft::reconcile-lighting state))
+    (setf (world-block-at world 8 15 8) luvcraft::*stone-block*)
+    (ok (not (luvcraft::lighting-state-residency-dirty-p state)))
+    (ok (luvcraft::schedule-luvcraft-lighting session))
+    (ok (not (luvcraft::lighting-state-dirty-p state)))
+    (ok (not (gethash '(:light)
+                      (luvcraft-session-outstanding-production session))))
+    (ok (= (sky-at world 8 14 8) 14))
+    (ok (light-matches-reference-p world))))
+
 (deftest random-edits-and-residency-match-the-reference-solver
   (let* ((world (make-block-world
                  :source (make-instance 'little-world-source :seed 1)))

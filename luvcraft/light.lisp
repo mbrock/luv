@@ -698,6 +698,11 @@ first reconcile lights a caller-built world without a separate protocol."
       (plusp (hash-table-count (lighting-state-arrivals state)))
       (plusp (hash-table-count (lighting-state-departures state)))))
 
+(defun lighting-state-residency-dirty-p (state)
+  "Whether STATE includes chunk arrivals or departures."
+  (or (plusp (hash-table-count (lighting-state-arrivals state)))
+      (plusp (hash-table-count (lighting-state-departures state)))))
+
 (defun seed-arrived-chunk (region key seed-sky seed-block)
   "Seed one newly resident chunk and import its neighbors' boundary light."
   (let* ((world (light-region-world region))
