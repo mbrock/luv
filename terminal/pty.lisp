@@ -15,7 +15,11 @@
 
 (defparameter +pty-child-launcher-source+
   (format nil
-          "import fcntl, os, signal, sys, termios~%
+          "import fcntl, os, signal, struct, sys, termios~%
+rows, cols = int(sys.argv[1]), int(sys.argv[2])~%
+del sys.argv[1:3]~%
+if rows > 0 and cols > 0:~%
+    fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack('HHHH', rows, cols, 0, 0))~%
 pid = os.fork()~%
 if pid:~%
     signal.signal(signal.SIGHUP, signal.SIG_IGN)~%
@@ -26,7 +30,10 @@ os.setsid()~%
 fcntl.ioctl(0, termios.TIOCSCTTY, 0)~%
 os.tcsetpgrp(0, os.getpgrp())~%
 os.execvpe(sys.argv[1], sys.argv[1:], os.environ)~%")
-  "One-shot child setup which turns SBCL's PTY slave into /dev/tty.")
+  "One-shot child setup which turns SBCL's PTY slave into /dev/tty.
+
+The first two arguments are the initial window rows and columns, so the child
+observes the terminal's real size before it ever runs.")
 
 (defclass pty-device ()
   ((terminal :initarg :terminal :reader pty-device-terminal)
@@ -336,7 +343,10 @@ snapshot work which must not race mutation."
     (error "Cannot attach a PTY to closed terminal ~S." terminal))
   (let* ((launcher-program "python3")
          (launcher-arguments
-           (list* "-c" +pty-child-launcher-source+ program arguments))
+           (multiple-value-bind (columns rows) (ghostty:terminal-size terminal)
+             (list* "-c" +pty-child-launcher-source+
+                    (princ-to-string rows) (princ-to-string columns)
+                    program arguments)))
          (options
            (append
             (list :pty t :wait nil :search t :external-format :latin-1)

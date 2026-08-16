@@ -44,8 +44,11 @@
         0.0 0.0 0.0  1.0 1.0 0.0  0.0 1.0 0.0)))
 
 (defun make-world-text-instances
-    (glyphs atlas center right up scale min-x min-y max-x max-y)
-  "Build one dense model-and-atlas record per drawable glyph occurrence."
+    (glyphs atlas center right up scale min-x min-y max-x max-y
+     &key (ink '(0.96 0.32 0.48)))
+  "Build one dense model-and-atlas record per drawable glyph occurrence.
+
+INK is the linear RGB carried in the record's three spare lanes."
   (let* ((padding 0.035)
          (middle-x (/ (+ min-x max-x) 2))
          (middle-y (/ (+ min-y max-y) 2))
@@ -107,13 +110,14 @@
                       outline-right outline-top
                       (luv.slug:slug-serialized-outline-vertical-band-count
                        serialized)
-                      (first atlas-location) (second atlas-location) 0.0
+                      (first atlas-location) (second atlas-location)
+                      (first ink)
                       (luv.slug:slug-glyph-placement-outline-min-x glyph)
                       (luv.slug:slug-glyph-placement-outline-min-y glyph)
-                      0.0
+                      (second ink)
                       (luv.slug:slug-glyph-placement-outline-max-x glyph)
                       (luv.slug:slug-glyph-placement-outline-max-y glyph)
-                      0.0)))
+                      (third ink))))
       data)))
 
 (defun world-text-center-before-camera (camera distance lift)

@@ -31,14 +31,35 @@
 
 (defstruct (terminal-grid-presentation
              (:constructor %make-terminal-grid-presentation
-                 (&key domain characters)))
+                 (&key domain characters screen)))
   domain
-  characters)
+  characters
+  ;; The styled Ghostty snapshot behind CHARACTERS, or NIL for plain text.
+  screen)
 
 (defstruct terminal-glyph-occurrence
   glyph
   column
-  row)
+  row
+  ;; Packed #xRRGGBB foreground and whether the bold face was used.
+  foreground
+  bold-p)
+
+(defparameter *luvcraft-fonts-directory*
+  (asdf:system-relative-pathname "luvcraft" "fonts/")
+  "The checkout's bundled fonts, captured while the system is loaded.")
+
+(defun luvcraft-font-pathname (name)
+  (merge-pathnames name *luvcraft-fonts-directory*))
+
+(defparameter *terminal-display-font-pathname*
+  (luvcraft-font-pathname "MonaspaceNeon-Regular.ttf"))
+
+(defparameter *terminal-display-bold-font-pathname*
+  (luvcraft-font-pathname "MonaspaceNeon-Bold.ttf"))
+
+(defparameter *terminal-display-default-foreground* #xF5528A
+  "Packed sRGB #xRRGGBB used for cells without an explicit foreground.")
 
 ;;; The frame records screen-right, screen-up, and outward in voxel axes.  EQL
 ;;; methods keep the six closed orientations inspectable without making block
@@ -110,12 +131,20 @@
                  :accessor terminal-display-presentation)
    (glyph-cache :initarg :glyph-cache :initform nil
                 :reader terminal-display-glyph-cache)
-   (glyphs-by-character :initform (make-hash-table :test #'eql)
+   ;; Keyed by (CHARACTER . BOLD-P).
+   (glyphs-by-character :initform (make-hash-table :test #'equal)
                         :reader terminal-display-glyphs-by-character)
    (glyph-run :initarg :glyph-run :initform nil
               :accessor terminal-display-glyph-run)
    (font-pathname :initarg :font-pathname :initform nil
                   :reader terminal-display-font-pathname)
+   (bold-font-pathname :initarg :bold-font-pathname :initform nil
+                       :reader terminal-display-bold-font-pathname)
+   (default-foreground :initarg :default-foreground
+                       :initform *terminal-display-default-foreground*
+                       :reader terminal-display-default-foreground)
+   (cell-run :initarg :cell-run :initform nil
+             :accessor terminal-display-cell-run)
    (margin :initarg :margin :initform 0.12
            :reader terminal-display-margin)
    (font-scale :initarg :font-scale :initform 1.0
@@ -148,6 +177,32 @@
                             character)))
     (%make-terminal-grid-presentation
      :domain domain :characters characters)))
+
+(defun make-terminal-screen-presentation (domain screen)
+  "Copy a styled Ghostty SCREEN snapshot into one exact viewport DOMAIN."
+  (let* ((columns (terminal-grid-domain-columns domain))
+         (rows (terminal-grid-domain-rows domain))
+         (characters
+           (make-array (domains:domain-cardinality domain)
+                       :element-type 'character :initial-element #\Space)))
+    (dotimes (row (min rows (ghostty:terminal-screen-rows screen)))
+      (dotimes (column (min columns (ghostty:terminal-screen-columns screen)))
+        (setf (aref characters (terminal-grid-offset domain column row))
+              (ghostty:terminal-screen-character screen column row))))
+    (%make-terminal-grid-presentation
+     :domain domain :characters characters :screen screen)))
+
+(defun terminal-presentation-cell-style (presentation column row)
+  "Return foreground #xRRGGBB, background #xRRGGBB or NIL, and bold-p."
+  (let ((screen (terminal-grid-presentation-screen presentation)))
+    (if (and screen
+             (< column (ghostty:terminal-screen-columns screen))
+             (< row (ghostty:terminal-screen-rows screen)))
+        (multiple-value-bind (foreground background)
+            (ghostty:terminal-screen-cell-colors screen column row)
+          (values foreground background
+                 (ghostty:terminal-screen-bold-p screen column row)))
+        (values *terminal-display-default-foreground* nil nil))))
 
 (defun terminal-grid-character (presentation column row)
   (aref (terminal-grid-presentation-characters presentation)
@@ -735,20 +790,27 @@ and height in world units.  FONT-SCALE is an explicit multiplier on contain."
               (/ (- surface-height grid-height) 2.0)
               grid-width grid-height))))
 
+(defstruct (terminal-face (:constructor make-terminal-face (pathname loader)))
+  "One font file and its open loader."
+  pathname
+  loader)
+
 (defun terminal-display-character-glyphs
-    (character glyphs-by-character glyph-cache font-pathname font-loader)
-  (multiple-value-bind (cached-glyphs present-p)
-      (gethash character glyphs-by-character)
-    (if present-p
-        cached-glyphs
-        (setf (gethash character glyphs-by-character)
-              (luv.slug:make-slug-glyph-placements
-               (luv.slug:cached-slug-shaped-text
-                glyph-cache font-pathname (string character))
-               font-loader glyph-cache font-pathname)))))
+    (character bold-p glyphs-by-character glyph-cache face)
+  (let ((key (cons character bold-p)))
+    (multiple-value-bind (cached-glyphs present-p)
+        (gethash key glyphs-by-character)
+      (if present-p
+          cached-glyphs
+          (setf (gethash key glyphs-by-character)
+                (luv.slug:make-slug-glyph-placements
+                 (luv.slug:cached-slug-shaped-text
+                  glyph-cache (terminal-face-pathname face) (string character))
+                 (terminal-face-loader face) glyph-cache
+                 (terminal-face-pathname face)))))))
 
 (defun terminal-display-glyph-occurrences
-    (presentation glyphs-by-character glyph-cache font-pathname font-loader)
+    (presentation glyphs-by-character glyph-cache regular bold)
   (let ((occurrences nil)
         (domain (terminal-grid-presentation-domain presentation)))
     (dotimes (row (terminal-grid-domain-rows domain))
@@ -756,31 +818,52 @@ and height in world units.  FONT-SCALE is an explicit multiplier on contain."
         (let ((character
                 (terminal-grid-character presentation column row)))
           (unless (char= character #\Space)
-            (dolist (glyph
-                      (terminal-display-character-glyphs
-                       character glyphs-by-character glyph-cache
-                       font-pathname font-loader))
-              (push (make-terminal-glyph-occurrence
-                     :glyph glyph :column column :row row)
-                    occurrences))))))
+            (multiple-value-bind (foreground background bold-p)
+                (terminal-presentation-cell-style presentation column row)
+              (declare (ignore background))
+              (dolist (glyph
+                        (terminal-display-character-glyphs
+                         character bold-p glyphs-by-character glyph-cache
+                         (if bold-p bold regular)))
+                (push (make-terminal-glyph-occurrence
+                       :glyph glyph :column column :row row
+                       :foreground foreground :bold-p bold-p)
+                      occurrences)))))))
     (nreverse occurrences)))
+
+(defun srgb-byte-to-linear (byte)
+  (let ((value (/ byte 255.0)))
+    (if (<= value 0.04045)
+        (/ value 12.92)
+        (expt (/ (+ value 0.055) 1.055) 2.4))))
+
+(defun packed-color-linear-components (packed)
+  "Return linear R G B floats for one packed sRGB #xRRGGBB."
+  (values (srgb-byte-to-linear (ldb (byte 8 16) packed))
+          (srgb-byte-to-linear (ldb (byte 8 8) packed))
+          (srgb-byte-to-linear (ldb (byte 8 0) packed))))
+
+(defun terminal-font-metrics (font-loader)
+  "Return the em-normalized line height, advance, and descender."
+  (let* ((ascender (zpb-ttf:ascender font-loader))
+         (descender (zpb-ttf:descender font-loader))
+         (units-per-em (zpb-ttf:units/em font-loader)))
+    (values (/ (- ascender descender) units-per-em)
+            (/ (zpb-ttf:advance-width
+                (zpb-ttf:find-glyph #\M font-loader))
+               units-per-em)
+            (/ descender units-per-em))))
 
 (defun make-terminal-display-glyph-instances
     (occurrences atlas domain surface font-loader margin font-scale)
   "Place glyphs in one font grid fitted across the entire block SURFACE."
-  (let* ((frame (terminal-face-frame (terminal-surface-face surface)))
+  (multiple-value-bind (font-height font-advance descender-ratio)
+      (terminal-font-metrics font-loader)
+   (let* ((frame (terminal-face-frame (terminal-surface-face surface)))
          (right (voxel-direction-vec3
                  (terminal-face-frame-right frame)))
          (up (voxel-direction-vec3 (terminal-face-frame-up frame)))
          (origin (terminal-surface-lower-left-point surface))
-         (ascender (zpb-ttf:ascender font-loader))
-         (descender (zpb-ttf:descender font-loader))
-         (units-per-em (zpb-ttf:units/em font-loader))
-         (font-height (/ (- ascender descender) units-per-em))
-         (font-advance
-           (/ (zpb-ttf:advance-width
-               (zpb-ttf:find-glyph #\M font-loader))
-              units-per-em))
          (padding 0.035)
          (data (make-array (* 24 (length occurrences))
                            :element-type 'single-float)))
@@ -805,7 +888,7 @@ and height in world units.  FONT-SCALE is an explicit multiplier on contain."
               for baseline =
                 (+ bottom grid-height
                    (- (* (1+ row) font-height scale))
-                   (* (- (/ descender units-per-em)) scale))
+                   (* (- descender-ratio) scale))
               for cell-x = (+ left (* column font-advance scale))
               for outline-left =
                 (- (luv.slug:slug-glyph-placement-outline-min-x glyph) padding)
@@ -841,68 +924,225 @@ and height in world units.  FONT-SCALE is an explicit multiplier on contain."
                 (luv.slug:slug-device-glyph-serialized resource)
               for atlas-location =
                 (gethash resource (luv.slug:slug-glyph-atlas-locations atlas))
-              do (write-values
-                  base
-                  (list
-                   (vec3-x quad-origin) (vec3-y quad-origin)
-                   (vec3-z quad-origin)
-                   (vec3-x (difference right-edge quad-origin))
-                   (vec3-y (difference right-edge quad-origin))
-                   (vec3-z (difference right-edge quad-origin))
-                   (vec3-x (difference top-edge quad-origin))
-                   (vec3-y (difference top-edge quad-origin))
-                   (vec3-z (difference top-edge quad-origin))
-                   outline-left outline-bottom
-                   (luv.slug:slug-serialized-outline-horizontal-band-count
-                    serialized)
-                   outline-right outline-top
-                   (luv.slug:slug-serialized-outline-vertical-band-count
-                    serialized)
-                   (first atlas-location) (second atlas-location) 0.0
-                   (luv.slug:slug-glyph-placement-outline-min-x glyph)
-                   (luv.slug:slug-glyph-placement-outline-min-y glyph) 0.0
-                   (luv.slug:slug-glyph-placement-outline-max-x glyph)
-                   (luv.slug:slug-glyph-placement-outline-max-y glyph) 0.0)))
+              do (multiple-value-bind (red green blue)
+                     (packed-color-linear-components
+                      (terminal-glyph-occurrence-foreground occurrence))
+                   ;; The three spare Z lanes carry the linear ink colour.
+                   (write-values
+                    base
+                    (list
+                     (vec3-x quad-origin) (vec3-y quad-origin)
+                     (vec3-z quad-origin)
+                     (vec3-x (difference right-edge quad-origin))
+                     (vec3-y (difference right-edge quad-origin))
+                     (vec3-z (difference right-edge quad-origin))
+                     (vec3-x (difference top-edge quad-origin))
+                     (vec3-y (difference top-edge quad-origin))
+                     (vec3-z (difference top-edge quad-origin))
+                     outline-left outline-bottom
+                     (luv.slug:slug-serialized-outline-horizontal-band-count
+                      serialized)
+                     outline-right outline-top
+                     (luv.slug:slug-serialized-outline-vertical-band-count
+                      serialized)
+                     (first atlas-location) (second atlas-location) red
+                     (luv.slug:slug-glyph-placement-outline-min-x glyph)
+                     (luv.slug:slug-glyph-placement-outline-min-y glyph) green
+                     (luv.slug:slug-glyph-placement-outline-max-x glyph)
+                     (luv.slug:slug-glyph-placement-outline-max-y glyph)
+                     blue))))
+        data)))))
+
+(defun make-terminal-display-cell-instances
+    (presentation surface font-loader margin font-scale)
+  "Build one solid quad record per cell which paints its own background.
+
+Each record is origin, right edge, up edge, and linear RGB: 12 floats."
+  (multiple-value-bind (font-height font-advance) (terminal-font-metrics font-loader)
+    (let* ((domain (terminal-grid-presentation-domain presentation))
+           (frame (terminal-face-frame (terminal-surface-face surface)))
+           (right (voxel-direction-vec3 (terminal-face-frame-right frame)))
+           (up (voxel-direction-vec3 (terminal-face-frame-up frame)))
+           ;; Sit just below the glyph plane so ink always wins the depth test.
+           (origin (terminal-surface-lower-left-point surface 0.004))
+           (values nil)
+           (count 0))
+      (multiple-value-bind (scale left bottom grid-width grid-height)
+          (fit-terminal-grid-in-surface
+           domain surface font-advance font-height margin font-scale)
+        (declare (ignore grid-width))
+        (let ((cell-width (* font-advance scale))
+              (cell-height (* font-height scale)))
+          (dotimes (row (terminal-grid-domain-rows domain))
+            (dotimes (column (terminal-grid-domain-columns domain))
+              (multiple-value-bind (foreground background)
+                  (terminal-presentation-cell-style presentation column row)
+                (declare (ignore foreground))
+                (when background
+                  (let ((corner
+                          (terminal-offset-point
+                           origin
+                           right (+ left (* column cell-width))
+                           up (+ bottom grid-height
+                                 (- (* (1+ row) cell-height))))))
+                    (multiple-value-bind (red green blue)
+                        (packed-color-linear-components background)
+                      (incf count)
+                      (push (list (vec3-x corner) (vec3-y corner) (vec3-z corner)
+                                  (* (vec3-x right) cell-width)
+                                  (* (vec3-y right) cell-width)
+                                  (* (vec3-z right) cell-width)
+                                  (* (vec3-x up) cell-height)
+                                  (* (vec3-y up) cell-height)
+                                  (* (vec3-z up) cell-height)
+                                  red green blue)
+                            values)))))))))
+      (let ((data (make-array (* 12 count) :element-type 'single-float))
+            (index 0))
+        (dolist (record (nreverse values))
+          (dolist (value record)
+            (setf (aref data index) (coerce value 'single-float))
+            (incf index)))
         data))))
 
 (defun make-terminal-display-glyph-population
     (presentation surface glyph-cache glyphs-by-character
-     font-pathname margin font-scale)
+     font-pathname bold-font-pathname margin font-scale)
+  "Return glyphs, atlas, glyph instances, and background cell instances."
   (zpb-ttf:with-font-loader (font-loader font-pathname)
-    ;; Keep ordinary shell interaction on one stable atlas.  Unicode output
-    ;; grows this retained character set only when a genuinely new character
-    ;; first appears, rather than manufacturing an atlas for every screen.
-    (loop for code from 32 to 126
-          do (terminal-display-character-glyphs
-              (code-char code) glyphs-by-character glyph-cache
-              font-pathname font-loader))
-    (let* ((occurrences
-             (terminal-display-glyph-occurrences
-              presentation glyphs-by-character glyph-cache
-              font-pathname font-loader))
-           (glyphs (mapcar #'terminal-glyph-occurrence-glyph occurrences))
-           (atlas-characters
-             (sort (loop for character being the hash-keys of glyphs-by-character
-                         collect character)
-                   #'< :key #'char-code))
-           (atlas-glyphs
-             (loop for character in atlas-characters
-                   append (copy-list (gethash character glyphs-by-character))))
-           (atlas (luv.slug:slug-glyph-atlas-for glyph-cache atlas-glyphs))
-           (instances
-             (make-terminal-display-glyph-instances
-              occurrences atlas
-              (terminal-grid-presentation-domain presentation)
-              surface font-loader margin font-scale)))
-      (values glyphs atlas instances))))
+    (zpb-ttf:with-font-loader (bold-loader (or bold-font-pathname font-pathname))
+      (let ((regular (make-terminal-face font-pathname font-loader))
+            (bold (make-terminal-face (or bold-font-pathname font-pathname)
+                                      bold-loader)))
+        ;; Keep ordinary shell interaction on one stable atlas.  Unicode
+        ;; output grows this retained character set only when a genuinely new
+        ;; character first appears, rather than manufacturing an atlas for
+        ;; every screen.
+        (loop for code from 32 to 126
+              do (terminal-display-character-glyphs
+                  (code-char code) nil glyphs-by-character glyph-cache regular)
+                 (terminal-display-character-glyphs
+                  (code-char code) t glyphs-by-character glyph-cache bold))
+        (let* ((occurrences
+                 (terminal-display-glyph-occurrences
+                  presentation glyphs-by-character glyph-cache regular bold))
+               (glyphs (mapcar #'terminal-glyph-occurrence-glyph occurrences))
+               (atlas-keys
+                 (sort (loop for key being the hash-keys of glyphs-by-character
+                             collect key)
+                       (lambda (a b)
+                         (or (< (char-code (car a)) (char-code (car b)))
+                             (and (char= (car a) (car b))
+                                  (not (cdr a)) (cdr b))))))
+               (atlas-glyphs
+                 (loop for key in atlas-keys
+                       append (copy-list (gethash key glyphs-by-character))))
+               (atlas (luv.slug:slug-glyph-atlas-for glyph-cache atlas-glyphs))
+               (instances
+                 (make-terminal-display-glyph-instances
+                  occurrences atlas
+                  (terminal-grid-presentation-domain presentation)
+                  surface font-loader margin font-scale))
+               (cell-instances
+                 (make-terminal-display-cell-instances
+                  presentation surface font-loader margin font-scale)))
+          (values glyphs atlas instances cell-instances))))))
+
+(defclass terminal-cell-run ()
+  ((pipeline :initarg :pipeline :reader terminal-cell-run-pipeline)
+   (vertex-buffer :initarg :vertex-buffer :reader terminal-cell-run-vertex-buffer)
+   (instance-buffer :initarg :instance-buffer
+                    :accessor terminal-cell-run-instance-buffer)
+   (count :initarg :count :initform 0 :accessor terminal-cell-run-count))
+  (:documentation
+   "Solid background quads behind terminal cells, sharing the glyph run's
+frame bind group so both draw against the same camera uniform."))
+
+(defun make-terminal-cell-run (session glyph-run instances)
+  (let* ((device (luvcraft-session-device session))
+         (vertex-data (make-world-text-quad-vertices))
+         (vertex-buffer nil)
+         (instance-buffer nil)
+         (pipeline nil)
+         (completed-p nil))
+    (unwind-protect
+         (progn
+           (setf vertex-buffer
+                 (create device
+                         (make-buffer-descriptor
+                          :label "terminal cell quads"
+                          :size (* 4 (length vertex-data))
+                          :usage '(:vertex :copy-dst)))
+                 instance-buffer
+                 (create device
+                         (make-buffer-descriptor
+                          :label "terminal cell instances"
+                          :size (max 4 (* 4 (length instances)))
+                          :usage '(:vertex :copy-dst)))
+                 pipeline
+                 (make-live-shader-pipeline
+                  :role :terminal-cell
+                  :vertex-role :terminal-cell
+                  :label "terminal cell backgrounds"
+                  :device device
+                  :layout (world-text-run-layout glyph-run)
+                  :vertex-buffers
+                  '((:array-stride 12
+                     :attributes
+                     ((:shader-location 0 :offset 0 :format :float32x3)))
+                    (:array-stride 48 :step-mode :instance
+                     :attributes
+                     ((:shader-location 1 :offset 0 :format :float32x3)
+                      (:shader-location 2 :offset 12 :format :float32x3)
+                      (:shader-location 3 :offset 24 :format :float32x3)
+                      (:shader-location 4 :offset 36 :format :float32x3))))
+                  :target-format (canvas-format (luvcraft-session-context session))
+                  :primitive '(:topology :triangle-list)
+                  :depth-stencil
+                  '(:format :depth32-float
+                    :depth-write-enabled nil
+                    :depth-compare :less)))
+           (write-buffer vertex-buffer vertex-data)
+           (when (plusp (length instances))
+             (write-buffer instance-buffer instances))
+           (setf completed-p t)
+           (make-instance 'terminal-cell-run
+                          :pipeline pipeline :vertex-buffer vertex-buffer
+                          :instance-buffer instance-buffer
+                          :count (floor (length instances) 12)))
+      (unless completed-p
+        (when pipeline (ignore-errors (release-live-shader-pipeline pipeline)))
+        (when instance-buffer (ignore-errors (destroy instance-buffer)))
+        (when vertex-buffer (ignore-errors (destroy vertex-buffer)))))))
+
+(defun replace-terminal-cell-run-instances (run device instances)
+  (let ((buffer (create device
+                        (make-buffer-descriptor
+                         :label "terminal cell instances"
+                         :size (max 4 (* 4 (length instances)))
+                         :usage '(:vertex :copy-dst)))))
+    (when (plusp (length instances))
+      (write-buffer buffer instances))
+    (let ((old (terminal-cell-run-instance-buffer run)))
+      (setf (terminal-cell-run-instance-buffer run) buffer
+            (terminal-cell-run-count run) (floor (length instances) 12))
+      (destroy old))
+    run))
+
+(defun release-terminal-cell-run (run)
+  (release-live-shader-pipeline (terminal-cell-run-pipeline run))
+  (destroy (terminal-cell-run-instance-buffer run))
+  (destroy (terminal-cell-run-vertex-buffer run))
+  (values))
 
 (defun make-terminal-display-glyph-run
     (session presentation surface glyph-cache glyphs-by-character
-     font-pathname margin font-scale)
-  (multiple-value-bind (glyphs atlas instances)
+     font-pathname bold-font-pathname margin font-scale)
+  "Return the glyph run and its companion background cell run."
+  (multiple-value-bind (glyphs atlas instances cell-instances)
       (make-terminal-display-glyph-population
        presentation surface glyph-cache glyphs-by-character
-       font-pathname margin font-scale)
+       font-pathname bold-font-pathname margin font-scale)
     (let* ((lower-left (terminal-surface-lower-left-point surface))
            (frame (terminal-face-frame (terminal-surface-face surface)))
            (center
@@ -912,11 +1152,15 @@ and height in world units.  FONT-SCALE is an explicit multiplier on contain."
               (/ (terminal-surface-physical-width surface) 2.0)
               (voxel-direction-vec3 (terminal-face-frame-up frame))
               (/ (terminal-surface-physical-height surface) 2.0))))
-      (make-world-text-run-from-instances
-       (luvcraft-session-device session)
-       (canvas-format (luvcraft-session-context session))
-       "terminal display" font-pathname nil glyphs atlas center 1.0 instances
-       :label "terminal surface Slug glyphs"))))
+      (let ((glyph-run
+              (make-world-text-run-from-instances
+               (luvcraft-session-device session)
+               (canvas-format (luvcraft-session-context session))
+               "terminal display" font-pathname nil glyphs atlas center 1.0
+               instances
+               :label "terminal surface Slug glyphs")))
+        (values glyph-run
+                (make-terminal-cell-run session glyph-run cell-instances))))))
 
 (defun clear-terminal-display-frame-bind-groups (display)
   (maphash (lambda (frame group)
@@ -936,23 +1180,29 @@ and height in world units.  FONT-SCALE is an explicit multiplier on contain."
     (let ((completed-p nil))
       (unwind-protect
            (let* ((device (terminal-display-device display))
-                  (text
+                  (screen
                     (if device
                         (termdev:call-with-pty-device-terminal
-                         device #'ghostty:terminal-text)
-                        (ghostty:terminal-text
+                         device #'ghostty:terminal-screen)
+                        (ghostty:terminal-screen
                          (terminal-display-terminal display))))
                   (old-presentation (terminal-display-presentation display))
                   (presentation
-                    (make-terminal-grid-presentation
-                     (terminal-grid-presentation-domain old-presentation)
-                     text)))
-             (multiple-value-bind (glyphs atlas instances)
+                    (progn
+                      ;; Unstyled cells take the wall's own ink colour.
+                      (setf (ghostty:terminal-screen-default-foreground screen)
+                            (terminal-display-default-foreground display))
+                      (make-terminal-screen-presentation
+                       (terminal-grid-presentation-domain old-presentation)
+                       screen)))
+                  (text (ghostty:terminal-screen-text screen)))
+             (multiple-value-bind (glyphs atlas instances cell-instances)
                  (make-terminal-display-glyph-population
                   presentation (terminal-display-surface display)
                   (terminal-display-glyph-cache display)
                   (terminal-display-glyphs-by-character display)
                   (terminal-display-font-pathname display)
+                  (terminal-display-bold-font-pathname display)
                   (terminal-display-margin display)
                   (terminal-display-font-scale display))
                (multiple-value-bind (run atlas-changed-p)
@@ -961,6 +1211,11 @@ and height in world units.  FONT-SCALE is an explicit multiplier on contain."
                     (luvcraft-session-device session)
                     text glyphs atlas instances)
                  (declare (ignore run))
+                 (when (terminal-display-cell-run display)
+                   (replace-terminal-cell-run-instances
+                    (terminal-display-cell-run display)
+                    (luvcraft-session-device session)
+                    cell-instances))
                  (when atlas-changed-p
                    (clear-terminal-display-frame-bind-groups display))
                  (setf (terminal-display-presentation display) presentation)
@@ -989,7 +1244,16 @@ and height in world units.  FONT-SCALE is an explicit multiplier on contain."
   (when (terminal-surface-current-p
          (terminal-display-surface display) session)
     (let ((frame (luvcraft-frame-state session surface-texture))
-          (glyph-run (terminal-display-glyph-run display)))
+          (glyph-run (terminal-display-glyph-run display))
+          (cell-run (terminal-display-cell-run display)))
+      (when (and cell-run (plusp (terminal-cell-run-count cell-run)))
+        (set-pipeline pass (live-shader-pipeline-native-pipeline
+                            (terminal-cell-run-pipeline cell-run)))
+        (set-vertex-buffer pass 0 (terminal-cell-run-vertex-buffer cell-run))
+        (set-vertex-buffer pass 1 (terminal-cell-run-instance-buffer cell-run))
+        (set-bind-group pass 0
+                        (terminal-display-frame-bind-group display frame))
+        (draw pass 6 (terminal-cell-run-count cell-run)))
       (when (plusp (length (world-text-run-glyphs glyph-run)))
         (set-pipeline pass (world-text-run-native-pipeline glyph-run))
         (set-vertex-buffer pass 0 (world-text-run-vertex-buffer glyph-run))
@@ -1004,6 +1268,9 @@ and height in world units.  FONT-SCALE is an explicit multiplier on contain."
     (termdev:close-pty-device (terminal-display-device display))
     (setf (terminal-display-device display) nil))
   (clear-terminal-display-frame-bind-groups display)
+  (when (terminal-display-cell-run display)
+    (release-terminal-cell-run (terminal-display-cell-run display))
+    (setf (terminal-display-cell-run display) nil))
   (release-world-text-run (terminal-display-glyph-run display))
   (luv.slug:release-slug-glyph-cache
    (terminal-display-glyph-cache display))
@@ -1110,29 +1377,59 @@ and height in world units.  FONT-SCALE is an explicit multiplier on contain."
                  arguments)))
   display)
 
+(defun terminal-grid-size-for-surface
+    (surface font-pathname margin rows-per-block)
+  "Choose columns and rows so the font grid fills SURFACE at ROWS-PER-BLOCK.
+
+The row count follows the wall's block height; the column count is whatever
+that cell height affords across the wall's width at the font's own aspect."
+  (zpb-ttf:with-font-loader (font-loader font-pathname)
+    (multiple-value-bind (font-height font-advance)
+        (terminal-font-metrics font-loader)
+      (let* ((rows (max 1 (round (* rows-per-block
+                                    (terminal-surface-height surface)))))
+             (available-height
+               (- (terminal-surface-physical-height surface) (* 2 margin)))
+             (available-width
+               (- (terminal-surface-physical-width surface) (* 2 margin)))
+             (cell-height (/ available-height rows))
+             (cell-width (* cell-height (/ font-advance font-height)))
+             (columns (max 1 (floor available-width cell-width))))
+        (values columns rows)))))
+
 (defun open-terminal-display
     (session x y z face
-     &key (columns 80) (rows 24)
+     &key columns rows
+          (rows-per-block 6)
           (fixture (terminal-display-fixture))
           (material *terminal-block*)
           (margin 0.12)
           (font-scale 1.0)
-          (font-pathname
-            (cl-dejavu:font-pathname "DejaVuSansMono.ttf")))
+          (font-pathname *terminal-display-font-pathname*)
+          (bold-font-pathname *terminal-display-bold-font-pathname*)
+          (default-foreground *terminal-display-default-foreground*))
   "Attach a deterministic Ghostty terminal to an authored block rectangle.
 
 X,Y,Z names any block in the desired exposed FACE.  The maximal coplanar
 terminal-material component must be rectangular.  Its native block meshes
-remain the display body; this overlay contributes only one fitted Slug grid."
+remain the display body; this overlay contributes only one fitted Slug grid.
+When COLUMNS or ROWS is omitted the grid is sized to the wall itself at
+ROWS-PER-BLOCK rows per block height."
   (multiple-value-bind (surface status)
       (find-terminal-surface
        (luvcraft-session-world session) x y z face :material material)
     (unless surface
       (error "Cannot open terminal display at (~D ~D ~D) ~S: ~S."
              x y z face status))
+    (multiple-value-bind (fitted-columns fitted-rows)
+        (terminal-grid-size-for-surface
+         surface font-pathname margin rows-per-block)
+      (setf columns (or columns fitted-columns)
+            rows (or rows fitted-rows)))
     (let ((terminal nil)
           (glyph-cache nil)
           (glyph-run nil)
+          (cell-run nil)
           (display nil)
           (completed-p nil))
       (unwind-protect
@@ -1143,23 +1440,30 @@ remain the display body; this overlay contributes only one fitted Slug grid."
              (let* ((domain
                       (make-instance 'terminal-grid-domain
                                      :columns columns :rows rows))
+                    (screen (ghostty:terminal-screen terminal))
                     (presentation
-                      (make-terminal-grid-presentation
-                       domain (ghostty:terminal-text terminal)))
-                    (glyphs-by-character (make-hash-table :test #'eql)))
+                      (progn
+                        (setf (ghostty:terminal-screen-default-foreground screen)
+                              default-foreground)
+                        (make-terminal-screen-presentation domain screen)))
+                    (glyphs-by-character (make-hash-table :test #'equal)))
                (setf glyph-cache
                      (luv.slug:make-slug-glyph-cache
-                      (luvcraft-session-device session))
-                     glyph-run
-                     (make-terminal-display-glyph-run
-                      session presentation surface glyph-cache
-                      glyphs-by-character font-pathname margin font-scale)
-                     display
+                      (luvcraft-session-device session)))
+               (multiple-value-setq (glyph-run cell-run)
+                 (make-terminal-display-glyph-run
+                  session presentation surface glyph-cache
+                  glyphs-by-character font-pathname bold-font-pathname
+                  margin font-scale))
+               (setf display
                      (make-instance
                       'terminal-display
                       :session session :surface surface :terminal terminal
                       :presentation presentation :glyph-cache glyph-cache
-                      :glyph-run glyph-run :font-pathname font-pathname
+                      :glyph-run glyph-run :cell-run cell-run
+                      :font-pathname font-pathname
+                      :bold-font-pathname bold-font-pathname
+                      :default-foreground default-foreground
                       :margin margin :font-scale font-scale))
                (setf (slot-value display 'glyphs-by-character)
                      glyphs-by-character))
@@ -1167,6 +1471,8 @@ remain the display body; this overlay contributes only one fitted Slug grid."
              (setf completed-p t)
              display)
         (unless completed-p
+          (when cell-run
+            (ignore-errors (release-terminal-cell-run cell-run)))
           (when glyph-run
             (ignore-errors (release-world-text-run glyph-run)))
           (when glyph-cache

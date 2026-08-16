@@ -66,6 +66,7 @@
                  (:file "package")
                  (:file "ffi")
                  (:file "terminal")
+                 (:file "screen")
                  (:file "key"))))
   :in-order-to ((test-op (test-op "luv/ghostty/test"))))
 

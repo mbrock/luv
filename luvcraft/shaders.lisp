@@ -267,10 +267,71 @@
     (set-output render-band-counts
                 (vec2 (swizzle outline-low :z)
                       (swizzle outline-high :z)))
-    (set-output render-color (vec4 0.96 0.32 0.48 1.0))))
+    ;; The instance record's three spare Z lanes carry the linear ink colour.
+    (set-output render-color
+                (vec4 (swizzle atlas-input :z)
+                      (swizzle band-low :z)
+                      (swizzle band-high :z)
+                      1.0))))
 
 (defun block-world-text-vertex-specification ()
   (shader-specification-for :slug-world-text :vertex))
+
+;;; Terminal cell backgrounds are solid world quads placed like glyph quads.
+;;; They share the text run's frame bind group and reuse the crosshair's flat
+;;; ink fragment stage.
+
+(define-shader-method shader-specification-for
+    terminal-cell-vertex-specification
+    ((role (eql :terminal-cell)) (stage (eql :vertex)))
+    (:stage :vertex
+     :inputs ((quad-corner :vec3 :location 0)
+              (world-origin :vec3 :location 1)
+              (world-right-edge :vec3 :location 2)
+              (world-up-edge :vec3 :location 3)
+              (ink-input :vec3 :location 4
+                         :quantity :linear-rgb :unit :one))
+     :outputs ((clip-position :vec4 :built-in :position)
+               (ink-output :vec3 :location 0
+                           :quantity :linear-rgb :unit :one))
+     :resources
+     ((frame-state :uniform-block :set 0 :binding 2
+                   :members #.*frame-uniform-members*)))
+  (let* ((world-position
+           (assume-quantity
+            (+ world-origin
+               (* world-right-edge (swizzle quad-corner :x))
+               (* world-up-edge (swizzle quad-corner :y)))
+            :quantity :world-position :unit :cell))
+         (camera (swizzle camera-vector :xyz))
+         (right (swizzle right-vector :xyz))
+         (up (swizzle up-vector :xyz))
+         (forward (swizzle forward-vector :xyz))
+         (relative (- world-position camera))
+         (view-x (dot relative right))
+         (view-y (dot relative up))
+         (view-z (interpret (dot relative forward)
+                            :quantity :view-distance :unit :cell))
+         (x-scale (swizzle projection-vector :x))
+         (y-scale (swizzle projection-vector :y))
+         (z-scale (swizzle projection-vector :z))
+         (z-offset (swizzle projection-vector :w))
+         (clip-x (* view-x x-scale))
+         (clip-y (- (* view-y y-scale)))
+         (clip-z (+ (interpret (* view-z z-scale)
+                              :quantity :view-distance :unit :cell)
+                    z-offset))
+         (clip (vec4 (representation clip-x)
+                     (representation clip-y)
+                     (representation clip-z)
+                     (representation view-z))))
+    (set-output clip-position clip)
+    (set-output ink-output ink-input)))
+
+(defmethod shader-specification-for
+    ((role (eql :terminal-cell)) (stage (eql :fragment)))
+  (declare (ignore role stage))
+  (shader-specification-for :block-crosshair :fragment))
 
 (defmethod shader-specification-for
     ((role (eql :slug-world-text)) (stage (eql :fragment)))

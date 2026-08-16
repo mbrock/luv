@@ -18,6 +18,21 @@
            #:set-terminal-response-function
            #:terminal-callback-condition
            #:terminal-text
+           #:terminal-screen
+           #:terminal-screen-p
+           #:terminal-screen-columns
+           #:terminal-screen-rows
+           #:terminal-screen-characters
+           #:terminal-screen-character
+           #:terminal-screen-bold-p
+           #:terminal-screen-inverse-p
+           #:terminal-screen-cell-colors
+           #:terminal-screen-default-foreground
+           #:terminal-screen-default-background
+           #:terminal-screen-cursor-visible-p
+           #:terminal-screen-cursor-column
+           #:terminal-screen-cursor-row
+           #:terminal-screen-text
            #:with-terminal
            #:key-encoder
            #:make-key-encoder
