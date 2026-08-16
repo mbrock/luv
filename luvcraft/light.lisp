@@ -150,21 +150,89 @@ resident."))
   ;; resident chunk without precomputing the affected set.
   (ensure-entry nil :type (or null function)))
 
-(defstruct (light-region-site
-             (:constructor %make-light-region-site (entry local)))
-  (entry nil :type (or null light-region-entry) :read-only t)
-  (local nil :type (or null local-coordinate) :read-only t))
+(defstruct (light-worklist-bucket
+             (:constructor %make-light-worklist-bucket))
+  ;; Parallel vectors keep hot work items dense: ENTRY supplies the semantic
+  ;; chunk boundary, while OFFSET and LEVEL are unboxed site data.
+  (entries (make-array 256 :initial-element nil
+                           :adjustable t :fill-pointer 0)
+           :type vector :read-only t)
+  (offsets (make-array 256 :element-type '(unsigned-byte 32)
+                           :adjustable t :fill-pointer 0)
+           :type vector :read-only t)
+  (levels (make-array 256 :element-type '(unsigned-byte 8)
+                          :adjustable t :fill-pointer 0)
+          :type vector :read-only t))
 
-(defun retain-light-region-site (entry local)
-  "Retain ENTRY and a copy of borrowed LOCAL beyond its traversal extent."
-  (%make-light-region-site entry (copy-local-coordinate local)))
+(defstruct (light-worklist (:constructor %make-light-worklist))
+  (scheduling :lifo :type (member :lifo :level) :read-only t)
+  (buckets (let ((buckets (make-array (1+ +maximum-light-level+))))
+             (dotimes (level (length buckets) buckets)
+               (setf (aref buckets level) (%make-light-worklist-bucket))))
+           :type simple-vector :read-only t)
+  (maximum-level -1 :type fixnum)
+  (count 0 :type fixnum))
 
-(defstruct (light-removal
-             (:constructor %make-light-removal (entry local level)))
-  (entry nil :type (or null light-region-entry) :read-only t)
-  (local nil :type (or null local-coordinate) :read-only t)
-  ;; LEVEL's sky/block quantity is owned by the queue which admits the item.
-  (level 0 :type (unsigned-byte 8) :read-only t))
+(defun make-light-worklist (&key (scheduling :lifo))
+  "Make a reusable packed lighting frontier with LIFO or level scheduling.
+
+Both modes retain ENTRY plus dense OFFSET and LEVEL lanes, never a cons or
+coordinate object per item.  LEVEL scheduling consumes brighter buckets
+first; LIFO puts every item in bucket zero and preserves the former order.
+#QS1ERH"
+  (check-type scheduling (member :lifo :level))
+  (%make-light-worklist :scheduling scheduling))
+
+(declaim (inline light-worklist-empty-p light-worklist-push))
+(defun light-worklist-empty-p (worklist)
+  (zerop (light-worklist-count worklist)))
+
+(defun light-worklist-push (worklist entry offset level)
+  "Push ENTRY, domain OFFSET, and propagation LEVEL onto WORKLIST."
+  (check-type entry light-region-entry)
+  (check-type offset (unsigned-byte 32))
+  (check-type level (unsigned-byte 8))
+  (let* ((bucket-level
+           (ecase (light-worklist-scheduling worklist)
+             (:lifo 0)
+             (:level level)))
+         (bucket (aref (light-worklist-buckets worklist) bucket-level)))
+    (vector-push-extend entry (light-worklist-bucket-entries bucket))
+    (vector-push-extend offset (light-worklist-bucket-offsets bucket))
+    (vector-push-extend level (light-worklist-bucket-levels bucket))
+    (incf (light-worklist-count worklist))
+    (setf (light-worklist-maximum-level worklist)
+          (max bucket-level (light-worklist-maximum-level worklist)))
+    worklist))
+
+(defun light-worklist-pop (worklist)
+  "Pop (VALUES ENTRY OFFSET LEVEL PRESENT-P), clearing retained ENTRY."
+  (when (light-worklist-empty-p worklist)
+    (return-from light-worklist-pop (values nil nil nil nil)))
+  (let* ((bucket-level (light-worklist-maximum-level worklist))
+         (bucket (aref (light-worklist-buckets worklist) bucket-level))
+         (entries (light-worklist-bucket-entries bucket))
+         (offsets (light-worklist-bucket-offsets bucket))
+         (levels (light-worklist-bucket-levels bucket))
+         (position (1- (fill-pointer entries)))
+         (entry (aref entries position))
+         (offset (aref offsets position))
+         (level (aref levels position)))
+    (setf (aref entries position) nil
+          (fill-pointer entries) position
+          (fill-pointer offsets) position
+          (fill-pointer levels) position)
+    (decf (light-worklist-count worklist))
+    (when (zerop position)
+      (loop for candidate downfrom (1- bucket-level) to 0
+            when (plusp
+                  (fill-pointer
+                   (light-worklist-bucket-entries
+                    (aref (light-worklist-buckets worklist) candidate))))
+              do (setf (light-worklist-maximum-level worklist) candidate)
+                 (return)
+            finally (setf (light-worklist-maximum-level worklist) -1)))
+    (values entry offset level t)))
 
 (defstruct (light-removal-queue
              (:constructor %make-light-removal-queue))
@@ -173,32 +241,34 @@ resident."))
                         :read-only t)
   (field-reader nil :type function :read-only t)
   (skylight-p nil :type boolean :read-only t)
-  (items nil :type list)
+  (worklist (make-light-worklist) :type light-worklist :read-only t)
   (removed (make-hash-table :test #'equalp) :type hash-table :read-only t))
 
-(defun make-light-removal-queue (field-name field-reader &key skylight-p)
+(defun make-light-removal-queue
+    (field-name field-reader &key skylight-p (scheduling :level))
   "Make a removal frontier whose raw levels retain one field's exact meaning."
   (let ((definition (luvcraft.world.fields:field-definition-for field-name)))
     (unless definition
       (error "There is no voxel field definition named ~S." field-name))
     (%make-light-removal-queue
-     :field-name field-name :field-definition definition
-     :field-reader field-reader :skylight-p skylight-p)))
+     :field-name field-name :field-definition definition :field-reader field-reader
+     :skylight-p skylight-p
+     :worklist (make-light-worklist :scheduling scheduling))))
 
 (defmethod luvcraft.world.fields:materialized-field-definition
     ((queue light-removal-queue) field-name)
   (and (eq field-name (light-removal-queue-field-name queue))
        (light-removal-queue-field-definition queue)))
 
-(defun enqueue-light-removal (queue entry local level)
-  "Admit one entry-local removal under QUEUE's retained field definition."
+(defun enqueue-light-removal (queue entry offset level)
+  "Admit one entry-local OFFSET under QUEUE's retained field definition."
   (unless (typep level
                  (luvcraft.world.fields:voxel-field-definition-legal-value-type
                   (light-removal-queue-field-definition queue)))
     (error "Light removal level ~S is illegal for field ~S."
            level (light-removal-queue-field-name queue)))
-  (push (%make-light-removal entry local level)
-        (light-removal-queue-items queue))
+  (light-worklist-push
+   (light-removal-queue-worklist queue) entry offset level)
   queue)
 
 (defun add-light-region-entry
@@ -327,46 +397,48 @@ the returned region may then be solved without reading the live world."
 ;;;   loses one level per step plus the target cell's opacity.
 
 (defun propagate-light-region (region field-reader queue skylight-p)
-  "Run FIELD's max-fixpoint BFS from entry-local sites in QUEUE.
+  "Run FIELD's max-fixpoint propagation from packed sites in QUEUE.
 
 Returns the number of cells visited, for the runtime's work counters."
   (let ((visited 0))
-    (loop while queue
-          do (let* ((site (pop queue))
-                    (entry (light-region-site-entry site))
-                    (local (light-region-site-local site))
-                    (domain (light-region-entry-domain entry))
-                    (offset (chunk-domain-offset domain local)))
-               (incf visited)
-               (let ((level (aref (funcall field-reader entry) offset)))
-                 (when (plusp level)
-                   (do-chunk-window-neighbors
-                       (neighbor-offset destination crossing direction
-                        materialization availability
-                        region domain local *voxel-face-directions*)
-                     (let ((neighbor
-                             (ecase availability
-                               (:local entry)
-                               (:available materialization)
-                               (:unavailable nil))))
-                       (when neighbor
-                         (let* ((opacity
-                                  (light-region-opacity
-                                   neighbor neighbor-offset))
-                                (loss
-                                  (if (and skylight-p
-                                           (eq direction
-                                               +voxel-negative-y+))
-                                      opacity
-                                      (+ 1 opacity)))
-                                (candidate (- level loss))
-                                (levels (funcall field-reader neighbor)))
-                           (when (> candidate
-                                    (aref levels neighbor-offset))
-                             (setf (aref levels neighbor-offset) candidate)
-                             (push (retain-light-region-site
-                                    neighbor destination)
-                                   queue))))))))))
+    (loop until (light-worklist-empty-p queue)
+          do (multiple-value-bind (entry offset queued-level present-p)
+                 (light-worklist-pop queue)
+               (declare (ignore queued-level present-p))
+               (let* ((domain (light-region-entry-domain entry))
+                      (local (chunk-domain-local-coordinate domain offset)))
+                 (declare (dynamic-extent local))
+                 (incf visited)
+                 (let ((level (aref (funcall field-reader entry) offset)))
+                   (when (plusp level)
+                     (do-chunk-window-neighbors
+                         (neighbor-offset destination crossing direction
+                          materialization availability
+                          region domain local *voxel-face-directions*)
+                       (values destination)
+                       (let ((neighbor
+                               (ecase availability
+                                 (:local entry)
+                                 (:available materialization)
+                                 (:unavailable nil))))
+                         (when neighbor
+                           (let* ((opacity
+                                    (light-region-opacity
+                                     neighbor neighbor-offset))
+                                  (loss
+                                    (if (and skylight-p
+                                             (eq direction
+                                                 +voxel-negative-y+))
+                                        opacity
+                                        (+ 1 opacity)))
+                                  (candidate (- level loss))
+                                  (levels (funcall field-reader neighbor)))
+                             (when (> candidate
+                                      (aref levels neighbor-offset))
+                               (setf (aref levels neighbor-offset) candidate)
+                               (light-worklist-push
+                                queue neighbor neighbor-offset
+                                candidate)))))))))))
     visited))
 
 (defun light-region-neighbor-resident-p (region coordinate direction)
@@ -424,22 +496,27 @@ LOCAL has dynamic extent and must be copied before FUNCTION retains it."
         (map-entry-face-sites
          entry direction
          (lambda (offset local)
+           (values local)
            (when (seed-open-sky-at-offset
                   entry offset (eq direction +voxel-positive-y+))
-             (funcall enqueue (retain-light-region-site entry local))))))))
+             (funcall enqueue entry offset
+                      (aref (light-region-entry-sky entry) offset))))))))
 
-(defun seed-region-sky-boundaries (region)
+(defun seed-region-sky-boundaries (region &key (scheduling :level))
   "Seed every entry's open-sky boundary light; return the seed queue."
-  (let ((queue nil))
+  (let ((queue (make-light-worklist :scheduling scheduling)))
     (maphash (lambda (key entry)
                (seed-entry-open-boundaries
-                region key entry (lambda (seed) (push seed queue))))
+                region key entry
+                (lambda (seed-entry offset level)
+                  (light-worklist-push
+                   queue seed-entry offset level))))
              (light-region-entries region))
     queue))
 
-(defun seed-region-emitters (region)
+(defun seed-region-emitters (region &key (scheduling :level))
   "Seed every emitting cell at its configured blocklight level."
-  (let ((queue nil))
+  (let ((queue (make-light-worklist :scheduling scheduling)))
     (maphash
      (lambda (key entry)
        (declare (ignore key))
@@ -448,22 +525,23 @@ LOCAL has dynamic extent and must be copied before FUNCTION retains it."
              (levels (light-region-entry-block entry))
              (domain (light-region-entry-domain entry)))
          (do-chunk-domain-sites (offset local domain)
+           (values local)
            (let ((level (aref emission (aref indices offset))))
              (when (plusp level)
                (setf (aref levels offset) level)
-               (push (retain-light-region-site entry local) queue))))))
+               (light-worklist-push queue entry offset level))))))
      (light-region-entries region))
     queue))
 
-(defun solve-light-region (region)
+(defun solve-light-region (region &key (scheduling :level))
   "Seed and propagate both light fields to fixation."
   (let ((visited
           (+ (propagate-light-region
               region #'light-region-entry-sky
-              (seed-region-sky-boundaries region) t)
+              (seed-region-sky-boundaries region :scheduling scheduling) t)
              (propagate-light-region
               region #'light-region-entry-block
-              (seed-region-emitters region) nil))))
+              (seed-region-emitters region :scheduling scheduling) nil))))
     (values region visited)))
 
 ;;; Publication compares complete candidate arrays against the chunk's
@@ -568,54 +646,54 @@ incremental state is suspect."
 ;;; the way re-enters the addition queue, so the max fixpoint is restored
 ;;; from true sources only.
 
-(defun unlight-light-region (region queue)
+(defun unlight-light-region (region queue sources)
   "Clear light reachable from LIGHT-REMOVAL records owned by QUEUE.
 
-Marks cleared cells in QUEUE's removed table and returns (VALUES SOURCES
-VISITED): surviving brighter cells to re-propagate from, and the number of
-removal steps performed."
+Marks cleared cells in QUEUE's removed table, pushes surviving brighter cells
+onto the packed addition worklist SOURCES, and returns the number of removal
+steps performed."
   (let ((field-reader (light-removal-queue-field-reader queue))
         (skylight-p (light-removal-queue-skylight-p queue))
         (removed (light-removal-queue-removed queue))
-        (sources nil)
+        (worklist (light-removal-queue-worklist queue))
         (visited 0))
-    (loop while (light-removal-queue-items queue)
-          do (let* ((removal (pop (light-removal-queue-items queue)))
-                    (entry (light-removal-entry removal))
-                    (local (light-removal-local removal))
-                    (domain (light-region-entry-domain entry))
-                    (level (light-removal-level removal)))
-               (incf visited)
-               (do-chunk-window-neighbors
-                   (offset destination crossing direction
-                    materialization availability
-                    region domain local *voxel-face-directions*)
-                 (let ((neighbor
-                         (ecase availability
-                           (:local entry)
-                           (:available materialization)
-                           (:unavailable nil))))
-                   (when neighbor
-                     (let* ((levels (funcall field-reader neighbor))
-                            (value (aref levels offset)))
-                       (when (plusp value)
-                         (if (or (< value level)
-                                 (and skylight-p
-                                      (eq direction +voxel-negative-y+)
-                                      (= value level)))
-                             (let ((coordinate
-                                     (chunk-domain-world-coordinate
-                                      (light-region-entry-domain neighbor)
-                                      destination)))
-                               (setf (aref levels offset) 0
-                                     (gethash coordinate removed) t)
-                               (enqueue-light-removal
-                                queue neighbor
-                                (copy-local-coordinate destination) value))
-                             (push (retain-light-region-site
-                                    neighbor destination)
-                                   sources)))))))))
-    (values sources visited)))
+    (loop until (light-worklist-empty-p worklist)
+          do (multiple-value-bind (entry source-offset level present-p)
+                 (light-worklist-pop worklist)
+               (declare (ignore present-p))
+               (let* ((domain (light-region-entry-domain entry))
+                      (local
+                        (chunk-domain-local-coordinate domain source-offset)))
+                 (declare (dynamic-extent local))
+                 (incf visited)
+                 (do-chunk-window-neighbors
+                     (offset destination crossing direction
+                      materialization availability
+                      region domain local *voxel-face-directions*)
+                   (let ((neighbor
+                           (ecase availability
+                             (:local entry)
+                             (:available materialization)
+                             (:unavailable nil))))
+                     (when neighbor
+                       (let* ((levels (funcall field-reader neighbor))
+                              (value (aref levels offset)))
+                         (when (plusp value)
+                           (if (or (< value level)
+                                   (and skylight-p
+                                        (eq direction +voxel-negative-y+)
+                                        (= value level)))
+                               (let ((coordinate
+                                       (chunk-domain-world-coordinate
+                                        (light-region-entry-domain neighbor)
+                                        destination)))
+                                 (setf (aref levels offset) 0
+                                       (gethash coordinate removed) t)
+                                 (enqueue-light-removal
+                                  queue neighbor offset value))
+                               (light-worklist-push
+                                sources neighbor offset value))))))))))
+    visited))
 
 (defun reseed-cell-open-boundaries (region coordinate enqueue)
   "Re-admit boundary sky at one cell which may sit on an open face."
@@ -638,7 +716,8 @@ removal steps performed."
                            :open-sky)
                        (seed-open-sky-at-offset
                         entry offset (eq direction +voxel-positive-y+)))
-              (funcall enqueue (retain-light-region-site entry local)))))))))
+              (funcall enqueue entry offset
+                       (aref (light-region-entry-sky entry) offset)))))))))
 
 (defclass luvcraft-lighting-state ()
   ((world :initarg :world :reader lighting-state-world)
@@ -717,10 +796,11 @@ first reconcile lights a caller-built world without a separate protocol."
             (levels (light-region-entry-block entry))
             (domain (light-region-entry-domain entry)))
         (do-chunk-domain-sites (offset local domain)
+          (values local)
           (let ((level (aref emission (aref indices offset))))
             (when (> level (aref levels offset))
               (setf (aref levels offset) level)
-              (funcall seed-block (retain-light-region-site entry local))))))
+              (funcall seed-block entry offset level)))))
       ;; Resident neighbors: their facing boundary cells re-propagate into
       ;; the newcomer.
       (dolist (direction *voxel-face-directions*)
@@ -738,10 +818,12 @@ first reconcile lights a caller-built world without a separate protocol."
             (map-entry-face-sites
              neighbor-entry (opposite-voxel-direction direction)
              (lambda (offset local)
-               (declare (ignore offset))
-               (let ((site (retain-light-region-site neighbor-entry local)))
-                 (funcall seed-sky site)
-                 (funcall seed-block site))))))))))
+               (declare (ignore local))
+               (funcall seed-sky neighbor-entry offset
+                        (aref (light-region-entry-sky neighbor-entry) offset))
+               (funcall seed-block neighbor-entry offset
+                        (aref (light-region-entry-block neighbor-entry)
+                              offset))))))))))
 
 (defun reconcile-lighting (state)
   "Settle STATE's queues over a candidate and publish once.
@@ -760,10 +842,13 @@ producer batches is justified by measurement rather than guesswork."
          (block-removals
            (make-light-removal-queue
             :block-light #'light-region-entry-block))
-         (sky-seeds nil) (block-seeds nil)
+         (sky-seeds (make-light-worklist :scheduling :level))
+         (block-seeds (make-light-worklist :scheduling :level))
          (visited 0))
-    (flet ((seed-sky (cell) (push cell sky-seeds))
-           (seed-block (cell) (push cell block-seeds)))
+    (flet ((seed-sky (entry offset level)
+             (light-worklist-push sky-seeds entry offset level))
+           (seed-block (entry offset level)
+             (light-worklist-push block-seeds entry offset level)))
       ;; Dirty cells lose both their values; removal rediscovers what they
       ;; fed, and surviving neighbors return as addition sources.
       (maphash
@@ -774,18 +859,15 @@ producer batches is justified by measurement rather than guesswork."
            (when entry
              (let ((old-sky (aref (light-region-entry-sky entry) offset))
                    (old-block
-                     (aref (light-region-entry-block entry) offset))
-                   (local
-                     (chunk-domain-local-coordinate
-                      (light-region-entry-domain entry) offset)))
+                     (aref (light-region-entry-block entry) offset)))
                (setf (aref (light-region-entry-sky entry) offset) 0
                      (aref (light-region-entry-block entry) offset) 0
                      (gethash cell
                               (light-removal-queue-removed sky-removals)) t
                      (gethash cell
                               (light-removal-queue-removed block-removals)) t)
-               (enqueue-light-removal sky-removals entry local old-sky)
-               (enqueue-light-removal block-removals entry local old-block)))))
+               (enqueue-light-removal sky-removals entry offset old-sky)
+               (enqueue-light-removal block-removals entry offset old-block)))))
        (lighting-state-dirty-cells state))
       ;; A departed neighbor may have been feeding the retained faces.
       (maphash
@@ -813,32 +895,27 @@ producer batches is justified by measurement rather than guesswork."
                     (when (or (plusp old-sky) (plusp old-block))
                       (let ((coordinate
                               (chunk-domain-world-coordinate
-                               (light-region-entry-domain entry) local))
-                            (retained-local (copy-local-coordinate local)))
+                               (light-region-entry-domain entry) local)))
                         (when (plusp old-sky)
                           (setf (aref (light-region-entry-sky entry) offset) 0
                                 (gethash coordinate
                                          (light-removal-queue-removed
                                           sky-removals)) t)
                           (enqueue-light-removal
-                           sky-removals entry retained-local old-sky))
+                           sky-removals entry offset old-sky))
                         (when (plusp old-block)
                           (setf (aref (light-region-entry-block entry) offset) 0
                                 (gethash coordinate
                                          (light-removal-queue-removed
                                           block-removals)) t)
                           (enqueue-light-removal
-                           block-removals entry retained-local old-block)))))))))))
+                           block-removals entry offset old-block)))))))))))
        (lighting-state-departures state))
       ;; Removal to exhaustion, collecting surviving sources.
-      (multiple-value-bind (sources count)
-          (unlight-light-region region sky-removals)
-        (setf sky-seeds (nconc sources sky-seeds))
-        (incf visited count))
-      (multiple-value-bind (sources count)
-          (unlight-light-region region block-removals)
-        (setf block-seeds (nconc sources block-seeds))
-        (incf visited count))
+      (incf visited
+            (unlight-light-region region sky-removals sky-seeds))
+      (incf visited
+            (unlight-light-region region block-removals block-seeds))
       ;; Every cleared cell whose block emits re-seeds its own emission:
       ;; edited cells pick up a newly placed emitter, and removal waves
       ;; which swept over an untouched emitter must not extinguish it.
@@ -855,11 +932,7 @@ producer batches is justified by measurement rather than guesswork."
                         (aref (light-region-entry-block entry) offset))
                  (setf (aref (light-region-entry-block entry) offset)
                        level)
-                 (seed-block
-                  (%make-light-region-site
-                   entry
-                   (chunk-domain-local-coordinate
-                    (light-region-entry-domain entry) offset))))))))
+                 (seed-block entry offset level))))))
        (light-removal-queue-removed block-removals))
       ;; Cells cleared by sky removal may sit on an open boundary whose
       ;; direct light must be re-admitted.

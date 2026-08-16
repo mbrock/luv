@@ -401,6 +401,28 @@
       (ok (= block 0))
       (ok (eq state :provisional)))))
 
+(deftest packed-light-scheduling-preserves-the-fixed-point
+  (let* ((world (make-little-block-world :chunk-radius 1 :seed 121))
+         (lifo (luvcraft::capture-light-region world))
+         (level (luvcraft::capture-light-region world)))
+    (multiple-value-bind (lifo-result lifo-visits)
+        (luvcraft::solve-light-region lifo :scheduling :lifo)
+      (declare (ignore lifo-result))
+      (multiple-value-bind (level-result level-visits)
+          (luvcraft::solve-light-region level :scheduling :level)
+        (declare (ignore level-result))
+        (ok (< level-visits lifo-visits))
+        (maphash
+         (lambda (key lifo-entry)
+           (let ((level-entry
+                   (gethash key (luvcraft::light-region-entries level))))
+             (ok level-entry)
+             (ok (equalp (luvcraft::light-region-entry-sky lifo-entry)
+                         (luvcraft::light-region-entry-sky level-entry)))
+             (ok (equalp (luvcraft::light-region-entry-block lifo-entry)
+                         (luvcraft::light-region-entry-block level-entry)))))
+         (luvcraft::light-region-entries lifo))))))
+
 (deftest light-hot-traversal-locates-only-at-domain-crossings
   (let ((world (make-block-world :chunk-width 3
                                  :chunk-height 3
@@ -415,12 +437,14 @@
                  (fill levels 0)
                  (let* ((local (make-local-coordinate x y z))
                         (offset (chunk-domain-offset domain local))
+                        (queue (luvcraft::make-light-worklist))
                         (*light-region-window-lookups* 0))
                    (setf (aref levels offset) 1)
+                   (luvcraft::light-worklist-push queue entry offset 1)
                    (values
                     (luvcraft::propagate-light-region
                      region #'luvcraft::light-region-entry-block
-                     (list (luvcraft::%make-light-region-site entry local)) nil)
+                     queue nil)
                     *light-region-window-lookups*))))
         (multiple-value-bind (visited lookups) (visit 1 1 1)
           (ok (= visited 1))
@@ -439,15 +463,18 @@
            (entry (gethash key (luvcraft::light-region-entries region))))
       (labels ((visit (x y z)
                  (let* ((local (make-local-coordinate x y z))
+                        (offset
+                          (chunk-domain-offset
+                           (luvcraft::light-region-entry-domain entry) local))
                         (queue
                           (luvcraft::make-light-removal-queue
                            :block-light #'luvcraft::light-region-entry-block))
+                        (sources (luvcraft::make-light-worklist))
                         (*light-region-window-lookups* 0))
-                   (luvcraft::enqueue-light-removal queue entry local 1)
-                   (multiple-value-bind (sources visited)
-                       (luvcraft::unlight-light-region region queue)
-                     (declare (ignore sources))
-                     (values visited *light-region-window-lookups*)))))
+                   (luvcraft::enqueue-light-removal queue entry offset 1)
+                   (values
+                    (luvcraft::unlight-light-region region queue sources)
+                    *light-region-window-lookups*))))
         (multiple-value-bind (visited lookups) (visit 1 1 1)
           (ok (= visited 1))
           (ok (zerop lookups)))

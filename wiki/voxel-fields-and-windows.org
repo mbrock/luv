@@ -798,7 +798,7 @@ luvcraft, and wiki suites.  Two standalone smoke builds produced the identical
 SHA-256
 =0c85d4550638418cb88d507c6541a49147aeeea5697175d13904942b65a689ec=.
 
-* NEXT Pack the lighting worklist, then test level scheduling
+* DONE Pack the lighting worklist, then test level scheduling
 :PROPERTIES:
 :ID: QS1ERH
 :END:
@@ -809,23 +809,70 @@ fixed-point algebra discussed in #BA9MCA.  Represent a lighting site densely as
 a region entry plus domain offset, while iteration reconstructs only a
 dynamic-extent local value.
 
-Evidence to gather:
+Evidence gathered:
 
-- first preserve the current LIFO order in a reusable array-backed worklist so
-  representation cost is measured independently of scheduling;
-- account for bytes per pushed and popped site and confirm that frontier
-  growth, reuse, and emptying do not retain obsolete entries;
-- then compare the same fixture with sixteen level buckets, consuming higher
-  propagation levels first, to learn whether scheduling lowers the current
-  7.32 visits per resident cell; and
-- exercise from-scratch sky and block propagation plus incremental removal and
-  reseeding, including cross-chunk and unavailable boundaries.
+- =light-worklist= stores entry, domain offset, and level in parallel reusable
+  vectors.  Pop clears the entry lane before reducing the logical length; an
+  exact test checks LIFO order, brighter-first order with LIFO ties, reuse of
+  the same backing vector, and absence of retained entries after emptying.
+- Addition, removal, open-boundary reseeding, arrivals, and emitter reseeding
+  all exchange packed sites.  A local coordinate is reconstructed with dynamic
+  extent only while visiting one popped site.
+- The unchanged-order variant isolates representation from scheduling, while
+  the sixteen-bucket variant consumes the highest available level first.
+
+The fixed seed-121 81-chunk solve produced these three-run ranges on SBCL
+2.6.6:
+
+| Frontier | Seconds | Consed | Visits |
+|-
+| retained structs and conses | about 1.23 | 264.1--264.2 MB | 2,430,167 |
+| packed LIFO | 1.245--1.265 | 31.8 MB | 2,430,167 |
+| packed level buckets | 0.180--0.181 | 13.3 MB | 340,050 |
+
+Packing therefore removed about 232 MB without improving latency: the former
+LIFO order, not allocation alone, caused the repeated fixed-point work.  Level
+scheduling reduced the solve to about 1.03 visits per resident cell and is now
+the default for both reference and incremental lighting.  On the same
+81-chunk world, initial incremental settlement took 0.240 seconds and 487,321
+visits; placing one crystal then reconciled in 0.001 seconds and 1,213 visits,
+changing five chunks.
 
 Done when: lighting frontiers allocate no coordinate structure or cons per
 item, the unchanged-order variant isolates that allocation win, the scheduling
 experiment records both visits and elapsed time, and tests establish identical
 published light fields.  A reusable solver protocol still waits for a second
 real client as in #BA9MCA.
+
+Done: direct LIFO-versus-level coverage compares every sky and block array;
+the incremental suite covers edits, removal, arrivals, departures, unknown and
+open boundaries, and randomized agreement with the reference solver.
+The complete =make test= path passes, and the standalone smoke render remains
+byte-identical at SHA-256
+=0c85d4550638418cb88d507c6541a49147aeeea5697175d13904942b65a689ec=.
+
+* NEXT Pay checked adjacency cost once per visited site
+:PROPERTIES:
+:ID: FGT96H
+:END:
+
+Intent: preserve checked public domain stepping while avoiding the same bounds
+and coordinate type validation for each of a trusted worklist site's six
+neighbors.  The packed frontier already proves its entry and offset; adjacency
+should validate that site once, then keep primitive steps inside the checked
+scope.
+
+Evidence: a 195-sample SB-SPROF run of the new 0.18-second solve still placed
+94% of total samples under =propagate-light-region=.  The flat report gave
+=chunk-domain-offset= 19% cumulative samples and placed its component bounds,
+=floor=, and SBCL class/type checks among the largest self-sample entries.
+Source inspection agrees: =with-chunk-domain-step= currently calls the checked
+offset operation once for every direction.
+
+Done when: a hot neighborhood visit validates its source once without weakening
+=step-chunk-domain-site= or arbitrary callers, the crossing-only window
+invariant and light fields remain exact, and the same profile records whether
+the removed checks produce a material latency change.
 
 * DONE Attach existing voxel field definitions
 :PROPERTIES:
