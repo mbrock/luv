@@ -18,6 +18,14 @@
 (defgeneric declaration-source-form (declaration)
   (:documentation "Return the source form which established DECLARATION."))
 
+(defgeneric value-declaration-for (name)
+  (:documentation
+   "Return the represented-value declaration published by global NAME, or NIL."))
+
+(defmethod value-declaration-for (name)
+  (declare (ignore name))
+  nil)
+
 (define-condition declaration-compatibility-error (error)
   ((actual
     :initarg :actual
@@ -150,3 +158,32 @@ conditions and representation-derived tensor defaults."
         (list :unit unit :tensor-order tensor-order)
         (and affine-p-supplied-p (list :affine-p affine-p))
         (and character-supplied-p (list :character character)))))))
+
+(defmacro define-quantity-constant
+    (name value &key type quantity documentation)
+  "Define an ordinary constant which publishes its represented quantity.
+
+The runtime value remains the unwrapped result of VALUE.  TYPE states its
+Common Lisp representation independently of QUANTITY's semantic declaration;
+VALUE-DECLARATION-FOR retrieves the latter at definition boundaries."
+  (unless (and (symbolp name) type quantity)
+    (error "DEFINE-QUANTITY-CONSTANT needs a name, :TYPE, and :QUANTITY: ~S"
+           name))
+  (let ((source-form
+          `(define-quantity-constant ,name ,value
+             :type ,type :quantity ,quantity
+             ,@(when documentation
+                 `(:documentation ,documentation))))
+        (query-name (gensym "NAME")))
+    `(progn
+       (declaim (type ,type ,name))
+       (defconstant ,name ,value ,@(when documentation (list documentation)))
+       (defmethod value-declaration-for ((,query-name (eql ',name)))
+         (declare (ignore ,query-name))
+         (load-time-value
+          (make-represented-value-declaration
+           :representation-type ',type
+           :quantity-specification
+           (make-declared-quantity-specification ',quantity)
+           :source-form ',source-form)))
+       ',name)))

@@ -735,20 +735,25 @@ Audit so far:
   concrete: one =level= slot carries either a raw sky level or a raw block-light
   level according to the queue which owns it, so the quantity belongs to a
   field/work-item schema rather than that representation slot in isolation.
-  Quantity-bearing constants and ordinary function parameters similarly remain
-  an explicit frontend question rather than being forced into record
-  declarations.
+  Ordinary function parameters remain an explicit frontend question rather
+  than being forced into record declarations.
 - Session state now distinguishes the monotonic frame-clock point from the
   accumulated physics duration, and production results declare their elapsed
   duration.  Lighting state now likewise declares its most recent
   reconciliation duration, while its counters remain counts.  These
   calculations remain ordinary direct Lisp: record metadata should not be used
-  as a pretext for wrapping a short subtraction before the constant/parameter
-  declaration vocabulary exists.
+  as a pretext for wrapping a short subtraction when no checked arithmetic
+  boundary needs it.
+- Stable quantity-bearing constants now use =define-quantity-constant=.  The
+  fixed physics step, collision clearance, shadow extents and depth biases, and
+  shadow filter radii remain ordinary unwrapped numbers while publishing the
+  same represented-value declarations as storage and arithmetic parameters.
+  Structural counts such as shadow-map resolution, mesh stride, vertex count,
+  and format version remain ordinary constants.
 
 Next: give dense fields and packed products declarations with layouts, and
-decide how constants and ordinary function parameters publish boundary
-meaning without turning direct Lisp into ceremony.
+decide how ordinary function parameters publish boundary meaning without
+turning direct Lisp into ceremony.
 
 * A possible Lisp vocabulary
 :PROPERTIES:

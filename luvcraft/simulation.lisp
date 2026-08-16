@@ -89,8 +89,14 @@ FRAME-UNIFORM-DATA from the session's sky clock and profile."
 ;;; body/contact domains and SIMD kernels must preserve, not their final
 ;;; storage layout.
 
-(defconstant +player-physics-step+ (/ 1d0 120d0))
-(defconstant +player-collision-epsilon+ 1d-7)
+(luv.arithmetic:define-quantity-constant
+    +player-physics-step+ (/ 1d0 120d0)
+  :type double-float
+  :quantity (:quantity :frame-duration :unit :second))
+(luv.arithmetic:define-quantity-constant
+    +player-collision-epsilon+ 1d-7
+  :type double-float
+  :quantity (:quantity :world-distance :unit :cell))
 
 (luv.arithmetic.lisp:define-lisp-arithmetic-function
     %predict-world-position

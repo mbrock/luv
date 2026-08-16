@@ -18,12 +18,30 @@
 
 (defconstant +block-world-crosshair-vertex-count+ 24)
 (defconstant +luvcraft-shadow-map-size+ 2048)
-(defconstant +luvcraft-shadow-half-extent+ 64.0)
-(defconstant +luvcraft-shadow-depth-radius+ 96.0)
-(defconstant +luvcraft-shadow-base-bias+ 0.00045)
-(defconstant +luvcraft-shadow-slope-bias+ 0.0015)
-(defconstant +luvcraft-shadow-minimum-filter-radius+ 2.0)
-(defconstant +luvcraft-shadow-maximum-filter-radius+ 6.0)
+(luv.arithmetic:define-quantity-constant
+    +luvcraft-shadow-half-extent+ 64.0
+  :type single-float
+  :quantity (:quantity :world-distance :unit :cell))
+(luv.arithmetic:define-quantity-constant
+    +luvcraft-shadow-depth-radius+ 96.0
+  :type single-float
+  :quantity (:quantity :world-distance :unit :cell))
+(luv.arithmetic:define-quantity-constant
+    +luvcraft-shadow-base-bias+ 0.00045
+  :type single-float
+  :quantity (:quantity :shadow-depth :unit :one))
+(luv.arithmetic:define-quantity-constant
+    +luvcraft-shadow-slope-bias+ 0.0015
+  :type single-float
+  :quantity (:quantity :shadow-depth :unit :one))
+(luv.arithmetic:define-quantity-constant
+    +luvcraft-shadow-minimum-filter-radius+ 2.0
+  :type single-float
+  :quantity (:quantity :shadow-filter-radius :unit :one))
+(luv.arithmetic:define-quantity-constant
+    +luvcraft-shadow-maximum-filter-radius+ 6.0
+  :type single-float
+  :quantity (:quantity :shadow-filter-radius :unit :one))
 
 (defun make-block-world-crosshair-vertices (width height)
   "Make an outlined pixel-sized crosshair in Vulkan clip coordinates."

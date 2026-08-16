@@ -106,6 +106,30 @@
                  (luv.arithmetic:declaration-quantity-specification
                   declaration))))))))
 
+(deftest semantic-owner-audit-exposes-quantity-bearing-constants
+  (dolist (claim
+           '((luv::+player-physics-step+ :frame-duration double-float)
+             (luv::+player-collision-epsilon+ :world-distance double-float)
+             (luv::+luvcraft-shadow-half-extent+ :world-distance single-float)
+             (luv::+luvcraft-shadow-depth-radius+ :world-distance single-float)
+             (luv::+luvcraft-shadow-base-bias+ :shadow-depth single-float)
+             (luv::+luvcraft-shadow-slope-bias+ :shadow-depth single-float)
+             (luv::+luvcraft-shadow-minimum-filter-radius+
+              :shadow-filter-radius single-float)
+             (luv::+luvcraft-shadow-maximum-filter-radius+
+              :shadow-filter-radius single-float)))
+    (destructuring-bind (name quantity representation) claim
+      (let ((declaration
+              (luv.arithmetic:value-declaration-for name)))
+        (ok declaration)
+        (ok (eq representation
+                (luv.arithmetic:declaration-representation-type
+                 declaration)))
+        (ok (eq quantity
+                (luv.arithmetic:quantity-specification-name
+                 (luv.arithmetic:declaration-quantity-specification
+                  declaration))))))))
+
 (deftest cpu-trace-zones-are-nested-reusable-and-bounded
   (let ((trace (make-cpu-trace :label "test")))
     (with-cpu-trace (trace)

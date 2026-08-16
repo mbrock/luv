@@ -7,6 +7,26 @@
 (math:define-quantity :position :kind :length
   :components (:position-x :position-y))
 
+(math:define-quantity-constant +declared-test-distance+ 3.5d0
+  :type double-float
+  :quantity (:quantity :distance :unit :metre))
+
+(deftest quantity-constants-publish-meaning-without-wrapping-values
+  (let ((declaration
+          (math:value-declaration-for '+declared-test-distance+)))
+    (ok (typep +declared-test-distance+ 'double-float))
+    (ok (= +declared-test-distance+ 3.5d0))
+    (ok (eq 'double-float
+            (math:declaration-representation-type declaration)))
+    (ok (eq :distance
+            (math:quantity-specification-name
+             (math:declaration-quantity-specification declaration))))
+    (ok (math:unit-expression=
+         :metre
+         (math:quantity-specification-unit
+          (math:declaration-quantity-specification declaration))))
+    (ok (null (math:value-declaration-for '+not-a-declared-value+)))))
+
 (deftest dimensions-form-a-canonical-symbolic-product
   (let* ((length (math:make-dimension :length))
          (duration (math:make-dimension :duration))

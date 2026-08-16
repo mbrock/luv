@@ -100,6 +100,8 @@
            #:declaration-quantity-layout
            #:declaration-source-form
            #:declaration-quantity-checked-p
+           #:value-declaration-for
+           #:define-quantity-constant
            #:quantity-component-names
            #:project-quantity-specification
            #:quantity-operation-error
