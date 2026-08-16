@@ -10,13 +10,23 @@
 
 (defvar *libghostty-vt-library* nil)
 
+(defparameter *libghostty-vt-default-path*
+  (uiop:getenv "LUV_GHOSTTY_LIBRARY")
+  "Pinned libghostty-vt path captured when this system was loaded.
+
+A saved standalone image retains this build-environment fallback so it can be
+launched directly.  An explicit LOAD-LIBGHOSTTY-VT argument or the current
+process environment still takes precedence.")
+
 (defun load-libghostty-vt (&optional path)
   "Load libghostty-vt from PATH, or search for its platform soname.
 
 PATH is useful for development builds which have not been installed. When it
 is NIL, LUV_GHOSTTY_LIBRARY is consulted before the platform soname search."
   (or *libghostty-vt-library*
-      (let ((override (or path (uiop:getenv "LUV_GHOSTTY_LIBRARY"))))
+      (let ((override (or path
+                          (uiop:getenv "LUV_GHOSTTY_LIBRARY")
+                          *libghostty-vt-default-path*)))
         (setf *libghostty-vt-library*
               (if override
                   (cffi:load-foreign-library override)

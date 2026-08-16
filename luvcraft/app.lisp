@@ -109,6 +109,8 @@
                            :reader luvcraft-session-world-text-glyph-cache)
    (overlays :initform nil :accessor luvcraft-session-overlays)
    (modal-focus :initform nil :accessor luvcraft-session-modal-focus)
+   (focus-toggle-tab-down-p
+    :initform nil :accessor luvcraft-session-focus-toggle-tab-down-p)
    (frame-states :initform (make-hash-table :test #'eql)
                  :reader luvcraft-session-frame-states)
    (resources :initarg :resources :initform nil
@@ -137,6 +139,14 @@
 
 (defmethod encode-luvcraft-overlay (overlay session pass surface-texture)
   (declare (ignore overlay session pass surface-texture))
+  nil)
+
+(defgeneric refresh-luvcraft-overlay (overlay session)
+  (:documentation
+   "Publish any complete pending render state for OVERLAY at a frame boundary."))
+
+(defmethod refresh-luvcraft-overlay (overlay session)
+  (declare (ignore overlay session))
   nil)
 
 (defgeneric release-luvcraft-overlay (overlay)
@@ -178,6 +188,14 @@
 
 (defmethod luvcraft-focus-score (focus session)
   (declare (ignore focus session))
+  nil)
+
+(defgeneric activate-luvcraft-target (block session hit)
+  (:documentation
+   "Create and return a focusable interaction for targeted BLOCK, or NIL."))
+
+(defmethod activate-luvcraft-target (block session hit)
+  (declare (ignore block session hit))
   nil)
 
 (defun clear-luvcraft-player-input (session)
@@ -226,16 +244,21 @@ mounting a vehicle, and other interactions described by #8JCMA5."
       t)))
 
 (defun luvcraft-session-focus-candidate (session)
-  "Return SESSION's best currently targeted focusable overlay, if any."
-  (loop with best = nil
-        with best-score = nil
-        for overlay in (luvcraft-session-overlays session)
-        for score = (luvcraft-focus-score overlay session)
-        when (and score
-                  (or (null best-score) (< score best-score)))
-          do (setf best overlay
-                   best-score score)
-        finally (return best)))
+  "Return or activate SESSION's best currently targeted focusable object."
+  (or (loop with best = nil
+            with best-score = nil
+            for overlay in (luvcraft-session-overlays session)
+            for score = (luvcraft-focus-score overlay session)
+            when (and score
+                      (or (null best-score) (< score best-score)))
+              do (setf best overlay
+                       best-score score)
+            finally (return best))
+      (multiple-value-bind (hit status) (luvcraft-session-target session)
+        (declare (ignore status))
+        (when hit
+          (activate-luvcraft-target
+           (block-ray-hit-block hit) session hit)))))
 
 (defun toggle-luvcraft-session-focus (session)
   "Leave modal focus, or enter the best overlay currently targeted by SESSION."
@@ -323,7 +346,7 @@ mounting a vehicle, and other interactions described by #8JCMA5."
     (when (slot-boundp session 'canvas)
       (setf (canvas-title (luvcraft-session-canvas session))
             (format nil
-                    "~A — [~A] ~(~A~)  ·  1–~D select  ·  shift sprint  ·  tab focus"
+                    "~A — [~A] ~(~A~)  ·  1–~D select  ·  shift sprint  ·  tab focus  ·  shift-tab leave"
                     (luvcraft-session-title-base session)
                     (if number (1+ number) "?")
                     (block-kind-name block)

@@ -370,6 +370,8 @@ the frame uniform cannot silently diverge between shader and host."
       (sample luvcraft-frame-sample-shader-refresh-seconds
               :luvcraft/shader-refresh)
     (refresh-luvcraft-shaders session))
+  (dolist (overlay (luvcraft-session-overlays session))
+    (refresh-luvcraft-overlay overlay session))
   (let* ((products
            (with-luvcraft-frame-timing
                (sample luvcraft-frame-sample-mesh-publication-seconds
@@ -603,8 +605,11 @@ the frame uniform cannot silently diverge between shader and host."
 
 (defmethod handle-canvas-event
     ((session luvcraft-session) canvas (event canvas-key-press-event))
-  (when (eq :tab (canvas-key-event-key-name event))
+  (when (and (eq :tab (canvas-key-event-key-name event))
+             (or (null (luvcraft-session-modal-focus session))
+                 (member :shift (canvas-key-event-modifiers event))))
     (unless (canvas-key-event-repeat-p event)
+      (setf (luvcraft-session-focus-toggle-tab-down-p session) t)
       (toggle-luvcraft-session-focus session))
     (return-from handle-canvas-event nil))
   (when (dispatch-luvcraft-focus-event session canvas event)
@@ -629,7 +634,9 @@ the frame uniform cannot silently diverge between shader and host."
 
 (defmethod handle-canvas-event
     ((session luvcraft-session) canvas (event canvas-key-release-event))
-  (when (eq :tab (canvas-key-event-key-name event))
+  (when (and (eq :tab (canvas-key-event-key-name event))
+             (luvcraft-session-focus-toggle-tab-down-p session))
+    (setf (luvcraft-session-focus-toggle-tab-down-p session) nil)
     (return-from handle-canvas-event nil))
   (when (dispatch-luvcraft-focus-event session canvas event)
     (return-from handle-canvas-event nil))

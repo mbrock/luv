@@ -7,24 +7,25 @@
 (in-package #:luvcraft)
 
 (defclass world-text-run ()
-  ((string :initarg :string :reader world-text-run-string)
+  ((string :initarg :string :accessor world-text-run-string)
    (font-pathname :initarg :font-pathname
                   :reader world-text-run-font-pathname)
    (shaped-text :initarg :shaped-text :reader world-text-run-shaped-text)
-   (glyphs :initarg :glyphs :reader world-text-run-glyphs)
-   (atlas :initarg :atlas :reader world-text-run-atlas)
+   (glyphs :initarg :glyphs :accessor world-text-run-glyphs)
+   (atlas :initarg :atlas :accessor world-text-run-atlas)
    (center :initarg :center :reader world-text-run-center)
    (world-units-per-em :initarg :world-units-per-em
                        :reader world-text-run-world-units-per-em)
    (vertex-data :initarg :vertex-data :reader world-text-run-vertex-data)
    (vertex-buffer :initarg :vertex-buffer
                   :reader world-text-run-vertex-buffer)
-   (instance-data :initarg :instance-data :reader world-text-run-instance-data)
+   (instance-data :initarg :instance-data
+                  :accessor world-text-run-instance-data)
    (instance-buffer :initarg :instance-buffer
-                    :reader world-text-run-instance-buffer)
+                    :accessor world-text-run-instance-buffer)
    (layout :initarg :layout :reader world-text-run-layout)
    (pipeline :initarg :pipeline :reader world-text-run-pipeline)
-   (resources :initarg :resources :reader world-text-run-resources)))
+   (resources :initarg :resources :accessor world-text-run-resources)))
 
 (defun world-text-point (center right up x y scale)
   (make-vec3
@@ -157,7 +158,7 @@ unified terminal surface in #7ZM22R."
                       device
                       (make-buffer-descriptor
                        :label "world Slug glyph instances"
-                       :size (* 4 (length instance-data))
+                       :size (max 4 (* 4 (length instance-data)))
                        :usage '(:vertex :copy-dst))))))
              (setf pipeline
                    (make-live-shader-pipeline
@@ -187,7 +188,8 @@ unified terminal surface in #7ZM22R."
                       :depth-write-enabled nil
                       :depth-compare :less)))
              (write-buffer vertex-buffer vertex-data)
-             (write-buffer instance-buffer instance-data)
+             (when (plusp (length instance-data))
+               (write-buffer instance-buffer instance-data))
              (let ((run
                      (make-instance
                       'world-text-run
@@ -262,6 +264,44 @@ font-and-glyph device resources reusable across runs.  See #QW7P96."
 
 (defun world-text-run-native-pipeline (run)
   (live-shader-pipeline-native-pipeline (world-text-run-pipeline run)))
+
+(defun replace-world-text-run-instances
+    (run device string glyphs atlas instance-data)
+  "Publish one complete replacement instance population into RUN.
+
+The caller owns the semantic candidate.  This function creates and fills its
+new GPU buffer before installing the new string, glyph, atlas, CPU-data, and
+buffer cohort.  Native destruction of the predecessor remains submission-aware
+through the backend's ordinary DESTROY contract."
+  (let ((buffer nil)
+        (completed-p nil))
+    (unwind-protect
+         (progn
+           (setf buffer
+                 (create
+                  device
+                  (make-buffer-descriptor
+                   :label "world Slug glyph instances"
+                   :size (max 4 (* 4 (length instance-data)))
+                   :usage '(:vertex :copy-dst))))
+           (when (plusp (length instance-data))
+             (write-buffer buffer instance-data))
+           (let ((old-buffer (world-text-run-instance-buffer run))
+                 (old-atlas (world-text-run-atlas run)))
+             (setf (world-text-run-string run) string
+                   (world-text-run-glyphs run) glyphs
+                   (world-text-run-atlas run) atlas
+                   (world-text-run-instance-data run) instance-data
+                   (world-text-run-instance-buffer run) buffer
+                   (world-text-run-resources run)
+                   (cons buffer
+                         (delete old-buffer
+                                 (world-text-run-resources run) :test #'eq))
+                   completed-p t)
+             (destroy old-buffer)
+             (values run (not (eq old-atlas atlas)))))
+      (unless completed-p
+        (when buffer (ignore-errors (destroy buffer)))))))
 
 (defun release-world-text-run (run)
   (release-live-shader-pipeline (world-text-run-pipeline run))

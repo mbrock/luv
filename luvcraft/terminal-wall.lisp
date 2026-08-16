@@ -102,13 +102,26 @@
                     :accessor terminal-surface-reconciliations)))
 
 (defclass terminal-display ()
-  ((session :initarg :session :reader terminal-display-session)
+  ((session :initarg :session :initform nil :reader terminal-display-session)
    (surface :initarg :surface :reader terminal-display-surface)
-   (terminal :initarg :terminal :reader terminal-display-terminal)
+   (terminal :initarg :terminal :initform nil :reader terminal-display-terminal)
    (device :initarg :device :initform nil :accessor terminal-display-device)
-   (presentation :initarg :presentation :reader terminal-display-presentation)
-   (glyph-cache :initarg :glyph-cache :reader terminal-display-glyph-cache)
-   (glyph-run :initarg :glyph-run :reader terminal-display-glyph-run)
+   (presentation :initarg :presentation :initform nil
+                 :accessor terminal-display-presentation)
+   (glyph-cache :initarg :glyph-cache :initform nil
+                :reader terminal-display-glyph-cache)
+   (glyphs-by-character :initform (make-hash-table :test #'eql)
+                        :reader terminal-display-glyphs-by-character)
+   (glyph-run :initarg :glyph-run :initform nil
+              :accessor terminal-display-glyph-run)
+   (font-pathname :initarg :font-pathname :initform nil
+                  :reader terminal-display-font-pathname)
+   (margin :initarg :margin :initform 0.12
+           :reader terminal-display-margin)
+   (font-scale :initarg :font-scale :initform 1.0
+               :reader terminal-display-font-scale)
+   (dirty-p :initform nil :accessor terminal-display-dirty-p)
+   (refresh-count :initform 0 :accessor terminal-display-refresh-count)
    (frame-bind-groups :initform (make-hash-table :test #'eq)
                       :reader terminal-display-frame-bind-groups)))
 
@@ -722,31 +735,35 @@ and height in world units.  FONT-SCALE is an explicit multiplier on contain."
               (/ (- surface-height grid-height) 2.0)
               grid-width grid-height))))
 
+(defun terminal-display-character-glyphs
+    (character glyphs-by-character glyph-cache font-pathname font-loader)
+  (multiple-value-bind (cached-glyphs present-p)
+      (gethash character glyphs-by-character)
+    (if present-p
+        cached-glyphs
+        (setf (gethash character glyphs-by-character)
+              (luv.slug:make-slug-glyph-placements
+               (luv.slug:cached-slug-shaped-text
+                glyph-cache font-pathname (string character))
+               font-loader glyph-cache font-pathname)))))
+
 (defun terminal-display-glyph-occurrences
-    (presentation glyph-cache font-pathname font-loader)
-  (let ((glyphs-by-character (make-hash-table :test #'eql))
-        (occurrences nil)
+    (presentation glyphs-by-character glyph-cache font-pathname font-loader)
+  (let ((occurrences nil)
         (domain (terminal-grid-presentation-domain presentation)))
-    (labels ((glyphs-for (character)
-               (multiple-value-bind (cached-glyphs present-p)
-                   (gethash character glyphs-by-character)
-                 (if present-p
-                     cached-glyphs
-                     (setf (gethash character glyphs-by-character)
-                           (luv.slug:make-slug-glyph-placements
-                            (luv.slug:cached-slug-shaped-text
-                             glyph-cache font-pathname (string character))
-                            font-loader glyph-cache font-pathname))))))
-      (dotimes (row (terminal-grid-domain-rows domain))
-        (dotimes (column (terminal-grid-domain-columns domain))
-          (let ((character
-                  (terminal-grid-character presentation column row)))
-            (unless (char= character #\Space)
-              (dolist (glyph (glyphs-for character))
-                (push (make-terminal-glyph-occurrence
-                       :glyph glyph :column column :row row)
-                      occurrences))))))
-      (nreverse occurrences))))
+    (dotimes (row (terminal-grid-domain-rows domain))
+      (dotimes (column (terminal-grid-domain-columns domain))
+        (let ((character
+                (terminal-grid-character presentation column row)))
+          (unless (char= character #\Space)
+            (dolist (glyph
+                      (terminal-display-character-glyphs
+                       character glyphs-by-character glyph-cache
+                       font-pathname font-loader))
+              (push (make-terminal-glyph-occurrence
+                     :glyph glyph :column column :row row)
+                    occurrences))))))
+    (nreverse occurrences)))
 
 (defun make-terminal-display-glyph-instances
     (occurrences atlas domain surface font-loader margin font-scale)
@@ -848,20 +865,45 @@ and height in world units.  FONT-SCALE is an explicit multiplier on contain."
                    (luv.slug:slug-glyph-placement-outline-max-y glyph) 0.0)))
         data))))
 
-(defun make-terminal-display-glyph-run
-    (session presentation surface glyph-cache font-pathname margin font-scale)
+(defun make-terminal-display-glyph-population
+    (presentation surface glyph-cache glyphs-by-character
+     font-pathname margin font-scale)
   (zpb-ttf:with-font-loader (font-loader font-pathname)
+    ;; Keep ordinary shell interaction on one stable atlas.  Unicode output
+    ;; grows this retained character set only when a genuinely new character
+    ;; first appears, rather than manufacturing an atlas for every screen.
+    (loop for code from 32 to 126
+          do (terminal-display-character-glyphs
+              (code-char code) glyphs-by-character glyph-cache
+              font-pathname font-loader))
     (let* ((occurrences
              (terminal-display-glyph-occurrences
-              presentation glyph-cache font-pathname font-loader))
+              presentation glyphs-by-character glyph-cache
+              font-pathname font-loader))
            (glyphs (mapcar #'terminal-glyph-occurrence-glyph occurrences))
-           (atlas (luv.slug:slug-glyph-atlas-for glyph-cache glyphs))
+           (atlas-characters
+             (sort (loop for character being the hash-keys of glyphs-by-character
+                         collect character)
+                   #'< :key #'char-code))
+           (atlas-glyphs
+             (loop for character in atlas-characters
+                   append (copy-list (gethash character glyphs-by-character))))
+           (atlas (luv.slug:slug-glyph-atlas-for glyph-cache atlas-glyphs))
            (instances
              (make-terminal-display-glyph-instances
               occurrences atlas
               (terminal-grid-presentation-domain presentation)
-              surface font-loader margin font-scale))
-           (lower-left (terminal-surface-lower-left-point surface))
+              surface font-loader margin font-scale)))
+      (values glyphs atlas instances))))
+
+(defun make-terminal-display-glyph-run
+    (session presentation surface glyph-cache glyphs-by-character
+     font-pathname margin font-scale)
+  (multiple-value-bind (glyphs atlas instances)
+      (make-terminal-display-glyph-population
+       presentation surface glyph-cache glyphs-by-character
+       font-pathname margin font-scale)
+    (let* ((lower-left (terminal-surface-lower-left-point surface))
            (frame (terminal-face-frame (terminal-surface-face surface)))
            (center
              (terminal-offset-point
@@ -875,6 +917,58 @@ and height in world units.  FONT-SCALE is an explicit multiplier on contain."
        (canvas-format (luvcraft-session-context session))
        "terminal display" font-pathname nil glyphs atlas center 1.0 instances
        :label "terminal surface Slug glyphs"))))
+
+(defun clear-terminal-display-frame-bind-groups (display)
+  (maphash (lambda (frame group)
+             (declare (ignore frame))
+             (destroy group))
+           (terminal-display-frame-bind-groups display))
+  (clrhash (terminal-display-frame-bind-groups display))
+  display)
+
+(defmethod refresh-luvcraft-overlay
+    ((display terminal-display) (session luvcraft-session))
+  (when (terminal-display-dirty-p display)
+    ;; Clearing before the snapshot preserves an output notification which
+    ;; races after this point; that later notification requests another frame
+    ;; publication instead of being lost.
+    (setf (terminal-display-dirty-p display) nil)
+    (let ((completed-p nil))
+      (unwind-protect
+           (let* ((device (terminal-display-device display))
+                  (text
+                    (if device
+                        (termdev:call-with-pty-device-terminal
+                         device #'ghostty:terminal-text)
+                        (ghostty:terminal-text
+                         (terminal-display-terminal display))))
+                  (old-presentation (terminal-display-presentation display))
+                  (presentation
+                    (make-terminal-grid-presentation
+                     (terminal-grid-presentation-domain old-presentation)
+                     text)))
+             (multiple-value-bind (glyphs atlas instances)
+                 (make-terminal-display-glyph-population
+                  presentation (terminal-display-surface display)
+                  (terminal-display-glyph-cache display)
+                  (terminal-display-glyphs-by-character display)
+                  (terminal-display-font-pathname display)
+                  (terminal-display-margin display)
+                  (terminal-display-font-scale display))
+               (multiple-value-bind (run atlas-changed-p)
+                   (replace-world-text-run-instances
+                    (terminal-display-glyph-run display)
+                    (luvcraft-session-device session)
+                    text glyphs atlas instances)
+                 (declare (ignore run))
+                 (when atlas-changed-p
+                   (clear-terminal-display-frame-bind-groups display))
+                 (setf (terminal-display-presentation display) presentation)
+                 (incf (terminal-display-refresh-count display))
+                 (setf completed-p t))))
+        (unless completed-p
+          (setf (terminal-display-dirty-p display) t)))))
+  display)
 
 (defun terminal-display-frame-bind-group (display frame)
   (or (gethash frame (terminal-display-frame-bind-groups display))
@@ -896,23 +990,20 @@ and height in world units.  FONT-SCALE is an explicit multiplier on contain."
          (terminal-display-surface display) session)
     (let ((frame (luvcraft-frame-state session surface-texture))
           (glyph-run (terminal-display-glyph-run display)))
-      (set-pipeline pass (world-text-run-native-pipeline glyph-run))
-      (set-vertex-buffer pass 0 (world-text-run-vertex-buffer glyph-run))
-      (set-vertex-buffer pass 1 (world-text-run-instance-buffer glyph-run))
-      (set-bind-group pass 0
-                      (terminal-display-frame-bind-group display frame))
-      (draw pass 6 (length (world-text-run-glyphs glyph-run)))))
+      (when (plusp (length (world-text-run-glyphs glyph-run)))
+        (set-pipeline pass (world-text-run-native-pipeline glyph-run))
+        (set-vertex-buffer pass 0 (world-text-run-vertex-buffer glyph-run))
+        (set-vertex-buffer pass 1 (world-text-run-instance-buffer glyph-run))
+        (set-bind-group pass 0
+                        (terminal-display-frame-bind-group display frame))
+        (draw pass 6 (length (world-text-run-glyphs glyph-run))))))
   display)
 
 (defmethod release-luvcraft-overlay ((display terminal-display))
   (when (terminal-display-device display)
     (termdev:close-pty-device (terminal-display-device display))
     (setf (terminal-display-device display) nil))
-  (maphash (lambda (frame group)
-             (declare (ignore frame))
-             (destroy group))
-           (terminal-display-frame-bind-groups display))
-  (clrhash (terminal-display-frame-bind-groups display))
+  (clear-terminal-display-frame-bind-groups display)
   (release-world-text-run (terminal-display-glyph-run display))
   (luv.slug:release-slug-glyph-cache
    (terminal-display-glyph-cache display))
@@ -947,14 +1038,76 @@ and height in world units.  FONT-SCALE is an explicit multiplier on contain."
                            (terminal-surface-coordinate surface column row))))
           (block-ray-hit-distance hit))))))
 
+(defun block-ray-hit-face (hit)
+  "Return the exposed block face through which HIT entered its block."
+  (let ((coordinate (block-ray-hit-coordinate hit))
+        (adjacent (block-ray-hit-adjacent-coordinate hit)))
+    (when adjacent
+      (find-if
+       (lambda (face)
+         (let ((neighbor (block-face-neighbor face)))
+           (and (= (+ (world-coordinate-x coordinate)
+                      (voxel-direction-dx neighbor))
+                   (world-coordinate-x adjacent))
+                (= (+ (world-coordinate-y coordinate)
+                      (voxel-direction-dy neighbor))
+                   (world-coordinate-y adjacent))
+                (= (+ (world-coordinate-z coordinate)
+                      (voxel-direction-dz neighbor))
+                   (world-coordinate-z adjacent)))))
+       *block-faces*))))
+
+(defmethod activate-luvcraft-target
+    ((block block-kind) (session luvcraft-session) hit)
+  (when (eq :terminal (block-kind-name block))
+    (let* ((coordinate (block-ray-hit-coordinate hit))
+           (face (block-ray-hit-face hit)))
+      (when face
+        (let ((display nil)
+              (completed-p nil))
+          (unwind-protect
+               (progn
+                 (setf display
+                       (open-terminal-display
+                        session
+                        (world-coordinate-x coordinate)
+                        (world-coordinate-y coordinate)
+                        (world-coordinate-z coordinate)
+                        (block-face-name face)
+                        :fixture ""))
+                 (attach-terminal-display-pty
+                  display
+                  :program "/bin/bash"
+                  :directory (uiop:getcwd)
+                  :environment
+                  (cons
+                   "BASH_SILENCE_DEPRECATION_WARNING=1"
+                   (delete-if
+                    (lambda (entry)
+                      (uiop:string-prefix-p
+                       "BASH_SILENCE_DEPRECATION_WARNING=" entry))
+                    (copy-list (sb-ext:posix-environ)))))
+                 (setf completed-p t)
+                 display)
+            (unless completed-p
+              (when display
+                (remove-luvcraft-overlay session display)))))))))
+
 (defun attach-terminal-display-pty (display &rest open-arguments)
   "Attach one owned PTY device to DISPLAY's existing Ghostty terminal."
   (check-type display terminal-display)
   (when (terminal-display-device display)
     (error "Terminal display ~S already has an input device." display))
-  (setf (terminal-display-device display)
-        (apply #'termdev:open-pty-device
-               (terminal-display-terminal display) open-arguments))
+  (let ((arguments (copy-list open-arguments)))
+    (remf arguments :on-output)
+    (setf (terminal-display-device display)
+          (apply #'termdev:open-pty-device
+                 (terminal-display-terminal display)
+                 :on-output
+                 (lambda (device bytes)
+                   (declare (ignore device bytes))
+                   (setf (terminal-display-dirty-p display) t))
+                 arguments)))
   display)
 
 (defun open-terminal-display
@@ -992,20 +1145,24 @@ remain the display body; this overlay contributes only one fitted Slug grid."
                                      :columns columns :rows rows))
                     (presentation
                       (make-terminal-grid-presentation
-                       domain (ghostty:terminal-text terminal))))
+                       domain (ghostty:terminal-text terminal)))
+                    (glyphs-by-character (make-hash-table :test #'eql)))
                (setf glyph-cache
                      (luv.slug:make-slug-glyph-cache
                       (luvcraft-session-device session))
                      glyph-run
                      (make-terminal-display-glyph-run
-                      session presentation surface glyph-cache font-pathname
-                      margin font-scale)
+                      session presentation surface glyph-cache
+                      glyphs-by-character font-pathname margin font-scale)
                      display
                      (make-instance
                       'terminal-display
                       :session session :surface surface :terminal terminal
                       :presentation presentation :glyph-cache glyph-cache
-                      :glyph-run glyph-run)))
+                      :glyph-run glyph-run :font-pathname font-pathname
+                      :margin margin :font-scale font-scale))
+               (setf (slot-value display 'glyphs-by-character)
+                     glyphs-by-character))
              (add-luvcraft-overlay session display)
              (setf completed-p t)
              display)

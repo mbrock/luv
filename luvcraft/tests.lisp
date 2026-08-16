@@ -62,18 +62,30 @@
     (handle-canvas-event session nil event)
     (ok (gethash :w (luvcraft::luvcraft-session-pressed-keys session)))))
 
-(deftest tab-toggles-the-best-targeted-modal-focus
+(deftest tab-enters-focus-reaches-it-and-shift-tab-leaves
   (let ((session (make-instance 'luvcraft-session))
         (far (make-instance 'recording-modal-focus :score 4.0))
         (near (make-instance 'recording-modal-focus :score 1.0))
-        (tab (make-instance 'canvas-key-press-event
-                            :timestamp 0 :key-name :tab)))
+        (tab-press (make-instance 'canvas-key-press-event
+                                  :timestamp 0 :key-name :tab))
+        (tab-release (make-instance 'canvas-key-release-event
+                                    :timestamp 0 :key-name :tab))
+        (shift-tab (make-instance 'canvas-key-press-event
+                                  :timestamp 0 :key-name :tab
+                                  :modifiers '(:shift))))
     (add-luvcraft-overlay session far)
     (add-luvcraft-overlay session near)
-    (handle-canvas-event session nil tab)
+    (handle-canvas-event session nil tab-press)
     (ok (eq near (luvcraft-session-modal-focus session)))
     (ok (equal '(:entered) (recording-focus-transitions near)))
-    (handle-canvas-event session nil tab)
+    ;; The release matching the gameplay focus key is swallowed.  Subsequent
+    ;; ordinary Tab events belong to the focus (notably Bash completion).
+    (handle-canvas-event session nil tab-release)
+    (handle-canvas-event session nil tab-press)
+    (handle-canvas-event session nil tab-release)
+    (ok (equal (list tab-release tab-press)
+               (recording-focus-events near)))
+    (handle-canvas-event session nil shift-tab)
     (ok (null (luvcraft-session-modal-focus session)))
     (ok (equal '(:left :entered) (recording-focus-transitions near)))
     (ok (null (recording-focus-transitions far)))))
@@ -89,7 +101,12 @@
          (session
            (make-instance 'luvcraft-session :world world :camera camera))
          (tab (make-instance 'canvas-key-press-event
-                             :timestamp 0 :key-name :tab)))
+                             :timestamp 0 :key-name :tab))
+         (tab-release (make-instance 'canvas-key-release-event
+                                     :timestamp 0 :key-name :tab))
+         (shift-tab (make-instance 'canvas-key-press-event
+                                   :timestamp 0 :key-name :tab
+                                   :modifiers '(:shift))))
     (ensure-world-chunk world 0 0 0)
     (place-terminal-block-rectangle world 2 3 4 :back 3 2)
     (let* ((surface (find-terminal-surface world 2 3 4 :back))
@@ -98,6 +115,7 @@
            (ordinary-focal (aref (camera-uniform-data camera 960 640) 17)))
       (add-luvcraft-overlay session display)
       (handle-canvas-event session nil tab)
+      (handle-canvas-event session nil tab-release)
       (ok (eq display (luvcraft-session-modal-focus session)))
       (luvcraft::advance-camera-focus camera t 0.1d0)
       (let ((focused (camera-field-of-view camera)))
@@ -106,7 +124,7 @@
                ordinary-focal))
         (ok (> focused
                luvcraft::+luvcraft-camera-focused-vertical-field-of-view+))
-        (handle-canvas-event session nil tab)
+        (handle-canvas-event session nil shift-tab)
         (ok (null (luvcraft-session-modal-focus session)))
         (luvcraft::advance-camera-focus camera nil 0.1d0)
         (ok (> (camera-field-of-view camera) focused))))))
@@ -150,6 +168,26 @@
                    device #'luv.ghostty:terminal-text))))
         (unfocus-luvcraft-session session)
         (luv.terminal:close-pty-device device)))))
+
+(deftest terminal-display-pty-output-marks-a-frame-publication-dirty
+  (luv.ghostty:with-terminal (terminal :columns 32 :rows 4)
+    (let ((display (make-instance 'terminal-display :terminal terminal)))
+      (attach-terminal-display-pty
+       display
+       :program "/bin/sh"
+       :arguments (list "-c" "printf 'fresh shell output\\r\\n'"))
+      (let ((device (terminal-display-device display)))
+        (unwind-protect
+             (progn
+               (ok (eq :exited
+                       (luv.terminal:wait-for-pty-device
+                        device :timeout 3.0)))
+               (ok (luvcraft::terminal-display-dirty-p display))
+               (ok (search
+                    "fresh shell output"
+                    (luv.terminal:call-with-pty-device-terminal
+                     device #'luv.ghostty:terminal-text))))
+          (luv.terminal:close-pty-device device))))))
 
 (deftest block-smash-particles-form-a-bounded-textured-burst
   (let ((system (make-instance 'block-particle-system))
@@ -616,6 +654,15 @@
       (ok (= 12 row)))
     (ok (signals (luvcraft::terminal-grid-offset domain 80 0) 'error))
     (ok (signals (luvcraft::terminal-grid-coordinate domain 1920) 'error))))
+
+(deftest empty-terminal-presentations-have-no-drawable-glyphs
+  (let* ((domain (make-instance 'luvcraft::terminal-grid-domain
+                                :columns 80 :rows 24))
+         (presentation
+           (luvcraft::make-terminal-grid-presentation domain "")))
+    (ok (every (lambda (character) (char= character #\Space))
+               (luvcraft::terminal-grid-presentation-characters
+                presentation)))))
 
 (deftest terminal-block-material-rectangles-become-one-display-surface
   (let ((world (make-block-world :chunk-width 16

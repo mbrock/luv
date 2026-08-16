@@ -68,9 +68,12 @@ movement key cannot remain stuck across the boundary.
 =Tab= is the temporary world interaction verb.  With no modal focus it chooses
 the best overlay under the centre view: terminal displays recognize a ray hit
 on any block in their authored rectangle, while McCLIM surfaces recognize the
-crosshair inside their projected quadrilateral.  With a modal focus, =Tab=
-leaves it.  Focus narrows the camera from 70 to 50 degrees with a short ease and
-hides the world crosshair; leaving reverses both cues.
+crosshair inside their projected quadrilateral.  A terminal-material ray hit
+without an existing display activates that authored face, starts its Bash PTY,
+and focuses the resulting display.  Once focused, ordinary =Tab= belongs to
+the terminal for shell completion; =Shift-Tab= leaves modal focus.  Focus
+narrows the camera from 70 to 50 degrees with a short ease and hides the world
+crosshair; leaving reverses both cues.
 
 This is the same player-facing transition whether the object is a McCLIM
 surface, a Ghostty terminal, an open book, or a mounted boat.  Those objects do
@@ -80,10 +83,11 @@ can separately govern rendering, simulation, camera attachment, or vehicle
 motion.  Removing a focused overlay or stopping the session leaves focus
 before releasing its resources.
 
-There is deliberately no universal Escape binding in this layer.  Escape is
-meaningful terminal input.  =Tab= is reserved as the provisional shared world
-interaction verb, and a future named gameplay action can replace its raw key
-binding while continuing to call [[lisp:toggle-luvcraft-session-focus]].
+There is deliberately no universal Escape binding in this layer.  Escape and
+Tab are both meaningful terminal input.  The provisional shared world
+interaction uses =Tab= only to enter and =Shift-Tab= to leave; a future named
+gameplay action can replace those raw bindings while continuing to call
+[[lisp:toggle-luvcraft-session-focus]].
 
 * Ghostty owns terminal semantics, not the surrounding application
 :PROPERTIES:
@@ -423,7 +427,7 @@ pipeline reuse across rows, font fallback, row/run aggregation, and measured
 edge quality.  Those are renderer iterations, not reasons to obscure the
 initial Ghostty-to-row boundary.
 
-* NEXT Bridge Ghostty render-state rows into the block wall
+* NEXT Bridge styled Ghostty render-state rows into the block wall
 :PROPERTIES:
 :ID: NTQ5KY
 :END:
@@ -441,6 +445,16 @@ depth-tested drawing, shaping, and device outline ownership.  The finite domain
 #RD8AEI, fixed presentation #AI83XS, and compact projections #BIXI1P give the
 crossing a concrete luv-shaped representation without making cells objects.
 
+The live Bash iteration establishes a deliberately coarser baseline without
+claiming this mark complete.  PTY output marks its display dirty; the frame
+owner borrows Ghostty under the PTY lock, formats one complete plain-text
+snapshot, builds a complete dense instance candidate, and atomically replaces
+the old GPU instance buffer.  Ordinary printable ASCII shares one stable Slug
+atlas, output bursts coalesce at the frame boundary, an empty screen emits no
+draw, and backend destruction carries replaced buffers past their last
+submission.  Styling, backgrounds, cursor state, true dirty rows, and resize
+still require the render-state crossing named by this mark.
+
 Done when: a fixed styled VT fixture produces visible Slug-rendered rows on the
 block wall, including cell backgrounds and cursor; Ghostty cells populate
 an exact domain-bound columnar materialization; a second unchanged render-state
@@ -450,7 +464,7 @@ rebuilds the small visible batch; resize replaces the domain coherently; and
 terminal, render-state, iterator, side-table, columnar, and GPU resources all
 have explicit release paths.
 
-* NEXT Attach a live PTY independently of the render boundary
+* DONE Attach a live PTY independently of the render boundary
 :PROPERTIES:
 :ID: 9OFAII
 :END:
@@ -488,8 +502,13 @@ layout-produced character and its unshifted counterpart, which is enough for
 ordinary Ctrl and shifted-key encoding without promoting SDL types into the
 application vocabulary.
 
-Done when: an ordinary shell can start, paint a prompt, receive text and
-special keys, answer a terminal query, resize, exit, and release its descriptor
-and child without blocking the world frame loop.  The remaining device-side
-work is richer composed text input; focus and event routing remain the wall
-gadget's side of the seam.
+Observed completion: aiming at an authored terminal wall and pressing =Tab=
+now creates its display, launches =/bin/bash= in the project's current
+directory, and focuses it.  A live Metal session sent =pwd= through
+=canvas-key-event= and the Ghostty encoder, displayed =/Users/mbrock/luv= on
+the wall, and published six successive output snapshots without stopping the
+frame loop.  Pressing Tab reached Bash completion; =Shift-Tab= is the separate
+world unfocus gesture.  The focused PTY and luvcraft suites exercise prompt
+output, text and special-key input, terminal replies, resize, exit, dirty
+notification, and release.  Rich composed text input remains later device-side
+work rather than a condition on this first playable Bash crossing.
