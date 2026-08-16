@@ -10,14 +10,15 @@
 ;;; A matrix is representation; this is the meaning of the operation it
 ;;; participates in.  The four dense rows arrive through the frame ABI, but
 ;;; applying them is a checked map from an affine cell-valued lattice point to
-;;; the deliberately packed shadow sample tuple used by the fragment stage.
-(define-projective-shader-map :world-to-shadow
+;;; homogeneous light clip.  A separate checked projection produces the
+;;; deliberately packed shadow sample tuple used by the fragment stage.
+(define-projective-shader-map :world-to-light
   :domain-type :vec3
   :domain-quantity :world-position
   :domain-unit :cell
   :domain-affine-p t
-  :codomain-type :vec3
-  :codomain-components
+  :sample-type :vec3
+  :sample-components
   ((:xy :quantity :shadow-uv :unit :one)
    (:z :quantity :shadow-depth :unit :one))
   :coordinate-scale (1/2 1/2 1)
@@ -163,9 +164,10 @@
                      (representation clip-z)
                      (representation view-z)))
          (shadow-projection
-           (project-point :world-to-shadow world-position
-                          shadow-row-x shadow-row-y
-                          shadow-row-z shadow-row-w))
+           (project-sample
+            (project-point :world-to-light world-position
+                           shadow-row-x shadow-row-y
+                           shadow-row-z shadow-row-w)))
          ;; Projecting either field lowers the shared homogeneous map once.
          ;; Keeping depth first preserves the established instruction order.
          (shadow-depth (swizzle shadow-projection :z)))
@@ -542,12 +544,10 @@
      :resources
      ((frame-state :uniform-block :set 0 :binding 2
                    :members #.*frame-uniform-members*)))
-  (let* ((world (vec4 (representation world-position) 1.0))
-         (clip-x (dot shadow-row-x world))
-         (clip-y (dot shadow-row-y world))
-         (clip-z (dot shadow-row-z world))
-         (clip-w (dot shadow-row-w world))
-         (clip (vec4 clip-x clip-y clip-z clip-w)))
+  (let* ((clip
+           (project-point :world-to-light world-position
+                          shadow-row-x shadow-row-y
+                          shadow-row-z shadow-row-w)))
     (set-output clip-position clip)))
 
 (defun block-world-shadow-vertex-specification ()

@@ -31,7 +31,7 @@
                 #:vec2 #:vec3 #:vec4 #:swizzle
                 #:clamp #:smoothstep #:normalize
                 #:quantity #:assume-quantity #:interpret #:representation
-                #:convert-unit #:project-point #:counted-fold
+                #:convert-unit #:project-point #:project-sample #:counted-fold
                 #:set-output))
 
 (in-package #:luv/spir-v/tests)
@@ -377,21 +377,30 @@
       (ok (math:unit-expression=
            :cell (math:quantity-specification-unit view-z-quantity))))
     (ok (typep (spv:shader-binding-expression shadow-projection)
-               'spv:shader-map-application))))
+               'spv:shader-map-projection))))
 
 (deftest projective-maps-are-semantic-objects-with-packed-products
   (let* ((specification (spv:block-world-vertex-specification))
-         (binding (binding-named 'shadow-projection specification))
-         (application (spv:shader-binding-expression binding))
-         (definition (spv:shader-map-definition-for :world-to-shadow))
+         (projection-binding
+           (binding-named 'shadow-projection specification))
+         (projection (spv:shader-binding-expression projection-binding))
+         (application (spv:shader-map-projection-application projection))
+         (definition (spv:shader-map-definition-for :world-to-light))
          (domain
            (spv:shader-map-domain-quantity-specification definition))
-         (layout (spv:shader-map-codomain-quantity-layout definition))
+         (layout
+           (spv:shader-projective-map-sample-quantity-layout definition))
          (uv (math:project-quantity-layout layout '(0 1)))
          (depth (math:project-quantity-layout layout '(2))))
     (ok (typep definition 'spv:shader-projective-map-definition))
     (ok (eq definition (spv:shader-map-application-definition application)))
+    (ok (eq application
+            (spv:shader-map-projection-application projection)))
     (ok (spv:shader-type= :vec3 (spv:shader-map-domain-type definition)))
+    (ok (spv:shader-type=
+         :vec4 (spv:shader-projective-map-homogeneous-type definition)))
+    (ok (spv:shader-type=
+         :vec3 (spv:shader-projective-map-sample-type definition)))
     (ok (eq :world-position
             (math:quantity-specification-name domain)))
     (ok (math:quantity-specification-affine-p domain))
@@ -402,7 +411,8 @@
     (ok (eq :shadow-depth (math:quantity-specification-name depth)))
     (ok (math:quantity-specification-affine-p depth))
     (ok (math:quantity-layout=
-         layout (spv:shader-expression-quantity-layout application)))
+         layout (spv:shader-expression-quantity-layout projection)))
+    (ok (null (spv:shader-expression-quantity-layout application)))
     (ok (equal '(1/2 1/2 1)
                (spv:shader-projective-map-coordinate-scale definition)))
     (ok (equal '(1/2 1/2 0)
@@ -411,7 +421,8 @@
     (ok (every (lambda (row)
                  (not (spv:shader-expression-quantity-checked-p row)))
                (spv:shader-map-application-rows application)))
-    (ok (not (spv:shader-expression-materialized-p application)))
+    (ok (spv:shader-expression-materialized-p application))
+    (ok (not (spv:shader-expression-materialized-p projection)))
     (labels ((contains-representation-p (expression)
                (or (typep expression 'spv:shader-representation)
                    (some #'contains-representation-p
@@ -455,24 +466,39 @@
       (ok (eq :projective-map-domain-mismatch
               (reason-for
                raw
-               '(project-point :world-to-shadow position
+               '(project-point :world-to-light position
                  row-x row-y row-z row-w))))
       (ok (eq :projective-map-domain-mismatch
               (reason-for
                direction
-               '(project-point :world-to-shadow position
+               '(project-point :world-to-light position
                  row-x row-y row-z row-w))))
       (ok (eq :projective-map-row-count
               (reason-for
                world
-               '(project-point :world-to-shadow position
+               '(project-point :world-to-light position
                  row-x row-y row-z))))
       (ok (eq :invalid-projective-map-rows
               (reason-for
                world
-               '(project-point :world-to-shadow position
+               '(project-point :world-to-light position
                  row-x row-y row-z row-w)
-               t))))))
+               t)))
+      (ok (eq :sampling-projection-requires-map-application
+              (handler-case
+                  (progn
+                    (spv:parse-shader-specification
+                     'invalid-sampling-projection-probe
+                     '(:stage :vertex
+                       :inputs ((raw-clip :vec4 :location 0))
+                       :outputs
+                       ((result :vec2 :location 0
+                                :quantity :shadow-uv :unit :one)))
+                     '((set-output
+                        result (swizzle (project-sample raw-clip) :xy))))
+                    nil)
+                (spv:shader-language-error (condition)
+                  (spv:shader-language-error-reason condition))))))))
 
 (deftest block-vertex-uniform-members-retain-access-chain-provenance
   (let* ((lowering (spv:block-world-vertex-lowering))
@@ -493,7 +519,7 @@
 (deftest block-shadow-vertex-is-a-light-space-depth-shader
   (let* ((specification (spv:block-world-shadow-vertex-specification))
          (resource (first (spv:shader-specification-resources specification)))
-         (clip-x (binding-named 'clip-x specification))
+         (clip (binding-named 'clip specification))
          (clip-position
            (first (spv:shader-specification-statements specification))))
     (ok (eq (spv:shader-specification-stage specification) :vertex))
@@ -501,14 +527,12 @@
     (ok (= (length (spv:shader-specification-outputs specification)) 1))
     (ok (typep resource 'spv:shader-uniform-block))
     (ok (= (spv:shader-resource-binding resource) 2))
-    (ok (spv:shader-type=
-         (spv:shader-expression-type
-          (spv:shader-binding-expression clip-x))
-         :float))
-    (ok (equal (form-names
-                (spv:shader-expression-form
-                 (spv:shader-binding-expression clip-x)))
-               '("dot" "shadow-row-x" "world")))
+    (let ((application (spv:shader-binding-expression clip)))
+      (ok (typep application 'spv:shader-map-application))
+      (ok (eq (spv:shader-map-definition-for :world-to-light)
+              (spv:shader-map-application-definition application)))
+      (ok (spv:shader-type=
+           (spv:shader-expression-type application) :vec4)))
     (ok (spv:shader-type=
          (spv:shader-expression-type
           (spv:shader-assignment-value clip-position))

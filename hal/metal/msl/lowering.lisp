@@ -475,6 +475,7 @@
     ((definition spv:shader-projective-map-definition)
      (context msl-lowering-context)
      (application spv:shader-map-application))
+  (declare (ignore definition))
   (let* ((point
            (msl-occurrence-text
             (lower-msl-expression
@@ -488,7 +489,29 @@
            (clip-components
              (mapcar (lambda (row)
                        (format nil "dot(~A, ~A)" row homogeneous))
-                     rows))
+                     rows)))
+    (note-msl-occurrence
+     context application
+     (format nil "float4(~{~A~^, ~})" clip-components))))
+
+(defmethod lower-msl-expression
+    ((context msl-lowering-context) (expression spv:shader-map-projection))
+  (let* ((application (spv:shader-map-projection-application expression))
+         (definition (spv:shader-map-application-definition application))
+         (point
+           (msl-occurrence-text
+            (lower-msl-expression
+             context (spv:shader-map-application-point application))))
+         (rows
+           (mapcar (lambda (row)
+                     (msl-occurrence-text
+                      (lower-msl-expression context row)))
+                   (spv:shader-map-application-rows application)))
+         (homogeneous (format nil "float4(~A, 1.0f)" point))
+         (clip-components
+           (mapcar (lambda (row)
+                     (format nil "dot(~A, ~A)" row homogeneous))
+                   rows))
            (normalized
              (format nil "(float3(~{~A~^, ~}) / ~A)"
                      (subseq clip-components 0 3)
@@ -504,7 +527,7 @@
                              (spv:shader-projective-map-coordinate-offset
                               definition)))))
     (note-msl-occurrence
-     context application
+     context expression
      (format nil "((~A * ~A) + ~A)" normalized scale offset))))
 
 (defmethod lower-msl-expression

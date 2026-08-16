@@ -418,9 +418,11 @@ retirement.  Metal should specialize those ownership points rather than fork
 the application model.
 
 The middle of that join is now proved.  The vertex target lowers the semantic
-=:world-to-shadow= map into a named =shadow_projection= value: four homogeneous
-row products, division by =w=, then coordinate scale and offset.  Both stages
-pass Apple's offline compiler.  =make metal-pipeline= then cold-starts the
+=:world-to-light= map and its =project-sample= operation into a named
+=shadow_projection= value: four homogeneous row products, division by =w=,
+then coordinate scale and offset.  The shadow vertex stage consumes the same
+map before division.  Both stages pass Apple's offline compiler.  =make
+metal-pipeline= then cold-starts the
 device-owned path and reports the expected luvcraft entry points, one 48-byte
 four-attribute vertex buffer, =MTLRenderPipelineState=, and
 =MTLDepthStencilState= on the Apple M2 Pro.  Shader and pipeline plausibility

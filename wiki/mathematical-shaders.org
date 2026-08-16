@@ -318,34 +318,38 @@ core.
 :END:
 
 The first matrix feature is deliberately a map protocol rather than a generic
-=mat4= shader type.  A =shader-map-definition= names a domain type and quantity,
-a codomain type and semantic layout, and the behavior of application.  Its
-dense coefficients remain ordinary represented shader values.  This separates
-“four rows happen to be stored here” from “this operation accepts an affine
-world point in metres and produces shadow sampling coordinates.”  The broader
-quantity argument and mp-units/Moppe comparison lives in #SM4DFB.
+=mat4= shader type.  A =shader-map-definition= names a domain type and quantity
+and the behavior of application.  A projective definition separately names
+its homogeneous representation and the type, semantic layout, and remap of
+its sampling projection.  Dense coefficients remain ordinary represented
+shader values.  This separates “four rows happen to be stored here” from
+“this operation accepts an affine world point in cells and maps it into light
+space.”  The broader quantity argument and mp-units/Moppe comparison lives in
+#SM4DFB.
 
-The production =:world-to-shadow= definition is projective: it forms a
-homogeneous point, evaluates four row dot products, divides by =w=, and remaps
-the first two coordinates.  Calling
+The production =:world-to-light= definition has two explicit operations.
+Calling
 
 #+begin_src lisp
-(project-point :world-to-shadow world-position
+(project-point :world-to-light world-position
                shadow-row-x shadow-row-y shadow-row-z shadow-row-w)
 #+end_src
 
-constructs a =shader-map-application= whose packed =vec3= result exposes only
-the declared projections: =xy= is affine =:shadow-uv= and =z= is affine
-=:shadow-depth=.  The application is virtual.  Lowering caches its three
-represented component ids, so selecting both fields performs the shared map
-once without constructing an intermediate vector.  This preserves the exact
-SPIR-V previously emitted by handwritten row arithmetic.
+constructs a =shader-map-application= denoting the homogeneous =vec4= after
+four row dot products.  The shadow pass uses that value directly.
+=project-sample= consumes the same application, divides by =w=, applies the
+declared remap, and returns a virtual =shader-map-projection=: =xy= is affine
+=:shadow-uv= and =z= is affine =:shadow-depth=.  Lowering caches represented
+components, so selecting both fields performs the map once without constructing
+an intermediate sample vector or homogeneous vector.  Both paths preserve the
+exact SPIR-V previously emitted by their two handwritten arithmetic spellings.
 
 Map names use an open EQL-specialized lookup protocol, and lowering dispatches
 on definition class.  An unknown map, incompatible domain, non-affine point,
-wrong row count, or semantic row is a source error.  Adding linear, affine,
-normal, or other map families therefore means adding semantic definitions and
-lowering methods, not weakening failed cases to unannotated values.
+wrong row count, semantic row, or sampling projection of an unrelated raw
+=vec4= is a source error.  Adding linear, affine, normal, or other map families
+therefore means adding semantic definitions and lowering methods, not weakening
+failed cases to unannotated values.
 
 * McCLIM presents the relationship
 :PROPERTIES:
@@ -367,9 +371,10 @@ reverse provenance map to highlight its source expression.
 The detail pane reports the source form, inferred type, semantic meaning, and
 association count.  Packed declarations and samples display lane-to-quantity
 maps, while construction, assumption, interpretation, and raw representation
-remain distinct selectable expression nodes.  Projective applications are
-selectable nodes too, rendered with their map name, semantic point, and dense
-represented rows.
+remain distinct selectable expression nodes.  Homogeneous projective
+applications and their sampling projections are selectable nodes too: the
+former renders its map name, semantic point, and dense represented rows; the
+latter renders the explicit projection relationship.
 The presentation objects are the compiler objects themselves; there is no
 parallel UI tree whose identities can drift.
 

@@ -120,8 +120,9 @@
            #:shader-projective-map-definition
            #:shader-map-domain-type
            #:shader-map-domain-quantity-specification
-           #:shader-map-codomain-type
-           #:shader-map-codomain-quantity-layout
+           #:shader-projective-map-homogeneous-type
+           #:shader-projective-map-sample-type
+           #:shader-projective-map-sample-quantity-layout
            #:shader-projective-map-coordinate-scale
            #:shader-projective-map-coordinate-offset
            #:shader-map-definition-for
@@ -162,6 +163,8 @@
            #:shader-map-application-definition
            #:shader-map-application-point
            #:shader-map-application-rows
+           #:shader-map-projection
+           #:shader-map-projection-application
            #:shader-interpretation
            #:shader-interpretation-operand
            #:shader-quantity-construction
@@ -195,6 +198,7 @@
            #:interpret
            #:representation
            #:project-point
+           #:project-sample
            #:convert-unit
            #:counted-fold
            #:set-output

@@ -822,7 +822,7 @@ construction, a narrow luvcraft ABI adapter flattens the shader's actual
 byte-offset members and parsed component quantities into float positions; the
 host and shader layouts must compare equal in addition to occupying the same
 288 bytes.  The final four vec4 rows intentionally remain representation for
-the separately declared =:world-to-shadow= semantic map, rather than being
+the separately declared =:world-to-light= semantic map, rather than being
 mislabelled as sixteen homogeneous quantities.
 
 ** DONE Declare the fullscreen and overlay vertex products
@@ -1168,7 +1168,7 @@ explicit unit conversion.
 Intent: make definition sharing answer a real engine question rather than only
 demonstrate two toy evaluators.
 
-Evidence: fog shaping is a small scalar candidate; the =:world-to-shadow= map
+Evidence: fog shaping is a small scalar candidate; the =:world-to-light= map
 is a richer candidate already used by production shaders and useful to CPU
 tests and tools.  The latter should follow the semantic-map split and the
 homogeneous-projection composition work in #ZYCSYZ rather than forcing its
@@ -1199,8 +1199,8 @@ while arithmetic graphs own numerical laws.  CPU clients can load that system
 without loading SPIR-V.
 
 Done when: satisfied by the named fog law and its two checked realizations.
-The richer =:world-to-shadow= map should still wait for #ZYCSYZ rather than
-forcing homogeneous GPU representation into the shared arithmetic layer.
+The richer =:world-to-light= composition subsequently became #ZYCSYZ without
+forcing homogeneous GPU representation into the common arithmetic layer.
 
 * IDEA Lower checked domains to native SIMD kernels
 :PROPERTIES:
@@ -1460,13 +1460,13 @@ plainly: quantities are converted to raw values before entering a
 relation as an inspectable object instead:
 
 #+begin_src lisp
-(define-projective-shader-map :world-to-shadow
+(define-projective-shader-map :world-to-light
   :domain-type :vec3
   :domain-quantity :world-position
   :domain-unit :metre
   :domain-affine-p t
-  :codomain-type :vec3
-  :codomain-components
+  :sample-type :vec3
+  :sample-components
   ((:xy :quantity :shadow-uv :unit :one :affine-p t)
    (:z :quantity :shadow-depth :unit :one :affine-p t))
   :coordinate-scale (1/2 1/2 1)
@@ -1476,17 +1476,20 @@ relation as an inspectable object instead:
 =shader-map-definition= is an open semantic protocol.  The first concrete
 definition is projective rather than pretending perspective division is a
 linear operation.  =project-point= requires the exact affine metre-valued
-domain and four raw represented rows.  Its result is a virtual semantic
-product: =xy= projects affine shadow UV and =z= projects affine shadow depth.
-The packed whole is not treated as a homogeneous mathematical vector.
+domain and four raw represented rows, producing the homogeneous light-space
+clip value.  =project-sample= then performs division and the declared remap;
+its virtual product exposes =xy= as affine shadow UV and =z= as affine shadow
+depth.  The packed sample whole is not treated as a homogeneous mathematical
+vector.
 
-Lowering expands the application into the existing homogeneous construction,
-four dot products, division, and coordinate remap once, then lets exact
-swizzles select the three component values.  It does not materialize an extra
-=vec3=.  Thus domain/codomain and point semantics become stricter while the
-SPIR-V stays byte-identical.  Future linear, affine, normal, and projective map
-definitions can share this separation: dense coefficients are representation;
-the named map owns meaning.
+Lowering expands the application into the existing homogeneous construction
+and four dot products.  A direct consumer materializes the =vec4=; a sampling
+projection reuses the four components, performs division and remap, and lets
+exact swizzles select the three sample components without an intermediate
+=vec3=.  Thus domain and point semantics become stricter while both production
+SPIR-V modules stay byte-identical.  Future linear, affine, normal, and
+projective map definitions can share this separation: dense coefficients are
+representation; the named map owns meaning.
 
 * Where luv's semantic arithmetic goes beyond its sources
 :PROPERTIES:
@@ -1597,7 +1600,7 @@ dimensionless fog is derived rather than asserted, normalized mesh meanings
 cross the stage interface, opaque representation boundaries are explicit, a
 metre/one mix-up is rejected, and the emitted SPIR-V is unchanged.
 
-* DONE Make the world-to-shadow transform a semantic projective map
+* DONE Introduce the world-to-light sampling map
 :PROPERTIES:
 :ID: U0AHTQ
 :END:
@@ -1613,10 +1616,11 @@ Evidence:
   objects behind an open name protocol, a projective definition with coordinate
   scale/offset, a =project-point= expression, and lowering specialized on the
   map definition class.
-- [[file:../luvcraft/shaders.lisp][The block vertex shader]] applies =:world-to-shadow= directly to an affine
-  =:world-position= in cells.  Its virtual packed codomain projects =:shadow-uv=
-  and =:shadow-depth= with their affine normalized meanings; the prior
-  =representation= and two =assume-quantity= nodes are gone from this path.
+- The first block-vertex version applied =:world-to-shadow= directly to an
+  affine =:world-position= in cells.  Its virtual packed result projected
+  =:shadow-uv= and =:shadow-depth= with their affine normalized meanings; the
+  prior =representation= and two =assume-quantity= nodes left this path.  The
+  composition was subsequently split and renamed by #ZYCSYZ.
 - Undefined maps, raw or wrong-domain points, the wrong number of rows, and
   semantically annotated rows are source-language errors.  Missing map
   semantics therefore cannot silently collapse to raw arithmetic.
@@ -1626,15 +1630,15 @@ Evidence:
   =9c99780b969b33eb242976c943463449b2cce4b66f779674a291fc3a4f2aeb34=.
 - [[file:../mcclim/shader-lab.lisp][The shader workbench]] renders the map application as its own selectable
   expression, including the named map, semantic point, and represented rows.
-  [[file:../hal/shader/tests.lisp][Shader tests]] inspect its domain, packed codomain, affine character,
-  virtual materialization policy, raw rows, and failure contracts.
+  [[file:../hal/shader/tests.lisp][Shader tests]] inspect its domain, packed result, affine character, virtual
+  materialization policy, raw rows, and failure contracts.
 
 Done when: achieved.  A real production matrix application is a checked
 semantic map, point versus raw/direction misuse is rejected, projected fields
 arrive with meaning rather than assumptions, tools can inspect the map object,
 and emitted GPU code is unchanged.
 
-* TODO Separate homogeneous projection from shadow sampling
+* DONE Separate homogeneous projection from shadow sampling
 :PROPERTIES:
 :ID: ZYCSYZ
 :END:
@@ -1645,18 +1649,26 @@ clip result directly, while the block vertex stage additionally divides and
 remaps it into shadow sampling coordinates.  Those should be named operations
 over one map rather than two unrelated arithmetic spellings.
 
-Evidence: #U0AHTQ proves that a projective application can be checked and
-lowered without changing code, but its first definition packages row
-application, homogeneous division, and sampling remap together.  The shadow
-vertex shader still uses =representation= and four manual dots to produce the
-same pre-division clip value.  That duplication now identifies a real
-composition boundary rather than a hypothetical matrix framework.
+The map is now =:world-to-light=.  =project-point= checks its affine
+=:world-position= domain and four raw rows, then denotes the homogeneous
+light-space =vec4=.  =project-sample= accepts only such an application and
+projects its declared virtual =:shadow-uv= plus =:shadow-depth= sample product.
+The map definition names the homogeneous and sample representation types and
+owns the sampling layout and coordinate remap separately.
 
-Done when: the four rows have one inspectable world-to-light map definition;
-one operation projects an affine world point to its homogeneous result; a
-second checked operation produces shadow UV/depth; both production vertex
-stages use the shared semantics; point/direction and incompatible-space uses
-fail; and both validated binaries remain byte-identical.
+The shadow vertex stage sends the homogeneous application directly to clip
+position.  The block vertex stage nests the same application under
+=project-sample= and selects exact sample fields; no intermediate =vec3= or
+=vec4= is materialized there.  The McCLIM workbench presents both nodes.  Tests
+inspect their relationship, require the same map definition in both production
+stages, reject raw/direction points and sampling projection of a raw clip
+value, and retain source provenance.
+
+Done when: satisfied.  Both Vulkan modules validate and remain byte-identical:
+block vertex SHA-256 =9c99780b969b33eb242976c943463449b2cce4b66f779674a291fc3a4f2aeb34=;
+shadow vertex SHA-256 =4402a20bc62ef9289244ec0b52d2cd32f644147938d372eda308021ce49c300a=.
+Direct MSL lowering mirrors the same composition and both production Metal
+sources compile.
 
 * DONE Give the remaining crosshair colour ABI meaning
 :PROPERTIES:

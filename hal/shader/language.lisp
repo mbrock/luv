@@ -252,25 +252,28 @@ colour transfer of the value returned by sampling."))
     :reader shader-map-domain-type)
    (domain-quantity-specification
     :initarg :domain-quantity-specification
-    :reader shader-map-domain-quantity-specification)
-   (codomain-type
-    :initarg :codomain-type
-    :reader shader-map-codomain-type)
-   (codomain-quantity-layout
-    :initarg :codomain-quantity-layout
-    :reader shader-map-codomain-quantity-layout))
+    :reader shader-map-domain-quantity-specification))
   (:documentation
    "An inspectable semantic map whose dense representation is supplied at use."))
 
 (defclass shader-projective-map-definition (shader-map-definition)
-  ((coordinate-scale
+  ((homogeneous-type
+    :initarg :homogeneous-type
+    :reader shader-projective-map-homogeneous-type)
+   (sample-type
+    :initarg :sample-type
+    :reader shader-projective-map-sample-type)
+   (sample-quantity-layout
+    :initarg :sample-quantity-layout
+    :reader shader-projective-map-sample-quantity-layout)
+   (coordinate-scale
     :initarg :coordinate-scale
     :reader shader-projective-map-coordinate-scale)
    (coordinate-offset
     :initarg :coordinate-offset
     :reader shader-projective-map-coordinate-offset))
   (:documentation
-   "A four-row homogeneous map followed by division and coordinate remapping."))
+   "A four-row homogeneous map with a separately checked sampling projection."))
 
 (defgeneric shader-map-definition-for (name)
   (:documentation "Return the shader semantic map named by NAME, or NIL."))
@@ -452,7 +455,14 @@ leaves it again while retaining the semantic operand in the expression graph."))
     :initarg :rows
     :reader shader-map-application-rows))
   (:documentation
-   "A virtual semantic product obtained by applying a represented map."))
+   "The homogeneous result of applying a represented semantic map."))
+
+(defclass shader-map-projection (shader-expression)
+  ((application
+    :initarg :application
+    :reader shader-map-projection-application))
+  (:documentation
+   "A virtual sampling product projected from a homogeneous map application."))
 
 (defclass shader-quantity-boundary
     (shader-expression lang:arithmetic-quantity-boundary)
@@ -533,6 +543,11 @@ leaves it again while retaining the semantic operand in the expression graph."))
   t)
 
 (defmethod lang:arithmetic-expression-quantity-checked-p
+    ((expression shader-map-projection))
+  (declare (ignore expression))
+  t)
+
+(defmethod lang:arithmetic-expression-quantity-checked-p
     ((expression shader-representation))
   (declare (ignore expression))
   nil)
@@ -570,11 +585,15 @@ leaves it again while retaining the semantic operand in the expression graph."))
   (lang:arithmetic-expression-quantity-checked-p expression))
 
 (defmethod shader-expression-materialized-p
-    ((expression shader-map-application))
-  ;; A semantic product is projected into represented values.  Materializing
-  ;; an intermediate vec3 would add GPU work solely for compiler convenience.
+    ((expression shader-map-projection))
+  ;; Exact fields lower directly from cached components; no intermediate vec3
+  ;; exists solely for compiler convenience.
   (declare (ignore expression))
   nil)
+
+(defmethod shader-expression-quantity-checked-p
+    ((expression shader-map-projection))
+  (lang:arithmetic-expression-quantity-checked-p expression))
 
 (defmethod shader-expression-quantity-checked-p
     ((expression shader-quantity-boundary))
@@ -652,6 +671,9 @@ leaves it again while retaining the semantic operand in the expression graph."))
 (defmethod shader-expression-form ((expression shader-map-application))
   (lang:arithmetic-expression-form expression))
 
+(defmethod shader-expression-form ((expression shader-map-projection))
+  (lang:arithmetic-expression-form expression))
+
 (defmethod shader-expression-form ((expression shader-quantity-boundary))
   (lang:arithmetic-expression-form expression))
 
@@ -660,6 +682,10 @@ leaves it again while retaining the semantic operand in the expression graph."))
 
 (defmethod lang:arithmetic-expression-form
     ((expression shader-map-application))
+  (shader-expression-source-form expression))
+
+(defmethod lang:arithmetic-expression-form
+    ((expression shader-map-projection))
   (shader-expression-source-form expression))
 
 (defmethod print-object ((expression shader-expression) stream)
@@ -684,6 +710,9 @@ leaves it again while retaining the semantic operand in the expression graph."))
 (defmethod shader-expression-children ((expression shader-map-application))
   (lang:arithmetic-expression-children expression))
 
+(defmethod shader-expression-children ((expression shader-map-projection))
+  (lang:arithmetic-expression-children expression))
+
 (defmethod shader-expression-children ((expression shader-quantity-boundary))
   (lang:arithmetic-expression-children expression))
 
@@ -694,6 +723,10 @@ leaves it again while retaining the semantic operand in the expression graph."))
     ((expression shader-map-application))
   (cons (shader-map-application-point expression)
         (shader-map-application-rows expression)))
+
+(defmethod lang:arithmetic-expression-children
+    ((expression shader-map-projection))
+  (list (shader-map-projection-application expression)))
 
 (defun shader-specification-expressions (specification)
   "Return the expression graph in source order, without duplicate objects."
@@ -1228,6 +1261,8 @@ never collides with a standard symbol's function documentation:
   "Expose a semantic value's raw representation without emitting code.")
 (define-shader-operator project-point
   "Apply a named projective map to a semantic affine point.")
+(define-shader-operator project-sample
+  "Project a homogeneous map application into its declared sampling product.")
 (define-shader-operator convert-unit
   "Explicitly express a semantic quantity in another compatible unit.")
 
@@ -1843,14 +1878,15 @@ NIL leaves the character to the named definition; T is the historical
 
 (defun make-projective-shader-map-definition
     (name &key domain-type domain-quantity domain-dimension domain-unit
-               domain-affine-p codomain-type codomain-components
+               domain-affine-p sample-type sample-components
                coordinate-scale coordinate-offset source-form)
   "Construct a checked projective map definition from declarative semantics."
   (let* ((domain-type (find-shader-type domain-type source-form))
-         (codomain-type (find-shader-type codomain-type source-form))
+         (homogeneous-type (find-shader-type :vec4 source-form))
+         (sample-type (find-shader-type sample-type source-form))
          (domain-component-count
            (shader-type-component-count domain-type))
-         (component-count (shader-type-component-count codomain-type)))
+         (component-count (shader-type-component-count sample-type)))
     (unless (and domain-component-count
                  component-count
                  (= domain-component-count 3)
@@ -1867,12 +1903,12 @@ NIL leaves the character to the named definition; T is the historical
             (parse-declaration-quantity-specification
              domain-quantity domain-dimension domain-unit domain-affine-p
              domain-type source-form))
-          (codomain
+          (sample-layout
             (parse-declaration-quantity-layout
-             codomain-components codomain-type source-form)))
+             sample-components sample-type source-form)))
       (unless (and domain
                    (math:quantity-specification-affine-p domain)
-                   codomain)
+                   sample-layout)
         (error 'shader-language-error
                :form source-form :reason :invalid-projective-map-semantics))
       (make-instance
@@ -1881,14 +1917,15 @@ NIL leaves the character to the named definition; T is the historical
        :source-form source-form
        :domain-type domain-type
        :domain-quantity-specification domain
-       :codomain-type codomain-type
-       :codomain-quantity-layout codomain
+       :homogeneous-type homogeneous-type
+       :sample-type sample-type
+       :sample-quantity-layout sample-layout
        :coordinate-scale coordinate-scale
        :coordinate-offset coordinate-offset))))
 
 (defmacro define-projective-shader-map
     (name &key domain-type domain-quantity domain-dimension domain-unit
-               domain-affine-p codomain-type codomain-components
+               domain-affine-p sample-type sample-components
                coordinate-scale coordinate-offset)
   "Define an inspectable projective map behind an EQL-specialized protocol."
   (let ((storage
@@ -1901,8 +1938,8 @@ NIL leaves the character to the named definition; T is the historical
              :domain-dimension ,domain-dimension
              :domain-unit ,domain-unit
              :domain-affine-p ,domain-affine-p
-             :codomain-type ,codomain-type
-             :codomain-components ,codomain-components
+             :sample-type ,sample-type
+             :sample-components ,sample-components
              :coordinate-scale ,coordinate-scale
              :coordinate-offset ,coordinate-offset)))
     `(progn
@@ -1914,8 +1951,8 @@ NIL leaves the character to the named definition; T is the historical
           :domain-dimension ',domain-dimension
           :domain-unit ',domain-unit
           :domain-affine-p ',domain-affine-p
-          :codomain-type ',codomain-type
-          :codomain-components ',codomain-components
+          :sample-type ',sample-type
+          :sample-components ',sample-components
           :coordinate-scale ',coordinate-scale
           :coordinate-offset ',coordinate-offset
           :source-form ',source))
@@ -1972,8 +2009,31 @@ NIL leaves the character to the named definition; T is the historical
          :definition definition
          :point point
          :rows rows
-         :type (shader-map-codomain-type definition)
-         :quantity-layout (shader-map-codomain-quantity-layout definition)
+         :type (shader-projective-map-homogeneous-type definition)
+         :source-form form)))))
+
+(defmethod parse-shader-operator-call
+    ((operator (eql 'project-sample)) form environment)
+  (declare (ignore operator))
+  (destructuring-bind (name application-form) form
+    (declare (ignore name))
+    (let* ((operand (parse-shader-expression application-form environment))
+           (application (shader-map-application-for-projection operand)))
+      (unless application
+        (error 'shader-language-error
+               :form form :reason :sampling-projection-requires-map-application
+               :details (shader-expression-form operand)))
+      (let ((definition (shader-map-application-definition application)))
+        (unless (typep definition 'shader-projective-map-definition)
+          (error 'shader-language-error
+                 :form form :reason :unsupported-sampling-projection
+                 :details (class-name (class-of definition))))
+        (make-instance
+         'shader-map-projection
+         :application application
+         :type (shader-projective-map-sample-type definition)
+         :quantity-layout
+         (shader-projective-map-sample-quantity-layout definition)
          :source-form form)))))
 
 (defmethod parse-shader-operator-call
@@ -2889,7 +2949,12 @@ Modules whose expressions use no extended mathematics never acquire one."
 (defmethod shader-expression-provenance-name
     ((expression shader-map-application))
   (declare (ignore expression))
-  'projected-point)
+  'homogeneous-point)
+
+(defmethod shader-expression-provenance-name
+    ((expression shader-map-projection))
+  (declare (ignore expression))
+  'projected-sample)
 
 (defmethod shader-expression-provenance-name
     ((expression shader-interpretation))
@@ -3189,34 +3254,50 @@ backend's context before its source-located unsupported-operation method."))
   (shader-map-application-from-target
    (shader-reference-target expression)))
 
-(defgeneric lower-shader-map-component-values
-    (definition context application)
+(defgeneric lower-shader-map-homogeneous-components
+    (definition context application &optional origin)
   (:documentation
-   "Lower APPLICATION once and return its represented codomain components."))
+   "Lower APPLICATION once and return its four homogeneous components."))
 
-(defmethod lower-shader-map-component-values
-    ((definition shader-projective-map-definition) context application)
+(defmethod lower-shader-map-homogeneous-components
+    ((definition shader-projective-map-definition) context application
+     &optional (origin application))
   (or (gethash application (context-map-component-values context))
       (let* ((point (shader-map-application-point application))
              (point-value (lower-shader-expression context point))
-             (float-type (find-shader-type :float))
              (homogeneous
                (emit-value-instruction
-                context application :vec4 'composite-construct
+                context origin :vec4 'composite-construct
                 (list point-value (ensure-shader-constant context 1.0))))
              (clip
                (mapcar
                 (lambda (row)
                   (emit-value-instruction
-                   context application :float 'dot
+                   context origin :float 'dot
                    (list (lower-shader-expression context row) homogeneous)))
-                (shader-map-application-rows application)))
+                (shader-map-application-rows application))))
+        (setf (gethash application (context-map-component-values context))
+              clip))))
+
+(defgeneric lower-shader-map-sample-components
+    (definition context projection)
+  (:documentation
+   "Project one homogeneous application into represented sample components."))
+
+(defmethod lower-shader-map-sample-components
+    ((definition shader-projective-map-definition) context projection)
+  (or (gethash projection (context-map-component-values context))
+      (let* ((application (shader-map-projection-application projection))
+             (float-type (find-shader-type :float))
+             (clip
+               (lower-shader-map-homogeneous-components
+                definition context application projection))
              (w (fourth clip))
              (normalized
                (loop for component in (subseq clip 0 3)
                      collect
                      (emit-binary-arithmetic
-                      context application '/ :float
+                      context projection '/ :float
                       component float-type w float-type)))
              (result
                (loop for component in normalized
@@ -3229,27 +3310,28 @@ backend's context before its source-located unsupported-operation method."))
                              (if (= scale 1)
                                  component
                                  (emit-binary-arithmetic
-                                  context application '* :float
+                                  context projection '* :float
                                   component float-type
                                   (ensure-shader-constant context scale)
                                   float-type))))
                        (if (zerop offset)
                            scaled
                            (emit-binary-arithmetic
-                            context application '+ :float
+                            context projection '+ :float
                             scaled float-type
                             (ensure-shader-constant context offset)
                             float-type))))))
-        (setf (gethash application (context-map-component-values context))
+        (setf (gethash projection (context-map-component-values context))
               result))))
 
 (defun lower-shader-map-projection
-    (context expression application indices)
+    (context expression projection indices)
   (let ((components
-          (lower-shader-map-component-values
-           (shader-map-application-definition application)
-           context application)))
-    (alias-shader-expression context expression application)
+          (lower-shader-map-sample-components
+           (shader-map-application-definition
+            (shader-map-projection-application projection))
+           context projection)))
+    (alias-shader-expression context expression projection)
     (if (= (length indices) 1)
         (nth (first indices) components)
         (emit-value-instruction
@@ -3257,16 +3339,41 @@ backend's context before its source-located unsupported-operation method."))
          'composite-construct
          (mapcar (lambda (index) (nth index components)) indices)))))
 
+(defgeneric shader-map-projection-for-swizzle (expression)
+  (:documentation
+   "Return the virtual sampling projection denoted by EXPRESSION, or NIL."))
+
+(defmethod shader-map-projection-for-swizzle (expression)
+  (declare (ignore expression))
+  nil)
+
+(defmethod shader-map-projection-for-swizzle
+    ((expression shader-map-projection))
+  expression)
+
+(defgeneric shader-map-projection-from-target (target))
+
+(defmethod shader-map-projection-from-target (target)
+  (declare (ignore target))
+  nil)
+
+(defmethod shader-map-projection-from-target ((target shader-binding))
+  (shader-map-projection-for-swizzle (shader-binding-expression target)))
+
+(defmethod shader-map-projection-for-swizzle
+    ((expression shader-reference))
+  (shader-map-projection-from-target (shader-reference-target expression)))
+
 (defmethod lower-shader-call ((operator (eql 'swizzle)) context expression)
   (let* ((operand (first (shader-call-operands expression)))
          (indices (swizzle-components
                    (first (shader-call-parameters expression))
                    (shader-expression-source-form expression)))
-         (map-application
-           (shader-map-application-for-projection operand)))
-    (if map-application
+         (map-projection
+           (shader-map-projection-for-swizzle operand)))
+    (if map-projection
         (lower-shader-map-projection
-         context expression map-application indices)
+         context expression map-projection indices)
         (let ((value (lower-shader-expression context operand)))
           (if (= (length indices) 1)
               (emit-value-instruction context expression
@@ -3477,10 +3584,17 @@ backend's context before its source-located unsupported-operation method."))
 
 (defmethod lower-shader-expression-value
     (context (expression shader-map-application))
+  (emit-value-instruction
+   context expression (shader-expression-type expression) 'composite-construct
+   (lower-shader-map-homogeneous-components
+    (shader-map-application-definition expression) context expression)))
+
+(defmethod lower-shader-expression-value
+    (context (expression shader-map-projection))
   (declare (ignore context))
   (error 'shader-language-error
          :form (shader-expression-source-form expression)
-         :reason :projective-map-result-requires-projection))
+         :reason :sampling-projection-requires-field-selection))
 
 (defmethod lower-shader-expression-value
     (context (expression shader-quantity-boundary))

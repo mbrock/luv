@@ -426,6 +426,12 @@
                       unless first-p do (write-string ", " stream)
                       do (write-shader-expression row stream frame))
                 (write-char #\) stream))
+               (luv.spir-v:shader-map-projection
+                (write-string "project-sample(" stream)
+                (write-shader-expression
+                 (luv.spir-v:shader-map-projection-application expression)
+                 stream frame)
+                (write-char #\) stream))
                (luv.spir-v:shader-interpretation
                 (write-string "interpret(" stream)
                 (write-shader-expression
@@ -508,6 +514,8 @@
                         (luv.spir-v:shader-reference
                          *shader-reference-ink*)
                         (luv.spir-v:shader-map-application
+                         *shader-call-ink*)
+                        (luv.spir-v:shader-map-projection
                          *shader-call-ink*)
                         (luv.spir-v:shader-interpretation
                          *shader-accent-ink*)
