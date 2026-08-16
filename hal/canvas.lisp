@@ -100,7 +100,12 @@
   (let ((next (cadence-clock-next-frame-time clock)))
     (if (or (null next) (<= next timestamp))
         0
-        (ceiling (* 1000 (- next timestamp))))))
+        ;; SDL's event timeout has millisecond resolution.  Rounding upward
+        ;; makes a 60 Hz deadline (16.667 ms) late by construction; on a
+        ;; 120 Hz display that can miss the intended presentation refresh.
+        ;; Wake on the last whole millisecond before the deadline and let the
+        ;; event loop poll through the sub-millisecond remainder.
+        (floor (* 1000 (- next timestamp))))))
 
 (defmethod service-canvas-clock ((clock cadence-clock) canvas timestamp)
   (let ((next (cadence-clock-next-frame-time clock)))
@@ -108,7 +113,14 @@
       ;; Deliberately do not accumulate missed frames.  A cadence is a pacing
       ;; policy, not a demand to replay time spent in a debugger.
       (setf (cadence-clock-next-frame-time clock)
-            (+ timestamp (/ 1.0d0 (clock-frames-per-second clock))))
+            (let ((interval (/ 1.0d0 (clock-frames-per-second clock))))
+              (if next
+                  ;; Preserve the established phase after an ordinary late
+                  ;; wakeup or a long pause, while skipping every missed frame.
+                  (+ next
+                     (* interval
+                        (1+ (floor (/ (- timestamp next) interval)))))
+                  (+ timestamp interval))))
       (funcall (clock-frame-function clock) canvas timestamp))))
 
 (defclass canvas ()
