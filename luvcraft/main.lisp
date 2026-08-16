@@ -57,14 +57,14 @@
 
 (defun usage (&optional (stream *standard-output*))
   (format stream "Usage: luvcraft [--metal] [--world FILE]~%")
-  (format stream "       luvcraft [--help | --smoke-test PNG | --metal-smoke-test PNG | --metal-benchmark [FRAMES [CSV]]]~%")
+  (format stream "       luvcraft [--help | --smoke-test PNG | --metal-smoke-test PNG | --metal-benchmark [FRAMES [CSV [SCENARIO]]]]~%")
   (format stream "~%")
   (format stream "With no arguments, resume the default interactive world.~%")
   (format stream "--metal opens the interactive world with the Metal 4 backend.~%")
   (format stream "--world loads or creates the named persistent world.~%")
   (format stream "--smoke-test renders one hidden Vulkan frame and exits.~%")
   (format stream "--metal-smoke-test renders one hidden Metal 4 frame and exits.~%")
-  (format stream "--metal-benchmark measures a fixed, fully resident Metal world.~%"))
+  (format stream "--metal-benchmark measures steady or streaming Metal frames.~%"))
 
 (defun default-luvcraft-world-pathname ()
   (merge-pathnames
@@ -151,9 +151,16 @@
       (error "Frame count must be a positive integer, not ~S." argument))
     count))
 
-(defun run-metal-benchmark (&optional frame-count pathname)
+(defun parse-benchmark-scenario (argument)
+  (cond ((or (null argument) (string= argument "steady")) :steady)
+        ((string= argument "streaming") :streaming)
+        (t (error "Benchmark scenario must be steady or streaming, not ~S."
+                  argument))))
+
+(defun run-metal-benchmark (&optional frame-count pathname scenario)
   (benchmark-luvcraft-frame-performance
    :frame-count (if frame-count (parse-frame-count frame-count) 120)
+   :scenario (parse-benchmark-scenario scenario)
    :csv-pathname (or (and pathname (pathname pathname))
                      #P"build/luvcraft-metal-benchmark.csv")))
 
@@ -170,9 +177,10 @@
      (run-smoke-test
       (pathname (second arguments))
       (make-metal-provider)))
-    ((and (<= 1 (length arguments) 3)
+    ((and (<= 1 (length arguments) 4)
           (string= (first arguments) "--metal-benchmark"))
-     (run-metal-benchmark (second arguments) (third arguments)))
+     (run-metal-benchmark
+      (second arguments) (third arguments) (fourth arguments)))
     (t
      (multiple-value-bind (provider world-pathname interactive-p)
          (parse-interactive-options arguments)

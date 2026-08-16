@@ -80,6 +80,40 @@ native thread handoff, the untraced benchmark remains the comparison baseline,
 tests prove nesting and storage reuse, and Vulkan and Metal smoke paths remain
 valid.
 
+* DONE Stream one chunk window under measurement
+:PROPERTIES:
+:ID: 887PO7
+:END:
+
+Intent: measure the frames where traversal creates real asynchronous chunk
+load, lighting, mesh, GPU upload, and publication work, rather than infer that
+cost from the fully resident steady benchmark.
+
+Evidence:
+
+#+begin_example
+LUVCRAFT_BENCHMARK_FRAMES=240 make metal-streaming-benchmark
+#+end_example
+
+This begins from the same settled 9 by 9 resident world as the steady case,
+then moves the player one chunk in +X at the measured boundary.  One edge of
+nine chunks leaves and one edge of nine genuinely new chunks enters.  Every
+CSV frame now records resident chunks, pending production, staged products,
+and rendered products; the printed transition summary stops at the first
+frame where residency, meshes, and the worker are settled again.
+
+The first Apple M2 Pro run settled at frame 57.  Across those 58 transition
+frames, CPU frame time had an 8.453 ms median, 43.225 ms p95, and 46.078 ms
+maximum; 10 frames exceeded the 16.667 ms 60 Hz deadline.  The worst repeated
+cost was not worker generation: owner-side mesh/lighting publication reached
+42.209 ms.  This is now a reproducible hitch and a next optimization target,
+not a claim that streaming performance is solved.
+
+Done when (met): one command produces a bounded steady/streaming comparison,
+names how many chunks entered and when the transition settled, reports 60 Hz
+deadline misses, and leaves per-frame lifecycle counts in a comparison-ready
+CSV.
+
 * The game names usage; backends realize hazards
 :PROPERTIES:
 :ID: T5MQO0

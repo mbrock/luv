@@ -418,6 +418,27 @@
         (ok (= 2.5d0 mean))
         (ok (= 4d0 maximum))))))
 
+(deftest streaming-frame-summary-covers-only-the-transition
+  (let ((samples (make-array 4)))
+    (dotimes (index 4)
+      (let ((sample (luvcraft::make-luvcraft-frame-sample)))
+        (setf (luvcraft::luvcraft-frame-sample-frame-seconds sample)
+              (/ (1+ index) 1000d0)
+              (aref samples index) sample)))
+    (let* ((benchmark
+             (luvcraft::make-luvcraft-frame-benchmark
+              :scenario :streaming :samples samples
+              :completion-seconds 0.004d0
+              :entering-chunk-count 9 :settled-frame 1))
+           (transition
+             (luvcraft::luvcraft-frame-benchmark-transition-samples benchmark))
+           (text
+             (with-output-to-string (stream)
+               (luvcraft:print-luvcraft-frame-benchmark benchmark stream))))
+      (ok (= 2 (length transition)))
+      (ok (search "9 entering chunks, 2 frames" text))
+      (ok (search "settled: frame 1" text)))))
+
 (defclass gated-production-request (luvcraft::production-request)
   ((gate :initarg :gate :reader gated-production-request-gate)
    (value :initarg :value :reader gated-production-request-value)))

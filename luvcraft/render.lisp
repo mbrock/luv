@@ -369,7 +369,16 @@ the frame uniform cannot silently diverge between shader and host."
             (when (plusp vertices)
               (incf mesh-draws)
               (incf mesh-vertices vertices))))
-        (setf (luvcraft-frame-sample-chunk-count sample) (length products)
+        (setf (luvcraft-frame-sample-resident-chunk-count sample)
+              (length
+               (resident-world-chunks (luvcraft-session-world session)))
+              (luvcraft-frame-sample-pending-production-count sample)
+              (production-system-pending-count
+               (luvcraft-session-production-system session))
+              (luvcraft-frame-sample-staged-chunk-count sample)
+              (hash-table-count
+               (luvcraft-session-staged-chunk-products session))
+              (luvcraft-frame-sample-chunk-count sample) (length products)
               (luvcraft-frame-sample-draw-count sample)
               (+ 2 (* 2 mesh-draws))
               (luvcraft-frame-sample-vertex-count sample)

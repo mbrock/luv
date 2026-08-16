@@ -25,6 +25,9 @@
   (surface-copy-encode-seconds 0d0 :type double-float
                                :quantity (:quantity :surface-copy-encode-duration
                                           :unit :second))
+  (resident-chunk-count 0 :type fixnum)
+  (pending-production-count 0 :type fixnum)
+  (staged-chunk-count 0 :type fixnum)
   (chunk-count 0 :type fixnum)
   (draw-count 0 :type fixnum)
   (vertex-count 0 :type fixnum))
@@ -47,6 +50,7 @@
 
 (luv.arithmetic.records:define-quantity-struct luvcraft-frame-benchmark
   (backend :metal :type keyword)
+  (scenario :steady :type keyword)
   (device "" :type string)
   (width 0 :type fixnum)
   (height 0 :type fixnum)
@@ -57,17 +61,16 @@
                                  :unit :second))
   (drain-seconds 0d0 :type double-float
                  :quantity (:quantity :benchmark-drain-duration :unit :second))
-  (desired-chunk-count 0 :type fixnum))
+  (desired-chunk-count 0 :type fixnum)
+  (entering-chunk-count 0 :type fixnum)
+  (settled-frame nil :type (or null fixnum)))
 
-(defun luvcraft-frame-metric-values (benchmark reader)
-  (map 'vector
-       (lambda (sample)
-         (* 1000d0 (funcall reader sample)))
-       (luvcraft-frame-benchmark-samples benchmark)))
-
-(defun luvcraft-frame-metric-summary (benchmark reader)
-  "Return the median, p95, mean, and maximum milliseconds for READER."
-  (let* ((values (luvcraft-frame-metric-values benchmark reader))
+(defun luvcraft-frame-samples-metric-summary (samples reader)
+  "Return median, p95, mean, and maximum milliseconds over SAMPLES."
+  (let* ((values
+           (map 'vector
+                (lambda (sample) (* 1000d0 (funcall reader sample)))
+                samples))
          (count (length values)))
     (when (zerop count)
       (error "Cannot summarize an empty luvcraft frame benchmark."))
@@ -85,6 +88,18 @@
               (aref sorted p95-index)
               (/ (reduce #'+ values) count)
               (aref sorted (1- count))))))
+
+(defun luvcraft-frame-metric-summary (benchmark reader)
+  "Return the median, p95, mean, and maximum milliseconds for READER."
+  (luvcraft-frame-samples-metric-summary
+   (luvcraft-frame-benchmark-samples benchmark) reader))
+
+(defun luvcraft-frame-benchmark-transition-samples (benchmark)
+  "Return measured samples up to streaming settlement, or all when unsettled."
+  (let* ((samples (luvcraft-frame-benchmark-samples benchmark))
+         (settled (luvcraft-frame-benchmark-settled-frame benchmark)))
+    (subseq samples 0 (if settled (min (length samples) (1+ settled))
+                           (length samples)))))
 
 (defparameter *luvcraft-frame-metrics*
   `(("frame CPU" . ,#'luvcraft-frame-sample-frame-seconds)
@@ -112,13 +127,15 @@
     (format stream "luvcraft ~:(~A~) frame benchmark~%"
             (luvcraft-frame-benchmark-backend benchmark))
     (format stream "  device: ~A~%" (luvcraft-frame-benchmark-device benchmark))
+    (format stream "  scenario: ~(~A~)~%"
+            (luvcraft-frame-benchmark-scenario benchmark))
     (format stream "  frame: ~Dx~D, ~D warmup + ~D measured~%"
             (luvcraft-frame-benchmark-width benchmark)
             (luvcraft-frame-benchmark-height benchmark)
             (luvcraft-frame-benchmark-warmup-count benchmark)
             count)
     (when first
-      (format stream "  world: ~D/~D chunks, ~D draws, ~:D vertices per frame~%"
+      (format stream "  first measured: ~D/~D chunks, ~D draws, ~:D vertices~%"
               (luvcraft-frame-sample-chunk-count first)
               (luvcraft-frame-benchmark-desired-chunk-count benchmark)
               (luvcraft-frame-sample-draw-count first)
@@ -129,6 +146,28 @@
           (luvcraft-frame-metric-summary benchmark (cdr metric))
         (format stream "  ~24A ~7,3F  ~7,3F  ~7,3F  ~7,3F ms~%"
                 (car metric) median p95 mean maximum)))
+    (when (eq :streaming (luvcraft-frame-benchmark-scenario benchmark))
+      (let* ((transition
+               (luvcraft-frame-benchmark-transition-samples benchmark))
+             (transition-count (length transition))
+             (settled (luvcraft-frame-benchmark-settled-frame benchmark)))
+        (multiple-value-bind (median p95 mean maximum)
+            (luvcraft-frame-samples-metric-summary
+             transition #'luvcraft-frame-sample-frame-seconds)
+          (format stream "~%  streaming transition: ~D entering chunks, ~D frames~%"
+                  (luvcraft-frame-benchmark-entering-chunk-count benchmark)
+                  transition-count)
+          (format stream "    settled: ~:[not within measured batch~;frame ~:*~D~]~%"
+                  settled)
+          (format stream "    frame CPU: median ~,3F, p95 ~,3F, max ~,3F ms (~,1F frames/s mean)~%"
+                  median p95 maximum (/ 1000d0 mean))
+          (format stream "    60 Hz deadline misses: ~D/~D~%"
+                  (count-if
+                   (lambda (sample)
+                     (> (luvcraft-frame-sample-frame-seconds sample)
+                        (/ 1d0 60d0)))
+                   transition)
+                  transition-count))))
     (format stream "~%  completion-limited: ~,3F ms/frame (~,1F frames/s)~%"
             (* 1000d0 (/ completion count))
             (/ count completion))
@@ -143,11 +182,11 @@ not a GPU timestamp.~%")
   "Write every BENCHMARK sample as stable, comparison-friendly CSV."
   (ensure-directories-exist pathname)
   (with-open-file (stream pathname :direction :output :if-exists :supersede)
-    (format stream "frame,frame_cpu_ms,simulation_ms,streaming_ms,present_ms,shader_refresh_ms,mesh_publication_ms,uniform_ms,shadow_encode_ms,scene_encode_ms,surface_copy_encode_ms,chunks,draws,vertices~%")
+    (format stream "frame,frame_cpu_ms,simulation_ms,streaming_ms,present_ms,shader_refresh_ms,mesh_publication_ms,uniform_ms,shadow_encode_ms,scene_encode_ms,surface_copy_encode_ms,resident_chunks,pending_production,staged_chunks,chunks,draws,vertices~%")
     (loop for sample across (luvcraft-frame-benchmark-samples benchmark)
           for index from 0
           do (format stream
-                     "~D,~,6F,~,6F,~,6F,~,6F,~,6F,~,6F,~,6F,~,6F,~,6F,~,6F,~D,~D,~D~%"
+                     "~D,~,6F,~,6F,~,6F,~,6F,~,6F,~,6F,~,6F,~,6F,~,6F,~,6F,~D,~D,~D,~D,~D,~D~%"
                      index
                      (* 1000d0 (luvcraft-frame-sample-frame-seconds sample))
                      (* 1000d0
@@ -169,6 +208,9 @@ not a GPU timestamp.~%")
                      (* 1000d0
                         (luvcraft-frame-sample-surface-copy-encode-seconds
                          sample))
+                     (luvcraft-frame-sample-resident-chunk-count sample)
+                     (luvcraft-frame-sample-pending-production-count sample)
+                     (luvcraft-frame-sample-staged-chunk-count sample)
                      (luvcraft-frame-sample-chunk-count sample)
                      (luvcraft-frame-sample-draw-count sample)
                      (luvcraft-frame-sample-vertex-count sample))))

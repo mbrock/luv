@@ -2,8 +2,10 @@
 
 LUVCRAFT_BENCHMARK_FRAMES ?= 120
 LUVCRAFT_BENCHMARK_CSV ?= build/luvcraft-metal-benchmark.csv
+LUVCRAFT_BENCHMARK_SCENARIO ?= steady
+LUVCRAFT_STREAMING_BENCHMARK_CSV ?= build/luvcraft-metal-streaming-benchmark.csv
 
-.PHONY: all luvcraft run test parinfer-check shader-validate msl-validate smoke metal-smoke metal-benchmark mcluv readme-screenshots wiki wiki-cli objective-c-probe metal-clear metal-shader metal-pipeline metal-draw slug-proof clean
+.PHONY: all luvcraft run test parinfer-check shader-validate msl-validate smoke metal-smoke metal-benchmark metal-streaming-benchmark mcluv readme-screenshots wiki wiki-cli objective-c-probe metal-clear metal-shader metal-pipeline metal-draw slug-proof clean
 
 all: luvcraft
 
@@ -79,7 +81,10 @@ metal-smoke: luvcraft
 
 metal-benchmark: luvcraft
 	mkdir -p build
-	./scripts/dev ./build/luvcraft --metal-benchmark $(LUVCRAFT_BENCHMARK_FRAMES) $(LUVCRAFT_BENCHMARK_CSV)
+	./scripts/dev ./build/luvcraft --metal-benchmark $(LUVCRAFT_BENCHMARK_FRAMES) $(LUVCRAFT_BENCHMARK_CSV) $(LUVCRAFT_BENCHMARK_SCENARIO)
+
+metal-streaming-benchmark:
+	$(MAKE) metal-benchmark LUVCRAFT_BENCHMARK_SCENARIO=streaming LUVCRAFT_BENCHMARK_CSV=$(LUVCRAFT_STREAMING_BENCHMARK_CSV)
 
 mcluv:
 	./scripts/dev sbcl --script mcclim/build.lisp
