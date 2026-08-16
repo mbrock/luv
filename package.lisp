@@ -596,6 +596,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:block-mesher
            #:exposed-face-mesher
            #:block-mesh
+           #:block-mesh-vertex-declaration
            #:block-mesh-vertices
            #:block-mesh-vertex-count
            #:block-mesh-face-count

@@ -754,9 +754,26 @@ Audit so far:
   Structural counts such as shadow-map resolution, mesh stride, vertex count,
   and format version remain ordinary constants.
 
-Next: give packed products declarations with repeated layouts, and decide how
-ordinary function parameters publish boundary meaning without turning direct
-Lisp into ceremony.
+The interleaved block-mesh vertex vector now carries a repeated 12-lane
+product declaration (#Q7M4PF), checked against the live block-surface vertex
+shader contract.  Next: resolve context-dependent work-item products, and
+decide how ordinary function parameters publish boundary meaning without
+turning direct Lisp into ceremony.
+
+** DONE Describe the repeated block-mesh vertex product
+:PROPERTIES:
+:ID: Q7M4PF
+:END:
+
+One =block-mesh= retains the declaration identity current when its flat
+single-float vector is constructed.  The declaration repeats a fixed product
+at stride 12: cell-valued world position, texture UV, ambient occlusion,
+world direction, normalized sky and block light, and material emission.
+Construction checks the physical vector representation and exact
+=vertex-count * stride= lane count; combination preserves one declaration
+identity rather than silently relabeling copied lanes.  A luvcraft test
+flattens the actual four location-ordered vertex-stage inputs and requires its
+quantity layout to equal the CPU product.
 
 * A possible Lisp vocabulary
 :PROPERTIES:

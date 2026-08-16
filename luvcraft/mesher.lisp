@@ -16,9 +16,39 @@
     :reader exposed-face-mesher-absent-neighbor-policy)))
 
 (defclass block-mesh ()
-  ((vertices :initarg :vertices :reader block-mesh-vertices)
+  ((vertex-declaration
+    :initarg :vertex-declaration
+    :initform (luv.arithmetic:value-declaration-for :block-mesh-vertices)
+    :reader block-mesh-vertex-declaration)
+   (vertices :initarg :vertices :reader block-mesh-vertices)
    (vertex-count :initarg :vertex-count :reader block-mesh-vertex-count)
    (face-count :initarg :face-count :reader block-mesh-face-count)))
+
+(defmethod initialize-instance :after ((mesh block-mesh) &key)
+  (let* ((declaration (block-mesh-vertex-declaration mesh))
+         (layout (luv.arithmetic:declaration-quantity-layout declaration))
+         (vertices (block-mesh-vertices mesh)))
+    (unless (typep vertices
+                   (luv.arithmetic:declaration-representation-type declaration))
+      (error "Block mesh vertices ~S do not satisfy ~S."
+             (type-of vertices)
+             (luv.arithmetic:declaration-representation-type declaration)))
+    (unless (typep layout 'luv.arithmetic:repeated-quantity-layout)
+      (error "Block mesh declaration has no repeated vertex layout: ~S."
+             declaration))
+    (unless (= (length vertices)
+               (* (block-mesh-vertex-count mesh)
+                  (luv.arithmetic:repeated-quantity-layout-stride layout)))
+      (error "Block mesh has ~D lanes for ~D declared vertices at stride ~D."
+             (length vertices) (block-mesh-vertex-count mesh)
+             (luv.arithmetic:repeated-quantity-layout-stride layout)))))
+
+(defun merge-block-mesh-vertex-declaration (accumulator mesh)
+  "Preserve one exact layout identity while concatenating MESH products."
+  (let ((declaration (block-mesh-vertex-declaration mesh)))
+    (when (and accumulator (not (eq accumulator declaration)))
+      (error "Cannot combine block meshes carrying different vertex layouts."))
+    declaration))
 
 (defclass block-mesh-snapshot ()
   ((key :initarg :key :reader block-mesh-snapshot-key)
@@ -597,14 +627,22 @@ normalized to 0..1."
   "Make a combined compatibility mesh from independently meshed chunks."
   (let ((vertices (make-array 0 :element-type 'single-float
                                 :adjustable t :fill-pointer 0))
+        (vertex-declaration nil)
         (vertex-count 0)
         (face-count 0))
     (dolist (chunk (resident-world-chunks world))
       (let ((mesh (mesh-block-chunk mesher world chunk)))
+        (setf vertex-declaration
+              (merge-block-mesh-vertex-declaration vertex-declaration mesh))
         (loop for component across (block-mesh-vertices mesh)
               do (vector-push-extend component vertices))
         (incf vertex-count (block-mesh-vertex-count mesh))
         (incf face-count (block-mesh-face-count mesh))))
-    (make-instance 'block-mesh :vertices vertices
+    (make-instance 'block-mesh
+                               :vertex-declaration
+                               (or vertex-declaration
+                                   (luv.arithmetic:value-declaration-for
+                                    :block-mesh-vertices))
+                               :vertices vertices
                                :vertex-count vertex-count
                                :face-count face-count)))

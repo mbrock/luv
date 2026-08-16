@@ -326,15 +326,23 @@ invalidate a mesh without impersonating an authored edit, and the stamp
   "Return a combined, inspectable snapshot of SESSION's chunk meshes."
   (let ((vertices (make-array 0 :element-type 'single-float
                                 :adjustable t :fill-pointer 0))
+        (vertex-declaration nil)
         (vertex-count 0)
         (face-count 0))
     (dolist (product (luvcraft-session-products-in-order session))
       (let ((mesh (luvcraft-chunk-product-mesh product)))
+        (setf vertex-declaration
+              (merge-block-mesh-vertex-declaration vertex-declaration mesh))
         (loop for component across (block-mesh-vertices mesh)
               do (vector-push-extend component vertices))
         (incf vertex-count (block-mesh-vertex-count mesh))
         (incf face-count (block-mesh-face-count mesh))))
-    (make-instance 'block-mesh :vertices vertices
+    (make-instance 'block-mesh
+                               :vertex-declaration
+                               (or vertex-declaration
+                                   (luv.arithmetic:value-declaration-for
+                                    :block-mesh-vertices))
+                               :vertices vertices
                                :vertex-count vertex-count
                                :face-count face-count)))
 

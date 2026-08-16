@@ -227,6 +227,64 @@
           (ok (luv.world.fields:materialized-field-current-p
                materialization name)))))))
 
+(defun shader-input-product-layout (specification)
+  "Flatten location-ordered shader inputs into one test-side product layout."
+  (let ((offset 0) (projections nil))
+    (dolist (input
+             (sort (copy-list
+                    (luv.spir-v:shader-specification-inputs specification))
+                   #'< :key #'luv.spir-v:shader-interface-location))
+      (let* ((width
+               (luv.spir-v:shader-type-component-count
+                (luv.arithmetic:declaration-representation-type input)))
+             (whole
+               (luv.arithmetic:declaration-quantity-specification input))
+             (layout (luv.arithmetic:declaration-quantity-layout input)))
+        (when whole
+          (push (luv.arithmetic:make-quantity-projection
+                 (loop for position below width collect (+ offset position))
+                 whole)
+                projections))
+        (when layout
+          (dolist (projection
+                   (luv.arithmetic:quantity-layout-projections layout))
+            (push
+             (luv.arithmetic:make-quantity-projection
+              (mapcar (lambda (position) (+ offset position))
+                      (luv.arithmetic:quantity-projection-positions projection))
+              (luv.arithmetic:quantity-projection-specification projection))
+             projections)))
+        (incf offset width)))
+    (luv.arithmetic:make-quantity-layout offset (nreverse projections))))
+
+(deftest block-meshes-carry-a-repeated-product-matching-the-shader-contract
+  (let* ((world (make-block-world :chunk-width 2
+                                  :chunk-height 2
+                                  :chunk-depth 2))
+         (chunk (ensure-world-chunk world 0 0 0))
+         (mesh (mesh-block-chunk (make-instance 'exposed-face-mesher)
+                                 world chunk))
+         (declaration (block-mesh-vertex-declaration mesh))
+         (layout (luv.arithmetic:declaration-quantity-layout declaration))
+         (element
+           (luv.arithmetic:repeated-quantity-layout-element-layout layout))
+         (shader-layout
+           (shader-input-product-layout
+            (luv.spir-v:shader-specification-for :block-surface :vertex))))
+    (ok (eq declaration
+            (luv.arithmetic:value-declaration-for :block-mesh-vertices)))
+    (ok (typep (block-mesh-vertices mesh)
+               (luv.arithmetic:declaration-representation-type declaration)))
+    (ok (= 12 (luv.arithmetic:repeated-quantity-layout-stride layout)))
+    (ok (luv.arithmetic:quantity-layout= element shader-layout))
+    (ok (= (length (block-mesh-vertices mesh))
+           (* 12 (block-mesh-vertex-count mesh))))
+    (ok (signals
+         (make-instance 'block-mesh
+                        :vertices (make-array 11 :element-type 'single-float)
+                        :vertex-count 1 :face-count 0)
+         'error))))
+
 (deftest cpu-trace-zones-are-nested-reusable-and-bounded
   (let ((trace (make-cpu-trace :label "test")))
     (with-cpu-trace (trace)
