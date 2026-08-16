@@ -21,10 +21,12 @@
 (math:define-quantity :world-direction :kind :unit-direction
   :components
   (:world-x-direction :world-y-direction :world-z-direction))
-(math:define-quantity :world-distance :kind :lattice-coordinate)
+(math:define-quantity :world-distance :kind :lattice-coordinate
+  :non-negative-p t)
 (math:define-quantity :ray-distance :kind :lattice-coordinate
   :non-negative-p t)
 (math:define-quantity :world-position :kind :lattice-coordinate
+  :character :point
   :components (:world-x-position :world-y-position :world-z-position))
 (math:define-quantity :world-velocity :kind :lattice-velocity
   :components (:world-x-velocity :world-y-velocity :world-z-velocity))

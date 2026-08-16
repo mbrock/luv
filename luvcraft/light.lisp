@@ -153,7 +153,7 @@ resident."))
      (:constructor %make-light-removal (coordinate level)))
   (coordinate nil :type world-coordinate :read-only t
               :quantity (:quantity :world-position :unit :cell
-                         :tensor-order 1 :affine-p t))
+                         :tensor-order 1))
   ;; LEVEL's sky/block quantity is owned by the queue which admits the item.
   (level 0 :type (unsigned-byte 8) :read-only t))
 

@@ -65,7 +65,8 @@
            (math:make-quantity-specification
             :shadow-depth :affine-p t))
          (difference
-           (math:make-quantity-specification :shadow-depth))
+           (math:make-quantity-specification
+            :shadow-depth :character :difference))
          (moved (math:derive-quantity-specification '- point difference))
          (separation (math:derive-quantity-specification '- point point)))
     (ok (math:quantity-specification-affine-p moved))
@@ -76,7 +77,8 @@
                  'math:quantity-operation-error))))
 
 (deftest dimensionless-scalar-scaling-preserves-semantic-identity
-  (let* ((bias (math:make-quantity-specification :shadow-depth))
+  (let* ((bias (math:make-quantity-specification
+                :shadow-depth :character :difference))
          (number (math:make-quantity-specification nil))
          (scaled (math:derive-quantity-specification '* number bias)))
     (ok (math:quantity-specification= scaled bias))))

@@ -33,11 +33,11 @@
 (luv.arithmetic:define-quantity-constant
     +luvcraft-shadow-base-bias+ 0.00045
   :type single-float
-  :quantity (:quantity :shadow-depth :unit :one))
+  :quantity (:quantity :shadow-depth :unit :one :character :difference))
 (luv.arithmetic:define-quantity-constant
     +luvcraft-shadow-slope-bias+ 0.0015
   :type single-float
-  :quantity (:quantity :shadow-depth :unit :one))
+  :quantity (:quantity :shadow-depth :unit :one :character :difference))
 (luv.arithmetic:define-quantity-constant
     +luvcraft-shadow-minimum-filter-radius+ 2.0
   :type single-float

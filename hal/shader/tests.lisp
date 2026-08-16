@@ -289,15 +289,13 @@
                '("interpret"
                  ("*" "albedo"
                   ("+" "sky-light" "sun-light" "local-light"))
-                 "quantity" "linear-rgb" "unit" "one"
-                 "character" "absolute")))
+                 "quantity" "linear-rgb" "unit" "one")))
     (ok (equal (form-names
                 (spv:shader-expression-form
                  (spv:shader-binding-expression radiance)))
                '("+" "reflected"
                  ("interpret" ("*" "albedo" "emission-input")
-                  "quantity" "linear-rgb" "unit" "one"
-                  "character" "absolute"))))
+                  "quantity" "linear-rgb" "unit" "one"))))
     (ok (equal (form-names
                 (spv:shader-expression-form
                  (spv:shader-binding-expression fogged)))
@@ -658,12 +656,12 @@
                 '(:stage :fragment
                   :inputs
                   ((receiver-depth :float :location 0
-                                   :quantity :shadow-depth :affine-p t)
+                                   :quantity :shadow-depth)
                    (bias :float :location 1
-                         :quantity :shadow-depth))
+                         :quantity :shadow-depth :character :difference))
                   :outputs
                   ((biased-depth :float :location 0
-                                 :quantity :shadow-depth :affine-p t)))
+                                 :quantity :shadow-depth)))
                 '(:stage :fragment
                   :inputs ((receiver-depth :float :location 0)
                            (bias :float :location 1))
@@ -1115,6 +1113,7 @@
                 (math:quantity-specification-name gradient)))
         (ok (eq :shadow-depth
                 (math:quantity-specification-name blocker-separation)))
+        (ok (math:quantity-specification-absolute-p blocker-separation))
         (ok (eq :shadow-filter-radius
                 (math:quantity-specification-name filter-radius)))
         (ok (eq :sample-count
@@ -1123,6 +1122,83 @@
                 (math:quantity-specification-name rgba)))
         (ok (eq :relative-color-signal
                 (math:quantity-specification-kind rgba)))))))
+
+(deftest production-quantity-vocabulary-supplies-character-defaults
+  (flet ((specification (name &optional (unit :one))
+           (math:make-quantity-specification name :unit unit)))
+    (dolist (name '(:world-position :texture-uv :shadow-uv :shadow-depth
+                    :clip-coordinate))
+      (ok (math:quantity-specification-affine-p
+           (specification name (if (eq name :world-position) :cell :one)))))
+    (dolist (name '(:world-distance :linear-rgb :linear-rgba :opacity
+                    :ambient-occlusion :fog-amount :day-factor
+                    :sky-light-level :block-light-level :material-emission
+                    :shadow-filter-radius :view-distance))
+      (let ((quantity
+              (specification name
+                             (if (member name '(:world-distance :view-distance))
+                                 :cell
+                                 :one))))
+        (ok (math:quantity-specification-absolute-p quantity))
+        (ok (math:quantity-specification-non-negative-p quantity))))))
+
+(deftest production-points-and-amounts-reject-invalid-arithmetic
+  (labels ((failure-for (form)
+             (handler-case
+                 (progn
+                   (spv:parse-shader-specification
+                    'invalid-production-quantity-operation
+                    '(:stage :fragment
+                      :outputs ((result :float :location 0)))
+                    `((set-output result ,form)))
+                   nil)
+               (spv:shader-language-error (condition) condition))))
+    (let* ((negation
+             '(- (quantity 1.0 :quantity :opacity :unit :one)))
+           (point-addition
+             '(+ (quantity 0.0 :quantity :world-x-position :unit :cell)
+                 (quantity 1.0 :quantity :world-x-position :unit :cell)))
+           (negation-error (failure-for negation))
+           (point-error (failure-for point-addition)))
+      (ok (eq :invalid-quantity-operation
+              (spv:shader-language-error-reason negation-error)))
+      (ok (eq :cannot-negate-amount
+              (spv::shader-language-error-details negation-error)))
+      (ok (equal negation (spv::shader-language-error-form negation-error)))
+      (ok (eq :invalid-quantity-operation
+              (spv:shader-language-error-reason point-error)))
+      (ok (eq :cannot-add-points
+              (spv::shader-language-error-details point-error)))
+      (ok (equal point-addition
+                 (spv::shader-language-error-form point-error))))))
+
+(deftest production-crosshair-composes-linear-rgb-with-opacity
+  (let* ((specification (spv:block-world-crosshair-fragment-specification))
+         (ink (first (spv:shader-specification-inputs specification)))
+         (rgba (binding-named 'rgba specification))
+         (ink-quantity
+           (spv:shader-declaration-quantity-specification ink))
+         (opaque-quantity
+           (spv:shader-expression-quantity-specification
+            (find-if
+             (lambda (expression)
+               (let ((quantity
+                       (spv:shader-expression-quantity-specification
+                        expression)))
+                 (and quantity
+                      (eq :opacity
+                          (math:quantity-specification-name quantity)))))
+             (spv:shader-specification-expressions specification))))
+         (rgba-quantity
+           (spv:shader-expression-quantity-specification
+            (spv:shader-binding-expression rgba))))
+    (ok (eq :linear-rgb
+            (math:quantity-specification-name ink-quantity)))
+    (ok (eq :opacity
+            (math:quantity-specification-name opaque-quantity)))
+    (ok (eq :linear-rgba
+            (math:quantity-specification-name rgba-quantity)))
+    (ok (math:quantity-specification-non-negative-p rgba-quantity))))
 
 (deftest shadow-visibility-is-a-source-abstraction-over-core-math
   (ok (spv:shader-abstraction-p 'spv:shadow-visibility))
@@ -1133,15 +1209,15 @@
             '(:stage :fragment
               :inputs
               ((uv :vec2 :location 0
-                   :quantity :shadow-uv :affine-p t)
+                   :quantity :shadow-uv)
                (receiver-depth :float :location 1
-                               :quantity :shadow-depth :affine-p t)
+                               :quantity :shadow-depth)
                (receiver-depth-gradient :vec2 :location 2
                                         :quantity :shadow-depth-gradient)
                (texel-size :vec2 :location 3
-                           :quantity :shadow-uv)
+                           :quantity :shadow-uv :character :difference)
                (bias :float :location 4
-                     :quantity :shadow-depth)
+                     :quantity :shadow-depth :character :difference)
                (radius :float :location 5
                        :quantity :shadow-filter-radius))
               :outputs ((visibility :float :location 0))

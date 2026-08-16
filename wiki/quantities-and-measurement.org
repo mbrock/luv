@@ -389,7 +389,7 @@ Done when: satisfied — the algebra is in place and inert for the current
 vocabulary.  Annotating luvcraft's amounts, which changes what production
 materials mean, is #9ZK7Q7.
 
-* NEXT Declare luvcraft's amounts absolute and non-negative
+* DONE Declare luvcraft's amounts absolute and non-negative
 :PROPERTIES:
 :ID: 9ZK7Q7
 :END:
@@ -402,22 +402,35 @@ block-world vocabulary state its truth: =:opacity=, =:ambient-occlusion=,
 =:world-position=, =:shadow-uv=, =:texture-uv=, =:shadow-depth= are points
 by definition rather than by per-site =:affine-p t=.
 
-Evidence to gather:
+Evidence:
 
-- Each annotated definition, with the ABI declarations dropping per-site
-  =:affine-p t= where the definition now supplies it.
-- The production materials re-checked: every place they subtract two
-  absolutes or interpret a difference back to an amount is found and either
-  accepted as an explicit promotion or rewritten; the seven modules stay
-  byte-identical since the character is erased at lowering.
-- One deliberately wrong expression — negating =:opacity=, or adding two
-  =:world-position= points — failing at parse time with provenance, where
-  the first is not caught before this mark.
-- The smoke MD5 unchanged from =edc597168a3ec79a04c6d2af53c5b1a5=.
+- =world-position=, =shadow-uv=, =texture-uv=, =shadow-depth=, and
+  =clip-coordinate= are points at their definitions.  The listed proportions,
+  colour signals, distances, and filter radius are definition-level
+  non-negative absolutes.  Production slots, packed layouts, constants, and
+  shader declarations now omit redundant character spellings; only real
+  differences such as shadow texel size and receiver bias override a default.
+- Compiling the stricter production graph exposed rather than concealed four
+  distinctions: homogeneous clip XYZ/W is a heterogeneous representation;
+  clip coordinates must cross the chosen zero origin before scaling; shadow
+  texel offsets and depth corrections are differences; and clamped blocker
+  separation is explicitly promoted from a signed depth difference to an
+  absolute amount.  The arithmetic test fixtures also had to stop borrowing
+  =shadow-depth= while silently assuming its old difference default.
+- =production-points-and-amounts-reject-invalid-arithmetic= proves that
+  negating =opacity= reports =cannot-negate-amount= and adding two
+  =world-x-position= points reports =cannot-add-points=.  Both shader errors
+  retain the exact offending source form.  The production quantity and shadow
+  tests inspect the inherited characters and deliberate overrides.
+- A detached worktree at =2bd3dfe= supplied the baseline.  All seven
+  block-world SPIR-V modules are byte-identical after the migration and pass
+  =spirv-val=; in particular the fragment hash remains =da53933e…= and the sky
+  vertex hash =2bff3dd9…=.  =make smoke= still produces
+  =edc597168a3ec79a04c6d2af53c5b1a5=.
 
-Done when: the vocabulary is annotated, the materials compile under the
-stricter algebra with byte-identical output, and the two wrong expressions
-are tests.
+Done when: satisfied.  The vocabulary owns the defaults, production materials
+compile under the stricter algebra without codegen drift, and invalid point
+and amount arithmetic has source-level regression tests.
 
 * Tensor order is independent of dimension
 :PROPERTIES:
@@ -1581,7 +1594,7 @@ second checked operation produces shadow UV/depth; both production vertex
 stages use the shared semantics; point/direction and incompatible-space uses
 fail; and both validated binaries remain byte-identical.
 
-* TODO Give the remaining crosshair colour ABI meaning
+* DONE Give the remaining crosshair colour ABI meaning
 :PROPERTIES:
 :ID: NXA19H
 :END:
@@ -1591,15 +1604,17 @@ pipeline.  Its literal vertex module carries an RGB ink tuple into the
 mathematical fragment method, where that boundary should state linear RGB and
 the final alpha construction should state opacity and linear RGBA explicitly.
 
-Evidence: #S00PRF leaves the crosshair fragment as the only production
-mathematical shader whose meaningful numeric interface is wholly raw.  Its
-vertex half is intentionally literal SPIR-V, so the fragment declaration is a
-real external-meaning boundary rather than an ordinary pass-through value.
+Evidence: the mathematical crosshair vertex and fragment interfaces carry
+=linear-rgb=, the fragment constructs its fourth lane from an explicit
+=opacity= quantity, and the heterogeneous tuple crosses one visible
+=representation=/=assume-quantity= boundary into =linear-rgba=.  The production
+test inspects all three meanings.  The general quantity tests reject colour and
+proportion mixing, while #9ZK7Q7 adds the production amount failures.  Both
+crosshair modules pass =spirv-val= and are byte-identical to =2bd3dfe=
+(fragment =d89e76bb…=, vertex =2577a6d3…=).
 
-Done when: the crosshair fragment input is linear RGB, its alpha lane is an
-opacity, its output derives linear RGBA through a checked interpretation, a
-colour/proportion misuse is rejected, and its validated SPIR-V stays
-byte-identical.
+Done when: satisfied.  Every crosshair colour lane has meaning, the packed
+RGBA boundary is explicit and checked, and lowering is unchanged.
 
 * An initial block-world quantity map
 :PROPERTIES:

@@ -27,8 +27,7 @@
                    :reader block-kind-light-emission)
    (surface-emission :initarg :surface-emission :initform 0.0
                      :type real
-                     :quantity (:quantity :material-emission :unit :one
-                                :character :absolute)
+                     :quantity (:quantity :material-emission :unit :one)
                      :reader block-kind-surface-emission))
   (:metaclass luv.arithmetic.records:quantity-class))
 

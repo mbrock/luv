@@ -12,11 +12,11 @@
 (luv.arithmetic:define-quantity-constant
     +luvcraft-camera-near-distance+ 0.1
   :type single-float
-  :quantity (:quantity :view-distance :unit :cell :character :absolute))
+  :quantity (:quantity :view-distance :unit :cell))
 (luv.arithmetic:define-quantity-constant
     +luvcraft-camera-far-distance+ 180.0
   :type single-float
-  :quantity (:quantity :view-distance :unit :cell :character :absolute))
+  :quantity (:quantity :view-distance :unit :cell))
 (luv.arithmetic:define-quantity-constant
     +luvcraft-camera-vertical-field-of-view+ 1.2217305
   :type single-float
@@ -28,7 +28,7 @@
              :initform (make-vec3 8.0 11.0 -6.0)
              :type vec3
              :quantity (:quantity :world-position :unit :cell
-                        :tensor-order 1 :character :point)
+                        :tensor-order 1)
              :accessor camera-position)
    (yaw :initarg :yaw :initform 0.0 :type real
         :quantity (:quantity :camera-yaw :unit :radian)
@@ -127,7 +127,7 @@ FRAME-UNIFORM-DATA from the session's sky clock and profile."
 (luv.arithmetic:define-quantity-constant
     +player-step-height+ 1d0
   :type double-float
-  :quantity (:quantity :world-distance :unit :cell :character :absolute))
+  :quantity (:quantity :world-distance :unit :cell))
 (luv.arithmetic:define-quantity-constant
     +player-terminal-fall-speed+ -50d0
   :type double-float
@@ -137,7 +137,7 @@ FRAME-UNIFORM-DATA from the session's sky clock and profile."
 (luv.arithmetic.lisp:define-lisp-arithmetic-function
     %predict-world-position
     ((position :quantity :world-position :unit :cell
-               :tensor-order 1 :character :point)
+               :tensor-order 1)
      (velocity :quantity :world-velocity
                :unit ((:cell 1) (:second -1)) :tensor-order 1)
      (elapsed :quantity :frame-duration :unit :second))
@@ -152,7 +152,7 @@ FRAME-UNIFORM-DATA from the session's sky clock and profile."
              :initform (make-vec3 0d0 0d0 0d0)
              :type vec3
              :quantity (:quantity :world-position :unit :cell
-                        :tensor-order 1 :character :point)
+                        :tensor-order 1)
              :accessor player-position)
    (velocity :initarg :velocity
              :initform (make-vec3 0d0 0d0 0d0)

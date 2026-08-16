@@ -18,8 +18,8 @@
   :domain-affine-p t
   :codomain-type :vec3
   :codomain-components
-  ((:xy :quantity :shadow-uv :unit :one :affine-p t)
-   (:z :quantity :shadow-depth :unit :one :affine-p t))
+  ((:xy :quantity :shadow-uv :unit :one)
+   (:z :quantity :shadow-depth :unit :one))
   :coordinate-scale (1/2 1/2 1)
   :coordinate-offset (1/2 1/2 0))
 
@@ -31,7 +31,7 @@
     '((camera-vector :vec4      ; camera position, w unused
                      :components
                      ((:xyz :quantity :world-position
-                            :unit :cell :affine-p t)))
+                            :unit :cell)))
       (right-vector :vec4
                     :components
                     ((:xyz :quantity :world-direction :unit :one)))
@@ -57,31 +57,29 @@
                    (:w :quantity :day-factor :unit :one)))
       (sun-color-vector :vec4   ; sun colour, angular width
                         :components
-                        ((:xyz :quantity :linear-rgb :unit :one
-                               :character :absolute)
+                        ((:xyz :quantity :linear-rgb :unit :one)
                          (:w :quantity :sun-disc-coordinate :unit :one)))
       (zenith-vector :vec4      ; zenith colour, w unused
                      :components
-                     ((:xyz :quantity :linear-rgb :unit :one
-                            :character :absolute)))
+                     ((:xyz :quantity :linear-rgb :unit :one)))
       (horizon-vector :vec4     ; horizon colour, w unused
                       :components
-                      ((:xyz :quantity :linear-rgb :unit :one
-                             :character :absolute)))
+                      ((:xyz :quantity :linear-rgb :unit :one)))
       (ambient-vector :vec4     ; ambient colour, exposure
                       :components
-                      ((:xyz :quantity :linear-rgb :unit :one
-                             :character :absolute)))
+                      ((:xyz :quantity :linear-rgb :unit :one)))
       (fog-color-vector :vec4   ; fog colour, w shadow diagnostic selector
                         :components
-                        ((:xyz :quantity :linear-rgb :unit :one
-                               :character :absolute)
+                        ((:xyz :quantity :linear-rgb :unit :one)
                          (:w :quantity :shadow-diagnostic :unit :one)))
       (shadow-control-vector :vec4 ; texel u/v, base bias, slope bias
                              :components
-                             ((:xy :quantity :shadow-uv :unit :one)
-                              (:z :quantity :shadow-depth :unit :one)
-                              (:w :quantity :shadow-depth :unit :one)))
+                             ((:xy :quantity :shadow-uv :unit :one
+                                   :character :difference)
+                              (:z :quantity :shadow-depth :unit :one
+                                  :character :difference)
+                              (:w :quantity :shadow-depth :unit :one
+                                  :character :difference)))
       (shadow-filter-vector :vec4 ; depth span, world/texel, min/max radius
                             :components
                             ((:x :quantity :world-distance :unit :cell)
@@ -100,11 +98,10 @@
     (:stage :vertex
      :inputs ((world-position :vec3 :location 0
                               :quantity :world-position
-                              :unit :cell :affine-p t)
+                              :unit :cell)
               (uv-shade-input :vec3 :location 1
                               :components
-                              ((:xy :quantity :texture-uv
-                                    :unit :one :affine-p t)
+                              ((:xy :quantity :texture-uv :unit :one)
                                (:z :quantity :ambient-occlusion :unit :one)))
               (normal-input :vec3 :location 2
                             :quantity :world-direction :unit :one)
@@ -116,8 +113,7 @@
      :outputs ((clip-position :vec4 :built-in :position)
                (uv-shade-output :vec3 :location 0
                                 :components
-                                ((:xy :quantity :texture-uv
-                                      :unit :one :affine-p t)
+                                ((:xy :quantity :texture-uv :unit :one)
                                  (:z :quantity :ambient-occlusion :unit :one)))
                (normal-output :vec3 :location 1
                               :quantity :world-direction :unit :one)
@@ -130,10 +126,10 @@
                               (:z :quantity :material-emission :unit :one)))
                (shadow-uv-output :vec2 :location 4
                                  :quantity :shadow-uv
-                                 :unit :one :affine-p t)
+                                 :unit :one)
                (shadow-depth-output :float :location 5
                                     :quantity :shadow-depth
-                                    :unit :one :affine-p t))
+                                    :unit :one))
      :resources
      ((frame-state :uniform-block :set 0 :binding 2
                    :members #.*frame-uniform-members*)))
@@ -168,7 +164,12 @@
          (clip-z (+ (interpret (* view-z z-scale)
                               :quantity :view-distance :unit :cell)
                     z-offset))
-         (clip (vec4 clip-x clip-y clip-z view-z))
+         ;; Homogeneous clip is a heterogeneous GPU representation: XYZ and W
+         ;; do not constitute one semantic vector quantity.
+         (clip (vec4 (representation clip-x)
+                     (representation clip-y)
+                     (representation clip-z)
+                     (representation view-z)))
          (shadow-projection
            (project-point :world-to-shadow world-position
                           shadow-row-x shadow-row-y
@@ -210,7 +211,7 @@
      :inputs
      ((uv-shade-input :vec3 :location 0
                       :components
-                      ((:xy :quantity :texture-uv :unit :one :affine-p t)
+                      ((:xy :quantity :texture-uv :unit :one)
                        (:z :quantity :ambient-occlusion :unit :one)))
       (normal-input :vec3 :location 1
                     :quantity :world-direction :unit :one)
@@ -221,22 +222,20 @@
                     (:y :quantity :block-light-level :unit :one)
                     (:z :quantity :material-emission :unit :one)))
       (shadow-uv-input :vec2 :location 4
-                       :quantity :shadow-uv :unit :one :affine-p t)
+                       :quantity :shadow-uv :unit :one)
       (shadow-depth-input :float :location 5
-                          :quantity :shadow-depth :unit :one :affine-p t))
+                          :quantity :shadow-depth :unit :one))
      :outputs ((color-output :vec4 :location 0))
      :resources ((block-atlas :texture-2d :set 0 :binding 0
                               :sample-components
-                              ((:rgb :quantity :linear-rgb :unit :one
-                                     :character :absolute)
+                              ((:rgb :quantity :linear-rgb :unit :one)
                                (:a :quantity :opacity :unit :one)))
                  (block-sampler :sampler :set 0 :binding 1)
                  (frame-state :uniform-block :set 0 :binding 2
                               :members #.*frame-uniform-members*)
                  (shadow-map :depth-texture-2d :set 0 :binding 3
                              :sample-components
-                             ((:x :quantity :shadow-depth
-                                  :unit :one :affine-p t)))
+                             ((:x :quantity :shadow-depth :unit :one)))
                  (shadow-sampler :sampler :set 0 :binding 4)
                  (shadow-comparison-sampler :sampler :set 0 :binding 5)))
   (let* ((uv-shade uv-shade-input)
@@ -249,18 +248,14 @@
          (shadow-u (swizzle shadow-coordinate :x))
          (shadow-v (swizzle shadow-coordinate :y))
          (shadow-in-bounds
-           (* (step (quantity 0.0 :quantity :shadow-u
-                              :unit :one :affine-p t)
+           (* (step (quantity 0.0 :quantity :shadow-u :unit :one)
                     shadow-u)
               (step shadow-u
-                    (quantity 1.0 :quantity :shadow-u
-                              :unit :one :affine-p t))
-              (step (quantity 0.0 :quantity :shadow-v
-                              :unit :one :affine-p t)
+                    (quantity 1.0 :quantity :shadow-u :unit :one))
+              (step (quantity 0.0 :quantity :shadow-v :unit :one)
                     shadow-v)
               (step shadow-v
-                    (quantity 1.0 :quantity :shadow-v
-                              :unit :one :affine-p t))))
+                    (quantity 1.0 :quantity :shadow-v :unit :one))))
          (shadow-texel-size (swizzle shadow-control-vector :xy))
          (shadow-base-bias (swizzle shadow-control-vector :z))
          (shadow-slope-bias (swizzle shadow-control-vector :w))
@@ -295,19 +290,28 @@
          (shadow-depth-gradient
            (interpret
             (vec2
-             (- (* (/ (dot normal shadow-right) shadow-normal-forward)
-                   shadow-span-ratio))
-             (- (* (/ (dot normal shadow-up) shadow-normal-forward)
-                   shadow-span-ratio)))
+             (- (assume-quantity
+                 (representation
+                  (* (/ (dot normal shadow-right) shadow-normal-forward)
+                     shadow-span-ratio))
+                 :quantity :shadow-depth-gradient :unit :one))
+             (- (assume-quantity
+                 (representation
+                  (* (/ (dot normal shadow-up) shadow-normal-forward)
+                     shadow-span-ratio))
+                 :quantity :shadow-depth-gradient :unit :one)))
             :quantity :shadow-depth-gradient :unit :one))
          (shadow-center-depth
            (swizzle
             (sample shadow-map shadow-sampler shadow-coordinate) :x))
          (receiver-depth shadow-depth-input)
          (shadow-blocker-separation
-           (max (quantity 0.0 :quantity :shadow-depth :unit :one)
-                (- (- receiver-depth shadow-bias)
-                   shadow-center-depth)))
+           (interpret
+            (max (quantity 0.0 :quantity :shadow-depth :unit :one
+                           :character :difference)
+                 (- (- receiver-depth shadow-bias)
+                    shadow-center-depth))
+            :quantity :shadow-depth :unit :one :character :absolute))
          (shadow-minimum-radius (swizzle shadow-filter-vector :z))
          (shadow-maximum-radius (swizzle shadow-filter-vector :w))
          (sun-angular-width (swizzle sun-color-vector :w))
@@ -352,44 +356,46 @@
          ;; a void; caves stay dark for the right reason.
          (sky-light
            (interpret (* ambient (+ 0.06 (* 1.34 sky-level)) ao)
-                      :quantity :linear-rgb :unit :one
-                      :character :absolute))
+                      :quantity :linear-rgb :unit :one))
          (sun-light
            (interpret
             (* sun-color
                (* n-dot-l sun-visibility day-factor direct-shadow))
-            :quantity :linear-rgb :unit :one :character :absolute))
+            :quantity :linear-rgb :unit :one))
          (torch-color
            (quantity (vec3 1.0 0.82 0.58)
-                     :quantity :linear-rgb :unit :one
-                     :character :absolute))
+                     :quantity :linear-rgb :unit :one))
          (local-light
            (interpret (* torch-color block-level)
-                      :quantity :linear-rgb :unit :one
-                      :character :absolute))
+                      :quantity :linear-rgb :unit :one))
          (albedo
            (swizzle (sample block-atlas block-sampler uv) :rgb))
          (reflected
            (interpret
             (* albedo (+ sky-light sun-light local-light))
-            :quantity :linear-rgb :unit :one :character :absolute))
+            :quantity :linear-rgb :unit :one))
          (radiance
            (+ reflected
               (interpret (* albedo emission-input)
-                         :quantity :linear-rgb :unit :one
-                         :character :absolute)))
+                         :quantity :linear-rgb :unit :one)))
          (fog-color (swizzle fog-color-vector :xyz))
          (fog-amount fog-input)
          (fogged (mix radiance fog-color fog-amount))
          (normal-rgba
-           (assume-quantity (vec4 (representation fogged) 1.0)
-                            :quantity :linear-rgba :unit :one
-                            :character :absolute))
+           (assume-quantity
+            (vec4
+             (representation fogged)
+             (representation
+              (quantity 1.0 :quantity :opacity :unit :one)))
+            :quantity :linear-rgba :unit :one))
          (shadow-diagnostic (swizzle fog-color-vector :w))
          (shadow-rgba
-           (interpret
-            (vec4 (vec3 direct-shadow direct-shadow direct-shadow) 1.0)
-            :quantity :linear-rgba :unit :one :character :absolute))
+           (assume-quantity
+            (vec4 (representation
+                   (vec3 direct-shadow direct-shadow direct-shadow))
+                  (representation
+                   (quantity 1.0 :quantity :opacity :unit :one)))
+            :quantity :linear-rgba :unit :one))
          (rgba (mix normal-rgba shadow-rgba shadow-diagnostic)))
     (set-output color-output rgba)))
 
@@ -435,8 +441,21 @@
          (y-scale (swizzle projection-vector :y))
          ;; Invert the block vertex projection: clip x,y back to view-space
          ;; slopes, including its y flip, so the ray agrees with the world.
-         (view-x (/ x x-scale))
-         (view-y (- (/ y y-scale)))
+         ;; These coordinates are measured from clip-space's zero origin.
+         ;; Representation makes that origin choice explicit and erased: no
+         ;; runtime subtraction is needed to treat either coordinate as a
+         ;; displacement before scaling it back into view space.
+         (clip-x-displacement
+           (assume-quantity (representation x)
+                            :quantity :clip-x-coordinate :unit :one
+                            :character :difference))
+         (clip-y-displacement
+           (assume-quantity (representation y)
+                            :quantity :clip-y-coordinate :unit :one
+                            :character :difference))
+         (view-x (/ clip-x-displacement x-scale))
+         (view-y
+           (- (/ clip-y-displacement y-scale)))
          (ray (+ (* right view-x) (* up view-y) forward))
          (clip (vec4 (representation x)
                      (representation y)
@@ -494,13 +513,15 @@
          (glow (* (expt alignment 24.0) 0.35))
          (sun-radiance
            (interpret (* sun-color (+ disc glow) day-factor)
-                      :quantity :linear-rgb :unit :one
-                      :character :absolute))
+                      :quantity :linear-rgb :unit :one))
          (rgb (+ base sun-radiance))
          (rgba
-           (assume-quantity (vec4 (representation rgb) 1.0)
-                            :quantity :linear-rgba :unit :one
-                            :character :absolute)))
+           (assume-quantity
+            (vec4
+             (representation rgb)
+             (representation
+              (quantity 1.0 :quantity :opacity :unit :one)))
+            :quantity :linear-rgba :unit :one)))
     (set-output color-output rgba)))
 
 (defun block-world-sky-fragment-specification ()
@@ -523,7 +544,7 @@
     (:stage :vertex
      :inputs ((world-position :vec3 :location 0
                               :quantity :world-position
-                              :unit :cell :affine-p t))
+                              :unit :cell))
      :outputs ((clip-position :vec4 :built-in :position))
      :resources
      ((frame-state :uniform-block :set 0 :binding 2
@@ -557,16 +578,14 @@
      :inputs ((screen-position :vec3 :location 0
                                :quantity :clip-coordinate :unit :one)
               (ink-input :vec3 :location 1
-                         :quantity :linear-rgb :unit :one
-                         :character :absolute))
+                         :quantity :linear-rgb :unit :one))
      :outputs ((clip-position :vec4 :built-in :position)
                (ink-output :vec3 :location 0
-                           :quantity :linear-rgb :unit :one
-                           :character :absolute)))
+                           :quantity :linear-rgb :unit :one)))
   (let* ((clip
-           (vec4 (swizzle screen-position :x)
-                 (swizzle screen-position :y)
-                 (swizzle screen-position :z)
+           (vec4 (representation (swizzle screen-position :x))
+                 (representation (swizzle screen-position :y))
+                 (representation (swizzle screen-position :z))
                  1.0)))
     (set-output clip-position clip)
     (set-output ink-output ink-input)))
@@ -579,14 +598,16 @@
     ((role (eql :block-crosshair)) (stage (eql :fragment)))
     (:stage :fragment
      :inputs ((ink-input :vec3 :location 0
-                         :quantity :linear-rgb :unit :one
-                         :character :absolute))
+                         :quantity :linear-rgb :unit :one))
      :outputs ((color-output :vec4 :location 0)))
   (let* ((ink ink-input)
          (rgba
-           (assume-quantity (vec4 (representation ink) 1.0)
-                            :quantity :linear-rgba :unit :one
-                            :character :absolute)))
+           (assume-quantity
+            (vec4
+             (representation ink)
+             (representation
+              (quantity 1.0 :quantity :opacity :unit :one)))
+            :quantity :linear-rgba :unit :one)))
     (set-output color-output rgba)))
 
 (defun block-world-crosshair-fragment-specification ()

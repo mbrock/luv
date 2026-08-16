@@ -1387,7 +1387,7 @@ shader source form made from core operators or other abstractions."
                    `(interpret
                      (* ,texel-size
                         (vec2 (* ,radius ,x) (* ,radius ,y)))
-                     :quantity :shadow-uv)))
+                     :quantity :shadow-uv :character :difference)))
              `(* ,weight
                  (shadow-depth-test
                   ,depth-texture ,sampler
@@ -1395,7 +1395,7 @@ shader source form made from core operators or other abstractions."
                   (+ ,receiver-depth
                      (interpret
                       (dot ,receiver-depth-gradient ,offset)
-                      :quantity :shadow-depth))
+                      :quantity :shadow-depth :character :difference))
                   ,bias)))))
     `(/ (+
          ,(tap 0.0 0.0 4.0)

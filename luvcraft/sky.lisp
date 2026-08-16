@@ -60,29 +60,27 @@ SLY can pause it, set a time, change its rate, or pin it without restarting.")
                 :quantity (:quantity :day-fraction :unit :one))
   (zenith-color #(0.0 0.0 0.0) :type (simple-vector 3)
                  :quantity (:quantity :linear-rgb :unit :one
-                            :tensor-order 1 :character :absolute))
+                            :tensor-order 1))
   (horizon-color #(0.0 0.0 0.0) :type (simple-vector 3)
                   :quantity (:quantity :linear-rgb :unit :one
-                             :tensor-order 1 :character :absolute))
+                             :tensor-order 1))
   (sun-color #(0.0 0.0 0.0) :type (simple-vector 3)
              :quantity (:quantity :linear-rgb :unit :one
-                        :tensor-order 1 :character :absolute))
+                        :tensor-order 1))
   (ambient-color #(0.0 0.0 0.0) :type (simple-vector 3)
                   :quantity (:quantity :linear-rgb :unit :one
-                             :tensor-order 1 :character :absolute))
+                             :tensor-order 1))
   (fog-color #(0.0 0.0 0.0) :type (simple-vector 3)
              :quantity (:quantity :linear-rgb :unit :one
-                        :tensor-order 1 :character :absolute))
+                        :tensor-order 1))
   (sun-angular-width 0.006 :type single-float
                      :quantity (:quantity :sun-angular-width :unit :radian))
   (exposure 1.0 :type single-float
             :quantity (:quantity :exposure :unit :one))
   (fog-near 0.0 :type single-float
-            :quantity (:quantity :view-distance :unit :cell
-                       :character :absolute))
+            :quantity (:quantity :view-distance :unit :cell))
   (fog-far 180.0 :type single-float
-           :quantity (:quantity :view-distance :unit :cell
-                      :character :absolute)))
+           :quantity (:quantity :view-distance :unit :cell)))
 
 (defstruct (sky-profile (:constructor %make-sky-profile))
   (keyframes #() :type simple-vector))
@@ -140,33 +138,30 @@ SLY can pause it, set a time, change its rate, or pin it without restarting.")
                  :quantity (:quantity :world-direction :unit :one
                             :tensor-order 1))
   (day-factor 1.0 :type single-float
-              :quantity (:quantity :day-factor :unit :one
-                         :character :absolute))
+              :quantity (:quantity :day-factor :unit :one))
   (sun-color #(0.0 0.0 0.0) :type (simple-vector 3)
              :quantity (:quantity :linear-rgb :unit :one
-                        :tensor-order 1 :character :absolute))
+                        :tensor-order 1))
   (sun-angular-width 0.006 :type single-float
                      :quantity (:quantity :sun-angular-width :unit :radian))
   (zenith-color #(0.0 0.0 0.0) :type (simple-vector 3)
                  :quantity (:quantity :linear-rgb :unit :one
-                            :tensor-order 1 :character :absolute))
+                            :tensor-order 1))
   (horizon-color #(0.0 0.0 0.0) :type (simple-vector 3)
                   :quantity (:quantity :linear-rgb :unit :one
-                             :tensor-order 1 :character :absolute))
+                             :tensor-order 1))
   (ambient-color #(0.0 0.0 0.0) :type (simple-vector 3)
                   :quantity (:quantity :linear-rgb :unit :one
-                             :tensor-order 1 :character :absolute))
+                             :tensor-order 1))
   (fog-color #(0.0 0.0 0.0) :type (simple-vector 3)
              :quantity (:quantity :linear-rgb :unit :one
-                        :tensor-order 1 :character :absolute))
+                        :tensor-order 1))
   (exposure 1.0 :type single-float
             :quantity (:quantity :exposure :unit :one))
   (fog-near 0.0 :type single-float
-            :quantity (:quantity :view-distance :unit :cell
-                       :character :absolute))
+            :quantity (:quantity :view-distance :unit :cell))
   (fog-far 180.0 :type single-float
-           :quantity (:quantity :view-distance :unit :cell
-                      :character :absolute)))
+           :quantity (:quantity :view-distance :unit :cell)))
 
 (defun sky-sun-direction (day-fraction)
   "The unit sun direction: rising at 0.25, zenith-adjacent at 0.5.

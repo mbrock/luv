@@ -22,28 +22,42 @@
   :dimension nil :parent :dimensionless)
 
 (math:define-quantity :shadow-uv :kind :normalized-coordinate
+  :character :point
   :components (:shadow-u :shadow-v))
 (math:define-quantity :texture-uv :kind :normalized-coordinate
+  :character :point
   :components (:texture-u :texture-v))
-(math:define-quantity :shadow-depth :kind :normalized-coordinate)
+(math:define-quantity :shadow-depth :kind :normalized-coordinate
+  :character :point)
 (math:define-quantity :sun-disc-coordinate :kind :normalized-coordinate)
 (math:define-quantity :shadow-depth-gradient :kind :normalized-gradient)
-(math:define-quantity :linear-rgb :kind :relative-color-signal)
-(math:define-quantity :linear-rgba :kind :relative-color-signal)
-(math:define-quantity :day-factor :kind :proportion)
-(math:define-quantity :opacity :kind :proportion)
-(math:define-quantity :ambient-occlusion :kind :proportion)
-(math:define-quantity :fog-amount :kind :proportion)
-(math:define-quantity :sky-light-level :kind :proportion)
-(math:define-quantity :block-light-level :kind :proportion)
-(math:define-quantity :material-emission :kind :proportion)
+(math:define-quantity :linear-rgb :kind :relative-color-signal
+  :non-negative-p t)
+(math:define-quantity :linear-rgba :kind :relative-color-signal
+  :non-negative-p t)
+(math:define-quantity :day-factor :kind :proportion
+  :non-negative-p t)
+(math:define-quantity :opacity :kind :proportion
+  :non-negative-p t)
+(math:define-quantity :ambient-occlusion :kind :proportion
+  :non-negative-p t)
+(math:define-quantity :fog-amount :kind :proportion
+  :non-negative-p t)
+(math:define-quantity :sky-light-level :kind :proportion
+  :non-negative-p t)
+(math:define-quantity :block-light-level :kind :proportion
+  :non-negative-p t)
+(math:define-quantity :material-emission :kind :proportion
+  :non-negative-p t)
 (math:define-quantity :sky-propagation-level :kind :sample-count
   :non-negative-p t)
 (math:define-quantity :block-propagation-level :kind :sample-count
   :non-negative-p t)
 (math:define-quantity :shadow-diagnostic :kind :control-signal)
-(math:define-quantity :shadow-filter-radius :kind :sample-count)
-(math:define-quantity :view-distance :kind :lattice-coordinate)
+(math:define-quantity :shadow-filter-radius :kind :sample-count
+  :non-negative-p t)
+(math:define-quantity :view-distance :kind :lattice-coordinate
+  :non-negative-p t)
 (math:define-quantity :player-half-width :kind :lattice-coordinate
   :non-negative-p t)
 (math:define-quantity :player-height :kind :lattice-coordinate
@@ -114,5 +128,6 @@
   :non-negative-p t)
 (math:define-quantity :projection-scale :kind :control-signal)
 (math:define-quantity :clip-coordinate :kind :normalized-coordinate
+  :character :point
   :components
   (:clip-x-coordinate :clip-y-coordinate :clip-z-coordinate))

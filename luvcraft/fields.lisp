@@ -28,10 +28,10 @@
      (list
       (projection '(0 1 2)
                   '(:quantity :world-position :unit :cell
-                    :tensor-order 1 :affine-p t))
+                    :tensor-order 1))
       (projection '(3 4)
                   '(:quantity :texture-uv :unit :one
-                    :tensor-order 1 :affine-p t))
+                    :tensor-order 1))
       (projection '(5) '(:quantity :ambient-occlusion :unit :one))
       (projection '(6 7 8)
                   '(:quantity :world-direction :unit :one :tensor-order 1))
@@ -72,7 +72,7 @@
      (list
       (projection '(0 1 2)
                   '(:quantity :world-position :unit :cell
-                    :tensor-order 1 :affine-p t))
+                    :tensor-order 1))
       (projection '(4 5 6)
                   '(:quantity :world-direction :unit :one :tensor-order 1))
       (projection '(8 9 10)
@@ -89,26 +89,24 @@
                   '(:quantity :world-direction :unit :one :tensor-order 1))
       (projection '(27) '(:quantity :day-factor :unit :one))
       (projection '(28 29 30)
-                  '(:quantity :linear-rgb :unit :one :tensor-order 1
-                    :character :absolute))
+                  '(:quantity :linear-rgb :unit :one :tensor-order 1))
       (projection '(31) '(:quantity :sun-disc-coordinate :unit :one))
       (projection '(32 33 34)
-                  '(:quantity :linear-rgb :unit :one :tensor-order 1
-                    :character :absolute))
+                  '(:quantity :linear-rgb :unit :one :tensor-order 1))
       (projection '(36 37 38)
-                  '(:quantity :linear-rgb :unit :one :tensor-order 1
-                    :character :absolute))
+                  '(:quantity :linear-rgb :unit :one :tensor-order 1))
       (projection '(40 41 42)
-                  '(:quantity :linear-rgb :unit :one :tensor-order 1
-                    :character :absolute))
+                  '(:quantity :linear-rgb :unit :one :tensor-order 1))
       (projection '(44 45 46)
-                  '(:quantity :linear-rgb :unit :one :tensor-order 1
-                    :character :absolute))
+                  '(:quantity :linear-rgb :unit :one :tensor-order 1))
       (projection '(47) '(:quantity :shadow-diagnostic :unit :one))
       (projection '(48 49)
-                  '(:quantity :shadow-uv :unit :one :tensor-order 1))
-      (projection '(50) '(:quantity :shadow-depth :unit :one))
-      (projection '(51) '(:quantity :shadow-depth :unit :one))
+                  '(:quantity :shadow-uv :unit :one :tensor-order 1
+                    :character :difference))
+      (projection '(50) '(:quantity :shadow-depth :unit :one
+                           :character :difference))
+      (projection '(51) '(:quantity :shadow-depth :unit :one
+                           :character :difference))
       (projection '(52) '(:quantity :world-distance :unit :cell))
       (projection '(53) '(:quantity :world-distance :unit :cell))
       (projection '(54) '(:quantity :shadow-filter-radius :unit :one))
@@ -223,8 +221,7 @@
     (luv.arithmetic:make-quantity-projection
      '(3 4 5)
      (luv.arithmetic:make-declared-quantity-specification
-      '(:quantity :linear-rgb :unit :one :tensor-order 1
-        :character :absolute))))))
+      '(:quantity :linear-rgb :unit :one :tensor-order 1))))))
 
 (defmethod luv.arithmetic:value-declaration-for
     ((name (eql :sky-vertices)))
