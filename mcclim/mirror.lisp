@@ -14,12 +14,20 @@
    (device
     :initarg :device
     :initform nil
-    :accessor mirror-device))
+    :accessor mirror-device)
+   (embedded-p
+    :initarg :embedded-p
+    :initform nil
+    :reader mirror-embedded-p))
   (:documentation
    "A McCLIM sheet's relationship with a luv presentation target.
 
 TARGET is initially a native canvas.  It is intentionally not part of the
 mirror's identity: a later target may be a texture presented on a 3D quad."))
+
+(defvar *embedded-mirror-target* nil)
+(defvar *embedded-mirror-context* nil)
+(defvar *embedded-mirror-device* nil)
 
 (defclass luv-raster-mirror (luv-mirror mcclim-render:image-mirror-mixin)
   ((texture
@@ -266,6 +274,8 @@ Conventional RUN-FRAME-TOP-LEVEL frames consume their own queues instead."
     (list (pattern-width image) (pattern-height image))))
 
 (defun ensure-raster-mirror-context (mirror)
+  (when (mirror-embedded-p mirror)
+    (return-from ensure-raster-mirror-context (mirror-context mirror)))
   (let* ((target (mirror-target mirror))
          (device
            (or (mirror-device mirror)
@@ -324,14 +334,14 @@ Conventional RUN-FRAME-TOP-LEVEL frames consume their own queues instead."
 
 (defmethod present-raster-mirror-texture
     ((mirror luv-raster-mirror) context texture (compositor null))
-  (declare (ignore mirror))
-  (luv:present-canvas-frame
-   context
-   (lambda (surface encoder)
-     (luv:encode
-      encoder
-      (luv:make-gpu-copy-texture-command
-       :source texture :destination surface)))))
+  (unless (mirror-embedded-p mirror)
+    (luv:present-canvas-frame
+     context
+     (lambda (surface encoder)
+       (luv:encode
+        encoder
+        (luv:make-gpu-copy-texture-command
+         :source texture :destination surface))))))
 
 (defgeneric release-raster-mirror-compositor (compositor))
 
@@ -359,7 +369,8 @@ Conventional RUN-FRAME-TOP-LEVEL frames consume their own queues instead."
              (let* ((image (mcclim-render:image-mirror-image mirror))
                     (size (raster-mirror-image-size mirror))
                     (context (ensure-raster-mirror-context mirror)))
-               (if (not (equal size (luv:canvas-extent context)))
+               (if (and (not (mirror-embedded-p mirror))
+                        (not (equal size (luv:canvas-extent context))))
                    ;; Swapchain creation is sometimes the first point where a
                    ;; Wayland compositor reveals its assigned size. Leave the
                    ;; raster dirty and let McCLIM lay it out before presenting.
@@ -398,8 +409,9 @@ Conventional RUN-FRAME-TOP-LEVEL frames consume their own queues instead."
 
 (defmethod release-mirror-presentation ((mirror luv-raster-mirror))
   (release-raster-mirror-compositor (mirror-compositor mirror))
-  (setf (mirror-compositor mirror) nil
-        (luv:canvas-clock (mirror-target mirror)) (luv:make-demand-clock))
+  (setf (mirror-compositor mirror) nil)
+  (unless (mirror-embedded-p mirror)
+    (setf (luv:canvas-clock (mirror-target mirror)) (luv:make-demand-clock)))
   (alexandria:when-let ((texture (mirror-texture mirror)))
     (luv:destroy texture)
     (setf (mirror-texture mirror) nil))
@@ -407,21 +419,29 @@ Conventional RUN-FRAME-TOP-LEVEL frames consume their own queues instead."
 
 (defmethod realize-mirror ((port luv-port) (sheet mirrored-sheet-mixin))
   (with-bounding-rectangle* (x y :width width :height height) sheet
-    (let* ((canvas (luv:make-sdl-canvas
-                    :title (sheet-title sheet)
-                    :x (floor x)
-                    :y (floor y)
-                    :width (max 1 (ceiling width))
-                    :height (max 1 (ceiling height))
-                    :visible-p nil))
+    (let* ((embedded-p (not (null *embedded-mirror-target*)))
+           (canvas (or *embedded-mirror-target*
+                       (luv:make-sdl-canvas
+                        :title (sheet-title sheet)
+                        :x (floor x)
+                        :y (floor y)
+                        :width (max 1 (ceiling width))
+                        :height (max 1 (ceiling height))
+                        :visible-p nil)))
            (region (make-rectangle* 0 0
                                     (max 1 (ceiling width))
                                     (max 1 (ceiling height))))
            (mirror (make-luv-mirror port sheet canvas region)))
-      (setf (luv:canvas-event-handler canvas) mirror)
+      (when embedded-p
+        (setf (slot-value mirror 'embedded-p) t
+              (mirror-context mirror) *embedded-mirror-context*
+              (mirror-device mirror) *embedded-mirror-device*))
+      (unless embedded-p
+        (setf (luv:canvas-event-handler canvas) mirror))
       (handler-case
           (progn
-            (luv:open-canvas canvas)
+            (unless embedded-p
+              (luv:open-canvas canvas))
             ;; REALIZE-MIRROR's standard :AROUND method normally installs the
             ;; direct mirror only after this primary method returns.  Geometry
             ;; initialization needs it sooner: without a native region the
@@ -430,20 +450,27 @@ Conventional RUN-FRAME-TOP-LEVEL frames consume their own queues instead."
             ;; Synchronize McCLIM with whatever logical geometry is observable
             ;; now. Presentation performs a second reconciliation if Wayland
             ;; reveals the compositor-assigned extent only at swapchain time.
-            (multiple-value-bind (actual-width actual-height)
-                (luv:canvas-logical-size canvas)
-              (setf (luv:canvas-width canvas) actual-width
-                    (luv:canvas-height canvas) actual-height)
-              (handle-event
-               sheet
-               (make-mirror-configuration-event
-                mirror actual-width actual-height 0)))
+            (if embedded-p
+                (handle-event
+                 sheet
+                 (make-mirror-configuration-event
+                  mirror (max 1 (ceiling width))
+                  (max 1 (ceiling height)) 0))
+                (multiple-value-bind (actual-width actual-height)
+                    (luv:canvas-logical-size canvas)
+                  (setf (luv:canvas-width canvas) actual-width
+                        (luv:canvas-height canvas) actual-height)
+                  (handle-event
+                   sheet
+                   (make-mirror-configuration-event
+                    mirror actual-width actual-height 0))))
             (push mirror (port-mirrors port))
             mirror)
         (error (condition)
           (when (eq (sheet-direct-mirror sheet) mirror)
             (setf (sheet-direct-mirror sheet) nil))
-          (when (member (luv:canvas-state canvas) '(:opening :open))
+          (when (and (not embedded-p)
+                     (member (luv:canvas-state canvas) '(:opening :open)))
             (ignore-errors (luv:close-canvas canvas)))
           (error condition))))))
 
@@ -458,10 +485,11 @@ Conventional RUN-FRAME-TOP-LEVEL frames consume their own queues instead."
     (when mirror
       (let ((target (mirror-target mirror)))
         (release-mirror-presentation mirror)
-        (setf (luv:canvas-event-handler target) nil)
-        (when (member (luv:canvas-state target) '(:opening :open))
-          (luv:close-canvas target))
-        (release-mirror-device mirror)
+        (unless (mirror-embedded-p mirror)
+          (setf (luv:canvas-event-handler target) nil)
+          (when (member (luv:canvas-state target) '(:opening :open))
+            (luv:close-canvas target))
+          (release-mirror-device mirror))
         (setf (mirror-context mirror) nil))
       (setf (port-mirrors port)
             (delete mirror (port-mirrors port))))))
@@ -470,7 +498,8 @@ Conventional RUN-FRAME-TOP-LEVEL frames consume their own queues instead."
   (declare (ignore port))
   (alexandria:when-let ((mirror (sheet-direct-mirror sheet)))
     (let ((target (mirror-target mirror)))
-      (luv:show-canvas target)
+      (unless (mirror-embedded-p mirror)
+        (luv:show-canvas target))
       ;; There is no separate McCLIM top-level loop to provoke the first
       ;; exposure. Paint and present before OPEN-WIDGET-LAB returns instead
       ;; of waiting for the first pointer event to dirty a gadget.
@@ -484,25 +513,28 @@ Conventional RUN-FRAME-TOP-LEVEL frames consume their own queues instead."
 (defmethod disable-mirror ((port luv-port) (sheet mirrored-sheet-mixin))
   (declare (ignore port))
   (alexandria:when-let ((mirror (sheet-direct-mirror sheet)))
-    (luv:hide-canvas (mirror-target mirror))))
+    (unless (mirror-embedded-p mirror)
+      (luv:hide-canvas (mirror-target mirror)))))
 
 (defmethod set-mirror-geometry
     ((port luv-port) (sheet mirrored-sheet-mixin) region)
   (declare (ignore port))
   (with-bounding-rectangle* (x1 y1 x2 y2 :width width :height height) region
     (alexandria:when-let ((mirror (sheet-direct-mirror sheet)))
-      (let ((target (mirror-target mirror)))
-        (luv:move-canvas target (floor x1) (floor y1))
-        (luv:resize-canvas target
-                           (max 1 (ceiling width))
-                           (max 1 (ceiling height)))))
+      (unless (mirror-embedded-p mirror)
+        (let ((target (mirror-target mirror)))
+          (luv:move-canvas target (floor x1) (floor y1))
+          (luv:resize-canvas target
+                             (max 1 (ceiling width))
+                             (max 1 (ceiling height))))))
     (values x1 y1 x2 y2)))
 
 (defmethod set-mirror-name
     ((port luv-port) (sheet top-level-sheet-mixin) name)
   (declare (ignore port))
   (alexandria:when-let ((mirror (sheet-direct-mirror sheet)))
-    (setf (luv:canvas-title (mirror-target mirror)) name)))
+    (unless (mirror-embedded-p mirror)
+      (setf (luv:canvas-title (mirror-target mirror)) name))))
 
 (defmethod set-mirror-icon
     ((port luv-port) (sheet top-level-sheet-mixin) icon)

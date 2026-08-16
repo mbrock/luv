@@ -21,6 +21,7 @@
            #:+little-world-source-version+
            #:+luvcraft-save-format-version+
            #:absent-chunk-light-semantics
+           #:add-luvcraft-overlay
            #:advance-sky-clock
            #:apply-block-world-source-edits
            #:attach-lighting-state
@@ -78,6 +79,7 @@
            #:edit-block-at
            #:edit-block-world-source
            #:edit-luvcraft-block
+           #:encode-luvcraft-overlay
            #:emit-block-face
            #:exposed-face-mesher
            #:find-luvcraft-gazetteer-view
@@ -134,6 +136,7 @@
            #:luvcraft-session-mesh
            #:luvcraft-session-meshed-world-revision
            #:luvcraft-session-outstanding-production
+           #:luvcraft-session-overlays
            #:luvcraft-session-player
            #:luvcraft-session-production-errors
            #:luvcraft-session-production-system
@@ -189,6 +192,7 @@
            #:populate-little-world-chunk
            #:print-luvcraft-frame-benchmark
            #:read-luvcraft-save
+           #:release-luvcraft-overlay
            #:reconcile-lighting
            #:refresh-luvcraft-mesh
            #:wait-for-luvcraft-streaming-quiescence
@@ -198,6 +202,7 @@
            #:rematerialize-little-world-chunk
            #:request-luvcraft-session-checkpoint
            #:request-world-checkpoint
+           #:remove-luvcraft-overlay
            #:restore-block-save-description
            #:restore-luvcraft-resume-save-description
            #:restore-luvcraft-save-description

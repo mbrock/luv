@@ -32,6 +32,9 @@
    (size
     :initform nil
     :accessor spinning-compositor-size)
+   (depth-format
+    :initform nil
+    :accessor spinning-compositor-depth-format)
    (output
     :initform nil
     :accessor spinning-compositor-output)
@@ -84,6 +87,7 @@
   (setf (spinning-compositor-device compositor) nil
         (spinning-compositor-source compositor) nil
         (spinning-compositor-size compositor) nil
+        (spinning-compositor-depth-format compositor) nil
         (spinning-compositor-output compositor) nil
         (spinning-compositor-source-view compositor) nil
         (spinning-compositor-output-view compositor) nil
@@ -100,13 +104,15 @@
   (values))
 
 (defun ensure-spinning-compositor-resources
-    (compositor context source)
+    (compositor context source &key depth-format)
   (let* ((device (luv:context-device context))
          (size (luv:gpu-texture-size source))
          (format (luv:gpu-texture-format source)))
     (unless (and (eq device (spinning-compositor-device compositor))
                  (eq source (spinning-compositor-source compositor))
-                 (equal size (spinning-compositor-size compositor)))
+                 (equal size (spinning-compositor-size compositor))
+                 (eq depth-format
+                     (spinning-compositor-depth-format compositor)))
       (clear-spinning-compositor-resources compositor)
       (let ((created nil)
             (completed-p nil))
@@ -158,10 +164,17 @@
                         :fragment `(:module ,fragment-module
                                     :entry-point "main"
                                     :targets ((:format ,format)))
+                        :depth-stencil
+                        (when depth-format
+                          `(:format ,depth-format
+                            :depth-write-enabled nil
+                            :depth-compare :always))
                         :primitive '(:topology :triangle-strip)))))
                  (setf (spinning-compositor-device compositor) device
                        (spinning-compositor-source compositor) source
                        (spinning-compositor-size compositor) size
+                       (spinning-compositor-depth-format compositor)
+                       depth-format
                        (spinning-compositor-output compositor) output
                        (spinning-compositor-source-view compositor) source-view
                        (spinning-compositor-output-view compositor) output-view

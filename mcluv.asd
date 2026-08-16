@@ -21,6 +21,13 @@
   :depends-on ("mcluv/backend" "luvcraft")
   :components ((:file "mcclim/shader-lab")))
 
+(defsystem "mcluv/luvcraft"
+  :description "McCLIM gadget textures embedded in a live luvcraft session."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("mcluv/backend" "luvcraft")
+  :components ((:file "mcclim/luvcraft")))
+
 (defsystem "mcluv/listener"
   :description "The McCLIM Listener running on the mcluv backend."
   :version "0.0.1"

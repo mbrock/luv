@@ -44,8 +44,11 @@
     (dispatch-repaint gadget +everywhere+)))
 
 (defun open-widget-lab (&key (server-path '(:luv))
-                             (title "McCLIM widgets on luv"))
+                             (title "McCLIM widgets on luv")
+                             target context device)
   "Create, adopt, and enable a tiny interactive McCLIM gadget frame."
+  (when (and target (not (and context device)))
+    (error ":TARGET requires the shared :CONTEXT and :DEVICE."))
   (let* ((port (find-port :server-path server-path))
          ;; McCLIM main currently calls FIRST on the newly constructed
          ;; manager when a port has no managers yet.  Spell out that tiny
@@ -54,8 +57,11 @@
          (manager (or (first (climi::frame-managers port))
                       (make-instance 'luv-frame-manager :port port)))
          (frame
-           (make-application-frame
-            'widget-lab :frame-manager manager :enable t)))
+           (let ((*embedded-mirror-target* target)
+                 (*embedded-mirror-context* context)
+                 (*embedded-mirror-device* device))
+             (make-application-frame
+              'widget-lab :frame-manager manager :enable t))))
     (setf (frame-pretty-name frame) title)
     frame))
 

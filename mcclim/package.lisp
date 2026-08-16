@@ -26,6 +26,7 @@
            #:mirror-sheet
            #:mirror-target
            #:mirror-context
+           #:mirror-embedded-p
            #:mirror-texture
            #:mirror-compositor
            #:port-mirrors
@@ -62,6 +63,9 @@
            #:enable-spinning-mirror
            #:disable-spinning-mirror
            #:open-spinning-widget-lab
+           #:luvcraft-widget-overlay
+           #:open-luvcraft-widget-lab
+           #:close-luvcraft-widget-lab
            #:open-listener
            #:main))
 

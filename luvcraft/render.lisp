@@ -502,6 +502,8 @@ the frame uniform cannot silently diverge between shader and host."
                   for first-vertex from 0 by 6
                   do (set-bind-group pass 0 bind-group)
                      (draw pass 6 1 first-vertex))))
+        (dolist (overlay (reverse (luvcraft-session-overlays session)))
+          (encode-luvcraft-overlay overlay session pass surface-texture))
         (set-pipeline pass (luvcraft-session-crosshair-native-pipeline session))
         (set-bind-group pass 0 (luvcraft-frame-scene-bind-group frame))
         (set-vertex-buffer
@@ -1061,6 +1063,9 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
     ;; Stop CPU publication before releasing any render-owned destination.
     (stop-production-system (luvcraft-session-production-system session))
     (destroy-luvcraft-chunk-products session)
+    (dolist (overlay (luvcraft-session-overlays session))
+      (release-luvcraft-overlay overlay))
+    (setf (luvcraft-session-overlays session) nil)
     (release-live-shader-pipeline (luvcraft-session-block-pipeline session))
     (release-live-shader-pipeline (luvcraft-session-shadow-pipeline session))
     (release-live-shader-pipeline (luvcraft-session-sky-pipeline session))

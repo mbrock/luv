@@ -102,6 +102,7 @@
                :reader luvcraft-session-world-text)
    (world-text-glyph-cache :initarg :world-text-glyph-cache :initform nil
                            :reader luvcraft-session-world-text-glyph-cache)
+   (overlays :initform nil :accessor luvcraft-session-overlays)
    (frame-states :initform (make-hash-table :test #'eql)
                  :reader luvcraft-session-frame-states)
    (resources :initarg :resources :initform nil
@@ -123,6 +124,34 @@
                      :accessor luvcraft-session-jump-requested-p)
    (running-p :initform t :accessor luvcraft-session-running-p))
   (:metaclass luv.arithmetic.records:quantity-class))
+
+(defgeneric encode-luvcraft-overlay (overlay session pass surface-texture)
+  (:documentation
+   "Encode OVERLAY into SESSION's open scene PASS for SURFACE-TEXTURE."))
+
+(defmethod encode-luvcraft-overlay (overlay session pass surface-texture)
+  (declare (ignore overlay session pass surface-texture))
+  nil)
+
+(defgeneric release-luvcraft-overlay (overlay)
+  (:documentation "Release resources owned by an object attached to luvcraft."))
+
+(defmethod release-luvcraft-overlay (overlay)
+  (declare (ignore overlay))
+  nil)
+
+(defun add-luvcraft-overlay (session overlay)
+  "Draw OVERLAY in subsequent SESSION frames and return it."
+  (pushnew overlay (luvcraft-session-overlays session) :test #'eq)
+  overlay)
+
+(defun remove-luvcraft-overlay (session overlay &key (release-p t))
+  "Stop drawing OVERLAY in SESSION, optionally releasing it."
+  (setf (luvcraft-session-overlays session)
+        (delete overlay (luvcraft-session-overlays session) :test #'eq))
+  (when release-p
+    (release-luvcraft-overlay overlay))
+  overlay)
 
 (defun request-luvcraft-session-checkpoint (session)
   "Capture SESSION's durable state and submit it to its asynchronous writer."
