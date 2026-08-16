@@ -1,0 +1,476 @@
+#+title: Frontiers, memoization, and materialized worlds
+#+startup: overview
+
+* Frontier is an operational pattern, not merely a queue
+:PROPERTIES:
+:ID: NXXOQT
+:END:
+
+The small Haskell repository
+[[https://github.com/mbrock/frontier/tree/1688ab1a78356da27ffe480f32bf6b11fc01c034][=mbrock/frontier= at =1688ab1=]]
+asks why breadth-first numbering, A* search, and Cheney copying garbage
+collection can all become instances of one short program.  Its answer is more
+specific than “they use a worklist.”  Each computation combines:
+
+- an /unfolder/ which reveals adjacent work without choosing traversal order;
+- a /frontier/ which chooses the next item;
+- a /memo/ which gives discovered identities stable results;
+- a planning rule which admits, rejects, prioritizes, or coalesces new work;
+  and
+- a two-phase materialization rule which reserves a result before adjacent
+  results exist and commits it once those results can be named.
+
+The repository is useful to luvcraft as source evidence, not as a library to
+port.  Its =Map=, =Seq=, lists of plans, and monadic interfaces make the
+relationships unusually legible.  Luvcraft's lighting evidence #QS1ERH says
+that a voxel implementation needs quite different physical machinery: packed
+parallel vectors, small finite priority buckets, dense fields, and
+compiler-visible iteration.  The source can teach the separation of
+responsibilities without prescribing the hot-loop representation.
+
+This page first describes what the Haskell program actually does.  It then
+uses that account to classify the frontier-shaped work already present, or
+plausible, in a Minecraft-like world.  Claims about =frontier= are observations
+of that repository; the final vocabulary is a proposal for luvcraft.
+
+* Five roles make the engine legible
+:PROPERTIES:
+:ID: 6BM1IQ
+:END:
+
+The public types in
+[[https://github.com/mbrock/frontier/blob/1688ab1a78356da27ffe480f32bf6b11fc01c034/src/FrontierTraversal.hs][=FrontierTraversal.hs=]]
+divide the computation into five roles.  Omitting monadic plumbing, their
+shape is:
+
+#+begin_src haskell
+data Step f b a e
+  = Done b
+  | Kids (f (a, e))
+
+data Node a b = Node
+  { nodeSeed   :: a
+  , nodeResult :: b
+  }
+
+data Plan a b k = Plan
+  { planKey    :: k
+  , planSeed   :: a
+  , planUpdate :: Node a b -> BucketUpdate (Node a b)
+  }
+
+data FrontierAlg m f a b k e = FrontierAlg
+  { initResult   :: a -> m b
+  , commitResult :: Node a b -> f b -> m ()
+  , planChildren :: Node a b -> f (a, e) -> m [Plan a b k]
+  , priorityOf   :: Node a b -> k
+  }
+#+end_src
+
+| Type parameter | Meaning in one traversal |
+|-
+| =a= | seed or source identity |
+| =b= | reserved result associated with that identity |
+| =e= | information on an outgoing edge |
+| =f= | one layer of adjacent structure |
+| =k= | frontier priority or scheduling class |
+| =m= | effects and client state used while traversing |
+
+=Step= lets unfolding either expose a layer of labelled children or stop with
+a completed result.  =Node= keeps a seed beside the result already reserved
+for it.  =Plan= is a scheduling instruction rather than a child: it adds a
+priority and a bucket-update policy.  =FrontierAlg= supplies the four client
+decisions.  Separate =MonadMemo= and =MonadFrontier= interfaces supply identity
+and scheduling storage.
+
+The type variables are not decoration.  They prevent a common collapse in
+which “neighbor,” “unvisited node,” “queued item,” and “computed result” all
+become one vaguely shaped record.
+
+* Reservation precedes adjacency; commitment follows naming
+:PROPERTIES:
+:ID: L4WPDP
+:END:
+
+The essential ordering appears in =drainFrontier=.  Roots are first ensured
+in the memo and pushed.  Each iteration then performs this sequence:
+
+#+begin_src mermaid
+flowchart TD
+  R["root seed"] --> I["look up or init result"]
+  I --> Q["push frontier item"]
+  Q --> P["pop minimum key"]
+  P --> U["unfold seed"]
+  U -->|"Done b"| D["write final memo result"]
+  U -->|"Kids"| C["plan children"]
+  C --> S["ensure each child's result; schedule admitted work"]
+  S --> M["look up every child result"]
+  M --> F["commit parent from reserved child results"]
+  D --> P
+  F --> P
+#+end_src
+
+“Child results are available” has a precise and slightly surprising meaning:
+they have been /initialized and memoized/, but their own nodes need not yet
+have left the frontier.  The parent therefore does not wait for a recursive
+post-order fold.  It can commit as soon as stable names for its children
+exist.
+
+For a seed $a$, let $\mu(a)$ be its memoized result.  The scheduler establishes
+the implication
+
+\[
+  a \text{ is scheduled} \Longrightarrow \mu(a) \text{ already exists}.
+\]
+
+When a parent with children $a_1,\ldots,a_n$ commits, every
+$\mu(a_i)$ exists even though some $a_i$ may remain pending.  This is the
+small invariant that makes shared and cyclic structures ordinary rather than
+special cases.
+
+* Memoization is identity preservation, not just a visited set
+:PROPERTIES:
+:ID: AQ5EDF
+:END:
+
+A visited bit answers whether an identity has been encountered.  The
+=MonadMemo= relationship answers a stronger question: /what stable result has
+been assigned to this seed?/  =lookupOrInit= performs the only reservation and
+writes it immediately, so every later encounter observes the same result.
+
+That distinction matters on a directed acyclic graph with sharing.  If two
+parents point to one child $c$, both receive the same $\mu(c)$; traversal does
+not duplicate the child's materialization.  On a cycle, an edge back to an
+already discovered seed also finds a result which can be named before either
+object is fully committed.
+
+The memo can still be trivial for algorithms that need only discovery.  BFS
+numbering uses the result as a visit number.  A voxel connected-component pass
+might use a bitfield plus a component identifier.  A copying collector uses a
+forwarding address.  The general lesson is that discovery often creates a
+durable correspondence, not merely a boolean historical fact.
+
+* Cheney collection is breadth-first materialization
+:PROPERTIES:
+:ID: RLNHEF
+:END:
+
+The repository's most clarifying example is
+[[https://github.com/mbrock/frontier/blob/1688ab1a78356da27ffe480f32bf6b11fc01c034/src/Heap.hs][the Cheney heap]].
+The correspondence is exact:
+
+| Frontier role | Cheney role |
+|-
+| seed =a= | from-space pointer |
+| result =b= | reserved to-space pointer |
+| memo $a \mapsto b$ | forwarding table |
+| unfolder | read the source object's child pointers |
+| =initResult= | allocate the next to-space address |
+| =planChildren= | enqueue referenced source objects |
+| =commitResult= | install an object using forwarded child pointers |
+| FIFO frontier | breadth-first copying order |
+
+#+begin_src mermaid
+flowchart LR
+  FP["from pointer p"] -->|"initResult"| FWD["forwarding p ↦ q"]
+  FWD --> Q["reserved to pointer q"]
+  FP -->|"unfold"| OBJ["object containing p₁ … pₙ"]
+  OBJ --> ENSURE["ensure forwarding pᵢ ↦ qᵢ"]
+  ENSURE --> COPY["commit object at q containing q₁ … qₙ"]
+#+end_src
+
+Reservation is the forwarding-pointer operation.  Commitment copies the one
+object layer after every child pointer has a to-space name.  Shared children
+remain shared because =lookupOrInit= cannot allocate them twice.  Garbage
+never enters the frontier because traversal begins only from roots.  A Lens
+=Traversal= describes an arbitrary root structure, allowing the final pass to
+rewrite every root through the forwarding memo.
+
+The property tests in
+[[https://github.com/mbrock/frontier/blob/1688ab1a78356da27ffe480f32bf6b11fc01c034/test/Main.hs][=test/Main.hs=]]
+check structure preservation, compact pointer ranges, garbage removal, and
+preservation of sharing in generated DAGs.  The abstraction is therefore not
+supported only by suggestive examples; the tests exercise precisely the
+identity claims that make the example interesting.
+
+* BFS and A* differ mainly at admission and order
+:PROPERTIES:
+:ID: BNUDE9
+:END:
+
+BFS numbering gives every new seed the next integer in =initResult=, commits
+nothing, assigns the neutral priority =()=, and enqueues every child.  FIFO
+order within the single priority bucket determines the numbering.
+
+A* leaves the memoized result trivial and keeps best-known path costs $g(s)$
+in client state.  For an edge $s \xrightarrow{w} t$, planning computes
+
+\[
+  g'(t) = g(s) + w
+\]
+
+and emits a plan only when $g'(t) < g(t)$.  Its priority is
+
+\[
+  f(t) = g'(t) + h(t).
+\]
+
+When the goal leaves the minimum frontier, the unfolder returns =Done= and the
+remaining work short-circuits.  Thus the same runner expresses two visibly
+different algorithms because adjacency, admission, priority, and stopping are
+separate decisions.
+
+This example also exposes a limit.  A* may plan the same state again when its
+best-known cost improves.  The memo says that the state has a stable result;
+the external $g$ field says that its current approximation changed.  “Has an
+identity” and “has reached its final value” are different predicates.
+
+* Bucket updates make duplicate work a policy question
+:PROPERTIES:
+:ID: BJCG8G
+:END:
+
+The concrete priority queue is a map from keys to FIFO sequences, accompanied
+by a min-priority queue of nonempty keys.  =BucketUpdate= receives the proposed
+item and the existing sequence at one key, then returns a possibly changed
+sequence and a boolean saying whether it added work.  The supplied policies
+are only enqueue and skip, but the seam can express replacement, deduplication,
+beam-width limits, or domain-specific coalescing.
+
+This is more than a queue convenience.  It puts the question “does this newly
+observed relation justify future work?” beside the algorithm that knows the
+answer.  A generic queue cannot infer that a dimmer light arrival is obsolete,
+that two fluid updates at one site should merge, or that a path with a worse
+cost should disappear.  Conversely, baking one deduplication rule into the
+frontier would make it wrong for clients that deliberately revisit a site.
+
+The relevant abstraction boundary is therefore /admission and coalescing/,
+not merely =push= and =pop=.
+
+* The repository became clearer by becoming less grand
+:PROPERTIES:
+:ID: 3Y7EQ1
+:END:
+
+The Git history is part of the evidence.  Early versions explored Elgot
+algebras, hylomorphisms, and several Cheney-specific recursion-scheme modules.
+Commit =932631b= replaced roughly 1,500 lines of those experiments with about
+700 lines centered on =FrontierTraversal= and =Heap=.  The final commit's own
+message says “change terminology to be less pretentious,” and the README now
+leads with a worklist-driven traversal engine.
+
+That evolution did not abandon the underlying structure.  It found an
+operational vocabulary in which the structure could be inspected:
+
+#+begin_example
+unfold
+reserve
+plan
+schedule
+look up
+commit
+#+end_example
+
+This is a useful precedent for luvcraft.  Mathematical interpretations can
+help discover laws and counterexamples, as #EQ6GLY argues, while the engine
+still speaks in terms a profiler and debugger can show directly.
+
+* Minecraft contains several families of frontier work
+:PROPERTIES:
+:ID: SRJEKA
+:END:
+
+“Flood fill” is too narrow a name for the work a voxel game performs, while
+“general graph solver” is too broad to guide representation.  The useful
+middle ground is a family of spatial maintenance problems sharing explicit
+frontiers and materialized state:
+
+| Work | Frontier item | Materialized state | Admission or priority |
+|-
+| sky and block light addition | chunk entry, cell offset, level | best light level | enqueue only a strict improvement; brightest first |
+| light removal | cell and invalidated level | candidate light field | remove dependents, then reseed surviving sources |
+| terminal-wall discovery | block site and display face | membership/component ID | matching coplanar terminal material and not yet visited |
+| fluid flow | active cell, face, pressure or level | volume and flow state | changed capacity/pressure; often priority or time ordered |
+| fire | burning or heat-bearing site | fuel, heat, burn state | ignition threshold and scheduled decay |
+| redstone-like signals | component port or conductor site | signal level and device state | enqueue when output changes; order may affect glitches |
+| navigation and reachability | cell or navigation node | cost, predecessor, region | unseen or improved path cost |
+| terrain/ecology influence | site and influence value | distance, moisture, fertility | strict improvement or threshold crossing |
+| falling-block or support updates | changed support site | stability/component state | adjacent support relation changed |
+| chunk production | chunk request and dependency stamp | staged world product | priority from visibility/distance; reject stale results |
+| critter perception or sound | source/site/intensity | transient influence field | attenuated contribution remains significant |
+
+Some rows operate over the six face-neighbor relation; others use faces,
+ports, visibility sets, chunk dependencies, or a metric radius.  #E4T0PD is
+therefore still the right separation: the domain owns primitive stepping, a
+neighborhood policy chooses relations, and the maintenance rule decides what
+those relations mean.
+
+* Discover, relax, and invalidate are three different dynamics
+:PROPERTIES:
+:ID: DURBKN
+:END:
+
+The workloads fall into at least three algorithmic families.
+
+1. *Discover once.*  Connected components and terminal-wall assembly usually
+   assign each reachable site once for one source revision.  A visited bit or
+   component memo prevents repeated work.
+
+2. *Relax monotonically.*  Distances, influence, and light addition keep a
+   best-known value.  For a transfer $T_e$ along edge $e$ and join $\sqcup$,
+   a site changes by
+
+   \[
+     x_v \leftarrow x_v \sqcup T_e(x_u).
+   \]
+
+   It enters the frontier only when this update strictly changes $x_v$.
+   Finite light levels make termination especially plain.
+
+3. *Invalidate and rebuild.*  Removing a source, conductor, support, or
+   resident neighbor can make a previously justified value too large.  The
+   system must trace invalid dependencies or conservatively clear a region,
+   then run monotone addition again from surviving evidence.  Voxel lighting's
+   removal and addition queues in #SKRELT are the current concrete example.
+
+These families can share storage, adjacency, counters, and scheduling
+machinery.  They should not be forced through one callback protocol that
+pretends deletion is an ordinary join or that every discovered node is final.
+The fixed-point shape proposed in #BA9MCA is one client protocol over a more
+basic frontier substrate, not the definition of that substrate.
+
+* Terminal walls supply a second, deliberately simpler client
+:PROPERTIES:
+:ID: K3PCP3
+:END:
+
+A planar rectangle of adjacent terminal-material blocks is a useful
+discover-once client.  Starting from a placed or changed block face, the pass
+can traverse coplanar face neighbors of the same material, reserve a candidate
+surface identity, and collect bounds and membership.  It then validates that
+the bounding rectangle is full and publishes one display surface over the
+participating blocks.
+
+#+begin_src mermaid
+flowchart LR
+  E["block edit"] --> S["seed affected terminal faces"]
+  S --> W["discover coplanar component"]
+  W --> B["accumulate orientation and bounds"]
+  B --> V{"every rectangle site present?"}
+  V -->|yes| P["publish terminal surface materialization"]
+  V -->|no| X["publish components or no display, by chosen rule"]
+  P --> G["project terminal grid and Slug draws over the whole face"]
+#+end_src
+
+Unlike light, the terminal surface need not revisit a site because a numeric
+approximation improved.  Unlike a permanent world entity, its identity is
+derived from block material, orientation, adjacency, and source revisions.
+Breaking one block invalidates the old component and may discover several new
+ones.  That places terminal walls between ordinary component labeling and
+incremental connectivity.
+
+The terminal grid described by #RD8AEI remains a separate domain.  The block
+frontier discovers /where the display surface exists/; Ghostty and the
+terminal presentation determine /what cells the display contains/.  Surface
+geometry maps between those domains without making one terminal cell equal to
+one voxel block.
+
+* Voxel efficiency requires translating the algebra, not its objects
+:PROPERTIES:
+:ID: RR9ODK
+:END:
+
+The Haskell carrier deliberately favors clarity: =Map= memoization, a =Map= of
+=Seq= priority buckets, allocated lists of =Plan= values, traversable child
+layers, and monadic state.  Those choices make the experiment easy to vary and
+test.  They are not an acceptable inner-loop cost model for millions of voxel
+visits.
+
+Luvcraft's existing packed light worklist records the relevant facts.  Moving
+from retained structures and conses to parallel vectors reduced one measured
+solve from about 264 MB to 31.8 MB consed without changing its 2.43 million
+visits.  Changing scheduling to sixteen brightest-first buckets then reduced
+the solve to about 13.3 MB, 340,050 visits, and 0.18 seconds.  Representation
+and order were independent performance dimensions.
+
+The luvcraft translation should therefore preserve semantic seams while
+specializing physical execution:
+
+| Semantic role | Hot representation |
+|-
+| seed identity | retained chunk-window entry plus dense domain offset |
+| priority =k= | small integer bucket or client-specific packed key |
+| memo/result | dense field lane, bitset, component lane, or side table |
+| child layer | compiler-visible neighborhood iteration with dynamic-extent coordinates |
+| plan | immediate admission branch; no allocated plan object |
+| bucket update | client-specialized enqueue, skip, replace, or coalesce operation |
+| commit | direct writes into a candidate materialization |
+
+One dispatch when choosing a maintenance policy may be useful.  Generic
+function calls, closures, conses, and coordinate allocation per edge would put
+abstraction precisely where #FGT96H says the current profiler is most
+sensitive.  A macro can expose the algebraic phases to source readers while
+expanding the trusted inner loop over primitive arrays.
+
+* The reusable substrate is smaller than a universal solver
+:PROPERTIES:
+:ID: QHBZJZ
+:END:
+
+The evidence suggests a layered design rather than one =run-frontier-system=
+protocol:
+
+#+begin_src mermaid
+flowchart TB
+  D["chunk domains and checked windows"] --> N["client neighborhood iteration"]
+  F["materialized fields and revisions"] --> M["maintenance policy"]
+  N --> M
+  P["packed frontier storage and priority discipline"] --> M
+  M --> C["candidate mutation / result reservation / commit"]
+  C --> U["coherent publication"]
+#+end_src
+
+The likely reusable pieces are concrete:
+
+- packed frontier ownership, growth, clearing, counters, and retention rules;
+- finite priority-bucket disciplines and perhaps FIFO/LIFO alternatives;
+- validated source-site scopes with allocation-free local and crossing
+  neighbor iteration;
+- dense visitation, best-known-value, component, and dirty-state
+  materializations; and
+- lifecycle rules for candidate state, stale inputs, and coherent publication.
+
+Client code should continue to own transfer laws, admission predicates,
+removal semantics, stopping conditions, and the interpretation of unavailable
+neighbors.  Those are where light remains light and a terminal wall remains a
+terminal wall.
+
+* The shared questions are now concrete
+:PROPERTIES:
+:ID: 7U572V
+:END:
+
+The =frontier= repository and luvcraft's two clients replace the vague question
+“should we generalize the flood fill?” with questions that can be answered in
+code and measurements:
+
+- Can one packed frontier storage vocabulary serve both light levels and
+  terminal component sites without weakening either representation?
+- Which admission choices can be selected outside the loop, and which must be
+  macro-expanded into it?
+- Is a dense per-materialization bitset sufficient for terminal discovery, or
+  does incremental splitting soon justify retained component metadata?
+- Can one validated-site neighborhood scope remove repeated bounds checks for
+  lighting while remaining useful to component discovery?
+- Which clients need result reservation in the strong Cheney sense, rather
+  than only visited or best-known state?
+- Can every candidate prove its source materialization and boundary revisions
+  before publication?
+- Do queue counters distinguish useful visits, stale pops, strict
+  improvements, invalidations, and cross-chunk steps well enough to compare
+  scheduling policies?
+
+The criterion is not whether all clients call the same function.  The
+substrate earns its keep when they share storage and iteration laws, retain
+their own semantics, allocate no per-edge garbage, and become easier to
+observe than their separate predecessors.

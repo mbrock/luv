@@ -28,6 +28,7 @@
                  (:file "quantities-and-measurement")
                  (:file "sb-simd")
                  (:file "sky-and-light")
+                 (:file "frontier-traversals")
                  (:file "voxel-fields-and-windows")
                  (:file "wiki-site")
                  (:static-file "site.js")

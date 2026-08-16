@@ -143,6 +143,12 @@ The following are starting paths rather than a table of settled doctrine.
   the first concrete domain/bundle clients.  It separates local domain
   traversal, cross-chunk windows, semantic field products, provenance, and
   checked arithmetic kernels, then names the first extraction to perform.
+- [[file:frontier-traversals.org][Frontiers, memoization, and materialized worlds]] studies the small Haskell
+  =frontier= repository as an operational account of worklist traversal:
+  unfolding, result reservation, memoization, admission, scheduling, and
+  commitment.  It then distinguishes discover-once, monotone relaxation, and
+  invalidation work across lighting, terminal walls, fluids, fire, signals,
+  navigation, ecology, and chunk production.
 - [[file:quantities-and-measurement.org][Quantities, dimensions, and interpretation]] studies Moppe's mp-units
   practice and the Zig Étalon experiment, then follows the resulting semantic
   arithmetic into homogeneous vector components, heterogeneous packed GPU

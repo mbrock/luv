@@ -498,6 +498,14 @@ unknown values, and lighting solves a nonlocal equation rather than merely
 gluing existing answers.  "Field materialization" and "chunk window" are more
 operationally exact today.
 
+The later source study #NXXOQT supplies another kind of evidence: a small
+Haskell engine in which BFS, A*, and Cheney collection share explicit frontier,
+memo, admission, and two-phase materialization roles.  The terminal-wall
+component in #K3PCP3 is now a deliberately simpler adjacency client beside
+lighting.  Together they narrow the reusable target to packed frontier storage
+and iteration laws while leaving fixed-point relaxation as one client-owned
+policy.
+
 * Chunk hierarchy and level of detail are related but not identical
 :PROPERTIES:
 :ID: TDEVBM
