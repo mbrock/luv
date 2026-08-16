@@ -1,0 +1,258 @@
+#+title: Slug: Bézier outlines in the pixel shader
+#+startup: overview
+
+* The 2026 release removes two different restrictions
+:PROPERTIES:
+:ID: VDGHWX
+:END:
+
+Slug is Eric Lengyel's method for evaluating quadratic outline curves directly
+for each covered pixel.  It does not rasterize a glyph into a bitmap or a
+signed-distance field first.  The original description is the 2017 JCGT paper
+[[https://jcgt.org/published/0006/02/02/][“GPU-Centered Font Rendering Directly from Glyph Outlines”]].  The current
+reference is the shader repository at commit
+[[https://github.com/EricLengyel/Slug/tree/be3c13eb7d63f9e8aa5c583e42d92c374cb91d98][=be3c13eb7d63f9e8aa5c583e42d92c374cb91d98=]] (15 April 2026), not the
+paper's sample code.
+
+There are two separate freedom claims:
+
+- In [[https://terathon.com/blog/decade-slug.html][“A Decade of Slug”]], Lengyel says that US patent 10,373,352 was
+  irrevocably dedicated to the public domain by filing USPTO form SB/43 and
+  paying its fee, effective 17 March 2026.
+- The released [[https://github.com/EricLengyel/Slug/blob/be3c13eb7d63f9e8aa5c583e42d92c374cb91d98/LICENSE][shader source is dual-licensed]] under MIT or Apache-2.0.  Its
+  [[https://github.com/EricLengyel/Slug/blob/be3c13eb7d63f9e8aa5c583e42d92c374cb91d98/NOTICE][NOTICE]] identifies Eric Lengyel as copyright holder, and the README requires
+  credit in distributed software.
+
+These are the patent owner's announcement and the repository's license terms,
+not legal advice.  The Google Patents snapshot for
+[[https://patents.google.com/patent/US10373352B1/en][US10373352B1]] still labels the patent “Active”, but that site also says its
+legal-status field is an unverified assumption and shows no 2026 event.  It is
+therefore a lagging aggregator, not evidence against the later dedication.
+
+* A pixel asks the outline for its winding
+:PROPERTIES:
+:ID: 3T0JD9
+:END:
+
+For a quadratic curve with control points =p1=, =p2=, and =p3=, Slug writes
+
+#+begin_example
+C(t) = a t^2 - 2 b t + p1
+a    = p1 - 2 p2 + p3
+b    = p1 - p2
+#+end_example
+
+At a pixel, the control points are translated so that the pixel is the origin.
+For a horizontal ray, the shader solves =C_y(t) = 0= and accumulates a signed
+contribution from the x coordinate of each eligible intersection.  It repeats
+the calculation with x and y exchanged for a vertical ray.  The magnitude of
+the resulting winding quantity distinguishes the inside from the outside,
+while the continuous intersection coordinate supplies antialiasing across the
+boundary.
+
+For one axis, the quadratic roots are
+
+#+begin_example
+t1 = (b - sqrt(max(b^2 - a p1, 0))) / a
+t2 = (b + sqrt(max(b^2 - a p1, 0))) / a
+#+end_example
+
+where =a=, =b=, and =p1= above mean the selected scalar components.  The
+current reference treats =abs(a) < 1/65536= as linear and uses
+=t = p1 / (2 b)=.  Clamping the discriminant to zero keeps the square root
+defined in finite-precision arithmetic.
+
+* Root eligibility, not a floating-point range test, supplies robustness
+:PROPERTIES:
+:ID: S2F8SA
+:END:
+
+Testing whether a computed root lies in =[0,1]= is numerically unstable at
+shared endpoints.  Slug instead classifies the signs of the three control
+coordinates before calculating roots.  Let =s1=, =s2=, and =s3= be one only
+when the corresponding coordinate is strictly positive; zero is non-positive.
+The exact eligibility table from the paper is:
+
+| s3 | s2 | s1 | root 2 | root 1 |
+|----+----+----+--------+--------|
+|  0 |  0 |  0 |      0 |      0 |
+|  0 |  0 |  1 |      0 |      1 |
+|  0 |  1 |  0 |      1 |      1 |
+|  0 |  1 |  1 |      0 |      1 |
+|  1 |  0 |  0 |      1 |      0 |
+|  1 |  0 |  1 |      1 |      1 |
+|  1 |  1 |  0 |      1 |      0 |
+|  1 |  1 |  1 |      0 |      0 |
+
+The reference shader extracts the two bits from the constant =0x2E74=.  Luv's
+proof emits the same table as float arithmetic so that it needs no integer
+bit operators.  In particular,
+
+#+begin_example
+e1 = s1 (1 - s2 s3) + (1 - s1) s2 (1 - s3)
+e2 = s3 (1 - s1 s2) + (1 - s3) s2 (1 - s1)
+#+end_example
+
+The source-level =signum= operator lowers to GLSL.std.450 =FSign= for SPIR-V
+and =sign= for MSL.  Its zero result preserves the table's strict inequality
+at an on-curve endpoint.
+
+* Coverage turns intersections into antialiasing
+:PROPERTIES:
+:ID: P9FDUS
+:END:
+
+If =r= is an intersection's coordinate along the ray in pixel units, its
+coverage contribution is =saturate(r + 0.5)=, multiplied by its eligibility
+bit and added or subtracted according to which root it is.  This gives a
+one-pixel-wide linear transition without supersampling.
+
+The current [[https://github.com/EricLengyel/Slug/blob/be3c13eb7d63f9e8aa5c583e42d92c374cb91d98/SlugPixelShader.hlsl][2026 pixel shader]] combines horizontal and vertical results
+instead of trusting one ray direction:
+
+#+begin_example
+w(r)     = saturate(1 - 2 abs(r))
+coverage = max(abs(xcov*xweight + ycov*yweight)
+               / max(xweight + yweight, 1/65536),
+               min(abs(xcov), abs(ycov)))
+#+end_example
+
+Each axis weight is the maximum =w= of its eligible intersections.  The
+weighted term prefers the ray whose crossing is closest to the pixel centre;
+the minimum term preserves coverage when both weights vanish.  The reference
+then clamps for nonzero fill, or applies =abs(fmod(coverage + 1, 2) - 1)= for
+even-odd fill.  An optional square root supplies optical-weight adjustment.
+
+* Bands make exact curves affordable
+:PROPERTIES:
+:ID: 8FJF9U
+:END:
+
+The full algorithm does not test every outline curve at every pixel.  A glyph
+is divided into equal-thickness horizontal and vertical bands, each pointing
+to the subset of curves that could cross rays in that band.  Adjacent bands
+may share an identical list or a contiguous subrange.
+
+The current reference has two textures:
+
+- an RGBA16F curve texture.  One texel stores =(x1,y1,x2,y2)= and the next
+  texel's first two channels provide =p3=; connected curves reuse their shared
+  endpoint;
+- an RG16U band texture whose two channels identify curve-list data.  A glyph
+  may have any number of bands, chosen to minimize the largest per-band list.
+
+The reference fixes the texture row width at 4096 texels.  Curves in a
+horizontal band are sorted by descending maximum x; vertical bands use
+descending maximum y.  The pixel shader can therefore stop once that maximum,
+in pixel units, is less than =-0.5=.  The README recommends a =1/1024= em
+overlap between bands.  Horizontal straight lines must be omitted from
+horizontal bands and vertical straight lines from vertical bands because a
+ray parallel to such a line has no winding contribution.  A straight segment
+from =p1= to =p2= is encoded as ={p1,p2,p2}=.
+
+* The 2026 reference is not the 2017 sample
+:PROPERTIES:
+:ID: 45K8GR
+:END:
+
+The decade retrospective records several material changes:
+
+- Slug still uses no precomputed or cached glyph images.
+- A former subdivision of each band into left and right curve lists was
+  removed, halving the band texture from four 16-bit channels to two.
+- The original supersampling layer was removed after the analytic coverage
+  calculation improved.
+- Colour emoji are drawn as multiple ordinary outline layers, one solid
+  colour per layer, and SVG gradient meshes are a separate path.
+- The vertex shader now performs dynamic dilation so the rasterized primitive
+  conservatively reaches every pixel whose centre can receive coverage.
+
+The repository's shader comments and data contracts should therefore be the
+implementation reference; the paper remains the clearest derivation and
+historical measurement.  Its benchmark and storage numbers describe 2017
+hardware and the older layout, not current performance promises.
+
+* Dynamic dilation is a rasterization guarantee
+:PROPERTIES:
+:ID: J0H590
+:END:
+
+The [[https://github.com/EricLengyel/Slug/blob/be3c13eb7d63f9e8aa5c583e42d92c374cb91d98/SlugVertexShader.hlsl][reference vertex shader]] expands the quad by half a pixel in screen
+space.  It transforms a per-vertex dilation normal through the inverse of the
+local-to-device Jacobian, while the model-view-projection matrix and viewport
+size determine the em-space size of that half pixel.  This is not decorative
+boldening: without conservative geometry, rasterization can omit a pixel
+whose centre lies just outside the undilated quad even though the analytic
+filter would assign it nonzero coverage.
+
+The full vertex record is five =float4= values carrying position plus dilation
+normal, texture coordinate plus packed glyph location and maxima, inverse
+Jacobian, band transform, and colour.  Band and glyph data are marked
+non-interpolated; only the render coordinate is interpolated.
+
+* DONE One fixed contour proves luv's pixel-stage mathematics
+:PROPERTIES:
+:ID: OWR8OZ
+:END:
+
+Intent: prove that luv's shader DSL can state, lower, compile, and actually
+draw the numerically important pixel-stage core before designing texture and
+font-data machinery.
+
+Evidence:
+
+- [[file:../hal/shader/slug.lisp][=slug-quadratic-outline=]] accepts a compile-time list of quadratic curves.
+  It implements the eight-class eligibility table, quadratic/linear roots,
+  both ray directions, intersection weights, and the current coverage
+  combination.
+- The ordinary Lisp function =slug-root-eligibility= exposes the same table to
+  focused tests.  All eight classes and the strict treatment of zero are
+  checked.
+- The DSL's open operator protocol now admits Common Lisp =signum= and lowers
+  it directly to SPIR-V =FSign= and MSL =sign=.  Both generated shaders pass
+  =spirv-val= and Apple's Metal 4 compiler.
+- [[file:../hal/metal/probes/slug-bezier.lisp][The cold Metal probe]] draws a two-triangle quad into a 256 by 256 RGBA8
+  texture, reads the real GPU result back, and writes this image:
+
+[[file:images/slug-bezier-proof.png]]
+
+Done when (met): a fixed four-quadratic heart crosses the normal mathematical
+shader path, both backend compilers accept it, root classification has an
+executable table oracle, and a Metal pixel shader produces the expected
+antialiased outline from Bézier data rather than a sampled image.
+
+* The proof deliberately stops before a font renderer
+:PROPERTIES:
+:ID: LB46YZ
+:END:
+
+The proof bakes four curves and =204.8= pixels per em into one shader.  It has
+no curve or band textures, variable-length band loop, font parser, glyph
+layout, dynamic dilation, fill-rule flag, or optical-weight flag.  The quad
+already includes ample margin, so it does not test the reference vertex
+dilation.  SPIR-V validation proves the portable module, while the executed
+offscreen probe is presently Metal-specific because that backend already has
+a no-resource mathematical-pipeline seam.
+
+This boundary matters: the image proves the hard per-pixel mathematics and the
+DSL capability, not Slug's data-scale performance or a usable text API.
+
+* NEXT Move curve and band lists into shader-visible data
+:PROPERTIES:
+:ID: HMNMBU
+:END:
+
+Intent: turn the fixed-contour proof into a data-driven glyph renderer without
+burying Slug's concrete texture contracts in a generic scene abstraction.
+
+Evidence needed: add the integer and texel-load vocabulary required by the
+RGBA16F curve and RG16U band textures, structured iteration with the sorted
+curve early-out, and a small font-outline packer.  Preserve the current fixed
+proof as the arithmetic oracle.  Add dynamic dilation only with a test where
+the undilated quad demonstrably loses edge coverage.
+
+Done when: a glyph with an inner contour renders from uploaded band data on
+both backends, GPU pixels compare against a small CPU winding reference at
+edge and shared-endpoint cases, the live Metal draw and a Vulkan smoke both
+cross the same public shader specification, and captured band lengths make the
+cost visible.

@@ -951,6 +951,10 @@ silent loss of meaning."
 (defmethod infer-shader-call-type ((operator (eql 'abs)) operands source-form)
   (infer-uniform-extended-type operator operands source-form 1 1))
 
+(defmethod infer-shader-call-type
+    ((operator (eql 'signum)) operands source-form)
+  (infer-uniform-extended-type operator operands source-form 1 1))
+
 (defmethod infer-shader-call-type ((operator (eql 'sqrt)) operands source-form)
   (infer-uniform-extended-type operator operands source-form 1 1))
 
@@ -1065,6 +1069,8 @@ never collides with a standard symbol's function documentation:
   "The componentwise maximum of two or more uniformly typed values.")
 (define-shader-operator abs
   "The componentwise absolute value of one scalar or vector.")
+(define-shader-operator signum
+  "The componentwise sign: negative one, zero, or positive one.")
 (define-shader-operator sqrt
   "The componentwise square root of one scalar or vector.")
 (define-shader-operator expt
@@ -2733,6 +2739,9 @@ backend's context before its source-located unsupported-operation method."))
 
 (defmethod lower-shader-call ((operator (eql 'abs)) context expression)
   (lower-extended-call context expression 'f-abs))
+
+(defmethod lower-shader-call ((operator (eql 'signum)) context expression)
+  (lower-extended-call context expression 'f-sign))
 
 (defmethod lower-shader-call ((operator (eql 'sqrt)) context expression)
   (lower-extended-call context expression 'sqrt))

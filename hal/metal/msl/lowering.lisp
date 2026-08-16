@@ -526,6 +526,7 @@
 (define-msl-function-operator spv:dot "dot")
 (define-msl-function-operator spv:mix "mix")
 (define-msl-function-operator abs "abs")
+(define-msl-function-operator signum "sign")
 (define-msl-function-operator sqrt "sqrt")
 (define-msl-function-operator expt "pow")
 (define-msl-function-operator spv:clamp "clamp")

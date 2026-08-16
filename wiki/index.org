@@ -113,6 +113,10 @@ The following are starting paths rather than a table of settled doctrine.
 - [[file:mathematical-shaders.org][Mathematical shaders as live Lisp objects]] records the typed expression
   language above the literal SPIR-V assembler, its deterministic CLOS
   lowering, and the McCLIM presentation browser connecting source to SSA.
+- [[file:slug-bezier.org][Slug: Bézier outlines in the pixel shader]] reconstructs the exact quadratic
+  root classification and two-ray coverage algorithm from its now-open
+  references, records the 2026 data contracts, and carries one fixed contour
+  through luv's shader DSL to an actual Metal image.
 - [[file:objective-c-and-metal.org][Objective-C as a foreign object system]] records declared message ABIs,
   direct message sends, explicit native ownership, opt-in trace events, and
   the diagnostic scope that turns native exceptions into Lisp conditions.

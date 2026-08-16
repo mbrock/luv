@@ -1,7 +1,8 @@
 (defpackage #:luv/msl/tests
   (:use #:cl #:rove)
   (:local-nicknames (#:msl #:luv.msl)
-                    (#:spv #:luv.spir-v)))
+                    (#:spv #:luv.spir-v)
+                    (#:slug #:luv.slug)))
 
 (in-package #:luv/msl/tests)
 
@@ -150,6 +151,15 @@
                (closer-mop:generic-function-argument-precedence-order
                 #'spv:lower-shader-call))
        '("CONTEXT" "OPERATOR" "EXPRESSION"))))
+
+(deftest slug-proof-lowers-to-direct-metal-pixel-mathematics
+  (let* ((document
+           (msl:compile-msl (slug:slug-bezier-fragment-specification)))
+         (source (msl:msl-document-source document)))
+    (ok (search "fragment SlugBezierFragmentSpecificationOutput" source))
+    (ok (search "sign(" source))
+    (ok (search "sqrt(" source))
+    (ok (search "result.color_output" source))))
 
 (deftest unsupported-msl-boundaries-retain-source-reasons
   (flet ((reason-for (specification)

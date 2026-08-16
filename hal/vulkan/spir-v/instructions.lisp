@@ -363,6 +363,7 @@
 ;; word conventions.  Entries follow actual shader needs, like the opcodes.
 (define-enumeration glsl-std-450
   (f-abs 4)
+  (f-sign 6)
   (pow 26)
   (sqrt 31)
   (f-min 37)

@@ -3,7 +3,7 @@
 LUVCRAFT_BENCHMARK_FRAMES ?= 120
 LUVCRAFT_BENCHMARK_CSV ?= build/luvcraft-metal-benchmark.csv
 
-.PHONY: all luvcraft run test parinfer-check shader-validate msl-validate smoke metal-smoke metal-benchmark mcluv wiki wiki-cli objective-c-probe metal-clear metal-shader metal-pipeline metal-draw clean
+.PHONY: all luvcraft run test parinfer-check shader-validate msl-validate smoke metal-smoke metal-benchmark mcluv wiki wiki-cli objective-c-probe metal-clear metal-shader metal-pipeline metal-draw slug-proof clean
 
 all: luvcraft
 
@@ -28,13 +28,16 @@ shader-validate:
 		--eval '(require :asdf)' \
 		--eval '(asdf:load-asd (truename "luv.asd"))' \
 		--eval '(asdf:load-system :luv/luvcraft/shaders)' \
+		--eval '(asdf:load-system :luv/slug)' \
 		--eval '(luv.spir-v:write-spir-v (luv.spir-v:block-world-vertex-shader) #p"build/block-world.vert.spv")' \
 		--eval '(luv.spir-v:write-spir-v (luv.spir-v:block-world-fragment-shader) #p"build/block-world.frag.spv")' \
 		--eval '(luv.spir-v:write-spir-v (luv.spir-v:block-world-crosshair-vertex-shader) #p"build/block-world-crosshair.vert.spv")' \
 		--eval '(luv.spir-v:write-spir-v (luv.spir-v:block-world-crosshair-fragment-shader) #p"build/block-world-crosshair.frag.spv")' \
 		--eval '(luv.spir-v:write-spir-v (luv.spir-v:block-world-sky-vertex-shader) #p"build/block-world-sky.vert.spv")' \
 		--eval '(luv.spir-v:write-spir-v (luv.spir-v:block-world-sky-fragment-shader) #p"build/block-world-sky.frag.spv")' \
-		--eval '(luv.spir-v:write-spir-v (luv.spir-v:block-world-shadow-vertex-shader) #p"build/block-world-shadow.vert.spv")'
+		--eval '(luv.spir-v:write-spir-v (luv.spir-v:block-world-shadow-vertex-shader) #p"build/block-world-shadow.vert.spv")' \
+		--eval '(luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (luv.slug:slug-bezier-vertex-specification)) #p"build/slug-bezier.vert.spv")' \
+		--eval '(luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (luv.slug:slug-bezier-fragment-specification)) #p"build/slug-bezier.frag.spv")'
 	./scripts/dev spirv-val --target-env vulkan1.0 build/block-world.vert.spv
 	./scripts/dev spirv-val --target-env vulkan1.0 build/block-world.frag.spv
 	./scripts/dev spirv-val --target-env vulkan1.0 build/block-world-crosshair.vert.spv
@@ -42,6 +45,8 @@ shader-validate:
 	./scripts/dev spirv-val --target-env vulkan1.0 build/block-world-sky.vert.spv
 	./scripts/dev spirv-val --target-env vulkan1.0 build/block-world-sky.frag.spv
 	./scripts/dev spirv-val --target-env vulkan1.0 build/block-world-shadow.vert.spv
+	./scripts/dev spirv-val --target-env vulkan1.0 build/slug-bezier.vert.spv
+	./scripts/dev spirv-val --target-env vulkan1.0 build/slug-bezier.frag.spv
 
 msl-validate:
 	mkdir -p build
@@ -50,10 +55,15 @@ msl-validate:
 		--eval '(asdf:load-asd (truename "luv.asd"))' \
 		--eval '(asdf:load-system :luv/msl)' \
 		--eval '(asdf:load-system :luv/luvcraft/shaders)' \
+		--eval '(asdf:load-system :luv/slug)' \
 		--eval '(luv.msl:write-msl (luv.msl:compile-msl (luv.spir-v:block-world-vertex-specification)) #p"build/block-world.vert.metal")' \
-		--eval '(luv.msl:write-msl (luv.msl:compile-msl (luv.spir-v:block-world-fragment-specification)) #p"build/block-world.frag.metal")'
+		--eval '(luv.msl:write-msl (luv.msl:compile-msl (luv.spir-v:block-world-fragment-specification)) #p"build/block-world.frag.metal")' \
+		--eval '(luv.msl:write-msl (luv.msl:compile-msl (luv.slug:slug-bezier-vertex-specification)) #p"build/slug-bezier.vert.metal")' \
+		--eval '(luv.msl:write-msl (luv.msl:compile-msl (luv.slug:slug-bezier-fragment-specification)) #p"build/slug-bezier.frag.metal")'
 	xcrun metal -std=metal4.0 -c build/block-world.vert.metal -o build/block-world.vert.air
 	xcrun metal -std=metal4.0 -c build/block-world.frag.metal -o build/block-world.frag.air
+	xcrun metal -std=metal4.0 -c build/slug-bezier.vert.metal -o build/slug-bezier.vert.air
+	xcrun metal -std=metal4.0 -c build/slug-bezier.frag.metal -o build/slug-bezier.frag.air
 
 smoke: luvcraft
 	mkdir -p build
@@ -98,9 +108,16 @@ metal-pipeline:
 metal-draw:
 	./scripts/dev sbcl --script hal/metal/probes/draw.lisp
 
+slug-proof:
+	./scripts/dev sbcl --script hal/metal/probes/slug-bezier.lisp build/slug-bezier-proof.png
+
 clean:
 	rm -f ./build/luvcraft ./build/mcluv ./build/luvcraft-smoke.png ./build/luvcraft-metal-smoke.png
 	rm -f ./build/block-world.vert.metal ./build/block-world.vert.air
 	rm -f ./build/block-world.frag.metal ./build/block-world.frag.air
+	rm -f ./build/slug-bezier.vert.spv ./build/slug-bezier.frag.spv
+	rm -f ./build/slug-bezier.vert.metal ./build/slug-bezier.vert.air
+	rm -f ./build/slug-bezier.frag.metal ./build/slug-bezier.frag.air
+	rm -f ./build/slug-bezier-proof.png
 	rm -f ./build/objective-c-exception-bridge-*.dylib
 	rm -rf ./build/wiki ./build/wiki-cli

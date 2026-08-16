@@ -212,3 +212,116 @@ object with STOP-CLEAR-COLOR-DEMO."
   (close-canvas (demo-canvas demo))
   (destroy (demo-device demo))
   (values))
+
+(defun render-metal-slug-bezier-proof (provider)
+  "Render the fixed Slug outline on Metal and return pixels, width, height, format.
+
+The shader specifications remain backend-neutral and independently lower to
+SPIR-V.  This live proof uses Metal because the current no-resource pipeline
+seam is available there without inventing an empty bind-group abstraction."
+  (let ((device nil)
+        (vertex-module nil)
+        (fragment-module nil)
+        (pipeline nil)
+        (target nil)
+        (vertices nil)
+        (readback nil)
+        (encoder nil)
+        (command-buffer nil)
+        (width 256)
+        (height 256)
+        (format :rgba8-unorm))
+    (unwind-protect
+         (progn
+           (setf device (request-gpu-device provider)
+                 vertex-module
+                 (create
+                  device
+                  (make-shader-module-descriptor
+                   :label "Slug proof vertex"
+                   :language :mathematical
+                   :code (luv.slug:slug-bezier-vertex-specification)))
+                 fragment-module
+                 (create
+                  device
+                  (make-shader-module-descriptor
+                   :label "Slug proof fragment"
+                   :language :mathematical
+                   :code (luv.slug:slug-bezier-fragment-specification)))
+                 pipeline
+                 (create
+                  device
+                  (make-render-pipeline-descriptor
+                   :label "Slug quadratic outline proof"
+                   :layout nil
+                   :vertex
+                   `(:module ,vertex-module
+                     :buffers
+                     ((:array-stride 24
+                       :attributes
+                       ((:shader-location 0 :offset 0 :format :float32x3)
+                        (:shader-location 1 :offset 12 :format :float32x3)))))
+                   :fragment
+                   `(:module ,fragment-module
+                     :targets ((:format ,format)))))
+                 target
+                 (create
+                  device
+                  (make-texture-descriptor
+                   :label "Slug proof target"
+                   :size (list width height) :dimensions :2d :format format
+                   :usage '(:render-attachment :copy-src)))
+                 vertices
+                 (create
+                  device
+                  (make-buffer-descriptor
+                   :label "Slug proof quad"
+                   :size (* 36 4) :usage '(:vertex :copy-dst)))
+                 readback
+                 (create
+                  device
+                  (make-buffer-descriptor
+                   :label "Slug proof readback"
+                   :size (* width height 4) :usage '(:copy-dst))))
+           (write-buffer
+            vertices
+            (make-array
+             36 :element-type 'single-float
+             :initial-contents
+             '(-0.8 -0.8 0.0  0.0 1.0 0.0
+                0.8 -0.8 0.0  1.0 1.0 0.0
+                0.8  0.8 0.0  1.0 0.0 0.0
+               -0.8 -0.8 0.0  0.0 1.0 0.0
+                0.8  0.8 0.0  1.0 0.0 0.0
+               -0.8  0.8 0.0  0.0 0.0 0.0)))
+           (setf encoder
+                 (create device
+                         (make-command-encoder-descriptor
+                          :label "Slug proof commands")))
+           (let ((pass
+                   (begin-render-pass
+                    encoder
+                    (make-render-pass-descriptor
+                     :color-attachments
+                     `((:view ,target :load-op :clear :store-op :store
+                        :clear-value #(0.0 0.0 0.0 1.0)))))))
+             (set-pipeline pass pipeline)
+             (set-vertex-buffer pass 0 vertices)
+             (draw pass 6)
+             (end-pass pass))
+           (encode
+            encoder
+            (make-gpu-copy-texture-to-buffer-command
+             :source target :destination readback))
+           (setf command-buffer (finish encoder))
+           (submit (device-queue device) command-buffer)
+           (values (read-buffer readback) width height format))
+      (when command-buffer (destroy command-buffer))
+      (when encoder (destroy encoder))
+      (when readback (destroy readback))
+      (when vertices (destroy vertices))
+      (when target (destroy target))
+      (when pipeline (destroy pipeline))
+      (when fragment-module (destroy fragment-module))
+      (when vertex-module (destroy vertex-module))
+      (when device (destroy device)))))

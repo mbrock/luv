@@ -227,6 +227,7 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
                              (:file "gpu-architecture")
                              (:file "frame-performance")
                              (:file "mathematical-shaders")
+                             (:file "slug-bezier")
                              (:file "metal-backend")
                              (:file "moppe-legacy")
                              (:file "objective-c-and-metal")
@@ -237,7 +238,8 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
                              (:file "voxel-fields-and-windows")
                              (:file "wiki-site")
                              (:static-file "site.js")
-                             (:static-file "images/dexp.png")))))
+                             (:static-file "images/dexp.png")
+                             (:static-file "images/slug-bezier-proof.png")))))
 
 (asdf:defsystem #:luv/objective-c
   :description "A declared Objective-C foreign object system with opt-in tracing."
@@ -316,6 +318,7 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on (#:luv/luvcraft/shaders
+               #:luv/slug
                #:rove)
   :components ((:module "hal"
                 :components
@@ -328,6 +331,19 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
                       (uiop:symbol-call
                        '#:rove '#:find-suite '#:luv/spir-v/tests))
                (error "luv shader tests failed"))))
+
+(asdf:defsystem #:luv/slug
+  :description "A fixed-outline proof of Slug quadratic rendering in mathematical shaders."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on (#:luv/spir-v)
+  :serial t
+  :components ((:module "hal"
+                :components
+                ((:module "shader"
+                  :serial t
+                  :components ((:file "slug-package")
+                               (:file "slug")))))))
 
 (asdf:defsystem #:luv/msl
   :description "Direct Metal Shading Language lowering for mathematical shaders."
@@ -350,6 +366,7 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
   :author "Mikael Brockman"
   :depends-on (#:luv/msl
                #:luv/luvcraft/shaders
+               #:luv/slug
                #:rove)
   :components ((:module "hal"
                 :components
@@ -592,7 +609,8 @@ Lisp objects; (asdf:make :luv/wiki) renders the static site into build/wiki/."
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on (#:luv/canvas
-               #:luv/spir-v)
+               #:luv/spir-v
+               #:luv/slug)
   :components ((:module "hal"
                 :components ((:file "examples")))))
 

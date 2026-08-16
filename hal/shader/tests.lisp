@@ -20,6 +20,7 @@
 (defpackage #:luv/spir-v/tests
   (:use #:cl #:rove)
   (:local-nicknames (#:spv #:luv.spir-v)
+                    (#:slug #:luv.slug)
                     (#:math #:luv.arithmetic)
                     (#:lang #:luv.arithmetic.language))
   ;; Shader operators are identified by symbol, so specification bodies
@@ -1231,6 +1232,42 @@
       (ok (equal (forms) (forms))))
     (ok (null (spv:spir-v-module-extended-instruction-imports
                (spv:block-world-crosshair-fragment-module))))))
+
+(deftest slug-root-eligibility-is-the-eight-class-table
+  (let ((expected '((0 0) (1 0) (1 1) (1 0)
+                    (0 1) (1 1) (0 1) (0 0))))
+    (loop for code below 8
+          for pair in expected
+          for y1 = (if (logbitp 0 code) 1.0 -1.0)
+          for y2 = (if (logbitp 1 code) 1.0 -1.0)
+          for y3 = (if (logbitp 2 code) 1.0 -1.0)
+          do (ok (equal pair
+                        (multiple-value-list
+                         (slug:slug-root-eligibility y1 y2 y3))))))
+  ;; Zero is deliberately in the non-positive class.
+  (ok (equal '(0 0)
+             (multiple-value-list
+              (slug:slug-root-eligibility 0.0 0.0 0.0)))))
+
+(deftest slug-proof-is-a-pixel-shader-over-quadratic-roots
+  (let* ((vertex (slug:slug-bezier-vertex-specification))
+         (fragment (slug:slug-bezier-fragment-specification))
+         (lowering (spv:compile-shader-specification fragment))
+         (forms
+           (mapcar #'spv:instruction-form
+                   (spv:lower-spir-v
+                    (spv:shader-lowering-module lowering))))
+         (printed (write-to-string forms)))
+    (ok (eq :vertex (spv:shader-specification-stage vertex)))
+    (ok (eq :fragment (spv:shader-specification-stage fragment)))
+    (ok (= 2 (length (spv:shader-specification-inputs vertex))))
+    (ok (= 1 (length (spv:shader-specification-inputs fragment))))
+    (ok (search "F-SIGN" printed))
+    (ok (search "SQRT" printed))
+    (ok (= #x07230203
+           (aref (spv:assemble-shader-specification vertex) 0)))
+    (ok (= #x07230203
+           (aref (spv:assemble-shader-specification fragment) 0)))))
 
 (deftest extended-math-signatures-are-explicit-contracts
   (flet ((failure-reason (body)

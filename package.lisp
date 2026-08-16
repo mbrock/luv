@@ -775,4 +775,5 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:compute-gradient-demo
            #:start-compute-gradient-demo
            #:stop-compute-gradient-demo
+           #:render-metal-slug-bezier-proof
            #:close-canvas))
