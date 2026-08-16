@@ -241,24 +241,30 @@ connects.  Leaving it started is the intended state for a durable image."
   "Measure BODY as a Tracy zone named NAME.
 
 A literal NAME -- a string or a keyword, which is every zone luv writes by
-hand -- gets its source location built once at load time, so the measured path
-is one special-variable read and one foreign call at each end.  A computed NAME
-still works through luv's source-location table, which is slower but reuses the
-same stable foreign record instead of growing Tracy's allocation table on every
-entry."
+hand -- gets one lazily initialized source-location cell per macro expansion.
+The cell itself may be dumped into a standalone Lisp core, but its foreign
+pointer is not allocated until the restored process first enters the zone.
+This distinction matters: foreign memory allocated by LOAD-TIME-VALUE does not
+survive SAVE-LISP-AND-DIE even though the Lisp pointer object does.  A computed
+NAME still works through luv's source-location table, which is slower but
+reuses the same stable foreign record instead of growing Tracy's allocation
+table on every entry."
   (let ((context (gensym "CONTEXT"))
+        (location-cell (gensym "LOCATION-CELL"))
         (literal (tracy-literal-zone-name name))
         (file (if *compile-file-truename*
                   (namestring *compile-file-truename*)
                   "")))
     `(if *tracy*
-         (let ((,context
+         (let* (,@(when literal
+                    `((,location-cell (load-time-value (cons nil nil) t))))
+                (,context
                  ,(if literal
                       `(%tracy-emit-zone-begin
-                        (load-time-value
-                         (tracy-source-location ,literal
-                                                :file ,file :color ,color)
-                         t)
+                        (or (car ,location-cell)
+                            (setf (car ,location-cell)
+                                  (tracy-source-location
+                                   ,literal :file ,file :color ,color)))
                         1)
                       `(%tracy-emit-zone-begin
                         (tracy-source-location

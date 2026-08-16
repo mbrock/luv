@@ -400,7 +400,11 @@ the frame uniform cannot silently diverge between shader and host."
           (tracy-plot "staged chunks" staged-chunks)
           (tracy-plot "drawable chunks" chunks)
           (tracy-plot "draws" draws)
-          (tracy-plot "vertices" vertices))))
+          (tracy-plot "vertices" vertices)
+          (let ((center (luvcraft-session-residency-center session)))
+            (when center
+              (tracy-plot "player chunk x" (first center))
+              (tracy-plot "player chunk z" (second center)))))))
     (with-luvcraft-frame-timing
         (sample luvcraft-frame-sample-uniform-seconds
                 :luvcraft/uniform-update)
@@ -483,50 +487,61 @@ the frame uniform cannot silently diverge between shader and host."
 (defun render-luvcraft-frame (session timestamp &optional sample)
   (when (luvcraft-session-running-p session)
     (describe-luvcraft-tracy-plots)
-    (with-luvcraft-frame-timing
-        (sample luvcraft-frame-sample-frame-seconds :luvcraft/frame)
+    (let ((tracy-frame-start
+            (and (tracy-connected-p) (get-internal-real-time))))
       (with-luvcraft-frame-timing
-          (sample luvcraft-frame-sample-simulation-seconds
-                  :luvcraft/simulation)
-        (let* ((last (luvcraft-session-last-frame-time session))
-               (seconds
-                 (if last
-                     (min +luvcraft-maximum-frame-duration+
-                          (max 0d0 (- timestamp last)))
-                     0d0)))
-          (setf (luvcraft-session-last-frame-time session) timestamp)
-          (advance-sky-clock (luvcraft-session-sky-clock session) seconds)
-          (let ((player (luvcraft-session-player session)))
-            (when player
-              (incf (luvcraft-session-physics-accumulator session) seconds)
-              (loop while (>= (luvcraft-session-physics-accumulator session)
-                              +player-physics-step+)
-                    do (step-block-world-player
-                        player (luvcraft-session-world session)
-                        (luvcraft-session-camera session)
-                        (luvcraft-session-pressed-keys session)
-                        +player-physics-step+
-                        :jump-p (luvcraft-session-jump-requested-p session))
-                       (setf (luvcraft-session-jump-requested-p session) nil)
-                       (decf (luvcraft-session-physics-accumulator session)
-                             +player-physics-step+))))))
-      (with-luvcraft-frame-timing
-          (sample luvcraft-frame-sample-streaming-seconds
-                  :luvcraft/streaming)
-        (maintain-luvcraft-residency session)
-        (evict-luvcraft-products session))
-      (with-luvcraft-frame-timing
-          (sample luvcraft-frame-sample-presentation-seconds
-                  :luvcraft/presentation)
-        (present-canvas-frame
-         (luvcraft-session-context session)
-         (lambda (surface-texture encoder)
-           (encode-luvcraft-frame
-            session surface-texture encoder :sample sample)))))
-    ;; The frame mark closes Tracy's frame outside every zone above, which is
-    ;; what lets the viewer draw a frame-time graph and say which frame a zone
-    ;; belongs to.
-    (tracy-frame-mark)))
+          (sample luvcraft-frame-sample-frame-seconds :luvcraft/frame)
+        (with-luvcraft-frame-timing
+            (sample luvcraft-frame-sample-simulation-seconds
+                    :luvcraft/simulation)
+          (let* ((last (luvcraft-session-last-frame-time session))
+                 (seconds
+                   (if last
+                       (min +luvcraft-maximum-frame-duration+
+                            (max 0d0 (- timestamp last)))
+                       0d0)))
+            (setf (luvcraft-session-last-frame-time session) timestamp)
+            (advance-sky-clock (luvcraft-session-sky-clock session) seconds)
+            (let ((player (luvcraft-session-player session)))
+              (when player
+                (incf (luvcraft-session-physics-accumulator session) seconds)
+                (loop while (>= (luvcraft-session-physics-accumulator session)
+                                +player-physics-step+)
+                      do (step-block-world-player
+                          player (luvcraft-session-world session)
+                          (luvcraft-session-camera session)
+                          (luvcraft-session-pressed-keys session)
+                          +player-physics-step+
+                          :jump-p (luvcraft-session-jump-requested-p session))
+                         (setf (luvcraft-session-jump-requested-p session) nil)
+                         (decf (luvcraft-session-physics-accumulator session)
+                               +player-physics-step+))))))
+        (with-luvcraft-frame-timing
+            (sample luvcraft-frame-sample-streaming-seconds
+                    :luvcraft/streaming)
+          (with-cpu-trace-zone (:streaming/reconcile-residency)
+            (maintain-luvcraft-residency session))
+          (with-cpu-trace-zone (:streaming/evict-products)
+            (evict-luvcraft-products session)))
+        (with-luvcraft-frame-timing
+            (sample luvcraft-frame-sample-presentation-seconds
+                    :luvcraft/presentation)
+          (present-canvas-frame
+           (luvcraft-session-context session)
+           (lambda (surface-texture encoder)
+             (encode-luvcraft-frame
+              session surface-texture encoder :sample sample)))))
+      (when tracy-frame-start
+        (tracy-plot
+         "frame CPU ms"
+         (* 1000d0
+            (/ (- (get-internal-real-time) tracy-frame-start)
+               (coerce internal-time-units-per-second 'double-float))))
+        (tracy-plot "60 Hz budget ms" (/ 1000d0 60d0)))
+      ;; The frame mark closes Tracy's frame outside every zone above, which is
+      ;; what lets the viewer draw a frame-time graph and say which frame a zone
+      ;; belongs to.
+      (tracy-frame-mark))))
 
 (defmethod handle-canvas-event
     ((session luvcraft-session) canvas (event canvas-key-press-event))

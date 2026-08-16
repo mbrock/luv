@@ -55,7 +55,9 @@
 
 (defparameter *luvcraft-tracy-plots*
   '("resident chunks" "pending production" "staged chunks"
-    "drawable chunks" "draws" "vertices")
+    "drawable chunks" "draws" "vertices"
+    "player chunk x" "player chunk z"
+    "frame CPU ms" "60 Hz budget ms")
   "The per-frame counts luvcraft draws alongside its Tracy zones.")
 
 (defvar *luvcraft-tracy-plots-described-p* nil

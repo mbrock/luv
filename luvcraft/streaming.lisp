@@ -48,12 +48,13 @@ presentation; deterministic captures wait for the broader default set."
    (snapshot :initarg :snapshot :reader block-mesh-production-request-snapshot)))
 
 (defmethod perform-production-request ((request block-mesh-production-request))
-  (mesh-block-snapshot
-   (make-instance
-    'exposed-face-mesher
-    :absent-neighbor-policy
-    (block-mesh-production-request-absent-neighbor-policy request))
-   (block-mesh-production-request-snapshot request)))
+  (with-cpu-trace-zone (:production/mesh-chunk)
+    (mesh-block-snapshot
+     (make-instance
+      'exposed-face-mesher
+      :absent-neighbor-policy
+      (block-mesh-production-request-absent-neighbor-policy request))
+     (block-mesh-production-request-snapshot request))))
 
 (defclass block-chunk-load-payload ()
   ((key :initarg :key :reader block-chunk-load-payload-key)
@@ -126,28 +127,29 @@ the session's outstanding-work and cancellation bookkeeping."))
 
 (defmethod perform-production-request ((request little-world-load-request))
   "Generate one isolated chunk and transfer only its dense content columns."
-  (destructuring-bind (chunk-x chunk-y chunk-z)
-      (second (production-request-key request))
-    (let* ((source (make-instance 'little-world-source
-                                  :seed (little-world-load-request-seed request)))
-           (world (make-block-world
-                   :chunk-width (little-world-load-request-width request)
-                   :chunk-height (little-world-load-request-height request)
-                   :chunk-depth (little-world-load-request-depth request)
-                   :source source)))
-      (materialize-block-world-chunk source world chunk-x chunk-y chunk-z)
-      (dolist (landmark (little-world-load-request-landmarks request))
-        (destructuring-bind (block x y z) landmark
-          (setf (world-block-at world x y z) block)))
-      (dolist (edit (little-world-load-request-edits request))
-        (destructuring-bind (block x y z) edit
-          (setf (world-block-at world x y z) block)))
-      (let ((chunk (world-chunk-at world chunk-x chunk-y chunk-z)))
-        (with-block-content-storage (domain palette indices) chunk
-          (declare (ignore domain))
-          (make-instance 'block-chunk-load-payload
-                         :key (list chunk-x chunk-y chunk-z)
-                         :palette palette :indices indices))))))
+  (with-cpu-trace-zone (:production/load-chunk)
+    (destructuring-bind (chunk-x chunk-y chunk-z)
+        (second (production-request-key request))
+      (let* ((source (make-instance 'little-world-source
+                                    :seed (little-world-load-request-seed request)))
+             (world (make-block-world
+                     :chunk-width (little-world-load-request-width request)
+                     :chunk-height (little-world-load-request-height request)
+                     :chunk-depth (little-world-load-request-depth request)
+                     :source source)))
+        (materialize-block-world-chunk source world chunk-x chunk-y chunk-z)
+        (dolist (landmark (little-world-load-request-landmarks request))
+          (destructuring-bind (block x y z) landmark
+            (setf (world-block-at world x y z) block)))
+        (dolist (edit (little-world-load-request-edits request))
+          (destructuring-bind (block x y z) edit
+            (setf (world-block-at world x y z) block)))
+        (let ((chunk (world-chunk-at world chunk-x chunk-y chunk-z)))
+          (with-block-content-storage (domain palette indices) chunk
+            (declare (ignore domain))
+            (make-instance 'block-chunk-load-payload
+                           :key (list chunk-x chunk-y chunk-z)
+                           :palette palette :indices indices)))))))
 
 (defclass luvcraft-chunk-product ()
   ((coordinate :initarg :coordinate
@@ -179,6 +181,10 @@ the session's outstanding-work and cancellation bookkeeping."))
     (session world player radius)
   (let ((center (luvcraft-player-chunk-center world player)))
     (unless (equal center (luvcraft-session-residency-center session))
+      (when (tracy-connected-p)
+        (tracy-message
+         (format nil "residency center ~{~D~^,~}" center)
+         :color #x4EA1FF))
       (let ((desired (luvcraft-session-desired-chunks session))
             (next-desired (make-hash-table :test #'equal)))
         (loop for chunk-x from (- (first center) radius)
@@ -659,19 +665,25 @@ here and install its publication cohort later at the frame boundary."))
 
 (defun refresh-luvcraft-mesh (session)
   "Advance asynchronous loading/meshing without doing either computation here."
-  (drain-luvcraft-production session)
-  (schedule-luvcraft-chunk-loads session)
+  (with-cpu-trace-zone (:streaming/drain-results)
+    (drain-luvcraft-production session))
+  (with-cpu-trace-zone (:streaming/schedule-loads)
+    (schedule-luvcraft-chunk-loads session))
   ;; Lighting reconciles before mesh snapshots are captured, so every
   ;; snapshot and dependency stamp observes stable published light.
   (let ((lighting (luvcraft-session-lighting-state session)))
     (when lighting
-      (reconcile-lighting lighting)))
+      (with-cpu-trace-zone (:streaming/reconcile-lighting)
+        (reconcile-lighting lighting))))
   ;; A result captured before this frame's lighting publication may already
   ;; be stale.  Reject it before deciding whether a complete mesh cohort can
   ;; cross the frame boundary.
-  (discard-stale-luvcraft-staged-products session)
-  (publish-ready-luvcraft-meshes session)
-  (schedule-luvcraft-meshes session)
+  (with-cpu-trace-zone (:streaming/discard-stale)
+    (discard-stale-luvcraft-staged-products session))
+  (with-cpu-trace-zone (:streaming/publish-meshes)
+    (publish-ready-luvcraft-meshes session))
+  (with-cpu-trace-zone (:streaming/schedule-meshes)
+    (schedule-luvcraft-meshes session))
   (setf (luvcraft-session-meshed-world-revision session)
         (block-world-revision (luvcraft-session-world session)))
   (luvcraft-session-products-in-order session))
