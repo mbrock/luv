@@ -2,6 +2,7 @@
   description = "luv — a Common Lisp Vulkan atelier";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  inputs.ghostty.url = "github:ghostty-org/ghostty";
   inputs.mcclim = {
     url = "git+https://codeberg.org/McCLIM/McCLIM.git?ref=master";
     flake = false;
@@ -18,7 +19,7 @@
     flake = false;
   };
 
-  outputs = { nixpkgs, mcclim, cl-sdl3, tracy, ... }:
+  outputs = { nixpkgs, ghostty, mcclim, cl-sdl3, tracy, ... }:
     let
       systems = [
         "x86_64-linux"
@@ -29,6 +30,10 @@
       environmentFor = system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
+          libghosttyVt =
+            ghostty.packages.${system}.libghostty-vt-releasesafe;
+          libghosttyVtLibrary =
+            "${libghosttyVt}/lib/libghostty-vt${pkgs.stdenv.hostPlatform.extensions.sharedLibrary}";
           sbclVersion = "2.6.7";
           needsSimdSbcl = system == "aarch64-linux" || system == "aarch64-darwin";
           sbclUnwrapped =
@@ -111,6 +116,7 @@
           nativeLibraryPath = nixpkgs.lib.makeLibraryPath (
             [
               pkgs.libffi
+              libghosttyVt
               pkgs.harfbuzz
               tracyClient
               pkgs.mesa
@@ -165,6 +171,7 @@
             name = "luv-env";
             runtimeInputs = [
               lisp
+              libghosttyVt
               pkgs.libffi
               pkgs.harfbuzz
               pkgs.mesa
@@ -176,6 +183,7 @@
             ];
             text = ''
               export LUV_NIX_SHELL=1
+              export LUV_GHOSTTY_LIBRARY=${libghosttyVtLibrary}
               export LUV_SLYNK_DIR=${slyRoot}/slynk
               export LUV_TRACY_CLIENT=${tracyClientLibrary}
               export CL_SOURCE_REGISTRY=${mcclim}//:${cl-sdl3}//
@@ -213,6 +221,7 @@
         in
         {
           inherit pkgs sbcl lisp nativeLibraryPath slyRoot dev;
+          inherit libghosttyVt libghosttyVtLibrary;
           inherit tracyClient tracyClientLibrary;
         };
     in
@@ -224,6 +233,7 @@
           sbcl = env.sbcl;
           lisp = env.lisp;
           dev = env.dev;
+          libghostty-vt = env.libghosttyVt;
           tracy-client = env.tracyClient;
           default = env.lisp;
         });
@@ -239,6 +249,7 @@
           default = env.pkgs.mkShell ({
             packages = [
               env.lisp
+              env.libghosttyVt
               env.pkgs.libffi
               env.pkgs.harfbuzz
               env.pkgs.mesa
@@ -250,6 +261,7 @@
             ];
             LD_LIBRARY_PATH = env.nativeLibraryPath;
             LUV_NIX_SHELL = "1";
+            LUV_GHOSTTY_LIBRARY = env.libghosttyVtLibrary;
             LUV_SLYNK_DIR = "${env.slyRoot}/slynk";
             LUV_TRACY_CLIENT = env.tracyClientLibrary;
             CL_SOURCE_REGISTRY = "${mcclim}//:${cl-sdl3}//";

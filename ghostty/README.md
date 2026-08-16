@@ -4,19 +4,21 @@ This experimental `luv/ghostty` ASDF system binds enough of libghostty-vt to
 create a terminal, feed its VT parser, format the active screen as plain text,
 and release all native resources explicitly.
 
-Build libghostty-vt, point luv at the shared library, and run the focused test:
+The luv Nix environment pins and builds Ghostty's maintained
+`libghostty-vt-releasesafe` derivation. Enter it through the usual development
+wrapper and run the focused test:
 
 ```sh
-cd ~/src/ghostty
-nix develop -c zig build -Demit-lib-vt=true -Doptimize=ReleaseSafe
-
 cd /path/to/luv
-LUV_GHOSTTY_LIBRARY="$HOME/src/ghostty/zig-out/lib/libghostty-vt.so" \
-  ./scripts/dev sbcl --non-interactive \
+./scripts/dev sbcl --non-interactive \
   --eval '(require :asdf)' \
   --eval '(asdf:load-asd (truename "luv.asd"))' \
   --eval '(asdf:test-system :luv/ghostty)'
 ```
+
+The package is also available as `.#libghostty-vt`. The environment exports
+`LUV_GHOSTTY_LIBRARY` as its exact shared-library store path, while ordinary
+installed soname lookup remains available outside Nix.
 
 From Lisp:
 

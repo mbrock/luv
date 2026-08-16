@@ -4,6 +4,19 @@ set -eu
 
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 
+if [ "${LUV_NIX_SHELL:-}" = 1 ]; then
+  if [ "${1:-}" = "--status" ]; then
+    "$project_root/scripts/worktree-port" --explain
+    printf 'environment: current Nix environment\n'
+    sh -c 'printf "SBCL: %s\nSBCL version: " "$(command -v sbcl)"; sbcl --version; printf "LUV_SLYNK_DIR: %s\nLUV_GHOSTTY_LIBRARY: %s\nCL_SOURCE_REGISTRY: %s\nASDF cache: %s/.cache/common-lisp\n" "${LUV_SLYNK_DIR:-unset}" "${LUV_GHOSTTY_LIBRARY:-unset}" "${CL_SOURCE_REGISTRY:-unset}" "$HOME"'
+    exit 0
+  fi
+  if [ "$#" -eq 0 ]; then
+    set -- sbcl
+  fi
+  exec "$@"
+fi
+
 if command -v luv-env >/dev/null 2>&1; then
   environment=luv-env
   provider="profile ($(command -v luv-env))"
@@ -16,9 +29,9 @@ if [ "${1:-}" = "--status" ]; then
   "$project_root/scripts/worktree-port" --explain
   printf 'environment: %s\n' "$provider"
   if [ -n "$environment" ]; then
-    luv-env sh -c 'printf "SBCL: %s\nSBCL version: " "$(command -v sbcl)"; sbcl --version; printf "LUV_SLYNK_DIR: %s\nCL_SOURCE_REGISTRY: %s\nASDF cache: %s/.cache/common-lisp\n" "${LUV_SLYNK_DIR:-unset}" "${CL_SOURCE_REGISTRY:-unset}" "$HOME"'
+    luv-env sh -c 'printf "SBCL: %s\nSBCL version: " "$(command -v sbcl)"; sbcl --version; printf "LUV_SLYNK_DIR: %s\nLUV_GHOSTTY_LIBRARY: %s\nCL_SOURCE_REGISTRY: %s\nASDF cache: %s/.cache/common-lisp\n" "${LUV_SLYNK_DIR:-unset}" "${LUV_GHOSTTY_LIBRARY:-unset}" "${CL_SOURCE_REGISTRY:-unset}" "$HOME"'
   else
-    nix develop "$project_root" --command sh -c 'printf "SBCL: %s\nSBCL version: " "$(command -v sbcl)"; sbcl --version; printf "LUV_SLYNK_DIR: %s\nCL_SOURCE_REGISTRY: %s\nASDF cache: %s/.cache/common-lisp\n" "${LUV_SLYNK_DIR:-unset}" "${CL_SOURCE_REGISTRY:-unset}" "$HOME"'
+    nix develop "$project_root" --command sh -c 'printf "SBCL: %s\nSBCL version: " "$(command -v sbcl)"; sbcl --version; printf "LUV_SLYNK_DIR: %s\nLUV_GHOSTTY_LIBRARY: %s\nCL_SOURCE_REGISTRY: %s\nASDF cache: %s/.cache/common-lisp\n" "${LUV_SLYNK_DIR:-unset}" "${LUV_GHOSTTY_LIBRARY:-unset}" "${CL_SOURCE_REGISTRY:-unset}" "$HOME"'
   fi
   exit 0
 fi

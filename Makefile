@@ -24,6 +24,7 @@ test: parinfer-check shader-validate
 		--eval '(asdf:load-asd (truename "luv-wiki.asd"))' \
 		--eval '(asdf:load-asd (truename "luv-wiki-site.asd"))' \
 		--eval '(asdf:test-system :luv)' \
+		--eval '(asdf:test-system :luv/ghostty)' \
 		--eval '(asdf:test-system :luvcraft)' \
 		--eval '(asdf:test-system :luv-wiki)'
 
