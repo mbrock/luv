@@ -310,6 +310,7 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:voxel-light-solver-comparison-frontier-gc-seconds
            #:voxel-light-solver-comparison-frontier-seconds
            #:voxel-light-solver-comparison-frontier-visits
+           #:voxel-light-solver-comparison-candidate-solver
            #:voxel-light-solver-comparison-legacy-bytes-consed
            #:voxel-light-solver-comparison-legacy-garbage-collections
            #:voxel-light-solver-comparison-legacy-gc-seconds

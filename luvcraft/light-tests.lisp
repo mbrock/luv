@@ -222,6 +222,129 @@
         (ok (plusp
              (luvcraft.frontier:frontier-execution-crossings execution)))))))
 
+(defun make-compiled-light-proof-world ()
+  "Three chunks with vertical and lateral seams, occlusion, a shaft, emitters."
+  (let ((world (make-open-sky-test-world '(0 0 0) '(0 1 0) '(1 0 0))))
+    (dotimes (x 32)
+      (dotimes (z 16)
+        (unless (and (= x 4) (= z 4))
+          (setf (world-block-at world x 15 z) luvcraft::*stone-block*))))
+    (setf (world-block-at world 15 8 8) *test-glow-block*
+          (world-block-at world 18 8 8) *test-dim-glow-block*)
+    world))
+
+(deftest compiled-light-kernel-is-inspectable-and-matches-both-oracles
+  ;; The program states its law; the realization retains the checked
+  ;; expressions, the emitted forms, and the compiled functions.
+  (let* ((definition
+           (luvcraft.frontier:frontier-program-definition-for
+            'luvcraft::voxel-light-addition))
+         (realization (luvcraft::compiled-light-realization :sky-light)))
+    (ok (luvcraft.frontier:frontier-program-definition-transfer definition))
+    (ok (equal '("LEVEL" "OPACITY")
+               (mapcar (lambda (role)
+                         (symbol-name
+                          (luvcraft.frontier:frontier-field-role-name role)))
+                       (luvcraft.frontier:frontier-program-definition-fields
+                        definition))))
+    (ok (luvcraft.frontier:frontier-realization-current-p realization))
+    (ok (eq 'lambda
+            (first (luvcraft.frontier:frontier-realization-drain-form
+                    realization))))
+    (ok (functionp
+         (luvcraft.frontier:frontier-realization-drain-function realization)))
+    (ok (functionp
+         (luvcraft.frontier:frontier-realization-admit-function realization)))
+    (ok (= 15 (luvcraft.frontier:frontier-realization-maximum-priority
+               realization)))
+    ;; The transfer law is checked in the bound field's own quantity: sky
+    ;; light stays sky light, and attenuation steps enter through an explicit
+    ;; AS-FIELD-QUANTITY boundary rather than by coincidence of encoding.
+    (ok (eq :sky-propagation-level
+            (luv.arithmetic:quantity-specification-name
+             (luv.arithmetic.language:arithmetic-expression-quantity-specification
+              (luvcraft.frontier:frontier-realization-transfer realization)))))
+    (ok (eq :block-propagation-level
+            (luv.arithmetic:quantity-specification-name
+             (luv.arithmetic.language:arithmetic-expression-quantity-specification
+              (luvcraft.frontier:frontier-realization-transfer
+               (luvcraft::compiled-light-realization :block-light))))))
+    ;; The emitted scalar loop contains no arithmetic dispatch: the law was
+    ;; inlined as ordinary CL operators over declared lanes.
+    (ok (not (labels ((mentions-p (tree)
+                        (if (atom tree)
+                            (member tree '(luv.arithmetic.lisp::lisp-add
+                                           luv.arithmetic.lisp::lisp-subtract
+                                           funcall apply))
+                            (or (mentions-p (car tree))
+                                (mentions-p (cdr tree))))))
+               (mentions-p
+                (luvcraft.frontier:frontier-realization-drain-form
+                 realization))))))
+  (let ((world (make-compiled-light-proof-world)))
+    ;; Warm the realizations, then compare exactly against both oracles.
+    (compare-voxel-light-solvers world :candidate :compiled)
+    (let ((legacy (compare-voxel-light-solvers world :candidate :compiled))
+          (frontier (compare-voxel-light-solvers world :candidate :frontier)))
+      (ok (voxel-light-solver-comparison-equal-p legacy))
+      (ok (= (voxel-light-solver-comparison-legacy-visits legacy)
+             (voxel-light-solver-comparison-frontier-visits legacy)
+             (voxel-light-solver-comparison-frontier-visits frontier)))
+      (ok (eq :compiled (voxel-light-solver-comparison-candidate-solver legacy)))
+      (ok (= 2 (length
+                (voxel-light-solver-comparison-frontier-executions legacy))))
+      ;; Both realizations of the same definition perform the same semantic
+      ;; work: visits, relations, and crossings agree execution by execution.
+      (loop for compiled in (voxel-light-solver-comparison-frontier-executions
+                             legacy)
+            for manual in (voxel-light-solver-comparison-frontier-executions
+                           frontier)
+            do (ok (= (luvcraft.frontier:frontier-execution-visits compiled)
+                      (luvcraft.frontier:frontier-execution-visits manual)))
+               (ok (= (luvcraft.frontier:frontier-execution-relations compiled)
+                      (luvcraft.frontier:frontier-execution-relations manual)))
+               (ok (= (luvcraft.frontier:frontier-execution-crossings compiled)
+                      (luvcraft.frontier:frontier-execution-crossings manual)))))))
+
+(deftest compiled-light-drain-allocates-nothing-per-relation
+  ;; A warmed drain over pre-grown frontier storage allocates only at chunk
+  ;; crossings, where the window resolves a coordinate key (#L84JCX), never
+  ;; per site or per relation.  The proof world exposes about 68,000
+  ;; relations and 4,000 crossings; one cons per relation would exceed a
+  ;; megabyte.
+  (let* ((world (make-compiled-light-proof-world))
+         (sky (luvcraft::compiled-light-realization :sky-light))
+         (frontier (luvcraft.frontier:make-realization-frontier sky))
+         (bytes nil)
+         (relations 0)
+         (crossings 0))
+    (dotimes (round 3)
+      (let* ((region (luvcraft::capture-light-region world))
+             (execution
+               (luvcraft.frontier:make-realization-execution sky region frontier)))
+        (luvcraft::seed-compiled-sky-boundaries sky region frontier execution)
+        (let ((observation (make-runtime-observation)))
+          (with-runtime-observation (observation)
+            (luvcraft.frontier:drain-frontier-realization
+             sky region frontier execution
+             :direct-direction luvcraft.world:+voxel-negative-y+))
+          (setf bytes (runtime-observation-bytes-consed observation)
+                relations (luvcraft.frontier:frontier-execution-relations
+                           execution)
+                crossings (luvcraft.frontier:frontier-execution-crossings
+                           execution)))))
+    (ok (> relations 60000))
+    (ok (< bytes (+ (* 64 1024) (* 128 crossings))))))
+
+(deftest compiled-light-can-be-selected-for-real-publication
+  (let ((world (make-open-sky-test-world '(0 0 0) '(1 0 0))))
+    (setf (world-block-at world 15 8 8) *test-glow-block*)
+    (let ((*voxel-light-solver* :compiled))
+      (ok (relight-block-world world)))
+    (ok (light-matches-reference-p world))
+    (ok (= 10 (blocklight-at world 15 8 8)))
+    (ok (= 9 (blocklight-at world 16 8 8)))))
+
 (deftest bucket-frontier-admission-does-not-construct-a-type-per-site
   (let ((frontier
           (luvcraft.frontier:make-bucket-frontier
