@@ -434,17 +434,16 @@
             :position (luv.arithmetic.lisp.vec3:make-vec3 0.0 0.0 0.0)
             :yaw 0.0 :pitch 0.0))
          (center (luv.arithmetic.lisp.vec3:make-vec3 0.0 0.0 10.0))
+         (resource (luvcraft::make-world-text-glyph-resource))
          (glyph
            (luvcraft::make-world-text-glyph
+            :resource resource
             :origin-x 0.0 :origin-y 0.0
             :outline-min-x 0.0 :outline-min-y 0.0
             :outline-max-x 1.0 :outline-max-y 1.0))
-         (vertices
-           (luvcraft::make-world-text-vertices
-            (list glyph) center
-            (luv.arithmetic.lisp.vec3:make-vec3 1.0 0.0 0.0)
-            (luv.arithmetic.lisp.vec3:make-vec3 0.0 1.0 0.0)
-            0.5 0.0 0.0 1.0 1.0))
+         (locations (make-hash-table :test #'eq))
+         (atlas (luvcraft::make-world-text-glyph-atlas :locations locations))
+         (instances nil)
          (run
            (make-instance 'luvcraft::world-text-run
                           :center center :world-units-per-em 0.5))
@@ -463,9 +462,19 @@
                  (/ (tan (/ luvcraft::+luvcraft-camera-vertical-field-of-view+
                               2.0))))
               10.0)))
-    (ok (= 54 (length vertices)))
-    (ok (every (lambda (index) (= 10.0 (aref vertices index)))
-               '(2 11 20 29 38 47)))
+    (setf (gethash resource locations) '(17 29)
+          instances
+          (luvcraft::make-world-text-instances
+           (list glyph) atlas center
+           (luv.arithmetic.lisp.vec3:make-vec3 1.0 0.0 0.0)
+           (luv.arithmetic.lisp.vec3:make-vec3 0.0 1.0 0.0)
+           0.5 0.0 0.0 1.0 1.0))
+    (ok (= 18 (length instances)))
+    (ok (= 10.0 (aref instances 2)))
+    (ok (= 0.535 (aref instances 3)))
+    (ok (= 0.535 (aref instances 7)))
+    (ok (= 17.0 (aref instances 15)))
+    (ok (= 29.0 (aref instances 16)))
     (ok (< (abs (- actual expected)) 1e-5))
     (ok (< (abs (- near (* 2 expected))) 1e-5))))
 

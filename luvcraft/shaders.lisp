@@ -207,17 +207,32 @@
     block-world-text-vertex-specification
     ((role (eql :slug-world-text)) (stage (eql :vertex)))
     (:stage :vertex
-     :inputs ((world-position :vec3 :location 0
-                              :quantity :world-position :unit :cell)
-              (outline-coordinate :vec3 :location 1)
-              (pixels-per-em :vec3 :location 2))
+     :inputs ((quad-corner :vec3 :location 0)
+              (world-origin :vec3 :location 1)
+              (world-right-edge :vec3 :location 2)
+              (world-up-edge :vec3 :location 3)
+              (outline-low :vec3 :location 4)
+              (outline-high :vec3 :location 5)
+              (atlas-input :vec3 :location 6))
      :outputs ((clip-position :vec4 :built-in :position)
                (render-coordinate :vec2 :location 0)
-               (render-pixels-per-em :vec2 :location 1))
+               (render-pixels-per-em :vec2 :location 1)
+               (render-atlas-base :vec2 :location 2))
      :resources
      ((frame-state :uniform-block :set 0 :binding 2
                    :members #.*frame-uniform-members*)))
-  (let* ((camera (swizzle camera-vector :xyz))
+  (let* ((world-position
+           (assume-quantity
+            (+ world-origin
+               (* world-right-edge (swizzle quad-corner :x))
+               (* world-up-edge (swizzle quad-corner :y)))
+            :quantity :world-position :unit :cell))
+         (outline-coordinate
+           (+ (swizzle outline-low :xy)
+              (* (- (swizzle outline-high :xy)
+                    (swizzle outline-low :xy))
+                 (swizzle quad-corner :xy))))
+         (camera (swizzle camera-vector :xyz))
          (right (swizzle right-vector :xyz))
          (up (swizzle up-vector :xyz))
          (forward (swizzle forward-vector :xyz))
@@ -240,8 +255,11 @@
                      (representation clip-z)
                      (representation view-z))))
     (set-output clip-position clip)
-    (set-output render-coordinate (swizzle outline-coordinate :xy))
-    (set-output render-pixels-per-em (swizzle pixels-per-em :xy))))
+    (set-output render-coordinate outline-coordinate)
+    (set-output render-pixels-per-em
+                (vec2 (swizzle outline-low :z)
+                      (swizzle outline-high :z)))
+    (set-output render-atlas-base (swizzle atlas-input :xy))))
 
 (defun block-world-text-vertex-specification ()
   (shader-specification-for :slug-world-text :vertex))
@@ -249,7 +267,7 @@
 (defmethod shader-specification-for
     ((role (eql :slug-world-text)) (stage (eql :fragment)))
   (declare (ignore role stage))
-  (luv.slug:slug-banded-fragment-specification))
+  (luv.slug:slug-atlas-fragment-specification))
 
 (defun block-world-text-fragment-specification ()
   (shader-specification-for :slug-world-text :fragment))

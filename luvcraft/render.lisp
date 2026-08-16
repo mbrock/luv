@@ -408,7 +408,8 @@ the frame uniform cannot silently diverge between shader and host."
                      (world-text-run-glyphs
                       (luvcraft-session-world-text session)))
                     0))
-              (draws (+ 2 text-glyph-count (* 2 mesh-draws)
+              (draws (+ 2 (if (plusp text-glyph-count) 1 0)
+                        (* 2 mesh-draws)
                         (if (plusp particle-vertex-count) 1 0)))
               (vertices (+ +block-world-crosshair-vertex-count+ 3
                            (* 6 text-glyph-count)
@@ -512,11 +513,10 @@ the frame uniform cannot silently diverge between shader and host."
           (let ((text (luvcraft-session-world-text session)))
             (set-pipeline pass (world-text-run-native-pipeline text))
             (set-vertex-buffer pass 0 (world-text-run-vertex-buffer text))
-            (loop for bind-group across
-                    (luvcraft-frame-world-text-bind-groups frame)
-                  for first-vertex from 0 by 6
-                  do (set-bind-group pass 0 bind-group)
-                     (draw pass 6 1 first-vertex))))
+            (set-vertex-buffer pass 1 (world-text-run-instance-buffer text))
+            (set-bind-group
+             pass 0 (aref (luvcraft-frame-world-text-bind-groups frame) 0))
+            (draw pass 6 (length (world-text-run-glyphs text)))))
         (dolist (overlay (reverse (luvcraft-session-overlays session)))
           (encode-luvcraft-overlay overlay session pass surface-texture))
         (set-pipeline pass (luvcraft-session-crosshair-native-pipeline session))

@@ -1,8 +1,8 @@
 ;;; HarfBuzz-shaped Slug text as world-owned render geometry.
 ;;;
 ;;; A WORLD-TEXT-RUN is the semantic placement boundary.  A per-device cache
-;;; retains HarfBuzz results and one uploaded outline per font/glyph pair until
-;;; the shared-atlas iteration packs those resources more tightly.
+;;; retains HarfBuzz results and normalized outlines.  Each distinct glyph set
+;;; is packed into two device atlases and shared by matching runs.
 
 (in-package #:luvcraft)
 
@@ -11,12 +11,18 @@
   outline-min-x outline-min-y outline-max-x outline-max-y)
 
 (defstruct world-text-glyph-resource
-  key glyph-id serialized band-texture band-view curve-texture curve-view)
+  key glyph-id serialized)
+
+(defstruct world-text-glyph-atlas
+  key locations band-texel-count curve-texel-count
+  band-texture band-view curve-texture curve-view)
 
 (defclass world-text-glyph-cache ()
   ((device :initarg :device :reader world-text-glyph-cache-device)
    (entries :initform (make-hash-table :test #'equal)
             :reader world-text-glyph-cache-entries)
+   (atlases :initform (make-hash-table :test #'equal)
+            :reader world-text-glyph-cache-atlases)
    (shaped-texts :initform (make-hash-table :test #'equal)
                  :reader world-text-glyph-cache-shaped-texts)))
 
@@ -26,12 +32,16 @@
                   :reader world-text-run-font-pathname)
    (shaped-text :initarg :shaped-text :reader world-text-run-shaped-text)
    (glyphs :initarg :glyphs :reader world-text-run-glyphs)
+   (atlas :initarg :atlas :reader world-text-run-atlas)
    (center :initarg :center :reader world-text-run-center)
    (world-units-per-em :initarg :world-units-per-em
                        :reader world-text-run-world-units-per-em)
    (vertex-data :initarg :vertex-data :reader world-text-run-vertex-data)
    (vertex-buffer :initarg :vertex-buffer
                   :reader world-text-run-vertex-buffer)
+   (instance-data :initarg :instance-data :reader world-text-run-instance-data)
+   (instance-buffer :initarg :instance-buffer
+                    :reader world-text-run-instance-buffer)
    (layout :initarg :layout :reader world-text-run-layout)
    (pipeline :initarg :pipeline :reader world-text-run-pipeline)
    (resources :initarg :resources :reader world-text-run-resources)))
@@ -52,88 +62,15 @@
 
 (defun create-world-text-glyph-resource
     (cache key glyph-id font-loader)
-  (let* ((device (world-text-glyph-cache-device cache))
-         (glyph (luv.slug:load-slug-glyph-index glyph-id font-loader))
+  (declare (ignore cache))
+  (let* ((glyph (luv.slug:load-slug-glyph-index glyph-id font-loader))
          (outline (luv.slug:normalize-slug-glyph-outline glyph)))
     (when (luv.slug:slug-outline-contours outline)
-      (let* ((serialized
-               (luv.slug:serialize-slug-outline
-                outline :horizontal-band-count 1 :vertical-band-count 1))
-             (band-texture nil)
-             (curve-texture nil)
-             (band-view nil)
-             (curve-view nil)
-             (completed-p nil))
-        (unwind-protect
-             (progn
-               (setf band-texture
-                     (create
-                      device
-                      (make-texture-descriptor
-                       :label "cached world glyph RG16U bands"
-                       :size
-                       (luv.slug:slug-serialized-outline-band-texture-size
-                        serialized)
-                       :dimensions :2d :format :rg16-uint
-                       :usage '(:texture-binding :copy-dst)))
-                     curve-texture
-                     (create
-                      device
-                      (make-texture-descriptor
-                       :label "cached world glyph RGBA16F curves"
-                       :size
-                       (luv.slug:slug-serialized-outline-curve-texture-size
-                        serialized)
-                       :dimensions :2d :format :rgba16-float
-                       :usage '(:texture-binding :copy-dst)))
-                     band-view
-                     (create
-                      device
-                      (make-texture-view-descriptor :texture band-texture))
-                     curve-view
-                     (create
-                      device
-                      (make-texture-view-descriptor :texture curve-texture)))
-               (write-texture
-                (device-queue device)
-                (make-texture-copy :texture band-texture)
-                (luv.slug:slug-serialized-outline-band-upload-data serialized)
-                (make-texture-data-layout
-                 :bytes-per-row
-                 (* 4
-                    (luv.slug:slug-serialized-outline-band-width serialized))
-                 :rows-per-image
-                 (second
-                  (luv.slug:slug-serialized-outline-band-texture-size
-                   serialized)))
-                (luv.slug:slug-serialized-outline-band-texture-size serialized))
-               (write-texture
-                (device-queue device)
-                (make-texture-copy :texture curve-texture)
-                (luv.slug:slug-serialized-outline-curve-upload-data serialized)
-                (make-texture-data-layout
-                 :bytes-per-row
-                 (* 8
-                    (luv.slug:slug-serialized-outline-curve-width serialized))
-                 :rows-per-image
-                 (second
-                  (luv.slug:slug-serialized-outline-curve-texture-size
-                   serialized)))
-                (luv.slug:slug-serialized-outline-curve-texture-size
-                 serialized))
-               (let ((resource
-                       (make-world-text-glyph-resource
-                        :key key :glyph-id glyph-id :serialized serialized
-                        :band-texture band-texture :band-view band-view
-                        :curve-texture curve-texture :curve-view curve-view)))
-                 (setf completed-p t)
-                 resource))
-          (unless completed-p
-            (dolist (resource
-                      (remove nil
-                              (list curve-view band-view
-                                    curve-texture band-texture)))
-              (destroy resource))))))))
+      (make-world-text-glyph-resource
+       :key key :glyph-id glyph-id
+       :serialized
+       (luv.slug:serialize-slug-outline
+        outline :horizontal-band-count 1 :vertical-band-count 1)))))
 
 (defun world-text-glyph-resource-for
     (cache font-pathname glyph-id font-loader)
@@ -154,16 +91,126 @@
           (world-text-glyph-cache-entries cache)
         count (not (eq resource :empty))))
 
+(defun world-text-atlas-upload-data (resources count-reader data-reader
+                                     element-type)
+  (let* ((width 4096)
+         (texel-count (loop for resource in resources
+                            sum (funcall count-reader
+                                         (world-text-glyph-resource-serialized
+                                          resource))))
+         (height (max 1 (ceiling texel-count width)))
+         (data (make-array (list height width)
+                           :element-type element-type :initial-element 0))
+         (offset 0))
+    (dolist (resource resources)
+      (let* ((serialized (world-text-glyph-resource-serialized resource))
+             (count (funcall count-reader serialized))
+             (source (funcall data-reader serialized)))
+        (dotimes (index count)
+          (setf (row-major-aref data (+ offset index))
+                (row-major-aref source index)))
+        (incf offset count)))
+    (values data texel-count)))
+
+(defun create-world-text-glyph-atlas (cache key resources)
+  "Pack RESOURCES tightly into one RG16U band and one RGBA16F curve texture."
+  (let ((locations (make-hash-table :test #'eq))
+        (band-offset 0)
+        (curve-offset 0))
+    (dolist (resource resources)
+      (setf (gethash resource locations) (list band-offset curve-offset))
+      (incf band-offset
+            (luv.slug:slug-serialized-outline-band-texel-count
+             (world-text-glyph-resource-serialized resource)))
+      (incf curve-offset
+            (luv.slug:slug-serialized-outline-curve-texel-count
+             (world-text-glyph-resource-serialized resource))))
+    (multiple-value-bind (band-data band-count)
+        (world-text-atlas-upload-data
+         resources #'luv.slug:slug-serialized-outline-band-texel-count
+         #'luv.slug:slug-serialized-outline-band-upload-data
+         '(unsigned-byte 32))
+      (multiple-value-bind (curve-data curve-count)
+          (world-text-atlas-upload-data
+           resources #'luv.slug:slug-serialized-outline-curve-texel-count
+           #'luv.slug:slug-serialized-outline-curve-upload-data
+           '(unsigned-byte 64))
+        (let* ((device (world-text-glyph-cache-device cache))
+               (band-size (list 4096 (array-dimension band-data 0)))
+               (curve-size (list 4096 (array-dimension curve-data 0)))
+               (band-texture nil) (curve-texture nil)
+               (band-view nil) (curve-view nil) (completed-p nil))
+          (unwind-protect
+               (progn
+                 (setf band-texture
+                       (create
+                        device
+                        (make-texture-descriptor
+                         :label "world glyph RG16U atlas" :size band-size
+                         :dimensions :2d :format :rg16-uint
+                         :usage '(:texture-binding :copy-dst)))
+                       curve-texture
+                       (create
+                        device
+                        (make-texture-descriptor
+                         :label "world glyph RGBA16F atlas" :size curve-size
+                         :dimensions :2d :format :rgba16-float
+                         :usage '(:texture-binding :copy-dst)))
+                       band-view
+                       (create device (make-texture-view-descriptor
+                                       :texture band-texture))
+                       curve-view
+                       (create device (make-texture-view-descriptor
+                                       :texture curve-texture)))
+                 (write-texture
+                  (device-queue device) (make-texture-copy :texture band-texture)
+                  band-data
+                  (make-texture-data-layout :bytes-per-row (* 4 4096)
+                                            :rows-per-image (second band-size))
+                  band-size)
+                 (write-texture
+                  (device-queue device)
+                  (make-texture-copy :texture curve-texture) curve-data
+                  (make-texture-data-layout :bytes-per-row (* 8 4096)
+                                            :rows-per-image (second curve-size))
+                  curve-size)
+                 (let ((atlas
+                         (make-world-text-glyph-atlas
+                          :key key :locations locations
+                          :band-texel-count band-count
+                          :curve-texel-count curve-count
+                          :band-texture band-texture :band-view band-view
+                          :curve-texture curve-texture :curve-view curve-view)))
+                   (setf completed-p t)
+                   atlas))
+            (unless completed-p
+              (dolist (resource
+                        (remove nil (list curve-view band-view
+                                          curve-texture band-texture)))
+                (destroy resource)))))))))
+
+(defun world-text-glyph-atlas-for (cache glyphs)
+  (let* ((resources
+           (remove-duplicates
+            (mapcar #'world-text-glyph-resource glyphs) :test #'eq))
+         (key (mapcar #'world-text-glyph-resource-key resources))
+         (atlases (world-text-glyph-cache-atlases cache)))
+    (or (gethash key atlases)
+        (setf (gethash key atlases)
+              (create-world-text-glyph-atlas cache key resources)))))
+
+(defun release-world-text-glyph-atlas (atlas)
+  (destroy (world-text-glyph-atlas-curve-view atlas))
+  (destroy (world-text-glyph-atlas-band-view atlas))
+  (destroy (world-text-glyph-atlas-curve-texture atlas))
+  (destroy (world-text-glyph-atlas-band-texture atlas)))
+
 (defun release-world-text-glyph-cache (cache)
-  (maphash
-   (lambda (key resource)
-     (declare (ignore key))
-     (unless (eq resource :empty)
-       (destroy (world-text-glyph-resource-curve-view resource))
-       (destroy (world-text-glyph-resource-band-view resource))
-       (destroy (world-text-glyph-resource-curve-texture resource))
-       (destroy (world-text-glyph-resource-band-texture resource))))
-   (world-text-glyph-cache-entries cache))
+  (maphash (lambda (key atlas)
+             (declare (ignore key))
+             (release-world-text-glyph-atlas atlas))
+           (world-text-glyph-cache-atlases cache))
+  (clrhash (world-text-glyph-cache-atlases cache))
   (clrhash (world-text-glyph-cache-entries cache))
   (clrhash (world-text-glyph-cache-shaped-texts cache))
   (values))
@@ -235,29 +282,32 @@
    (+ (vec3-z center)
       (* scale (+ (* x (vec3-z right)) (* y (vec3-z up)))))))
 
-(defun make-world-text-vertices
-    (glyphs center right up scale min-x min-y max-x max-y)
-  "Apply one text-run model transform and retain em coordinates per vertex."
+(defun make-world-text-quad-vertices ()
+  (make-array
+   18 :element-type 'single-float
+      :initial-contents
+      '(0.0 0.0 0.0  1.0 0.0 0.0  1.0 1.0 0.0
+        0.0 0.0 0.0  1.0 1.0 0.0  0.0 1.0 0.0)))
+
+(defun make-world-text-instances
+    (glyphs atlas center right up scale min-x min-y max-x max-y)
+  "Build one dense model-and-atlas record per drawable glyph occurrence."
   (let* ((padding 0.035)
          (middle-x (/ (+ min-x max-x) 2))
          (middle-y (/ (+ min-y max-y) 2))
-         (data (make-array (* 54 (length glyphs))
+         (data (make-array (* 18 (length glyphs))
                            :element-type 'single-float)))
-    (labels ((write-vertex (offset layout-x layout-y outline-x outline-y)
-               (let ((world
-                       (world-text-point
-                        center right up (- layout-x middle-x)
-                        (- layout-y middle-y) scale)))
-                 (loop for value in (list (vec3-x world) (vec3-y world)
-                                          (vec3-z world)
-                                          outline-x outline-y 0.0
-                                          1.0 1.0 0.0)
-                       for index from offset
-                       do (setf (aref data index)
-                                (coerce value 'single-float))))))
+    (labels ((difference (end start)
+               (make-vec3 (- (vec3-x end) (vec3-x start))
+                          (- (vec3-y end) (vec3-y start))
+                          (- (vec3-z end) (vec3-z start))))
+             (write-values (offset values)
+               (loop for value in values
+                     for index from offset
+                     do (setf (aref data index)
+                              (coerce value 'single-float)))))
       (loop for glyph in glyphs
-            for glyph-index from 0
-            for base = (* glyph-index 54)
+            for base from 0 by 18
             for outline-left = (- (world-text-glyph-outline-min-x glyph)
                                   padding)
             for outline-bottom = (- (world-text-glyph-outline-min-y glyph)
@@ -273,18 +323,30 @@
             for layout-right = (+ (world-text-glyph-origin-x glyph)
                                   outline-right)
             for layout-top = (+ (world-text-glyph-origin-y glyph) outline-top)
-            do (write-vertex base layout-left layout-bottom
-                             outline-left outline-bottom)
-               (write-vertex (+ base 9) layout-right layout-bottom
-                             outline-right outline-bottom)
-               (write-vertex (+ base 18) layout-right layout-top
-                             outline-right outline-top)
-               (write-vertex (+ base 27) layout-left layout-bottom
-                             outline-left outline-bottom)
-               (write-vertex (+ base 36) layout-right layout-top
-                             outline-right outline-top)
-               (write-vertex (+ base 45) layout-left layout-top
-                             outline-left outline-top))
+            for origin = (world-text-point
+                          center right up (- layout-left middle-x)
+                          (- layout-bottom middle-y) scale)
+            for right-edge = (world-text-point
+                              center right up (- layout-right middle-x)
+                              (- layout-bottom middle-y) scale)
+            for top-edge = (world-text-point
+                            center right up (- layout-left middle-x)
+                            (- layout-top middle-y) scale)
+            for atlas-location =
+              (gethash (world-text-glyph-resource glyph)
+                       (world-text-glyph-atlas-locations atlas))
+            do (write-values
+                base
+                (list (vec3-x origin) (vec3-y origin) (vec3-z origin)
+                      (vec3-x (difference right-edge origin))
+                      (vec3-y (difference right-edge origin))
+                      (vec3-z (difference right-edge origin))
+                      (vec3-x (difference top-edge origin))
+                      (vec3-y (difference top-edge origin))
+                      (vec3-z (difference top-edge origin))
+                      outline-left outline-bottom 1.0
+                      outline-right outline-top 1.0
+                      (first atlas-location) (second atlas-location) 0.0)))
       data)))
 
 (defun world-text-center-before-camera (camera distance lift)
@@ -316,12 +378,15 @@ font-and-glyph device resources reusable across runs.  See #QW7P96."
             (world-text-extents glyphs shaped font-loader)
           (multiple-value-bind (right up forward) (camera-basis camera)
             (declare (ignore forward))
-            (let* ((vertex-data
-                     (make-world-text-vertices
-                      glyphs center right up world-units-per-em
+            (let* ((atlas (world-text-glyph-atlas-for glyph-cache glyphs))
+                   (vertex-data (make-world-text-quad-vertices))
+                   (instance-data
+                     (make-world-text-instances
+                      glyphs atlas center right up world-units-per-em
                       min-x min-y max-x max-y))
                    (layout nil)
-                   (vertex-buffer nil))
+                   (vertex-buffer nil)
+                   (instance-buffer nil))
               (flet ((keep (resource) (push resource resources) resource))
                 (unwind-protect
                      (progn
@@ -343,6 +408,14 @@ font-and-glyph device resources reusable across runs.  See #QW7P96."
                                 :label "world Slug glyph quads"
                                 :size (* 4 (length vertex-data))
                                 :usage '(:vertex :copy-dst))))
+                             instance-buffer
+                             (keep
+                              (create
+                               device
+                               (make-buffer-descriptor
+                                :label "world Slug glyph instances"
+                                :size (* 4 (length instance-data))
+                                :usage '(:vertex :copy-dst))))
                              pipeline
                              (make-live-shader-pipeline
                               :role :slug-world-text
@@ -350,13 +423,23 @@ font-and-glyph device resources reusable across runs.  See #QW7P96."
                               :label "world HarfBuzz Slug text"
                               :device device :layout layout
                               :vertex-buffers
-                              '((:array-stride 36
+                              '((:array-stride 12
                                  :attributes
                                  ((:shader-location 0 :offset 0
+                                   :format :float32x3)))
+                                (:array-stride 72 :step-mode :instance
+                                 :attributes
+                                 ((:shader-location 1 :offset 0
                                    :format :float32x3)
-                                  (:shader-location 1 :offset 12
+                                  (:shader-location 2 :offset 12
                                    :format :float32x3)
-                                  (:shader-location 2 :offset 24
+                                  (:shader-location 3 :offset 24
+                                   :format :float32x3)
+                                  (:shader-location 4 :offset 36
+                                   :format :float32x3)
+                                  (:shader-location 5 :offset 48
+                                   :format :float32x3)
+                                  (:shader-location 6 :offset 60
                                    :format :float32x3))))
                               :target-format target-format
                               :target-blend :premultiplied-alpha
@@ -366,15 +449,18 @@ font-and-glyph device resources reusable across runs.  See #QW7P96."
                                 :depth-write-enabled nil
                                 :depth-compare :less)))
                        (write-buffer vertex-buffer vertex-data)
+                       (write-buffer instance-buffer instance-data)
                        (let ((run
                                (make-instance
                                 'world-text-run
                                 :string string :font-pathname font-pathname
-                                :shaped-text shaped :glyphs glyphs
+                                :shaped-text shaped :glyphs glyphs :atlas atlas
                                 :center center
                                 :world-units-per-em world-units-per-em
                                 :vertex-data vertex-data
-                                :vertex-buffer vertex-buffer :layout layout
+                                :vertex-buffer vertex-buffer
+                                :instance-data instance-data
+                                :instance-buffer instance-buffer :layout layout
                                 :pipeline pipeline :resources resources)))
                          (setf completed-p t)
                          run))
@@ -385,41 +471,28 @@ font-and-glyph device resources reusable across runs.  See #QW7P96."
                       (ignore-errors (destroy resource)))))))))))))
 
 (defun make-world-text-frame-bind-groups (run device uniform-buffer)
-  "Bind each temporary glyph texture pair to one drawable-frame uniform."
-  (let* ((glyphs (world-text-run-glyphs run))
-         (groups (make-array (length glyphs) :initial-element nil))
-         (groups-by-resource (make-hash-table :test #'eq))
+  "Bind one shared glyph atlas to one drawable-frame uniform."
+  (let* ((atlas (world-text-run-atlas run))
+         (groups (make-array 1 :initial-element nil))
          (completed-p nil))
     (unwind-protect
          (progn
-           (loop for glyph in glyphs
-                 for index from 0
-                 for resource = (world-text-glyph-resource glyph)
-                 do (setf (aref groups index)
-                          (or (gethash resource groups-by-resource)
-                              (setf
-                               (gethash resource groups-by-resource)
-                               (create
-                                device
-                                (make-bind-group-descriptor
-                                 :label "cached world glyph frame bindings"
-                                 :layout (world-text-run-layout run)
-                                 :entries
-                                 `((:binding 0
-                                    :resource ,(world-text-glyph-resource-band-view
-                                                resource))
-                                   (:binding 1
-                                    :resource ,(world-text-glyph-resource-curve-view
-                                                resource))
-                                   (:binding 2
-                                    :resource ,uniform-buffer))))))))
+           (setf (aref groups 0)
+                 (create
+                  device
+                  (make-bind-group-descriptor
+                   :label "world glyph atlas frame bindings"
+                   :layout (world-text-run-layout run)
+                   :entries
+                   `((:binding 0
+                      :resource ,(world-text-glyph-atlas-band-view atlas))
+                     (:binding 1
+                      :resource ,(world-text-glyph-atlas-curve-view atlas))
+                     (:binding 2 :resource ,uniform-buffer)))))
            (setf completed-p t)
            groups)
       (unless completed-p
-        (maphash (lambda (resource group)
-                   (declare (ignore resource))
-                   (destroy group))
-                 groups-by-resource)))))
+        (when (aref groups 0) (destroy (aref groups 0)))))))
 
 (defun world-text-projected-pixels-per-em (run camera viewport-height)
   "Approximate projected em scale at RUN's center for the current camera."
@@ -441,15 +514,15 @@ font-and-glyph device resources reusable across runs.  See #QW7P96."
        'single-float))))
 
 (defun update-world-text-projected-scale (run camera viewport-height)
-  "Update the temporary per-vertex scale until fragment derivatives own it."
+  "Update the temporary per-instance scale until fragment derivatives own it."
   (let ((pixels-per-em
           (world-text-projected-pixels-per-em run camera viewport-height))
-        (data (world-text-run-vertex-data run)))
-    (loop for vertex below (* 6 (length (world-text-run-glyphs run)))
-          for base = (* vertex 9)
-          do (setf (aref data (+ base 6)) pixels-per-em
-                   (aref data (+ base 7)) pixels-per-em))
-    (write-buffer (world-text-run-vertex-buffer run) data)
+        (data (world-text-run-instance-data run)))
+    (loop for glyph below (length (world-text-run-glyphs run))
+          for base = (* glyph 18)
+          do (setf (aref data (+ base 11)) pixels-per-em
+                   (aref data (+ base 14)) pixels-per-em))
+    (write-buffer (world-text-run-instance-buffer run) data)
     pixels-per-em))
 
 (defun world-text-run-native-pipeline (run)

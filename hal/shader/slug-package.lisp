@@ -77,6 +77,7 @@
            #:load-slug-glyph
            #:map-slug-outline-points
            #:normalize-slug-glyph-outline
+           #:slug-atlas-fragment-specification
            #:slug-root-eligibility
            #:slug-quadratic-outline
            #:slug-bezier-vertex-specification

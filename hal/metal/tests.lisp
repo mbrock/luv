@@ -74,6 +74,14 @@
                  (saw-repeated-glyph-p nil))
              (ok (eq (luvcraft::world-text-run-shaped-text first)
                      (luvcraft::world-text-run-shaped-text second)))
+             (ok (eq (luvcraft::world-text-run-atlas first)
+                     (luvcraft::world-text-run-atlas second)))
+             (ok (< (luvcraft::world-text-glyph-atlas-band-texel-count
+                     (luvcraft::world-text-run-atlas first))
+                    4096))
+             (ok (< (luvcraft::world-text-glyph-atlas-curve-texel-count
+                     (luvcraft::world-text-run-atlas first))
+                    4096))
              (ok (< (luvcraft::world-text-glyph-cache-resource-count cache)
                     (length first-glyphs)))
              (dolist (glyph first-glyphs)
