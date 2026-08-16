@@ -56,6 +56,13 @@ publishing either candidate:
  (luvcraft:luvcraft-session-world luvcraft:*session*))
 #+end_src
 
+#53Q1II states the next paradigm explicitly: these are compiled sparse
+kernels, formed by composing a frontier/control IR with the quantity-checked
+arithmetic IR and lowering the result to a chosen scalar, SIMD, or GPU
+execution plan.  #PJY6E1 is the immediate handoff: compile the present
+monotone light program to closed scalar Lisp while keeping both existing
+solvers as exact oracles.
+
 The old solver remains present as oracle and recovery path.  The new program
 begins deliberately with the simpler addition fixpoint; incremental
 invalidation, removal, and residency reconciliation are the next frontier
@@ -544,6 +551,115 @@ a terminal wall remains unmistakably a terminal wall, while both can speak in
 the same precise language about frontier, domain, materialization, extent,
 and publication.
 
+* Frontier programs are compiled sparse kernels
+:PROPERTIES:
+:ID: 53Q1II
+:END:
+
+The proposed frontier language is a DSL compiler, not a generic worklist
+framework whose inner loop depends on accidental devirtualization.  A live,
+inspectable program definition remains open to Common Lisp development; one
+compilation closes that definition over particular fields, domains,
+neighborhoods, representations, and an execution plan, then emits the exact
+scalar, SIMD, or GPU machinery required by that realization.  This is the
+explicit staging which C++ templates and Haskell type-class specialization
+obtain through their host languages, but here the generated program and every
+choice which produced it can themselves be ordinary Lisp objects.
+
+The compiler composes two deliberately different languages:
+
+#+begin_src mermaid
+flowchart TB
+  F["frontier program IR<br/><small>family, domain, neighborhood, effects, fixation, publication</small>"]
+  A["arithmetic IR<br/><small>quantity-checked transfer, join, admission, priority</small>"]
+  C["frontier compiler<br/><small>bind fields and choose a physical plan</small>"]
+  S["closed scalar Lisp loop"]
+  V["columnar SIMD batches"]
+  G["bulk GPU passes"]
+  W["GPU work graph"]
+  F --> C
+  A --> C
+  C --> S
+  C --> V
+  C --> G
+  C --> W
+#+end_src
+
+The arithmetic language owns pure value laws: derive a propagation loss,
+compute a candidate, compare it with a destination, join compatible values,
+and derive a priority.  The frontier language owns work-generating effects:
+seed, expose a relation, read and commit fields, admit another site, settle or
+invalidate work, and publish a coherent candidate.  Chunk lookup, unavailable
+neighbors, queues, atomics, revision stamps, and publication do not become
+arithmetic expressions.  Conversely, a light attenuation law should not be
+duplicated as handwritten scalar, SIMD, and shader arithmetic.  This sharpens
+the local-law boundary anticipated by #WEE8P5 and realizes the checked field
+kernel of #ADR040 through the multi-backend arithmetic medium #5N6SOQ.
+
+One execution plan need not contain a conventional queue.  The physical
+meaning of “unsettled work” may be a packed bucket frontier, a FIFO, an active
+bitset, current/next append buffers, component parents undergoing pointer
+jumping, or records emitted between GPU nodes.  Two sources make that range
+concrete:
+
+- [[https://diglib.eg.org/items/93fc78c0-71fa-4511-8564-a7e5268bf27a][Kuth et al.'s 2025 real-time GPU tree generator]] uses GPU work-graph
+  nodes which consume typed tree records and emit recursive stem, leaf, and
+  mesh work.  This is a heterogeneous, dynamically growing frontier realized
+  by the device scheduler.
+- [[https://m.sheaf.less.rest/read/NV2YRW][Jain et al.'s 2024 FastFlow]] instead turns terrain flow into regular
+  bulk GPU iterations: rake-compress and pointer jumping accumulate stream
+  trees, while a Borůvka-style process merges depression basins.  Its GPU may
+  run a fixed logarithmic number of rounds rather than synchronizing with the
+  CPU to detect early convergence.  Here the frontier is evolving dense
+  relations, not an emitted queue.
+
+These are source observations, not a claim that luv already has either GPU
+backend.  Their design consequence is that =:frontier-layout= alone is too
+narrow to describe compilation: layout is one part of an /execution plan/.
+The compiler may select a different algorithmic realization when the program
+declares and tests the laws which justify it--for example monotonicity,
+associative joining, an acyclic recipient relation, finite priority, or a
+bounded round count.  Such laws are semantic claims with differential and
+property evidence, never optimistic compiler annotations.
+
+The same source can make SIMD explicit without demanding that irregular
+scheduling itself vectorize.  A plan may drain a homogeneous bucket cohort,
+separate same-materialization interior sites from crossings, borrow raw
+columns once, evaluate transfer and admission over lanes and masks, compact
+successful lanes, and handle a scalar tail.  Selection occurs outside the
+hot loop.  The scalar lowering remains the reference realization for exact
+field, visit, and arithmetic conformance.
+
+Quantity meaning survives compilation while quantity wrappers do not.  The
+current =:sky-propagation-level= and =:block-propagation-level= fields are
+already different dimensionless kinds over the same =u8= encoding; neither
+should be renamed radiance or illuminance merely because future lighting will
+be more physical.  A richer kernel may distinguish radiance, irradiance,
+luminance, spectral or photon quantities, material transmittance, and
+photopic, scotopic, or mesopic conditions at its checked boundary, then still
+execute over plain integer or floating lanes.  Physicalization therefore
+strengthens this compiler seam: it does not make a quantity object per voxel.
+
+The current implementation is a useful manually staged compiler prototype:
+
+| Present definition | Compiler reading |
+|-
+| =define-frontier-program= | embryonic semantic source definition |
+| =execute-frontier-program= method | handwritten program/backend selection and lowering |
+| =do-voxel-frontier-relations= | fused scalar loop template with compiler temporaries exposed |
+| =bucket-frontier= | one physical scheduler and record store |
+| inline light body | not-yet-reified arithmetic kernel |
+| legacy/frontier A/B | reference-backend conformance and cost test |
+
+The large binding list of =do-voxel-frontier-relations= is thus not the
+desired human-facing API.  It is evidence about the lowered loop.  A pleasant
+kernel source should primarily name fields, relations, transfer, join,
+admission, priority, and lifecycle; the compiler introduces offsets,
+crossing flags, buffer access, counters, and temporaries while retaining
+source provenance for inspection.  CLOS remains the open control plane for
+definitions and backend protocols, while generated code deliberately contains
+no generic dispatch at the per-site or per-relation grain.
+
 * The shared questions are now concrete
 :PROPERTIES:
 :ID: 7U572V
@@ -575,7 +691,9 @@ no per-edge garbage, and become easier to read and observe than their separate
 predecessors.  If several modules can become short declarations of their
 world laws while the generated or macro-expanded loops remain excellent,
 that is not abstraction for its own sake.  It is the engine discovering one
-of its native languages.
+of its native languages.  #53Q1II now names the compiler architecture which
+makes that criterion explicit rather than leaving specialization to macro
+convention or implementation luck.
 
 * Tracy aligns temporal structure with semantic work
 :PROPERTIES:
@@ -663,7 +781,11 @@ compiler-visible drain over local primitive state, and writes the counters
 back at the boundary.  The former tests whether sealed CLOS can itself be the
 zero-overhead physical language; the latter preserves unrestricted live CLOS
 at the boundary.  Comparing their generated code, live redefinition behavior,
-and whole-solver Tracy capture is more informative than choosing by taste.
+and whole-solver Tracy capture remains informative.  The compiler proposal
+#53Q1II gives the second candidate a larger meaning: raw binding is not an
+adapter around CLOS but one deliberate lowering of an open semantic program.
+Fast generic functions remain a valuable A/B realization, not a prerequisite
+for zero-overhead frontier semantics.
 
 * DONE Remove the per-admission type construction
 :PROPERTIES:
@@ -705,13 +827,48 @@ verdict on the language: both programs visited the same sites and produced
 identical fields, while the new semantic boundaries made their physical cost
 directly comparable.
 
-* NEXT Give frontier light its own invalidation program
+* NEXT Compile the monotone light kernel to scalar Lisp
+:PROPERTIES:
+:ID: PJY6E1
+:END:
+
+Intent: turn the manually staged frontier-light proof into the smallest real
+compiler path described by #53Q1II.  Reify the local transfer, join,
+admission, and priority arithmetic with checked field meanings; make the
+program definition drive a scalar execution plan; and emit one closed Lisp
+loop over bound raw storage.  Keep the existing handwritten frontier solver
+and legacy solver unchanged as two independent oracles.
+
+Evidence: the current declaration records =:brightest-first-buckets= but does
+not select or construct that layout, the execution macro exposes its lowered
+temporaries as a dizzying source API, and the hot bucket path still contains
+CLOS accessor calls.  The arithmetic frontend already produces inspectable,
+quantity-checked definitions and ordinary compiled Lisp realizations, while
+the light fields already retain distinct sky and block quantity declarations.
+
+Done when: one inspectable source definition can be recompiled in the live
+image; its generated scalar realization contains no per-site generic dispatch
+or allocation; its sky and block fields and visit counts agree exactly with
+both current oracles; its emitted form and compiler output are inspectable;
+and Tracy attributes any remaining cost at the same semantic zones.  SIMD,
+GPU lowering, invalidation, and a final surface syntax are explicitly outside
+this first proof.
+
+* TODO Give frontier light its own invalidation program
 :PROPERTIES:
 :ID: K3WRD3
 :END:
 
-State removal and incremental reconsideration in the same vocabulary.  The
-next proof should make invalidation and re-admission explicit, retain stale
-and useful work counters, and converge bit-for-bit with the from-scratch
-frontier program across edits, arrivals, departures, and same-key chunk
-replacement.
+Intent: state removal and incremental reconsideration in the same compiled
+vocabulary after the monotone kernel establishes its source and lowering
+boundary.
+
+Evidence: the greenfield program currently implements only from-scratch
+monotone addition; the established reconciler remains the oracle for edits,
+arrivals, departures, and same-key chunk replacement.  #DURBKN shows why
+invalidation is a different dynamic family rather than an option on addition.
+
+Done when: invalidation and re-admission are explicit program operations,
+executions retain stale and useful work counters, and the compiled program
+converges bit-for-bit with from-scratch frontier light across each residency
+and edit case above.
