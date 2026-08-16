@@ -1,20 +1,29 @@
-# The one Lisp
+# Start here: one Lisp, one game
 
 Everything happens in one durable SBCL image per checkout, and the game
 normally runs inside it:
 
 ```sh
-./sly start                                  # boot the image (luv, luvcraft, luv-wiki)
-./sly eval '(luvcraft:play)'                 # open the real game window in it
-./sly screenshot build/frame.png             # what the game is showing right now
-./sly eval '(luvcraft:stop-playing)'         # checkpoint and close the game
-./sly stop && ./sly start                    # if the image is wrecked, just restart it
+./sly play                              # boot the image and open the real game
+./sly status                            # identify the image and game state
+./sly screenshot build/frame.png        # capture what the game is showing
+./sly stop-playing                      # checkpoint and close the game
+./sly restart                           # explicit recovery if the image is wrecked
 ```
 
-`./sly eval`, `inspect`, `describe`, `apropos`, `edit`, and `xref` all talk to
-that same process (`./sly --help` lists them), so code can be redefined while
-the game runs.  `luvcraft:*session*` is the live game.  Do not start a second
-Lisp or run `build/luvcraft` alongside it — one process, one window.
+`play` starts the checkout's durable image when necessary. `./sly eval`,
+`inspect`, `describe`, `apropos`, `edit`, and `xref` all talk to that same
+process; `luvcraft:*session*` is the live game. `./sly --help` is the command
+map. Do not start a second Lisp or run `build/luvcraft` alongside it.
+
+The surfaces have distinct jobs:
+
+- `./sly`: persistent interactive development; use this by default.
+- `./scripts/dev COMMAND`: one clean process in the checkout environment;
+  use it for tests, builds, and native command-line tools.
+- `./scripts/luv COMMAND`: named one-shot luvcraft tools such as `gazetteer`.
+- `build/luvcraft`: shipped/CI executable. `./sly --luvcraft ...` is only for
+  deliberately attaching to that standalone process.
 
 # Working style
 
@@ -63,23 +72,22 @@ the window and other live Lisp state already exist, but opens a fresh Slynk
 connection for each invocation so there is no persistent client to go stale.
 Start the `luv` SLY implementation in Emacs first if its listener is not up.
 
-Useful starting points:
+Useful starting points while the game is running:
 
 ```sh
-./sly eval '(defparameter *canvas* (open-canvas (make-sdl-canvas)))' --package LUV
-./sly eval '(defparameter *device* (request-gpu-device *gpu-provider*))' --package LUV
-./sly eval '(defparameter *context* (make-canvas-context *canvas* *gpu-provider* (make-canvas-configuration :device *device*)))' --package LUV
-./sly eval '(render-canvas-color *context* 1.0 0.0 1.0)' --package LUV
-./sly inspect '*context*' --package LUV
-./sly describe render-canvas-color --package LUV
-./sly describe-package luv
+./sly inspect 'luvcraft:*session*'
+./sly describe play --package LUVCRAFT
+./sly apropos terminal --package LUVCRAFT
+./sly edit render-luvcraft-frame --package LUVCRAFT
+./sly xref uses render-luvcraft-frame --package LUVCRAFT
 ./sly describe-system luv
-./sly apropos color --package LUV
-./sly edit luv:render-canvas-color
-./sly xref uses render-canvas-color --package LUV
 ```
 
-`./sly status`, `./sly start`, and `./sly stop` manage the image when it is
+Use lower-level `open-canvas`, device, and context forms only when the task is
+specifically below luvcraft; they create another window and another ownership
+lifecycle by design.
+
+`./sly play`, `status`, `restart`, `start`, and `stop` manage the image when it is
 the `./sly`-managed one (`sly-server.lisp`, which loads `luv` and `luv-wiki`).
 The standalone `./build/luvcraft` (for shipping and `make smoke`) embeds its
 own Slynk listener; `./sly --luvcraft ...` attaches to it.  Do not run it

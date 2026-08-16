@@ -7,17 +7,17 @@ description: Use when starting or diagnosing development in a luv checkout or wo
 
 Keep the checkout, environment, compiled artifacts, and live Lisp image aligned. Treat an unexplained pause as a process to inspect, not a reason to launch more SBCLs.
 
-## The one Lisp
+## Start here: one Lisp, one game
 
 One durable image per checkout; the game normally runs inside it.  This is
 the whole workflow — do not invent another:
 
 ```sh
-./sly start                                  # boot the image
-./sly eval '(luvcraft:play)'                 # open the game window in it
-./sly screenshot build/frame.png             # what the game shows right now
-./sly eval '(luvcraft:stop-playing)'         # checkpoint and close the game
-./sly stop && ./sly start                    # image wrecked?  just restart it
+./sly play                              # boot the image and open the real game
+./sly status                            # identify the image and game state
+./sly screenshot build/frame.png        # capture what the game shows
+./sly stop-playing                      # checkpoint and close the game
+./sly restart                           # explicit recovery if the image is wrecked
 ```
 
 - Work in small evals against `luvcraft:*session*`; redefine code with
@@ -50,7 +50,8 @@ After `flake.nix`, `flake.lock`, an `.asd`, or Lisp dependency changes, remember
 
 ## Choose the execution path
 
-- Use `./sly eval`, `inspect`, `describe`, `apropos`, `edit`, or `xref` for iterative work. Each invocation opens a fresh client connection to the checkout's durable image.
+- Use `./sly play`, then `eval`, `inspect`, `describe`, `apropos`, `edit`, or `xref` for iterative work. Each invocation opens a fresh client connection to the checkout's durable image.
+- Use `./scripts/luv COMMAND` for named one-shot luvcraft tools such as `gazetteer`; these do not share the live game.
 - Use `./sly --luvcraft ...` only to inspect the standalone game named by `build/luvcraft.slynk`; `luvcraft:*session*` is its live session.
 - Use `./scripts/dev sbcl --non-interactive ...` for isolated verification that must start clean.
 - Use Make targets for their intended artifacts. Expect the first build in a new absolute checkout path to compile local systems into a distinct ASDF cache subtree; later loads should be much faster.
@@ -61,9 +62,11 @@ Do not replace a broken durable image with an ad hoc sequence of fresh SBCL proc
 ## Manage the image
 
 ```sh
+./sly play
 ./sly status
-./sly start
+./sly restart
 ./sly log
+./sly stop-playing
 ./sly stop
 ```
 

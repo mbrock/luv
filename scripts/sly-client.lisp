@@ -796,8 +796,8 @@
     (format t "~A~%"
             (cond ((null answer) "Game state unknown (image busy or not loaded).")
                   ((search "PLAYING" (string-upcase (princ-to-string answer)))
-                   "A game is playing: ./sly screenshot PNG, ./sly eval '(luvcraft:stop-playing)'.")
-                  (t "No game is playing: ./sly eval '(luvcraft:play)' starts one.")))))
+                   "A game is playing: ./sly screenshot PNG; ./sly stop-playing closes it.")
+                  (t "No game is playing: ./sly play starts one.")))))
 
 (defun evaluate-output-on (stream code &optional (package "CL-USER"))
   (write-result-string (evaluate-captured-output-on stream code package)))
@@ -1086,12 +1086,14 @@
         (terpri)))))
 
 (defun usage (&optional (stream *standard-output*))
-  (format stream "The one Lisp: ./sly start, then ./sly eval '(luvcraft:play)' opens the game~%")
-  (format stream "in it; ./sly screenshot PNG captures its frame; ./sly eval~%")
-  (format stream "'(luvcraft:stop-playing)' closes it; ./sly stop && ./sly start if it is wrecked.~%")
+  (format stream "The ordinary workflow is one live Lisp and one game:~%")
+  (format stream "  ./sly play | status | screenshot PNG | stop-playing | restart~%")
+  (format stream "PLAY starts the checkout's durable image when necessary. RESTART is the~%")
+  (format stream "explicit recovery path when that image is wrecked.~%")
   (format stream "Prefix a client command with --luvcraft only to attach to a separate~%")
   (format stream "standalone build/luvcraft process.~%~%")
-  (format stream "Usage: ./sly start|stop|status|log~%")
+  (format stream "Usage: ./sly play|stop-playing|status|restart~%")
+  (format stream "       ./sly start|stop|log~%")
   (format stream "       ./sly screenshot PNG~%")
   (format stream "       ./sly eval CODE [--package PACKAGE]~%")
   (format stream "       ./sly parinfer [--check|--diff|--write] [--strict] [--file FILE|CODE|FILE]~%")
@@ -1338,7 +1340,7 @@
            (format nil
                    "(progn
                       (unless luvcraft:*session*
-                        (error \"No game is playing here; ./sly eval '(luvcraft:play)' first.\"))
+                        (error \"No game is playing here; run ./sly play first.\"))
                       (multiple-value-bind (pathname pixels width height format)
                           (luvcraft:capture-luvcraft-screenshot
                            luvcraft:*session* ~S)
@@ -1347,6 +1349,22 @@
                               width height format)))"
                    pathname)))
     (evaluate code "LUVCRAFT")))
+
+(defun run-luvcraft-play (arguments)
+  (when arguments
+    (error "play does not accept arguments"))
+  (when (attach-only-p)
+    (error "play owns the durable image; a standalone luvcraft is already playing"))
+  (ensure-server)
+  (evaluate "(play)" "LUVCRAFT"))
+
+(defun run-luvcraft-stop-playing (arguments)
+  (when arguments
+    (error "stop-playing does not accept arguments"))
+  (when (attach-only-p)
+    (error "stop-playing owns the durable image; close the standalone game normally"))
+  (ensure-server)
+  (evaluate "(stop-playing)" "LUVCRAFT"))
 
 (defun parse-names (command arguments)
   (unless arguments
@@ -1471,6 +1489,20 @@
        (when arguments
          (error "status does not accept arguments"))
        (server-status)
+       0)
+      ((string= command "restart")
+       (when arguments
+         (error "restart does not accept arguments"))
+       (when (attach-only-p)
+         (error "restart manages the durable image, not a standalone luvcraft"))
+       (stop-server)
+       (start-server)
+       0)
+      ((string= command "play")
+       (run-luvcraft-play arguments)
+       0)
+      ((string= command "stop-playing")
+       (run-luvcraft-stop-playing arguments)
        0)
       ((string= command "log")
        (when arguments
