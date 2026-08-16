@@ -10,37 +10,29 @@ live Lisp image.
 
 ## What's here
 
-The ASDF systems are the useful map:
+The systems are the useful map; modules inside them follow the
+directory tree instead of pretending that every implementation layer is an
+independently loadable product:
 
 ```text
-:luv/gpu/api          portable GPU classes, descriptors, commands, generics
-:luv/vulkan/fundament Vulkan loader, invocation bridge, binding macros, tracing
-:luv/vulkan/defs      hand-owned Vulkan enums, structs, and raw entry points
-:luv/vulkan           Lisp-shaped helpers over the raw Vulkan vocabulary
-:luv/gpu/vulkan       Vulkan implementation of the GPU API
-:luv/gpu              GPU API plus the default Vulkan backend
-:luv/canvas/api       native canvas, events, frame clocks, context protocol
-:luv/canvas/sdl       SDL window host and event translation
-:luv/canvas/vulkan    Vulkan swapchain presentation for SDL canvases
-:luv/canvas           SDL canvas presentation for the GPU API
-:luv/world            coordinate spaces, chunk domains, resident block data
-:luv/spir-v           literal SPIR-V plus typed mathematical shader expressions
-:luv/spir-v/tests     expression typing, provenance, and lowering tests
-:luv/luvcraft/shaders the block-world materials as mathematical shaders
-:luv/luvcraft         luvcraft: the interactive block world application
-:luv/examples         small live demos of the HAL protocols
-:luv/tests            renderer-independent world and development-tool tests
-:luv/luvcraft/tests   generation, cross-chunk meshing, and edit tests
-:luv/mcclim           experimental McCLIM backend on luv canvases
-:luv/mcclim/shader-lab McCLIM presentation browser for luvcraft's shaders
-:luv/tools            one-shot command-line tools
+:luv                 GPU, shader, native-canvas, Vulkan, and Metal atelier
+:luvcraft/world      renderer-independent voxel coordinates and resident data
+:luvcraft            the interactive block-world application
+:luvcraft/tools      one-shot block-world and gazetteer tools
+:luvcraft/program    the standalone game and its live Slynk endpoint
+:mcluv/backend       McCLIM presented through luv canvases
+:mcluv/shader-lab    McCLIM browser for luvcraft's live shaders
+:mcluv               the standalone Listener and shader lab
+:luv-wiki            reusable Org reader and site renderer
+:luv-wiki-site       this repository's Org corpus and rendered site
 ```
 
-The four root ASDF files are deliberate primary entrypoints: `luv.asd` owns
-the workshop library and its `luv/...` systems, `luvcraft.asd` and `mcluv.asd`
-build the two standalone programs, and `luv-wiki.asd` owns the reusable wiki
-reader and renderer.  Keeping those primary definitions at the root lets ASDF
-discover them normally while their components live with the code they own.
+The five root ASDF files are deliberate ownership boundaries. `luv.asd`,
+`luvcraft.asd`, and `mcluv.asd` own the HAL, game, and McCLIM application;
+`luv-wiki.asd` owns the reusable wiki machinery, while `luv-wiki-site.asd`
+owns the corpus that uses its custom ASDF component. Keeping those primary
+definitions at the root lets ASDF discover them normally while their
+components live with the code they own.
 
 The implementation follows the same contracts physically under
 [`hal/`](hal/).  Shared GPU, canvas, shader, and tracing protocols sit at the
@@ -64,8 +56,11 @@ interactive application.  The McCLIM backend and its labs live in
 [`mcclim/`](mcclim/).  The Org design corpus and the Lisp implementation that
 reads and renders it now form one neighborhood under [`wiki/`](wiki/).
 
-The public package is still mostly `LUV`, with `LVK` for the lower Vulkan
-helpers and `SPV` for the SPIR-V pieces.
+The packages express the same boundaries: `LUV` is the GPU and canvas HAL,
+`LUVCRAFT.WORLD` is the renderer-independent voxel model, `LUVCRAFT` is the
+game, `LUVCRAFT.SHADERS` owns its shaders, and `MCLUV` owns the McCLIM
+application. Lower layers retain focused packages such as `LUV.SPIR-V`,
+`LUV.MSL`, and `LUV.OBJECTIVE-C`.
 
 ## Quick Start
 
@@ -103,7 +98,7 @@ host system. `./scripts/dev --status` shows the active provider, pinned SBCL,
 ASDF cache, checkout identity, and checkout-specific Slynk port:
 
 ```sh
-scripts/luv eval '(luv:make-little-block-world)'
+scripts/luv eval '(luvcraft:make-little-block-world)'
 scripts/luv block-world /tmp/luv-block-world.png
 ```
 
@@ -121,9 +116,9 @@ make smoke         # runs the built program headlessly and writes a PNG
 The world model can be loaded and tested without SDL or Vulkan:
 
 ```lisp
-(asdf:load-system :luv/world)
-(asdf:test-system :luv/world)
-(asdf:test-system :luv/luvcraft)
+(asdf:load-asd (truename "luvcraft.asd"))
+(asdf:load-system :luvcraft/world)
+(asdf:test-system :luvcraft)
 ```
 
 ## Live Workflow
@@ -161,20 +156,21 @@ that enters the same profile-aware `scripts/dev` environment, loads
 (defparameter *compute* (luv:start-compute-gradient-demo))
 (luv:stop-compute-gradient-demo *compute*)
 
-(defparameter *world* (luv:start-luvcraft))
-(luv:capture-luvcraft-screenshot *world* #P"/tmp/luv-block-world.png")
-(luv:stop-luvcraft *world*)
+(defparameter *world* (luvcraft:start-luvcraft))
+(luvcraft:capture-luvcraft-screenshot *world* #P"/tmp/luv-block-world.png")
+(luvcraft:stop-luvcraft *world*)
 
-(asdf:load-system :luv/mcclim/shader-lab)
-(defparameter *shader-lab* (luv.mcclim:open-shader-lab))
-(luv.mcclim:refresh-shader-lab *shader-lab*)
+(asdf:load-asd (truename "mcluv.asd"))
+(asdf:load-system :mcluv/shader-lab)
+(defparameter *shader-lab* (mcluv:open-shader-lab))
+(mcluv:refresh-shader-lab *shader-lab*)
 (multiple-value-bind (status report)
-    (luv.mcclim:shader-lab-health *shader-lab*)
+    (mcluv:shader-lab-health *shader-lab*)
   (list status
-        (luv.mcclim:shader-lab-health-report-mirror-count report)
-        (luv.mcclim:shader-lab-health-report-canvas-state report)))
+        (mcluv:shader-lab-health-report-mirror-count report)
+        (mcluv:shader-lab-health-report-canvas-state report)))
 ;; => (:responsive 1 :open)
-(luv.mcclim:close-shader-lab *shader-lab*)
+(mcluv:close-shader-lab *shader-lab*)
 ```
 
 Click the block-world window once to capture the pointer. Walk with WASD and
@@ -222,7 +218,7 @@ The workshop wiki starts at [`wiki/index.org`](wiki/index.org). It is the right
 place for the current GPU architecture and backend proofs, the block world,
 source studies, and other evolving design notes. It is also rendered as a
 static site at
-<https://mbrock.github.io/luv/>; `make wiki` (or `(asdf:make :luv/wiki)`)
+<https://mbrock.github.io/luv/>; `make wiki` (or `(asdf:make :luv-wiki-site)`)
 builds it into `build/wiki/`.
 
 The current implementation is deliberately incomplete. The Vulkan binding grows

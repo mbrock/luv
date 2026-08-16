@@ -7,7 +7,7 @@
 ;;; profile is ordinary data.  There is deliberately no sky class hierarchy
 ;;; until more than one actual sky model exists.
 
-(in-package #:luv)
+(in-package #:luvcraft)
 
 (defclass sky-clock ()
   ((day-fraction

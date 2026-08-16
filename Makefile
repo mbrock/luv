@@ -17,7 +17,12 @@ test: parinfer-check shader-validate
 	./scripts/dev sbcl --non-interactive \
 		--eval '(require :asdf)' \
 		--eval '(asdf:load-asd (truename "luv.asd"))' \
-		--eval '(asdf:test-system :luv)'
+		--eval '(asdf:load-asd (truename "luvcraft.asd"))' \
+		--eval '(asdf:load-asd (truename "luv-wiki.asd"))' \
+		--eval '(asdf:load-asd (truename "luv-wiki-site.asd"))' \
+		--eval '(asdf:test-system :luv)' \
+		--eval '(asdf:test-system :luvcraft)' \
+		--eval '(asdf:test-system :luv-wiki)'
 
 parinfer-check:
 	@./scripts/dev sh -c 'tmp=$$(mktemp); trap "rm -f $$tmp" EXIT; for file in $$(rg --files -g"*.lisp"); do if ! ./sly parinfer --strict --check "$$file" >"$$tmp" 2>&1; then cat "$$tmp"; exit 1; fi; done; echo "parinfer: strict check passed."'
@@ -27,15 +32,15 @@ shader-validate:
 	./scripts/dev sbcl --non-interactive \
 		--eval '(require :asdf)' \
 		--eval '(asdf:load-asd (truename "luv.asd"))' \
-		--eval '(asdf:load-system :luv/luvcraft/shaders)' \
-		--eval '(asdf:load-system :luv/slug)' \
-		--eval '(luv.spir-v:write-spir-v (luv.spir-v:block-world-vertex-shader) #p"build/block-world.vert.spv")' \
-		--eval '(luv.spir-v:write-spir-v (luv.spir-v:block-world-fragment-shader) #p"build/block-world.frag.spv")' \
-		--eval '(luv.spir-v:write-spir-v (luv.spir-v:block-world-crosshair-vertex-shader) #p"build/block-world-crosshair.vert.spv")' \
-		--eval '(luv.spir-v:write-spir-v (luv.spir-v:block-world-crosshair-fragment-shader) #p"build/block-world-crosshair.frag.spv")' \
-		--eval '(luv.spir-v:write-spir-v (luv.spir-v:block-world-sky-vertex-shader) #p"build/block-world-sky.vert.spv")' \
-		--eval '(luv.spir-v:write-spir-v (luv.spir-v:block-world-sky-fragment-shader) #p"build/block-world-sky.frag.spv")' \
-		--eval '(luv.spir-v:write-spir-v (luv.spir-v:block-world-shadow-vertex-shader) #p"build/block-world-shadow.vert.spv")' \
+		--eval '(asdf:load-asd (truename "luvcraft.asd"))' \
+		--eval '(asdf:load-system :luvcraft)' \
+		--eval '(luv.spir-v:write-spir-v (luvcraft.shaders:block-world-vertex-shader) #p"build/block-world.vert.spv")' \
+		--eval '(luv.spir-v:write-spir-v (luvcraft.shaders:block-world-fragment-shader) #p"build/block-world.frag.spv")' \
+		--eval '(luv.spir-v:write-spir-v (luvcraft.shaders:block-world-crosshair-vertex-shader) #p"build/block-world-crosshair.vert.spv")' \
+		--eval '(luv.spir-v:write-spir-v (luvcraft.shaders:block-world-crosshair-fragment-shader) #p"build/block-world-crosshair.frag.spv")' \
+		--eval '(luv.spir-v:write-spir-v (luvcraft.shaders:block-world-sky-vertex-shader) #p"build/block-world-sky.vert.spv")' \
+		--eval '(luv.spir-v:write-spir-v (luvcraft.shaders:block-world-sky-fragment-shader) #p"build/block-world-sky.frag.spv")' \
+		--eval '(luv.spir-v:write-spir-v (luvcraft.shaders:block-world-shadow-vertex-shader) #p"build/block-world-shadow.vert.spv")' \
 		--eval '(luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (luv.slug:slug-bezier-vertex-specification)) #p"build/slug-bezier.vert.spv")' \
 		--eval '(luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (luv.slug:slug-bezier-fragment-specification)) #p"build/slug-bezier.frag.spv")'
 	./scripts/dev spirv-val --target-env vulkan1.0 build/block-world.vert.spv
@@ -53,11 +58,10 @@ msl-validate:
 	./scripts/dev sbcl --non-interactive \
 		--eval '(require :asdf)' \
 		--eval '(asdf:load-asd (truename "luv.asd"))' \
-		--eval '(asdf:load-system :luv/msl)' \
-		--eval '(asdf:load-system :luv/luvcraft/shaders)' \
-		--eval '(asdf:load-system :luv/slug)' \
-		--eval '(luv.msl:write-msl (luv.msl:compile-msl (luv.spir-v:block-world-vertex-specification)) #p"build/block-world.vert.metal")' \
-		--eval '(luv.msl:write-msl (luv.msl:compile-msl (luv.spir-v:block-world-fragment-specification)) #p"build/block-world.frag.metal")' \
+		--eval '(asdf:load-asd (truename "luvcraft.asd"))' \
+		--eval '(asdf:load-system :luvcraft)' \
+		--eval '(luv.msl:write-msl (luv.msl:compile-msl (luvcraft.shaders:block-world-vertex-specification)) #p"build/block-world.vert.metal")' \
+		--eval '(luv.msl:write-msl (luv.msl:compile-msl (luvcraft.shaders:block-world-fragment-specification)) #p"build/block-world.frag.metal")' \
 		--eval '(luv.msl:write-msl (luv.msl:compile-msl (luv.slug:slug-bezier-vertex-specification)) #p"build/slug-bezier.vert.metal")' \
 		--eval '(luv.msl:write-msl (luv.msl:compile-msl (luv.slug:slug-bezier-fragment-specification)) #p"build/slug-bezier.frag.metal")'
 	xcrun metal -std=metal4.0 -c build/block-world.vert.metal -o build/block-world.vert.air
@@ -86,14 +90,15 @@ wiki-cli:
 wiki:
 	./scripts/dev sbcl --non-interactive \
 		--eval '(require :asdf)' \
-		--eval '(asdf:load-asd (truename "luv.asd"))' \
-		--eval '(asdf:make :luv/wiki)'
+		--eval '(asdf:load-asd (truename "luv-wiki.asd"))' \
+		--eval '(asdf:load-asd (truename "luv-wiki-site.asd"))' \
+		--eval '(asdf:make :luv-wiki-site)'
 
 objective-c-probe:
 	./scripts/dev sbcl --non-interactive \
 		--eval '(require :asdf)' \
 		--eval '(asdf:load-asd (truename "luv.asd"))' \
-		--eval '(asdf:load-system :luv/metal/probe)' \
+		--eval '(asdf:load-system :luv)' \
 		--eval '(format t "~S~%" (luv.metal:probe-system-default-device))'
 
 metal-clear:

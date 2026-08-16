@@ -1,8 +1,8 @@
-(in-package #:luv.tools)
+(in-package #:luvcraft.tools)
 
 (defun parse-gazetteer-view-name-option (string option)
   (declare (ignore option))
-  (luv::normalize-luvcraft-gazetteer-view-name string))
+  (luvcraft::normalize-luvcraft-gazetteer-view-name string))
 
 (defun command-gazetteer (arguments)
   (multiple-value-bind (positionals options)
@@ -31,7 +31,7 @@
         (command-line-error "gazetteer --count requires one --view."))
       (let ((pathnames
               (if count
-                  (luv:capture-luvcraft-gazetteer-sequence
+                  (luvcraft:capture-luvcraft-gazetteer-sequence
                    view target :count count
                    :forward-step (or (getf options :forward-step) 0.2)
                    :yaw-step (or (getf options :yaw-step) 0.0)
@@ -41,7 +41,7 @@
                    :shadow-diagnostic-p (getf options :shadow-only)
                    :provider provider
                    :width width :height height)
-                  (luv:capture-luvcraft-gazetteer
+                  (luvcraft:capture-luvcraft-gazetteer
                    target
                    :views (and view (list view))
                    :provider provider

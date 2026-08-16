@@ -1,12 +1,4 @@
-(defpackage #:luv/arithmetic/language/tests
-  (:use #:cl #:rove)
-  (:local-nicknames (#:lang #:luv.arithmetic.language)
-                    (#:math #:luv.arithmetic))
-  (:import-from #:luv.arithmetic #:clamp)
-  (:import-from #:luv.arithmetic.language
-                #:quantity #:interpret #:convert-unit #:counted-fold))
-
-(in-package #:luv/arithmetic/language/tests)
+(in-package #:luv.tests)
 
 (lang:define-arithmetic-function fog-shape
     ((view-distance :quantity :distance :unit :metre)

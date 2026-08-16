@@ -266,28 +266,4 @@
            #:spinning-texture-vertex-module
            #:spinning-texture-fragment-module
            #:spinning-texture-vertex-shader
-           #:spinning-texture-fragment-shader
-           #:block-world-vertex-module
-           #:block-world-vertex-specification
-           #:block-world-vertex-lowering
-           #:block-world-camera-uniform-block
-           #:block-world-fragment-specification
-           #:block-world-fragment-lowering
-           #:block-world-fragment-module
-           #:block-world-sky-vertex-specification
-           #:block-world-sky-vertex-module
-           #:block-world-sky-vertex-shader
-           #:block-world-sky-fragment-specification
-           #:block-world-sky-fragment-module
-           #:block-world-sky-fragment-shader
-           #:block-world-shadow-vertex-specification
-           #:block-world-shadow-vertex-module
-           #:block-world-shadow-vertex-shader
-           #:block-world-crosshair-vertex-specification
-           #:block-world-crosshair-vertex-module
-           #:block-world-crosshair-fragment-specification
-           #:block-world-crosshair-fragment-module
-           #:block-world-vertex-shader
-           #:block-world-fragment-shader
-           #:block-world-crosshair-vertex-shader
-           #:block-world-crosshair-fragment-shader))
+           #:spinning-texture-fragment-shader))

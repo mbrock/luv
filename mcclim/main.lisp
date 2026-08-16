@@ -1,13 +1,9 @@
-(defpackage #:mcluv
-  (:use #:cl)
-  (:export #:main))
-
 (in-package #:mcluv)
 
 (defun main ()
   "Run the McCLIM Listener on luv until its frame exits."
   (multiple-value-bind (process frame)
-      (luv.mcclim:open-listener
+      (mcluv:open-listener
        :exit-function (lambda () (uiop:quit 0)))
     (declare (ignore frame))
     (clim-sys:join-process process))

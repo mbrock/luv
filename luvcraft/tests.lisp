@@ -1,7 +1,4 @@
-(defpackage #:luv/luvcraft/tests
-  (:use #:cl #:rove #:luv))
-
-(in-package #:luv/luvcraft/tests)
+(in-package #:luvcraft.tests)
 
 (defclass recording-command-encoder (gpu-command-encoder)
   ((commands :initform nil :accessor recording-command-encoder-commands)))
@@ -25,10 +22,10 @@
                                 :position position :velocity velocity))
          (position-declaration
            (luv.arithmetic.records:record-slot-declaration
-            'block-world-player 'luv::position))
+            'block-world-player 'luvcraft::position))
          (velocity-declaration
            (luv.arithmetic.records:record-slot-declaration
-            'block-world-player 'luv::velocity)))
+            'block-world-player 'luvcraft::velocity)))
     (ok (eq position (player-position player)))
     (ok (eq 'vec3
             (luv.arithmetic:declaration-representation-type
@@ -47,17 +44,17 @@
              velocity-declaration))))
     (ok (null
          (luv.arithmetic.records:record-slot-declaration
-          'block-world-player 'luv::grounded-p)))
-    (let ((predicted (luv::predict-player-position player 0.5d0)))
+          'block-world-player 'luvcraft::grounded-p)))
+    (let ((predicted (luvcraft::predict-player-position player 0.5d0)))
       (ok (equalp (make-vec3 3d0 4.5d0 6d0) predicted))
       (ok (eq position (player-position player)))
       (ok (eq velocity (player-velocity player))))
-    (ok (compiled-function-p luv::*predict-player-position-function*))
+    (ok (compiled-function-p luvcraft::*predict-player-position-function*))
     (ok (signals
          (luv.arithmetic.lisp:bind-lisp-arithmetic-realization
-          luv::*predict-player-position-realization*
+          luvcraft::*predict-player-position-realization*
           (list velocity-declaration velocity-declaration
-                luv::*player-frame-duration-declaration*)
+                luvcraft::*player-frame-duration-declaration*)
           :actual-result-declaration position-declaration)
          'luv.arithmetic:declaration-compatibility-error))))
 
@@ -65,14 +62,14 @@
   (let* ((sky (sky-frame-parameters
                (make-instance 'sky-clock)
                (make-default-sky-profile)))
-         (direction (luv::sky-frame-parameters-sun-direction sky))
+         (direction (luvcraft::sky-frame-parameters-sun-direction sky))
          (direction-declaration
            (luv.arithmetic.records:record-slot-declaration
-            'luv::sky-frame-parameters 'luv::sun-direction))
+            'luvcraft::sky-frame-parameters 'luvcraft::sun-direction))
          (fog-declaration
            (luv.arithmetic.records:record-slot-declaration
-            'luv::sky-frame-parameters 'luv::fog-far)))
-    (ok (typep sky 'luv::sky-frame-parameters))
+            'luvcraft::sky-frame-parameters 'luvcraft::fog-far)))
+    (ok (typep sky 'luvcraft::sky-frame-parameters))
     (ok (typep direction 'vec3))
     (ok (eq :world-direction
             (luv.arithmetic:quantity-specification-name
@@ -81,16 +78,16 @@
     (ok (eq 'single-float
             (luv.arithmetic:declaration-representation-type
              fog-declaration)))
-    (ok (typep (luv::sky-frame-parameters-fog-far sky) 'single-float))))
+    (ok (typep (luvcraft::sky-frame-parameters-fog-far sky) 'single-float))))
 
 (deftest production-fog-law-is-shared-by-shader-and-cpu
   (let* ((sky
-           (luv::%make-sky-frame-parameters
+           (luvcraft::%make-sky-frame-parameters
             :fog-near 20.0 :fog-far 100.0))
          (definition
            (luv.arithmetic.language:arithmetic-function-definition-for
             'luvcraft.arithmetic:fog-amount-at-view-distance))
-         (vertex (luv.spir-v:block-world-vertex-specification))
+         (vertex (luvcraft.shaders:block-world-vertex-specification))
          (calls
            (remove-if-not
             (lambda (expression)
@@ -102,42 +99,42 @@
             (luv.spir-v:shader-specification-expressions vertex))))
     (ok definition)
     (ok (= 1 (length calls)))
-    (ok (= 0.0 (luv::sky-fog-amount-at-distance sky 10.0)))
-    (ok (= 0.25 (luv::sky-fog-amount-at-distance sky 60.0)))
-    (ok (= 1.0 (luv::sky-fog-amount-at-distance sky 120.0)))
-    (ok (compiled-function-p luv::*sky-fog-amount-function*))
+    (ok (= 0.0 (luvcraft::sky-fog-amount-at-distance sky 10.0)))
+    (ok (= 0.25 (luvcraft::sky-fog-amount-at-distance sky 60.0)))
+    (ok (= 1.0 (luvcraft::sky-fog-amount-at-distance sky 120.0)))
+    (ok (compiled-function-p luvcraft::*sky-fog-amount-function*))
     (ok (signals
          (luv.arithmetic.lisp:bind-lisp-arithmetic-realization
-          luv::*sky-fog-amount-realization*
+          luvcraft::*sky-fog-amount-realization*
           (list
-           luv::*sky-fog-view-distance-declaration*
-           luv::*sky-fog-amount-declaration*
+           luvcraft::*sky-fog-view-distance-declaration*
+           luvcraft::*sky-fog-amount-declaration*
            (luv.arithmetic.records:record-slot-declaration
-            'luv::sky-frame-parameters 'luv::fog-far))
-          :actual-result-declaration luv::*sky-fog-amount-declaration*)
+            'luvcraft::sky-frame-parameters 'luvcraft::fog-far))
+          :actual-result-declaration luvcraft::*sky-fog-amount-declaration*)
          'luv.arithmetic:declaration-compatibility-error))))
 
 (deftest semantic-owner-audit-exposes-camera-sky-material-and-timing-fields
   (dolist (claim
-           '((fly-camera luv::yaw :camera-yaw)
-             (fly-camera luv::sensitivity :look-sensitivity)
-             (sky-clock luv::rate :sky-cycle-rate)
-             (sky-clock luv::pinned-day-fraction :day-fraction)
-             (luv::sky-keyframe luv::sun-color :linear-rgb)
-             (luv::sky-keyframe luv::fog-far :view-distance)
-             (block-kind luv::light-opacity :block-light-attenuation-step)
-             (block-kind luv::surface-emission :material-emission)
-             (luv::luvcraft-frame-sample luv::simulation-seconds
+           '((fly-camera luvcraft::yaw :camera-yaw)
+             (fly-camera luvcraft::sensitivity :look-sensitivity)
+             (sky-clock luvcraft::rate :sky-cycle-rate)
+             (sky-clock luvcraft::pinned-day-fraction :day-fraction)
+             (luvcraft::sky-keyframe luvcraft::sun-color :linear-rgb)
+             (luvcraft::sky-keyframe luvcraft::fog-far :view-distance)
+             (block-kind luvcraft::light-opacity :block-light-attenuation-step)
+             (block-kind luvcraft::surface-emission :material-emission)
+             (luvcraft::luvcraft-frame-sample luvcraft::simulation-seconds
               :simulation-duration)
-             (luv::luvcraft-frame-benchmark luv::drain-seconds
+             (luvcraft::luvcraft-frame-benchmark luvcraft::drain-seconds
               :benchmark-drain-duration)
-             (luv::production-result luv::elapsed-seconds
+             (luvcraft::production-result luvcraft::elapsed-seconds
               :production-duration)
-             (luv::luvcraft-lighting-state luv::last-latency-seconds
+             (luvcraft::luvcraft-lighting-state luvcraft::last-latency-seconds
               :lighting-reconciliation-duration)
-             (luvcraft-session luv::last-frame-time
+             (luvcraft-session luvcraft::last-frame-time
               :monotonic-frame-time)
-             (luvcraft-session luv::physics-accumulator
+             (luvcraft-session luvcraft::physics-accumulator
               :physics-accumulated-duration)))
     (destructuring-bind (record slot quantity) claim
       (let ((declaration
@@ -150,24 +147,24 @@
 
 (deftest semantic-owner-audit-exposes-quantity-bearing-constants
   (dolist (claim
-           '((luv::+player-physics-step+ :frame-duration double-float)
-             (luv::+player-collision-epsilon+ :world-distance double-float)
-             (luv::+player-step-height+ :world-distance double-float)
-             (luv::+player-terminal-fall-speed+ :world-velocity double-float)
-             (luv::+luvcraft-camera-near-distance+ :view-distance single-float)
-             (luv::+luvcraft-camera-far-distance+ :view-distance single-float)
-             (luv::+luvcraft-camera-vertical-field-of-view+
+           '((luvcraft::+player-physics-step+ :frame-duration double-float)
+             (luvcraft::+player-collision-epsilon+ :world-distance double-float)
+             (luvcraft::+player-step-height+ :world-distance double-float)
+             (luvcraft::+player-terminal-fall-speed+ :world-velocity double-float)
+             (luvcraft::+luvcraft-camera-near-distance+ :view-distance single-float)
+             (luvcraft::+luvcraft-camera-far-distance+ :view-distance single-float)
+             (luvcraft::+luvcraft-camera-vertical-field-of-view+
               :camera-field-of-view single-float)
-             (luv::+luvcraft-target-reach+ :ray-distance double-float)
-             (luv::+luvcraft-maximum-frame-duration+
+             (luvcraft::+luvcraft-target-reach+ :ray-distance double-float)
+             (luvcraft::+luvcraft-maximum-frame-duration+
               :frame-duration double-float)
-             (luv::+luvcraft-shadow-half-extent+ :world-distance single-float)
-             (luv::+luvcraft-shadow-depth-radius+ :world-distance single-float)
-             (luv::+luvcraft-shadow-base-bias+ :shadow-depth single-float)
-             (luv::+luvcraft-shadow-slope-bias+ :shadow-depth single-float)
-             (luv::+luvcraft-shadow-minimum-filter-radius+
+             (luvcraft::+luvcraft-shadow-half-extent+ :world-distance single-float)
+             (luvcraft::+luvcraft-shadow-depth-radius+ :world-distance single-float)
+             (luvcraft::+luvcraft-shadow-base-bias+ :shadow-depth single-float)
+             (luvcraft::+luvcraft-shadow-slope-bias+ :shadow-depth single-float)
+             (luvcraft::+luvcraft-shadow-minimum-filter-radius+
               :shadow-filter-radius single-float)
-             (luv::+luvcraft-shadow-maximum-filter-radius+
+             (luvcraft::+luvcraft-shadow-maximum-filter-radius+
               :shadow-filter-radius single-float)))
     (destructuring-bind (name quantity representation) claim
       (let ((declaration
@@ -214,7 +211,7 @@
                                   :chunk-height 2
                                   :chunk-depth 2))
          (chunk (ensure-world-chunk world 0 0 0))
-         (neighborhood (luv::make-block-mesh-neighborhood world chunk))
+         (neighborhood (luvcraft::make-block-mesh-neighborhood world chunk))
          (snapshot
            (make-block-mesh-snapshot
             world chunk (chunk-mesh-dependency-stamp world chunk))))
@@ -233,15 +230,15 @@
         (ok (eq availability :unavailable))))))
 
 (deftest voxel-light-fields-retain-distinct-quantity-definitions
-  (let* ((sky (luv.world.fields:field-definition-for :sky-light))
-         (block (luv.world.fields:field-definition-for :block-light))
+  (let* ((sky (luvcraft.world.fields:field-definition-for :sky-light))
+         (block (luvcraft.world.fields:field-definition-for :block-light))
          (world (make-block-world :chunk-width 2
                                   :chunk-height 2
                                   :chunk-depth 2))
          (chunk (ensure-world-chunk world 0 0 0)))
     (relight-block-world world)
     (let* ((light (block-chunk-light-field chunk))
-           (region (luv::capture-light-region world))
+           (region (luvcraft::capture-light-region world))
            (entry (nth-value 0 (locate-chunk-window-site region 0 0 0)))
            (snapshot
              (make-block-mesh-snapshot
@@ -267,7 +264,7 @@
                        (,snapshot :sky-light)
                        (,snapshot :block-light)))
         (destructuring-bind (materialization name) claim
-          (ok (luv.world.fields:materialized-field-current-p
+          (ok (luvcraft.world.fields:materialized-field-current-p
                materialization name)))))))
 
 (deftest block-meshes-carry-a-repeated-product-matching-the-shader-contract
@@ -282,7 +279,7 @@
          (element
            (luv.arithmetic:repeated-quantity-layout-element-layout layout))
          (shader-layout
-           (luv::shader-input-product-layout
+           (luvcraft::shader-input-product-layout
             (luv.spir-v:shader-specification-for :block-surface :vertex))))
     (ok (eq declaration
             (luv.arithmetic:value-declaration-for :block-mesh-vertices)))
@@ -301,13 +298,13 @@
 (deftest screen-geometry-products-match-their-shader-contracts
   (dolist (claim
            `((:sky-vertices
-              ,(luv::make-block-world-sky-vertices)
+              ,(luvcraft::make-block-world-sky-vertices)
               3
-              ,(luv.spir-v:block-world-sky-vertex-specification))
+              ,(luvcraft.shaders:block-world-sky-vertex-specification))
              (:crosshair-vertices
-              ,(luv::make-block-world-crosshair-vertices 960 640)
-              ,luv::+block-world-crosshair-vertex-count+
-              ,(luv.spir-v:block-world-crosshair-vertex-specification))))
+              ,(luvcraft::make-block-world-crosshair-vertices 960 640)
+              ,luvcraft::+block-world-crosshair-vertex-count+
+              ,(luvcraft.shaders:block-world-crosshair-vertex-specification))))
     (destructuring-bind (name vertices count specification) claim
       (let* ((declaration (luv.arithmetic:value-declaration-for name))
              (layout
@@ -321,41 +318,41 @@
         (ok
          (luv.arithmetic:quantity-layout=
           (luv.arithmetic:repeated-quantity-layout-element-layout layout)
-          (luv::shader-input-product-layout specification)))))))
+          (luvcraft::shader-input-product-layout specification)))))))
 
 (deftest light-removal-queues-own-the-meaning-of-unwrapped-levels
   (let* ((world (make-block-world))
-         (chunk (luv::ensure-world-chunk world 0 0 0))
-         (region (luv::capture-light-region world))
+         (chunk (luvcraft::ensure-world-chunk world 0 0 0))
+         (region (luvcraft::capture-light-region world))
          (entry (gethash (chunk-domain-coordinate (block-chunk-domain chunk))
-                         (luv::light-region-entries region)))
+                         (luvcraft::light-region-entries region)))
          (domain (block-chunk-domain chunk))
          (local (make-local-coordinate 1 2 3))
          (sky
-           (luv::make-light-removal-queue
-            :sky-light #'luv::light-region-entry-sky :skylight-p t))
+           (luvcraft::make-light-removal-queue
+            :sky-light #'luvcraft::light-region-entry-sky :skylight-p t))
          (block
-           (luv::make-light-removal-queue
-            :block-light #'luv::light-region-entry-block)))
-    (luv::enqueue-light-removal sky entry local 12)
-    (ok (eq domain (luv::light-region-entry-domain entry)))
-    (ok (luv.world.fields:materialized-field-current-p sky :sky-light))
-    (ok (luv.world.fields:materialized-field-current-p block :block-light))
+           (luvcraft::make-light-removal-queue
+            :block-light #'luvcraft::light-region-entry-block)))
+    (luvcraft::enqueue-light-removal sky entry local 12)
+    (ok (eq domain (luvcraft::light-region-entry-domain entry)))
+    (ok (luvcraft.world.fields:materialized-field-current-p sky :sky-light))
+    (ok (luvcraft.world.fields:materialized-field-current-p block :block-light))
     (ok (null
-         (luv.world.fields:materialized-field-definition sky :block-light)))
+         (luvcraft.world.fields:materialized-field-definition sky :block-light)))
     (ok (eq :sky-propagation-level
             (luv.arithmetic:quantity-specification-name
              (luv.arithmetic:declaration-quantity-specification
-              (luv::light-removal-queue-field-definition sky)))))
+              (luvcraft::light-removal-queue-field-definition sky)))))
     (ok (eq :block-propagation-level
             (luv.arithmetic:quantity-specification-name
              (luv.arithmetic:declaration-quantity-specification
-              (luv::light-removal-queue-field-definition block)))))
-    (let ((item (first (luv::light-removal-queue-items sky))))
-      (ok (eq entry (luv::light-removal-entry item)))
-      (ok (eq local (luv::light-removal-local item)))
-      (ok (= 12 (luv::light-removal-level item))))
-    (ok (signals (luv::enqueue-light-removal sky entry local 16) 'error))))
+              (luvcraft::light-removal-queue-field-definition block)))))
+    (let ((item (first (luvcraft::light-removal-queue-items sky))))
+      (ok (eq entry (luvcraft::light-removal-entry item)))
+      (ok (eq local (luvcraft::light-removal-local item)))
+      (ok (= 12 (luvcraft::light-removal-level item))))
+    (ok (signals (luvcraft::enqueue-light-removal sky entry local 16) 'error))))
 
 (deftest cpu-trace-zones-are-nested-reusable-and-bounded
   (let ((trace (make-cpu-trace :label "test")))
@@ -398,25 +395,25 @@
 (deftest frame-performance-summary-is-comparison-friendly
   (let ((samples (make-array 4)))
     (dotimes (index 4)
-      (let ((sample (luv::make-luvcraft-frame-sample)))
-        (setf (luv::luvcraft-frame-sample-frame-seconds sample)
+      (let ((sample (luvcraft::make-luvcraft-frame-sample)))
+        (setf (luvcraft::luvcraft-frame-sample-frame-seconds sample)
               (/ (1+ index) 1000d0)
               (aref samples index) sample)))
     (let ((benchmark
-            (luv::make-luvcraft-frame-benchmark :samples samples)))
+            (luvcraft::make-luvcraft-frame-benchmark :samples samples)))
       (multiple-value-bind (median p95 mean maximum)
-          (luv::luvcraft-frame-metric-summary
-           benchmark #'luv::luvcraft-frame-sample-frame-seconds)
+          (luvcraft::luvcraft-frame-metric-summary
+           benchmark #'luvcraft::luvcraft-frame-sample-frame-seconds)
         (ok (= 2.5d0 median))
         (ok (= 4d0 p95))
         (ok (= 2.5d0 mean))
         (ok (= 4d0 maximum))))))
 
-(defclass gated-production-request (luv::production-request)
+(defclass gated-production-request (luvcraft::production-request)
   ((gate :initarg :gate :reader gated-production-request-gate)
    (value :initarg :value :reader gated-production-request-value)))
 
-(defmethod luv::perform-production-request ((request gated-production-request))
+(defmethod luvcraft::perform-production-request ((request gated-production-request))
   (sb-thread:wait-on-semaphore (gated-production-request-gate request))
   (gated-production-request-value request))
 
@@ -424,8 +421,8 @@
   ((title :initarg :title :accessor canvas-title)))
 
 (defun production-system-active-request (system)
-  (sb-thread:with-mutex ((luv::production-system-lock system))
-    (luv::production-system-active-request system)))
+  (sb-thread:with-mutex ((luvcraft::production-system-lock system))
+    (luvcraft::production-system-active-request system)))
 
 (defun wait-until (predicate &key (timeout 2.0))
   (let ((deadline (+ (get-internal-real-time)
@@ -481,9 +478,9 @@
       (ok (eq status :resident))
       (ok (null block)))
     ;; Explicit placement into generated air is an overlay value too.
-    (edit-block-at luv::*stone-block* world 2 14 2)
+    (edit-block-at luvcraft::*stone-block* world 2 14 2)
     (rematerialize-little-world-chunk source world 0 0)
-    (ok (eq (world-block-at world 2 14 2) luv::*stone-block*))
+    (ok (eq (world-block-at world 2 14 2) luvcraft::*stone-block*))
     (ok (= (block-edit-overlay-count (little-world-source-edits source)) 2))))
 
 (deftest little-world-save-descriptions-round-trip-semantic-state
@@ -495,12 +492,12 @@
                                 :position
                                 (make-vec3 -20.5d0 7.25d0 44.0d0))))
     (record-block-edit (little-world-source-edits source)
-                       luv::*crystal-block* -19 8 44)
+                       luvcraft::*crystal-block* -19 8 44)
     (record-block-edit (little-world-source-edits source) nil 3 4 -5)
     (let ((description
             (make-luvcraft-save-description
              world :camera camera :player player
-             :selected-block luv::*crystal-block*)))
+             :selected-block luvcraft::*crystal-block*)))
       ;; Stable coordinate order makes saves readable and diffs meaningful.
       (ok (equal
            (mapcar (lambda (edit) (getf edit :at))
@@ -522,7 +519,7 @@
                  2))
           (ok (eq (block-edit-at (little-world-source-edits restored-source)
                                  -19 8 44)
-                  luv::*crystal-block*))
+                  luvcraft::*crystal-block*))
           (multiple-value-bind (block present-p)
               (block-edit-at (little-world-source-edits restored-source)
                              3 4 -5)
@@ -533,7 +530,7 @@
           (multiple-value-bind (block status)
               (world-block-at restored -19 8 44)
             (ok (eq status :resident))
-            (ok (eq block luv::*crystal-block*)))
+            (ok (eq block luvcraft::*crystal-block*)))
           (center-little-world-residency restored-source restored 0 -1
                                          :radius 0)
           (multiple-value-bind (block status)
@@ -547,7 +544,7 @@
           (ok (= (player-x restored-player) -20.5d0))
           (ok (= (player-y restored-player) 7.25d0))
           (ok (= (player-z restored-player) 44.0d0))
-          (ok (eq selected-block luv::*crystal-block*)))))))
+          (ok (eq selected-block luvcraft::*crystal-block*)))))))
 
 (deftest camera-uniform-coerces-vec3-at-the-gpu-boundary
   (let* ((uniform
@@ -571,20 +568,20 @@
   (let* ((session
            (make-instance 'luvcraft-session
                           :camera (make-instance 'fly-camera)))
-         (data (luv::frame-uniform-data session 1280 720))
+         (data (luvcraft::frame-uniform-data session 1280 720))
          (declaration
            (luv.arithmetic:value-declaration-for :frame-uniform-data))
          (host-layout
            (luv.arithmetic:declaration-quantity-layout declaration))
-         (block (luv.spir-v:block-world-camera-uniform-block))
-         (shader-layout (luv::frame-shader-uniform-product-layout block)))
+         (block (luvcraft.shaders:block-world-camera-uniform-block))
+         (shader-layout (luvcraft::frame-shader-uniform-product-layout block)))
     (ok (eq declaration
             (luv.arithmetic:value-declaration-for :frame-uniform-data)))
     (ok (typep data
                (luv.arithmetic:declaration-representation-type declaration)))
     (ok (= 72 (luv.arithmetic:quantity-layout-extent host-layout)))
     (ok (luv.arithmetic:quantity-layout= host-layout shader-layout))
-    (ok (= 288 (luv::block-world-camera-uniform-size session)))
+    (ok (= 288 (luvcraft::block-world-camera-uniform-size session)))
     ;; Four dense matrix rows are representation for the declared
     ;; :WORLD-TO-SHADOW map, not sixteen falsely homogeneous quantities.
     (loop for position from 56 below 72
@@ -644,12 +641,12 @@
 (deftest block-atlas-and-mesh-vertices-carry-material-readings
   (ok (eq :srgb-to-linear
           (texture-format-sample-transfer
-           luv::+block-atlas-texture-format+)))
-  (ok (eq luv::+block-atlas-texture-format+
-          (luv::ensure-block-atlas-sample-transfer
-           luv::+block-atlas-texture-format+)))
+           luvcraft::+block-atlas-texture-format+)))
+  (ok (eq luvcraft::+block-atlas-texture-format+
+          (luvcraft::ensure-block-atlas-sample-transfer
+           luvcraft::+block-atlas-texture-format+)))
   (ok (signals
-       (luv::ensure-block-atlas-sample-transfer :rgba8-unorm)
+       (luvcraft::ensure-block-atlas-sample-transfer :rgba8-unorm)
        'error))
   (let ((atlas (make-block-texture-atlas)))
     (ok (equal (array-dimensions atlas) '(16 160)))
@@ -658,13 +655,13 @@
     (ok (/= (aref atlas 8 8) (aref atlas 8 (+ 8 (* 3 16)))))
     (ok (/= (aref atlas 8 8) (aref atlas 8 (+ 8 (* 9 16))))))
   (flet ((face (name)
-           (find name luv::*block-faces* :key #'block-face-name)))
-    (ok (= (block-face-tile luv::*grass-block* (face :top)) 0))
-    (ok (= (block-face-tile luv::*grass-block* (face :front)) 1))
-    (ok (= (block-face-tile luv::*grass-block* (face :bottom)) 2))
-    (ok (= (block-face-tile luv::*wood-block* (face :top)) 5))
-    (ok (= (block-face-tile luv::*sand-block* (face :top)) 7))
-    (ok (= (block-face-tile luv::*snow-block* (face :top)) 8))
+           (find name luvcraft::*block-faces* :key #'block-face-name)))
+    (ok (= (block-face-tile luvcraft::*grass-block* (face :top)) 0))
+    (ok (= (block-face-tile luvcraft::*grass-block* (face :front)) 1))
+    (ok (= (block-face-tile luvcraft::*grass-block* (face :bottom)) 2))
+    (ok (= (block-face-tile luvcraft::*wood-block* (face :top)) 5))
+    (ok (= (block-face-tile luvcraft::*sand-block* (face :top)) 7))
+    (ok (= (block-face-tile luvcraft::*snow-block* (face :top)) 8))
     (ok (= (block-face-tile *crystal-block* (face :top)) 9))
     (ok (= (block-light-emission *crystal-block*) 12))
     (ok (= (block-surface-emission *crystal-block*) 1.2))
@@ -673,7 +670,7 @@
                                  :chunk-height 2
                                  :chunk-depth 2)))
     (ensure-world-chunk world 0 0 0)
-    (setf (world-block-at world 0 0 0) luv::*stone-block*)
+    (setf (world-block-at world 0 0 0) luvcraft::*stone-block*)
     (let ((mesh (mesh-block-world (make-instance 'exposed-face-mesher) world)))
       (ok (= (length (block-mesh-vertices mesh))
              (* 12 (block-mesh-vertex-count mesh)))))))
@@ -689,22 +686,22 @@
                        source x z surface 16)
                       materials)
                      t)))
-    (ok (gethash luv::*grass-block* materials))
-    (ok (gethash luv::*sand-block* materials))
-    (ok (gethash luv::*snow-block* materials))))
+    (ok (gethash luvcraft::*grass-block* materials))
+    (ok (gethash luvcraft::*sand-block* materials))
+    (ok (gethash luvcraft::*snow-block* materials))))
 
 (deftest crosshair-and-numbered-materials-are-playable-state
-  (let* ((vertices (luv::make-block-world-crosshair-vertices 960 640))
+  (let* ((vertices (luvcraft::make-block-world-crosshair-vertices 960 640))
          (canvas (make-instance 'title-canvas :title "luvcraft test"))
          (session (make-instance 'luvcraft-session
                                  :canvas canvas
                                  :title-base "luvcraft test"
-                                 :selected-block luv::*stone-block*)))
+                                 :selected-block luvcraft::*stone-block*)))
     (ok (= (length vertices)
-           (* luv::+block-world-crosshair-vertex-count+ 6)))
-    (ok (eq (select-luvcraft-block session 1) luv::*grass-block*))
-    (ok (eq (luvcraft-session-selected-block session) luv::*grass-block*))
-    (ok (eq (select-luvcraft-block session 7) luv::*snow-block*))
+           (* luvcraft::+block-world-crosshair-vertex-count+ 6)))
+    (ok (eq (select-luvcraft-block session 1) luvcraft::*grass-block*))
+    (ok (eq (luvcraft-session-selected-block session) luvcraft::*grass-block*))
+    (ok (eq (select-luvcraft-block session 7) luvcraft::*snow-block*))
     (ok (eq (select-luvcraft-block session 8) *crystal-block*))
     (ok (search "1–8 select" (canvas-title canvas)))
     (ok (search "crystal" (canvas-title canvas)))
@@ -724,7 +721,7 @@
       (ok (find name names)))
     (let* ((view (find-luvcraft-gazetteer-view "crystal-seam"))
            (world
-             (funcall (luv::luvcraft-gazetteer-view-world-factory view))))
+             (funcall (luvcraft::luvcraft-gazetteer-view-world-factory view))))
       (ok (eq (world-block-at world 16 1 8) *crystal-block*))
       (ok (= (nth-value 1 (world-light-at world 16 1 8))
              (block-light-emission *crystal-block*)))
@@ -733,10 +730,10 @@
 
 (deftest shadow-yard-gazetteer-has-raised-casters-over-receiver
   (let* ((view (find-luvcraft-gazetteer-view "shadow-yard"))
-         (world (funcall (luv::luvcraft-gazetteer-view-world-factory view))))
-    (ok (eq (world-block-at world 7 0 7) luv::*snow-block*))
-    (ok (eq (world-block-at world 9 1 10) luv::*stone-block*))
-    (ok (eq (world-block-at world 10 8 10) luv::*stone-block*))
+         (world (funcall (luvcraft::luvcraft-gazetteer-view-world-factory view))))
+    (ok (eq (world-block-at world 7 0 7) luvcraft::*snow-block*))
+    (ok (eq (world-block-at world 9 1 10) luvcraft::*stone-block*))
+    (ok (eq (world-block-at world 10 8 10) luvcraft::*stone-block*))
     (ok (null (world-block-at world 9 9 10)))
     (ok (null (world-block-at world 8 1 4)))
     (ok (= (nth-value 0 (world-light-at world 7 1 7)) 15))))
@@ -752,9 +749,9 @@
          (farther-camera
            (make-instance 'fly-camera
                           :position (make-vec3 0.25d0 0d0 0.25d0)))
-         (first-rows (luv::shadow-frame-rows first-camera sky))
-         (nearby-rows (luv::shadow-frame-rows nearby-camera sky))
-         (farther-rows (luv::shadow-frame-rows farther-camera sky)))
+         (first-rows (luvcraft::shadow-frame-rows first-camera sky))
+         (nearby-rows (luvcraft::shadow-frame-rows nearby-camera sky))
+         (farther-rows (luvcraft::shadow-frame-rows farther-camera sky)))
     ;; The first two rows locate the orthographic footprint.  Translation
     ;; smaller than one 0.0625-world-unit shadow texel cannot move it.
     (ok (equal (subseq first-rows 0 8) (subseq nearby-rows 0 8)))
@@ -765,13 +762,13 @@
   (let* ((camera (make-instance 'fly-camera))
          (profile (make-default-sky-profile))
          (before
-           (luv::shadow-frame-rows
+           (luvcraft::shadow-frame-rows
             camera
             (sky-frame-parameters
              (make-instance 'sky-clock :pinned-day-fraction 0.451)
              profile)))
          (after
-           (luv::shadow-frame-rows
+           (luvcraft::shadow-frame-rows
             camera
             (sky-frame-parameters
              (make-instance 'sky-clock :pinned-day-fraction 0.453)
@@ -782,8 +779,8 @@
     ;; Row X has length 1/extent.  Undo that scale before comparing the
     ;; neighboring orientations around the former abs(forward.y)=0.92 switch.
     (ok (> (* right-dot
-              luv::+luvcraft-shadow-half-extent+
-              luv::+luvcraft-shadow-half-extent+)
+              luvcraft::+luvcraft-shadow-half-extent+
+              luvcraft::+luvcraft-shadow-half-extent+)
            0.99))))
 
 (deftest temporal-frame-derivatives-expose-change-and-flicker
@@ -791,13 +788,13 @@
         (second #(13 17 36 255 40 50 60 255))
         (third #(16 14 42 255 43 53 63 255)))
     (multiple-value-bind (difference mean maximum changed)
-        (luv::temporal-derivative-rgba second first 10.0)
+        (luvcraft::temporal-derivative-rgba second first 10.0)
       (ok (equalp difference #(40 40 40 255 0 0 0 255)))
       (ok (< (abs (- mean (/ 2.0 255.0))) 1e-6))
       (ok (< (abs (- maximum (/ 4.0 255.0))) 1e-6))
       (ok (= changed 0.5)))
     (multiple-value-bind (difference mean maximum changed)
-        (luv::temporal-derivative-rgba third second 10.0 first)
+        (luvcraft::temporal-derivative-rgba third second 10.0 first)
       (ok (equalp difference #(0 0 0 255 30 30 30 255)))
       (ok (< (abs (- mean (/ 1.5 255.0))) 1e-6))
       (ok (< (abs (- maximum (/ 3.0 255.0))) 1e-6))
@@ -816,7 +813,7 @@
     (ensure-world-chunk world 0 0 0)
     (loop for x below 4 do
       (loop for z below 4 do
-        (setf (world-block-at world x 0 z) luv::*stone-block*)))
+        (setf (world-block-at world x 0 z) luvcraft::*stone-block*)))
     ;; Gravity settles the body exactly on the block tops.
     (dotimes (step 240)
       (declare (ignorable step))
@@ -825,8 +822,8 @@
     (ok (player-grounded-p player))
     (ok (< (abs (- (camera-y camera) 2.62d0)) 1d-5))
     ;; A held right input accelerates into, but not through, a two-block wall.
-    (setf (world-block-at world 3 1 1) luv::*stone-block*
-          (world-block-at world 3 2 1) luv::*stone-block*
+    (setf (world-block-at world 3 1 1) luvcraft::*stone-block*
+          (world-block-at world 3 2 1) luvcraft::*stone-block*
           (gethash :d keys) t)
     (dotimes (step 120)
       (declare (ignorable step))
@@ -863,8 +860,8 @@
     (ensure-world-chunk world 0 0 0)
     (loop for x below 8 do
       (loop for z below 4 do
-        (setf (world-block-at world x 0 z) luv::*stone-block*)))
-    (setf (world-block-at world 3 1 1) luv::*stone-block*
+        (setf (world-block-at world x 0 z) luvcraft::*stone-block*)))
+    (setf (world-block-at world 3 1 1) luvcraft::*stone-block*
           (gethash :d keys) t)
     (dotimes (step 120)
       (declare (ignorable step))
@@ -879,15 +876,15 @@
                                  :chunk-depth 2)))
     (ensure-world-chunk world 0 0 0)
     (ensure-world-chunk world 1 0 0)
-    (setf (world-block-at world 1 0 0) luv::*stone-block*
-          (world-block-at world 2 0 0) luv::*stone-block*)
+    (setf (world-block-at world 1 0 0) luvcraft::*stone-block*
+          (world-block-at world 2 0 0) luvcraft::*stone-block*)
     (let ((mesher (make-instance 'exposed-face-mesher)))
       (ok (= (block-mesh-face-count (mesh-block-world mesher world)) 10))
       (let ((revision (block-world-revision world)))
         (setf (world-block-at world 2 0 0) nil)
         (ok (= (block-world-revision world) (1+ revision))))
       (ok (= (block-mesh-face-count (mesh-block-world mesher world)) 6))
-      (setf (world-block-at world 2 0 0) luv::*stone-block*)
+      (setf (world-block-at world 2 0 0) luvcraft::*stone-block*)
       (ok (= (block-mesh-face-count (mesh-block-world mesher world)) 10)))))
 
 (deftest chunk-mesh-is-exactly-sized-and-preserves-the-public-emitter
@@ -896,24 +893,24 @@
                                   :chunk-depth 2))
          (chunk (ensure-world-chunk world 0 0 0))
          (mesher (make-instance 'exposed-face-mesher)))
-    (setf (world-block-at world 0 0 0) luv::*stone-block*)
+    (setf (world-block-at world 0 0 0) luvcraft::*stone-block*)
     (let* ((mesh (mesh-block-chunk mesher world chunk))
            (vertices (block-mesh-vertices mesh)))
       (ok (= (block-mesh-face-count mesh) 6))
       (ok (= (length vertices)
              (* (block-mesh-face-count mesh)
-                luv::+block-mesh-floats-per-face+)))
+                luvcraft::+block-mesh-floats-per-face+)))
       (ok (= (array-total-size vertices) (length vertices))))
     ;; Tools may still emit a single semantic face through the exported API;
     ;; the optimized neighborhood object remains an implementation detail.
     (let ((vertices
-            (make-array luv::+block-mesh-floats-per-face+
+            (make-array luvcraft::+block-mesh-floats-per-face+
                         :element-type 'single-float :fill-pointer 0)))
-      (emit-block-face mesher world vertices luv::*stone-block*
-                       (find :top luv::*block-faces*
+      (emit-block-face mesher world vertices luvcraft::*stone-block*
+                       (find :top luvcraft::*block-faces*
                              :key #'block-face-name)
                        0 0 0)
-      (ok (= (length vertices) luv::+block-mesh-floats-per-face+)))))
+      (ok (= (length vertices) luvcraft::+block-mesh-floats-per-face+)))))
 
 (deftest immutable-mesh-snapshot-is-bit-identical-to-owner-side-meshing
   (let* ((world (make-little-block-world :chunk-radius 1 :seed 121))
@@ -932,35 +929,35 @@
                 (block-mesh-vertices (mesh-block-snapshot mesher snapshot))))))
 
 (deftest production-system-coalesces-desired-work-and-stops-cooperatively
-  (let ((system (luv::make-single-worker-production-system
+  (let ((system (luvcraft::make-single-worker-production-system
                  :name "luv production test")))
     (unwind-protect
          (let* ((first
                   (make-instance
-                   'luv::little-world-load-request
+                   'luvcraft::little-world-load-request
                    :key '(:load (0 0 0)) :priority 4
                    :seed 1 :demand-token 1
                    :width 8 :height 8 :depth 8))
                 (latest
                   (make-instance
-                   'luv::little-world-load-request
+                   'luvcraft::little-world-load-request
                    :key '(:load (0 0 0)) :priority 0
                    :seed 2 :demand-token 2
                    :width 8 :height 8 :depth 8)))
-           (luv::schedule-production-request system first)
-           (luv::schedule-production-request system latest)
+           (luvcraft::schedule-production-request system first)
+           (luvcraft::schedule-production-request system latest)
            (multiple-value-bind (result present-p)
                (sb-concurrency:receive-message
-                (luv::production-system-result-mailbox system) :timeout 5.0)
+                (luvcraft::production-system-result-mailbox system) :timeout 5.0)
              (ok present-p)
-             (ok (null (luv::production-result-condition result)))
-             (ok (<= (luv::production-system-pending-count system) 2))))
-      (luv::stop-production-system system))
+             (ok (null (luvcraft::production-result-condition result)))
+             (ok (<= (luvcraft::production-system-pending-count system) 2))))
+      (luvcraft::stop-production-system system))
     (ok (not (sb-thread:thread-alive-p
-              (luv::production-system-thread system))))))
+              (luvcraft::production-system-thread system))))))
 
 (deftest production-system-keeps-one-result-behind-its-owner
-  (let* ((system (luv::make-single-worker-production-system
+  (let* ((system (luvcraft::make-single-worker-production-system
                   :name "luv production backpressure test"))
          (first-gate (sb-thread:make-semaphore :count 0))
          (second-gate (sb-thread:make-semaphore :count 0))
@@ -970,41 +967,41 @@
                                 :key :second :gate second-gate :value :second)))
     (unwind-protect
          (progn
-           (luv::schedule-production-request system first)
+           (luvcraft::schedule-production-request system first)
            (ok (wait-until
                 (lambda () (eq (production-system-active-request system)
                                first))))
            ;; Scheduling while FIRST is active must remain desired work, not a
            ;; second queued wake which can run behind an unread first result.
-           (luv::schedule-production-request system second)
+           (luvcraft::schedule-production-request system second)
            (sb-thread:signal-semaphore first-gate)
            (ok (wait-until
                 (lambda ()
                   (and (= 1 (sb-concurrency:mailbox-count
-                             (luv::production-system-result-mailbox system)))
+                             (luvcraft::production-system-result-mailbox system)))
                        (not (eq (production-system-active-request system)
                                 first))))))
            (ok (null (production-system-active-request system)))
            (ok (= 1 (sb-concurrency:mailbox-count
-                     (luv::production-system-result-mailbox system))))
+                     (luvcraft::production-system-result-mailbox system))))
            (ok (nth-value
-                1 (gethash :second (luv::production-system-desired system))))
+                1 (gethash :second (luvcraft::production-system-desired system))))
            (multiple-value-bind (result present-p)
-               (luv::receive-production-result-no-hang system)
+               (luvcraft::receive-production-result-no-hang system)
              (ok present-p)
-             (ok (eq (luv::production-result-value result) :first)))
+             (ok (eq (luvcraft::production-result-value result) :first)))
            (ok (wait-until
                 (lambda () (eq (production-system-active-request system)
                                second))))
            (sb-thread:signal-semaphore second-gate)
            (multiple-value-bind (result present-p)
                (sb-concurrency:receive-message
-                (luv::production-system-result-mailbox system) :timeout 2.0)
+                (luvcraft::production-system-result-mailbox system) :timeout 2.0)
              (ok present-p)
-             (ok (eq (luv::production-result-value result) :second))))
+             (ok (eq (luvcraft::production-result-value result) :second))))
       (sb-thread:signal-semaphore first-gate)
       (sb-thread:signal-semaphore second-gate)
-      (luv::stop-production-system system))))
+      (luvcraft::stop-production-system system))))
 
 (deftest prebuilt-world-remains-desired-for-asynchronous-meshing
   (let* ((world (make-block-world :chunk-width 8
@@ -1012,7 +1009,7 @@
                                   :chunk-depth 8))
          (first (ensure-world-chunk world -1 0 2))
          (second (ensure-world-chunk world 3 0 -4))
-         (system (luv::make-single-worker-production-system
+         (system (luvcraft::make-single-worker-production-system
                   :name "luv static residency test"))
          (session (make-instance 'luvcraft-session
                               :world world
@@ -1022,18 +1019,18 @@
                               :production-system system)))
     (unwind-protect
          (progn
-           (luv::maintain-luvcraft-residency session)
-           (ok (gethash (luv::block-chunk-key first)
+           (luvcraft::maintain-luvcraft-residency session)
+           (ok (gethash (luvcraft::block-chunk-key first)
                         (luvcraft-session-desired-chunks session)))
-           (ok (gethash (luv::block-chunk-key second)
+           (ok (gethash (luvcraft::block-chunk-key second)
                         (luvcraft-session-desired-chunks session)))
            (remove-world-chunk world -1 0 2)
-           (luv::maintain-luvcraft-residency session)
-           (ok (not (gethash (luv::block-chunk-key first)
+           (luvcraft::maintain-luvcraft-residency session)
+           (ok (not (gethash (luvcraft::block-chunk-key first)
                              (luvcraft-session-desired-chunks session))))
-           (ok (gethash (luv::block-chunk-key second)
+           (ok (gethash (luvcraft::block-chunk-key second)
                         (luvcraft-session-desired-chunks session))))
-      (luv::stop-production-system system))))
+      (luvcraft::stop-production-system system))))
 
 (deftest chunk-mesh-products-have-narrow-neighbor-dependencies
   (let* ((world (make-block-world :chunk-width 4
@@ -1042,16 +1039,16 @@
          (left (ensure-world-chunk world 0 0 0))
          (right (ensure-world-chunk world 1 0 0))
          (mesher (make-instance 'exposed-face-mesher)))
-    (setf (world-block-at world 3 1 1) luv::*stone-block*
-          (world-block-at world 4 1 1) luv::*stone-block*)
+    (setf (world-block-at world 3 1 1) luvcraft::*stone-block*
+          (world-block-at world 4 1 1) luvcraft::*stone-block*)
     (ok (= (block-mesh-face-count (mesh-block-chunk mesher world left)) 5))
     (ok (= (block-mesh-face-count (mesh-block-chunk mesher world right)) 5))
     (let ((stamp (chunk-mesh-dependency-stamp world left)))
       ;; This changes RIGHT, but not the boundary LEFT's mesh observes.
-      (setf (world-block-at world 5 2 2) luv::*stone-block*)
+      (setf (world-block-at world 5 2 2) luvcraft::*stone-block*)
       (ok (equal stamp (chunk-mesh-dependency-stamp world left)))
       ;; This touches RIGHT's -X boundary and must invalidate LEFT.
-      (setf (world-block-at world 4 2 2) luv::*stone-block*)
+      (setf (world-block-at world 4 2 2) luvcraft::*stone-block*)
       (ok (not (equal stamp (chunk-mesh-dependency-stamp world left)))))
     (let ((stamp (chunk-mesh-dependency-stamp world left)))
       (remove-world-chunk world 0 0 0)
@@ -1061,7 +1058,7 @@
 
 (defun test-luvcraft-chunk-product (chunk stamp)
   (make-instance
-   'luv::luvcraft-chunk-product
+   'luvcraft::luvcraft-chunk-product
    :coordinate (chunk-domain-coordinate (block-chunk-domain chunk))
    :dependency-stamp stamp
    :mesh nil :vertex-buffer nil))
@@ -1072,22 +1069,22 @@
                                   :chunk-depth 2))
          (left (ensure-world-chunk world 0 0 0))
          (right (ensure-world-chunk world 1 0 0))
-         (session (make-instance 'luv::luvcraft-session :world world))
+         (session (make-instance 'luvcraft::luvcraft-session :world world))
          (left-key '(0 0 0))
          (right-key '(1 0 0)))
-    (setf (gethash left-key (luv::luvcraft-session-desired-chunks session)) t
-          (gethash right-key (luv::luvcraft-session-desired-chunks session)) t
-          (world-block-at world 1 0 0) luv::*stone-block*
-          (world-block-at world 2 0 0) luv::*stone-block*)
+    (setf (gethash left-key (luvcraft::luvcraft-session-desired-chunks session)) t
+          (gethash right-key (luvcraft::luvcraft-session-desired-chunks session)) t
+          (world-block-at world 1 0 0) luvcraft::*stone-block*
+          (world-block-at world 2 0 0) luvcraft::*stone-block*)
     (let ((old-left
             (test-luvcraft-chunk-product
              left (chunk-mesh-dependency-stamp world left)))
           (old-right
             (test-luvcraft-chunk-product
              right (chunk-mesh-dependency-stamp world right))))
-      (setf (gethash left-key (luv::luvcraft-session-chunk-products session))
+      (setf (gethash left-key (luvcraft::luvcraft-session-chunk-products session))
             old-left
-            (gethash right-key (luv::luvcraft-session-chunk-products session))
+            (gethash right-key (luvcraft::luvcraft-session-chunk-products session))
             old-right)
       ;; Removing RIGHT's boundary block also exposes a face owned by LEFT.
       ;; One completed replacement must leave the whole old pair visible.
@@ -1096,28 +1093,28 @@
               (test-luvcraft-chunk-product
                right (chunk-mesh-dependency-stamp world right))))
         (setf (gethash right-key
-                       (luv::luvcraft-session-staged-chunk-products session))
+                       (luvcraft::luvcraft-session-staged-chunk-products session))
               new-right)
-        (ok (zerop (luv::publish-ready-luvcraft-meshes session)))
+        (ok (zerop (luvcraft::publish-ready-luvcraft-meshes session)))
         (ok (eq old-left
                 (gethash left-key
-                         (luv::luvcraft-session-chunk-products session))))
+                         (luvcraft::luvcraft-session-chunk-products session))))
         (ok (eq old-right
                 (gethash right-key
-                         (luv::luvcraft-session-chunk-products session))))
+                         (luvcraft::luvcraft-session-chunk-products session))))
         (let ((new-left
                 (test-luvcraft-chunk-product
                  left (chunk-mesh-dependency-stamp world left))))
           (setf (gethash left-key
-                         (luv::luvcraft-session-staged-chunk-products session))
+                         (luvcraft::luvcraft-session-staged-chunk-products session))
                 new-left)
-          (ok (= 2 (luv::publish-ready-luvcraft-meshes session)))
+          (ok (= 2 (luvcraft::publish-ready-luvcraft-meshes session)))
           (ok (eq new-left
                   (gethash left-key
-                           (luv::luvcraft-session-chunk-products session))))
+                           (luvcraft::luvcraft-session-chunk-products session))))
           (ok (eq new-right
                   (gethash right-key
-                           (luv::luvcraft-session-chunk-products session)))))))))
+                           (luvcraft::luvcraft-session-chunk-products session)))))))))
 
 (deftest camera-edits-the-resident-lattice
   (let* ((world (make-block-world :chunk-width 4
@@ -1129,12 +1126,12 @@
          (session (make-instance 'luvcraft-session
                               :world world
                               :camera camera
-                              :selected-block luv::*dirt-block*)))
+                              :selected-block luvcraft::*dirt-block*)))
     (ensure-world-chunk world 0 0 0)
     ;; The second stone means placing after removing the first still has a
     ;; solid target beyond the empty adjacent site.
-    (setf (world-block-at world 2 1 1) luv::*stone-block*
-          (world-block-at world 3 1 1) luv::*stone-block*)
+    (setf (world-block-at world 2 1 1) luvcraft::*stone-block*
+          (world-block-at world 3 1 1) luvcraft::*stone-block*)
     (multiple-value-bind (coordinate status)
         (edit-luvcraft-block session :remove)
       (ok (eq status :edited))
@@ -1146,7 +1143,7 @@
                            :player (make-instance 'block-world-player
                                                   :position
                                                   (make-vec3 2.5d0 1d0 1.5d0))
-                           :selected-block luv::*dirt-block*)))
+                           :selected-block luvcraft::*dirt-block*)))
       (multiple-value-bind (coordinate status)
           (edit-luvcraft-block occupied-session :place)
         (ok (null coordinate))
@@ -1156,4 +1153,4 @@
         (edit-luvcraft-block session :place)
       (ok (eq status :edited))
       (ok (= (world-coordinate-x coordinate) 2))
-      (ok (eq (world-block-at world 2 1 1) luv::*dirt-block*)))))
+      (ok (eq (world-block-at world 2 1 1) luvcraft::*dirt-block*)))))

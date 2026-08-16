@@ -23,7 +23,7 @@
 ;;;; FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 ;;;; DEALINGS IN THE SOFTWARE.
 
-(defpackage #:sly-client/parinfer
+(defpackage #:sly-client.parinfer
   (:use #:cl)
   (:export #:apply-indent-mode
            #:analyze-indent-mode
@@ -34,7 +34,7 @@
            #:indent-mode-report-candidate-changed-p
            #:indent-mode-report-source-balanced-p))
 
-(in-package #:sly-client/parinfer)
+(in-package #:sly-client.parinfer)
 
 (defstruct (state (:constructor make-state ()))
   (stack nil :type list)

@@ -1,8 +1,8 @@
 ;;; Luvcraft's dense voxel fields and packed product declarations.
 
-(in-package #:luv)
+(in-package #:luvcraft)
 
-(luv.world.fields:define-voxel-field :sky-light
+(luvcraft.world.fields:define-voxel-field :sky-light
   :site-kind :voxel-cell
   :value-type (unsigned-byte 8)
   :quantity (:quantity :sky-propagation-level :unit :one)
@@ -10,7 +10,7 @@
   :legal-values (integer 0 15)
   :representation :u8-levels)
 
-(luv.world.fields:define-voxel-field :block-light
+(luvcraft.world.fields:define-voxel-field :block-light
   :site-kind :voxel-cell
   :value-type (unsigned-byte 8)
   :quantity (:quantity :block-propagation-level :unit :one)

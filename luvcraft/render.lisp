@@ -6,7 +6,7 @@
 ;;; canvas event handling and the START/STOP pair that creates and releases
 ;;; every GPU resource the application uses.
 
-(in-package #:luv)
+(in-package #:luvcraft)
 
 (defclass luvcraft-frame-state ()
   ((uniform-buffer :initarg :uniform-buffer
@@ -52,9 +52,9 @@
 (defun ensure-block-atlas-sample-transfer (format)
   "Check the host texture format against the block shader's decoded result."
   (let* ((resource
-           (find 'luv.spir-v::block-atlas
+           (find 'luvcraft.shaders::block-atlas
                  (luv.spir-v:shader-specification-resources
-                  (luv.spir-v:block-world-fragment-specification))
+                  (luvcraft.shaders:block-world-fragment-specification))
                  :key #'luv.spir-v:shader-object-name))
          (expected (texture-format-sample-transfer format))
          (declared
@@ -90,7 +90,7 @@
       (rectangle -8.0 -0.75 8.0 0.75 '(0.96 0.98 1.0)))
     (ensure-vertex-product-contract
      vertices :crosshair-vertices +block-world-crosshair-vertex-count+
-     (spv:block-world-crosshair-vertex-specification))))
+     (luvcraft.shaders:block-world-crosshair-vertex-specification))))
 
 (defun make-block-world-sky-vertices ()
   "Make the one fullscreen triangle in normalized clip coordinates."
@@ -100,7 +100,7 @@
     :initial-contents '(-1.0 -1.0 0.5
                         3.0 -1.0 0.5
                         -1.0 3.0 0.5))
-   :sky-vertices 3 (spv:block-world-sky-vertex-specification)))
+   :sky-vertices 3 (luvcraft.shaders:block-world-sky-vertex-specification)))
 
 (defun shadow-frame-rows (camera sky)
   "Pack a texel-stable orthographic light-space transform as four vec4 rows."
@@ -256,7 +256,7 @@ quantities; the host independently owns the product it writes."
 
 Checked against the host's packed frame data at construction, so growing
 the frame uniform cannot silently diverge between shader and host."
-  (let* ((block (spv:block-world-camera-uniform-block))
+  (let* ((block (luvcraft.shaders:block-world-camera-uniform-block))
          (size (spv:shader-uniform-block-byte-size block))
          (declaration
            (luv.arithmetic:value-declaration-for :frame-uniform-data))
@@ -615,7 +615,7 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                   ;; terrain frame has been presented.  Showing it here would
                   ;; expose black initialization and sky-only streaming states.
                   :visible-p nil
-                  :presentation-api (sdl-presentation-api-for provider)))
+                  :presentation-api (luv::sdl-presentation-api-for provider)))
          (player (or player (make-player-for-camera camera)))
          (device nil) (context nil) (resources nil) (pipelines nil)
          (session nil) (production-system nil) (completed-p nil))

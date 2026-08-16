@@ -2,9 +2,9 @@
 
 (require :asdf)
 
-(asdf:load-asd (truename (merge-pathnames #P"../luv.asd" *load-truename*)))
+(asdf:load-asd (truename (merge-pathnames #P"../../../luv.asd" *load-truename*)))
 
-(asdf:load-system :luv/canvas/metal)
+(asdf:load-system :luv)
 
 (handler-case
     (progn

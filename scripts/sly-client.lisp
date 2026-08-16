@@ -1169,13 +1169,13 @@
     (values mode source file strict)))
 
 (defun parinfer-safe-repair-p (report)
-  (and (not (sly-client/parinfer:indent-mode-report-source-balanced-p report))
-       (sly-client/parinfer:indent-mode-report-candidate-balanced-p report)
-       (sly-client/parinfer:indent-mode-report-candidate-changed-p report)))
+  (and (not (sly-client.parinfer:indent-mode-report-source-balanced-p report))
+       (sly-client.parinfer:indent-mode-report-candidate-balanced-p report)
+       (sly-client.parinfer:indent-mode-report-candidate-changed-p report)))
 
 (defun parinfer-balanced-conflict-p (report)
-  (and (sly-client/parinfer:indent-mode-report-source-balanced-p report)
-       (sly-client/parinfer:indent-mode-report-candidate-changed-p report)))
+  (and (sly-client.parinfer:indent-mode-report-source-balanced-p report)
+       (sly-client.parinfer:indent-mode-report-candidate-changed-p report)))
 
 (defun explain-parinfer-report (report label stream)
   (cond
@@ -1187,7 +1187,7 @@
      (format stream
              "parinfer: ~A has a validated indentation repair candidate; use --diff or --write.~%"
              label))
-    ((not (sly-client/parinfer:indent-mode-report-source-balanced-p report))
+    ((not (sly-client.parinfer:indent-mode-report-source-balanced-p report))
      (format stream
              "parinfer: ~A is not paren-balanced, and no validated repair candidate was found.~%"
              label))
@@ -1203,17 +1203,17 @@
                    (source source)
                    (t (read-standard-input-to-end))))
            (report
-             (sly-client/parinfer:analyze-indent-mode original))
+             (sly-client.parinfer:analyze-indent-mode original))
            (candidate
-             (sly-client/parinfer:indent-mode-report-candidate report))
+             (sly-client.parinfer:indent-mode-report-candidate report))
            (repaired
-             (sly-client/parinfer:apply-indent-mode original))
+             (sly-client.parinfer:apply-indent-mode original))
            (changed-p (not (string= original repaired)))
            (candidate-changed-p
-             (sly-client/parinfer:indent-mode-report-candidate-changed-p
+             (sly-client.parinfer:indent-mode-report-candidate-changed-p
               report))
            (source-balanced-p
-             (sly-client/parinfer:indent-mode-report-source-balanced-p
+             (sly-client.parinfer:indent-mode-report-source-balanced-p
               report)))
       (ecase mode
         (:print

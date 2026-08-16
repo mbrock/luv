@@ -5,7 +5,7 @@
 ;;; from coordinate hashes, and player edits from a sparse replayable overlay,
 ;;; so any chunk can be regenerated bit-identically on any thread.
 
-(in-package #:luv)
+(in-package #:luvcraft)
 
 (defclass little-world-source ()
   ((seed :initarg :seed :initform 121 :reader little-world-source-seed)

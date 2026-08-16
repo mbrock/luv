@@ -1,4 +1,4 @@
-(in-package #:luv.tools)
+(in-package #:luvcraft.tools)
 
 (defun usage (&optional (stream *standard-output*))
   (format stream "Usage: luv COMMAND [ARGS...]~%")
@@ -110,7 +110,7 @@
                                   value))))
     (unless (= 1 (length positionals))
       (command-line-error "eval expects exactly one FORM."))
-    (let* ((package-name (or (getf options :package) "LUV"))
+    (let* ((package-name (or (getf options :package) "LUVCRAFT"))
            (package (or (find-package package-name)
                         (command-line-error "No package named ~A." package-name))))
       (let ((*package* package))

@@ -1,4 +1,4 @@
-(in-package #:luv.mcclim)
+(in-package #:mcluv)
 
 (defun open-listener (&key (server-path '(:luv))
                            (width 790)

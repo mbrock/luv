@@ -6,7 +6,7 @@
 ;;; placing or removing blocks.  Chunk streaming lives in streaming.lisp and
 ;;; frame rendering in render.lisp.
 
-(in-package #:luv)
+(in-package #:luvcraft)
 
 (luv.arithmetic:define-quantity-constant
     +luvcraft-target-reach+ 8d0

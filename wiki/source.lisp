@@ -248,7 +248,7 @@ and a count button that shows the definitions in a popover."
 system that merely depends on everything."
   (remove-if (lambda (entry)
                (let ((name (system-entry-name entry)))
-                 (or (search "/tests" name)
+                 (or (search "/test" name)
                      (string= name "luv"))))
              (site-systems site)))
 
@@ -258,7 +258,7 @@ system that merely depends on everything."
 
 (defun system-anchor (name)
   "The id of NAME's row in the source index: the name itself, slashes and
-all, since luv/wiki and luv-wiki are different systems."
+all, since luv-wiki-site and luv-wiki are different systems."
   (concatenate 'string "system-" name))
 
 (defun transitive-reduction (edges)

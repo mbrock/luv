@@ -1,6 +1,6 @@
 ;;; Named screenshot views for semantic luvcraft visual checks.
 
-(in-package #:luv)
+(in-package #:luvcraft)
 
 (defclass gazetteer-open-sky-source () ())
 

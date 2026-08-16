@@ -1,6 +1,6 @@
 ;;; Small, explicit measurements of the actual luvcraft frame path.
 
-(in-package #:luv)
+(in-package #:luvcraft)
 
 (luv.arithmetic.records:define-quantity-struct
     (luvcraft-frame-sample (:constructor make-luvcraft-frame-sample ()))

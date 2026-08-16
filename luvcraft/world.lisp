@@ -1,6 +1,6 @@
 ;;; Discrete world coordinates, finite chunk domains, and resident block data.
 
-(in-package #:luv)
+(in-package #:luvcraft.world)
 
 ;;; VEC3 is the small, transparent CPU representation shared by continuous
 ;;; positions and displacements.  Semantic owners name what a value means;
@@ -563,12 +563,12 @@ BODY returns."
 (defclass block-content-column ()
   ((definition
     :initarg :definition
-    :initform (luv.world.fields:field-definition-for :block-content)
+    :initform (luvcraft.world.fields:field-definition-for :block-content)
     :reader block-content-column-definition)
    (palette :initarg :palette :reader block-content-column-palette)
    (indices :initarg :indices :reader block-content-column-indices)))
 
-(defmethod luv.world.fields:materialized-field-definition
+(defmethod luvcraft.world.fields:materialized-field-definition
     ((column block-content-column) (field-name (eql :block-content)))
   (declare (ignore field-name))
   (block-content-column-definition column))

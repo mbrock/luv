@@ -6,7 +6,7 @@
 ;;; BLOCK-MESH-SNAPSHOT copied for a worker thread; ambient occlusion and
 ;;; face visibility sample through the same accessor in all three cases.
 
-(in-package #:luv)
+(in-package #:luvcraft)
 
 (defclass block-mesher () ())
 (defclass exposed-face-mesher (block-mesher)
@@ -78,17 +78,17 @@ The snapshot owns compact u16 columns, but its small palette contains the same
 shared semantic block descriptors used by the world.  Cell identity does not
 cross the thread boundary, and the worker never observes live chunk storage."))
 
-(defmethod luv.world.fields:materialized-field-definition
+(defmethod luvcraft.world.fields:materialized-field-definition
     ((snapshot block-mesh-snapshot) (field-name (eql :block-content)))
   (declare (ignore field-name))
   (block-mesh-snapshot-content-definition snapshot))
 
-(defmethod luv.world.fields:materialized-field-definition
+(defmethod luvcraft.world.fields:materialized-field-definition
     ((snapshot block-mesh-snapshot) (field-name (eql :sky-light)))
   (declare (ignore field-name))
   (block-mesh-snapshot-sky-definition snapshot))
 
-(defmethod luv.world.fields:materialized-field-definition
+(defmethod luvcraft.world.fields:materialized-field-definition
     ((snapshot block-mesh-snapshot) (field-name (eql :block-light)))
   (declare (ignore field-name))
   (block-mesh-snapshot-block-light-definition snapshot))
@@ -606,18 +606,18 @@ normalized to 0..1."
      :key (block-chunk-key chunk) :dependency-stamp dependency-stamp
      :domain domain
      :content-definition
-     (luv.world.fields:materialized-field-definition
+     (luvcraft.world.fields:materialized-field-definition
       (block-chunk-content chunk) :block-content)
      :sky-definition
      (let ((field (block-chunk-light-field chunk)))
        (if field
-           (luv.world.fields:materialized-field-definition field :sky-light)
-           (luv.world.fields:field-definition-for :sky-light)))
+           (luvcraft.world.fields:materialized-field-definition field :sky-light)
+           (luvcraft.world.fields:field-definition-for :sky-light)))
      :block-light-definition
      (let ((field (block-chunk-light-field chunk)))
        (if field
-           (luv.world.fields:materialized-field-definition field :block-light)
-           (luv.world.fields:field-definition-for :block-light)))
+           (luvcraft.world.fields:materialized-field-definition field :block-light)
+           (luvcraft.world.fields:field-definition-for :block-light)))
      :palette palette :target-indices target-indices
      :sample-indices sample-indices
      :sky-samples sky-samples :block-light-samples block-light-samples)))

@@ -5,7 +5,7 @@
 ;;; owner captures an immutable description; a dedicated latest-value worker
 ;;; performs printing and atomic replacement without file I/O in a frame.
 
-(in-package #:luv)
+(in-package #:luvcraft)
 
 (defconstant +luvcraft-save-format-version+ 1)
 (defconstant +little-world-source-version+ 1)

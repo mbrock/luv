@@ -1,9 +1,4 @@
-(defpackage #:luv/arithmetic/records/tests
-  (:use #:cl #:rove)
-  (:local-nicknames (#:math #:luv.arithmetic)
-                    (#:records #:luv.arithmetic.records)))
-
-(in-package #:luv/arithmetic/records/tests)
+(in-package #:luv.tests)
 
 (defclass quantity-base-record ()
   ((position

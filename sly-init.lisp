@@ -6,13 +6,16 @@
   (uiop:pathname-directory-pathname *load-truename*))
 
 (asdf:load-asd (merge-pathnames #P"luv.asd" *load-truename*))
+(asdf:load-asd (merge-pathnames #P"luvcraft.asd" *load-truename*))
+(asdf:load-asd (merge-pathnames #P"luv-wiki.asd" *load-truename*))
 (asdf:load-system :luv)
+(asdf:load-system :luvcraft)
 (asdf:load-system :luv-wiki)
 
 (defun register-luv-readtables ()
   "Tell Slynk which packages read under a named readtable, so C-c C-c and
 ./sly eval read them as their files do.  IN-READTABLE does this itself when
-Slynk is loaded first; here Slynk arrives after luv."
+Slynk is loaded first; here Slynk arrives after the project systems."
   (let ((alist (find-symbol "*READTABLE-ALIST*" "SLYNK")))
     (dolist (entry (list (cons "LUV.WIKI.STYLE"
                                (named-readtables:find-readtable 'luv.css:syntax))))

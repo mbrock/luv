@@ -56,11 +56,11 @@ cannot expose every native capability.  That source evidence remains on
 
 The current backend is deliberately narrow but real:
 
-- =:luv/gpu/api= is the shared semantic seam;
-- =:luv/gpu/metal= supplies Metal provider, device, queue, compiler, buffer,
+- [[file:../hal/gpu.lisp][=hal/gpu.lisp=]] in =:luv= is the shared semantic seam;
+- the =hal/metal= module supplies Metal provider, device, queue, compiler, buffer,
   shader-module, render-pipeline, texture, general command-encoder, finished
   command-buffer, and render-pass objects;
-- =:luv/canvas/metal= specializes the canvas × provider relationship;
+- [[file:../hal/metal/canvas.lisp][=hal/metal/canvas.lisp=]] specializes the canvas × provider relationship;
 - declared Objective-C messages cover synchronous Metal 4 library compilation
   as well as the submission and drawable vocabulary needed by one frame; and
 - cold probes validate in-memory luvcraft vertex and fragment libraries, their

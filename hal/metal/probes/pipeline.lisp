@@ -2,17 +2,17 @@
 
 (require :asdf)
 
-(asdf:load-asd (truename (merge-pathnames #P"../luv.asd" *load-truename*)))
-(asdf:load-system :luv/gpu/metal)
-(asdf:load-system :luv/luvcraft/shaders)
+(asdf:load-asd (truename (merge-pathnames #P"../../../luv.asd" *load-truename*)))
+(asdf:load-asd (truename (merge-pathnames #P"../../../luvcraft.asd" *load-truename*)))
+(asdf:load-system :luvcraft)
 
 (handler-case
     (progn
       (format
        t "~S~%"
        (luv:probe-metal-render-pipeline
-        (luv.spir-v:block-world-vertex-specification)
-        (luv.spir-v:block-world-fragment-specification)
+        (luvcraft.shaders:block-world-vertex-specification)
+        (luvcraft.shaders:block-world-fragment-specification)
         '((:array-stride 48
            :attributes
            ((:shader-location 0 :offset 0 :format :float32x3)

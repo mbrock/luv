@@ -1,9 +1,4 @@
-(defpackage #:luv/vulkan/tests
-  (:use #:cl #:rove)
-  (:local-nicknames (#:lvk #:luv.vulkan)
-                    (#:vk #:luv.vk)))
-
-(in-package #:luv/vulkan/tests)
+(in-package #:luv.tests)
 
 (deftest slug-formats-retain-the-exact-vulkan-abi-values
   (ok (= 81 (cffi:foreign-enum-value 'lvk::format :r16g16-uint)))

@@ -1,6 +1,6 @@
 ;;; Offscreen luvcraft captures for smoke tests and CI-ish environments.
 
-(in-package #:luv)
+(in-package #:luvcraft)
 
 (defun capture-luvcraft-screenshot (session pathname)
   "Render SESSION once, read its real color attachment, and write a PNG."

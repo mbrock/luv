@@ -1,9 +1,9 @@
-(defpackage #:luv-wiki/tests
+(defpackage #:luv.wiki.tests
   (:use #:cl #:rove)
   (:local-nicknames (#:wiki #:luv.wiki)
                     (#:css #:luv.css)))
 
-(in-package #:luv-wiki/tests)
+(in-package #:luv.wiki.tests)
 (named-readtables:in-readtable luv.css:syntax)
 
 (defparameter *page*
@@ -142,8 +142,8 @@ Nothing here refers to anything.
     (ok (search "<h3><span class=\"mark mark-next\">" html))))
 
 (deftest the-loaded-corpus-is-consistent
-  ;; Depending on luv/wiki loads every page into its ORG-FILE component.
-  (let* ((system (asdf:find-system :luv/wiki))
+  ;; Depending on luv-wiki-site loads every page into its ORG-FILE component.
+  (let* ((system (asdf:find-system :luv-wiki-site))
          (files (wiki::system-org-files system))
          (site (wiki::system-site system)))
     (ok (every #'wiki:org-file-document files))
@@ -385,7 +385,7 @@ and *features* stay text; *special* names are code.\"
     (ok (not (search "<b>" html)))))
 
 (deftest the-cli-prints-the-corpus
-  (let* ((root (asdf:system-source-directory :luv/wiki))
+  (let* ((root (asdf:system-source-directory :luv-wiki-site))
          (luv.wiki.cli::*root* root)
          (luv.wiki.cli::*site* nil)
          (toc (with-output-to-string (*standard-output*) (luv.wiki.cli:run '("toc" "index"))))
@@ -402,8 +402,9 @@ and *features* stay text; *special* names are code.\"
   ;; every host while making their build actions invalid away from Darwin.
   ;; The wiki deliberately walks the complete component tree rather than only
   ;; ASDF's active SUB-COMPONENTS, so Linux CI can render the Metal sources.
-  (let* ((system (asdf:find-system :luv/gpu/metal))
-         (root (asdf:system-source-directory :luv/wiki))
+  (let* ((system (asdf:find-system :luv))
+         (metal-module (asdf:find-component system '("hal" "metal")))
+         (root (asdf:system-source-directory :luv-wiki-site))
          (metal-source (merge-pathnames "hal/metal/gpu.lisp" root)))
-    (ok (equal :darwin (asdf/component:component-if-feature system)))
+    (ok (equal :darwin (asdf/component:component-if-feature metal-module)))
     (ok (find metal-source (wiki:code-source-files) :test #'equal))))

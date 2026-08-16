@@ -7,6 +7,7 @@
          (merge-pathnames #P"../"
                           (uiop:pathname-directory-pathname *load-truename*)))))
   (asdf:load-asd (merge-pathnames #P"luv.asd" project-root))
+  (asdf:load-asd (merge-pathnames #P"luvcraft.asd" project-root))
   (asdf:load-asd (merge-pathnames #P"mcluv.asd" project-root)))
 
 (asdf:load-system :mcluv)

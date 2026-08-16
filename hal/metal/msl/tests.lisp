@@ -1,10 +1,4 @@
-(defpackage #:luv/msl/tests
-  (:use #:cl #:rove)
-  (:local-nicknames (#:msl #:luv.msl)
-                    (#:spv #:luv.spir-v)
-                    (#:slug #:luv.slug)))
-
-(in-package #:luv/msl/tests)
+(in-package #:luvcraft.tests)
 
 (spv:define-shader msl-unsigned-texel-fold-probe
     (:stage :fragment
@@ -27,7 +21,7 @@
                (+ sum (float word))))))
     (spv:set-output color (spv:vec4 total total total 1.0))))
 
-(defun binding-named (name specification)
+(defun msl-binding-named (name specification)
   (find name (spv:shader-specification-bindings specification)
         :key #'spv:shader-object-name
         :test (lambda (left right)
@@ -37,7 +31,7 @@
   (find name objects :key name-function :test #'string=))
 
 (deftest block-fragment-lowers-directly-to-structured-msl
-  (let* ((specification (spv:block-world-fragment-specification))
+  (let* ((specification (shaders:block-world-fragment-specification))
          (document (msl:compile-msl specification))
          (source (msl:msl-document-source document)))
     (ok (typep document 'msl:msl-document))
@@ -67,10 +61,10 @@
     (ok (search "float(" source))))
 
 (deftest block-vertex-lowers-projective-map-to-msl
-  (let* ((specification (spv:block-world-vertex-specification))
+  (let* ((specification (shaders:block-world-vertex-specification))
          (document (msl:compile-msl specification))
          (source (msl:msl-document-source document))
-         (binding (binding-named 'shadow-projection specification))
+         (binding (msl-binding-named 'shadow-projection specification))
          (expression (spv:shader-binding-expression binding)))
     (ok (search "vertex BlockWorldVertexSpecificationOutput" source))
     (ok (search "float3 shadow_projection =" source))
@@ -88,7 +82,7 @@
                  (msl:msl-document-expression-occurrences document)))))
 
 (deftest msl-lowering-is-deterministic-and-does-not-perturb-spir-v
-  (let* ((specification (spv:block-world-fragment-specification))
+  (let* ((specification (shaders:block-world-fragment-specification))
          (spir-v-before (spv:assemble-shader-specification specification))
          (first (msl:msl-document-source (msl:compile-msl specification)))
          (second (msl:msl-document-source (msl:compile-msl specification)))
@@ -99,9 +93,9 @@
                'spv:shader-lowering))))
 
 (deftest msl-occurrences-retain-expression-provenance
-  (let* ((specification (spv:block-world-fragment-specification))
+  (let* ((specification (shaders:block-world-fragment-specification))
          (document (msl:compile-msl specification))
-         (binding (binding-named 'reflected specification))
+         (binding (msl-binding-named 'reflected specification))
          (expression (spv:shader-binding-expression binding))
          (occurrences
            (gethash expression
@@ -118,7 +112,7 @@
               occurrences))))
 
 (deftest generated-msl-explains-quantities-in-plain-language
-  (let* ((specification (spv:block-world-vertex-specification))
+  (let* ((specification (shaders:block-world-vertex-specification))
          (document (msl:compile-msl specification))
          (source (msl:msl-document-source document))
          (input (first (spv:shader-specification-inputs specification)))
@@ -127,7 +121,7 @@
            (msl-named "world_position"
                       (msl:msl-structure-fields input-structure)
                       #'msl:msl-field-name))
-         (binding (binding-named 'view-z specification))
+         (binding (msl-binding-named 'view-z specification))
          (output
            (first (spv:shader-specification-statements specification)))
          (statement
@@ -158,7 +152,7 @@
                        (msl:msl-document-entry-point document))))))))
 
 (deftest texture-parameters-describe-their-sampled-quantity-layout
-  (let* ((specification (spv:block-world-fragment-specification))
+  (let* ((specification (shaders:block-world-fragment-specification))
          (document (msl:compile-msl specification))
          (source (msl:msl-document-source document))
          (resource

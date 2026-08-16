@@ -1,8 +1,3 @@
-(defpackage #:luvcraft
-  (:use #:cl)
-  (:export #:*session*
-           #:main))
-
 (in-package #:luvcraft)
 
 (defvar *session* nil
@@ -83,10 +78,10 @@
   (if (probe-file pathname)
       (progn
         (format t "Loading luvcraft world from ~A~%" pathname)
-        (luv:read-luvcraft-save pathname))
+        (read-luvcraft-save pathname))
       (progn
         (format t "Creating luvcraft world at ~A~%" pathname)
-        (values (luv:make-empty-little-block-world) nil))))
+        (values (make-empty-little-block-world) nil))))
 
 (defun make-metal-provider ()
   #+darwin
@@ -101,13 +96,13 @@
   (multiple-value-bind (world resume-description)
       (load-or-make-luvcraft-world world-pathname)
     (multiple-value-bind (camera player selected-block)
-        (luv:restore-luvcraft-resume-save-description resume-description)
+        (restore-luvcraft-resume-save-description resume-description)
       (let ((session nil)
-            (writer (luv:make-world-checkpoint-writer world-pathname)))
+            (writer (make-world-checkpoint-writer world-pathname)))
         (unwind-protect
              (progn
                (setf session
-                     (luv:start-luvcraft
+                     (start-luvcraft
                       :provider (or provider luv:*gpu-provider*)
                       :title "luvcraft — walk, jump, mine, and build"
                       :world world :camera camera :player player
@@ -118,13 +113,13 @@
                ;; native teardown before releasing the session-owned GPU resources.
                (loop until (eq :closed
                                (luv:canvas-state
-                                (luv:luvcraft-session-canvas session)))
+                                (luvcraft-session-canvas session)))
                      do (sleep 0.05)))
           (unwind-protect
                (when session
-                 (luv:request-luvcraft-session-checkpoint session)
-                 (luv:stop-luvcraft session))
-            (luv:stop-world-checkpoint-writer writer)
+                 (request-luvcraft-session-checkpoint session)
+                 (stop-luvcraft session))
+            (stop-world-checkpoint-writer writer)
             (setf *session* nil)))))))
 
 (defun parse-interactive-options (arguments)
@@ -145,7 +140,7 @@
 
 (defun run-smoke-test (pathname &optional provider)
   (format t "Rendering ~A~%" pathname)
-  (luv:capture-hidden-luvcraft-screenshot
+  (capture-hidden-luvcraft-screenshot
    pathname :provider (or provider luv:*gpu-provider*))
   (format t "Wrote ~A~%" (truename pathname)))
 
@@ -157,7 +152,7 @@
     count))
 
 (defun run-metal-benchmark (&optional frame-count pathname)
-  (luv:benchmark-luvcraft-frame-performance
+  (benchmark-luvcraft-frame-performance
    :frame-count (if frame-count (parse-frame-count frame-count) 120)
    :csv-pathname (or (and pathname (pathname pathname))
                      #P"build/luvcraft-metal-benchmark.csv")))

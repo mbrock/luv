@@ -425,8 +425,8 @@ and render it through the same public shader specification on Metal and the
 Vulkan smoke path.  Keep shaping separate: HarfBuzz supplies glyph indexes and
 positions for runs, while this step proves one indexed glyph's outline.
 
-The font boundary is now working before any rasterizer.  The =luv/slug= system
-depends directly on =zpb-ttf= and converts its resolved
+The font boundary is now working before any rasterizer.  The shader module in
+=:luv= depends directly on =zpb-ttf= and converts its resolved
 =(start,control,end)= segments into luv contours; a nil control becomes the
 standard Slug line quadratic.  A =slug-glyph= also retains advance width, left
 side bearing, and units per em, and the converter accepts an already selected

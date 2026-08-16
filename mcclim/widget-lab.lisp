@@ -1,4 +1,4 @@
-(in-package #:luv.mcclim)
+(in-package #:mcluv)
 
 ;;; A tiny real-gadget proof for the canvas input bridge.  It deliberately
 ;;; enables the frame without entering a conventional backend event loop:

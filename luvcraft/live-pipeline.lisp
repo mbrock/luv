@@ -7,7 +7,7 @@
 ;;; A broken edit is retained as diagnostic state while the last good pipeline
 ;;; continues rendering.
 
-(in-package #:luv)
+(in-package #:luvcraft)
 
 (defclass live-shader-pipeline ()
   ((role :initarg :role :reader live-shader-pipeline-role)

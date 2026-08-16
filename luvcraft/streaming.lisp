@@ -7,7 +7,7 @@
 ;;; publishing a bounded number of results per frame.  Stale products fail
 ;;; validation harmlessly instead of requiring cancellation of active work.
 
-(in-package #:luv)
+(in-package #:luvcraft)
 
 (defun wait-for-luvcraft-products
     (session &key minimum (timeout 10.0))

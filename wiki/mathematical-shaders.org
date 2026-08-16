@@ -391,20 +391,20 @@ parallel UI tree whose identities can drift.
 In the durable SLY image:
 
 #+begin_src lisp
-(asdf:load-system :luv/mcclim)
+(asdf:load-system :mcluv)
 
 (defparameter *shader-lab*
-  (luv.mcclim:open-shader-lab))
+  (mcluv:open-shader-lab))
 
-(luv.mcclim:refresh-shader-lab *shader-lab*)
+(mcluv:refresh-shader-lab *shader-lab*)
 (multiple-value-bind (status report)
-    (luv.mcclim:shader-lab-health *shader-lab*)
+    (mcluv:shader-lab-health *shader-lab*)
   (list status
-        (luv.mcclim:shader-lab-health-report-mirror-count report)
-        (luv.mcclim:shader-lab-health-report-canvas-state report)))
+        (mcluv:shader-lab-health-report-mirror-count report)
+        (mcluv:shader-lab-health-report-canvas-state report)))
 ;; => (:responsive 1 :open)
 
-(luv.mcclim:close-shader-lab *shader-lab*)
+(mcluv:close-shader-lab *shader-lab*)
 #+end_src
 
 The workbench runs =run-frame-top-level= in its own McCLIM process; SDL

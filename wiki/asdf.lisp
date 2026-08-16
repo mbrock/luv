@@ -15,7 +15,7 @@
 ;;;; system, because mentions and backlinks cross pages.  It writes HTML into
 ;;;; the site directory rather than the fasl cache, so its OUTPUT-FILES asks
 ;;;; not to be translated.  A static-file such as an image is simply
-;;;; copied.  With :BUILD-OPERATION set, (asdf:make :luv/wiki) builds the site.
+;;;; copied.  With :BUILD-OPERATION set, (asdf:make :luv-wiki-site) builds the site.
 
 (in-package #:luv.wiki)
 
@@ -61,7 +61,8 @@
   "The DOCUMENTs of SYSTEM's loaded org files."
   (remove nil (mapcar #'org-file-document (system-org-files system))))
 
-(defparameter *code-systems* '("luv" "luvcraft" "luv-wiki")
+(defparameter *code-systems*
+  '("luv" "luvcraft" "mcluv" "luv-wiki" "luv-wiki-site")
   "Primary names of the systems whose source files the site reads for
 definitions and figure mentions.  luv-wiki is among them so the site shows
 how it renders itself; its tests fabricate figure IDs, which is why
@@ -121,7 +122,8 @@ each SOURCE-FILE of SOURCE-FILES attached to its system."
                           ;; topological pass places them behind their subjects.
                           (sort (copy-list names)
                                 (lambda (a b)
-                                  (let ((ta (and (search "/tests" a) t)) (tb (and (search "/tests" b) t)))
+                                  (let ((ta (and (search "/test" a) t))
+                                        (tb (and (search "/test" b) t)))
                                     (if (eq ta tb) (string< a b) tb))))))
          (ordered '()))
     ;; Topological order: repeatedly take the first entry whose dependencies

@@ -588,7 +588,7 @@ Evidence:
 - =luvcraft/light-tests.lisp= checks reference equivalence, mesh light transport, and
   same-key chunk replacement before reconciliation.
 
-Done when: =:luv/luvcraft/tests= passes and the wiki describes the implemented
+Done when: =:luvcraft= tests pass and the wiki describes the implemented
 Phase 0--2 state rather than the pre-implementation plan.
 
 ** DONE Player-placeable crystal

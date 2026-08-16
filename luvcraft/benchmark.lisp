@@ -1,13 +1,13 @@
 ;;; Repeatable demand-driven benchmarks of a fully resident luvcraft world.
 
-(in-package #:luv)
+(in-package #:luvcraft)
 
 (defun benchmark-metal-device-name (device)
   #-darwin
   (declare (ignore device))
   #+darwin
   (luv.objective-c:objective-c-string
-   (luv.metal:device-name (metal-native-object device)))
+   (luv.metal:device-name (luv::metal-native-object device)))
   #-darwin
   (error "The Metal benchmark is only available on Darwin."))
 

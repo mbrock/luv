@@ -296,9 +296,9 @@ products for the entering chunks and destroys the leaving buffers through the
 GPU completion frontier.  Thus travel is not bounded by the original square,
 while resident world data and render products remain bounded at 81 chunks.
 
-The tests keep these layers visible.  =:luv/world= exercises coordinates,
+The tests keep these layers visible.  =:luvcraft/world= exercises coordinates,
 domains, palette storage, revisions, residency, and ray traversal without SDL
-or Vulkan.  =:luv/examples= adds deterministic generation, cross-chunk face
+or Vulkan.  =:luvcraft= adds deterministic generation, cross-chunk face
 culling, and camera-directed remove/place behavior.
 
 * Landmarks from working voxel engines

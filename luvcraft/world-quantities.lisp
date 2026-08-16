@@ -4,7 +4,7 @@
 ;;; dimensionless but deliberately not the identity unit: one cell is not one
 ;;; metre unless a particular VOXEL-SPACE says so through its CELL-EXTENT.
 
-(in-package #:luv.world.quantities)
+(in-package #:luvcraft.world.quantities)
 
 (math:define-quantity-kind :lattice-coordinate
   :dimension nil :parent :dimensionless)

@@ -1,4 +1,4 @@
-(defpackage #:luv.world.quantities
+(defpackage #:luvcraft.world.quantities
   (:use #:cl)
   (:local-nicknames (#:math #:luv.arithmetic))
   (:documentation

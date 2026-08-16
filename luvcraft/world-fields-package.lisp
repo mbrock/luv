@@ -1,4 +1,4 @@
-(defpackage #:luv.world.fields
+(defpackage #:luvcraft.world.fields
   (:use #:cl)
   (:local-nicknames (#:math #:luv.arithmetic))
   (:export #:voxel-field-definition

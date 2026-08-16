@@ -1,6 +1,6 @@
 ;;; A presentation-oriented browser for mathematical shaders and lowered SSA.
 
-(in-package #:luv.mcclim)
+(in-package #:mcluv)
 
 (define-presentation-type shader-expression-presentation ())
 (define-presentation-type shader-instruction-presentation ())
@@ -39,7 +39,7 @@
 
 (define-presentation-method presentation-typep
     (object (type block-kind-presentation))
-  (typep object 'luv:block-kind))
+  (typep object 'luvcraft:block-kind))
 
 (defclass shader-definition-entry ()
   ((role :initarg :role :reader shader-definition-entry-role)
@@ -154,7 +154,7 @@
 (define-application-frame shader-lab ()
   ((lowering
     :initarg :lowering
-    :initform (luv.spir-v:block-world-fragment-lowering)
+    :initform (luvcraft.shaders:block-world-fragment-lowering)
     :accessor shader-lab-lowering)
    (definitions
     :initarg :definitions
@@ -164,10 +164,10 @@
     :accessor shader-lab-current-definition)
    (materials
     :initarg :materials
-    :initform (luv:placeable-block-kinds)
+    :initform (luvcraft:placeable-block-kinds)
     :reader shader-lab-materials)
    (atlas
-    :initform (luv:make-block-texture-atlas)
+    :initform (luvcraft:make-block-texture-atlas)
     :reader shader-lab-atlas)
    (process
     :initform nil
@@ -251,14 +251,14 @@
 
 (defun shader-display-label (specification)
   (case (luv.spir-v:shader-object-name specification)
-    (luv.spir-v:block-world-fragment-specification "BLOCK SURFACE")
-    (luv.spir-v:block-world-crosshair-fragment-specification "CROSSHAIR INK")
+    (luvcraft.shaders:block-world-fragment-specification "BLOCK SURFACE")
+    (luvcraft.shaders:block-world-crosshair-fragment-specification "CROSSHAIR INK")
     (otherwise
      (string-upcase
       (symbol-name (luv.spir-v:shader-object-name specification))))))
 
 (defun block-material-preview-tile (block)
-  (let ((tiles (luv:block-kind-face-tiles block)))
+  (let ((tiles (luvcraft:block-kind-face-tiles block)))
     (or (getf tiles :top) (getf tiles :all) (getf tiles :side))))
 
 (defun packed-block-ink (word)
@@ -314,7 +314,7 @@
                        :filled nil :line-thickness (if selected-p 2 1))
       (draw-text* stream
                   (format nil "~D  ~(~A~)" number
-                          (luv:block-kind-name block))
+                          (luvcraft:block-kind-name block))
                   (+ left 8) (+ top 66)
                   :ink (if selected-p *shader-accent-ink* +black+)
                   :align-y :top))))
@@ -603,12 +603,12 @@
     (terpri stream)
     (when pipeline
       (format stream "GPU ~(~A~)  ·  installed revision ~D~%"
-              (luv:live-shader-pipeline-status pipeline)
-              (luv:live-shader-pipeline-installed-revision pipeline)))
+              (luvcraft:live-shader-pipeline-status pipeline)
+              (luvcraft:live-shader-pipeline-installed-revision pipeline)))
     (let ((diagnostic
             (or (shader-definition-entry-diagnostic definition)
                 (and pipeline
-                     (luv:live-shader-pipeline-diagnostic pipeline)))))
+                     (luvcraft:live-shader-pipeline-diagnostic pipeline)))))
       (when diagnostic
         (with-drawing-options (stream :ink *shader-literal-ink*)
           (format stream "diagnostic: ~A~%" diagnostic))))
@@ -730,13 +730,13 @@
        (write-string
         " — click a material, mathematical expression, SSA instruction, or block"
         stream))
-      ((typep selection 'luv:block-kind)
+      ((typep selection 'luvcraft:block-kind)
        (let* ((materials (shader-lab-materials frame))
               (number (position selection materials :test #'eq))
               (tile (block-material-preview-tile selection)))
          (format stream " — material ~A  ~(~A~)~%"
                  (if number (1+ number) "?")
-                 (luv:block-kind-name selection))
+                 (luvcraft:block-kind-name selection))
          (format stream
                  "atlas tile ~D · number key ~A in luvcraft · right click places · middle click picks"
                  tile (if number (1+ number) "?"))))
@@ -813,10 +813,10 @@
   (find-if (lambda (pipeline)
              (ecase stage
                (:vertex
-                (eq role (luv:live-shader-pipeline-vertex-role pipeline)))
+                (eq role (luvcraft:live-shader-pipeline-vertex-role pipeline)))
                (:fragment
-                (and (eq role (luv:live-shader-pipeline-role pipeline))
-                     (eq stage (luv:live-shader-pipeline-stage pipeline))))))
+                (and (eq role (luvcraft:live-shader-pipeline-role pipeline))
+                     (eq stage (luvcraft:live-shader-pipeline-stage pipeline))))))
            pipelines))
 
 (defun make-default-shader-definitions (pipelines)
@@ -982,7 +982,7 @@ revision and last diagnostic then appear alongside the source definition."
              (specification
               (mapcar #'make-static-shader-definition-entry
                       (list specification
-                            (luv.spir-v:block-world-crosshair-fragment-specification))))
+                            (luvcraft.shaders:block-world-crosshair-fragment-specification))))
              (t (make-default-shader-definitions pipelines))))
          (current-definition (first definitions))
          (port (find-port :server-path server-path))

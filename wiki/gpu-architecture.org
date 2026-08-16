@@ -32,16 +32,17 @@ not footnotes to it.
 :ID: A7N4XP
 :END:
 
-The ASDF systems now make the intended boundaries literal:
+The =luv= system's modules now make the intended boundaries literal without
+turning every implementation layer into a public ASDF system:
 
 #+begin_example
-luv/gpu/api                     descriptors, commands, generic operations
+hal/gpu.lisp                    descriptors, commands, generic operations
        |\
-       | +--> luv/gpu/vulkan --> luv/vulkan --> owned Vulkan ABI
+       | +--> hal/vulkan/ -----> owned Vulkan ABI
        |
-       `----> luv/gpu/metal ----> luv/metal ---> Objective-C / Metal 4
+       `----> hal/metal/ ------> LUV.METAL / Objective-C / Metal 4
 
-luv/canvas/api --> luv/canvas/sdl --> backend presentation context
+hal/canvas.lisp --> hal/sdl/ --> backend presentation context
 #+end_example
 
 [[file:../hal/gpu.lisp][=hal/gpu.lisp=]] contains no Vulkan or Metal calls.  It names providers,

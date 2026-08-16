@@ -80,7 +80,7 @@ to exercise the reader, so their mentions are not expected to resolve."
   (let ((file (definition-source-file definition site)))
     (and file
          (source-file-system-name file)
-         (search "/tests" (source-file-system-name file))
+         (search "/test" (source-file-system-name file))
          t)))
 
 (defun dangling-code-mentions (site)

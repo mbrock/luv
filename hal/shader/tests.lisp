@@ -1,42 +1,25 @@
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  ;; LUV.SPIR-V can migrate language words to backend-neutral home packages
-  ;; during a live reload.  Drop imports that still denote their old symbols
-  ;; before DEFPACKAGE imports the current identities.
-  (let ((package (find-package '#:luv/spir-v/tests))
-        (shader-package (find-package '#:luv.spir-v)))
-    (when (and package shader-package)
-      (dolist (name '("DOT" "SAMPLE" "SAMPLE-COMPARE" "MIX"
-                      "TEXEL-LOAD" "UINT" "UVEC2"
-                      "VEC2" "VEC3" "VEC4" "SWIZZLE" "CLAMP"
-                      "SMOOTHSTEP" "NORMALIZE" "QUANTITY"
-                      "ASSUME-QUANTITY" "INTERPRET" "REPRESENTATION"
-                      "CONVERT-UNIT" "PROJECT-POINT" "COUNTED-FOLD"
-                      "SET-OUTPUT"))
-        (multiple-value-bind (present status) (find-symbol name package)
-          (let ((current (find-symbol name shader-package)))
-            (when (and (member status '(:internal :external))
-                       current
-                       (not (eq present current)))
-              (unintern present package))))))))
-
-(defpackage #:luv/spir-v/tests
-  (:use #:cl #:rove)
+(defpackage #:luvcraft.tests
+  (:use #:cl #:rove #:luv #:luvcraft #:luvcraft.world)
   (:local-nicknames (#:spv #:luv.spir-v)
+                    (#:shaders #:luvcraft.shaders)
                     (#:slug #:luv.slug)
                     (#:math #:luv.arithmetic)
-                    (#:lang #:luv.arithmetic.language))
+                    (#:lang #:luv.arithmetic.language)
+                    (#:msl #:luv.msl)
+                    (#:objc #:luv.objective-c)
+                    (#:metal #:luv.metal))
   ;; Shader operators are identified by symbol, so specification bodies
   ;; written here must use the shader language's own words.
   (:import-from #:luv.spir-v
                 #:dot #:sample #:sample-compare #:texel-load #:mix
                 #:uint #:uvec2
-                #:vec2 #:vec3 #:vec4 #:swizzle
+                #:vec2 #:vec4 #:swizzle
                 #:clamp #:smoothstep #:normalize
                 #:quantity #:assume-quantity #:interpret #:representation
                 #:convert-unit #:project-point #:project-sample #:counted-fold
                 #:set-output))
 
-(in-package #:luv/spir-v/tests)
+(in-package #:luvcraft.tests)
 
 (math:define-quantity :test-position :kind :dimensionless
   :components (:test-position-x :test-position-y :test-position-z))
@@ -265,7 +248,7 @@
     (ok (typep call 'spv:shader-function-call))))
 
 (deftest shader-source-is-a-typed-clos-graph
-  (let* ((specification (spv:block-world-fragment-specification))
+  (let* ((specification (shaders:block-world-fragment-specification))
          (sun-direction (binding-named 'sun-direction specification))
          (sun-visibility (binding-named 'sun-visibility specification))
          (direct-shadow (binding-named 'direct-shadow specification))
@@ -337,7 +320,7 @@
            (length (spv:shader-specification-bindings specification))))))
 
 (deftest block-vertex-source-is-a-typed-clos-graph-with-an-explicit-abi
-  (let* ((specification (spv:block-world-vertex-specification))
+  (let* ((specification (shaders:block-world-vertex-specification))
          (resource (first (spv:shader-specification-resources specification)))
          (clip-position
            (find 'clip-position
@@ -403,7 +386,7 @@
                'spv:shader-map-projection))))
 
 (deftest projective-maps-are-semantic-objects-with-packed-products
-  (let* ((specification (spv:block-world-vertex-specification))
+  (let* ((specification (shaders:block-world-vertex-specification))
          (projection-binding
            (binding-named 'shadow-projection specification))
          (projection (spv:shader-binding-expression projection-binding))
@@ -524,7 +507,7 @@
                   (spv:shader-language-error-reason condition))))))))
 
 (deftest block-vertex-uniform-members-retain-access-chain-provenance
-  (let* ((lowering (spv:block-world-vertex-lowering))
+  (let* ((lowering (shaders:block-world-vertex-lowering))
          (specification (spv:shader-lowering-specification lowering))
          (camera (binding-named 'camera specification))
          (reference
@@ -540,7 +523,7 @@
     (ok (find "LOAD" names :test #'string=))))
 
 (deftest block-shadow-vertex-is-a-light-space-depth-shader
-  (let* ((specification (spv:block-world-shadow-vertex-specification))
+  (let* ((specification (shaders:block-world-shadow-vertex-specification))
          (resource (first (spv:shader-specification-resources specification)))
          (clip (binding-named 'clip specification))
          (clip-position
@@ -560,7 +543,7 @@
          (spv:shader-expression-type
           (spv:shader-assignment-value clip-position))
          :vec4))
-    (ok (> (length (spv:block-world-shadow-vertex-shader)) 5))))
+    (ok (> (length (shaders:block-world-shadow-vertex-shader)) 5))))
 
 (deftest uniform-blocks-do-not-pretend-to-implement-general-packing
   (ok (signals
@@ -574,7 +557,7 @@
        'spv:shader-language-error)))
 
 (deftest lowering-retains-expression-to-ssa-provenance
-  (let* ((lowering (spv:block-world-fragment-lowering))
+  (let* ((lowering (shaders:block-world-fragment-lowering))
          (specification (spv:shader-lowering-specification lowering))
          (reflected-expression
            (spv:shader-binding-expression
@@ -617,7 +600,7 @@
          (right-instructions
            (gethash (second references)
                     (spv:shader-lowering-expression-instructions lowering)))
-         (block-specification (spv:block-world-fragment-specification))
+         (block-specification (shaders:block-world-fragment-specification))
          (torch-color (binding-named 'torch-color block-specification))
          (block-lowering
            (spv:compile-shader-specification block-specification))
@@ -1051,7 +1034,7 @@
                :dimension :length :unit :metre))))))
 
 (deftest production-vertex-interfaces-carry-quantities-end-to-end
-  (let* ((specification (spv:block-world-vertex-specification))
+  (let* ((specification (shaders:block-world-vertex-specification))
          (inputs (spv:shader-specification-inputs specification))
          (outputs (spv:shader-specification-outputs specification))
          (position (first inputs))
@@ -1160,7 +1143,7 @@
                :unit :furlong))))))
 
 (deftest production-shadow-material-carries-semantic-quantities
-  (let ((specification (spv:block-world-fragment-specification)))
+  (let ((specification (shaders:block-world-fragment-specification)))
     (flet ((quantity (name)
              (spv:shader-expression-quantity-specification
               (spv:shader-binding-expression
@@ -1248,7 +1231,7 @@
                  (spv::shader-language-error-form point-error))))))
 
 (deftest production-crosshair-composes-linear-rgb-with-opacity
-  (let* ((specification (spv:block-world-crosshair-fragment-specification))
+  (let* ((specification (shaders:block-world-crosshair-fragment-specification))
          (ink (first (spv:shader-specification-inputs specification)))
          (rgba (binding-named 'rgba specification))
          (ink-quantity
@@ -1386,27 +1369,27 @@
   (flet ((forms ()
            (mapcar #'spv:instruction-form
                    (spv:lower-spir-v
-                    (spv:block-world-fragment-module)))))
+                    (shaders:block-world-fragment-module)))))
     (ok (equal (forms) (forms)))
-    (let ((words (spv:block-world-fragment-shader)))
+    (let ((words (shaders:block-world-fragment-shader)))
       (ok (> (length words) 5))
       (ok (= (aref words 0) #x07230203)))
-    (let ((vertex (spv:block-world-crosshair-vertex-shader))
-          (fragment (spv:block-world-crosshair-fragment-shader)))
+    (let ((vertex (shaders:block-world-crosshair-vertex-shader))
+          (fragment (shaders:block-world-crosshair-fragment-shader)))
       (ok (> (length vertex) 5))
       (ok (> (length fragment) 5))
       (ok (= (aref vertex 0) #x07230203))
       (ok (= (aref fragment 0) #x07230203)))
-    (let ((vertex (spv:block-world-vertex-shader)))
+    (let ((vertex (shaders:block-world-vertex-shader)))
       (ok (> (length vertex) 5))
       (ok (= (aref vertex 0) #x07230203)))
-    (let ((vertex (spv:block-world-sky-vertex-shader))
-          (fragment (spv:block-world-sky-fragment-shader)))
+    (let ((vertex (shaders:block-world-sky-vertex-shader))
+          (fragment (shaders:block-world-sky-fragment-shader)))
       (ok (> (length vertex) 5))
       (ok (> (length fragment) 5))
       (ok (= (aref vertex 0) #x07230203))
       (ok (= (aref fragment 0) #x07230203)))
-    (let ((vertex (spv:block-world-shadow-vertex-shader)))
+    (let ((vertex (shaders:block-world-shadow-vertex-shader)))
       (ok (> (length vertex) 5))
       (ok (= (aref vertex 0) #x07230203)))))
 
@@ -1425,11 +1408,11 @@
                            (spv:shader-uniform-member-offset member)))
                    (spv:shader-uniform-block-members block))))
     (let* ((specifications
-             (list (spv:block-world-vertex-specification)
-                   (spv:block-world-fragment-specification)
-                   (spv:block-world-sky-vertex-specification)
-                   (spv:block-world-sky-fragment-specification)
-                   (spv:block-world-shadow-vertex-specification)))
+             (list (shaders:block-world-vertex-specification)
+                   (shaders:block-world-fragment-specification)
+                   (shaders:block-world-sky-vertex-specification)
+                   (shaders:block-world-sky-fragment-specification)
+                   (shaders:block-world-shadow-vertex-specification)))
            (blocks (mapcar #'frame-block specifications))
            (reference (member-layout (first blocks))))
       (ok (every (lambda (block) (typep block 'spv:shader-uniform-block))
@@ -1445,9 +1428,9 @@
                  blocks)))))
 
 (deftest the-sky-material-is-image-mathematics-over-environment-lanes
-  (let* ((vertex (spv:block-world-sky-vertex-specification))
-         (fragment (spv:block-world-sky-fragment-specification))
-         (fragment-module (spv:block-world-sky-fragment-module))
+  (let* ((vertex (shaders:block-world-sky-vertex-specification))
+         (fragment (shaders:block-world-sky-fragment-specification))
+         (fragment-module (shaders:block-world-sky-fragment-module))
          (ray (binding-named 'ray vertex))
          (unit (binding-named 'unit fragment))
          (disc (binding-named 'disc fragment)))
@@ -1478,7 +1461,7 @@
               :outputs ((color :vec4 :location 0)))
             '((let* ((unit (normalize direction))
                      (glow (smoothstep 0.9 1.0 level))
-                     (lit (max 0.0 (dot unit (vec3 0.0 1.0 0.0))))
+                     (lit (max 0.0 (dot unit (spv:vec3 0.0 1.0 0.0))))
                      (shaped (expt (clamp (+ glow lit) 0.0 1.0) 2.2))
                      (softened (sqrt (abs shaped)))
                      (rgb (* unit softened)))
@@ -1507,7 +1490,7 @@
                        (spv:compile-shader-specification specification))))))
       (ok (equal (forms) (forms))))
     (ok (null (spv:spir-v-module-extended-instruction-imports
-               (spv:block-world-crosshair-fragment-module))))))
+               (shaders:block-world-crosshair-fragment-module))))))
 
 (deftest slug-root-eligibility-is-the-eight-class-table
   (let ((expected '((0 0) (1 0) (1 1) (1 0)

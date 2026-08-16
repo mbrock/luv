@@ -6,13 +6,13 @@
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   ;; Keep source reloads honest when experimental public names are replaced.
-  (let ((package (find-package '#:luv.mcclim)))
+  (let ((package (find-package '#:mcluv)))
     (when package
       (let ((symbol (find-symbol "LUV-MEDIUM" package)))
         (when symbol
           (unexport symbol package))))))
 
-(defpackage #:luv.mcclim
+(defpackage #:mcluv
   (:use #:clim-lisp #:clim #:clime #:climb)
   (:local-nicknames (#:luv #:luv))
   (:export #:luv-port
@@ -60,6 +60,7 @@
            #:enable-spinning-mirror
            #:disable-spinning-mirror
            #:open-spinning-widget-lab
-           #:open-listener))
+           #:open-listener
+           #:main))
 
-(in-package #:luv.mcclim)
+(in-package #:mcluv)

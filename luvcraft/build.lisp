@@ -7,7 +7,12 @@
          (merge-pathnames #P"../"
                           (uiop:pathname-directory-pathname *load-truename*)))))
   (asdf:load-asd (merge-pathnames #P"luv.asd" project-root))
-  (asdf:load-asd (merge-pathnames #P"luvcraft.asd" project-root)))
+  (asdf:load-asd (merge-pathnames #P"luvcraft.asd" project-root))
+  (let ((slynk-root (uiop:getenv "LUV_SLYNK_DIR")))
+    (unless slynk-root
+      (error "LUV_SLYNK_DIR is not set; build luvcraft through ./scripts/dev."))
+    (asdf:load-asd
+     (merge-pathnames #P"slynk.asd"
+                      (uiop:ensure-directory-pathname slynk-root)))))
 
-(asdf:load-system :luvcraft)
-(asdf:make :luvcraft)
+(asdf:make :luvcraft/program)

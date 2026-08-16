@@ -670,7 +670,7 @@ Result:
   performs the compatibility checks once and returns the already compiled raw
   Lisp function.  No quantity objects travel through that function.
 - The numerical Lisp protocol now admits representation extensions.
-  =:luv/arithmetic/lisp/vec3= implements componentwise binary operations, dot,
+  [[file:../luvcraft/world-arithmetic.lisp][=luvcraft/world-arithmetic.lisp=]] implements componentwise binary operations, dot,
   and normalization for luv's transparent =vec3= without making the portable
   arithmetic system depend on the block world.
 - =%predict-world-position= derives displacement from world velocity and frame
@@ -730,7 +730,7 @@ Audit so far:
   measures.  The raw 0--15 sky/block propagation levels likewise remain
   distinct from the normalized light proportions sent to the GPU.
 - The =voxel-space= boundary is now explicit.  =:cell= is a dimensionless but
-  non-identity unit owned by =luv/world/quantities=: it cannot silently compare
+  non-identity unit owned by =LUVCRAFT.WORLD.QUANTITIES=: it cannot silently compare
   equal to =:one= or =:metre=.  Continuous world/player/shader positions are
   measured in cells, =cell-extent= is a =:voxel-cell-extent= vector measured in
   metres per cell, and ray hits carry =:ray-distance= in cells.  The application
@@ -1041,18 +1041,15 @@ Evidence:
   =LUV.SPIR-V= package.  The names are domain meanings used at simulation and
   ABI boundaries, not properties of SPIR-V.
 - [[file:../luvcraft/quantities.lisp][=luvcraft/quantities.lisp=]] now publishes the unchanged kind and quantity
-  definitions from the =LUVCRAFT.QUANTITIES= package.  The small
-  =:luv/luvcraft/quantities= system depends only on =:luv/arithmetic=;
-  =:luv/luvcraft/shaders= and =:luv/luvcraft= state their dependency on it.
-- A fresh SBCL image loaded =:luv/luvcraft/quantities=, resolved
-  =:world-position= as a length quantity, and proved that the =LUV.SPIR-V=
-  package did not exist.  Full tests, generated-module validation, and the
-  smoke render pass.
+  definitions from the =LUVCRAFT.QUANTITIES= package. They are loaded by the
+  =:luvcraft= owner after its renderer-independent =:luvcraft/world= model.
+- A fresh SBCL image loaded the quantity files through =:luvcraft= and resolved
+  =:world-position= as a length quantity. Full tests, generated-module
+  validation, and the smoke render pass.
 
-Done when: a small =:luv/luvcraft/quantities= system depends only on
-=:luv/arithmetic=; loading it publishes the existing definitions without
-loading =:luv/spir-v=; shaders depend on it explicitly; focused and project
-tests retain their behavior.
+Done when: luvcraft quantities are owned outside =LUV.SPIR-V=; the application
+and shader packages share them explicitly; focused and project tests retain
+their behavior.
 
 * DONE Move portable operator semantics below shaders
 :PROPERTIES:
@@ -1083,7 +1080,7 @@ Evidence:
   cleanly and reported EQ identity for all six common/SPIR-V operator names.
 
 Done when: portable operator symbols and quantity-derivation methods are owned
-below =:luv/spir-v=; arithmetic tests exercise them directly; shader source
+below =LUV.SPIR-V=; arithmetic tests exercise them directly; shader source
 keeps the same symbol identity and diagnostics; generated shader modules are
 unchanged.
 
@@ -1203,10 +1200,9 @@ the named call in the production shader graph, execute the CPU curve below,
 between, and beyond its bounds, and reject substituting a =:fog-amount= slot
 where the shared =:view-distance= contract requires distance.
 
-The definition lives in the small =:luv/luvcraft/arithmetic= system rather
-than the quantity vocabulary or either backend: quantities name meaning,
-while arithmetic graphs own numerical laws.  CPU clients can load that system
-without loading SPIR-V.
+The definition lives in the =LUVCRAFT.ARITHMETIC= package rather than the
+quantity vocabulary or either backend: quantities name meaning, while
+arithmetic graphs own numerical laws.
 
 Done when: satisfied by the named fog law and its two checked realizations.
 The richer =:world-to-light= composition subsequently became #ZYCSYZ without

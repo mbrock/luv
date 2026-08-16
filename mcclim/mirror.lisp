@@ -1,4 +1,4 @@
-(in-package #:luv.mcclim)
+(in-package #:mcluv)
 
 (defclass luv-mirror (luv:canvas-event-handler)
   ((sheet

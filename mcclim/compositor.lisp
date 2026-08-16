@@ -5,7 +5,7 @@
 ;;; perspective-spinning quad into an offscreen color attachment, after which
 ;;; the canvas context performs its familiar texture-to-swapchain copy.
 
-(in-package #:luv.mcclim)
+(in-package #:mcluv)
 
 (defclass spinning-compositor-frame-state ()
   ((buffer

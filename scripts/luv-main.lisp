@@ -7,5 +7,6 @@
                    (uiop:pathname-directory-pathname *load-truename*)))
 
 (asdf:load-asd (merge-pathnames #P"luv.asd" (launcher-project-root)))
-(asdf:load-system :luv/tools)
-(funcall (find-symbol "MAIN" "LUV.TOOLS"))
+(asdf:load-asd (merge-pathnames #P"luvcraft.asd" (launcher-project-root)))
+(asdf:load-system :luvcraft/tools)
+(funcall (find-symbol "MAIN" "LUVCRAFT.TOOLS"))

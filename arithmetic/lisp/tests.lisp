@@ -1,13 +1,4 @@
-(defpackage #:luv/arithmetic/lisp/tests
-  (:use #:cl #:rove)
-  (:local-nicknames (#:lang #:luv.arithmetic.language)
-                    (#:lisp #:luv.arithmetic.lisp)
-                    (#:math #:luv.arithmetic))
-  (:import-from #:luv.arithmetic #:dot #:clamp)
-  (:import-from #:luv.arithmetic.language
-                #:quantity #:interpret #:convert-unit #:counted-fold))
-
-(in-package #:luv/arithmetic/lisp/tests)
+(in-package #:luv.tests)
 
 (lisp:define-lisp-arithmetic-function cpu-fog-shape
     ((view-distance :quantity :distance :unit :metre)

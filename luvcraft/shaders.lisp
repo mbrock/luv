@@ -5,7 +5,7 @@
 ;;; dependents and rebuild on redefinition.  The crosshair vertex stage at the
 ;;; end is a literal SPIR-V module rather than a mathematical specification.
 
-(in-package #:luv.spir-v)
+(in-package #:luvcraft.shaders)
 
 ;;; A matrix is representation; this is the meaning of the operation it
 ;;; participates in.  The four dense rows arrive through the frame ABI, but

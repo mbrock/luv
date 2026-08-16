@@ -1,4 +1,4 @@
-(in-package #:luv.tools)
+(in-package #:luvcraft.tools)
 
 (defun command-block-world (arguments)
   (multiple-value-bind (positionals options)
@@ -19,7 +19,7 @@
           (provider (make-backend-provider (getf options :backend))))
       (if count
           (dolist (pathname
-                    (luv:capture-hidden-luvcraft-frames
+                    (luvcraft:capture-hidden-luvcraft-frames
                      target
                      :count count
                      :width width
@@ -28,7 +28,7 @@
                      :yaw-step yaw-step))
             (format t "~A~%" pathname))
           (format t "~A~%"
-                  (luv:capture-hidden-luvcraft-screenshot
+                  (luvcraft:capture-hidden-luvcraft-screenshot
                    target
                    :width width
                    :height height

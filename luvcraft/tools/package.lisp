@@ -1,3 +1,3 @@
-(defpackage #:luv.tools
+(defpackage #:luvcraft.tools
   (:use #:cl)
   (:export #:main))

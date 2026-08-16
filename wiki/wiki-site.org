@@ -12,7 +12,7 @@ browsable static site, why the build is expressed in ASDF, and what the
 Org-subset reader deliberately does and does not understand.  It is a
 design page for =luv-wiki=, the Lisp system in [[file:org.lisp][wiki/org.lisp]],
 [[file:html.lisp][wiki/html.lisp]], and [[file:asdf.lisp][wiki/asdf.lisp]], and for the corpus system
-=luv/wiki= in [[file:../luv.asd][luv.asd]] whose components are the pages themselves.
+=luv-wiki-site= in [[file:../luv-wiki-site.asd][luv-wiki-site.asd]] whose components are the pages themselves.
 
 The rendered site lives at [[https://mbrock.github.io/luv/][mbrock.github.io/luv]] once the Pages
 workflow in [[file:../.github/workflows/wiki.yml][wiki.yml]] has run; locally, =make wiki= writes it to
@@ -36,7 +36,7 @@ component whose =compile-op= outputs an object file.
 
 The wiki fits the same shape, and more naturally than a fresh script would:
 
-- An =org-file= is a component of the =luv/wiki= system.  Its =load-op= reads
+- An =org-file= is a component of the =luv-wiki-site= system.  Its =load-op= reads
   the page into a =document= object and remembers it on the component, so
   "loading the wiki" means having the corpus in the image as inspectable Lisp
   objects, which is where the figure vocabulary of #F2N8VX wants to go
@@ -52,13 +52,13 @@ The wiki fits the same shape, and more naturally than a fresh script would:
   in =build/wiki/= rather than the compiled-file cache.  A =static-file= such as
   an image is copied by the same operation; the stylesheet is compiled from
   Lisp definitions (#UODI74) by the system's own render.
-- =:build-operation "luv.wiki:render-op"= makes =(asdf:make :luv/wiki)= build
+- =:build-operation "luv.wiki:render-op"= makes =(asdf:make :luv-wiki-site)= build
   the site, matching how =luvcraft= is built.
 
 Two ASDF details are worth remembering.  =defsystem-depends-on= cannot name a
 system defined in the same =.asd= file (ASDF reports a circular =define-op=),
-so the tooling is the primary system =luv-wiki= in its own file, and =luv.asd=
-loads that file first.  Class names in a defsystem can be given as strings
+so the tooling is the primary system =luv-wiki= in its own file and the corpus
+is the primary =luv-wiki-site= system in another. Class names in a defsystem can be given as strings
 such as ="luv.wiki:org-file"=, which ASDF reads in its own package; that avoids
 interning anything into ASDF's package, which the manual asks extensions not to
 do.
@@ -148,10 +148,10 @@ Intent: make the wiki browsable outside Emacs without a second source of
 truth, and express the build as an ASDF operation so it composes with the
 rest of the project.
 
-Evidence: =(asdf:make :luv/wiki)= renders all pages, =figures.html=, and the
+Evidence: =(asdf:make :luv-wiki-site)= renders all pages, =figures.html=, and the
 stylesheet into =build/wiki/=; a second =make wiki= rewrites nothing and
 touching a page re-renders.  The corpus loads with no dangling mentions.
-=luv-wiki/tests= covers the reader, the site index, the rendered HTML, and the
+=luv-wiki/test= covers the reader, the site index, the rendered HTML, and the
 =render-op= output placement.
 
 Done when: the six tests pass and the site builds from a fresh SBCL.
@@ -262,7 +262,7 @@ motivated by a browser affordance:
   relationship, with =html= and =clim= backends over one model.  Two
   consumers justify that; one does not.
 
-The live loop is then: edit Org in Emacs, =(asdf:load-system :luv/wiki)=
+The live loop is then: edit Org in Emacs, =(asdf:load-system :luv-wiki-site)=
 re-reads only the changed page, the browser redisplays.  Mentions become
 presentations that jump on click and offer backlinks on right-click; the
 shader lab's presentation types could accept a figure to attach it to a
@@ -542,7 +542,7 @@ that =role-p= parses back, per =clos-design=.
 
 /Done when./ Each item lands as its own small commit with the source
 pages checked in the browser; the layout table is shorter than today;
-=luv-wiki/tests= pass.
+=luv-wiki/test= passes.
 
 * Reading source without loading it: Eclector
 :PROPERTIES:
@@ -733,7 +733,7 @@ the third is left as a nice-to-have.
 :ID: NPZWLR
 :END:
 
-Intent: a McCLIM application frame over the loaded =luv/wiki= documents, with
+Intent: a McCLIM application frame over the loaded =luv-wiki-site= documents, with
 figure and mention presentations, page navigation, and backlinks; the
 exercise that tells us what the model in #AGTIO4 is missing.
 
@@ -741,7 +741,7 @@ Evidence: none yet; the shader lab in [[file:../mcclim/shader-lab.lisp][shader-l
 presentation-type pattern to follow.
 
 Done when: every wiki page can be read in the frame, clicking a mention jumps
-to its figure, and re-loading =luv/wiki= after an Org edit redisplays.
+to its figure, and re-loading =luv-wiki-site= after an Org edit redisplays.
 
 * WAIT A WIKI package of figure symbols
 :PROPERTIES:

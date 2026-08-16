@@ -1,9 +1,4 @@
-(defpackage #:luv/metal/tests
-  (:use #:cl #:rove #:luv)
-  (:local-nicknames (#:objc #:luv.objective-c)
-                    (#:metal #:luv.metal)))
-
-(in-package #:luv/metal/tests)
+(in-package #:luvcraft.tests)
 
 (deftest slug-formats-have-exact-portable-and-metal-storage
   (ok (= 4 (texture-format-bytes-per-texel :rg16-uint)))
@@ -168,7 +163,7 @@
 
 (deftest luvcraft-shader-compiles-in-memory-on-the-metal-device
   (let ((specification
-          (luv.spir-v:block-world-fragment-specification))
+          (luvcraft.shaders:block-world-fragment-specification))
         (device
           (request-gpu-device (make-instance 'metal-gpu-provider)))
         (module nil))
@@ -211,14 +206,14 @@
                   (make-shader-module-descriptor
                    :label "block vertex Metal library"
                    :language :mathematical
-                   :code (luv.spir-v:block-world-vertex-specification)))
+                   :code (luvcraft.shaders:block-world-vertex-specification)))
                  fragment-module
                  (create
                   device
                   (make-shader-module-descriptor
                    :label "block fragment Metal library"
                    :language :mathematical
-                   :code (luv.spir-v:block-world-fragment-specification)))
+                   :code (luvcraft.shaders:block-world-fragment-specification)))
                  pipeline
                  (create
                   device
@@ -262,7 +257,7 @@
   (let* ((device
            (request-gpu-device (make-instance 'metal-gpu-provider)))
          (specification
-           (luv.spir-v:block-world-fragment-specification))
+           (luvcraft.shaders:block-world-fragment-specification))
          (bad-document (luv.msl:compile-msl specification))
          (module nil)
          (failure nil))
@@ -300,7 +295,7 @@
     (unwind-protect
          (progn
            (setf artifact
-                 (luv::make-live-shader-pipeline
+                 (luvcraft::make-live-shader-pipeline
                   :role :metal-live-probe
                   :vertex-role :metal-live-probe
                   :label "live Metal pipeline probe"
@@ -313,19 +308,19 @@
                   :primitive '(:topology :triangle-list)
                   :depth-stencil nil))
            (let ((first-pipeline
-                   (luv::live-shader-pipeline-native-pipeline artifact)))
+                   (luvcraft::live-shader-pipeline-native-pipeline artifact)))
              (ok (typep first-pipeline 'metal-gpu-render-pipeline))
              (ok (eq :installed (live-shader-pipeline-status artifact)))
              (install-metal-live-probe-fragment 0.5 :invalid-p t)
-             (luv::refresh-live-shader-pipeline artifact)
+             (luvcraft::refresh-live-shader-pipeline artifact)
              (ok (eq :failed (live-shader-pipeline-status artifact)))
              (ok (eq first-pipeline
-                     (luv::live-shader-pipeline-native-pipeline artifact)))
+                     (luvcraft::live-shader-pipeline-native-pipeline artifact)))
              (ok (not (luv::metal-object-destroyed-p first-pipeline)))
              (install-metal-live-probe-fragment 0.75)
-             (luv::refresh-live-shader-pipeline artifact)
+             (luvcraft::refresh-live-shader-pipeline artifact)
              (let ((replacement
-                     (luv::live-shader-pipeline-native-pipeline artifact)))
+                     (luvcraft::live-shader-pipeline-native-pipeline artifact)))
                (ok (eq :installed (live-shader-pipeline-status artifact)))
                (ok (= 1 (live-shader-pipeline-installed-revision artifact)))
                (ok (not (eq first-pipeline replacement)))
@@ -333,7 +328,7 @@
                (ok (typep replacement 'metal-gpu-render-pipeline)))))
       (install-metal-live-probe-fragment 0.25)
       (when artifact
-        (luv::release-live-shader-pipeline artifact))
+        (luvcraft::release-live-shader-pipeline artifact))
       (destroy device))))
 
 (deftest live-metal-pipeline-replacement-retires-after-its-in-flight-draw
@@ -351,7 +346,7 @@
     (unwind-protect
          (progn
            (setf artifact
-                 (luv::make-live-shader-pipeline
+                 (luvcraft::make-live-shader-pipeline
                   :role :metal-live-probe
                   :vertex-role :metal-live-probe
                   :label "in-flight Metal pipeline probe"
@@ -383,7 +378,7 @@
              :initial-contents
              '(-0.7 -0.6 0.0 0.7 -0.6 0.0 0.0 0.7 0.0)))
            (let ((old-pipeline
-                   (luv::live-shader-pipeline-native-pipeline artifact)))
+                   (luvcraft::live-shader-pipeline-native-pipeline artifact)))
              (setf old-native-pipeline (luv::metal-native-object old-pipeline)
                    encoder (create device (make-command-encoder-descriptor)))
              (let ((pass
@@ -401,10 +396,10 @@
              (setf commands (finish encoder))
              (submit queue commands)
              (install-metal-live-probe-fragment 0.75)
-             (luv::refresh-live-shader-pipeline artifact)
+             (luvcraft::refresh-live-shader-pipeline artifact)
              (ok (luv::metal-object-destroyed-p old-pipeline))
              (ok (not (eq old-pipeline
-                          (luv::live-shader-pipeline-native-pipeline artifact))))
+                          (luvcraft::live-shader-pipeline-native-pipeline artifact))))
              (submitted-work-done queue)
              (ok (objc:objective-c-object-released-p old-native-pipeline))))
       (install-metal-live-probe-fragment 0.25)
@@ -412,7 +407,7 @@
       (when encoder (destroy encoder))
       (when vertices (destroy vertices))
       (when texture (destroy texture))
-      (when artifact (luv::release-live-shader-pipeline artifact))
+      (when artifact (luvcraft::release-live-shader-pipeline artifact))
       (destroy device))))
 
 (deftest metal-buffer-populates-a-native-metal-4-argument-table
@@ -560,23 +555,23 @@
               (setf session
                     (start-luvcraft
                      :provider (make-instance 'metal-gpu-provider)
-                     :world (luv::make-gazetteer-shadow-yard-world)
+                     :world (luvcraft::make-gazetteer-shadow-yard-world)
                      :residency-radius 0
                      :visible-p nil :frames-per-second nil
                      :width 160 :height 100))
               (wait-for-luvcraft-products session :minimum 1)
               (let ((resources-before
-                      (length (luv::luvcraft-session-resources session))))
+                      (length (luvcraft::luvcraft-session-resources session))))
                 (dotimes (index 8)
-                  (luv::render-luvcraft-frame
+                  (luvcraft::render-luvcraft-frame
                    session (* index (/ 1d0 60d0))))
                 (submitted-work-done
-                 (device-queue (luv::luvcraft-session-device session)))
+                 (device-queue (luvcraft::luvcraft-session-device session)))
                 (let ((state-count
                         (hash-table-count
-                         (luv::luvcraft-session-frame-states session))))
+                         (luvcraft::luvcraft-session-frame-states session))))
                   (ok (<= 1 state-count 3))
-                  (ok (= (length (luv::luvcraft-session-resources session))
+                  (ok (= (length (luvcraft::luvcraft-session-resources session))
                          (+ resources-before (* 3 state-count)))))))
          (when session
            (stop-luvcraft session)))))))

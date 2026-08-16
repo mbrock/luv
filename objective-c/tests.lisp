@@ -1,9 +1,4 @@
-(defpackage #:luv/objective-c/tests
-  (:use #:cl #:rove)
-  (:local-nicknames (#:objc #:luv.objective-c)
-                    (#:metal #:luv.metal)))
-
-(in-package #:luv/objective-c/tests)
+(in-package #:luv.tests)
 
 (objc:define-objective-c-message make-exception-test-array
     ("new" :object :ownership :owned :class "NSMutableArray"))

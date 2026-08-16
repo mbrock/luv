@@ -5,7 +5,7 @@
 ;;; palette here is what the player places, what the mesher shades, and what
 ;;; the shader lab browses; the atlas is generated arithmetic, not an asset.
 
-(in-package #:luv)
+(in-package #:luvcraft)
 
 (defclass block-kind ()
   ((name :initarg :name :reader block-kind-name)

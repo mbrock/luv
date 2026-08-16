@@ -44,7 +44,7 @@ configuration is used whenever it exists."
     (asdf:initialize-source-registry *build-source-registry*)))
 
 (defvar *root* nil
-  "The repository root: the directory holding luv.asd and wiki/.")
+  "The repository root: the directory holding the primary ASD files and wiki/.")
 
 (defun root ()
   (or *root*
@@ -53,10 +53,10 @@ configuration is used whenever it exists."
              (or (uiop:getenv "LUV_ROOT") (uiop:getcwd))))))
 
 (defun ensure-systems ()
-  "Register the luv systems from luv.asd so the source scan knows the files.
-luv-wiki itself is already in this image; luv.asd only re-reads its
-definition, which is harmless."
-  (asdf:load-asd (merge-pathnames "luv.asd" (root))))
+  "Register every repository-owned system so the source scan knows its files."
+  (dolist (name '("luv.asd" "luvcraft.asd" "mcluv.asd"
+                  "luv-wiki.asd" "luv-wiki-site.asd"))
+    (asdf:load-asd (merge-pathnames name (root)))))
 
 (defvar *site* nil)
 
@@ -323,7 +323,7 @@ hex digits, which the reader takes for a colour."
                  (format t "~A~%" candidate)
                  (return)))))
 
-(defparameter *introspection-systems* '("luv" "luv/luvcraft" "luv-wiki")
+(defparameter *introspection-systems* '("luv" "luvcraft" "luv-wiki")
   "Systems loaded before gathering operator lambda lists.")
 
 (define-command introspect (&rest systems)
@@ -340,11 +340,12 @@ derived layouts.  Give system names to load others instead."
     (format t "~&~D operators written to ~A~%" count pathname)))
 
 (define-command build (&rest arguments)
-  "Render the site into build/wiki/ with (asdf:make :luv/wiki)."
+  "Render the site into build/wiki/ with (asdf:make :luv-wiki-site)."
   (declare (ignore arguments))
   (ensure-systems)
-  (asdf:make :luv/wiki)
-  (format t "~&~A~%" (wiki:site-output-directory (asdf:find-system :luv/wiki))))
+  (asdf:make :luv-wiki-site)
+  (format t "~&~A~%"
+          (wiki:site-output-directory (asdf:find-system :luv-wiki-site))))
 
 (defun run (arguments)
   "Run the command named by the first of ARGUMENTS."

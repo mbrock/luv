@@ -1,6 +1,6 @@
 ;;; A deliberately small owner/worker production boundary.
 
-(in-package #:luv)
+(in-package #:luvcraft)
 
 (defclass production-request ()
   ((key :initarg :key :reader production-request-key)

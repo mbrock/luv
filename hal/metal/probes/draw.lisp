@@ -2,9 +2,8 @@
 
 (require :asdf)
 
-(asdf:load-asd (truename (merge-pathnames #P"../luv.asd" *load-truename*)))
-(asdf:load-system :luv/canvas/metal)
-(asdf:load-system :luv/luvcraft)
+(asdf:load-asd (truename (merge-pathnames #P"../../../luv.asd" *load-truename*)))
+(asdf:load-system :luv)
 
 (luv.spir-v:define-shader-method
     luv.spir-v:shader-specification-for

@@ -1,8 +1,18 @@
-(defpackage #:luv/arithmetic/tests
+(defpackage #:luv.tests
   (:use #:cl #:rove)
-  (:local-nicknames (#:math #:luv.arithmetic)))
+  (:local-nicknames (#:lang #:luv.arithmetic.language)
+                    (#:lisp #:luv.arithmetic.lisp)
+                    (#:lvk #:luv.vulkan)
+                    (#:math #:luv.arithmetic)
+                    (#:metal #:luv.metal)
+                    (#:objc #:luv.objective-c)
+                    (#:records #:luv.arithmetic.records)
+                    (#:vk #:luv.vk))
+  (:import-from #:luv.arithmetic #:dot #:clamp)
+  (:import-from #:luv.arithmetic.language
+                #:quantity #:interpret #:convert-unit #:counted-fold))
 
-(in-package #:luv/arithmetic/tests)
+(in-package #:luv.tests)
 
 (math:define-quantity :position :kind :length
   :components (:position-x :position-y))

@@ -6,7 +6,7 @@
         (truename
          (merge-pathnames #P"../"
                           (uiop:pathname-directory-pathname *load-truename*)))))
-  (asdf:load-asd (merge-pathnames #P"luv.asd" project-root)))
+  (asdf:load-asd (merge-pathnames #P"luv-wiki.asd" project-root)))
 
 (asdf:load-system :luv-wiki/cli)
 (uiop:symbol-call '#:luv.wiki.cli '#:capture-asdf-configuration)

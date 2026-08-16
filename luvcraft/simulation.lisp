@@ -7,7 +7,7 @@
 ;;; lattice directly.  This is the behavior later dense body/contact domains
 ;;; and SIMD kernels must preserve, not their final storage layout.
 
-(in-package #:luv)
+(in-package #:luvcraft)
 
 (luv.arithmetic:define-quantity-constant
     +luvcraft-camera-near-distance+ 0.1

@@ -12,18 +12,18 @@
 ;;; to fixation.  It favors obvious correctness; the incremental runtime
 ;;; relighter is checked against it.
 
-(in-package #:luv)
+(in-package #:luvcraft)
 
 (defconstant +maximum-light-level+ 15)
 
 (defclass chunk-light-field ()
   ((sky-definition
     :initarg :sky-definition
-    :initform (luv.world.fields:field-definition-for :sky-light)
+    :initform (luvcraft.world.fields:field-definition-for :sky-light)
     :reader chunk-light-field-sky-definition)
    (block-definition
     :initarg :block-definition
-    :initform (luv.world.fields:field-definition-for :block-light)
+    :initform (luvcraft.world.fields:field-definition-for :block-light)
     :reader chunk-light-field-block-definition)
    (sky-levels :initarg :sky-levels :reader chunk-light-field-sky-levels)
    (block-levels :initarg :block-levels
@@ -41,12 +41,12 @@ from block content.  STATE is :UNLIT before any solve, :STABLE when every
 boundary was known, and :PROVISIONAL when an unknown residency boundary
 contributed to the result."))
 
-(defmethod luv.world.fields:materialized-field-definition
+(defmethod luvcraft.world.fields:materialized-field-definition
     ((field chunk-light-field) (field-name (eql :sky-light)))
   (declare (ignore field-name))
   (chunk-light-field-sky-definition field))
 
-(defmethod luv.world.fields:materialized-field-definition
+(defmethod luvcraft.world.fields:materialized-field-definition
     ((field chunk-light-field) (field-name (eql :block-light)))
   (declare (ignore field-name))
   (chunk-light-field-block-definition field))
@@ -122,17 +122,17 @@ resident."))
   (sky nil :type (or null (simple-array (unsigned-byte 8) (*))))
   (block nil :type (or null (simple-array (unsigned-byte 8) (*)))))
 
-(defmethod luv.world.fields:materialized-field-definition
+(defmethod luvcraft.world.fields:materialized-field-definition
     ((entry light-region-entry) (field-name (eql :block-content)))
   (declare (ignore field-name))
   (light-region-entry-content-definition entry))
 
-(defmethod luv.world.fields:materialized-field-definition
+(defmethod luvcraft.world.fields:materialized-field-definition
     ((entry light-region-entry) (field-name (eql :sky-light)))
   (declare (ignore field-name))
   (light-region-entry-sky-definition entry))
 
-(defmethod luv.world.fields:materialized-field-definition
+(defmethod luvcraft.world.fields:materialized-field-definition
     ((entry light-region-entry) (field-name (eql :block-light)))
   (declare (ignore field-name))
   (light-region-entry-block-definition entry))
@@ -165,7 +165,7 @@ resident."))
 (defstruct (light-removal-queue
              (:constructor %make-light-removal-queue))
   (field-name nil :type keyword :read-only t)
-  (field-definition nil :type luv.world.fields:voxel-field-definition
+  (field-definition nil :type luvcraft.world.fields:voxel-field-definition
                         :read-only t)
   (field-reader nil :type function :read-only t)
   (skylight-p nil :type boolean :read-only t)
@@ -174,14 +174,14 @@ resident."))
 
 (defun make-light-removal-queue (field-name field-reader &key skylight-p)
   "Make a removal frontier whose raw levels retain one field's exact meaning."
-  (let ((definition (luv.world.fields:field-definition-for field-name)))
+  (let ((definition (luvcraft.world.fields:field-definition-for field-name)))
     (unless definition
       (error "There is no voxel field definition named ~S." field-name))
     (%make-light-removal-queue
      :field-name field-name :field-definition definition
      :field-reader field-reader :skylight-p skylight-p)))
 
-(defmethod luv.world.fields:materialized-field-definition
+(defmethod luvcraft.world.fields:materialized-field-definition
     ((queue light-removal-queue) field-name)
   (and (eq field-name (light-removal-queue-field-name queue))
        (light-removal-queue-field-definition queue)))
@@ -189,7 +189,7 @@ resident."))
 (defun enqueue-light-removal (queue entry local level)
   "Admit one entry-local removal under QUEUE's retained field definition."
   (unless (typep level
-                 (luv.world.fields:voxel-field-definition-legal-value-type
+                 (luvcraft.world.fields:voxel-field-definition-legal-value-type
                   (light-removal-queue-field-definition queue)))
     (error "Light removal level ~S is illegal for field ~S."
            level (light-removal-queue-field-name queue)))
@@ -217,18 +217,18 @@ resident."))
               (%make-light-region-entry
                :chunk chunk :domain domain :key key
                :content-definition
-               (luv.world.fields:materialized-field-definition
+               (luvcraft.world.fields:materialized-field-definition
                 (block-chunk-content chunk) :block-content)
                :sky-definition
                (if field
-                   (luv.world.fields:materialized-field-definition
+                   (luvcraft.world.fields:materialized-field-definition
                     field :sky-light)
-                   (luv.world.fields:field-definition-for :sky-light))
+                   (luvcraft.world.fields:field-definition-for :sky-light))
                :block-definition
                (if field
-                   (luv.world.fields:materialized-field-definition
+                   (luvcraft.world.fields:materialized-field-definition
                     field :block-light)
-                   (luv.world.fields:field-definition-for :block-light))
+                   (luvcraft.world.fields:field-definition-for :block-light))
                :indices (coerce indices
                                 '(simple-array (unsigned-byte 16) (*)))
                :opacity-lut opacity :emission-lut emission
