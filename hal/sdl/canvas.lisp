@@ -274,6 +274,12 @@ have a main-thread host and execute directly."
     (setf (sdl-canvas-request-error request) condition)
     (sb-thread:signal-semaphore (sdl-canvas-request-completion request))))
 
+(defun sdl-canvas-terminal-error (canvas)
+  "Return the native-loop failure callers need, preserving its original type."
+  (or (sdl-canvas-startup-error canvas)
+      (make-condition 'canvas-error :canvas canvas
+                      :operation :frame :reason :canvas-closed)))
+
 (defun wake-sdl-canvas (canvas)
   "Wake CANVAS's native SDL event loop after cross-thread work arrives."
   (let ((event-type (sdl-canvas-wake-event-type canvas)))
@@ -743,10 +749,11 @@ have a main-thread host and execute directly."
               (unless (sdl-canvas-startup-error canvas)
                 (setf (sdl-canvas-startup-error canvas) condition)))))
         (setf (sdl-canvas-wake-event-type canvas) nil)
-        (fail-sdl-canvas-requests
-         canvas
-         (make-condition 'canvas-error :canvas canvas
-                         :operation :frame :reason :canvas-closed))
+        ;; If event dispatch or rendering killed the native loop, wake every
+        ;; synchronous caller with that exact condition.  Replacing it with a
+        ;; generic :CANVAS-CLOSED made the actionable error available only by
+        ;; inspecting SDL-CANVAS-STARTUP-ERROR after the fact.
+        (fail-sdl-canvas-requests canvas (sdl-canvas-terminal-error canvas))
         (setf (canvas-state canvas) :closed)
         ;; CLOSE-CANVAS's completion is also permission for its caller to open
         ;; a replacement.  Publish native-host release before waking it.

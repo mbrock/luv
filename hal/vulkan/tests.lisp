@@ -23,6 +23,18 @@
     (ok (= 3 (length timestamps)))
     (ok (> (luv::cadence-clock-next-frame-time clock) 10.1d0))))
 
+(deftest canvas-loop-failure-preserves-the-actionable-condition
+  (let* ((canvas (luv:make-sdl-canvas))
+         (root-cause (make-condition 'simple-error
+                                     :format-control "event dispatch failed"))
+         (request (luv::make-sdl-canvas-request :function #'identity)))
+    (setf (luv::sdl-canvas-startup-error canvas) root-cause
+          (luv::sdl-canvas-requests canvas) (list request))
+    (luv::fail-sdl-canvas-requests
+     canvas (luv::sdl-canvas-terminal-error canvas))
+    (ok (eq root-cause (luv::sdl-canvas-request-error request)))
+    (ok (null (luv::sdl-canvas-requests canvas)))))
+
 (deftest slug-formats-retain-the-exact-vulkan-abi-values
   (ok (= 81 (cffi:foreign-enum-value 'lvk::format :r16g16-uint)))
   (ok (= 97
