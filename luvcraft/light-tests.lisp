@@ -201,6 +201,14 @@
            (voxel-light-solver-comparison-mismatched-keys comparison)))
       (ok (= (voxel-light-solver-comparison-legacy-visits comparison)
              (voxel-light-solver-comparison-frontier-visits comparison)))
+      (ok (plusp
+           (voxel-light-solver-comparison-legacy-bytes-consed comparison)))
+      (ok (plusp
+           (voxel-light-solver-comparison-frontier-bytes-consed comparison)))
+      (ok (>= (voxel-light-solver-comparison-legacy-gc-seconds comparison)
+              0d0))
+      (ok (>= (voxel-light-solver-comparison-frontier-gc-seconds comparison)
+              0d0))
       (ok (= 2 (length
                 (voxel-light-solver-comparison-frontier-executions
                  comparison))))

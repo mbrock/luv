@@ -190,6 +190,19 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:cpu-trace-zone-parent-index
            #:cpu-trace-zone-depth
            #:cpu-trace-zone-seconds
+           #:cpu-trace-zone-bytes-consed
+           #:cpu-trace-zone-self-bytes-consed
+           #:cpu-trace-zone-gc-seconds
+           #:cpu-trace-zone-self-gc-seconds
+           #:cpu-trace-zone-garbage-collections
+           #:cpu-trace-garbage-collections
+           #:runtime-observation
+           #:make-runtime-observation
+           #:runtime-observation-elapsed-seconds
+           #:runtime-observation-bytes-consed
+           #:runtime-observation-gc-seconds
+           #:runtime-observation-garbage-collections
+           #:with-runtime-observation
            #:print-cpu-trace
            #:gpu-error
            #:gpu-error-operation

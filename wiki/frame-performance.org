@@ -38,9 +38,12 @@ control flow.
 
 Evidence:
 
-- [[file:../hal/trace.lisp][The trace buffer]] records a zone name, parent, depth, and monotonic start/end
-  ticks.  =with-cpu-trace-zone= is a thin =unwind-protect= wrapper; buffers
-  reuse event and stack storage after their first capture.
+- [[file:../hal/trace.lisp][The trace buffer]] records a zone name, parent, depth, monotonic start/end
+  ticks, allocated bytes, garbage-collection time, and collections crossing
+  the extent.  =with-cpu-trace-zone= is a thin =unwind-protect= wrapper;
+  buffers reuse event and stack storage after their first capture.  The same
+  module provides =with-runtime-observation= for a retained aggregate when a
+  benchmark needs time, allocation, and GC evidence without a zone tree.
 - [[file:../hal/sdl/canvas.lisp][The SDL request boundary]] explicitly carries the selected trace onto the
   native frame thread.  Dynamic Lisp bindings alone do not cross that thread
   handoff.

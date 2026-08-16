@@ -66,12 +66,34 @@ The proof carries cost evidence at the same semantic boundaries.  Both
 solvers emit nested CPU/Tracy zones for the whole solve, sky and block
 seeding, and sky and block propagation; each retained frontier execution also
 records elapsed propagation time beside visits, relations, admissions,
-crossings, and peak frontier size.  A/B comparison therefore asks three
-different questions without confusing them: are the fields identical, did
-the programs perform the same semantic work, and where did the physical
-realizations spend time?  The ordinary production worker traverses these same
-zones, so a live Tracy capture observes the selected solver in the actual
-asynchronous world path, not only in a special benchmark.
+crossings, and peak frontier size.  The CPU trace and the retained A/B result
+now also record allocated bytes, garbage-collection time, and the exact number
+of collections crossing each dynamic extent.  A/B comparison therefore asks
+four different questions without confusing them: are the fields identical,
+did the programs perform the same semantic work, where did the physical
+realizations spend time, and how much memory pressure did they create?  The
+ordinary production worker traverses these same zones, so a live Tracy capture
+observes the selected solver in the actual asynchronous world path, not only
+in a special benchmark.
+
+The first terrain measurement is already useful specialization evidence.  On
+fifteen alternating solves of the same nine-chunk captured world, both
+programs produced equal fields and made 30,534 site visits.  The medians were
+22.676 ms and 1.125 MiB allocated for the legacy solver, versus 30.784 ms and
+2.560 MiB for the frontier solver: 1.36 times the time and 2.28 times the
+allocation.  A sustained batch of forty equivalent captures made the memory
+pressure tangible: 51 MiB allocated by the legacy solver and 102 MiB by the
+frontier solver, with one garbage collection crossing each batch.
+
+This is exactly the kind of result the frontier language is meant to expose
+rather than conceal.  Allocation profiling places the difference in the sky
+solve and frontier execution paths.  It is not explained by a larger logical
+frontier: after sky seeding, both implementations contain 2,304 sites and have
+the same bucket capacities, including the one bucket grown from 256 to 4,096
+entries.  The next physical question is therefore sharper and more exciting:
+which temporary representation or compiler escape in the general execution
+path accounts for those extra bytes, and can we specialize it away while
+leaving the clearer semantic program intact?
 
 * Frontier is an operational pattern, not merely a queue
 :PROPERTIES:

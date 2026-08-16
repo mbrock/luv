@@ -128,6 +128,12 @@ and traversal counters for inspection in a live image. #DVUZ6H"
   (frontier-visits 0 :type (integer 0 #.most-positive-fixnum))
   (legacy-seconds 0d0 :type double-float)
   (frontier-seconds 0d0 :type double-float)
+  (legacy-bytes-consed 0 :type integer)
+  (frontier-bytes-consed 0 :type integer)
+  (legacy-gc-seconds 0d0 :type double-float)
+  (frontier-gc-seconds 0d0 :type double-float)
+  (legacy-garbage-collections 0 :type fixnum)
+  (frontier-garbage-collections 0 :type fixnum)
   (frontier-executions nil :type list))
 
 (defun light-regions-mismatched-keys (left right)
@@ -162,19 +168,19 @@ the retained frontier executions.  Neither candidate is published. #DVUZ6H"
           (frontier-visits 0)
           (legacy-seconds 0d0)
           (frontier-seconds 0d0)
+          (legacy-observation (make-runtime-observation))
+          (frontier-observation (make-runtime-observation))
           (executions nil))
-      (let ((start (get-internal-real-time)))
+      (with-runtime-observation (legacy-observation)
         (multiple-value-setq (legacy-region legacy-visits)
-          (solve-light-region-using :legacy legacy-region))
-        (setf legacy-seconds
-              (/ (- (get-internal-real-time) start)
-                 (coerce internal-time-units-per-second 'double-float))))
-      (let ((start (get-internal-real-time)))
+          (solve-light-region-using :legacy legacy-region)))
+      (setf legacy-seconds
+            (runtime-observation-elapsed-seconds legacy-observation))
+      (with-runtime-observation (frontier-observation)
         (multiple-value-setq (frontier-region frontier-visits executions)
-          (solve-light-region-using :frontier frontier-region))
-        (setf frontier-seconds
-              (/ (- (get-internal-real-time) start)
-                 (coerce internal-time-units-per-second 'double-float))))
+          (solve-light-region-using :frontier frontier-region)))
+      (setf frontier-seconds
+            (runtime-observation-elapsed-seconds frontier-observation))
       (let ((mismatches
               (light-regions-mismatched-keys legacy-region frontier-region)))
         (make-voxel-light-solver-comparison
@@ -184,4 +190,16 @@ the retained frontier executions.  Neither candidate is published. #DVUZ6H"
          :frontier-visits frontier-visits
          :legacy-seconds legacy-seconds
          :frontier-seconds frontier-seconds
+         :legacy-bytes-consed
+         (runtime-observation-bytes-consed legacy-observation)
+         :frontier-bytes-consed
+         (runtime-observation-bytes-consed frontier-observation)
+         :legacy-gc-seconds
+         (runtime-observation-gc-seconds legacy-observation)
+         :frontier-gc-seconds
+         (runtime-observation-gc-seconds frontier-observation)
+         :legacy-garbage-collections
+         (runtime-observation-garbage-collections legacy-observation)
+         :frontier-garbage-collections
+         (runtime-observation-garbage-collections frontier-observation)
          :frontier-executions executions)))))

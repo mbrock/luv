@@ -262,8 +262,14 @@
            #:voxel-light-solver-comparison
            #:voxel-light-solver-comparison-equal-p
            #:voxel-light-solver-comparison-frontier-executions
+           #:voxel-light-solver-comparison-frontier-bytes-consed
+           #:voxel-light-solver-comparison-frontier-garbage-collections
+           #:voxel-light-solver-comparison-frontier-gc-seconds
            #:voxel-light-solver-comparison-frontier-seconds
            #:voxel-light-solver-comparison-frontier-visits
+           #:voxel-light-solver-comparison-legacy-bytes-consed
+           #:voxel-light-solver-comparison-legacy-garbage-collections
+           #:voxel-light-solver-comparison-legacy-gc-seconds
            #:voxel-light-solver-comparison-legacy-seconds
            #:voxel-light-solver-comparison-legacy-visits
            #:voxel-light-solver-comparison-mismatched-keys

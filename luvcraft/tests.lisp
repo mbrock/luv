@@ -677,6 +677,10 @@
       (ok (= 0 (cpu-trace-zone-parent-index inner)))
       (ok (>= (cpu-trace-zone-seconds outer)
               (cpu-trace-zone-seconds inner)))
+      (ok (>= (cpu-trace-zone-bytes-consed outer)
+              (cpu-trace-zone-bytes-consed inner)))
+      (ok (>= (cpu-trace-zone-gc-seconds outer)
+              (cpu-trace-zone-gc-seconds inner)))
       (with-cpu-trace (trace)
         (with-cpu-trace-zone (:again)
           (values)))
@@ -687,7 +691,34 @@
       (let ((text (with-output-to-string (stream)
                     (print-cpu-trace trace stream))))
         (ok (search "inclusive" text))
+        (ok (search "allocated" text))
+        (ok (search "garbage collection" text))
         (ok (search "again" text))))))
+
+(deftest runtime-observations-measure-allocation-and-garbage-collection
+  (let ((observation (make-runtime-observation))
+        (retained nil)
+        (old-nursery-size (sb-ext:bytes-consed-between-gcs)))
+    (unwind-protect
+         (progn
+           (setf (sb-ext:bytes-consed-between-gcs) (* 1024 1024))
+           ;; Establish the small nursery before observing automatic GC.
+           ;; Explicit SB-EXT:GC calls intentionally do not run after-GC hooks.
+           (sb-ext:gc :full t)
+           (with-runtime-observation (observation)
+             (setf retained
+                   (loop repeat 64
+                         collect (make-array (* 256 1024)
+                                             :element-type '(unsigned-byte 8)
+                                             :initial-element 17)))))
+      (setf (sb-ext:bytes-consed-between-gcs) old-nursery-size))
+    (ok (= 17 (aref (first retained) 0)))
+    (ok (>= (runtime-observation-bytes-consed observation)
+            (* 16 1024 1024)))
+    (ok (plusp
+         (runtime-observation-garbage-collections observation)))
+    (ok (>= (runtime-observation-gc-seconds observation) 0d0))
+    (ok (plusp (runtime-observation-elapsed-seconds observation)))))
 
 (deftest tracy-source-locations-are-interned-per-zone
   ;; Tracy tells zones apart by the address of their source location, and
