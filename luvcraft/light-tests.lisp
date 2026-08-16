@@ -306,6 +306,40 @@
                (ok (= (luvcraft.frontier:frontier-execution-crossings compiled)
                       (luvcraft.frontier:frontier-execution-crossings manual)))))))
 
+(deftest compiled-light-seeds-are-boundary-transfers
+  ;; Open sky is a virtual source at full brightness related inward through
+  ;; the program's own transfer law: straight down pays only opacity, a
+  ;; lateral boundary pays one step more, and a fully opaque cell admits
+  ;; nothing.  The realization exposes this as its RELATE entry.
+  (let* ((world (make-open-sky-test-world '(0 0 0)))
+         (sky (luvcraft::compiled-light-realization :sky-light)))
+    (setf (world-block-at world 3 15 3) luvcraft::*stone-block*)
+    (let* ((region (luvcraft::capture-light-region world))
+           (frontier (luvcraft.frontier:make-realization-frontier sky))
+           (execution
+             (luvcraft.frontier:make-realization-execution sky region frontier))
+           (entry (gethash (make-chunk-coordinate 0 0 0)
+                           (luvcraft::light-region-entries region)))
+           (domain (luvcraft::light-region-entry-domain entry))
+           (levels (luvcraft::light-region-entry-sky entry)))
+      (ok (functionp (luvcraft.frontier:frontier-realization-relate-function sky)))
+      (flet ((relate (x y z direction)
+               (luvcraft.frontier:relate-frontier-realization-site
+                sky region frontier execution entry
+                (chunk-domain-offset-components domain x y z) direction
+                :direct-direction luvcraft.world:+voxel-negative-y+
+                :level luvcraft::+maximum-light-level+)))
+        (ok (relate 0 15 0 luvcraft.world:+voxel-negative-y+))
+        (ok (= 15 (aref levels (chunk-domain-offset-components domain 0 15 0))))
+        (ok (relate 15 15 0 luvcraft.world:+voxel-negative-x+))
+        (ok (= 14 (aref levels (chunk-domain-offset-components domain 15 15 0))))
+        (ok (not (relate 3 15 3 luvcraft.world:+voxel-negative-y+)))
+        (ok (= 0 (aref levels (chunk-domain-offset-components domain 3 15 3))))
+        ;; A second, dimmer relation into the same site is not an improvement.
+        (ok (not (relate 0 15 0 luvcraft.world:+voxel-negative-x+))))
+      (ok (= 2 (luvcraft.frontier:bucket-frontier-count frontier)))
+      (ok (= 2 (luvcraft.frontier:frontier-execution-admissions execution))))))
+
 (deftest compiled-light-drain-allocates-nothing-per-relation
   ;; A warmed drain over pre-grown frontier storage allocates only at chunk
   ;; crossings, where the window resolves a coordinate key (#L84JCX), never

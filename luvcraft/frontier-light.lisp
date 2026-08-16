@@ -195,17 +195,18 @@ and traversal counters for inspection in a live image. #DVUZ6H"
                   (eq (light-region-absent-boundary-semantics
                        region key direction)
                       :open-sky))
-         (let ((downward-p (eq direction +voxel-positive-y+)))
+         ;; Open sky is a virtual source at full brightness beyond the face;
+         ;; the relation into the entry runs the other way.  The program's own
+         ;; transfer law decides the level and admission. #581ZQP
+         (let ((inward (opposite-voxel-direction direction)))
            (map-entry-face-sites
             entry direction
             (lambda (offset local)
               (values local)
-              (frontiers:admit-frontier-realization-site
-               realization region frontier execution entry offset
-               (- +maximum-light-level+
-                  (luvcraft.arithmetic:light-propagation-loss
-                   (light-region-opacity entry offset) downward-p))
-               :direct-direction +voxel-negative-y+)))))))
+              (frontiers:relate-frontier-realization-site
+               realization region frontier execution entry offset inward
+               :direct-direction +voxel-negative-y+
+               :level +maximum-light-level+)))))))
    (light-region-entries region)))
 
 (defun seed-compiled-emitters (realization region frontier execution)
