@@ -419,18 +419,35 @@ rebuilds the small visible batch; resize replaces the domain coherently; and
 terminal, render-state, iterator, side-table, columnar, and GPU resources all
 have explicit release paths.
 
-* TODO Attach a live PTY after the render boundary works
+* NEXT Attach a live PTY independently of the render boundary
 :PROPERTIES:
 :ID: 9OFAII
 :END:
 
 Intent: make the world terminal interactive without folding process ownership
-or callback reentrancy into its renderer.
+or callback reentrancy into its renderer.  The PTY owner can now advance beside
+the render-state work rather than waiting behind it: both meet at the owned
+Ghostty terminal and neither needs the other's representation.
 
-Evidence needed: a small PTY owner feeds reads through the serialized flow in
-#K3KFGZ, copies Ghostty's synchronous reply bytes into its write queue, encodes
-keys from current terminal modes, and coordinates resize and child exit.
+Evidence: the separate =luv/terminal= system now supplies one concrete
+=pty-device= rather than a speculative device framework.  Its worker owns the
+child process and bidirectional PTY stream; a mailbox serializes caller input,
+Ghostty's copied synchronous reply bytes, resize, and stop with PTY reads and
+terminal mutation.  Renderer-side snapshot work can borrow the terminal under
+the same explicit lock.  The device does not own the semantic terminal, so a
+fixture, Lisp inspector, or later non-PTY producer can drive that terminal
+without inheriting process machinery.
+
+Focused cold tests exercise a shell exchanging text with the host, a cursor
+position query which makes the complete child → PTY → Ghostty → response
+callback → PTY → child round trip, matching =TIOCSWINSZ= and =stty size= with
+Ghostty grid resize, natural child exit, forced shutdown, idempotent release,
+and survival of the caller-owned terminal after device close.  The child gets
+a deliberate =xterm-256color= baseline rather than inheriting a headless
+=TERM=dumb= development environment.
 
 Done when: an ordinary shell can start, paint a prompt, receive text and
 special keys, answer a terminal query, resize, exit, and release its descriptor
-and child without blocking the world frame loop.
+and child without blocking the world frame loop.  The remaining device-side
+piece is Ghostty's mode-aware key encoder; focus and event projection remain
+the wall gadget's side of the seam.

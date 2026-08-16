@@ -12,5 +12,10 @@
            #:terminal-open-p
            #:close-terminal
            #:write-terminal
+           #:write-terminal-bytes
+           #:resize-terminal
+           #:terminal-size
+           #:set-terminal-response-function
+           #:terminal-callback-condition
            #:terminal-text
            #:with-terminal))

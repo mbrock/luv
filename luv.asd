@@ -81,6 +81,32 @@
                                                          '#:luv.ghostty.tests))
                (error "luv/ghostty tests failed"))))
 
+(defsystem "luv/terminal"
+  :description "Owned terminal devices for luv's libghostty-vt terminal."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("luv/ghostty" "sb-concurrency" "sb-posix" "uiop")
+  :serial t
+  :components
+  ((:module "terminal"
+    :serial t
+    :components ((:file "package")
+                 (:file "pty"))))
+  :in-order-to ((test-op (test-op "luv/terminal/test"))))
+
+(defsystem "luv/terminal/test"
+  :description "Executable PTY ownership and terminal-driving claims."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("luv/terminal" "rove" "uiop")
+  :components ((:file "terminal/tests"))
+  :perform (test-op (operation component)
+             (declare (ignore operation component))
+             (unless (uiop:symbol-call '#:rove '#:run-suite
+                                       (uiop:symbol-call '#:rove '#:find-suite
+                                                         '#:luv.terminal.tests))
+               (error "luv/terminal tests failed"))))
+
 (defsystem "luv/parinfer"
   :description "The connection-free indentation and parenthesis checker."
   :version "0.0.1"

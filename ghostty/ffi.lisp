@@ -39,6 +39,15 @@ is NIL, LUV_GHOSTTY_LIBRARY is consulted before the platform soname search."
   (:vt 1)
   (:html 2))
 
+(cffi:defcenum (terminal-option :int)
+  (:userdata 0)
+  (:write-pty 1))
+
+(cffi:defcenum (terminal-data :int)
+  (:invalid 0)
+  (:columns 1)
+  (:rows 2))
+
 (cffi:defcstruct formatter-screen-extra
   (size :size)
   (cursor :bool)
@@ -79,6 +88,23 @@ is NIL, LUV_GHOSTTY_LIBRARY is consulted before the platform soname search."
   (terminal :pointer)
   (data :pointer)
   (length :size))
+
+(cffi:defcfun ("ghostty_terminal_resize" %terminal-resize) ghostty-result
+  (terminal :pointer)
+  (columns :uint16)
+  (rows :uint16)
+  (cell-width-pixels :uint32)
+  (cell-height-pixels :uint32))
+
+(cffi:defcfun ("ghostty_terminal_set" %terminal-set) ghostty-result
+  (terminal :pointer)
+  (option terminal-option)
+  (value :pointer))
+
+(cffi:defcfun ("ghostty_terminal_get" %terminal-get) ghostty-result
+  (terminal :pointer)
+  (data terminal-data)
+  (output :pointer))
 
 (cffi:defcfun ("ghostty_formatter_terminal_new" %formatter-terminal-new)
     :int
