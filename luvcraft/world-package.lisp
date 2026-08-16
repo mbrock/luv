@@ -82,6 +82,7 @@
            #:copy-local-coordinate
            #:do-chunk-domain-face
            #:do-chunk-domain-sites
+           #:do-chunk-window-neighbors
            #:ensure-world-chunk
            #:install-world-chunk-storage
            #:local-coordinate
@@ -116,6 +117,8 @@
            #:voxel-space-decompose-components
            #:voxel-space-id
            #:with-block-content-storage
+           #:with-chunk-domain-step
+           #:with-chunk-window-step
            #:with-world-change-transaction
            #:world-block-at
            #:world-chunk-at

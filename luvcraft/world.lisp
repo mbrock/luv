@@ -329,6 +329,63 @@ coordinates."
                   (chunk-shape-depth shape))
                local-z))))
 
+(defmacro with-chunk-domain-step
+    ((offset destination crossing) domain local direction &body body)
+  "Execute BODY for one primitive step from LOCAL inside DOMAIN.
+
+OFFSET, DESTINATION, and CROSSING are bound as by STEP-CHUNK-DOMAIN-SITE, but
+DESTINATION has dynamic extent and must be copied before BODY retains it.  The
+compiler-visible lifetime keeps rejected adjacency probes off the heap. #E4T0PD"
+  (let ((domain-value (gensym "DOMAIN"))
+        (local-value (gensym "LOCAL"))
+        (direction-value (gensym "DIRECTION"))
+        (shape (gensym "SHAPE"))
+        (width (gensym "WIDTH"))
+        (height (gensym "HEIGHT"))
+        (depth (gensym "DEPTH"))
+        (crossing-x (gensym "CROSSING-X"))
+        (crossing-y (gensym "CROSSING-Y"))
+        (crossing-z (gensym "CROSSING-Z"))
+        (local-x (gensym "LOCAL-X"))
+        (local-y (gensym "LOCAL-Y"))
+        (local-z (gensym "LOCAL-Z")))
+    `(let* ((,domain-value ,domain)
+            (,local-value ,local)
+            (,direction-value ,direction))
+       (check-type ,local-value local-coordinate)
+       (check-type ,direction-value voxel-direction)
+       (chunk-domain-offset ,domain-value ,local-value)
+       (let* ((,shape
+                (voxel-space-chunk-shape
+                 (chunk-domain-space ,domain-value)))
+              (,width (chunk-shape-width ,shape))
+              (,height (chunk-shape-height ,shape))
+              (,depth (chunk-shape-depth ,shape)))
+         (multiple-value-bind (,crossing-x ,local-x)
+             (floor (+ (local-coordinate-x ,local-value)
+                       (voxel-direction-dx ,direction-value))
+                    ,width)
+           (multiple-value-bind (,crossing-y ,local-y)
+               (floor (+ (local-coordinate-y ,local-value)
+                         (voxel-direction-dy ,direction-value))
+                      ,height)
+             (multiple-value-bind (,crossing-z ,local-z)
+                 (floor (+ (local-coordinate-z ,local-value)
+                           (voxel-direction-dz ,direction-value))
+                        ,depth)
+               (let ((,destination
+                       (make-local-coordinate ,local-x ,local-y ,local-z))
+                     (,offset
+                       (+ ,local-x
+                          (* ,width (+ ,local-y (* ,height ,local-z)))))
+                     (,crossing
+                       (and (not (zerop (+ (abs ,crossing-x)
+                                           (abs ,crossing-y)
+                                           (abs ,crossing-z))))
+                            ,direction-value)))
+                 (declare (dynamic-extent ,destination))
+                 ,@body))))))))
+
 (declaim (inline step-chunk-domain-site))
 (defun step-chunk-domain-site (domain local direction)
   "Step from one local site in a primitive face direction.
@@ -336,30 +393,9 @@ coordinates."
 Return the destination OFFSET and wrapped LOCAL-COORDINATE, followed by
 DIRECTION when the step crosses into that adjacent chunk or NIL when it stays
 inside DOMAIN."
-  (check-type local local-coordinate)
-  (check-type direction voxel-direction)
-  (chunk-domain-offset domain local)
-  (let ((shape (voxel-space-chunk-shape (chunk-domain-space domain))))
-    (multiple-value-bind (crossing-x local-x)
-        (floor (+ (local-coordinate-x local)
-                  (voxel-direction-dx direction))
-               (chunk-shape-width shape))
-      (multiple-value-bind (crossing-y local-y)
-          (floor (+ (local-coordinate-y local)
-                    (voxel-direction-dy direction))
-                 (chunk-shape-height shape))
-        (multiple-value-bind (crossing-z local-z)
-            (floor (+ (local-coordinate-z local)
-                      (voxel-direction-dz direction))
-                   (chunk-shape-depth shape))
-          (let ((destination
-                  (make-local-coordinate local-x local-y local-z)))
-            (values (chunk-domain-offset domain destination)
-                    destination
-                    (and (not (zerop (+ (abs crossing-x)
-                                        (abs crossing-y)
-                                        (abs crossing-z))))
-                         direction))))))))
+  (with-chunk-domain-step (offset destination crossing)
+      domain local direction
+    (values offset (copy-local-coordinate destination) crossing)))
 
 (defgeneric locate-chunk-window-site (window x y z)
   (:documentation
@@ -370,6 +406,68 @@ Return (VALUES MATERIALIZATION OFFSET AVAILABILITY).  AVAILABILITY is
 fact rather than making the spatial protocol call absence air, solid, zero,
 or open sky.  Implementations keep their existing aggregate representation."))
 
+(defmacro with-chunk-window-step
+    ((offset destination crossing materialization availability)
+     window domain local direction
+     &body body)
+  "Execute BODY for one DOMAIN step continued through WINDOW when necessary.
+
+DESTINATION has dynamic extent.  MATERIALIZATION and AVAILABILITY are selected
+through LOCATE-CHUNK-WINDOW-SITE only for a boundary crossing. #YUBB7X"
+  (let ((window-value (gensym "WINDOW"))
+        (domain-value (gensym "DOMAIN"))
+        (local-value (gensym "LOCAL"))
+        (direction-value (gensym "DIRECTION"))
+        (local-offset (gensym "LOCAL-OFFSET"))
+        (world-x (gensym "WORLD-X"))
+        (world-y (gensym "WORLD-Y"))
+        (world-z (gensym "WORLD-Z")))
+    `(let ((,window-value ,window)
+           (,domain-value ,domain)
+           (,local-value ,local)
+           (,direction-value ,direction))
+       (with-chunk-domain-step (,local-offset ,destination ,crossing)
+           ,domain-value ,local-value ,direction-value
+         (multiple-value-bind (,materialization ,offset ,availability)
+             (if ,crossing
+                 (multiple-value-bind (,world-x ,world-y ,world-z)
+                     (chunk-domain-world-components
+                      ,domain-value
+                      (local-coordinate-x ,local-value)
+                      (local-coordinate-y ,local-value)
+                      (local-coordinate-z ,local-value))
+                   (locate-chunk-window-site
+                    ,window-value
+                    (+ ,world-x (voxel-direction-dx ,direction-value))
+                    (+ ,world-y (voxel-direction-dy ,direction-value))
+                    (+ ,world-z (voxel-direction-dz ,direction-value))))
+                 (values nil ,local-offset :local))
+           ,@body)))))
+
+(defmacro do-chunk-window-neighbors
+    ((offset destination crossing direction materialization availability
+      window domain local directions &optional result)
+     &body body)
+  "Execute BODY for the DIRECTIONS neighboring LOCAL through WINDOW.
+
+DIRECTIONS is the caller's explicit neighborhood policy.  DESTINATION has
+dynamic extent on each iteration and must be copied before BODY retains it.
+Interior steps remain domain arithmetic; window dispatch occurs only at an
+actual chunk crossing. #E4T0PD"
+  (let ((window-value (gensym "WINDOW"))
+        (domain-value (gensym "DOMAIN"))
+        (local-value (gensym "LOCAL"))
+        (directions-value (gensym "DIRECTIONS")))
+    `(let ((,window-value ,window)
+           (,domain-value ,domain)
+           (,local-value ,local)
+           (,directions-value ,directions))
+       (dolist (,direction ,directions-value ,result)
+         (with-chunk-window-step
+             (,offset ,destination ,crossing ,materialization ,availability)
+             ,window-value ,domain-value ,local-value ,direction
+           ,@body)))))
+
 (defun continue-chunk-window-site (window domain local direction)
   "Step LOCAL and resolve WINDOW only when the step crosses DOMAIN.
 
@@ -378,24 +476,11 @@ STEP-CHUNK-DOMAIN-SITE does, followed by the neighboring MATERIALIZATION and
 its AVAILABILITY.  A local step returns NIL and :LOCAL for the last two values.
 The one generic window decision therefore occurs only at an aggregate
 boundary, never for every site in a dense traversal. #L84JCX"
-  (multiple-value-bind (offset destination crossing)
-      (step-chunk-domain-site domain local direction)
-    (if crossing
-        (multiple-value-bind (world-x world-y world-z)
-            (chunk-domain-world-components
-             domain
-             (local-coordinate-x local)
-             (local-coordinate-y local)
-             (local-coordinate-z local))
-          (multiple-value-bind (materialization located-offset availability)
-              (locate-chunk-window-site
-               window
-               (+ world-x (voxel-direction-dx direction))
-               (+ world-y (voxel-direction-dy direction))
-               (+ world-z (voxel-direction-dz direction)))
-            (values located-offset destination crossing
-                    materialization availability)))
-        (values offset destination nil nil :local))))
+  (with-chunk-window-step
+      (offset destination crossing materialization availability)
+      window domain local direction
+    (values offset (copy-local-coordinate destination) crossing
+            materialization availability)))
 
 (defmacro do-chunk-domain-sites
     ((offset local domain &optional result) &body body)

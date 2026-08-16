@@ -340,36 +340,33 @@ Returns the number of cells visited, for the runtime's work counters."
                (incf visited)
                (let ((level (aref (funcall field-reader entry) offset)))
                  (when (plusp level)
-                   (dolist (direction *voxel-face-directions*)
-                     (multiple-value-bind
-                           (neighbor-offset destination crossing
-                            materialization availability)
-                         (continue-chunk-window-site
-                          region domain local direction)
-                       (declare (ignore crossing))
-                       (let ((neighbor
-                               (ecase availability
-                                 (:local entry)
-                                 (:available materialization)
-                                 (:unavailable nil))))
-                         (when neighbor
-                           (let* ((opacity
-                                    (light-region-opacity
-                                     neighbor neighbor-offset))
-                                  (loss
-                                    (if (and skylight-p
-                                             (eq direction
-                                                 +voxel-negative-y+))
-                                        opacity
-                                        (+ 1 opacity)))
-                                  (candidate (- level loss))
-                                  (levels (funcall field-reader neighbor)))
-                             (when (> candidate
-                                      (aref levels neighbor-offset))
-                               (setf (aref levels neighbor-offset) candidate)
-                               (push (%make-light-region-site
-                                      neighbor destination)
-                                     queue)))))))))))
+                   (do-chunk-window-neighbors
+                       (neighbor-offset destination crossing direction
+                        materialization availability
+                        region domain local *voxel-face-directions*)
+                     (let ((neighbor
+                             (ecase availability
+                               (:local entry)
+                               (:available materialization)
+                               (:unavailable nil))))
+                       (when neighbor
+                         (let* ((opacity
+                                  (light-region-opacity
+                                   neighbor neighbor-offset))
+                                (loss
+                                  (if (and skylight-p
+                                           (eq direction
+                                               +voxel-negative-y+))
+                                      opacity
+                                      (+ 1 opacity)))
+                                (candidate (- level loss))
+                                (levels (funcall field-reader neighbor)))
+                           (when (> candidate
+                                    (aref levels neighbor-offset))
+                             (setf (aref levels neighbor-offset) candidate)
+                             (push (retain-light-region-site
+                                    neighbor destination)
+                                   queue))))))))))
     visited))
 
 (defun light-region-neighbor-resident-p (region coordinate direction)
@@ -589,35 +586,35 @@ removal steps performed."
                     (domain (light-region-entry-domain entry))
                     (level (light-removal-level removal)))
                (incf visited)
-               (dolist (direction *voxel-face-directions*)
-                 (multiple-value-bind
-                       (offset destination crossing materialization availability)
-                     (continue-chunk-window-site region domain local direction)
-                   (declare (ignore crossing))
-                   (let ((neighbor
-                           (ecase availability
-                             (:local entry)
-                             (:available materialization)
-                             (:unavailable nil))))
-                     (when neighbor
-                       (let* ((levels (funcall field-reader neighbor))
-                              (value (aref levels offset)))
-                         (when (plusp value)
-                           (if (or (< value level)
-                                   (and skylight-p
-                                        (eq direction +voxel-negative-y+)
-                                        (= value level)))
-                               (let ((coordinate
-                                       (chunk-domain-world-coordinate
-                                        (light-region-entry-domain neighbor)
-                                        destination)))
-                                 (setf (aref levels offset) 0
-                                       (gethash coordinate removed) t)
-                                 (enqueue-light-removal
-                                  queue neighbor destination value))
-                               (push (%make-light-region-site
-                                      neighbor destination)
-                                     sources))))))))))
+               (do-chunk-window-neighbors
+                   (offset destination crossing direction
+                    materialization availability
+                    region domain local *voxel-face-directions*)
+                 (let ((neighbor
+                         (ecase availability
+                           (:local entry)
+                           (:available materialization)
+                           (:unavailable nil))))
+                   (when neighbor
+                     (let* ((levels (funcall field-reader neighbor))
+                            (value (aref levels offset)))
+                       (when (plusp value)
+                         (if (or (< value level)
+                                 (and skylight-p
+                                      (eq direction +voxel-negative-y+)
+                                      (= value level)))
+                             (let ((coordinate
+                                     (chunk-domain-world-coordinate
+                                      (light-region-entry-domain neighbor)
+                                      destination)))
+                               (setf (aref levels offset) 0
+                                     (gethash coordinate removed) t)
+                               (enqueue-light-removal
+                                queue neighbor
+                                (copy-local-coordinate destination) value))
+                             (push (retain-light-region-site
+                                    neighbor destination)
+                                   sources)))))))))
     (values sources visited)))
 
 (defun reseed-cell-open-boundaries (region coordinate enqueue)
@@ -630,8 +627,8 @@ removal steps performed."
              (local (chunk-domain-local-coordinate domain offset)))
         (declare (dynamic-extent local))
         (dolist (direction *voxel-face-directions*)
-          (multiple-value-bind (neighbor-offset neighbor crossing)
-              (step-chunk-domain-site domain local direction)
+          (with-chunk-domain-step (neighbor-offset neighbor crossing)
+              domain local direction
             (declare (ignore neighbor-offset neighbor))
             (when (and crossing
                        (not (light-region-neighbor-resident-p

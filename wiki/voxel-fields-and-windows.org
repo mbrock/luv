@@ -192,6 +192,15 @@ indefinite-extent coordinate, while a loop-local coordinate can have dynamic
 extent.  Compiler-visible iteration macros can provide the latter without a
 heap allocation or a per-cell call across a compilation-unit boundary.
 
+That requirement applies to adjacency as well as whole-domain and face
+iteration.  A function which returns a fresh neighboring coordinate has to
+give it indefinite extent before its caller can decide whether to retain it.
+The useful hot-path shape is therefore a macro which binds one dynamic-extent
+destination around the consumer body; only a consumer which actually enqueues
+the destination copies it.  Crossing arithmetic remains the domain's job,
+window lookup still occurs only for a crossing, and the caller still supplies
+the neighborhood policy.
+
 * Coordinate values can be stack-temporary
 :PROPERTIES:
 :ID: B3UEVE
@@ -755,6 +764,68 @@ boundary-lookup invariant, not a latency win.  The focused luvcraft suite
 passes 58 tests, strict parinfer accepts every touched Lisp file, and a smoke
 capture from the production SLY image remains byte-identical at
 =edc597168a3ec79a04c6d2af53c5b1a5=.
+
+* DONE Keep rejected neighbors at dynamic extent
+:PROPERTIES:
+:ID: KRU4RZ
+:END:
+
+Intent: make the lifetime distinction in #E4T0PD visible to SBCL while
+preserving the chunk-domain and chunk-window boundaries from #L84JCX.  A
+six-neighbor visit should use one body-scoped destination at a time and copy a
+coordinate only when the algorithm retains that destination.
+
+Evidence: =with-chunk-domain-step= exposes local stepping without returning its
+temporary, =with-chunk-window-step= adds crossing-only window resolution, and
+=do-chunk-window-neighbors= takes an explicit direction sequence.  The lighting
+addition and removal paths now retain a destination only when they enqueue it;
+boundary reseeding uses the same body-scoped step.  The old
+=step-chunk-domain-site= and =continue-chunk-window-site= functions remain as
+colder adapters which deliberately copy their result.
+
+On SBCL 2.6.6, the fixed seed-121 81-chunk solve still performs exactly
+2,430,167 worklist visits.  Before this change it took about 1.79 seconds and
+consed 863.6 MB; three post-change solves each took 1.23 seconds and consed
+264.1--264.2 MB.  Thus rejected adjacency coordinates accounted for roughly
+600 MB and a third of this fixture's elapsed time, without accounting for any
+of the repeated fixed-point work.
+
+Done when: interior visits perform no window lookup, one-face visits perform
+one lookup, explicit copies survive subsequent iterations, lighting results
+remain unchanged, and the full test and deterministic smoke evidence pass.
+The complete =make test= path passes, including SPIR-V validation and all luv,
+luvcraft, and wiki suites.  Two standalone smoke builds produced the identical
+SHA-256
+=0c85d4550638418cb88d507c6541a49147aeeea5697175d13904942b65a689ec=.
+
+* NEXT Pack the lighting worklist, then test level scheduling
+:PROPERTIES:
+:ID: QS1ERH
+:END:
+
+Intent: remove the retained frontier's per-item list cell, =light-region-site=,
+and copied =local-coordinate= without prematurely extracting the general
+fixed-point algebra discussed in #BA9MCA.  Represent a lighting site densely as
+a region entry plus domain offset, while iteration reconstructs only a
+dynamic-extent local value.
+
+Evidence to gather:
+
+- first preserve the current LIFO order in a reusable array-backed worklist so
+  representation cost is measured independently of scheduling;
+- account for bytes per pushed and popped site and confirm that frontier
+  growth, reuse, and emptying do not retain obsolete entries;
+- then compare the same fixture with sixteen level buckets, consuming higher
+  propagation levels first, to learn whether scheduling lowers the current
+  7.32 visits per resident cell; and
+- exercise from-scratch sky and block propagation plus incremental removal and
+  reseeding, including cross-chunk and unavailable boundaries.
+
+Done when: lighting frontiers allocate no coordinate structure or cons per
+item, the unchanged-order variant isolates that allocation win, the scheduling
+experiment records both visits and elapsed time, and tests establish identical
+published light fields.  A reusable solver protocol still waits for a second
+real client as in #BA9MCA.
 
 * DONE Attach existing voxel field definitions
 :PROPERTIES:

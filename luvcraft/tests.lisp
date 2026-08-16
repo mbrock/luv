@@ -248,6 +248,37 @@
       (ok (eq availability :available))
       (ok (equal (recording-window-locations window) '((2 0 0)))))))
 
+(deftest chunk-window-neighbor-iteration-retains-only-explicit-copies
+  (let* ((space (make-voxel-space
+                 :chunk-shape
+                 (make-chunk-shape :width 3 :height 3 :depth 3)))
+         (domain (make-chunk-domain space (make-chunk-coordinate 0 0 0)))
+         (window (make-instance 'recording-chunk-window))
+         (neighbors nil))
+    (do-chunk-window-neighbors
+        (offset destination crossing direction materialization availability
+         window domain (make-local-coordinate 1 1 1)
+         *voxel-face-directions*)
+      (ok (eq availability :local))
+      (push (list offset (copy-local-coordinate destination)) neighbors))
+    (ok (= (length neighbors) 6))
+    (dolist (expected (list (make-local-coordinate 0 1 1)
+                            (make-local-coordinate 2 1 1)
+                            (make-local-coordinate 1 0 1)
+                            (make-local-coordinate 1 2 1)
+                            (make-local-coordinate 1 1 0)
+                            (make-local-coordinate 1 1 2)))
+      (ok (find expected neighbors :key #'second :test #'equalp)))
+    (ok (null (recording-window-locations window)))
+    (setf neighbors nil)
+    (do-chunk-window-neighbors
+        (offset destination crossing direction materialization availability
+         window domain (make-local-coordinate 0 1 1)
+         *voxel-face-directions*)
+      (when crossing (push crossing neighbors)))
+    (ok (equal neighbors (list +voxel-negative-x+)))
+    (ok (equal (recording-window-locations window) '((-1 1 1))))))
+
 (deftest current-meshing-windows-share-location-availability
   (let* ((world (make-block-world :chunk-width 2
                                   :chunk-height 2
