@@ -287,6 +287,30 @@
              call-environment)))
       `(let* ,(nreverse lambda-bindings) ,result))))
 
+(defmethod lower-lisp-arithmetic-expression
+    ((expression lang:arithmetic-counted-fold) environment)
+  (let* ((index-name (gensym "INDEX-"))
+         (state-name (gensym "STATE-"))
+         (count
+           (lower-lisp-arithmetic-expression
+            (lang:arithmetic-counted-fold-count expression) environment))
+         (initial
+           (lower-lisp-arithmetic-expression
+            (lang:arithmetic-counted-fold-initial expression) environment))
+         (fold-environment
+           (list* (cons (lang:arithmetic-counted-fold-index-binding expression)
+                        index-name)
+                  (cons (lang:arithmetic-counted-fold-state-binding expression)
+                        state-name)
+                  environment))
+         (update
+           (lower-lisp-arithmetic-expression
+            (lang:arithmetic-counted-fold-update expression)
+            fold-environment)))
+    `(let ((,state-name ,initial))
+       (dotimes (,index-name ,count ,state-name)
+         (setf ,state-name ,update)))))
+
 (defun arithmetic-definition-for-lisp (name)
   (or (lang:arithmetic-function-definition-for name)
       (error 'lisp-arithmetic-error

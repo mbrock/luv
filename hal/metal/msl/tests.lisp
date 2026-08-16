@@ -161,6 +161,24 @@
     (ok (search "sqrt(" source))
     (ok (search "result.color_output" source))))
 
+(deftest counted-fold-lowers-to-a-direct-metal-loop
+  (let* ((specification
+           (spv:parse-shader-specification
+            'metal-fold-probe
+            '(:stage :fragment
+              :inputs ((count :float :location 0))
+              :outputs ((result :float :location 0)))
+            '((spv:set-output result
+                              (spv:counted-fold
+                                  (index count sum 0.0)
+                                (+ sum index))))))
+         (source
+           (msl:msl-document-source (msl:compile-msl specification))))
+    (ok (search "float fold_state_1 = 0.0f;" source))
+    (ok (search "for (float fold_index_1 = 0.0f;" source))
+    (ok (search "fold_state_1 = (fold_state_1 + fold_index_1);" source))
+    (ok (search "result.result = fold_state_1;" source))))
+
 (deftest unsupported-msl-boundaries-retain-source-reasons
   (flet ((reason-for (specification)
            (handler-case

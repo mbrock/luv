@@ -273,7 +273,7 @@ structured blocks and phi values; MSL realizes it as an ordinary loop.  The
 source object should say what the loop computes, not encode either target's
 control-flow machinery.
 
-* NEXT Share function application across arithmetic and shader realizations
+* DONE Share function application across arithmetic and shader realizations
 :PROPERTIES:
 :ID: YZS04W
 :END:
@@ -292,6 +292,25 @@ Done when: there is one source definition for each eligibility calculation,
 both CPU and shader call graphs contain an inspectable application object, live
 redefinition is observed by fresh realizations, and the old independent shader
 definition is unnecessary for these portable functions.
+
+The resulting =arithmetic-function-source= and
+=arithmetic-function-call= objects now own this shared meaning.  Ordinary Lisp
+lowers applications to lexical =let*= forms; shader parsing specializes the
+same source against represented values and emits the existing typed call
+provenance.  The Slug root-eligibility helpers are
+=define-lisp-arithmetic-function= definitions used directly by both the CPU
+table oracle and the pixel shader.  Publishing shared source also retires a
+stale shader-only definition of the same name and advances the live shader
+source revision.
+
+The first shared control-flow node follows the same rule.  =counted-fold=
+carries one arbitrary state value through a runtime count.  The Lisp target
+emits =dotimes=, direct Metal emits a local and =for= loop, and SPIR-V emits
+header/body/continue/merge blocks with =OpPhi= and =OpLoopMerge=.  The generated
+module passes =spirv-val= and the generated Metal 4 source compiles with the
+Metal compiler.  One vector state is enough to carry Slug's four coverage and
+weight accumulators without making multiple assignment part of the portable
+core.
 
 * Semantic maps are not merely matrix-shaped values
 :PROPERTIES:

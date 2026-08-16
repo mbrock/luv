@@ -1,7 +1,8 @@
 (defpackage #:luv.msl
   (:use #:cl)
   (:local-nicknames (#:math #:luv.arithmetic)
-                    (#:spv #:luv.spir-v))
+                    (#:spv #:luv.spir-v)
+                    (#:lang #:luv.arithmetic.language))
   (:documentation
    "Structured Metal Shading Language lowering for luv's shader graph.")
   (:export #:msl-target

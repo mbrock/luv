@@ -4,7 +4,7 @@
                     (#:math #:luv.arithmetic))
   (:import-from #:luv.arithmetic #:clamp)
   (:import-from #:luv.arithmetic.language
-                #:quantity #:interpret #:convert-unit))
+                #:quantity #:interpret #:convert-unit #:counted-fold))
 
 (in-package #:luv/arithmetic/language/tests)
 
@@ -26,6 +26,10 @@
 
 (lang:define-arithmetic-function composed-arithmetic ((value))
   (+ (square-offset value) 2.0))
+
+(lang:define-arithmetic-function triangular-number ((count))
+  (counted-fold (index count sum 0)
+    (+ sum index)))
 
 (deftest arithmetic-functions-retain-checked-source-graphs
   (let* ((definition (lang:arithmetic-function-definition-for 'fog-shape))
@@ -89,6 +93,20 @@
                 nil)
             (lang:arithmetic-language-error (condition)
               (lang:arithmetic-language-error-reason condition))))))
+
+(deftest counted-fold-is-shared-inspectable-control-flow
+  (let ((fold
+          (lang:arithmetic-function-result
+           (lang:arithmetic-function-definition-for 'triangular-number))))
+    (ok (typep fold 'lang:arithmetic-counted-fold))
+    (ok (eq 'index
+            (lang:arithmetic-object-name
+             (lang:arithmetic-counted-fold-index-binding fold))))
+    (ok (eq 'sum
+            (lang:arithmetic-object-name
+             (lang:arithmetic-counted-fold-state-binding fold))))
+    (ok (equal '(counted-fold (index count sum 0) (+ sum index))
+               (lang:arithmetic-expression-form fold)))))
 
 (deftest arithmetic-parameters-implement-the-common-declaration-protocol
   (let* ((definition (lang:arithmetic-function-definition-for 'fog-shape))

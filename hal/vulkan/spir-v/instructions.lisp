@@ -248,6 +248,7 @@
   (:operands :id :literal (:enum decoration) :literal))
 
 (define-instruction type-void () (:opcode 19) (:result :id))
+(define-instruction type-bool () (:opcode 20) (:result :id))
 (define-instruction type-int (width signedness)
   (:opcode 21) (:result :id) (:operands :literal :literal))
 (define-instruction type-float (width)
@@ -309,6 +310,8 @@
   (dot 148)
   (shift-right-logical 194)
   (bitwise-and 199))
+(define-instruction f-ord-less-than (left right)
+  (:opcode 184) (:result :typed) (:operands :id :id))
 (define-instruction vector-times-scalar (vector scalar)
   (:opcode 142)
   (:result :typed)
@@ -318,7 +321,16 @@
   (:result :typed)
   (:operands (:enum function-control) :id))
 (define-instruction function-end () (:opcode 56))
+(define-instruction phi (&rest pairs)
+  (:opcode 245) (:result :typed) (:operands :id))
+(define-instruction loop-merge (merge-block continue-target loop-control)
+  (:opcode 246)
+  (:operands :id :id (:enum loop-control)))
 (define-instruction label () (:opcode 248) (:result :id))
+(define-instruction branch (target)
+  (:opcode 249) (:operands :id))
+(define-instruction branch-conditional (condition true-label false-label)
+  (:opcode 250) (:operands :id :id :id))
 (define-instruction return () (:opcode 253))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
@@ -343,6 +355,7 @@
 (define-enumeration execution-mode
   (origin-upper-left 7)
   (local-size 17))
+(define-enumeration loop-control (none 0))
 (define-enumeration decoration
   (block 2)
   (built-in 11)

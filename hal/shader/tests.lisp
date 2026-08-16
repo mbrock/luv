@@ -9,7 +9,8 @@
                       "VEC2" "VEC3" "VEC4" "SWIZZLE" "CLAMP"
                       "SMOOTHSTEP" "NORMALIZE" "QUANTITY"
                       "ASSUME-QUANTITY" "INTERPRET" "REPRESENTATION"
-                      "CONVERT-UNIT" "PROJECT-POINT" "SET-OUTPUT"))
+                      "CONVERT-UNIT" "PROJECT-POINT" "COUNTED-FOLD"
+                      "SET-OUTPUT"))
         (multiple-value-bind (present status) (find-symbol name package)
           (let ((current (find-symbol name shader-package)))
             (when (and (member status '(:internal :external))
@@ -30,7 +31,7 @@
                 #:vec2 #:vec3 #:vec4 #:swizzle
                 #:clamp #:smoothstep #:normalize
                 #:quantity #:assume-quantity #:interpret #:representation
-                #:convert-unit #:project-point
+                #:convert-unit #:project-point #:counted-fold
                 #:set-output))
 
 (in-package #:luv/spir-v/tests)
@@ -76,6 +77,10 @@
 (lang:define-arithmetic-function shared-shader-function-probe ((value))
   (let* ((shifted (+ value 0.25)))
     (* shifted shifted)))
+
+(lang:define-arithmetic-function shared-fold-probe ((count))
+  (counted-fold (index count sum 0.0)
+    (+ sum index)))
 
 (spv:define-shader-method shader-method-probe shader-method-probe
     ((role (eql :probe)) (stage (eql :fragment)))
@@ -1404,6 +1409,25 @@
              'shared-source-migration-probe)))
   (ok (lang:arithmetic-function-definition-for
        'shared-source-migration-probe)))
+
+(deftest shared-counted-fold-lowers-to-structured-spir-v
+  (let* ((specification
+           (spv:parse-shader-specification
+            'fold-fragment
+            '(:stage :fragment
+              :inputs ((count :float :location 0))
+              :outputs ((result :float :location 0)))
+            '((set-output result (shared-fold-probe count)))))
+         (names
+           (mapcar #'spv:instruction-name
+                   (spv:lower-spir-v
+                    (spv:shader-module specification)))))
+    (ok (find "PHI" names :key #'symbol-name :test #'string=))
+    (ok (find "LOOP-MERGE" names :key #'symbol-name :test #'string=))
+    (ok (find "BRANCH-CONDITIONAL" names
+              :key #'symbol-name :test #'string=))
+    (ok (= #x07230203
+           (aref (spv:assemble-shader-specification specification) 0)))))
 
 (deftest slug-proof-is-a-pixel-shader-over-quadratic-roots
   (let* ((vertex (slug:slug-bezier-vertex-specification))

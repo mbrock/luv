@@ -306,6 +306,25 @@
   (:documentation
    "One inspectable application of shared function source to checked values."))
 
+(defclass arithmetic-counted-fold (arithmetic-expression)
+  ((count
+    :initarg :count
+    :reader arithmetic-counted-fold-count)
+   (initial
+    :initarg :initial
+    :reader arithmetic-counted-fold-initial)
+   (index-binding
+    :initarg :index-binding
+    :reader arithmetic-counted-fold-index-binding)
+   (state-binding
+    :initarg :state-binding
+    :reader arithmetic-counted-fold-state-binding)
+   (update
+    :initarg :update
+    :reader arithmetic-counted-fold-update))
+  (:documentation
+   "A bounded value-producing fold over an index and one carried state."))
+
 (defmethod arithmetic-expression-quantity-checked-p
     ((expression arithmetic-function-call))
   (arithmetic-expression-quantity-checked-p
@@ -321,6 +340,20 @@
    (mapcar #'arithmetic-binding-expression
            (arithmetic-function-call-bindings expression))
    (list (arithmetic-function-call-result expression))))
+
+(defmethod arithmetic-expression-quantity-checked-p
+    ((expression arithmetic-counted-fold))
+  (arithmetic-expression-quantity-checked-p
+   (arithmetic-counted-fold-initial expression)))
+
+(defmethod arithmetic-expression-form ((expression arithmetic-counted-fold))
+  (arithmetic-expression-source-form expression))
+
+(defmethod arithmetic-expression-children
+    ((expression arithmetic-counted-fold))
+  (list (arithmetic-counted-fold-count expression)
+        (arithmetic-counted-fold-initial expression)
+        (arithmetic-counted-fold-update expression)))
 
 (defgeneric arithmetic-function-definition-for (name)
   (:documentation "Return the live arithmetic definition named by NAME, or NIL."))
@@ -561,12 +594,78 @@
                          :quantity-specification target
                          :source-form form))))))
 
+(defun arithmetic-state-compatible-p (left right)
+  (or (not (or (arithmetic-expression-quantity-checked-p left)
+               (arithmetic-expression-quantity-checked-p right)))
+      (and (let ((left-specification
+                   (arithmetic-expression-quantity-specification left))
+                 (right-specification
+                   (arithmetic-expression-quantity-specification right)))
+             (or (and (null left-specification) (null right-specification))
+                 (and left-specification right-specification
+                      (math:quantity-specification=
+                       left-specification right-specification))))
+           (let ((left-layout (arithmetic-expression-quantity-layout left))
+                 (right-layout (arithmetic-expression-quantity-layout right)))
+             (or (and (null left-layout) (null right-layout))
+                 (and left-layout right-layout
+                      (math:quantity-layout= left-layout right-layout)))))))
+
+(defun parse-arithmetic-counted-fold (form environment)
+  (unless (and (= (length form) 3)
+               (consp (second form))
+               (= (length (second form)) 4))
+    (error 'arithmetic-language-error
+           :form form :reason :invalid-counted-fold))
+  (destructuring-bind (operator (index-name count-form state-name initial-form)
+                       update-form)
+      form
+    (declare (ignore operator))
+    (unless (and (symbolp index-name) (symbolp state-name)
+                 (not (eq index-name state-name)))
+      (error 'arithmetic-language-error
+             :form form :reason :invalid-counted-fold-bindings))
+    (let* ((count (parse-arithmetic-expression count-form environment))
+           (initial (parse-arithmetic-expression initial-form environment))
+           (index-binding
+             (make-instance 'arithmetic-binding
+                            :name index-name
+                            :expression
+                            (parse-arithmetic-expression 0 environment)
+                            :source-form (list index-name 0)))
+           (state-binding
+             (make-instance 'arithmetic-binding
+                            :name state-name :expression initial
+                            :source-form (list state-name initial-form)))
+           (fold-environment
+             (list* (cons index-name index-binding)
+                    (cons state-name state-binding)
+                    environment))
+           (update
+             (parse-arithmetic-expression update-form fold-environment)))
+      (unless (arithmetic-state-compatible-p initial update)
+        (error 'arithmetic-language-error
+               :form form :reason :counted-fold-state-mismatch
+               :details (list (arithmetic-expression-form initial)
+                              (arithmetic-expression-form update))))
+      (make-instance
+       'arithmetic-counted-fold
+       :count count :initial initial
+       :index-binding index-binding :state-binding state-binding
+       :update update
+       :quantity-specification
+       (arithmetic-expression-quantity-specification initial)
+       :quantity-layout (arithmetic-expression-quantity-layout initial)
+       :source-form form))))
+
 (defun parse-arithmetic-call (form environment)
   (let* ((operator (first form))
          (function
            (and (symbolp operator)
                 (arithmetic-function-definition-for operator))))
-    (cond ((arithmetic-operator-p operator)
+    (cond ((eq operator 'counted-fold)
+           (parse-arithmetic-counted-fold form environment))
+          ((arithmetic-operator-p operator)
            (parse-arithmetic-operator-call operator form environment))
           (function
            (parse-arithmetic-function-call function form environment))

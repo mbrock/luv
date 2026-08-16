@@ -7,7 +7,7 @@
     (when package
       (dolist (name '("CLAMP" "MIX" "SMOOTHSTEP" "STEP" "NORMALIZE"
                       "QUANTITY" "ASSUME-QUANTITY" "INTERPRET"
-                      "REPRESENTATION" "CONVERT-UNIT"))
+                      "REPRESENTATION" "CONVERT-UNIT" "COUNTED-FOLD"))
         (multiple-value-bind (symbol status) (find-symbol name package)
           (when (and (member status '(:internal :external))
                      (eq (symbol-package symbol) package))
@@ -20,7 +20,7 @@
                 #:dot #:clamp #:mix #:smoothstep #:normalize)
   (:import-from #:luv.arithmetic.language
                 #:quantity #:assume-quantity #:interpret #:representation
-                #:convert-unit)
+                #:convert-unit #:counted-fold)
   (:shadowing-import-from #:luv.arithmetic #:step)
   (:local-nicknames (#:math #:luv.arithmetic)
                     (#:lang #:luv.arithmetic.language))
@@ -155,6 +155,7 @@
            #:shader-function-call-arguments
            #:shader-function-call-bindings
            #:shader-function-call-result
+           #:shader-counted-fold
            #:shader-map-application
            #:shader-map-application-definition
            #:shader-map-application-point
@@ -193,6 +194,7 @@
            #:representation
            #:project-point
            #:convert-unit
+           #:counted-fold
            #:set-output
            #:shader-operator
            #:define-shader-operator

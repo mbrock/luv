@@ -63,6 +63,17 @@
   (:documentation
    "One output assignment retaining its semantic shader assignment."))
 
+(defclass msl-counted-fold-statement ()
+  ((type :initarg :type :reader msl-counted-fold-statement-type)
+   (state-name
+    :initarg :state-name :reader msl-counted-fold-statement-state-name)
+   (initial :initarg :initial :reader msl-counted-fold-statement-initial)
+   (index-name
+    :initarg :index-name :reader msl-counted-fold-statement-index-name)
+   (count :initarg :count :reader msl-counted-fold-statement-count)
+   (update :initarg :update :reader msl-counted-fold-statement-update)
+   (origin :initarg :origin :reader msl-counted-fold-statement-origin)))
+
 (defclass msl-entry-point ()
   ((stage :initarg :stage :reader msl-entry-point-stage)
    (return-type :initarg :return-type :reader msl-entry-point-return-type)
@@ -94,7 +105,14 @@
     :reader msl-context-expression-occurrences)
    (occurrence-expression
     :initform (make-hash-table :test #'eq)
-    :reader msl-context-occurrence-expression)))
+    :reader msl-context-occurrence-expression)
+   (pending-statements
+    :initform nil :accessor msl-context-pending-statements)
+   (fold-counter :initform 0 :accessor msl-context-fold-counter)))
+
+(defun drain-msl-pending-statements (context)
+  (prog1 (msl-context-pending-statements context)
+    (setf (msl-context-pending-statements context) nil)))
 
 (defun msl-identifier (name)
   (let ((text (string-downcase (string name))))
@@ -372,6 +390,54 @@
           (lower-msl-expression
            context (spv:shader-function-call-result expression))))
     (note-msl-occurrence context expression (msl-occurrence-text result))))
+
+(defmethod lower-msl-expression
+    ((context msl-lowering-context) (expression spv:shader-counted-fold))
+  (let* ((ordinal (incf (msl-context-fold-counter context)))
+         (state-name (format nil "fold_state_~D" ordinal))
+         (index-name (format nil "fold_index_~D" ordinal))
+         (count
+           (lower-msl-expression
+            context (lang:arithmetic-counted-fold-count expression)))
+         (initial
+           (lower-msl-expression
+            context (lang:arithmetic-counted-fold-initial expression)))
+         (index-binding
+           (lang:arithmetic-counted-fold-index-binding expression))
+         (state-binding
+           (lang:arithmetic-counted-fold-state-binding expression)))
+    (multiple-value-bind (old-index old-index-p)
+        (gethash index-binding (msl-context-references context))
+      (multiple-value-bind (old-state old-state-p)
+          (gethash state-binding (msl-context-references context))
+        (setf (gethash index-binding (msl-context-references context))
+              index-name
+              (gethash state-binding (msl-context-references context))
+              state-name)
+        (let ((update
+                (lower-msl-expression
+                 context (lang:arithmetic-counted-fold-update expression))))
+          (setf (msl-context-pending-statements context)
+                (nconc (msl-context-pending-statements context)
+                       (list
+                        (make-instance
+                         'msl-counted-fold-statement
+                         :type (msl-type-name
+                                (spv:shader-expression-type expression))
+                         :state-name state-name :initial initial
+                         :index-name index-name :count count
+                         :update update :origin expression))))
+          (if old-index-p
+              (setf (gethash index-binding
+                             (msl-context-references context))
+                    old-index)
+              (remhash index-binding (msl-context-references context)))
+          (if old-state-p
+              (setf (gethash state-binding
+                             (msl-context-references context))
+                    old-state)
+              (remhash state-binding (msl-context-references context))))))
+    (note-msl-occurrence context expression state-name)))
 
 (defgeneric lower-msl-shader-map-application
     (definition context application)
@@ -775,6 +841,23 @@
     (format stream "  result.~A = ~A;~%"
             (msl-output-statement-field statement) text)))
 
+(defmethod write-msl-statement
+    ((statement msl-counted-fold-statement) stream)
+  (format stream "  ~A ~A = ~A;~%"
+          (msl-counted-fold-statement-type statement)
+          (msl-counted-fold-statement-state-name statement)
+          (msl-occurrence-text
+           (msl-counted-fold-statement-initial statement)))
+  (format stream "  for (float ~A = 0.0f; ~A < ~A; ~A += 1.0f) {~%"
+          (msl-counted-fold-statement-index-name statement)
+          (msl-counted-fold-statement-index-name statement)
+          (msl-occurrence-text (msl-counted-fold-statement-count statement))
+          (msl-counted-fold-statement-index-name statement))
+  (format stream "    ~A = ~A;~%  }~%"
+          (msl-counted-fold-statement-state-name statement)
+          (msl-occurrence-text
+           (msl-counted-fold-statement-update statement))))
+
 (defun msl-stage-qualifier (stage)
   (ecase stage
     (:vertex "vertex")
@@ -857,6 +940,8 @@ This is the sibling target proof described by #58IDSR."
       (let ((expression (spv:shader-binding-expression binding)))
         (let* ((name (msl-identifier (spv:shader-object-name binding)))
                (value (lower-msl-expression context expression)))
+          (dolist (pending (drain-msl-pending-statements context))
+            (push pending statements))
           (setf (gethash binding (msl-context-references context)) name)
           (push (make-instance
                  'msl-variable-statement
@@ -866,15 +951,17 @@ This is the sibling target proof described by #58IDSR."
                  :name name :value value :origin binding)
                 statements))))
     (dolist (statement (spv:shader-specification-statements specification))
-      (push (make-instance
-             'msl-output-statement
-             :field (msl-identifier
-                     (spv:shader-object-name
-                      (spv:shader-assignment-output statement)))
-             :value (lower-msl-expression
-                     context (spv:shader-assignment-value statement))
-             :origin statement)
-            statements))
+      (let ((value (lower-msl-expression
+                    context (spv:shader-assignment-value statement))))
+        (dolist (pending (drain-msl-pending-statements context))
+          (push pending statements))
+        (push (make-instance
+               'msl-output-statement
+               :field (msl-identifier
+                       (spv:shader-object-name
+                        (spv:shader-assignment-output statement)))
+               :value value :origin statement)
+              statements)))
     (maphash (lambda (expression occurrences)
                (setf (gethash expression
                               (msl-context-expression-occurrences context))

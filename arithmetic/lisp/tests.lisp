@@ -5,7 +5,7 @@
                     (#:math #:luv.arithmetic))
   (:import-from #:luv.arithmetic #:dot #:clamp)
   (:import-from #:luv.arithmetic.language
-                #:quantity #:interpret #:convert-unit))
+                #:quantity #:interpret #:convert-unit #:counted-fold))
 
 (in-package #:luv/arithmetic/lisp/tests)
 
@@ -47,6 +47,10 @@
 (lisp:define-lisp-arithmetic-function twice-offset-square ((value))
   (+ (offset-square value) (offset-square value)))
 
+(lisp:define-lisp-arithmetic-function cpu-triangular-number ((count))
+  (counted-fold (index count sum 0)
+    (+ sum index)))
+
 (defun tree-contains-any-object-p (tree objects)
   (cond ((atom tree) (member tree objects :test #'eql))
         ((consp tree)
@@ -78,6 +82,15 @@
     (ok (tree-contains-any-object-p lambda-expression '(let*)))
     (ok (not (tree-contains-any-object-p
               lambda-expression '(offset-square))))))
+
+(deftest counted-fold-lowers-to-an-ordinary-lisp-loop
+  (let ((lambda-expression
+          (lisp:lower-arithmetic-function 'cpu-triangular-number)))
+    (ok (= 10 (cpu-triangular-number 5)))
+    (ok (= 45 (funcall (lisp:compile-arithmetic-function
+                        'cpu-triangular-number)
+                       10)))
+    (ok (tree-contains-any-object-p lambda-expression '(dotimes)))))
 
 (deftest ordinary-vectors-execute-without-semantic-wrappers
   (let ((add (lisp:compile-arithmetic-function 'add-vectors))

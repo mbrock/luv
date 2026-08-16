@@ -59,6 +59,13 @@
            #:arithmetic-function-call-arguments
            #:arithmetic-function-call-bindings
            #:arithmetic-function-call-result
+           #:arithmetic-counted-fold
+           #:arithmetic-counted-fold-count
+           #:arithmetic-counted-fold-initial
+           #:arithmetic-counted-fold-index-binding
+           #:arithmetic-counted-fold-state-binding
+           #:arithmetic-counted-fold-update
+           #:arithmetic-state-compatible-p
            #:arithmetic-function-expressions
            #:arithmetic-function-definition-for
            #:note-arithmetic-function-redefinition
@@ -74,4 +81,5 @@
            #:assume-quantity
            #:interpret
            #:representation
-           #:convert-unit))
+           #:convert-unit
+           #:counted-fold))

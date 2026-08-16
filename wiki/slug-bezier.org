@@ -306,6 +306,15 @@ realization over a small curve array, lower the same body to valid MSL and
 SPIR-V structured control flow, and keep the current fixed shader as the pixel
 oracle.
 
+The neutral loop skeleton is now present: =counted-fold= accepts a runtime
+count and one carried scalar or vector state, executes as =dotimes= on the CPU,
+as an ordinary =for= loop in direct Metal, and as validated structured SPIR-V
+with phi-carried index and state.  The remaining work in this mark is the
+Slug-shaped data boundary: integer/index representations, exact curve loads,
+conditional accumulation, and the sorted-coordinate early exit.  Those needs
+now extend one shared fold rather than motivating a shader-only control
+language.
+
 Done when: a runtime curve count rather than source unrolling controls the
 number of evaluated quadratics; CPU and GPU results agree at edge,
 shared-endpoint, empty-band, and early-exit cases; and source/lowering tools

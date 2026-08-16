@@ -402,6 +402,12 @@ leaves it again while retaining the semantic operand in the expression graph."))
   (:documentation
    "An inspectable typed call whose body is inlined during backend lowering."))
 
+(defclass shader-counted-fold
+    (shader-expression lang:arithmetic-counted-fold)
+  ()
+  (:documentation
+   "A typed bounded fold lowered as structured target control flow."))
+
 (defgeneric shader-function-call-definition (call))
 
 (defmethod shader-function-call-definition ((call shader-function-call))
@@ -532,6 +538,11 @@ leaves it again while retaining the semantic operand in the expression graph."))
   (shader-expression-quantity-checked-p
    (shader-function-call-result expression)))
 
+(defmethod shader-expression-quantity-checked-p
+    ((expression shader-counted-fold))
+  (shader-expression-quantity-checked-p
+   (lang:arithmetic-counted-fold-initial expression)))
+
 (defmethod lang:arithmetic-expression-quantity-checked-p
     ((expression shader-function-call))
   (shader-expression-quantity-checked-p
@@ -613,6 +624,9 @@ leaves it again while retaining the semantic operand in the expression graph."))
   (lang:arithmetic-expression-form expression))
 
 (defmethod shader-expression-form ((expression shader-function-call))
+  (shader-expression-source-form expression))
+
+(defmethod shader-expression-form ((expression shader-counted-fold))
   (shader-expression-source-form expression))
 
 (defmethod shader-expression-form ((expression shader-map-application))
@@ -1568,13 +1582,66 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
            :quantity-layout (shader-expression-quantity-layout result)
            :source-form form))))))
 
+(defun parse-shader-counted-fold (form environment)
+  (unless (and (= (length form) 3)
+               (consp (second form))
+               (= (length (second form)) 4))
+    (error 'shader-language-error
+           :form form :reason :invalid-counted-fold))
+  (destructuring-bind (operator (index-name count-form state-name initial-form)
+                       update-form)
+      form
+    (declare (ignore operator))
+    (unless (and (symbolp index-name) (symbolp state-name)
+                 (not (eq index-name state-name)))
+      (error 'shader-language-error
+             :form form :reason :invalid-counted-fold-bindings))
+    (let* ((count (parse-shader-expression count-form environment))
+           (initial (parse-shader-expression initial-form environment))
+           (index-binding
+             (make-instance 'shader-binding
+                            :name index-name
+                            :expression
+                            (parse-shader-expression 0.0 environment)
+                            :source-form (list index-name 0.0)))
+           (state-binding
+             (make-instance 'shader-binding
+                            :name state-name :expression initial
+                            :source-form (list state-name initial-form)))
+           (fold-environment
+             (list* (cons index-name index-binding)
+                    (cons state-name state-binding)
+                    environment))
+           (update (parse-shader-expression update-form fold-environment)))
+      (unless (shader-type= (shader-expression-type count) :float)
+        (error 'shader-language-error
+               :form count-form :reason :counted-fold-count-type))
+      (unless (and (shader-type=
+                    (shader-expression-type initial)
+                    (shader-expression-type update))
+                   (lang:arithmetic-state-compatible-p initial update))
+        (error 'shader-language-error
+               :form form :reason :counted-fold-state-mismatch))
+      (make-instance
+       'shader-counted-fold
+       :count count :initial initial
+       :index-binding index-binding :state-binding state-binding
+       :update update
+       :type (shader-expression-type initial)
+       :quantity-specification
+       (shader-expression-quantity-specification initial)
+       :quantity-layout (shader-expression-quantity-layout initial)
+       :source-form form))))
+
 (defun parse-shader-call (form environment)
   (let* ((operator (first form))
          (function (and (symbolp operator)
                         (or (shader-function-definition-for operator)
                             (lang:arithmetic-function-definition-for
                              operator)))))
-    (cond ((shader-operator-p operator)
+    (cond ((eq operator 'counted-fold)
+           (parse-shader-counted-fold form environment))
+          ((shader-operator-p operator)
            (parse-shader-operator-call operator form environment))
           (function
            (parse-shader-function-call function form environment))
@@ -2169,6 +2236,11 @@ without turning function definitions back into source-form substitution."
                  (push binding ordered)))
              (visit (expression)
                (typecase expression
+                 (shader-counted-fold
+                  ;; COUNT and INITIAL belong to the preheader.  UPDATE owns
+                  ;; its lexical work inside the loop body.
+                  (visit (lang:arithmetic-counted-fold-count expression))
+                  (visit (lang:arithmetic-counted-fold-initial expression)))
                  (shader-function-call
                   (mapc #'visit (shader-function-call-arguments expression))
                   (dolist (binding (shader-function-call-bindings expression))
@@ -2409,7 +2481,18 @@ structured product and source provenance.  #JDLQPN"))
    (variable-declarations :initform nil :accessor context-variable-declarations)
    (annotations :initform nil :accessor context-annotations)
    (interfaces :initform nil :accessor context-interfaces)
+   (fold-values :initform (make-hash-table :test #'eq)
+                :accessor context-fold-values)
+   (basic-blocks :initform nil :accessor context-basic-blocks)
+   (current-block :initform nil :accessor context-current-block)
    (instructions :initform nil :accessor context-instructions)))
+
+(defun begin-shader-basic-block (context label)
+  (let ((block (make-instance 'spir-v-basic-block :label label)))
+    (setf (context-basic-blocks context)
+          (nconc (context-basic-blocks context) (list block))
+          (context-current-block context) block)
+    block))
 
 (defun shader-id-string (name)
   (let ((text (string-upcase (string name))))
@@ -2478,6 +2561,14 @@ structured product and source provenance.  #JDLQPN"))
       (append-context-form 'type-declarations context
                            (list id 'type-void)))
     id))
+
+(defun ensure-bool-type-id (context)
+  (or (gethash :bool (context-type-ids context))
+      (let ((id (reserve-shader-id context "BOOL")))
+        (setf (gethash :bool (context-type-ids context)) id)
+        (append-context-form 'type-declarations context
+                             (list id 'type-bool))
+        id)))
 
 (defun ensure-pointer-type-id (context storage-class value-type)
   (let* ((value-id (ensure-shader-type-id context value-type))
@@ -2661,6 +2752,13 @@ Modules whose expressions use no extended mathematics never acquire one."
   (let ((instruction (parse-instruction form)))
     (setf (context-instructions context)
           (nconc (context-instructions context) (list instruction)))
+    (let ((block (context-current-block context)))
+      (unless block
+        (error 'shader-language-error
+               :form form :reason :instruction-outside-basic-block))
+      (setf (spir-v-basic-block-instructions block)
+            (nconc (spir-v-basic-block-instructions block)
+                   (list instruction))))
     (when expression
       (associate-shader-instruction context expression instruction))
     instruction))
@@ -2738,10 +2836,14 @@ Modules whose expressions use no extended mathematics never acquire one."
   (let ((target (shader-reference-target expression)))
     (etypecase target
       (shader-binding
-       (let* ((source (shader-binding-expression target))
-              (value (lower-shader-expression context source)))
-         (alias-shader-expression context expression source)
-         value))
+       (multiple-value-bind (fold-value fold-value-p)
+           (gethash target (context-fold-values context))
+         (if fold-value-p
+             fold-value
+             (let* ((source (shader-binding-expression target))
+                    (value (lower-shader-expression context source)))
+               (alias-shader-expression context expression source)
+               value))))
       (shader-uniform-member
        (let* ((block (shader-uniform-member-block target))
               (type (shader-declaration-type target))
@@ -3174,6 +3276,81 @@ backend's context before its source-located unsupported-operation method."))
     value))
 
 (defmethod lower-shader-expression-value
+    (context (expression shader-counted-fold))
+  (let* ((preheader
+           (spir-v-basic-block-label (context-current-block context)))
+         (count
+           (lower-shader-expression
+            context (lang:arithmetic-counted-fold-count expression)))
+         (initial
+           (lower-shader-expression
+            context (lang:arithmetic-counted-fold-initial expression)))
+         (state-type (shader-expression-type expression))
+         (header-label (fresh-shader-id context 'fold-header))
+         (body-label (fresh-shader-id context 'fold-body))
+         (continue-label (fresh-shader-id context 'fold-continue))
+         (merge-label (fresh-shader-id context 'fold-merge))
+         (index-id (fresh-shader-id context 'fold-index))
+         (state-id (fresh-shader-id context 'fold-state))
+         (next-index-id (fresh-shader-id context 'fold-next-index))
+         (zero (ensure-shader-constant context 0.0))
+         (one (ensure-shader-constant context 1.0)))
+    (emit-shader-instruction context expression (list 'branch header-label))
+    (let ((header (begin-shader-basic-block context header-label)))
+      (let ((condition-id (fresh-shader-id context 'fold-condition)))
+        (emit-shader-instruction
+         context expression
+         (list condition-id 'f-ord-less-than
+               (ensure-bool-type-id context) index-id count))
+        (emit-shader-instruction
+         context expression
+         (list 'loop-merge merge-label continue-label 'none))
+        (emit-shader-instruction
+         context expression
+         (list 'branch-conditional condition-id body-label merge-label)))
+      (begin-shader-basic-block context body-label)
+      (setf (gethash (lang:arithmetic-counted-fold-index-binding expression)
+                     (context-fold-values context))
+            index-id
+            (gethash (lang:arithmetic-counted-fold-state-binding expression)
+                     (context-fold-values context))
+            state-id)
+      (let ((next-state
+              (lower-shader-expression
+               context (lang:arithmetic-counted-fold-update expression))))
+        (emit-shader-instruction context expression
+                                 (list 'branch continue-label))
+        (begin-shader-basic-block context continue-label)
+        (emit-shader-instruction
+         context expression
+         (list next-index-id 'f-add
+               (ensure-shader-type-id context :float) index-id one))
+        (emit-shader-instruction context expression (list 'branch header-label))
+        (let ((index-phi
+                (parse-instruction
+                 (list index-id 'phi
+                       (ensure-shader-type-id context :float)
+                       zero preheader next-index-id continue-label)))
+              (state-phi
+                (parse-instruction
+                 (list state-id 'phi
+                       (ensure-shader-type-id context state-type)
+                       initial preheader next-state continue-label))))
+          (setf (spir-v-basic-block-instructions header)
+                (list* index-phi state-phi
+                       (spir-v-basic-block-instructions header))
+                (context-instructions context)
+                (nconc (context-instructions context)
+                       (list index-phi state-phi)))
+          (associate-shader-instruction context expression state-phi)))
+      (remhash (lang:arithmetic-counted-fold-index-binding expression)
+               (context-fold-values context))
+      (remhash (lang:arithmetic-counted-fold-state-binding expression)
+               (context-fold-values context))
+      (begin-shader-basic-block context merge-label)
+      state-id)))
+
+(defmethod lower-shader-expression-value
     (context (expression shader-map-application))
   (declare (ignore context))
   (error 'shader-language-error
@@ -3220,6 +3397,7 @@ backend's context before its source-located unsupported-operation method."))
          (main-id (reserve-shader-id context "MAIN"))
          (entry-id (reserve-shader-id context "ENTRY"))
          (function-type-id (reserve-shader-id context "FUNCTION-TYPE")))
+    (begin-shader-basic-block context entry-id)
     (append-context-form 'type-declarations context
                          (list function-type-id 'type-function void-id))
     (dolist (declaration
@@ -3273,10 +3451,7 @@ backend's context before its source-located unsupported-operation method."))
                 :result-id main-id :return-type void-id
                 :function-type function-type-id
                 :basic-blocks
-                (list (make-instance 'spir-v-basic-block
-                                     :label entry-id
-                                     :instructions
-                                     (context-instructions context)))))))
+                (context-basic-blocks context)))))
            (lowering
              (make-instance
               'shader-lowering
