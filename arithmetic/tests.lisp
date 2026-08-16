@@ -2,6 +2,7 @@
   (:use #:cl #:rove)
   (:local-nicknames (#:lang #:luv.arithmetic.language)
                     (#:lisp #:luv.arithmetic.lisp)
+                    (#:vec #:luv.arithmetic.lisp.vec3)
                     (#:lvk #:luv.vulkan)
                     (#:math #:luv.arithmetic)
                     (#:metal #:luv.metal)

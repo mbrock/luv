@@ -15,6 +15,15 @@
   (push (list x y z) (recording-window-locations window))
   (values window 37 :available))
 
+(deftest vec3-is-imported-from-its-arithmetic-representation-package
+  (dolist (package-name '("LUVCRAFT.WORLD" "LUVCRAFT"))
+    (multiple-value-bind (symbol status)
+        (find-symbol "VEC3" package-name)
+      (ok (eq symbol 'luv.arithmetic.lisp.vec3:vec3))
+      (ok (eq status :internal))))
+  (ok (eq (symbol-package 'vec3)
+          (find-package "LUV.ARITHMETIC.LISP.VEC3"))))
+
 (deftest player-storage-publishes-quantities-without-wrapping-values
   (let* ((position (make-vec3 1d0 2d0 3d0))
          (velocity (make-vec3 4d0 5d0 6d0))

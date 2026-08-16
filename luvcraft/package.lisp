@@ -3,6 +3,18 @@
   (:local-nicknames (#:fields #:luvcraft.world.fields)
                     (#:math #:luv.arithmetic)
                     (#:spv #:luv.spir-v))
+  (:import-from #:luv.arithmetic.lisp.vec3
+                #:make-vec3
+                #:vec3
+                #:vec3-component
+                #:vec3-cross
+                #:vec3-dot
+                #:vec3-list
+                #:vec3-normalize
+                #:vec3-scale
+                #:vec3-x
+                #:vec3-y
+                #:vec3-z)
   (:documentation "The interactive block world built on luv.")
   (:export #:*crystal-block*
            #:*session*

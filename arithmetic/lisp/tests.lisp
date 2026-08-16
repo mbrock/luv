@@ -117,6 +117,31 @@
                 (funcall add left right)))
     (ok (= 32.0d0 (funcall dot left right)))))
 
+(deftest vec3-is-owned-and-realized-by-the-lisp-arithmetic-backend
+  (let* ((vector (vec:make-vec3 3d0 4d0 0d0))
+         (add (lisp:compile-arithmetic-function 'add-vectors))
+         (dot (lisp:compile-arithmetic-function 'vector-inner-product)))
+    (ok (= (vec:vec3-length vector) 5d0))
+    (ok (= 6d0
+           (vec:vec3-dot vector (vec:make-vec3 2d0 0d0 1d0))))
+    (ok (equalp (vec:make-vec3 6d0 8d0 0d0)
+                (vec:vec3-scale vector 2d0)))
+    (ok (equalp (vec:make-vec3 0d0 0d0 1d0)
+                (vec:vec3-cross (vec:make-vec3 1d0 0d0 0d0)
+                                (vec:make-vec3 0d0 1d0 0d0))))
+    (let ((normalized (vec:vec3-normalize vector)))
+      (ok (< (abs (- (vec:vec3-x normalized) 0.6d0)) 1d-12))
+      (ok (< (abs (- (vec:vec3-y normalized) 0.8d0)) 1d-12))
+      (ok (zerop (vec:vec3-z normalized))))
+    (setf (vec:vec3-component vector :z) 5d0)
+    (ok (equal '(3d0 4d0 5d0) (vec:vec3-list vector)))
+    (ok (equalp (vec:make-vec3 4d0 6d0 8d0)
+                (funcall add vector (vec:make-vec3 1d0 2d0 3d0))))
+    (ok (= 14d0
+           (funcall dot (vec:make-vec3 1d0 2d0 3d0)
+                        (vec:make-vec3 1d0 2d0 3d0))))
+    (ok (null (find-package "LUVCRAFT.WORLD")))))
+
 (deftest lisp-realizations-bind-storage-contracts-once
   (let* ((realization
            (lisp:make-lisp-arithmetic-realization

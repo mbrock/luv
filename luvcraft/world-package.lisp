@@ -2,6 +2,16 @@
   (:use #:cl)
   (:local-nicknames (#:fields #:luvcraft.world.fields)
                     (#:math #:luv.arithmetic))
+  (:import-from #:luv.arithmetic.lisp.vec3
+                #:make-vec3
+                #:vec3
+                #:vec3-component
+                #:vec3-cross
+                #:vec3-dot
+                #:vec3-list
+                #:vec3-x
+                #:vec3-y
+                #:vec3-z)
   (:documentation
    "Renderer-independent coordinates, chunk domains, and resident voxel data.")
   (:export #:*voxel-face-directions*
@@ -86,7 +96,6 @@
            #:make-chunk-domain
            #:make-chunk-shape
            #:make-local-coordinate
-           #:make-vec3
            #:make-voxel-direction
            #:make-voxel-space
            #:make-world-coordinate
@@ -97,17 +106,6 @@
            #:remove-world-chunk
            #:resident-world-chunks
            #:step-chunk-domain-site
-           #:vec3
-           #:vec3-component
-           #:vec3-cross
-           #:vec3-dot
-           #:vec3-length
-           #:vec3-list
-           #:vec3-normalize
-           #:vec3-scale
-           #:vec3-x
-           #:vec3-y
-           #:vec3-z
            #:voxel-direction
            #:voxel-direction-dx
            #:voxel-direction-dy

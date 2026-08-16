@@ -13,21 +13,6 @@
        (= (world-coordinate-y left) (world-coordinate-y right))
        (= (world-coordinate-z left) (world-coordinate-z right))))
 
-(deftest vec3-bundles-continuous-components
-  (let ((vector (make-vec3 3d0 4d0 0d0)))
-    (ok (= (vec3-length vector) 5d0))
-    (ok (= (vec3-dot vector (make-vec3 2d0 0d0 1d0)) 6d0))
-    (ok (equalp (vec3-scale vector 2d0) (make-vec3 6d0 8d0 0d0)))
-    (ok (equalp (vec3-cross (make-vec3 1d0 0d0 0d0)
-                            (make-vec3 0d0 1d0 0d0))
-                (make-vec3 0d0 0d0 1d0)))
-    (let ((normalized (vec3-normalize vector)))
-      (ok (< (abs (- (vec3-x normalized) 0.6d0)) 1d-12))
-      (ok (< (abs (- (vec3-y normalized) 0.8d0)) 1d-12))
-      (ok (zerop (vec3-z normalized))))
-    (setf (vec3-component vector :z) 5d0)
-    (ok (equal (vec3-list vector) '(3d0 4d0 5d0)))))
-
 (deftest signed-world-coordinate-decomposition
   (let ((space (make-voxel-space
                 :chunk-shape (make-chunk-shape :width 16

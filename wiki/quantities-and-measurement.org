@@ -670,9 +670,10 @@ Result:
   performs the compatibility checks once and returns the already compiled raw
   Lisp function.  No quantity objects travel through that function.
 - The numerical Lisp protocol now admits representation extensions.
-  [[file:../luvcraft/world-arithmetic.lisp][=luvcraft/world-arithmetic.lisp=]] implements componentwise binary operations, dot,
-  and normalization for luv's transparent =vec3= without making the portable
-  arithmetic system depend on the block world.
+  [[file:../arithmetic/lisp/vec3.lisp][=arithmetic/lisp/vec3.lisp=]] owns the transparent CPU =vec3= and implements
+  its componentwise binary operations, dot, and normalization methods as a
+  representation extension. The Lisp arithmetic protocol does not name the
+  type, and neither it nor the representation depends on the block world.
 - =%predict-world-position= derives displacement from world velocity and frame
   duration, explicitly interprets the derived vector as a world-position
   difference, and adds it lawfully to a position point.  Its =vec3= realization

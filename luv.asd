@@ -24,7 +24,9 @@
      (:module "lisp"
       :serial t
       :components ((:file "package")
-                   (:file "compiler")))))))
+                   (:file "compiler")
+                   (:file "vec3-package")
+                   (:file "vec3")))))))
 
 (defsystem "luv/objective-c"
   :description "A declared Objective-C foreign object system with opt-in tracing."

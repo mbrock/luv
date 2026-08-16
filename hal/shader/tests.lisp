@@ -8,6 +8,19 @@
                     (#:msl #:luv.msl)
                     (#:objc #:luv.objective-c)
                     (#:metal #:luv.metal))
+  (:import-from #:luv.arithmetic.lisp.vec3
+                #:make-vec3
+                #:vec3
+                #:vec3-component
+                #:vec3-cross
+                #:vec3-dot
+                #:vec3-length
+                #:vec3-list
+                #:vec3-normalize
+                #:vec3-scale
+                #:vec3-x
+                #:vec3-y
+                #:vec3-z)
   ;; Shader operators are identified by symbol, so specification bodies
   ;; written here must use the shader language's own words.
   (:import-from #:luv.spir-v

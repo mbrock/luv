@@ -133,9 +133,12 @@ audit shows that they should not all become the same abstraction:
 | colours | simple vectors | sky/color calculation |
 | mesh attributes and shader values | specialized arrays and =:vec3= lanes | vertex layout and shader quantity metadata |
 
-The new [[file:../luvcraft/world.lisp][=vec3=]] structure is therefore deliberately modest.  It bundles
-continuous CPU components and supplies component, scale, dot, cross, length,
-and normalization operations.  It does not claim that a point is a velocity,
+The [[file:../arithmetic/lisp/vec3.lisp][=vec3=]] structure in =LUV.ARITHMETIC.LISP.VEC3= is therefore
+deliberately modest. It bundles continuous CPU components, supplies component,
+scale, dot, cross, length, and normalization operations, and extends the open
+Lisp arithmetic protocol without making that protocol name the representation.
+=LUVCRAFT.WORLD= imports it but does not own or re-export it. The representation
+does not claim that a point is a velocity,
 that either is already measured in metres, or that an RGB triple belongs to
 spatial algebra.  =camera-position= and =player-velocity= name different
 semantic owners even though both use the same transparent representation.

@@ -14,8 +14,7 @@
                  (:file "world-fields-package")
                  (:file "world-fields")
                  (:file "world-package")
-                 (:file "world")
-                 (:file "world-arithmetic")))))
+                 (:file "world")))))
 
 (defsystem "luvcraft"
   :description "The interactive block world built on luv."
