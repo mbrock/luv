@@ -118,6 +118,14 @@
            #:shader-uniform-member-block
            #:shader-uniform-member-index
            #:shader-uniform-member-offset
+           #:shader-task-payload
+           #:shader-task-payload-fields
+           #:shader-task-payload-field
+           #:shader-task-payload-field-payload
+           #:shader-task-payload-field-index
+           #:shader-task-payload-field-element-count
+           #:task-payload-definition-for
+           #:define-task-payload
            #:shader-map-definition
            #:shader-projective-map-definition
            #:shader-map-domain-type
@@ -212,7 +220,14 @@
            #:convert-unit
            #:mod
            #:counted-fold
+           #:payload-element
            #:set-output
+           #:set-mesh-output-counts
+           #:set-mesh-vertex
+           #:set-mesh-primitive
+           #:set-payload
+           #:set-payload-element
+           #:emit-mesh-workgroups
            #:shader-operator
            #:define-shader-operator
            #:shader-operator-p
@@ -232,6 +247,9 @@
            #:shader-operator-result-name
            #:binary-arithmetic-instruction
            #:shader-output-assignment
+           #:shader-statement
+           #:shader-statement-source-form
+           #:shader-statement-expressions
            #:shader-assignment-output
            #:shader-assignment-value
            #:shader-assignment-source-form
@@ -240,9 +258,42 @@
            #:shader-specification-inputs
            #:shader-specification-outputs
            #:shader-specification-resources
+           #:shader-specification-workgroup-size
+           #:shader-specification-task-payload
+           #:shader-specification-mesh-output
            #:shader-specification-bindings
            #:shader-specification-statements
            #:shader-specification-expressions
+           #:shader-conditional-statement
+           #:shader-conditional-statement-condition
+           #:shader-conditional-statement-statements
+           #:shader-mesh-output
+           #:shader-mesh-output-topology
+           #:shader-mesh-output-max-vertices
+           #:shader-mesh-output-max-primitives
+           #:shader-mesh-output-vertex-outputs
+           #:shader-mesh-output-primitive-outputs
+           #:shader-mesh-output-counts
+           #:shader-mesh-output-vertex-count
+           #:shader-mesh-output-primitive-count
+           #:shader-mesh-vertex-store
+           #:shader-mesh-vertex-store-index
+           #:shader-mesh-vertex-store-values
+           #:shader-mesh-primitive-store
+           #:shader-mesh-primitive-store-index
+           #:shader-mesh-primitive-store-indices
+           #:shader-mesh-primitive-store-values
+           #:shader-task-payload-store
+           #:shader-task-payload-store-field
+           #:shader-task-payload-store-index
+           #:shader-task-payload-store-value
+           #:shader-emit-mesh-workgroups
+           #:shader-emit-mesh-workgroups-counts
+           #:shader-payload-element
+           #:shader-payload-element-field
+           #:shader-payload-element-index
+           #:shader-expression-uniformity
+           #:shader-expression-workgroup-uniform-p
            #:define-shader
            #:define-shader-method
            #:shader-specification-for

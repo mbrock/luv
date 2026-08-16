@@ -16,6 +16,7 @@
            #:msl-field-name
            #:msl-field-attribute
            #:msl-field-origin
+           #:msl-field-array-length
            #:msl-structure-declaration
            #:msl-structure-name
            #:msl-structure-fields

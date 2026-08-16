@@ -266,6 +266,105 @@ colour transfer of the value returned by sampling."))
   (:documentation
    "A named value inside a SHADER-UNIFORM-BLOCK, not a separate resource."))
 
+(defclass shader-task-payload (shader-named-object)
+  ((fields
+    :initarg :fields
+    :initform nil
+    :accessor shader-task-payload-fields))
+  (:documentation
+   "The named ABI shared by one task shader and its mesh shader consumers."))
+
+(defclass shader-task-payload-field (shader-variable-declaration)
+  ((payload
+    :initarg :payload
+    :reader shader-task-payload-field-payload)
+   (index
+    :initarg :index
+    :reader shader-task-payload-field-index)
+   (element-count
+    :initarg :element-count
+    :initform nil
+    :reader shader-task-payload-field-element-count))
+  (:documentation
+   "One scalar/vector field or fixed array in a task payload ABI."))
+
+(defgeneric task-payload-definition-for (name)
+  (:documentation "Return the task-payload ABI named by NAME, or NIL."))
+
+(defmethod task-payload-definition-for (name)
+  (declare (ignore name))
+  nil)
+
+(defun parse-task-payload-field-type (form)
+  (let ((designator (second form)))
+    (if (and (consp designator)
+             (shader-symbol= (first designator) :array)
+             (= (length designator) 3))
+        (destructuring-bind (array element-type element-count) designator
+          (declare (ignore array))
+          (unless (typep element-count '(integer 1 *))
+            (error 'shader-language-error
+                   :form form :reason :invalid-payload-array-size
+                   :details element-count))
+          (values (find-shader-type element-type form) element-count))
+        (values (find-shader-type designator form) nil))))
+
+(defun make-task-payload-definition (name field-forms source-form)
+  (unless (and (listp field-forms) field-forms)
+    (error 'shader-language-error
+           :form source-form :reason :empty-task-payload))
+  (let ((payload
+          (make-instance 'shader-task-payload
+                         :name name :source-form source-form)))
+    (setf (shader-task-payload-fields payload)
+          (loop with names = nil
+                for field-form in field-forms
+                for index from 0
+                collect
+                (destructuring-bind
+                    (field-name field-type
+                     &key quantity dimension unit affine-p character components)
+                    field-form
+                  (declare (ignore field-type))
+                  (when (find field-name names :test #'shader-symbol=)
+                    (error 'shader-language-error
+                           :form field-form :reason :duplicate-payload-field
+                           :details field-name))
+                  (push field-name names)
+                  (multiple-value-bind (type element-count)
+                      (parse-task-payload-field-type field-form)
+                    (let ((specification
+                            (parse-declaration-quantity-specification
+                             quantity dimension unit
+                             (declared-character affine-p character)
+                             type field-form)))
+                      (make-instance
+                       'shader-task-payload-field
+                       :name field-name :type type
+                       :quantity-specification specification
+                       :quantity-layout
+                       (parse-declaration-quantity-layout
+                        components type field-form specification)
+                       :payload payload :index index
+                       :element-count element-count
+                       :source-form field-form))))))
+    payload))
+
+(defmacro define-task-payload (name &body fields)
+  "Define a durable, inspectable task-to-mesh payload ABI."
+  (let* ((package (or (symbol-package name) *package*))
+         (variable
+           (intern (format nil "*~A-TASK-PAYLOAD*" (symbol-name name))
+                   package)))
+    `(progn
+       (defparameter ,variable
+         (make-task-payload-definition
+          ',name ',fields '(define-task-payload ,name ,@fields)))
+       (defmethod task-payload-definition-for ((payload-name (eql ',name)))
+         (declare (ignore payload-name))
+         ,variable)
+       ',name)))
+
 (defclass shader-map-definition (shader-named-object)
   ((domain-type
     :initarg :domain-type
@@ -631,16 +730,104 @@ leaves it again while retaining the semantic operand in the expression graph."))
     ((expression shader-unit-conversion))
   (lang:arithmetic-expression-quantity-checked-p expression))
 
-(defclass shader-output-assignment ()
+(defclass shader-statement ()
+  ((source-form
+    :initarg :source-form
+    :reader shader-statement-source-form))
+  (:documentation
+   "One ordered shader effect or structured group of shader effects."))
+
+(defclass shader-output-assignment (shader-statement)
   ((output
     :initarg :output
     :reader shader-assignment-output)
    (value
     :initarg :value
-    :reader shader-assignment-value)
+    :reader shader-assignment-value)))
+
+(defmethod shader-assignment-source-form
+    ((assignment shader-output-assignment))
+  (shader-statement-source-form assignment))
+
+(defclass shader-conditional-statement (shader-statement)
+  ((condition
+    :initarg :condition
+    :reader shader-conditional-statement-condition)
+   (statements
+    :initarg :statements
+    :reader shader-conditional-statement-statements)))
+
+(defclass shader-mesh-output-counts (shader-statement)
+  ((vertex-count
+    :initarg :vertex-count
+    :reader shader-mesh-output-vertex-count)
+   (primitive-count
+    :initarg :primitive-count
+    :reader shader-mesh-output-primitive-count)))
+
+(defclass shader-mesh-vertex-store (shader-statement)
+  ((index
+    :initarg :index
+    :reader shader-mesh-vertex-store-index)
+   (values
+    :initarg :values
+    :reader shader-mesh-vertex-store-values)))
+
+(defclass shader-mesh-primitive-store (shader-statement)
+  ((index
+    :initarg :index
+    :reader shader-mesh-primitive-store-index)
+   (indices
+    :initarg :indices
+    :reader shader-mesh-primitive-store-indices)
+   (values
+    :initarg :values
+    :reader shader-mesh-primitive-store-values)))
+
+(defclass shader-task-payload-store (shader-statement)
+  ((field
+    :initarg :field
+    :reader shader-task-payload-store-field)
+   (index
+    :initarg :index
+    :initform nil
+    :reader shader-task-payload-store-index)
+   (value
+    :initarg :value
+    :reader shader-task-payload-store-value)))
+
+(defclass shader-emit-mesh-workgroups (shader-statement)
+  ((workgroups
+    :initarg :workgroups
+    :reader shader-emit-mesh-workgroups-counts)))
+
+(defclass shader-mesh-output ()
+  ((topology
+    :initarg :topology
+    :reader shader-mesh-output-topology)
+   (max-vertices
+    :initarg :max-vertices
+    :reader shader-mesh-output-max-vertices)
+   (max-primitives
+    :initarg :max-primitives
+    :reader shader-mesh-output-max-primitives)
+   (vertex-outputs
+    :initarg :vertex-outputs
+    :reader shader-mesh-output-vertex-outputs)
+   (primitive-outputs
+    :initarg :primitive-outputs
+    :reader shader-mesh-output-primitive-outputs)
    (source-form
     :initarg :source-form
-    :reader shader-assignment-source-form)))
+    :reader shader-mesh-output-source-form)))
+
+(defclass shader-payload-element (shader-expression)
+  ((field
+    :initarg :field
+    :reader shader-payload-element-field)
+   (index
+    :initarg :index
+    :reader shader-payload-element-index)))
 
 (defclass shader-specification (shader-named-object)
   ((stage
@@ -658,6 +845,18 @@ leaves it again while retaining the semantic operand in the expression graph."))
     :initarg :resources
     :initform nil
     :reader shader-specification-resources)
+   (workgroup-size
+    :initarg :workgroup-size
+    :initform nil
+    :reader shader-specification-workgroup-size)
+   (task-payload
+    :initarg :task-payload
+    :initform nil
+    :reader shader-specification-task-payload)
+   (mesh-output
+    :initarg :mesh-output
+    :initform nil
+    :reader shader-specification-mesh-output)
    (bindings
     :initarg :bindings
     :initform nil
@@ -700,6 +899,9 @@ leaves it again while retaining the semantic operand in the expression graph."))
 (defmethod shader-expression-form ((expression shader-unit-conversion))
   (lang:arithmetic-expression-form expression))
 
+(defmethod shader-expression-form ((expression shader-payload-element))
+  (shader-expression-source-form expression))
+
 (defmethod lang:arithmetic-expression-form
     ((expression shader-map-application))
   (shader-expression-source-form expression))
@@ -739,6 +941,9 @@ leaves it again while retaining the semantic operand in the expression graph."))
 (defmethod shader-expression-children ((expression shader-unit-conversion))
   (lang:arithmetic-expression-children expression))
 
+(defmethod shader-expression-children ((expression shader-payload-element))
+  (list (shader-payload-element-index expression)))
+
 (defmethod lang:arithmetic-expression-children
     ((expression shader-map-application))
   (cons (shader-map-application-point expression)
@@ -747,6 +952,44 @@ leaves it again while retaining the semantic operand in the expression graph."))
 (defmethod lang:arithmetic-expression-children
     ((expression shader-map-projection))
   (list (shader-map-projection-application expression)))
+
+(defgeneric shader-statement-expressions (statement)
+  (:documentation
+   "Return the expressions directly or recursively owned by STATEMENT."))
+
+(defmethod shader-statement-expressions ((statement shader-output-assignment))
+  (list (shader-assignment-value statement)))
+
+(defmethod shader-statement-expressions
+    ((statement shader-conditional-statement))
+  (cons (shader-conditional-statement-condition statement)
+        (mapcan #'shader-statement-expressions
+                (shader-conditional-statement-statements statement))))
+
+(defmethod shader-statement-expressions
+    ((statement shader-mesh-output-counts))
+  (list (shader-mesh-output-vertex-count statement)
+        (shader-mesh-output-primitive-count statement)))
+
+(defmethod shader-statement-expressions
+    ((statement shader-mesh-vertex-store))
+  (cons (shader-mesh-vertex-store-index statement)
+        (mapcar #'cdr (shader-mesh-vertex-store-values statement))))
+
+(defmethod shader-statement-expressions
+    ((statement shader-mesh-primitive-store))
+  (list* (shader-mesh-primitive-store-index statement)
+         (shader-mesh-primitive-store-indices statement)
+         (mapcar #'cdr (shader-mesh-primitive-store-values statement))))
+
+(defmethod shader-statement-expressions
+    ((statement shader-task-payload-store))
+  (remove nil (list (shader-task-payload-store-index statement)
+                    (shader-task-payload-store-value statement))))
+
+(defmethod shader-statement-expressions
+    ((statement shader-emit-mesh-workgroups))
+  (list (shader-emit-mesh-workgroups-counts statement)))
 
 (defun shader-specification-expressions (specification)
   "Return the expression graph in source order, without duplicate objects."
@@ -760,8 +1003,42 @@ leaves it again while retaining the semantic operand in the expression graph."))
       (dolist (binding (shader-specification-bindings specification))
         (visit (shader-binding-expression binding)))
       (dolist (statement (shader-specification-statements specification))
-        (visit (shader-assignment-value statement))))
+        (mapc #'visit (shader-statement-expressions statement))))
     (nreverse expressions)))
+
+(defgeneric shader-expression-uniformity (expression)
+  (:documentation
+   "Return :WORKGROUP or :INVOCATION for the expression's finest variation."))
+
+(defun combine-shader-uniformities (&rest uniformities)
+  (if (member :invocation uniformities) :invocation :workgroup))
+
+(defmethod shader-expression-uniformity ((expression shader-literal))
+  (declare (ignore expression))
+  :workgroup)
+
+(defmethod shader-expression-uniformity ((expression shader-reference))
+  (let ((target (shader-reference-target expression)))
+    (typecase target
+      (shader-binding
+       (shader-expression-uniformity (shader-binding-expression target)))
+      (shader-task-payload-field :workgroup)
+      (shader-uniform-member :workgroup)
+      (shader-resource :workgroup)
+      (shader-interface-variable
+       (if (member (shader-interface-built-in target)
+                   '(:workgroup-id :num-workgroups :workgroup-size))
+           :workgroup
+           :invocation))
+      (t :invocation))))
+
+(defmethod shader-expression-uniformity ((expression shader-expression))
+  (apply #'combine-shader-uniformities
+         (mapcar #'shader-expression-uniformity
+                 (shader-expression-children expression))))
+
+(defun shader-expression-workgroup-uniform-p (expression)
+  (eq :workgroup (shader-expression-uniformity expression)))
 
 (defun shader-symbol= (left right)
   (and (symbolp left) (symbolp right)
@@ -779,6 +1056,11 @@ leaves it again while retaining the semantic operand in the expression graph."))
 
 (defun make-shader-reference (name environment source-form)
   (let ((target (shader-environment-value name environment source-form)))
+    (when (and (typep target 'shader-task-payload-field)
+               (shader-task-payload-field-element-count target))
+      (error 'shader-language-error
+             :form source-form :reason :payload-array-requires-element
+             :details name))
     (make-instance 'shader-reference
                    :target target
                    :type (etypecase target
@@ -1367,6 +1649,8 @@ never collides with a standard symbol's function documentation:
   "Compare a depth reference through a comparison sampler at a UV coordinate.")
 (define-shader-operator texel-load
   "Load one exact two-dimensional texel at an unsigned integer coordinate.")
+(define-shader-operator payload-element
+  "Read one indexed element of the task payload shared with a mesh shader.")
 (define-shader-operator derivative-x
   "Return the horizontal screen-space derivative of a fragment value.")
 (define-shader-operator derivative-y
@@ -1724,6 +2008,41 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
                              (shader-expression-type operand)))
                      :quantity-specification projected
                      :source-form form))))
+
+(defmethod parse-shader-operator-call
+    ((operator (eql 'payload-element)) form environment)
+  (declare (ignore operator))
+  (unless (= (length form) 3)
+    (error 'shader-language-error
+           :form form :reason :payload-element-arity))
+  (let* ((field-name (second form))
+         (field (shader-environment-value field-name environment form))
+         (index (parse-shader-expression (third form) environment)))
+    (unless (and (typep field 'shader-task-payload-field)
+                 (shader-task-payload-field-element-count field))
+      (error 'shader-language-error
+             :form form :reason :not-payload-array :details field-name))
+    (unless (shader-uint-type-p (shader-expression-type index))
+      (error 'shader-language-error
+             :form form :reason :payload-index-type
+             :details (shader-type-name (shader-expression-type index))))
+    (multiple-value-bind (constant-index constant-p)
+        (shader-constant-uint-value index)
+      (when (and constant-p
+                 (>= constant-index
+                     (shader-task-payload-field-element-count field)))
+        (error 'shader-language-error
+               :form form :reason :payload-index-out-of-bounds
+               :details
+               (list constant-index
+                     (shader-task-payload-field-element-count field)))))
+    (make-instance 'shader-payload-element
+                   :field field :index index
+                   :type (shader-declaration-type field)
+                   :quantity-specification
+                   (shader-declaration-quantity-specification field)
+                   :quantity-layout (shader-declaration-quantity-layout field)
+                   :source-form form)))
 
 (defvar *shader-function-call-counter* 0)
 (defvar *shader-function-call-stack* nil)
@@ -2280,6 +2599,26 @@ NIL leaves the character to the named definition; T is the historical
                  (shader-call-operands expression))))
     (t nil)))
 
+(defun shader-constant-uint-value (expression)
+  "Return a compile-time unsigned value and true, or NIL and false."
+  (typecase expression
+    (shader-reference
+     (let ((target (shader-reference-target expression)))
+       (if (typep target 'shader-binding)
+           (shader-constant-uint-value (shader-binding-expression target))
+           (values nil nil))))
+    (shader-call
+     (if (and (eq 'uint (shader-call-operator expression))
+              (= 1 (length (shader-call-operands expression)))
+              (typep (first (shader-call-operands expression))
+                     'shader-literal))
+         (values (truncate
+                  (shader-literal-value
+                   (first (shader-call-operands expression))))
+                 t)
+         (values nil nil)))
+    (t (values nil nil))))
+
 (defun parse-raw-quantity-boundary
     (class form environment &key constant-only-p)
   (destructuring-bind
@@ -2508,7 +2847,290 @@ NIL leaves the character to the named definition; T is the historical
     (make-instance 'shader-output-assignment
                    :output output :value value :source-form form)))
 
-(defun parse-shader-body (body environment outputs)
+(defclass shader-parsing-context ()
+  ((stage
+    :initarg :stage
+    :reader shader-parsing-context-stage)
+   (outputs
+    :initarg :outputs
+    :initform nil
+    :reader shader-parsing-context-outputs)
+   (task-payload
+    :initarg :task-payload
+    :initform nil
+    :reader shader-parsing-context-task-payload)
+   (mesh-output
+    :initarg :mesh-output
+    :initform nil
+    :reader shader-parsing-context-mesh-output)))
+
+(defun check-shader-store-value
+    (declaration value form type-reason quantity-reason layout-reason)
+  (unless (shader-type= (shader-declaration-type declaration)
+                        (shader-expression-type value))
+    (error 'shader-language-error
+           :form form :reason type-reason
+           :details (list (shader-type-name (shader-declaration-type declaration))
+                          (shader-type-name (shader-expression-type value)))))
+  (let ((expected (shader-declaration-quantity-specification declaration))
+        (actual (shader-expression-quantity-specification value))
+        (expected-layout (shader-declaration-quantity-layout declaration))
+        (actual-layout (shader-expression-quantity-layout value)))
+    (when (and expected
+               (or (null actual)
+                   (not (math:quantity-specification= expected actual))))
+      (error 'shader-language-error
+             :form form :reason quantity-reason
+             :details (list expected actual)))
+    (when (and expected-layout
+               (or (null actual-layout)
+                   (not (math:quantity-layout=
+                         expected-layout actual-layout))))
+      (error 'shader-language-error
+             :form form :reason layout-reason
+             :details (list expected-layout actual-layout))))
+  value)
+
+(defgeneric parse-shader-statement
+    (operator stage form environment context)
+  (:documentation
+   "Parse one stage effect, dispatching on its source operator and stage."))
+
+(defmethod parse-shader-statement
+    (operator stage form environment context)
+  (declare (ignore environment context))
+  (error 'shader-language-error
+         :form form :reason :invalid-statement-for-stage
+         :details (list operator stage)))
+
+(defmethod parse-shader-statement
+    ((operator (eql 'set-output)) stage form environment context)
+  (declare (ignore operator))
+  (unless (member stage '(:vertex :fragment :compute))
+    (error 'shader-language-error
+           :form form :reason :invalid-statement-for-stage
+           :details (list 'set-output stage)))
+  (parse-output-assignment
+   form environment (shader-parsing-context-outputs context)))
+
+(defun parse-complete-mesh-output-values
+    (forms declarations environment source-form)
+  (let ((seen nil)
+        (parsed nil))
+    (dolist (form forms)
+      (unless (and (consp form) (= (length form) 2) (symbolp (first form)))
+        (error 'shader-language-error
+               :form form :reason :invalid-mesh-output-value))
+      (let* ((name (first form))
+             (declaration
+               (find name declarations :key #'shader-object-name
+                                       :test #'shader-symbol=)))
+        (unless declaration
+          (error 'shader-language-error
+                 :form form :reason :unknown-mesh-output :details name))
+        (when (member declaration seen)
+          (error 'shader-language-error
+                 :form form :reason :duplicate-mesh-output :details name))
+        (let ((value (parse-shader-expression (second form) environment)))
+          (check-shader-store-value
+           declaration value form
+           :mesh-output-type-mismatch
+           :mesh-output-quantity-mismatch
+           :mesh-output-quantity-layout-mismatch)
+          (push declaration seen)
+          (push (cons declaration value) parsed))))
+    (let ((missing (set-difference declarations seen)))
+      (when missing
+        (error 'shader-language-error
+               :form source-form :reason :missing-mesh-output-values
+               :details (mapcar #'shader-object-name missing))))
+    (loop for declaration in declarations
+          collect (assoc declaration parsed))))
+
+(defmethod parse-shader-statement
+    ((operator (eql 'set-mesh-output-counts)) (stage (eql :mesh))
+     form environment context)
+  (declare (ignore operator context))
+  (unless (= (length form) 3)
+    (error 'shader-language-error
+           :form form :reason :mesh-output-counts-arity))
+  (let ((vertex-count (parse-shader-expression (second form) environment))
+        (primitive-count (parse-shader-expression (third form) environment)))
+    (unless (and (shader-uint-type-p (shader-expression-type vertex-count))
+                 (shader-uint-type-p (shader-expression-type primitive-count)))
+      (error 'shader-language-error
+             :form form :reason :mesh-output-count-type))
+    (make-instance 'shader-mesh-output-counts
+                   :vertex-count vertex-count :primitive-count primitive-count
+                   :source-form form)))
+
+(defmethod parse-shader-statement
+    ((operator (eql 'set-mesh-vertex)) (stage (eql :mesh))
+     form environment context)
+  (declare (ignore operator))
+  (unless (>= (length form) 3)
+    (error 'shader-language-error
+           :form form :reason :mesh-vertex-arity))
+  (let* ((index (parse-shader-expression (second form) environment))
+         (mesh-output (shader-parsing-context-mesh-output context)))
+    (unless (shader-uint-type-p (shader-expression-type index))
+      (error 'shader-language-error
+             :form form :reason :mesh-output-index-type))
+    (make-instance
+     'shader-mesh-vertex-store
+     :index index
+     :values
+     (parse-complete-mesh-output-values
+      (cddr form) (shader-mesh-output-vertex-outputs mesh-output)
+      environment form)
+     :source-form form)))
+
+(defun mesh-topology-index-type (topology)
+  (ecase topology
+    (:points :uint)
+    (:lines :uvec2)
+    (:triangles :uvec3)))
+
+(defmethod parse-shader-statement
+    ((operator (eql 'set-mesh-primitive)) (stage (eql :mesh))
+     form environment context)
+  (declare (ignore operator))
+  (unless (>= (length form) 3)
+    (error 'shader-language-error
+           :form form :reason :mesh-primitive-arity))
+  (let* ((index (parse-shader-expression (second form) environment))
+         (indices (parse-shader-expression (third form) environment))
+         (mesh-output (shader-parsing-context-mesh-output context))
+         (expected-index-type
+           (mesh-topology-index-type
+            (shader-mesh-output-topology mesh-output))))
+    (unless (shader-uint-type-p (shader-expression-type index))
+      (error 'shader-language-error
+             :form form :reason :mesh-output-index-type))
+    (unless (shader-type= expected-index-type
+                          (shader-expression-type indices))
+      (error 'shader-language-error
+             :form form :reason :mesh-primitive-indices-type
+             :details (list expected-index-type
+                            (shader-type-name
+                             (shader-expression-type indices)))))
+    (make-instance
+     'shader-mesh-primitive-store
+     :index index :indices indices
+     :values
+     (parse-complete-mesh-output-values
+      (cdddr form) (shader-mesh-output-primitive-outputs mesh-output)
+      environment form)
+     :source-form form)))
+
+(defun shader-payload-field-named (name payload source-form)
+  (or (and payload
+           (find name (shader-task-payload-fields payload)
+                      :key #'shader-object-name :test #'shader-symbol=))
+      (error 'shader-language-error
+             :form source-form :reason :unknown-payload-field :details name)))
+
+(defmethod parse-shader-statement
+    ((operator (eql 'set-payload)) (stage (eql :task))
+     form environment context)
+  (declare (ignore operator))
+  (unless (= (length form) 3)
+    (error 'shader-language-error
+           :form form :reason :set-payload-arity))
+  (let* ((field
+           (shader-payload-field-named
+            (second form) (shader-parsing-context-task-payload context) form))
+         (value (parse-shader-expression (third form) environment)))
+    (when (shader-task-payload-field-element-count field)
+      (error 'shader-language-error
+             :form form :reason :payload-array-requires-element
+             :details (shader-object-name field)))
+    (check-shader-store-value
+     field value form
+     :payload-type-mismatch :payload-quantity-mismatch
+     :payload-quantity-layout-mismatch)
+    (make-instance 'shader-task-payload-store
+                   :field field :value value :source-form form)))
+
+(defmethod parse-shader-statement
+    ((operator (eql 'set-payload-element)) (stage (eql :task))
+     form environment context)
+  (declare (ignore operator))
+  (unless (= (length form) 4)
+    (error 'shader-language-error
+           :form form :reason :set-payload-element-arity))
+  (let* ((field
+           (shader-payload-field-named
+            (second form) (shader-parsing-context-task-payload context) form))
+         (index (parse-shader-expression (third form) environment))
+         (value (parse-shader-expression (fourth form) environment)))
+    (unless (shader-task-payload-field-element-count field)
+      (error 'shader-language-error
+             :form form :reason :not-payload-array
+             :details (shader-object-name field)))
+    (unless (shader-uint-type-p (shader-expression-type index))
+      (error 'shader-language-error
+             :form form :reason :payload-index-type))
+    (multiple-value-bind (constant-index constant-p)
+        (shader-constant-uint-value index)
+      (when (and constant-p
+                 (>= constant-index
+                     (shader-task-payload-field-element-count field)))
+        (error 'shader-language-error
+               :form form :reason :payload-index-out-of-bounds
+               :details
+               (list constant-index
+                     (shader-task-payload-field-element-count field)))))
+    (check-shader-store-value
+     field value form
+     :payload-type-mismatch :payload-quantity-mismatch
+     :payload-quantity-layout-mismatch)
+    (make-instance 'shader-task-payload-store
+                   :field field :index index :value value :source-form form)))
+
+(defmethod parse-shader-statement
+    ((operator (eql 'emit-mesh-workgroups)) (stage (eql :task))
+     form environment context)
+  (declare (ignore operator context))
+  (unless (= (length form) 2)
+    (error 'shader-language-error
+           :form form :reason :emit-mesh-workgroups-arity))
+  (let ((workgroups (parse-shader-expression (second form) environment)))
+    (unless (shader-type= :uvec3 (shader-expression-type workgroups))
+      (error 'shader-language-error
+             :form form :reason :mesh-workgroups-type
+             :details (shader-type-name
+                       (shader-expression-type workgroups))))
+    (make-instance 'shader-emit-mesh-workgroups
+                   :workgroups workgroups :source-form form)))
+
+(defmethod parse-shader-statement
+    ((operator (eql 'when)) stage form environment context)
+  (declare (ignore operator))
+  (unless (>= (length form) 3)
+    (error 'shader-language-error
+           :form form :reason :shader-when-arity))
+  (let ((condition (parse-shader-expression (second form) environment)))
+    (unless (shader-type= :bool (shader-expression-type condition))
+      (error 'shader-language-error
+             :form form :reason :shader-when-condition-type))
+    (make-instance
+     'shader-conditional-statement
+     :condition condition
+     :statements
+     (mapcar (lambda (statement)
+               (parse-shader-statement-form
+                statement stage environment context))
+             (cddr form))
+     :source-form form)))
+
+(defun parse-shader-statement-form (form stage environment context)
+  (unless (and (consp form) (symbolp (first form)))
+    (error 'shader-language-error
+           :form form :reason :invalid-shader-statement))
+  (parse-shader-statement (first form) stage form environment context))
+
+(defun parse-shader-body (body environment context)
   (unless (= (length body) 1)
     (error 'shader-language-error
            :form body :reason :expected-single-shader-body))
@@ -2538,10 +3160,16 @@ NIL leaves the character to the named definition; T is the historical
                 (push (cons name binding) lexical-environment)))
             (values (nreverse bindings)
                     (mapcar (lambda (statement)
-                              (parse-output-assignment
-                               statement lexical-environment outputs))
+                              (parse-shader-statement-form
+                               statement
+                               (shader-parsing-context-stage context)
+                               lexical-environment context))
                             statements))))
-        (values nil (list (parse-output-assignment form environment outputs))))))
+        (values nil
+                (list
+                 (parse-shader-statement-form
+                  form (shader-parsing-context-stage context)
+                  environment context))))))
 
 (defun collect-shader-bindings (bindings statements)
   "Hoist inline-function lexical bindings in dependency order.
@@ -2575,8 +3203,150 @@ without turning function definitions back into source-form substitution."
       (dolist (binding bindings)
         (add-binding binding))
       (dolist (statement statements)
-        (visit (shader-assignment-value statement))))
+        (mapc #'visit (shader-statement-expressions statement))))
     (nreverse ordered)))
+
+(defun parse-workgroup-size (form options)
+  (unless (and (listp form) (= (length form) 3)
+               (every (lambda (value) (typep value '(integer 1 *))) form))
+    (error 'shader-language-error
+           :form options :reason :invalid-workgroup-size :details form))
+  form)
+
+(defun parse-mesh-output-declaration (form)
+  (unless (listp form)
+    (error 'shader-language-error
+           :form form :reason :invalid-mesh-output))
+  (let ((topology (getf form :topology))
+        (max-vertices (getf form :max-vertices))
+        (max-primitives (getf form :max-primitives)))
+    (unless (member topology '(:points :lines :triangles))
+      (error 'shader-language-error
+             :form form :reason :invalid-mesh-topology :details topology))
+    (unless (and (typep max-vertices '(integer 1 *))
+                 (typep max-primitives '(integer 1 *)))
+      (error 'shader-language-error
+             :form form :reason :invalid-mesh-output-limits
+             :details (list max-vertices max-primitives)))
+    (let ((vertex-outputs
+            (mapcar (lambda (declaration)
+                      (parse-interface-declaration declaration :output))
+                    (getf form :vertex)))
+          (primitive-outputs
+            (mapcar (lambda (declaration)
+                      (parse-interface-declaration declaration :output))
+                    (getf form :primitive))))
+      (unless vertex-outputs
+        (error 'shader-language-error
+               :form form :reason :empty-mesh-vertex-output))
+      (unless (= 1 (count :position vertex-outputs
+                          :key #'shader-interface-built-in))
+        (error 'shader-language-error
+               :form form :reason :mesh-position-output-count))
+      (make-instance 'shader-mesh-output
+                     :topology topology
+                     :max-vertices max-vertices
+                     :max-primitives max-primitives
+                     :vertex-outputs vertex-outputs
+                     :primitive-outputs primitive-outputs
+                     :source-form form))))
+
+(defun workgroup-built-in-type (built-in)
+  (case built-in
+    (:local-invocation-index :uint)
+    ((:local-invocation-id :workgroup-id :num-workgroups :workgroup-size)
+     :uvec3)
+    (otherwise nil)))
+
+(defun validate-workgroup-inputs (inputs options)
+  (let ((seen nil))
+    (dolist (input inputs)
+      (let* ((built-in (shader-interface-built-in input))
+             (expected (workgroup-built-in-type built-in)))
+        (unless expected
+          (error 'shader-language-error
+                 :form (shader-object-source-form input)
+                 :reason :invalid-workgroup-input :details built-in))
+        (unless (shader-type= expected (shader-declaration-type input))
+          (error 'shader-language-error
+                 :form (shader-object-source-form input)
+                 :reason :workgroup-built-in-type
+                 :details (list built-in expected)))
+        (when (member built-in seen)
+          (error 'shader-language-error
+                 :form options :reason :duplicate-workgroup-built-in
+                 :details built-in))
+        (push built-in seen)))
+    (unless (member :local-invocation-index seen)
+      (error 'shader-language-error
+             :form options :reason :missing-local-invocation-index))))
+
+(defun statement-tree-occurrences (statements class)
+  (loop for statement in statements
+        append
+        (append (when (typep statement class) (list statement))
+                (when (typep statement 'shader-conditional-statement)
+                  (statement-tree-occurrences
+                   (shader-conditional-statement-statements statement)
+                   class)))))
+
+(defun validate-stage-statements
+    (stage statements source-form &optional mesh-output)
+  (ecase stage
+    ((:vertex :fragment :compute) nil)
+    (:mesh
+     (let ((counts
+             (statement-tree-occurrences
+              statements 'shader-mesh-output-counts))
+           (stores
+             (append
+              (statement-tree-occurrences statements 'shader-mesh-vertex-store)
+              (statement-tree-occurrences
+               statements 'shader-mesh-primitive-store))))
+       (unless (= (length counts) 1)
+         (error 'shader-language-error
+                :form source-form :reason :mesh-output-counts-count
+                :details (length counts)))
+       (unless (eq (first statements) (first counts))
+         (error 'shader-language-error
+                :form (shader-statement-source-form (first counts))
+                :reason :mesh-output-counts-must-be-first))
+       (unless (every #'shader-expression-workgroup-uniform-p
+                      (shader-statement-expressions (first counts)))
+         (error 'shader-language-error
+                :form (shader-statement-source-form (first counts))
+                :reason :mesh-output-counts-not-uniform))
+       (loop for expression
+               in (shader-statement-expressions (first counts))
+             for limit in (list (shader-mesh-output-max-vertices mesh-output)
+                                (shader-mesh-output-max-primitives mesh-output))
+             do (multiple-value-bind (constant constant-p)
+                    (shader-constant-uint-value expression)
+                  (when (and constant-p (> constant limit))
+                    (error 'shader-language-error
+                           :form (shader-statement-source-form (first counts))
+                           :reason :mesh-output-count-exceeds-limit
+                           :details (list constant limit)))))
+       (unless stores
+         (error 'shader-language-error
+                :form source-form :reason :empty-mesh-output-body))))
+    (:task
+     (let ((emissions
+             (statement-tree-occurrences
+              statements 'shader-emit-mesh-workgroups)))
+       (unless (= (length emissions) 1)
+         (error 'shader-language-error
+                :form source-form :reason :mesh-workgroups-emission-count
+                :details (length emissions)))
+       (unless (eq (car (last statements)) (first emissions))
+         (error 'shader-language-error
+                :form (shader-statement-source-form (first emissions))
+                :reason :mesh-workgroups-emission-must-be-last))
+       (unless (shader-expression-workgroup-uniform-p
+                (shader-emit-mesh-workgroups-counts (first emissions)))
+         (error 'shader-language-error
+                :form (shader-statement-source-form (first emissions))
+                :reason :mesh-workgroups-not-uniform))))))
 
 (defun parse-shader-specification (name options body)
   (let* ((stage (getf options :stage))
@@ -2589,29 +3359,64 @@ without turning function definitions back into source-form substitution."
                           (getf options :outputs)))
          (resources (mapcar #'parse-resource-declaration
                             (getf options :resources)))
+         (workgroup-size
+           (and (member stage '(:task :mesh))
+                (parse-workgroup-size (getf options :workgroup-size) options)))
+         (payload-name (getf options :payload))
+         (payload
+           (and payload-name
+                (or (task-payload-definition-for payload-name)
+                    (error 'shader-language-error
+                           :form options :reason :undefined-task-payload
+                           :details payload-name))))
+         (mesh-output
+           (and (eq stage :mesh)
+                (parse-mesh-output-declaration (getf options :mesh-output))))
          (environment-items
            (append inputs
                    (loop for resource in resources
                          if (typep resource 'shader-uniform-block)
                            append (shader-uniform-block-members resource)
-                         else collect resource)))
+                         else collect resource)
+                   (and payload (shader-task-payload-fields payload))))
          (environment
            (mapcar (lambda (item) (cons (shader-object-name item) item))
                    environment-items)))
-    (unless (member stage '(:vertex :fragment :compute))
+    (unless (member stage '(:vertex :fragment :compute :task :mesh))
       (error 'shader-language-error
              :form options :reason :invalid-stage :details stage))
+    (when (member stage '(:task :mesh))
+      (validate-workgroup-inputs inputs options)
+      (when outputs
+        (error 'shader-language-error
+               :form options :reason :ordinary-outputs-on-workgroup-stage)))
+    (when (and (eq stage :task) (getf options :mesh-output))
+      (error 'shader-language-error
+             :form options :reason :mesh-output-on-task-stage))
+    (when (and (not (member stage '(:task :mesh)))
+               (or payload-name (getf options :mesh-output)))
+      (error 'shader-language-error
+             :form options :reason :workgroup-contract-on-ordinary-stage))
     (let ((*shader-function-call-counter* 0)
           (*shader-function-call-stack* nil))
-      (multiple-value-bind (bindings statements)
-          (parse-shader-body expanded-body environment outputs)
-        (make-instance
-         'shader-specification
-         :name name :stage stage
-         :inputs inputs :outputs outputs :resources resources
-         :bindings (collect-shader-bindings bindings statements)
-         :statements statements
-         :source-form (list* 'define-shader name options body))))))
+      (let ((context
+              (make-instance 'shader-parsing-context
+                             :stage stage :outputs outputs
+                             :task-payload payload :mesh-output mesh-output)))
+        (multiple-value-bind (bindings statements)
+            (parse-shader-body expanded-body environment context)
+          (validate-stage-statements
+           stage statements (list* 'define-shader name options body)
+           mesh-output)
+          (make-instance
+           'shader-specification
+           :name name :stage stage
+           :inputs inputs :outputs outputs :resources resources
+           :workgroup-size workgroup-size
+           :task-payload payload :mesh-output mesh-output
+           :bindings (collect-shader-bindings bindings statements)
+           :statements statements
+           :source-form (list* 'define-shader name options body)))))))
 
 (defmacro define-shader (name options &body body)
   "Define NAME as a function returning a durable, inspectable shader graph."
