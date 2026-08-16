@@ -284,6 +284,31 @@
           '(0) 2)
          'math:quantity-operation-error))))
 
+(deftest repeated-layouts-name-strided-products-without-element-objects
+  (let* ((position
+           (math:make-quantity-specification
+            :position :dimension :length :unit :metre
+            :tensor-order 1 :affine-p t))
+         (element
+           (math:make-quantity-layout
+            3 (list (math:make-quantity-projection '(0 1 2) position))))
+         (packed (math:make-repeated-quantity-layout element))
+         (padded (math:make-repeated-quantity-layout element :stride 4))
+         (same
+           (math:make-repeated-quantity-layout
+            (math:make-quantity-layout
+             3 (list (math:make-quantity-projection '(0 1 2) position))))))
+    (ok (= 3 (math:repeated-quantity-layout-stride packed)))
+    (ok (= 4 (math:quantity-layout-extent padded)))
+    (ok (eq element
+            (math:repeated-quantity-layout-element-layout packed)))
+    (ok (eq position (math:project-quantity-layout packed '(0 1 2))))
+    (ok (math:quantity-layout= packed same))
+    (ok (not (math:quantity-layout= packed element)))
+    (ok (not (math:quantity-layout= packed padded)))
+    (ok (signals (math:make-repeated-quantity-layout element :stride 2)
+                 'error))))
+
 (deftest source-declarations-share-one-quantity-option-parser
   (let ((point
           (math:make-declared-quantity-specification

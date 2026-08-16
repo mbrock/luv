@@ -737,6 +737,20 @@ sets or clears the point character."
   (:documentation
    "Semantic quantities packed into disjoint positions of one representation."))
 
+(defclass repeated-quantity-layout (quantity-layout)
+  ((element-layout
+    :initarg :element-layout
+    :reader repeated-quantity-layout-element-layout)
+   (stride
+    :initarg :stride
+    :reader repeated-quantity-layout-stride))
+  (:documentation
+   "A fixed product repeated through flat storage at a physical lane stride.
+
+The inherited extent and projections describe one stride period so existing
+projection tools continue to inspect an element.  ELEMENT-LAYOUT retains the
+unpadded product definition; no runtime element object is implied."))
+
 (defun make-quantity-layout (extent projections)
   (unless (typep extent '(integer 1 *))
     (error "A quantity layout extent must be a positive integer, not ~S."
@@ -756,6 +770,25 @@ sets or clears the point character."
                  :extent extent
                  :projections (copy-list projections)))
 
+(defun make-repeated-quantity-layout (element-layout &key stride)
+  "Repeat ELEMENT-LAYOUT through flat storage, optionally with lane padding."
+  (check-type element-layout quantity-layout)
+  (when (typep element-layout 'repeated-quantity-layout)
+    (error "A repeated quantity layout needs a fixed product element, not ~S."
+           element-layout))
+  (let ((physical-stride (or stride (quantity-layout-extent element-layout))))
+    (unless (and (typep physical-stride '(integer 1 *))
+                 (>= physical-stride
+                     (quantity-layout-extent element-layout)))
+      (error "Repeated layout stride ~S is smaller than element extent ~D."
+             physical-stride (quantity-layout-extent element-layout)))
+    (make-instance
+     'repeated-quantity-layout
+     :extent physical-stride
+     :projections (copy-list (quantity-layout-projections element-layout))
+     :element-layout element-layout
+     :stride physical-stride)))
+
 (defmethod print-object ((layout quantity-layout) stream)
   (print-unreadable-object (layout stream :type t)
     (format stream "~D lanes: ~{~S~^, ~}"
@@ -767,27 +800,48 @@ sets or clears the point character."
                       (quantity-projection-specification projection))))
              (quantity-layout-projections layout)))))
 
+(defmethod print-object ((layout repeated-quantity-layout) stream)
+  (print-unreadable-object (layout stream :type t)
+    (format stream "~S every ~D lanes"
+            (repeated-quantity-layout-element-layout layout)
+            (repeated-quantity-layout-stride layout))))
+
 (defun quantity-layout= (left right)
-  (and (= (quantity-layout-extent left) (quantity-layout-extent right))
-       (= (length (quantity-layout-projections left))
-          (length (quantity-layout-projections right)))
-       (every
-        (lambda (left-projection)
-          (let ((right-projection
-                  (find (quantity-projection-positions left-projection)
-                        (quantity-layout-projections right)
-                        :test #'equal
-                        :key #'quantity-projection-positions)))
-            (and right-projection
-                 (quantity-specification=
-                  (quantity-projection-specification left-projection)
-                  (quantity-projection-specification right-projection)))))
-        (quantity-layout-projections left))))
+  (let ((left-repeated-p (typep left 'repeated-quantity-layout))
+        (right-repeated-p (typep right 'repeated-quantity-layout)))
+    (cond
+      ((and left-repeated-p right-repeated-p)
+       (and (= (repeated-quantity-layout-stride left)
+               (repeated-quantity-layout-stride right))
+            (quantity-layout=
+             (repeated-quantity-layout-element-layout left)
+             (repeated-quantity-layout-element-layout right))))
+      ((or left-repeated-p right-repeated-p) nil)
+      (t
+       (and (= (quantity-layout-extent left) (quantity-layout-extent right))
+            (= (length (quantity-layout-projections left))
+               (length (quantity-layout-projections right)))
+            (every
+             (lambda (left-projection)
+               (let ((right-projection
+                       (find (quantity-projection-positions left-projection)
+                             (quantity-layout-projections right)
+                             :test #'equal
+                             :key #'quantity-projection-positions)))
+                 (and right-projection
+                      (quantity-specification=
+                       (quantity-projection-specification left-projection)
+                       (quantity-projection-specification right-projection)))))
+             (quantity-layout-projections left)))))))
 
 (defun project-quantity-layout (layout positions)
   "Return the quantity exactly occupying POSITIONS in LAYOUT, or NIL."
-  (let ((projection
-          (find positions (quantity-layout-projections layout)
+  (let* ((element-layout
+           (if (typep layout 'repeated-quantity-layout)
+               (repeated-quantity-layout-element-layout layout)
+               layout))
+         (projection
+          (find positions (quantity-layout-projections element-layout)
                 :test #'equal :key #'quantity-projection-positions)))
     (and projection (quantity-projection-specification projection))))
 

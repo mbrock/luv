@@ -87,6 +87,10 @@
            #:quantity-layout-projections
            #:quantity-layout=
            #:project-quantity-layout
+           #:repeated-quantity-layout
+           #:make-repeated-quantity-layout
+           #:repeated-quantity-layout-element-layout
+           #:repeated-quantity-layout-stride
            #:make-declared-quantity-specification
            #:declaration-compatibility-error
            #:declaration-compatibility-error-actual
