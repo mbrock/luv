@@ -479,6 +479,9 @@
 (define-arithmetic-operator interpret "Name a compatible derived quantity.")
 (define-arithmetic-operator representation "Expose a quantity's raw representation.")
 (define-arithmetic-operator convert-unit "Convert a quantity to a compatible unit.")
+(define-arithmetic-operator and "Logical conjunction of tests and raw truth values.")
+(define-arithmetic-operator or "Logical disjunction of tests and raw truth values.")
+(define-arithmetic-operator not "Logical negation of one test or raw truth value.")
 
 (defun arithmetic-environment-value (name environment source-form)
   (or (cdr (assoc name environment :test #'eq))
@@ -545,6 +548,39 @@
      :quantity-specification
      (infer-arithmetic-call-quantity-specification operator operands form)
      :source-form form)))
+
+(defclass arithmetic-logical-call (arithmetic-call)
+  ()
+  (:documentation
+   "A truth-valued combination of tests.  Like a comparison it carries no
+quantity, and unlike an arithmetic call it never infers one from operands, so
+checked comparisons and raw flags may combine freely."))
+
+(defmethod arithmetic-expression-quantity-checked-p
+    ((expression arithmetic-logical-call))
+  (declare (ignore expression))
+  nil)
+
+(defun parse-arithmetic-logical-call (operator form environment)
+  (when (and (eq operator 'not) (/= (length form) 2))
+    (error 'arithmetic-language-error
+           :form form :reason :negation-arity :details (1- (length form))))
+  (make-instance
+   'arithmetic-logical-call
+   :operator operator
+   :operands (mapcar (lambda (operand)
+                       (parse-arithmetic-expression operand environment))
+                     (rest form))
+   :source-form form))
+
+(defmethod parse-arithmetic-operator-call ((operator (eql 'and)) form environment)
+  (parse-arithmetic-logical-call operator form environment))
+
+(defmethod parse-arithmetic-operator-call ((operator (eql 'or)) form environment)
+  (parse-arithmetic-logical-call operator form environment))
+
+(defmethod parse-arithmetic-operator-call ((operator (eql 'not)) form environment)
+  (parse-arithmetic-logical-call operator form environment))
 
 (defgeneric arithmetic-constant-expression-p (expression)
   (:documentation "Whether EXPRESSION is a literal construction source."))

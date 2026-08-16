@@ -29,6 +29,7 @@
            #:arithmetic-call-operator
            #:arithmetic-call-operands
            #:arithmetic-call-parameters
+           #:arithmetic-logical-call
            #:arithmetic-conditional
            #:arithmetic-conditional-condition
            #:arithmetic-conditional-consequent

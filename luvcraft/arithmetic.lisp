@@ -16,3 +16,16 @@
                        (lang:quantity 1.0 :unit :one))))
     (lang:interpret (* fog-progress fog-progress)
                     :quantity :fog-amount :unit :one)))
+
+;;; Voxel light loses one attenuation step per cell entered plus the entered
+;;; cell's own opacity, except that a direct transmission (sky light continuing
+;;; straight down) pays only the opacity.  This is the one local law shared by
+;;; the legacy solver, the seeds, and the compiled frontier kernel, which
+;;; inlines the checked definition rather than calling this function. #53Q1II
+(lisp:define-lisp-arithmetic-function light-propagation-loss
+    ((opacity :quantity :block-light-attenuation-step :unit :one)
+     (direct-transmission-p))
+  (if direct-transmission-p
+      opacity
+      (+ opacity
+         (lang:quantity 1 :quantity :block-light-attenuation-step :unit :one))))
