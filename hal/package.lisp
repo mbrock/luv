@@ -440,6 +440,18 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:canvas-dispatch-timeout
            #:canvas-dispatch-timeout-seconds
            #:*canvas-dispatch-timeout*
+           #:log-event
+           #:*log-enabled-p*
+           #:*log-categories*
+           #:*log-stream*
+           #:canvas-health
+           #:canvas-stalled-seconds
+           #:*canvas-event-wait-slice*
+           #:*canvas-watchdog-interval*
+           #:*canvas-watchdog-warn-seconds*
+           #:*canvas-watchdog-sample-seconds*
+           #:*canvas-watchdog-fatal-seconds*
+           #:*canvas-watchdog-inhibit-hook*
            #:canvas-configuration
            #:make-canvas-configuration
            #:canvas-configuration-device

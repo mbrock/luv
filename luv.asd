@@ -198,6 +198,7 @@ offsets and of headers."
     :serial t
     :components
     ((:file "package")
+     (:file "log")
      (:file "tracy")
      (:file "trace")
      (:file "gpu")

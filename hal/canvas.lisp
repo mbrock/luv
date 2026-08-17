@@ -307,6 +307,21 @@ says the user asked for, not what the hardware reported."))
 (defgeneric canvas-visible-p (canvas)
   (:documentation "Return whether CANVAS is intended to be visible."))
 
+(defgeneric canvas-health (canvas)
+  (:documentation
+   "Return a plist describing whether CANVAS's native loop is still alive.
+
+The keys are :STATE, :PHASE, :PHASE-SECONDS, :TICKS, and :STALLED-P.  A
+caller reads this to answer the question a beachballing window raises --
+is anything servicing that window at all -- without attaching a debugger."))
+
+(defgeneric canvas-stalled-seconds (canvas)
+  (:documentation
+   "Return how long CANVAS's loop has been in one phase past its deadline.
+
+NIL means the loop is healthy: either it is cycling, or it is parked in a
+bounded wait that the window system is pumping for it."))
+
 (defgeneric canvas-fullscreen-p (canvas)
   (:documentation "Return whether CANVAS occupies its display."))
 

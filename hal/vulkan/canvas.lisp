@@ -551,6 +551,8 @@ ordinary state for a minimized window and not an error."
         (return-from rebuild-vulkan-canvas-swapchain nil)))
     (unconfigure-vulkan-canvas-context context)
     (configure-vulkan-canvas-context context configuration)
+    (log-event :vulkan "rebuilt the swapchain for ~{~D~^x~}"
+               (canvas-extent context))
     t))
 
 (defun ensure-vulkan-canvas-swapchain (context)

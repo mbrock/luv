@@ -163,7 +163,39 @@
     (write-sequence octets stream)
     (force-output stream)))
 
+(defparameter *slynk-silence-notices* '(5 15 30 60)
+  "Seconds of silence at which ./sly reports that the image has not answered.
+
+After the last entry the notice repeats at that interval.  A request can take
+minutes legitimately -- loading a system, meshing a world -- so waiting is not
+itself an error, but waiting without a word is: silence is exactly what a
+wedged image looks like, and the difference has to be visible from here.")
+
+(defun report-slynk-silence (seconds)
+  (format *error-output*
+          "~&sly: no answer from ~A:~D after ~D s. It may simply be busy; ~
+`./sly status` in another shell says whether its canvas is stalled.~%"
+          *host* *port* seconds)
+  (force-output *error-output*))
+
+(defun await-slynk-packet (stream)
+  "Wait until STREAM has something to say, reporting the silence if it lasts."
+  (let* ((descriptor (sb-sys:fd-stream-fd stream))
+         (interval (or (car (last *slynk-silence-notices*)) 60))
+         (pending (rest *slynk-silence-notices*))
+         (waited 0)
+         (next (or (first *slynk-silence-notices*) interval)))
+    (loop until (listen stream)
+          do (when (sb-sys:wait-until-fd-usable
+                    descriptor :input (max 1 (- next waited)))
+               (return))
+             (setf waited next)
+             (report-slynk-silence waited)
+             (setf next (if pending (first pending) (+ waited interval))
+                   pending (rest pending)))))
+
 (defun read-packet (stream)
+  (await-slynk-packet stream)
   (let* ((header (sb-ext:octets-to-string
                   (read-exactly stream 6)
                   :external-format :ascii))
@@ -820,6 +852,47 @@
            (ignore-errors (delete-file *server-pid-path*))
            (format t "luv Slynk is not running.~%")))))))
 
+(defparameter *game-status-form*
+  "(let* ((session-symbol
+            (and (find-package :luvcraft)
+                 (find-symbol \"*SESSION*\" :luvcraft)))
+          (session (and session-symbol
+                        (boundp session-symbol)
+                        (symbol-value session-symbol)))
+          (health
+            (ignore-errors
+             (when session
+               (funcall (find-symbol \"CANVAS-HEALTH\" :luv)
+                        (funcall (find-symbol \"LUVCRAFT-SESSION-CANVAS\"
+                                              :luvcraft)
+                                 session))))))
+     (princ (if session :playing :idle))
+     (when health (format t \" ~S\" health)))"
+  "Read out of the image: whether a game is playing, and its canvas health.
+
+The health comes from the canvas's own loop counters rather than from asking
+the canvas thread anything, so it answers even when that thread is the thing
+that has stopped -- which is the only moment the question really matters.")
+
+(defun print-canvas-health (text)
+  "Print the canvas health plist embedded in the game status TEXT, if any."
+  (let* ((start (position #\( text))
+         (health (and start
+                      (ignore-errors
+                       (let ((*read-eval* nil))
+                         (read-from-string (subseq text start)))))))
+    (when health
+      (let ((phase (getf health :phase))
+            (seconds (getf health :phase-seconds))
+            (ticks (getf health :ticks)))
+        (if (getf health :stalled-p)
+            (format t "The canvas is STALLED in ~(~A~) for ~,1F s after ~D ~
+loop iterations. It is not servicing its window; the image logs the stall ~
+and ends itself if it does not recover (./sly log).~%"
+                    phase (or seconds 0) ticks)
+            (format t "The canvas loop is healthy (~(~A~), ~D iterations).~%"
+                    phase ticks))))))
+
 (defun print-game-status ()
   "Say whether luvcraft:play has a live game window in the image."
   (let ((answer
@@ -827,20 +900,14 @@
            (with-slynk-connection (stream)
              (authenticate stream)
              (evaluate-captured-output-on
-              stream
-              "(let ((session-symbol
-                       (and (find-package :luvcraft)
-                            (find-symbol \"*SESSION*\" :luvcraft))))
-                 (princ (if (and session-symbol
-                                 (boundp session-symbol)
-                                 (symbol-value session-symbol))
-                          :playing :idle)))"
-              "CL-USER")))))
+              stream *game-status-form* "CL-USER")))))
     (format t "~A~%"
             (cond ((null answer) "Game state unknown (image busy or not loaded).")
                   ((search "PLAYING" (string-upcase (princ-to-string answer)))
                    "A game is playing: ./sly screenshot PNG; ./sly stop-playing closes it.")
-                  (t "No game is playing: ./sly play starts one.")))))
+                  (t "No game is playing: ./sly play starts one.")))
+    (when answer
+      (print-canvas-health (princ-to-string answer)))))
 
 (defun evaluate-output-on (stream code &optional (package "CL-USER"))
   (write-result-string (evaluate-captured-output-on stream code package)))

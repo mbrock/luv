@@ -732,6 +732,8 @@ frame will present to.  The outgoing images stay alive until the last
 submission that used them completes."
   (let ((extent (canvas-extent (luvcraft-session-context session))))
     (unless (equal extent (luvcraft-session-render-extent session))
+      (log-event :luvcraft "reframing ~{~D~^x~} to ~{~D~^x~}"
+                 (or (luvcraft-session-render-extent session) '(0 0)) extent)
       (let ((attachments
               (make-luvcraft-frame-attachments
                (luvcraft-session-device session)
