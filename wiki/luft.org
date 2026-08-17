@@ -170,25 +170,26 @@ live frame lane.  The exact morphological answer for the mixed stars would be
 a table over the 256 vertex configurations, which #WQ611A's wave-level work
 does not need and which this heuristic postpones.
 
-* Woodworking: a handplane breaks only the exposed edges
+* Small planar facets soften convex and concave creases
 :PROPERTIES:
 :ID: RUAWR5
 :END:
 
-The =:chamfer= style is the one-ring case of #6TEFOS, but it models an edge
-break made by a handplane rather than applying the rounded style's symmetric
-minority rule.  Only a convex, accessible crease moves: both cells beyond its
-solid face must be air.  Concave meetings remain sharp, so a block standing on
-a floor does not acquire an impossible mitred cove.  Convex vertex stars with
-one, two, or three solid cells join their incident cuts; stars with four or
-more remain unchanged.
+The =:chamfer= style is the one-ring, planar case of #6TEFOS.  It applies the
+same symmetric star classification as the rounded style: a convex crease
+moves toward its minority solid cells, a concave crease moves toward its
+minority air cells, and flat or saddle stars do not move.  Thus both exposed
+silhouettes and inside meetings lose the perfectly sharp edge that makes a
+block world look synthetic, without pretending the geometry is literal
+woodworking.
 
 A shared point moves by exactly $\tfrac{w}{2}\,q$, half the setback along its
-clamped solid-side direction.  At an edge this is the midline of the flat
-45-degree facet between two faces inset by $w$; at a pure corner it is where
-the three small chamfer planes meet.  The default =*chamfer-width*= is 0.045
-cell: enough to catch the studio lights without making the blocks look carved
-away.  The rounded style keeps its independent =*bevel-radius*=.
+clamped minority direction.  At an edge this is the midline of a flat
+45-degree facet between two offset faces; at a pure corner it is where three
+small chamfer planes meet.  The default =*chamfer-width*= is 0.045 cell:
+enough to catch the studio lights and soften terrain notches without bringing
+back the old 0.22-cell carved coves.  The rounded style keeps its independent
+=*bevel-radius*=.
 
 Shading comes from the geometry rather than interpolated vertex normals:
 =chamfer-fragment-shader= reads each facet's normal from screen-space

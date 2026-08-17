@@ -224,7 +224,7 @@
 (defparameter *bevel-radius* 0.22
   "The :BEVEL style's crease-rounding radius in cells, below one half.")
 (defparameter *chamfer-width* 0.045
-  "The :CHAMFER style's subtle 45-degree edge setback in cells.")
+  "The :CHAMFER style's subtle 45-degree crease relief in cells.")
 (defparameter *arris-softness* 0.004
   "The narrow shading transition where a chamfer meets its original face.")
 
@@ -410,7 +410,7 @@
                         (style :bevel))
   "Create every GPU object needed to draw SCENE from CAMERA at WIDTH by HEIGHT.
 
-STYLE is :FLAT, :BEVEL (rounded), or :CHAMFER (a subtle convex edge-break),
+STYLE is :FLAT, :BEVEL (rounded), or :CHAMFER (subtle planar crease relief),
 and may be changed later with (SETF RENDERER-STYLE).
 Without DEVICE, one is requested from PROVIDER and owned by the renderer."
   (let* ((owns-device-p (null device))
