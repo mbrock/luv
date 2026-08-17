@@ -118,6 +118,7 @@ are normalized mean magnitude, maximum magnitude, and changed-pixel fraction."
                 (mesher (make-instance 'exposed-face-mesher))
                 (camera (make-instance 'fly-camera))
                 (provider *gpu-provider*)
+                (world-text-string nil)
                 (world-text-distance 8.0)
                 (world-text-lift 3.0)
                 (world-text-units-per-em 0.55)
@@ -137,6 +138,7 @@ pass an unpinned clock to photograph another time of day."
                   :frames-per-second nil :visible-p nil
                   :provider provider
                   :world world :mesher mesher :camera camera
+                  :world-text-string world-text-string
                   :world-text-distance world-text-distance
                   :world-text-lift world-text-lift
                   :world-text-units-per-em world-text-units-per-em
@@ -163,6 +165,7 @@ and coverage defects visible without scaling up a smaller raster afterward.
     'fly-camera
     :position (make-vec3 8.0 24.0 -6.0)
     :yaw 0.0 :pitch 0.02)
+   :world-text-string "hello, world"
    :world-text-distance 6.0
    :world-text-lift 2.2
    :world-text-units-per-em 3.4))

@@ -1023,7 +1023,11 @@ the frame uniform cannot silently diverge between shader and host."
                                 (sky-clock (make-instance 'sky-clock))
                                 (sky-profile (make-default-sky-profile))
                                 (shadow-diagnostic-p nil)
-                                (world-text-string "hello, world")
+                                ;; The world-text banner is a proof of the
+                                ;; Slug path, not scenery: a caller that
+                                ;; wants one asks for it, and the ordinary
+                                ;; game sky stays empty.
+                                (world-text-string nil)
                                 (world-text-font-pathname
                                   (cl-dejavu:font-pathname "DejaVuSans.ttf"))
                                 (world-text-distance 8.0)
