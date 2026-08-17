@@ -711,7 +711,13 @@ the frame uniform cannot silently diverge between shader and host."
 
 (defun start-luvcraft (&key
                                 (title "luv little block world — click, look, walk")
-                                (width 960) (height 640)
+                                ;; KMSDRM consoles can only present at a real
+                                ;; display mode, so allow the environment to pin
+                                ;; the canvas to the panel's native size.
+                                (width (let ((value (uiop:getenv "LUVCRAFT_WIDTH")))
+                                         (if value (parse-integer value) 960)))
+                                (height (let ((value (uiop:getenv "LUVCRAFT_HEIGHT")))
+                                          (if value (parse-integer value) 640)))
                                 (frames-per-second 60)
                                 (visible-p t)
                                 (world (make-empty-little-block-world))
