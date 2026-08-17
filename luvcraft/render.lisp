@@ -1062,6 +1062,14 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
          (world-text-run nil)
          (video-screen nil)
          (session nil) (production-system nil) (completed-p nil))
+    ;; FFmpeg has to be dlopened before the canvas exists.  The first call
+    ;; into libav loads four shared libraries, and doing that once the canvas
+    ;; is open never returns: the game hangs before it can publish its window,
+    ;; with no error and nothing left holding a handle to close it.  Loading
+    ;; here costs a few milliseconds and only when a film was actually asked
+    ;; for.
+    (when video-pathname
+      (libav:load-libav))
     (open-canvas canvas)
     (unwind-protect
          (progn
