@@ -29,7 +29,9 @@
                                :initform nil
                                :reader luvcraft-frame-bloom-secondary-bind-group)
    (world-text-bind-groups :initarg :world-text-bind-groups :initform #()
-                           :reader luvcraft-frame-world-text-bind-groups)))
+                           :reader luvcraft-frame-world-text-bind-groups)
+   (video-screen-bind-group :initarg :video-screen-bind-group :initform nil
+                            :reader luvcraft-frame-video-screen-bind-group)))
 
 (defconstant +block-world-crosshair-vertex-count+ 24)
 (defconstant +luvcraft-shadow-map-size+ 2048)
@@ -435,6 +437,7 @@ the frame uniform cannot silently diverge between shader and host."
             (bloom-primary-bind-group nil)
             (bloom-secondary-bind-group nil)
             (world-text-bind-groups #())
+            (video-screen-bind-group nil)
             (completed-p nil))
         (unwind-protect
              (progn
@@ -523,7 +526,12 @@ the frame uniform cannot silently diverge between shader and host."
                          (make-world-text-frame-bind-groups
                           (luvcraft-session-world-text session)
                           (luvcraft-session-device session) buffer)
-                         #()))
+                         #())
+                     video-screen-bind-group
+                     (when (luvcraft-session-video-screen session)
+                       (make-video-screen-bind-group
+                        (luvcraft-session-video-screen session)
+                        (luvcraft-session-device session) buffer)))
                (remember-luvcraft-resource session buffer)
                (remember-luvcraft-resource session scene-bind-group)
                (remember-luvcraft-resource session shadow-bind-group)
@@ -536,6 +544,8 @@ the frame uniform cannot silently diverge between shader and host."
                          (remove-duplicates
                           (coerce world-text-bind-groups 'list) :test #'eq))
                  (remember-luvcraft-resource session group))
+               (when video-screen-bind-group
+                 (remember-luvcraft-resource session video-screen-bind-group))
                (let ((state
                        (make-instance
                         'luvcraft-frame-state
@@ -547,7 +557,8 @@ the frame uniform cannot silently diverge between shader and host."
                         :bloom-scene-bind-group bloom-scene-bind-group
                         :bloom-primary-bind-group bloom-primary-bind-group
                         :bloom-secondary-bind-group bloom-secondary-bind-group
-                        :world-text-bind-groups world-text-bind-groups)))
+                        :world-text-bind-groups world-text-bind-groups
+                        :video-screen-bind-group video-screen-bind-group)))
                  (setf (gethash key
                                 (luvcraft-session-frame-states session))
                        state
@@ -558,6 +569,7 @@ the frame uniform cannot silently diverge between shader and host."
                       (remove-duplicates
                        (coerce world-text-bind-groups 'list) :test #'eq))
               (destroy group))
+            (when video-screen-bind-group (destroy video-screen-bind-group))
             (when shadow-bind-group (destroy shadow-bind-group))
             (when scene-bind-group (destroy scene-bind-group))
             (when bloom-scene-bind-group (destroy bloom-scene-bind-group))
@@ -576,6 +588,12 @@ the frame uniform cannot silently diverge between shader and host."
       (sample luvcraft-frame-sample-shader-refresh-seconds
               :luvcraft/shader-refresh)
     (refresh-luvcraft-shaders session))
+  ;; The film's clock runs on the world's frames, so it advances here, before
+  ;; anything is encoded: the upload is an ordinary queue write, not part of
+  ;; this frame's command stream.
+  (when (luvcraft-session-video-screen session)
+    (advance-video-screen (luvcraft-session-video-screen session)
+                          (luvcraft-session-device session)))
   (dolist (overlay (luvcraft-session-overlays session))
     (refresh-luvcraft-overlay overlay session))
   (let* ((products
@@ -717,6 +735,16 @@ the frame uniform cannot silently diverge between shader and host."
           (set-vertex-buffer
            pass 0 (luvcraft-session-particle-vertex-buffer session))
           (draw pass particle-vertex-count))
+        ;; Before the text, so a caption drawn over the screen wins.
+        (when (and (luvcraft-session-video-screen session)
+                   (luvcraft-frame-video-screen-bind-group frame))
+          (let ((screen (luvcraft-session-video-screen session)))
+            (set-pipeline pass (video-screen-native-pipeline screen))
+            (set-vertex-buffer pass 0 (video-screen-vertex-buffer screen))
+            (set-vertex-buffer pass 1 (video-screen-instance-buffer screen))
+            (set-bind-group
+             pass 0 (luvcraft-frame-video-screen-bind-group frame))
+            (draw pass 6 1)))
         (when (luvcraft-session-world-text session)
           (let ((text (luvcraft-session-world-text session)))
             (set-pipeline pass (world-text-run-native-pipeline text))
@@ -1000,6 +1028,10 @@ the frame uniform cannot silently diverge between shader and host."
                                 (world-text-distance 8.0)
                                 (world-text-lift 3.0)
                                 (world-text-units-per-em 0.55)
+                                (video-pathname nil)
+                                (video-distance 13.0)
+                                (video-lift 4.5)
+                                (video-height 5.0)
                                 (residency-radius 4)
                                 (publication-limit 2)
                                 (load-schedule-limit 4)
@@ -1028,6 +1060,7 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
          (device nil) (context nil) (resources nil) (pipelines nil)
          (world-text-glyph-cache nil)
          (world-text-run nil)
+         (video-screen nil)
          (session nil) (production-system nil) (completed-p nil))
     (open-canvas canvas)
     (unwind-protect
@@ -1410,9 +1443,19 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                              :lift world-text-lift
                              :world-units-per-em
                              world-text-units-per-em))))
+                  (screen
+                    (when video-pathname
+                      (setf video-screen
+                            (make-video-screen
+                             device camera video-pathname
+                             +luvcraft-scene-color-format+
+                             :distance video-distance
+                             :lift video-lift
+                             :height video-height))))
                   (new-session
                     (make-instance
                      'luvcraft-session
+                     :video-screen screen
                      :canvas canvas :device device :context context
                      :world world :mesher mesher
                      :checkpoint-writer checkpoint-writer
@@ -1506,6 +1549,8 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
           (ignore-errors (release-live-shader-pipeline pipeline)))
         (dolist (resource resources)
           (ignore-errors (destroy resource)))
+        (when video-screen
+          (ignore-errors (release-video-screen video-screen)))
         (when world-text-run
           (ignore-errors (release-world-text-run world-text-run)))
         (when world-text-glyph-cache
@@ -1551,6 +1596,9 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
     (dolist (resource (luvcraft-session-resources session))
       (destroy resource))
     (setf (luvcraft-session-resources session) nil)
+    (when (luvcraft-session-video-screen session)
+      (release-video-screen (luvcraft-session-video-screen session))
+      (setf (luvcraft-session-video-screen session) nil))
     (when (luvcraft-session-world-text session)
       (release-world-text-run (luvcraft-session-world-text session)))
     (when (luvcraft-session-world-text-glyph-cache session)

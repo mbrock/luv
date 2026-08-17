@@ -151,6 +151,8 @@
                :reader luvcraft-session-world-text)
    (world-text-glyph-cache :initarg :world-text-glyph-cache :initform nil
                            :reader luvcraft-session-world-text-glyph-cache)
+   (video-screen :initarg :video-screen :initform nil
+                 :accessor luvcraft-session-video-screen)
    (overlays :initform nil :accessor luvcraft-session-overlays)
    (modal-focus :initform nil :accessor luvcraft-session-modal-focus)
    (focus-camera-origin :initform nil
@@ -476,6 +478,9 @@ mounting a vehicle, and other interactions described by #8JCMA5."
   (when (luvcraft-session-world-text session)
     (refresh-live-shader-pipeline
      (world-text-run-pipeline (luvcraft-session-world-text session))))
+  (when (luvcraft-session-video-screen session)
+    (refresh-live-shader-pipeline
+     (video-screen-pipeline (luvcraft-session-video-screen session))))
   session)
 
 (defun luvcraft-session-target
