@@ -1495,6 +1495,45 @@
                     :key-name :8 :character #\8))
     (ok (eq (luvcraft-session-selected-block session) *crystal-block*))))
 
+(deftest block-inventory-supports-creative-and-finite-stacks
+  (let* ((creative
+           (make-block-inventory :blocks (list luvcraft::*stone-block*)))
+         (finite (make-block-inventory :blocks (list luvcraft::*dirt-block*)
+                                       :quantity 2))
+         (entry
+           (block-inventory-entry-for finite luvcraft::*dirt-block*)))
+    (ok (equal (block-inventory-blocks creative)
+               (list luvcraft::*stone-block*)))
+    (ok (null (block-inventory-entry-quantity
+               (first (block-inventory-entries creative)))))
+    (ok (remove-block-from-inventory creative luvcraft::*stone-block* 1000))
+    (ok (remove-block-from-inventory finite luvcraft::*dirt-block*))
+    (ok (= 1 (block-inventory-entry-quantity entry)))
+    (ng (remove-block-from-inventory finite luvcraft::*dirt-block* 2))
+    (add-block-to-inventory finite luvcraft::*dirt-block* 4)
+    (ok (= 5 (block-inventory-entry-quantity entry)))
+    (add-block-to-inventory finite *crystal-block* 3)
+    (ok (equal (block-inventory-blocks finite)
+               (list luvcraft::*dirt-block* *crystal-block*)))
+    (ok (= 3
+           (block-inventory-entry-quantity
+            (block-inventory-entry-for finite *crystal-block*))))))
+
+(deftest numbered-selection-follows-the-session-inventory
+  (let* ((canvas (make-instance 'title-canvas :title "inventory test"))
+         (inventory
+           (make-block-inventory
+            :blocks (list luvcraft::*wood-block* *crystal-block*)))
+         (session
+           (make-instance 'luvcraft-session
+                          :canvas canvas :inventory inventory
+                          :selected-block luvcraft::*wood-block*)))
+    (ok (eq *crystal-block* (select-luvcraft-block session 2)))
+    (ok (eq *crystal-block*
+            (luvcraft-session-selected-block session)))
+    (ok (null (select-luvcraft-block session 3)))
+    (ok (search "1–2 select" (canvas-title canvas)))))
+
 (deftest gazetteer-names-semantic-gameplay-views
   (let* ((views (luvcraft-gazetteer-views))
          (names (mapcar #'luvcraft-gazetteer-view-name views)))

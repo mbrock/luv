@@ -107,7 +107,9 @@
   (let* ((frame (pane-frame pane))
          (selected
            (luvcraft:luvcraft-session-selected-block (hotbar-session frame)))
-         (blocks (luvcraft:placeable-block-kinds)))
+         (blocks
+           (luvcraft:block-inventory-blocks
+            (luvcraft:luvcraft-session-inventory (hotbar-session frame)))))
     (alexandria:when-let ((display (hotbar-terminal-display frame)))
       (paint-terminal-mode-hotbar pane display)
       (return-from handle-repaint nil))

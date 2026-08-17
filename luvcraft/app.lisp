@@ -76,6 +76,8 @@
                      :accessor luvcraft-session-residency-center)
    (selected-block :initarg :selected-block :initform *stone-block*
                    :accessor luvcraft-session-selected-block)
+   (inventory :initarg :inventory :initform (make-block-inventory)
+              :reader luvcraft-session-inventory)
    (particle-system :initarg :particle-system
                     :initform (make-instance 'block-particle-system)
                     :reader luvcraft-session-particle-system)
@@ -512,13 +514,14 @@ mounting a vehicle, and other interactions described by #8JCMA5."
        forward #'block-solid-p :max-distance max-distance))))
 
 (defun update-luvcraft-session-title (session)
-  (let* ((blocks (placeable-block-kinds))
+  (let* ((blocks (block-inventory-blocks
+                  (luvcraft-session-inventory session)))
          (block (luvcraft-session-selected-block session))
          (number (position block blocks :test #'eq)))
     (when (slot-boundp session 'canvas)
       (setf (canvas-title (luvcraft-session-canvas session))
             (format nil
-                    "~A — [~A] ~(~A~)  ·  1–~D select  ·  shift sprint  ·  tab focus  ·  shift-tab leave"
+                    "~A — [~A] ~(~A~)  ·  1–~D select  ·  I inventory  ·  shift sprint  ·  tab focus"
                     (luvcraft-session-title-base session)
                     (if number (1+ number) "?")
                     (block-kind-name block)
@@ -528,7 +531,10 @@ mounting a vehicle, and other interactions described by #8JCMA5."
 (defun select-luvcraft-block (session number)
   "Select the one-based numbered placeable material and update the title."
   (check-type number (integer 1))
-  (let ((block (nth (1- number) (placeable-block-kinds))))
+  (let ((block
+          (nth (1- number)
+               (block-inventory-blocks
+                (luvcraft-session-inventory session)))))
     (when block
       (setf (luvcraft-session-selected-block session) block)
       (update-luvcraft-session-title session))

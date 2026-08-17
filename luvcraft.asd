@@ -41,6 +41,7 @@
                  (:file "fields")
                  (:file "production")
                  (:file "blocks")
+                 (:file "inventory")
                  (:file "terrain")
                  (:file "frontier")
                  (:file "light")

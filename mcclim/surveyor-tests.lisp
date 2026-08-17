@@ -47,6 +47,17 @@
            (allocate-instance
             (find-class 'mcluv:luvcraft-hotbar-overlay))))))
 
+(deftest inventory-is-a-modal-hud-with-stable-grid-hit-testing
+  (ok (eq :hud
+          (luvcraft:luvcraft-overlay-stage
+           (allocate-instance
+            (find-class 'mcluv:luvcraft-inventory-overlay)))))
+  (ok (= 0 (mcluv::inventory-slot-at 0.04 0.20 9)))
+  (ok (= 2 (mcluv::inventory-slot-at 0.96 0.20 9)))
+  (ok (= 8 (mcluv::inventory-slot-at 0.96 0.90 9)))
+  (ok (null (mcluv::inventory-slot-at 0.01 0.20 9)))
+  (ok (null (mcluv::inventory-slot-at 0.50 0.95 9))))
+
 (deftest terminal-film-browser-shows-directories-and-playable-files
   (let* ((root (asdf:system-source-directory :luv))
          (directory (merge-pathnames "libav/" root))

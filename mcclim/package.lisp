@@ -87,10 +87,13 @@
            #:open-spinning-widget-lab
            #:luvcraft-widget-overlay
            #:luvcraft-hotbar-overlay
+           #:luvcraft-inventory-overlay
            #:terminal-film-browser
            #:open-terminal-film-browser
            #:open-luvcraft-hotbar
            #:close-luvcraft-hotbar
+           #:open-luvcraft-inventory
+           #:close-luvcraft-inventory
            #:open-luvcraft-widget-lab
            #:close-luvcraft-widget-lab
            #:surveyor-map

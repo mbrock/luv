@@ -64,7 +64,8 @@
   :components ((:file "mcclim/surveyor")
                (:file "mcclim/luvcraft")
                (:file "mcclim/terminal-film-browser")
-               (:file "mcclim/hotbar")))
+               (:file "mcclim/hotbar")
+               (:file "mcclim/inventory")))
 
 (defsystem "mcluv/luvcraft-test"
   :description "Executable claims for McCLIM instruments embedded in luvcraft."

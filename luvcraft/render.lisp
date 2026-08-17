@@ -902,6 +902,10 @@ the frame uniform cannot silently diverge between shader and host."
       (setf (luvcraft-session-focus-toggle-tab-down-p session) t)
       (toggle-luvcraft-session-focus session))
     (return-from handle-canvas-event nil))
+  (when (and (eq :i (canvas-key-event-key-name event))
+             (not (canvas-key-event-repeat-p event))
+             (toggle-luvcraft-inventory session))
+    (return-from handle-canvas-event nil))
   (when (dispatch-luvcraft-focus-event session canvas event)
     (return-from handle-canvas-event nil))
   (let ((key (canvas-key-event-key-name event)))
@@ -918,7 +922,10 @@ the frame uniform cannot silently diverge between shader and host."
             (let* ((character (canvas-key-event-character event))
                    (number (and character (digit-char-p character))))
               (when (and number
-                         (<= 1 number (length (placeable-block-kinds))))
+                         (<= 1 number
+                             (length
+                              (block-inventory-blocks
+                               (luvcraft-session-inventory session)))))
                 (select-luvcraft-block session number)))))))
   nil)
 
@@ -1010,6 +1017,7 @@ the frame uniform cannot silently diverge between shader and host."
                                 (camera (make-instance 'fly-camera))
                                 player
                                 (selected-block *stone-block*)
+                                (inventory (make-block-inventory))
                                 checkpoint-writer
                                 (provider *gpu-provider*)
                                 (sky-clock (make-instance 'sky-clock))
@@ -1039,7 +1047,8 @@ Click to capture the pointer, look with the mouse, walk with WASD, and jump
 with Space.  Once captured, left click removes the block at the centre of view
 and right click places the selected block.  Number keys select materials,
 middle click picks the targeted material, Shift sprints, and Escape releases
-the pointer.
+the pointer.  When a presentation extension supplies it, I opens the player
+inventory.
 
 Pass :PROVIDER to select the Vulkan or Metal relationship without changing
 world, simulation, streaming, or frame orchestration.  Pass :VISIBLE-P NIL to
@@ -1480,6 +1489,7 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                      :camera camera
                      :player player
                      :selected-block selected-block
+                     :inventory inventory
                      :lighting-state lighting-state
                      :sky-clock sky-clock :sky-profile sky-profile
                      :shadow-diagnostic-p shadow-diagnostic-p

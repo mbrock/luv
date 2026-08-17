@@ -125,6 +125,7 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:advance-sky-clock
            #:apply-block-world-source-edits
            #:attach-luvcraft-hud
+           #:toggle-luvcraft-inventory
            #:attach-lighting-state
            #:benchmark-luvcraft-frame-performance
            #:block-chunk-load-payload
@@ -138,6 +139,16 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:block-kind-face-tiles
            #:block-kind-name
            #:block-kind-named
+           #:block-inventory
+           #:block-inventory-blocks
+           #:block-inventory-entries
+           #:block-inventory-entry
+           #:block-inventory-entry-block
+           #:block-inventory-entry-for
+           #:block-inventory-entry-quantity
+           #:make-block-inventory
+           #:add-block-to-inventory
+           #:remove-block-from-inventory
            #:block-light-emission
            #:block-light-opacity
            #:block-mesh
@@ -248,6 +259,7 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:luvcraft-session-desired-chunks
            #:luvcraft-session-lighting-state
            #:luvcraft-session-modal-focus
+           #:luvcraft-session-inventory
            #:luvcraft-session-focus-candidate
            #:luvcraft-focus-entered
            #:luvcraft-focus-camera-pose
