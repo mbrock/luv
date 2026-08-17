@@ -66,7 +66,8 @@
                (:file "mcclim/terminal-film-browser")
                (:file "mcclim/block-icon")
                (:file "mcclim/hotbar")
-               (:file "mcclim/inventory")))
+               (:file "mcclim/inventory")
+               (:file "mcclim/metabar")))
 
 (defsystem "mcluv/telegram"
   :description "A Telegram terminal mounted on a luvcraft wall."

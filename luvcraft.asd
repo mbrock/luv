@@ -65,6 +65,7 @@
                  (:file "play")
                  (:file "terminal-wall")
                  (:file "phone")
+                 (:file "tunables")
                  (:file "capture")
                  (:file "benchmark")
                  (:file "gazetteer"))))

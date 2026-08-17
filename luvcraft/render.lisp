@@ -1154,6 +1154,13 @@ submission that used them completes."
              (not (canvas-key-event-repeat-p event))
              (toggle-luvcraft-inventory session))
     (return-from handle-canvas-event nil))
+  ;; RET slides the metabar of live knobs in from the left, or away again,
+  ;; unless something focused -- a shell -- wants the key as text.
+  (when (and (eq :return (canvas-key-event-key-name event))
+             (not (canvas-key-event-repeat-p event))
+             (null (luvcraft-session-modal-focus session))
+             (toggle-luvcraft-metabar session))
+    (return-from handle-canvas-event nil))
   ;; Fullscreen belongs to the window rather than to anything focused inside
   ;; it, so F11 is taken before a terminal or an overlay can read it as text.
   (when (and (eq :f11 (canvas-key-event-key-name event))

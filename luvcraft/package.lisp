@@ -126,6 +126,23 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:apply-block-world-source-edits
            #:attach-luvcraft-hud
            #:toggle-luvcraft-inventory
+           #:toggle-luvcraft-metabar
+           #:tunable
+           #:tunable-name
+           #:tunable-label
+           #:tunable-group
+           #:tunable-unit
+           #:tunable-minimum
+           #:tunable-maximum
+           #:tunable-step
+           #:tunable-value
+           #:tunable-fraction
+           #:set-tunable-value
+           #:step-tunable
+           #:format-tunable-value
+           #:find-tunable
+           #:define-tunable
+           #:*tunables*
            #:attach-lighting-state
            #:benchmark-luvcraft-frame-performance
            #:block-chunk-load-payload

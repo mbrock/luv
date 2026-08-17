@@ -31,8 +31,13 @@
   (asdf:load-asd (merge-pathnames #P"luvcraft.asd" project-root))
   (asdf:load-asd (merge-pathnames #P"luv-wiki.asd" project-root))
   (asdf:load-asd (merge-pathnames #P"luft.asd" project-root))
+  (asdf:load-asd (merge-pathnames #P"mcluv.asd" project-root))
   (asdf:load-system :luv)
   (asdf:load-system :luvcraft)
+  ;; The McCLIM presentation layer -- hotbar, inventory, metabar, the film
+  ;; browser -- is part of the game whichever way it is started, so the
+  ;; durable image carries it just as the shipped executable does.
+  (asdf:load-system :mcluv/luvcraft)
   (asdf:load-system :luv-wiki)
   (asdf:load-system :luft/render)
   (format t "~&Starting luv Slynk on 127.0.0.1:~D.~%" port)
