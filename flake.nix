@@ -136,6 +136,7 @@
           # Homebrew happens to have left in /usr/local/lib.
           ffmpeg = pkgs.ffmpeg;
           ffmpegLibraryDirectory = "${ffmpeg.lib}/lib";
+          ffmpegDevelopment = ffmpeg.dev;
           nativeLibraryPath = nixpkgs.lib.makeLibraryPath (
             [
               ffmpeg
@@ -225,6 +226,11 @@
               export LUV_TRACY_CLIENT=${tracyClientLibrary}
               export LUV_FFMPEG_LIBDIR=${ffmpegLibraryDirectory}
               export CL_SOURCE_REGISTRY=${mcclim}//:${cl-sdl3}//
+              # cffi-grovel compiles a C program against these headers to read
+              # AVFrame's layout out of the compiler rather than transcribing
+              # offsets.  The dev shell gets this from mkShell's buildInputs;
+              # here it has to be said out loud.
+              export PKG_CONFIG_PATH=${ffmpegDevelopment}/lib/pkgconfig''${PKG_CONFIG_PATH:+:}''${PKG_CONFIG_PATH:-}
               export LD_LIBRARY_PATH=${nativeLibraryPath}''${LD_LIBRARY_PATH:+:}''${LD_LIBRARY_PATH:-}
 
               ${nixpkgs.lib.optionalString (system == "x86_64-linux") ''
