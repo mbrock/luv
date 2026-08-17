@@ -56,142 +56,187 @@ mode appends it here and gets a numbered slot; nothing else has to change.")
   (or (cdr (assoc mode *terminal-display-mode-colors*))
       '(0.35 0.35 0.35)))
 
+;;;; Geometry
+;;;;
+;;;; One function decides where a slot is, so painting and hit-testing cannot
+;;;; disagree about which one the player clicked.
+
+(defconstant +hotbar-width+ 612)
+(defconstant +hotbar-height+ 104)
+(defconstant +hotbar-pad+ 12)
+(defconstant +hotbar-gap+ 6)
+(defconstant +hotbar-slot-height+ 60)
+(defconstant +hotbar-slot-top+ 10)
+
+(defun hotbar-slot-geometry (count index)
+  "Left, top, right, and bottom of slot INDEX of COUNT."
+  (let* ((content (- +hotbar-width+ (* 2 +hotbar-pad+)))
+         (width (/ (- content (* +hotbar-gap+ (1- count))) (float count)))
+         (left (+ +hotbar-pad+ (* index (+ width +hotbar-gap+)))))
+    (values left +hotbar-slot-top+ (+ left width)
+            (+ +hotbar-slot-top+ +hotbar-slot-height+))))
+
+(defun hotbar-slot-at (count u)
+  "The slot index at horizontal texture fraction U, or NIL between slots."
+  (loop for index below count
+        do (multiple-value-bind (left top right bottom)
+               (hotbar-slot-geometry count index)
+             (declare (ignore top bottom))
+             (let ((x (* u +hotbar-width+)))
+               (when (and (<= left x) (< x right))
+                 (return index))))))
+
+(defun draw-hotbar-shell (pane medium)
+  "The instrument the slots sit in: one raised chassis, quietly lit."
+  ;; Cover the whole sheet first.  The chassis is drawn at the bar's declared
+  ;; size, and a sheet that is larger than that -- a frame outliving a resize
+  ;; -- would otherwise show through as bare white.
+  (with-bounding-rectangle* (left top right bottom) pane
+    (draw-rectangle* pane left top right bottom
+                     :ink (make-rgb-color 0.012 0.014 0.018)))
+  (draw-analytic-rounded-rectangle*
+   medium 0 0 +hotbar-width+ +hotbar-height+ :radius 14
+   :ink (make-linear-gradient
+         0 0 0 +hotbar-height+
+         (make-rgb-color 0.20 0.21 0.23)
+         (make-rgb-color 0.055 0.060 0.070)))
+  (draw-analytic-rounded-rectangle*
+   medium 2 2 (- +hotbar-width+ 2) (- +hotbar-height+ 2) :radius 12
+   :ink (make-linear-gradient
+         0 0 0 +hotbar-height+
+         (make-rgb-color 0.085 0.092 0.105)
+         (make-rgb-color 0.030 0.034 0.040)))
+  ;; A single bright hairline along the top edge is what reads as "made of
+  ;; something" without drawing a border around every slot.
+  (draw-line* pane 12 1.5 (- +hotbar-width+ 12) 1.5
+              :ink (make-rgb-color 0.42 0.45 0.50) :line-thickness 1))
+
+(defun draw-hotbar-slot (pane medium left top right bottom
+                         &key selected-p (accent '(0.95 0.86 0.55)))
+  "One recessed well, lit from inside when it is the chosen one."
+  (draw-analytic-rounded-rectangle*
+   medium left top right bottom :radius 8
+   :ink (if selected-p
+            (make-linear-gradient
+             0 top 0 bottom
+             (hotbar-scaled-color accent 0.34)
+             (hotbar-scaled-color accent 0.13))
+            (make-linear-gradient
+             0 top 0 bottom
+             (make-rgb-color 0.028 0.032 0.038)
+             (make-rgb-color 0.055 0.060 0.068))))
+  (when selected-p
+    (draw-analytic-rounded-rectangle*
+     medium (- left 2) (- top 2) (+ right 2) (+ bottom 2) :radius 10
+     :filled nil :ink (hotbar-scaled-color accent 1.0))
+    (draw-analytic-rounded-rectangle*
+     medium (- left 1) (- top 1) (+ right 1) (+ bottom 1) :radius 9
+     :filled nil :ink (hotbar-scaled-color accent 1.0)))
+  ;; The well's own top edge, darker than the chassis, is the whole recess.
+  (draw-line* pane (+ left 3) (+ top 0.5) (- right 3) (+ top 0.5)
+              :ink (make-rgb-color 0.014 0.016 0.020)))
+
+(defun draw-hotbar-caption (pane medium text &key (ink '(0.93 0.93 0.90)))
+  "The one label the bar carries: what is currently chosen."
+  (let ((top (- +hotbar-height+ 28))
+        (bottom (- +hotbar-height+ 10)))
+    (draw-analytic-rounded-rectangle*
+     medium (- (/ +hotbar-width+ 2.0) 96) top
+     (+ (/ +hotbar-width+ 2.0) 96) bottom
+     :radius 7 :ink (make-rgb-color 0.020 0.023 0.028))
+    (draw-text* pane text (/ +hotbar-width+ 2.0) (/ (+ top bottom) 2.0)
+                :align-x :center :align-y :center :text-size 12
+                :ink (apply #'make-rgb-color ink))))
+
+(defparameter *terminal-display-mode-glyphs*
+  '((:shell . "❯") (:film . "▶") (:telegram . "✈"))
+  "One mark per mode.  A chooser of three words all the same size makes the
+player read; a chooser of three shapes lets them recognize.")
+
 (defun paint-terminal-mode-hotbar (pane display)
   "Paint the focused terminal's semantic modes into PANE."
-  (with-bounding-rectangle* (left top right bottom) pane
-    (with-sheet-medium (medium pane)
-      (when (typep medium 'luv-raster-medium)
-        (clear-raster-medium-reliefs medium))
-      (draw-analytic-rounded-rectangle*
-       medium left top right bottom :radius 15
-       :ink (make-linear-gradient
-             0 top 0 bottom
-             (make-rgb-color 0.13 0.15 0.18)
-             (make-rgb-color 0.025 0.03 0.04)))
-      (let* ((content-left (+ left 6))
-             (content-right (- right 6))
-             (content-top (+ top 6))
-             (content-bottom (- bottom 6))
-             (slot-width (/ (- content-right content-left)
-                            (float (max 1 (length *terminal-display-modes*))))))
-        (loop for mode in *terminal-display-modes*
-              for number from 1
-              for slot-left = (+ content-left (* (1- number) slot-width))
-              for slot-right = (+ content-left (* number slot-width))
-              for selected-p = (eq mode (luvcraft:terminal-display-mode display))
-              for colors = (terminal-display-mode-color mode)
-              do (draw-rectangle*
-                  pane slot-left content-top slot-right content-bottom
-                  :ink (hotbar-scaled-color colors
-                                            (if selected-p 1.45 0.72)))
-                 (when (> number 1)
-                   (draw-rectangle*
-                    pane slot-left content-top (+ slot-left 1) content-bottom
-                    :ink (make-rgb-color 0.08 0.09 0.10)))
-                 (when selected-p
-                   (draw-rectangle*
-                    pane (+ slot-left 3) (+ content-top 3)
-                    (- slot-right 3) (- content-bottom 3)
-                    :filled nil :line-thickness 3
-                    :ink (hotbar-selection-ink content-top content-bottom)))
-                 (draw-text* pane (format nil "~D" number)
-                             (+ slot-left 24) (/ (+ content-top content-bottom) 2)
-                             :align-x :center :align-y :center :text-size 18
-                             :ink +white+)
-                 (draw-text* pane (string-upcase (symbol-name mode))
-                             (/ (+ slot-left slot-right) 2)
-                             (/ (+ content-top content-bottom) 2)
-                             :align-x :center :align-y :center :text-size 22
-                             :ink +white+))))))
+  (with-sheet-medium (medium pane)
+    (when (typep medium 'luv-raster-medium)
+      (clear-raster-medium-reliefs medium))
+    (draw-hotbar-shell pane medium)
+    (let ((count (length *terminal-display-modes*))
+          (current (luvcraft:terminal-display-mode display)))
+      (loop for mode in *terminal-display-modes*
+            for index from 0
+            for selected-p = (eq mode current)
+            for accent = (terminal-display-mode-color mode)
+            do (multiple-value-bind (left top right bottom)
+                   (hotbar-slot-geometry count index)
+                 (draw-hotbar-slot pane medium left top right bottom
+                                   :selected-p selected-p :accent accent)
+                 ;; A mode slot is wide and short, so the mark and the word sit
+                 ;; beside each other on one line rather than stacked into
+                 ;; each other's space.
+                 (let ((middle (/ (+ top bottom) 2.0)))
+                   (draw-text* pane
+                               (or (cdr (assoc mode
+                                               *terminal-display-mode-glyphs*))
+                                   "?")
+                               (+ left 34) middle
+                               :align-x :center :align-y :center :text-size 20
+                               :ink (hotbar-scaled-color
+                                     accent (if selected-p 2.2 1.5)))
+                   (draw-text* pane (string-capitalize (symbol-name mode))
+                               (+ left 56) middle
+                               :align-x :left :align-y :center :text-size 15
+                               :ink (if selected-p
+                                        (make-rgb-color 0.98 0.98 0.96)
+                                        (make-rgb-color 0.62 0.64 0.66)))
+                   (draw-text* pane (format nil "~D" (1+ index))
+                               (+ left 10) (+ top 11)
+                               :align-x :left :align-y :center :text-size 10
+                               :ink (make-rgb-color 0.46 0.48 0.52)))))
+      (draw-hotbar-caption
+       pane medium
+       (format nil "~A wall" (string-capitalize (symbol-name current)))))))
 
 (defmethod handle-repaint ((pane hotbar-pane) region)
   (declare (ignore region))
   (let* ((frame (pane-frame pane))
-         (selected
-           (luvcraft:luvcraft-session-selected-block (hotbar-session frame)))
+         (session (hotbar-session frame))
+         (selected (luvcraft:luvcraft-session-selected-block session))
          (blocks
            (luvcraft:block-inventory-quickbar-blocks
-            (luvcraft:luvcraft-session-inventory (hotbar-session frame)))))
+            (luvcraft:luvcraft-session-inventory session))))
     (alexandria:when-let ((display (hotbar-terminal-display frame)))
       (paint-terminal-mode-hotbar pane display)
       (return-from handle-repaint nil))
-    (with-bounding-rectangle* (left top right bottom) pane
-      (with-sheet-medium (medium pane)
-        (when (typep medium 'luv-raster-medium)
-          (clear-raster-medium-reliefs medium))
-        ;; One raised shell and one continuous color field make this a single
-        ;; instrument. Slots meet exactly; fine rules identify positions
-        ;; without opening dark cracks between nine independent gadgets.
-        (draw-rectangle*
-         pane left top right bottom
-         :ink (make-linear-gradient
-               0 top 0 bottom
-               (make-rgb-color 0.035 0.042 0.048)
-               (make-rgb-color 0.012 0.016 0.020)))
-        (draw-analytic-rounded-rectangle*
-         medium (+ left 1) (+ top 1) (- right 1) (- bottom 1)
-         :radius 15
-         :ink (make-linear-gradient
-               0 top 0 bottom
-               (make-rgb-color 0.18 0.20 0.22)
-               (make-rgb-color 0.055 0.065 0.075)))
-        (draw-analytic-rounded-rectangle*
-         medium (+ left 3) (+ top 3) (- right 3) (- bottom 3)
-         :radius 13
-         :ink (make-linear-gradient
-               0 top 0 bottom
-               (make-rgb-color 0.075 0.085 0.095)
-               (make-rgb-color 0.025 0.030 0.036)))
-        (let* ((content-left (+ left 6))
-               (content-right (- right 6))
-               (content-top (+ top 6))
-               (content-bottom (- bottom 6))
-               (slot-width (/ (- content-right content-left)
-                              (max 1.0 (length blocks)))))
-          (loop for block in blocks
-                for number from 1
-                for slot-left = (+ content-left (* (1- number) slot-width))
-                for slot-right = (+ content-left (* number slot-width))
-                for selected-p = (eq block selected)
-                do (draw-rectangle*
-                    pane slot-left content-top slot-right content-bottom
-                    :ink (hotbar-material-ink
-                          block content-top content-bottom))
-                   (when (> number 1)
-                     (draw-rectangle*
-                      pane slot-left content-top (+ slot-left 1) content-bottom
-                      :ink (make-rgb-color 0.08 0.09 0.095)))
-                   (when selected-p
-                     (draw-rectangle*
-                      pane (+ slot-left 2) (+ content-top 2)
-                      (- slot-right 2) (- content-bottom 2)
-                      :filled nil :line-thickness 2
-                      :ink (hotbar-selection-ink
-                            content-top content-bottom)))
-                   ;; Stable dark plates keep every label readable without
-                   ;; visually separating the underlying material strip.
-                   (draw-analytic-rounded-rectangle*
-                    medium (+ slot-left 6) (+ content-top 5)
-                    (+ slot-left 27) (+ content-top 26)
-                    :radius 7 :ink (make-rgb-color 0.045 0.052 0.058))
-                   (draw-analytic-rounded-rectangle*
-                    medium (+ slot-left 5) (- content-bottom 25)
-                    (- slot-right 5) (- content-bottom 5)
-                    :radius 6 :ink (make-linear-gradient
-                                    0 (- content-bottom 25) 0 content-bottom
-                                    (make-rgb-color 0.12 0.14 0.15)
-                                    (make-rgb-color 0.03 0.038 0.044)))
-                   (draw-text* pane (format nil "~D" number)
-                               (+ slot-left 16.5) (+ content-top 15.5)
-                               :align-x :center :align-y :center :text-size 12
-                               :ink (make-rgb-color 0.98 0.98 0.96))
-                   (draw-text* pane
-                               (string-upcase
-                                (symbol-name (luvcraft:block-kind-name block)))
-                               (/ (+ slot-left slot-right) 2)
-                               (- content-bottom 14)
-                               :align-x :center :align-y :center :text-size 10
-                               :ink (make-rgb-color 0.98 0.98 0.96))))))))
+    (with-sheet-medium (medium pane)
+      (when (typep medium 'luv-raster-medium)
+        (clear-raster-medium-reliefs medium))
+      (draw-hotbar-shell pane medium)
+      (let ((count (max 1 (length blocks))))
+        (loop for block in blocks
+              for index from 0
+              for selected-p = (eq block selected)
+              do (multiple-value-bind (left top right bottom)
+                     (hotbar-slot-geometry count index)
+                   (draw-hotbar-slot pane medium left top right bottom
+                                     :selected-p selected-p)
+                   ;; The cube is the material: the same procedural faces the
+                   ;; world is built from, not a swatch of its average colour.
+                   (draw-block-icon pane block
+                                    (- (/ (+ left right) 2.0) 20)
+                                    (- (/ (+ top bottom) 2.0) 21)
+                                    40)
+                   (draw-text* pane (format nil "~D" (1+ index))
+                               (+ left 7) (+ top 10)
+                               :align-x :left :align-y :center :text-size 10
+                               :ink (if selected-p
+                                        (make-rgb-color 0.98 0.95 0.82)
+                                        (make-rgb-color 0.46 0.48 0.52))))))
+      ;; Nine labels is nine things to read; the chosen one is the only name
+      ;; that answers a question the player is actually asking.
+      (draw-hotbar-caption
+       pane medium
+       (string-capitalize
+        (substitute #\Space #\- (symbol-name
+                                  (luvcraft:block-kind-name selected))))))))
 
 (define-application-frame luvcraft-hotbar ()
   ((session :initarg :session :reader hotbar-session)
@@ -201,7 +246,7 @@ mode appends it here and gets a numbered slot; nothing else has to change.")
    (bar (make-pane 'hotbar-pane)))
   (:layouts
    (default
-    (horizontally (:width 846 :height 100) bar))))
+    (horizontally (:width +hotbar-width+ :height +hotbar-height+) bar))))
 
 (defun repaint-hotbar (frame)
   "Repaint and publish one complete material palette."
@@ -292,13 +337,19 @@ mode appends it here and gets a numbered slot; nothing else has to change.")
                (eq :left (luv:canvas-pointer-event-button event)))
       (let* ((frame (widget-overlay-frame overlay))
              (display (hotbar-terminal-display frame)))
+        ;; HOTBAR-SLOT-AT reads the same geometry the painter does, so a click
+        ;; in the gap between two slots chooses neither rather than guessing.
         (if display
-            (let* ((count (length *terminal-display-modes*))
-                   (slot (min (1- count) (floor (* (first uv) count)))))
+            (alexandria:when-let
+                ((slot (hotbar-slot-at (length *terminal-display-modes*)
+                                       (first uv))))
               (luvcraft:change-terminal-display-mode
                display session (nth slot *terminal-display-modes*)))
-            (let ((slot (min 9 (1+ (floor (* (first uv) 9))))))
-              (luvcraft:select-luvcraft-block session slot)))
+            (let ((count (length (luvcraft:block-inventory-quickbar-blocks
+                                  (luvcraft:luvcraft-session-inventory
+                                   session)))))
+              (alexandria:when-let ((slot (hotbar-slot-at count (first uv))))
+                (luvcraft:select-luvcraft-block session (1+ slot)))))
         (repaint-hotbar frame)))
     t))
 

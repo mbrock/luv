@@ -77,16 +77,14 @@
 
 (defun draw-inventory-block-tile
     (stream atlas block left top &key (scale 3))
-  "Paint BLOCK's real generated top tile as a crisp nearest-neighbour icon."
-  (let ((tile (inventory-block-preview-tile block)))
-    (dotimes (y 16)
-      (dotimes (x 16)
-        (draw-rectangle*
-         stream
-         (+ left (* x scale)) (+ top (* y scale))
-         (+ left (* (1+ x) scale)) (+ top (* (1+ y) scale))
-         :ink (packed-inventory-ink
-               (aref atlas y (+ x (* tile 16)))))))))
+  "Paint BLOCK as an isometric cube, sized as SCALE sixteenths used to be.
+
+The flat top tile said what a material looked like; the cube says what it
+is.  ATLAS is no longer read here -- BLOCK-ICON-PATTERN keeps its own -- but
+it stays in the lambda list because the inventory frame owns one and the
+callers all have it to hand."
+  (declare (ignore atlas))
+  (draw-block-icon stream block left top (* scale 16)))
 
 (defun inventory-entry-label (entry)
   (string-upcase
@@ -95,10 +93,14 @@
      (luvcraft:block-inventory-entry-block entry)))))
 
 (defun inventory-entry-quantity-label (entry)
+  "How many there are, as a count or as the mark for no limit.
+
+A creative inventory is mostly unlimited stacks, and spelling that out in
+every cell makes the word louder than the block it is about."
   (alexandria:if-let
       ((quantity (luvcraft:block-inventory-entry-quantity entry)))
     (format nil "~D" quantity)
-    "UNLIMITED"))
+    "∞"))
 
 (defun inventory-category-block-p (category block)
   (or (eq category :all)
@@ -193,14 +195,15 @@
                          :ink *inventory-accent-ink*
                          :filled nil :line-thickness 2))
       (draw-inventory-block-tile
-       pane (inventory-atlas frame) block (+ left 22) (+ top 9) :scale 3)
+       pane (inventory-atlas frame) block
+       (+ left (/ (- width 48) 2.0)) (+ top 10) :scale 3)
       (draw-text* pane (format nil "~D" (1+ index))
                   (+ left 9) (+ top 10) :text-size 11
                   :ink *inventory-text-ink*)
       (draw-text* pane (inventory-entry-quantity-label entry)
-                  (- (+ left width) 7) (- (+ top height) 8)
-                  :align-x :right :align-y :bottom :text-size 10
-                  :ink +white+))))
+                  (- (+ left width) 8) (- (+ top height) 7)
+                  :align-x :right :align-y :bottom :text-size 12
+                  :ink *inventory-muted-ink*))))
 
 (defun draw-inventory-quickbar (frame pane entries)
   (draw-text* pane "Quickbar" +inventory-grid-left+ 242
