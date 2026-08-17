@@ -7,18 +7,22 @@
 ;;;; surface while the parent samples the very same pixels as a texture.  No
 ;;;; ports, no shared memory ceremony: a pipe carrying one number each way.
 ;;;;
-;;;; The protocol is lockstep and tiny.  Parent writes "surface ID", child
-;;;; answers "ready W H".  Parent writes "frame", child renders one frame,
-;;;; waits for the GPU, and answers "done N".  Parent writes "quit" or closes
-;;;; the pipe; child stops.  Everything else is the ordinary game.
+;;;; The protocol is lockstep and tiny.  Parent writes "size W H" (points);
+;;;; child opens its hidden game and answers "extent W H" (pixels).  Parent
+;;;; creates a ring of surfaces that size and writes "surfaces ID ID ID";
+;;;; child wraps each and answers "ready".  Parent writes "frame K", child
+;;;; renders one frame into slot K, waits for the GPU, and answers "done K".
+;;;; Parent writes "quit" or closes the pipe; child stops.  The ring is what
+;;;; keeps the picture from tearing: the parent only ever asks for a slot it
+;;;; is not showing and was not showing a frame ago.
 
 (in-package #:luvcraft)
 
 ;;; The child: render into a surface somebody else named.
 
 (defun attach-luvcraft-frame-mirror (session surface)
-  "Copy every frame SESSION presents into the IOSurface SURFACE as well.
-Returns the adopted mirror texture, which the caller destroys."
+  "Return an adopted texture over the IOSurface SURFACE, sized like SESSION's
+frame, fit to be SESSION's frame mirror.  The caller destroys it."
   #-darwin (declare (ignore session surface))
   #-darwin (error "Frame mirrors need IOSurface, which is Darwin only.")
   #+darwin
@@ -47,7 +51,6 @@ Returns the adopted mirror texture, which the caller destroys."
                :label "luvcraft frame mirror"
                :size (list width height) :dimensions :2d :format format
                :usage '(:copy-dst :texture-binding)))))
-      (setf (luvcraft-session-frame-mirror session) mirror)
       mirror)))
 
 (defun serve-luvcraft-mirror (&key (input *standard-input*)
@@ -68,7 +71,7 @@ frame's pixel extent, and from then on render into whatever surface INPUT names.
            (height (and width (parse-integer (third hello) :junk-allowed t))))
       (unless height
         (error "Expected \"size W H\" on standard input, got ~S." hello))
-      (let ((surface nil) (session nil) (mirror nil) (frames 0))
+      (let ((surfaces nil) (session nil) (mirrors nil))
         (unwind-protect
              (progn
                (setf session
@@ -79,47 +82,69 @@ frame's pixel extent, and from then on render into whatever surface INPUT names.
                       :provider provider))
                (wait-for-luvcraft-products session)
                ;; The window is in points; the frame is in pixels, and the
-               ;; surface has to be the frame's size, so the parent learns
-               ;; the pixel extent from us and creates the surface after.
+               ;; surfaces have to be the frame's size, so the parent learns
+               ;; the pixel extent from us and creates the ring after.
                (let ((extent (canvas-extent (luvcraft-session-context session))))
                  (say "extent ~D ~D" (first extent) (second extent)))
-               (let* ((message (hear))
-                      (id (and (equal (first message) "surface")
-                               (parse-integer (second message) :junk-allowed t))))
-                 (unless id
-                   (error "Expected \"surface ID\", got ~S." message))
-                 (setf surface (luv.metal:lookup-iosurface id))
-                 (unless surface
-                   (error "No IOSurface is named ~D." id))
-                 (setf mirror (attach-luvcraft-frame-mirror session surface)))
+               (let ((message (hear)))
+                 (unless (and (equal (first message) "surfaces") (rest message))
+                   (error "Expected \"surfaces ID...\", got ~S." message))
+                 (setf surfaces
+                       (map 'vector
+                            (lambda (word)
+                              (let ((id (parse-integer word :junk-allowed t)))
+                                (or (and id (luv.metal:lookup-iosurface id))
+                                    (error "No IOSurface is named ~A." word))))
+                            (rest message)))
+                 (setf mirrors
+                       (map 'vector
+                            (lambda (surface)
+                              (attach-luvcraft-frame-mirror session surface))
+                            surfaces)))
                (say "ready")
                (loop for message = (hear)
                      while (and message (not (equal (first message) "quit")))
                      do (cond
                           ((equal (first message) "frame")
-                           (render-luvcraft-frame
-                            session (/ (get-internal-real-time)
-                                       (float internal-time-units-per-second 1d0)))
-                           (submitted-work-done
-                            (device-queue (luvcraft-session-device session)))
-                           (say "done ~D" (incf frames)))
+                           (let ((slot (parse-integer (or (second message) "0")
+                                                      :junk-allowed t)))
+                             (unless (and slot (< -1 slot (length mirrors)))
+                               (error "No ring slot ~S." (second message)))
+                             (setf (luvcraft-session-frame-mirror session)
+                                   (aref mirrors slot))
+                             (render-luvcraft-frame
+                              session (/ (get-internal-real-time)
+                                         (float internal-time-units-per-second 1d0)))
+                             (submitted-work-done
+                              (device-queue (luvcraft-session-device session)))
+                             (say "done ~D" slot)))
                           (t (say "what ~{~A~^ ~}" message)))))
           (when session
             (setf (luvcraft-session-frame-mirror session) nil)
-            (when mirror (destroy mirror))
+            (when mirrors (map nil #'destroy mirrors))
             (stop-luvcraft session))
-          (when surface (luv.metal:release-iosurface surface)))))))
+          (when surfaces (map nil #'luv.metal:release-iosurface surfaces)))))))
 
 ;;; The parent: a child process and the surface it draws into.
 
 (defclass luvcraft-mirror ()
-  ((surface :initform nil :accessor luvcraft-mirror-surface)
+  ((surfaces :initform #() :accessor luvcraft-mirror-surfaces)
    (process :initarg :process :reader luvcraft-mirror-process)
    (width :initform nil :accessor luvcraft-mirror-width)
    (height :initform nil :accessor luvcraft-mirror-height)
-   (frames :initform 0 :accessor luvcraft-mirror-frames))
-  (:documentation "A child luvcraft rendering into an IOSurface this process owns.
-WIDTH and HEIGHT are the surface's, in pixels."))
+   (frames :initform 0 :accessor luvcraft-mirror-frames)
+   ;; The slot the child most recently finished, or NIL before the first.
+   (completed-slot :initform nil :accessor luvcraft-mirror-completed-slot))
+  (:documentation "A child luvcraft rendering into a ring of IOSurfaces this
+process owns.  WIDTH and HEIGHT are the surfaces', in pixels."))
+
+(defun luvcraft-mirror-surface (mirror &optional slot)
+  "Surface SLOT of MIRROR's ring; with no SLOT, the last completed one."
+  (aref (luvcraft-mirror-surfaces mirror)
+        (or slot (luvcraft-mirror-completed-slot mirror) 0)))
+
+(defun luvcraft-mirror-slot-count (mirror)
+  (length (luvcraft-mirror-surfaces mirror)))
 
 (defun luvcraft-mirror-executable ()
   (let ((path (merge-pathnames "build/luvcraft"
@@ -134,9 +159,10 @@ WIDTH and HEIGHT are the surface's, in pixels."))
     (terpri stream)
     (finish-output stream)))
 
-(defun spawn-luvcraft-mirror (&key (width 640) (height 400) executable)
+(defun spawn-luvcraft-mirror (&key (width 640) (height 400) (slots 3) executable)
   "Spawn a child game in a hidden WIDTH x HEIGHT window (in points), give it a
-surface the size of its pixel frame, and return the mirror once it is drawing."
+ring of SLOTS surfaces the size of its pixel frame, and return the mirror once
+it is drawing."
   (let* ((process
            (sb-ext:run-program
             (namestring (or executable (luvcraft-mirror-executable)))
@@ -159,11 +185,15 @@ surface the size of its pixel frame, and return the mirror once it is drawing."
           (declare (ignore word))
           (setf (luvcraft-mirror-width mirror) (parse-integer pixel-width)
                 (luvcraft-mirror-height mirror) (parse-integer pixel-height)
-                (luvcraft-mirror-surface mirror)
-                (luv.metal:create-iosurface (luvcraft-mirror-width mirror)
-                                            (luvcraft-mirror-height mirror)))))
-      (tell-luvcraft-mirror mirror "surface ~D"
-                            (luv.metal:iosurface-id (luvcraft-mirror-surface mirror)))
+                (luvcraft-mirror-surfaces mirror)
+                (coerce (loop repeat slots
+                              collect (luv.metal:create-iosurface
+                                       (luvcraft-mirror-width mirror)
+                                       (luvcraft-mirror-height mirror)))
+                        'vector))))
+      (tell-luvcraft-mirror mirror "surfaces~{ ~D~}"
+                            (map 'list #'luv.metal:iosurface-id
+                                 (luvcraft-mirror-surfaces mirror)))
       (unless (hear-luvcraft-mirror mirror "ready")
         (error "The mirror child did not become ready; see build/luvcraft-mirror.log.")))
     mirror))
@@ -178,13 +208,19 @@ The child's stdout also carries the ordinary startup chatter of the game."
         when (uiop:string-prefix-p word line)
           return line))
 
-(defun request-luvcraft-mirror-frame (mirror)
-  "Ask the child for one frame and return once its pixels are in the surface."
-  (progn
-    (tell-luvcraft-mirror mirror "frame")
-    (unless (hear-luvcraft-mirror mirror "done")
-      (error "The mirror child did not finish a frame; see build/luvcraft-mirror.log."))
-    (incf (luvcraft-mirror-frames mirror))))
+(defun request-luvcraft-mirror-frame (mirror &optional slot)
+  "Ask the child for one frame into SLOT (default: the slot after the last
+completed one) and return the slot once its pixels are in the surface."
+  (let ((slot (or slot
+                  (mod (1+ (or (luvcraft-mirror-completed-slot mirror) -1))
+                       (luvcraft-mirror-slot-count mirror)))))
+    (tell-luvcraft-mirror mirror "frame ~D" slot)
+    (let ((answer (hear-luvcraft-mirror mirror "done")))
+      (unless answer
+        (error "The mirror child did not finish a frame; see build/luvcraft-mirror.log."))
+      (incf (luvcraft-mirror-frames mirror))
+      (setf (luvcraft-mirror-completed-slot mirror) slot)
+      slot)))
 
 (defun stop-luvcraft-mirror (mirror)
   (let ((process (luvcraft-mirror-process mirror)))
@@ -192,9 +228,8 @@ The child's stdout also carries the ordinary startup chatter of the game."
       (ignore-errors (tell-luvcraft-mirror mirror "quit"))
       (sb-ext:process-wait process)
       (sb-ext:process-close process))
-    (when (luvcraft-mirror-surface mirror)
-      (luv.metal:release-iosurface (luvcraft-mirror-surface mirror))
-      (setf (luvcraft-mirror-surface mirror) nil))
+    (map nil #'luv.metal:release-iosurface (luvcraft-mirror-surfaces mirror))
+    (setf (luvcraft-mirror-surfaces mirror) #())
     (values)))
 
 (defun luvcraft-mirror-pixel (mirror x y)
