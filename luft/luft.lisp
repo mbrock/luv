@@ -32,10 +32,15 @@
 ;;; worm space; it merely treats the futural time quantum as a fundamental
 ;;; extrusion.
 ;;;
-;;; X is west/east and Y is south/north.  Both wrap, so each horizontal slice
-;;; is a torus.  Z does not wrap.  Eight Z bits identify 256 horizontal lattice
-;;; planes and therefore 255 unit intervals between them; a Z-extended site
-;;; cannot be anchored on the top plane.
+;;; X is west/east and Y is south/north.  Each world chooses independently how
+;;; many of the 24 available X and Y bits are significant.  Both active fields
+;;; wrap, so a horizontal slice is a possibly rectangular torus.  The packed
+;;; fields describe representational capacity; a WORLD-DOMAIN supplies the
+;;; actual topology and its canonical coordinate masks.
+;;;
+;;; Z does not wrap.  Eight Z bits identify 256 horizontal lattice planes and
+;;; therefore 255 unit intervals between them; a Z-extended site cannot be
+;;; anchored on the top plane.
 ;;;
 ;;; A site occupies 60 bits:
 ;;;
@@ -75,13 +80,50 @@
 (defconstant +spatial-extent+ #b0111)
 
 (defconstant +extent-bits+ 4)
-(defconstant +horizontal-coordinate-bits+ 24)
+(defconstant +horizontal-capacity-bits+ 24)
 (defconstant +vertical-coordinate-bits+ 8)
 (defconstant +x-shift+ +extent-bits+)
-(defconstant +y-shift+ (+ +x-shift+ +horizontal-coordinate-bits+))
-(defconstant +z-shift+ (+ +y-shift+ +horizontal-coordinate-bits+))
-(defconstant +horizontal-period+ (ash 1 +horizontal-coordinate-bits+))
+(defconstant +y-shift+ (+ +x-shift+ +horizontal-capacity-bits+))
+(defconstant +z-shift+ (+ +y-shift+ +horizontal-capacity-bits+))
 (defconstant +top-z+ (1- (ash 1 +vertical-coordinate-bits+)))
+
+;;; A world domain realizes the topology admitted by the packed coordinate
+;;; capacity.  Widths remain inspectable configuration; masks are the form
+;;; consumed by construction and stepping.  Sites have canonical fixnum
+;;; equality only inside one such domain.
+
+(defstruct (world-domain
+             (:constructor %make-world-domain
+                 (x-bits y-bits x-mask y-mask)))
+  (x-bits 24 :type (integer 1 24) :read-only t)
+  (y-bits 24 :type (integer 1 24) :read-only t)
+  (x-mask #xffffff :type (unsigned-byte 24) :read-only t)
+  (y-mask #xffffff :type (unsigned-byte 24) :read-only t))
+
+(defun make-world-domain
+    (&key (horizontal-bits 24)
+          (x-bits horizontal-bits)
+          (y-bits horizontal-bits))
+  "Make a toroidal world domain with power-of-two X and Y periods.
+
+HORIZONTAL-BITS supplies the convenient common default.  X-BITS and Y-BITS
+may override it independently.  Each width is between one and the 24-bit
+capacity of the packed site ABI."
+  (check-type horizontal-bits (integer 1 #.+horizontal-capacity-bits+))
+  (check-type x-bits (integer 1 #.+horizontal-capacity-bits+))
+  (check-type y-bits (integer 1 #.+horizontal-capacity-bits+))
+  (%make-world-domain x-bits y-bits
+                      (1- (ash 1 x-bits))
+                      (1- (ash 1 y-bits))))
+
+(declaim (inline world-domain-x-period world-domain-y-period))
+(defun world-domain-x-period (domain)
+  (check-type domain world-domain)
+  (1+ (world-domain-x-mask domain)))
+
+(defun world-domain-y-period (domain)
+  (check-type domain world-domain)
+  (1+ (world-domain-y-mask domain)))
 
 (declaim (inline axis-bit))
 (defun axis-bit (axis)
@@ -102,11 +144,11 @@
 
 (defun site-x (site)
   (check-type site site)
-  (ldb (byte +horizontal-coordinate-bits+ +x-shift+) site))
+  (ldb (byte +horizontal-capacity-bits+ +x-shift+) site))
 
 (defun site-y (site)
   (check-type site site)
-  (ldb (byte +horizontal-coordinate-bits+ +y-shift+) site))
+  (ldb (byte +horizontal-capacity-bits+ +y-shift+) site))
 
 (defun site-z (site)
   (check-type site site)
@@ -116,18 +158,27 @@
   "Return SITE's X, Y, and Z lattice coordinates as three values."
   (values (site-x site) (site-y site) (site-z site)))
 
-(defun site-valid-p (thing)
-  "Whether THING is a packed site whose spatial extent stays in the world."
+(defun site-valid-p (domain thing)
+  "Whether THING is a canonical packed site in DOMAIN.
+
+Inactive upper X and Y bits make an otherwise representable value
+noncanonical for this domain."
+  (check-type domain world-domain)
   (and (typep thing 'site)
-       (not (and (= (site-z thing) +top-z+)
-                 (logbitp 2 (site-extent thing))))))
+       (let ((x (site-x thing))
+             (y (site-y thing)))
+         (and (= x (logand x (world-domain-x-mask domain)))
+              (= y (logand y (world-domain-y-mask domain)))
+              (not (and (= (site-z thing) +top-z+)
+                        (logbitp 2 (site-extent thing))))))))
 
-(defun make-site (x y z &optional (extent +vertex-extent+))
-  "Make the site at lattice anchor X,Y,Z with EXTENT.
+(defun make-site (domain x y z &optional (extent +vertex-extent+))
+  "Make DOMAIN's canonical site at lattice anchor X,Y,Z with EXTENT.
 
-X and Y are reduced modulo the horizontal world period.  Z must name one of
-the 256 non-wrapping lattice planes.  A site extending along Z must leave room
-for its high boundary and therefore cannot begin on the top plane."
+X and Y are reduced with DOMAIN's independent power-of-two masks.  Z must name
+one of the 256 non-wrapping lattice planes.  A site extending along Z must
+leave room for its high boundary and therefore cannot begin on the top plane."
+  (check-type domain world-domain)
   (check-type x integer)
   (check-type y integer)
   (check-type z (integer 0 #.+top-z+))
@@ -135,48 +186,48 @@ for its high boundary and therefore cannot begin on the top plane."
   (when (and (= z +top-z+) (logbitp 2 extent))
     (error "A Z-extended site cannot be anchored on top plane ~D." +top-z+))
   (logior extent
-          (ash (mod x +horizontal-period+) +x-shift+)
-          (ash (mod y +horizontal-period+) +y-shift+)
+          (ash (logand x (world-domain-x-mask domain)) +x-shift+)
+          (ash (logand y (world-domain-y-mask domain)) +y-shift+)
           (ash z +z-shift+)))
 
-(defun checked-site (site)
-  (unless (site-valid-p site)
-    (error "~S is not a valid LUFT site." site))
+(defun checked-site (domain site)
+  (unless (site-valid-p domain site)
+    (error "~S is not a canonical LUFT site in ~S." site domain))
   site)
 
 (defun site-extends-p (site axis)
   "Whether SITE spans the unit interval along AXIS."
-  (logtest (axis-bit axis) (site-extent (checked-site site))))
+  (logtest (axis-bit axis) (site-extent site)))
 
 (defun site-spatial-dimension (site)
   "Return SITE's dimension after ignoring temporal extent."
-  (logcount (logand +spatial-extent+ (site-extent (checked-site site)))))
+  (logcount (logand +spatial-extent+ (site-extent site))))
 
 (defun site-dimension (site)
   "Return SITE's dimension, including temporal extent."
-  (logcount (site-extent (checked-site site))))
+  (logcount (site-extent site)))
 
-(defun site-with-extent (site extent)
-  (make-site (site-x site) (site-y site) (site-z site) extent))
+(defun site-with-extent (domain site extent)
+  (make-site domain (site-x site) (site-y site) (site-z site) extent))
 
 ;;; ------------------------------------------------------------------------
 ;;; Adjacency
 
-(defun step-site (site axis delta)
-  "Translate SITE along AXIS by DELTA.
+(defun step-site (domain site axis delta)
+  "Translate DOMAIN's SITE along AXIS by DELTA.
 
 Return the translated packed site and a temporal-origin offset.  Spatial
 steps return zero as the second value.  Temporal steps leave the packed site
 unchanged and return DELTA, because actual time belongs to the ambient
 simulation history.  A spatial step outside the non-wrapping vertical world
 returns NIL and zero."
-  (checked-site site)
+  (checked-site domain site)
   (check-type delta integer)
   (ecase axis
-    (:x (values (make-site (+ (site-x site) delta)
+    (:x (values (make-site domain (+ (site-x site) delta)
                            (site-y site) (site-z site) (site-extent site))
                 0))
-    (:y (values (make-site (site-x site)
+    (:y (values (make-site domain (site-x site)
                            (+ (site-y site) delta)
                            (site-z site) (site-extent site))
                 0))
@@ -186,22 +237,22 @@ returns NIL and zero."
                   (and (= z +top-z+)
                        (logbitp 2 (site-extent site))))
               (values nil 0)
-              (values (make-site (site-x site) (site-y site)
+              (values (make-site domain (site-x site) (site-y site)
                                  z (site-extent site))
                       0))))
     (:t (values site delta))))
 
-(defun site-forward (site axis)
-  "Move SITE one unit forward along AXIS.
+(defun site-forward (domain site axis)
+  "Move DOMAIN's SITE one unit forward along AXIS.
 
 The second value is the change in ambient temporal origin; see STEP-SITE."
-  (step-site site axis 1))
+  (step-site domain site axis 1))
 
-(defun site-backward (site axis)
-  "Move SITE one unit backward along AXIS.
+(defun site-backward (domain site axis)
+  "Move DOMAIN's SITE one unit backward along AXIS.
 
 The second value is the change in ambient temporal origin; see STEP-SITE."
-  (step-site site axis -1))
+  (step-site domain site axis -1))
 
 ;;; ------------------------------------------------------------------------
 ;;; Incidence
@@ -217,23 +268,26 @@ The second value is the change in ambient temporal origin; see STEP-SITE."
 ;;; at now from the boundary one simulation quantum from now.
 
 (defun require-site-extent (site axis present-p)
+  (check-type site site)
   (let ((present (site-extends-p site axis)))
     (unless (eq present present-p)
       (error "Site ~S ~:[already extends~;does not extend~] along ~S."
              site present-p axis))))
 
-(defun site-boundary-low (site axis)
-  "Return SITE's low boundary along AXIS and its temporal-origin offset."
+(defun site-boundary-low (domain site axis)
+  "Return DOMAIN's low boundary of SITE and its temporal-origin offset."
+  (checked-site domain site)
   (require-site-extent site axis t)
-  (values (site-with-extent site
+  (values (site-with-extent domain site
                             (logandc2 (site-extent site) (axis-bit axis)))
           0))
 
-(defun site-boundary-high (site axis)
-  "Return SITE's high boundary along AXIS and its temporal-origin offset."
+(defun site-boundary-high (domain site axis)
+  "Return DOMAIN's high boundary of SITE and its temporal-origin offset."
+  (checked-site domain site)
   (require-site-extent site axis t)
-  (site-forward
-   (site-with-extent site
+  (site-forward domain
+   (site-with-extent domain site
                      (logandc2 (site-extent site) (axis-bit axis)))
    axis))
 
@@ -249,19 +303,19 @@ among the axes present in SITE; the low boundary has the opposite sign."
          (high-sign (if (evenp (logcount earlier-axes)) 1 -1)))
     (if (eq side :high) high-sign (- high-sign))))
 
-(defun map-site-boundary (function site)
-  "Call FUNCTION for every oriented codimension-one boundary of SITE.
+(defun map-site-boundary (function domain site)
+  "Call FUNCTION for every oriented codimension-one boundary of DOMAIN's SITE.
 
 FUNCTION receives BOUNDARY, SIGN, TEMPORAL-OFFSET, AXIS, and SIDE.  The
 temporal offset is relative to the ambient origin of SITE."
-  (checked-site site)
+  (checked-site domain site)
   (dolist (axis '(:x :y :z :t) site)
     (when (site-extends-p site axis)
       (dolist (side '(:low :high))
         (multiple-value-bind (boundary temporal-offset)
             (if (eq side :low)
-                (site-boundary-low site axis)
-                (site-boundary-high site axis))
+                (site-boundary-low domain site axis)
+                (site-boundary-high domain site axis))
           (funcall function boundary
                    (site-boundary-sign site axis side)
                    temporal-offset axis side))))))
@@ -273,27 +327,29 @@ temporal offset is relative to the ambient origin of SITE."
 ;;; Along T, the packed coface is the same in both cases, while its temporal
 ;;; origin is respectively now or one tick in the past.
 
-(defun site-coface-forward (site axis)
-  "Return the coface extending forward from SITE along AXIS.
+(defun site-coface-forward (domain site axis)
+  "Return DOMAIN's coface extending forward from SITE along AXIS.
 
 The second value is its temporal-origin offset.  NIL means that the coface
 would extend above the vertical world."
+  (checked-site domain site)
   (require-site-extent site axis nil)
   (let ((extent (logior (site-extent site) (axis-bit axis))))
     (if (and (eq axis :z) (= (site-z site) +top-z+))
         (values nil 0)
-        (values (site-with-extent site extent) 0))))
+        (values (site-with-extent domain site extent) 0))))
 
-(defun site-coface-backward (site axis)
-  "Return the coface whose high AXIS boundary is SITE.
+(defun site-coface-backward (domain site axis)
+  "Return DOMAIN's coface whose high AXIS boundary is SITE.
 
 The second value is its temporal-origin offset.  NIL means that the coface
 would extend below the vertical world."
+  (checked-site domain site)
   (require-site-extent site axis nil)
   (multiple-value-bind (anchor temporal-offset)
-      (site-backward site axis)
+      (site-backward domain site axis)
     (if anchor
-        (values (site-with-extent
+        (values (site-with-extent domain
                  anchor (logior (site-extent anchor) (axis-bit axis)))
                 temporal-offset)
         (values nil temporal-offset))))

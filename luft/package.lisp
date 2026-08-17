@@ -5,6 +5,14 @@
    #:extent-mask
    #:axis
    #:side
+   #:world-domain
+   #:make-world-domain
+   #:world-domain-x-bits
+   #:world-domain-y-bits
+   #:world-domain-x-mask
+   #:world-domain-y-mask
+   #:world-domain-x-period
+   #:world-domain-y-period
    #:+vertex-extent+
    #:+x-edge-extent+
    #:+y-edge-extent+
