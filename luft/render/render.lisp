@@ -194,8 +194,33 @@
 (defparameter *near-distance* 0.1)
 (defparameter *far-distance* 400.0)
 (defparameter *sun-direction*
-  (vec3:vec3-normalize (vec3:make-vec3 0.45 0.25 0.85)))
-(defparameter *ambient-light* 0.38)
+  (vec3:vec3-normalize (vec3:make-vec3 0.52 0.30 0.62))
+  "The direction toward the key light, low enough to model the terraces.")
+(defparameter *sun-color* (vec3:make-vec3 1.05 0.96 0.82)
+  "The key light's radiance, warm as afternoon sun.")
+(defparameter *sheen-strength* 0.16
+  "How brightly a face catches the sun's reflection; chamfers show it most.")
+(defparameter *fill-direction*
+  (vec3:vec3-normalize (vec3:make-vec3 -0.62 -0.55 0.24))
+  "The direction toward the cool fill light opposite the sun.")
+(defparameter *fill-strength* 0.30
+  "The fill light's strength, which separates the faces the sun misses.")
+(defparameter *ambient-light* 0.42
+  "The strength of the ambient hemisphere: sky above, bounce below.")
+(defparameter *ground-color* (vec3:make-vec3 0.34 0.30 0.24)
+  "The bounce colour of the lower hemisphere.")
+(defparameter *top-color* (vec3:make-vec3 0.17 0.36 0.11)
+  "The material of an upward face: turf, in linear light.")
+(defparameter *side-color* (vec3:make-vec3 0.42 0.32 0.21)
+  "The material of a sideways face: the earth a cut exposes.")
+(defparameter *bottom-color* (vec3:make-vec3 0.11 0.10 0.10)
+  "The material of a downward face: an underside, seen rarely.")
+(defparameter *shadow-strength* 1.0
+  "How darkly the sun's walk shadows a point; zero switches shadows off.")
+(defparameter *occlusion-strength* 0.75
+  "How deeply the crowding of nearby cells darkens the ambient hemisphere.")
+(defparameter *exposure* 1.15
+  "Exposure of the 1 - exp(-x) curve the lit colour rolls off through.")
 (defparameter *sky-color* (vec3:make-vec3 0.62 0.76 0.92))
 (defparameter *fog-distance* 140.0)
 (defparameter *bevel-radius* 0.22
@@ -211,7 +236,7 @@ the facet normal, in cells.")
            (far *far-distance*)
            (focal (/ (tan (/ (camera-field-of-view camera) 2.0))))
            (aspect (/ (coerce width 'single-float) height))
-           (data (make-array 32 :element-type 'single-float))
+           (data (make-array 60 :element-type 'single-float))
            (index 0))
       (flet ((lane (vector fourth)
                (setf (aref data index) (coerce (vec3:vec3-x vector) 'single-float)
@@ -233,7 +258,14 @@ the facet normal, in cells.")
                (if domain (luft:world-domain-x-period domain) 1)
                (if domain (luft:world-domain-y-period domain) 1)
                *bevel-radius*)
-              *sanding-width*))
+              *sanding-width*)
+        (lane *sun-color* *sheen-strength*)
+        (lane *fill-direction* *fill-strength*)
+        (lane *ground-color* *exposure*)
+        (lane (vec3:make-vec3 *occlusion-strength* *shadow-strength* 0.0) 0.0)
+        (lane *top-color* 0.0)
+        (lane *side-color* 0.0)
+        (lane *bottom-color* 0.0))
       data)))
 
 ;;; ------------------------------------------------------------------------

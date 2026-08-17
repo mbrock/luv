@@ -53,6 +53,21 @@ of packed LUFT sites, drawn by task and mesh shaders.")
            #:renderer-style
            #:*bevel-radius*
            #:*sanding-width*
+           #:*sun-direction*
+           #:*sun-color*
+           #:*sheen-strength*
+           #:*fill-direction*
+           #:*fill-strength*
+           #:*ambient-light*
+           #:*ground-color*
+           #:*occlusion-strength*
+           #:*shadow-strength*
+           #:*top-color*
+           #:*side-color*
+           #:*bottom-color*
+           #:*exposure*
+           #:*sky-color*
+           #:*fog-distance*
            #:destroy-renderer
            #:upload-scene
            #:encode-frame

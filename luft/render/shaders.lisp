@@ -32,6 +32,14 @@ vertices a face.")
 ;;; member order and offsets are the ABI, written once and spliced at read
 ;;; time.  The members are deliberately unannotated raw lanes.
 (eval-when (:compile-toplevel :load-toplevel :execute)
+  (defvar *occlusion-steps* 6
+    "Cell faces an occlusion walk crosses: how far away the world still
+crowds a point, and four times this many cell reads per pixel.")
+
+  (defvar *shadow-steps* 28
+    "Cell boundaries a sun ray crosses before it gives up and calls itself
+lit: both the reach of shadows in cells and their cost per pixel.")
+
   (defparameter *frame-uniform-members*
     '((camera-vector :vec4)      ; camera position, w unused
       (right-vector :vec4)       ; camera basis
@@ -40,7 +48,14 @@ vertices a face.")
       (projection-vector :vec4)  ; x scale, y scale, z scale, z offset
       (sun-vector :vec4)         ; direction toward the sun, ambient light
       (sky-vector :vec4)         ; sky colour, fog distance
-      (domain-vector :vec4))))   ; x period, y period, bevel radius, sanding
+      (domain-vector :vec4)      ; x period, y period, bevel radius, sanding
+      (sun-colour-vector :vec4)  ; sun radiance, sheen strength
+      (fill-vector :vec4)        ; direction toward the fill light, strength
+      (ground-vector :vec4)      ; ground bounce colour, exposure
+      (occlusion-vector :vec4)   ; crowding strength, shadow strength
+      (top-vector :vec4)         ; the material of an upward face
+      (side-vector :vec4)        ; the material of a sideways face
+      (bottom-vector :vec4))))   ; the material of a downward face
 
 (define-shader-function view-clip (point camera right up forward projection)
   "Homogeneous clip position of the world POINT.
@@ -55,6 +70,12 @@ lowering owns the target's flip."
           (- (* view-y (swizzle projection :y)))
           (+ (* view-z (swizzle projection :z)) (swizzle projection :w))
           view-z)))
+
+(define-shader-function cross-product (a b)
+  "The right-handed cross product of two vec3 values."
+  (vec3 (- (* (swizzle a :y) (swizzle b :z)) (* (swizzle a :z) (swizzle b :y)))
+        (- (* (swizzle a :z) (swizzle b :x)) (* (swizzle a :x) (swizzle b :z)))
+        (- (* (swizzle a :x) (swizzle b :y)) (* (swizzle a :y) (swizzle b :x)))))
 
 (define-task-payload surface-brick-payload
   (brick-index :uint))
@@ -185,6 +206,176 @@ lowering owns the target's flip."
     (set-mesh-primitive primitive-0 (uvec3 vertex-0 second-0 third-0))
     (set-mesh-primitive primitive-1 (uvec3 vertex-0 second-1 third-1))))
 
+;;; ------------------------------------------------------------------------
+;;; Shadow: a ray walked cell by cell through the occupancy bits
+;;;
+;;; The cells the solid chain fills are already on the GPU, one bit each, so
+;;; the truest cheap shadow is to walk the grid from the shaded point toward
+;;; the sun and ask whether any cell on the way is solid.  The walk is an
+;;; Amanatides-Woo traversal folded over a counted range: the state is the
+;;; current cell and whether anything has been hit, and the parameter at which
+;;; the ray leaves that cell along each axis is recomputed from that cell's
+;;; own boundary rather than carried, which keeps the state one vec4.  The
+;;; nearest boundary picks the axis to step, by masks rather than branches.
+;;; Each iteration crosses exactly one cell face, so the count is the reach in
+;;; cells; past it the ray is called lit and the shadow simply ends.  The
+;;; horizontal axes wrap with the domain, as the world does, and everything
+;;; below or above the cell array is air.
+;;;
+;;; It is an abstraction rather than a shader function because it reads a
+;;; storage buffer, which only a name in the shader's own resources can do.
+
+(define-shader-abstraction marched-cell-walk
+    (origin direction cells period-x period-y steps)
+  "Walk STEPS cell faces from ORIGIN along DIRECTION through the CELLS bits.
+
+The value is the vec4 of the cell the walk ended in and, in W, how near the
+first solid cell was: zero when the walk met none, and otherwise STEPS less
+the distance from ORIGIN to that cell's centre.  Nearness rather than a flag
+lets one walk answer both questions asked of it, whether the sun is hidden and
+how closely the world crowds this point, and it is read only once, which
+matters because the walk is spliced into its caller's expression.  Measuring
+by distance rather than by iteration is what keeps occlusion smooth: the cell
+is quantised but ORIGIN is not, so the shade slides across a face instead of
+stepping from one square to the next."
+  `(counted-fold (%walk-step ,(float steps) %walk-state
+                  (vec4 (floor (swizzle ,origin :x))
+                        (floor (swizzle ,origin :y))
+                        (floor (swizzle ,origin :z))
+                        0.0))
+     (let* ((%walk-here (swizzle %walk-state :xyz))
+            (%walk-near (swizzle %walk-state :w))
+            ;; An axis the ray does not travel must never be the nearest
+            ;; boundary, so give it a direction it can never cross in reach.
+            (%walk-toward
+              (+ ,direction
+                 (* (- (vec3 1.0 1.0 1.0) (abs (signum ,direction)))
+                    0.00001)))
+            (%walk-sign (signum %walk-toward))
+            ;; The boundary each axis leaves its cell by: the far side when
+            ;; the ray climbs that axis, the near side when it falls.
+            (%walk-ahead (max %walk-sign (vec3 0.0 0.0 0.0)))
+            (%walk-time (/ (- (+ %walk-here %walk-ahead) ,origin)
+                           %walk-toward))
+            (%walk-tx (swizzle %walk-time :x))
+            (%walk-ty (swizzle %walk-time :y))
+            (%walk-tz (swizzle %walk-time :z))
+            (%walk-ax (if (<= %walk-tx %walk-ty)
+                          (if (<= %walk-tx %walk-tz) 1.0 0.0)
+                          0.0))
+            (%walk-ay (* (- 1.0 %walk-ax)
+                         (if (<= %walk-ty %walk-tz) 1.0 0.0)))
+            (%walk-az (- 1.0 (+ %walk-ax %walk-ay)))
+            (%walk-next (+ %walk-here
+                           (* %walk-sign (vec3 %walk-ax %walk-ay %walk-az))))
+            (%walk-z (swizzle %walk-next :z))
+            (%walk-inside (if (< %walk-z 0.0) 0.0
+                              (if (> %walk-z 255.0) 0.0 1.0)))
+            ;; The language's MOD is unsigned, so wrap the horizontal
+            ;; axes the way a float must: x - period * floor(x / period).
+            (%walk-x (swizzle %walk-next :x))
+            (%walk-y (swizzle %walk-next :y))
+            (%walk-wrapped-x
+              (- %walk-x (* ,period-x (floor (/ %walk-x ,period-x)))))
+            (%walk-wrapped-y
+              (- %walk-y (* ,period-y (floor (/ %walk-y ,period-y)))))
+            (%walk-index (uint (+ %walk-wrapped-x
+                                  (* ,period-x
+                                     (+ %walk-wrapped-y
+                                        (* ,period-y
+                                           (clamp %walk-z 0.0 255.0)))))))
+            (%walk-word (buffer-element ,cells (/ %walk-index (uint 32.0))))
+            (%walk-solid
+              (* %walk-inside
+                 (float (ldb (byte 1 (mod %walk-index (uint 32.0)))
+                             %walk-word))))
+            (%walk-reach (- (+ %walk-next (vec3 0.5 0.5 0.5)) ,origin))
+            (%walk-distance (sqrt (dot %walk-reach %walk-reach))))
+       (vec4 (swizzle %walk-next :x)
+             (swizzle %walk-next :y)
+             (swizzle %walk-next :z)
+             ;; The first solid cell wins; later ones must not overwrite it.
+             (max %walk-near
+                  (* %walk-solid
+                     (max 0.0 (- ,(float steps) %walk-distance))))))))
+
+(define-shader-abstraction crowded-sky
+    (origin normal cells period-x period-y steps)
+  "How much of the sky the world hides from ORIGIN, zero to one.
+
+Four walks leave the surface at forty-five degrees to NORMAL, one into each
+quadrant, and each returns nearness: a cell right against the point counts
+fully, one at the end of the reach hardly at all.  Their mean is the crowding,
+which darkens the ambient hemisphere and no other light.  All of it is one
+expression, since an abstraction cannot bind, so the tangents are written out
+per ray and left to the backend's common subexpressions."
+  (flet ((ray (u v)
+           ;; A tangent pair from a vector no axis-aligned face normal can be
+           ;; parallel to; the face normals here are always axis-aligned.
+           (let* ((tangent `(normalize
+                             (cross-product ,normal (vec3 0.577 0.577 0.577))))
+                  (bitangent `(cross-product ,normal ,tangent)))
+             `(/ (swizzle
+                  (marched-cell-walk
+                   ,origin
+                   (normalize (+ ,normal
+                                 (* (+ (* ,tangent ,u) (* ,bitangent ,v))
+                                    0.85)))
+                   ,cells ,period-x ,period-y ,steps)
+                  :w)
+                 ,(float steps)))))
+    `(* 0.25 (+ (+ ,(ray 1.0 1.0) ,(ray 1.0 -1.0))
+                (+ ,(ray -1.0 1.0) ,(ray -1.0 -1.0))))))
+
+;;; ------------------------------------------------------------------------
+;;; Light: one warm key, one cool fill, a hemisphere, and a little sheen
+;;;
+;;; Six axis-aligned face directions want six distinguishable tones, which a
+;;; single sun and a constant ambient cannot give: the three faces turned away
+;;; from the sun all land on the ambient floor.  So the atelier lights like a
+;;; studio.  The sun is the key; a dimmer fill from another quarter separates
+;;; the shaded faces from each other; the ambient is a hemisphere, sky above
+;;; and bounce below, which separates up from down; and a low sheen picks out
+;;; the chamfers, whose normals sweep through angles no flat face has.
+;;; Occlusion darkens only the ambient, as occlusion does.  The sum is
+;;; exposed through 1 - exp(-x), so bright faces roll off instead of clipping.
+
+(define-shader-function surface-lighting
+    (base normal world occlusion shade camera-vector sun-vector
+     sun-colour-vector fill-vector sky-vector ground-vector)
+  "The lit, exposed, fogged colour of BASE material under the frame's lights.
+
+OCCLUSION scales the ambient hemisphere and SHADE the direct sun; both are
+one where nothing is hidden."
+  (let* ((sun (swizzle sun-vector :xyz))
+         (ambient (swizzle sun-vector :w))
+         (sky (swizzle sky-vector :xyz))
+         (ground (swizzle ground-vector :xyz))
+         (exposure (swizzle ground-vector :w))
+         (radiance (swizzle sun-colour-vector :xyz))
+         (sheen (swizzle sun-colour-vector :w))
+         (camera (swizzle camera-vector :xyz))
+         (delta (- world camera))
+         (distance (sqrt (dot delta delta)))
+         (view (/ delta (- distance)))
+         (facing (max (dot normal sun) 0.0))
+         (key (* facing (* shade (mix 1.0 occlusion 0.5))))
+         (fill (* (swizzle fill-vector :w)
+                  (max (dot normal (swizzle fill-vector :xyz)) 0.0)))
+         (upness (swizzle normal :z))
+         (sky-weight (* occlusion (+ 0.5 (* 0.5 upness))))
+         (ground-weight (* occlusion (- 0.5 (* 0.5 upness))))
+         (half (normalize (+ sun view)))
+         (gloss (* sheen (* key (expt (max (dot normal half) 0.0) 48.0))))
+         (light (+ (* radiance key)
+                   (+ (* sky (+ (* ambient sky-weight) fill))
+                      (* ground (* ambient ground-weight)))))
+         (lit (+ (* base light) (* radiance gloss)))
+         (exposed (- (vec3 1.0 1.0 1.0) (exp (* lit (- exposure)))))
+         (fog-far (swizzle sky-vector :w))
+         (fog (smoothstep (* 0.45 fog-far) fog-far distance)))
+    (mix exposed sky fog)))
+
 (define-shader surface-fragment-shader
     (:stage :fragment
      :inputs ((normal :vec3 :location 0)
@@ -192,28 +383,38 @@ lowering owns the target's flip."
               (uv :vec2 :location 2))
      :outputs ((color :vec4 :location 0))
      :resources ((frame :uniform-block :binding #.+frame-binding+
-                        :members #.*frame-uniform-members*)))
-  (let* ((sun (swizzle sun-vector :xyz))
-         (ambient (swizzle sun-vector :w))
-         (diffuse (max (dot normal sun) 0.0))
-         (light (+ ambient (* diffuse (- 1.0 ambient))))
-         (upness (swizzle normal :z))
-         (top (vec3 0.40 0.60 0.28))
-         (side (vec3 0.58 0.50 0.40))
-         (bottom (vec3 0.28 0.26 0.25))
-         (base (if (> upness 0.5) top (if (< upness -0.5) bottom side)))
+                        :members #.*frame-uniform-members*)
+                 (cells :storage-buffer :binding #.+cells-binding+
+                        :element :uint)))
+  (let* ((upness (swizzle normal :z))
+         (base (if (> upness 0.5)
+                   (swizzle top-vector :xyz)
+                   (if (< upness -0.5)
+                       (swizzle bottom-vector :xyz)
+                       (swizzle side-vector :xyz))))
          ;; Textureless, but not featureless: a soft line where faces meet.
          (u (swizzle uv :x))
          (v (swizzle uv :y))
          (edge (min (min u (- 1.0 u)) (min v (- 1.0 v))))
          (line (mix 0.70 1.0 (smoothstep 0.0 0.06 edge)))
-         (shaded (* base (* light line)))
-         (camera (swizzle camera-vector :xyz))
-         (delta (- world camera))
-         (distance (sqrt (dot delta delta)))
-         (fog-far (swizzle sky-vector :w))
-         (fog (smoothstep (* 0.45 fog-far) fog-far distance))
-         (final (mix shaded (swizzle sky-vector :xyz) fog)))
+         ;; A rounded surface lies inside its own cell, by up to the
+         ;; radius, so clear that much before trusting the grid.
+         (walk-origin
+           (+ world (* normal (+ (* 2.0 (swizzle domain-vector :z)) 0.1))))
+         (walk (marched-cell-walk walk-origin (swizzle sun-vector :xyz)
+                                  cells (swizzle domain-vector :x)
+                                  (swizzle domain-vector :y)
+                                  #.*shadow-steps*))
+         (shade (mix 1.0 (if (> (swizzle walk :w) 0.5) 0.0 1.0)
+                     (swizzle occlusion-vector :y)))
+         (crowding (crowded-sky walk-origin normal cells
+                                (swizzle domain-vector :x)
+                                (swizzle domain-vector :y)
+                                #.*occlusion-steps*))
+         (open (* line (- 1.0 (* (swizzle occlusion-vector :x) crowding))))
+         (final (surface-lighting base normal world open shade
+                                  camera-vector sun-vector sun-colour-vector
+                                  fill-vector sky-vector ground-vector)))
     (set-output color (vec4 final 1.0))))
 
 
@@ -301,12 +502,6 @@ its star's clamped minority, where the flat 45-degree facets meet."
     (if (> length 0.5)
         (* q (/ sign length))
         normal)))
-
-(define-shader-function cross-product (a b)
-  "The right-handed cross product of two vec3 values."
-  (vec3 (- (* (swizzle a :y) (swizzle b :z)) (* (swizzle a :z) (swizzle b :y)))
-        (- (* (swizzle a :z) (swizzle b :x)) (* (swizzle a :x) (swizzle b :z)))
-        (- (* (swizzle a :x) (swizzle b :y)) (* (swizzle a :y) (swizzle b :x)))))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defvar *bevel-rings* 2
@@ -734,7 +929,9 @@ The chamfer rule also emits the face normal for facet shading."
               (face-normal :vec3 :location 3))
      :outputs ((color :vec4 :location 0))
      :resources ((frame :uniform-block :binding #.+frame-binding+
-                        :members #.*frame-uniform-members*)))
+                        :members #.*frame-uniform-members*)
+                 (cells :storage-buffer :binding #.+cells-binding+
+                        :element :uint)))
   (let* ((raw-facet (cross-product (derivative-x world) (derivative-y world)))
          (facet (normalize raw-facet))
          (face (normalize face-normal))
@@ -748,23 +945,33 @@ The chamfer rule also emits the face normal for facet shading."
          (arris (- inset radius))
          (sanded (normalize (mix oriented face
                                  (smoothstep (- sanding) sanding arris))))
-         (sun (swizzle sun-vector :xyz))
-         (ambient (swizzle sun-vector :w))
-         (diffuse (max (dot sanded sun) 0.0))
-         (light (+ ambient (* diffuse (- 1.0 ambient))))
-         (upness (swizzle sanded :z))
-         (top (vec3 0.40 0.60 0.28))
-         (side (vec3 0.58 0.50 0.40))
-         (bottom (vec3 0.28 0.26 0.25))
-         (base (if (> upness 0.5) top (if (< upness -0.5) bottom side)))
-         (shaded (* base light))
-         (camera (swizzle camera-vector :xyz))
-         (delta (- world camera))
-         (distance (sqrt (dot delta delta)))
-         (fog-far (swizzle sky-vector :w))
-         (fog (smoothstep (* 0.45 fog-far) fog-far distance))
-         (final (mix shaded (swizzle sky-vector :xyz) fog)))
+         (upness (swizzle face :z))
+         (base (if (> upness 0.5)
+                   (swizzle top-vector :xyz)
+                   (if (< upness -0.5)
+                       (swizzle bottom-vector :xyz)
+                       (swizzle side-vector :xyz))))
+         ;; A chamfered surface lies inside its own cell, by up to the
+         ;; radius along every axis its facet cuts, so leave along the facet
+         ;; normal, which is the one direction certain to point out of the
+         ;; solid, and by more than the radius.
+         (walk-origin (+ world (* oriented (+ (* 2.0 radius) 0.1))))
+         (walk (marched-cell-walk walk-origin (swizzle sun-vector :xyz)
+                                  cells (swizzle domain-vector :x)
+                                  (swizzle domain-vector :y)
+                                  #.*shadow-steps*))
+         (shade (mix 1.0 (if (> (swizzle walk :w) 0.5) 0.0 1.0)
+                     (swizzle occlusion-vector :y)))
+         (crowding (crowded-sky walk-origin face cells
+                                (swizzle domain-vector :x)
+                                (swizzle domain-vector :y)
+                                #.*occlusion-steps*))
+         (open (- 1.0 (* (swizzle occlusion-vector :x) crowding)))
+         (final (surface-lighting base sanded world open shade
+                                  camera-vector sun-vector sun-colour-vector
+                                  fill-vector sky-vector ground-vector)))
     (set-output color (vec4 final 1.0))))
+
 
 (defun frame-uniform-block ()
   "The frame uniform block as declared by the mesh stage."
