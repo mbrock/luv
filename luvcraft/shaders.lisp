@@ -576,6 +576,35 @@
          (radiance (swizzle picture :rgb)))
     (set-output color-output (vec4 (representation radiance) 1.0))))
 
+(define-shader-method shader-specification-for
+    video-screen-hardware-fragment-specification
+    ((role (eql :video-screen-hardware)) (stage (eql :fragment)))
+    (:stage :fragment
+     :inputs ((uv-input :vec2 :location 0
+                        :quantity :texture-uv :unit :one))
+     :outputs ((color-output :vec4 :location 0))
+     :resources
+     ((video-luma :texture-2d :set 0 :binding 0)
+      (video-sampler :sampler :set 0 :binding 1)
+      (frame-state :uniform-block :set 0 :binding 2
+                   :members #.*frame-uniform-members*)
+      (video-chroma :texture-2d :set 0 :binding 3)))
+  ;; VideoToolbox's ordinary bi-planar output is video-range NV12.  Sampling
+  ;; the two CVMetalTextures performs no copy; this matrix is the only colour
+  ;; conversion between the decoder surface and the HDR scene target.
+  (let* ((y (- (swizzle (representation
+                          (sample video-luma video-sampler uv-input)) :x)
+               (/ 16.0 255.0)))
+         (uv (- (swizzle (representation
+                           (sample video-chroma video-sampler uv-input)) :xy)
+                (vec2 0.5 0.5)))
+         (u (swizzle uv :x))
+         (v (swizzle uv :y))
+         (r (+ (* 1.164383 y) (* 1.792741 v)))
+         (g (- (* 1.164383 y) (* 0.213249 u) (* 0.532909 v)))
+         (b (+ (* 1.164383 y) (* 2.112402 u))))
+    (set-output color-output (vec4 r g b 1.0))))
+
 (defmethod shader-specification-for
     ((role (eql :slug-world-text)) (stage (eql :fragment)))
   (declare (ignore role stage))

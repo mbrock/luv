@@ -31,6 +31,7 @@
            #:frame-duration
            #:frame-key-p
            #:frame-plane-pointer
+           #:frame-videotoolbox-pixel-buffer
            #:frame-plane-pitch
            #:frame-hardware-p
            #:allocate-frame-buffer

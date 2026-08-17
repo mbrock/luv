@@ -166,7 +166,9 @@
 (cstruct av-codec-context "AVCodecContext"
   (width "width" :type :int)
   (height "height" :type :int)
-  (pixel-format "pix_fmt" :type :int))
+  (pixel-format "pix_fmt" :type :int)
+  (get-format "get_format" :type :pointer)
+  (hardware-device-context "hw_device_ctx" :type :pointer))
 
 (cstruct av-packet "AVPacket"
   (data "data" :type :pointer)

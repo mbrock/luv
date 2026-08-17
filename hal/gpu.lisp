@@ -209,6 +209,9 @@ factories for requesting GPU-DEVICE instances."))
   (:documentation "Asks the DEVICE for a handle to newly created instance
 of some object fulfilling the DESCRIPTOR."))
 
+(defgeneric adopt-native-texture (device native-object owner descriptor)
+  (:documentation "Wrap a platform texture and its retained OWNER in the HAL."))
+
 (defgeneric encode (encoder command)
   (:documentation "Record an inspectable GPU COMMAND onto ENCODER."))
 

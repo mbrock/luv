@@ -121,6 +121,12 @@ touched the CPU and FRAME's third plane holds a platform surface."
     (frame-pointer (ensure-frame-live frame)) '(:struct av-frame) 'data)
    :pointer plane))
 
+(defun frame-videotoolbox-pixel-buffer (frame)
+  "Return FRAME's borrowed CVPixelBuffer, or NIL for a non-VideoToolbox frame."
+  (when (eq :videotoolbox (frame-pixel-format frame))
+    (let ((buffer (frame-plane-pointer frame 3)))
+      (unless (cffi:null-pointer-p buffer) buffer))))
+
 (defun frame-plane-pitch (frame plane)
   "Return the byte stride of FRAME's PLANE, which exceeds its width when padded."
   (check-type plane (integer 0 7))

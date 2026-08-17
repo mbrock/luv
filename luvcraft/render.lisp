@@ -527,11 +527,7 @@ the frame uniform cannot silently diverge between shader and host."
                           (luvcraft-session-world-text session)
                           (luvcraft-session-device session) buffer)
                          #())
-                     video-screen-bind-group
-                     (when (luvcraft-session-video-screen session)
-                       (make-video-screen-bind-group
-                        (luvcraft-session-video-screen session)
-                        (luvcraft-session-device session) buffer)))
+                     video-screen-bind-group nil)
                (remember-luvcraft-resource session buffer)
                (remember-luvcraft-resource session scene-bind-group)
                (remember-luvcraft-resource session shadow-bind-group)
@@ -736,15 +732,20 @@ the frame uniform cannot silently diverge between shader and host."
            pass 0 (luvcraft-session-particle-vertex-buffer session))
           (draw pass particle-vertex-count))
         ;; Before the text, so a caption drawn over the screen wins.
-        (when (and (luvcraft-session-video-screen session)
-                   (luvcraft-frame-video-screen-bind-group frame))
+        (when (luvcraft-session-video-screen session)
           (let ((screen (luvcraft-session-video-screen session)))
-            (set-pipeline pass (video-screen-native-pipeline screen))
-            (set-vertex-buffer pass 0 (video-screen-vertex-buffer screen))
-            (set-vertex-buffer pass 1 (video-screen-instance-buffer screen))
-            (set-bind-group
-             pass 0 (luvcraft-frame-video-screen-bind-group frame))
-            (draw pass 6 1)))
+            (let ((group
+                    (make-video-screen-bind-group
+                     screen (luvcraft-session-device session)
+                     (luvcraft-frame-uniform-buffer frame))))
+              (unwind-protect
+                   (progn
+                     (set-pipeline pass (video-screen-native-pipeline screen))
+                     (set-vertex-buffer pass 0 (video-screen-vertex-buffer screen))
+                     (set-vertex-buffer pass 1 (video-screen-instance-buffer screen))
+                     (set-bind-group pass 0 group)
+                     (draw pass 6 1))
+                (destroy group)))))
         (when (luvcraft-session-world-text session)
           (let ((text (luvcraft-session-world-text session)))
             (set-pipeline pass (world-text-run-native-pipeline text))

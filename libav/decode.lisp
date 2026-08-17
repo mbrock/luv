@@ -72,6 +72,13 @@
   (context :pointer) (packet :pointer))
 (cffi:defcfun ("avcodec_receive_frame" %avcodec-receive-frame) :int
   (context :pointer) (frame :pointer))
+(cffi:defcfun ("av_hwdevice_ctx_create" %av-hwdevice-context-create) :int
+  (reference :pointer) (type :int) (device :pointer) (options :pointer)
+  (flags :int))
+(cffi:defcfun ("av_buffer_ref" %av-buffer-reference) :pointer
+  (reference :pointer))
+(cffi:defcfun ("av_buffer_unref" %av-buffer-unreference) :void
+  (reference :pointer))
 
 (cffi:defcfun ("av_packet_alloc" %av-packet-alloc) :pointer)
 (cffi:defcfun ("av_packet_free" %av-packet-free) :void (packet :pointer))
@@ -108,7 +115,45 @@
     (unless (zerop denominator)
       (/ numerator denominator))))
 
-(defun open-video (pathname)
+(cffi:defcallback choose-videotoolbox-format :int
+    ((context :pointer) (formats :pointer))
+  (declare (ignore context))
+  (let ((wanted (cffi:foreign-enum-value 'pixel-format :videotoolbox)))
+    (loop for index from 0
+          for format = (cffi:mem-aref formats :int index)
+          until (= format (cffi:foreign-enum-value 'pixel-format :none))
+          when (= format wanted) return format
+          finally (return (cffi:mem-aref formats :int 0)))))
+
+(defun enable-videotoolbox-decoding (codec-context)
+  "Ask FFmpeg to decode into reference-counted CVPixelBuffers."
+  #+darwin
+  (cffi:with-foreign-object (reference-cell :pointer)
+    (setf (cffi:mem-ref reference-cell :pointer) (cffi:null-pointer))
+    (check-code
+     (%av-hwdevice-context-create
+      reference-cell
+      (cffi:foreign-enum-value 'hardware-device-type :videotoolbox)
+      (cffi:null-pointer) (cffi:null-pointer) 0)
+     'enable-videotoolbox-decoding)
+    (unwind-protect
+         (let ((reference (%av-buffer-reference
+                           (cffi:mem-ref reference-cell :pointer))))
+           (when (cffi:null-pointer-p reference)
+             (error "Could not retain FFmpeg's VideoToolbox device context."))
+           (setf (cffi:foreign-slot-value
+                  codec-context '(:struct av-codec-context)
+                  'hardware-device-context)
+                 reference
+                 (cffi:foreign-slot-value
+                  codec-context '(:struct av-codec-context) 'get-format)
+                 (cffi:callback choose-videotoolbox-format)))
+      (%av-buffer-unreference reference-cell)))
+  #-darwin
+  (declare (ignore codec-context))
+  codec-context)
+
+(defun open-video (pathname &key (hardware :auto))
   "Open PATHNAME, find its best video stream, and start a decoder for it.
 
 Returns a VIDEO.  The caller owns it and must CLOSE-VIDEO it."
@@ -152,6 +197,13 @@ Returns a VIDEO.  The caller owns it and must CLOSE-VIDEO it."
                (check-code (%avcodec-parameters-to-context
                             codec-context parameters)
                            'open-video)
+               (when (and #+darwin t #-darwin nil
+                          (member hardware '(:auto :required)))
+                 (handler-case (enable-videotoolbox-decoding codec-context)
+                   (error (condition)
+                     (when (eq hardware :required) (error condition))
+                     (warn "VideoToolbox decode unavailable; using software: ~A"
+                           condition))))
                (check-code (%avcodec-open2 codec-context decoder
                                            (cffi:null-pointer))
                            'open-video)

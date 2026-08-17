@@ -55,6 +55,8 @@
 (defconstant +pixel-format-bgra8-unorm-srgb+ 81)
 (defconstant +pixel-format-rgba8-unorm+ 70)
 (defconstant +pixel-format-rgba8-unorm-srgb+ 71)
+(defconstant +pixel-format-r8-unorm+ 10)
+(defconstant +pixel-format-rg8-unorm+ 30)
 (defconstant +pixel-format-rg16-uint+ 63)
 (defconstant +pixel-format-rgba16-float+ 115)
 (defconstant +pixel-format-depth32-float+ 252)

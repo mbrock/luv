@@ -276,6 +276,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:request-gpu-device
            #:device-queue
            #:create
+           #:adopt-native-texture
            #:encode
            #:enqueue
            #:finish

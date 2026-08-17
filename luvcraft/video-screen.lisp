@@ -20,14 +20,44 @@
 
 (in-package #:luvcraft)
 
+#+darwin
+(progn
+  (cffi:define-foreign-library core-video
+    (:darwin (:framework "CoreVideo")))
+  (cffi:define-foreign-library core-foundation
+    (:darwin (:framework "CoreFoundation")))
+  (cffi:defcfun ("CVMetalTextureCacheCreate" %cv-metal-texture-cache-create)
+      :int
+    (allocator :pointer) (cache-attributes :pointer) (device :pointer)
+    (texture-attributes :pointer) (cache :pointer))
+  (cffi:defcfun ("CVMetalTextureCacheCreateTextureFromImage"
+                 %cv-metal-texture-from-image) :int
+    (allocator :pointer) (cache :pointer) (image :pointer)
+    (texture-attributes :pointer) (pixel-format :uint64)
+    (width :size) (height :size) (plane :size) (texture :pointer))
+  (cffi:defcfun ("CVMetalTextureGetTexture" %cv-metal-texture-get-texture)
+      :pointer (texture :pointer))
+  (cffi:defcfun ("CVPixelBufferGetPlaneCount" %cv-pixel-buffer-plane-count)
+      :size (buffer :pointer))
+  (cffi:defcfun ("CVPixelBufferGetWidthOfPlane" %cv-pixel-buffer-plane-width)
+      :size (buffer :pointer) (plane :size))
+  (cffi:defcfun ("CVPixelBufferGetHeightOfPlane" %cv-pixel-buffer-plane-height)
+      :size (buffer :pointer) (plane :size)))
+
 (defclass video-screen ()
   ((video :initarg :video :reader video-screen-video)
    (width :initarg :width :reader video-screen-texture-width)
    (height :initarg :height :reader video-screen-texture-height)
    ;; The RGBA words swscale writes into, reused for every picture.
-   (words :initarg :words :reader video-screen-words)
-   (texture :initarg :texture :reader video-screen-texture)
-   (view :initarg :view :reader video-screen-view)
+   (words :initarg :words :initform nil :reader video-screen-words)
+   (texture :initarg :texture :initform nil :accessor video-screen-texture)
+   (view :initarg :view :initform nil :accessor video-screen-view)
+   (chroma-texture :initform nil :accessor video-screen-chroma-texture)
+   (chroma-view :initform nil :accessor video-screen-chroma-view)
+   (texture-cache :initarg :texture-cache :initform nil
+                  :accessor video-screen-texture-cache)
+   (hardware-p :initarg :hardware-p :initform nil
+               :reader video-screen-hardware-p)
    (sampler :initarg :sampler :reader video-screen-sampler)
    (layout :initarg :layout :reader video-screen-layout)
    (pipeline :initarg :pipeline :reader video-screen-pipeline)
@@ -95,112 +125,138 @@ WIDTH by HEIGHT in cells, square to the camera's own basis."
   "Open PATHNAME and build a world screen playing it, facing CAMERA.
 
 HEIGHT is the screen's height in cells; its width follows the film's aspect."
-  (let* ((video (libav:open-video pathname))
+  (let* ((video (libav:open-video
+                 pathname
+                 :hardware (if (typep device 'luv::metal-gpu-device)
+                               :auto nil)))
          (resources nil)
          (pipeline nil)
          (completed-p nil))
     (flet ((keep (resource) (push resource resources) resource))
       (unwind-protect
-           (multiple-value-bind (texture-width texture-height)
-               (video-screen-texture-size video)
-             (let* ((aspect (/ (libav:video-width video)
-                               (libav:video-height video)))
-                    (width (* height aspect))
-                    (vertex-data (make-world-text-quad-vertices)))
-               (multiple-value-bind (origin right-edge up-edge)
-                   (video-screen-rectangle-before-camera
-                    camera distance lift width height)
-                 (let* ((instance-data
-                          (make-video-screen-instances
-                           origin right-edge up-edge))
-                        (texture
-                          (keep
-                           (create device
-                                   (make-texture-descriptor
-                                    :label "world video screen picture"
-                                    :size (list texture-width texture-height)
-                                    :dimensions :2d
-                                    :format :rgba8-unorm-srgb
-                                    :usage '(:copy-dst :texture-binding)))))
-                        (view
-                          (keep
-                           (create device
-                                   (make-texture-view-descriptor
-                                    :texture texture))))
-                        (sampler
-                          (keep
-                           (create device
-                                   (make-sampler-descriptor
-                                    :label "world video screen sampler"
-                                    :mag-filter :linear
-                                    :min-filter :linear
-                                    :mipmap-filter :nearest))))
-                        (layout
-                          (keep
-                           (create device
-                                   (make-bind-group-layout-descriptor
-                                    :label "world video screen layout"
-                                    :entries '((:binding 0 :type :texture)
-                                               (:binding 1 :type :sampler)
-                                               (:binding 2
-                                                :type :uniform-buffer))))))
-                        (vertex-buffer
-                          (keep
-                           (create device
-                                   (make-buffer-descriptor
-                                    :label "world video screen quad"
-                                    :size (* 4 (length vertex-data))
-                                    :usage '(:vertex :copy-dst)))))
-                        (instance-buffer
-                          (keep
-                           (create device
-                                   (make-buffer-descriptor
-                                    :label "world video screen instance"
-                                    :size (* 4 (length instance-data))
-                                    :usage '(:vertex :copy-dst))))))
-                   (setf pipeline
-                         (make-live-shader-pipeline
-                          :role :video-screen
-                          :vertex-role :video-screen
-                          :label "world video screen pipeline"
-                          :device device :layout layout
-                          :vertex-buffers
-                          '((:array-stride 12
-                             :attributes
-                             ((:shader-location 0 :offset 0
-                               :format :float32x3)))
-                            (:array-stride 36 :step-mode :instance
-                             :attributes
-                             ((:shader-location 1 :offset 0
-                               :format :float32x3)
-                              (:shader-location 2 :offset 12
-                               :format :float32x3)
-                              (:shader-location 3 :offset 24
-                               :format :float32x3))))
-                          :target-format target-format
-                          :primitive '(:topology :triangle-list)
-                          :depth-stencil
-                          '(:format :depth32-float
-                            :depth-write-enabled t
-                            :depth-compare :less)))
-                   (write-buffer vertex-buffer vertex-data)
-                   (write-buffer instance-buffer instance-data)
-                   (let ((screen
-                           (make-instance
-                            'video-screen
-                            :video video
-                            :width texture-width :height texture-height
-                            :words (make-array
-                                    (list texture-height texture-width)
-                                    :element-type '(unsigned-byte 32))
-                            :texture texture :view view :sampler sampler
-                            :layout layout :pipeline pipeline
-                            :vertex-buffer vertex-buffer
-                            :instance-buffer instance-buffer
-                            :loop-p loop-p
-                            :resources resources)))
-                     (setf completed-p t)
-                     screen)))))
+           (let* ((first-frame (libav:decode-next-frame video))
+                  (hardware-p
+                    (not (null
+                          (and first-frame
+                               (libav:frame-videotoolbox-pixel-buffer
+                                first-frame))))))
+             (multiple-value-bind (texture-width texture-height)
+                 (if hardware-p
+                     (values (libav:video-width video) (libav:video-height video))
+                     (video-screen-texture-size video))
+               (let* ((aspect (/ (libav:video-width video)
+                                 (libav:video-height video)))
+                      (width (* height aspect))
+                      (vertex-data (make-world-text-quad-vertices)))
+                 (multiple-value-bind (origin right-edge up-edge)
+                     (video-screen-rectangle-before-camera
+                      camera distance lift width height)
+                   (let* ((instance-data
+                            (make-video-screen-instances
+                             origin right-edge up-edge))
+                          (texture
+                            (unless hardware-p
+                              (keep
+                               (create device
+                                       (make-texture-descriptor
+                                        :label "world video screen picture"
+                                        :size (list texture-width texture-height)
+                                        :dimensions :2d
+                                        :format :rgba8-unorm-srgb
+                                        :usage '(:copy-dst :texture-binding))))))
+                          (view
+                            (when texture
+                              (keep
+                               (create device
+                                       (make-texture-view-descriptor
+                                        :texture texture)))))
+                          (sampler
+                            (keep
+                             (create device
+                                     (make-sampler-descriptor
+                                      :label "world video screen sampler"
+                                      :mag-filter :linear
+                                      :min-filter :linear
+                                      :mipmap-filter :nearest))))
+                          (layout
+                            (keep
+                             (create device
+                                     (make-bind-group-layout-descriptor
+                                      :label "world video screen layout"
+                                      :entries
+                                      (if hardware-p
+                                          '((:binding 0 :type :texture)
+                                            (:binding 1 :type :sampler)
+                                            (:binding 2 :type :uniform-buffer)
+                                            (:binding 3 :type :texture))
+                                          '((:binding 0 :type :texture)
+                                            (:binding 1 :type :sampler)
+                                            (:binding 2 :type :uniform-buffer)))))))
+                          (vertex-buffer
+                            (keep
+                             (create device
+                                     (make-buffer-descriptor
+                                      :label "world video screen quad"
+                                      :size (* 4 (length vertex-data))
+                                      :usage '(:vertex :copy-dst)))))
+                          (instance-buffer
+                            (keep
+                             (create device
+                                     (make-buffer-descriptor
+                                      :label "world video screen instance"
+                                      :size (* 4 (length instance-data))
+                                      :usage '(:vertex :copy-dst))))))
+                     (setf pipeline
+                           (make-live-shader-pipeline
+                            :role (if hardware-p
+                                      :video-screen-hardware :video-screen)
+                            :vertex-role :video-screen
+                            :label "world video screen pipeline"
+                            :device device :layout layout
+                            :vertex-buffers
+                            '((:array-stride 12
+                               :attributes
+                               ((:shader-location 0 :offset 0
+                                 :format :float32x3)))
+                              (:array-stride 36 :step-mode :instance
+                               :attributes
+                               ((:shader-location 1 :offset 0
+                                 :format :float32x3)
+                                (:shader-location 2 :offset 12
+                                 :format :float32x3)
+                                (:shader-location 3 :offset 24
+                                 :format :float32x3))))
+                            :target-format target-format
+                            :primitive '(:topology :triangle-list)
+                            :depth-stencil
+                            '(:format :depth32-float
+                              :depth-write-enabled t
+                              :depth-compare :less)))
+                     (write-buffer vertex-buffer vertex-data)
+                     (write-buffer instance-buffer instance-data)
+                     (let ((screen
+                             (make-instance
+                              'video-screen
+                              :video video
+                              :width texture-width :height texture-height
+                              :words (unless hardware-p
+                                       (make-array
+                                        (list texture-height texture-width)
+                                        :element-type '(unsigned-byte 32)))
+                              :texture texture :view view :sampler sampler
+                              :hardware-p hardware-p
+                              :layout layout :pipeline pipeline
+                              :vertex-buffer vertex-buffer
+                              :instance-buffer instance-buffer
+                              :loop-p loop-p
+                              :resources resources)))
+                       (when first-frame
+                         (if hardware-p
+                             (install-videotoolbox-picture screen device)
+                             (upload-video-screen-picture screen device))
+                         (setf (video-screen-shown screen) 0))
+                       (setf completed-p t)
+                       screen))))))
         (unless completed-p
           ;; The caller is already being told why the screen could not be
           ;; built, so trouble unwinding it is a warning beside that.
@@ -223,6 +279,12 @@ release report is running.  See WITH-RELEASE-REPORT."
   (dolist (resource (video-screen-resources screen))
     (releasing :video-screen-resource (destroy resource)))
   (setf (video-screen-resources screen) nil)
+  (release-video-screen-picture screen)
+  #+darwin
+  (when (video-screen-texture-cache screen)
+    (cffi:foreign-funcall "CFRelease" :pointer
+                          (video-screen-texture-cache screen) :void)
+    (setf (video-screen-texture-cache screen) nil))
   (releasing :video-screen-film (libav:close-video (video-screen-video screen)))
   (values))
 
@@ -237,7 +299,90 @@ release report is running.  See WITH-RELEASE-REPORT."
            :layout (video-screen-layout screen)
            :entries `((:binding 0 :resource ,(video-screen-view screen))
                       (:binding 1 :resource ,(video-screen-sampler screen))
-                      (:binding 2 :resource ,uniform-buffer)))))
+                      (:binding 2 :resource ,uniform-buffer)
+                      ,@(when (video-screen-hardware-p screen)
+                          `((:binding 3 :resource
+                             ,(video-screen-chroma-view screen))))))))
+
+(defun release-video-screen-picture (screen)
+  (when (video-screen-view screen) (destroy (video-screen-view screen)))
+  (when (video-screen-chroma-view screen)
+    (destroy (video-screen-chroma-view screen)))
+  (when (and (video-screen-hardware-p screen) (video-screen-texture screen))
+    (destroy (video-screen-texture screen)))
+  (when (video-screen-chroma-texture screen)
+    (destroy (video-screen-chroma-texture screen)))
+  (when (video-screen-hardware-p screen)
+    (setf (video-screen-view screen) nil
+          (video-screen-texture screen) nil))
+  (setf (video-screen-chroma-view screen) nil
+        (video-screen-chroma-texture screen) nil))
+
+#+darwin
+(defun ensure-video-screen-texture-cache (screen device)
+  (or (video-screen-texture-cache screen)
+      (progn
+        (cffi:use-foreign-library core-video)
+        (cffi:use-foreign-library core-foundation)
+        (cffi:with-foreign-object (cell :pointer)
+          (let ((status
+                  (%cv-metal-texture-cache-create
+                   (cffi:null-pointer) (cffi:null-pointer)
+                   (luv.objective-c:objective-c-pointer
+                    (luv::metal-native-object device))
+                   (cffi:null-pointer) cell)))
+            (unless (zerop status)
+              (error "CVMetalTextureCacheCreate failed with status ~D." status))
+            (setf (video-screen-texture-cache screen)
+                  (cffi:mem-ref cell :pointer)))))))
+
+#+darwin
+(defun make-video-plane-texture (screen device pixel-buffer plane format native-format)
+  (let ((width (%cv-pixel-buffer-plane-width pixel-buffer plane))
+        (height (%cv-pixel-buffer-plane-height pixel-buffer plane)))
+    (cffi:with-foreign-object (cell :pointer)
+      (let ((status
+              (%cv-metal-texture-from-image
+               (cffi:null-pointer)
+               (ensure-video-screen-texture-cache screen device) pixel-buffer
+               (cffi:null-pointer) native-format width height plane cell)))
+        (unless (zerop status)
+          (error "CVMetalTexture creation for plane ~D failed with status ~D."
+                 plane status))
+        (let* ((owner (cffi:mem-ref cell :pointer))
+               (native
+                 (luv.objective-c:wrap-objective-c-object
+                  (%cv-metal-texture-get-texture owner)
+                  :ownership :borrowed :protocol-name "MTLTexture"))
+               (texture
+                 (adopt-native-texture
+                  device native owner
+                  (make-texture-descriptor
+                   :label (format nil "VideoToolbox plane ~D" plane)
+                   :size (list width height) :dimensions :2d :format format
+                   :usage '(:texture-binding)))))
+          (values texture
+                  (create device
+                          (make-texture-view-descriptor :texture texture))))))))
+
+(defun install-videotoolbox-picture (screen device)
+  #-darwin (declare (ignore screen device))
+  #+darwin
+  (let ((buffer
+          (libav:frame-videotoolbox-pixel-buffer
+           (libav:video-frame (video-screen-video screen)))))
+    (unless (and buffer (= 2 (%cv-pixel-buffer-plane-count buffer)))
+      (error "VideoToolbox did not return the expected two-plane NV12 surface."))
+    (multiple-value-bind (luma luma-view)
+        (make-video-plane-texture screen device buffer 0 :r8-unorm 10)
+      (multiple-value-bind (chroma chroma-view)
+          (make-video-plane-texture screen device buffer 1 :rg8-unorm 30)
+        (release-video-screen-picture screen)
+        (setf (video-screen-texture screen) luma
+              (video-screen-view screen) luma-view
+              (video-screen-chroma-texture screen) chroma
+              (video-screen-chroma-view screen) chroma-view))))
+  screen)
 
 (defun video-screen-due-picture (screen)
   "Return the index of the picture that should be showing now.
@@ -309,7 +454,9 @@ the renderer's."
             (- (get-internal-real-time)
                (video-screen-picture-span screen (video-screen-shown screen)))))
     (when decoded-p
-      (upload-video-screen-picture screen device))
+      (if (video-screen-hardware-p screen)
+          (install-videotoolbox-picture screen device)
+          (upload-video-screen-picture screen device)))
     decoded-p))
 
 (defun video-screen-picture-span (screen count)
