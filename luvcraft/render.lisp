@@ -29,9 +29,7 @@
                                :initform nil
                                :reader luvcraft-frame-bloom-secondary-bind-group)
    (world-text-bind-groups :initarg :world-text-bind-groups :initform #()
-                           :reader luvcraft-frame-world-text-bind-groups)
-   (video-screen-bind-group :initarg :video-screen-bind-group :initform nil
-                            :reader luvcraft-frame-video-screen-bind-group)))
+                           :reader luvcraft-frame-world-text-bind-groups)))
 
 (defconstant +block-world-crosshair-vertex-count+ 24)
 (defconstant +luvcraft-shadow-map-size+ 2048)
@@ -437,7 +435,6 @@ the frame uniform cannot silently diverge between shader and host."
             (bloom-primary-bind-group nil)
             (bloom-secondary-bind-group nil)
             (world-text-bind-groups #())
-            (video-screen-bind-group nil)
             (completed-p nil))
         (unwind-protect
              (progn
@@ -529,8 +526,7 @@ the frame uniform cannot silently diverge between shader and host."
                          (make-world-text-frame-bind-groups
                           (luvcraft-session-world-text session)
                           (luvcraft-session-device session) buffer)
-                         #())
-                     video-screen-bind-group nil)
+                         #()))
                (remember-luvcraft-resource session buffer)
                (remember-luvcraft-resource session scene-bind-group)
                (remember-luvcraft-resource session shadow-bind-group)
@@ -543,8 +539,6 @@ the frame uniform cannot silently diverge between shader and host."
                          (remove-duplicates
                           (coerce world-text-bind-groups 'list) :test #'eq))
                  (remember-luvcraft-resource session group))
-               (when video-screen-bind-group
-                 (remember-luvcraft-resource session video-screen-bind-group))
                (let ((state
                        (make-instance
                         'luvcraft-frame-state
@@ -556,8 +550,7 @@ the frame uniform cannot silently diverge between shader and host."
                         :bloom-scene-bind-group bloom-scene-bind-group
                         :bloom-primary-bind-group bloom-primary-bind-group
                         :bloom-secondary-bind-group bloom-secondary-bind-group
-                        :world-text-bind-groups world-text-bind-groups
-                        :video-screen-bind-group video-screen-bind-group)))
+                        :world-text-bind-groups world-text-bind-groups)))
                  (setf (gethash key
                                 (luvcraft-session-frame-states session))
                        state
@@ -568,7 +561,6 @@ the frame uniform cannot silently diverge between shader and host."
                       (remove-duplicates
                        (coerce world-text-bind-groups 'list) :test #'eq))
               (destroy group))
-            (when video-screen-bind-group (destroy video-screen-bind-group))
             (when shadow-bind-group (destroy shadow-bind-group))
             (when scene-bind-group (destroy scene-bind-group))
             (when bloom-scene-bind-group (destroy bloom-scene-bind-group))
@@ -736,19 +728,16 @@ the frame uniform cannot silently diverge between shader and host."
           (draw pass particle-vertex-count))
         ;; Before the text, so a caption drawn over the screen wins.
         (when (luvcraft-session-video-screen session)
-          (let ((screen (luvcraft-session-video-screen session)))
-            (let ((group
-                    (make-video-screen-bind-group
-                     screen (luvcraft-session-device session)
-                     (luvcraft-frame-uniform-buffer frame))))
-              (unwind-protect
-                   (progn
-                     (set-pipeline pass (video-screen-native-pipeline screen))
-                     (set-vertex-buffer pass 0 (video-screen-vertex-buffer screen))
-                     (set-vertex-buffer pass 1 (video-screen-instance-buffer screen))
-                     (set-bind-group pass 0 group)
-                     (draw pass 6 1))
-                (destroy group)))))
+          (let* ((screen (luvcraft-session-video-screen session))
+                 (group
+                   (refresh-video-screen-bind-group
+                    screen (luvcraft-session-device session)
+                    (luvcraft-frame-uniform-buffer frame))))
+            (set-pipeline pass (video-screen-native-pipeline screen))
+            (set-vertex-buffer pass 0 (video-screen-vertex-buffer screen))
+            (set-vertex-buffer pass 1 (video-screen-instance-buffer screen))
+            (set-bind-group pass 0 group)
+            (draw pass 6 1)))
         (when (luvcraft-session-world-text session)
           (let ((text (luvcraft-session-world-text session)))
             (set-pipeline pass (world-text-run-native-pipeline text))
@@ -1070,14 +1059,11 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
          (world-text-run nil)
          (video-screen nil)
          (session nil) (production-system nil) (completed-p nil))
-    ;; FFmpeg has to be dlopened before the canvas exists.  The first call
-    ;; into libav loads four shared libraries, and doing that once the canvas
-    ;; is open never returns: the game hangs before it can publish its window,
-    ;; with no error and nothing left holding a handle to close it.  Loading
-    ;; here costs a few milliseconds and only when a film was actually asked
-    ;; for.
-    (when video-pathname
-      (libav:load-libav))
+    ;; FFmpeg has to be dlopened before the canvas exists.  Film is now a live
+    ;; terminal-wall mode, so waiting until the user opens its browser would
+    ;; attempt the first dlopen under Cocoa's running canvas and hang.  Preload
+    ;; the libraries here; no decoder or file is opened until Film is chosen.
+    (libav:load-libav)
     (open-canvas canvas)
     (unwind-protect
          (progn

@@ -87,6 +87,8 @@
            #:open-spinning-widget-lab
            #:luvcraft-widget-overlay
            #:luvcraft-hotbar-overlay
+           #:terminal-film-browser
+           #:open-terminal-film-browser
            #:open-luvcraft-hotbar
            #:close-luvcraft-hotbar
            #:open-luvcraft-widget-lab

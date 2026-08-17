@@ -63,6 +63,7 @@
   :serial t
   :components ((:file "mcclim/surveyor")
                (:file "mcclim/luvcraft")
+               (:file "mcclim/terminal-film-browser")
                (:file "mcclim/hotbar")))
 
 (defsystem "mcluv/luvcraft-test"

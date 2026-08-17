@@ -112,6 +112,9 @@
                :reader video-screen-hardware-p)
    (sampler :initarg :sampler :reader video-screen-sampler)
    (layout :initarg :layout :reader video-screen-layout)
+   ;; The argument table remains live through submission, then the next
+   ;; world's frame replaces it after that submission has been committed.
+   (bind-group :initform nil :accessor video-screen-bind-group)
    (pipeline :initarg :pipeline :reader video-screen-pipeline)
    (vertex-buffer :initarg :vertex-buffer :reader video-screen-vertex-buffer)
    (instance-buffer :initarg :instance-buffer
@@ -173,16 +176,24 @@ WIDTH by HEIGHT in cells, square to the camera's own basis."
 
 (defun make-video-screen
     (device camera pathname target-format
-     &key (distance 12.0) (lift 4.0) (height 4.5) (loop-p t))
+     &key (distance 12.0) (lift 4.0) (height 4.5) rectangle (loop-p t)
+       (hardware :auto))
   "Open PATHNAME and build a world screen playing it, facing CAMERA.
 
-HEIGHT is the screen's height in cells; its width follows the film's aspect."
+HEIGHT is the screen's height in cells; its width follows the film's aspect.
+When RECTANGLE is supplied, it is called with that aspect and returns the
+lower-left origin, right edge, and up edge of an authored world rectangle.
+HARDWARE is NIL, :AUTO, or :REQUIRED.  :REQUIRED rejects a file unless its
+first decoded picture actually lives in a hardware surface."
+  (check-type hardware (member nil :auto :required))
   (let* ((vulkan-configuration (vulkan-video-configuration device))
          (video (libav:open-video
                  pathname
                  :hardware (cond #+darwin
-                                 ((typep device 'luv::metal-gpu-device) :auto)
-                                 (vulkan-configuration :vulkan)
+                                 ((and hardware
+                                       (typep device 'luv::metal-gpu-device))
+                                  hardware)
+                                 ((and hardware vulkan-configuration) :vulkan)
                                  (t nil))
                  :hardware-configuration vulkan-configuration))
          (resources nil)
@@ -197,6 +208,9 @@ HEIGHT is the screen's height in cells; its width follows the film's aspect."
                                (or (libav:frame-videotoolbox-pixel-buffer
                                     first-frame)
                                    (libav:frame-vulkan-frame first-frame)))))))
+             (when (and (eq hardware :required) (not hardware-p))
+               (error "FFmpeg could not hardware-decode ~A on this device."
+                      pathname))
              (multiple-value-bind (texture-width texture-height)
                  (if hardware-p
                      (values (libav:video-width video) (libav:video-height video))
@@ -206,8 +220,10 @@ HEIGHT is the screen's height in cells; its width follows the film's aspect."
                       (width (* height aspect))
                       (vertex-data (make-world-text-quad-vertices)))
                  (multiple-value-bind (origin right-edge up-edge)
-                     (video-screen-rectangle-before-camera
-                      camera distance lift width height)
+                     (if rectangle
+                         (funcall rectangle aspect)
+                         (video-screen-rectangle-before-camera
+                          camera distance lift width height))
                    (let* ((instance-data
                             (make-video-screen-instances
                              origin right-edge up-edge))
@@ -331,6 +347,10 @@ HEIGHT is the screen's height in cells; its width follows the film's aspect."
 Each step is contained so that a failure early on cannot strand the film's
 decoder or the resources after it; the failures travel out through whatever
 release report is running.  See WITH-RELEASE-REPORT."
+  (when (video-screen-bind-group screen)
+    (releasing :video-screen-bind-group
+      (destroy (video-screen-bind-group screen)))
+    (setf (video-screen-bind-group screen) nil))
   (releasing :video-screen-pipeline
     (release-live-shader-pipeline (video-screen-pipeline screen)))
   (dolist (resource (video-screen-resources screen))
@@ -348,18 +368,25 @@ release report is running.  See WITH-RELEASE-REPORT."
 (defun video-screen-native-pipeline (screen)
   (live-shader-pipeline-native-pipeline (video-screen-pipeline screen)))
 
-(defun make-video-screen-bind-group (screen device uniform-buffer)
-  "Bind the screen's picture, its sampler, and one drawable frame's uniform."
-  (create device
-          (make-bind-group-descriptor
-           :label "world video screen frame bindings"
-           :layout (video-screen-layout screen)
-           :entries `((:binding 0 :resource ,(video-screen-view screen))
-                      (:binding 1 :resource ,(video-screen-sampler screen))
-                      (:binding 2 :resource ,uniform-buffer)
-                      ,@(when (video-screen-hardware-p screen)
-                          `((:binding 3 :resource
-                             ,(video-screen-chroma-view screen))))))))
+(defun refresh-video-screen-bind-group (screen device uniform-buffer)
+  "Bind SCREEN's current picture for this frame and retain it through submit."
+  (when (video-screen-bind-group screen)
+    ;; Encoding has already committed the preceding frame before the next
+    ;; callback begins.  Destroying the old semantic argument table now is
+    ;; safe; destroying the new one before SUBMIT is not.
+    (destroy (video-screen-bind-group screen))
+    (setf (video-screen-bind-group screen) nil))
+  (setf (video-screen-bind-group screen)
+        (create device
+                (make-bind-group-descriptor
+                 :label "world video screen frame bindings"
+                 :layout (video-screen-layout screen)
+                 :entries `((:binding 0 :resource ,(video-screen-view screen))
+                            (:binding 1 :resource ,(video-screen-sampler screen))
+                            (:binding 2 :resource ,uniform-buffer)
+                            ,@(when (video-screen-hardware-p screen)
+                                `((:binding 3 :resource
+                                   ,(video-screen-chroma-view screen)))))))))
 
 (defun release-video-screen-picture (screen)
   (when (video-screen-view screen) (destroy (video-screen-view screen)))

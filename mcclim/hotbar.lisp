@@ -42,12 +42,75 @@
    (make-rgb-color 0.78 0.82 0.80)
    (make-rgb-color 0.40 0.46 0.48)))
 
+(defun hotbar-terminal-display (frame)
+  (let ((focus
+          (luvcraft:luvcraft-session-modal-focus (hotbar-session frame))))
+    (and (typep focus 'luvcraft:terminal-display) focus)))
+
+(defun hotbar-visible-state-for (frame)
+  (alexandria:if-let ((display (hotbar-terminal-display frame)))
+    (list :terminal display (luvcraft:terminal-display-mode display))
+    (list :blocks
+          (luvcraft:luvcraft-session-selected-block (hotbar-session frame)))))
+
+(defun paint-terminal-mode-hotbar (pane display)
+  "Paint the focused terminal's two semantic modes into PANE."
+  (with-bounding-rectangle* (left top right bottom) pane
+    (with-sheet-medium (medium pane)
+      (when (typep medium 'luv-raster-medium)
+        (clear-raster-medium-reliefs medium))
+      (draw-analytic-rounded-rectangle*
+       medium left top right bottom :radius 15
+       :ink (make-linear-gradient
+             0 top 0 bottom
+             (make-rgb-color 0.13 0.15 0.18)
+             (make-rgb-color 0.025 0.03 0.04)))
+      (let* ((content-left (+ left 6))
+             (content-right (- right 6))
+             (content-top (+ top 6))
+             (content-bottom (- bottom 6))
+             (slot-width (/ (- content-right content-left) 2.0)))
+        (loop for mode in '(:shell :film)
+              for number from 1
+              for slot-left = (+ content-left (* (1- number) slot-width))
+              for slot-right = (+ content-left (* number slot-width))
+              for selected-p = (eq mode (luvcraft:terminal-display-mode display))
+              for colors = (ecase mode
+                             (:shell '(0.12 0.44 0.30))
+                             (:film '(0.47 0.24 0.58)))
+              do (draw-rectangle*
+                  pane slot-left content-top slot-right content-bottom
+                  :ink (hotbar-scaled-color colors
+                                            (if selected-p 1.45 0.72)))
+                 (when (= number 2)
+                   (draw-rectangle*
+                    pane slot-left content-top (+ slot-left 1) content-bottom
+                    :ink (make-rgb-color 0.08 0.09 0.10)))
+                 (when selected-p
+                   (draw-rectangle*
+                    pane (+ slot-left 3) (+ content-top 3)
+                    (- slot-right 3) (- content-bottom 3)
+                    :filled nil :line-thickness 3
+                    :ink (hotbar-selection-ink content-top content-bottom)))
+                 (draw-text* pane (format nil "~D" number)
+                             (+ slot-left 24) (/ (+ content-top content-bottom) 2)
+                             :align-x :center :align-y :center :text-size 18
+                             :ink +white+)
+                 (draw-text* pane (string-upcase (symbol-name mode))
+                             (/ (+ slot-left slot-right) 2)
+                             (/ (+ content-top content-bottom) 2)
+                             :align-x :center :align-y :center :text-size 22
+                             :ink +white+))))))
+
 (defmethod handle-repaint ((pane hotbar-pane) region)
   (declare (ignore region))
   (let* ((frame (pane-frame pane))
          (selected
            (luvcraft:luvcraft-session-selected-block (hotbar-session frame)))
          (blocks (luvcraft:placeable-block-kinds)))
+    (alexandria:when-let ((display (hotbar-terminal-display frame)))
+      (paint-terminal-mode-hotbar pane display)
+      (return-from handle-repaint nil))
     (with-bounding-rectangle* (left top right bottom) pane
       (with-sheet-medium (medium pane)
         (when (typep medium 'luv-raster-medium)
@@ -144,7 +207,7 @@
           (repaint-sheet (mirror-sheet mirror) +everywhere+)
           (present-mirror mirror))))
   (setf (hotbar-visible-selection frame)
-        (luvcraft:luvcraft-session-selected-block (hotbar-session frame)))
+        (hotbar-visible-state-for frame))
   frame)
 
 (defclass luvcraft-hotbar-overlay (luvcraft-widget-overlay) ())
@@ -188,7 +251,8 @@
       ;; No depth state: the hotbar is a HUD and must remain visible over the
       ;; scene regardless of the block depth already in the shared pass.
       (ensure-spinning-compositor-resources
-       overlay (mirror-context mirror) source)
+       overlay (mirror-context mirror) source
+       :target-format (luv:gpu-texture-format surface-texture))
       (let* ((state (hotbar-screen-state overlay))
              (frame-state
                (ensure-spinning-compositor-frame-state
@@ -203,9 +267,10 @@
 
 (defmethod luvcraft:refresh-luvcraft-overlay
     ((overlay luvcraft-hotbar-overlay) session)
+  (declare (ignore session))
   (let* ((frame (widget-overlay-frame overlay))
-         (selected (luvcraft:luvcraft-session-selected-block session)))
-    (unless (eq selected (hotbar-visible-selection frame))
+         (state (hotbar-visible-state-for frame)))
+    (unless (equal state (hotbar-visible-selection frame))
       (repaint-hotbar frame)))
   overlay)
 
@@ -221,10 +286,25 @@
     (when (and (typep event 'luv:canvas-pointer-button-press-event)
                (eq :left (luv:canvas-pointer-event-button event)))
       (let* ((frame (widget-overlay-frame overlay))
-             (slot (min 9 (1+ (floor (* (first uv) 9))))))
-        (luvcraft:select-luvcraft-block session slot)
+             (display (hotbar-terminal-display frame)))
+        (if display
+            (let ((slot (min 2 (1+ (floor (* (first uv) 2))))))
+              (luvcraft:change-terminal-display-mode
+               display session (nth (1- slot) '(:shell :film))))
+            (let ((slot (min 9 (1+ (floor (* (first uv) 9))))))
+              (luvcraft:select-luvcraft-block session slot)))
         (repaint-hotbar frame)))
     t))
+
+(defmethod luvcraft:handle-luvcraft-focus-control-event
+    ((display luvcraft:terminal-display) session canvas
+     (event luv:canvas-pointer-event))
+  (declare (ignore display))
+  (some (lambda (overlay)
+          (and (typep overlay 'luvcraft-hotbar-overlay)
+               (luvcraft:handle-luvcraft-overlay-event
+                overlay session canvas event)))
+        (luvcraft:luvcraft-session-overlays session)))
 
 (defmethod luvcraft:luvcraft-focus-score
     ((overlay luvcraft-hotbar-overlay) session)
@@ -263,7 +343,7 @@
               :session session))))
     (setf (frame-pretty-name frame) title
           (hotbar-visible-selection frame)
-          (luvcraft:luvcraft-session-selected-block session))
+          (hotbar-visible-state-for frame))
     (let* ((mirror (sheet-direct-mirror (frame-top-level-sheet frame)))
            (overlay
              (make-instance 'luvcraft-hotbar-overlay

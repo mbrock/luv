@@ -232,6 +232,30 @@
         (unfocus-luvcraft-session session)
         (luv.terminal:close-pty-device device)))))
 
+(deftest terminal-film-mode-fits-the-authored-wall-and-returns-to-shell
+  (let* ((world (make-block-world :chunk-width 16
+                                  :chunk-height 16
+                                  :chunk-depth 16))
+         (session (make-instance 'luvcraft-session))
+         (aspect (/ 16.0 9.0)))
+    (ensure-world-chunk world 0 0 0)
+    (place-terminal-block-rectangle world 2 3 4 :back 3 2)
+    (let* ((surface (find-terminal-surface world 2 3 4 :back))
+           (display (make-instance 'terminal-display :surface surface)))
+      (change-terminal-display-mode display session :film)
+      (ok (eq :film (terminal-display-mode display)))
+      (multiple-value-bind (origin right up)
+          (luvcraft::terminal-film-rectangle surface aspect)
+        (declare (ignore origin))
+        (let ((width (vec3-length right))
+              (height (vec3-length up)))
+          (ok (< (abs (- (/ width height) aspect)) 1e-5))
+          (ok (<= width (luvcraft::terminal-surface-physical-width surface)))
+          (ok (<= height
+                  (luvcraft::terminal-surface-physical-height surface)))))
+      (change-terminal-display-mode display session :shell)
+      (ok (eq :shell (terminal-display-mode display))))))
+
 (deftest terminal-display-pty-output-marks-a-frame-publication-dirty
   (luv.ghostty:with-terminal (terminal :columns 32 :rows 4)
     (let ((display (make-instance 'terminal-display :terminal terminal)))

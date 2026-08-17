@@ -46,3 +46,24 @@
           (luvcraft:luvcraft-overlay-stage
            (allocate-instance
             (find-class 'mcluv:luvcraft-hotbar-overlay))))))
+
+(deftest terminal-film-browser-shows-directories-and-playable-files
+  (let* ((root (asdf:system-source-directory :luv))
+         (directory (merge-pathnames "libav/" root))
+         (entries (mcluv::terminal-film-browser-entries directory)))
+    (ok (mcluv::terminal-film-pathname-p
+         (merge-pathnames "test-pattern.mp4" directory)))
+    (ok (not (mcluv::terminal-film-pathname-p
+              (merge-pathnames "README.org" directory))))
+    (ok (find "test-pattern.mp4" entries :test #'string=
+              :key (lambda (entry)
+                     (and (eq :film (mcluv::terminal-film-entry-kind entry))
+                          (file-namestring
+                           (mcluv::terminal-film-entry-pathname entry))))))))
+
+(deftest terminal-film-browser-shortens-long-directory-headings
+  (let ((label
+          (mcluv::terminal-film-browser-path-label
+           #P"/a/directory/name/that/is/long/enough/to/collide/with/the/browser/title/")))
+    (ok (<= (length label) mcluv::+terminal-film-browser-path-limit+))
+    (ok (string= "..." label :end2 3))))

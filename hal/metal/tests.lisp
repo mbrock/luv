@@ -52,6 +52,40 @@
       (when band-texture (destroy band-texture))
       (destroy device))))
 
+(deftest adopted-metal-textures-enter-explicit-residency
+  (let* ((device
+           (request-gpu-device (make-instance 'metal-gpu-provider)))
+         (native nil)
+         (texture nil))
+    (unwind-protect
+         (progn
+           (setf native
+                 (metal:new-metal-texture
+                  (luv::metal-native-object device) 8 8
+                  metal::+pixel-format-r8-unorm+
+                  metal:+texture-usage-shader-read+
+                  :storage-mode metal:+storage-mode-private+
+                  :label "adopted residency probe"))
+           (let ((owner
+                   (objc:objective-c-pointer
+                    (objc:retain-objective-c-object native))))
+             (setf texture
+                   (adopt-native-texture
+                    device native owner
+                    (make-texture-descriptor
+                     :size '(8 8) :dimensions :2d :format :r8-unorm
+                     :usage '(:texture-binding)))))
+           (ok (luv::metal-texture-resident-p texture))
+           (ok (not (luv::metal-texture-owned-p texture)))
+           (destroy texture)
+           (setf texture nil)
+           ;; The external-owner retain was consumed, but this original
+           ;; native retain remains independently owned by the test.
+           (ok (not (objc:objective-c-object-released-p native))))
+      (when texture (destroy texture))
+      (when native (objc:release-objective-c-object native))
+      (destroy device))))
+
 (deftest metal-coalesces-multiple-sampled-texture-preparations
   (let* ((device
            (request-gpu-device (make-instance 'metal-gpu-provider)))

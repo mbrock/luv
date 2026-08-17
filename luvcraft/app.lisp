@@ -242,6 +242,19 @@
   (:documentation
    "Handle EVENT while FOCUS owns SESSION's modal player interaction."))
 
+(defgeneric handle-luvcraft-focus-control-event (focus session canvas event)
+  (:documentation
+   "Offer EVENT to controls which belong to focused FOCUS, returning true when consumed.
+
+This is narrower than the ordinary overlay event path: a focused world object
+may expose a HUD control without allowing an unconsumed click to fall through
+to block editing or to unrelated overlays."))
+
+(defmethod handle-luvcraft-focus-control-event
+    (focus session canvas event)
+  (declare (ignore focus session canvas event))
+  nil)
+
 (defgeneric luvcraft-focus-score (focus session)
   (:documentation
    "Return a non-negative targeting score when FOCUS can be entered by TAB."))

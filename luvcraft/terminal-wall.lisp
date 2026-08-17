@@ -140,6 +140,12 @@
 (defclass terminal-display ()
   ((session :initarg :session :initform nil :reader terminal-display-session)
    (surface :initarg :surface :reader terminal-display-surface)
+   (mode :initform :shell :accessor terminal-display-mode)
+   ;; Presentation extensions such as MCLUV install their browser here.  The
+   ;; terminal remains the focus owner and delegates drawing and events to this
+   ;; child only while its mode calls for it.
+   (mode-overlay :initform nil :accessor terminal-display-mode-overlay)
+   (film-screen :initform nil :accessor terminal-display-film-screen)
    (terminal :initarg :terminal :initform nil :reader terminal-display-terminal)
    (device :initarg :device :initform nil :accessor terminal-display-device)
    (presentation :initarg :presentation :initform nil
@@ -172,6 +178,27 @@
    (refresh-count :initform 0 :accessor terminal-display-refresh-count)
    (frame-bind-groups :initform (make-hash-table :test #'eq)
                       :reader terminal-display-frame-bind-groups)))
+
+(defgeneric change-terminal-display-mode (display session mode)
+  (:documentation
+   "Select DISPLAY's focused wall MODE.
+
+The built-in modes are the EQL-specialized symbols :SHELL and :FILM.  A
+presentation extension may add an :AFTER method which supplies the film
+browser, while the display continues to own focus and movie lifetime."))
+
+(defmethod change-terminal-display-mode
+    ((display terminal-display) (session luvcraft-session) (mode (eql :shell)))
+  (stop-terminal-display-film display session)
+  (setf (terminal-display-mode display) mode)
+  display)
+
+(defmethod change-terminal-display-mode
+    ((display terminal-display) (session luvcraft-session) (mode (eql :film)))
+  ;; Selecting Film again while a movie is running returns to its browser.
+  (stop-terminal-display-film display session)
+  (setf (terminal-display-mode display) mode)
+  display)
 
 (defun split-terminal-lines (text)
   (loop with start = 0
@@ -729,6 +756,58 @@ projection remain one last-known-good cohort."
        (terminal-surface-axis-extent
         surface (terminal-face-frame-up frame)))))
 
+(defun terminal-film-rectangle (surface film-aspect)
+  "Fit FILM-ASPECT inside SURFACE and return its lower-left and edge vectors."
+  (let* ((frame (terminal-face-frame (terminal-surface-face surface)))
+         (right (voxel-direction-vec3 (terminal-face-frame-right frame)))
+         (up (voxel-direction-vec3 (terminal-face-frame-up frame)))
+         (surface-width (terminal-surface-physical-width surface))
+         (surface-height (terminal-surface-physical-height surface))
+         (surface-aspect (/ surface-width surface-height))
+         (width (if (> film-aspect surface-aspect)
+                    surface-width
+                    (* surface-height film-aspect)))
+         (height (if (> film-aspect surface-aspect)
+                     (/ surface-width film-aspect)
+                     surface-height))
+         (left-margin (/ (- surface-width width) 2.0))
+         (bottom-margin (/ (- surface-height height) 2.0))
+         (origin
+           (terminal-offset-point
+            (terminal-surface-lower-left-point surface 0.009)
+            right left-margin up bottom-margin)))
+    (values origin (vec3-scale right width) (vec3-scale up height))))
+
+(defun stop-terminal-display-film (display session)
+  "Stop and release DISPLAY's owned movie, if any."
+  (alexandria:when-let ((screen (terminal-display-film-screen display)))
+    (when (eq screen (luvcraft-session-video-screen session))
+      (setf (luvcraft-session-video-screen session) nil))
+    (setf (terminal-display-film-screen display) nil)
+    (release-video-screen screen))
+  display)
+
+(defun play-terminal-display-film (display pathname)
+  "Play PATHNAME on DISPLAY's authored wall using the session's video backend."
+  (let* ((session (terminal-display-session display))
+         (surface (terminal-display-surface display)))
+    (unless session
+      (error "Terminal display ~S is not attached to a session." display))
+    (stop-terminal-display-film display session)
+    (let ((screen
+            (make-video-screen
+             (luvcraft-session-device session)
+             (luvcraft-session-camera session)
+             pathname +luvcraft-scene-color-format+
+             :hardware :required
+             :rectangle
+             (lambda (aspect)
+               (terminal-film-rectangle surface aspect)))))
+      (setf (terminal-display-film-screen display) screen
+            (luvcraft-session-video-screen session) screen
+            (terminal-display-mode display) :film)
+      screen)))
+
 (defun terminal-surface-lower-left-point (surface &optional (offset 0.006))
   "Return the metric world point OFFSET cell-depths outside the lower left."
   (let* ((origin (terminal-surface-origin surface))
@@ -1248,6 +1327,10 @@ two materials can share one placement stage without sharing a name."
 
 (defmethod refresh-luvcraft-overlay
     ((display terminal-display) (session luvcraft-session))
+  (when (and (eq :film (terminal-display-mode display))
+             (null (terminal-display-film-screen display))
+             (terminal-display-mode-overlay display))
+    (refresh-luvcraft-overlay (terminal-display-mode-overlay display) session))
   ;; The wall's shaders are as live as the block world's: a redefined
   ;; :terminal-screen or :terminal-cell method rebuilds here, at the frame
   ;; boundary, keeping the last good pipeline on failure.
@@ -1330,36 +1413,49 @@ two materials can share one placement stage without sharing a name."
   (when (terminal-surface-current-p
          (terminal-display-surface display) session)
     (let ((frame (luvcraft-frame-state session surface-texture))
-          (glyph-run (terminal-display-glyph-run display))
-          (cell-run (terminal-display-cell-run display))
-          (screen-run (terminal-display-screen-run display))
           (faceplate-run (terminal-display-faceplate-run display)))
-      (when (and screen-run (plusp (terminal-cell-run-count screen-run)))
-        (set-pipeline pass (live-shader-pipeline-native-pipeline
-                            (terminal-cell-run-pipeline screen-run)))
-        (set-vertex-buffer pass 0 (terminal-cell-run-vertex-buffer screen-run))
-        (set-vertex-buffer pass 1 (terminal-cell-run-instance-buffer screen-run))
-        (set-bind-group pass 0
-                        (terminal-display-frame-bind-group display frame))
-        (draw pass 6 (terminal-cell-run-count screen-run)))
-      (when (and cell-run (plusp (terminal-cell-run-count cell-run)))
-        (set-pipeline pass (live-shader-pipeline-native-pipeline
-                            (terminal-cell-run-pipeline cell-run)))
-        (set-vertex-buffer pass 0 (terminal-cell-run-vertex-buffer cell-run))
-        (set-vertex-buffer pass 1 (terminal-cell-run-instance-buffer cell-run))
-        (set-bind-group pass 0
-                        (terminal-display-frame-bind-group display frame))
-        (draw pass 6 (terminal-cell-run-count cell-run)))
-      (when (plusp (length (world-text-run-glyphs glyph-run)))
-        (set-pipeline pass (world-text-run-native-pipeline glyph-run))
-        (set-vertex-buffer pass 0 (world-text-run-vertex-buffer glyph-run))
-        (set-vertex-buffer pass 1 (world-text-run-instance-buffer glyph-run))
-        (set-bind-group pass 0
-                        (terminal-display-frame-bind-group display frame))
-        (draw pass 6 (length (world-text-run-glyphs glyph-run))))
-      ;; The glass goes on last, over a finished picture, because that is
-      ;; where it is: raster, corners, and reflections all belong in front of
-      ;; the glyphs rather than behind them.
+      (case (terminal-display-mode display)
+        (:shell
+         (let ((glyph-run (terminal-display-glyph-run display))
+               (cell-run (terminal-display-cell-run display))
+               (screen-run (terminal-display-screen-run display)))
+           (when (and screen-run (plusp (terminal-cell-run-count screen-run)))
+             (set-pipeline pass (live-shader-pipeline-native-pipeline
+                                 (terminal-cell-run-pipeline screen-run)))
+             (set-vertex-buffer pass 0
+                                (terminal-cell-run-vertex-buffer screen-run))
+             (set-vertex-buffer pass 1
+                                (terminal-cell-run-instance-buffer screen-run))
+             (set-bind-group pass 0
+                             (terminal-display-frame-bind-group display frame))
+             (draw pass 6 (terminal-cell-run-count screen-run)))
+           (when (and cell-run (plusp (terminal-cell-run-count cell-run)))
+             (set-pipeline pass (live-shader-pipeline-native-pipeline
+                                 (terminal-cell-run-pipeline cell-run)))
+             (set-vertex-buffer pass 0
+                                (terminal-cell-run-vertex-buffer cell-run))
+             (set-vertex-buffer pass 1
+                                (terminal-cell-run-instance-buffer cell-run))
+             (set-bind-group pass 0
+                             (terminal-display-frame-bind-group display frame))
+             (draw pass 6 (terminal-cell-run-count cell-run)))
+           (when (and glyph-run
+                      (plusp (length (world-text-run-glyphs glyph-run))))
+             (set-pipeline pass (world-text-run-native-pipeline glyph-run))
+             (set-vertex-buffer pass 0 (world-text-run-vertex-buffer glyph-run))
+             (set-vertex-buffer pass 1
+                                (world-text-run-instance-buffer glyph-run))
+             (set-bind-group pass 0
+                             (terminal-display-frame-bind-group display frame))
+             (draw pass 6 (length (world-text-run-glyphs glyph-run))))))
+        (:film
+         (when (and (null (terminal-display-film-screen display))
+                    (terminal-display-mode-overlay display))
+           (encode-luvcraft-overlay
+            (terminal-display-mode-overlay display)
+            session pass surface-texture))))
+      ;; The glass goes on last over shell, browser, or movie: raster,
+      ;; corners, and reflections belong in front of the finished picture.
       (when (and faceplate-run (plusp (terminal-cell-run-count faceplate-run)))
         (set-pipeline pass (live-shader-pipeline-native-pipeline
                             (terminal-cell-run-pipeline faceplate-run)))
@@ -1373,6 +1469,11 @@ two materials can share one placement stage without sharing a name."
   display)
 
 (defmethod release-luvcraft-overlay ((display terminal-display))
+  (alexandria:when-let ((session (terminal-display-session display)))
+    (stop-terminal-display-film display session))
+  (alexandria:when-let ((overlay (terminal-display-mode-overlay display)))
+    (setf (terminal-display-mode-overlay display) nil)
+    (release-luvcraft-overlay overlay))
   (when (terminal-display-device display)
     (termdev:close-pty-device (terminal-display-device display))
     (setf (terminal-display-device display) nil))
@@ -1394,16 +1495,27 @@ two materials can share one placement stage without sharing a name."
 
 (defmethod handle-luvcraft-focus-event
     ((display terminal-display) session canvas (event canvas-key-event))
-  (declare (ignore session canvas))
-  (let ((device (terminal-display-device display)))
-    (when device
-      (termdev:send-pty-device-canvas-key-event device event)))
-  t)
+  (case (terminal-display-mode display)
+    (:shell
+     (let ((device (terminal-display-device display)))
+       (when device
+         (termdev:send-pty-device-canvas-key-event device event)))
+     t)
+    (:film
+     (if (and (null (terminal-display-film-screen display))
+              (terminal-display-mode-overlay display))
+         (handle-luvcraft-focus-event
+          (terminal-display-mode-overlay display) session canvas event)
+         t))))
 
 (defmethod handle-luvcraft-focus-event
     ((display terminal-display) session canvas (event canvas-event))
-  (declare (ignore display session canvas event))
-  nil)
+  (or (and (eq :film (terminal-display-mode display))
+           (null (terminal-display-film-screen display))
+           (terminal-display-mode-overlay display)
+           (handle-luvcraft-overlay-event
+            (terminal-display-mode-overlay display) session canvas event))
+      (handle-luvcraft-focus-control-event display session canvas event)))
 
 (defmethod luvcraft-focus-score ((display terminal-display) session)
   (multiple-value-bind (hit status) (luvcraft-session-target session)

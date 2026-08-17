@@ -191,6 +191,7 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:focus-luvcraft-session
            #:handle-luvcraft-overlay-event
            #:handle-luvcraft-focus-event
+           #:handle-luvcraft-focus-control-event
            #:emit-block-face
            #:exposed-face-mesher
            #:find-luvcraft-gazetteer-view
@@ -369,8 +370,13 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:step-block-world-player
            #:stop-luvcraft
            #:terminal-display
+           #:change-terminal-display-mode
            #:terminal-display-device
+           #:terminal-display-film-screen
+           #:terminal-display-mode
+           #:terminal-display-mode-overlay
            #:terminal-display-surface
+           #:play-terminal-display-film
            #:terminal-surface
            #:terminal-surface-face
            #:terminal-surface-height

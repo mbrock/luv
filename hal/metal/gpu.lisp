@@ -55,6 +55,8 @@
 (defclass metal-gpu-texture (gpu-texture metal-gpu-object)
   ((device :initarg :device :reader metal-texture-device)
    (owned-p :initarg :owned-p :initform t :reader metal-texture-owned-p)
+   (resident-p :initarg :resident-p :initform nil
+               :reader metal-texture-resident-p)
    (external-owner :initarg :external-owner :initform nil
                    :reader metal-texture-external-owner)))
 
@@ -705,6 +707,7 @@ aligned to the element size."
                       'metal-gpu-texture
                       :label (gpu-descriptor-label descriptor)
                       :device device :native-object native :owned-p t
+                      :resident-p t
                       :size size :usage usage :dimensions :2d
                       :format (texture-descriptor-format descriptor))))
                (setf completed-p t)
@@ -722,13 +725,36 @@ aligned to the element size."
   (ensure-live-metal-object device :adopt-native-texture)
   (unless (and (typep native 'luv.objective-c:objective-c-object) owner)
     (reject-metal-gpu-request descriptor :invalid-native-texture native))
-  (make-instance 'metal-gpu-texture
-                 :label (gpu-descriptor-label descriptor)
-                 :device device :native-object native :owned-p nil
-                 :external-owner owner
-                 :size (normalize-metal-texture-size descriptor)
-                 :usage (normalize-metal-texture-usage descriptor)
-                 :dimensions :2d :format (texture-descriptor-format descriptor)))
+  (let ((size (normalize-metal-texture-size descriptor))
+        (usage (normalize-metal-texture-usage descriptor))
+        (resident-p nil)
+        (completed-p nil))
+    (unwind-protect
+         (progn
+           ;; Metal 4 does not make an externally created MTLTexture resident
+           ;; merely because an argument table points at it.  CVMetalTexture
+           ;; planes therefore need the same explicit residency membership as
+           ;; textures allocated by this device.
+           (luv.metal:add-metal-residency-allocation
+            (metal-device-residency-set device) native)
+           (setf resident-p t)
+           (luv.metal:commit-metal-residency-set
+            (metal-device-residency-set device))
+           (let ((texture
+                   (make-instance
+                    'metal-gpu-texture
+                    :label (gpu-descriptor-label descriptor)
+                    :device device :native-object native :owned-p nil
+                    :resident-p t :external-owner owner
+                    :size size :usage usage :dimensions :2d
+                    :format (texture-descriptor-format descriptor))))
+             (setf completed-p t)
+             texture))
+      (when (and resident-p (not completed-p))
+        (luv.metal:remove-metal-residency-allocation
+         (metal-device-residency-set device) native)
+        (luv.metal:commit-metal-residency-set
+         (metal-device-residency-set device))))))
 
 (defmethod create
     ((device metal-gpu-device) (descriptor texture-view-descriptor))
@@ -951,14 +977,15 @@ contiguous block -- starting at the beginning, with no padding between rows."
      bytes-per-row)))
 
 (defmethod destroy-metal-native ((texture metal-gpu-texture))
-  (when (metal-texture-owned-p texture)
+  (when (metal-texture-resident-p texture)
     (let* ((device (metal-texture-device texture))
            (residency-set (metal-device-residency-set device)))
       (luv.metal:remove-metal-residency-allocation
        residency-set (metal-native-object texture))
-      (luv.metal:commit-metal-residency-set residency-set)
-      (luv.objective-c:release-objective-c-object
-       (metal-native-object texture))))
+      (luv.metal:commit-metal-residency-set residency-set)))
+  (when (metal-texture-owned-p texture)
+    (luv.objective-c:release-objective-c-object
+     (metal-native-object texture)))
   (when (metal-texture-external-owner texture)
     (cffi:foreign-funcall "CFRelease" :pointer
                           (metal-texture-external-owner texture) :void))

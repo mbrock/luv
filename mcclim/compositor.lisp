@@ -111,6 +111,9 @@
    (depth-format
     :initform nil
     :accessor spinning-compositor-depth-format)
+   (target-format
+    :initform nil
+    :accessor spinning-compositor-target-format)
    (output
     :initform nil
     :accessor spinning-compositor-output)
@@ -179,6 +182,7 @@
         (spinning-compositor-source compositor) nil
         (spinning-compositor-size compositor) nil
         (spinning-compositor-depth-format compositor) nil
+        (spinning-compositor-target-format compositor) nil
         (spinning-compositor-output compositor) nil
         (spinning-compositor-source-view compositor) nil
         (spinning-compositor-output-view compositor) nil
@@ -198,15 +202,18 @@
   (values))
 
 (defun ensure-spinning-compositor-resources
-    (compositor context source &key depth-format)
+    (compositor context source &key depth-format target-format)
   (let* ((device (luv:context-device context))
          (size (luv:gpu-texture-size source))
-         (format (luv:gpu-texture-format source)))
+         (format (luv:gpu-texture-format source))
+         (target-format (or target-format format)))
     (unless (and (eq device (spinning-compositor-device compositor))
                  (eq source (spinning-compositor-source compositor))
                  (equal size (spinning-compositor-size compositor))
                  (eq depth-format
-                     (spinning-compositor-depth-format compositor)))
+                     (spinning-compositor-depth-format compositor))
+                 (eq target-format
+                     (spinning-compositor-target-format compositor)))
       (clear-spinning-compositor-resources compositor)
       (let ((created nil)
             (completed-p nil))
@@ -271,7 +278,7 @@
                         :layout layout
                         :vertex `(:module ,vertex-module)
                         :fragment `(:module ,fragment-module
-                                    :targets ((:format ,format)))
+                                    :targets ((:format ,target-format)))
                         :depth-stencil
                         (when depth-format
                           `(:format ,depth-format
@@ -285,7 +292,7 @@
                         :layout layout
                         :vertex `(:module ,chassis-vertex-module)
                         :fragment `(:module ,chassis-fragment-module
-                                    :targets ((:format ,format)))
+                                    :targets ((:format ,target-format)))
                         :depth-stencil
                         (when depth-format
                           `(:format ,depth-format
@@ -297,6 +304,8 @@
                        (spinning-compositor-size compositor) size
                        (spinning-compositor-depth-format compositor)
                        depth-format
+                       (spinning-compositor-target-format compositor)
+                       target-format
                        (spinning-compositor-output compositor) output
                        (spinning-compositor-source-view compositor) source-view
                        (spinning-compositor-output-view compositor) output-view

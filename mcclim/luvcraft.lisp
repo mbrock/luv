@@ -296,7 +296,11 @@
          (source (mirror-texture mirror)))
     (when source
       (ensure-spinning-compositor-resources
-       overlay (mirror-context mirror) source :depth-format :depth32-float)
+       overlay (mirror-context mirror) source
+       :depth-format :depth32-float
+       :target-format
+       (luv:gpu-texture-format
+        (luvcraft::luvcraft-session-color-texture session)))
       (let* ((viewport-size
                (luv:canvas-extent (luvcraft::luvcraft-session-context session)))
              (state
