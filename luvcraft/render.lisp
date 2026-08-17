@@ -29,7 +29,9 @@
                                :initform nil
                                :reader luvcraft-frame-bloom-secondary-bind-group)
    (world-text-bind-groups :initarg :world-text-bind-groups :initform #()
-                           :reader luvcraft-frame-world-text-bind-groups)))
+                           :reader luvcraft-frame-world-text-bind-groups)
+   (video-screen-bind-group :initarg :video-screen-bind-group :initform nil
+                            :reader luvcraft-frame-video-screen-bind-group)))
 
 (defconstant +block-world-crosshair-vertex-count+ 24)
 (defconstant +luvcraft-shadow-map-size+ 2048)
@@ -435,6 +437,7 @@ the frame uniform cannot silently diverge between shader and host."
             (bloom-primary-bind-group nil)
             (bloom-secondary-bind-group nil)
             (world-text-bind-groups #())
+            (video-screen-bind-group nil)
             (completed-p nil))
         (unwind-protect
              (progn
@@ -523,7 +526,12 @@ the frame uniform cannot silently diverge between shader and host."
                          (make-world-text-frame-bind-groups
                           (luvcraft-session-world-text session)
                           (luvcraft-session-device session) buffer)
-                         #()))
+                         #())
+                     video-screen-bind-group
+                     (when (luvcraft-session-video-screen session)
+                       (make-video-screen-bind-group
+                        (luvcraft-session-video-screen session)
+                        (luvcraft-session-device session) buffer)))
                (remember-luvcraft-resource session buffer)
                (remember-luvcraft-resource session scene-bind-group)
                (remember-luvcraft-resource session shadow-bind-group)
@@ -536,6 +544,8 @@ the frame uniform cannot silently diverge between shader and host."
                          (remove-duplicates
                           (coerce world-text-bind-groups 'list) :test #'eq))
                  (remember-luvcraft-resource session group))
+               (when video-screen-bind-group
+                 (remember-luvcraft-resource session video-screen-bind-group))
                (let ((state
                        (make-instance
                         'luvcraft-frame-state
@@ -547,7 +557,8 @@ the frame uniform cannot silently diverge between shader and host."
                         :bloom-scene-bind-group bloom-scene-bind-group
                         :bloom-primary-bind-group bloom-primary-bind-group
                         :bloom-secondary-bind-group bloom-secondary-bind-group
-                        :world-text-bind-groups world-text-bind-groups)))
+                        :world-text-bind-groups world-text-bind-groups
+                        :video-screen-bind-group video-screen-bind-group)))
                  (setf (gethash key
                                 (luvcraft-session-frame-states session))
                        state
@@ -558,6 +569,7 @@ the frame uniform cannot silently diverge between shader and host."
                       (remove-duplicates
                        (coerce world-text-bind-groups 'list) :test #'eq))
               (destroy group))
+            (when video-screen-bind-group (destroy video-screen-bind-group))
             (when shadow-bind-group (destroy shadow-bind-group))
             (when scene-bind-group (destroy scene-bind-group))
             (when bloom-scene-bind-group (destroy bloom-scene-bind-group))
@@ -576,6 +588,12 @@ the frame uniform cannot silently diverge between shader and host."
       (sample luvcraft-frame-sample-shader-refresh-seconds
               :luvcraft/shader-refresh)
     (refresh-luvcraft-shaders session))
+  ;; The film's clock runs on the world's frames, so it advances here, before
+  ;; anything is encoded: the upload is an ordinary queue write, not part of
+  ;; this frame's command stream.
+  (when (luvcraft-session-video-screen session)
+    (advance-video-screen (luvcraft-session-video-screen session)
+                          (luvcraft-session-device session)))
   (dolist (overlay (luvcraft-session-overlays session))
     (refresh-luvcraft-overlay overlay session))
   (let* ((products
@@ -717,6 +735,16 @@ the frame uniform cannot silently diverge between shader and host."
           (set-vertex-buffer
            pass 0 (luvcraft-session-particle-vertex-buffer session))
           (draw pass particle-vertex-count))
+        ;; Before the text, so a caption drawn over the screen wins.
+        (when (and (luvcraft-session-video-screen session)
+                   (luvcraft-frame-video-screen-bind-group frame))
+          (let ((screen (luvcraft-session-video-screen session)))
+            (set-pipeline pass (video-screen-native-pipeline screen))
+            (set-vertex-buffer pass 0 (video-screen-vertex-buffer screen))
+            (set-vertex-buffer pass 1 (video-screen-instance-buffer screen))
+            (set-bind-group
+             pass 0 (luvcraft-frame-video-screen-bind-group frame))
+            (draw pass 6 1)))
         (when (luvcraft-session-world-text session)
           (let ((text (luvcraft-session-world-text session)))
             (set-pipeline pass (world-text-run-native-pipeline text))
@@ -1000,6 +1028,10 @@ the frame uniform cannot silently diverge between shader and host."
                                 (world-text-distance 8.0)
                                 (world-text-lift 3.0)
                                 (world-text-units-per-em 0.55)
+                                (video-pathname nil)
+                                (video-distance 13.0)
+                                (video-lift 4.5)
+                                (video-height 5.0)
                                 (residency-radius 4)
                                 (publication-limit 2)
                                 (load-schedule-limit 4)
@@ -1028,7 +1060,16 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
          (device nil) (context nil) (resources nil) (pipelines nil)
          (world-text-glyph-cache nil)
          (world-text-run nil)
+         (video-screen nil)
          (session nil) (production-system nil) (completed-p nil))
+    ;; FFmpeg has to be dlopened before the canvas exists.  The first call
+    ;; into libav loads four shared libraries, and doing that once the canvas
+    ;; is open never returns: the game hangs before it can publish its window,
+    ;; with no error and nothing left holding a handle to close it.  Loading
+    ;; here costs a few milliseconds and only when a film was actually asked
+    ;; for.
+    (when video-pathname
+      (libav:load-libav))
     (open-canvas canvas)
     (unwind-protect
          (progn
@@ -1410,9 +1451,19 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                              :lift world-text-lift
                              :world-units-per-em
                              world-text-units-per-em))))
+                  (screen
+                    (when video-pathname
+                      (setf video-screen
+                            (make-video-screen
+                             device camera video-pathname
+                             +luvcraft-scene-color-format+
+                             :distance video-distance
+                             :lift video-lift
+                             :height video-height))))
                   (new-session
                     (make-instance
                      'luvcraft-session
+                     :video-screen screen
                      :canvas canvas :device device :context context
                      :world world :mesher mesher
                      :checkpoint-writer checkpoint-writer
@@ -1500,62 +1551,89 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
       (unless completed-p
         (when production-system
           (ignore-errors (stop-production-system production-system)))
-        (when session
-          (ignore-errors (destroy-luvcraft-chunk-products session)))
-        (dolist (pipeline pipelines)
-          (ignore-errors (release-live-shader-pipeline pipeline)))
-        (dolist (resource resources)
-          (ignore-errors (destroy resource)))
-        (when world-text-run
-          (ignore-errors (release-world-text-run world-text-run)))
-        (when world-text-glyph-cache
-          (ignore-errors
-            (luv.slug:release-slug-glyph-cache world-text-glyph-cache)))
-        (close-canvas canvas)
-        (when device (destroy device))))))
+        ;; Startup failed and its condition is already on its way out, so
+        ;; trouble releasing the half-built session is warned about rather
+        ;; than signalled -- signalling here would replace the error that
+        ;; actually explains why the game did not open.
+        (with-release-warnings
+          (when session
+            (releasing :chunk-products
+              (destroy-luvcraft-chunk-products session)))
+          (dolist (pipeline pipelines)
+            (releasing :pipeline (release-live-shader-pipeline pipeline)))
+          (dolist (resource resources)
+            (releasing :resource (destroy resource)))
+          (when video-screen
+            (releasing :video-screen (release-video-screen video-screen)))
+          (when world-text-run
+            (releasing :world-text (release-world-text-run world-text-run)))
+          (when world-text-glyph-cache
+            (releasing :glyph-cache
+              (luv.slug:release-slug-glyph-cache world-text-glyph-cache)))
+          (releasing :canvas (close-canvas canvas))
+          (when device (releasing :device (destroy device))))))))
 
 (defun stop-luvcraft (session)
-  "Stop SESSION and explicitly release all of its GPU and canvas resources."
+  "Stop SESSION and explicitly release all of its GPU and canvas resources.
+
+Every step runs whatever the ones before it did, so the window closes even
+when something fails; the failures are then signalled together as
+LUVCRAFT-RELEASE-ERROR.  See WITH-RELEASE-REPORT."
   ;; A native close request may already have set this, but the resources still
   ;; belong to the session until this explicit teardown.
   (setf (luvcraft-session-running-p session) nil)
-  (unfocus-luvcraft-session session)
-  (let ((canvas (luvcraft-session-canvas session)))
-    (when (eq :open (canvas-state canvas))
-      (setf (canvas-clock canvas) (make-demand-clock))
-      (when (luvcraft-session-pointer-captured-p session)
-        (ignore-errors (set-canvas-relative-pointer-mode canvas nil))
-        (setf (luvcraft-session-pointer-captured-p session) nil))
-      ;; A synchronous no-op after changing the clock is a native-thread
-      ;; barrier: an already-running frame has finished before teardown starts.
-      (request-canvas-frame canvas (lambda (timestamp)
-                                     (declare (ignore timestamp)))))
-    (setf (canvas-event-handler canvas) nil)
-    ;; Stop CPU publication before releasing any render-owned destination.
-    (stop-production-system (luvcraft-session-production-system session))
-    (destroy-luvcraft-chunk-products session)
-    (dolist (overlay (luvcraft-session-overlays session))
-      (release-luvcraft-overlay overlay))
-    (setf (luvcraft-session-overlays session) nil)
-    (release-live-shader-pipeline (luvcraft-session-block-pipeline session))
-    (release-live-shader-pipeline (luvcraft-session-shadow-pipeline session))
-    (release-live-shader-pipeline (luvcraft-session-sky-pipeline session))
-    (release-live-shader-pipeline (luvcraft-session-crosshair-pipeline session))
-    (release-live-shader-pipeline (luvcraft-session-post-pipeline session))
-    (dolist (pipeline (list (luvcraft-session-bloom-bright-pipeline session)
-                            (luvcraft-session-bloom-horizontal-pipeline session)
-                            (luvcraft-session-bloom-vertical-pipeline session)
-                            (luvcraft-session-sun-shaft-pipeline session)))
-      (when pipeline
-        (release-live-shader-pipeline pipeline)))
-    (dolist (resource (luvcraft-session-resources session))
-      (destroy resource))
-    (setf (luvcraft-session-resources session) nil)
-    (when (luvcraft-session-world-text session)
-      (release-world-text-run (luvcraft-session-world-text session)))
-    (when (luvcraft-session-world-text-glyph-cache session)
-      (luv.slug:release-slug-glyph-cache
-       (luvcraft-session-world-text-glyph-cache session)))
-    (close-canvas canvas))
-  (destroy (luvcraft-session-device session))
+  (with-release-report
+    (releasing :focus (unfocus-luvcraft-session session))
+    (let ((canvas (luvcraft-session-canvas session)))
+      (releasing :canvas-quiescence
+        (when (eq :open (canvas-state canvas))
+          (setf (canvas-clock canvas) (make-demand-clock))
+          (when (luvcraft-session-pointer-captured-p session)
+            (releasing :pointer-capture
+              (set-canvas-relative-pointer-mode canvas nil))
+            (setf (luvcraft-session-pointer-captured-p session) nil))
+          ;; A synchronous no-op after changing the clock is a native-thread
+          ;; barrier: an already-running frame has finished before teardown
+          ;; starts.
+          (request-canvas-frame canvas (lambda (timestamp)
+                                         (declare (ignore timestamp))))))
+      (setf (canvas-event-handler canvas) nil)
+      ;; Stop CPU publication before releasing any render-owned destination.
+      (releasing :production-system
+        (stop-production-system (luvcraft-session-production-system session)))
+      (releasing :chunk-products (destroy-luvcraft-chunk-products session))
+      (dolist (overlay (luvcraft-session-overlays session))
+        (releasing :overlay (release-luvcraft-overlay overlay)))
+      (setf (luvcraft-session-overlays session) nil)
+      (dolist (pipeline
+                (list (luvcraft-session-block-pipeline session)
+                      (luvcraft-session-shadow-pipeline session)
+                      (luvcraft-session-sky-pipeline session)
+                      (luvcraft-session-crosshair-pipeline session)
+                      (luvcraft-session-post-pipeline session)
+                      (luvcraft-session-bloom-bright-pipeline session)
+                      (luvcraft-session-bloom-horizontal-pipeline session)
+                      (luvcraft-session-bloom-vertical-pipeline session)
+                      (luvcraft-session-sun-shaft-pipeline session)))
+        (when pipeline
+          (releasing :pipeline (release-live-shader-pipeline pipeline))))
+      (dolist (resource (luvcraft-session-resources session))
+        (releasing :resource (destroy resource)))
+      (setf (luvcraft-session-resources session) nil)
+      (when (luvcraft-session-video-screen session)
+        (releasing :video-screen
+          (release-video-screen (luvcraft-session-video-screen session)))
+        (setf (luvcraft-session-video-screen session) nil))
+      (when (luvcraft-session-world-text session)
+        (releasing :world-text
+          (release-world-text-run (luvcraft-session-world-text session))))
+      (when (luvcraft-session-world-text-glyph-cache session)
+        (releasing :glyph-cache
+          (luv.slug:release-slug-glyph-cache
+           (luvcraft-session-world-text-glyph-cache session))))
+      ;; The window and the device are last and are never skipped: they are
+      ;; the two handles whose loss would leave something on the desktop that
+      ;; nothing can close.
+      (releasing :canvas (close-canvas canvas)))
+    (releasing :device (destroy (luvcraft-session-device session))))
   (values))

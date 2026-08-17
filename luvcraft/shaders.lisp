@@ -498,6 +498,84 @@
          (rgb (mix bezel-color screen-color screen-mask)))
     (set-output color-output (vec4 rgb 1.0))))
 
+;;; A video screen is the plainest world rectangle luvcraft draws: the same
+;;; instance record as a terminal cell, but the fragment stage reads a decoded
+;;; picture instead of computing a material.  The picture is the only thing on
+;;; it, so there is no shading model here at all -- the texture is sRGB and the
+;;; hardware decode hands the scene target the linear radiance it wants.
+;;;
+;;; The one non-obvious line is the flipped V.  A quad corner runs from zero at
+;;; the bottom to one at the top, and a decoded frame's first row is its top,
+;;; so a screen that did not flip would play the film upside down.
+
+(define-shader-method shader-specification-for
+    video-screen-vertex-specification
+    ((role (eql :video-screen)) (stage (eql :vertex)))
+    (:stage :vertex
+     :inputs ((quad-corner :vec3 :location 0)
+              (world-origin :vec3 :location 1)
+              (world-right-edge :vec3 :location 2)
+              (world-up-edge :vec3 :location 3))
+     :outputs ((clip-position :vec4 :built-in :position)
+               (render-uv :vec2 :location 0))
+     :resources
+     ((frame-state :uniform-block :set 0 :binding 2
+                   :members #.*frame-uniform-members*)))
+  (let* ((corner-x (swizzle quad-corner :x))
+         (corner-y (swizzle quad-corner :y))
+         (world-position
+           (assume-quantity
+            (+ world-origin
+               (* world-right-edge corner-x)
+               (* world-up-edge corner-y))
+            :quantity :world-position :unit :cell))
+         (camera (swizzle camera-vector :xyz))
+         (right (swizzle right-vector :xyz))
+         (up (swizzle up-vector :xyz))
+         (forward (swizzle forward-vector :xyz))
+         (relative (- world-position camera))
+         (view-x (dot relative right))
+         (view-y (dot relative up))
+         (view-z (interpret (dot relative forward)
+                            :quantity :view-distance :unit :cell))
+         (x-scale (swizzle projection-vector :x))
+         (y-scale (swizzle projection-vector :y))
+         (z-scale (swizzle projection-vector :z))
+         (z-offset (swizzle projection-vector :w))
+         (clip-x (* view-x x-scale))
+         (clip-y (- (* view-y y-scale)))
+         (clip-z (+ (interpret (* view-z z-scale)
+                               :quantity :view-distance :unit :cell)
+                    z-offset))
+         (clip (vec4 (representation clip-x)
+                     (representation clip-y)
+                     (representation clip-z)
+                     (representation view-z))))
+    (set-output clip-position clip)
+    (set-output render-uv (vec2 corner-x (- 1.0 corner-y)))))
+
+(define-shader-method shader-specification-for
+    video-screen-fragment-specification
+    ((role (eql :video-screen)) (stage (eql :fragment)))
+    (:stage :fragment
+     :inputs ((uv-input :vec2 :location 0
+                        :quantity :texture-uv :unit :one))
+     :outputs ((color-output :vec4 :location 0))
+     :resources
+     ((video-picture :texture-2d :set 0 :binding 0
+                     :sample-transfer :srgb-to-linear
+                     :sample-components
+                     ((:rgb :quantity :linear-rgb :unit :one)))
+      (video-sampler :sampler :set 0 :binding 1)
+      (frame-state :uniform-block :set 0 :binding 2
+                   :members #.*frame-uniform-members*)))
+  ;; The scene pass writes raw radiance: exposure and the filmic curve belong
+  ;; to the post chain, so a screen that emits its own picture writes the
+  ;; decoded picture and stops there.
+  (let* ((picture (sample video-picture video-sampler uv-input))
+         (radiance (swizzle picture :rgb)))
+    (set-output color-output (vec4 (representation radiance) 1.0))))
+
 (defmethod shader-specification-for
     ((role (eql :slug-world-text)) (stage (eql :fragment)))
   (declare (ignore role stage))

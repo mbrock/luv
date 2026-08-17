@@ -887,19 +887,51 @@ aligned to the element size."
                  (>= bytes-per-row (* bytes-per-texel (first size)))
                  (zerop (mod bytes-per-row bytes-per-texel)))
       (reject-metal-gpu-request command :unsupported-texture-upload))
-    (cffi:with-foreign-object
-        (storage :uint8 (+ offset (* bytes-per-row (second size))))
-      (dotimes (row (second size))
-        (let ((destination
-                (cffi:inc-pointer storage (+ offset (* row bytes-per-row)))))
-          (dotimes (column (first size))
-            (setf (cffi:mem-aref destination foreign-type column)
-                  (row-major-aref
-                   data (+ (* row (array-dimension data 1)) column))))))
-      (luv.metal:replace-metal-texture-region
-       (metal-native-object texture) (first size) (second size)
-       (cffi:inc-pointer storage offset) bytes-per-row)))
+    ;; A tightly packed simple array is already exactly the image Metal wants,
+    ;; so pin it and hand over its own storage.  Staging it word by word costs
+    ;; tens of milliseconds on an image the size of a video frame, which is a
+    ;; whole frame's budget spent copying memory that did not need copying.
+    (if (upload-can-share-storage-p data offset bytes-per-row bytes-per-texel
+                                    size)
+        (share-metal-upload-storage texture data (first size) (second size)
+                                    bytes-per-row)
+        (cffi:with-foreign-object
+            (storage :uint8 (+ offset (* bytes-per-row (second size))))
+          (dotimes (row (second size))
+            (let ((destination
+                    (cffi:inc-pointer storage
+                                      (+ offset (* row bytes-per-row)))))
+              (dotimes (column (first size))
+                (setf (cffi:mem-aref destination foreign-type column)
+                      (row-major-aref
+                       data (+ (* row (array-dimension data 1)) column))))))
+          (luv.metal:replace-metal-texture-region
+           (metal-native-object texture) (first size) (second size)
+           (cffi:inc-pointer storage offset) bytes-per-row))))
   command)
+
+(defun upload-can-share-storage-p (data offset bytes-per-row bytes-per-texel
+                                   size)
+  "True when DATA's own storage is already the exact upload image.
+
+Sharing needs a simple array -- displaced or adjustable storage is not one
+contiguous block -- starting at the beginning, with no padding between rows."
+  (declare (ignorable data offset bytes-per-row bytes-per-texel size))
+  #+sbcl
+  (and (typep data '(simple-array (unsigned-byte 32) (* *)))
+       (eql 4 bytes-per-texel)
+       (zerop offset)
+       (= bytes-per-row (* bytes-per-texel (first size))))
+  #-sbcl nil)
+
+#+sbcl
+(defun share-metal-upload-storage (texture data width height bytes-per-row)
+  "Upload DATA's own pinned storage into TEXTURE without staging a copy."
+  (sb-sys:with-pinned-objects (data)
+    (luv.metal:replace-metal-texture-region
+     (metal-native-object texture) width height
+     (sb-sys:vector-sap (sb-ext:array-storage-vector data))
+     bytes-per-row)))
 
 (defmethod destroy-metal-native ((texture metal-gpu-texture))
   (when (metal-texture-owned-p texture)
