@@ -75,6 +75,13 @@
   :depends-on ("mcluv/luvcraft" "telegram/chat" "luv/libav" "sb-concurrency")
   :components ((:file "mcclim/telegram")))
 
+(defsystem "mcluv/paper"
+  :description "A sheet of PDF paper hung on a luvcraft wall."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("mcluv/luvcraft" "luv/mupdf")
+  :components ((:file "mcclim/paper")))
+
 (defsystem "mcluv/luvcraft-test"
   :description "Executable claims for McCLIM instruments embedded in luvcraft."
   :version "0.0.1"

@@ -243,6 +243,19 @@ literal character."
         (when (and to (<= to tag-end))
           (subseq text from to))))))
 
+(defun parse-character-reference (name)
+  "The code point in a reference body like \"#8217\" or \"#x201c\", or NIL."
+  (let* ((hex (and (> (length name) 2)
+                   (char-equal (char name 1) #\x)))
+         (digits (subseq name (if hex 2 1)))
+         (radix (if hex 16 10))
+         (value 0))
+    (when (plusp (length digits))
+      (dotimes (index (length digits) value)
+        (let ((weight (digit-char-p (char digits index) radix)))
+          (unless weight (return nil))
+          (setf value (+ (* value radix) weight)))))))
+
 (defun unescape-xml (string)
   "The five escapes MuPDF's writer emits, turned back into characters."
   (if (find #\& string)
@@ -265,6 +278,17 @@ literal character."
                                        ((string= name "gt") ">")
                                        ((string= name "quot") "\"")
                                        ((string= name "apos") "'")
+                                       ;; Everything outside ASCII comes back
+                                       ;; as a numeric reference, which for a
+                                       ;; typeset document means every curly
+                                       ;; quote and dash in it.
+                                       ((and (> (length name) 1)
+                                             (char= (char name 0) #\#))
+                                        (alexandria:if-let
+                                            ((code (parse-character-reference
+                                                    name)))
+                                          (string (code-char code))
+                                          (format nil "&~A;" name)))
                                        (t (format nil "&~A;" name)))
                                  out)
                                 (setf index (1+ semicolon))))))
