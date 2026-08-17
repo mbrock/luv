@@ -120,7 +120,8 @@ thing an interactive image is for."))
    "Return milliseconds until CLOCK is due, or NIL to wait indefinitely."))
 
 (defgeneric service-canvas-clock (clock canvas timestamp)
-  (:documentation "Run any frame CLOCK has made due at TIMESTAMP."))
+  (:documentation
+   "Run any frame CLOCK has made due at TIMESTAMP; true if one ran."))
 
 (defmethod clock-wait-timeout ((clock demand-clock) timestamp)
   (declare (ignore clock timestamp))
@@ -155,7 +156,8 @@ thing an interactive image is for."))
                      (* interval
                         (1+ (floor (/ (- timestamp next) interval)))))
                   (+ timestamp interval))))
-      (funcall (clock-frame-function clock) canvas timestamp))))
+      (funcall (clock-frame-function clock) canvas timestamp)
+      t)))
 
 (defclass canvas ()
   ((clock
@@ -275,8 +277,13 @@ says the user asked for, not what the hardware reported."))
 (defmethod handle-canvas-event ((handler function) (canvas canvas) event)
   (funcall handler canvas event))
 
+(defvar *canvas-events-held-p* nil
+  "True on a canvas loop while its frames are held or parked by a failure:
+the window is still pumped, but no event reaches the application.")
+
 (defun dispatch-canvas-event (canvas event)
-  (handle-canvas-event (canvas-event-handler canvas) canvas event))
+  (unless *canvas-events-held-p*
+    (handle-canvas-event (canvas-event-handler canvas) canvas event)))
 
 (defstruct canvas-configuration
   "The small portable portion of a canvas presentation configuration."

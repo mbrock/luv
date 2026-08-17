@@ -481,10 +481,42 @@ mounting a vehicle, and other interactions described by #8JCMA5."
         (error condition))))
   focus)
 
+(defmacro guarding-luvcraft-overlay ((session overlay phase) &body body)
+  "Run BODY for OVERLAY; an error is OVERLAY's alone.  It is retained on the
+session's canvas with its backtrace, logged, and the overlay is taken out of
+the session -- a paint bug in a gadget must not take the world with it.
+Returns BODY's values, or NIL when the overlay failed."
+  (let ((backtrace (gensym "BACKTRACE")))
+    `(let ((,backtrace nil))
+       (handler-case
+           (handler-bind ((error (lambda (condition)
+                                   (declare (ignore condition))
+                                   (setf ,backtrace
+                                         (luv:capture-backtrace-string)))))
+             ,@body)
+         (error (condition)
+           (fuse-luvcraft-overlay ,session ,overlay ,phase condition ,backtrace)
+           nil)))))
+
+(defun fuse-luvcraft-overlay (session overlay phase condition backtrace)
+  "OVERLAY failed in PHASE with CONDITION: retain the failure and drop it.
+The overlay's resources are not released here -- this may be mid-frame,
+with its buffers still in the command stream -- so they are leaked, which
+a development image can afford and a frame cannot."
+  (luv:retain-canvas-failure (luvcraft-session-canvas session)
+                             phase condition backtrace)
+  (luv:log-event :luvcraft "overlay ~A is fused after failing in ~(~A~)"
+                 (type-of overlay) phase)
+  (remove-luvcraft-overlay session overlay :release-p nil)
+  overlay)
+
 (defun dispatch-luvcraft-focus-event (session canvas event)
   (let ((focus (luvcraft-session-modal-focus session)))
     (when focus
-      (handle-luvcraft-focus-event focus session canvas event)
+      (if (member focus (luvcraft-session-overlays session))
+          (guarding-luvcraft-overlay (session focus :focus-event)
+            (handle-luvcraft-focus-event focus session canvas event))
+          (handle-luvcraft-focus-event focus session canvas event))
       t)))
 
 (defun luvcraft-session-targeted-critter
@@ -536,7 +568,8 @@ the terrain the ray meets first is what the player is looking at."
 (defun dispatch-luvcraft-overlay-event (session canvas event)
   "Offer EVENT to SESSION's frontmost overlay and report consumption."
   (some (lambda (overlay)
-          (handle-luvcraft-overlay-event overlay session canvas event))
+          (guarding-luvcraft-overlay (session overlay :overlay-event)
+            (handle-luvcraft-overlay-event overlay session canvas event)))
         (luvcraft-session-overlays session)))
 
 (defun add-luvcraft-overlay (session overlay)

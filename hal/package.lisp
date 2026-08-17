@@ -446,6 +446,31 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:*log-stream*
            #:canvas-health
            #:canvas-stalled-seconds
+           #:canvas-failure
+           #:canvas-failure-serial
+           #:canvas-failure-canvas
+           #:canvas-failure-phase
+           #:canvas-failure-universal-time
+           #:canvas-failure-tick
+           #:canvas-failure-condition
+           #:canvas-failure-report
+           #:canvas-failure-backtrace
+           #:canvas-failures
+           #:canvas-failures-since
+           #:canvas-failure-serial-now
+           #:report-canvas-failure
+           #:retain-canvas-failure
+           #:capture-backtrace-string
+           #:*canvas-failure-limit*
+           #:open-canvases
+           #:resume-canvas-frames
+           #:hold-canvas-frames
+           #:release-canvas-frames
+           #:call-with-canvas-frames-held
+           #:with-canvas-frames-held
+           #:fence-canvas
+           #:fence-canvases
+           #:*canvas-events-held-p*
            #:*canvas-event-wait-slice*
            #:*canvas-watchdog-interval*
            #:*canvas-watchdog-warn-seconds*

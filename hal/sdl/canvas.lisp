@@ -89,7 +89,22 @@
     :reader sdl-canvas-request-lock)
    (requests
     :initform nil
-    :accessor sdl-canvas-requests)))
+    :accessor sdl-canvas-requests)
+   ;; What has gone wrong on this loop, kept: the newest first, each with the
+   ;; backtrace it was caught with.  A frame failure also parks here, in
+   ;; FRAME-FAILURE, and holds further frames until it is resumed.
+   (failures
+    :initform nil
+    :accessor sdl-canvas-failures)
+   (frame-failure
+    :initform nil
+    :accessor sdl-canvas-frame-failure)
+   (frame-count
+    :initform 0
+    :accessor sdl-canvas-frame-count)
+   (frames-held-p
+    :initform nil
+    :accessor sdl-canvas-frames-held-p)))
 
 (defstruct sdl-canvas-request
   function
@@ -523,6 +538,227 @@ is finally created."
                      (coerce internal-time-units-per-second
                              'double-float))))))))
 
+;;; What went wrong, kept.
+;;;
+;;; The pump itself must not die of application errors: a frame that throws,
+;;; a key handler that throws, a paint that throws.  Each of those runs under
+;;; a guard that catches the condition with its backtrace still standing,
+;;; retains it on the canvas, logs it, and lets the loop go on servicing the
+;;; window.  A failed frame parks the frame clock -- rendering into a broken
+;;; world every 16 ms would only bury the evidence -- until someone fixes the
+;;; cause and asks for RESUME-CANVAS-FRAMES.  Anyone who changed the world
+;;; and wants to know what the next frame made of it can FENCE-CANVAS and
+;;; read what was retained since.
+
+(defstruct canvas-failure
+  "One error caught on a canvas loop, with everything needed to read it later."
+  serial
+  canvas
+  phase
+  universal-time
+  tick
+  condition
+  report
+  backtrace)
+
+(defvar *canvas-failure-serial* 0
+  "A count of every failure retained on any canvas, so a caller can mark a
+moment and later ask what failed after it.")
+
+(defvar *canvas-failure-lock*
+  (sb-thread:make-mutex :name "luv canvas failure lock"))
+
+(defparameter *canvas-failure-limit* 12
+  "How many failures a canvas keeps; the oldest are forgotten.")
+
+(defparameter *canvas-failure-backtrace-depth* 40
+  "How many frames of backtrace a retained failure carries.")
+
+(defvar *open-sdl-canvases* '()
+  "Every SDL canvas whose loop is running, so a fence or a hold can find
+them without being handed one.")
+
+(defvar *open-sdl-canvases-lock*
+  (sb-thread:make-mutex :name "luv open canvases lock"))
+
+(defun open-canvases ()
+  "The canvases whose native loops are running right now."
+  (sb-thread:with-mutex (*open-sdl-canvases-lock*)
+    (copy-list *open-sdl-canvases*)))
+
+(defun note-sdl-canvas-open (canvas)
+  (sb-thread:with-mutex (*open-sdl-canvases-lock*)
+    (pushnew canvas *open-sdl-canvases*)))
+
+(defun note-sdl-canvas-closed (canvas)
+  (sb-thread:with-mutex (*open-sdl-canvases-lock*)
+    (setf *open-sdl-canvases* (remove canvas *open-sdl-canvases*))))
+
+(defparameter *canvas-failure-backtrace-floor*
+  '("SDL-CANVAS-EVENT-LOOP" "PROCESS-SDL-CANVAS-REQUESTS" "MAIN-RUNNER")
+  "Frames at which a retained backtrace stops: below them is the pump and
+the image's own toplevel, the same in every failure and never the point.")
+
+(defun capture-backtrace-string (&optional (depth *canvas-failure-backtrace-depth*))
+  "The current backtrace as text, from the frame that asked for it down to
+the pump: forms abbreviated, the frames of the capture itself left out."
+  (let ((text (with-output-to-string (stream)
+                (let ((*print-length* 6) (*print-level* 3)
+                      (*print-pretty* nil))
+                  (sb-debug:print-backtrace :stream stream :count depth
+                                            :emergency-best-effort t)))))
+    (with-output-to-string (out)
+      (with-input-from-string (in text)
+        (loop for line = (read-line in nil)
+              for index from 0
+              while line
+              ;; The first line names the thread; then the capture, the
+              ;; guard's handler, %SIGNAL, and ERROR itself.
+              unless (and (plusp index) (< index 5)
+                          (or (search "CAPTURE-BACKTRACE-STRING" line)
+                              (search "%SIGNAL" line)
+                              (search "(ERROR " line)
+                              (search "(LAMBDA (CONDITION)" line)))
+                do (write-line line out)
+              when (some (lambda (floor) (search floor line))
+                         *canvas-failure-backtrace-floor*)
+                do (return))))))
+
+(defun retain-canvas-failure (canvas phase condition backtrace)
+  "Keep CONDITION, caught in PHASE on CANVAS with BACKTRACE, and log it."
+  (let ((failure
+          (make-canvas-failure
+           :canvas canvas :phase phase
+           :universal-time (get-universal-time)
+           :tick (sdl-canvas-ticks canvas)
+           :condition condition
+           :report (handler-case (princ-to-string condition)
+                     (error () (format nil "~S" (type-of condition))))
+           :backtrace backtrace)))
+    (sb-thread:with-mutex (*canvas-failure-lock*)
+      (setf (canvas-failure-serial failure) (incf *canvas-failure-serial*))
+      (setf (sdl-canvas-failures canvas)
+            (subseq (cons failure (sdl-canvas-failures canvas))
+                    0 (min *canvas-failure-limit*
+                           (1+ (length (sdl-canvas-failures canvas)))))))
+    (log-event :canvas "~S failed in ~(~A~): ~A~@[~%~A~]"
+               (canvas-title canvas) phase
+               (canvas-failure-report failure)
+               backtrace)
+    failure))
+
+(defun canvas-failures (canvas)
+  "CANVAS's retained failures, newest first."
+  (sdl-canvas-failures canvas))
+
+(defun canvas-failures-since (serial)
+  "Every retained failure on any open canvas newer than SERIAL, oldest first."
+  (sort (loop for canvas in (open-canvases)
+              append (remove-if-not
+                      (lambda (failure)
+                        (> (canvas-failure-serial failure) serial))
+                      (canvas-failures canvas)))
+        #'< :key #'canvas-failure-serial))
+
+(defun canvas-failure-serial-now ()
+  "The failure serial as of now: pass it later to CANVAS-FAILURES-SINCE."
+  (sb-thread:with-mutex (*canvas-failure-lock*)
+    *canvas-failure-serial*))
+
+(defun report-canvas-failure (failure &optional (stream *standard-output*))
+  "Print FAILURE for a person: when, where, what, and the backtrace."
+  (multiple-value-bind (second minute hour)
+      (decode-universal-time (canvas-failure-universal-time failure))
+    (format stream "~&~2,'0D:~2,'0D:~2,'0D canvas ~S failed in ~(~A~) ~
+                    (loop iteration ~D):~%  ~A~%"
+            hour minute second
+            (canvas-title (canvas-failure-canvas failure))
+            (canvas-failure-phase failure)
+            (canvas-failure-tick failure)
+            (canvas-failure-report failure))
+    (when (canvas-failure-backtrace failure)
+      (format stream "~A~%" (canvas-failure-backtrace failure)))))
+
+(defmacro guarding-sdl-canvas ((canvas phase) &body body)
+  "Run BODY on CANVAS's loop in PHASE; an error is retained, not raised.
+Returns BODY's values, or NIL and the failure as a second value."
+  (let ((backtrace (gensym "BACKTRACE"))
+        (failure (gensym "FAILURE")))
+    `(let ((,backtrace nil) (,failure nil))
+       (values
+        (handler-case
+            (handler-bind ((error
+                             (lambda (condition)
+                               (declare (ignore condition))
+                               (setf ,backtrace (capture-backtrace-string)))))
+              ,@body)
+          (error (condition)
+            (setf ,failure
+                  (retain-canvas-failure ,canvas ,phase condition ,backtrace))
+            nil))
+        ,failure))))
+
+(defun resume-canvas-frames (canvas)
+  "Let CANVAS run frames again after a frame failure parked them."
+  (setf (sdl-canvas-frame-failure canvas) nil)
+  (wake-sdl-canvas canvas)
+  canvas)
+
+(defun hold-canvas-frames (canvas)
+  "Stop CANVAS running frames or delivering events; the window is still
+pumped.  For the duration of a redefinition the loop must not run through."
+  (setf (sdl-canvas-frames-held-p canvas) t)
+  canvas)
+
+(defun release-canvas-frames (canvas)
+  (setf (sdl-canvas-frames-held-p canvas) nil)
+  (wake-sdl-canvas canvas)
+  canvas)
+
+(defun call-with-canvas-frames-held (function &optional (canvases (open-canvases)))
+  "Call FUNCTION with every canvas in CANVASES holding its frames and events."
+  (unwind-protect
+       (progn
+         (dolist (canvas canvases) (hold-canvas-frames canvas))
+         ;; A frame already under way finishes; wait for the loops to come
+         ;; round to a phase that honours the hold.
+         (dolist (canvas canvases)
+           (fence-canvas canvas :frames 0 :timeout 1.0))
+         (funcall function))
+    (dolist (canvas canvases) (release-canvas-frames canvas))))
+
+(defmacro with-canvas-frames-held (() &body body)
+  `(call-with-canvas-frames-held (lambda () ,@body)))
+
+(defun fence-canvas (canvas &key (frames 1) (timeout 5.0))
+  "Wait until CANVAS has run FRAMES more frames -- or, with no frame clock,
+come round its loop twice more -- and return :DONE; :FAILED as soon as a
+frame failure parks it; :CLOSED if it closes; :TIMEOUT after TIMEOUT
+seconds.  This is how a caller who just changed the world finds out what
+the next frame made of the change."
+  (let* ((start-frames (sdl-canvas-frame-count canvas))
+         (start-ticks (sdl-canvas-ticks canvas))
+         (cadence-p (typep (canvas-clock canvas) 'cadence-clock))
+         (deadline (+ (get-internal-real-time)
+                      (* timeout internal-time-units-per-second))))
+    (wake-sdl-canvas canvas)
+    (loop
+      (cond ((sdl-canvas-frame-failure canvas) (return :failed))
+            ((not (member (canvas-state canvas) '(:opening :open)))
+             (return :closed))
+            ((if (and cadence-p (not (sdl-canvas-frames-held-p canvas)))
+                 (>= (sdl-canvas-frame-count canvas) (+ start-frames frames))
+                 (>= (sdl-canvas-ticks canvas) (+ start-ticks 2)))
+             (return :done))
+            ((> (get-internal-real-time) deadline) (return :timeout)))
+      (sleep 0.002))))
+
+(defun fence-canvases (&key (frames 1) (timeout 5.0))
+  "FENCE-CANVAS every open canvas; an alist of canvas to outcome."
+  (mapcar (lambda (canvas)
+            (cons canvas (fence-canvas canvas :frames frames :timeout timeout)))
+          (open-canvases)))
+
 (defun canvas-timestamp ()
   (/ (get-internal-real-time)
      (coerce internal-time-units-per-second 'double-float)))
@@ -805,7 +1041,8 @@ ever see what the user meant."
 (defun poll-sdl-canvas-event (canvas)
   (cffi:with-foreign-object (event '(:union sdl3:event))
     (when (sdl3:poll-event event)
-      (handle-sdl-canvas-event canvas event (cffi:mem-ref event :uint32))
+      (guarding-sdl-canvas (canvas :events)
+        (handle-sdl-canvas-event canvas event (cffi:mem-ref event :uint32)))
       t)))
 
 (defun drain-sdl-canvas-events (canvas)
@@ -849,7 +1086,8 @@ evidence that matters: whether the loop came back.")
       ;; -- and is a place the loop can be lost for reasons that have nothing
       ;; to do with waiting.
       (enter-sdl-canvas-phase canvas :events)
-      (handle-sdl-canvas-event canvas event (cffi:mem-ref event :uint32))
+      (guarding-sdl-canvas (canvas :events)
+        (handle-sdl-canvas-event canvas event (cffi:mem-ref event :uint32)))
       (drain-sdl-canvas-events canvas))))
 
 (defun sdl-canvas-wait-milliseconds (canvas timestamp)
@@ -860,18 +1098,37 @@ evidence that matters: whether the loop came back.")
         (max 0 (min requested slice))
         slice)))
 
+(defun run-sdl-canvas-frame (canvas timestamp)
+  "Service the clock once, under guard.  A frame that fails parks the clock
+in FRAME-FAILURE; a frame that runs counts."
+  (multiple-value-bind (ran-p failure)
+      (guarding-sdl-canvas (canvas :frame)
+        (service-canvas-clock (canvas-clock canvas) canvas timestamp))
+    (cond (failure
+           (setf (sdl-canvas-frame-failure canvas) failure))
+          (ran-p
+           (incf (sdl-canvas-frame-count canvas))))))
+
 (defun sdl-canvas-event-loop (canvas)
   (loop until (sdl-canvas-close-requested-p canvas)
         do (enter-sdl-canvas-phase canvas :requests)
            (process-sdl-canvas-requests canvas)
-           (let ((timestamp (canvas-timestamp)))
+           (let ((timestamp (canvas-timestamp))
+                 ;; Held or parked, the loop still pumps the window; it only
+                 ;; stops running the application through it.
+                 (*canvas-events-held-p*
+                   (or (sdl-canvas-frames-held-p canvas)
+                       (and (sdl-canvas-frame-failure canvas) t))))
              (enter-sdl-canvas-phase canvas :frame)
-             (service-canvas-clock (canvas-clock canvas) canvas timestamp)
+             (unless *canvas-events-held-p*
+               (run-sdl-canvas-frame canvas timestamp))
              (unless (sdl-canvas-close-requested-p canvas)
                (enter-sdl-canvas-phase canvas :waiting)
                (wait-for-sdl-canvas-event
                 canvas
-                (sdl-canvas-wait-milliseconds canvas (canvas-timestamp)))))
+                (if *canvas-events-held-p*
+                    (max 1 (round (* 1000 *canvas-event-wait-slice*)))
+                    (sdl-canvas-wait-milliseconds canvas (canvas-timestamp))))))
            (incf (sdl-canvas-ticks canvas))))
 
 ;;; The watchdog.
@@ -946,11 +1203,21 @@ first frame there is somebody's build, not somebody's desktop."
       seconds)))
 
 (defmethod canvas-health ((canvas sdl-canvas))
-  (list :state (canvas-state canvas)
-        :phase (sdl-canvas-phase canvas)
-        :phase-seconds (sdl-canvas-phase-seconds canvas)
-        :ticks (sdl-canvas-ticks canvas)
-        :stalled-p (and (canvas-stalled-seconds canvas) t)))
+  (let ((failure (sdl-canvas-frame-failure canvas)))
+    (list :state (canvas-state canvas)
+          :phase (sdl-canvas-phase canvas)
+          :phase-seconds (sdl-canvas-phase-seconds canvas)
+          :ticks (sdl-canvas-ticks canvas)
+          :frames (sdl-canvas-frame-count canvas)
+          :stalled-p (and (canvas-stalled-seconds canvas) t)
+          :held-p (sdl-canvas-frames-held-p canvas)
+          :failure-count (length (sdl-canvas-failures canvas))
+          :frame-failure
+          (and failure
+               (list :report (canvas-failure-report failure)
+                     :phase (canvas-failure-phase failure)
+                     :universal-time (canvas-failure-universal-time failure)
+                     :tick (canvas-failure-tick failure))))))
 
 (defun canvas-stall-sample-pathname (canvas)
   (declare (ignore canvas))
@@ -1097,12 +1364,15 @@ servicing its window~@[; ending this image in ~,1F s unless it recovers~]"
                                 (canvas-title canvas) width height
                                 (sdl-canvas-presentation-api canvas)))
                    (start-sdl-canvas-watchdog canvas)
+                   (note-sdl-canvas-open canvas)
                    (sb-thread:signal-semaphore
                     (sdl-canvas-startup-completion canvas))
                    (sdl-canvas-event-loop canvas)))
              (error (condition)
-               (log-event :canvas "~S failed: ~A" (canvas-title canvas)
-                          condition)
+               ;; Only what the guards above cannot catch reaches here:
+               ;; startup, and the loop's own machinery.
+               (log-event :canvas "~S failed outside any guard: ~A"
+                          (canvas-title canvas) condition)
                (setf (sdl-canvas-startup-error canvas) condition)
                (when (eq :opening (canvas-state canvas))
                  (sb-thread:signal-semaphore
@@ -1113,6 +1383,7 @@ servicing its window~@[; ending this image in ~,1F s unless it recovers~]"
         ;; releasing a device would trade a clean window for a dirty exit.
         (enter-sdl-canvas-phase canvas :closing)
         (setf (canvas-state canvas) :closing)
+        (note-sdl-canvas-closed canvas)
         (stop-sdl-canvas-watchdog canvas)
         (log-event :canvas "closing ~S after ~D loop iterations"
                    (canvas-title canvas) (sdl-canvas-ticks canvas))
@@ -1125,7 +1396,11 @@ servicing its window~@[; ending this image in ~,1F s unless it recovers~]"
           (setf (canvas-context canvas) nil))
         (when (sdl-canvas-window canvas)
           (sdl3:destroy-window (sdl-canvas-window canvas))
-          (setf (sdl-canvas-window canvas) nil))
+          (setf (sdl-canvas-window canvas) nil)
+          ;; The window is gone from SDL; give the native loop a few turns
+          ;; so the desktop learns it too, rather than leaving a ghost that
+          ;; beachballs until the process ends.
+          (loop repeat 5 do (sdl3:pump-events) (sleep 0.005)))
         (when sdl-initialized-p
           (sdl3:quit)
           (handler-case

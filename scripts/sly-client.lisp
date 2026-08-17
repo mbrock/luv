@@ -682,18 +682,82 @@ reclaimed here so the caller can start a real image on it."
   (write-packet stream (apply #'query-request operation package arguments))
   (read-eval-return stream package))
 
+(defparameter *fence-watermark-form*
+  "(cl:let ((now (cl:and (cl:find-package \"LUV\")
+                       (cl:find-symbol \"CANVAS-FAILURE-SERIAL-NOW\" \"LUV\"))))
+     (cl:princ (cl:if (cl:and now (cl:fboundp now)) (cl:funcall now) -1)))"
+  "Read out of the image before an evaluation: the canvas failure serial, so
+that afterwards we can ask what failed since.  -1 when the image has no luv.")
+
+(defparameter *fence-form*
+  "(cl:let* ((luv (cl:find-package \"LUV\"))
+            (fence (cl:and luv (cl:find-symbol \"FENCE-CANVASES\" \"LUV\")))
+            (since (cl:and luv (cl:find-symbol \"CANVAS-FAILURES-SINCE\" \"LUV\")))
+            (report (cl:and luv (cl:find-symbol \"REPORT-CANVAS-FAILURE\" \"LUV\")))
+            (title (cl:and luv (cl:find-symbol \"CANVAS-TITLE\" \"LUV\"))))
+     (cl:when (cl:and fence (cl:fboundp fence))
+       (cl:let ((outcomes (cl:funcall fence :frames 2 :timeout 3.0))
+                (failures (cl:funcall since ~D)))
+         (cl:dolist (outcome outcomes)
+           (cl:when (cl:eq (cl:cdr outcome) :timeout)
+             (cl:format cl:t \"~~&FENCE-TIMEOUT canvas ~~S ran no frame within 3 s.~~%\"
+                        (cl:funcall title (cl:car outcome)))))
+         (cl:when failures
+           (cl:format cl:t \"~~&FENCE-FAILURES ~~D~~%\" (cl:length failures))
+           (cl:dolist (failure failures)
+             (cl:funcall report failure))))))"
+  "Evaluated after every evaluation: wait for two more frames of every open
+canvas -- a frame already under way when the evaluation returned may finish
+first; the second must have begun after it -- then print every failure
+retained since the watermark, with its backtrace.  A ./sly do that broke
+the next frame says so, and exits 1.")
+
+(defvar *fence-p* t
+  "Whether EVALUATE fences on the canvas loops after the evaluation.")
+
+(defun fence-watermark-on (stream)
+  (let ((text (evaluate-captured-output-on stream *fence-watermark-form*
+                                           "CL-USER")))
+    (or (ignore-errors (parse-integer (string-trim '(#\Space #\Newline) text)))
+        -1)))
+
+(defun fence-on (stream watermark)
+  "Fence and report; true when the frames after the evaluation failed."
+  (let ((text (evaluate-captured-output-on
+               stream (format nil *fence-form* watermark) "CL-USER")))
+    (cond ((search "FENCE-FAILURES" text)
+           (format *error-output*
+                   "~&The game failed after this evaluation:~%~A~%"
+                   (string-trim '(#\Newline) text))
+           (force-output *error-output*)
+           t)
+          ((search "FENCE-TIMEOUT" text)
+           (format *error-output* "~&~A~%" (string-trim '(#\Newline) text))
+           (force-output *error-output*)
+           nil)
+          (t nil))))
+
 (defun evaluate (code package)
+  "Evaluate CODE in PACKAGE, print what it printed and what it returned, then
+fence: wait for the next frame of every open canvas and report any failure
+it retained.  A change deposited by the evaluation and only felt on the
+canvas thread a frame later still comes back to the caller.  Returns 1 when
+the frames after CODE failed, else 0."
   (with-verified-slynk-connection (stream)
-    (write-packet stream (eval-request code package))
-    (destructuring-bind (output value diagnostic-output)
-        (read-eval-return stream package)
-      (unless (zerop (length output))
-        (write-string output)
-        (unless (char= (char output (1- (length output))) #\Newline)
-          (terpri))
-        (force-output))
-      (write-diagnostic-output diagnostic-output)
-      (write-line value))))
+    (let ((watermark (if *fence-p* (fence-watermark-on stream) -1)))
+      (write-packet stream (eval-request code package))
+      (destructuring-bind (output value diagnostic-output)
+          (read-eval-return stream package)
+        (unless (zerop (length output))
+          (write-string output)
+          (unless (char= (char output (1- (length output))) #\Newline)
+            (terpri))
+          (force-output))
+        (write-diagnostic-output diagnostic-output)
+        (write-line value))
+      (if (and *fence-p* (>= watermark 0) (fence-on stream watermark))
+          1
+          0))))
 
 (defun call-inspector (stream package operation &rest arguments)
   (write-packet stream
@@ -1031,14 +1095,38 @@ that has stopped -- which is the only moment the question really matters.")
     (when health
       (let ((phase (getf health :phase))
             (seconds (getf health :phase-seconds))
-            (ticks (getf health :ticks)))
-        (if (getf health :stalled-p)
-            (format t "The canvas is STALLED in ~(~A~) for ~,1F s after ~D ~
+            (ticks (getf health :ticks))
+            (state (getf health :state))
+            (failure (getf health :frame-failure))
+            (failure-count (getf health :failure-count)))
+        (cond
+          ((getf health :stalled-p)
+           (format t "The canvas is STALLED in ~(~A~) for ~,1F s after ~D ~
 loop iterations. It is not servicing its window; the image logs the stall ~
 and ends itself if it does not recover (./sly log).~%"
-                    phase (or seconds 0) ticks)
-            (format t "The canvas loop is healthy (~(~A~), ~D iterations).~%"
-                    phase ticks))))))
+                   phase (or seconds 0) ticks))
+          (failure
+           (multiple-value-bind (second minute hour)
+               (decode-universal-time (getf failure :universal-time))
+             (format t "The game's frames are PARKED: a frame failed at ~
+~2,'0D:~2,'0D:~2,'0D in ~(~A~) (loop iteration ~D):~%  ~A~%The window is ~
+still pumped. Fix the cause and ./sly resume; ./sly failures shows the ~
+backtrace.~%"
+                     hour minute second (getf failure :phase)
+                     (getf failure :tick) (getf failure :report))))
+          ((not (member state '(:open :opening)))
+           (format t "The canvas is ~(~A~) after ~D loop iterations.~%"
+                   state ticks))
+          ((getf health :held-p)
+           (format t "The canvas loop is pumping with frames HELD (~D ~
+iterations); something is redefining the world.~%" ticks))
+          (t
+           (format t "The canvas loop is healthy (~(~A~), ~D iterations, ~
+~D frames).~%"
+                   phase ticks (or (getf health :frames) 0))))
+        (when (and failure-count (plusp failure-count) (not failure))
+          (format t "~D failure~:P retained on the canvas: ./sly failures ~
+shows them.~%" failure-count))))))
 
 (defun print-game-status ()
   "Say whether luvcraft:play has a live game window in the image."
@@ -1354,6 +1442,9 @@ and ends itself if it does not recover (./sly log).~%"
   (format stream "       ./sly screenshot PNG~%")
   (format stream "       ./sly eval CODE [--package PACKAGE]~%")
   (format stream "       ./sly do CODE [--package PACKAGE]   (synonym for eval)~%")
+  (format stream "       ./sly load SYSTEM...   (frames held while loading; then fenced)~%")
+  (format stream "       ./sly failures         (every error retained on the canvas, with backtraces)~%")
+  (format stream "       ./sly resume           (run frames again after a frame failure parked them)~%")
   (format stream "       ./sly parinfer [--check|--diff|--write] [--strict] [--file FILE|CODE|FILE]~%")
   (format stream "       ./sly parinfer --batch --check [--strict] FILE...~%")
   (format stream "       ./sly inspect CODE [--package PACKAGE]~%")
@@ -1783,8 +1874,41 @@ and ends itself if it does not recover (./sly log).~%"
        (ensure-server)
        (multiple-value-bind (code package)
            (parse-code-arguments command arguments)
-         (evaluate code package))
-       0)
+         (evaluate code package)))
+      ((string= command "load")
+       (unless arguments
+         (error "load requires at least one system name"))
+       (ensure-server)
+       ;; The frame loop is held while the world is redefined: a class
+       ;; whose reader is called mid-redefinition kills the frame that
+       ;; called it, and a redefinition is nothing a frame should run
+       ;; through.  The fence after it says whether the next frame lived.
+       (evaluate
+        (format nil "(luv:with-canvas-frames-held () ~{(asdf:load-system ~S)~^ ~})"
+                arguments)
+        "CL-USER"))
+      ((string= command "failures")
+       (when arguments
+         (error "failures does not accept arguments"))
+       (ensure-server)
+       (let ((*fence-p* nil))
+         (evaluate
+          "(cl:let ((failures
+                     (cl:loop for canvas in (luv:open-canvases)
+                              append (cl:reverse (luv:canvas-failures canvas)))))
+             (cl:if failures
+                    (cl:dolist (failure failures)
+                      (luv:report-canvas-failure failure))
+                    (cl:format cl:t \"No failures are retained on any open canvas.~~%\"))
+             (cl:length failures))"
+          "CL-USER")))
+      ((string= command "resume")
+       (when arguments
+         (error "resume does not accept arguments"))
+       (ensure-server)
+       (evaluate
+        "(cl:mapcar (cl:function luv:resume-canvas-frames) (luv:open-canvases))"
+        "CL-USER"))
       ((string= command "parinfer")
        (if (member "--batch" arguments :test #'string=)
            (run-parinfer-batch

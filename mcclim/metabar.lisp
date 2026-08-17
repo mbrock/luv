@@ -190,13 +190,15 @@ shader, the mark that turning it rebuilds one."
                 :align-y :center :text-size 17
                 :ink (if selected-p +white+ *metabar-text-ink*))
     (when (luvcraft:shader-knob-p knob)
-      (draw-text* pane "⟳"
-                  (+ *metabar-pad* 8
-                     (text-size pane (luvcraft:knob-label knob)
-                                :text-style (make-text-style nil nil 17)))
-                  (+ top 24)
-                  :align-y :center :text-size 14
-                  :ink *metabar-rebuild-ink*))
+      ;; A dot after the label, in the rebuild colour: turning this one
+      ;; recompiles a shader, so it answers in tens of milliseconds, not
+      ;; on the next frame.
+      (draw-circle* pane
+                    (+ *metabar-pad* 10
+                       (text-size pane (luvcraft:knob-label knob)
+                                  :text-style (make-text-style nil nil 17)))
+                    (+ top 24) 4
+                    :ink *metabar-rebuild-ink*))
     (draw-text* pane (luvcraft:format-knob-value knob session)
                 (- *metabar-width* *metabar-pad*) (+ top 24)
                 :align-x :right :align-y :center :text-size 17

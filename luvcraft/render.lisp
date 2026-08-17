@@ -805,7 +805,8 @@ submission that used them completes."
     (advance-video-screen (luvcraft-session-video-screen session)
                           (luvcraft-session-device session)))
   (dolist (overlay (luvcraft-session-overlays session))
-    (refresh-luvcraft-overlay overlay session))
+    (guarding-luvcraft-overlay (session overlay :overlay-refresh)
+      (refresh-luvcraft-overlay overlay session)))
   (let* ((products
            (with-luvcraft-frame-timing
                (sample luvcraft-frame-sample-mesh-publication-seconds
@@ -1006,7 +1007,8 @@ submission that used them completes."
             (draw pass 6 (length (world-text-run-glyphs text)))))
         (dolist (overlay (reverse (luvcraft-session-overlays session)))
           (when (eq :scene (luvcraft-overlay-stage overlay))
-            (encode-luvcraft-overlay overlay session pass surface-texture)))
+            (guarding-luvcraft-overlay (session overlay :overlay-encode)
+              (encode-luvcraft-overlay overlay session pass surface-texture))))
         (unless (luvcraft-session-modal-focus session)
           (set-pipeline pass (luvcraft-session-crosshair-native-pipeline session))
           (set-bind-group pass 0 (luvcraft-frame-scene-bind-group frame))
@@ -1070,7 +1072,8 @@ submission that used them completes."
         (draw pass 3)
         (dolist (overlay (reverse (luvcraft-session-overlays session)))
           (when (eq :hud (luvcraft-overlay-stage overlay))
-            (encode-luvcraft-overlay overlay session pass surface-texture)))
+            (guarding-luvcraft-overlay (session overlay :overlay-encode)
+              (encode-luvcraft-overlay overlay session pass surface-texture))))
         (end-pass pass)))
     (with-luvcraft-frame-timing
         (sample luvcraft-frame-sample-surface-copy-encode-seconds
