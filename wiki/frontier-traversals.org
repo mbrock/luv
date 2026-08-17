@@ -45,14 +45,16 @@ The declaration is an inspectable CLOS definition, while its realization is
 one closed loop over specialized arrays.  On a three-chunk proof world with
 vertical and lateral seams, occlusion, a sky shaft, and competing emitters,
 the new program produces exactly the legacy oracle's sky and block arrays
-with the same number of site visits.  Either program can solve future
-from-scratch captures in a running image, and both can be compared without
-publishing either candidate:
+with the same number of site visits.  The compiled program is the production
+default; the legacy program remains its oracle and recovery path.  Either can
+solve future from-scratch captures in a running image, and candidates can be
+compared without publishing them:
 
 #+begin_src lisp
-(setf luvcraft:*voxel-light-solver* :frontier)
+(setf luvcraft:*voxel-light-solver* :compiled)
 (luvcraft:compare-voxel-light-solvers
- (luvcraft:luvcraft-session-world luvcraft:*session*))
+ (luvcraft:luvcraft-session-world luvcraft:*session*)
+ :candidate :compiled)
 #+end_src
 
 #53Q1II states the paradigm explicitly: these are compiled sparse kernels,
