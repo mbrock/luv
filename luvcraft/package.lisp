@@ -143,6 +143,13 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:find-tunable
            #:define-tunable
            #:*tunables*
+           #:action
+           #:action-name
+           #:action-label
+           #:define-action
+           #:find-action
+           #:run-action
+           #:*actions*
            #:attach-lighting-state
            #:benchmark-luvcraft-frame-performance
            #:block-chunk-load-payload

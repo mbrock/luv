@@ -1025,20 +1025,69 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
                 *suppress-luv-mirror-visibility*)
       (luv:show-canvas (mirror-target mirror)))))
 
+;;; Which TrueType file a CLIM text style means.  DejaVu ships with the
+;;; system and is always there; a nicer face can take over a family when it
+;;; is installed on this machine.  Input Sans (David Jonathan Ross) is the
+;;; one we reach for: its licence keeps it out of the repository, so it is
+;;; looked for in the user's own fonts and DejaVu stands in otherwise.
+
+(defun user-font-pathname (name)
+  "The font file NAME in the user's own font directory, when it exists."
+  (probe-file (merge-pathnames (format nil "Library/Fonts/~A" name)
+                               (user-homedir-pathname))))
+
+(defparameter *gpu-sans-serif-fonts*
+  (cons (or (user-font-pathname "InputSans-Regular.ttf")
+            (cl-dejavu:font-pathname "DejaVuSans.ttf"))
+        (or (user-font-pathname "InputSans-Bold.ttf")
+            (cl-dejavu:font-pathname "DejaVuSans-Bold.ttf")))
+  "The regular and bold files behind the :SANS-SERIF family -- the default
+face of every McCLIM pane here.")
+
+(defun adopt-user-sans-serif-fonts ()
+  "Point both text paths' :SANS-SERIF at Input Sans when it is installed.
+
+The GPU medium reads *GPU-SANS-SERIF-FONTS*; the raster medium goes through
+MCCLIM-RENDER's *FAMILIES/FACES* table, so that is retargeted too, and any
+raster port already open forgets the faces it had cached."
+  (let ((regular (user-font-pathname "InputSans-Regular.ttf"))
+        (bold (user-font-pathname "InputSans-Bold.ttf"))
+        (italic (user-font-pathname "InputSans-Italic.ttf"))
+        (bold-italic (user-font-pathname "InputSans-BoldItalic.ttf")))
+    (when (and regular bold)
+      (setf *gpu-sans-serif-fonts* (cons regular bold))
+      (flet ((retarget (key pathname)
+               (when pathname
+                 (let ((entry (assoc key mcclim-truetype:*families/faces*
+                                     :test #'equal)))
+                   (if entry
+                       (setf (cdr entry) pathname)
+                       (push (cons key pathname)
+                             mcclim-truetype:*families/faces*))))))
+        (retarget '(:sans-serif :roman) regular)
+        (retarget '(:sans-serif :bold) bold)
+        (retarget '(:sans-serif :italic) italic)
+        (retarget '(:sans-serif (:bold :italic)) bold-italic)
+        (retarget '(:sans-serif (:italic :bold)) bold-italic))
+      (dolist (port climi::*all-ports*)
+        (when (typep port 'mcclim-truetype:ttf-port-mixin)
+          (mcclim-truetype::invalidate-port-font-cache port)))
+      t)))
+
+(adopt-user-sans-serif-fonts)
+
 (defun gpu-text-font-pathname (text-style)
   (multiple-value-bind (family face size)
       (text-style-components (climb:parse-text-style* text-style))
     (declare (ignore size))
-    (cl-dejavu:font-pathname
-     (cond
-       ((eq family :fix) "DejaVuSansMono.ttf")
-       ((eq family :serif)
-        (if (member :bold (if (listp face) face (list face)))
-            "DejaVuSerif-Bold.ttf"
-            "DejaVuSerif.ttf"))
-       ((member :bold (if (listp face) face (list face)))
-        "DejaVuSans-Bold.ttf")
-       (t "DejaVuSans.ttf")))))
+    (let ((bold-p (member :bold (if (listp face) face (list face)))))
+      (cond
+        ((eq family :fix) (cl-dejavu:font-pathname "DejaVuSansMono.ttf"))
+        ((eq family :serif)
+         (cl-dejavu:font-pathname
+          (if bold-p "DejaVuSerif-Bold.ttf" "DejaVuSerif.ttf")))
+        (bold-p (cdr *gpu-sans-serif-fonts*))
+        (t (car *gpu-sans-serif-fonts*))))))
 
 (defun gpu-text-style-size (text-style)
   (nth-value 2

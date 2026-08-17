@@ -47,6 +47,23 @@ SLY can pause it, set a time, change its rate, or pin it without restarting.")
                1.0)))
   clock)
 
+(defun sky-clock-hour (clock)
+  "CLOCK's time of day in hours, 0 to 24."
+  (* 24.0 (sky-clock-day-fraction clock)))
+
+(defun (setf sky-clock-hour) (hour clock)
+  "Set CLOCK's time of day to HOUR, wrapping around midnight."
+  (setf (sky-clock-day-fraction clock) (mod (/ hour 24.0) 1.0))
+  hour)
+
+(defun sky-clock-minutes-per-day (clock)
+  "How many real minutes one of CLOCK's days lasts."
+  (/ 1.0 (* 60.0 (sky-clock-rate clock))))
+
+(defun (setf sky-clock-minutes-per-day) (minutes clock)
+  (setf (sky-clock-rate clock) (/ 1.0 (* 60.0 minutes)))
+  minutes)
+
 (defun sky-clock-current-day-fraction (clock)
   (or (sky-clock-pinned-day-fraction clock)
       (sky-clock-day-fraction clock)))

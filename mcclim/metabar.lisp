@@ -1,24 +1,27 @@
 ;;; The metabar: a drawer of live knobs, slid in from the left with RET.
 ;;;
-;;; The game's grading and the terminal's emissions are TUNABLES
-;;; (LUVCRAFT/TUNABLES.LISP): each one names its place, its range, its step,
-;;; and what must happen after a change.  The metabar is the gadget that
-;;; turns them: one McCLIM pane, composited as a HUD strip down the left
-;;; edge, one row per tunable with a track, a value, and a pair of nudge
-;;; buttons.  It is a tool, not a thing in the world; it does not care where
-;;; the player is standing.
+;;; The game's grading, the terminal's emissions, and the sky's clock are
+;;; TUNABLES (LUVCRAFT/TUNABLES.LISP): each one names its place, its range,
+;;; its step, and what must happen after a change.  Its verbs -- focus what
+;;; the crosshair is on, quit -- are ACTIONS from the same file.  The metabar
+;;; is the gadget that offers both: one McCLIM pane, composited as a HUD
+;;; strip down the left edge, one row per tunable with a track, a value, and
+;;; a pair of nudge buttons, and a button per action beneath them.  It is a
+;;; tool, not a thing in the world; it does not care where the player is
+;;; standing.
 ;;;
 ;;; RET slides it out and takes the focus so the keys drive it: up and down
-;;; choose a row, left and right nudge (shift for ten steps), RET or escape
-;;; slide it back.  The mouse works too, on the tracks and the buttons, and
-;;; the wheel over a row nudges it.
+;;; choose a row, left and right nudge (shift for ten steps) or press the
+;;; chosen action, RET or escape slide it back.  The mouse works too, on the
+;;; tracks and the buttons, and the wheel over a row nudges it.
 
 (in-package #:mcluv)
 
 (defparameter *metabar-width* 460)
 (defparameter *metabar-row-height* 74)
-(defparameter *metabar-header-height* 68)
-(defparameter *metabar-footer-height* 40)
+(defparameter *metabar-top-pad* 8)
+(defparameter *metabar-bottom-pad* 8)
+(defparameter *metabar-action-height* 44)
 (defparameter *metabar-pad* 18)
 (defparameter *metabar-track-left* 58)
 (defparameter *metabar-track-right* 400)
@@ -49,27 +52,65 @@
    (default
     (horizontally (:width *metabar-width* :height (metabar-height)) bar))))
 
+(defun metabar-row-count ()
+  "Rows are the tunables followed by the actions, one selection order."
+  (+ (length luvcraft:*tunables*) (length luvcraft:*actions*)))
+
 (defun metabar-height ()
-  (+ *metabar-header-height*
+  (+ *metabar-top-pad*
      (* *metabar-row-height* (length luvcraft:*tunables*))
-     *metabar-footer-height*))
+     (* *metabar-action-height* (length luvcraft:*actions*))
+     *metabar-bottom-pad*))
 
 (defun metabar-row-top (index)
-  (+ *metabar-header-height* (* index *metabar-row-height*)))
+  "The top of row INDEX: a tunable's row, or, past them, an action's."
+  (let ((tunables (length luvcraft:*tunables*)))
+    (if (< index tunables)
+        (+ *metabar-top-pad* (* index *metabar-row-height*))
+        (+ *metabar-top-pad* (* tunables *metabar-row-height*)
+           (* (- index tunables) *metabar-action-height*)))))
+
+(defun metabar-row-height (index)
+  (if (< index (length luvcraft:*tunables*))
+      *metabar-row-height*
+      *metabar-action-height*))
+
+(defun metabar-row-at (v)
+  "The row index at texture-space V, or NIL."
+  (let ((y (* v (metabar-height))))
+    (loop for index below (metabar-row-count)
+          for top = (metabar-row-top index)
+          when (and (<= top y) (< y (+ top (metabar-row-height index))))
+            return index)))
 
 (defun metabar-visible-state-for (frame)
   (list* (metabar-selected frame)
-         (mapcar #'luvcraft:tunable-value luvcraft:*tunables*)))
+         (mapcar (lambda (tunable)
+                   (luvcraft:tunable-value tunable (metabar-session frame)))
+                 luvcraft:*tunables*)))
 
 ;;; ---------------------------------------------------------------------
 ;;; Painting.
 
-(defun draw-metabar-row (frame pane tunable index)
+(defun draw-metabar-action (frame pane action index)
   (let* ((top (metabar-row-top index))
+         (bottom (+ top *metabar-action-height*))
+         (selected-p (= index (metabar-selected frame))))
+    (draw-analytic-rounded-rectangle*
+     pane 10 (+ top 4) (- *metabar-width* 10) (- bottom 4) :radius 6
+     :ink (if selected-p *metabar-fill-ink* *metabar-selected-row-ink*))
+    (draw-text* pane (luvcraft:action-label action)
+                (/ *metabar-width* 2) (/ (+ top bottom) 2)
+                :align-x :center :align-y :center :text-size 16
+                :ink (if selected-p *metabar-panel-ink* *metabar-text-ink*))))
+
+(defun draw-metabar-row (frame pane tunable index)
+  (let* ((session (metabar-session frame))
+         (top (metabar-row-top index))
          (bottom (+ top *metabar-row-height*))
          (selected-p (= index (metabar-selected frame)))
          (track-y (+ top 52))
-         (fraction (luvcraft:tunable-fraction tunable))
+         (fraction (luvcraft:tunable-fraction tunable session))
          (knob-x (+ *metabar-track-left*
                     (* fraction (- *metabar-track-right*
                                    *metabar-track-left*)))))
@@ -84,7 +125,7 @@
                 *metabar-pad* (+ top 24)
                 :align-y :center :text-size 17
                 :ink (if selected-p +white+ *metabar-text-ink*))
-    (draw-text* pane (luvcraft:format-tunable-value tunable)
+    (draw-text* pane (luvcraft:format-tunable-value tunable session)
                 (- *metabar-width* *metabar-pad*) (+ top 24)
                 :align-x :right :align-y :center :text-size 17
                 :text-face :bold
@@ -117,18 +158,12 @@
         (draw-rectangle* pane left top right bottom :ink *metabar-panel-ink*)
         (draw-line* pane (- right 1) top (- right 1) bottom
                     :ink *metabar-edge-ink* :line-thickness 2)
-        (draw-text* pane "metabar" *metabar-pad* 28
-                    :align-y :center :text-size 22 :text-face :bold
-                    :ink *metabar-text-ink*)
-        (draw-text* pane "live knobs  ·  ↑↓ choose  ←→ nudge  ⇧ ×10"
-                    *metabar-pad* 52
-                    :align-y :center :text-size 14 :ink *metabar-muted-ink*)
         (loop for tunable in luvcraft:*tunables*
               for index from 0
               do (draw-metabar-row frame pane tunable index))
-        (draw-text* pane "RET / Esc: close     wheel: nudge"
-                    *metabar-pad* (- bottom 18)
-                    :align-y :center :text-size 14 :ink *metabar-muted-ink*)))))
+        (loop for action in luvcraft:*actions*
+              for index from (length luvcraft:*tunables*)
+              do (draw-metabar-action frame pane action index))))))
 
 (defun repaint-metabar (frame)
   (let ((mirror (sheet-direct-mirror (frame-top-level-sheet frame))))
@@ -232,28 +267,33 @@
 (defun metabar-selected-tunable (frame)
   (nth (metabar-selected frame) luvcraft:*tunables*))
 
+(defun metabar-selected-action (frame)
+  (let ((index (- (metabar-selected frame) (length luvcraft:*tunables*))))
+    (and (>= index 0) (nth index luvcraft:*actions*))))
+
 (defun metabar-nudge (overlay direction &optional (multiplier 1))
+  "Nudge the chosen tunable, or, if an action is chosen, press it."
   (let* ((frame (widget-overlay-frame overlay))
          (tunable (metabar-selected-tunable frame)))
-    (when tunable
-      (luvcraft:step-tunable tunable (widget-overlay-session overlay)
-                             direction multiplier)
-      (repaint-metabar frame))))
+    (if tunable
+        (progn
+          (luvcraft:step-tunable tunable (widget-overlay-session overlay)
+                                 direction multiplier)
+          (repaint-metabar frame))
+        (metabar-press overlay))))
+
+(defun metabar-press (overlay)
+  "Press the chosen action, if the choice is one."
+  (alexandria:when-let
+      ((action (metabar-selected-action (widget-overlay-frame overlay))))
+    (luvcraft:run-action action (widget-overlay-session overlay))))
 
 (defun metabar-select (overlay index)
   (let ((frame (widget-overlay-frame overlay))
-        (count (length luvcraft:*tunables*)))
+        (count (metabar-row-count)))
     (when (plusp count)
       (setf (metabar-selected frame) (mod index count))
       (repaint-metabar frame))))
-
-(defun metabar-row-at (v)
-  "The tunable row index at texture-space V, or NIL."
-  (let* ((y (* v (metabar-height)))
-         (index (floor (- y *metabar-header-height*) *metabar-row-height*)))
-    (and (>= y *metabar-header-height*)
-         (< index (length luvcraft:*tunables*))
-         index)))
 
 (defun metabar-set-from-track (overlay index u)
   "Set row INDEX's tunable from the pointer's texture-space U on its track."
@@ -269,7 +309,8 @@
          (raw (+ minimum (* fraction (- maximum minimum))))
          (quantized (* step (round raw step))))
     (luvcraft:set-tunable-value
-     tunable (coerce quantized (type-of (luvcraft:tunable-value tunable)))
+     tunable
+     (coerce quantized (type-of (luvcraft:tunable-value tunable session)))
      session)
     (repaint-metabar (widget-overlay-frame overlay))))
 
@@ -293,10 +334,11 @@
       (luv:canvas-pointer-wheel-event
        (when uv
          (alexandria:when-let ((row (metabar-row-at (second uv))))
-           (metabar-select overlay row)
-           (let ((delta (luv:canvas-pointer-event-scroll-y event)))
-             (unless (zerop delta)
-               (metabar-nudge overlay (if (plusp delta) 1 -1)))))
+           (when (< row (length luvcraft:*tunables*))
+             (metabar-select overlay row)
+             (let ((delta (luv:canvas-pointer-event-scroll-y event)))
+               (unless (zerop delta)
+                 (metabar-nudge overlay (if (plusp delta) 1 -1))))))
          t))
       (luv:canvas-pointer-button-press-event
        ;; A click in the world, past the bar, puts the tool away.
@@ -307,14 +349,16 @@
          (luvcraft:focus-luvcraft-session session overlay)
          (alexandria:when-let ((row (metabar-row-at (second uv))))
            (metabar-select overlay row)
-           (let ((x (* (first uv) *metabar-width*)))
-             (cond ((< x *metabar-track-left*)
-                    (metabar-nudge overlay -1))
-                   ((> x *metabar-track-right*)
-                    (metabar-nudge overlay 1))
-                   (t
-                    (setf (metabar-dragging overlay) row)
-                    (metabar-set-from-track overlay row (first uv))))))
+           (if (>= row (length luvcraft:*tunables*))
+               (metabar-press overlay)
+               (let ((x (* (first uv) *metabar-width*)))
+                 (cond ((< x *metabar-track-left*)
+                        (metabar-nudge overlay -1))
+                       ((> x *metabar-track-right*)
+                        (metabar-nudge overlay 1))
+                       (t
+                        (setf (metabar-dragging overlay) row)
+                        (metabar-set-from-track overlay row (first uv)))))))
          t))
       (t (and uv t)))))
 
@@ -332,7 +376,8 @@
       ((:down :j) (metabar-select
                    overlay (1+ (metabar-selected (widget-overlay-frame overlay)))))
       ((:left :h) (metabar-nudge overlay -1 multiplier))
-      ((:right :l) (metabar-nudge overlay 1 multiplier))))
+      ((:right :l) (metabar-nudge overlay 1 multiplier))
+      ((:space) (metabar-press overlay))))
   t)
 
 (defmethod luvcraft:handle-luvcraft-focus-event
