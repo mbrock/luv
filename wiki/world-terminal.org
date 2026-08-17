@@ -54,6 +54,10 @@ world-overlay relationship is the architectural result; sharing the CPU raster
 machinery would preserve precisely the indirection this experiment is meant to
 remove.
 
+The terminal took that advice and the McCLIM instruments built after it did
+not, which is now visible rather than theoretical: #AX9ZTA describes the
+raster path they share, and #I3G0S7 measures what it costs their type.
+
 * Modal focus is a player relationship
 :PROPERTIES:
 :ID: 8JCMA5
