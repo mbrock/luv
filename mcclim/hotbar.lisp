@@ -1,0 +1,273 @@
+;;; A real McCLIM hotbar, composited into luvcraft's existing game canvas.
+
+(in-package #:mcluv)
+
+(defparameter *hotbar-material-colors*
+  '((0.28 0.66 0.25)                 ; grass
+    (0.48 0.31 0.18)                 ; dirt
+    (0.49 0.52 0.54)                 ; stone
+    (0.57 0.36 0.17)                 ; wood
+    (0.19 0.50 0.22)                 ; leaves
+    (0.78 0.68 0.37)                 ; sand
+    (0.86 0.91 0.94)                 ; snow
+    (0.18 0.86 0.88)                 ; crystal
+    (0.13 0.31 0.34))                ; terminal
+  "The compact visual palette for the nine stable hotbar positions.")
+
+(defclass hotbar-pane (application-pane) ())
+
+(defun hotbar-material-color (number)
+  (destructuring-bind (red green blue)
+      (nth (1- number) *hotbar-material-colors*)
+    (make-rgb-color red green blue)))
+
+(defun hotbar-scaled-color (components scale)
+  (destructuring-bind (red green blue) components
+    (make-rgb-color (min 1.0 (* red scale))
+                    (min 1.0 (* green scale))
+                    (min 1.0 (* blue scale)))))
+
+(defun hotbar-material-ink (number top bottom)
+  "Give material NUMBER a restrained top-lit gradient from TOP to BOTTOM."
+  (let ((components (nth (1- number) *hotbar-material-colors*)))
+    (make-linear-gradient
+     0 top 0 bottom
+     (hotbar-scaled-color components 1.18)
+     (hotbar-scaled-color components 0.68))))
+
+(defun hotbar-selection-halo-ink (number center-x top radius)
+  "A warm light contained by the selected material cell."
+  (make-radial-gradient
+   center-x (+ top 4) radius
+   (make-rgb-color 1.0 0.78 0.22)
+   (hotbar-scaled-color
+    (nth (1- number) *hotbar-material-colors*) 0.72)))
+
+(defmethod handle-repaint ((pane hotbar-pane) region)
+  (declare (ignore region))
+  (let* ((frame (pane-frame pane))
+         (selected
+           (luvcraft:luvcraft-session-selected-block (hotbar-session frame)))
+         (blocks (luvcraft:placeable-block-kinds)))
+    (with-bounding-rectangle* (left top right bottom) pane
+      (with-sheet-medium (medium pane)
+        (when (typep medium 'luv-raster-medium)
+          (clear-raster-medium-reliefs medium))
+        ;; One raised shell and one continuous color field make this a single
+        ;; instrument. Slots meet exactly; fine rules identify positions
+        ;; without opening dark cracks between nine independent gadgets.
+        (draw-rectangle*
+         pane left top right bottom
+         :ink (make-linear-gradient
+               0 top 0 bottom
+               (make-rgb-color 0.035 0.042 0.048)
+               (make-rgb-color 0.012 0.016 0.020)))
+        (draw-analytic-rounded-rectangle*
+         medium (+ left 1) (+ top 1) (- right 1) (- bottom 1)
+         :radius 15
+         :ink (make-linear-gradient
+               0 top 0 bottom
+               (make-rgb-color 0.18 0.20 0.22)
+               (make-rgb-color 0.055 0.065 0.075)))
+        (draw-analytic-rounded-rectangle*
+         medium (+ left 3) (+ top 3) (- right 3) (- bottom 3)
+         :radius 13
+         :ink (make-linear-gradient
+               0 top 0 bottom
+               (make-rgb-color 0.075 0.085 0.095)
+               (make-rgb-color 0.025 0.030 0.036)))
+        (let* ((content-left (+ left 6))
+               (content-right (- right 6))
+               (content-top (+ top 6))
+               (content-bottom (- bottom 6))
+               (slot-width (/ (- content-right content-left) 9.0)))
+          (loop for block in blocks
+                for number from 1
+                for slot-left = (+ content-left (* (1- number) slot-width))
+                for slot-right = (+ content-left (* number slot-width))
+                for selected-p = (eq block selected)
+                do (draw-rectangle*
+                    pane slot-left content-top slot-right content-bottom
+                    :ink (hotbar-material-ink
+                          number content-top content-bottom))
+                   (when (> number 1)
+                     (draw-rectangle*
+                      pane slot-left content-top (+ slot-left 1) content-bottom
+                      :ink (make-rgb-color 0.08 0.09 0.095)))
+                   (when selected-p
+                     (draw-rectangle*
+                      pane slot-left content-top slot-right content-bottom
+                      :ink (hotbar-selection-halo-ink
+                            number (/ (+ slot-left slot-right) 2)
+                            content-top (* slot-width 0.62)))
+                     (draw-rectangle*
+                      pane (+ slot-left 2) content-top
+                      (- slot-right 2) (+ content-top 2)
+                      :ink (make-linear-gradient
+                            slot-left 0 slot-right 0
+                            (make-rgb-color 0.74 0.43 0.06)
+                            (make-rgb-color 1.0 0.88 0.36))))
+                   ;; Stable dark plates keep every label readable without
+                   ;; visually separating the underlying material strip.
+                   (draw-analytic-rounded-rectangle*
+                    medium (+ slot-left 6) (+ content-top 5)
+                    (+ slot-left 27) (+ content-top 26)
+                    :radius 7 :ink (make-rgb-color 0.045 0.052 0.058))
+                   (draw-analytic-rounded-rectangle*
+                    medium (+ slot-left 5) (- content-bottom 25)
+                    (- slot-right 5) (- content-bottom 5)
+                    :radius 6 :ink (make-linear-gradient
+                                    0 (- content-bottom 25) 0 content-bottom
+                                    (make-rgb-color 0.12 0.14 0.15)
+                                    (make-rgb-color 0.03 0.038 0.044)))
+                   (draw-text* pane (format nil "~D" number)
+                               (+ slot-left 16.5) (+ content-top 15.5)
+                               :align-x :center :align-y :center :text-size 12
+                               :ink (make-rgb-color 0.98 0.98 0.96))
+                   (draw-text* pane
+                               (string-upcase
+                                (symbol-name (luvcraft:block-kind-name block)))
+                               (/ (+ slot-left slot-right) 2)
+                               (- content-bottom 14)
+                               :align-x :center :align-y :center :text-size 10
+                               :ink (make-rgb-color 0.98 0.98 0.96))))))))
+
+(define-application-frame luvcraft-hotbar ()
+  ((session :initarg :session :reader hotbar-session)
+   (visible-selection :initform nil :accessor hotbar-visible-selection))
+  (:menu-bar nil)
+  (:panes
+   (bar (make-pane 'hotbar-pane)))
+  (:layouts
+   (default
+    (horizontally (:width 846 :height 100) bar))))
+
+(defun repaint-hotbar (frame)
+  "Repaint and publish one complete material palette."
+  (let ((mirror (sheet-direct-mirror (frame-top-level-sheet frame))))
+    (if (typep mirror 'luv-gpu-mirror)
+        (repaint-gpu-mirror mirror)
+        (progn
+          (repaint-sheet (mirror-sheet mirror) +everywhere+)
+          (present-mirror mirror))))
+  (setf (hotbar-visible-selection frame)
+        (luvcraft:luvcraft-session-selected-block (hotbar-session frame)))
+  frame)
+
+(defclass luvcraft-hotbar-overlay (luvcraft-widget-overlay) ())
+
+(defun hotbar-screen-state (overlay)
+  (let* ((source-size
+           (luv:gpu-texture-size
+            (mirror-texture (widget-overlay-mirror overlay))))
+         (viewport-size
+           (luv:canvas-extent
+            (luvcraft::luvcraft-session-context
+             (widget-overlay-session overlay))))
+         (source-width (first source-size))
+         (source-height (second source-size))
+         (viewport-width (first viewport-size))
+         (viewport-height (second viewport-size))
+         (scale (min 1.0 (/ (- viewport-width 24.0) source-width)))
+         (half-width (/ (* source-width scale) viewport-width))
+         (half-height (/ (* source-height scale) viewport-height))
+         (bottom-margin (/ 28.0 viewport-height))
+         (center-y (- 1.0 bottom-margin half-height)))
+    (make-array
+     12 :element-type 'single-float
+     :initial-contents
+     (mapcar (lambda (value) (coerce value 'single-float))
+             (list 0.0 center-y 0.0 1.0
+                   half-width 0.0 0.0 0.0
+                   0.0 half-height 0.0 0.0)))))
+
+(defmethod luvcraft:encode-luvcraft-overlay
+    ((overlay luvcraft-hotbar-overlay) session pass surface-texture)
+  (declare (ignore session))
+  (let* ((mirror (widget-overlay-mirror overlay))
+         (source (mirror-texture mirror)))
+    (when source
+      ;; No depth state: the hotbar is a HUD and must remain visible over the
+      ;; scene regardless of the block depth already in the shared pass.
+      (ensure-spinning-compositor-resources
+       overlay (mirror-context mirror) source)
+      (let* ((state (hotbar-screen-state overlay))
+             (frame-state
+               (ensure-spinning-compositor-frame-state
+                overlay surface-texture)))
+        (setf (widget-overlay-render-state overlay) state)
+        (luv:write-buffer (spinning-frame-state-buffer frame-state) state)
+        (luv:set-pipeline pass (spinning-compositor-pipeline overlay))
+        (luv:set-bind-group
+         pass 0 (spinning-frame-state-bind-group frame-state))
+        (luv:draw pass 4))))
+  overlay)
+
+(defmethod luvcraft:refresh-luvcraft-overlay
+    ((overlay luvcraft-hotbar-overlay) session)
+  (let* ((frame (widget-overlay-frame overlay))
+         (selected (luvcraft:luvcraft-session-selected-block session)))
+    (unless (eq selected (hotbar-visible-selection frame))
+      (repaint-hotbar frame)))
+  overlay)
+
+(defmethod luvcraft:handle-luvcraft-overlay-event
+    ((overlay luvcraft-hotbar-overlay) session canvas
+     (event luv:canvas-pointer-event))
+  (declare (ignore canvas))
+  (alexandria:when-let
+      ((uv (luvcraft-widget-texture-coordinate
+            overlay
+            (luv:canvas-pointer-event-x event)
+            (luv:canvas-pointer-event-y event))))
+    (when (and (typep event 'luv:canvas-pointer-button-press-event)
+               (eq :left (luv:canvas-pointer-event-button event)))
+      (let* ((frame (widget-overlay-frame overlay))
+             (slot (min 9 (1+ (floor (* (first uv) 9))))))
+        (luvcraft:select-luvcraft-block session slot)
+        (repaint-hotbar frame)))
+    t))
+
+(defmethod luvcraft:luvcraft-focus-score
+    ((overlay luvcraft-hotbar-overlay) session)
+  (declare (ignore overlay session))
+  nil)
+
+(defun open-luvcraft-hotbar (session &key (title "luvcraft block palette"))
+  "Create and attach the screen-space McCLIM block palette for SESSION."
+  (let* ((port (find-port :server-path '(:luv)))
+         (manager (or (first (climi::frame-managers port))
+                      (make-instance 'luv-frame-manager :port port)))
+         (frame
+           (let ((*embedded-mirror-target*
+                   (luvcraft:luvcraft-session-canvas session))
+                 (*embedded-mirror-context*
+                   (luvcraft::luvcraft-session-context session))
+                 (*embedded-mirror-device*
+                   (luvcraft::luvcraft-session-device session)))
+             (make-application-frame
+              'luvcraft-hotbar :frame-manager manager :enable t
+              :session session))))
+    (setf (frame-pretty-name frame) title
+          (hotbar-visible-selection frame)
+          (luvcraft:luvcraft-session-selected-block session))
+    (let* ((mirror (sheet-direct-mirror (frame-top-level-sheet frame)))
+           (overlay
+             (make-instance 'luvcraft-hotbar-overlay
+                            :session session :frame frame :mirror mirror)))
+      (setf (mirror-compositor mirror) overlay)
+      (luvcraft:add-luvcraft-overlay session overlay)
+      (when (typep mirror 'luv-gpu-mirror)
+        (repaint-gpu-mirror mirror))
+      overlay)))
+
+(defun close-luvcraft-hotbar (overlay)
+  "Remove and release an OPEN-LUVCRAFT-HOTBAR overlay."
+  (check-type overlay luvcraft-hotbar-overlay)
+  (luvcraft:remove-luvcraft-overlay
+   (widget-overlay-session overlay) overlay)
+  nil)
+
+(defmethod luvcraft:attach-luvcraft-hud
+    ((session luvcraft:luvcraft-session))
+  (open-luvcraft-hotbar session))

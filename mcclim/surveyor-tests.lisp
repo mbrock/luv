@@ -32,3 +32,11 @@
       (ok (zerop sky))
       (ok (zerop block))
       (ok (eq state :unavailable)))))
+
+(deftest hotbar-palette-covers-every-placeable-block
+  (ok (= (length mcluv::*hotbar-material-colors*)
+         (length (luvcraft:placeable-block-kinds))))
+  (loop for number from 1 to 9
+        do (ok (typep (mcluv::hotbar-material-color number) 'clim:color))
+           (ok (typep (mcluv::hotbar-material-ink number 0 80)
+                      'mcluv:linear-gradient))))

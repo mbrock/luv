@@ -86,6 +86,9 @@
            #:disable-spinning-mirror
            #:open-spinning-widget-lab
            #:luvcraft-widget-overlay
+           #:luvcraft-hotbar-overlay
+           #:open-luvcraft-hotbar
+           #:close-luvcraft-hotbar
            #:open-luvcraft-widget-lab
            #:close-luvcraft-widget-lab
            #:surveyor-map

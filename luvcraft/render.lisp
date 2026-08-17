@@ -1065,6 +1065,7 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                 (list atlas-width atlas-height))
                (setf session new-session)
                (update-luvcraft-session-title session)
+               (attach-luvcraft-hud session)
                (maintain-luvcraft-residency session)
                (refresh-luvcraft-mesh session)
                (setf (canvas-event-handler canvas) session)

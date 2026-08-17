@@ -198,6 +198,18 @@
   (declare (ignore block session hit))
   nil)
 
+(defgeneric attach-luvcraft-hud (session)
+  (:documentation
+   "Attach the player HUD supplied by the loaded presentation system.
+
+The base game deliberately has no presentation-system dependency.  An
+extension such as MCLUV may specialize this at the session boundary and
+return its attached overlay."))
+
+(defmethod attach-luvcraft-hud ((session t))
+  (declare (ignore session))
+  nil)
+
 (defun clear-luvcraft-player-input (session)
   (clrhash (luvcraft-session-pressed-keys session))
   (setf (luvcraft-session-jump-requested-p session) nil)

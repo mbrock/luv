@@ -62,7 +62,8 @@
   :depends-on ("mcluv/backend" "luvcraft")
   :serial t
   :components ((:file "mcclim/surveyor")
-               (:file "mcclim/luvcraft")))
+               (:file "mcclim/luvcraft")
+               (:file "mcclim/hotbar")))
 
 (defsystem "mcluv/luvcraft-test"
   :description "Executable claims for McCLIM instruments embedded in luvcraft."

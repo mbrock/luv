@@ -123,6 +123,7 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:add-luvcraft-overlay
            #:advance-sky-clock
            #:apply-block-world-source-edits
+           #:attach-luvcraft-hud
            #:attach-lighting-state
            #:benchmark-luvcraft-frame-performance
            #:block-chunk-load-payload
@@ -313,6 +314,7 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:read-luvcraft-save
            #:release-luvcraft-overlay
            #:reconcile-lighting
+           #:refresh-luvcraft-overlay
            #:refresh-luvcraft-mesh
            #:wait-for-luvcraft-streaming-quiescence
            #:trace-luvcraft-streaming-boundary
