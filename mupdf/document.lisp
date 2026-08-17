@@ -188,6 +188,11 @@ CLIM pattern wants, so the result can be handed straight to MAKE-PATTERN."
   (string "" :type string)
   (x 0.0 :type single-float)
   (y 0.0 :type single-float)
+  ;; Where the pen actually sits.  X and Y are the line's box; a renderer
+  ;; setting the line from glyph outlines wants the baseline the document
+  ;; wrote it on, which is the first character's own origin.
+  (baseline-x 0.0 :type single-float)
+  (baseline-y 0.0 :type single-float)
   (width 0.0 :type single-float)
   (height 0.0 :type single-float)
   (size 0.0 :type single-float)
@@ -321,10 +326,25 @@ until the font element that follows names its size."
                        (destructuring-bind (&optional x0 y0 x1 y1)
                            (parse-decimals bbox)
                          (when y1
-                           (make-text-run :string (unescape-xml string)
-                                          :x x0 :y y0
-                                          :width (- x1 x0)
-                                          :height (- y1 y0))))))
+                           (let ((char-at (search "<char " text
+                                                  :start2 line-at)))
+                             (make-text-run
+                              :string (unescape-xml string)
+                              :x x0 :y y0
+                              :width (- x1 x0)
+                              :height (- y1 y0)
+                              :baseline-x
+                              (or (and char-at
+                                       (parse-decimal
+                                        (or (xml-attribute text char-at "x")
+                                            "")))
+                                  x0)
+                              :baseline-y
+                              (or (and char-at
+                                       (parse-decimal
+                                        (or (xml-attribute text char-at "y")
+                                            "")))
+                                  y1)))))))
                (setf index (1+ line-at))))
             (t
              (when pending

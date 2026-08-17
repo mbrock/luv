@@ -79,7 +79,7 @@
   :description "A sheet of PDF paper hung on a luvcraft wall."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("mcluv/luvcraft" "luv/mupdf")
+  :depends-on ("mcluv/luvcraft" "luv/mupdf" "cl-dejavu" "zpb-ttf")
   :components ((:file "mcclim/paper")))
 
 (defsystem "mcluv/luvcraft-test"

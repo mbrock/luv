@@ -1,17 +1,21 @@
 ;;; A sheet of PDF paper, standing in the luvcraft world.
 ;;;
-;;; Not a picture of a page.  MuPDF gives back the typeset lines of a page --
-;;; each with its box, its size, and the font it was set in -- and this draws
-;;; them as text, so the glyphs go through the same Slug rasterizer the rest
-;;; of luv's type does and stay sharp at whatever distance the player happens
-;;; to be standing.  A rendered pixmap would have been fewer moving parts and
-;;; would look like a photograph of paper taped to a wall.
+;;; The page is split the way #S8LIJP says to split it: the sheet is a raster
+;;; and the type is geometry.
 ;;;
-;;; The sheet itself is analytic: one rounded rectangle, lit top to bottom,
-;;; from the same primitive the inventory and the hotbar use.  The texture is
-;;; cut to the page's own proportions, so that rectangle is the whole quad --
-;;; the thing in the world is the sheet, with no frame, desk, or backdrop
-;;; around it to decide what to put in.
+;;; The sheet is one analytic rounded rectangle drawn into the mirror texture,
+;;; which is exactly what that path is good at -- a smooth fill with no detail
+;;; finer than a texel.  The texture is cut to the page's own proportions, so
+;;; that rectangle is the whole quad and there is no surround to decide about.
+;;;
+;;; The text is not in the texture at all.  MuPDF gives back each typeset line
+;;; with its baseline, its size, and the font it was set in; those are shaped
+;;; through Slug and emitted as world-space glyph instances on the sheet's own
+;;; plane, the same way a terminal wall emits its screen.  Slug evaluates the
+;;; outlines in the fragment shader at whatever resolution the pixel has, so
+;;; the page is as sharp far away as it is up close -- which is the whole
+;;; point, and which drawing the text into the texture could not do at any
+;;; texture size (#I3G0S7).
 
 (in-package #:mcluv)
 
@@ -37,6 +41,12 @@ cut to the page: the sheet is the whole quad and its edge is the page edge.")
   (merge-pathnames "build/tool-being.pdf"
                    (asdf:system-source-directory "luv"))
   "The document a sheet shows when nobody said which.")
+
+(defparameter *paper-ink-lift* 0.004
+  "How far off the sheet the type stands, in world units.
+
+Ink on paper is not coplanar with it.  Nor can it be here: glyphs at exactly
+the sheet's depth lose the depth test against the sheet and come out hollow.")
 
 (defparameter *paper-text-ink* (make-rgb-color 0.10 0.09 0.08))
 (defparameter *paper-muted-ink* (make-rgb-color 0.52 0.50 0.46))
@@ -91,78 +101,20 @@ centred with paper around it rather than stretched."
             (/ (- texture-height height) 2.0)
             width height scale)))
 
-(defun paper-condense-table (pane runs scale)
-  "How much to narrow each nominal size on this page, as size to ratio.
-
-The PDF was set in its own font and this is not that font: the substitute
-sets about a third wider, so a line justified to the measure spills off the
-page.  The document says how wide each line ended up, so the type is
-condensed until it fits again.
-
-The ratio is worked out per nominal size and not per line.  Fitting each line
-on its own looks like the obvious thing and is wrong: neighbouring lines of
-one paragraph then get sizes a few percent apart, and a paragraph whose type
-changes size line to line reads as broken in a way that a uniformly smaller
-paragraph does not.  So the widest line of a size decides for all of them."
-  (let ((table (make-hash-table :test #'eql)))
-    (dolist (run runs table)
-      (let* ((nominal (* scale (luv.mupdf:text-run-size run)))
-             (target (* scale (luv.mupdf:text-run-width run)))
-             (string (luv.mupdf:text-run-string run)))
-        (when (and (plusp nominal) (plusp target) (plusp (length string)))
-          (let ((measured (text-size pane string
-                                     :text-style (make-text-style :serif nil
-                                                                  nominal))))
-            (when (plusp measured)
-              (let ((key (luv.mupdf:text-run-size run)))
-                (setf (gethash key table)
-                      (min (/ target measured)
-                           (gethash key table 1.0)))))))))))
-
 (defmethod handle-repaint ((pane paper-pane) region)
+  "Paint the sheet, and only the sheet.  The type is world geometry."
   (declare (ignore region))
   (let ((frame (pane-frame pane)))
     (with-sheet-medium (medium pane)
       (when (typep medium 'luv-raster-medium)
         (clear-raster-medium-reliefs medium))
       (with-bounding-rectangle* (left top right bottom) pane
-        ;; The whole texture is paper.  The texture is shaped like a page, so
-        ;; the little the page's own proportions leave over is margin -- and
-        ;; margin on a sheet of paper is more paper, not a backdrop.
         (draw-analytic-rounded-rectangle*
          medium left top right bottom :radius 4
          :ink (make-linear-gradient
                0 top 0 bottom
                (make-rgb-color 0.985 0.980 0.960)
                (make-rgb-color 0.900 0.895 0.870))))
-      (multiple-value-bind (sheet-left sheet-top width height scale)
-          (with-bounding-rectangle* (left top right bottom) pane
-            (declare (ignore left top))
-            (paper-sheet-geometry frame right bottom))
-        (declare (ignore width height))
-        (let ((condense (paper-condense-table pane (paper-runs frame) scale)))
-          (dolist (run (paper-runs frame))
-            (let ((size (* scale
-                           (luv.mupdf:text-run-size run)
-                           (gethash (luv.mupdf:text-run-size run)
-                                    condense 1.0))))
-              (when (>= size 3.0)
-                (draw-text* pane (luv.mupdf:text-run-string run)
-                            (+ sheet-left (* scale (luv.mupdf:text-run-x run)))
-                            (+ sheet-top (* scale (luv.mupdf:text-run-y run)))
-                            :align-y :top
-                            :text-size size
-                            :ink *paper-text-ink*)))))
-        (draw-text* pane
-                    (format nil "~A  ·  ~D / ~D"
-                            (file-namestring
-                             (luv.mupdf:document-pathname (paper-document frame)))
-                            (1+ (paper-page frame))
-                            (luv.mupdf:document-page-count (paper-document frame)))
-                    (/ (bounding-rectangle-width pane) 2.0)
-                    (- (bounding-rectangle-height pane) 12)
-                    :align-x :center :align-y :center :text-size 10
-                    :ink *paper-muted-ink*))
       (setf (paper-painted frame) (paper-paint-state frame)))))
 
 (defun paper-paint-state (frame)
@@ -186,12 +138,188 @@ paragraph does not.  So the widest line of a size decides for all of them."
       (load-paper-page frame)
       t)))
 
+
+;;;; Setting the page as geometry
+;;;;
+;;;; One text run holds every line of the page.  The whole page shares one
+;;;; glyph atlas and one instanced draw, which is why the lines are shaped
+;;;; separately but their instance records are concatenated: the atlas is a
+;;;; property of the glyph set, and a set assembled from the whole page is one
+;;;; binding rather than one per line.
+
+(defparameter *paper-faces*
+  '((:italic . "DejaVuSerifCondensed-Italic.ttf")
+    (:bold . "DejaVuSerifCondensed-Bold.ttf")
+    (:regular . "DejaVuSerifCondensed.ttf"))
+  "The faces a page is set in.
+
+Condensed on purpose.  The documents this reads are set in Palatino-like
+faces and the ordinary DejaVu serif is about a third wider, which is what
+forced the old raster path to squeeze every line to make it fit.  A condensed
+face lands close enough that the lines simply sit where the document put
+them.")
+
+(defun paper-face-pathname (font-name)
+  "The face to set a run in, from what the document says it used."
+  (let ((name (or font-name "")))
+    (cl-dejavu:font-pathname
+     (cdr (assoc (cond ((search "Italic" name) :italic)
+                       ((search "Oblique" name) :italic)
+                       ((search "Bold" name) :bold)
+                       (t :regular))
+                 *paper-faces*)))))
+
+(defun paper-plane (overlay)
+  "The sheet's top-left corner and the unit vectors that span it.
+
+Returns the corner, a unit vector along the page's own left-to-right, a unit
+vector along its top-to-bottom, and how many world units a PDF point is."
+  (let* ((center (widget-overlay-center overlay))
+         (right (widget-overlay-right-axis overlay))
+         (up (widget-overlay-up-axis overlay))
+         (frame (widget-overlay-frame overlay))
+         (half-width (vec:vec3-length right))
+         (right-unit (vec:vec3-scale right (/ 1.0 (max 1e-6 half-width))))
+         (down-unit (vec:vec3-scale up (/ 1.0 (max 1e-6 (vec:vec3-length up)))))
+         ;; UP-AXIS points down the texture, so the top-left corner is one
+         ;; half-axis back along both.  The type also stands a fraction of a
+         ;; centimetre off the sheet: glyphs exactly coplanar with the paper
+         ;; lose the depth test against it and come out hollow, which is the
+         ;; same reason a terminal wall lifts its glyph run off its blocks.
+         (corner (add-scaled-vector center
+                                    right -1.0
+                                    up -1.0
+                                    (widget-overlay-normal-axis overlay)
+                                    *paper-ink-lift*))
+         (points-per-world (/ (* 2.0 half-width)
+                              (max 1.0 (paper-page-width frame)))))
+    (values corner right-unit down-unit points-per-world)))
+
+(defun paper-run-instances (overlay run atlas glyphs shaped font-loader)
+  "Instance records placing one shaped line on the sheet at its own baseline."
+  (multiple-value-bind (corner right-unit down-unit scale) (paper-plane overlay)
+    (multiple-value-bind (min-x min-y max-x max-y)
+        (luv.slug:slug-text-extents glyphs shaped font-loader)
+      (let* ((em (* scale (luv.mupdf:text-run-size run)))
+             (text-up (vec:vec3-scale down-unit -1.0))
+             ;; Where the pen starts, in world space.
+             (pen (add-scaled-vector
+                   corner
+                   right-unit (* scale (luv.mupdf:text-run-baseline-x run))
+                   down-unit (* scale (luv.mupdf:text-run-baseline-y run))))
+             ;; MAKE-WORLD-TEXT-INSTANCES centres a run on its own inked
+             ;; extents, so the centre that puts the pen where it belongs is
+             ;; the pen displaced by half of those extents.
+             (center (add-scaled-vector
+                      pen
+                      right-unit (* em (/ (+ min-x max-x) 2.0))
+                      text-up (* em (/ (+ min-y max-y) 2.0)))))
+        (luvcraft::make-world-text-instances
+         glyphs atlas center right-unit text-up em min-x min-y max-x max-y
+         :ink '(0.09 0.08 0.07))))))
+
+(defun paper-shaped-lines (overlay)
+  "Shape every line of the current page and place it on the sheet.
+
+Returns the concatenated instance data, every glyph placement, and the atlas
+they share, or NIL when the page has no drawable text."
+  (let* ((frame (widget-overlay-frame overlay))
+         (cache (paper-glyph-cache overlay))
+         (shapings '()))
+    ;; Shape first, so the atlas is packed once for the whole page.
+    (dolist (run (paper-runs frame))
+      (let ((string (luv.mupdf:text-run-string run)))
+        (when (plusp (length (string-trim " " string)))
+          (let* ((font (paper-face-pathname (luv.mupdf:text-run-font run)))
+                 (shaped (luv.slug:cached-slug-shaped-text cache font string)))
+            (zpb-ttf:with-font-loader (loader font)
+              (let ((glyphs (luv.slug:make-slug-glyph-placements
+                             shaped loader cache font)))
+                (when glyphs
+                  (push (list run shaped glyphs font) shapings))))))))
+    (setf shapings (nreverse shapings))
+    (when shapings
+      (let* ((all-glyphs (loop for (nil nil glyphs nil) in shapings
+                               append glyphs))
+             (atlas (luv.slug:slug-glyph-atlas-for cache all-glyphs))
+             (records
+               (loop for (run shaped glyphs font) in shapings
+                     collect (zpb-ttf:with-font-loader (loader font)
+                               (paper-run-instances overlay run atlas glyphs
+                                                    shaped loader))))
+             (total (reduce #'+ records :key #'length))
+             (data (make-array total :element-type 'single-float))
+             (cursor 0))
+        (dolist (record records)
+          (replace data record :start1 cursor)
+          (incf cursor (length record)))
+        (values data all-glyphs atlas)))))
+
 ;;;; The overlay
 
-(defclass luvcraft-paper-overlay (luvcraft-widget-overlay) ())
+(defclass luvcraft-paper-overlay (luvcraft-widget-overlay)
+  ((glyph-cache :initform nil :accessor paper-glyph-cache)
+   (text-run :initform nil :accessor paper-text-run)
+   (text-generation :initform nil :accessor paper-text-generation)
+   (frame-bind-groups :initform (make-hash-table :test #'eq)
+                      :reader paper-frame-bind-groups)))
+
+(defun clear-paper-frame-bind-groups (overlay)
+  (maphash (lambda (frame group)
+             (declare (ignore frame))
+             (ignore-errors (luv:destroy group)))
+           (paper-frame-bind-groups overlay))
+  (clrhash (paper-frame-bind-groups overlay)))
+
+(defun ensure-paper-text-run (overlay session)
+  "Build or republish the page's glyph run when the page has changed.
+
+Called at a frame boundary rather than from inside the pass: this creates
+pipelines and buffers, and the pass is no place to do that."
+  (let ((frame (widget-overlay-frame overlay)))
+    (unless (equal (paper-paint-state frame) (paper-text-generation overlay))
+      (setf (paper-text-generation overlay) (paper-paint-state frame))
+      (let ((device (luvcraft::luvcraft-session-device session)))
+        (unless (paper-glyph-cache overlay)
+          (setf (paper-glyph-cache overlay)
+                (luv.slug:make-slug-glyph-cache device)))
+        (multiple-value-bind (data glyphs atlas) (paper-shaped-lines overlay)
+          (cond
+            ((null data) nil)
+            ((paper-text-run overlay)
+             (multiple-value-bind (run atlas-changed-p)
+                 (luvcraft::replace-world-text-run-instances
+                  (paper-text-run overlay) device "page" glyphs atlas data)
+               (declare (ignore run))
+               ;; A new atlas is a new binding; the old groups name the old
+               ;; textures and have to go.
+               (when atlas-changed-p
+                 (clear-paper-frame-bind-groups overlay))))
+            (t
+             ;; The scene pass draws into the session's colour texture, not
+             ;; into the swapchain surface; a pipeline built for the surface
+             ;; format is rejected as an incompatible render pass.
+             (setf (paper-text-run overlay)
+                   (luvcraft::make-world-text-run-from-instances
+                    device
+                    (luv:gpu-texture-format
+                     (luvcraft::luvcraft-session-color-texture session))
+                    "page" (paper-face-pathname nil) nil glyphs atlas
+                    (widget-overlay-center overlay) 1.0 data
+                    :label "PDF page Slug text")))))))
+    (paper-text-run overlay)))
+
+(defun paper-frame-bind-group (overlay run frame device)
+  (or (gethash frame (paper-frame-bind-groups overlay))
+      (setf (gethash frame (paper-frame-bind-groups overlay))
+            (aref (luvcraft::make-world-text-frame-bind-groups
+                   run device (luvcraft::luvcraft-frame-uniform-buffer frame))
+                  0))))
+
 
 (defmethod luvcraft:encode-luvcraft-overlay
     ((overlay luvcraft-paper-overlay) session pass surface-texture)
+  "Draw the sheet, then set the page on it."
   (let* ((mirror (widget-overlay-mirror overlay))
          (source (mirror-texture mirror)))
     (when source
@@ -213,15 +341,30 @@ paragraph does not.  So the widest line of a size decides for all of them."
         (luv:set-pipeline pass (spinning-compositor-pipeline overlay))
         (luv:set-bind-group pass 0
                             (spinning-frame-state-bind-group frame-state))
-        (luv:draw pass 4))))
+        (luv:draw pass 4))
+      ;; The type is a second draw in the same pass, in world space, sharing
+      ;; the scene's own frame uniform rather than the compositor's.
+      (alexandria:when-let ((run (paper-text-run overlay)))
+        (let* ((device (luvcraft::luvcraft-session-device session))
+               (frame (luvcraft::luvcraft-frame-state session surface-texture))
+               (glyphs (luvcraft::world-text-run-glyphs run)))
+          (when (plusp (length glyphs))
+            (luv:set-pipeline pass (luvcraft::world-text-run-native-pipeline run))
+            (luv:set-vertex-buffer
+             pass 0 (luvcraft::world-text-run-vertex-buffer run))
+            (luv:set-vertex-buffer
+             pass 1 (luvcraft::world-text-run-instance-buffer run))
+            (luv:set-bind-group
+             pass 0 (paper-frame-bind-group overlay run frame device))
+            (luv:draw pass 6 (length glyphs)))))))
   overlay)
 
 (defmethod luvcraft:refresh-luvcraft-overlay
     ((overlay luvcraft-paper-overlay) session)
-  (declare (ignore session))
   (let ((frame (widget-overlay-frame overlay)))
     (unless (equal (paper-paint-state frame) (paper-painted frame))
-      (repaint-paper frame)))
+      (repaint-paper frame))
+    (ensure-paper-text-run overlay session))
   overlay)
 
 (defmethod luvcraft:handle-luvcraft-focus-event
@@ -270,6 +413,10 @@ paragraph does not.  So the widest line of a size decides for all of them."
 
 (defmethod luvcraft:release-luvcraft-overlay
     ((overlay luvcraft-paper-overlay))
+  (clear-paper-frame-bind-groups overlay)
+  (alexandria:when-let ((run (paper-text-run overlay)))
+    (setf (paper-text-run overlay) nil)
+    (ignore-errors (luvcraft::release-world-text-run run)))
   (let ((frame (widget-overlay-frame overlay)))
     (ignore-errors (luv.mupdf:close-document (paper-document frame))))
   (call-next-method))

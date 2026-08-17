@@ -45,6 +45,8 @@ back as pixels or as positioned text.")
            #:text-run-string
            #:text-run-x
            #:text-run-y
+           #:text-run-baseline-x
+           #:text-run-baseline-y
            #:text-run-size
            #:text-run-width
            #:text-run-height
