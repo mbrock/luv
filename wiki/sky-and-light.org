@@ -17,9 +17,14 @@ spatially varying image mathematics belongs in shaders; and the boundary
 between them should become more capable as the renderer asks more of it.
 
 Phases 0--4 and the first directional-shadow pass now have implementations in
-the codebase; HDR and bloom remain a plan.  Each phase below has a visible
-result and an evidence gate, so it can be revised from measurements without
-undoing the preceding phases.
+the codebase, and the HDR presentation stack the last phase asked for has
+landed: a linear floating-point scene attachment, a filmic curve, a bloom
+chain, and light shafts (#IC14P3).  The sky it presents became procedural
+image mathematics rather than a two-colour gradient (#9SSXDJ), and the block
+surface grew a shape of its own from what the mesher knows about each face's
+edges (#J19EBO) and what the atlas paints beside each material's colour
+(#CHUKWD).  Each phase below has a visible result and an evidence gate, so it
+can be revised from measurements without undoing the preceding phases.
 
 * What the critique changed
 :PROPERTIES:
@@ -420,6 +425,105 @@ test world works even though the current generator resides at Y=0.  Random
 edit and residency sequences leave the runtime field bit-identical to the
 reference relight after queues settle.
 
+* Meshing also carries what a fragment cannot see
+:PROPERTIES:
+:ID: J19EBO
+:END:
+
+#SKMESH establishes why light readings belong in the vertex product: they are
+what the mesher knows and the fragment stage does not.  Face *edges* are the
+same kind of fact, and they turn out to be the difference between a block
+world which reads as carved solids and one which reads as a lit grid.
+
+A block face is flat geometry, but a real surface rounds over where it ends
+and fillets where it meets a wall.  Perturbing the shading normal near the
+face's boundary gives both, and needs no mesh change beyond knowing where the
+fragment sits inside its cell.  Doing it at *every* boundary, though, draws a
+seam across the middle of an open plain, where the face merely continues into
+an identically oriented neighbour and there is no edge at all.  A fragment
+cannot tell those cases apart; the mesher can.
+
+So =block-face-edge-shaping-components= classifies each face's four in-plane
+edges once, from the same neighbourhood the corner occlusion already samples:
+
+| classification | what lies across the edge  | what the surface does           |
+|----------------+----------------------------+---------------------------------|
+| concave (-1)   | a block rises at the edge  | fillet inward, gather occlusion |
+| flush (0)      | the same plane continues   | nothing                         |
+| convex (+1)    | nothing                    | round over                      |
+
+The four signed values become a fifth vertex lane, =:float32x4=, and the
+fragment stage multiplies each of its four boundary ramps by the matching
+sign.  One expression therefore serves all three cases, and the sign is what
+turns a round-over into a fillet.  The two in-plane axes are chosen from the
+face normal by the same rule on both sides of the ABI, which is what makes U
+and V mean the same thing to the mesher and to the shader.
+
+This widened the vertex from a 48-byte to a 64-byte stride, and required the
+portable vertex-attribute vocabulary to grow past =:float32x3= alone --- a
+gap #SKMESH's "four =:float32x3= lanes" had left standing in both backends.
+
+Two later corrections, both about making the round-over read as a *shape*
+(#YUB8CH).
+
+* A round-over is an arc, not a leaning plane
+:PROPERTIES:
+:ID: YUB8CH
+:END:
+
+The first version of #J19EBO's shaping added a scaled tangent to the face
+normal and normalized the sum.  That can only ever reach the arctangent of
+the scale --- a strength of 0.42 buys 23 degrees --- so a legible edge needs
+an implausible scale, and even then the shading bunches into the last sliver
+of the ramp because the tangent grows linearly while the angle saturates.
+
+Rotating the normal through an angle instead sweeps it evenly from the face
+toward the edge, which is what a fillet of a given radius actually does.  The
+in-plane lean gives the direction and the ramp gives the fraction of a
+quarter turn, and the normal is the corresponding point on that arc.  The
+guarded denominator matters more than it looks: over the flat middle of a
+face the lean is exactly zero, so the direction is undefined and only the
+guard keeps it from being a division by zero --- but the angle is zero there
+too, so the undefined direction is multiplied away.
+
+The second correction is that a round-over is only legible if it is a few
+pixels wide.  Held to a fixed fraction of a cell it dwindles as blocks
+recede, and everything in the middle distance flattens back into a card long
+before it is genuinely unresolvable.  The block material already measures its
+own texel footprint from screen derivatives of the atlas coordinate, for the
+relief fade; the same measurement grows the bevel width until the edge is
+worth drawing, bounded above so it never eats the face it is an edge of, and
+then fades it out.  So the two shapings share one measurement and use it in
+opposite directions: relief shrinks with distance, the round-over widens.
+
+* The atlas paints relief as well as colour
+:PROPERTIES:
+:ID: CHUKWD
+:END:
+
+Colour is only half of what a material looks like.  The other half is its
+micro-surface: whether it is granular, grooved, tufted, or faceted.  luvcraft's
+atlas was already generated arithmetic rather than an asset, one
+=paint-block-atlas-tile= method per numbered tile, so the honest place for
+that half is the same arithmetic.  =paint-block-atlas-relief= paints a height
+field; colour variation reads that field, and =make-block-normal-atlas=
+materializes its tile-clamped central difference as a linear tangent-space
+normal map.  The block material reads that map once instead of reconstructing
+the gradient with four dependent texture taps per fragment.
+
+The colour atlas stays sRGB with ordinary opaque coverage.  The normal atlas
+is linear RGBA8: RGB is the encoded unit normal and alpha retains the source
+height for inspection.  The shader declares those sampled meanings as
+=:surface-normal-sample= and =:surface-relief= rather than treating channels
+as unlabeled numbers.  #SKOPEN's decision that bloom must not commandeer
+*scene* alpha remains independent of both material textures.
+
+Relief and bevel are both sub-block detail, so both fade out on a measured
+texel footprint from the atlas UV derivatives: distant terrain neither
+sparkles nor shows a lit grid.  A material's relief is one EQL method, so a
+live image can re-sculpt grass tufts or stone cracks and rebuild both dense
+atlases without touching the rest of the palette.
+
 * Phase 3: one crystal proves emission and edit propagation
 :PROPERTIES:
 :ID: SKCRYS
@@ -464,6 +568,76 @@ resize handling, usage flags, and completion-safe destruction.
 The first bloom target is deliberately the crystal at night.  Exposure,
 threshold, radius, and intensity are live profile values, while the pinned
 smoke profile keeps deterministic output.
+
+* What the presentation stack became
+:PROPERTIES:
+:ID: IC14P3
+:END:
+
+The plan of #SKHDR is built, and the shape it took is worth recording because
+two of its decisions were made by the implementation rather than by the plan.
+
+The scene attachment is =:rgba16-float= and every scene-stage pipeline targets
+it: block surfaces, the sky triangle, world text, the terminal wall's glyph
+and cell runs, the crosshair.  Only the presentation image is an sRGB
+eight-bit surface, and the hardware encode on that write is the only gamma
+step in the frame.  Fragments therefore write radiance, and a sun disc, a
+specular glint, or a crystal is allowed to be many times display white.
+
+Presentation runs a quarter-resolution lens chain between the scene pass and
+the tone map: a soft-knee bright pass with four scene taps per chain texel, a
+separable nine-tap gaussian expressed as five linear samples, and a radial
+sweep toward the solar disc.  The chain ping-pongs between two attachments, so
+the blurred bloom ends in one and the shafts in the other, and presentation
+adds both into linear scene radiance before the fitted ACES curve, a small
+vignette, and the sRGB write.
+
+Two departures from the plan:
+
+- The four lens stages are *four CLOS roles*, not one shader with a mode lane.
+  =:bloom-bright=, =:bloom-horizontal=, =:bloom-vertical=, and =:sun-shafts=
+  share a bind group shape and a fullscreen vertex stage and differ only in
+  which fragment method they name, which is how the rest of #M3D7QK's live
+  pipelines already work.
+- The shafts do not march the shadow map as #BAP0QU proposes.  They sweep the
+  already-blurred bright image toward the sun's screen position, because
+  terrain which occludes the sun is already dark in that image.  The cheaper
+  effect arrived first; the marched version remains worth measuring against it.
+
+Grading is art direction rather than architecture, so exposure, bloom gain,
+threshold, shaft gain and decay, and vignette are ordinary special variables
+that a SLY eval retunes on the running game without rebuilding a pipeline.
+
+[[file:images/hdr-day-vista.png]]
+
+[[file:images/hdr-night-crystal.png]]
+
+* A sky worth tone mapping
+:PROPERTIES:
+:ID: 9SSXDJ
+:END:
+
+An HDR path only pays for itself if something in the frame is genuinely
+bright, and a two-colour gradient with a soft disc is not.  The sky fragment
+stage became image mathematics over the view ray and the frame environment: a
+shaped vertical gradient between the profile's horizon and zenith colours, a
+warm low band and two Mie lobes around the sun, a fractal-noise cloud deck
+projected onto a plane at cloud height and drifting with an elapsed time the
+frame environment now carries, stars at night, and a solar disc drawn at a few
+times the sun's true angular radius and pushed far past display white so the
+bright pass has something real to feed on.
+
+Only the last few degrees above level fade into the fog colour distant terrain
+fades to.  The wide horizon blend the earlier gradient used washed the whole
+lower sky into haze, which reads as a rendering limitation rather than as
+weather.
+
+The noise is lattice value noise, and its hash taught a lesson worth keeping:
+hashing the collapsed index $x + 57y + 113z$ through a sine gives every plane
+of constant index the same value, and at star-field frequencies those planes
+are plainly visible as streaks across the sky.  Folding a site's own
+components against each other has no preferred direction, and costs less than
+eight sines besides.
 
 * Later: real-time shadows, not baked animated sunlight
 :PROPERTIES:
@@ -1023,7 +1197,76 @@ after an explained geometric correction; normal and shadow-only derivatives
 both improve substantially; contact remains attached; and tests, SPIR-V
 validation, runtime capture, and smoke pass.
 
-** IDEA HDR crystal bloom
+** DONE The shimmer that only noon could show
+:PROPERTIES:
+:ID: 0604PY
+:END:
+
+Intent: #X9Q2YS removed the field-wide receiver-plane acne and left cast
+shadows shimmering anyway.  Play reported the residue as worst near noon,
+which is a strong clue: a defect with a preferred hour has a mechanism that
+depends on the sun's elevation.
+
+Evidence:
+
+- A frozen-sun, frozen-camera control over 20 frames produced a first
+  derivative of exactly zero, so the capture is bit-deterministic and every
+  measured change is sun motion rather than instrument noise.  Worth doing
+  first; it costs one run and it retires a whole class of explanation.
+- Presentation now hands the =--shadow-only= diagnostic through ungraded.
+  Exposure, the filmic curve, the lens chain, and the vignette had all
+  arrived between #X9Q2YS and this work, and every one of them distorts the
+  quantity the diagnostic exists to measure.  An instrument that shares a
+  pipeline with the picture needs saying so.
+- At pinned noon the diagnostic plate showed fine vertical striping across
+  wall faces, not activity at cast-shadow boundaries.  Those are faces the
+  sun barely reaches, where the receiver plane runs almost parallel to the
+  light: every filter tap lands an ill-conditioned distance away and the
+  answer is noise.  #X9Q2YS's bounded denominator keeps that finite without
+  making it mean anything.  Near noon it is *every vertical face at once*,
+  which is the hour dependence.
+- A surface turned away from the light has no shadow decision to make, so
+  the material now fades the decision toward lit as the cosine falls, handing
+  over exactly where the denominator bound begins.  It costs nothing visually
+  because the same cosine multiplies the direct term to zero.  Raw shadow
+  visibility at noon: mean first derivative 0.00117895 to 0.00052242, changed
+  area 0.08791 to 0.03441.
+- The second cause was the light basis, and it is the one #X9Q2YS could not
+  have found at dusk.  Texel snapping stabilizes the projection against
+  translation and can do nothing about rotation, so the roll about the light
+  axis is a free choice worth making well.  World up is badly conditioned for
+  it: the sun's angle to world up changes all day, the transverse component
+  collapses toward the orbit tilt as the sun climbs, and the roll rate
+  therefore peaks at noon --- spinning the whole texel grid under the world
+  exactly when the sun is highest.  The sun's own axis of revolution
+  (=sky-sun-orbit-axis=) keeps a constant angle to the sun at every hour.
+  Noon fell further, to 0.00020979 and 0.02110: 82.2 and 76.0 percent below
+  the start.
+- The trade is real and was measured rather than assumed.  At dusk the new
+  basis is slightly *worse*, 0.00050110 to 0.00061021, because world up
+  happens to be near-stationary when the sun is low.  A uniformly conditioned
+  reference costs a little at the best hour and saves a great deal at the
+  worst one; the worst hour is what play notices.
+- In the ordinary rendered image at noon, mean first derivative fell from
+  0.00016889 to 0.00006079 (64.0 percent) and changed area from 0.02105 to
+  0.00812 (61.4 percent).  The analytic yard keeps attached pillar contact
+  and a coherent penumbra.
+- The specular lobe added with #IC14P3 was missing its cosine, which had
+  given the noise a path into the visible image on exactly the faces where it
+  was worst.
+
+The lesson worth keeping is about evidence rather than shadows: #X9Q2YS
+settled on one explanation using captures pinned at 0.70, and its
+measurements were honest.  The hour it chose was the hour where the second
+cause is weakest.  A defect that play reports as time-dependent should be
+measured across the day before it is explained.
+
+Done when: a frozen control proves the instrument; the diagnostic is
+ungraded again; both causes are separately measured at the hour that shows
+them; the day-long trade is stated rather than hidden; and contact remains
+attached.
+
+** DONE HDR crystal bloom
 :PROPERTIES:
 :ID: WLHDRB
 :END:
@@ -1031,16 +1274,44 @@ validation, runtime capture, and smoke pass.
 Intent: give emissive materials headroom and bloom without abusing alpha or
 the current LDR scene target.
 
+Observed: the scene attachment is =:rgba16-float=, presentation applies
+exposure and a fitted ACES curve, and a quarter-resolution bright/blur/sweep
+chain adds bloom and shafts in linear light before that curve (#IC14P3).  The
+crystal-at-night capture in #IC14P3 shows the emissive blocks blooming into a
+dark sky while the terminal wall beside them stays readable and the ground
+they light stays in the toe of the curve rather than crushing.  Scene alpha
+was not commandeered; the relief channel #CHUKWD uses is normal-atlas alpha,
+which is a different surface and is declared as what it holds.
+
+The lens attachments are session-owned and retire with the rest of the
+session's GPU resources, but resize is *not* handled --- and was not handled
+for the scene or depth attachments before this either, so the gap is
+pre-existing rather than new.  #YMAQQD carries it.
+
+Exposure, bloom gain, threshold, shaft gain and decay, and vignette are live
+specials rather than sky-profile keyframes.  A profile lane is the better home
+once a keyframed value is actually wanted for time of day; nothing so far has
+wanted one.
+
+** TODO Rebuild the offscreen attachments when the canvas resizes
+:PROPERTIES:
+:ID: YMAQQD
+:END:
+
+Intent: the scene colour, depth, presentation, and lens-chain attachments are
+all created once from the canvas extent at session start.  A resized window
+therefore presents a stale-sized image.  The bug predates the lens chain, but
+the chain multiplies the number of textures which have to agree.
+
 Evidence to gather:
 
-- A linear HDR scene texture, tone-map pass, and LDR presentation copy exist
-  with explicit resize and lifetime handling.
-- Bright extraction and blur are driven by live profile values and remain
-  deterministic under a pinned capture.
+- what the canvas actually reports and when, on a live resize; and
+- whether frame-state bind groups can be invalidated by extent the way they
+  are already keyed by surface texture.
 
-Done when: a crystal-at-night smoke image has stable tone mapping and
-restrained bloom, and the intermediate resources retire through the existing
-completion frontier.
+Done when: a resized window presents a correctly sized frame, the old
+attachments retire through the completion frontier, and a capture after resize
+matches a capture taken at that size from the start.
 
 * Decisions now made; questions left to evidence
 :PROPERTIES:
@@ -1064,7 +1335,11 @@ Made here:
   pass with a continuous light basis and round, blocker-distance-guided
   filtering; analytic, camera-motion, and explicit sun-motion captures provide
   distinct evidence;
-- bloom waits for an HDR scene path and does not commandeer alpha.
+- bloom waits for an HDR scene path and does not commandeer scene alpha;
+- what the mesher knows about a face and the fragment stage cannot see travels
+  in the vertex product, edges as well as light (#J19EBO);
+- a material's micro-surface is generated arithmetic beside its colour, not an
+  asset (#CHUKWD).
 
 Questions for probes rather than prior debate:
 

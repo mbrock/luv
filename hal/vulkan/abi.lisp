@@ -73,13 +73,17 @@
   (:3d 2))
 
 (cffi:defcenum (format :uint32 :allow-undeclared-values t)
+  (:r8-unorm 9)
+  (:r8g8-unorm 16)
   (:r8g8b8a8-unorm 37)
   (:r8g8b8a8-srgb 43)
   (:b8g8r8a8-unorm 44)
   (:b8g8r8a8-srgb 50)
   (:r16g16-uint 81)
   (:r16g16b16a16-sfloat 97)
+  (:r32g32-sfloat 103)
   (:r32g32b32-sfloat 106)
+  (:r32g32b32a32-sfloat 109)
   (:d32-sfloat 126))
 
 (cffi:defcenum (image-tiling :uint32)
@@ -249,7 +253,9 @@
   (:graphics #x1)
   (:compute #x2)
   (:transfer #x4)
-  (:sparse-binding #x8))
+  (:sparse-binding #x8)
+  (:video-decode #x20)
+  (:video-encode #x40))
 
 (cffi:defbitfield (image-usage-flags :uint32)
   (:transfer-src #x1)
@@ -302,7 +308,9 @@
 (cffi:defbitfield (image-aspect-flags :uint32)
   (:color #x1)
   (:depth #x2)
-  (:stencil #x4))
+  (:stencil #x4)
+  (:plane-0 #x10)
+  (:plane-1 #x20))
 
 (cffi:defbitfield (access-flags :uint32)
   (:depth-stencil-attachment-read #x200)
@@ -994,6 +1002,13 @@
 
 (defvkfun "vkEnumerateInstanceExtensionProperties"
     checked-result
+  (layer-name :pointer)
+  (property-count :pointer)
+  (properties :pointer))
+
+(defvkfun "vkEnumerateDeviceExtensionProperties"
+    checked-result
+  (physical-device :pointer)
   (layer-name :pointer)
   (property-count :pointer)
   (properties :pointer))

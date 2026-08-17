@@ -52,6 +52,69 @@
       (when band-texture (destroy band-texture))
       (destroy device))))
 
+(deftest adopted-metal-textures-enter-explicit-residency
+  (let* ((device
+           (request-gpu-device (make-instance 'metal-gpu-provider)))
+         (native nil)
+         (texture nil))
+    (unwind-protect
+         (progn
+           (setf native
+                 (metal:new-metal-texture
+                  (luv::metal-native-object device) 8 8
+                  metal::+pixel-format-r8-unorm+
+                  metal:+texture-usage-shader-read+
+                  :storage-mode metal:+storage-mode-private+
+                  :label "adopted residency probe"))
+           (let ((owner
+                   (objc:objective-c-pointer
+                    (objc:retain-objective-c-object native))))
+             (setf texture
+                   (adopt-native-texture
+                    device native owner
+                    (make-texture-descriptor
+                     :size '(8 8) :dimensions :2d :format :r8-unorm
+                     :usage '(:texture-binding)))))
+           (ok (luv::metal-texture-resident-p texture))
+           (ok (not (luv::metal-texture-owned-p texture)))
+           (destroy texture)
+           (setf texture nil)
+           ;; The external-owner retain was consumed, but this original
+           ;; native retain remains independently owned by the test.
+           (ok (not (objc:objective-c-object-released-p native))))
+      (when texture (destroy texture))
+      (when native (objc:release-objective-c-object native))
+      (destroy device))))
+
+(deftest metal-coalesces-multiple-sampled-texture-preparations
+  (let* ((device
+           (request-gpu-device (make-instance 'metal-gpu-provider)))
+         (encoder nil)
+         (color nil)
+         (depth nil))
+    (unwind-protect
+         (progn
+           (setf encoder (create device (make-command-encoder-descriptor))
+                 color
+                 (create device
+                         (make-texture-descriptor
+                          :size '(8 8) :dimensions :2d :format :rgba8-unorm
+                          :usage '(:render-attachment :texture-binding)))
+                 depth
+                 (create device
+                         (make-texture-descriptor
+                          :size '(8 8) :dimensions :2d :format :depth32-float
+                          :usage '(:render-attachment :texture-binding))))
+           (prepare-texture encoder color :texture-binding)
+           (prepare-texture encoder depth :texture-binding)
+           (ok (luv::metal-encoder-pending-consumer-barrier encoder))
+           (ok (gethash color (luv::metal-encoder-resources encoder)))
+           (ok (gethash depth (luv::metal-encoder-resources encoder))))
+      (when encoder (destroy encoder))
+      (when depth (destroy depth))
+      (when color (destroy color))
+      (destroy device))))
+
 (deftest world-text-cache-reuses-shaping-and-device-glyphs
   (let* ((device
            (request-gpu-device (make-instance 'metal-gpu-provider)))
@@ -286,12 +349,13 @@
                    :vertex
                    `(:module ,vertex-module
                      :buffers
-                     ((:array-stride 48
+                     ((:array-stride 64
                        :attributes
                        ((:shader-location 0 :offset 0 :format :float32x3)
                         (:shader-location 1 :offset 12 :format :float32x3)
                         (:shader-location 2 :offset 24 :format :float32x3)
-                        (:shader-location 3 :offset 36 :format :float32x3)))))
+                        (:shader-location 3 :offset 36 :format :float32x3)
+                        (:shader-location 4 :offset 48 :format :float32x4)))))
                    :fragment
                    `(:module ,fragment-module
                      :targets
@@ -736,3 +800,76 @@
                          (+ resources-before (* 4 state-count)))))))
          (when session
            (stop-luvcraft session)))))))
+
+(deftest metal-storage-buffers-carry-packed-words-to-mesh-pipelines
+  (let ((device
+          (request-gpu-device (make-instance 'metal-gpu-provider)))
+        (terms nil)
+        (uniform nil)
+        (layout nil)
+        (bind-group nil))
+    (unwind-protect
+         (progn
+           (setf terms
+                 (create
+                  device
+                  (make-buffer-descriptor
+                   :label "storage words" :size 32 :usage '(:storage)))
+                 uniform
+                 (create
+                  device
+                  (make-buffer-descriptor
+                   :label "storage words uniform" :size 16
+                   :usage '(:uniform))))
+           ;; Sixty-four-bit words round-trip through the shared buffer.
+           (write-buffer terms
+                         (make-array 4 :element-type '(unsigned-byte 64)
+                                       :initial-contents
+                                       '(1 #x123456789abcdef0
+                                         #xffffffffffffffff 0)))
+           (let ((bytes (read-buffer terms)))
+             (ok (= 32 (length bytes)))
+             (ok (= 1 (aref bytes 0)))
+             (ok (= #xf0 (aref bytes 8)))
+             (ok (= #x12 (aref bytes 15)))
+             (ok (= #xff (aref bytes 23))))
+           ;; A one-word offset is legal for a 64-bit array; a half word is not.
+           (write-buffer terms
+                         (make-array 1 :element-type '(unsigned-byte 64)
+                                       :initial-contents '(7))
+                         :offset 8)
+           (ok (= 7 (aref (read-buffer terms) 8)))
+           (ok (signals
+                (write-buffer terms
+                              (make-array 1 :element-type '(unsigned-byte 64)
+                                            :initial-contents '(7))
+                              :offset 4)
+                'gpu-error))
+           ;; Storage buffers bind beside uniform buffers, by usage.
+           (setf layout
+                 (create
+                  device
+                  (make-bind-group-layout-descriptor
+                   :entries '((:binding 0 :type :uniform-buffer)
+                              (:binding 1 :type :storage-buffer)))))
+           (ok (signals
+                (create
+                 device
+                 (make-bind-group-descriptor
+                  :layout layout
+                  :entries `((:binding 0 :resource ,uniform)
+                             (:binding 1 :resource ,uniform))))
+                'gpu-error))
+           (setf bind-group
+                 (create
+                  device
+                  (make-bind-group-descriptor
+                   :layout layout
+                   :entries `((:binding 0 :resource ,uniform)
+                              (:binding 1 :resource ,terms)))))
+           (ok (typep bind-group 'luv::metal-gpu-bind-group)))
+      (when bind-group (destroy bind-group))
+      (when layout (destroy layout))
+      (when uniform (destroy uniform))
+      (when terms (destroy terms))
+      (destroy device))))

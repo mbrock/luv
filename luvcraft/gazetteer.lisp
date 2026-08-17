@@ -24,6 +24,8 @@
                       :reader luvcraft-gazetteer-view-sky-clock-factory)
    (sky-profile-factory :initarg :sky-profile-factory
                         :reader luvcraft-gazetteer-view-sky-profile-factory)
+   (critter-factory :initarg :critter-factory
+                    :reader luvcraft-gazetteer-view-critter-factory)
    (width :initarg :width :initform nil
           :reader luvcraft-gazetteer-view-width)
    (height :initarg :height :initform nil
@@ -59,6 +61,49 @@
     (relight-block-world world)
     world))
 
+(defun make-gazetteer-meadow-world ()
+  "A small open grass meadow with a sandy patch, for looking at animals."
+  (let ((world (make-block-world
+                :source (make-instance 'gazetteer-open-sky-source))))
+    (ensure-world-chunk world 0 0 0)
+    (loop for x below 16 do
+      (loop for z below 16 do
+        (setf (world-block-at world x 0 z) *dirt-block*
+              (world-block-at world x 1 z)
+              (if (and (<= 9 x 14) (<= 2 z 7))
+                  *sand-block*
+                  *grass-block*))))
+    ;; A couple of blocks for scale, and something for a turtle to walk around.
+    (setf (world-block-at world 4 2 11) *stone-block*
+          (world-block-at world 5 2 11) *stone-block*
+          (world-block-at world 4 3 11) *stone-block*)
+    (relight-block-world world)
+    world))
+
+(defun make-gazetteer-turtle (x y z yaw gait-phase &key resting-p (seed 7))
+  "Pose one turtle for a still photograph rather than letting it wander."
+  (let ((turtle (make-instance 'turtle
+                               :seed seed
+                               :position (make-vec3 x y z)
+                               :yaw yaw :heading yaw)))
+    (setf (turtle-gait-phase turtle) gait-phase
+          (turtle-resting-p turtle) resting-p
+          (critter-grounded-p turtle) t)
+    turtle))
+
+(defun make-gazetteer-turtle-population ()
+  "Three turtles posed across the meadow: mid-stride, turning, and resting."
+  (let ((population (make-instance 'critter-population)))
+    (dolist (turtle
+             (list (make-gazetteer-turtle 7.8d0 2d0 6.7d0 2.15d0 1.1d0
+                                          :seed 11)
+                   (make-gazetteer-turtle 10.4d0 2d0 8.4d0 4.90d0 3.9d0
+                                          :seed 12)
+                   (make-gazetteer-turtle 5.0d0 2d0 8.0d0 0.90d0 0d0
+                                          :resting-p t :seed 13)))
+      (add-critter population turtle))
+    population))
+
 (defun make-pinned-sky-clock (day-fraction)
   (make-instance 'sky-clock :pinned-day-fraction day-fraction))
 
@@ -77,7 +122,7 @@
 
 (defun make-luvcraft-gazetteer-view
     (name description title world-factory camera-factory day-fraction
-     &key width height sky-profile-factory)
+     &key width height sky-profile-factory critter-factory)
   (make-instance
    'luvcraft-gazetteer-view
    :name name
@@ -87,6 +132,9 @@
    :camera-factory camera-factory
    :sky-clock-factory (lambda () (make-pinned-sky-clock day-fraction))
    :sky-profile-factory (or sky-profile-factory #'make-default-sky-profile)
+   :critter-factory
+   (or critter-factory
+       (lambda () (make-instance 'critter-population)))
    :width width
    :height height))
 
@@ -140,6 +188,17 @@
                               :yaw 0.05d0 :pitch -0.28d0))
     0.90)
    (make-luvcraft-gazetteer-view
+    :turtle-meadow
+    "Three posed turtles on a grass meadow: model, materials, and cast shadow."
+    "luvcraft gazetteer - turtle meadow"
+    (lambda () (make-gazetteer-meadow-world))
+    (lambda () (make-instance 'fly-camera
+                              :position (make-vec3 7.4d0 2.85d0 3.4d0)
+                              :yaw 0.10d0 :pitch -0.20d0))
+    0.42
+    :width 960 :height 640
+    :critter-factory #'make-gazetteer-turtle-population)
+   (make-luvcraft-gazetteer-view
     :shadow-yard
     "A low sun over a flat receiver with elevated block casters."
     "luvcraft gazetteer - shadow yard"
@@ -187,7 +246,9 @@
          (sky-clock
            (funcall (luvcraft-gazetteer-view-sky-clock-factory view)))
          (sky-profile
-           (funcall (luvcraft-gazetteer-view-sky-profile-factory view))))
+           (funcall (luvcraft-gazetteer-view-sky-profile-factory view)))
+         (critters
+           (funcall (luvcraft-gazetteer-view-critter-factory view))))
     (capture-hidden-luvcraft-screenshot
      pathname
      :title (luvcraft-gazetteer-view-title view)
@@ -196,6 +257,7 @@
      :provider provider
      :world world
      :camera camera
+     :critters critters
      :sky-clock sky-clock
      :sky-profile sky-profile)
     pathname))
@@ -225,9 +287,12 @@
          (sky-clock
            (funcall (luvcraft-gazetteer-view-sky-clock-factory view)))
          (sky-profile
-           (funcall (luvcraft-gazetteer-view-sky-profile-factory view))))
+           (funcall (luvcraft-gazetteer-view-sky-profile-factory view)))
+         (critters
+           (funcall (luvcraft-gazetteer-view-critter-factory view))))
     (capture-hidden-luvcraft-frames
      directory
+     :critters critters
      :count count :forward-step forward-step :yaw-step yaw-step
      :day-start day-start :day-step day-step
      :difference-scale difference-scale

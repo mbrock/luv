@@ -379,6 +379,16 @@
     (ok (= 10 (blocklight-at world 15 8 8)))
     (ok (= 9 (blocklight-at world 16 8 8)))))
 
+(deftest compiled-frontier-light-is-the-production-default
+  (ok (eq :compiled *voxel-light-solver*))
+  (let ((request
+          (make-instance 'luvcraft::block-light-production-request
+                         :key '(:light)
+                         :region nil
+                         :dependency-stamp nil)))
+    (ok (eq :compiled
+            (luvcraft::block-light-production-request-solver request)))))
+
 (deftest bucket-frontier-admission-does-not-construct-a-type-per-site
   (let ((frontier
           (luvcraft.frontier:make-bucket-frontier

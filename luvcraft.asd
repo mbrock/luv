@@ -22,6 +22,7 @@
   :author "Mikael Brockman"
   :depends-on ("luv"
                "luv/ghostty"
+               "luv/libav"
                "luv/terminal/canvas"
                "luvcraft/world"
                "cl-dejavu"
@@ -40,6 +41,7 @@
                  (:file "fields")
                  (:file "production")
                  (:file "blocks")
+                 (:file "inventory")
                  (:file "terrain")
                  (:file "frontier")
                  (:file "light")
@@ -47,12 +49,16 @@
                  (:file "mesher")
                  (:file "particles")
                  (:file "simulation")
+                 (:file "critters")
                  (:file "persistence")
                  (:file "sky")
                  (:file "frame-performance")
                  (:file "live-pipeline")
+                 (:file "release")
                  (:file "text")
+                 (:file "video-screen")
                  (:file "app")
+                 (:file "riding")
                  (:file "streaming")
                  (:file "render")
                  (:file "play")

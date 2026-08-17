@@ -394,7 +394,7 @@
              (msl:msl-document-entry-point document))
             #'msl:msl-parameter-name)))
     (ok (search "The sampled xyz lanes hold linear rgb" source))
-    (ok (search "The sampled w lane holds opacity" source))
+    (ok (search "The sampled w lane holds surface relief" source))
     (ok (eq resource (msl:msl-parameter-origin parameter)))))
 
 (deftest target-context-precedes-operator-identity
@@ -498,3 +498,18 @@
       (ok (eq :unsupported-msl-stage (reason-for compute)))
       (ok (eq :unsupported-msl-descriptor-set
               (reason-for descriptor-set))))))
+
+(deftest storage-buffers-and-bit-fields-lower-to-device-pointers-and-shifts
+  (let ((source
+          (msl:msl-document-source
+           (msl:compile-msl (storage-site-fragment-probe)))))
+    (ok (search "const device ulong* sites [[buffer(1)]]" source))
+    (ok (search "const device uint4* words [[buffer(2)]]" source))
+    (ok (search "ulong term = sites[uint(3.0f)];" source))
+    (ok (search "words[extent].x" source))
+    ;; A 64-bit field masks with a 64-bit literal, a 32-bit one with a
+    ;; 32-bit literal, and a field reaching the top bit needs no mask.
+    (ok (search "((term >> 4ul) & 0xFFFFFFul)" source))
+    (ok (search "((term >> 0ul) & 0xFul)" source))
+    (ok (search "(word >> 16u)" source))
+    (ok (search "uint whole = (word);" source))))

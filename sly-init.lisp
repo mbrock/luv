@@ -11,6 +11,8 @@
 (asdf:load-system :luv)
 (asdf:load-system :luvcraft)
 (asdf:load-system :luv-wiki)
+(asdf:load-asd (merge-pathnames #P"luft.asd" *load-truename*))
+(asdf:load-system :luft/render)
 
 (defun register-luv-readtables ()
   "Tell Slynk which packages read under a named readtable, so C-c C-c and

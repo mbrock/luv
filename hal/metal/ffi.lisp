@@ -55,6 +55,8 @@
 (defconstant +pixel-format-bgra8-unorm-srgb+ 81)
 (defconstant +pixel-format-rgba8-unorm+ 70)
 (defconstant +pixel-format-rgba8-unorm-srgb+ 71)
+(defconstant +pixel-format-r8-unorm+ 10)
+(defconstant +pixel-format-rg8-unorm+ 30)
 (defconstant +pixel-format-rg16-uint+ 63)
 (defconstant +pixel-format-rgba16-float+ 115)
 (defconstant +pixel-format-depth32-float+ 252)
@@ -72,7 +74,9 @@
 (defconstant +function-type-fragment+ 2)
 (defconstant +function-type-mesh+ 7)
 (defconstant +function-type-object+ 8)
+(defconstant +vertex-format-float2+ 29)
 (defconstant +vertex-format-float3+ 30)
+(defconstant +vertex-format-float4+ 31)
 (defconstant +vertex-step-function-per-vertex+ 1)
 (defconstant +vertex-step-function-per-instance+ 2)
 (defconstant +primitive-topology-class-triangle+ 3)
@@ -669,7 +673,9 @@ rejection.  Source and names cross only as in-memory NSString objects."
             (%set-vertex-attribute-format
              native-attribute
              (ecase (getf attribute :format)
-               (:float32x3 +vertex-format-float3+)))
+               (:float32x2 +vertex-format-float2+)
+               (:float32x3 +vertex-format-float3+)
+               (:float32x4 +vertex-format-float4+)))
             (%set-vertex-attribute-offset
              native-attribute (getf attribute :offset))
             (%set-vertex-attribute-buffer-index native-attribute binding))))))

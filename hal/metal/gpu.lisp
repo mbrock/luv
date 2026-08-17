@@ -54,7 +54,11 @@
 
 (defclass metal-gpu-texture (gpu-texture metal-gpu-object)
   ((device :initarg :device :reader metal-texture-device)
-   (owned-p :initarg :owned-p :initform t :reader metal-texture-owned-p)))
+   (owned-p :initarg :owned-p :initform t :reader metal-texture-owned-p)
+   (resident-p :initarg :resident-p :initform nil
+               :reader metal-texture-resident-p)
+   (external-owner :initarg :external-owner :initform nil
+                   :reader metal-texture-external-owner)))
 
 (defclass metal-gpu-texture-view (gpu-texture-view metal-gpu-object)
   ((device :initarg :device :reader metal-texture-view-device)))
@@ -509,7 +513,7 @@ backend-local extension; ordinary callers use SUBMIT.  #T9K4RC"
              (otherwise nil))))
     (unless (and usage
                  (every (lambda (value)
-                          (member value '(:uniform :vertex :copy-dst)))
+                          (member value '(:uniform :storage :vertex :copy-dst)))
                         usage))
       (reject-metal-gpu-request descriptor :unsupported-buffer-usage raw))
     usage))
@@ -555,24 +559,40 @@ backend-local extension; ordinary callers use SUBMIT.  #T9K4RC"
                (metal-device-residency-set device)))
             (luv.objective-c:release-objective-c-object native-buffer)))))))
 
+(defun buffer-data-foreign-type (data)
+  "Return the CFFI element type and byte size for a one-dimensional DATA
+array of single-floats or unsigned bytes, words, or double words."
+  (let ((element-type (and (arrayp data) (= 1 (array-rank data))
+                           (array-element-type data))))
+    (cond ((null element-type) nil)
+          ((subtypep element-type 'single-float) (values :float 4))
+          ((subtypep element-type '(unsigned-byte 8)) (values :uint8 1))
+          ((subtypep element-type '(unsigned-byte 32)) (values :uint32 4))
+          ((subtypep element-type '(unsigned-byte 64)) (values :uint64 8))
+          (t nil))))
+
 (defmethod write-buffer
     ((buffer metal-gpu-buffer) data &key (offset 0))
-  "Copy a one-dimensional single-float array into shared Metal memory."
+  "Copy a one-dimensional numeric array into shared Metal memory.
+
+DATA holds single-floats or unsigned 8-, 32-, or 64-bit integers; OFFSET is
+aligned to the element size."
   (ensure-live-metal-object buffer :write-buffer)
-  (unless (and (arrayp data) (= 1 (array-rank data))
-               (nth-value 0
-                 (subtypep (array-element-type data) 'single-float)))
-    (reject-metal-gpu-request buffer :unsupported-buffer-data data))
-  (unless (and (typep offset '(unsigned-byte 64))
-               (zerop (mod offset 4))
-               (<= (+ offset (* 4 (length data)))
-                   (gpu-buffer-size buffer)))
-    (reject-metal-gpu-request
-     buffer :buffer-write-out-of-bounds
-     (list :offset offset :length (* 4 (length data)))))
-  (let ((destination (cffi:inc-pointer (metal-buffer-mapped buffer) offset)))
-    (dotimes (index (length data))
-      (setf (cffi:mem-aref destination :float index) (aref data index))))
+  (multiple-value-bind (foreign-type element-size)
+      (buffer-data-foreign-type data)
+    (unless foreign-type
+      (reject-metal-gpu-request buffer :unsupported-buffer-data data))
+    (unless (and (typep offset '(unsigned-byte 64))
+                 (zerop (mod offset element-size))
+                 (<= (+ offset (* element-size (length data)))
+                     (gpu-buffer-size buffer)))
+      (reject-metal-gpu-request
+       buffer :buffer-write-out-of-bounds
+       (list :offset offset :length (* element-size (length data)))))
+    (let ((destination (cffi:inc-pointer (metal-buffer-mapped buffer) offset)))
+      (dotimes (index (length data))
+        (setf (cffi:mem-aref destination foreign-type index)
+              (aref data index)))))
   buffer)
 
 (defmethod read-buffer
@@ -634,6 +654,8 @@ backend-local extension; ordinary callers use SUBMIT.  #T9K4RC"
   (case format
     (:rgba8-unorm luv.metal:+pixel-format-rgba8-unorm+)
     (:rgba8-unorm-srgb luv.metal:+pixel-format-rgba8-unorm-srgb+)
+    (:r8-unorm luv.metal::+pixel-format-r8-unorm+)
+    (:rg8-unorm luv.metal::+pixel-format-rg8-unorm+)
     (:bgra8-unorm luv.metal:+pixel-format-bgra8-unorm+)
     (:bgra8-unorm-srgb luv.metal:+pixel-format-bgra8-unorm-srgb+)
     (:rg16-uint luv.metal:+pixel-format-rg16-uint+)
@@ -685,6 +707,7 @@ backend-local extension; ordinary callers use SUBMIT.  #T9K4RC"
                       'metal-gpu-texture
                       :label (gpu-descriptor-label descriptor)
                       :device device :native-object native :owned-p t
+                      :resident-p t
                       :size size :usage usage :dimensions :2d
                       :format (texture-descriptor-format descriptor))))
                (setf completed-p t)
@@ -696,6 +719,42 @@ backend-local extension; ordinary callers use SUBMIT.  #T9K4RC"
             (luv.metal:commit-metal-residency-set
              (metal-device-residency-set device)))
           (luv.objective-c:release-objective-c-object native))))))
+
+(defmethod adopt-native-texture
+    ((device metal-gpu-device) native owner (descriptor texture-descriptor))
+  (ensure-live-metal-object device :adopt-native-texture)
+  (unless (and (typep native 'luv.objective-c:objective-c-object) owner)
+    (reject-metal-gpu-request descriptor :invalid-native-texture native))
+  (let ((size (normalize-metal-texture-size descriptor))
+        (usage (normalize-metal-texture-usage descriptor))
+        (resident-p nil)
+        (completed-p nil))
+    (unwind-protect
+         (progn
+           ;; Metal 4 does not make an externally created MTLTexture resident
+           ;; merely because an argument table points at it.  CVMetalTexture
+           ;; planes therefore need the same explicit residency membership as
+           ;; textures allocated by this device.
+           (luv.metal:add-metal-residency-allocation
+            (metal-device-residency-set device) native)
+           (setf resident-p t)
+           (luv.metal:commit-metal-residency-set
+            (metal-device-residency-set device))
+           (let ((texture
+                   (make-instance
+                    'metal-gpu-texture
+                    :label (gpu-descriptor-label descriptor)
+                    :device device :native-object native :owned-p nil
+                    :resident-p t :external-owner owner
+                    :size size :usage usage :dimensions :2d
+                    :format (texture-descriptor-format descriptor))))
+             (setf completed-p t)
+             texture))
+      (when (and resident-p (not completed-p))
+        (luv.metal:remove-metal-residency-allocation
+         (metal-device-residency-set device) native)
+        (luv.metal:commit-metal-residency-set
+         (metal-device-residency-set device))))))
 
 (defmethod create
     ((device metal-gpu-device) (descriptor texture-view-descriptor))
@@ -768,7 +827,8 @@ backend-local extension; ordinary callers use SUBMIT.  #T9K4RC"
                                (typep (getf entry :binding)
                                       '(unsigned-byte 32))
                                (member (getf entry :type)
-                                       '(:texture :sampler :uniform-buffer))))
+                                       '(:texture :sampler :uniform-buffer
+                                         :storage-buffer))))
                         entries)
                  (= (length bindings) (length (remove-duplicates bindings))))
       (reject-metal-gpu-request descriptor :unsupported-bind-group-layout
@@ -801,7 +861,10 @@ backend-local extension; ordinary callers use SUBMIT.  #T9K4RC"
                        (:sampler (typep resource 'metal-gpu-sampler))
                        (:uniform-buffer
                         (and (typep resource 'metal-gpu-buffer)
-                             (member :uniform (gpu-buffer-usage resource))))))
+                             (member :uniform (gpu-buffer-usage resource))))
+                       (:storage-buffer
+                        (and (typep resource 'metal-gpu-buffer)
+                             (member :storage (gpu-buffer-usage resource))))))
           (reject-metal-gpu-request descriptor :invalid-bind-group-entry
                                     layout-entry))
         (ensure-metal-object-device
@@ -867,29 +930,65 @@ backend-local extension; ordinary callers use SUBMIT.  #T9K4RC"
                  (>= bytes-per-row (* bytes-per-texel (first size)))
                  (zerop (mod bytes-per-row bytes-per-texel)))
       (reject-metal-gpu-request command :unsupported-texture-upload))
-    (cffi:with-foreign-object
-        (storage :uint8 (+ offset (* bytes-per-row (second size))))
-      (dotimes (row (second size))
-        (let ((destination
-                (cffi:inc-pointer storage (+ offset (* row bytes-per-row)))))
-          (dotimes (column (first size))
-            (setf (cffi:mem-aref destination foreign-type column)
-                  (row-major-aref
-                   data (+ (* row (array-dimension data 1)) column))))))
-      (luv.metal:replace-metal-texture-region
-       (metal-native-object texture) (first size) (second size)
-       (cffi:inc-pointer storage offset) bytes-per-row)))
+    ;; A tightly packed simple array is already exactly the image Metal wants,
+    ;; so pin it and hand over its own storage.  Staging it word by word costs
+    ;; tens of milliseconds on an image the size of a video frame, which is a
+    ;; whole frame's budget spent copying memory that did not need copying.
+    (if (upload-can-share-storage-p data offset bytes-per-row bytes-per-texel
+                                    size)
+        (share-metal-upload-storage texture data (first size) (second size)
+                                    bytes-per-row)
+        (cffi:with-foreign-object
+            (storage :uint8 (+ offset (* bytes-per-row (second size))))
+          (dotimes (row (second size))
+            (let ((destination
+                    (cffi:inc-pointer storage
+                                      (+ offset (* row bytes-per-row)))))
+              (dotimes (column (first size))
+                (setf (cffi:mem-aref destination foreign-type column)
+                      (row-major-aref
+                       data (+ (* row (array-dimension data 1)) column))))))
+          (luv.metal:replace-metal-texture-region
+           (metal-native-object texture) (first size) (second size)
+           (cffi:inc-pointer storage offset) bytes-per-row))))
   command)
 
+(defun upload-can-share-storage-p (data offset bytes-per-row bytes-per-texel
+                                   size)
+  "True when DATA's own storage is already the exact upload image.
+
+Sharing needs a simple array -- displaced or adjustable storage is not one
+contiguous block -- starting at the beginning, with no padding between rows."
+  (declare (ignorable data offset bytes-per-row bytes-per-texel size))
+  #+sbcl
+  (and (typep data '(simple-array (unsigned-byte 32) (* *)))
+       (eql 4 bytes-per-texel)
+       (zerop offset)
+       (= bytes-per-row (* bytes-per-texel (first size))))
+  #-sbcl nil)
+
+#+sbcl
+(defun share-metal-upload-storage (texture data width height bytes-per-row)
+  "Upload DATA's own pinned storage into TEXTURE without staging a copy."
+  (sb-sys:with-pinned-objects (data)
+    (luv.metal:replace-metal-texture-region
+     (metal-native-object texture) width height
+     (sb-sys:vector-sap (sb-ext:array-storage-vector data))
+     bytes-per-row)))
+
 (defmethod destroy-metal-native ((texture metal-gpu-texture))
-  (when (metal-texture-owned-p texture)
+  (when (metal-texture-resident-p texture)
     (let* ((device (metal-texture-device texture))
            (residency-set (metal-device-residency-set device)))
       (luv.metal:remove-metal-residency-allocation
        residency-set (metal-native-object texture))
-      (luv.metal:commit-metal-residency-set residency-set)
-      (luv.objective-c:release-objective-c-object
-       (metal-native-object texture))))
+      (luv.metal:commit-metal-residency-set residency-set)))
+  (when (metal-texture-owned-p texture)
+    (luv.objective-c:release-objective-c-object
+     (metal-native-object texture)))
+  (when (metal-texture-external-owner texture)
+    (cffi:foreign-funcall "CFRelease" :pointer
+                          (metal-texture-external-owner texture) :void))
   (values))
 
 (defmethod destroy ((texture metal-gpu-texture))
@@ -1057,8 +1156,9 @@ compiler boundary of #58IDSR."
                                          '(unsigned-byte 32))
                                   (typep (getf attribute :offset)
                                          '(unsigned-byte 32))
-                                  (eq :float32x3
-                                      (getf attribute :format))))
+                                  (member (getf attribute :format)
+                                          '(:float32x2 :float32x3
+                                            :float32x4))))
                            attributes))
           do (reject-metal-gpu-request
               descriptor :invalid-vertex-buffer buffer)
@@ -1241,7 +1341,12 @@ compiler boundary of #58IDSR."
          (max-mesh-workgroups
            (mesh-render-pipeline-descriptor-max-mesh-workgroups descriptor))
          (depth-stencil
-           (mesh-render-pipeline-descriptor-depth-stencil descriptor)))
+           (mesh-render-pipeline-descriptor-depth-stencil descriptor))
+         (depth-format (and depth-stencil (getf depth-stencil :format)))
+         (depth-compare
+           (and depth-stencil (getf depth-stencil :depth-compare)))
+         (depth-write-enabled
+           (and depth-stencil (getf depth-stencil :depth-write-enabled))))
     (unless (and (or (null layout)
                      (typep layout 'metal-gpu-bind-group-layout))
                  (or (null task-module)
@@ -1264,7 +1369,12 @@ compiler boundary of #58IDSR."
                  format
                  (member blend '(nil :premultiplied-alpha))
                  (typep max-mesh-workgroups '(integer 1 #.most-positive-fixnum))
-                 (null depth-stencil))
+                 (or (null depth-stencil)
+                     (and (eq depth-format :depth32-float)
+                          (member depth-compare
+                                  '(:never :less :equal :less-or-equal
+                                    :greater :not-equal :greater-or-equal
+                                    :always)))))
       (reject-metal-gpu-request
        descriptor :unsupported-metal-mesh-render-pipeline
        (list :layout layout :depth-stencil depth-stencil
@@ -1284,6 +1394,7 @@ compiler boundary of #58IDSR."
            (mesh-workgroup-size
              (metal-shader-module-workgroup-size mesh-module))
            (pipeline-state nil)
+           (depth-state nil)
            (completed-p nil))
       (unwind-protect
            (progn
@@ -1304,18 +1415,34 @@ compiler boundary of #58IDSR."
                         :reason :pipeline-compilation-failed
                         :details diagnostic))
                (setf pipeline-state pipeline))
+             (when depth-stencil
+               (setf depth-state
+                     (luv.metal:new-metal-depth-stencil-state
+                      (metal-native-object device)
+                      (metal-compare-function depth-compare)
+                      depth-write-enabled
+                      :label (and (gpu-descriptor-label descriptor)
+                                  (format nil "~A depth state"
+                                          (gpu-descriptor-label descriptor)))))
+               (unless depth-state
+                 (error 'metal-gpu-error
+                        :operation :create-mesh-render-pipeline
+                        :reason :depth-state-creation-failed)))
              (let ((pipeline
                      (make-instance
                       'metal-gpu-mesh-render-pipeline
                       :label (gpu-descriptor-label descriptor)
                       :native-object pipeline-state :device device :layout layout
                       :vertex-buffers nil :primitive-topology :triangle-list
-                      :fragment-p t :depth-format nil :depth-stencil-state nil
+                      :fragment-p t :depth-format depth-format
+                      :depth-stencil-state depth-state
                       :task-workgroup-size task-workgroup-size
                       :mesh-workgroup-size mesh-workgroup-size)))
                (setf completed-p t)
                pipeline))
         (unless completed-p
+          (when depth-state
+            (luv.objective-c:release-objective-c-object depth-state))
           (when pipeline-state
             (luv.objective-c:release-objective-c-object pipeline-state)))))))
 
@@ -1570,18 +1697,15 @@ compiler boundary of #58IDSR."
     (ensure-live-metal-object texture :prepare-texture)
     (ensure-metal-object-device
      texture (metal-texture-device texture) device :prepare-texture)
-    (when (metal-encoder-pending-consumer-barrier encoder)
-      (error 'gpu-invalid-state-error :object encoder
-             :operation :prepare-texture
-             :state :consumer-barrier-pending
-             :expected-state :between-passes))
     ;; Metal 4 queues do not perform ordinary MTLResource hazard tracking.
-    ;; The following render encoder consumes this texture in its fragment
-    ;; stage, so install the barrier when that native encoder is created.
-    (setf (metal-encoder-pending-consumer-barrier encoder)
-          (list luv.metal:+stage-fragment+
-                luv.metal:+stage-fragment+
-                luv.metal:+visibility-device+))
+    ;; Coalesce every texture produced by the preceding pass into the one
+    ;; producer-to-fragment barrier installed on the following encoder.  The
+    ;; command encoder retains each concrete resource independently below.
+    (unless (metal-encoder-pending-consumer-barrier encoder)
+      (setf (metal-encoder-pending-consumer-barrier encoder)
+            (list luv.metal:+stage-fragment+
+                  luv.metal:+stage-fragment+
+                  luv.metal:+visibility-device+)))
     (retain-metal-resource encoder texture))
   encoder)
 
@@ -1622,7 +1746,7 @@ compiler boundary of #58IDSR."
         (when (typep resource 'metal-gpu-texture-view)
           (retain-metal-resource owner (gpu-texture-view-texture resource)))
         (ecase (getf layout-entry :type)
-          (:uniform-buffer
+          ((:uniform-buffer :storage-buffer)
            (luv.metal:set-metal-argument-table-address
             table
             (luv.metal:metal-buffer-gpu-address
@@ -1666,7 +1790,8 @@ compiler boundary of #58IDSR."
                                     :key (lambda (buffer)
                                            (getf buffer :binding))))
                         0)
-                    (metal-layout-binding-count layout :uniform-buffer)))
+                    (metal-layout-binding-count layout :uniform-buffer)
+                    (metal-layout-binding-count layout :storage-buffer)))
              (texture-count (metal-layout-binding-count layout :texture))
              (sampler-count (metal-layout-binding-count layout :sampler)))
         (when (plusp (+ buffer-count texture-count sampler-count))

@@ -177,6 +177,9 @@ the finalizer thread — against submission and device destruction."
    (queue-family
     :initarg :queue-family
     :reader vulkan-device-queue-family)
+   (video-queue-family
+    :initarg :video-queue-family :initform nil
+    :reader vulkan-device-video-queue-family)
    (queue
     :initform nil
     :accessor vulkan-device-queue)
@@ -239,10 +242,28 @@ and scheduled texture layouts across the canvas and REPL threads.")))
     :initarg :owned-p
     :initform t
     :reader vulkan-texture-owned-p)
+   (external-owner
+    :initarg :external-owner
+    :initform nil
+    :reader vulkan-texture-external-owner)
+   (aspect
+    :initarg :aspect
+    :initform nil
+    :reader vulkan-texture-explicit-aspect)
+   (external-semaphore
+    :initarg :external-semaphore :initform nil
+    :reader vulkan-texture-external-semaphore)
+   (external-semaphore-value
+    :initarg :external-semaphore-value :initform 0
+    :reader vulkan-texture-external-semaphore-value)
+   (external-submitted
+    :initarg :external-submitted :initform nil
+   :reader vulkan-texture-external-submitted)
    (vk-format
     :initarg :vk-format
     :reader vulkan-texture-vk-format)
    (layout
+    :initarg :layout
     :initform :undefined
     :accessor vulkan-texture-layout)))
 
@@ -301,6 +322,10 @@ and scheduled texture layouts across the canvas and REPL threads.")))
    (render-pass
     :initarg :render-pass
     :reader vulkan-render-pipeline-render-pass)
+   (target-format
+    :initarg :target-format
+    :initform nil
+    :reader vulkan-render-pipeline-target-format)
    (vertex-buffers
     :initarg :vertex-buffers
     :initform nil
@@ -470,6 +495,23 @@ visible to it.")
              :reason :no-graphics-queue
              :details physical-device)))
 
+(defun first-vulkan-video-decode-queue-family (physical-device)
+  (loop for properties in (lvk:physical-device-queue-families physical-device)
+        for index from 0
+        when (and (plusp (lvk:queue-family-count properties))
+                  (member :video-decode (lvk:queue-family-flags properties)))
+          return index))
+
+(defparameter *vulkan-video-device-extensions*
+  '("VK_KHR_video_queue" "VK_KHR_video_decode_queue"
+    "VK_KHR_video_decode_h264" "VK_KHR_video_decode_h265")
+  "Optional extensions which let FFmpeg decode on luv's VkDevice.")
+
+(defun available-vulkan-video-device-extensions (physical-device)
+  (let ((available (lvk:enumerate-device-extension-names physical-device)))
+    (remove-if-not (lambda (name) (member name available :test #'string=))
+                   *vulkan-video-device-extensions*)))
+
 (defun install-vulkan-device-leak-finalizer (device)
   "Arrange to warn about and reclaim DEVICE if it is collected undestroyed.
 
@@ -502,12 +544,15 @@ wrapper, this finalizer cannot run before theirs have."
 
 (defun make-vulkan-gpu-device
     (instance physical-device queue-family descriptor
-     &key debug-messenger instance-extension-names enabled-extension-names)
+     &key debug-messenger instance-extension-names enabled-extension-names
+          video-queue-family)
   "Create GPU wrappers for an already selected Vulkan device and queue."
   (let ((native-device
           (lvk:create-device
            physical-device queue-family
-           :enabled-extension-names enabled-extension-names))
+           :enabled-extension-names enabled-extension-names
+           :additional-family-indices (and video-queue-family
+                                           (list video-queue-family))))
         (timeline nil))
     (handler-case
         (let* ((native-queue
@@ -522,7 +567,8 @@ wrapper, this finalizer cannot run before theirs have."
                   :instance-extension-names instance-extension-names
                   :device-extension-names enabled-extension-names
                   :physical-device physical-device
-                  :queue-family queue-family))
+                  :queue-family queue-family
+                  :video-queue-family video-queue-family))
                (queue
                  (progn
                    (setf timeline
@@ -544,7 +590,9 @@ wrapper, this finalizer cannot run before theirs have."
         (error condition)))))
 
 (defun make-borrowed-vulkan-texture
-    (device image size format vk-format &key (usage '(:copy-dst)))
+    (device image size format vk-format &key (usage '(:copy-dst)) owner aspect
+                                             (layout :undefined) semaphore
+                                             (semaphore-value 0) submitted)
   "Wrap an externally owned Vulkan IMAGE as a GPU texture."
   (make-instance
    'vulkan-gpu-texture
@@ -556,6 +604,12 @@ wrapper, this finalizer cannot run before theirs have."
    :handle image
    :device device
    :vk-format vk-format
+   :external-owner owner
+   :aspect aspect
+   :layout layout
+   :external-semaphore semaphore
+   :external-semaphore-value semaphore-value
+   :external-submitted submitted
    :owned-p nil))
 
 (defun check-vulkan-device-descriptor (descriptor)
@@ -622,6 +676,8 @@ wrapper, this finalizer cannot run before theirs have."
 (defun vulkan-gpu-format (format descriptor)
   (or (cdr (assoc format
                   '((:rgba8-unorm . :r8g8b8a8-unorm)
+                    (:r8-unorm . :r8-unorm)
+                    (:rg8-unorm . :r8g8-unorm)
                     (:rgba8-unorm-srgb . :r8g8b8a8-srgb)
                     (:bgra8-unorm . :b8g8r8a8-unorm)
                     (:bgra8-unorm-srgb . :b8g8r8a8-srgb)
@@ -639,7 +695,25 @@ wrapper, this finalizer cannot run before theirs have."
   (eq format :depth32-float))
 
 (defun vulkan-texture-aspect (texture)
-  (if (vulkan-depth-format-p (gpu-texture-format texture)) :depth :color))
+  (or (vulkan-texture-explicit-aspect texture)
+      (if (vulkan-depth-format-p (gpu-texture-format texture)) :depth :color)))
+
+(defmethod adopt-native-texture
+    ((device vulkan-gpu-device) native owner (descriptor texture-descriptor))
+  "Wrap one plane view of an AVVkFrame image without taking image ownership."
+  (ensure-live-vulkan-object device :adopt-native-texture)
+  (unless (and (listp native) (getf native :image) owner)
+    (reject-gpu-request descriptor :invalid-native-texture native))
+  (make-borrowed-vulkan-texture
+   device (getf native :image) (normalize-vulkan-texture-size descriptor)
+   (texture-descriptor-format descriptor)
+   (or (getf native :format) (vulkan-texture-format descriptor))
+   :usage (normalize-vulkan-texture-usage descriptor)
+   :owner owner :aspect (getf native :aspect)
+   :layout (or (getf native :layout) :general)
+   :semaphore (getf native :semaphore)
+   :semaphore-value (or (getf native :semaphore-value) 0)
+   :submitted (getf native :submitted)))
 
 (defun vulkan-image-usage (usages format)
   (mapcar (lambda (usage)
@@ -748,14 +822,23 @@ wrapper, this finalizer cannot run before theirs have."
                                    :operation :request-device
                                    :reason :no-physical-device)))
                       (queue-family
-                        (first-vulkan-graphics-queue-family physical-device)))
+                        (first-vulkan-graphics-queue-family physical-device))
+                      (video-queue-family
+                        (first-vulkan-video-decode-queue-family
+                         physical-device)))
                  (let ((device
                          (make-vulkan-gpu-device
                           instance physical-device queue-family descriptor
                           :debug-messenger debug-messenger
                           :instance-extension-names extensions
+                          :video-queue-family video-queue-family
                           :enabled-extension-names
-                          (vulkan-gpu-device-extension-names provider))))
+                          (remove-duplicates
+                           (append
+                            (vulkan-gpu-device-extension-names provider)
+                            (available-vulkan-video-device-extensions
+                             physical-device))
+                           :test #'string=))))
                    (setf native-device (vulkan-handle device)
                          completed-p t)
                    device)))
@@ -1165,7 +1248,9 @@ wrapper, this finalizer cannot run before theirs have."
                                          '(unsigned-byte 32))
                                   (typep (getf attribute :offset)
                                          '(unsigned-byte 32))
-                                  (eq :float32x3 (getf attribute :format))))
+                                  (member (getf attribute :format)
+                                          '(:float32x2 :float32x3
+                                            :float32x4))))
                            attributes))
           do (reject-gpu-request descriptor :invalid-vertex-buffer buffer)
         collect
@@ -1175,7 +1260,12 @@ wrapper, this finalizer cannot run before theirs have."
                         (list :shader-location
                               (getf attribute :shader-location)
                               :offset (getf attribute :offset)
-                              :format :r32g32b32-sfloat))
+                              :format
+                              (ecase (vertex-attribute-format-component-count
+                                      (getf attribute :format))
+                                (2 :r32g32-sfloat)
+                                (3 :r32g32b32-sfloat)
+                                (4 :r32g32b32a32-sfloat))))
                       attributes))))
 
 (defmethod create
@@ -1266,7 +1356,8 @@ wrapper, this finalizer cannot run before theirs have."
                 :label (gpu-descriptor-label descriptor)
                 :handle pipeline :device device :layout layout
                 :pipeline-layout pipeline-layout :render-pass render-pass
-                :vertex-buffers vertex-buffers :depth-format depth-format))
+                :vertex-buffers vertex-buffers :target-format format
+                :depth-format depth-format))
           (unless completed-p
              (lvk:destroy-pipeline-layout
               (vulkan-handle device) pipeline-layout)))))))
@@ -2130,19 +2221,34 @@ lowering later without changing this queue-level operation."
       (ensure-vulkan-object-device
        pipeline (vulkan-render-pipeline-device pipeline) device
        :set-pipeline)
-      (unless (eq (vulkan-render-pipeline-render-pass pipeline)
-                  (vulkan-render-pass-for-format
-                   device
-                   (and (vulkan-render-pass-target pass)
-                        (gpu-texture-format
-                         (vulkan-render-pass-target pass)))
-                   pass
-                   (and (vulkan-render-pass-depth-target pass)
-                        (gpu-texture-format
-                         (vulkan-render-pass-depth-target pass)))
-                   (or (vulkan-render-pass-depth-store-op pass)
-                       :discard)))
-        (reject-gpu-request pipeline :incompatible-render-pass pass))
+      ;; Vulkan render-pass compatibility is governed by attachment formats
+      ;; and sample counts, not load/store operations.  Our textures are all
+      ;; single-sampled, so compare the two formats directly instead of the
+      ;; cached native render-pass handle (whose key also carries STORE-OP).
+      (unless
+          (and
+           (eq (vulkan-render-pipeline-target-format pipeline)
+               (and (vulkan-render-pass-target pass)
+                    (gpu-texture-format (vulkan-render-pass-target pass))))
+           (eq (vulkan-render-pipeline-depth-format pipeline)
+               (and (vulkan-render-pass-depth-target pass)
+                    (gpu-texture-format
+                     (vulkan-render-pass-depth-target pass)))))
+        (reject-gpu-request
+         pipeline :incompatible-render-pass
+         (list :pipeline-label (gpu-object-label pipeline)
+               :pipeline-target-format
+               (vulkan-render-pipeline-target-format pipeline)
+               :pipeline-depth-format
+               (vulkan-render-pipeline-depth-format pipeline)
+               :target-format
+               (and (vulkan-render-pass-target pass)
+                    (gpu-texture-format (vulkan-render-pass-target pass)))
+               :depth-format
+               (and (vulkan-render-pass-depth-target pass)
+                    (gpu-texture-format
+                     (vulkan-render-pass-depth-target pass)))
+               :depth-store-op (vulkan-render-pass-depth-store-op pass))))
       (lvk:cmd-bind-graphics-pipeline
        (vulkan-command-encoder-command-buffer encoder)
        (vulkan-handle pipeline))
@@ -2602,17 +2708,46 @@ destroy any of them immediately after this returns."
         (let ((texture-layouts
                 (vulkan-submitted-texture-layouts command-buffers)))
           (when (plusp (length command-buffers))
-            (setf index (1+ (vulkan-queue-submission-counter queue)))
-            (lvk:submit-command-buffers
-             (vulkan-handle queue)
-             (map 'vector #'vulkan-handle command-buffers)
-             :wait-semaphores wait-semaphores
-             :signal-semaphores
-             (concatenate
-              'vector signal-semaphores
-              (vector (list (vulkan-queue-timeline queue)
-                            '(:all-commands)
-                            index))))
+            (let ((external '()))
+              (maphash
+               (lambda (texture layout)
+                 (declare (ignore layout))
+                 (let ((semaphore (vulkan-texture-external-semaphore texture)))
+                   (when (and semaphore
+                              (not (find semaphore external :key #'first)))
+                     (push (list semaphore
+                                 (vulkan-texture-external-semaphore-value texture)
+                                 texture)
+                           external))))
+               texture-layouts)
+              (setf index (1+ (vulkan-queue-submission-counter queue)))
+              (lvk:submit-command-buffers
+               (vulkan-handle queue)
+               (map 'vector #'vulkan-handle command-buffers)
+               :wait-semaphores
+               (concatenate
+                'vector wait-semaphores
+                (map 'vector (lambda (entry)
+                               (list (first entry) '(:all-commands)
+                                     (second entry)))
+                     external))
+               :signal-semaphores
+               (concatenate
+                'vector signal-semaphores
+                (map 'vector (lambda (entry)
+                               (list (first entry) '(:all-commands)
+                                     (1+ (second entry))))
+                     external)
+                (vector (list (vulkan-queue-timeline queue)
+                              '(:all-commands)
+                              index))))
+              (dolist (entry external)
+                (let* ((texture (third entry))
+                       (callback (vulkan-texture-external-submitted texture)))
+                  (when callback
+                    (funcall callback
+                             (gethash texture texture-layouts)
+                             (1+ (second entry)))))))
             (setf (vulkan-queue-submission-counter queue) index)
             (let ((resources '()))
               (loop for command-buffer across command-buffers
@@ -2784,10 +2919,13 @@ teardown lock, with DEVICE anaphorically bound to the native handle."
     (vulkan-texture-device texture)
     ((handle (vulkan-handle texture))
      (memory (vulkan-texture-memory texture))
-     (owned-p (vulkan-texture-owned-p texture)))
+     (owned-p (vulkan-texture-owned-p texture))
+     (external-owner (vulkan-texture-external-owner texture)))
   (when owned-p
     (lvk:destroy-image device handle)
-    (lvk:free-memory device memory)))
+    (lvk:free-memory device memory))
+  (when external-owner
+    (funcall external-owner)))
 
 (defmethod destroy ((device vulkan-gpu-device))
   (with-vulkan-gpu-driver-environment

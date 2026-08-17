@@ -681,13 +681,14 @@ LOCAL has dynamic extent and must be copied before FUNCTION retains it."
          (visited (+ sky-visits block-visits)))
     (values region visited)))
 
-(defparameter *voxel-light-solver* :legacy
+(defparameter *voxel-light-solver* :compiled
   "The from-scratch voxel-light program selected for future captures.
 
-:LEGACY is the established oracle.  :FRONTIER is the handwritten lowering of
-the greenfield frontier program and :COMPILED its compiled realization; all
-three produce the same LIGHT-REGION materialization so they can be switched
-and compared without changing publication or consumers. #X7Q90E #PJY6E1")
+:COMPILED is the production default.  :LEGACY remains the established oracle
+and recovery path, while :FRONTIER is the handwritten lowering of the
+greenfield frontier program.  All three produce the same LIGHT-REGION
+materialization so they can be switched and compared without changing
+publication or consumers. #X7Q90E #PJY6E1 #K3WRD3")
 
 (defgeneric solve-light-region-using
     (solver region &key &allow-other-keys)

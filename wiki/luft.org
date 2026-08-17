@@ -1,0 +1,251 @@
+#+title: LUFT: packed sites, chains, and the mesh atelier
+#+startup: overview
+
+LUFT is a small complement to luv: a way of naming the vertices, edges, faces,
+and cells of a cubical world with one fixnum each, and of treating a block
+world as algebra rather than as voxels with decorations.  Its first client
+is a greenfield renderer, an atelier free of the luvcraft mesher, that draws
+a textureless block world with task and mesh shaders reading those fixnums
+straight from a GPU buffer.  This page records the vocabulary, the algebra
+that makes the surface fall out, the shader-language extensions the GPU path
+needed, and the shape of the pipeline.
+
+* A site is a lattice anchor, an extent mask, and a polarity
+:PROPERTIES:
+:ID: KE4P5F
+:END:
+
+A /site/ is a 60-bit unsigned value: three extent bits =XYZ= and one polarity
+bit in the low positions, then a 24-bit X anchor, a 24-bit Y anchor, and an
+8-bit Z anchor.  Each extent bit says the site spans the unit interval forward
+from its anchor along that axis, so no extent is a vertex, one is an edge, two
+a face, and three a cell.  The clear polarity bit is positive and the set bit
+negative; [[lisp:luft:opposite-site]] toggles it without changing the site's
+geometry.
+
+Incidence is canonical: the high X boundary of the cell at =(x,y,z)= has the
+same geometry as the low X boundary of the cell at =(x+1,y,z)=, but the two
+faces have opposite polarities.  X and Y wrap with the period a
+[[lisp:luft:world-domain]] chooses; Z is 256 non-wrapping planes.
+
+The oriented boundary follows from the ordered axes in the extent: the high
+boundary along the =i=-th present axis has the canonical polarity =(-1)^i=,
+the low boundary has the opposite polarity, and a negative input site reverses
+every result.  Thus [[lisp:luft:map-site-boundary]] returns signed sites
+directly, and =∂∂ = 0= is an executable annihilation test in
+=luft/tests.lisp=.
+
+* A block world is a 3-chain and its surface is a boundary
+:PROPERTIES:
+:ID: 9HLYEE
+:END:
+
+A [[lisp:luft:chain]] is a collection of signed sites.  Its implementation is
+a pair of hash-table ledgers, one per polarity, both keyed by geometry with the
+polarity bit masked away.  Adding a site annihilates one opposite site already
+in the other ledger.  Private occurrence counts make that result independent
+of arrival order; an ordinary solid and its surface still contain at most one
+copy of any signed site.
+
+A solid world is the 3-chain containing one positive site for every occupied
+cell.  Its visible surface is not a meshing problem but an algebraic fact:
+[[lisp:luft:boundary-chain]] applies #KE4P5F's oriented boundary to every
+site.  Two solid neighbours send their shared face to opposite polarity
+ledgers, so the pair annihilates; only exposed signed faces survive.  A face's
+polarity reverses or preserves its canonical orientation to give its outward
+normal, and =∂(∂ solid) = 0= says the surface is closed.  Editing a cell later
+means adding its signed boundary or the opposite boundary, not remeshing
+anything.
+
+The luvcraft mesher walks chunk fields on the CPU and emits atlas-textured
+quads (see [[file:block-world.org][the block world]]); LUFT's
+[[lisp:luft:surface-chain]] is a pair of polarity ledgers holding signed face
+sites.  Both are right for their worlds; the second is what a mesh shader
+wants.
+
+* The GPU reads signed sites directly
+:PROPERTIES:
+:ID: AGVXGM
+:END:
+
+A surface face is already one signed 60-bit site, with no separate wrapper or
+coefficient encoding.  It remains an immediate fixnum on 64-bit SBCL, and a
+specialized vector of sites can be copied directly into the
+=(unsigned-byte 64)= buffer the shader reads; no vertex is ever built on the
+CPU.  The renderer orders the sites by eight-cell chunk, pads them to whole
+/bricks/ of [[lisp:luft.render.shaders:+brick-size+]] sites, and measures one
+bounding sphere per brick as four floats —
+two arrays and one uniform block are the whole upload.
+
+The four buffer bits above the site are deliberately unearned.  A per-face
+material would fit there, but the occurrence is still a chain site, and
+materials belong to cells; the atelier is textureless on purpose until that
+question is asked properly.
+
+* Storage buffers and bit fields enter the shader language
+:PROPERTIES:
+:ID: HFX2LI
+:END:
+
+The mathematical shader language of #S4H8DR had textures, samplers, and a
+vec4-only uniform block, and no way to read an array of 64-bit words.  Two
+additions carry a site into a shader:
+
+- A =:storage-buffer= resource with an =:element= type, indexed by
+  =buffer-element=; the array has no declared length, and a bare reference to
+  the buffer is an error.  Metal lowers it to =const device T* name
+  [[buffer(n)]]= bound through the same argument-table address slot as a
+  uniform buffer, and SPIR-V to a =StorageBuffer= block holding one
+  =RuntimeArray= with an explicit stride, asking for
+  =SPV_KHR_storage_buffer_storage_class= in 1.0 modules.
+- =ldb= with a literal =(byte size position)= on a =:uint= or =:uint64=
+  value, so a shader unpacks a site with the very words =luft.lisp= uses.
+  Metal lowers it to a shift and a mask in the operand's width; SPIR-V to
+  two logical shifts, because Vulkan restricts bit-field instructions to
+  32-bit operands and the language has no 64-bit constants.
+
+Both are raw representations until interpreted: they carry no quantity, so an
+unannotated graph stays valid legacy source and an annotated one still
+refuses to mix.  The Metal HAL gained the matching =:storage= buffer usage,
+=:storage-buffer= binding type, typed =write-buffer= for unsigned arrays,
+and depth-stencil state on mesh pipelines.
+
+* Task workgroups cull bricks; mesh lanes unpack faces
+:PROPERTIES:
+:ID: VAABY9
+:END:
+
+[[file:images/luft-atelier.png]]
+
+The pipeline in =luft/render/shaders.lisp= has three stages and no vertex
+buffer.  A task workgroup owns one brick: it reads the brick's sphere,
+tests it against the view pyramid with a workgroup-uniform expression, and
+emits one mesh workgroup or none, handing the brick index through a
+one-word payload.  Each mesh lane then loads one site with =buffer-element=,
+extracts anchor, extent, and polarity with =ldb=, and writes four vertices and
+two triangles.  The extent names the face's two spanning axes in canonical
+X<Y<Z order, their cross product is the canonical orientation, and the
+polarity times that orientation is the outward normal — the boundary
+operator's orientation rendered directly.  A lane whose site is zero, or
+whose face turns away from the camera by the exact plane test, scales its quad
+to a point instead of branching on output counts, which the language requires
+to be uniform.
+
+The fragment stage is textureless by design: a top, side, and bottom tone,
+a soft line where faces meet, sun and ambient light, and fog toward the sky.
+The whole atelier is =luft/render=: a scene holds the solid chain and its
+products, a renderer holds the GPU objects, [[lisp:luft.render:render-to-png]]
+draws headlessly, and [[lisp:luft.render:start-viewer]] opens a window with a
+fly camera.  Its test turns the camera straight up and expects only sky,
+which is the frustum test doing real work.
+
+* Fillets and bevels belong to edge and vertex sites
+:PROPERTIES:
+:ID: 6TEFOS
+:END:
+
+Rounding a crease is not something either face beside it can decide alone,
+and in LUFT it does not have to be: the crease is an edge site, its four
+surrounding cells are its star, and a vertex site has eight.  The star's
+solidity classifies the crease — flat, convex, concave, or saddle — and one
+rule places the shared point: move toward the star's /minority/ (the lone
+solid cell of a convex crease, the lone air cell of a concave one) so that
+the point lands on the sphere or cylinder of radius $r$ centred at
+$\text{site} + r\,q$, where $q$ is the minority direction clamped to unit
+components.  For edges that is the fillet cylinder point at $r(1-1/\sqrt2)$,
+for corners the sphere point at $r(1-1/\sqrt3)$, zero on flat and saddle
+stars, and a vertex in the middle of a crease run agrees with its edge, so
+creases stay straight.
+
+Because every face incident to a site computes that point from the same star,
+subdivided faces meet exactly and the surface is watertight without stitching
+or corner patches.  =luft/render/shaders.lisp= subdivides each face 6×6:
+boundary points use the site rule, ring points inside the radius project onto
+the nearest crease's cylinder or the corner's sphere (a pure one-cell corner
+is the exact rounded box), and mixed corners such as a block standing on a
+floor blend toward the vertex sphere by distance.  The only CPU help is
+[[lisp:luft:chain-cell-bits]], the solid chain as one bit per cell, from
+which each mesh lane gathers its sixteen star cells; the rounding radius is a
+live frame lane.  The exact morphological answer for the mixed stars would be
+a table over the 256 vertex configurations, which #WQ611A's wave-level work
+does not need and which this heuristic postpones.
+
+* Small planar facets soften convex and concave creases
+:PROPERTIES:
+:ID: RUAWR5
+:END:
+
+The =:chamfer= style is the one-ring, planar case of #6TEFOS.  It applies the
+same symmetric star classification as the rounded style: a convex crease
+moves toward its minority solid cells, a concave crease moves toward its
+minority air cells, and flat or saddle stars do not move.  Thus both exposed
+silhouettes and inside meetings lose the perfectly sharp edge that makes a
+block world look synthetic, without pretending the geometry is literal
+woodworking.
+
+A shared point moves by exactly $\tfrac{w}{2}\,q$, half the setback along its
+clamped minority direction.  At an edge this is the midline of a flat
+45-degree facet between two offset faces; at a pure corner it is where three
+small chamfer planes meet.  The default =*chamfer-width*= is 0.045 cell:
+enough to catch the studio lights and soften terrain notches without bringing
+back the old 0.22-cell carved coves.  The rounded style keeps its independent
+=*bevel-radius*=.
+
+Shading comes from the geometry rather than interpolated vertex normals:
+=chamfer-fragment-shader= reads each facet's normal from screen-space
+derivatives of world position.  Only the arris where the original face meets
+the cut receives a narrow =*arris-softness*= transition, currently 0.004 cell;
+the chamfer itself stays planar.  The overhead view regression now exercises
+rounded, flat, and chamfered pipelines and finds no sky-visible cracks.
+
+** NEXT Edit cells through the linearity of the boundary
+:PROPERTIES:
+:ID: 3QNZC1
+:END:
+
+/Intent./ Let the viewer place and remove cells by adding =∂cell= or its
+opposite to the surface chain (#9HLYEE), reorder only the touched bricks, and
+upload them, so an edit costs six ledger updates and one small =write-buffer=.
+
+/Evidence./ The whole-scene path already refreshes and re-uploads correctly;
+[[lisp:luft.render:refresh-scene]] rebuilds everything, which is fine for a
+64×64 world but is not the point of chains.
+
+/Done when./ Clicking in the viewer changes the world without a full
+=surface-chain= recomputation, and a test shows the incremental surface equals
+the recomputed one.
+
+** IDEA Compact surviving faces inside a brick
+:PROPERTIES:
+:ID: WQ611A
+:END:
+
+/Intent./ Today a culled or back-facing lane still costs four vertices and
+two degenerate triangles because output counts must be uniform and the
+language has no workgroup memory, atomics, or subgroup ballots.  A ballot
+and prefix sum in the task stage would let a brick emit only its visible
+faces, and a mesh workgroup could serve several sparse bricks.
+
+/Evidence./ The current world draws thousands of faces at trivial cost, so
+this is not yet a bottleneck; it is the natural next language extension
+after #HFX2LI, and the first that touches wave-level semantics on both
+Metal and SPIR-V.
+
+/Done when./ A dense brick facing away from the camera emits zero mesh work,
+measured on Metal, without changing the surface encoding of #AGVXGM.
+
+** IDEA Draw the torus, not only its fundamental domain
+:PROPERTIES:
+:ID: PGRM80
+:END:
+
+/Intent./ A camera outside the fundamental domain sees a cut world: faces at
+=x=0= that a solid neighbour at =x=period-1= cancels are honestly absent.
+The mesh lane could translate its anchor by the domain period toward the
+camera, or the task stage could dispatch each brick under the nearest
+translates, so the wrap becomes visible instead of surprising.
+
+/Evidence./ The first render, taken from =x=-6=, showed exactly this cut.
+
+/Done when./ Flying across the seam of a small domain shows the world repeat
+without a gap.

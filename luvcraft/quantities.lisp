@@ -49,11 +49,24 @@
   :non-negative-p t)
 (math:define-quantity :material-emission :kind :proportion
   :non-negative-p t)
+;;; A material's own micro-surface height, retained in the generated normal
+;;; atlas alongside the unit normal derived from it.
+(math:define-quantity :surface-relief :kind :proportion
+  :non-negative-p t)
+;;; The normal atlas stores a tangent-space unit normal in unsigned texture
+;;; channels.  Sampling produces this encoded control value; the block shader
+;;; recentres it before placing it in the face's world-space tangent frame.
+(math:define-quantity :surface-normal-sample :kind :control-signal
+  :non-negative-p t)
 (math:define-quantity :sky-propagation-level :kind :sample-count
   :non-negative-p t)
 (math:define-quantity :block-propagation-level :kind :sample-count
   :non-negative-p t)
 (math:define-quantity :shadow-diagnostic :kind :control-signal)
+;;; Per-face edge shaping: what the mesher knows about a block face's four
+;;; in-plane boundaries.  Signed, because a concave edge and a convex one are
+;;; opposite shapings of the same surface rather than different amounts of one.
+(math:define-quantity :edge-shaping :kind :control-signal)
 (math:define-quantity :shadow-filter-radius :kind :sample-count
   :non-negative-p t)
 (math:define-quantity :view-distance :kind :lattice-coordinate
@@ -69,6 +82,17 @@
 (math:define-quantity :player-jump-speed :kind :lattice-velocity
   :non-negative-p t)
 (math:define-quantity :player-acceleration :kind :lattice-acceleration
+  :non-negative-p t)
+;;; An animal is measured in the same lattice as the player it shares the
+;;; world with, but its own dimensions and gait are its own quantities: a
+;;; turtle's walking speed is not a slow player's.
+(math:define-quantity :critter-half-width :kind :lattice-coordinate
+  :non-negative-p t)
+(math:define-quantity :critter-height :kind :lattice-coordinate
+  :non-negative-p t)
+(math:define-quantity :critter-walk-speed :kind :lattice-velocity
+  :non-negative-p t)
+(math:define-quantity :critter-behavior-duration :kind :duration
   :non-negative-p t)
 (math:define-quantity :gravity-magnitude :kind :lattice-acceleration
   :non-negative-p t)
@@ -106,7 +130,16 @@
   :non-negative-p t)
 (math:define-quantity :monotonic-frame-time :kind :duration
   :character :point)
+;;; The sky's own clock: a bounded elapsed time the cloud deck drifts with.
+;;; It is a point on a wrapped timeline rather than a duration measured
+;;; between two events, which is why it is not :FRAME-DURATION.
+(math:define-quantity :sky-time :kind :duration
+  :character :point)
+(math:define-quantity :cloudiness :kind :proportion
+  :non-negative-p t)
 (math:define-quantity :camera-yaw :kind :angular-measure
+  :character :point)
+(math:define-quantity :critter-yaw :kind :angular-measure
   :character :point)
 (math:define-quantity :camera-pitch :kind :angular-measure
   :character :point)

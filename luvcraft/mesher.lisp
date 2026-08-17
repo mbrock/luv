@@ -149,19 +149,22 @@ cross the thread boundary, and the worker never observes live chunk storage."))
 (defgeneric mesh-block-snapshot (mesher snapshot))
 (defgeneric emit-block-face (mesher world vertices block face x y z))
 
-(defconstant +block-mesh-floats-per-vertex+ 12)
+(defconstant +block-mesh-floats-per-vertex+ 16)
 (defconstant +block-mesh-vertices-per-face+ 6)
 (defconstant +block-mesh-floats-per-face+
   (* +block-mesh-floats-per-vertex+ +block-mesh-vertices-per-face+))
 
 (declaim (inline push-block-vertex-components))
 (defun push-block-vertex-components
-    (vertices px py pz u v shade nx ny nz sky-level block-level emission)
+    (vertices px py pz u v shade nx ny nz sky-level block-level emission
+     edge-u-low edge-u-high edge-v-low edge-v-high)
   "Append one interleaved vertex without constructing tuple objects.
 
 The fourth lane carries normalized raw light readings, not an
 art-directed bake: shader edits can change the response curve without
-remeshing the world."
+remeshing the world.  The fifth carries the face's edge shaping: what the
+mesher knows about each of the face's four in-plane boundaries and the
+fragment stage cannot see."
   (vector-push (coerce px 'single-float) vertices)
   (vector-push (coerce py 'single-float) vertices)
   (vector-push (coerce pz 'single-float) vertices)
@@ -174,6 +177,10 @@ remeshing the world."
   (vector-push (coerce sky-level 'single-float) vertices)
   (vector-push (coerce block-level 'single-float) vertices)
   (vector-push (coerce emission 'single-float) vertices)
+  (vector-push (coerce edge-u-low 'single-float) vertices)
+  (vector-push (coerce edge-u-high 'single-float) vertices)
+  (vector-push (coerce edge-v-low 'single-float) vertices)
+  (vector-push (coerce edge-v-high 'single-float) vertices)
   vertices)
 
 (defun block-color-variation (x y z)
@@ -400,6 +407,50 @@ falling through to BLOCK-SOLID-P."))
                         (if second-side 1 0)
                         (if corner-block 1 0))))))))
 
+;;; What a fragment cannot know about its own face is what lies beyond its
+;;; edges.  The mesher does know, so it classifies each of a face's four
+;;; in-plane boundaries once and hands the answer to the surface shader.
+;;;
+;;; This is the difference between a block world that reads as carved solids
+;;; and one that reads as a lit grid: rounding every face edge over would draw
+;;; a seam across the middle of an open plain, where the face merely continues
+;;; into an identically oriented neighbour and there is no edge at all.
+;;;
+;;; -1  concave: a block rises across this edge, so the surface fillets into
+;;;              the inner corner and gathers a little occlusion there.
+;;;  0  flush:   the same plane continues; leave the surface alone.
+;;;  1  convex:  nothing beyond the edge, so the surface rounds over it.
+
+(defconstant +block-face-edge-concave+ -1.0)
+(defconstant +block-face-edge-flush+ 0.0)
+(defconstant +block-face-edge-convex+ 1.0)
+
+(declaim (inline block-face-edge-shaping-components))
+(defun block-face-edge-shaping-components (mesher samples nx ny nz x y z)
+  "Classify the four in-plane edges of the face of (X Y Z) normal to N.
+
+The two in-plane axes are chosen exactly as the fragment stage chooses
+them from the same normal, so U and V mean the same thing on both sides of
+the vertex ABI.  Returns (VALUES U-LOW U-HIGH V-LOW V-HIGH).
+
+See #J19EBO for why this is the mesher's job and not the shader's."
+  (flet ((solid-p (ox oy oz)
+           (block-solid-p
+            (mesher-block-at mesher samples (+ x ox) (+ y oy) (+ z oz)))))
+    (let ((ux (if (zerop nx) 1 0))
+          (uz (if (zerop nx) 0 1))
+          (vy (if (zerop ny) 1 0))
+          (vz (if (zerop ny) 0 1)))
+      (flet ((edge (dx dy dz)
+               (cond ((solid-p (+ dx nx) (+ dy ny) (+ dz nz))
+                      +block-face-edge-concave+)
+                     ((solid-p dx dy dz) +block-face-edge-flush+)
+                     (t +block-face-edge-convex+))))
+        (values (edge (- ux) 0 (- uz))
+                (edge ux 0 uz)
+                (edge 0 (- vy) (- vz))
+                (edge 0 vy vz))))))
+
 (declaim (inline block-face-corner-light-components))
 (defun block-face-corner-light-components
     (mesher samples nx ny nz cx cy cz x y z)
@@ -466,7 +517,9 @@ normalized to 0..1."
          (size +block-atlas-tile-size+)
          (atlas-width (* size +block-atlas-tile-count+))
          (variation (block-color-variation x y z)))
-    (dolist (index '(0 1 2 0 2 3))
+    (multiple-value-bind (edge-u-low edge-u-high edge-v-low edge-v-high)
+        (block-face-edge-shaping-components mesher samples nx ny nz x y z)
+     (dolist (index '(0 1 2 0 2 3))
       (let* ((corner (nth index corners))
              (cx (first corner))
              (cy (second corner))
@@ -485,7 +538,8 @@ normalized to 0..1."
              (/ (+ 0.5 (* local-v (1- size))) size)
              shade nx ny nz
              sky-level block-level
-             (block-surface-emission block))))))
+             (block-surface-emission block)
+             edge-u-low edge-u-high edge-v-low edge-v-high))))))
     vertices))
 
 (defmethod emit-block-face

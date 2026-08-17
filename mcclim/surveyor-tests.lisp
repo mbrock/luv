@@ -34,9 +34,56 @@
       (ok (eq state :unavailable)))))
 
 (deftest hotbar-palette-covers-every-placeable-block
-  (ok (= (length mcluv::*hotbar-material-colors*)
-         (length (luvcraft:placeable-block-kinds))))
-  (loop for number from 1 to 9
-        do (ok (typep (mcluv::hotbar-material-color number) 'clim:color))
-           (ok (typep (mcluv::hotbar-material-ink number 0 80)
+  (loop for block in (luvcraft:placeable-block-kinds)
+        do (ok (typep (mcluv::hotbar-material-color block) 'clim:color))
+           (ok (typep (mcluv::hotbar-material-ink block 0 80)
                       'mcluv:linear-gradient))))
+
+(deftest hotbar-is-composited-after-scene-postprocessing
+  (ok (eq :hud
+          (luvcraft:luvcraft-overlay-stage
+           (allocate-instance
+            (find-class 'mcluv:luvcraft-hotbar-overlay))))))
+
+(deftest inventory-is-a-modal-hud-with-stable-grid-hit-testing
+  (ok (eq :hud
+          (luvcraft:luvcraft-overlay-stage
+           (allocate-instance
+            (find-class 'mcluv:luvcraft-inventory-overlay)))))
+  (ok (= 0 (mcluv::inventory-slot-at 0.21 0.12 9)))
+  (ok (= 2 (mcluv::inventory-slot-at 0.50 0.12 9)))
+  (ok (= 8 (mcluv::inventory-slot-at 0.61 0.36 9)))
+  (ok (null (mcluv::inventory-slot-at 0.01 0.20 9)))
+  (ok (null (mcluv::inventory-slot-at 0.50 0.95 9)))
+  (ok (eq :all (mcluv::inventory-category-at 0.05 0.12)))
+  (ok (eq :building (mcluv::inventory-category-at 0.05 0.28)))
+  (ok (= -1 (mcluv::inventory-page-direction-at 0.22 0.05)))
+  (ok (= 1 (mcluv::inventory-page-direction-at 0.75 0.05)))
+  (ok (null (mcluv::inventory-page-direction-at 0.50 0.05)))
+  (ok (= 0 (mcluv::inventory-quickbar-slot-at 0.20 0.56 9)))
+  (ok (= 8 (mcluv::inventory-quickbar-slot-at 0.76 0.56 9)))
+  (ok (mcluv::inventory-category-block-p
+       :natural luvcraft::*grass-block*))
+  (ok (not (mcluv::inventory-category-block-p
+            :natural luvcraft::*stone-block*))))
+
+(deftest terminal-film-browser-shows-directories-and-playable-files
+  (let* ((root (asdf:system-source-directory :luv))
+         (directory (merge-pathnames "libav/" root))
+         (entries (mcluv::terminal-film-browser-entries directory)))
+    (ok (mcluv::terminal-film-pathname-p
+         (merge-pathnames "test-pattern.mp4" directory)))
+    (ok (not (mcluv::terminal-film-pathname-p
+              (merge-pathnames "README.org" directory))))
+    (ok (find "test-pattern.mp4" entries :test #'string=
+              :key (lambda (entry)
+                     (and (eq :film (mcluv::terminal-film-entry-kind entry))
+                          (file-namestring
+                           (mcluv::terminal-film-entry-pathname entry))))))))
+
+(deftest terminal-film-browser-shortens-long-directory-headings
+  (let ((label
+          (mcluv::terminal-film-browser-path-label
+           #P"/a/directory/name/that/is/long/enough/to/collide/with/the/browser/title/")))
+    (ok (<= (length label) mcluv::+terminal-film-browser-path-limit+))
+    (ok (string= "..." label :end2 3))))

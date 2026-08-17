@@ -125,6 +125,7 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:advance-sky-clock
            #:apply-block-world-source-edits
            #:attach-luvcraft-hud
+           #:toggle-luvcraft-inventory
            #:attach-lighting-state
            #:benchmark-luvcraft-frame-performance
            #:block-chunk-load-payload
@@ -135,9 +136,23 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:block-face-neighbor
            #:block-face-tile
            #:block-kind
+           #:block-kind-categories
+           #:block-kind-display-color
            #:block-kind-face-tiles
            #:block-kind-name
            #:block-kind-named
+           #:block-inventory
+           #:block-inventory-blocks
+           #:block-inventory-quickbar-blocks
+           #:block-inventory-quickbar-entries
+           #:block-inventory-entries
+           #:block-inventory-entry
+           #:block-inventory-entry-block
+           #:block-inventory-entry-for
+           #:block-inventory-entry-quantity
+           #:make-block-inventory
+           #:add-block-to-inventory
+           #:remove-block-from-inventory
            #:block-light-emission
            #:block-light-opacity
            #:block-mesh
@@ -157,6 +172,12 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:block-surface-emission
            #:block-world-player
            #:block-world-source
+           #:body-grounded-p
+           #:body-half-width
+           #:body-height
+           #:body-position
+           #:body-position-clear-p
+           #:body-velocity
            #:camera-basis
            #:camera-field-of-view
            #:camera-pitch
@@ -184,6 +205,44 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:chunk-light-levels-at-coordinate
            #:compare-voxel-light-solvers
            #:chunk-mesh-dependency-stamp
+           #:activate-luvcraft-critter
+           #:add-critter
+           #:advance-critter
+           #:advance-critters
+           #:advance-luvcraft-focus
+           #:critter
+           #:critter-along-ray
+           #:critter-count
+           #:critter-ray-distance
+           #:critter-ride
+           #:critter-ride-critter
+           #:critter-sway
+           #:luvcraft-focus-carries-player-p
+           #:luvcraft-session-targeted-critter
+           #:urge-critter
+           #:critter-half-width
+           #:critter-height
+           #:critter-model-box-count
+           #:critter-population
+           #:critter-population-critters
+           #:critter-population-species
+           #:critter-population-target-count
+           #:critter-position
+           #:critter-species
+           #:critter-velocity
+           #:critter-vertices
+           #:critter-x
+           #:critter-y
+           #:critter-yaw
+           #:critter-z
+           #:maintain-critter-population
+           #:map-critter-boxes
+           #:move-body-axis
+           #:spawn-critter-at
+           #:turtle
+           #:turtle-heading
+           #:turtle-resting-p
+           #:world-terrain-solid-p
            #:edit-block-at
            #:edit-block-world-source
            #:edit-luvcraft-block
@@ -191,6 +250,7 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:focus-luvcraft-session
            #:handle-luvcraft-overlay-event
            #:handle-luvcraft-focus-event
+           #:handle-luvcraft-focus-control-event
            #:emit-block-face
            #:exposed-face-mesher
            #:find-luvcraft-gazetteer-view
@@ -236,6 +296,8 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:luvcraft-session-atlas-sampler
            #:luvcraft-session-atlas-texture
            #:luvcraft-session-atlas-view
+           #:luvcraft-session-normal-atlas-texture
+           #:luvcraft-session-normal-atlas-view
            #:luvcraft-session-block-pipeline
            #:luvcraft-session-camera
            #:luvcraft-session-canvas
@@ -245,16 +307,19 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:luvcraft-session-desired-chunks
            #:luvcraft-session-lighting-state
            #:luvcraft-session-modal-focus
+           #:luvcraft-session-inventory
            #:luvcraft-session-focus-candidate
            #:luvcraft-focus-entered
            #:luvcraft-focus-camera-pose
            #:luvcraft-focus-left
            #:luvcraft-focus-score
            #:luvcraft-overlay-focus-insets
+           #:luvcraft-overlay-stage
            #:luvcraft-session-mesh
            #:luvcraft-session-meshed-world-revision
            #:luvcraft-session-outstanding-production
            #:luvcraft-session-overlays
+           #:luvcraft-session-critters
            #:luvcraft-session-particle-system
            #:luvcraft-session-player
            #:luvcraft-session-production-errors
@@ -279,6 +344,7 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:make-block-chunk-load-request
            #:make-block-mesh-snapshot
            #:make-block-texture-atlas
+           #:make-block-normal-atlas
            #:make-default-sky-profile
            #:make-empty-little-block-world
            #:make-little-block-world
@@ -365,8 +431,13 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:step-block-world-player
            #:stop-luvcraft
            #:terminal-display
+           #:change-terminal-display-mode
            #:terminal-display-device
+           #:terminal-display-film-screen
+           #:terminal-display-mode
+           #:terminal-display-mode-overlay
            #:terminal-display-surface
+           #:play-terminal-display-film
            #:terminal-surface
            #:terminal-surface-face
            #:terminal-surface-height
@@ -418,4 +489,6 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:block-world-vertex-lowering
            #:block-world-vertex-module
            #:block-world-vertex-shader
-           #:block-world-vertex-specification))
+           #:block-world-vertex-specification
+           #:focus-post-fragment-specification
+           #:focus-post-uniform-block))

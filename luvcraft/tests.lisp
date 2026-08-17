@@ -37,6 +37,11 @@
   (declare (ignore session canvas))
   (push event (recording-focus-events focus)))
 
+(deftest overlays-default-to-the-depth-bearing-scene-stage
+  (ok (eq :scene
+          (luvcraft-overlay-stage
+           (make-instance 'recording-modal-focus)))))
+
 (deftest modal-focus-suspends-player-input-and-owns-events
   (let ((session (make-instance 'luvcraft-session))
         (first (make-instance 'recording-modal-focus))
@@ -227,6 +232,30 @@
         (unfocus-luvcraft-session session)
         (luv.terminal:close-pty-device device)))))
 
+(deftest terminal-film-mode-fits-the-authored-wall-and-returns-to-shell
+  (let* ((world (make-block-world :chunk-width 16
+                                  :chunk-height 16
+                                  :chunk-depth 16))
+         (session (make-instance 'luvcraft-session))
+         (aspect (/ 16.0 9.0)))
+    (ensure-world-chunk world 0 0 0)
+    (place-terminal-block-rectangle world 2 3 4 :back 3 2)
+    (let* ((surface (find-terminal-surface world 2 3 4 :back))
+           (display (make-instance 'terminal-display :surface surface)))
+      (change-terminal-display-mode display session :film)
+      (ok (eq :film (terminal-display-mode display)))
+      (multiple-value-bind (origin right up)
+          (luvcraft::terminal-film-rectangle surface aspect)
+        (declare (ignore origin))
+        (let ((width (vec3-length right))
+              (height (vec3-length up)))
+          (ok (< (abs (- (/ width height) aspect)) 1e-5))
+          (ok (<= width (luvcraft::terminal-surface-physical-width surface)))
+          (ok (<= height
+                  (luvcraft::terminal-surface-physical-height surface)))))
+      (change-terminal-display-mode display session :shell)
+      (ok (eq :shell (terminal-display-mode display))))))
+
 (deftest terminal-display-pty-output-marks-a-frame-publication-dirty
   (luv.ghostty:with-terminal (terminal :columns 32 :rows 4)
     (let ((display (make-instance 'terminal-display :terminal terminal)))
@@ -279,6 +308,213 @@
              initial-velocity-y)))
     (luvcraft::advance-block-particles system 1.0)
     (ok (zerop (block-particle-count system)))))
+
+(defun make-critter-test-world (&key (surface luvcraft::*grass-block*))
+  "A one-chunk world with a flat SURFACE top at y=1, for walking animals over."
+  (let ((world (make-block-world)))
+    (ensure-world-chunk world 0 0 0)
+    (loop for x below 16 do
+      (loop for z below 16 do
+        (setf (world-block-at world x 0 z) luvcraft::*dirt-block*
+              (world-block-at world x 1 z) surface)))
+    (relight-block-world world)
+    world))
+
+(deftest turtles-stand-on-the-ground-they-walk-over
+  (let* ((world (make-critter-test-world))
+         (turtle (spawn-critter-at :turtle world 8 2 8 4242)))
+    (ok (typep turtle 'turtle))
+    (ok (eq :turtle (critter-species turtle)))
+    (dotimes (step 1200)
+      (declare (ignorable step))
+      (advance-critter turtle world (/ 1d0 60)))
+    ;; It rests on the surface it started on, has not fallen through the
+    ;; world or climbed it, and has actually gone somewhere.
+    (ok (luvcraft::critter-grounded-p turtle))
+    (ok (< (abs (- 2d0 (critter-y turtle))) 1d-3))
+    (ok (> (+ (abs (- (critter-x turtle) 8.5d0))
+              (abs (- (critter-z turtle) 8.5d0)))
+           0.5d0))
+    ;; And it stays inside the chunk it was spawned in: a turtle walking into
+    ;; the world boundary turns away from it rather than leaving.
+    (ok (<= 0d0 (critter-x turtle) 16d0))
+    (ok (<= 0d0 (critter-z turtle) 16d0))))
+
+(deftest turtles-wander-the-same-way-from-the-same-seed
+  (let ((world (make-critter-test-world))
+        (positions '()))
+    (dotimes (attempt 2)
+      (declare (ignorable attempt))
+      (let ((turtle (spawn-critter-at :turtle world 8 2 8 777)))
+        (dotimes (step 600)
+          (declare (ignorable step))
+          (advance-critter turtle world (/ 1d0 60)))
+        (push (list (critter-x turtle) (critter-z turtle)
+                    (critter-yaw turtle))
+              positions)))
+    (ok (equal (first positions) (second positions)))))
+
+(deftest a-turtle-says-which-ground-it-lives-on
+  (let ((meadow (make-critter-test-world))
+        (bare (make-critter-test-world :surface luvcraft::*stone-block*)))
+    (ok (spawn-critter-at :turtle meadow 4 2 4 1))
+    (ok (spawn-critter-at :turtle
+                          (make-critter-test-world
+                           :surface luvcraft::*sand-block*)
+                          4 2 4 1))
+    ;; Stone is not turtle country, an occupied cell is nobody's, and a
+    ;; species nothing has claimed is an error rather than a silent absence.
+    (ok (null (spawn-critter-at :turtle bare 4 2 4 1)))
+    (setf (world-block-at meadow 4 2 4) luvcraft::*stone-block*)
+    (ok (null (spawn-critter-at :turtle meadow 4 2 4 1)))
+    (ok (signals (spawn-critter-at :axolotl meadow 4 2 4 1) 'error))))
+
+(deftest a-critter-population-fills-up-and-forgets-what-wanders-off
+  (let ((world (make-critter-test-world))
+        (population (make-instance 'critter-population :target-count 3)))
+    ;; Only the resident chunk offers sites, so the neighbourhood has to be
+    ;; visited a few times before it is as full as it wants to be.
+    (dotimes (frame 40)
+      (declare (ignorable frame))
+      (maintain-critter-population population world 8d0 8d0))
+    (ok (= 3 (critter-count population)))
+    (ok (every (lambda (critter) (typep critter 'turtle))
+               (critter-population-critters population)))
+    (maintain-critter-population population world 900d0 900d0)
+    (ok (zerop (critter-count population)))))
+
+(deftest a-critter-model-is-a-bounded-stream-of-turned-boxes
+  (let* ((world (make-critter-test-world))
+         (population (make-instance 'critter-population))
+         (turtle (spawn-critter-at :turtle world 8 2 8 5)))
+    (setf (critter-yaw turtle) 0.9d0)
+    (add-critter population turtle)
+    (let ((vertices (critter-vertices population world)))
+      (ok (typep vertices '(array single-float (*))))
+      (ok (= (length vertices)
+             (* (critter-model-box-count turtle)
+                luvcraft::+critter-vertices-per-box+
+                luvcraft::+block-mesh-floats-per-vertex+)))
+      ;; Every vertex of every turned box stays within the animal: the yaw
+      ;; rotation moves the model around its own position rather than away
+      ;; from it, whatever heading it walks on.
+      (ok (loop for offset from 0 below (length vertices)
+                by luvcraft::+block-mesh-floats-per-vertex+
+                always
+                (let ((dx (- (aref vertices offset) (critter-x turtle)))
+                      (y (aref vertices (+ offset 1)))
+                      (dz (- (aref vertices (+ offset 2))
+                             (critter-z turtle))))
+                  (and (< (sqrt (+ (* dx dx) (* dz dz))) 0.65)
+                       (<= -0.001 (- y (critter-y turtle))
+                           (critter-height turtle)))))))))
+
+(defun make-critter-riding-session (&key (world (make-critter-test-world)))
+  "A headless session with one turtle in front of a player looking at it."
+  (let* ((population (make-instance 'critter-population))
+         (turtle (spawn-critter-at :turtle world 8 2 8 3))
+         (camera (make-instance 'fly-camera
+                                :position (make-vec3 8.5d0 2.3d0 5.5d0)
+                                :yaw 0d0 :pitch 0d0))
+         (player (make-instance 'block-world-player
+                                :position (make-vec3 8.5d0 2d0 5.5d0)))
+         (session (make-instance 'luvcraft-session
+                                 :world world :camera camera :player player
+                                 :critters population)))
+    (add-critter population turtle)
+    (values session turtle player world)))
+
+(deftest looking-at-an-animal-is-looking-past-the-terrain
+  (multiple-value-bind (session turtle player world)
+      (make-critter-riding-session)
+    (declare (ignore player))
+    (ok (eq turtle (luvcraft-session-targeted-critter session)))
+    ;; A wall between the two is decided by which the ray reaches first, not by
+    ;; whether the animal is within reach.
+    (setf (world-block-at world 8 2 7) luvcraft::*stone-block*)
+    (ok (null (luvcraft-session-targeted-critter session)))
+    (setf (world-block-at world 8 2 7) nil)
+    (ok (eq turtle (luvcraft-session-targeted-critter session)))
+    ;; And an animal beyond the player's reach is out of it.
+    (setf (vec3-z (camera-position (luvcraft-session-camera session)))
+          -8d0)
+    (ok (null (luvcraft-session-targeted-critter session)))))
+
+(deftest mounting-a-turtle-carries-the-player-and-reins-the-animal
+  (multiple-value-bind (session turtle player world)
+      (make-critter-riding-session)
+    (let ((ride (toggle-luvcraft-session-focus session)))
+      (ok (typep ride 'critter-ride))
+      (ok (eq turtle (critter-ride-critter ride)))
+      (ok (eq ride (luvcraft-session-modal-focus session)))
+      ;; A mount carries the player, so the ordinary controller stands down.
+      (ok (luvcraft-focus-carries-player-p ride))
+      ;; An unridden turtle rests first; a reined one walks.
+      (setf (gethash :w (luvcraft::critter-ride-reins ride)) t)
+      (let ((start-z (critter-z turtle)))
+        (dotimes (frame 300)
+          (declare (ignorable frame))
+          (advance-critters (luvcraft-session-critters session) world
+                            (/ 1d0 60))
+          (advance-luvcraft-focus ride session (/ 1d0 60)))
+        (ok (not (turtle-resting-p turtle)))
+        (ok (> (abs (- (critter-z turtle) start-z)) 0.2d0)))
+      ;; Wherever it went, the player went too.
+      (ok (< (abs (- (player-x player) (critter-x turtle))) 1d-6))
+      (ok (< (abs (- (player-z player) (critter-z turtle))) 1d-6))
+      ;; And the camera it asks for is a seat on the animal: over its own
+      ;; footprint, above its back, facing the way it faces give or take the
+      ;; sway of its gait.
+      (let* ((pose (luvcraft-focus-camera-pose ride session))
+             (position (luvcraft::camera-pose-position pose))
+             (dx (- (vec3-x position) (critter-x turtle)))
+             (dz (- (vec3-z position) (critter-z turtle))))
+        (ok (typep pose 'luvcraft::camera-pose))
+        (ok (< (sqrt (+ (* dx dx) (* dz dz)))
+               (* 2 (critter-half-width turtle))))
+        (ok (> (vec3-y position)
+               (+ (critter-y turtle) (critter-height turtle))))
+        (ok (< (abs (luvcraft::shortest-angle-difference
+                     (luvcraft::camera-pose-yaw pose) (critter-yaw turtle)))
+               0.1d0)))
+      ;; Shift-TAB is the same toggle: it puts the rider down somewhere their
+      ;; own box fits and gives the animal its mind back.
+      (ok (eq ride (toggle-luvcraft-session-focus session)))
+      (ok (null (luvcraft-session-modal-focus session)))
+      (ok (body-position-clear-p player world (player-x player)
+                                 (player-y player) (player-z player)))
+      (ok (turtle-resting-p turtle)))))
+
+(deftest a-ride-ends-when-its-animal-does
+  (multiple-value-bind (session turtle player world)
+      (make-critter-riding-session)
+    (declare (ignore player world))
+    (let ((ride (toggle-luvcraft-session-focus session))
+          (population (luvcraft-session-critters session)))
+      (ok (typep ride 'critter-ride))
+      (setf (fill-pointer (critter-population-critters population)) 0)
+      (advance-luvcraft-focus ride session (/ 1d0 60))
+      (ok (null (luvcraft-session-modal-focus session)))
+      (ok (eq turtle (critter-ride-critter ride))))))
+
+(deftest an-animal-nobody-can-ride-is-only-looked-at
+  (let ((critter (make-instance 'critter)))
+    (ok (null (activate-luvcraft-critter critter nil)))
+    (ok (null (luvcraft-focus-carries-player-p critter)))
+    ;; And it ignores a rider's wishes rather than failing to understand them.
+    (ok (null (urge-critter critter 1d0 1d0 0.1d0)))))
+
+(deftest a-turtle-and-the-player-are-both-bodies
+  (let ((turtle (make-instance 'turtle))
+        (player (make-instance 'block-world-player)))
+    (dolist (body (list turtle player))
+      (ok (typep (body-position body) 'luvcraft::vec3))
+      (ok (typep (body-velocity body) 'luvcraft::vec3))
+      (ok (plusp (body-half-width body)))
+      (ok (plusp (body-height body)))
+      (ok (null (body-grounded-p body)))
+      (setf (body-grounded-p body) t)
+      (ok (body-grounded-p body)))))
 
 (deftest vec3-is-imported-from-its-arithmetic-representation-package
   (dolist (package-name '("LUVCRAFT.WORLD" "LUVCRAFT"))
@@ -624,10 +860,12 @@
             (luv.arithmetic:value-declaration-for :block-mesh-vertices)))
     (ok (typep (block-mesh-vertices mesh)
                (luv.arithmetic:declaration-representation-type declaration)))
-    (ok (= 12 (luv.arithmetic:repeated-quantity-layout-stride layout)))
+    (ok (= luvcraft::+block-mesh-floats-per-vertex+
+           (luv.arithmetic:repeated-quantity-layout-stride layout)))
     (ok (luv.arithmetic:quantity-layout= element shader-layout))
     (ok (= (length (block-mesh-vertices mesh))
-           (* 12 (block-mesh-vertex-count mesh))))
+           (* luvcraft::+block-mesh-floats-per-vertex+
+              (block-mesh-vertex-count mesh))))
     (ok (signals
          (make-instance 'block-mesh
                         :vertices (make-array 11 :element-type 'single-float)
@@ -1345,15 +1583,63 @@
   (ok (eq luvcraft::+block-atlas-texture-format+
           (luvcraft::ensure-block-atlas-sample-transfer
            luvcraft::+block-atlas-texture-format+)))
+  (ok (eq :identity
+          (texture-format-sample-transfer
+           luvcraft::+block-normal-atlas-texture-format+)))
   (ok (signals
        (luvcraft::ensure-block-atlas-sample-transfer :rgba8-unorm)
        'error))
-  (let ((atlas (make-block-texture-atlas)))
-    (ok (equal (array-dimensions atlas) '(16 176)))
+  (let ((atlas (make-block-texture-atlas))
+        (normal-atlas (make-block-normal-atlas)))
+    (ok (equal (array-dimensions atlas) '(16 416)))
+    (ok (equal (array-dimensions normal-atlas) '(16 416)))
     (ok (subtypep (array-element-type atlas) '(unsigned-byte 32)))
-    (ok (= (ldb (byte 8 24) (aref atlas 8 8)) 255))
+    (ok (subtypep (array-element-type normal-atlas) '(unsigned-byte 32)))
     (ok (/= (aref atlas 8 8) (aref atlas 8 (+ 8 (* 3 16)))))
-    (ok (/= (aref atlas 8 8) (aref atlas 8 (+ 8 (* 9 16))))))
+    (ok (/= (aref atlas 8 8) (aref atlas 8 (+ 8 (* 9 16)))))
+    ;; The colour atlas remains ordinary opaque sRGB material colour.
+    (ok (loop for tile below luvcraft::+block-atlas-tile-count+
+              always (loop for x below luvcraft::+block-atlas-tile-size+
+                           always (loop for y below
+                                        luvcraft::+block-atlas-tile-size+
+                                        always (= 255
+                                                  (ldb (byte 8 24)
+                                                       (aref atlas y
+                                                             (+ x (* tile 16)))))))))
+    (ok (loop for tile below luvcraft::+block-atlas-tile-count+
+              always (/= (ldb (byte 8 24)
+                              (aref normal-atlas 3 (+ 3 (* tile 16))))
+                         (ldb (byte 8 24)
+                              (aref normal-atlas 11 (+ 12 (* tile 16)))))))
+    ;; The normal materialization is derived from exactly that height field:
+    ;; alpha preserves it byte-for-byte, RGB stays unit length within RGBA8
+    ;; quantization, and at least one tangent lane responds to relief.
+    (ok (loop for y below luvcraft::+block-atlas-tile-size+
+              always
+              (loop for x below (* luvcraft::+block-atlas-tile-size+
+                                   luvcraft::+block-atlas-tile-count+)
+                    for tile = (floor x luvcraft::+block-atlas-tile-size+)
+                    for local-x = (mod x luvcraft::+block-atlas-tile-size+)
+                    always (= (luvcraft::paint-block-atlas-relief tile local-x y)
+                              (ldb (byte 8 24) (aref normal-atlas y x))))))
+    (ok (loop for y below luvcraft::+block-atlas-tile-size+
+              always
+              (loop for x below (* luvcraft::+block-atlas-tile-size+
+                                   luvcraft::+block-atlas-tile-count+)
+                    for pixel = (aref normal-atlas y x)
+                    for nx = (- (/ (ldb (byte 8 0) pixel) 127.5) 1.0)
+                    for ny = (- (/ (ldb (byte 8 8) pixel) 127.5) 1.0)
+                    for nz = (- (/ (ldb (byte 8 16) pixel) 127.5) 1.0)
+                    always (< (abs (- (+ (* nx nx) (* ny ny) (* nz nz))
+                                      1.0))
+                              0.025))))
+    (ok (loop for y below luvcraft::+block-atlas-tile-size+
+              thereis
+              (loop for x below (* luvcraft::+block-atlas-tile-size+
+                                   luvcraft::+block-atlas-tile-count+)
+                    for pixel = (aref normal-atlas y x)
+                    thereis (or (/= (ldb (byte 8 0) pixel) 128)
+                                (/= (ldb (byte 8 8) pixel) 128))))))
   (flet ((face (name)
            (find name luvcraft::*block-faces* :key #'block-face-name)))
     (ok (= (block-face-tile luvcraft::*grass-block* (face :top)) 0))
@@ -1364,10 +1650,15 @@
     (ok (= (block-face-tile luvcraft::*snow-block* (face :top)) 8))
     (ok (= (block-face-tile *crystal-block* (face :top)) 9))
     (ok (= (block-face-tile *terminal-block* (face :front)) 10))
+    (ok (= (block-face-tile luvcraft::*cactus-block* (face :front)) 15))
+    (ok (= (block-face-tile luvcraft::*cactus-block* (face :top)) 16))
     (ok (= (block-light-emission *crystal-block*) 12))
     (ok (= (block-surface-emission *crystal-block*) 1.2))
     (ok (= (block-surface-emission *terminal-block*) 0.16))
-    (ok (= (length (placeable-block-kinds)) 9)))
+    (ok (equal (mapcar #'block-kind-name (placeable-block-kinds))
+               '(:grass :dirt :stone :wood :leaves :sand :snow :crystal
+                 :terminal :gravel :clay :mud :moss :cactus :cobblestone
+                 :stone-bricks :bricks :planks :sandstone :slate))))
   (let ((world (make-block-world :chunk-width 2
                                  :chunk-height 2
                                  :chunk-depth 2)))
@@ -1375,7 +1666,8 @@
     (setf (world-block-at world 0 0 0) luvcraft::*stone-block*)
     (let ((mesh (mesh-block-world (make-instance 'exposed-face-mesher) world)))
       (ok (= (length (block-mesh-vertices mesh))
-             (* 12 (block-mesh-vertex-count mesh)))))))
+             (* luvcraft::+block-mesh-floats-per-vertex+
+                (block-mesh-vertex-count mesh)))))))
 
 (deftest little-world-has-readable-biome-materials
   (let ((source (make-instance 'little-world-source :seed 121))
@@ -1408,12 +1700,75 @@
     (ok (eq (select-luvcraft-block session 9) *terminal-block*))
     (ok (search "1–9 select" (canvas-title canvas)))
     (ok (search "terminal" (canvas-title canvas)))
-    (ok (null (select-luvcraft-block session 10)))
+    (ok (eq (select-luvcraft-block session 10) luvcraft::*gravel-block*))
+    (ok (search "[inventory]" (canvas-title canvas)))
     (handle-canvas-event
      session canvas
      (make-instance 'canvas-key-press-event
                     :key-name :8 :character #\8))
     (ok (eq (luvcraft-session-selected-block session) *crystal-block*))))
+
+(deftest block-inventory-supports-creative-and-finite-stacks
+  (let* ((creative
+           (make-block-inventory :blocks (list luvcraft::*stone-block*)))
+         (finite (make-block-inventory :blocks (list luvcraft::*dirt-block*)
+                                       :quantity 2))
+         (entry
+           (block-inventory-entry-for finite luvcraft::*dirt-block*)))
+    (ok (equal (block-inventory-blocks creative)
+               (list luvcraft::*stone-block*)))
+    (ok (null (block-inventory-entry-quantity
+               (first (block-inventory-entries creative)))))
+    (ok (remove-block-from-inventory creative luvcraft::*stone-block* 1000))
+    (ok (remove-block-from-inventory finite luvcraft::*dirt-block*))
+    (ok (= 1 (block-inventory-entry-quantity entry)))
+    (ng (remove-block-from-inventory finite luvcraft::*dirt-block* 2))
+    (add-block-to-inventory finite luvcraft::*dirt-block* 4)
+    (ok (= 5 (block-inventory-entry-quantity entry)))
+    (add-block-to-inventory finite *crystal-block* 3)
+    (ok (equal (block-inventory-blocks finite)
+               (list luvcraft::*dirt-block* *crystal-block*)))
+    (ok (= 3
+           (block-inventory-entry-quantity
+            (block-inventory-entry-for finite *crystal-block*))))))
+
+(deftest numbered-selection-follows-the-session-inventory
+  (let* ((canvas (make-instance 'title-canvas :title "inventory test"))
+         (inventory
+           (make-block-inventory
+            :blocks (list luvcraft::*wood-block* *crystal-block*)))
+         (session
+           (make-instance 'luvcraft-session
+                          :canvas canvas :inventory inventory
+                          :selected-block luvcraft::*wood-block*)))
+    (ok (eq *crystal-block* (select-luvcraft-block session 2)))
+    (ok (eq *crystal-block*
+            (luvcraft-session-selected-block session)))
+    (ok (null (select-luvcraft-block session 3)))
+    (ok (search "1–2 select" (canvas-title canvas)))))
+
+(deftest inventory-and-nine-slot-quickbar-have-independent-extents
+  (let* ((extra
+           (make-instance 'block-kind :name :test-extra
+                          :face-tiles '(:all 3)
+                          :categories '(:building)
+                          :display-color '(0.4 0.5 0.6)))
+         (base-count (length (placeable-block-kinds)))
+         (inventory
+           (make-block-inventory
+            :blocks (append (placeable-block-kinds) (list extra))))
+         (canvas (make-instance 'title-canvas :title "inventory extent test"))
+         (session
+           (make-instance 'luvcraft-session
+                          :canvas canvas :inventory inventory
+                          :selected-block luvcraft::*grass-block*)))
+    (ok (= (1+ base-count) (length (block-inventory-blocks inventory))))
+    (ok (= 9 (length (block-inventory-quickbar-blocks inventory))))
+    ;; The full inventory may select a block with no number key; the title
+    ;; makes that distinction visible rather than advertising a tenth key.
+    (ok (eq extra (select-luvcraft-block session (1+ base-count))))
+    (ok (search "[inventory]" (canvas-title canvas)))
+    (ok (search "1–9 select" (canvas-title canvas)))))
 
 (deftest gazetteer-names-semantic-gameplay-views
   (let* ((views (luvcraft-gazetteer-views))

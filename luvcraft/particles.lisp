@@ -143,7 +143,11 @@
               atlas-width)
            (/ (+ 0.5 (* local-v (1- +block-atlas-tile-size+)))
               +block-atlas-tile-size+)
-           shade nx ny nz 1.0 0.0 (block-surface-emission block)))))))
+           shade nx ny nz 1.0 0.0 (block-surface-emission block)
+           ;; A tumbling fragment has no neighbours at all, so every edge of
+           ;; every face is a convex one.
+           +block-face-edge-convex+ +block-face-edge-convex+
+           +block-face-edge-convex+ +block-face-edge-convex+))))))
 
 (defun block-particle-vertices (system)
   "Build the block-pipeline vertex stream for SYSTEM's current fragments."

@@ -13,6 +13,21 @@
   :type double-float
   :quantity (:quantity :ray-distance :unit :cell))
 
+;;; Every scene stage writes linear radiance into a floating-point attachment
+;;; instead of an already-encoded display image.  A sun disc, a specular
+;;; glint, or an emissive crystal is then allowed to be far brighter than
+;;; display white, which is exactly the signal the bloom chain feeds on and
+;;; the tonemapper rolls off.  Only the final presentation image is an sRGB
+;;; eight-bit surface.
+(defconstant +luvcraft-scene-color-format+ :rgba16-float
+  "The linear HDR attachment format shared by every scene-stage pipeline.")
+
+(defconstant +luvcraft-bloom-color-format+ :rgba16-float
+  "The reduced-resolution attachment format of the bloom and shaft chain.")
+
+(defconstant +luvcraft-bloom-divisor+ 4
+  "How much smaller each bloom chain attachment is than the frame.")
+
 (defclass luvcraft-session (canvas-event-handler)
   ((canvas :initarg :canvas :reader luvcraft-session-canvas)
    (device :initarg :device :reader luvcraft-session-device)
@@ -61,9 +76,14 @@
                      :accessor luvcraft-session-residency-center)
    (selected-block :initarg :selected-block :initform *stone-block*
                    :accessor luvcraft-session-selected-block)
+   (inventory :initarg :inventory :initform (make-block-inventory)
+              :reader luvcraft-session-inventory)
    (particle-system :initarg :particle-system
                     :initform (make-instance 'block-particle-system)
                     :reader luvcraft-session-particle-system)
+   (critters :initarg :critters
+             :initform (make-instance 'critter-population)
+             :reader luvcraft-session-critters)
    (title-base :initarg :title-base :initform "luvcraft"
                :reader luvcraft-session-title-base)
    (atlas-texture :initarg :atlas-texture
@@ -71,12 +91,20 @@
    (atlas-view :initarg :atlas-view :reader luvcraft-session-atlas-view)
    (atlas-sampler :initarg :atlas-sampler
                   :reader luvcraft-session-atlas-sampler)
+   (normal-atlas-texture :initarg :normal-atlas-texture
+                         :reader luvcraft-session-normal-atlas-texture)
+   (normal-atlas-view :initarg :normal-atlas-view
+                      :reader luvcraft-session-normal-atlas-view)
    (color-texture :initarg :color-texture
                   :reader luvcraft-session-color-texture)
    (color-view :initarg :color-view :reader luvcraft-session-color-view)
    (depth-texture :initarg :depth-texture
                   :reader luvcraft-session-depth-texture)
    (depth-view :initarg :depth-view :reader luvcraft-session-depth-view)
+   (presentation-texture :initarg :presentation-texture
+                         :reader luvcraft-session-presentation-texture)
+   (presentation-view :initarg :presentation-view
+                      :reader luvcraft-session-presentation-view)
    (shadow-depth-texture :initarg :shadow-depth-texture
                          :reader luvcraft-session-shadow-depth-texture)
    (shadow-depth-view :initarg :shadow-depth-view
@@ -88,6 +116,29 @@
    (layout :initarg :layout :reader luvcraft-session-layout)
    (shadow-layout :initarg :shadow-layout
                   :reader luvcraft-session-shadow-layout)
+   (post-layout :initarg :post-layout :reader luvcraft-session-post-layout)
+   (bloom-layout :initarg :bloom-layout :initform nil
+                 :reader luvcraft-session-bloom-layout)
+   (linear-sampler :initarg :linear-sampler :initform nil
+                   :reader luvcraft-session-linear-sampler)
+   ;; The lens chain ping-pongs between two reduced attachments: the blurred
+   ;; bloom ends on the primary one and the light shafts on the secondary.
+   (bloom-primary-texture :initarg :bloom-primary-texture :initform nil
+                          :reader luvcraft-session-bloom-primary-texture)
+   (bloom-primary-view :initarg :bloom-primary-view :initform nil
+                       :reader luvcraft-session-bloom-primary-view)
+   (bloom-secondary-texture :initarg :bloom-secondary-texture :initform nil
+                            :reader luvcraft-session-bloom-secondary-texture)
+   (bloom-secondary-view :initarg :bloom-secondary-view :initform nil
+                         :reader luvcraft-session-bloom-secondary-view)
+   (bloom-bright-pipeline :initarg :bloom-bright-pipeline :initform nil
+                          :reader luvcraft-session-bloom-bright-pipeline)
+   (bloom-horizontal-pipeline :initarg :bloom-horizontal-pipeline :initform nil
+                              :reader luvcraft-session-bloom-horizontal-pipeline)
+   (bloom-vertical-pipeline :initarg :bloom-vertical-pipeline :initform nil
+                            :reader luvcraft-session-bloom-vertical-pipeline)
+   (sun-shaft-pipeline :initarg :sun-shaft-pipeline :initform nil
+                       :reader luvcraft-session-sun-shaft-pipeline)
    (block-pipeline :initarg :block-pipeline
                    :reader luvcraft-session-block-pipeline)
    (shadow-pipeline :initarg :shadow-pipeline
@@ -101,12 +152,18 @@
     :reader luvcraft-session-crosshair-vertex-buffer)
    (crosshair-pipeline :initarg :crosshair-pipeline
                        :reader luvcraft-session-crosshair-pipeline)
+   (post-pipeline :initarg :post-pipeline
+                  :reader luvcraft-session-post-pipeline)
    (particle-vertex-buffer :initarg :particle-vertex-buffer
                            :reader luvcraft-session-particle-vertex-buffer)
+   (critter-vertex-buffer :initarg :critter-vertex-buffer
+                          :reader luvcraft-session-critter-vertex-buffer)
    (world-text :initarg :world-text :initform nil
                :reader luvcraft-session-world-text)
    (world-text-glyph-cache :initarg :world-text-glyph-cache :initform nil
                            :reader luvcraft-session-world-text-glyph-cache)
+   (video-screen :initarg :video-screen :initform nil
+                 :accessor luvcraft-session-video-screen)
    (overlays :initform nil :accessor luvcraft-session-overlays)
    (modal-focus :initform nil :accessor luvcraft-session-modal-focus)
    (focus-camera-origin :initform nil
@@ -142,6 +199,14 @@
 (defmethod encode-luvcraft-overlay (overlay session pass surface-texture)
   (declare (ignore overlay session pass surface-texture))
   nil)
+
+(defgeneric luvcraft-overlay-stage (overlay)
+  (:documentation
+   "Return :SCENE for depth-bearing overlays or :HUD for crisp presentation."))
+
+(defmethod luvcraft-overlay-stage (overlay)
+  (declare (ignore overlay))
+  :scene)
 
 (defgeneric refresh-luvcraft-overlay (overlay session)
   (:documentation
@@ -184,6 +249,19 @@
   (:documentation
    "Handle EVENT while FOCUS owns SESSION's modal player interaction."))
 
+(defgeneric handle-luvcraft-focus-control-event (focus session canvas event)
+  (:documentation
+   "Offer EVENT to controls which belong to focused FOCUS, returning true when consumed.
+
+This is narrower than the ordinary overlay event path: a focused world object
+may expose a HUD control without allowing an unconsumed click to fall through
+to block editing or to unrelated overlays."))
+
+(defmethod handle-luvcraft-focus-control-event
+    (focus session canvas event)
+  (declare (ignore focus session canvas event))
+  nil)
+
 (defgeneric luvcraft-focus-score (focus session)
   (:documentation
    "Return a non-negative targeting score when FOCUS can be entered by TAB."))
@@ -198,6 +276,29 @@
 
 (defmethod luvcraft-focus-camera-pose (focus session)
   (declare (ignore focus session))
+  nil)
+
+(defgeneric luvcraft-focus-carries-player-p (focus)
+  (:documentation
+   "Whether FOCUS moves the player itself instead of the player controller.
+
+A terminal on a wall leaves the player standing in front of it and the ordinary
+scalar controller keeps running.  A mount does not: it carries the player, so
+the controller must stand down for as long as the interaction lasts."))
+
+(defmethod luvcraft-focus-carries-player-p (focus)
+  (declare (ignore focus))
+  nil)
+
+(defgeneric advance-luvcraft-focus (focus session seconds)
+  (:documentation
+   "Let FOCUS take its own turn in SESSION's simulation, before the player's.
+
+A focus which only reads input needs nothing here; a moving one -- a mount, a
+vehicle, a cutscene -- does its own work in this method."))
+
+(defmethod advance-luvcraft-focus (focus session seconds)
+  (declare (ignore focus session seconds))
   nil)
 
 (defgeneric luvcraft-overlay-focus-insets (overlay session)
@@ -269,6 +370,18 @@
   (declare (ignore block session hit))
   nil)
 
+(defgeneric activate-luvcraft-critter (critter session)
+  (:documentation
+   "Create and return a focusable interaction for targeted CRITTER, or NIL.
+
+The animal counterpart of ACTIVATE-LUVCRAFT-TARGET: an animal which can be
+mounted answers with the ride, and one which cannot answers NIL and is simply
+looked at."))
+
+(defmethod activate-luvcraft-critter (critter session)
+  (declare (ignore critter session))
+  nil)
+
 (defgeneric attach-luvcraft-hud (session)
   (:documentation
    "Attach the player HUD supplied by the loaded presentation system.
@@ -330,6 +443,24 @@ mounting a vehicle, and other interactions described by #8JCMA5."
       (handle-luvcraft-focus-event focus session canvas event)
       t)))
 
+(defun luvcraft-session-targeted-critter
+    (session &key (max-distance +luvcraft-target-reach+))
+  "Return the animal SESSION's centre view ray reaches first, and how far.
+
+An animal standing behind a wall is not targeted: whichever of the animal and
+the terrain the ray meets first is what the player is looking at."
+  (let ((camera (luvcraft-session-camera session)))
+    (multiple-value-bind (right up forward) (camera-basis camera)
+      (declare (ignore right up))
+      (multiple-value-bind (critter distance)
+          (critter-along-ray (luvcraft-session-critters session)
+                             (camera-position camera) forward max-distance)
+        (when critter
+          (let ((hit (luvcraft-session-target
+                      session :max-distance max-distance)))
+            (unless (and hit (< (block-ray-hit-distance hit) distance))
+              (values critter distance))))))))
+
 (defun luvcraft-session-focus-candidate (session)
   "Return or activate SESSION's best currently targeted focusable object."
   (or (loop with best = nil
@@ -341,6 +472,9 @@ mounting a vehicle, and other interactions described by #8JCMA5."
               do (setf best overlay
                        best-score score)
             finally (return best))
+      (alexandria:when-let
+          ((critter (luvcraft-session-targeted-critter session)))
+        (activate-luvcraft-critter critter session))
       (multiple-value-bind (hit status) (luvcraft-session-target session)
         (declare (ignore status))
         (when hit
@@ -404,15 +538,29 @@ mounting a vehicle, and other interactions described by #8JCMA5."
   (live-shader-pipeline-native-pipeline
    (luvcraft-session-sky-pipeline session)))
 
+(defun luvcraft-session-post-native-pipeline (session)
+  (live-shader-pipeline-native-pipeline
+   (luvcraft-session-post-pipeline session)))
+
 (defun refresh-luvcraft-shaders (session)
   "Install any successfully redefined block-world shader methods."
   (refresh-live-shader-pipeline (luvcraft-session-block-pipeline session))
   (refresh-live-shader-pipeline (luvcraft-session-shadow-pipeline session))
   (refresh-live-shader-pipeline (luvcraft-session-sky-pipeline session))
   (refresh-live-shader-pipeline (luvcraft-session-crosshair-pipeline session))
+  (refresh-live-shader-pipeline (luvcraft-session-post-pipeline session))
+  (dolist (pipeline (list (luvcraft-session-bloom-bright-pipeline session)
+                          (luvcraft-session-bloom-horizontal-pipeline session)
+                          (luvcraft-session-bloom-vertical-pipeline session)
+                          (luvcraft-session-sun-shaft-pipeline session)))
+    (when pipeline
+      (refresh-live-shader-pipeline pipeline)))
   (when (luvcraft-session-world-text session)
     (refresh-live-shader-pipeline
      (world-text-run-pipeline (luvcraft-session-world-text session))))
+  (when (luvcraft-session-video-screen session)
+    (refresh-live-shader-pipeline
+     (video-screen-pipeline (luvcraft-session-video-screen session))))
   session)
 
 (defun luvcraft-session-target
@@ -427,15 +575,16 @@ mounting a vehicle, and other interactions described by #8JCMA5."
        forward #'block-solid-p :max-distance max-distance))))
 
 (defun update-luvcraft-session-title (session)
-  (let* ((blocks (placeable-block-kinds))
+  (let* ((blocks (block-inventory-quickbar-blocks
+                  (luvcraft-session-inventory session)))
          (block (luvcraft-session-selected-block session))
          (number (position block blocks :test #'eq)))
     (when (slot-boundp session 'canvas)
       (setf (canvas-title (luvcraft-session-canvas session))
             (format nil
-                    "~A — [~A] ~(~A~)  ·  1–~D select  ·  e place  ·  x mine  ·  c pick  ·  arrows look  ·  tab focus  ·  ctrl-q quit"
+                    "~A — [~A] ~(~A~)  ·  1–~D select  ·  e place  ·  x mine  ·  c pick  ·  I inventory  ·  shift sprint  ·  arrows look  ·  tab focus  ·  ctrl-q quit"
                     (luvcraft-session-title-base session)
-                    (if number (1+ number) "?")
+                    (if number (1+ number) "inventory")
                     (block-kind-name block)
                     (length blocks)))))
   session)
@@ -443,7 +592,10 @@ mounting a vehicle, and other interactions described by #8JCMA5."
 (defun select-luvcraft-block (session number)
   "Select the one-based numbered placeable material and update the title."
   (check-type number (integer 1))
-  (let ((block (nth (1- number) (placeable-block-kinds))))
+  (let ((block
+          (nth (1- number)
+               (block-inventory-blocks
+                (luvcraft-session-inventory session)))))
     (when block
       (setf (luvcraft-session-selected-block session) block)
       (update-luvcraft-session-title session))

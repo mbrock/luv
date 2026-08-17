@@ -118,6 +118,7 @@
                       :sample-result-type :uvec4)
 (register-shader-type :sampler :opaque-kind :sampler)
 (register-shader-type :uniform-block :opaque-kind :uniform-block)
+(register-shader-type :storage-buffer :opaque-kind :storage-buffer)
 
 (defun find-shader-type (designator &optional source-form)
   (or (and (typep designator 'shader-type) designator)
@@ -275,6 +276,22 @@ colour transfer of the value returned by sampling."))
     :reader shader-uniform-member-offset))
   (:documentation
    "A named value inside a SHADER-UNIFORM-BLOCK, not a separate resource."))
+
+(defclass shader-storage-buffer (shader-resource)
+  ((element-type
+    :initarg :element-type
+    :reader shader-storage-buffer-element-type))
+  (:documentation
+   "One descriptor-backed read-only array of uniformly typed elements.
+
+The array has no declared length: a shader indexes it with BUFFER-ELEMENT
+and the host decides how many elements it uploads.  #HFX2LI"))
+
+(defun shader-storage-buffer-element-stride (buffer)
+  "Return the byte distance between consecutive elements of BUFFER."
+  (let ((type (shader-storage-buffer-element-type buffer)))
+    (* (shader-type-component-count type)
+       (floor (shader-type-bit-width type) 8))))
 
 (defclass shader-task-payload (shader-named-object)
   ((fields
@@ -713,6 +730,7 @@ leaves it again while retaining the semantic operand in the expression graph."))
     ((expression shader-map-application))
   (lang:arithmetic-expression-quantity-checked-p expression))
 
+
 (defmethod shader-expression-materialized-p
     ((expression shader-map-projection))
   ;; Exact fields lower directly from cached components; no intermediate vec3
@@ -839,6 +857,45 @@ leaves it again while retaining the semantic operand in the expression graph."))
     :initarg :index
     :reader shader-payload-element-index)))
 
+(defclass shader-buffer-element (shader-expression)
+  ((buffer
+    :initarg :buffer
+    :reader shader-buffer-element-buffer)
+   (index
+    :initarg :index
+    :reader shader-buffer-element-index)))
+
+(defclass shader-bit-field-call (shader-call)
+  ((size
+    :initarg :size
+    :reader shader-bit-field-size)
+   (position
+    :initarg :position
+    :reader shader-bit-field-position))
+  (:documentation
+   "An LDB call whose byte specifier is part of the operator, not an operand."))
+
+(defmethod shader-expression-quantity-checked-p
+    ((expression shader-payload-element))
+  (or (shader-declaration-quantity-specification
+       (shader-payload-element-field expression))
+      (shader-declaration-quantity-layout
+       (shader-payload-element-field expression))))
+
+(defmethod shader-expression-quantity-checked-p
+    ((expression shader-buffer-element))
+  ;; Buffer elements are raw representations until a shader interprets them.
+  (declare (ignore expression))
+  nil)
+
+(defmethod lang:arithmetic-expression-quantity-checked-p
+    ((expression shader-payload-element))
+  (shader-expression-quantity-checked-p expression))
+
+(defmethod lang:arithmetic-expression-quantity-checked-p
+    ((expression shader-buffer-element))
+  (shader-expression-quantity-checked-p expression))
+
 (defclass shader-specification (shader-named-object)
   ((stage
     :initarg :stage
@@ -912,6 +969,12 @@ leaves it again while retaining the semantic operand in the expression graph."))
 (defmethod shader-expression-form ((expression shader-payload-element))
   (shader-expression-source-form expression))
 
+(defmethod shader-expression-form ((expression shader-buffer-element))
+  (shader-expression-source-form expression))
+
+(defmethod shader-expression-form ((expression shader-bit-field-call))
+  (shader-expression-source-form expression))
+
 (defmethod lang:arithmetic-expression-form
     ((expression shader-map-application))
   (shader-expression-source-form expression))
@@ -953,6 +1016,9 @@ leaves it again while retaining the semantic operand in the expression graph."))
 
 (defmethod shader-expression-children ((expression shader-payload-element))
   (list (shader-payload-element-index expression)))
+
+(defmethod shader-expression-children ((expression shader-buffer-element))
+  (list (shader-buffer-element-index expression)))
 
 (defmethod lang:arithmetic-expression-children
     ((expression shader-map-application))
@@ -1070,6 +1136,10 @@ leaves it again while retaining the semantic operand in the expression graph."))
                (shader-task-payload-field-element-count target))
       (error 'shader-language-error
              :form source-form :reason :payload-array-requires-element
+             :details name))
+    (when (typep target 'shader-storage-buffer)
+      (error 'shader-language-error
+             :form source-form :reason :storage-buffer-requires-element
              :details name))
     (make-instance 'shader-reference
                    :target target
@@ -1543,6 +1613,18 @@ silent loss of meaning."
 (defmethod infer-shader-call-type ((operator (eql 'sqrt)) operands source-form)
   (infer-uniform-extended-type operator operands source-form 1 1))
 
+(macrolet
+    ((define-unary-extended-type (&rest operators)
+       `(progn
+          ,@(mapcar
+             (lambda (operator)
+               `(defmethod infer-shader-call-type
+                    ((operator (eql ',operator)) operands source-form)
+                  (infer-uniform-extended-type
+                   operator operands source-form 1 1)))
+             operators))))
+  (define-unary-extended-type floor fract sin cos exp log))
+
 (defmethod infer-shader-call-type
     ((operator (eql 'derivative-x)) operands source-form)
   (infer-uniform-extended-type operator operands source-form 1 1))
@@ -1682,6 +1764,10 @@ never collides with a standard symbol's function documentation:
   "Load one exact two-dimensional texel at an unsigned integer coordinate.")
 (define-shader-operator payload-element
   "Read one indexed element of the task payload shared with a mesh shader.")
+(define-shader-operator buffer-element
+  "Read one indexed element of a storage buffer resource.")
+(define-shader-operator ldb
+  "Extract the unsigned bit field (BYTE SIZE POSITION) of one unsigned scalar.")
 (define-shader-operator derivative-x
   "Return the horizontal screen-space derivative of a fragment value.")
 (define-shader-operator derivative-y
@@ -1722,6 +1808,20 @@ never collides with a standard symbol's function documentation:
   "The componentwise square root of one scalar or vector.")
 (define-shader-operator expt
   "Raise a value to a power, componentwise over one uniform type.")
+;;; The transcendental and lattice family: what procedural image mathematics
+;;; needs to build hashes, value noise, and periodic shaping without a table.
+(define-shader-operator floor
+  "The componentwise greatest integer not above one scalar or vector.")
+(define-shader-operator fract
+  "The componentwise fractional part: the value less its floor.")
+(define-shader-operator sin
+  "The componentwise sine of one scalar or vector of radians.")
+(define-shader-operator cos
+  "The componentwise cosine of one scalar or vector of radians.")
+(define-shader-operator exp
+  "The componentwise natural exponential of one scalar or vector.")
+(define-shader-operator log
+  "The componentwise natural logarithm of one scalar or vector.")
 (define-shader-operator < "Test two scalar floats for ordered less-than.")
 (define-shader-operator <= "Test two scalar floats for ordered less-or-equal.")
 (define-shader-operator > "Test two scalar floats for ordered greater-than.")
@@ -2075,6 +2175,90 @@ syntax, such as SWIZZLE's component designator, replaces parsing wholesale."))
                    :quantity-specification
                    (shader-declaration-quantity-specification field)
                    :quantity-layout (shader-declaration-quantity-layout field)
+                   :source-form form)))
+
+(defmethod parse-shader-operator-call
+    ((operator (eql 'buffer-element)) form environment)
+  (declare (ignore operator))
+  (unless (= (length form) 3)
+    (error 'shader-language-error
+           :form form :reason :buffer-element-arity))
+  (let* ((buffer-name (second form))
+         (buffer (shader-environment-value buffer-name environment form))
+         (index (parse-shader-expression (third form) environment)))
+    (unless (typep buffer 'shader-storage-buffer)
+      (error 'shader-language-error
+             :form form :reason :not-storage-buffer :details buffer-name))
+    (unless (shader-uint-type-p (shader-expression-type index))
+      (error 'shader-language-error
+             :form form :reason :buffer-index-type
+             :details (shader-type-name (shader-expression-type index))))
+    (make-instance 'shader-buffer-element
+                   :buffer buffer :index index
+                   :type (shader-storage-buffer-element-type buffer)
+                   :quantity-specification nil
+                   :quantity-layout nil
+                   :source-form form)))
+
+(defun shader-constant-integer-value (form)
+  "Return FORM's integer value when it is an integer literal or a constant
+symbol naming one, else NIL."
+  (cond ((integerp form) form)
+        ((and (symbolp form) (constantp form) (boundp form)
+              (integerp (symbol-value form)))
+         (symbol-value form))
+        (t nil)))
+
+(defmethod parse-shader-operator-call
+    ((operator (eql 'ldb)) form environment)
+  "Parse (LDB (BYTE SIZE POSITION) VALUE).
+
+SIZE is a positive integer.  POSITION is an integer, or a 32-bit unsigned
+expression for a field whose place is only known at run time; then the field
+must still fit the operand's width, which is checked by the caller's data
+rather than the language."
+  (unless (= (length form) 3)
+    (error 'shader-language-error :form form :reason :ldb-arity))
+  (let* ((specifier (second form))
+         (size (and (consp specifier) (= (length specifier) 3)
+                    (shader-symbol= (first specifier) 'byte)
+                    (shader-constant-integer-value (second specifier))))
+         (position (and size
+                        (shader-constant-integer-value (third specifier))))
+         (position-expression
+           (and size (null position)
+                (parse-shader-expression (third specifier) environment)))
+         (value (parse-shader-expression (third form) environment))
+         (type (shader-expression-type value)))
+    (unless (and size (plusp size)
+                 (or (and position (>= position 0))
+                     position-expression))
+      (error 'shader-language-error
+             :form form :reason :invalid-byte-specifier :details specifier))
+    (unless (shader-unsigned-type-p type)
+      (error 'shader-language-error
+             :form form :reason :invalid-bit-field-operand
+             :details (shader-type-name type)))
+    (when (and position-expression
+               (not (shader-uint-type-p
+                     (shader-expression-type position-expression))))
+      (error 'shader-language-error
+             :form form :reason :byte-position-type
+             :details (shader-type-name
+                       (shader-expression-type position-expression))))
+    (unless (<= (+ size (or position 0)) (shader-type-bit-width type))
+      (error 'shader-language-error
+             :form form :reason :byte-specifier-exceeds-width
+             :details (list specifier (shader-type-bit-width type))))
+    (make-instance 'shader-bit-field-call
+                   :operator operator
+                   :operands (if position-expression
+                                 (list value position-expression)
+                                 (list value))
+                   :size size :position position
+                   :type type
+                   :quantity-specification nil
+                   :quantity-layout nil
                    :source-form form)))
 
 (defvar *shader-function-call-counter* 0)
@@ -2739,7 +2923,7 @@ NIL leaves the character to the named definition; T is the historical
 
 (defun parse-resource-declaration (form)
   (destructuring-bind
-      (name type &key (set 0) binding members
+      (name type &key (set 0) binding members element
                        sample-quantity sample-dimension sample-unit
                        sample-affine-p sample-character sample-components
                        sample-transfer)
@@ -2749,93 +2933,116 @@ NIL leaves the character to the named definition; T is the historical
       (error 'shader-language-error
              :form form :reason :invalid-resource-location
              :details (list set binding)))
-    (if (shader-symbol= type :uniform-block)
-        (let ((block
-                (make-instance 'shader-uniform-block
-                               :name name
-                               :type (find-shader-type :uniform-block form)
-                               :descriptor-set set :binding binding
-                               :source-form form)))
-          (unless (and (listp members) members)
-            (error 'shader-language-error
-                   :form form :reason :empty-uniform-block))
-          (setf (shader-uniform-block-members block)
-                (loop for member-form in members
-                      for index from 0
-                      collect
-                      (destructuring-bind
-                          (member-name member-type
-                           &key quantity dimension unit affine-p character
-                             components)
-                          member-form
-                        (let ((resolved-type
-                                (find-shader-type member-type member-form)))
-                          ;; This intentionally models the renderer's current
-                          ;; camera ABI: an aggregate of aligned vec4 lanes.
-                          ;; Do not imply general std140 packing until the
-                          ;; language owns that calculation explicitly.
-                          (unless (eq resolved-type (find-shader-type :vec4))
-                            (error 'shader-language-error
-                                   :form member-form
-                                   :reason :unsupported-uniform-member-type
-                                   :details member-type))
-                          (let ((specification
-                                  (parse-declaration-quantity-specification
-                                   quantity dimension unit
-                                   (declared-character affine-p character)
-                                   resolved-type member-form)))
-                            (make-instance
-                             'shader-uniform-member
-                             :name member-name :type resolved-type
-                             :quantity-specification specification
-                             :quantity-layout
+    (when (and element (not (shader-symbol= type :storage-buffer)))
+      (error 'shader-language-error
+             :form form :reason :element-on-non-storage-buffer))
+    (cond
+      ((shader-symbol= type :storage-buffer)
+       (let ((element-type (and element (find-shader-type element form))))
+         (unless (and element-type
+                      (shader-type-component-count element-type)
+                      (member (shader-type-component-count element-type)
+                              '(1 2 4)))
+           (error 'shader-language-error
+                  :form form :reason :invalid-storage-buffer-element
+                  :details element))
+         (when members
+           (error 'shader-language-error
+                  :form form :reason :members-on-opaque-resource))
+         (make-instance 'shader-storage-buffer
+                        :name name
+                        :type (find-shader-type :storage-buffer form)
+                        :element-type element-type
+                        :descriptor-set set :binding binding
+                        :source-form form)))
+      ((shader-symbol= type :uniform-block)
+       (let ((block
+               (make-instance 'shader-uniform-block
+                              :name name
+                              :type (find-shader-type :uniform-block form)
+                              :descriptor-set set :binding binding
+                              :source-form form)))
+         (unless (and (listp members) members)
+           (error 'shader-language-error
+                  :form form :reason :empty-uniform-block))
+         (setf (shader-uniform-block-members block)
+               (loop for member-form in members
+                     for index from 0
+                     collect
+                     (destructuring-bind
+                         (member-name member-type
+                          &key quantity dimension unit affine-p character
+                            components)
+                         member-form
+                       (let ((resolved-type
+                               (find-shader-type member-type member-form)))
+                         ;; This intentionally models the renderer's current
+                         ;; camera ABI: an aggregate of aligned vec4 lanes.
+                         ;; Do not imply general std140 packing until the
+                         ;; language owns that calculation explicitly.
+                         (unless (eq resolved-type (find-shader-type :vec4))
+                           (error 'shader-language-error
+                                  :form member-form
+                                  :reason :unsupported-uniform-member-type
+                                  :details member-type))
+                         (let ((specification
+                                 (parse-declaration-quantity-specification
+                                  quantity dimension unit
+                                  (declared-character affine-p character)
+                                  resolved-type member-form)))
+                           (make-instance
+                            'shader-uniform-member
+                            :name member-name :type resolved-type
+                            :quantity-specification specification
+                            :quantity-layout
+                            (parse-declaration-quantity-layout
+                             components resolved-type member-form
+                             specification)
+                            :block block :index index :offset (* index 16)
+                            :source-form member-form))))))
+         block))
+      (t
+       (let* ((resolved-type (find-shader-type type form))
+              (sample-type
+                (and (shader-type-sample-result-type resolved-type)
+                     (find-shader-type
+                      (shader-type-sample-result-type resolved-type)
+                      form)))
+              (sample-specification
+                (and sample-type
+                     (parse-declaration-quantity-specification
+                      sample-quantity sample-dimension sample-unit
+                      (declared-character sample-affine-p sample-character)
+                      sample-type form))))
+         (unless (and (shader-type-opaque-kind resolved-type)
+                      (not (eq (shader-type-opaque-kind resolved-type)
+                               :uniform-block)))
+           (error 'shader-language-error
+                  :form form :reason :non-resource-type :details type))
+         (when members
+           (error 'shader-language-error
+                  :form form :reason :members-on-opaque-resource))
+         (unless (member sample-transfer '(nil :identity :srgb-to-linear))
+           (error 'shader-language-error
+                  :form form :reason :invalid-sample-transfer
+                  :details sample-transfer))
+         (when (and (or sample-quantity sample-dimension sample-unit
+                        sample-affine-p sample-character sample-components
+                        sample-transfer)
+                    (null sample-type))
+           (error 'shader-language-error
+                  :form form :reason :sample-semantics-on-non-texture))
+         (make-instance 'shader-resource
+                        :name name :type resolved-type
+                        :sample-quantity-specification sample-specification
+                        :sample-quantity-layout
+                        (and sample-type
                              (parse-declaration-quantity-layout
-                              components resolved-type member-form
-                              specification)
-                             :block block :index index :offset (* index 16)
-                             :source-form member-form))))))
-          block)
-        (let* ((resolved-type (find-shader-type type form))
-               (sample-type
-                 (and (shader-type-sample-result-type resolved-type)
-                      (find-shader-type
-                       (shader-type-sample-result-type resolved-type)
-                       form)))
-               (sample-specification
-                 (and sample-type
-                      (parse-declaration-quantity-specification
-                       sample-quantity sample-dimension sample-unit
-                       (declared-character sample-affine-p sample-character)
-                       sample-type form))))
-          (unless (and (shader-type-opaque-kind resolved-type)
-                       (not (eq (shader-type-opaque-kind resolved-type)
-                                :uniform-block)))
-            (error 'shader-language-error
-                   :form form :reason :non-resource-type :details type))
-          (when members
-            (error 'shader-language-error
-                   :form form :reason :members-on-opaque-resource))
-          (unless (member sample-transfer '(nil :identity :srgb-to-linear))
-            (error 'shader-language-error
-                   :form form :reason :invalid-sample-transfer
-                   :details sample-transfer))
-          (when (and (or sample-quantity sample-dimension sample-unit
-                         sample-affine-p sample-character sample-components
-                         sample-transfer)
-                     (null sample-type))
-            (error 'shader-language-error
-                   :form form :reason :sample-semantics-on-non-texture))
-          (make-instance 'shader-resource
-                         :name name :type resolved-type
-                         :sample-quantity-specification sample-specification
-                         :sample-quantity-layout
-                         (and sample-type
-                              (parse-declaration-quantity-layout
-                               sample-components sample-type form
-                               sample-specification))
-                         :sample-transfer sample-transfer
-                         :descriptor-set set :binding binding
-                         :source-form form)))))
+                              sample-components sample-type form
+                              sample-specification))
+                        :sample-transfer sample-transfer
+                        :descriptor-set set :binding binding
+                        :source-form form))))))
 
 (defun parse-output-assignment (form environment outputs)
   (unless (and (consp form) (eq (first form) 'set-output)
@@ -3620,6 +3827,7 @@ structured product and source provenance.  #JDLQPN"))
                    :accessor context-array-type-ids)
    (uniform-struct-ids :initform (make-hash-table :test #'eq)
                        :accessor context-uniform-struct-ids)
+   (stage :initform nil :accessor context-stage)
    (task-payload-variable :initform nil
                           :accessor context-task-payload-variable)
    (mesh-primitive-indices-variable
@@ -3680,8 +3888,11 @@ structured product and source provenance.  #JDLQPN"))
 
 (defun reserve-shader-id (context name)
   (let ((id (shader-id name)))
-    (setf (gethash id (context-claimed-ids context)) t)
-    id))
+    (if (gethash id (context-claimed-ids context))
+        (fresh-shader-id context name)
+        (progn
+          (setf (gethash id (context-claimed-ids context)) t)
+          id))))
 
 (defun fresh-shader-id (context name)
   (let* ((base (shader-id-string name))
@@ -3845,6 +4056,44 @@ structured product and source provenance.  #JDLQPN"))
                                (list id 'type-pointer 'uniform struct-id))
           id))))
 
+(defun ensure-storage-buffer-type-id (context buffer)
+  "Return the id of BUFFER's block struct: one runtime array of elements."
+  (or (gethash buffer (context-uniform-struct-ids context))
+      (let* ((name (shader-object-name buffer))
+             (element-id (ensure-shader-type-id
+                          context (shader-storage-buffer-element-type buffer)))
+             (array-id (reserve-shader-id
+                        context (format nil "~A-RUNTIME-ARRAY" name)))
+             (id (reserve-shader-id context (format nil "~A-BLOCK" name))))
+        (setf (gethash buffer (context-uniform-struct-ids context)) id)
+        (append-context-form 'type-declarations context
+                             (list array-id 'type-runtime-array element-id))
+        (append-context-form
+         'annotations context
+         (list 'decorate array-id 'array-stride
+               (shader-storage-buffer-element-stride buffer)))
+        (append-context-form 'type-declarations context
+                             (list id 'type-struct array-id))
+        (append-context-form 'annotations context
+                             (list 'decorate id 'block))
+        (append-context-form 'annotations context
+                             (list 'member-decorate id 0 'offset 0))
+        (append-context-form 'annotations context
+                             (list 'member-decorate id 0 'non-writable))
+        id)))
+
+(defun ensure-storage-buffer-pointer-type-id (context buffer)
+  (let* ((struct-id (ensure-storage-buffer-type-id context buffer))
+         (key (list 'storage-buffer struct-id)))
+    (or (gethash key (context-pointer-ids context))
+        (let ((id (reserve-shader-id
+                   context
+                   (format nil "~A-POINTER" (shader-object-name buffer)))))
+          (setf (gethash key (context-pointer-ids context)) id)
+          (append-context-form 'type-declarations context
+                               (list id 'type-pointer 'storage-buffer struct-id))
+          id))))
+
 (defun shader-constant-name (value)
   (format nil "FLOAT-~A" value))
 
@@ -3924,12 +4173,16 @@ Modules whose expressions use no extended mathematics never acquire one."
                 (:input 'input)
                 (:output 'output)))
              (shader-uniform-block 'uniform)
+             (shader-storage-buffer 'storage-buffer)
              (shader-resource 'uniform-constant)))
          (type (shader-declaration-type declaration))
          (pointer-id
-           (if (typep declaration 'shader-uniform-block)
-               (ensure-uniform-block-pointer-type-id context declaration)
-               (ensure-pointer-type-id context direction type)))
+           (typecase declaration
+             (shader-uniform-block
+              (ensure-uniform-block-pointer-type-id context declaration))
+             (shader-storage-buffer
+              (ensure-storage-buffer-pointer-type-id context declaration))
+             (t (ensure-pointer-type-id context direction type))))
          (variable-id (reserve-shader-id context
                                          (shader-object-name declaration))))
     (setf (gethash declaration (context-variable-ids context)) variable-id)
@@ -3955,7 +4208,11 @@ Modules whose expressions use no extended mathematics never acquire one."
        (append-context-form
         'annotations context
         (list 'decorate variable-id 'binding
-              (shader-resource-binding declaration)))))
+              (shader-resource-binding declaration)))
+       ;; SPIR-V 1.4 modules list every global the entry point touches.
+       (when (member (context-stage context) '(:task :mesh))
+         (setf (context-interfaces context)
+               (nconc (context-interfaces context) (list variable-id))))))
     variable-id))
 
 (defun register-workgroup-size-value (context declaration workgroup-size)
@@ -4158,6 +4415,10 @@ Modules whose expressions use no extended mathematics never acquire one."
   (shader-object-name (shader-payload-element-field expression)))
 
 (defmethod shader-expression-provenance-name
+    ((expression shader-buffer-element))
+  (shader-object-name (shader-buffer-element-buffer expression)))
+
+(defmethod shader-expression-provenance-name
     ((expression shader-interpretation))
   (declare (ignore expression))
   'interpretation)
@@ -4182,11 +4443,16 @@ Modules whose expressions use no extended mathematics never acquire one."
       (shader-expression-provenance-name expression)))
 
 (defun emit-value-instruction (context expression type instruction operands)
-  (let ((result (fresh-shader-id context (expression-result-name expression))))
-    (emit-shader-instruction
-     context expression
-     (list* result instruction (ensure-shader-type-id context type) operands))
-    result))
+  ;; Types own their canonical names.  Claim the result type before deriving a
+  ;; value name: a first-use constructor such as (VEC3 0 0 0) otherwise lets
+  ;; both its type and its value independently choose %VEC3.
+  (let ((type-id (ensure-shader-type-id context type)))
+    (let ((result
+            (fresh-shader-id context (expression-result-name expression))))
+      (emit-shader-instruction
+       context expression
+       (list* result instruction type-id operands))
+      result)))
 
 (defun lower-shader-reference (context expression)
   (let ((target (shader-reference-target expression)))
@@ -4400,6 +4666,44 @@ backend's context before its source-located unsupported-operation method."))
      context expression (shader-expression-type expression) 'u-mod
      (list (lower-shader-expression context left)
            (lower-shader-expression context right)))))
+
+(defmethod lower-shader-call ((operator (eql 'ldb)) context expression)
+  ;; Left-align the field, then right-align it: two logical shifts by 32-bit
+  ;; amounts extract any field of a 32- or 64-bit value without bit-field
+  ;; instructions, which Vulkan restricts to 32-bit operands, and without
+  ;; wide mask constants.  A run-time position subtracts itself from the
+  ;; constant left shift.
+  (let* ((type (shader-expression-type expression))
+         (width (shader-type-bit-width type))
+         (size (shader-bit-field-size expression))
+         (position (shader-bit-field-position expression))
+         (operands (shader-call-operands expression))
+         (value (lower-shader-expression context (first operands)))
+         (left-shift
+           (cond (position
+                  (and (< (+ size position) width)
+                       (ensure-shader-uint-constant
+                        context (- width size position))))
+                 (t
+                  (emit-value-instruction
+                   context expression :uint 'i-sub
+                   (list (ensure-shader-uint-constant context (- width size))
+                         (lower-shader-expression
+                          context (second operands)))))))
+         (aligned
+           (if left-shift
+               (emit-value-instruction
+                context expression type 'shift-left-logical
+                (list value left-shift))
+               value)))
+    (if (= size width)
+        (progn
+          (alias-shader-expression context expression (first operands))
+          aligned)
+        (emit-value-instruction
+         context expression type 'shift-right-logical
+         (list aligned
+               (ensure-shader-uint-constant context (- width size)))))))
 
 (defmethod lower-shader-call ((operator (eql '/)) context expression)
   (let ((operands (shader-call-operands expression)))
@@ -4723,6 +5027,19 @@ backend's context before its source-located unsupported-operation method."))
 (defmethod lower-shader-call ((operator (eql 'sqrt)) context expression)
   (lower-extended-call context expression 'sqrt))
 
+(macrolet
+    ((define-unary-extended-lowering (&rest pairs)
+       `(progn
+          ,@(mapcar
+             (lambda (pair)
+               (destructuring-bind (operator instruction) pair
+                 `(defmethod lower-shader-call
+                      ((operator (eql ',operator)) context expression)
+                    (lower-extended-call context expression ',instruction))))
+             pairs))))
+  (define-unary-extended-lowering
+      (floor floor) (fract fract) (sin sin) (cos cos) (exp exp) (log log)))
+
 (defmethod lower-shader-call
     ((operator (eql 'derivative-x)) context expression)
   (emit-value-instruction
@@ -4830,6 +5147,25 @@ backend's context before its source-located unsupported-operation method."))
            (context-task-payload-variable context)
            (ensure-shader-uint-constant
             context (shader-task-payload-field-index field))
+           index))
+    (emit-value-instruction context expression type 'load (list pointer))))
+
+(defmethod lower-shader-expression-value
+    (context (expression shader-buffer-element))
+  (let* ((buffer (shader-buffer-element-buffer expression))
+         (type (shader-storage-buffer-element-type buffer))
+         (pointer (fresh-shader-id
+                   context
+                   (format nil "~A-ELEMENT-POINTER"
+                           (shader-object-name buffer))))
+         (index (lower-shader-expression
+                 context (shader-buffer-element-index expression))))
+    (emit-shader-instruction
+     context expression
+     (list pointer 'access-chain
+           (ensure-pointer-type-id context 'storage-buffer type)
+           (gethash buffer (context-variable-ids context))
+           (ensure-shader-uint-constant context 0)
            index))
     (emit-value-instruction context expression type 'load (list pointer))))
 
@@ -5166,8 +5502,13 @@ backend's context before its source-located unsupported-operation method."))
   (let* ((context (make-instance 'shader-lowering-context))
          (void-id (ensure-void-type-id context))
          (main-id (reserve-shader-id context "MAIN"))
+         (storage-buffers
+           (remove-if-not (lambda (resource)
+                            (typep resource 'shader-storage-buffer))
+                          (shader-specification-resources specification)))
          (entry-id (reserve-shader-id context "ENTRY"))
          (function-type-id (reserve-shader-id context "FUNCTION-TYPE")))
+    (setf (context-stage context) (shader-specification-stage specification))
     (begin-shader-basic-block context entry-id)
     (append-context-form 'type-declarations context
                          (list function-type-id 'type-function void-id))
@@ -5216,9 +5557,17 @@ backend's context before its source-located unsupported-operation method."))
                              '(:task :mesh))
                  '(mesh-shading-ext)))
               :extensions
-              (when (member (shader-specification-stage specification)
-                            '(:task :mesh))
-                '("SPV_EXT_mesh_shader"))
+              (append
+               (when (member (shader-specification-stage specification)
+                             '(:task :mesh))
+                 '("SPV_EXT_mesh_shader"))
+               ;; The StorageBuffer storage class is core from SPIR-V 1.3;
+               ;; the 1.0 modules of ordinary stages must ask for it.
+               (when (and storage-buffers
+                          (not (member (shader-specification-stage
+                                        specification)
+                                       '(:task :mesh))))
+                 '("SPV_KHR_storage_buffer_storage_class")))
               :extended-instruction-imports
               (context-extended-instruction-imports context)
               :entry-points

@@ -549,8 +549,10 @@ owns placement, dense instance data, layout, and pipeline.  Stopping the
 session destroys frame bind groups, then runs, then atlas textures, then the
 device.
 
-Repeated occurrences share the same serialized resource object.  The default
+Repeated occurrences share the same serialized resource object.  The
 ="hello, world"= proof has 11 drawable occurrences but only 8 cached outlines.
+That banner is a proof rather than scenery, so a caller asks for it by passing
+=:world-text-string=; the ordinary game sky carries no text at all.
 A second identical run reuses the =slug-shaped-text=, all eight outlines, and
 the matching atlas.  Metal regressions construct both runs and exercise the
 ownership-order teardown.
@@ -578,7 +580,7 @@ selection.  The vertex stage expands these records; the render pass binds the
 two buffers and one atlas group, then calls =draw= once with the glyph count as
 the instance count.
 
-The exact default-run comparison is deliberately about owned objects and
+The exact proof-run comparison is deliberately about owned objects and
 encoded commands, not a noisy whole-frame timing claim:
 
 | text cost, ="hello, world"= | cached glyph pairs | atlas instances |

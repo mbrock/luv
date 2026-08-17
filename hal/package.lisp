@@ -35,6 +35,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:vulkan-function-description
            #:make-version
            #:enumerate-instance-extension-names
+           #:enumerate-device-extension-names
            #:create-instance
            #:destroy-instance
            #:debug-message
@@ -276,6 +277,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:request-gpu-device
            #:device-queue
            #:create
+           #:adopt-native-texture
            #:encode
            #:enqueue
            #:finish
@@ -300,6 +302,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:make-texture-descriptor
            #:texture-format-bytes-per-texel
            #:texture-format-sample-transfer
+           #:vertex-attribute-format-component-count
            #:make-texture-copy
            #:texture-copy-texture
            #:texture-copy-mip-level
@@ -393,6 +396,9 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:canvas-pointer-event-clicks
            #:canvas-pointer-button-press-event
            #:canvas-pointer-button-release-event
+           #:canvas-pointer-wheel-event
+           #:canvas-pointer-event-scroll-x
+           #:canvas-pointer-event-scroll-y
            #:canvas-key-event
            #:canvas-key-event-key-name
            #:canvas-key-event-modifiers

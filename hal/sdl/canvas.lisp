@@ -459,6 +459,27 @@ have a main-thread host and execute directly."
                         :button button
                         :clicks (sdl3:%clicks event)))))))
 
+(defun dispatch-sdl-pointer-wheel (canvas event)
+  "Turn one SDL wheel event into a canvas one.
+
+SDL reports a flipped direction rather than flipped amounts when the platform
+is set to natural scrolling, so the sign is corrected here and consumers only
+ever see what the user meant."
+  (when (sdl-canvas-window-event-p canvas event)
+    (let ((sign (if (= (sdl3:%direction event)
+                       (cffi:foreign-enum-value 'sdl3::mouse-wheel-direction
+                                                :flipped))
+                    -1.0
+                    1.0)))
+      (dispatch-canvas-event
+       canvas
+       (make-instance 'canvas-pointer-wheel-event
+                      :timestamp (sdl3:%timestamp event)
+                      :x (sdl3:%mouse-x event)
+                      :y (sdl3:%mouse-y event)
+                      :scroll-x (* sign (sdl3:%x event))
+                      :scroll-y (* sign (sdl3:%y event)))))))
+
 (defun dispatch-sdl-pointer-boundary (canvas event class)
   (when (sdl-canvas-window-event-p canvas event)
     (multiple-value-bind (buttons x y) (sdl3:get-mouse-state)
@@ -746,7 +767,12 @@ key, so the swap has to track the key itself.")
      (dispatch-sdl-pointer-button
       canvas
       (cffi:mem-ref event '(:struct sdl3:mouse-button-event))
-      'canvas-pointer-button-release-event))))
+      'canvas-pointer-button-release-event))
+    ((= event-type
+        (cffi:foreign-enum-value 'sdl3::event-type :mouse-wheel))
+     (dispatch-sdl-pointer-wheel
+      canvas
+      (cffi:mem-ref event '(:struct sdl3:mouse-wheel-event))))))
 
 (defun poll-sdl-canvas-event (canvas)
   (cffi:with-foreign-object (event '(:union sdl3:event))

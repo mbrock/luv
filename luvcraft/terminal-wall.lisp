@@ -61,6 +61,21 @@
 (defparameter *terminal-display-default-foreground* #xF4EFE1
   "Packed sRGB #xRRGGBB used for cells without an explicit foreground.")
 
+;;; A terminal cell's colour arrives as a display colour: the byte a shell
+;;; would have written to a monitor, whose white means "as bright as this
+;;; screen goes".  The scene it is drawn into measures radiance instead, and
+;;; a lit tube in a daylit room is emphatically brighter than its own diffuse
+;;; surroundings.  These gains are that conversion, and they are also what
+;;; carries lit glyphs over the presentation bloom threshold, so the glow
+;;; around bright text is the ordinary lens chain seeing an ordinary bright
+;;; thing rather than a halo painted onto the terminal.
+
+(defparameter *terminal-ink-emission* 2.3
+  "Radiance per unit of glyph ink, in scene units where diffuse white is one.")
+
+(defparameter *terminal-background-emission* 1.15
+  "Radiance per unit of cell-background colour, held below the ink's own.")
+
 ;;; The frame records screen-right, screen-up, and outward in voxel axes.  EQL
 ;;; methods keep the six closed orientations inspectable without making block
 ;;; materials or terminal surfaces branch on their names.
@@ -125,6 +140,12 @@
 (defclass terminal-display ()
   ((session :initarg :session :initform nil :reader terminal-display-session)
    (surface :initarg :surface :reader terminal-display-surface)
+   (mode :initform :shell :accessor terminal-display-mode)
+   ;; Presentation extensions such as MCLUV install their browser here.  The
+   ;; terminal remains the focus owner and delegates drawing and events to this
+   ;; child only while its mode calls for it.
+   (mode-overlay :initform nil :accessor terminal-display-mode-overlay)
+   (film-screen :initform nil :accessor terminal-display-film-screen)
    (terminal :initarg :terminal :initform nil :reader terminal-display-terminal)
    (device :initarg :device :initform nil :accessor terminal-display-device)
    (presentation :initarg :presentation :initform nil
@@ -147,6 +168,8 @@
              :accessor terminal-display-cell-run)
    (screen-run :initarg :screen-run :initform nil
                :accessor terminal-display-screen-run)
+   (faceplate-run :initarg :faceplate-run :initform nil
+                  :accessor terminal-display-faceplate-run)
    (margin :initarg :margin :initform 0.12
            :reader terminal-display-margin)
    (font-scale :initarg :font-scale :initform 1.0
@@ -155,6 +178,37 @@
    (refresh-count :initform 0 :accessor terminal-display-refresh-count)
    (frame-bind-groups :initform (make-hash-table :test #'eq)
                       :reader terminal-display-frame-bind-groups)))
+
+(defgeneric change-terminal-display-mode (display session mode)
+  (:documentation
+   "Select DISPLAY's focused wall MODE.
+
+The built-in modes are the EQL-specialized symbols :SHELL and :FILM.  A
+presentation extension may add an :AFTER method which supplies the film
+browser, while the display continues to own focus and movie lifetime."))
+
+(defmethod change-terminal-display-mode
+    ((display terminal-display) (session luvcraft-session) (mode (eql :shell)))
+  (stop-terminal-display-film display session)
+  (setf (terminal-display-mode display) mode)
+  display)
+
+(defmethod change-terminal-display-mode
+    ((display terminal-display) (session luvcraft-session) (mode (eql :film)))
+  ;; Selecting Film again while a movie is running returns to its browser.
+  (stop-terminal-display-film display session)
+  (setf (terminal-display-mode display) mode)
+  display)
+
+(defun terminal-display-delegate-overlay (display)
+  "DISPLAY's mode child, when the mode is one that presents through it.
+
+:SHELL drives a PTY and owns its own drawing and keys.  Every other mode
+installs a presentation overlay and works through it -- except while a film is
+actually playing, when the wall is a screen and not a control."
+  (unless (or (eq :shell (terminal-display-mode display))
+              (terminal-display-film-screen display))
+    (terminal-display-mode-overlay display)))
 
 (defun split-terminal-lines (text)
   (loop with start = 0
@@ -712,6 +766,64 @@ projection remain one last-known-good cohort."
        (terminal-surface-axis-extent
         surface (terminal-face-frame-up frame)))))
 
+(defun terminal-film-rectangle (surface film-aspect)
+  "Fit FILM-ASPECT inside SURFACE and return its lower-left and edge vectors."
+  (let* ((frame (terminal-face-frame (terminal-surface-face surface)))
+         (right (voxel-direction-vec3 (terminal-face-frame-right frame)))
+         (up (voxel-direction-vec3 (terminal-face-frame-up frame)))
+         (surface-width (terminal-surface-physical-width surface))
+         (surface-height (terminal-surface-physical-height surface))
+         (surface-aspect (/ surface-width surface-height))
+         (width (if (> film-aspect surface-aspect)
+                    surface-width
+                    (* surface-height film-aspect)))
+         (height (if (> film-aspect surface-aspect)
+                     (/ surface-width film-aspect)
+                     surface-height))
+         (left-margin (/ (- surface-width width) 2.0))
+         (bottom-margin (/ (- surface-height height) 2.0))
+         (origin
+           (terminal-offset-point
+            (terminal-surface-lower-left-point surface 0.009)
+            right left-margin up bottom-margin)))
+    (values origin (vec3-scale right width) (vec3-scale up height))))
+
+(defun stop-terminal-display-film (display session)
+  "Stop and release DISPLAY's owned movie, if any."
+  (alexandria:when-let ((screen (terminal-display-film-screen display)))
+    (when (eq screen (luvcraft-session-video-screen session))
+      (setf (luvcraft-session-video-screen session) nil))
+    (setf (terminal-display-film-screen display) nil)
+    (release-video-screen screen))
+  display)
+
+(defun play-terminal-display-film (display pathname &key (hardware :required))
+  "Play PATHNAME on DISPLAY's authored wall using the session's video backend.
+
+HARDWARE is the decode policy MAKE-VIDEO-SCREEN takes.  It defaults to
+:REQUIRED, which is right for authored films whose codec is known, and wrong
+for a film that arrived from somewhere: whatever a stranger's phone recorded
+is not necessarily something this device can decode in hardware, and :AUTO
+lets it fall back to software rather than refusing to play."
+  (let* ((session (terminal-display-session display))
+         (surface (terminal-display-surface display)))
+    (unless session
+      (error "Terminal display ~S is not attached to a session." display))
+    (stop-terminal-display-film display session)
+    (let ((screen
+            (make-video-screen
+             (luvcraft-session-device session)
+             (luvcraft-session-camera session)
+             pathname +luvcraft-scene-color-format+
+             :hardware hardware
+             :rectangle
+             (lambda (aspect)
+               (terminal-film-rectangle surface aspect)))))
+      (setf (terminal-display-film-screen display) screen
+            (luvcraft-session-video-screen session) screen
+            (terminal-display-mode display) :film)
+      screen)))
+
 (defun terminal-surface-lower-left-point (surface &optional (offset 0.006))
   "Return the metric world point OFFSET cell-depths outside the lower left."
   (let* ((origin (terminal-surface-origin surface))
@@ -844,6 +956,11 @@ and height in world units.  FONT-SCALE is an explicit multiplier on contain."
           (srgb-byte-to-linear (ldb (byte 8 8) packed))
           (srgb-byte-to-linear (ldb (byte 8 0) packed))))
 
+(defun scaled-color-linear-components (packed emission)
+  "Return one packed sRGB display colour as EMISSION units of scene radiance."
+  (multiple-value-bind (red green blue) (packed-color-linear-components packed)
+    (values (* red emission) (* green emission) (* blue emission))))
+
 (defun terminal-font-metrics (font-loader)
   "Return the em-normalized line height, advance, and descender."
   (let* ((ascender (zpb-ttf:ascender font-loader))
@@ -926,8 +1043,9 @@ and height in world units.  FONT-SCALE is an explicit multiplier on contain."
               for atlas-location =
                 (gethash resource (luv.slug:slug-glyph-atlas-locations atlas))
               do (multiple-value-bind (red green blue)
-                     (packed-color-linear-components
-                      (terminal-glyph-occurrence-foreground occurrence))
+                     (scaled-color-linear-components
+                      (terminal-glyph-occurrence-foreground occurrence)
+                      *terminal-ink-emission*)
                    ;; The three spare Z lanes carry the linear ink colour.
                    (write-values
                     base
@@ -985,7 +1103,8 @@ resolves the analytic edge, so adjacent runs meet without seams."
                                   (- (* (1+ row) cell-height)))))
                          (width (* (- end start) cell-width)))
                      (multiple-value-bind (red green blue)
-                         (packed-color-linear-components background)
+                         (scaled-color-linear-components
+                          background *terminal-background-emission*)
                        (incf count)
                        (push (list (vec3-x corner) (vec3-y corner) (vec3-z corner)
                                    (* (vec3-x right) width)
@@ -1016,18 +1135,20 @@ resolves the analytic edge, so adjacent runs meet without seams."
             (incf index)))
         data))))
 
-(defun make-terminal-display-screen-instances (surface)
+(defun make-terminal-display-screen-instances (surface &optional (offset 0.003))
   "Build the one screen-panel record spanning the whole display surface.
 
 The record shares the cell run's layout: origin, right edge, up edge, then
-the outward face normal in the lane the cell run uses for ink.  The panel
-sits just below the cell backgrounds so both they and the glyphs win the
-depth test against it while it hides the block tiles behind the screen."
+the outward face normal in the lane the cell run uses for ink.  OFFSET names
+which of the terminal's coplanar rectangles this is: the default sits just
+below the cell backgrounds, so both they and the glyphs win the depth test
+against it while it hides the block tiles behind the screen, and the
+faceplate's larger offset sits in front of the glyphs instead."
   (let* ((frame (terminal-face-frame (terminal-surface-face surface)))
          (right (voxel-direction-vec3 (terminal-face-frame-right frame)))
          (up (voxel-direction-vec3 (terminal-face-frame-up frame)))
          (outward (voxel-direction-vec3 (terminal-face-frame-outward frame)))
-         (origin (terminal-surface-lower-left-point surface 0.003))
+         (origin (terminal-surface-lower-left-point surface offset))
          (width (terminal-surface-physical-width surface))
          (height (terminal-surface-physical-height surface))
          (data (make-array 12 :element-type 'single-float))
@@ -1099,12 +1220,15 @@ frame bind group so both draw against the same camera uniform."))
 
 (defun make-terminal-cell-run (session glyph-run instances
                                &key (role :terminal-cell)
+                                    (vertex-role role)
                                     (label "terminal cell backgrounds"))
   "Build an analytic world-rectangle run of ROLE over 48-byte instances.
 
 The default ROLE draws cell backgrounds; :TERMINAL-SCREEN draws the one
 screen panel from MAKE-TERMINAL-DISPLAY-SCREEN-INSTANCES with the same
-vertex layout."
+vertex layout, and :TERMINAL-FACEPLATE draws the glass over the finished
+picture from that same rectangle, which is why VERTEX-ROLE is separable:
+two materials can share one placement stage without sharing a name."
   (let* ((device (luvcraft-session-device session))
          (vertex-data (make-world-text-quad-vertices))
          (vertex-buffer nil)
@@ -1128,7 +1252,7 @@ vertex layout."
                  pipeline
                  (make-live-shader-pipeline
                   :role role
-                  :vertex-role role
+                  :vertex-role vertex-role
                   :label label
                   :device device
                   :layout (world-text-run-layout glyph-run)
@@ -1142,7 +1266,7 @@ vertex layout."
                       (:shader-location 2 :offset 12 :format :float32x3)
                       (:shader-location 3 :offset 24 :format :float32x3)
                       (:shader-location 4 :offset 36 :format :float32x3))))
-                  :target-format (canvas-format (luvcraft-session-context session))
+                  :target-format +luvcraft-scene-color-format+
                   :target-blend :premultiplied-alpha
                   :primitive '(:topology :triangle-list)
                   :depth-stencil
@@ -1202,7 +1326,7 @@ vertex layout."
       (let ((glyph-run
               (make-world-text-run-from-instances
                (luvcraft-session-device session)
-               (canvas-format (luvcraft-session-context session))
+               +luvcraft-scene-color-format+
                "terminal display" font-pathname nil glyphs atlas center 1.0
                instances
                :label "terminal surface Slug glyphs")))
@@ -1219,13 +1343,16 @@ vertex layout."
 
 (defmethod refresh-luvcraft-overlay
     ((display terminal-display) (session luvcraft-session))
+  (alexandria:when-let ((overlay (terminal-display-delegate-overlay display)))
+    (refresh-luvcraft-overlay overlay session))
   ;; The wall's shaders are as live as the block world's: a redefined
   ;; :terminal-screen or :terminal-cell method rebuilds here, at the frame
   ;; boundary, keeping the last good pipeline on failure.
   (refresh-live-shader-pipeline
    (world-text-run-pipeline (terminal-display-glyph-run display)))
   (dolist (run (list (terminal-display-cell-run display)
-                     (terminal-display-screen-run display)))
+                     (terminal-display-screen-run display)
+                     (terminal-display-faceplate-run display)))
     (when run
       (refresh-live-shader-pipeline (terminal-cell-run-pipeline run))))
   (when (terminal-display-dirty-p display)
@@ -1300,39 +1427,74 @@ vertex layout."
   (when (terminal-surface-current-p
          (terminal-display-surface display) session)
     (let ((frame (luvcraft-frame-state session surface-texture))
-          (glyph-run (terminal-display-glyph-run display))
-          (cell-run (terminal-display-cell-run display))
-          (screen-run (terminal-display-screen-run display)))
-      (when (and screen-run (plusp (terminal-cell-run-count screen-run)))
+          (faceplate-run (terminal-display-faceplate-run display)))
+      (case (terminal-display-mode display)
+        (:shell
+         (let ((glyph-run (terminal-display-glyph-run display))
+               (cell-run (terminal-display-cell-run display))
+               (screen-run (terminal-display-screen-run display)))
+           (when (and screen-run (plusp (terminal-cell-run-count screen-run)))
+             (set-pipeline pass (live-shader-pipeline-native-pipeline
+                                 (terminal-cell-run-pipeline screen-run)))
+             (set-vertex-buffer pass 0
+                                (terminal-cell-run-vertex-buffer screen-run))
+             (set-vertex-buffer pass 1
+                                (terminal-cell-run-instance-buffer screen-run))
+             (set-bind-group pass 0
+                             (terminal-display-frame-bind-group display frame))
+             (draw pass 6 (terminal-cell-run-count screen-run)))
+           (when (and cell-run (plusp (terminal-cell-run-count cell-run)))
+             (set-pipeline pass (live-shader-pipeline-native-pipeline
+                                 (terminal-cell-run-pipeline cell-run)))
+             (set-vertex-buffer pass 0
+                                (terminal-cell-run-vertex-buffer cell-run))
+             (set-vertex-buffer pass 1
+                                (terminal-cell-run-instance-buffer cell-run))
+             (set-bind-group pass 0
+                             (terminal-display-frame-bind-group display frame))
+             (draw pass 6 (terminal-cell-run-count cell-run)))
+           (when (and glyph-run
+                      (plusp (length (world-text-run-glyphs glyph-run))))
+             (set-pipeline pass (world-text-run-native-pipeline glyph-run))
+             (set-vertex-buffer pass 0 (world-text-run-vertex-buffer glyph-run))
+             (set-vertex-buffer pass 1
+                                (world-text-run-instance-buffer glyph-run))
+             (set-bind-group pass 0
+                             (terminal-display-frame-bind-group display frame))
+             (draw pass 6 (length (world-text-run-glyphs glyph-run))))))
+        (t
+         ;; Film, Telegram, and anything a presentation extension adds later
+         ;; all draw through the mode's own overlay.
+         (alexandria:when-let
+             ((overlay (terminal-display-delegate-overlay display)))
+           (encode-luvcraft-overlay overlay session pass surface-texture))))
+      ;; The glass goes on last over shell, browser, or movie: raster,
+      ;; corners, and reflections belong in front of the finished picture.
+      (when (and faceplate-run (plusp (terminal-cell-run-count faceplate-run)))
         (set-pipeline pass (live-shader-pipeline-native-pipeline
-                            (terminal-cell-run-pipeline screen-run)))
-        (set-vertex-buffer pass 0 (terminal-cell-run-vertex-buffer screen-run))
-        (set-vertex-buffer pass 1 (terminal-cell-run-instance-buffer screen-run))
+                            (terminal-cell-run-pipeline faceplate-run)))
+        (set-vertex-buffer pass 0
+                           (terminal-cell-run-vertex-buffer faceplate-run))
+        (set-vertex-buffer pass 1
+                           (terminal-cell-run-instance-buffer faceplate-run))
         (set-bind-group pass 0
                         (terminal-display-frame-bind-group display frame))
-        (draw pass 6 (terminal-cell-run-count screen-run)))
-      (when (and cell-run (plusp (terminal-cell-run-count cell-run)))
-        (set-pipeline pass (live-shader-pipeline-native-pipeline
-                            (terminal-cell-run-pipeline cell-run)))
-        (set-vertex-buffer pass 0 (terminal-cell-run-vertex-buffer cell-run))
-        (set-vertex-buffer pass 1 (terminal-cell-run-instance-buffer cell-run))
-        (set-bind-group pass 0
-                        (terminal-display-frame-bind-group display frame))
-        (draw pass 6 (terminal-cell-run-count cell-run)))
-      (when (plusp (length (world-text-run-glyphs glyph-run)))
-        (set-pipeline pass (world-text-run-native-pipeline glyph-run))
-        (set-vertex-buffer pass 0 (world-text-run-vertex-buffer glyph-run))
-        (set-vertex-buffer pass 1 (world-text-run-instance-buffer glyph-run))
-        (set-bind-group pass 0
-                        (terminal-display-frame-bind-group display frame))
-        (draw pass 6 (length (world-text-run-glyphs glyph-run))))))
+        (draw pass 6 (terminal-cell-run-count faceplate-run)))))
   display)
 
 (defmethod release-luvcraft-overlay ((display terminal-display))
+  (alexandria:when-let ((session (terminal-display-session display)))
+    (stop-terminal-display-film display session))
+  (alexandria:when-let ((overlay (terminal-display-mode-overlay display)))
+    (setf (terminal-display-mode-overlay display) nil)
+    (release-luvcraft-overlay overlay))
   (when (terminal-display-device display)
     (termdev:close-pty-device (terminal-display-device display))
     (setf (terminal-display-device display) nil))
   (clear-terminal-display-frame-bind-groups display)
+  (when (terminal-display-faceplate-run display)
+    (release-terminal-cell-run (terminal-display-faceplate-run display))
+    (setf (terminal-display-faceplate-run display) nil))
   (when (terminal-display-screen-run display)
     (release-terminal-cell-run (terminal-display-screen-run display))
     (setf (terminal-display-screen-run display) nil))
@@ -1347,16 +1509,22 @@ vertex layout."
 
 (defmethod handle-luvcraft-focus-event
     ((display terminal-display) session canvas (event canvas-key-event))
-  (declare (ignore session canvas))
-  (let ((device (terminal-display-device display)))
-    (when device
-      (termdev:send-pty-device-canvas-key-event device event)))
-  t)
+  (if (eq :shell (terminal-display-mode display))
+      (let ((device (terminal-display-device display)))
+        (when device
+          (termdev:send-pty-device-canvas-key-event device event))
+        t)
+      (let ((overlay (terminal-display-delegate-overlay display)))
+        (if overlay
+            (handle-luvcraft-focus-event overlay session canvas event)
+            t))))
 
 (defmethod handle-luvcraft-focus-event
     ((display terminal-display) session canvas (event canvas-event))
-  (declare (ignore display session canvas event))
-  nil)
+  (or (alexandria:when-let
+          ((overlay (terminal-display-delegate-overlay display)))
+        (handle-luvcraft-overlay-event overlay session canvas event))
+      (handle-luvcraft-focus-control-event display session canvas event)))
 
 (defmethod luvcraft-focus-score ((display terminal-display) session)
   (multiple-value-bind (hit status) (luvcraft-session-target session)
@@ -1373,11 +1541,47 @@ vertex layout."
                            (terminal-surface-coordinate surface column row))))
           (block-ray-hit-distance hit))))))
 
+;;; A screen framed exactly square-on stops being a thing in the world and
+;;; becomes a pasted screenshot: nothing in the picture reports that the
+;;; terminal has a plane, a bezel with depth, or a room around it.  A few
+;;; degrees of azimuth and elevation give the frame back its perspective and
+;;; let the faceplate's reflections and rim curvature actually appear, while
+;;; staying far short of the angle at which a glyph's stem starts to matter.
+
+(defparameter *terminal-focus-azimuth* 9.0
+  "Degrees the focused view stands to the side of the screen's own normal.")
+
+(defparameter *terminal-focus-elevation* 4.5
+  "Degrees the focused view stands above the screen's own centre.")
+
+(defun terminal-focus-eye-direction (right up outward azimuth elevation)
+  "The unit direction from a screen's centre toward a viewer standing at
+AZIMUTH and ELEVATION degrees off that screen's outward normal."
+  (let* ((radian (coerce (/ pi 180.0) 'single-float))
+         (side (* azimuth radian))
+         (rise (* elevation radian)))
+    (vec3-normalize
+     (terminal-offset-point
+      (make-vec3 0.0 0.0 0.0)
+      outward (* (cos rise) (cos side))
+      right (* (cos rise) (sin side))
+      up (sin rise)))))
+
 (defun terminal-focus-camera-pose
     (surface viewport-width viewport-height
      &optional (left-inset 0.0) (top-inset 0.0)
                (right-inset 0.0) (bottom-inset 0.0))
-  "Return a head-on camera pose which contains SURFACE inside the safe view."
+  "Return a camera pose which contains SURFACE inside the safe view.
+
+Framing is solved rather than approximated.  For an eye at distance D from
+the surface centre along EYE-DIRECTION, a corner at offset O from that centre
+lands at DOT(O, camera-right) * focal / (aspect * (D - DOT(O, EYE-DIRECTION)))
+across and at the matching quotient down, because the camera's own right and
+up axes are perpendicular to its forward axis and so drop out of the depth.
+Inverting that for each capacity gives the smallest D at which one corner is
+just inside the safe view; the pose takes the largest of the four.  With the
+focus angles at zero this is exactly the head-on width-and-height solution it
+generalizes."
   (let* ((width (coerce viewport-width 'single-float))
          (height (coerce viewport-height 'single-float))
          (margin (* 0.06 (min width height)))
@@ -1397,11 +1601,8 @@ vertex layout."
            (up (voxel-direction-vec3 (terminal-face-frame-up frame)))
            (outward
              (voxel-direction-vec3 (terminal-face-frame-outward frame)))
-           (forward (vec3-scale outward -1.0))
-           (surface-width (terminal-surface-physical-width surface))
-           (surface-height (terminal-surface-physical-height surface))
-           (half-width (/ surface-width 2.0))
-           (half-height (/ surface-height 2.0))
+           (half-width (/ (terminal-surface-physical-width surface) 2.0))
+           (half-height (/ (terminal-surface-physical-height surface) 2.0))
            (lower-left (terminal-surface-lower-left-point surface))
            (center
              (terminal-offset-point
@@ -1409,24 +1610,57 @@ vertex layout."
            (field-of-view +luvcraft-camera-focused-vertical-field-of-view+)
            (focal (/ (tan (/ field-of-view 2.0))))
            (aspect (/ width height))
-           (distance
-             (max 1.5
-                  (/ (* half-width focal)
-                     (* aspect horizontal-capacity))
-                  (/ (* surface-height focal) vertical-capacity)))
+           (eye-direction
+             (terminal-focus-eye-direction
+              right up outward
+              *terminal-focus-azimuth* *terminal-focus-elevation*))
+           (forward (vec3-scale eye-direction -1.0))
+           (pitch (asin (max -1.0 (min 1.0 (vec3-y forward)))))
+           (yaw
+             (if (> (abs (cos pitch)) 1e-5)
+                 (atan (vec3-x forward) (vec3-z forward))
+                 (atan (- (vec3-z right)) (vec3-x right))))
+           ;; The camera carries no roll, so its own basis follows from the
+           ;; pose it is about to be given rather than from the surface.
+           (camera-right (make-vec3 (cos yaw) 0.0 (- (sin yaw))))
+           (camera-up (make-vec3 (- (* (sin pitch) (sin yaw)))
+                                 (cos pitch)
+                                 (- (* (sin pitch) (cos yaw)))))
            ;; Move the eye down the surface just enough to place the terminal
            ;; in the center of the unobscured view rather than the full frame.
            (vertical-shift
              (* half-height
                 (/ (- top-capacity bottom-capacity) vertical-capacity)))
+           (upward-capacity (max top-capacity 1e-3))
+           (downward-capacity (max bottom-capacity 1e-3))
+           (distance
+             (max 1.5
+                  (loop for column in (list (- half-width) half-width)
+                        maximize
+                        (loop for row in (list (- half-height) half-height)
+                              maximize
+                              (let* ((offset
+                                       (terminal-offset-point
+                                        (make-vec3 0.0 0.0 0.0)
+                                        right column up row))
+                                     (across
+                                       (abs (vec3-dot offset camera-right)))
+                                     (raised
+                                       (+ (vec3-dot offset camera-up)
+                                          vertical-shift))
+                                     (across-need
+                                       (/ (* across focal)
+                                          (* aspect horizontal-capacity)))
+                                     (raised-need
+                                       (if (plusp raised)
+                                           (/ (* raised focal) upward-capacity)
+                                           (/ (* (- raised) focal)
+                                              downward-capacity))))
+                                (+ (vec3-dot offset eye-direction)
+                                   (max across-need raised-need)))))))
            (position
              (terminal-offset-point
-              center outward distance up (- vertical-shift)))
-           (pitch (asin (max -1.0 (min 1.0 (vec3-y forward)))))
-           (yaw
-             (if (> (abs (cos pitch)) 1e-5)
-                 (atan (vec3-x forward) (vec3-z forward))
-                 (atan (- (vec3-z right)) (vec3-x right)))))
+              center eye-direction distance camera-up (- vertical-shift))))
       (make-camera-pose position yaw pitch field-of-view))))
 
 (defmethod luvcraft-focus-camera-pose
@@ -1566,6 +1800,7 @@ ROWS-PER-BLOCK rows per block height."
           (glyph-run nil)
           (cell-run nil)
           (screen-run nil)
+          (faceplate-run nil)
           (display nil)
           (completed-p nil))
       (unwind-protect
@@ -1597,13 +1832,20 @@ ROWS-PER-BLOCK rows per block height."
                       (make-terminal-display-screen-instances surface)
                       :role :terminal-screen
                       :label "terminal screen panel"))
+               (setf faceplate-run
+                     (make-terminal-cell-run
+                      session glyph-run
+                      (make-terminal-display-screen-instances surface 0.008)
+                      :role :terminal-faceplate
+                      :vertex-role :terminal-screen
+                      :label "terminal faceplate glass"))
                (setf display
                      (make-instance
                       'terminal-display
                       :session session :surface surface :terminal terminal
                       :presentation presentation :glyph-cache glyph-cache
                       :glyph-run glyph-run :cell-run cell-run
-                      :screen-run screen-run
+                      :screen-run screen-run :faceplate-run faceplate-run
                       :font-pathname font-pathname
                       :bold-font-pathname bold-font-pathname
                       :default-foreground default-foreground
@@ -1614,6 +1856,8 @@ ROWS-PER-BLOCK rows per block height."
              (setf completed-p t)
              display)
         (unless completed-p
+          (when faceplate-run
+            (ignore-errors (release-terminal-cell-run faceplate-run)))
           (when screen-run
             (ignore-errors (release-terminal-cell-run screen-run)))
           (when cell-run

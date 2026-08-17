@@ -77,6 +77,8 @@ SLY can pause it, set a time, change its rate, or pin it without restarting.")
                      :quantity (:quantity :sun-angular-width :unit :radian))
   (exposure 1.0 :type single-float
             :quantity (:quantity :exposure :unit :one))
+  (cloudiness 0.5 :type single-float
+              :quantity (:quantity :cloudiness :unit :one))
   (fog-near 0.0 :type single-float
             :quantity (:quantity :view-distance :unit :cell))
   (fog-far 180.0 :type single-float
@@ -158,6 +160,8 @@ SLY can pause it, set a time, change its rate, or pin it without restarting.")
                         :tensor-order 1))
   (exposure 1.0 :type single-float
             :quantity (:quantity :exposure :unit :one))
+  (cloudiness 0.5 :type single-float
+              :quantity (:quantity :cloudiness :unit :one))
   (fog-near 0.0 :type single-float
             :quantity (:quantity :view-distance :unit :cell))
   (fog-far 180.0 :type single-float
@@ -211,6 +215,20 @@ SLY can pause it, set a time, change its rate, or pin it without restarting.")
            (sky-frame-parameters-fog-near sky)
            (sky-frame-parameters-fog-far sky)))
 
+(defconstant +sky-sun-orbit-tilt+ 0.28
+  "How far the solar orbit leans out of the world X/Y plane.")
+
+(defun sky-sun-orbit-axis ()
+  "The axis the sun revolves around: world Z, because the orbit is a circle
+in the X/Y plane displaced along Z.
+
+Anything which needs a stable reference direction transverse to the sun
+should use this rather than world up.  The sun's angle to this axis is the
+same at every hour, so a basis built from it is uniformly well conditioned;
+a basis built from world up degenerates toward the sun's own direction as
+the sun climbs."
+  (make-vec3 0.0 0.0 1.0))
+
 (defun sky-sun-direction (day-fraction)
   "The unit sun direction: rising at 0.25, zenith-adjacent at 0.5.
 
@@ -219,7 +237,7 @@ even at noon."
   (let* ((angle (* 2.0 pi (- day-fraction 0.25)))
          (x (coerce (cos angle) 'single-float))
          (y (coerce (sin angle) 'single-float))
-         (z 0.28)
+         (z +sky-sun-orbit-tilt+)
          (length (sqrt (+ (* x x) (* y y) (* z z)))))
     (make-vec3 (/ x length)
                (/ y length)
@@ -257,6 +275,9 @@ even at noon."
                                   (sky-keyframe-fog-color end) progress)
        :exposure (sky-lerp (sky-keyframe-exposure start)
                            (sky-keyframe-exposure end) progress)
+       :cloudiness (coerce (sky-lerp (sky-keyframe-cloudiness start)
+                                     (sky-keyframe-cloudiness end) progress)
+                           'single-float)
        :fog-near (sky-lerp (sky-keyframe-fog-near start)
                            (sky-keyframe-fog-near end) progress)
        :fog-far (sky-lerp (sky-keyframe-fog-far start)
@@ -264,9 +285,11 @@ even at noon."
 
 (defun make-default-sky-profile ()
   "A clear-day profile whose noon matches the world's original literals."
-  (flet ((keyframe (time zenith horizon sun ambient fog &key (width 0.006))
+  (flet ((keyframe (time zenith horizon sun ambient fog
+                    &key (width 0.006) (cloudiness 0.5))
            (make-sky-keyframe
             :day-fraction time
+            :cloudiness (coerce cloudiness 'single-float)
             :zenith-color (coerce (mapcar (lambda (c)
                                             (coerce c 'single-float))
                                           zenith)

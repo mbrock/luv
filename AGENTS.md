@@ -1,3 +1,9 @@
+# Note for Claude
+
+when i interrupt you and ask a question, it means i want you to ANSWER
+the question and then almost always just CHILL OUT instead of ceaselessly
+continuing to fuck around with whatever my question is probably annoyed by
+
 # Start here: one Lisp, one game
 
 Everything happens in one durable SBCL image per checkout, and the game

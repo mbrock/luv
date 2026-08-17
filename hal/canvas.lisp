@@ -182,6 +182,18 @@ backend returns the same Lisp wrapper every time it revisits a native drawable."
 (defclass canvas-pointer-button-press-event (canvas-pointer-button-event) ())
 (defclass canvas-pointer-button-release-event (canvas-pointer-button-event) ())
 
+(defclass canvas-pointer-wheel-event (canvas-pointer-event)
+  ((scroll-x :initarg :scroll-x :initform 0.0
+             :reader canvas-pointer-event-scroll-x)
+   (scroll-y :initarg :scroll-y :initform 0.0
+             :reader canvas-pointer-event-scroll-y))
+  (:documentation
+   "A scroll, carrying where the pointer was and how far the wheel turned.
+
+The amounts are in wheel notches rather than pixels, positive up and right,
+already corrected for a natural-scrolling platform -- what the window system
+says the user asked for, not what the hardware reported."))
+
 (defclass canvas-key-event (canvas-event)
   ((key-name
     :initarg :key-name

@@ -115,6 +115,9 @@
            #:shader-uniform-block
            #:shader-uniform-block-members
            #:shader-uniform-block-byte-size
+           #:shader-storage-buffer
+           #:shader-storage-buffer-element-type
+           #:shader-storage-buffer-element-stride
            #:shader-uniform-member
            #:shader-uniform-member-block
            #:shader-uniform-member-index
@@ -213,6 +216,12 @@
            #:smoothstep
            #:step
            #:normalize
+           #:floor
+           #:fract
+           #:sin
+           #:cos
+           #:exp
+           #:log
            #:quantity
            #:assume-quantity
            #:interpret
@@ -221,8 +230,11 @@
            #:project-sample
            #:convert-unit
            #:mod
+           #:ldb
+           #:byte
            #:counted-fold
            #:payload-element
+           #:buffer-element
            #:set-output
            #:set-mesh-output-counts
            #:set-mesh-vertex
@@ -295,6 +307,12 @@
            #:shader-payload-element
            #:shader-payload-element-field
            #:shader-payload-element-index
+           #:shader-buffer-element
+           #:shader-buffer-element-buffer
+           #:shader-buffer-element-index
+           #:shader-bit-field-call
+           #:shader-bit-field-size
+           #:shader-bit-field-position
            #:shader-expression-uniformity
            #:shader-expression-workgroup-uniform-p
            #:define-shader

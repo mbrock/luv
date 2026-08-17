@@ -63,7 +63,17 @@
   :serial t
   :components ((:file "mcclim/surveyor")
                (:file "mcclim/luvcraft")
-               (:file "mcclim/hotbar")))
+               (:file "mcclim/terminal-film-browser")
+               (:file "mcclim/block-icon")
+               (:file "mcclim/hotbar")
+               (:file "mcclim/inventory")))
+
+(defsystem "mcluv/telegram"
+  :description "A Telegram terminal mounted on a luvcraft wall."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("mcluv/luvcraft" "telegram/chat" "luv/libav" "sb-concurrency")
+  :components ((:file "mcclim/telegram")))
 
 (defsystem "mcluv/luvcraft-test"
   :description "Executable claims for McCLIM instruments embedded in luvcraft."

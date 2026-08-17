@@ -33,7 +33,16 @@
 (defparameter *server-start-lock-path*
   (merge-pathnames #P".sly-server.start.lock" *project-root*))
 (defparameter *server-start-timeout* 120)
+(defparameter *slynk-handshake-timeout* 3)
 (defparameter *default-output-limit* (* 256 1024))
+
+(define-condition slynk-handshake-timeout (error) ()
+  (:report
+   (lambda (condition stream)
+     (declare (ignore condition))
+     (format stream
+             "Timed out after ~D seconds waiting for a Slynk handshake on ~A:~D. The port accepts TCP but may be occupied by a non-Slynk process."
+             *slynk-handshake-timeout* *host* *port*))))
 
 (defun attach-only-p ()
   (not (null (sb-ext:posix-getenv "LUV_SLYNK_ATTACH_ONLY"))))
@@ -171,15 +180,27 @@
   (sb-bsd-sockets:host-ent-address
    (sb-bsd-sockets:get-host-by-name host)))
 
+(defun slynk-handshake-timeout-error ()
+  (error 'slynk-handshake-timeout))
+
+(defun connect-slynk-socket (socket)
+  (handler-case
+      (sb-ext:with-timeout *slynk-handshake-timeout*
+        (sb-bsd-sockets:socket-connect
+         socket (host-address *host*) *port*))
+    (sb-ext:timeout ()
+      (slynk-handshake-timeout-error))))
+
 (defun connection-available-p ()
   (let ((socket (make-instance 'sb-bsd-sockets:inet-socket
                                :type :stream :protocol :tcp)))
     (unwind-protect
          (handler-case
              (progn
-               (sb-bsd-sockets:socket-connect
-                socket (host-address *host*) *port*)
+               (connect-slynk-socket socket)
                t)
+           (slynk-handshake-timeout (condition)
+             (error condition))
            (error () nil))
       (ignore-errors (sb-bsd-sockets:socket-close socket)))))
 
@@ -326,8 +347,7 @@
                                 :type :stream :protocol :tcp)))
      (unwind-protect
           (progn
-            (sb-bsd-sockets:socket-connect
-             socket (host-address *host*) *port*)
+            (connect-slynk-socket socket)
             (let ((,stream
                     (sb-bsd-sockets:socket-make-stream
                      socket :input t :output t
@@ -337,6 +357,13 @@
                    (progn ,@body)
                 (close ,stream))))
        (ignore-errors (sb-bsd-sockets:socket-close socket)))))
+
+(defmacro with-slynk-handshake-timeout (&body body)
+  `(handler-case
+       (sb-ext:with-timeout *slynk-handshake-timeout*
+         ,@body)
+     (sb-ext:timeout ()
+       (slynk-handshake-timeout-error))))
 
 (defmacro with-verified-slynk-connection ((stream) &body body)
   `(with-slynk-connection (,stream)
@@ -657,7 +684,8 @@
     (handler-case
         (with-slynk-connection (stream)
           (authenticate stream)
-          (listener-process-id-on stream))
+          (with-slynk-handshake-timeout
+            (listener-process-id-on stream)))
       (error () nil))))
 
 (defun canonical-directory-name (pathname)
@@ -677,8 +705,19 @@
     (handler-case
         (with-slynk-connection (stream)
           (authenticate stream)
-          (listener-project-root-on stream))
+          (with-slynk-handshake-timeout
+            (listener-project-root-on stream)))
       (error () nil))))
+
+(defun listener-identity ()
+  (handler-case
+      (with-slynk-connection (stream)
+        (authenticate stream)
+        (with-slynk-handshake-timeout
+          (values (listener-process-id-on stream)
+                  (listener-project-root-on stream))))
+    (slynk-handshake-timeout (condition) (values nil nil condition))
+    (error () (values nil nil nil))))
 
 (defun listener-for-project-p (&optional (root (listener-project-root)))
   (and root
@@ -698,7 +737,8 @@
 (defun assert-listener-project ()
   (with-slynk-connection (stream)
     (authenticate stream)
-    (assert-stream-listener-project stream)))
+    (with-slynk-handshake-timeout
+      (assert-stream-listener-project stream))))
 
 (defun stop-server ()
   (when (attach-only-p)
@@ -749,33 +789,36 @@
           (format t "External Slynk is not accepting connections on ~A:~D.~%"
                   *host* *port*)))
     (return-from server-status nil))
-  (let ((connection-p (connection-available-p))
-        (pid (pid-file-pid))
-        (listener-pid (listener-process-id))
-        (listener-root (listener-project-root)))
-    (cond
-      ((and connection-p (not (listener-for-project-p listener-root)))
-       (format t "Slynk port ~D belongs to ~A, not this checkout ~A.~%"
-               *port* (or listener-root "an unidentified Lisp image") *project-root*))
-      (listener-pid
-       (unless (eql pid listener-pid)
-         (ignore-errors (delete-file *server-pid-path*)))
-       (format t "luv Slynk is listening on ~A:~D (pid ~D, ~A, checkout ~A).~%"
-               *host* *port* listener-pid
-               (if (eql pid listener-pid)
-                   "managed by ./sly"
-                   "Emacs/external")
-               listener-root)
-       (print-game-status))
-      (connection-p
-       (format t "luv Slynk is listening on ~A:~D (owner unavailable).~%"
-               *host* *port*))
-      ((pid-alive-p pid)
-       (format t "luv Slynk pid ~D exists, but ~A:~D is not accepting connections.~%"
-               pid *host* *port*))
-      (t
-       (ignore-errors (delete-file *server-pid-path*))
-       (format t "luv Slynk is not running.~%")))))
+  (let ((pid (pid-file-pid)))
+    (multiple-value-bind (listener-pid listener-root handshake-error)
+        (listener-identity)
+      (let ((connection-p (or listener-pid listener-root handshake-error)))
+        (cond
+          (handshake-error
+           (format t "Port ~D accepts TCP but did not complete a Slynk handshake: ~A~%"
+                   *port* handshake-error))
+          ((and connection-p (not (listener-for-project-p listener-root)))
+           (format t "Slynk port ~D belongs to ~A, not this checkout ~A.~%"
+                   *port* (or listener-root "an unidentified Lisp image") *project-root*))
+          (listener-pid
+           (unless (eql pid listener-pid)
+             (ignore-errors (delete-file *server-pid-path*)))
+           (format t "luv Slynk is listening on ~A:~D (pid ~D, ~A, checkout ~A).~%"
+                   *host* *port* listener-pid
+                   (if (eql pid listener-pid)
+                       "managed by ./sly"
+                       "Emacs/external")
+                   listener-root)
+           (print-game-status))
+          (connection-p
+           (format t "luv Slynk is listening on ~A:~D (owner unavailable).~%"
+                   *host* *port*))
+          ((pid-alive-p pid)
+           (format t "luv Slynk pid ~D exists, but ~A:~D is not accepting connections.~%"
+                   pid *host* *port*))
+          (t
+           (ignore-errors (delete-file *server-pid-path*))
+           (format t "luv Slynk is not running.~%")))))))
 
 (defun print-game-status ()
   "Say whether luvcraft:play has a live game window in the image."
@@ -1096,6 +1139,7 @@
   (format stream "       ./sly start|stop|log~%")
   (format stream "       ./sly screenshot PNG~%")
   (format stream "       ./sly eval CODE [--package PACKAGE]~%")
+  (format stream "       ./sly do CODE [--package PACKAGE]   (synonym for eval)~%")
   (format stream "       ./sly parinfer [--check|--diff|--write] [--strict] [--file FILE|CODE|FILE]~%")
   (format stream "       ./sly parinfer --batch --check [--strict] FILE...~%")
   (format stream "       ./sly inspect CODE [--package PACKAGE]~%")
@@ -1513,7 +1557,7 @@
        (ensure-server)
        (run-luvcraft-screenshot arguments)
        0)
-      ((string= command "eval")
+      ((member command '("eval" "do") :test #'string=)
        (ensure-server)
        (multiple-value-bind (code package)
            (parse-code-arguments command arguments)

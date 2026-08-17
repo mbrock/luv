@@ -30,9 +30,11 @@
   (asdf:load-asd (merge-pathnames #P"luv.asd" project-root))
   (asdf:load-asd (merge-pathnames #P"luvcraft.asd" project-root))
   (asdf:load-asd (merge-pathnames #P"luv-wiki.asd" project-root))
+  (asdf:load-asd (merge-pathnames #P"luft.asd" project-root))
   (asdf:load-system :luv)
   (asdf:load-system :luvcraft)
   (asdf:load-system :luv-wiki)
+  (asdf:load-system :luft/render)
   (format t "~&Starting luv Slynk on 127.0.0.1:~D.~%" port)
   (funcall (find-symbol "CREATE-SERVER" "SLYNK")
            :interface "127.0.0.1"
