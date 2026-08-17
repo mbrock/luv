@@ -1868,11 +1868,15 @@ ROWS-PER-BLOCK rows per block height."
           (font-pathname *terminal-display-font-pathname*)
           (bold-font-pathname *terminal-display-bold-font-pathname*)
           (default-foreground *terminal-display-default-foreground*)
+          (screen-role :terminal-screen)
+          (faceplate-role :terminal-faceplate)
           (add-p t))
   "Build a COLUMNS by ROWS Ghostty terminal display of CLASS on SURFACE.
 
 SURFACE is anything answering the terminal-surface protocol: a wall of
-blocks or a phone screen.  The display is added to SESSION's overlays
+blocks or a phone screen.  SCREEN-ROLE and FACEPLATE-ROLE name the shader
+materials of the panel behind the text and the glass in front of it; the
+defaults are the wall's tube.  The display is added to SESSION's overlays
 unless ADD-P is false."
     (let ((terminal nil)
           (glyph-cache nil)
@@ -1909,13 +1913,14 @@ unless ADD-P is false."
                      (make-terminal-cell-run
                       session glyph-run
                       (make-terminal-display-screen-instances surface)
-                      :role :terminal-screen
+                      :role screen-role
+                      :vertex-role :terminal-screen
                       :label "terminal screen panel"))
                (setf faceplate-run
                      (make-terminal-cell-run
                       session glyph-run
                       (make-terminal-display-screen-instances surface 0.008)
-                      :role :terminal-faceplate
+                      :role faceplate-role
                       :vertex-role :terminal-screen
                       :label "terminal faceplate glass"))
                (setf display

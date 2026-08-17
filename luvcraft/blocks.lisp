@@ -791,16 +791,9 @@ material and rebuild the atlas without touching the rest of the palette."))
     (shaded-block-atlas-pixel 44 112 118 (+ rib variation))))
 
 (defmethod paint-block-atlas-tile ((tile (eql 28)) x y)
-  "Phone body: near-black glass and aluminium with a hairline chamfer."
-  (let ((edge (if (or (zerop x) (zerop y)
-                      (= x (1- +block-atlas-tile-size+))
-                      (= y (1- +block-atlas-tile-size+)))
-                  26
-                  0))
-        (variation (round (block-atlas-variation x y tile) 6)))
-    (pack-block-atlas-rgba (+ 22 edge variation)
-                           (+ 24 edge variation)
-                           (+ 30 edge variation))))
+  "Phone body: matte dark metal, one even tone with no visible grain."
+  (declare (ignore x y))
+  (pack-block-atlas-rgba 34 35 39))
 
 (defun phone-screen-icon-p (x y)
   "Whether X,Y lies on one of the app icons in the phone screen's grid.
@@ -838,12 +831,8 @@ and a dock row at the bottom."
   (block-atlas-byte (if (evenp (floor x 2)) 150 106)))
 
 (defmethod paint-block-atlas-relief ((tile (eql 28)) x y)
-  "Phone body: brushed flat, with a raised chamfer at the rim."
-  (if (or (zerop x) (zerop y)
-          (= x (1- +block-atlas-tile-size+))
-          (= y (1- +block-atlas-tile-size+)))
-      160
-      (+ 127 (mod y 3))))
+  "Phone body: bead-blasted flat, the least relief a tile is allowed."
+  (+ 128 (mod (block-atlas-lattice-hash x y 283) 2)))
 
 (defmethod paint-block-atlas-relief ((tile (eql 29)) x y)
   "Phone screen: glass, flat but for the faintest bow across the pane."

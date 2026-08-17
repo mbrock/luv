@@ -22,24 +22,44 @@
 
 (in-package #:luvcraft)
 
-;;; The slab, in the grip frame: 0.32 wide, 0.56 tall, 0.05 deep, standing up
-;;; out of the fist.  Comically large, which is the point, and also what
-;;; makes the shell on it readable.
+;;; The slab, in the grip frame: 0.40 wide, 0.58 tall, 0.024 thin, held in
+;;; front of the palm by its lower third with the thumb up one edge and the
+;;; fingers round the other.  Comically large, which is the point, and also
+;;; what makes a real terminal on it readable: the screen is proportioned
+;;; for seventy-odd condensed columns.
 
-(defconstant +phone-half-width+ 0.160d0)
-(defconstant +phone-half-height+ 0.280d0)
-(defconstant +phone-half-depth+ 0.025d0)
-(defconstant +phone-center-height+ 0.320d0
-  "The slab's centre above the palm; its bottom clears the fist.")
-(defconstant +phone-screen-half-width+ 0.145d0)
-(defconstant +phone-screen-half-height+ 0.255d0)
-(defconstant +phone-screen-depth+ -0.032d0
+(defparameter *phone-half-width* 0.220d0)
+(defparameter *phone-half-height* 0.290d0)
+(defparameter *phone-half-depth* 0.012d0)
+(defparameter *phone-corner-radius* 0.030d0
+  "How far the slab's corners are rounded, in cells; the screen's too.")
+(defparameter *phone-center-height* 0.160d0
+  "The slab's centre above the palm, which holds it by its lower third.")
+(defparameter *phone-center-depth* -0.170d0
+  "The slab's centre in front of the palm.")
+(defparameter *phone-screen-half-width* 0.200d0)
+(defparameter *phone-screen-half-height* 0.262d0)
+(defparameter *phone-screen-depth* (+ *phone-center-depth* (- *phone-half-depth*))
   "The screen plane's z in the grip frame: the slab's face toward the eye.")
 
-(defparameter *phone-terminal-rows* 32
+(defparameter *phone-terminal-rows* 46
   "How many rows of shell the phone shows; the columns follow its width.")
-(defparameter *phone-terminal-margin* 0.010
+(defparameter *phone-terminal-margin* 0.008
   "The bezel between the screen's edge and its font grid, in cells.")
+
+(defun phone-font-pathname (weight)
+  "The phone's font: Input Mono Condensed from the user's fonts when it is
+installed (its licence keeps it out of the repository), else the wall's.
+WEIGHT is \"Regular\" or \"Bold\"."
+  (let ((installed
+          (merge-pathnames
+           (format nil "Library/Fonts/InputMonoCondensed-~A.ttf" weight)
+           (user-homedir-pathname))))
+    (if (probe-file installed)
+        installed
+        (if (string= weight "Bold")
+            *terminal-display-bold-font-pathname*
+            *terminal-display-font-pathname*))))
 
 ;;; ---------------------------------------------------------------------
 ;;; The phone's screen as a terminal surface.
@@ -57,15 +77,15 @@ grip y, and outward is toward the eye, grip -z."))
 
 (defmethod terminal-surface-lower-left-point
     ((surface phone-screen-surface) &optional (offset 0.006))
-  (make-vec3 (- +phone-screen-half-width+)
-             (- +phone-center-height+ +phone-screen-half-height+)
-             (- +phone-screen-depth+ offset)))
+  (make-vec3 (- *phone-screen-half-width*)
+             (- *phone-center-height* *phone-screen-half-height*)
+             (- *phone-screen-depth* offset)))
 
 (defmethod terminal-surface-physical-width ((surface phone-screen-surface))
-  (* 2 +phone-screen-half-width+))
+  (* 2 *phone-screen-half-width*))
 
 (defmethod terminal-surface-physical-height ((surface phone-screen-surface))
-  (* 2 +phone-screen-half-height+))
+  (* 2 *phone-screen-half-height*))
 
 (defmethod terminal-surface-current-p
     ((surface phone-screen-surface) &optional session)
@@ -164,7 +184,7 @@ against a per-frame uniform whose camera is expressed in the grip frame."))
 toward the player.  Held in the right hand; TAB focuses its shell."))
 
 (defmethod hand-item-name ((item phone)) "phone")
-(defmethod hand-item-box-count ((item phone)) 4)
+(defmethod hand-item-box-count ((item phone)) 10)
 
 (defmethod hand-item-carry-pose ((item phone) body)
   (declare (ignore body))
@@ -172,8 +192,8 @@ toward the player.  Held in the right hand; TAB focuses its shell."))
   ;; right of centre so the crosshair still shows past its edge; when its
   ;; shell has the focus, brought square to the centre and held a little
   ;; further off, where the narrowed field of view frames the whole screen.
-  (lerp-pose '(0.19d0 -0.32d0 0.54d0 -0.10d0 -0.14d0 0.03d0)
-             '(0.02d0 -0.34d0 0.72d0 -0.02d0 0.0d0 0.0d0)
+  (lerp-pose '(0.26d0 -0.28d0 0.66d0 -0.16d0 -0.16d0 0.04d0)
+             '(0.02d0 -0.19d0 0.96d0 -0.02d0 0.0d0 0.0d0)
              (phone-attention item)))
 
 (defmethod advance-hand-item ((item phone) body seconds)
@@ -192,21 +212,37 @@ toward the player.  Held in the right hand; TAB focuses its shell."))
 
 (defmethod map-hand-item-boxes ((item phone) body function)
   (declare (ignore body))
-  ;; The slab.
-  (funcall function 0d0 +phone-center-height+ 0d0
-           +phone-half-width+ +phone-half-height+ +phone-half-depth+
-           +phone-body-tile+ :stretch-p t)
-  ;; The dark glass under the terminal: the display's own screen panel and
-  ;; glyphs draw just in front of this face.
-  (funcall function 0d0 +phone-center-height+ -0.028d0
-           +phone-screen-half-width+ +phone-screen-half-height+ 0.004d0
-           +phone-body-tile+ :stretch-p t)
-  ;; A camera bump on the back, high on the left as seen from behind.
-  (funcall function 0.085d0 (+ +phone-center-height+ 0.19d0) 0.032d0
-           0.035d0 0.045d0 0.008d0 +phone-body-tile+ :stretch-p t)
-  ;; A thumb up across the lower screen: this is what makes it *held*.
-  (funcall function 0.085d0 0.10d0 -0.042d0 0.024d0 0.058d0 0.020d0
-           +player-skin-tile+ :tilt '(0d0 0d0 0.35d0)))
+  (let* ((hw *phone-half-width*)
+         (hh *phone-half-height*)
+         (hd *phone-half-depth*)
+         (r *phone-corner-radius*)
+         (cy *phone-center-height*)
+         (cz *phone-center-depth*)
+         (metal +phone-body-tile+))
+    ;; The slab with its corners rounded: a cross of two boxes leaves a
+    ;; notch at each corner, and a box turned forty-five degrees fills each
+    ;; notch as a chamfer, which at arm's length reads as a radius.
+    (funcall function 0d0 cy cz (- hw r) hh hd metal :stretch-p t)
+    (funcall function 0d0 cy cz hw (- hh r) hd metal :stretch-p t)
+    (let ((side (/ r (sqrt 2d0))))
+      (dolist (corner '((-1 -1) (1 -1) (-1 1) (1 1)))
+        (funcall function
+                 (* (first corner) (- hw r)) (+ cy (* (second corner) (- hh r)))
+                 cz side side hd metal :stretch-p t
+                 :tilt (list 0d0 0d0 (/ pi 4)))))
+    ;; A camera bump on the back, high on the left as seen from behind.
+    (funcall function (- hw 0.06d0) (+ cy hh -0.07d0) (+ cz hd 0.006d0)
+             0.030d0 0.045d0 0.006d0 metal :stretch-p t)
+    ;; The grip takes the sides, never the screen: a thumb up the right
+    ;; edge, fingers round the left edge with their tips just onto the
+    ;; bezel.
+    (funcall function (+ hw 0.018d0) 0.05d0 cz
+             0.020d0 0.085d0 0.022d0 +player-skin-tile+
+             :tilt '(0d0 0d0 -0.12d0))
+    (funcall function (- (+ hw 0.018d0)) 0.01d0 cz
+             0.020d0 0.075d0 0.030d0 +player-skin-tile+)
+    (funcall function (+ (- hw) 0.008d0) 0.01d0 (- cz hd 0.005d0)
+             0.012d0 0.070d0 0.008d0 +player-skin-tile+)))
 
 (defun phone-in-hand-p (phone session)
   (eq phone (player-body-hand-item (luvcraft-session-body session))))
@@ -220,14 +256,18 @@ toward the player.  Held in the right hand; TAB focuses its shell."))
         (unwind-protect
              (multiple-value-bind (columns rows)
                  (terminal-grid-columns-for-rows
-                  surface *terminal-display-font-pathname*
+                  surface (phone-font-pathname "Regular")
                   *phone-terminal-margin* *phone-terminal-rows*)
                (setf display
                      (make-terminal-display
                       session surface columns rows
                       :class 'phone-terminal-display
                       :fixture ""
-                      :margin *phone-terminal-margin*))
+                      :margin *phone-terminal-margin*
+                      :font-pathname (phone-font-pathname "Regular")
+                      :bold-font-pathname (phone-font-pathname "Bold")
+                      :screen-role :phone-screen
+                      :faceplate-role :phone-glass))
                (attach-terminal-display-shell display)
                (setf (phone-display phone) display
                      completed-p t)

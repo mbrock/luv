@@ -648,6 +648,115 @@
     (set-output color-output
                 (vec4 (* emission screen-mask) (* attenuation screen-mask)))))
 
+;;; The phone's screen is not a tube.  It is a sheet of flat glass over a
+;;; dark panel, and everything the wall's faceplate argues about -- raster,
+;;; hum, grain, the tube's convex bulge and its darker corners -- is exactly
+;;; what a retina slab does not have.  What it has instead is a rounded
+;;; edge, a Fresnel reflection of the sky it is held under, one tight glint,
+;;; and, because someone has been holding it, fingerprints: patches of oil
+;;; that scatter a little of the room forward where clean glass would not.
+;;; Both stages below share the wall's vertex stage; only the material is
+;;; the phone's own.
+
+(define-shader-function phone-glass-distance (coordinate half-size radius)
+  "Signed distance from a panel-local point to the rounded glass edge,
+negative inside.  RADIUS is the corner radius in world cells."
+  (let* ((qx (max (- (abs (swizzle coordinate :x))
+                     (- (swizzle half-size :x) radius))
+                  0.0))
+         (qy (max (- (abs (swizzle coordinate :y))
+                     (- (swizzle half-size :y) radius))
+                  0.0)))
+    (- (sqrt (+ (* qx qx) (* qy qy))) radius)))
+
+(define-shader-function phone-glass-coverage (coordinate half-size radius)
+  "One on the glass, zero past its rounded edge, resolved over one pixel."
+  (let* ((distance (phone-glass-distance coordinate half-size radius))
+         (dx (derivative-x (swizzle coordinate :x)))
+         (dy (derivative-y (swizzle coordinate :x)))
+         (pixel (max (sqrt (+ (* dx dx) (* dy dy))) 1e-5)))
+    (- 1.0 (smoothstep (- pixel) pixel distance))))
+
+(define-shader-method shader-specification-for
+    phone-screen-fragment-specification
+    ((role (eql :phone-screen)) (stage (eql :fragment)))
+    (:stage :fragment
+     :inputs ((render-coordinate :vec2 :location 0)
+              (half-size :vec2 :location 1)
+              (world-position :vec3 :location 2)
+              (normal-input :vec3 :location 3)
+              (right-input :vec3 :location 4)
+              (up-input :vec3 :location 5))
+     :outputs ((color-output :vec4 :location 0))
+     :resources
+     ((frame-state :uniform-block :set 0 :binding 2
+                   :members #.*frame-uniform-members*)))
+  (let* ((sun-direction (representation (swizzle sun-vector :xyz)))
+         (day-factor (representation (swizzle sun-vector :w)))
+         (sun-color (representation (swizzle sun-color-vector :xyz)))
+         (ambient (representation (swizzle ambient-vector :xyz)))
+         (normal (normalize normal-input))
+         (n-dot-l (max 0.0 (dot normal sun-direction)))
+         (irradiance (+ ambient (* sun-color (* n-dot-l day-factor))))
+         (coverage (phone-glass-coverage render-coordinate half-size 0.03))
+         ;; The panel behind the glass: black, and lit only by what little
+         ;; the room puts into it.  Off, it should read as a dark mirror.
+         (panel-albedo (vec3 0.005 0.005 0.006))
+         (rgb (* panel-albedo irradiance)))
+    (set-output color-output (vec4 (* rgb coverage) coverage))))
+
+(define-shader-method shader-specification-for
+    phone-glass-fragment-specification
+    ((role (eql :phone-glass)) (stage (eql :fragment)))
+    (:stage :fragment
+     :inputs ((render-coordinate :vec2 :location 0)
+              (half-size :vec2 :location 1)
+              (world-position :vec3 :location 2)
+              (normal-input :vec3 :location 3)
+              (right-input :vec3 :location 4)
+              (up-input :vec3 :location 5))
+     :outputs ((color-output :vec4 :location 0))
+     :resources
+     ((frame-state :uniform-block :set 0 :binding 2
+                   :members #.*frame-uniform-members*)))
+  (let* ((camera (representation (swizzle camera-vector :xyz)))
+         (sun-direction (representation (swizzle sun-vector :xyz)))
+         (day-factor (representation (swizzle sun-vector :w)))
+         (sun-color (representation (swizzle sun-color-vector :xyz)))
+         (zenith (representation (swizzle zenith-vector :xyz)))
+         (horizon (representation (swizzle horizon-vector :xyz)))
+         (ambient (representation (swizzle ambient-vector :xyz)))
+         (normal (normalize normal-input))
+         (view (normalize (- camera world-position)))
+         (n-dot-v (max 0.0 (dot normal view)))
+         ;; Coated glass: dark seen straight on, a mirror seen at a slant.
+         (fresnel (+ 0.018 (* 0.982 (expt (- 1.0 n-dot-v) 5.0))))
+         (reflected (- (* normal (* 2.0 (dot normal view))) view))
+         (sky-height (smoothstep -0.06 0.5 (swizzle reflected :y)))
+         (sky-reflection (* (mix horizon zenith sky-height) (* fresnel 0.8)))
+         (room-reflection (* ambient (* fresnel 0.5)))
+         (half-vector (normalize (+ sun-direction view)))
+         (n-dot-h (max 0.0 (dot normal half-vector)))
+         (glint (* sun-color (* (expt n-dot-h 320.0) 2.0 day-factor)))
+         ;; Fingerprints.  Oil on the glass scatters light forward over a
+         ;; broad lobe where the clean coating would send it away, so the
+         ;; smudges only appear where there is light to scatter -- near
+         ;; the sun's sheen and at a slant to the sky -- and never as paint.
+         (u (swizzle render-coordinate :x))
+         (v (swizzle render-coordinate :y))
+         (smudge-field
+           (lattice-fractal-noise
+            (vec3 (* u 38.0) (* v 27.0) 3.7)))
+         (smudge (* (smoothstep 0.56 0.74 smudge-field) 0.22))
+         (sheen (* sun-color (* (expt n-dot-h 14.0) 0.05 day-factor)))
+         (scatter (* (+ sheen (* (+ ambient (* horizon 0.4)) 0.035))
+                     smudge))
+         (coverage (phone-glass-coverage render-coordinate half-size 0.03))
+         (emission (+ sky-reflection room-reflection glint scatter)))
+    ;; The glass takes nothing away from the picture under it: alpha zero,
+    ;; and only what it sends back is added.
+    (set-output color-output (vec4 (* emission coverage) 0.0))))
+
 ;;; A video screen is the plainest world rectangle luvcraft draws: the same
 ;;; instance record as a terminal cell, but the fragment stage reads a decoded
 ;;; picture instead of computing a material.  The picture is the only thing on

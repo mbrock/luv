@@ -324,8 +324,10 @@ behind and below the eye and never in the picture; the hand is a skin box
 at its end."
   (destructuring-bind (x y z pitch yaw roll) pose
     (let* ((shoulder-x (* sign 0.30d0))
+           ;; The elbow follows the reach: a hand held far out is on a bent
+           ;; arm, so the forearm keeps its slope instead of lying flat.
+           (shoulder-z (- z 0.36d0))
            (shoulder-y -0.62d0)
-           (shoulder-z 0.10d0)
            (dx (- x shoulder-x)) (dy (- y shoulder-y)) (dz (- z shoulder-z))
            (length (sqrt (+ (* dx dx) (* dy dy) (* dz dz))))
            ;; The forearm's own frame: its z runs from shoulder to palm.
@@ -336,18 +338,18 @@ at its end."
         ;; The sleeve covers the far two thirds of the arm, so the wrist is
         ;; bare skin for a little way before the hand.
         (let ((cuff (frame-point eye right up forward
-                                 (+ shoulder-x (* 0.62d0 dx))
-                                 (+ shoulder-y (* 0.62d0 dy))
-                                 (+ shoulder-z (* 0.62d0 dz)))))
+                                 (+ shoulder-x (* 0.42d0 dx))
+                                 (+ shoulder-y (* 0.42d0 dy))
+                                 (+ shoulder-z (* 0.42d0 dz)))))
           (emit-framed-box vertices cuff arm-right arm-up arm-forward
-                           0.075d0 0.075d0 (* 0.40d0 length)
+                           0.062d0 0.062d0 (* 0.24d0 length)
                            +player-sleeve-tile+ sky block 0.0 nil))
         (let ((wrist (frame-point eye right up forward
-                                  (+ shoulder-x (* 0.90d0 dx))
-                                  (+ shoulder-y (* 0.90d0 dy))
-                                  (+ shoulder-z (* 0.90d0 dz)))))
+                                  (+ shoulder-x (* 0.88d0 dx))
+                                  (+ shoulder-y (* 0.88d0 dy))
+                                  (+ shoulder-z (* 0.88d0 dz)))))
           (emit-framed-box vertices wrist arm-right arm-up arm-forward
-                           0.058d0 0.058d0 (* 0.14d0 length)
+                           0.055d0 0.055d0 (* 0.10d0 length)
                            +player-skin-tile+ sky block 0.0 nil)))
       ;; The hand itself sits at the palm, turned as the pose says: a fist
       ;; when empty, a grip when holding.

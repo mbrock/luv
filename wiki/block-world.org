@@ -593,6 +593,23 @@ square to the centre of the view and a little further off, where the
 narrowed view frames the whole screen.  Putting the phone away pockets it
 with its shell still running.
 
+The phone is not a tube, and its glass says so.  The wall's screen and
+faceplate materials are the whole analogue argument of a CRT -- bezel in
+world cells, raster, hum, grain, a convex bulge -- and on a hand-sized
+slab every one of those reads as a fault.  The phone draws the same two
+panels with materials of its own (=:phone-screen=, =:phone-glass=): a flat
+black panel behind the text with rounded corners resolved analytically,
+and coated glass in front that only reflects -- Fresnel sky, one tight
+glint -- plus fingerprints, patches of oil that scatter a little of the
+room forward where the clean coating would not, so they show only where
+there is light to scatter and never as paint.  The slab itself is one
+even matte tone with the least relief a tile is allowed; its corners are
+rounded by a cross of two boxes with a box turned forty-five degrees in
+each notch, which at arm's length reads as a radius.  The grip takes the
+sides, never the screen.  The screen is proportioned for a real terminal:
+forty-six rows of Input Mono Condensed (from the user's own fonts when
+installed, the wall's Monaspace otherwise) give seventy-three columns.
+
 The wall's three modes -- shell, film, browser -- are not what the phone
 inherited; it is a shell and only a shell.  That mode switch is a kludge
 waiting to be redesigned from the ground up, and when it is, the phone
