@@ -993,6 +993,16 @@ the frame uniform cannot silently diverge between shader and host."
   nil)
 
 (defmethod handle-canvas-event
+    ((session luvcraft-session) canvas (event canvas-pointer-wheel-event))
+  "Offer a scroll to whatever owns focus, then to the overlays.
+
+The player's own view does not scroll -- the wheel is not a camera control
+here -- so an unconsumed wheel event is simply the end of the matter."
+  (unless (dispatch-luvcraft-focus-event session canvas event)
+    (dispatch-luvcraft-overlay-event session canvas event))
+  nil)
+
+(defmethod handle-canvas-event
     ((session luvcraft-session) canvas (event canvas-pointer-button-press-event))
   (when (dispatch-luvcraft-focus-event session canvas event)
     (return-from handle-canvas-event nil))

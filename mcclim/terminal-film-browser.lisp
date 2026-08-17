@@ -8,16 +8,48 @@
 
 (defconstant +terminal-film-browser-width+ 720)
 (defconstant +terminal-film-browser-height+ 440)
-(defconstant +terminal-film-browser-header-height+ 54)
+(defconstant +terminal-film-browser-header-height+ 70
+  "Where the first row starts.  The painter and the hit-test both measure
+from here, so a row is always where the click says it is.")
 (defconstant +terminal-film-browser-footer-height+ 38)
-(defconstant +terminal-film-browser-row-height+ 29)
+(defconstant +terminal-film-browser-row-height+ 27)
 (defconstant +terminal-film-browser-page-size+ 12)
-(defconstant +terminal-film-browser-path-limit+ 42)
+(defconstant +terminal-film-browser-path-limit+ 52)
+
+;; The same stone the communicator is cased in.  Two things mounted on the
+;; same wall that behave alike should look alike, and a light surround gives
+;; the faceplate's own reflection somewhere to land instead of blowing out
+;; across a dark screen.
+(defparameter *film-browser-bezel-ink* (make-rgb-color 0.55 0.51 0.43))
+(defparameter *film-browser-bezel-light* (make-rgb-color 0.73 0.69 0.59))
+(defparameter *film-browser-bezel-dark* (make-rgb-color 0.26 0.24 0.20))
+(defparameter *film-browser-screen-ink* (make-rgb-color 0.075 0.075 0.075))
+(defparameter *film-browser-row-ink* (make-rgb-color 0.125 0.125 0.125))
+(defparameter *film-browser-text-ink* (make-rgb-color 0.92 0.93 0.94))
+(defparameter *film-browser-muted-ink* (make-rgb-color 0.50 0.53 0.57))
 
 (defstruct terminal-film-entry
   pathname
   kind
-  label)
+  label
+  (size nil))
+
+(defun terminal-film-size (pathname)
+  "PATHNAME's length in bytes, or NIL if it will not say."
+  (ignore-errors
+   (with-open-file (stream pathname :element-type '(unsigned-byte 8))
+     (file-length stream))))
+
+(defun terminal-film-size-label (size)
+  (cond ((null size) "")
+        ((< size 1048576) (format nil "~D KB" (round size 1024)))
+        ((< size 1073741824) (format nil "~,1F MB" (/ size 1048576.0)))
+        (t (format nil "~,1F GB" (/ size 1073741824.0)))))
+
+(defparameter *terminal-film-entry-marks*
+  '((:directory . "▸") (:film . "▶") (:previous . "↑") (:next . "↓"))
+  "A mark per row kind.  It replaces the bracketed word the label used to
+carry: the shape says what the row is, and the name gets the whole line.")
 
 (defun terminal-film-pathname-p (pathname)
   (member (string-downcase (or (pathname-type pathname) ""))
@@ -42,19 +74,19 @@
     (append
      (unless (equal directory parent)
        (list (make-terminal-film-entry
-              :pathname parent :kind :directory :label "[..] parent")))
+              :pathname parent :kind :directory :label "..")))
      (mapcar
       (lambda (pathname)
         (make-terminal-film-entry
          :pathname pathname :kind :directory
-         :label (format nil "[DIR]  ~A/"
-                        (terminal-film-directory-name pathname))))
+         :label (format nil "~A/" (terminal-film-directory-name pathname))))
       directories)
      (mapcar
       (lambda (pathname)
         (make-terminal-film-entry
          :pathname pathname :kind :film
-         :label (format nil "[FILM] ~A" (file-namestring pathname))))
+         :label (file-namestring pathname)
+         :size (terminal-film-size pathname)))
       films))))
 
 (defclass terminal-film-browser-pane (application-pane) ())
@@ -97,53 +129,85 @@
          (content-count (- available (if more-p 1 0))))
     (append
      (when previous-p
-       (list (make-terminal-film-entry :kind :previous
-                                       :label "[PAGE] previous")))
+       (list (make-terminal-film-entry :kind :previous :label "previous page")))
      (subseq entries offset (min (length entries) (+ offset content-count)))
      (when more-p
-       (list (make-terminal-film-entry :kind :next :label "[PAGE] next"))))))
+       (list (make-terminal-film-entry :kind :next :label "next page"))))))
 
 (defun terminal-film-entry-color (entry)
+  "The mark's colour.  A row is dark and the ink is what carries the kind:
+twelve saturated bars fight each other and the filename loses."
   (ecase (terminal-film-entry-kind entry)
-    (:directory (make-rgb-color 0.17 0.31 0.42))
-    (:film (make-rgb-color 0.36 0.20 0.45))
-    ((:previous :next) (make-rgb-color 0.20 0.24 0.27))))
+    (:directory (make-rgb-color 0.44 0.68 0.92))
+    (:film (make-rgb-color 0.78 0.56 0.95))
+    ((:previous :next) (make-rgb-color 0.55 0.58 0.62))))
 
 (defmethod handle-repaint ((pane terminal-film-browser-pane) region)
   (declare (ignore region))
   (let* ((frame (pane-frame pane))
-         (entries (terminal-film-browser-visible-entries frame)))
+         (entries (terminal-film-browser-visible-entries frame))
+         (all (terminal-film-browser-frame-entries frame))
+         (medium (sheet-medium pane)))
     (with-bounding-rectangle* (left top right bottom) pane
+      ;; The same chassis the communicator wears, because they are the same
+      ;; wall showing two different things.
       (draw-rectangle* pane left top right bottom
-                       :ink (make-rgb-color 0.018 0.024 0.032))
-      (draw-rectangle* pane left top right (+ top 46)
-                       :ink (make-linear-gradient
-                             0 top 0 (+ top 46)
-                             (make-rgb-color 0.16 0.20 0.24)
-                             (make-rgb-color 0.07 0.09 0.12)))
-      (draw-text* pane "FILM BROWSER" (+ left 16) (+ top 17)
-                  :align-y :center :text-size 14 :ink +white+)
+                       :ink *film-browser-bezel-ink*)
+      (draw-rectangle* pane (+ left 3) (+ top 3) (- right 3) (- bottom 3)
+                       :filled nil :line-thickness 3
+                       :ink *film-browser-bezel-light*)
+      (draw-rectangle* pane (+ left 6) (+ top 6) (- right 6) (- bottom 6)
+                       :filled nil :line-thickness 2
+                       :ink *film-browser-bezel-dark*)
+      (draw-analytic-rounded-rectangle*
+       medium (+ left 12) (+ top 12) (- right 12) (- bottom 12) :radius 6
+       :ink *film-browser-screen-ink*)
+      ;; Header
+      (draw-text* pane "Films" (+ left 24) (+ top 30)
+                  :align-y :center :text-size 19 :ink *film-browser-text-ink*)
       (draw-text* pane
                   (terminal-film-browser-path-label
                    (terminal-film-browser-directory frame))
-                  (+ left 180) (+ top 17) :align-y :center :text-size 12
-                  :ink (make-rgb-color 0.82 0.86 0.88))
+                  (+ left 24) (+ top 52) :align-y :center :text-size 12
+                  :ink *film-browser-muted-ink*)
+      (draw-text* pane (format nil "~D item~:P" (length all))
+                  (- right 24) (+ top 30)
+                  :align-x :right :align-y :center :text-size 12
+                  :ink *film-browser-muted-ink*)
+      (draw-line* pane (+ left 18) (+ top 64) (- right 18) (+ top 64)
+                  :ink (make-rgb-color 0.16 0.17 0.19))
       (loop for entry in entries
             for index from 0
             for row-top = (+ top +terminal-film-browser-header-height+
                              (* index +terminal-film-browser-row-height+))
-            for row-bottom = (+ row-top (- +terminal-film-browser-row-height+ 3))
-            do (draw-analytic-rounded-rectangle*
-                (sheet-medium pane)
-                (+ left 10) row-top (- right 10) row-bottom
-                :radius 5 :ink (terminal-film-entry-color entry))
+            for row-bottom = (+ row-top (- +terminal-film-browser-row-height+ 2))
+            do (when (oddp index)
+                 (draw-analytic-rounded-rectangle*
+                  medium (+ left 16) row-top (- right 16) row-bottom
+                  :radius 4 :ink *film-browser-row-ink*))
+               (draw-text* pane
+                           (or (cdr (assoc (terminal-film-entry-kind entry)
+                                           *terminal-film-entry-marks*))
+                               "·")
+                           (+ left 30) (/ (+ row-top row-bottom) 2.0)
+                           :align-x :center :align-y :center :text-size 14
+                           :ink (terminal-film-entry-color entry))
                (draw-text* pane (terminal-film-entry-label entry)
-                           (+ left 22) (/ (+ row-top row-bottom) 2)
-                           :align-y :center :text-size 13 :ink +white+))
+                           (+ left 48) (/ (+ row-top row-bottom) 2.0)
+                           :align-y :center :text-size 13
+                           :ink *film-browser-text-ink*)
+               (alexandria:when-let ((size (terminal-film-entry-size entry)))
+                 (draw-text* pane (terminal-film-size-label size)
+                             (- right 30) (/ (+ row-top row-bottom) 2.0)
+                             :align-x :right :align-y :center :text-size 11
+                             :ink *film-browser-muted-ink*)))
+      ;; Footer
+      (draw-line* pane (+ left 18) (- bottom 40) (- right 18) (- bottom 40)
+                  :ink (make-rgb-color 0.16 0.17 0.19))
       (draw-text* pane (terminal-film-browser-message frame)
-                  (+ left 14) (- bottom 15)
-                  :align-y :center :text-size 11
-                  :ink (make-rgb-color 0.76 0.80 0.82)))))
+                  (+ left 24) (- bottom 25)
+                  :align-y :center :text-size 12
+                  :ink *film-browser-muted-ink*))))
 
 (defun repaint-terminal-film-browser (frame)
   (let ((mirror (sheet-direct-mirror (frame-top-level-sheet frame))))
@@ -213,6 +277,21 @@
 
 (defclass terminal-film-browser-overlay (luvcraft-widget-overlay)
   ((display :initarg :display :reader terminal-film-browser-overlay-display)))
+
+(defun displace-terminal-mode-overlay (display wanted-type)
+  "Return DISPLAY's mode child if it is already WANTED-TYPE, else drop it.
+
+Every mode installs a different child and only one can be mounted, so
+changing mode has to take the previous one down.  It is released rather than
+merely forgotten: the child being replaced may own a thread or a socket, and
+a Telegram console left running behind a film is a connection nobody closes."
+  (let ((overlay (luvcraft:terminal-display-mode-overlay display)))
+    (cond ((null overlay) nil)
+          ((typep overlay wanted-type) overlay)
+          (t
+           (setf (luvcraft:terminal-display-mode-overlay display) nil)
+           (ignore-errors (luvcraft:release-luvcraft-overlay overlay))
+           nil))))
 
 (defmethod luvcraft:encode-luvcraft-overlay
     ((overlay terminal-film-browser-overlay) session pass surface-texture)
@@ -320,5 +399,6 @@
     ((display luvcraft:terminal-display)
      (session luvcraft:luvcraft-session) (mode (eql :film)))
   (declare (ignore session mode))
-  (unless (luvcraft:terminal-display-mode-overlay display)
+  (unless (displace-terminal-mode-overlay
+           display 'terminal-film-browser-overlay)
     (open-terminal-film-browser display)))

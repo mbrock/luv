@@ -396,6 +396,9 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:canvas-pointer-event-clicks
            #:canvas-pointer-button-press-event
            #:canvas-pointer-button-release-event
+           #:canvas-pointer-wheel-event
+           #:canvas-pointer-event-scroll-x
+           #:canvas-pointer-event-scroll-y
            #:canvas-key-event
            #:canvas-key-event-key-name
            #:canvas-key-event-modifiers

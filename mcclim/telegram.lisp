@@ -943,6 +943,26 @@ so this only has to say which way and how far."
 
 (defmethod luvcraft:handle-luvcraft-overlay-event
     ((overlay luvcraft-communicator-overlay) session canvas
+     (event luv:canvas-pointer-wheel-event))
+  "Scroll the transcript under the pointer.
+
+Only when the pointer is actually on the panel: a wheel turn aimed at the
+world should not quietly move a screen on a wall somewhere behind it."
+  (declare (ignore session canvas))
+  (when (and (eq :chat (communicator-screen (widget-overlay-frame overlay)))
+             (communicator-texture-point overlay event))
+    (let ((frame (widget-overlay-frame overlay))
+          (view (console-view (communicator-console
+                               (widget-overlay-frame overlay)))))
+      (setf (communicator-scroll frame)
+            (max 0 (min (communicator-scroll-limit view)
+                        (round (+ (communicator-scroll frame)
+                                  (* 48 (luv:canvas-pointer-event-scroll-y
+                                         event)))))))
+      t)))
+
+(defmethod luvcraft:handle-luvcraft-overlay-event
+    ((overlay luvcraft-communicator-overlay) session canvas
      (event luv:canvas-pointer-event))
   (declare (ignore session canvas))
   (alexandria:when-let ((point (communicator-texture-point overlay event)))
@@ -1077,12 +1097,20 @@ so this only has to say which way and how far."
           (repaint-communicator frame)
           overlay)))))
 
+(defmethod luvcraft:release-luvcraft-overlay
+    ((overlay luvcraft-communicator-overlay))
+  "Stop the console thread and close its Telegram connection.
+
+This is what makes a mode switch safe: the overlay is dropped by whoever is
+mounting the next one, and its thread has to go with it."
+  (stop-telegram-console (communicator-console (widget-overlay-frame overlay)))
+  (call-next-method))
+
 (defun close-luvcraft-communicator (overlay)
-  (let ((frame (widget-overlay-frame overlay)))
-    (stop-telegram-console (communicator-console frame)))
   (let ((display (communicator-overlay-display overlay)))
     (when (eq overlay (luvcraft:terminal-display-mode-overlay display))
       (setf (luvcraft:terminal-display-mode-overlay display) nil)))
+  (luvcraft:release-luvcraft-overlay overlay)
   nil)
 
 ;; Loading this system is what makes the wall offer a third mode.
@@ -1096,9 +1124,7 @@ so this only has to say which way and how far."
      (session luvcraft:luvcraft-session) (mode (eql :telegram)))
   (luvcraft::stop-terminal-display-film display session)
   (setf (luvcraft:terminal-display-mode display) mode)
-  (unless (typep (luvcraft:terminal-display-mode-overlay display)
-                 'luvcraft-communicator-overlay)
-    ;; A different mode's child was installed here; drop it and mount ours.
-    (setf (luvcraft:terminal-display-mode-overlay display) nil)
+  (unless (displace-terminal-mode-overlay
+           display 'luvcraft-communicator-overlay)
     (open-luvcraft-communicator display))
   display)
