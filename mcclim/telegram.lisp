@@ -491,6 +491,10 @@ pictures appearing over a second or two is the better failure."
    ;; the panel's own business and never leave the game thread.
    (screen :initform :dialogs :accessor communicator-screen)
    (draft :initform "" :accessor communicator-draft)
+   ;; How far back the transcript is pushed, in pixels above the bottom.
+   ;; Zero means pinned to the newest message, which is where a chat starts.
+   (scroll :initform 0 :accessor communicator-scroll)
+   (content-height :initform nil :accessor communicator-content-height-cache)
    (painted :initform nil :accessor communicator-painted))
   (:menu-bar nil)
   (:panes
@@ -610,32 +614,91 @@ face rather than a blank square."
     (:video 46)
     (t 18)))
 
-(defun communicator-transcript-layout (view)
-  "The tail of VIEW's transcript that fits, as (LINE TOP HEIGHT) triples.
+(defun communicator-visible-height ()
+  (- +communicator-screen-bottom+ +communicator-screen-top+))
 
-Bottom-anchored like every chat, so the newest line sits against the
-composer.  Drawing and hit-testing both read this, which is the only way a
-click can land on the picture the player is actually looking at."
+(defun communicator-content-height (view)
+  (reduce #'+ (console-view-lines view)
+          :key #'transcript-line-extent :initial-value 0))
+
+(defun communicator-scroll-limit (view)
+  "How far back the transcript can be pushed before it runs out of history."
+  (max 0 (- (communicator-content-height view) (communicator-visible-height))))
+
+(defun communicator-transcript-layout (view &optional (scroll 0))
+  "VIEW's transcript as (LINE TOP HEIGHT) triples, SCROLL pixels back.
+
+Bottom-anchored like every chat: at scroll zero the newest line sits against
+the composer, and scrolling moves the whole column down to uncover older
+ones.  Drawing and hit-testing both read this, which is the only way a click
+can land on the picture the player is actually looking at.
+
+Lines that fall entirely outside the well are dropped; ones that straddle its
+edge are kept and clipped when drawn, so scrolling moves smoothly instead of
+a line at a time."
   (let* ((lines (console-view-lines view))
          (heights (mapcar #'transcript-line-extent lines))
-         (available (- +communicator-screen-bottom+ +communicator-screen-top+))
          (total (reduce #'+ heights :initial-value 0))
-         (y +communicator-screen-top+))
-    (loop while (and lines (> total available))
-          do (decf total (pop heights))
-             (pop lines))
-    (when (< total available)
-      (incf y (- available total)))
+         (available (communicator-visible-height))
+         (y (+ +communicator-screen-top+
+               (min 0 (- available total))
+               (max 0 scroll))))
     (loop for line in lines
           for height in heights
-          collect (list line y height)
-          do (incf y height))))
+          for top = y
+          do (incf y height)
+          when (and (< top +communicator-screen-bottom+)
+                    (> (+ top height) +communicator-screen-top+))
+            collect (list line top height))))
 
-(defun draw-communicator-transcript (pane view)
-  "Paint the tail of the transcript."
+(defun draw-communicator-scrollbar (pane view scroll)
+  "A slim mark on the right of the well showing where the transcript is."
+  (let ((limit (communicator-scroll-limit view)))
+    (when (plusp limit)
+      (let* ((track-top (+ +communicator-screen-top+ 2))
+             (track-bottom (- +communicator-screen-bottom+ 2))
+             (track (- track-bottom track-top))
+             (total (communicator-content-height view))
+             (thumb (max 18 (round (* track (/ (communicator-visible-height)
+                                               total)))))
+             ;; Scroll counts backwards from the bottom, so a scroll of zero
+             ;; puts the thumb at the end of the track.
+             (offset (round (* (- track thumb)
+                               (- 1.0 (/ (min scroll limit) limit)))))
+             (x (- +communicator-width+ +communicator-inset+ 7)))
+        (draw-rectangle* pane x track-top (+ x 4) track-bottom
+                         :ink (make-rgb-color 0.14 0.14 0.14))
+        (draw-rectangle* pane x (+ track-top offset) (+ x 4)
+                         (+ track-top offset thumb)
+                         :ink (make-rgb-color 0.42 0.42 0.40))))))
+
+(defun adjust-communicator-scroll (frame view)
+  "Keep a scrolled-back transcript over the same messages as new ones arrive.
+
+Pinned to the bottom it stays pinned, which is what a chat should do; pushed
+back, it holds its place instead of being dragged along by every arrival."
+  (let ((total (communicator-content-height view))
+        (previous (communicator-content-height-cache frame)))
+    (when (and previous (> total previous) (plusp (communicator-scroll frame)))
+      (incf (communicator-scroll frame) (- total previous)))
+    (setf (communicator-content-height-cache frame) total)
+    (setf (communicator-scroll frame)
+          (max 0 (min (communicator-scroll frame)
+                      (communicator-scroll-limit view))))))
+
+(defun draw-communicator-transcript (pane frame view)
+  "Paint the visible part of the transcript, clipped to the well."
+  (adjust-communicator-scroll frame view)
+  (draw-communicator-scrollbar pane view (communicator-scroll frame))
   (let ((left (+ +communicator-inset+ 6))
         (right (- +communicator-width+ +communicator-inset+ 6)))
-    (loop for (line y height) in (communicator-transcript-layout view)
+    (with-drawing-options
+        (pane :clipping-region
+              (make-rectangle* +communicator-inset+ +communicator-screen-top+
+                               (- +communicator-width+ +communicator-inset+ 10)
+                               +communicator-screen-bottom+))
+      (loop for (line y height) in (communicator-transcript-layout
+                                    view (communicator-scroll frame))
           do (ecase (transcript-line-kind line)
                (:head
                 (draw-communicator-avatar
@@ -690,7 +753,7 @@ click can land on the picture the player is actually looking at."
                 (draw-text* pane (transcript-line-text line)
                             (+ left 42) (+ y 9)
                             :align-y :center :text-size 14
-                            :ink *communicator-text-ink*))))))
+                            :ink *communicator-text-ink*)))))))
 
 (defun draw-communicator-composer (frame pane)
   (let ((left +communicator-inset+)
@@ -749,7 +812,7 @@ click can land on the picture the player is actually looking at."
          :ink *communicator-screen-ink* :recessed-p t)
         (ecase (communicator-screen frame)
           (:dialogs (draw-communicator-dialogs pane view))
-          (:chat (draw-communicator-transcript pane view)))
+          (:chat (draw-communicator-transcript pane frame view)))
         (draw-communicator-composer frame pane)
         (alexandria:when-let ((failure (console-view-failure view)))
           (draw-text* pane (subseq failure 0 (min 70 (length failure)))
@@ -759,7 +822,8 @@ click can land on the picture the player is actually looking at."
     (setf (communicator-painted frame)
           (list (console-view-generation view)
                 (communicator-screen frame)
-                (communicator-draft frame)))))
+                (communicator-draft frame)
+                (communicator-scroll frame)))))
 
 (defun repaint-communicator (frame)
   (let ((mirror (sheet-direct-mirror (frame-top-level-sheet frame))))
@@ -773,7 +837,8 @@ click can land on the picture the player is actually looking at."
 (defun communicator-paint-state (frame)
   (list (console-view-generation (console-view (communicator-console frame)))
         (communicator-screen frame)
-        (communicator-draft frame)))
+        (communicator-draft frame)
+        (communicator-scroll frame)))
 
 ;;;; The overlay on the wall
 
@@ -844,9 +909,28 @@ has typed.  This runs every frame, so it has to be cheap to say no."
     (list (* (first uv) +communicator-width+)
           (* (second uv) +communicator-height+))))
 
-(defun communicator-video-line-at (view y)
+(defun scroll-communicator (frame key)
+  "Move the transcript for one of the scrolling keys.
+
+Clamping happens at paint time against the view that will actually be drawn,
+so this only has to say which way and how far."
+  (let ((view (console-view (communicator-console frame)))
+        (page (- (communicator-visible-height) 24)))
+    (setf (communicator-scroll frame)
+          (max 0
+               (min (communicator-scroll-limit view)
+                    (case key
+                      (:up (+ (communicator-scroll frame) 22))
+                      (:down (- (communicator-scroll frame) 22))
+                      (:page-up (+ (communicator-scroll frame) page))
+                      (:page-down (- (communicator-scroll frame) page))
+                      (:home (communicator-scroll-limit view))
+                      (:end 0)
+                      (t (communicator-scroll frame))))))))
+
+(defun communicator-video-line-at (view y scroll)
   "The playable video line at texture Y, if the click landed on one."
-  (loop for (line top height) in (communicator-transcript-layout view)
+  (loop for (line top height) in (communicator-transcript-layout view scroll)
         when (and (eq :video (transcript-line-kind line))
                   (<= top y) (< y (+ top height)))
           return line))
@@ -882,11 +966,16 @@ has typed.  This runs every frame, so it has to be cheap to say no."
             ((eq :dialogs (communicator-screen frame))
              (alexandria:when-let ((row (communicator-dialog-at view y)))
                (console-request console :select (dialog-row-key row))
-               (setf (communicator-screen frame) :chat)))
+               ;; A conversation opens at its newest message, not wherever
+               ;; the last one happened to be scrolled to.
+               (setf (communicator-screen frame) :chat
+                     (communicator-scroll frame) 0
+                     (communicator-content-height-cache frame) nil)))
             (t
              ;; A click inside a video's plate plays it on the wall.
              (alexandria:when-let
-                 ((line (communicator-video-line-at view y)))
+                 ((line (communicator-video-line-at
+                         view y (communicator-scroll frame))))
                (console-request console :play
                                 (transcript-line-document line))))))))
     t))
@@ -903,6 +992,9 @@ has typed.  This runs every frame, so it has to be cheap to say no."
       ;; TAB belongs to the session: it is how the player leaves the wall,
       ;; and a composer that ate it would trap them at the screen.
       (:tab nil)
+      ((:up :down :page-up :page-down :home :end)
+       (scroll-communicator frame key)
+       t)
       (:escape
        ;; One Escape leaves the conversation, the next leaves the wall.
        (if (eq :chat (communicator-screen frame))
