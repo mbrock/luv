@@ -200,7 +200,10 @@ have a main-thread host and execute directly."
 
 (defmethod sdl-presentation-window-flags ((presentation-api (eql :vulkan)))
   (declare (ignore presentation-api))
-  '(:vulkan :resizable :hidden))
+  ;; The swapchain follows the window's pixel size, so a dense display should
+  ;; be presented to at its own resolution rather than upscaled from half of
+  ;; it -- the same bargain the Metal layer already makes.
+  '(:vulkan :high-pixel-density :resizable :hidden))
 
 #+darwin
 (defmethod sdl-presentation-window-flags ((presentation-api (eql :metal)))

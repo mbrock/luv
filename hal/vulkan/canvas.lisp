@@ -41,6 +41,15 @@
    (extent
     :initform nil
     :accessor canvas-extent)
+   (window-size
+    :initform nil
+    :accessor vulkan-canvas-window-size
+    :documentation
+    "The window's pixel size when this swapchain was built.
+
+Compared against the window rather than against EXTENT, which comes from
+the surface's own idea of its current extent: a platform where the two
+disagree would otherwise ask for a rebuild on every single frame.")
    (format
     :initform nil
     :accessor canvas-format)
@@ -408,6 +417,9 @@
              (setf (vulkan-canvas-swapchain context) swapchain
                    (vulkan-canvas-textures context) textures
                    (canvas-extent context) extent
+                   (vulkan-canvas-window-size context)
+                   (multiple-value-list
+                    (canvas-size (context-canvas context)))
                    (canvas-format context) gpu-format
                    (vulkan-canvas-render-done context) render-done
                    (vulkan-canvas-frame-slots context) frame-slots
@@ -438,7 +450,7 @@
    (lambda ()
      (configure-vulkan-canvas-context context configuration))))
 
-(defmethod unconfigure-canvas-context ((context vulkan-canvas-context))
+(defun unconfigure-vulkan-canvas-context (context)
   (when (eq :in-frame (canvas-context-state context))
     (ensure-vulkan-canvas-state context :unconfigure :configured))
   (unless (member (canvas-context-state context) '(:unconfigured :destroyed))
@@ -456,6 +468,7 @@
            native-device (vulkan-canvas-swapchain context)))))
     (setf (vulkan-canvas-swapchain context) nil
           (vulkan-canvas-textures context) #()
+          (vulkan-canvas-window-size context) nil
           (vulkan-canvas-render-done context) #()
           (vulkan-canvas-frame-slots context) #()
           (vulkan-canvas-next-frame-slot context) 0
@@ -465,6 +478,9 @@
           (canvas-format context) nil
           (canvas-context-state context) :unconfigured))
   (values))
+
+(defmethod unconfigure-canvas-context ((context vulkan-canvas-context))
+  (unconfigure-vulkan-canvas-context context))
 
 (defmethod destroy-canvas-context ((context vulkan-canvas-context))
   (unless (eq :destroyed (canvas-context-state context))
@@ -510,24 +526,81 @@
              :operation :get-current-texture :reason :outside-frame
              :state (canvas-context-state context) :expected-state :in-frame)))
 
+;;; A swapchain is only ever right for one window size.  Resizing the window
+;;; leaves the images, their views, and the surface's own extent describing a
+;;; window that no longer exists, and Vulkan says so by refusing to hand out
+;;; another image.  Rebuilding is the whole answer, and it is cheap enough to
+;;; do from inside the frame that discovered the problem.
+
+(defun rebuild-vulkan-canvas-swapchain (context)
+  "Replace CONTEXT's swapchain with one built for the window's present size.
+
+The configuration is the one the application already asked for: only the
+extent, the images, and the per-image synchronization are made again.
+Returns NIL when the window has no pixels to present to at all, which is an
+ordinary state for a minimized window and not an error."
+  (let ((configuration (canvas-context-configuration context)))
+    (unless configuration
+      (error 'canvas-state-error
+             :canvas (context-canvas context)
+             :operation :rebuild-swapchain :reason :invalid-context-state
+             :state (canvas-context-state context)
+             :expected-state :configured))
+    (multiple-value-bind (width height) (canvas-size (context-canvas context))
+      (when (or (zerop width) (zerop height))
+        (return-from rebuild-vulkan-canvas-swapchain nil)))
+    (unconfigure-vulkan-canvas-context context)
+    (configure-vulkan-canvas-context context configuration)
+    t))
+
+(defun ensure-vulkan-canvas-swapchain (context)
+  "Make the swapchain agree with the window before a frame asks for an image.
+
+Returns NIL when this frame cannot be presented, which the caller skips."
+  (let ((size (multiple-value-list (canvas-size (context-canvas context)))))
+    (cond ((or (zerop (first size)) (zerop (second size))) nil)
+          ((equal size (vulkan-canvas-window-size context)) t)
+          (t (rebuild-vulkan-canvas-swapchain context)))))
+
+(defun acquire-vulkan-canvas-image (context)
+  "Acquire the next presentable image, rebuilding a stale swapchain once.
+
+Returns the frame slot, its index, and the image index, or NIL when the
+surface still cannot supply an image and this frame should be skipped."
+  (let ((device (context-device context))
+        (queue (device-queue (context-device context))))
+    (dotimes (attempt 2)
+      (let* ((slot-index (vulkan-canvas-next-frame-slot context))
+             (slot (aref (vulkan-canvas-frame-slots context) slot-index)))
+        (with-cpu-trace-zone (:vulkan/recycle-frame-slot)
+          (recycle-vulkan-canvas-frame-slot queue slot))
+        (multiple-value-bind (image-index result)
+            (with-cpu-trace-zone (:canvas/acquire-drawable)
+              (lvk:acquire-next-image
+               (vulkan-handle device) (vulkan-canvas-swapchain context)
+               (vulkan-frame-slot-image-ready slot)))
+          (if (eq result :error-out-of-date-khr)
+              ;; The semaphore is left unsignalled by a refused acquisition,
+              ;; so the rebuilt swapchain's own slots start clean.
+              (unless (rebuild-vulkan-canvas-swapchain context)
+                (return-from acquire-vulkan-canvas-image nil))
+              (return-from acquire-vulkan-canvas-image
+                (values slot slot-index image-index))))))
+    nil))
+
 (defun call-with-vulkan-canvas-frame (context function)
   (with-cpu-trace-zone (:canvas/frame)
     (ensure-vulkan-canvas-state context :frame :configured)
+    (unless (ensure-vulkan-canvas-swapchain context)
+      (return-from call-with-vulkan-canvas-frame nil))
     (let* ((device (context-device context))
-           (native-device (vulkan-handle device))
            (queue (device-queue device))
-           (slot-index (vulkan-canvas-next-frame-slot context))
-           (slot (aref (vulkan-canvas-frame-slots context) slot-index))
            (encoder nil)
            (commands nil))
-      (with-cpu-trace-zone (:vulkan/recycle-frame-slot)
-        (recycle-vulkan-canvas-frame-slot queue slot))
-      (multiple-value-bind (image-index acquire-result)
-          (with-cpu-trace-zone (:canvas/acquire-drawable)
-            (lvk:acquire-next-image
-             native-device (vulkan-canvas-swapchain context)
-             (vulkan-frame-slot-image-ready slot)))
-        (declare (ignore acquire-result))
+      (multiple-value-bind (slot slot-index image-index)
+          (acquire-vulkan-canvas-image context)
+        (unless slot
+          (return-from call-with-vulkan-canvas-frame nil))
         (let ((texture (aref (vulkan-canvas-textures context) image-index))
               (render-done
                 (aref (vulkan-canvas-render-done context) image-index)))
@@ -566,12 +639,18 @@
                          (vulkan-frame-slot-submission-index slot)
                          submission-index
                          commands nil))
-                 (with-cpu-trace-zone (:canvas/present)
-                   (lvk:present
-                    (vulkan-handle queue)
-                    (vulkan-canvas-swapchain context) image-index
-                    :wait-semaphores
-                    (vector render-done)))
+                 (when (eq :error-out-of-date-khr
+                           (with-cpu-trace-zone (:canvas/present)
+                             (lvk:present
+                              (vulkan-handle queue)
+                              (vulkan-canvas-swapchain context) image-index
+                              :wait-semaphores
+                              (vector render-done))))
+                   ;; The image was presented to a surface that has already
+                   ;; moved on.  Forgetting the size this swapchain was built
+                   ;; for is what makes the next frame rebuild it, even when
+                   ;; the window itself reports the same pixels as before.
+                   (setf (vulkan-canvas-window-size context) nil))
                  (setf (vulkan-canvas-next-frame-slot context)
                        (mod (1+ slot-index)
                             (length (vulkan-canvas-frame-slots context))))
