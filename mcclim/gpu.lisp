@@ -1027,16 +1027,22 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
 
 ;;; Which TrueType file a CLIM text style means.  DejaVu ships with the
 ;;; system and is always there; a nicer face takes over the :SANS-SERIF
-;;; family -- the default face of every McCLIM pane here -- when it is
-;;; installed on this machine.  The preference is Iosevka Aile, then Input
-;;; Sans; both are looked for in the user's own fonts (Iosevka is a
-;;; 45 MB family and Input may not be redistributed, so neither is in the
-;;; repository) and DejaVu stands in otherwise.
+;;; family -- the default face of every McCLIM pane here -- when it can be
+;;; found.  The checkout bundles Iosevka Aile (OFL, subset to the Latin,
+;;; Greek, Cyrillic, punctuation, arrow, and symbol ranges a game UI needs)
+;;; beside Monaspace in FONTS/; a face may also be dropped into the user's
+;;; own fonts, and DejaVu stands in otherwise.
+
+(defparameter *bundled-fonts-directory*
+  (asdf:system-relative-pathname "mcluv/backend" "fonts/")
+  "The checkout's bundled fonts, captured while the system is loaded.")
 
 (defun user-font-pathname (name)
-  "The font file NAME in the user's own font directory, when it exists."
-  (probe-file (merge-pathnames (format nil "Library/Fonts/~A" name)
-                               (user-homedir-pathname))))
+  "The font file NAME from the bundled fonts, else the user's own fonts,
+else NIL."
+  (or (probe-file (merge-pathnames name *bundled-fonts-directory*))
+      (probe-file (merge-pathnames (format nil "Library/Fonts/~A" name)
+                                   (user-homedir-pathname)))))
 
 (defparameter *sans-serif-font-preferences*
   '(("Iosevka Aile" "IosevkaAile-Regular.ttf" "IosevkaAile-Bold.ttf"
@@ -1044,7 +1050,8 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
     ("Input Sans" "InputSans-Regular.ttf" "InputSans-Bold.ttf"
      "InputSans-Italic.ttf" "InputSans-BoldItalic.ttf"))
   "Families to try for :SANS-SERIF, best first: a name and the regular,
-bold, italic, and bold-italic files expected in the user's fonts.")
+bold, italic, and bold-italic files looked for in the bundled and then the
+user's fonts.  Italics are optional; the upright stands in.")
 
 (defparameter *gpu-sans-serif-fonts*
   (cons (cl-dejavu:font-pathname "DejaVuSans.ttf")

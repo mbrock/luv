@@ -573,11 +573,16 @@ SDL reports a flipped direction rather than flipped amounts when the platform
 is set to natural scrolling, so the sign is corrected here and consumers only
 ever see what the user meant."
   (when (sdl-canvas-window-event-p canvas event)
-    (let ((sign (if (= (sdl3:%direction event)
-                       (cffi:foreign-enum-value 'sdl3::mouse-wheel-direction
-                                                :flipped))
-                    -1.0
-                    1.0)))
+    ;; The struct reader hands the direction back as the enum's keyword
+    ;; when it can translate it and as the raw integer when it cannot, so
+    ;; both spellings of "flipped" are honoured; anything else is normal.
+    (let* ((direction (sdl3:%direction event))
+           (sign (if (or (eq direction :flipped)
+                         (eql direction
+                              (cffi:foreign-enum-value
+                               'sdl3::mouse-wheel-direction :flipped)))
+                     -1.0
+                     1.0)))
       (dispatch-canvas-event
        canvas
        (make-instance 'canvas-pointer-wheel-event
