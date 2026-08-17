@@ -68,7 +68,7 @@ wants.
 :ID: AGVXGM
 :END:
 
-A surface face is already one signed 60-bit site, with no separate term or
+A surface face is already one signed 60-bit site, with no separate wrapper or
 coefficient encoding.  It remains an immediate fixnum on 64-bit SBCL, and a
 specialized vector of sites can be copied directly into the
 =(unsigned-byte 64)= buffer the shader reads; no vertex is ever built on the
@@ -89,7 +89,7 @@ question is asked properly.
 
 The mathematical shader language of #S4H8DR had textures, samplers, and a
 vec4-only uniform block, and no way to read an array of 64-bit words.  Two
-additions carry a term into a shader:
+additions carry a site into a shader:
 
 - A =:storage-buffer= resource with an =:element= type, indexed by
   =buffer-element=; the array has no declared length, and a bare reference to
@@ -121,15 +121,15 @@ The pipeline in =luft/render/shaders.lisp= has three stages and no vertex
 buffer.  A task workgroup owns one brick: it reads the brick's sphere,
 tests it against the view pyramid with a workgroup-uniform expression, and
 emits one mesh workgroup or none, handing the brick index through a
-one-word payload.  Each mesh lane then loads one term with =buffer-element=,
+one-word payload.  Each mesh lane then loads one site with =buffer-element=,
 extracts anchor, extent, and polarity with =ldb=, and writes four vertices and
 two triangles.  The extent names the face's two spanning axes in canonical
 X<Y<Z order, their cross product is the canonical orientation, and the
 polarity times that orientation is the outward normal — the boundary
-operator's orientation rendered directly.  A lane whose site is zero, or whose face
-turns away from the camera by the exact plane test, scales its quad to a
-point instead of branching on output counts, which the language requires to
-be uniform.
+operator's orientation rendered directly.  A lane whose site is zero, or
+whose face turns away from the camera by the exact plane test, scales its quad
+to a point instead of branching on output counts, which the language requires
+to be uniform.
 
 The fragment stage is textureless by design: a top, side, and bottom tone,
 a soft line where faces meet, sun and ambient light, and fog toward the sky.

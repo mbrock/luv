@@ -5,7 +5,7 @@
    "Task, mesh, and fragment stages that draw a surface chain of packed sites.")
   (:export #:+brick-size+
            #:+frame-binding+
-           #:+terms-binding+
+           #:+sites-binding+
            #:+bricks-binding+
            #:+cells-binding+
            #:*frame-uniform-members*
@@ -31,7 +31,7 @@ of packed LUFT sites, drawn by task and mesh shaders.")
            #:scene-domain
            #:scene-solid
            #:scene-surface
-           #:scene-terms
+           #:scene-sites
            #:scene-bricks
            #:scene-brick-count
            #:scene-cell-bits

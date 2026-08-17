@@ -2,7 +2,7 @@
 ;;; that draw it.
 ;;;
 ;;; Nothing here meshes.  The world is a 3-chain of solid cells; REFRESH-SCENE
-;;; takes its boundary, orders the resulting face terms by chunk, pads them to
+;;; takes its boundary, orders the resulting face sites by chunk, pads them to
 ;;; whole bricks, and measures a bounding sphere per brick.  The renderer
 ;;; uploads exactly those two arrays and one frame block, then dispatches one
 ;;; task workgroup per brick.
@@ -14,7 +14,7 @@
 
 (defconstant +brick-size+ shaders:+brick-size+)
 (defconstant +chunk-bits+ 3
-  "Terms are ordered by 8-cell chunk so a brick's faces stay close together.")
+  "Sites are ordered by 8-cell chunk so a brick's faces stay close together.")
 
 (defclass scene ()
   ((domain
@@ -22,16 +22,16 @@
     :reader scene-domain)
    (solid
     :initarg :solid
-   :reader scene-solid
+    :reader scene-solid
     :documentation "The solid world: a 3-chain of positive cells.")
    (surface
     :initform nil
     :accessor scene-surface
     :documentation "The boundary of SOLID: exposed signed face sites.")
-   (terms
+   (sites
     :initform nil
-    :accessor scene-terms
-    :documentation "Packed surface terms in brick order, zero-padded.")
+    :accessor scene-sites
+    :documentation "Packed surface sites in brick order, zero-padded.")
    (bricks
     :initform nil
     :accessor scene-bricks
@@ -49,18 +49,18 @@
   "Make a scene over DOMAIN and refresh its surface products once."
   (refresh-scene (make-instance 'scene :domain domain :solid solid)))
 
-(defun term-chunk-key (term)
-  "A fixnum ordering key grouping signed site TERM by chunk, then by site."
-  (logior (ash (ash (luft:site-z term) (- +chunk-bits+)) 45)
-          (ash (ash (luft:site-y term) (- +chunk-bits+)) 24)
-          (ash (luft:site-x term) (- +chunk-bits+))))
+(defun site-chunk-key (site)
+  "A fixnum ordering key grouping signed site SITE by chunk, then by site."
+  (logior (ash (ash (luft:site-z site) (- +chunk-bits+)) 45)
+          (ash (ash (luft:site-y site) (- +chunk-bits+)) 24)
+          (ash (luft:site-x site) (- +chunk-bits+))))
 
-(defun order-terms-by-chunk (terms)
-  "Return a fresh copy of the site-ordered TERMS grouped by chunk."
-  (stable-sort (copy-seq terms) #'< :key #'term-chunk-key))
+(defun order-sites-by-chunk (sites)
+  "Return a fresh copy of the site-ordered SITES grouped by chunk."
+  (stable-sort (copy-seq sites) #'< :key #'site-chunk-key))
 
-(defun brick-spheres (terms brick-count)
-  "Measure a bounding sphere for each brick of TERMS as four floats each."
+(defun brick-spheres (sites brick-count)
+  "Measure a bounding sphere for each brick of SITES as four floats each."
   (let ((spheres (make-array (* 4 brick-count) :element-type 'single-float
                                                :initial-element 0.0)))
     (dotimes (brick brick-count spheres)
@@ -68,10 +68,9 @@
             (high-x nil) (high-y nil) (high-z nil))
         (loop for index from (* brick +brick-size+)
                 below (* (1+ brick) +brick-size+)
-              for term = (aref terms index)
-              unless (zerop term)
-                do (let* ((site term)
-                          (x (luft:site-x site))
+              for site = (aref sites index)
+              unless (zerop site)
+                do (let* ((x (luft:site-x site))
                           (y (luft:site-y site))
                           (z (luft:site-z site))
                           (x-high (+ x (if (luft:site-extends-p site :x) 1 0)))
@@ -97,18 +96,18 @@
                   (coerce radius 'single-float))))))))
 
 (defun refresh-scene (scene)
-  "Recompute SCENE's surface chain, brick-ordered terms, and brick spheres."
+  "Recompute SCENE's surface chain, brick-ordered sites, and brick spheres."
   (let* ((surface (luft:surface-chain (scene-solid scene)))
-         (ordered (order-terms-by-chunk (luft:chain-sites surface)))
+         (ordered (order-sites-by-chunk (luft:chain-sites surface)))
          (brick-count (max 1 (ceiling (length ordered) +brick-size+)))
-         (terms (make-array (* brick-count +brick-size+)
+         (sites (make-array (* brick-count +brick-size+)
                             :element-type '(unsigned-byte 64)
                             :initial-element 0)))
-    (replace terms ordered)
+    (replace sites ordered)
     (setf (scene-surface scene) surface
-          (scene-terms scene) terms
+          (scene-sites scene) sites
           (scene-brick-count scene) brick-count
-          (scene-bricks scene) (brick-spheres terms brick-count)
+          (scene-bricks scene) (brick-spheres sites brick-count)
           (scene-cell-bits scene) (luft:chain-cell-bits (scene-solid scene)))
     scene))
 
@@ -283,10 +282,10 @@ the facet normal, in cells.")
    (depth-texture :initform nil :accessor renderer-depth-texture)
    (depth-view :initform nil :accessor renderer-depth-view)
    (uniform-buffer :initform nil :accessor renderer-uniform-buffer)
-   (terms-buffer :initform nil :accessor renderer-terms-buffer)
+   (sites-buffer :initform nil :accessor renderer-sites-buffer)
    (bricks-buffer :initform nil :accessor renderer-bricks-buffer)
    (cells-buffer :initform nil :accessor renderer-cells-buffer)
-   (terms-capacity :initform 0 :accessor renderer-terms-capacity)
+   (sites-capacity :initform 0 :accessor renderer-sites-capacity)
    (bricks-capacity :initform 0 :accessor renderer-bricks-capacity)
    (cells-capacity :initform 0 :accessor renderer-cells-capacity)
    (layout :initform nil :accessor renderer-layout)
@@ -372,7 +371,7 @@ the facet normal, in cells.")
                           :entries
                           `((:binding ,shaders:+frame-binding+
                              :type :uniform-buffer)
-                            (:binding ,shaders:+terms-binding+
+                            (:binding ,shaders:+sites-binding+
                              :type :storage-buffer)
                             (:binding ,shaders:+bricks-binding+
                              :type :storage-buffer)
@@ -448,7 +447,7 @@ Without DEVICE, one is requested from PROVIDER and owned by the renderer."
     (when resource (ignore-errors (destroy resource))))
   (dolist (module (renderer-modules renderer))
     (ignore-errors (destroy module)))
-  (dolist (resource (list (renderer-terms-buffer renderer)
+  (dolist (resource (list (renderer-sites-buffer renderer)
                           (renderer-bricks-buffer renderer)
                           (renderer-cells-buffer renderer)
                           (renderer-uniform-buffer renderer)
@@ -461,7 +460,7 @@ Without DEVICE, one is requested from PROVIDER and owned by the renderer."
         (renderer-pipelines renderer) nil
         (renderer-layout renderer) nil
         (renderer-modules renderer) nil
-        (renderer-terms-buffer renderer) nil
+        (renderer-sites-buffer renderer) nil
         (renderer-bricks-buffer renderer) nil
         (renderer-cells-buffer renderer) nil
         (renderer-uniform-buffer renderer) nil)
@@ -487,16 +486,16 @@ The second value is true when a new buffer was created."
           (values new t)))))
 
 (defun upload-scene (renderer &optional (scene (renderer-scene renderer)))
-  "Upload SCENE's terms and brick spheres, rebinding when buffers grow."
-  (let* ((terms (scene-terms scene))
+  "Upload SCENE's sites and brick spheres, rebinding when buffers grow."
+  (let* ((sites (scene-sites scene))
          (bricks (scene-bricks scene))
          (rebind-p (null (renderer-bind-group renderer))))
-    (multiple-value-bind (terms-buffer new-p)
-        (ensure-storage-buffer renderer 'renderer-terms-buffer
-                               'renderer-terms-capacity
-                               (* 8 (length terms)) "luft surface terms")
+    (multiple-value-bind (sites-buffer new-p)
+        (ensure-storage-buffer renderer 'renderer-sites-buffer
+                               'renderer-sites-capacity
+                               (* 8 (length sites)) "luft surface sites")
       (when new-p (setf rebind-p t))
-      (write-buffer terms-buffer terms))
+      (write-buffer sites-buffer sites))
     (multiple-value-bind (bricks-buffer new-p)
         (ensure-storage-buffer renderer 'renderer-bricks-buffer
                                'renderer-bricks-capacity
@@ -521,8 +520,8 @@ The second value is true when a new buffer was created."
                      :entries
                      `((:binding ,shaders:+frame-binding+
                         :resource ,(renderer-uniform-buffer renderer))
-                       (:binding ,shaders:+terms-binding+
-                        :resource ,(renderer-terms-buffer renderer))
+                       (:binding ,shaders:+sites-binding+
+                        :resource ,(renderer-sites-buffer renderer))
                        (:binding ,shaders:+bricks-binding+
                         :resource ,(renderer-bricks-buffer renderer))
                        (:binding ,shaders:+cells-binding+
