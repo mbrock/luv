@@ -35,13 +35,12 @@
      (hotbar-scaled-color components 1.18)
      (hotbar-scaled-color components 0.68))))
 
-(defun hotbar-selection-halo-ink (number center-x top radius)
-  "A warm light contained by the selected material cell."
-  (make-radial-gradient
-   center-x (+ top 4) radius
-   (make-rgb-color 1.0 0.78 0.22)
-   (hotbar-scaled-color
-    (nth (1- number) *hotbar-material-colors*) 0.72)))
+(defun hotbar-selection-ink (top bottom)
+  "A quiet neutral edge for the currently selected material."
+  (make-linear-gradient
+   0 top 0 bottom
+   (make-rgb-color 0.78 0.82 0.80)
+   (make-rgb-color 0.40 0.46 0.48)))
 
 (defmethod handle-repaint ((pane hotbar-pane) region)
   (declare (ignore region))
@@ -96,17 +95,11 @@
                       :ink (make-rgb-color 0.08 0.09 0.095)))
                    (when selected-p
                      (draw-rectangle*
-                      pane slot-left content-top slot-right content-bottom
-                      :ink (hotbar-selection-halo-ink
-                            number (/ (+ slot-left slot-right) 2)
-                            content-top (* slot-width 0.62)))
-                     (draw-rectangle*
-                      pane (+ slot-left 2) content-top
-                      (- slot-right 2) (+ content-top 2)
-                      :ink (make-linear-gradient
-                            slot-left 0 slot-right 0
-                            (make-rgb-color 0.74 0.43 0.06)
-                            (make-rgb-color 1.0 0.88 0.36))))
+                      pane (+ slot-left 2) (+ content-top 2)
+                      (- slot-right 2) (- content-bottom 2)
+                      :filled nil :line-thickness 2
+                      :ink (hotbar-selection-ink
+                            content-top content-bottom)))
                    ;; Stable dark plates keep every label readable without
                    ;; visually separating the underlying material strip.
                    (draw-analytic-rounded-rectangle*
