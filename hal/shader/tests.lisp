@@ -1528,7 +1528,7 @@
                  (spv:shader-binding-expression cloud-density)))
                '("*" "deck-mask"
                  ("smoothstep" "cloud-edge"
-                  ("+" "cloud-edge" 0.14) "cloud-field"))))
+                  ("+" "cloud-edge" 0.11) "cloud-field"))))
     (ok (equal (form-names
                 (spv:shader-expression-form
                  (spv:shader-binding-expression disc)))

@@ -629,10 +629,12 @@
             (luv.arithmetic:value-declaration-for :block-mesh-vertices)))
     (ok (typep (block-mesh-vertices mesh)
                (luv.arithmetic:declaration-representation-type declaration)))
-    (ok (= 12 (luv.arithmetic:repeated-quantity-layout-stride layout)))
+    (ok (= luvcraft::+block-mesh-floats-per-vertex+
+           (luv.arithmetic:repeated-quantity-layout-stride layout)))
     (ok (luv.arithmetic:quantity-layout= element shader-layout))
     (ok (= (length (block-mesh-vertices mesh))
-           (* 12 (block-mesh-vertex-count mesh))))
+           (* luvcraft::+block-mesh-floats-per-vertex+
+              (block-mesh-vertex-count mesh))))
     (ok (signals
          (make-instance 'block-mesh
                         :vertices (make-array 11 :element-type 'single-float)
@@ -1356,9 +1358,24 @@
   (let ((atlas (make-block-texture-atlas)))
     (ok (equal (array-dimensions atlas) '(16 176)))
     (ok (subtypep (array-element-type atlas) '(unsigned-byte 32)))
-    (ok (= (ldb (byte 8 24) (aref atlas 8 8)) 255))
     (ok (/= (aref atlas 8 8) (aref atlas 8 (+ 8 (* 3 16)))))
-    (ok (/= (aref atlas 8 8) (aref atlas 8 (+ 8 (* 9 16))))))
+    (ok (/= (aref atlas 8 8) (aref atlas 8 (+ 8 (* 9 16)))))
+    ;; The fourth channel is the material's own surface height rather than
+    ;; coverage: every block kind here is opaque, and the height has to
+    ;; vary across a tile or there is no relief for the shader to read.
+    (ok (loop for tile below luvcraft::+block-atlas-tile-count+
+              always (loop for x below luvcraft::+block-atlas-tile-size+
+                           always (loop for y below
+                                        luvcraft::+block-atlas-tile-size+
+                                        always
+                                        (typep (ldb (byte 8 24)
+                                                    (aref atlas y
+                                                          (+ x (* tile 16))))
+                                               '(integer 0 255))))))
+    (ok (loop for tile below luvcraft::+block-atlas-tile-count+
+              always (/= (ldb (byte 8 24) (aref atlas 3 (+ 3 (* tile 16))))
+                         (ldb (byte 8 24)
+                              (aref atlas 11 (+ 12 (* tile 16))))))))
   (flet ((face (name)
            (find name luvcraft::*block-faces* :key #'block-face-name)))
     (ok (= (block-face-tile luvcraft::*grass-block* (face :top)) 0))
@@ -1380,7 +1397,8 @@
     (setf (world-block-at world 0 0 0) luvcraft::*stone-block*)
     (let ((mesh (mesh-block-world (make-instance 'exposed-face-mesher) world)))
       (ok (= (length (block-mesh-vertices mesh))
-             (* 12 (block-mesh-vertex-count mesh)))))))
+             (* luvcraft::+block-mesh-floats-per-vertex+
+                (block-mesh-vertex-count mesh)))))))
 
 (deftest little-world-has-readable-biome-materials
   (let ((source (make-instance 'little-world-source :seed 121))

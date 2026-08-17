@@ -394,7 +394,7 @@
              (msl:msl-document-entry-point document))
             #'msl:msl-parameter-name)))
     (ok (search "The sampled xyz lanes hold linear rgb" source))
-    (ok (search "The sampled w lane holds opacity" source))
+    (ok (search "The sampled w lane holds surface relief" source))
     (ok (eq resource (msl:msl-parameter-origin parameter)))))
 
 (deftest target-context-precedes-operator-identity
