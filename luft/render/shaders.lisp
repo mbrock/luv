@@ -2,8 +2,8 @@
 ;;;
 ;;; The host uploads two arrays and one small uniform block:
 ;;;
-;;;   terms   (unsigned-byte 64)  the surface chain, one signed site per face
-;;;   bricks  vec4                a bounding sphere per +BRICK-SIZE+ terms
+;;;   sites   (unsigned-byte 64)  the surface chain, one signed site per face
+;;;   bricks  vec4                a bounding sphere per +BRICK-SIZE+ sites
 ;;;   frame   uniform block       camera basis, projection, sun, sky
 ;;;
 ;;; The task stage owns one brick per workgroup and decides, uniformly, whether
@@ -18,13 +18,13 @@
 (in-package #:luft.render.shaders)
 
 (defconstant +brick-size+ 7
-  "Terms per task workgroup and faces per mesh workgroup.
+  "Sites per task workgroup and faces per mesh workgroup.
 
 Seven faces subdivided into 6x6 grids are 252 vertices, just under the mesh
 threadgroup limit of 256; the flat pipeline uses the same bricks at four
 vertices a face.")
 (defconstant +frame-binding+ 0)
-(defconstant +terms-binding+ 1)
+(defconstant +sites-binding+ 1)
 (defconstant +bricks-binding+ 2)
 (defconstant +cells-binding+ 3)
 
@@ -119,7 +119,7 @@ lowering owns the target's flip."
      :inputs ((lane :uint :built-in :local-invocation-index))
      :resources ((frame :uniform-block :binding #.+frame-binding+
                         :members #.*frame-uniform-members*)
-                 (terms :storage-buffer :binding #.+terms-binding+
+                 (sites :storage-buffer :binding #.+sites-binding+
                         :element :uint64))
      :mesh-output
      (:topology :triangles
@@ -129,22 +129,22 @@ lowering owns the target's flip."
                (normal :vec3 :location 0)
                (world :vec3 :location 1)
                (uv :vec2 :location 2))))
-  (let* ((term (buffer-element
-                terms (+ (* brick-index (uint +brick-size+)) lane)))
+  (let* ((site (buffer-element
+                sites (+ (* brick-index (uint +brick-size+)) lane)))
          ;; The signed site: XYZ extent in the low three bits, polarity in the
          ;; fourth, then X, Y, Z anchors.
-         (extent (uint (ldb (byte luft:+extent-bits+ 0) term)))
+         (extent (uint (ldb (byte luft:+extent-bits+ 0) site)))
          (anchor
            (vec3 (float (uint (ldb (byte luft:+horizontal-capacity-bits+
                                           luft:+x-shift+)
-                                    term)))
+                                    site)))
                  (float (uint (ldb (byte luft:+horizontal-capacity-bits+
                                           luft:+y-shift+)
-                                    term)))
+                                    site)))
                  (float (uint (ldb (byte luft:+vertical-coordinate-bits+
                                           luft:+z-shift+)
-                                    term)))))
-         (negative-p (= (uint (ldb (byte 1 luft:+site-sign-bit+) term))
+                                    site)))))
+         (negative-p (= (uint (ldb (byte 1 luft:+site-sign-bit+) site))
                         (uint 1.0)))
          (present-p (> extent (uint 0.0)))
          (yz-face-p (= extent (uint luft:+yz-face-extent+)))
@@ -804,7 +804,7 @@ The chamfer rule also emits the face normal for facet shading."
               :inputs ((lane :uint :built-in :local-invocation-index))
               :resources ((frame :uniform-block :binding ,+frame-binding+
                                  :members ,*frame-uniform-members*)
-                          (terms :storage-buffer :binding ,+terms-binding+
+                          (sites :storage-buffer :binding ,+sites-binding+
                                  :element :uint64)
                           (cells :storage-buffer :binding ,+cells-binding+
                                  :element :uint))
@@ -818,20 +818,20 @@ The chamfer rule also emits the face normal for facet shading."
                         (uv :vec2 :location 2)
                         ,@(when (eq rule :chamfer)
                             '((face-normal :vec3 :location 3))))))
-           (let* ((term (buffer-element
-                         terms (+ (* brick-index (uint ,+brick-size+)) lane)))
-                  (extent (uint (ldb (byte luft:+extent-bits+ 0) term)))
+           (let* ((site (buffer-element
+                         sites (+ (* brick-index (uint ,+brick-size+)) lane)))
+                  (extent (uint (ldb (byte luft:+extent-bits+ 0) site)))
                   (anchor
                     (vec3 (float (uint (ldb (byte luft:+horizontal-capacity-bits+
                                                    luft:+x-shift+)
-                                             term)))
+                                             site)))
                           (float (uint (ldb (byte luft:+horizontal-capacity-bits+
                                                    luft:+y-shift+)
-                                             term)))
+                                             site)))
                           (float (uint (ldb (byte luft:+vertical-coordinate-bits+
                                                    luft:+z-shift+)
-                                             term)))))
-                  (negative-p (= (uint (ldb (byte 1 luft:+site-sign-bit+) term))
+                                             site)))))
+                  (negative-p (= (uint (ldb (byte 1 luft:+site-sign-bit+) site))
                                  (uint 1.0)))
                   (present-p (> extent (uint 0.0)))
                   (yz-face-p (= extent (uint luft:+yz-face-extent+)))
