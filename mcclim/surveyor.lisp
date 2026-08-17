@@ -134,17 +134,9 @@
     (redisplay-frame-panes frame :force-p t)))
 
 (defun surveyor-material-color (material)
-  (case (and material (luvcraft:block-kind-name material))
-    (:grass '(0.25 0.64 0.25))
-    (:dirt '(0.44 0.29 0.16))
-    (:stone '(0.48 0.50 0.51))
-    (:wood '(0.48 0.31 0.16))
-    (:leaves '(0.16 0.48 0.20))
-    (:sand '(0.72 0.65 0.34))
-    (:snow '(0.86 0.89 0.88))
-    (:crystal '(0.18 0.92 0.92))
-    (:terminal '(0.10 0.13 0.16))
-    (otherwise '(0.08 0.12 0.14))))
+  (if material
+      (luvcraft:block-kind-display-color material)
+      '(0.08 0.12 0.14)))
 
 (defun surveyor-cell-color (snapshot offset mode)
   (let* ((height (aref (surveyor-snapshot-heights snapshot) offset))

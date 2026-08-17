@@ -10,6 +10,12 @@
 (defclass block-kind ()
   ((name :initarg :name :reader block-kind-name)
    (face-tiles :initarg :face-tiles :reader block-kind-face-tiles)
+   (categories :initarg :categories :initform nil
+               :reader block-kind-categories)
+   (display-color :initarg :display-color :initform '(0.5 0.5 0.5)
+                  :reader block-kind-display-color)
+   (placeable-p :initarg :placeable-p :initform t
+                :reader block-kind-placeable-p)
    ;; Light behavior is distinct from collision: opacity is how much a cell
    ;; costs propagating light, emission seeds the propagated blocklight
    ;; field, and surface emission is the material's own visible radiance.
@@ -30,6 +36,26 @@
                      :quantity (:quantity :material-emission :unit :one)
                      :reader block-kind-surface-emission))
   (:metaclass luv.arithmetic.records:quantity-class))
+
+(defmethod shared-initialize :after
+    ((block block-kind) slot-names &key)
+  (declare (ignore slot-names))
+  (unless (keywordp (block-kind-name block))
+    (error "A block kind name must be a keyword, not ~S."
+           (block-kind-name block)))
+  (let ((tiles (block-kind-face-tiles block)))
+    (unless (and (listp tiles) (evenp (length tiles)))
+      (error "Block kind ~S has invalid face tiles ~S."
+             (block-kind-name block) tiles)))
+  (unless (every #'keywordp (block-kind-categories block))
+    (error "Block kind ~S has invalid categories ~S."
+           (block-kind-name block) (block-kind-categories block)))
+  (unless (and (= 3 (length (block-kind-display-color block)))
+               (every (lambda (component)
+                        (and (realp component) (<= 0 component 1)))
+                      (block-kind-display-color block)))
+    (error "Block kind ~S has invalid display color ~S."
+           (block-kind-name block) (block-kind-display-color block))))
 
 (defgeneric block-solid-p (block))
 (defgeneric block-face-tile (block face))
@@ -103,46 +129,79 @@ hang upright."
         (error "No texture tile for ~S face ~S."
                (block-kind-name block) (block-face-name face)))))
 
-(defparameter *grass-block*
-  (make-instance 'block-kind :name :grass
-                             :face-tiles '(:top 0 :side 1 :bottom 2)))
-(defparameter *dirt-block*
-  (make-instance 'block-kind :name :dirt
-                             :face-tiles '(:all 2)))
-(defparameter *stone-block*
-  (make-instance 'block-kind :name :stone
-                             :face-tiles '(:all 3)))
-(defparameter *wood-block*
-  (make-instance 'block-kind :name :wood
-                             :face-tiles '(:top 5 :bottom 5 :side 4)))
-(defparameter *leaf-block*
-  (make-instance 'block-kind :name :leaves
-                             :face-tiles '(:all 6)))
-(defparameter *sand-block*
-  (make-instance 'block-kind :name :sand
-                             :face-tiles '(:all 7)))
-(defparameter *snow-block*
-  (make-instance 'block-kind :name :snow
-                             :face-tiles '(:top 8 :side 8 :bottom 2)))
-(defparameter *crystal-block*
-  (make-instance 'block-kind :name :crystal
-                             :face-tiles '(:all 9)
-                             :light-emission 12
-                             :surface-emission 1.2))
-(defparameter *terminal-block*
-  (make-instance 'block-kind :name :terminal
-                             :face-tiles '(:all 10)
-                             :surface-emission 0.16)
-  "The graphite display-block material used by world-native terminals.")
+(defvar *block-kinds* nil)
 
-(defparameter *placeable-block-kinds*
-  (list *grass-block* *dirt-block* *stone-block* *wood-block*
-        *leaf-block* *sand-block* *snow-block* *crystal-block*
-        *terminal-block*))
+(defun ensure-block-kind
+    (current name &key face-tiles categories
+                       (display-color '(0.5 0.5 0.5)) (placeable-p t)
+                       (light-opacity 15) (light-emission 0)
+                       (surface-emission 0.0))
+  "Define NAME while preserving CURRENT's identity across live redefinition."
+  (let ((initargs
+          (list :name name :face-tiles face-tiles :categories categories
+                :display-color display-color :placeable-p placeable-p
+                :light-opacity light-opacity :light-emission light-emission
+                :surface-emission surface-emission)))
+    (if (and (typep current 'block-kind)
+             (eq name (block-kind-name current)))
+        (apply #'reinitialize-instance current initargs)
+        (apply #'make-instance 'block-kind initargs))))
+
+(defmacro define-block-kinds (&body definitions)
+  "Define the complete ordered block vocabulary.
+
+Each definition is (VARIABLE NAME &rest BLOCK-KIND-INITARGS), optionally
+followed by a variable documentation string.  Re-evaluation updates existing
+objects in place, so resident worlds and live inventories observe the new
+definition."
+  (let ((variables (mapcar #'first definitions)))
+    `(progn
+       ,@(loop for (variable name . options) in definitions
+               for documentation = (and (stringp (first options))
+                                        (pop options))
+               collect
+               `(progn
+                  (defvar ,variable nil ,@(when documentation
+                                             (list documentation)))
+                  (setf ,variable
+                        (ensure-block-kind ,variable ,name ,@options))))
+       (setf *block-kinds* (list ,@variables)))))
+
+(define-block-kinds
+  (*grass-block* :grass
+   :face-tiles '(:top 0 :side 1 :bottom 2)
+   :categories '(:natural) :display-color '(0.28 0.66 0.25))
+  (*dirt-block* :dirt
+   :face-tiles '(:all 2)
+   :categories '(:natural) :display-color '(0.48 0.31 0.18))
+  (*stone-block* :stone
+   :face-tiles '(:all 3)
+   :categories '(:building) :display-color '(0.49 0.52 0.54))
+  (*wood-block* :wood
+   :face-tiles '(:top 5 :bottom 5 :side 4)
+   :categories '(:building) :display-color '(0.57 0.36 0.17))
+  (*leaf-block* :leaves
+   :face-tiles '(:all 6)
+   :categories '(:natural) :display-color '(0.19 0.50 0.22))
+  (*sand-block* :sand
+   :face-tiles '(:all 7)
+   :categories '(:natural) :display-color '(0.78 0.68 0.37))
+  (*snow-block* :snow
+   :face-tiles '(:top 8 :side 8 :bottom 2)
+   :categories '(:natural) :display-color '(0.86 0.91 0.94))
+  (*crystal-block* :crystal
+   :face-tiles '(:all 9)
+   :categories '(:luminous) :display-color '(0.18 0.86 0.88)
+   :light-emission 12 :surface-emission 1.2)
+  (*terminal-block* :terminal
+   "The graphite display-block material used by world-native terminals."
+   :face-tiles '(:all 10)
+   :categories '(:building :luminous) :display-color '(0.13 0.31 0.34)
+   :surface-emission 0.16))
 
 (defun placeable-block-kinds ()
   "Return the numbered material palette used by luvcraft and its tools."
-  (copy-list *placeable-block-kinds*))
+  (remove-if-not #'block-kind-placeable-p *block-kinds*))
 
 (defun block-kind-named (name &optional (error-p t))
   "Return the shared block kind whose durable semantic name is NAME.
@@ -150,7 +209,7 @@ hang upright."
 When ERROR-P is true, signal an error rather than returning NIL for an
 unknown name.  Save files and other external descriptions refer to block
 kinds through this vocabulary instead of printing CLOS object identities."
-  (or (find name *placeable-block-kinds* :key #'block-kind-name :test #'eq)
+  (or (find name *block-kinds* :key #'block-kind-name :test #'eq)
       (when error-p
         (error "No block kind is named ~S." name))))
 

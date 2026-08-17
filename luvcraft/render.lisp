@@ -924,7 +924,7 @@ the frame uniform cannot silently diverge between shader and host."
               (when (and number
                          (<= 1 number
                              (length
-                              (block-inventory-blocks
+                              (block-inventory-quickbar-blocks
                                (luvcraft-session-inventory session)))))
                 (select-luvcraft-block session number)))))))
   nil)

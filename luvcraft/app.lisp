@@ -514,7 +514,7 @@ mounting a vehicle, and other interactions described by #8JCMA5."
        forward #'block-solid-p :max-distance max-distance))))
 
 (defun update-luvcraft-session-title (session)
-  (let* ((blocks (block-inventory-blocks
+  (let* ((blocks (block-inventory-quickbar-blocks
                   (luvcraft-session-inventory session)))
          (block (luvcraft-session-selected-block session))
          (number (position block blocks :test #'eq)))
@@ -523,7 +523,7 @@ mounting a vehicle, and other interactions described by #8JCMA5."
             (format nil
                     "~A — [~A] ~(~A~)  ·  1–~D select  ·  I inventory  ·  shift sprint  ·  tab focus"
                     (luvcraft-session-title-base session)
-                    (if number (1+ number) "?")
+                    (if number (1+ number) "inventory")
                     (block-kind-name block)
                     (length blocks)))))
   session)

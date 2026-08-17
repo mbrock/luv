@@ -1534,6 +1534,28 @@
     (ok (null (select-luvcraft-block session 3)))
     (ok (search "1–2 select" (canvas-title canvas)))))
 
+(deftest inventory-and-nine-slot-quickbar-have-independent-extents
+  (let* ((extra
+           (make-instance 'block-kind :name :test-extra
+                          :face-tiles '(:all 3)
+                          :categories '(:building)
+                          :display-color '(0.4 0.5 0.6)))
+         (inventory
+           (make-block-inventory
+            :blocks (append (placeable-block-kinds) (list extra))))
+         (canvas (make-instance 'title-canvas :title "inventory extent test"))
+         (session
+           (make-instance 'luvcraft-session
+                          :canvas canvas :inventory inventory
+                          :selected-block luvcraft::*grass-block*)))
+    (ok (= 10 (length (block-inventory-blocks inventory))))
+    (ok (= 9 (length (block-inventory-quickbar-blocks inventory))))
+    ;; The full inventory may select a block with no number key; the title
+    ;; makes that distinction visible rather than advertising a tenth key.
+    (ok (eq extra (select-luvcraft-block session 10)))
+    (ok (search "[inventory]" (canvas-title canvas)))
+    (ok (search "1–9 select" (canvas-title canvas)))))
+
 (deftest gazetteer-names-semantic-gameplay-views
   (let* ((views (luvcraft-gazetteer-views))
          (names (mapcar #'luvcraft-gazetteer-view-name views)))

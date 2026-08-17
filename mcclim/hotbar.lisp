@@ -2,23 +2,11 @@
 
 (in-package #:mcluv)
 
-(defparameter *hotbar-material-colors*
-  '((0.28 0.66 0.25)                 ; grass
-    (0.48 0.31 0.18)                 ; dirt
-    (0.49 0.52 0.54)                 ; stone
-    (0.57 0.36 0.17)                 ; wood
-    (0.19 0.50 0.22)                 ; leaves
-    (0.78 0.68 0.37)                 ; sand
-    (0.86 0.91 0.94)                 ; snow
-    (0.18 0.86 0.88)                 ; crystal
-    (0.13 0.31 0.34))                ; terminal
-  "The compact visual palette for the nine stable hotbar positions.")
-
 (defclass hotbar-pane (application-pane) ())
 
-(defun hotbar-material-color (number)
+(defun hotbar-material-color (block)
   (destructuring-bind (red green blue)
-      (nth (1- number) *hotbar-material-colors*)
+      (luvcraft:block-kind-display-color block)
     (make-rgb-color red green blue)))
 
 (defun hotbar-scaled-color (components scale)
@@ -27,9 +15,9 @@
                     (min 1.0 (* green scale))
                     (min 1.0 (* blue scale)))))
 
-(defun hotbar-material-ink (number top bottom)
-  "Give material NUMBER a restrained top-lit gradient from TOP to BOTTOM."
-  (let ((components (nth (1- number) *hotbar-material-colors*)))
+(defun hotbar-material-ink (block top bottom)
+  "Give BLOCK a restrained top-lit gradient from TOP to BOTTOM."
+  (let ((components (luvcraft:block-kind-display-color block)))
     (make-linear-gradient
      0 top 0 bottom
      (hotbar-scaled-color components 1.18)
@@ -108,7 +96,7 @@
          (selected
            (luvcraft:luvcraft-session-selected-block (hotbar-session frame)))
          (blocks
-           (luvcraft:block-inventory-blocks
+           (luvcraft:block-inventory-quickbar-blocks
             (luvcraft:luvcraft-session-inventory (hotbar-session frame)))))
     (alexandria:when-let ((display (hotbar-terminal-display frame)))
       (paint-terminal-mode-hotbar pane display)
@@ -144,7 +132,8 @@
                (content-right (- right 6))
                (content-top (+ top 6))
                (content-bottom (- bottom 6))
-               (slot-width (/ (- content-right content-left) 9.0)))
+               (slot-width (/ (- content-right content-left)
+                              (max 1.0 (length blocks)))))
           (loop for block in blocks
                 for number from 1
                 for slot-left = (+ content-left (* (1- number) slot-width))
@@ -153,7 +142,7 @@
                 do (draw-rectangle*
                     pane slot-left content-top slot-right content-bottom
                     :ink (hotbar-material-ink
-                          number content-top content-bottom))
+                          block content-top content-bottom))
                    (when (> number 1)
                      (draw-rectangle*
                       pane slot-left content-top (+ slot-left 1) content-bottom

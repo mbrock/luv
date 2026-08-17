@@ -100,11 +100,7 @@
 
 (defun inventory-category-block-p (category block)
   (or (eq category :all)
-      (member (luvcraft:block-kind-name block)
-              (ecase category
-                (:natural '(:grass :dirt :leaves :sand :snow))
-                (:building '(:stone :wood :terminal))
-                (:luminous '(:crystal :terminal))))))
+      (member category (luvcraft:block-kind-categories block))))
 
 (defun inventory-visible-entries (frame)
   (remove-if-not
@@ -256,6 +252,7 @@
          (inventory (luvcraft:luvcraft-session-inventory session))
          (entries (inventory-visible-entries frame))
          (all-entries (luvcraft:block-inventory-entries inventory))
+         (quickbar-entries (luvcraft:block-inventory-quickbar-entries inventory))
          (selected (luvcraft:luvcraft-session-selected-block session))
          (selected-entry (luvcraft:block-inventory-entry-for inventory selected))
          (cell-width (/ (- +inventory-grid-right+ +inventory-grid-left+)
@@ -296,7 +293,7 @@
                   (+ +inventory-grid-left+ (* column cell-width) 4)
                   (+ +inventory-grid-top+ (* row cell-height) 4)
                   (- cell-width 8) (- cell-height 8)))
-        (draw-inventory-quickbar frame pane all-entries)
+        (draw-inventory-quickbar frame pane quickbar-entries)
         (when selected-entry
           (draw-inventory-details frame pane selected selected-entry))
         (draw-inventory-bevel pane 8 366 832 404
@@ -453,6 +450,8 @@
       (let* ((frame (widget-overlay-frame overlay))
              (inventory (luvcraft:luvcraft-session-inventory session))
              (all-entries (luvcraft:block-inventory-entries inventory))
+             (quickbar-entries
+               (luvcraft:block-inventory-quickbar-entries inventory))
              (category (inventory-category-at (first uv) (second uv))))
         (cond
           (category
@@ -463,11 +462,11 @@
                   (slot (or (inventory-slot-at
                              (first uv) (second uv) (length visible))
                             (inventory-quickbar-slot-at
-                             (first uv) (second uv) (length all-entries))))
+                             (first uv) (second uv) (length quickbar-entries))))
                   (entries
                     (if (inventory-slot-at
                          (first uv) (second uv) (length visible))
-                        visible all-entries))
+                        visible quickbar-entries))
                   (entry (and slot (nth slot entries))))
              (when entry
                (let ((number

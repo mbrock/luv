@@ -136,11 +136,15 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:block-face-neighbor
            #:block-face-tile
            #:block-kind
+           #:block-kind-categories
+           #:block-kind-display-color
            #:block-kind-face-tiles
            #:block-kind-name
            #:block-kind-named
            #:block-inventory
            #:block-inventory-blocks
+           #:block-inventory-quickbar-blocks
+           #:block-inventory-quickbar-entries
            #:block-inventory-entries
            #:block-inventory-entry
            #:block-inventory-entry-block

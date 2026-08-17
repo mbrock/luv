@@ -34,11 +34,9 @@
       (ok (eq state :unavailable)))))
 
 (deftest hotbar-palette-covers-every-placeable-block
-  (ok (= (length mcluv::*hotbar-material-colors*)
-         (length (luvcraft:placeable-block-kinds))))
-  (loop for number from 1 to 9
-        do (ok (typep (mcluv::hotbar-material-color number) 'clim:color))
-           (ok (typep (mcluv::hotbar-material-ink number 0 80)
+  (loop for block in (luvcraft:placeable-block-kinds)
+        do (ok (typep (mcluv::hotbar-material-color block) 'clim:color))
+           (ok (typep (mcluv::hotbar-material-ink block 0 80)
                       'mcluv:linear-gradient))))
 
 (deftest hotbar-is-composited-after-scene-postprocessing
