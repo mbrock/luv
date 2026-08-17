@@ -180,10 +180,13 @@
   (let* ((mirror (widget-overlay-mirror overlay))
          (source (mirror-texture mirror)))
     (when source
-      ;; No depth state: the hotbar is a HUD and must remain visible over the
-      ;; scene regardless of the block depth already in the shared pass.
+      ;; The hotbar is a HUD and must remain visible over the scene
+      ;; regardless of the block depth already in the shared pass, but the
+      ;; pipeline still has to match that pass's depth attachment, so it
+      ;; keeps the depth format and passes every depth test.
       (ensure-spinning-compositor-resources
-       overlay (mirror-context mirror) source)
+       overlay (mirror-context mirror) source
+       :depth-format :depth32-float :depth-compare :always)
       (let* ((state (hotbar-screen-state overlay))
              (frame-state
                (ensure-spinning-compositor-frame-state

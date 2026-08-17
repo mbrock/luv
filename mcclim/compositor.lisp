@@ -111,6 +111,9 @@
    (depth-format
     :initform nil
     :accessor spinning-compositor-depth-format)
+   (depth-compare
+    :initform nil
+    :accessor spinning-compositor-depth-compare)
    (output
     :initform nil
     :accessor spinning-compositor-output)
@@ -179,6 +182,7 @@
         (spinning-compositor-source compositor) nil
         (spinning-compositor-size compositor) nil
         (spinning-compositor-depth-format compositor) nil
+        (spinning-compositor-depth-compare compositor) nil
         (spinning-compositor-output compositor) nil
         (spinning-compositor-source-view compositor) nil
         (spinning-compositor-output-view compositor) nil
@@ -198,7 +202,7 @@
   (values))
 
 (defun ensure-spinning-compositor-resources
-    (compositor context source &key depth-format)
+    (compositor context source &key depth-format (depth-compare :less))
   (let* ((device (luv:context-device context))
          (size (luv:gpu-texture-size source))
          (format (luv:gpu-texture-format source)))
@@ -206,7 +210,9 @@
                  (eq source (spinning-compositor-source compositor))
                  (equal size (spinning-compositor-size compositor))
                  (eq depth-format
-                     (spinning-compositor-depth-format compositor)))
+                     (spinning-compositor-depth-format compositor))
+                 (eq depth-compare
+                     (spinning-compositor-depth-compare compositor)))
       (clear-spinning-compositor-resources compositor)
       (let ((created nil)
             (completed-p nil))
@@ -276,7 +282,7 @@
                         (when depth-format
                           `(:format ,depth-format
                             :depth-write-enabled nil
-                            :depth-compare :less))
+                            :depth-compare ,depth-compare))
                         :primitive '(:topology :triangle-strip))))
                     (chassis-pipeline
                       (create-resource
@@ -290,13 +296,15 @@
                         (when depth-format
                           `(:format ,depth-format
                             :depth-write-enabled nil
-                            :depth-compare :less))
+                            :depth-compare ,depth-compare))
                         :primitive '(:topology :triangle-strip)))))
                  (setf (spinning-compositor-device compositor) device
                        (spinning-compositor-source compositor) source
                        (spinning-compositor-size compositor) size
                        (spinning-compositor-depth-format compositor)
                        depth-format
+                       (spinning-compositor-depth-compare compositor)
+                       depth-compare
                        (spinning-compositor-output compositor) output
                        (spinning-compositor-source-view compositor) source-view
                        (spinning-compositor-output-view compositor) output-view
