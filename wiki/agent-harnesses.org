@@ -1,12 +1,12 @@
-#+title: Field notes on three agent harnesses
+#+title: Field notes on four agent harnesses
 #+startup: overview
 
-* Three earlier harnesses, read for what luv can borrow
+* Four earlier harnesses, read for what luv can borrow
 :PROPERTIES:
 :ID: LRDE65
 :END:
 
-Three of the author's other repositories are, more or less, LLM agent
+Four of the author's other repositories are, more or less, LLM agent
 harnesses, and each solved a different part of the problem well enough to
 be worth remembering here before luv grows its own agent surface (an agent
 already lives inside the world terminal, #NMAD2U).  This page is a reading
@@ -29,6 +29,13 @@ concretely enough that a later design can cite it.
   telemetry riding along with each result; Arrow/Parquet/DuckDB traces
   rendered through XSLT; a diff-based terminal compositor that keeps a HUD
   pinned under scrolling output.
+- *swash* (Go, systemd transient units, D-Bus, the journal): the shell
+  command as a persistent session with a host process that outlives the
+  client, structured output in the systemd journal with a portable
+  pure-Go journal-file writer, a run that returns after three seconds or a
+  screenful and tells you how to follow, TTY sessions with a WASM libvterm
+  whose screen can be read as text, contexts as journal facts, and an RDF
+  projection of the same log queried with SPARQL.
 
 The three voices to keep apart: what each repository actually does (cited
 by file), what any harness must therefore do (stated as a lesson), and what
@@ -496,17 +503,140 @@ wrapped lines.
 Lesson: bound at the tool, tell the model why something is short, and
 treat the provider stream as a grammar with a name for every violation.
 
-* What the three agree on
+* Swash: a shell command is a session with a host, and the host outlives you
+:PROPERTIES:
+:ID: KZG2ZF
+:END:
+
+Swash (=README.md=, =CLAUDE.md=) makes every command a /session/ with a
+six-character id (three letters, three digits, =GenID= in
+=internal/host/types.go=).  =swash run echo hello= asks =systemd --user=
+over D-Bus to start =swash-host-KXO284.service=; that host owns the bus
+name =sh.swa.Swash.KXO284=, starts =swash-task-KXO284.service= for the
+actual command, and both live in =swash-KXO284.slice=.  The host, not the
+client, holds the pipes: it reads stdout and stderr through a
+=ProtocolReader= (=internal/protocol/protocol.go=, line-oriented by
+default, or SSE events split on blank lines) and writes each unit to the
+journal tagged =SWASH_SESSION=, =FD=1|2=.  The =Controller= interface --
+=SendInput=, =Kill=, =Restart=, =Gist= -- is implemented once by the host
+and once by a D-Bus proxy, so "the thing that started it" is never a
+distinguished party: any later client, or a different agent, can send
+input, kill, or restart.  Restart keeps the id and command; a session is
+an identity, not a PID.
+
+The portable =posix= backend (=internal/backend/posix/=) is the same
+two-process shape with a Unix socket in place of D-Bus and a =swash
+minijournald= daemon writing /native systemd journal files/ through the
+pure-Go =pkg/journalfile= (lookup3 and SipHash ported, format documented
+beside the code) so =journalctl --file= reads them on a Mac.  Backend
+choice is auto-detected by probing the bus for =org.freedesktop.systemd1=.
+=VISION.md= says why: current agent tool calls are blocking, fragile,
+opaque, and tied to one session; a task should be a persistent object
+with stable identity, provenance, observable state and structured output,
+and completion "a state, not an event" -- finished work sits in an inbox
+until someone receives it, which is the not-yet-built half.
+
+Lesson: put the process under a supervisor that owns its output and its
+control surface, and let clients be transient.  Detach and hand-off then
+cost nothing, because there was never a client to lose.
+
+* Swash: run returns in three seconds or a screenful, and says how to follow
+:PROPERTIES:
+:ID: I0U0LI
+:END:
+
+=swash run= (=cmd/swash/main.go=) follows the new session and returns
+either when it exits or when a /detach threshold/ trips: =--detach-after=
+defaults to three seconds and =--detach-after-output= to 80×24 = 1,920
+bytes.  On detach it prints to stderr "still running after 3s, detaching"
+or "output exceeded 1920 bytes, detaching", followed by the exact command
+to resume: =swash follow KXO284=.  =swash start= is the same with the
+threshold at zero; =swash poll= reads what has accumulated since a journal
+cursor; =swash follow= streams to exit.  Structured lifecycle events use
+=WriteSync= (=internal/journal/combined.go=): the write carries a
+=SWASH_WRITE_NONCE= and the call polls until that nonce is readable, so a
+"started" or "exited" event is read-after-write consistent while ordinary
+output stays fire-and-forget.
+
+This is the same detach-with-a-handle rule as froth's three-second eval
+(#ENM1B2), stated for shell commands and made the /default/ rather than an
+option -- and the "screenful" bound is a nice complement to a time bound:
+a chatty command detaches early with a handle instead of flooding the
+caller.
+
+Lesson: default tool calls to "a result, or a handle plus the follow
+command, within seconds"; measure the bound in both time and bytes.
+
+* Swash: TTY sessions with a screen you can read as text
+:PROPERTIES:
+:ID: 0PK1OV
+:END:
+
+=--tty= sessions run under a PTY fed into libvterm compiled to WASM
+(=vterm/=, run under wazero, embedded zstd-compressed) so the host keeps a
+real terminal model without cgo.  =TTYHost= (=internal/host/tty.go=)
+exposes =GetScreenText=, =GetScreenANSI=, =GetRowText=, =GetCursor=,
+=GetTitle=, =GetScrollback=, =GetMode= (alternate screen or not) and
+=Resize= over D-Bus, and logs output lines to the journal /only when not
+in the alternate screen/, so a full-screen program does not spray redraw
+noise into history.  On exit the final screen is persisted as one
+=SWASH_EVENT=screen= entry with =ROWS= and =COLS=.  =Attach= hands the
+client two file descriptors plus a screen snapshot taken under the same
+lock as the stream is opened, "so no bytes are lost between them," and
+several clients may be attached at once (the master size is negotiated).
+The webui (=cmd/swash/webui.go=, templ templates) shows sessions, output,
+and a WebSocket terminal on the same host methods.
+
+Lesson: an agent driving an interactive program wants =screen= (what is
+visible now) as a first-class tool result, distinct from the scroll of
+output; luv's =./sly screenshot= is the pixel version of the same instinct.
+
+* Swash: contexts as journal facts, and the log projected as RDF
+:PROPERTIES:
+:ID: VBQ79J
+:END:
+
+A /context/ (=CONTEXT.md=, =cmd/swash/context.go=) is a directory under
+=$XDG_STATE_HOME/swash/contexts/<ID>/= plus one journal event; a session
+belongs to a context through a second event (=SWASH_EVENT=session-context=)
+emitted when =SWASH_CONTEXT= is in the environment.  Relations are
+first-class facts, not tree structure -- "to find all output from a
+context, query in two steps."  =swash context shell ID= opens bash with a
+generated rcfile whose =PROMPT_COMMAND= calls =swash prompt=, which prints
+=[swash context XYZ789; 2 running]= above the prompt, so the count of
+live background sessions is ambient.
+
+The same lifecycle events are also read into an in-memory oxigraph store
+(Rust compiled to WASI, Go bindings designed in
+=oxigraph-wasi-ffi/DESIGN.md= with =iter.Seq= result iteration):
+=EventToQuads= in =internal/journal/types.go= maps started/exited/context
+events onto a tiny vocabulary (=swash:Session=, =swash:startedAt=,
+=swash:exitCode=, =swash:context= ...) and =swash graph query= runs SPARQL
+over it.  =claude.sh= is the throwaway proof of =SHELL.md='s thesis: a
+conversation kept /in the journal/ (=CLAUDE_SESSION=, =CLAUDE_ROLE=
+fields via =logger --journald=), rebuilt into a messages array by
+=journalctl -o json | jq=, no files anywhere.  =SHELL.md= argues the
+harness should be the shell itself -- =claude "fix the build"= as an
+ordinary command, scrollback untouched, with a status bar of live tasks
+showing cgroup-accurate CPU and memory -- and ends on "an LLM API call is
+just a long-running command that happens to talk to a remote server."
+
+Lesson: one append-only structured log can be the process log, the
+conversation store, and the source of a graph; group work by emitting a
+relation, not by nesting directories.
+
+* What the four agree on
 :PROPERTIES:
 :ID: YY6EYZ
 :END:
 
-Read together, the three repositories converge on a few points that any
+Read together, the four repositories converge on a few points that any
 future luv agent surface should probably accept as given:
 
 - /Results are typed values with more than one rendering./  Froth's block
   trees (#5GU1VI), sheaf's result structs (#GR1GL1), nxt's =tool_result=
-  with telemetry (#KZ019W): the model-facing text, the human-facing view,
+  with telemetry (#KZ019W), swash's journal entries and screen events
+  (#0PK1OV): the model-facing text, the human-facing view,
   and the persisted record are projections of one datum.
 - /Size is the harness's problem./  Froth folds and pages (#FDMSXG),
   sheaf reads collapsed with handles (#GR1GL1), nxt caps and says why
@@ -514,16 +644,18 @@ future luv agent surface should probably accept as given:
   omitted and given a handle to get more.
 - /Handles are short, stable, and typed by the store, not the syntax./
   Sheaf's six characters (#9P5YLW), froth's =blob:= ULIDs and timeline
-  refs (#WYOFMD), this wiki's figure IDs.
+  refs (#WYOFMD), swash's session ids (#KZG2ZF), this wiki's figure IDs.
 - /History is data first./  Froth's events and spans (#VGXIN9), sheaf's
   quad log and doubled context store (#DCH4QD, #RLXBWB), nxt's Arrow
-  traces (#7FFNVT) -- and each of them can be re-rendered later without
-  rerunning anything.
+  traces (#7FFNVT), swash's journal-as-graph (#VBQ79J) -- and each of
+  them can be re-rendered later without rerunning anything.
 - /Silence is a defect the runtime must be able to explain./  Froth's
-  three-second detach (#ENM1B2), nxt's SIGUSR1 dump (#BWXFJK), and this
-  project's own rule.
+  three-second detach (#ENM1B2), swash's three-second-or-screenful detach
+  with the follow command printed (#I0U0LI), nxt's SIGUSR1 dump (#BWXFJK),
+  and this project's own rule.
 - /A cycle is a supervised scope./  Froth's CycleRuntime and
-  prepare/commit (#IOGTGD), nxt's firms (#3J1QNQ).
+  prepare/commit (#IOGTGD), nxt's firms (#3J1QNQ), swash's host-per-session
+  slice that survives its client (#KZG2ZF).
 
 * IDEA A luv agent surface would inherit these seams
 :PROPERTIES:
