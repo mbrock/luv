@@ -129,11 +129,18 @@
            (vec3-scale
             (vec3-normalize (sky-frame-parameters-sun-direction sky))
             -1.0))
-         ;; The tilted solar orbit never reaches the world-Y pole, so its
-         ;; projection is a safe continuous reference.  Switching to world Z
-         ;; near noon used to rotate the whole shadow map discontinuously.
-         (basis-up (make-vec3 0.0 1.0 0.0))
-         (right (vec3-normalize (vec3-cross basis-up forward)))
+         ;; Texel snapping stabilizes the map against translation but can do
+         ;; nothing about rotation, so the free choice of roll about the light
+         ;; axis is worth making well.  World up is a continuous reference --
+         ;; the tilted orbit never reaches the Y pole -- but it is a badly
+         ;; conditioned one: the sun's angle to it changes all day, the
+         ;; transverse component collapses toward the orbit tilt as the sun
+         ;; climbs, and the roll rate consequently peaks at noon, spinning the
+         ;; whole texel grid under the world exactly when the sun is highest.
+         ;; The sun's own axis of revolution keeps a constant angle to the sun
+         ;; at every hour, so the basis it induces simply turns with the day.
+         (reference (sky-sun-orbit-axis))
+         (right (vec3-normalize (vec3-cross reference forward)))
          (up (vec3-cross forward right))
          (extent +luvcraft-shadow-half-extent+)
          (depth-radius +luvcraft-shadow-depth-radius+)
@@ -291,7 +298,7 @@ check in LUVCRAFT-POST-UNIFORM-SIZE keeps the two honest."
                 *luvcraft-vignette*
                 *luvcraft-bloom-threshold*
                 sun-u sun-v sun-weight
-                (/ (coerce width 'single-float) height)
+                (if (luvcraft-session-shadow-diagnostic-p session) 1.0 0.0)
                 (/ 1.0 (first bloom-extent))
                 (/ 1.0 (second bloom-extent))
                 *luvcraft-shaft-decay*

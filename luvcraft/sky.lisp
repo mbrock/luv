@@ -215,6 +215,20 @@ SLY can pause it, set a time, change its rate, or pin it without restarting.")
            (sky-frame-parameters-fog-near sky)
            (sky-frame-parameters-fog-far sky)))
 
+(defconstant +sky-sun-orbit-tilt+ 0.28
+  "How far the solar orbit leans out of the world X/Y plane.")
+
+(defun sky-sun-orbit-axis ()
+  "The axis the sun revolves around: world Z, because the orbit is a circle
+in the X/Y plane displaced along Z.
+
+Anything which needs a stable reference direction transverse to the sun
+should use this rather than world up.  The sun's angle to this axis is the
+same at every hour, so a basis built from it is uniformly well conditioned;
+a basis built from world up degenerates toward the sun's own direction as
+the sun climbs."
+  (make-vec3 0.0 0.0 1.0))
+
 (defun sky-sun-direction (day-fraction)
   "The unit sun direction: rising at 0.25, zenith-adjacent at 0.5.
 
@@ -223,7 +237,7 @@ even at noon."
   (let* ((angle (* 2.0 pi (- day-fraction 0.25)))
          (x (coerce (cos angle) 'single-float))
          (y (coerce (sin angle) 'single-float))
-         (z 0.28)
+         (z +sky-sun-orbit-tilt+)
          (length (sqrt (+ (* x x) (* y y) (* z z)))))
     (make-vec3 (/ x length)
                (/ y length)

@@ -746,7 +746,26 @@
             shadow-map shadow-comparison-sampler
             shadow-coordinate receiver-depth shadow-depth-gradient
             shadow-texel-size shadow-bias shadow-filter-radius))
-         (direct-shadow (mix 1.0 shadow-sample shadow-in-bounds))
+         (sampled-shadow (mix 1.0 shadow-sample shadow-in-bounds))
+         ;; A surface turned away from the light has no shadow decision to
+         ;; make: its own geometry already excludes the sun, the receiver
+         ;; plane's depth runs almost parallel to the light so every filter
+         ;; tap lands a large and increasingly ill-conditioned distance away,
+         ;; and the map's answer degenerates into noise.  Near noon that is
+         ;; every vertical face in the world at once, which is why the
+         ;; shimmer was worst there.  Fading the decision out toward "lit"
+         ;; exactly where it stops meaning anything costs nothing visually --
+         ;; the same cosine multiplies the direct term to zero -- and gives
+         ;; the specular lobe and the diagnostic a stable value instead of
+         ;; the noise.
+         ;;
+         ;; The lower edge is where the receiver-plane denominator above
+         ;; starts being clamped: SHADOW-FORWARD is the negated sun, so that
+         ;; dot product is exactly -N-DOT-L, and the clamp engages precisely
+         ;; below 0.05.  The two mechanisms therefore hand over rather than
+         ;; overlap, and the clamp never has to carry a visible decision.
+         (shadow-relevance (smoothstep 0.05 0.22 n-dot-l))
+         (direct-shadow (mix 1.0 sampled-shadow shadow-relevance))
          ;; The mesh carries normalized raw light readings; every response
          ;; curve and balance below is an art parameter editable live
          ;; without remeshing the world.
@@ -814,10 +833,13 @@
          (n-dot-h (max 0.0 (dot shading-normal half-vector)))
          (n-dot-v (max 0.0 (dot shading-normal view-direction)))
          (fresnel (+ 0.030 (* 0.22 (expt (- 1.0 n-dot-v) 5.0))))
+         ;; The cosine belongs in the specular lobe as much as in the diffuse
+         ;; one: without it a highlight can appear on a face the sun cannot
+         ;; reach, carrying whatever the shadow map happened to say there.
          (specular
            (interpret
             (* sun-color
-               (* 4.5 (expt n-dot-h 26.0) fresnel
+               (* 4.5 (expt n-dot-h 26.0) fresnel n-dot-l
                   sun-visibility day-factor direct-shadow occlusion))
             :quantity :linear-rgb :unit :one))
          (radiance
@@ -1123,7 +1145,7 @@ than inlined three times."
   (defparameter *post-uniform-members*
     '((post-control :vec4)    ; texel u, texel v, focus blur, exposure
       (lens-control :vec4)    ; bloom gain, shaft gain, vignette, threshold
-      (sun-screen :vec4)      ; sun screen u, v, on-screen weight, aspect
+      (sun-screen :vec4)      ; sun screen u, v, on-screen weight, diagnostic
       (bloom-control :vec4))  ; chain texel u, v, shaft decay, elapsed time
     "The presentation uniform layout shared by the post and bloom stages."))
 
@@ -1358,8 +1380,15 @@ than inlined three times."
          (vignette
            (- 1.0
               (* (swizzle lens-control :z)
-                 (smoothstep 0.10 0.75 (dot centered centered))))))
-    (set-output color-output (vec4 (* graded vignette) 1.0))))
+                 (smoothstep 0.10 0.75 (dot centered centered)))))
+         ;; The shadow diagnostic is a measurement, not a picture: when the
+         ;; scene pass is writing raw visibility instead of radiance, exposure,
+         ;; the filmic curve, the lens chain, and the vignette would all
+         ;; distort exactly the quantity being measured, so presentation hands
+         ;; the value straight through.
+         (diagnostic (swizzle sun-screen :w))
+         (presented (mix (* graded vignette) radiance diagnostic)))
+    (set-output color-output (vec4 presented 1.0))))
 
 (defun focus-post-fragment-specification ()
   (shader-specification-for :focus-post :fragment))
