@@ -103,7 +103,7 @@
     (make-scene domain :solid solid)))
 
 #+darwin
-(deftest bevelled-surfaces-are-watertight-from-above
+(deftest shaped-surfaces-are-watertight-from-above
   ;; Straight down onto the floor, every pixel inside the floor is ground:
   ;; a crack between rounded faces would let the sky through.
   (let* ((width 200)
@@ -121,6 +121,10 @@
            (ok (zerop (count-pixels pixels width height #'sky-pixel-p
                                     :from-row 20 :to-row 180)))
            (setf (renderer-style renderer) :flat)
+           (ok (zerop (count-pixels (render-pixels renderer) width height
+                                    #'sky-pixel-p
+                                    :from-row 20 :to-row 180)))
+           (setf (renderer-style renderer) :chamfer)
            (ok (zerop (count-pixels (render-pixels renderer) width height
                                     #'sky-pixel-p
                                     :from-row 20 :to-row 180))))

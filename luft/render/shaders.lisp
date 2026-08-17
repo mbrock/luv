@@ -48,7 +48,7 @@ lit: both the reach of shadows in cells and their cost per pixel.")
       (projection-vector :vec4)  ; x scale, y scale, z scale, z offset
       (sun-vector :vec4)         ; direction toward the sun, ambient light
       (sky-vector :vec4)         ; sky colour, fog distance
-      (domain-vector :vec4)      ; x period, y period, bevel radius, sanding
+      (domain-vector :vec4)      ; x/y period, fillet radius/chamfer width, arris
       (sun-colour-vector :vec4)  ; sun radiance, sheen strength
       (fill-vector :vec4)        ; direction toward the fill light, strength
       (ground-vector :vec4)      ; ground bounce colour, exposure
@@ -466,6 +466,16 @@ solid, a concave crease out of it, and both move inward along the face."
       (- (* normal (- (* 2.0 solid-c) 1.0)) tangent)
       (vec3 0.0 0.0 0.0)))
 
+(define-shader-function convex-edge-minority (solid-c solid-e normal tangent)
+  "The solid direction of a genuinely exposed edge, otherwise zero.
+
+Both cells across the edge must be air.  Unlike EDGE-MINORITY this deliberately
+rejects concave inside corners: a handplane breaks an accessible outside edge;
+it does not cut a cove where two solid faces meet."
+  (if (< (+ solid-c solid-e) 0.5)
+      (- (- normal) tangent)
+      (vec3 0.0 0.0 0.0)))
+
 (define-shader-function vertex-minority
     (normal u v solid-cu solid-eu solid-cv solid-ev solid-cuv solid-euv)
   "The minority direction of a vertex star from the six unknown solidities.
@@ -488,11 +498,29 @@ beside the solid cell and beside the air cell."
             (- solid-sum)
             (vec3 0.0 0.0 0.0)))))
 
-(define-shader-function chamfer-point (point minority radius)
+(define-shader-function convex-vertex-minority
+    (normal u v solid-cu solid-eu solid-cv solid-ev solid-cuv solid-euv)
+  "The solid-side direction of a convex vertex star, otherwise zero.
+
+One, two, or three incident solid cells describe an exposed corner.  Stars
+with four or more solids are flat, saddle-shaped, or concave and remain sharp
+under the woodworking chamfer rule."
+  (let* ((count (+ 1.0 solid-cu solid-eu solid-cv solid-ev solid-cuv
+                   solid-euv))
+         (sum-n (+ -1.0 (- solid-cu) solid-eu (- solid-cv) solid-ev
+                   (- solid-cuv) solid-euv))
+         (sum-u (+ -1.0 solid-cu solid-eu (- solid-cv) (- solid-ev)
+                   solid-cuv solid-euv))
+         (sum-v (+ -1.0 (- solid-cu) (- solid-eu) solid-cv solid-ev
+                   solid-cuv solid-euv))
+         (solid-sum (+ (* normal sum-n) (* u sum-u) (* v sum-v))))
+    (if (< count 3.5) solid-sum (vec3 0.0 0.0 0.0))))
+
+(define-shader-function chamfer-point (point minority width)
   "The woodworking rule: a shared point moves half the chamfer width along
 its star's clamped minority, where the flat 45-degree facets meet."
   (+ point (* (clamp minority (vec3 -1.0 -1.0 -1.0) (vec3 1.0 1.0 1.0))
-              (* radius 0.5))))
+              (* width 0.5))))
 
 (define-shader-function chamfer-normal (minority normal)
   "The facet normal at a chamfered shared point, or NORMAL when flat."
@@ -725,6 +753,12 @@ a grid of RINGS rings of points moved by RULE, and their triangles per face.
 The chamfer rule also emits the face normal for facet shading."
     (let* ((*bevel-rings* rings)
            (*bevel-rule* rule)
+           (edge-rule (if (eq rule :chamfer)
+                          'convex-edge-minority
+                          'edge-minority))
+           (vertex-rule (if (eq rule :chamfer)
+                            'convex-vertex-minority
+                            'vertex-minority))
            (side (bevel-grid-side))
            (points (* side side))
            (primitives (* 2 (1- side) (1- side)))
@@ -876,33 +910,33 @@ The chamfer rule also emits the face normal for facet shading."
                                       ,(offset-form du dv))))
                   ;; Site rules: four edges, four corners.
                   (edge-u-pos-minority
-                    (edge-minority solid-cu-pos solid-eu-pos normal edge-a))
+                    (,edge-rule solid-cu-pos solid-eu-pos normal edge-a))
                   (edge-u-neg-minority
-                    (edge-minority solid-cu-neg solid-eu-neg normal (- edge-a)))
+                    (,edge-rule solid-cu-neg solid-eu-neg normal (- edge-a)))
                   (edge-v-pos-minority
-                    (edge-minority solid-cv-pos solid-ev-pos normal edge-b))
+                    (,edge-rule solid-cv-pos solid-ev-pos normal edge-b))
                   (edge-v-neg-minority
-                    (edge-minority solid-cv-neg solid-ev-neg normal (- edge-b)))
+                    (,edge-rule solid-cv-neg solid-ev-neg normal (- edge-b)))
                   (corner-pos-pos-minority
-                    (vertex-minority normal edge-a edge-b
-                                     solid-cu-pos solid-eu-pos
-                                     solid-cv-pos solid-ev-pos
-                                     solid-c-pos-pos solid-e-pos-pos))
+                    (,vertex-rule normal edge-a edge-b
+                                  solid-cu-pos solid-eu-pos
+                                  solid-cv-pos solid-ev-pos
+                                  solid-c-pos-pos solid-e-pos-pos))
                   (corner-pos-neg-minority
-                    (vertex-minority normal edge-a (- edge-b)
-                                     solid-cu-pos solid-eu-pos
-                                     solid-cv-neg solid-ev-neg
-                                     solid-c-pos-neg solid-e-pos-neg))
+                    (,vertex-rule normal edge-a (- edge-b)
+                                  solid-cu-pos solid-eu-pos
+                                  solid-cv-neg solid-ev-neg
+                                  solid-c-pos-neg solid-e-pos-neg))
                   (corner-neg-pos-minority
-                    (vertex-minority normal (- edge-a) edge-b
-                                     solid-cu-neg solid-eu-neg
-                                     solid-cv-pos solid-ev-pos
-                                     solid-c-neg-pos solid-e-neg-pos))
+                    (,vertex-rule normal (- edge-a) edge-b
+                                  solid-cu-neg solid-eu-neg
+                                  solid-cv-pos solid-ev-pos
+                                  solid-c-neg-pos solid-e-neg-pos))
                   (corner-neg-neg-minority
-                    (vertex-minority normal (- edge-a) (- edge-b)
-                                     solid-cu-neg solid-eu-neg
-                                     solid-cv-neg solid-ev-neg
-                                     solid-c-neg-neg solid-e-neg-neg))
+                    (,vertex-rule normal (- edge-a) (- edge-b)
+                                  solid-cu-neg solid-eu-neg
+                                  solid-cv-neg solid-ev-neg
+                                  solid-c-neg-neg solid-e-neg-neg))
                   ,@(bevel-corner-bindings)
                   ,@point-bindings
                   (vertex-base (* lane (uint ,(float points))))
@@ -936,15 +970,15 @@ The chamfer rule also emits the face normal for facet shading."
          (facet (normalize raw-facet))
          (face (normalize face-normal))
          (oriented (if (< (dot facet face) 0.0) (- facet) facet))
-         (radius (swizzle domain-vector :z))
-         (sanding (max (swizzle domain-vector :w) 0.001))
+         (width (swizzle domain-vector :z))
+         (softness (max (swizzle domain-vector :w) 0.0005))
          (u (swizzle uv :x))
          (v (swizzle uv :y))
          (inset (min (min u (- 1.0 u)) (min v (- 1.0 v))))
          ;; Signed distance from the chamfer line: negative on the chamfer.
-         (arris (- inset radius))
+         (arris (- inset width))
          (sanded (normalize (mix oriented face
-                                 (smoothstep (- sanding) sanding arris))))
+                                 (smoothstep (- softness) softness arris))))
          (upness (swizzle face :z))
          (base (if (> upness 0.5)
                    (swizzle top-vector :xyz)
@@ -952,10 +986,10 @@ The chamfer rule also emits the face normal for facet shading."
                        (swizzle bottom-vector :xyz)
                        (swizzle side-vector :xyz))))
          ;; A chamfered surface lies inside its own cell, by up to the
-         ;; radius along every axis its facet cuts, so leave along the facet
+         ;; width along every axis its facet cuts, so leave along the facet
          ;; normal, which is the one direction certain to point out of the
-         ;; solid, and by more than the radius.
-         (walk-origin (+ world (* oriented (+ (* 2.0 radius) 0.1))))
+         ;; solid, and by more than the width.
+         (walk-origin (+ world (* oriented (+ (* 2.0 width) 0.1))))
          (walk (marched-cell-walk walk-origin (swizzle sun-vector :xyz)
                                   cells (swizzle domain-vector :x)
                                   (swizzle domain-vector :y)

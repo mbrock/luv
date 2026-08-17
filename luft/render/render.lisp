@@ -222,12 +222,14 @@
 (defparameter *sky-color* (vec3:make-vec3 0.62 0.76 0.92))
 (defparameter *fog-distance* 140.0)
 (defparameter *bevel-radius* 0.22
-  "The crease rounding radius, or chamfer width, in cells, below one half.")
-(defparameter *sanding-width* 0.05
-  "How far on either side of a chamfer's arris the :CHAMFER style softens
-the facet normal, in cells.")
+  "The :BEVEL style's crease-rounding radius in cells, below one half.")
+(defparameter *chamfer-width* 0.045
+  "The :CHAMFER style's subtle 45-degree edge setback in cells.")
+(defparameter *arris-softness* 0.004
+  "The narrow shading transition where a chamfer meets its original face.")
 
-(defun frame-uniform-data (camera width height &optional domain)
+(defun frame-uniform-data
+    (camera width height &optional domain (surface-width *bevel-radius*))
   "Pack the frame block: camera, basis, projection, sun, sky, and domain lanes."
   (multiple-value-bind (right up forward) (camera-basis camera)
     (let* ((near *near-distance*)
@@ -255,8 +257,8 @@ the facet normal, in cells.")
         (lane (vec3:make-vec3
                (if domain (luft:world-domain-x-period domain) 1)
                (if domain (luft:world-domain-y-period domain) 1)
-               *bevel-radius*)
-              *sanding-width*)
+               surface-width)
+              *arris-softness*)
         (lane *sun-color* *sheen-strength*)
         (lane *fill-direction* *fill-strength*)
         (lane *ground-color* *exposure*)
@@ -408,7 +410,8 @@ the facet normal, in cells.")
                         (style :bevel))
   "Create every GPU object needed to draw SCENE from CAMERA at WIDTH by HEIGHT.
 
-STYLE is :BEVEL or :FLAT and may be changed later with (SETF RENDERER-STYLE).
+STYLE is :FLAT, :BEVEL (rounded), or :CHAMFER (a subtle convex edge-break),
+and may be changed later with (SETF RENDERER-STYLE).
 Without DEVICE, one is requested from PROVIDER and owned by the renderer."
   (let* ((owns-device-p (null device))
          (device (or device
@@ -540,7 +543,10 @@ The second value is true when a new buffer was created."
     (write-buffer (renderer-uniform-buffer renderer)
                   (frame-uniform-data (renderer-camera renderer)
                                       (first extent) (second extent)
-                                      (scene-domain scene)))
+                                      (scene-domain scene)
+                                      (if (eq (renderer-style renderer) :chamfer)
+                                          *chamfer-width*
+                                          *bevel-radius*)))
     (let ((pass (begin-render-pass
                  encoder
                  (make-render-pass-descriptor

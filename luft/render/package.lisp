@@ -52,7 +52,8 @@ of packed LUFT sites, drawn by task and mesh shaders.")
            #:renderer-extent
            #:renderer-style
            #:*bevel-radius*
-           #:*sanding-width*
+           #:*chamfer-width*
+           #:*arris-softness*
            #:*sun-direction*
            #:*sun-color*
            #:*sheen-strength*
