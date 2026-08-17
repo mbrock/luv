@@ -102,8 +102,6 @@
            #:open-surveyor-map
            #:close-surveyor-map
            #:open-luvcraft-surveyor-map
-           #:close-luvcraft-surveyor-map
-           #:open-listener
-           #:main))
+           #:close-luvcraft-surveyor-map))
 
 (in-package #:mcluv)

@@ -1,5 +1,15 @@
 (in-package #:asdf-user)
 
+(defsystem "mcluv"
+  :description "McCLIM presented through luv canvases and embedded in luvcraft."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  ;; ASDF resolves every MCLUV/... secondary system through this primary one,
+  ;; so it exists whether or not anyone loads the whole layer at once.  It is
+  ;; an aggregate rather than a program: the McCLIM surfaces luv actually runs
+  ;; are panes inside the game, not a separate application.
+  :depends-on ("mcluv/backend" "mcluv/luvcraft"))
+
 (defsystem "mcluv/backend"
   :description "An experimental McCLIM backend presented through luv canvases."
   :version "0.0.1"
@@ -96,19 +106,3 @@
                                        :style :luv)
                (error "mcluv surveyor tests failed"))))
 
-(defsystem "mcluv/listener"
-  :description "The McCLIM Listener running on the mcluv backend."
-  :version "0.0.1"
-  :author "Mikael Brockman"
-  :depends-on ("mcluv/backend" "clim-listener")
-  :components ((:file "mcclim/listener")))
-
-(defsystem "mcluv"
-  :description "The McCLIM Listener and shader lab as a standalone luv program."
-  :version "0.0.1"
-  :author "Mikael Brockman"
-  :depends-on ("mcluv/listener" "mcluv/shader-lab")
-  :components ((:file "mcclim/main"))
-  :build-operation "program-op"
-  :build-pathname "build/mcluv"
-  :entry-point "mcluv:main")

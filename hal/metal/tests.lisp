@@ -242,7 +242,7 @@
 
 (deftest canvas-presentation-policy-is-explicit-and-provider-specific
   (ok (equal (luv::sdl-presentation-window-flags :vulkan)
-             '(:vulkan :resizable :hidden)))
+             '(:vulkan :high-pixel-density :resizable :hidden)))
   (ok (equal (luv::sdl-presentation-window-flags :metal)
              '(:metal :high-pixel-density :resizable :hidden)))
   (ok (eq :vulkan
