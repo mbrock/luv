@@ -67,6 +67,18 @@ below it does not need any of it."
   :components ((:module "telegram"
                 :components ((:file "net")))))
 
+(defsystem "telegram/chat"
+  :description "Peers, histories, photos, and an update cursor over INVOKE."
+  :long-description
+  "The application layer a chat client needs and the protocol does not
+provide: peers that remember their access hashes, a history per peer sorted
+by message id, and the pts/qts/date cursor that turns updates.getDifference
+into news."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("telegram/client")
+  :components ((:module "telegram" :components ((:file "chat")))))
+
 (defsystem "telegram/test"
   :description "Executable claims for the MTProto core, against published vectors."
   :version "0.0.1"
