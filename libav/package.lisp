@@ -34,4 +34,18 @@
            #:frame-plane-pitch
            #:frame-hardware-p
            #:allocate-frame-buffer
-           #:unreference-frame))
+           #:unreference-frame
+           #:video
+           #:open-video
+           #:close-video
+           #:with-video
+           #:video-open-p
+           #:video-pathname
+           #:video-width
+           #:video-height
+           #:video-frame-rate
+           #:video-frame
+           #:decode-next-frame
+           #:rewind-video
+           #:scale-frame-into
+           #:frame-rgba-words))

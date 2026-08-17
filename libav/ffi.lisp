@@ -1,14 +1,32 @@
 ;;;; Loading FFmpeg, and the slice of its C ABI luv speaks directly.
 ;;;;
-;;;; Three libraries come in together because they version together: libavutil
+;;;; The libraries come in together because they version together: libavutil
 ;;;; owns AVFrame, libavcodec owns the decoders, libavformat owns the
-;;;; demuxers, and FFmpeg only supports combinations from one build.  The
+;;;; demuxers, libswscale owns pixel conversion, and FFmpeg only supports
+;;;; combinations from a single build.  The
 ;;;; groveled LIBAV*_VERSION_MAJOR constants are the compile-time half of that
 ;;;; agreement; LOAD-LIBAV checks them against what the loaded libraries say at
 ;;;; run time, because a mismatch here does not fail loudly at the call site --
 ;;;; it silently reads a field from the wrong offset.
 
 (in-package #:luv.libav)
+
+(defmacro with-libav-native-environment (&body body)
+  "Run BODY with the floating-point environment FFmpeg's own code expects.
+
+FFmpeg computes with floats that raise invalid-operation and divide-by-zero as
+a matter of course -- probing stream timing alone will do it -- and SBCL traps
+those by default, so an unmasked call dies inside avformat_find_stream_info
+rather than returning an error luv could handle.  This is the same masking
+luv's SDL and Vulkan boundaries use."
+  #+sbcl
+  `(sb-int:with-float-traps-masked
+       (:invalid :divide-by-zero :overflow :underflow :inexact)
+     ,@body)
+  #+(and darwin (not sbcl))
+  `(float-features:with-float-traps-masked t ,@body)
+  #-(or sbcl darwin)
+  `(progn ,@body))
 
 (define-condition libav-error (error)
   ((operation :initarg :operation :reader libav-error-operation)
@@ -83,7 +101,8 @@ system was groveled against."
               (loop for (stem major)
                       in (list (list "avutil" +avutil-version-major+)
                                (list "avcodec" +avcodec-version-major+)
-                               (list "avformat" +avformat-version-major+))
+                               (list "avformat" +avformat-version-major+)
+                               (list "swscale" +swscale-version-major+))
                     collect (cffi:load-foreign-library
                              (cons :or (library-sonames stem major)))))
         (check-libav-versions)
@@ -95,6 +114,7 @@ system was groveled against."
 (cffi:defcfun ("avutil_version" %avutil-version) :unsigned-int)
 (cffi:defcfun ("avcodec_version" %avcodec-version) :unsigned-int)
 (cffi:defcfun ("avformat_version" %avformat-version) :unsigned-int)
+(cffi:defcfun ("swscale_version" %swscale-version) :unsigned-int)
 (cffi:defcfun ("av_version_info" %av-version-info) :string)
 (cffi:defcfun ("avutil_configuration" %avutil-configuration) :string)
 
@@ -114,7 +134,8 @@ system was groveled against."
   (loop for (name compiled reader)
           in (list (list "libavutil" +avutil-version-major+ #'%avutil-version)
                    (list "libavcodec" +avcodec-version-major+ #'%avcodec-version)
-                   (list "libavformat" +avformat-version-major+ #'%avformat-version))
+                   (list "libavformat" +avformat-version-major+ #'%avformat-version)
+                   (list "libswscale" +swscale-version-major+ #'%swscale-version))
         for loaded = (ldb (byte 8 16) (funcall reader))
         unless (= compiled loaded)
           do (error 'libav-version-mismatch
@@ -131,7 +152,8 @@ system was groveled against."
   (load-libav)
   (list (cons "libavutil" (version-triple (%avutil-version)))
         (cons "libavcodec" (version-triple (%avcodec-version)))
-        (cons "libavformat" (version-triple (%avformat-version)))))
+        (cons "libavformat" (version-triple (%avformat-version)))
+        (cons "libswscale" (version-triple (%swscale-version)))))
 
 (defun libav-configuration ()
   "Return the ./configure line this FFmpeg was built with."

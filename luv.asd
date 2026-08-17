@@ -95,10 +95,12 @@
   ((:module "libav"
     :serial t
     :components ((:static-file "README.md")
+                 (:static-file "test-pattern.mp4")
                  (:file "package")
                  (:cffi-grovel-file "abi")
                  (:file "ffi")
-                 (:file "frame"))))
+                 (:file "frame")
+                 (:file "decode"))))
   :in-order-to ((test-op (test-op "luv/libav/test"))))
 
 (defsystem "luv/libav/test"

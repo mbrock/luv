@@ -73,6 +73,57 @@
     (ok (eq frame (libav:release-frame frame)))
     (ok (signals (libav:frame-width frame) 'error))))
 
+(defparameter *test-pattern*
+  (asdf:system-relative-pathname "luv/libav" "libav/test-pattern.mp4")
+  "A ten-frame 64x48 H.264 test pattern, small enough to keep in the tree.")
+
+(deftest a-file-opens-and-describes-itself
+  (libav:with-video (video *test-pattern*)
+    (ok (libav:video-open-p video))
+    (ok (= 64 (libav:video-width video)))
+    (ok (= 48 (libav:video-height video)))
+    (ok (= 10 (libav:video-frame-rate video)))))
+
+(deftest decoding-drains-every-picture-in-the-file
+  ;; The count is the claim: a decode loop that forgets to flush the codec at
+  ;; end of file loses the pictures still buffered inside it, and a loop that
+  ;; mishandles EAGAIN stops early.  Ten frames in, ten frames out.
+  (libav:with-video (video *test-pattern*)
+    (let ((count 0))
+      (loop while (libav:decode-next-frame video) do (incf count))
+      (ok (= 10 count))
+      ;; Exhausted stays exhausted.
+      (ok (null (libav:decode-next-frame video)))
+      ;; And rewinding makes it whole again.
+      (libav:rewind-video video)
+      (let ((again 0))
+        (loop while (libav:decode-next-frame video) do (incf again))
+        (ok (= 10 again))))))
+
+(deftest a-decoded-picture-converts-to-packed-rgba
+  (libav:with-video (video *test-pattern*)
+    (ok (libav:decode-next-frame video))
+    (let ((frame (libav:video-frame video)))
+      (ok (= 64 (libav:frame-width frame)))
+      (ok (= 48 (libav:frame-height frame)))
+      ;; Software decoding, so the picture is in ordinary memory and its
+      ;; planes are real.
+      (ok (not (libav:frame-hardware-p frame)))
+      (ok (eq :yuv420p (libav:frame-pixel-format frame))))
+    ;; swscale both converts and resizes, so a caller can ask for the size its
+    ;; surface wants rather than the size the file happens to be.
+    (let ((words (libav:frame-rgba-words video 16 16)))
+      (ok (equal '(16 16) (array-dimensions words)))
+      (ok (loop for index below (array-total-size words)
+                always (= #xff (ldb (byte 8 24) (row-major-aref words index)))))
+      ;; A test pattern is not one flat colour; a conversion that silently
+      ;; produced an empty image would be.
+      (let ((distinct (make-hash-table)))
+        (dotimes (y 16)
+          (dotimes (x 16)
+            (setf (gethash (aref words y x) distinct) t)))
+        (ok (> (hash-table-count distinct) 8))))))
+
 (deftest a-failed-call-carries-ffmpegs-own-explanation
   (libav:with-frame (frame)
     ;; No width, height, or format: av_frame_get_buffer has nothing to size.
