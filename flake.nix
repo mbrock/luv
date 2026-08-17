@@ -121,8 +121,24 @@
           };
           tracyClientLibrary =
             "${tracyClient}/lib/libTracyClient${pkgs.stdenv.hostPlatform.extensions.sharedLibrary}";
+          # FFmpeg is here for its libraries, not its command line: libavcodec
+          # and friends are the one decoder front door that reaches hardware
+          # video decode on both of our platforms, VideoToolbox on Darwin and
+          # VAAPI or Vulkan Video on Linux, and hands back a frame that is
+          # already on the GPU.  The default "small" variant already enables
+          # Vulkan and VAAPI off-Darwin, and FFmpeg's configure turns
+          # VideoToolbox on by itself when it sees the frameworks.
+          #
+          # CFFI finds these by soname: it searches LD_LIBRARY_PATH itself on
+          # both platforms, before falling back to the system loader, so the
+          # entry in NATIVE-LIBRARY-PATH below is what makes an unqualified
+          # "libavcodec.dylib" resolve to this build rather than to whatever
+          # Homebrew happens to have left in /usr/local/lib.
+          ffmpeg = pkgs.ffmpeg;
+          ffmpegLibraryDirectory = "${ffmpeg.lib}/lib";
           nativeLibraryPath = nixpkgs.lib.makeLibraryPath (
             [
+              ffmpeg
               pkgs.libffi
               libghosttyVt
               pkgs.harfbuzz
@@ -191,6 +207,7 @@
             name = "luv-env";
             runtimeInputs = [
               lisp
+              ffmpeg
               libghosttyVt
               pkgs.libffi
               pkgs.harfbuzz
@@ -206,6 +223,7 @@
               export LUV_GHOSTTY_LIBRARY=${libghosttyVtLibrary}
               export LUV_SLYNK_DIR=${slyRoot}/slynk
               export LUV_TRACY_CLIENT=${tracyClientLibrary}
+              export LUV_FFMPEG_LIBDIR=${ffmpegLibraryDirectory}
               export CL_SOURCE_REGISTRY=${mcclim}//:${cl-sdl3}//
               export LD_LIBRARY_PATH=${nativeLibraryPath}''${LD_LIBRARY_PATH:+:}''${LD_LIBRARY_PATH:-}
 
@@ -241,6 +259,7 @@
         in
         {
           inherit pkgs wpePkgs sbcl lisp nativeLibraryPath slyRoot dev;
+          inherit ffmpeg ffmpegLibraryDirectory;
           inherit libghosttyVt libghosttyVtLibrary;
           inherit tracyClient tracyClientLibrary;
         };
@@ -253,6 +272,7 @@
           sbcl = env.sbcl;
           lisp = env.lisp;
           dev = env.dev;
+          ffmpeg = env.ffmpeg;
           libghostty-vt = env.libghosttyVt;
           tracy-client = env.tracyClient;
           default = env.lisp;
@@ -273,6 +293,8 @@
           default = env.pkgs.mkShell ({
             packages = [
               env.lisp
+              env.ffmpeg
+              env.ffmpeg.dev
               env.libghosttyVt
               env.pkgs.libffi
               env.pkgs.harfbuzz
@@ -288,6 +310,7 @@
             LUV_GHOSTTY_LIBRARY = env.libghosttyVtLibrary;
             LUV_SLYNK_DIR = "${env.slyRoot}/slynk";
             LUV_TRACY_CLIENT = env.tracyClientLibrary;
+            LUV_FFMPEG_LIBDIR = env.ffmpegLibraryDirectory;
             CL_SOURCE_REGISTRY = "${mcclim}//:${cl-sdl3}//";
             shellHook = ''
               if [ -z "''${SDL_VIDEODRIVER:-}" ] \
