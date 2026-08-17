@@ -80,7 +80,8 @@
              (declare (ignore operation component))
              (unless (uiop:symbol-call '#:rove '#:run-suite
                                        (uiop:symbol-call '#:rove '#:find-suite
-                                                         '#:luv.ghostty.tests))
+                                                         '#:luv.ghostty.tests)
+                                       :style :luv)
                (error "luv/ghostty tests failed"))))
 
 (defsystem "luv/terminal"
@@ -113,7 +114,8 @@
              (declare (ignore operation component))
              (unless (uiop:symbol-call '#:rove '#:run-suite
                                        (uiop:symbol-call '#:rove '#:find-suite
-                                                         '#:luv.terminal.tests))
+                                                         '#:luv.terminal.tests)
+                                       :style :luv)
                (error "luv/terminal tests failed"))))
 
 (defsystem "luv/parinfer"
@@ -224,5 +226,6 @@
              (declare (ignore operation component))
              (unless (uiop:symbol-call '#:rove '#:run-suite
                                        (uiop:symbol-call '#:rove '#:find-suite
-                                                         '#:luv.tests))
+                                                         '#:luv.tests)
+                                       :style :luv)
                (error "luv tests failed"))))

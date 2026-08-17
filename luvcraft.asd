@@ -105,5 +105,6 @@
              (declare (ignore operation component))
              (unless (uiop:symbol-call '#:rove '#:run-suite
                                        (uiop:symbol-call '#:rove '#:find-suite
-                                                         '#:luvcraft.tests))
+                                                         '#:luvcraft.tests)
+                                       :style :luv)
                (error "luvcraft tests failed"))))

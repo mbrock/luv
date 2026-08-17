@@ -36,7 +36,8 @@ component and operation that make the wiki a buildable system."
              (declare (ignore operation component))
              (unless (uiop:symbol-call '#:rove '#:run-suite
                                        (uiop:symbol-call '#:rove '#:find-suite
-                                                         '#:luv.wiki.tests))
+                                                         '#:luv.wiki.tests)
+                                       :style :luv)
                (error "luv wiki tests failed"))))
 
 (defsystem "luv-wiki/cli"

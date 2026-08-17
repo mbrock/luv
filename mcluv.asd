@@ -26,7 +26,8 @@
              (declare (ignore operation component))
              (unless (uiop:symbol-call '#:rove '#:run-suite
                                        (uiop:symbol-call '#:rove '#:find-suite
-                                                         '#:mcluv.tests))
+                                                         '#:mcluv.tests)
+                                       :style :luv)
                (error "mcluv tests failed"))))
 
 (defsystem "mcluv/shader-lab"
@@ -72,7 +73,8 @@
              (declare (ignore operation component))
              (unless (uiop:symbol-call '#:rove '#:run-suite
                                        (uiop:symbol-call '#:rove '#:find-suite
-                                                         '#:mcluv.surveyor-tests))
+                                                         '#:mcluv.surveyor-tests)
+                                       :style :luv)
                (error "mcluv surveyor tests failed"))))
 
 (defsystem "mcluv/listener"
