@@ -1088,7 +1088,14 @@ submission that used them completes."
        encoder
        (make-gpu-copy-texture-command
         :source (luvcraft-session-presentation-texture session)
-        :destination surface-texture)))))
+        :destination surface-texture))
+      (let ((mirror (luvcraft-session-frame-mirror session)))
+        (when mirror
+          (encode
+           encoder
+           (make-gpu-copy-texture-command
+            :source (luvcraft-session-presentation-texture session)
+            :destination mirror)))))))
 
 (defun luvcraft-session-neighborhood-center (session)
   "Return the world X and Z the session's neighbourhood is centred on."

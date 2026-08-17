@@ -78,6 +78,7 @@
            #:iosurface-width
            #:iosurface-height
            #:iosurface-bytes-per-row
+           #:iosurface-base-address
            #:with-locked-iosurface
            #:read-iosurface-pixel
            #:new-metal-texture-for-iosurface

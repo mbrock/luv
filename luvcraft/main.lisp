@@ -65,7 +65,8 @@
   (format stream "--vulkan-smoke-test renders one hidden Vulkan frame and exits.~%")
   (format stream "--metal-smoke-test renders one hidden Metal 4 frame and exits.~%")
   (format stream "--metal-text-closeup renders the enlarged Slug world-text proof.~%")
-  (format stream "--metal-benchmark measures steady or streaming Metal frames.~%"))
+  (format stream "--metal-benchmark measures steady or streaming Metal frames.~%")
+  (format stream "--serve-surface renders a hidden game into the IOSurface named on stdin.~%"))
 
 (defun make-metal-provider ()
   #+darwin
@@ -178,6 +179,10 @@
     ((and (= (length arguments) 2)
           (string= (first arguments) "--metal-text-closeup"))
      (run-metal-text-closeup (pathname (second arguments))))
+    ((and (= (length arguments) 1)
+          (string= (first arguments) "--serve-surface"))
+     #+darwin (serve-luvcraft-mirror)
+     #-darwin (error "--serve-surface needs IOSurface, which is Darwin only."))
     ((and (<= 1 (length arguments) 4)
           (string= (first arguments) "--metal-benchmark"))
      (run-metal-benchmark

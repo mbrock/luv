@@ -175,6 +175,10 @@
                            :reader luvcraft-session-world-text-glyph-cache)
    (video-screen :initarg :video-screen :initform nil
                  :accessor luvcraft-session-video-screen)
+   ;; When set, every presented frame is also copied into this texture, so
+   ;; something outside the window -- another process, through an IOSurface --
+   ;; can watch the game.
+   (frame-mirror :initform nil :accessor luvcraft-session-frame-mirror)
    (overlays :initform nil :accessor luvcraft-session-overlays)
    (modal-focus :initform nil :accessor luvcraft-session-modal-focus)
    (focus-camera-origin :initform nil

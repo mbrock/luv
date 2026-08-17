@@ -87,10 +87,17 @@
   (logior (ash (char-code #\B) 24) (ash (char-code #\G) 16)
           (ash (char-code #\R) 8) (char-code #\A)))
 
+(objc:define-objective-c-message %number-with-bool
+    ("numberWithBool:" :object :ownership :borrowed :class "NSNumber")
+  (value :int8))
+
 (defun create-iosurface (width height &key (bytes-per-element 4)
-                                           (pixel-format +iosurface-pixel-format-bgra+))
+                                           (pixel-format +iosurface-pixel-format-bgra+)
+                                           (global-p t))
   "Create a WIDTH x HEIGHT IOSurface and return its raw IOSurfaceRef.
-The caller owns one CF reference; release it with RELEASE-IOSURFACE."
+The caller owns one CF reference; release it with RELEASE-IOSURFACE.
+GLOBAL-P (deprecated by Apple, still honoured) is what lets another process
+find the surface by its integer ID with LOOKUP-IOSURFACE."
   (objc:with-autorelease-pool ()
     (objc:with-owned-objective-c-object
         (properties
@@ -104,7 +111,11 @@ The caller owns one CF reference; release it with RELEASE-IOSURFACE."
           (put "kIOSurfaceWidth" width)
           (put "kIOSurfaceHeight" height)
           (put "kIOSurfaceBytesPerElement" bytes-per-element)
-          (put "kIOSurfacePixelFormat" pixel-format)))
+          (put "kIOSurfacePixelFormat" pixel-format))
+        (when global-p
+          (%dictionary-set-object
+           properties (%number-with-bool number-class 1)
+           (iosurface-property-key "kIOSurfaceIsGlobal"))))
       (let ((surface (%iosurface-create (objc:objective-c-pointer properties))))
         (when (cffi:null-pointer-p surface)
           (error "IOSurfaceCreate refused a ~Dx~D surface." width height))

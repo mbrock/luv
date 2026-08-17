@@ -492,6 +492,17 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:sky-keyframe
            #:sky-profile
            #:start-luvcraft
+           #:attach-luvcraft-frame-mirror
+           #:serve-luvcraft-mirror
+           #:luvcraft-mirror
+           #:spawn-luvcraft-mirror
+           #:request-luvcraft-mirror-frame
+           #:stop-luvcraft-mirror
+           #:luvcraft-mirror-pixel
+           #:luvcraft-mirror-pixels
+           #:save-luvcraft-mirror-png
+           #:luvcraft-mirror-frames
+           #:luvcraft-session-frame-mirror
            #:start-luvcraft-tracy
            #:step-block-world-player
            #:movement-intent
