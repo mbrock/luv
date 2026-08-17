@@ -5,7 +5,7 @@
 ;;; The camera has always been a disembodied eye.  This gives it a pair of
 ;;; arms hanging into the bottom of the view, hands on the ends of them, and a
 ;;; grip protocol so that a hand can hold something: brought up out of a
-;;; pocket, carried while walking, brandished at the world.
+;;; pocket, held while walking, put away again.
 ;;;
 ;;; The body is drawn exactly like an animal (see CRITTERS.LISP): a handful of
 ;;; textured boxes on the ordinary block surface pipeline.  What differs is
@@ -17,9 +17,9 @@
 ;;; screen edge and a phone lean back in the palm instead of everything
 ;;; standing square to the lens.
 ;;;
-;;; The first thing a hand can hold is a phone.  It is deliberately a little
-;;; too large: a slab of near-black glass with a lit screen the size of a
-;;; paperback, held up in front of the face like everyone holds theirs.
+;;; The first thing a hand can hold is a phone (PHONE.LISP).  It is
+;;; deliberately a little too large: a slab of near-black glass with a live
+;;; terminal on it, held up in front of the face like everyone holds theirs.
 
 (in-package #:luvcraft)
 
@@ -31,8 +31,6 @@
 
 (defconstant +player-body-equip-rate+ 7.0d0
   "How quickly a held item rises into view or drops out of it, per second.")
-(defconstant +player-body-brandish-rate+ 9.0d0
-  "How quickly a held item is raised to the centre of the view, per second.")
 (defconstant +player-body-bob-rate+ 9.0d0
   "Radians of walking bob per second at full walking speed.")
 
@@ -59,72 +57,44 @@ from the player."))
 
 (defgeneric hand-item-carry-pose (item body)
   (:documentation
-   "Where BODY holds ITEM when it is merely carried: (X Y Z PITCH YAW ROLL)
-of the grip in the view frame, before walking bob is added."))
+   "Where BODY holds ITEM: (X Y Z PITCH YAW ROLL) of the grip in the view
+frame, before walking bob is added."))
 
-(defgeneric hand-item-brandish-pose (item body)
+(defgeneric hand-item-taken-out (item body session)
+  (:documentation "Notify ITEM that BODY has just taken it in hand."))
+
+(defmethod hand-item-taken-out (item body session)
+  (declare (ignore item body session))
+  nil)
+
+(defgeneric hand-item-put-away (item body session)
+  (:documentation "Notify ITEM that BODY has just pocketed it."))
+
+(defmethod hand-item-put-away (item body session)
+  (declare (ignore item body session))
+  nil)
+
+(defgeneric advance-hand-item (item body seconds)
   (:documentation
-   "Where BODY holds ITEM when brandishing it, in the same shape as
-HAND-ITEM-CARRY-POSE."))
+   "Let ITEM ease its own state by SECONDS while BODY holds it."))
 
-;;; ---------------------------------------------------------------------
-;;; The phone.
-
-(defclass phone ()
-  ((screen-emission :initarg :screen-emission :initform 1.7
-                    :accessor phone-screen-emission))
-  (:documentation
-   "A comically large phone: a graphite slab with a lit screen on the face
-toward the player.  Its screen shows a wallpaper and a grid of app icons for
-now; a terminal on it is the obvious next thing (#IK8PIN)."))
-
-(defmethod hand-item-name ((item phone)) "phone")
-(defmethod hand-item-box-count ((item phone)) 4)
-
-(defmethod hand-item-carry-pose ((item phone) body)
-  (declare (ignore body))
-  ;; Down and to the right, screen tipped back toward the eye a little, the
-  ;; way a phone sits in a hand that is not really looking at it.
-  '(0.30d0 -0.38d0 0.62d0 -0.35d0 -0.28d0 0.10d0))
-
-(defmethod hand-item-brandish-pose ((item phone) body)
-  (declare (ignore body))
-  ;; Straight up in front of the face, screen square to the eye and close
-  ;; enough that it fills a good part of the view.
-  '(0.13d0 -0.27d0 0.50d0 -0.06d0 -0.10d0 0.0d0))
-
-(defmethod map-hand-item-boxes ((item phone) body function)
-  (declare (ignore body))
-  (let ((glow (phone-screen-emission item)))
-    ;; The slab: 0.24 wide, 0.50 tall, 0.05 deep, standing up out of the
-    ;; fist, which is the palm box the arm already draws at the origin.
-    (funcall function 0d0 0.29d0 0d0 0.120d0 0.250d0 0.025d0
-             +phone-body-tile+ :stretch-p t)
-    ;; The screen sits just proud of the face toward the player (-z), inset
-    ;; from the rim.  It is the one lit surface on the body.
-    (funcall function 0d0 0.29d0 -0.028d0 0.104d0 0.228d0 0.004d0
-             +phone-screen-tile+ :stretch-p t :emission glow)
-    ;; A camera bump on the back, high on the left as seen from behind.
-    (funcall function 0.065d0 0.47d0 0.032d0 0.035d0 0.045d0 0.008d0
-             +phone-body-tile+ :stretch-p t)
-    ;; A thumb up across the lower screen: this is what makes it *held*.
-    (funcall function 0.060d0 0.09d0 -0.042d0 0.024d0 0.058d0 0.020d0
-             +player-skin-tile+ :tilt '(0d0 0d0 0.35d0))))
+(defmethod advance-hand-item (item body seconds)
+  (declare (ignore item body seconds))
+  nil)
 
 ;;; ---------------------------------------------------------------------
 ;;; The body.
 
 (defclass player-body ()
   ((hand-item :initform nil :accessor player-body-hand-item)
+   ;; Items the body owns but is not holding.  A pocketed item keeps its
+   ;; state -- the phone keeps its shell -- and comes back out as it was.
+   (pocket :initform nil :accessor player-body-pocket)
    ;; How far the held item has come up into view, 0 (pocketed) to 1
-   ;; (carried).  Eased toward its target every frame so equipping is a
-   ;; motion rather than a cut.
+   ;; (held).  Eased toward its target every frame so taking something out
+   ;; is a motion rather than a cut.
    (equip-amount :initform 0d0 :type double-float
                  :accessor player-body-equip-amount)
-   (brandishing-p :initform nil :accessor player-body-brandishing-p)
-   ;; 0 (carried) to 1 (brandished), likewise eased.
-   (brandish-amount :initform 0d0 :type double-float
-                    :accessor player-body-brandish-amount)
    ;; The walking bob, accumulated from ground speed so standing still
    ;; stands still.
    (bob-phase :initform 0d0 :type double-float
@@ -136,28 +106,41 @@ now; a terminal on it is the obvious next thing (#IK8PIN)."))
    (clock :initform 0d0 :type double-float :accessor player-body-clock))
   (:documentation "The first-person body: two arms and what they hold."))
 
-(defun equip-hand-item (body item)
-  "Put ITEM in BODY's hand, or pocket the current item when ITEM is NIL.
+(defun put-away-hand-item (body session)
+  "Pocket whatever BODY holds and return it, or NIL when the hand was empty."
+  (let ((item (player-body-hand-item body)))
+    (when item
+      (setf (player-body-hand-item body) nil)
+      (pushnew item (player-body-pocket body))
+      (hand-item-put-away item body session)
+      (update-luvcraft-session-title session))
+    item))
 
-Equipping the item already held pockets it, so one key toggles."
-  (cond ((null item)
-         (setf (player-body-hand-item body) nil))
-        ((eq item (player-body-hand-item body))
-         (setf (player-body-hand-item body) nil))
-        (t
-         (setf (player-body-hand-item body) item
-               (player-body-brandishing-p body) nil)))
-  (player-body-hand-item body))
+(defun take-out-hand-item (body session item)
+  "Put ITEM in BODY's hand, pocketing whatever was there, and return it."
+  (unless (eq item (player-body-hand-item body))
+    (put-away-hand-item body session)
+    (setf (player-body-pocket body)
+          (remove item (player-body-pocket body))
+          (player-body-hand-item body) item)
+    (hand-item-taken-out item body session)
+    (update-luvcraft-session-title session))
+  item)
 
-(defun toggle-luvcraft-phone (session)
-  "Take the session's phone out, or put it away."
-  (let ((body (luvcraft-session-body session)))
-    (prog1 (equip-hand-item body (or (player-body-hand-item body)
-                                     (make-instance 'phone)))
-      (update-luvcraft-session-title session))))
+(defun toggle-hand-item (body session type)
+  "Take out BODY's item of TYPE -- from the pocket, or newly made -- or put
+it away when it is already the thing in hand.  Returns what is now held."
+  (let ((held (player-body-hand-item body)))
+    (if (typep held type)
+        (put-away-hand-item body session)
+        (take-out-hand-item body session
+                            (or (find-if (lambda (item) (typep item type))
+                                         (player-body-pocket body))
+                                (make-instance type))))
+    (player-body-hand-item body)))
 
 (defun advance-player-body (body session seconds)
-  "Ease BODY's held item, brandish, and walking bob by SECONDS."
+  "Ease BODY's held item and walking bob by SECONDS."
   (flet ((ease (current target rate)
            (let ((step (* rate seconds)))
              (cond ((> target current) (min target (+ current step)))
@@ -168,12 +151,8 @@ Equipping the item already held pockets it, so one key toggles."
           (ease (player-body-equip-amount body)
                 (if (player-body-hand-item body) 1d0 0d0)
                 +player-body-equip-rate+))
-    (setf (player-body-brandish-amount body)
-          (ease (player-body-brandish-amount body)
-                (if (and (player-body-hand-item body)
-                         (player-body-brandishing-p body))
-                    1d0 0d0)
-                +player-body-brandish-rate+))
+    (alexandria:when-let ((item (player-body-hand-item body)))
+      (advance-hand-item item body seconds))
     (let* ((player (luvcraft-session-player session))
            (speed
              (if (and player (player-grounded-p player))
@@ -293,8 +272,7 @@ orthonormal frame, so the face normals come out unit too."
   "Where SIDE's (:LEFT or :RIGHT) palm is in the view frame, and its tilt.
 
 Returns (X Y Z PITCH YAW ROLL).  The right hand is where a held item lives;
-the left just hangs into the corner of the view, closer to the eye when the
-right one is brandishing something so the shoulders read as turned."
+the left just hangs into the corner of the view."
   (let* ((clock (player-body-clock body))
          (bob-phase (player-body-bob-phase body))
          (bob (player-body-bob-amount body))
@@ -302,29 +280,39 @@ right one is brandishing something so the shoulders read as turned."
          (bob-x (* bob 0.020d0 (sin bob-phase)))
          (bob-y (* bob 0.028d0 (abs (sin bob-phase))))
          (item (player-body-hand-item body))
-         (equip (player-body-equip-amount body))
-         (brandish (player-body-brandish-amount body)))
+         (equip (player-body-equip-amount body)))
     (ecase side
       (:right
        (let* ((empty '(0.36d0 -0.40d0 0.60d0 -0.30d0 -0.35d0 0.20d0))
               (pocket '(0.40d0 -0.72d0 0.55d0 -0.60d0 -0.35d0 0.20d0))
               (pose (if item
-                        (lerp-pose pocket
-                                   (lerp-pose (hand-item-carry-pose item body)
-                                              (hand-item-brandish-pose item body)
-                                              brandish)
+                        (lerp-pose pocket (hand-item-carry-pose item body)
                                    equip)
                         (lerp-pose pocket empty (- 1d0 equip)))))
          (destructuring-bind (x y z pitch yaw roll) pose
            (list (+ x bob-x) (+ y bob-y breathe) z
                  (+ pitch (* bob 0.05d0 (sin bob-phase))) yaw roll))))
       (:left
-       (let ((pose (lerp-pose '(-0.36d0 -0.40d0 0.60d0 -0.30d0 0.35d0 -0.20d0)
-                              '(-0.30d0 -0.44d0 0.50d0 -0.20d0 0.55d0 -0.30d0)
-                              brandish)))
-         (destructuring-bind (x y z pitch yaw roll) pose
-           (list (- x bob-x) (+ y (* 0.7d0 bob-y) (- breathe)) z
-                 (- pitch (* bob 0.05d0 (sin bob-phase))) yaw roll)))))))
+       (destructuring-bind (x y z pitch yaw roll)
+           '(-0.36d0 -0.40d0 0.60d0 -0.30d0 0.35d0 -0.20d0)
+         (list (- x bob-x) (+ y (* 0.7d0 bob-y) (- breathe)) z
+               (- pitch (* bob 0.05d0 (sin bob-phase))) yaw roll))))))
+
+(defun player-body-grip-frame (session)
+  "The world-space frame of the right hand's grip this frame.
+
+Returns the palm point and the unit RIGHT, UP, and FORWARD of the grip.  A
+held item's boxes are placed in this frame, and a display drawn on a held
+item (the phone's terminal) expresses the camera in it."
+  (let ((camera (luvcraft-session-camera session))
+        (body (luvcraft-session-body session)))
+    (multiple-value-bind (right up forward) (camera-basis camera)
+      (destructuring-bind (x y z pitch yaw roll)
+          (player-body-hand-pose body :right)
+        (multiple-value-bind (grip-right grip-up grip-forward)
+            (rotate-frame right up forward pitch yaw roll)
+          (values (frame-point (camera-position camera) right up forward x y z)
+                  grip-right grip-up grip-forward))))))
 
 (defun emit-player-arm
     (vertices eye right up forward pose sign sky block)
@@ -383,25 +371,23 @@ at its end."
           (emit-player-arm vertices eye right up forward right-pose 1 sky block)
           (let ((item (player-body-hand-item body)))
             (when item
-              (destructuring-bind (x y z pitch yaw roll) right-pose
-                (multiple-value-bind (grip-right grip-up grip-forward)
-                    (rotate-frame right up forward pitch yaw roll)
-                  (let ((palm (frame-point eye right up forward x y z)))
-                    (map-hand-item-boxes
-                     item body
-                     (lambda (bx by bz half-x half-y half-z tile
-                              &key (tilt '(0d0 0d0 0d0)) stretch-p
-                                (emission 0.0))
-                       (multiple-value-bind (box-right box-up box-forward)
-                           (apply #'rotate-frame
-                                  grip-right grip-up grip-forward tilt)
-                         (emit-framed-box
-                          vertices
-                          (frame-point palm grip-right grip-up grip-forward
-                                       bx by bz)
-                          box-right box-up box-forward
-                          half-x half-y half-z tile
-                          sky block emission stretch-p))))))))))))
+              (multiple-value-bind (palm grip-right grip-up grip-forward)
+                  (player-body-grip-frame session)
+                (map-hand-item-boxes
+                 item body
+                 (lambda (bx by bz half-x half-y half-z tile
+                          &key (tilt '(0d0 0d0 0d0)) stretch-p
+                            (emission 0.0))
+                   (multiple-value-bind (box-right box-up box-forward)
+                       (apply #'rotate-frame
+                              grip-right grip-up grip-forward tilt)
+                     (emit-framed-box
+                      vertices
+                      (frame-point palm grip-right grip-up grip-forward
+                                   bx by bz)
+                      box-right box-up box-forward
+                      half-x half-y half-z tile
+                      sky block emission stretch-p))))))))))
     vertices))
 
 (defun player-body-vertices (session)

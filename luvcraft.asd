@@ -64,6 +64,7 @@
                  (:file "render")
                  (:file "play")
                  (:file "terminal-wall")
+                 (:file "phone")
                  (:file "capture")
                  (:file "benchmark")
                  (:file "gazetteer"))))

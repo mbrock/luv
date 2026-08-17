@@ -407,8 +407,7 @@ return its attached overlay."))
 
 (defun clear-luvcraft-player-input (session)
   (clrhash (luvcraft-session-pressed-keys session))
-  (setf (luvcraft-session-jump-requested-p session) nil
-        (player-body-brandishing-p (luvcraft-session-body session)) nil)
+  (setf (luvcraft-session-jump-requested-p session) nil)
   (when (luvcraft-session-pointer-captured-p session)
     (set-canvas-relative-pointer-mode
      (luvcraft-session-canvas session) nil)
@@ -595,7 +594,7 @@ the terrain the ray meets first is what the player is looking at."
     (when (slot-boundp session 'canvas)
       (setf (canvas-title (luvcraft-session-canvas session))
             (format nil
-                    "~A — [~A] ~(~A~)~@[  ·  holding ~A~]  ·  1–~D select  ·  I inventory  ·  F phone  ·  G brandish  ·  shift sprint  ·  tab focus"
+                    "~A — [~A] ~(~A~)~@[  ·  holding ~A~]  ·  1–~D select  ·  I inventory  ·  F phone  ·  shift sprint  ·  tab focus"
                     (luvcraft-session-title-base session)
                     (if number (1+ number) "inventory")
                     (block-kind-name block)

@@ -60,7 +60,7 @@ above it (blocks, terrain, meshing, simulation, and the application files):
 - a lattice DDA ray stops distinctly at a hit, a resident miss, or absent
   terrain; an outlined Vulkan crosshair shows that ray, left and right clicks
   remove and place, middle click picks, number keys select placeable
-  materials, and F takes out a phone which G brandishes (#S27JKR);
+  materials, and F takes out a phone with a shell on it (#S27JKR, #IK8PIN);
 - a separate player AABB advances at fixed 120 Hz against the voxel lattice,
   with gravity, grounding, wall collision, acceleration, and jumping; the eye
   camera follows the body while relative pointer input controls its view and
@@ -550,41 +550,53 @@ standing square to the lens.  Walking bobs the hands on a phase accumulated
 from ground speed, so standing still stands still, and a breath moves them
 when nothing else does.
 
-A hand can hold something.  The held-item protocol is four generic
+A hand can hold something.  The held-item protocol is a few generic
 functions -- map-hand-item-boxes for the item's boxes in the grip frame,
-hand-item-carry-pose and hand-item-brandish-pose for where the right hand
-takes it, hand-item-name for the title -- and the body eases between
-pocket, carry, and brandish rather than cutting, so taking a thing out is a
-motion.  F takes the phone out or puts it away; holding G brandishes it.
+hand-item-carry-pose for where the right hand holds it, hand-item-name for
+the title, hand-item-taken-out and hand-item-put-away for what the item
+does about being held -- and the body eases between pocket and hand rather
+than cutting, so taking a thing out is a motion.  F takes the phone out or
+puts it away; a pocketed item keeps its state.
 
-The first thing to hold is a phone, because it is funny: a slab of
-near-black glass a little too large for the hand, with a lit screen (its
-own emission on the vertex, so it blooms a little in the dark) showing a
-wallpaper and a grid of app icons.  Brandished, it comes up square in front
-of the face and fills a good part of the view, the way everyone holds
-theirs.  It is nearly a wall terminal (#8JCMA5) you can carry, and that is
-the point of it.
-
-** NEXT Put a terminal on the phone
+** The phone is a wall terminal you can carry
 :PROPERTIES:
 :ID: IK8PIN
 :END:
 
-*Intent.*  The phone's screen is a painted tile.  The wall terminal already
-knows how to lay a font grid over a rectangle and keep it current from a
-PTY; the phone should show the same thing, so a shell can be carried
-around the world and read while walking.
+The first thing to hold is a phone, because it is funny: a slab of
+near-black glass a little too large for the hand, held up in front of the
+face the way everyone holds theirs, and on it a live shell.  It is not a
+new kind of screen.  [[file:../luvcraft/phone.lisp][phone.lisp]] builds
+the very display TERMINAL-WALL.LISP builds for a wall (#8JCMA5) --
+Ghostty terminal, PTY, Slug glyph run, cell backgrounds, screen panel,
+faceplate glass -- on a surface of its own kind.
 
-*Evidence.*  The glyph placement in terminal-wall.lisp is written against a
-terminal-surface, which is a rectangle of world blocks with an axis-aligned
-face frame; the phone's screen is a rectangle in the grip frame that moves
-every frame.  What is needed is the placement generalized to an arbitrary
-origin, right, and up, and a glyph run whose instances are rewritten each
-frame the way the body's vertices already are, rather than only when the
-text changes.
+The trick is where that surface lives.  A wall's surface is a rectangle of
+blocks in world space.  The phone's is a rectangle in the *grip frame*, the
+right hand's own coordinate space, where the screen never moves.  What
+moves is the hand, and therefore, seen from the phone, the camera: each
+frame the display draws against a frame uniform whose camera lanes are the
+real camera re-expressed in grip coordinates.  Nothing about the runs is
+rebuilt for motion.  The same glyph instances that were right last frame
+are right this frame, because in their own space nothing happened.  The
+projection and near and far planes are the real ones, so depth is honest
+against the scene and the phone's own slab.  This took only making the
+surface a protocol (terminal-surface-axes, the lower-left point, physical
+width and height, currency, focus score, focus camera pose) and letting a
+display say which uniform it draws against.
 
-*Done when.*  Holding G with the phone out shows a live shell on it, and a
-screenshot of the brandished phone is readable.
+Focus is the same transition as a wall's: TAB with the phone out enters
+its shell and keys go to the PTY; shift-TAB leaves.  The phone offers no
+camera pose of its own, so the camera stays where the player left it and
+only the field of view narrows; the hand answers instead, easing the phone
+square to the centre of the view and a little further off, where the
+narrowed view frames the whole screen.  Putting the phone away pockets it
+with its shell still running.
+
+The wall's three modes -- shell, film, browser -- are not what the phone
+inherited; it is a shell and only a shell.  That mode switch is a kludge
+waiting to be redesigned from the ground up, and when it is, the phone
+should be one of the things it is redesigned for.
 
 * The sequence that stays fun
 :PROPERTIES:

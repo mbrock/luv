@@ -98,39 +98,50 @@
 The environment lanes which complete the block are packed by
 FRAME-UNIFORM-DATA from the session's sky clock and profile."
   (multiple-value-bind (right up forward) (camera-basis camera)
-    (let* ((near +luvcraft-camera-near-distance+)
-           (far +luvcraft-camera-far-distance+)
-           (focal (/ (tan (/ (camera-field-of-view camera) 2.0))))
-           (aspect (/ (coerce width 'single-float) height))
-           (projection
-             (make-vec3 (/ focal aspect) focal (/ far (- far near)))))
-      (flet ((uniform-lane (vector fourth)
-               (list (coerce (vec3-x vector) 'single-float)
-                     (coerce (vec3-y vector) 'single-float)
-                     (coerce (vec3-z vector) 'single-float)
-                     (coerce fourth 'single-float))))
-        (let* ((data
-                 (make-array
-                  20 :element-type 'single-float
-                  :initial-contents
-                  (append (uniform-lane (camera-position camera) 0.0)
-                          (uniform-lane right 0.0)
-                          (uniform-lane up 0.0)
-                          (uniform-lane forward 0.0)
-                          (uniform-lane
-                           projection (/ (- (* far near)) (- far near))))))
-               (declaration
-                 (luv.arithmetic:value-declaration-for
-                  :camera-uniform-data)))
-          (unless (typep
-                   data
-                   (luv.arithmetic:declaration-representation-type
-                    declaration))
-            (error "Camera uniform data ~S does not satisfy ~S."
-                   (type-of data)
-                   (luv.arithmetic:declaration-representation-type
-                    declaration)))
-          data)))))
+    (camera-lanes-uniform-data (camera-position camera) right up forward
+                               (camera-field-of-view camera) width height)))
+
+(defun camera-lanes-uniform-data
+    (position right up forward field-of-view width height)
+  "Pack the five camera lanes for an eye at POSITION with the unit basis
+RIGHT UP FORWARD, in whatever coordinate space those are given in.
+
+The ordinary camera packs its own pose through this; a display drawn in a
+space of its own (a phone screen in the hand) packs the same camera
+re-expressed in that space."
+  (let* ((near +luvcraft-camera-near-distance+)
+         (far +luvcraft-camera-far-distance+)
+         (focal (/ (tan (/ field-of-view 2.0))))
+         (aspect (/ (coerce width 'single-float) height))
+         (projection
+           (make-vec3 (/ focal aspect) focal (/ far (- far near)))))
+    (flet ((uniform-lane (vector fourth)
+             (list (coerce (vec3-x vector) 'single-float)
+                   (coerce (vec3-y vector) 'single-float)
+                   (coerce (vec3-z vector) 'single-float)
+                   (coerce fourth 'single-float))))
+      (let* ((data
+               (make-array
+                20 :element-type 'single-float
+                :initial-contents
+                (append (uniform-lane position 0.0)
+                        (uniform-lane right 0.0)
+                        (uniform-lane up 0.0)
+                        (uniform-lane forward 0.0)
+                        (uniform-lane
+                         projection (/ (- (* far near)) (- far near))))))
+             (declaration
+               (luv.arithmetic:value-declaration-for
+                :camera-uniform-data)))
+        (unless (typep
+                 data
+                 (luv.arithmetic:declaration-representation-type
+                  declaration))
+          (error "Camera uniform data ~S does not satisfy ~S."
+                 (type-of data)
+                 (luv.arithmetic:declaration-representation-type
+                  declaration)))
+        data))))
 
 (defun copy-camera-position (position)
   (make-vec3 (vec3-x position) (vec3-y position) (vec3-z position)))

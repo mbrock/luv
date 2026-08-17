@@ -165,13 +165,16 @@
              (- 0.5 (/ (vec3-dot center forward) (* 2.0 depth-radius))))
        '(0.0 0.0 0.0 1.0)))))
 
-(defun frame-uniform-data (session width height)
+(defun frame-uniform-data (session width height &key camera-lanes)
   "Pack the frame environment: camera lanes plus the evaluated sky.
 
 Lane order must match *FRAME-UNIFORM-MEMBERS* exactly; the construction-time
-check in BLOCK-WORLD-CAMERA-UNIFORM-SIZE keeps the two honest."
-  (let* ((camera-lanes (camera-uniform-data
-                        (luvcraft-session-camera session) width height))
+check in BLOCK-WORLD-CAMERA-UNIFORM-SIZE keeps the two honest.  CAMERA-LANES
+may replace the session camera's own five lanes with a camera expressed in
+some other space; the environment lanes are packed the same either way."
+  (let* ((camera-lanes (or camera-lanes
+                           (camera-uniform-data
+                            (luvcraft-session-camera session) width height)))
          (sky (sky-frame-parameters (luvcraft-session-sky-clock session)
                                     (luvcraft-session-sky-profile session)))
          (data (make-array (+ (length camera-lanes) 52)
@@ -1167,13 +1170,9 @@ submission that used them completes."
           (when (and (eq key :space)
                      (not (canvas-key-event-repeat-p event)))
             (setf (luvcraft-session-jump-requested-p session) t))
-          ;; F takes the phone out or puts it away; holding G brandishes
-          ;; whatever the hand holds.
+          ;; F takes the phone out or puts it away.
           (when (and (eq key :f) (not (canvas-key-event-repeat-p event)))
             (toggle-luvcraft-phone session))
-          (when (eq key :g)
-            (setf (player-body-brandishing-p (luvcraft-session-body session))
-                  t))
           (unless (canvas-key-event-repeat-p event)
             (let* ((character (canvas-key-event-character event))
                    (number (and character (digit-char-p character))))
@@ -1195,8 +1194,6 @@ submission that used them completes."
     (return-from handle-canvas-event nil))
   (remhash (canvas-key-event-key-name event)
            (luvcraft-session-pressed-keys session))
-  (when (eq :g (canvas-key-event-key-name event))
-    (setf (player-body-brandishing-p (luvcraft-session-body session)) nil))
   nil)
 
 (defmethod handle-canvas-event

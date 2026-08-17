@@ -838,17 +838,16 @@ and a dock row at the bottom."
   (block-atlas-byte (if (evenp (floor x 2)) 150 106)))
 
 (defmethod paint-block-atlas-relief ((tile (eql 28)) x y)
-  "Phone body: flat, with a raised chamfer at the rim."
+  "Phone body: brushed flat, with a raised chamfer at the rim."
   (if (or (zerop x) (zerop y)
           (= x (1- +block-atlas-tile-size+))
           (= y (1- +block-atlas-tile-size+)))
       160
-      128))
+      (+ 127 (mod y 3))))
 
 (defmethod paint-block-atlas-relief ((tile (eql 29)) x y)
-  "Phone screen: glass, perfectly flat."
-  (declare (ignore x y))
-  128)
+  "Phone screen: glass, flat but for the faintest bow across the pane."
+  (+ 126 (floor (+ x y) 8)))
 
 (defun make-block-texture-atlas ()
   "Return the little world's horizontal RGBA8 atlas as packed pixel words.

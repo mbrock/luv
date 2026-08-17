@@ -245,18 +245,22 @@ compiler which closes a program over bound fields into a scalar loop.")
            ;; The first-person body and what it holds (BODY.LISP).
            #:player-body
            #:player-body-hand-item
-           #:player-body-brandishing-p
+           #:player-body-pocket
            #:player-body-vertices
            #:luvcraft-session-body
            #:hand-item-name
            #:hand-item-box-count
            #:hand-item-carry-pose
-           #:hand-item-brandish-pose
+           #:hand-item-taken-out
+           #:hand-item-put-away
            #:map-hand-item-boxes
-           #:equip-hand-item
+           #:take-out-hand-item
+           #:put-away-hand-item
+           #:toggle-hand-item
            #:toggle-luvcraft-phone
            #:phone
-           #:phone-screen-emission
+           #:phone-display
+           #:phone-terminal-display
            #:world-terrain-solid-p
            #:edit-block-at
            #:edit-block-world-source
