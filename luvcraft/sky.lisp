@@ -77,6 +77,8 @@ SLY can pause it, set a time, change its rate, or pin it without restarting.")
                      :quantity (:quantity :sun-angular-width :unit :radian))
   (exposure 1.0 :type single-float
             :quantity (:quantity :exposure :unit :one))
+  (cloudiness 0.5 :type single-float
+              :quantity (:quantity :cloudiness :unit :one))
   (fog-near 0.0 :type single-float
             :quantity (:quantity :view-distance :unit :cell))
   (fog-far 180.0 :type single-float
@@ -158,6 +160,8 @@ SLY can pause it, set a time, change its rate, or pin it without restarting.")
                         :tensor-order 1))
   (exposure 1.0 :type single-float
             :quantity (:quantity :exposure :unit :one))
+  (cloudiness 0.5 :type single-float
+              :quantity (:quantity :cloudiness :unit :one))
   (fog-near 0.0 :type single-float
             :quantity (:quantity :view-distance :unit :cell))
   (fog-far 180.0 :type single-float
@@ -257,6 +261,9 @@ even at noon."
                                   (sky-keyframe-fog-color end) progress)
        :exposure (sky-lerp (sky-keyframe-exposure start)
                            (sky-keyframe-exposure end) progress)
+       :cloudiness (coerce (sky-lerp (sky-keyframe-cloudiness start)
+                                     (sky-keyframe-cloudiness end) progress)
+                           'single-float)
        :fog-near (sky-lerp (sky-keyframe-fog-near start)
                            (sky-keyframe-fog-near end) progress)
        :fog-far (sky-lerp (sky-keyframe-fog-far start)
@@ -264,9 +271,11 @@ even at noon."
 
 (defun make-default-sky-profile ()
   "A clear-day profile whose noon matches the world's original literals."
-  (flet ((keyframe (time zenith horizon sun ambient fog &key (width 0.006))
+  (flet ((keyframe (time zenith horizon sun ambient fog
+                    &key (width 0.006) (cloudiness 0.5))
            (make-sky-keyframe
             :day-fraction time
+            :cloudiness (coerce cloudiness 'single-float)
             :zenith-color (coerce (mapcar (lambda (c)
                                             (coerce c 'single-float))
                                           zenith)

@@ -106,6 +106,13 @@
   :non-negative-p t)
 (math:define-quantity :monotonic-frame-time :kind :duration
   :character :point)
+;;; The sky's own clock: a bounded elapsed time the cloud deck drifts with.
+;;; It is a point on a wrapped timeline rather than a duration measured
+;;; between two events, which is why it is not :FRAME-DURATION.
+(math:define-quantity :sky-time :kind :duration
+  :character :point)
+(math:define-quantity :cloudiness :kind :proportion
+  :non-negative-p t)
 (math:define-quantity :camera-yaw :kind :angular-measure
   :character :point)
 (math:define-quantity :camera-pitch :kind :angular-measure

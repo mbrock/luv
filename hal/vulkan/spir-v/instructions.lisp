@@ -433,7 +433,13 @@
 (define-enumeration glsl-std-450
   (f-abs 4)
   (f-sign 6)
+  (floor 8)
+  (fract 10)
+  (sin 13)
+  (cos 14)
   (pow 26)
+  (exp 27)
+  (log 28)
   (sqrt 31)
   (f-min 37)
   (f-max 40)

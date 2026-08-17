@@ -108,6 +108,28 @@
    (shadow-layout :initarg :shadow-layout
                   :reader luvcraft-session-shadow-layout)
    (post-layout :initarg :post-layout :reader luvcraft-session-post-layout)
+   (bloom-layout :initarg :bloom-layout :initform nil
+                 :reader luvcraft-session-bloom-layout)
+   (linear-sampler :initarg :linear-sampler :initform nil
+                   :reader luvcraft-session-linear-sampler)
+   ;; The lens chain ping-pongs between two reduced attachments: the blurred
+   ;; bloom ends on the primary one and the light shafts on the secondary.
+   (bloom-primary-texture :initarg :bloom-primary-texture :initform nil
+                          :reader luvcraft-session-bloom-primary-texture)
+   (bloom-primary-view :initarg :bloom-primary-view :initform nil
+                       :reader luvcraft-session-bloom-primary-view)
+   (bloom-secondary-texture :initarg :bloom-secondary-texture :initform nil
+                            :reader luvcraft-session-bloom-secondary-texture)
+   (bloom-secondary-view :initarg :bloom-secondary-view :initform nil
+                         :reader luvcraft-session-bloom-secondary-view)
+   (bloom-bright-pipeline :initarg :bloom-bright-pipeline :initform nil
+                          :reader luvcraft-session-bloom-bright-pipeline)
+   (bloom-horizontal-pipeline :initarg :bloom-horizontal-pipeline :initform nil
+                              :reader luvcraft-session-bloom-horizontal-pipeline)
+   (bloom-vertical-pipeline :initarg :bloom-vertical-pipeline :initform nil
+                            :reader luvcraft-session-bloom-vertical-pipeline)
+   (sun-shaft-pipeline :initarg :sun-shaft-pipeline :initform nil
+                       :reader luvcraft-session-sun-shaft-pipeline)
    (block-pipeline :initarg :block-pipeline
                    :reader luvcraft-session-block-pipeline)
    (shadow-pipeline :initarg :shadow-pipeline
@@ -445,6 +467,12 @@ mounting a vehicle, and other interactions described by #8JCMA5."
   (refresh-live-shader-pipeline (luvcraft-session-sky-pipeline session))
   (refresh-live-shader-pipeline (luvcraft-session-crosshair-pipeline session))
   (refresh-live-shader-pipeline (luvcraft-session-post-pipeline session))
+  (dolist (pipeline (list (luvcraft-session-bloom-bright-pipeline session)
+                          (luvcraft-session-bloom-horizontal-pipeline session)
+                          (luvcraft-session-bloom-vertical-pipeline session)
+                          (luvcraft-session-sun-shaft-pipeline session)))
+    (when pipeline
+      (refresh-live-shader-pipeline pipeline)))
   (when (luvcraft-session-world-text session)
     (refresh-live-shader-pipeline
      (world-text-run-pipeline (luvcraft-session-world-text session))))

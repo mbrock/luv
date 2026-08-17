@@ -19,6 +19,15 @@
                         :reader luvcraft-frame-post-uniform-buffer)
    (post-bind-group :initarg :post-bind-group
                     :reader luvcraft-frame-post-bind-group)
+   ;; The lens chain reads three different sources through one layout: the
+   ;; scene once, then each reduced attachment in turn.
+   (bloom-scene-bind-group :initarg :bloom-scene-bind-group :initform nil
+                           :reader luvcraft-frame-bloom-scene-bind-group)
+   (bloom-primary-bind-group :initarg :bloom-primary-bind-group :initform nil
+                             :reader luvcraft-frame-bloom-primary-bind-group)
+   (bloom-secondary-bind-group :initarg :bloom-secondary-bind-group
+                               :initform nil
+                               :reader luvcraft-frame-bloom-secondary-bind-group)
    (world-text-bind-groups :initarg :world-text-bind-groups :initform #()
                            :reader luvcraft-frame-world-text-bind-groups)))
 
@@ -167,8 +176,12 @@ check in BLOCK-WORLD-CAMERA-UNIFORM-SIZE keeps the two honest."
                (incf index)))
            (color (vector) (coerce vector 'list)))
       (let ((sun (sky-frame-parameters-sun-direction sky)))
+        ;; The sky's cloud deck drifts, so the frame environment carries a
+        ;; bounded elapsed time alongside the fog band it shares a lane with.
         (emit (sky-frame-parameters-fog-near sky)
-              (sky-frame-parameters-fog-far sky) 0.0 0.0)
+              (sky-frame-parameters-fog-far sky)
+              (mod (or (luvcraft-session-last-frame-time session) 0d0) 3600d0)
+              (sky-frame-parameters-cloudiness sky))
         (emit (vec3-x sun) (vec3-y sun) (vec3-z sun)
               (sky-frame-parameters-day-factor sky))
         (apply #'emit (append (color (sky-frame-parameters-sun-color sky))
@@ -228,6 +241,9 @@ check in BLOCK-WORLD-CAMERA-UNIFORM-SIZE keeps the two honest."
 (defparameter *luvcraft-bloom-threshold* 1.05
   "Luminance at which a fragment starts contributing to the bloom chain.")
 
+(defparameter *luvcraft-shaft-decay* 0.955
+  "Per-tap attenuation along a light shaft; nearer one reaches further.")
+
 (defun luvcraft-sun-screen-position (camera sky width height)
   "The sun's presentation UV and how strongly it counts as on screen.
 
@@ -260,20 +276,26 @@ check in LUVCRAFT-POST-UNIFORM-SIZE keeps the two honest."
                                     (luvcraft-session-sky-profile session))))
     (multiple-value-bind (sun-u sun-v sun-weight)
         (luvcraft-sun-screen-position camera sky width height)
-      (make-array
-       12 :element-type 'single-float
-       :initial-contents
-       (mapcar
-        (lambda (value) (coerce value 'single-float))
-        (list (/ 1.0 width) (/ 1.0 height)
-              (if (luvcraft-session-modal-focus session) 1.0 0.0)
-              (* *luvcraft-exposure* (sky-frame-parameters-exposure sky))
-              *luvcraft-bloom-gain*
-              (* *luvcraft-shaft-gain* sun-weight)
-              *luvcraft-vignette*
-              *luvcraft-bloom-threshold*
-              sun-u sun-v sun-weight
-              (/ (coerce width 'single-float) height)))))))
+      (let ((bloom-extent (luvcraft-bloom-extent (list width height)))
+            (elapsed (or (luvcraft-session-last-frame-time session) 0d0)))
+        (make-array
+         16 :element-type 'single-float
+         :initial-contents
+         (mapcar
+          (lambda (value) (coerce value 'single-float))
+          (list (/ 1.0 width) (/ 1.0 height)
+                (if (luvcraft-session-modal-focus session) 1.0 0.0)
+                (* *luvcraft-exposure* (sky-frame-parameters-exposure sky))
+                *luvcraft-bloom-gain*
+                (* *luvcraft-shaft-gain* sun-weight)
+                *luvcraft-vignette*
+                *luvcraft-bloom-threshold*
+                sun-u sun-v sun-weight
+                (/ (coerce width 'single-float) height)
+                (/ 1.0 (first bloom-extent))
+                (/ 1.0 (second bloom-extent))
+                *luvcraft-shaft-decay*
+                (mod elapsed 3600d0))))))))
 
 (defun luvcraft-post-uniform-size (session)
   "The presentation buffer byte size derived from the shader-visible block."
@@ -360,6 +382,37 @@ the frame uniform cannot silently diverge between shader and host."
   (push resource (luvcraft-session-resources session))
   resource)
 
+(defun make-luvcraft-bloom-bind-group (session uniform-buffer view label)
+  "Bind one lens-chain source: a sampled texture, linear filter, uniforms."
+  (create
+   (luvcraft-session-device session)
+   (make-bind-group-descriptor
+    :label label
+    :layout (luvcraft-session-bloom-layout session)
+    :entries `((:binding 0 :resource ,view)
+               (:binding 1
+                :resource ,(luvcraft-session-linear-sampler session))
+               (:binding 2 :resource ,uniform-buffer)))))
+
+(defun luvcraft-bloom-extent (extent)
+  "The reduced attachment size the lens chain runs at, at least one texel."
+  (list (max 1 (floor (first extent) +luvcraft-bloom-divisor+))
+        (max 1 (floor (second extent) +luvcraft-bloom-divisor+))))
+
+(defun make-luvcraft-lens-pipeline (device layout role label)
+  "One fullscreen lens-chain stage, named by the fragment method it runs."
+  (make-live-shader-pipeline
+   :role role
+   :vertex-role :focus-post
+   :label label
+   :device device :layout layout
+   :vertex-buffers
+   '((:array-stride 12
+      :attributes ((:shader-location 0 :offset 0 :format :float32x3))))
+   :target-format +luvcraft-bloom-color-format+
+   :primitive '(:topology :triangle-list)
+   :depth-stencil nil))
+
 (defun luvcraft-frame-state (session surface-texture)
   (let ((key
           (canvas-frame-resource-key
@@ -370,6 +423,9 @@ the frame uniform cannot silently diverge between shader and host."
             (shadow-bind-group nil)
             (post-uniform-buffer nil)
             (post-bind-group nil)
+            (bloom-scene-bind-group nil)
+            (bloom-primary-bind-group nil)
+            (bloom-secondary-bind-group nil)
             (world-text-bind-groups #())
             (completed-p nil))
         (unwind-protect
@@ -427,10 +483,33 @@ the frame uniform cannot silently diverge between shader and host."
                        `((:binding 0
                           :resource ,(luvcraft-session-color-view session))
                          (:binding 1
-                          :resource ,(luvcraft-session-atlas-sampler session))
+                          :resource ,(luvcraft-session-linear-sampler session))
                          (:binding 2
                           :resource ,(luvcraft-session-depth-view session))
-                         (:binding 3 :resource ,post-uniform-buffer))))
+                         (:binding 3 :resource ,post-uniform-buffer)
+                         (:binding 4
+                          :resource ,(luvcraft-session-bloom-primary-view
+                                       session))
+                         (:binding 5
+                          :resource ,(luvcraft-session-bloom-secondary-view
+                                       session))
+                         (:binding 6
+                          :resource ,(luvcraft-session-atlas-sampler session)))))
+                     bloom-scene-bind-group
+                     (make-luvcraft-bloom-bind-group
+                      session post-uniform-buffer
+                      (luvcraft-session-color-view session)
+                      "block world bloom scene bindings")
+                     bloom-primary-bind-group
+                     (make-luvcraft-bloom-bind-group
+                      session post-uniform-buffer
+                      (luvcraft-session-bloom-primary-view session)
+                      "block world bloom primary bindings")
+                     bloom-secondary-bind-group
+                     (make-luvcraft-bloom-bind-group
+                      session post-uniform-buffer
+                      (luvcraft-session-bloom-secondary-view session)
+                      "block world bloom secondary bindings")
                      world-text-bind-groups
                      (if (luvcraft-session-world-text session)
                          (make-world-text-frame-bind-groups
@@ -442,6 +521,9 @@ the frame uniform cannot silently diverge between shader and host."
                (remember-luvcraft-resource session shadow-bind-group)
                (remember-luvcraft-resource session post-uniform-buffer)
                (remember-luvcraft-resource session post-bind-group)
+               (remember-luvcraft-resource session bloom-scene-bind-group)
+               (remember-luvcraft-resource session bloom-primary-bind-group)
+               (remember-luvcraft-resource session bloom-secondary-bind-group)
                (dolist (group
                          (remove-duplicates
                           (coerce world-text-bind-groups 'list) :test #'eq))
@@ -454,6 +536,9 @@ the frame uniform cannot silently diverge between shader and host."
                         :shadow-bind-group shadow-bind-group
                         :post-uniform-buffer post-uniform-buffer
                         :post-bind-group post-bind-group
+                        :bloom-scene-bind-group bloom-scene-bind-group
+                        :bloom-primary-bind-group bloom-primary-bind-group
+                        :bloom-secondary-bind-group bloom-secondary-bind-group
                         :world-text-bind-groups world-text-bind-groups)))
                  (setf (gethash key
                                 (luvcraft-session-frame-states session))
@@ -467,6 +552,10 @@ the frame uniform cannot silently diverge between shader and host."
               (destroy group))
             (when shadow-bind-group (destroy shadow-bind-group))
             (when scene-bind-group (destroy scene-bind-group))
+            (when bloom-scene-bind-group (destroy bloom-scene-bind-group))
+            (when bloom-primary-bind-group (destroy bloom-primary-bind-group))
+            (when bloom-secondary-bind-group
+              (destroy bloom-secondary-bind-group))
             (when post-bind-group (destroy post-bind-group))
             (when post-uniform-buffer (destroy post-uniform-buffer))
             (when buffer (destroy buffer))))))))
@@ -642,6 +731,43 @@ the frame uniform cannot silently diverge between shader and host."
                        :texture-binding)
       (prepare-texture encoder (luvcraft-session-depth-texture session)
                        :texture-binding)
+      ;; The lens chain: bright pass, separable blur, radial sun sweep.  Each
+      ;; stage is one fullscreen triangle over the reduced attachment pair,
+      ;; leaving the blurred bloom in the primary and the shafts in the
+      ;; secondary for presentation to add back.
+      (flet ((lens-stage (pipeline bind-group view texture)
+               (let ((pass
+                       (begin-render-pass
+                        encoder
+                        (make-render-pass-descriptor
+                         :color-attachments
+                         `((:view ,view :load-op :clear :store-op :store
+                            :clear-value #(0.0 0.0 0.0 1.0)))
+                         :depth-stencil-attachment nil))))
+                 (set-pipeline pass (live-shader-pipeline-native-pipeline
+                                     pipeline))
+                 (set-bind-group pass 0 bind-group)
+                 (set-vertex-buffer
+                  pass 0 (luvcraft-session-sky-vertex-buffer session))
+                 (draw pass 3)
+                 (end-pass pass))
+               (prepare-texture encoder texture :texture-binding)))
+        (let ((primary-view (luvcraft-session-bloom-primary-view session))
+              (primary (luvcraft-session-bloom-primary-texture session))
+              (secondary-view (luvcraft-session-bloom-secondary-view session))
+              (secondary (luvcraft-session-bloom-secondary-texture session)))
+          (lens-stage (luvcraft-session-bloom-bright-pipeline session)
+                      (luvcraft-frame-bloom-scene-bind-group frame)
+                      primary-view primary)
+          (lens-stage (luvcraft-session-bloom-horizontal-pipeline session)
+                      (luvcraft-frame-bloom-primary-bind-group frame)
+                      secondary-view secondary)
+          (lens-stage (luvcraft-session-bloom-vertical-pipeline session)
+                      (luvcraft-frame-bloom-secondary-bind-group frame)
+                      primary-view primary)
+          (lens-stage (luvcraft-session-sun-shaft-pipeline session)
+                      (luvcraft-frame-bloom-primary-bind-group frame)
+                      secondary-view secondary)))
       (let ((pass
               (begin-render-pass
                encoder
@@ -939,6 +1065,33 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                     (keep
                      (create device (make-texture-view-descriptor
                                      :texture depth-texture))))
+                  (bloom-extent (luvcraft-bloom-extent extent))
+                  (bloom-primary-texture
+                    (keep
+                     (create
+                      device
+                      (make-texture-descriptor
+                       :label "block world bloom primary"
+                       :size bloom-extent :dimensions :2d
+                       :format +luvcraft-bloom-color-format+
+                       :usage '(:render-attachment :texture-binding)))))
+                  (bloom-primary-view
+                    (keep
+                     (create device (make-texture-view-descriptor
+                                     :texture bloom-primary-texture))))
+                  (bloom-secondary-texture
+                    (keep
+                     (create
+                      device
+                      (make-texture-descriptor
+                       :label "block world bloom secondary"
+                       :size bloom-extent :dimensions :2d
+                       :format +luvcraft-bloom-color-format+
+                       :usage '(:render-attachment :texture-binding)))))
+                  (bloom-secondary-view
+                    (keep
+                     (create device (make-texture-view-descriptor
+                                     :texture bloom-secondary-texture))))
                   (presentation-texture
                     (keep
                      (create
@@ -1008,6 +1161,16 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                                      :mag-filter :nearest
                                      :min-filter :nearest
                                      :mipmap-filter :nearest))))
+                  ;; Presentation and the lens chain read continuous images
+                  ;; rather than a texel grid; the five-sample gaussian below
+                  ;; is only a nine-tap kernel because it filters linearly.
+                  (linear-sampler
+                    (keep
+                     (create device (make-sampler-descriptor
+                                     :label "block world linear sampler"
+                                     :mag-filter :linear
+                                     :min-filter :linear
+                                     :mipmap-filter :nearest))))
                   (sky-vertices (make-block-world-sky-vertices))
                   (sky-vertex-buffer
                     (keep
@@ -1064,7 +1227,19 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                        :entries '((:binding 0 :type :texture)
                                   (:binding 1 :type :sampler)
                                   (:binding 2 :type :texture)
-                                  (:binding 3 :type :uniform-buffer))))))
+                                  (:binding 3 :type :uniform-buffer)
+                                  (:binding 4 :type :texture)
+                                  (:binding 5 :type :texture)
+                                  (:binding 6 :type :sampler))))))
+                  (bloom-layout
+                    (keep
+                     (create
+                      device
+                      (make-bind-group-layout-descriptor
+                       :label "block world lens chain layout"
+                       :entries '((:binding 0 :type :texture)
+                                  (:binding 1 :type :sampler)
+                                  (:binding 2 :type :uniform-buffer))))))
                   (pipeline
                     (let ((artifact
                             (make-live-shader-pipeline
@@ -1177,6 +1352,37 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                              :depth-stencil nil)))
                       (push artifact pipelines)
                       artifact))
+                  ;; The four lens stages differ only in which mathematical
+                  ;; fragment method they name; everything else about them is
+                  ;; the same fullscreen triangle over the same layout.
+                  (bloom-bright-pipeline
+                    (let ((artifact
+                            (make-luvcraft-lens-pipeline
+                             device bloom-layout :bloom-bright
+                             "block world bloom bright pipeline")))
+                      (push artifact pipelines)
+                      artifact))
+                  (bloom-horizontal-pipeline
+                    (let ((artifact
+                            (make-luvcraft-lens-pipeline
+                             device bloom-layout :bloom-horizontal
+                             "block world bloom horizontal pipeline")))
+                      (push artifact pipelines)
+                      artifact))
+                  (bloom-vertical-pipeline
+                    (let ((artifact
+                            (make-luvcraft-lens-pipeline
+                             device bloom-layout :bloom-vertical
+                             "block world bloom vertical pipeline")))
+                      (push artifact pipelines)
+                      artifact))
+                  (sun-shaft-pipeline
+                    (let ((artifact
+                            (make-luvcraft-lens-pipeline
+                             device bloom-layout :sun-shafts
+                             "block world sun shaft pipeline")))
+                      (push artifact pipelines)
+                      artifact))
                   (text-glyph-cache
                     (when world-text-string
                       (setf world-text-glyph-cache
@@ -1222,6 +1428,16 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                      :shadow-comparison-sampler shadow-comparison-sampler
                      :layout layout :shadow-layout shadow-layout
                      :post-layout post-layout
+                     :bloom-layout bloom-layout
+                     :linear-sampler linear-sampler
+                     :bloom-primary-texture bloom-primary-texture
+                     :bloom-primary-view bloom-primary-view
+                     :bloom-secondary-texture bloom-secondary-texture
+                     :bloom-secondary-view bloom-secondary-view
+                     :bloom-bright-pipeline bloom-bright-pipeline
+                     :bloom-horizontal-pipeline bloom-horizontal-pipeline
+                     :bloom-vertical-pipeline bloom-vertical-pipeline
+                     :sun-shaft-pipeline sun-shaft-pipeline
                      :block-pipeline pipeline
                      :shadow-pipeline shadow-pipeline
                      :sky-vertex-buffer sky-vertex-buffer
@@ -1314,6 +1530,12 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
     (release-live-shader-pipeline (luvcraft-session-sky-pipeline session))
     (release-live-shader-pipeline (luvcraft-session-crosshair-pipeline session))
     (release-live-shader-pipeline (luvcraft-session-post-pipeline session))
+    (dolist (pipeline (list (luvcraft-session-bloom-bright-pipeline session)
+                            (luvcraft-session-bloom-horizontal-pipeline session)
+                            (luvcraft-session-bloom-vertical-pipeline session)
+                            (luvcraft-session-sun-shaft-pipeline session)))
+      (when pipeline
+        (release-live-shader-pipeline pipeline)))
     (dolist (resource (luvcraft-session-resources session))
       (destroy resource))
     (setf (luvcraft-session-resources session) nil)

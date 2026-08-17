@@ -48,10 +48,12 @@
                           (:y :quantity :projection-scale :unit :one)
                           (:z :quantity :projection-scale :unit :one)
                           (:w :quantity :view-distance :unit :cell)))
-      (fog-vector :vec4         ; fog near, fog far, unused, unused
+      (fog-vector :vec4         ; fog near, fog far, elapsed time, cloudiness
                   :components
                   ((:x :quantity :view-distance :unit :cell)
-                   (:y :quantity :view-distance :unit :cell)))
+                   (:y :quantity :view-distance :unit :cell)
+                   (:z :quantity :sky-time :unit :second)
+                   (:w :quantity :cloudiness :unit :one)))
       (sun-vector :vec4         ; sun direction, day factor
                   :components
                   ((:xyz :quantity :world-direction :unit :one)
@@ -761,6 +763,70 @@
 (defun block-world-sky-vertex-shader ()
   (assemble-spir-v-module (block-world-sky-vertex-module)))
 
+;;; Lattice value noise is the whole procedural vocabulary the sky needs: a
+;;; hash of an integer lattice index, trilinear smoothing between its corners,
+;;; and a few octaves with the domain rotated between them so the cubic grain
+;;; never reads as a grid.  It is written once here and reused by the cloud
+;;; deck, the star field, and the block surface's own detail.
+
+(define-shader-function lattice-hash (index)
+  "Hash one lattice index into the unit interval."
+  (fract (* (sin index) 43758.5453)))
+
+(define-shader-function lattice-noise (point)
+  "Smoothly interpolated value noise over an integer lattice."
+  (let* ((lattice (floor point))
+         (offset (fract point))
+         ;; The classic smoothstep weight: continuous first derivative at the
+         ;; cell boundaries, which is what keeps the clouds from creasing.
+         (weight (* offset (* offset (- (vec3 3.0 3.0 3.0) (* offset 2.0)))))
+         (index (+ (swizzle lattice :x)
+                   (* (swizzle lattice :y) 57.0)
+                   (* (swizzle lattice :z) 113.0)))
+         (u (swizzle weight :x))
+         (v (swizzle weight :y))
+         (w (swizzle weight :z))
+         (near-low (mix (lattice-hash index)
+                        (lattice-hash (+ index 1.0)) u))
+         (near-high (mix (lattice-hash (+ index 57.0))
+                         (lattice-hash (+ index 58.0)) u))
+         (far-low (mix (lattice-hash (+ index 113.0))
+                       (lattice-hash (+ index 114.0)) u))
+         (far-high (mix (lattice-hash (+ index 170.0))
+                        (lattice-hash (+ index 171.0)) u)))
+    (mix (mix near-low near-high v) (mix far-low far-high v) w)))
+
+(define-shader-function lattice-fractal-noise (point)
+  "Three octaves of value noise; the domain rotates to hide the lattice.
+
+The fold's state carries the rotating sample point and the running sum
+together, so the noise body is emitted once and executed three times rather
+than inlined three times."
+  (let* ((accumulated
+           (counted-fold (octave 3.0 state (vec4 point 0.0))
+             (let* ((sample-point (swizzle state :xyz))
+                    (x (swizzle sample-point :x))
+                    (y (swizzle sample-point :y))
+                    (z (swizzle sample-point :z))
+                    (gain (expt 0.5 (+ octave 1.0)))
+                    (total (+ (swizzle state :w)
+                              (* (lattice-noise sample-point) gain)))
+                    (rotated
+                      (* (vec3 (+ (* 0.8 x) (* 0.6 z))
+                               (+ y 7.31)
+                               (+ (* -0.6 x) (* 0.8 z)))
+                         2.03)))
+               (vec4 rotated total)))))
+    (swizzle accumulated :w)))
+
+;;; The sky is image mathematics over a view ray and the frame environment:
+;;; a vertical gradient between the profile's two colours, a warm low band and
+;;; two Mie lobes around the sun, a drifting cloud deck projected onto a plane
+;;; at cloud height, stars at night, and a compact solar disc pushed well past
+;;; display white so the lens chain has something real to bloom.  Everything
+;;; below the horizon fades into the exact fog colour distant terrain fades
+;;; to, so silhouettes meet the sky without a seam.
+
 (define-shader-method shader-specification-for
     block-world-sky-fragment-specification
     ((role (eql :sky)) (stage (eql :fragment)))
@@ -771,45 +837,98 @@
      :resources
      ((frame-state :uniform-block :set 0 :binding 2
                    :members #.*frame-uniform-members*)))
-  (let* ((unit (normalize ray-input))
-         (elevation (swizzle unit :y))
-         (zenith (swizzle zenith-vector :xyz))
-         (horizon (swizzle horizon-vector :xyz))
-         ;; A soft vertical gradient with a wide horizon band; the band sits
-         ;; slightly below level so distant terrain meets the fog colour.
-         (height
-           (smoothstep
-            (quantity -0.04 :quantity :world-y-direction :unit :one)
-            (quantity 0.45 :quantity :world-y-direction :unit :one)
-            elevation))
-         (base (mix horizon zenith height))
-         (sun-direction (swizzle sun-vector :xyz))
-         (day-factor (swizzle sun-vector :w))
-         (sun-color (swizzle sun-color-vector :xyz))
-         (sun-width (swizzle sun-color-vector :w))
-         (alignment
-           (interpret (max 0.0 (dot unit sun-direction))
-                      :quantity :sun-disc-coordinate :unit :one))
-         (disc-outer
-           (- (quantity 1.0 :quantity :sun-disc-coordinate :unit :one)
-              (* sun-width 3.0)))
-         (disc-inner
-           (- (quantity 1.0 :quantity :sun-disc-coordinate :unit :one)
-              sun-width))
-         (disc (smoothstep disc-outer disc-inner alignment))
-         (glow (* (expt alignment 24.0) 0.35))
-         (sun-radiance
-           (interpret (* sun-color (+ disc glow) day-factor)
-                      :quantity :linear-rgb :unit :one))
-         (rgb (+ base sun-radiance))
-         (rgba
-           (assume-quantity
-            (vec4
-             (representation rgb)
-             (representation
-              (quantity 1.0 :quantity :opacity :unit :one)))
-            :quantity :linear-rgba :unit :one)))
-    (set-output color-output rgba)))
+  (let* ((direction (normalize (representation ray-input)))
+         (elevation (swizzle direction :y))
+         (sun-direction (representation (swizzle sun-vector :xyz)))
+         (day-factor (representation (swizzle sun-vector :w)))
+         (sun-color (representation (swizzle sun-color-vector :xyz)))
+         (sun-width (representation (swizzle sun-color-vector :w)))
+         (zenith (representation (swizzle zenith-vector :xyz)))
+         (horizon (representation (swizzle horizon-vector :xyz)))
+         (fog-color (representation (swizzle fog-color-vector :xyz)))
+         (elapsed (representation (swizzle fog-vector :z)))
+         (cloudiness (representation (swizzle fog-vector :w)))
+         ;; One number decides how much of the sky is sunrise: a sun near the
+         ;; horizon warms the haze, the scatter, and the cloud faces together.
+         (low-sun
+           (* day-factor
+              (- 1.0 (smoothstep 0.10 0.55 (swizzle sun-direction :y)))))
+         (above (smoothstep -0.02 0.30 elevation))
+         (base (mix horizon zenith (expt above 0.70)))
+         (band (expt (clamp (- 1.0 (abs elevation)) 0.0 1.0) 9.0))
+         (hazed (mix base (vec3 1.05 0.60 0.32) (* 0.32 (* low-sun band))))
+         (alignment (max 0.0 (dot direction sun-direction)))
+         ;; Two Mie lobes: a broad brightening of the sun's quarter of the
+         ;; sky, and a tighter shaft that hugs the disc.
+         (broad (expt alignment 5.0))
+         (tight (expt alignment 42.0))
+         (scatter-tint
+           (mix (vec3 1.0 0.96 0.86) (vec3 1.0 0.58 0.28) low-sun))
+         (scattered
+           (+ hazed
+              (* scatter-tint
+                 (* day-factor
+                    (+ (* broad (+ 0.05 (* 0.10 low-sun)))
+                       (* tight (+ 0.10 (* 0.22 low-sun))))))))
+         ;; The cloud deck is a plane at a fixed height: the ray meets it
+         ;; farther out the closer it runs to level, which is exactly the
+         ;; perspective foreshortening real cloud decks show.
+         (deck-mask (smoothstep 0.035 0.17 elevation))
+         (deck-point
+           (+ (* direction (/ 260.0 (max elevation 0.05)))
+              (vec3 (* elapsed 1.7) 0.0 (* elapsed 0.9))))
+         (cloud-field (lattice-fractal-noise (* deck-point 0.0062)))
+         (cloud-edge (mix 0.66 0.36 (clamp cloudiness 0.0 1.0)))
+         (cloud-density
+           (* deck-mask
+              (smoothstep cloud-edge (+ cloud-edge 0.11) cloud-field)))
+         (core (expt (clamp cloud-density 0.0 1.0) 0.75))
+         (cloud-lit
+           (mix (vec3 1.15 1.13 1.10) (vec3 1.25 0.86 0.58)
+                (* low-sun low-sun)))
+         (cloud-shade
+           (mix (vec3 0.50 0.58 0.74) (vec3 0.46 0.41 0.55)
+                (* low-sun low-sun)))
+         ;; Silver lining: thin edges facing the sun glow, dense cores do not.
+         (silver
+           (* cloud-lit
+              (* (expt alignment 16.0)
+                 (* (- 1.0 core) (+ 0.35 (* 0.75 low-sun))))))
+         (cloud-color
+           (* (+ (mix cloud-lit cloud-shade (* 0.82 core)) silver)
+              (max day-factor 0.05)))
+         (clouded (mix scattered cloud-color (* cloud-density 0.92)))
+         (night (- 1.0 (smoothstep 0.0 0.35 day-factor)))
+         (star-field (expt (lattice-noise (* direction 190.0)) 24.0))
+         (starred
+           (+ clouded
+              (* (vec3 0.85 0.90 1.0)
+                 (* star-field
+                    (* night (* 1.4 (smoothstep 0.02 0.35 elevation)))))))
+         ;; Only the last few degrees above level become fog; anything wider
+         ;; washes the whole sky into the haze the fog is supposed to explain.
+         (horizon-blend (smoothstep 0.085 -0.01 elevation))
+         (grounded (mix starred fog-color horizon-blend))
+         ;; The disc is drawn at a few times the sun's true angular radius,
+         ;; the way every game sun is, and deliberately far above display
+         ;; white: the floating point attachment keeps it, the bright pass
+         ;; feeds on it, and the filmic curve rolls it into a hot core
+         ;; instead of a flat clipped patch.  For a small angle the cosine
+         ;; threshold of an angular radius is one less half its square.
+         (disc-radius (* sun-width 4.0))
+         (disc-limb (* 0.5 (* disc-radius disc-radius)))
+         (disc
+           (smoothstep (- 1.0 disc-limb) (- 1.0 (* 0.56 disc-limb)) alignment))
+         (corona
+           (+ (* (expt alignment 900.0) 0.8) (* (expt alignment 120.0) 0.22)))
+         (occlusion (- 1.0 (* (clamp cloud-density 0.0 1.0) 0.94)))
+         (solar
+           (* sun-color
+              (* day-factor
+                 (+ (* disc (* 30.0 occlusion))
+                    (* corona (* 2.0 occlusion))))))
+         (rgb (+ grounded solar)))
+    (set-output color-output (vec4 rgb 1.0))))
 
 (defun block-world-sky-fragment-specification ()
   (shader-specification-for :sky :fragment))
@@ -834,9 +953,10 @@
 ;;; exactly as it is for the frame environment, so it is written once here.
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defparameter *post-uniform-members*
-    '((post-control :vec4)   ; texel u, texel v, focus blur, exposure
-      (lens-control :vec4)   ; bloom gain, shaft gain, vignette, grain
-      (sun-screen :vec4))    ; sun screen u, v, on-screen weight, aspect
+    '((post-control :vec4)    ; texel u, texel v, focus blur, exposure
+      (lens-control :vec4)    ; bloom gain, shaft gain, vignette, threshold
+      (sun-screen :vec4)      ; sun screen u, v, on-screen weight, aspect
+      (bloom-control :vec4))  ; chain texel u, v, shaft decay, elapsed time
     "The presentation uniform layout shared by the post and bloom stages."))
 
 ;;; Narkowicz's fitted ACES curve.  Its toe keeps shadows from turning to mud,
@@ -866,6 +986,152 @@
     (set-output uv-output (vec2 (* (+ x 1.0) 0.5)
                                 (* (+ y 1.0) 0.5)))))
 
+;;; The bloom and light-shaft chain runs on a quarter-resolution pair of
+;;; floating-point attachments.  Bright fragments are extracted once, blurred
+;;; separably, and then swept radially away from the solar disc; presentation
+;;; adds both back into linear scene radiance before the filmic curve.  Every
+;;; stage sees the same bind group shape -- source texture, linear sampler,
+;;; presentation uniforms -- so one layout serves the whole chain, and the
+;;; stage that reads it is chosen by CLOS role rather than by a mode lane.
+
+(define-shader-method shader-specification-for
+    bloom-bright-fragment-specification
+    ((role (eql :bloom-bright)) (stage (eql :fragment)))
+    (:stage :fragment
+     :inputs ((uv-input :vec2 :location 0))
+     :outputs ((color-output :vec4 :location 0))
+     :resources
+     ((source-color :texture-2d :set 0 :binding 0
+                    :sample-transfer :identity)
+      (source-sampler :sampler :set 0 :binding 1)
+      (post-state :uniform-block :set 0 :binding 2
+                  :members #.*post-uniform-members*)))
+  (let* ((texel (swizzle post-control :xy))
+         (exposure (swizzle post-control :w))
+         (threshold (swizzle lens-control :w))
+         (dx (* texel (vec2 1.0 0.0)))
+         (dy (* texel (vec2 0.0 1.0)))
+         ;; Four scene taps per chain texel.  The chain is a quarter of the
+         ;; frame's width, so a single tap would alias exactly the highlights
+         ;; this pass exists to smear.
+         (box
+           (* (+ (swizzle (sample source-color source-sampler
+                                  (+ uv-input (+ dx dy))) :xyz)
+                 (swizzle (sample source-color source-sampler
+                                  (+ uv-input (- dx dy))) :xyz)
+                 (swizzle (sample source-color source-sampler
+                                  (- uv-input (- dx dy))) :xyz)
+                 (swizzle (sample source-color source-sampler
+                                  (- uv-input (+ dx dy))) :xyz))
+              0.25))
+         ;; The chain works in exposed units, so its contribution stays in
+         ;; step with the scene when exposure moves.
+         (radiance (* box exposure))
+         (luminance (dot radiance (vec3 0.2126 0.7152 0.0722)))
+         (knee (smoothstep threshold (+ threshold 0.75) luminance)))
+    (set-output color-output (vec4 (* radiance knee) 1.0))))
+
+;;; A nine-tap gaussian expressed as five linearly filtered samples: each
+;;; offset lands between the two texels whose weights it combines.  The two
+;;; directions are separate roles rather than a uniform lane, so each pipeline
+;;; is exactly the code it runs.
+
+(define-shader-method shader-specification-for
+    bloom-horizontal-fragment-specification
+    ((role (eql :bloom-horizontal)) (stage (eql :fragment)))
+    (:stage :fragment
+     :inputs ((uv-input :vec2 :location 0))
+     :outputs ((color-output :vec4 :location 0))
+     :resources
+     ((source-color :texture-2d :set 0 :binding 0
+                    :sample-transfer :identity)
+      (source-sampler :sampler :set 0 :binding 1)
+      (post-state :uniform-block :set 0 :binding 2
+                  :members #.*post-uniform-members*)))
+  (let* ((span (vec2 (swizzle bloom-control :x) 0.0))
+         (near-offset (* span 1.3846154))
+         (far-offset (* span 3.2307692))
+         (center
+           (* (swizzle (sample source-color source-sampler uv-input) :xyz)
+              0.2270270))
+         (near
+           (* (+ (swizzle (sample source-color source-sampler
+                                  (+ uv-input near-offset)) :xyz)
+                 (swizzle (sample source-color source-sampler
+                                  (- uv-input near-offset)) :xyz))
+              0.3162162))
+         (far
+           (* (+ (swizzle (sample source-color source-sampler
+                                  (+ uv-input far-offset)) :xyz)
+                 (swizzle (sample source-color source-sampler
+                                  (- uv-input far-offset)) :xyz))
+              0.0702700)))
+    (set-output color-output (vec4 (+ center near far) 1.0))))
+
+(define-shader-method shader-specification-for
+    bloom-vertical-fragment-specification
+    ((role (eql :bloom-vertical)) (stage (eql :fragment)))
+    (:stage :fragment
+     :inputs ((uv-input :vec2 :location 0))
+     :outputs ((color-output :vec4 :location 0))
+     :resources
+     ((source-color :texture-2d :set 0 :binding 0
+                    :sample-transfer :identity)
+      (source-sampler :sampler :set 0 :binding 1)
+      (post-state :uniform-block :set 0 :binding 2
+                  :members #.*post-uniform-members*)))
+  (let* ((span (vec2 0.0 (swizzle bloom-control :y)))
+         (near-offset (* span 1.3846154))
+         (far-offset (* span 3.2307692))
+         (center
+           (* (swizzle (sample source-color source-sampler uv-input) :xyz)
+              0.2270270))
+         (near
+           (* (+ (swizzle (sample source-color source-sampler
+                                  (+ uv-input near-offset)) :xyz)
+                 (swizzle (sample source-color source-sampler
+                                  (- uv-input near-offset)) :xyz))
+              0.3162162))
+         (far
+           (* (+ (swizzle (sample source-color source-sampler
+                                  (+ uv-input far-offset)) :xyz)
+                 (swizzle (sample source-color source-sampler
+                                  (- uv-input far-offset)) :xyz))
+              0.0702700)))
+    (set-output color-output (vec4 (+ center near far) 1.0))))
+
+;;; Crepuscular rays as a screen-space gather: march the blurred bright image
+;;; toward the solar disc and accumulate what is still lit, attenuating with
+;;; distance.  Terrain that occludes the sun is dark in the bright image, so
+;;; the rays break into beams around leaves and rooftops for free.  The host
+;;; fades SUN-SCREEN's weight out as the disc leaves the frame.
+
+(define-shader-method shader-specification-for
+    sun-shaft-fragment-specification
+    ((role (eql :sun-shafts)) (stage (eql :fragment)))
+    (:stage :fragment
+     :inputs ((uv-input :vec2 :location 0))
+     :outputs ((color-output :vec4 :location 0))
+     :resources
+     ((source-color :texture-2d :set 0 :binding 0
+                    :sample-transfer :identity)
+      (source-sampler :sampler :set 0 :binding 1)
+      (post-state :uniform-block :set 0 :binding 2
+                  :members #.*post-uniform-members*)))
+  (let* ((sun-uv (swizzle sun-screen :xy))
+         (weight (swizzle sun-screen :z))
+         (decay (swizzle bloom-control :z))
+         (delta (* (- sun-uv uv-input) 0.03125))
+         (gathered
+           (counted-fold (tap 32.0 total (vec3 0.0 0.0 0.0))
+             (+ total
+                (* (swizzle
+                    (sample source-color source-sampler
+                            (+ uv-input (* delta tap)))
+                    :xyz)
+                   (expt decay tap))))))
+    (set-output color-output (vec4 (* gathered (* weight 0.03125)) 1.0))))
+
 (define-shader-method shader-specification-for
     focus-post-fragment-specification
     ((role (eql :focus-post)) (stage (eql :fragment)))
@@ -878,14 +1144,19 @@
       (scene-sampler :sampler :set 0 :binding 1)
       (scene-depth :depth-texture-2d :set 0 :binding 2)
       (post-state :uniform-block :set 0 :binding 3
-                  :members #.*post-uniform-members*)))
+                  :members #.*post-uniform-members*)
+      (bloom-color :texture-2d :set 0 :binding 4
+                   :sample-transfer :identity)
+      (shaft-color :texture-2d :set 0 :binding 5
+                   :sample-transfer :identity)
+      (depth-sampler :sampler :set 0 :binding 6)))
   (let* ((texel (swizzle post-control :xy))
          (active (swizzle post-control :z))
          (exposure (swizzle post-control :w))
          (sharp (sample scene-color scene-sampler uv-input))
-         (depth (swizzle (sample scene-depth scene-sampler uv-input) :x))
+         (depth (swizzle (sample scene-depth depth-sampler uv-input) :x))
          (focus-depth
-           (swizzle (sample scene-depth scene-sampler (vec2 0.5 0.5)) :x))
+           (swizzle (sample scene-depth depth-sampler (vec2 0.5 0.5)) :x))
          (blur-amount
            (* active (smoothstep 0.0015 0.018 (- depth focus-depth))))
          (dx (* texel (vec2 5.0 0.0)))
@@ -902,7 +1173,15 @@
                  (sample scene-color scene-sampler (- (- uv-input dx) dy)))
               0.0625))
          (radiance (swizzle (mix sharp blurred blur-amount) :xyz))
-         (exposed (* radiance exposure))
+         ;; The chain already carries exposed units; the scene does not.
+         (bloom
+           (swizzle (sample bloom-color scene-sampler uv-input) :xyz))
+         (shafts
+           (swizzle (sample shaft-color scene-sampler uv-input) :xyz))
+         (exposed
+           (+ (* radiance exposure)
+              (* bloom (swizzle lens-control :x))
+              (* shafts (swizzle lens-control :y))))
          (graded (aces-filmic exposed))
          ;; A restrained corner falloff; the frame should feel photographed,
          ;; not port-holed.

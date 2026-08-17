@@ -1543,6 +1543,18 @@ silent loss of meaning."
 (defmethod infer-shader-call-type ((operator (eql 'sqrt)) operands source-form)
   (infer-uniform-extended-type operator operands source-form 1 1))
 
+(macrolet
+    ((define-unary-extended-type (&rest operators)
+       `(progn
+          ,@(mapcar
+             (lambda (operator)
+               `(defmethod infer-shader-call-type
+                    ((operator (eql ',operator)) operands source-form)
+                  (infer-uniform-extended-type
+                   operator operands source-form 1 1)))
+             operators))))
+  (define-unary-extended-type floor fract sin cos exp log))
+
 (defmethod infer-shader-call-type
     ((operator (eql 'derivative-x)) operands source-form)
   (infer-uniform-extended-type operator operands source-form 1 1))
@@ -1722,6 +1734,20 @@ never collides with a standard symbol's function documentation:
   "The componentwise square root of one scalar or vector.")
 (define-shader-operator expt
   "Raise a value to a power, componentwise over one uniform type.")
+;;; The transcendental and lattice family: what procedural image mathematics
+;;; needs to build hashes, value noise, and periodic shaping without a table.
+(define-shader-operator floor
+  "The componentwise greatest integer not above one scalar or vector.")
+(define-shader-operator fract
+  "The componentwise fractional part: the value less its floor.")
+(define-shader-operator sin
+  "The componentwise sine of one scalar or vector of radians.")
+(define-shader-operator cos
+  "The componentwise cosine of one scalar or vector of radians.")
+(define-shader-operator exp
+  "The componentwise natural exponential of one scalar or vector.")
+(define-shader-operator log
+  "The componentwise natural logarithm of one scalar or vector.")
 (define-shader-operator < "Test two scalar floats for ordered less-than.")
 (define-shader-operator <= "Test two scalar floats for ordered less-or-equal.")
 (define-shader-operator > "Test two scalar floats for ordered greater-than.")
@@ -4722,6 +4748,19 @@ backend's context before its source-located unsupported-operation method."))
 
 (defmethod lower-shader-call ((operator (eql 'sqrt)) context expression)
   (lower-extended-call context expression 'sqrt))
+
+(macrolet
+    ((define-unary-extended-lowering (&rest pairs)
+       `(progn
+          ,@(mapcar
+             (lambda (pair)
+               (destructuring-bind (operator instruction) pair
+                 `(defmethod lower-shader-call
+                      ((operator (eql ',operator)) context expression)
+                    (lower-extended-call context expression ',instruction))))
+             pairs))))
+  (define-unary-extended-lowering
+      (floor floor) (fract fract) (sin sin) (cos cos) (exp exp) (log log)))
 
 (defmethod lower-shader-call
     ((operator (eql 'derivative-x)) context expression)

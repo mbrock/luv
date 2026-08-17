@@ -213,6 +213,12 @@
            #:smoothstep
            #:step
            #:normalize
+           #:floor
+           #:fract
+           #:sin
+           #:cos
+           #:exp
+           #:log
            #:quantity
            #:assume-quantity
            #:interpret

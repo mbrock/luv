@@ -85,6 +85,8 @@
       (projection '(19) '(:quantity :view-distance :unit :cell))
       (projection '(20) '(:quantity :view-distance :unit :cell))
       (projection '(21) '(:quantity :view-distance :unit :cell))
+      (projection '(22) '(:quantity :sky-time :unit :second))
+      (projection '(23) '(:quantity :cloudiness :unit :one))
       (projection '(24 25 26)
                   '(:quantity :world-direction :unit :one :tensor-order 1))
       (projection '(27) '(:quantity :day-factor :unit :one))
@@ -152,6 +154,8 @@
        (12 13 14) forward-direction
        (16 17 18) projection-scales
        (19 20 21) view-distances
+       (22) sky-time
+       (23) cloudiness
        (24 25 26) sun-direction
        (27) day-factor
        (28 29 30) sun-color

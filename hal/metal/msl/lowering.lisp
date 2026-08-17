@@ -823,6 +823,12 @@
 (define-msl-function-operator spv:smoothstep "smoothstep")
 (define-msl-function-operator spv:step "step")
 (define-msl-function-operator spv:normalize "normalize")
+(define-msl-function-operator floor "floor")
+(define-msl-function-operator spv:fract "fract")
+(define-msl-function-operator sin "sin")
+(define-msl-function-operator cos "cos")
+(define-msl-function-operator exp "exp")
+(define-msl-function-operator log "log")
 
 (defmacro define-msl-chained-function-operator (operator name)
   `(defmethod spv:lower-shader-call
