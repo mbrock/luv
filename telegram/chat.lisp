@@ -87,6 +87,8 @@
            #:refresh-roster-dialogs
            #:refresh-peer-history
            #:send-chat-message
+           #:upload-chat-file
+           #:send-chat-photo
            #:mark-peer-read
            #:synchronize-chat-updates
            #:pull-chat-updates
@@ -847,6 +849,42 @@ ours already, so that case is completed here rather than refetched."
                (let ((history (peer-history roster peer)))
                  (when (plusp (fill-pointer history))
                    (aref history (1- (fill-pointer history)))))))))
+
+(defun upload-chat-file (bytes &key (name "file.bin") (part-size 524288)
+                                    connection)
+  "Save BYTES into Telegram's scratch storage and return the InputFile.
+
+PART-SIZE has to divide 512KB and be a multiple of 1024.  The md5_checksum
+goes out empty: the server does not verify it for a photo, and carrying an
+MD5 that nothing checks would mean a whole digest implementation for the sake
+of a field."
+  (let* ((file-id (fresh-random-id))
+         (total (length bytes))
+         (parts (max 1 (ceiling total part-size))))
+    (dotimes (index parts)
+      (let ((start (* index part-size)))
+        (client:invoke (client:current-connection connection)
+                       :upload.save-file-part
+                       :file-id file-id
+                       :file-part index
+                       :bytes (subseq bytes start
+                                      (min total (+ start part-size))))))
+    (tl:make-tl :input-file :id file-id :parts parts
+                            :name name :md5-checksum "")))
+
+(defun send-chat-photo (roster peer bytes &key (caption "") (name "photo.png")
+                                               connection)
+  "Upload BYTES and post them to PEER as a photo with CAPTION."
+  (let* ((file (upload-chat-file bytes :name name :connection connection))
+         (answer (client:invoke
+                  (client:current-connection connection)
+                  :messages.send-media
+                  :peer (peer-input-peer peer)
+                  :media (tl:make-tl :input-media-uploaded-photo :file file)
+                  :message caption
+                  :random-id (fresh-random-id))))
+    (apply-chat-updates (tl-name answer) answer roster)
+    answer))
 
 (defun mark-peer-read (peer &key connection)
   "Tell Telegram PEER's history has been read, and forget the unread count."
