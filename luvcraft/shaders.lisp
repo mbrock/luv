@@ -792,8 +792,7 @@
      :resources ((block-atlas :texture-2d :set 0 :binding 0
                               :sample-transfer :srgb-to-linear
                               :sample-components
-                              ((:rgb :quantity :linear-rgb :unit :one)
-                               (:a :quantity :surface-relief :unit :one)))
+                              ((:rgb :quantity :linear-rgb :unit :one)))
                  (block-sampler :sampler :set 0 :binding 1)
                  (frame-state :uniform-block :set 0 :binding 2
                               :members #.*frame-uniform-members*)
@@ -801,7 +800,15 @@
                              :sample-components
                              ((:x :quantity :shadow-depth :unit :one)))
                  (shadow-sampler :sampler :set 0 :binding 4)
-                 (shadow-comparison-sampler :sampler :set 0 :binding 5)))
+                 (shadow-comparison-sampler :sampler :set 0 :binding 5)
+                 (block-normal-atlas :texture-2d :set 0 :binding 6
+                                     :sample-transfer :identity
+                                     :sample-components
+                                     ((:rgb :quantity
+                                            :surface-normal-sample
+                                            :unit :one)
+                                      (:a :quantity :surface-relief
+                                          :unit :one)))))
   (let* ((uv-shade uv-shade-input)
          (uv (swizzle uv-shade :xy))
          (ao (swizzle uv-shade :z))
@@ -824,9 +831,9 @@
          (tangent-v (vec3 0.0 (- 1.0 axis-y) axis-y))
          (plane-u (mix (swizzle cell :x) (swizzle cell :z) axis-x))
          (plane-v (mix (swizzle cell :y) (swizzle cell :z) axis-y))
-         ;; The atlas coordinate and its screen derivative are needed by both
-         ;; shapings: the relief reads neighbouring texels through it, and the
-         ;; round-over sizes itself against the same measured footprint.
+         ;; The atlas coordinate and its screen derivative size both shapings.
+         ;; The normal itself is already the central difference of the same
+         ;; procedural relief field that paints the colour atlas.
          (atlas-u (representation (swizzle uv :x)))
          (atlas-v (representation (swizzle uv :y)))
          (tile-count 11.0)
@@ -875,48 +882,18 @@
               (* ramp-v-low (max 0.0 (- edge-v-low)))
               (* ramp-v-high (max 0.0 (- edge-v-high)))))
          (seam (clamp crease 0.0 1.0))
-         ;; Per-texel relief, read from the height the atlas paints alongside
-         ;; each material's colour.  The atlas is one row of square tiles, so
-         ;; the tile a fragment belongs to is the whole part of its scaled U,
-         ;; and neighbour taps are clamped inside that tile: relief never
-         ;; bleeds across a material boundary.
-         (texel-step (/ 1.0 tile-texels))
-         (tile-low (* 0.5 texel-step))
-         (tile-high (- 1.0 tile-low))
-         (tile-origin (floor (* atlas-u tile-count)))
-         (tile-u (- (* atlas-u tile-count) tile-origin))
-         (u-back
-           (vec2 (/ (+ tile-origin
-                       (clamp (- tile-u texel-step) tile-low tile-high))
-                    tile-count)
-                 atlas-v))
-         (u-ahead
-           (vec2 (/ (+ tile-origin
-                       (clamp (+ tile-u texel-step) tile-low tile-high))
-                    tile-count)
-                 atlas-v))
-         (v-back
-           (vec2 (/ (+ tile-origin tile-u) tile-count)
-                 (clamp (- atlas-v texel-step) tile-low tile-high)))
-         (v-ahead
-           (vec2 (/ (+ tile-origin tile-u) tile-count)
-                 (clamp (+ atlas-v texel-step) tile-low tile-high)))
-         (height-u-back
+         ;; One linear texture read replaces the four height taps formerly
+         ;; used here.  The CPU generator clamps those taps within each tile,
+         ;; normalizes the result, and stores the source height in alpha for
+         ;; inspection.  Fade the decoded tangent normal back toward the flat
+         ;; face as its texels become sub-pixel.
+         (normal-sample
            (representation
-            (swizzle (sample block-atlas block-sampler u-back) :a)))
-         (height-u-ahead
-           (representation
-            (swizzle (sample block-atlas block-sampler u-ahead) :a)))
-         (height-v-back
-           (representation
-            (swizzle (sample block-atlas block-sampler v-back) :a)))
-         (height-v-ahead
-           (representation
-            (swizzle (sample block-atlas block-sampler v-ahead) :a)))
-         (relief
-           (* (+ (* tangent-u (- height-u-back height-u-ahead))
-                 (* tangent-v (- height-v-back height-v-ahead)))
-              (* 1.15 relief-fade)))
+            (swizzle (sample block-normal-atlas block-sampler uv) :rgb)))
+         (tangent-normal (- (* normal-sample 2.0) (vec3 1.0 1.0 1.0)))
+         (relief-x (* (swizzle tangent-normal :x) relief-fade))
+         (relief-y (* (swizzle tangent-normal :y) relief-fade))
+         (relief-z (mix 1.0 (swizzle tangent-normal :z) relief-fade))
          ;; A real round-over is an arc, not a leaning plane.  Adding a scaled
          ;; tangent to the face normal can only ever reach the arctangent of
          ;; that scale, so a strong edge needs an implausible scale and still
@@ -932,7 +909,10 @@
          (rounded
            (+ (* flat-normal (cos bevel-turn)) (* lean-direction (sin bevel-turn))))
          (seam-occlusion (- 1.0 (* 0.34 (* seam bevel-fade))))
-         (shaped (normalize (+ rounded relief)))
+         (shaped
+           (normalize (+ (* rounded relief-z)
+                         (* tangent-u relief-x)
+                         (* tangent-v relief-y))))
          (shading-normal
            (assume-quantity shaped :quantity :world-direction :unit :one))
          (sun-direction (swizzle sun-vector :xyz))

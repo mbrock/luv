@@ -505,22 +505,24 @@ Colour is only half of what a material looks like.  The other half is its
 micro-surface: whether it is granular, grooved, tufted, or faceted.  luvcraft's
 atlas was already generated arithmetic rather than an asset, one
 =paint-block-atlas-tile= method per numbered tile, so the honest place for
-that half is the same arithmetic: =paint-block-atlas-relief= paints a height
-field into the atlas's fourth channel, and the block material reads its
-gradient with the four tile-clamped taps it needed anyway.
+that half is the same arithmetic.  =paint-block-atlas-relief= paints a height
+field; colour variation reads that field, and =make-block-normal-atlas=
+materializes its tile-clamped central difference as a linear tangent-space
+normal map.  The block material reads that map once instead of reconstructing
+the gradient with four dependent texture taps per fragment.
 
-Every block kind in this world is opaque, so that channel was carrying
-nothing.  #SKOPEN's decision was that bloom must not commandeer *scene* alpha,
-and it does not; this is atlas alpha, and the shader declares
-=:surface-relief= rather than =:opacity= so the sampled meaning is stated
-rather than assumed.  Transparent materials would need that channel back, and
-would then need a separate relief attachment.
+The colour atlas stays sRGB with ordinary opaque coverage.  The normal atlas
+is linear RGBA8: RGB is the encoded unit normal and alpha retains the source
+height for inspection.  The shader declares those sampled meanings as
+=:surface-normal-sample= and =:surface-relief= rather than treating channels
+as unlabeled numbers.  #SKOPEN's decision that bloom must not commandeer
+*scene* alpha remains independent of both material textures.
 
 Relief and bevel are both sub-block detail, so both fade out on a measured
 texel footprint from the atlas UV derivatives: distant terrain neither
 sparkles nor shows a lit grid.  A material's relief is one EQL method, so a
-live image can re-sculpt grass tufts or stone cracks and rebuild the atlas
-without touching the rest of the palette.
+live image can re-sculpt grass tufts or stone cracks and rebuild both dense
+atlases without touching the rest of the palette.
 
 * Phase 3: one crystal proves emission and edit propagation
 :PROPERTIES:
@@ -1278,8 +1280,8 @@ chain adds bloom and shafts in linear light before that curve (#IC14P3).  The
 crystal-at-night capture in #IC14P3 shows the emissive blocks blooming into a
 dark sky while the terminal wall beside them stays readable and the ground
 they light stays in the toe of the curve rather than crushing.  Scene alpha
-was not commandeered; the relief channel #CHUKWD uses is atlas alpha, which is
-a different surface and is declared as what it holds.
+was not commandeered; the relief channel #CHUKWD uses is normal-atlas alpha,
+which is a different surface and is declared as what it holds.
 
 The lens attachments are session-owned and retire with the rest of the
 session's GPU resources, but resize is *not* handled --- and was not handled

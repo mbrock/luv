@@ -86,6 +86,10 @@
    (atlas-view :initarg :atlas-view :reader luvcraft-session-atlas-view)
    (atlas-sampler :initarg :atlas-sampler
                   :reader luvcraft-session-atlas-sampler)
+   (normal-atlas-texture :initarg :normal-atlas-texture
+                         :reader luvcraft-session-normal-atlas-texture)
+   (normal-atlas-view :initarg :normal-atlas-view
+                      :reader luvcraft-session-normal-atlas-view)
    (color-texture :initarg :color-texture
                   :reader luvcraft-session-color-texture)
    (color-view :initarg :color-view :reader luvcraft-session-color-view)

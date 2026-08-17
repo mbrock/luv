@@ -1352,30 +1352,63 @@
   (ok (eq luvcraft::+block-atlas-texture-format+
           (luvcraft::ensure-block-atlas-sample-transfer
            luvcraft::+block-atlas-texture-format+)))
+  (ok (eq :identity
+          (texture-format-sample-transfer
+           luvcraft::+block-normal-atlas-texture-format+)))
   (ok (signals
        (luvcraft::ensure-block-atlas-sample-transfer :rgba8-unorm)
        'error))
-  (let ((atlas (make-block-texture-atlas)))
+  (let ((atlas (make-block-texture-atlas))
+        (normal-atlas (make-block-normal-atlas)))
     (ok (equal (array-dimensions atlas) '(16 176)))
+    (ok (equal (array-dimensions normal-atlas) '(16 176)))
     (ok (subtypep (array-element-type atlas) '(unsigned-byte 32)))
+    (ok (subtypep (array-element-type normal-atlas) '(unsigned-byte 32)))
     (ok (/= (aref atlas 8 8) (aref atlas 8 (+ 8 (* 3 16)))))
     (ok (/= (aref atlas 8 8) (aref atlas 8 (+ 8 (* 9 16)))))
-    ;; The fourth channel is the material's own surface height rather than
-    ;; coverage: every block kind here is opaque, and the height has to
-    ;; vary across a tile or there is no relief for the shader to read.
+    ;; The colour atlas remains ordinary opaque sRGB material colour.
     (ok (loop for tile below luvcraft::+block-atlas-tile-count+
               always (loop for x below luvcraft::+block-atlas-tile-size+
                            always (loop for y below
                                         luvcraft::+block-atlas-tile-size+
-                                        always
-                                        (typep (ldb (byte 8 24)
-                                                    (aref atlas y
-                                                          (+ x (* tile 16))))
-                                               '(integer 0 255))))))
+                                        always (= 255
+                                                  (ldb (byte 8 24)
+                                                       (aref atlas y
+                                                             (+ x (* tile 16)))))))))
     (ok (loop for tile below luvcraft::+block-atlas-tile-count+
-              always (/= (ldb (byte 8 24) (aref atlas 3 (+ 3 (* tile 16))))
+              always (/= (ldb (byte 8 24)
+                              (aref normal-atlas 3 (+ 3 (* tile 16))))
                          (ldb (byte 8 24)
-                              (aref atlas 11 (+ 12 (* tile 16))))))))
+                              (aref normal-atlas 11 (+ 12 (* tile 16)))))))
+    ;; The normal materialization is derived from exactly that height field:
+    ;; alpha preserves it byte-for-byte, RGB stays unit length within RGBA8
+    ;; quantization, and at least one tangent lane responds to relief.
+    (ok (loop for y below luvcraft::+block-atlas-tile-size+
+              always
+              (loop for x below (* luvcraft::+block-atlas-tile-size+
+                                   luvcraft::+block-atlas-tile-count+)
+                    for tile = (floor x luvcraft::+block-atlas-tile-size+)
+                    for local-x = (mod x luvcraft::+block-atlas-tile-size+)
+                    always (= (luvcraft::paint-block-atlas-relief tile local-x y)
+                              (ldb (byte 8 24) (aref normal-atlas y x))))))
+    (ok (loop for y below luvcraft::+block-atlas-tile-size+
+              always
+              (loop for x below (* luvcraft::+block-atlas-tile-size+
+                                   luvcraft::+block-atlas-tile-count+)
+                    for pixel = (aref normal-atlas y x)
+                    for nx = (- (/ (ldb (byte 8 0) pixel) 127.5) 1.0)
+                    for ny = (- (/ (ldb (byte 8 8) pixel) 127.5) 1.0)
+                    for nz = (- (/ (ldb (byte 8 16) pixel) 127.5) 1.0)
+                    always (< (abs (- (+ (* nx nx) (* ny ny) (* nz nz))
+                                      1.0))
+                              0.025))))
+    (ok (loop for y below luvcraft::+block-atlas-tile-size+
+              thereis
+              (loop for x below (* luvcraft::+block-atlas-tile-size+
+                                   luvcraft::+block-atlas-tile-count+)
+                    for pixel = (aref normal-atlas y x)
+                    thereis (or (/= (ldb (byte 8 0) pixel) 128)
+                                (/= (ldb (byte 8 8) pixel) 128))))))
   (flet ((face (name)
            (find name luvcraft::*block-faces* :key #'block-face-name)))
     (ok (= (block-face-tile luvcraft::*grass-block* (face :top)) 0))

@@ -157,6 +157,18 @@ kinds through this vocabulary instead of printing CLOS object identities."
 (defconstant +block-atlas-tile-size+ 16)
 (defconstant +block-atlas-tile-count+ 11)
 (defconstant +block-atlas-texture-format+ :rgba8-unorm-srgb)
+(defconstant +block-normal-atlas-texture-format+ :rgba8-unorm)
+
+(defgeneric paint-block-atlas-relief (tile x y)
+  (:documentation
+   "Return the 0..255 surface height of atlas tile TILE at tile-local X,Y.
+
+Like the colour, each numbered tile is one EQL method, so a live image can
+re-sculpt a single material's micro-surface and rebuild both atlases without
+touching the rest of the palette.
+
+See #CHUKWD for why relief and normals are generated beside colour rather
+than arriving as authored assets."))
 
 (defun block-atlas-byte (value)
   (max 0 (min 255 (round value))))
@@ -167,8 +179,10 @@ kinds through this vocabulary instead of printing CLOS object identities."
           (ash (block-atlas-byte blue) 16)
           #xff000000))
 
-(defun block-atlas-variation (x y salt)
-  (- (mod (+ (* x 17) (* y 31) (* salt 43) (* x y 7)) 25) 12))
+(defun block-atlas-variation (x y tile)
+  "Fine colour grain modulated by TILE's shared procedural relief."
+  (+ (- (mod (+ (* x 17) (* y 31) (* tile 43) (* x y 7)) 25) 12)
+     (round (- (paint-block-atlas-relief tile x y) 128) 12)))
 
 (defun shaded-block-atlas-pixel (red green blue &optional (variation 0))
   (pack-block-atlas-rgba (+ red variation)
@@ -283,11 +297,9 @@ material and rebuild the atlas without touching the rest of the palette."))
 
 ;;; Colour is only half of what a material looks like.  The other half is its
 ;;; micro-surface: whether it is granular, grooved, tufted, or faceted.  The
-;;; atlas carries that as a height field in its fourth channel, painted by the
-;;; same per-tile arithmetic that paints the colour and read by the block
-;;; shader as a gradient which perturbs the shading normal.  The channel is
-;;; free: every block kind in this world is opaque, so nothing was using it
-;;; for coverage, and the shader declares what it actually means.
+;;; normal atlas carries that as a height field and the unit normal derived
+;;; from it, painted by the same per-tile arithmetic that paints the colour.
+;;; The block shader reads that normal directly to perturb its shading normal.
 
 (defun block-atlas-lattice-hash (x y salt)
   "A small deterministic hash of one integer lattice site into 0..255."
@@ -310,17 +322,6 @@ material and rebuild the atlas without touching the rest of the palette."))
          (d (block-atlas-lattice-hash (1+ cx) (1+ cy) salt)))
     (round (+ (* (+ a (* (- b a) sx)) (- 1.0 sy))
               (* (+ c (* (- d c) sx)) sy)))))
-
-(defgeneric paint-block-atlas-relief (tile x y)
-  (:documentation
-   "Return the 0..255 surface height of atlas tile TILE at tile-local X,Y.
-
-Like the colour, each numbered tile is one EQL method, so a live image can
-re-sculpt a single material's micro-surface and rebuild the atlas without
-touching the rest of the palette.
-
-See #CHUKWD for why relief lives beside colour in generated arithmetic
-rather than arriving as an authored normal map."))
 
 (defmethod paint-block-atlas-relief (tile x y)
   "A plausible default: fine grain, so a new material is never dead flat."
@@ -412,8 +413,7 @@ rather than arriving as an authored normal map."))
 (defun make-block-texture-atlas ()
   "Return the little world's horizontal RGBA8 atlas as packed pixel words.
 
-RGB is the material's colour and A its surface height; both come from the
-same per-tile arithmetic, and neither is an asset."
+RGB is the material's procedural colour and A is opaque coverage."
   (let* ((width (* +block-atlas-tile-size+ +block-atlas-tile-count+))
          (pixels (make-array (list +block-atlas-tile-size+ width)
                              :element-type '(unsigned-byte 32))))
@@ -421,8 +421,55 @@ same per-tile arithmetic, and neither is an asset."
       (dotimes (tile +block-atlas-tile-count+)
         (dotimes (x +block-atlas-tile-size+)
           (setf (aref pixels y (+ x (* tile +block-atlas-tile-size+)))
-                (logior (logand (paint-block-atlas-tile tile x y) #x00ffffff)
-                        (ash (block-atlas-byte
-                              (paint-block-atlas-relief tile x y))
-                             24))))))
+                (paint-block-atlas-tile tile x y)))))
+    pixels))
+
+(defun block-atlas-relief-at (tile x y)
+  "Read TILE's relief with coordinates clamped to its own boundary."
+  (paint-block-atlas-relief
+   tile
+   (max 0 (min (1- +block-atlas-tile-size+) x))
+   (max 0 (min (1- +block-atlas-tile-size+) y))))
+
+(defun pack-block-atlas-normal (x y z height)
+  "Pack a signed tangent-space normal and its source HEIGHT into RGBA8."
+  ;; PACK-BLOCK-ATLAS-RGBA supplies opaque alpha; replace it with the
+  ;; inspectable height after reusing its channel encoding.
+  (logior (logand (pack-block-atlas-rgba (* (+ x 1.0) 127.5)
+                                         (* (+ y 1.0) 127.5)
+                                         (* (+ z 1.0) 127.5))
+                  #x00ffffff)
+          (ash (block-atlas-byte height) 24)))
+
+(defun paint-block-atlas-normal (tile x y)
+  "Return TILE's packed tangent-space normal at X,Y.
+
+The normal is the central difference of the exact procedural relief painted
+beside the colour.  Boundary reads clamp to the tile, so neither the generated
+map nor later texture filtering can borrow a neighbouring material's shape."
+  (let* ((height (block-atlas-relief-at tile x y))
+         (dx (* 1.15
+                (/ (- (block-atlas-relief-at tile (1- x) y)
+                      (block-atlas-relief-at tile (1+ x) y))
+                   255.0)))
+         (dy (* 1.15
+                (/ (- (block-atlas-relief-at tile x (1- y))
+                      (block-atlas-relief-at tile x (1+ y)))
+                   255.0)))
+         (length (sqrt (+ (* dx dx) (* dy dy) 1.0))))
+    (pack-block-atlas-normal (/ dx length) (/ dy length) (/ length) height)))
+
+(defun make-block-normal-atlas ()
+  "Return the relief-correlated tangent-space normal atlas as packed RGBA8.
+
+RGB is a linear encoded unit normal and A is the procedural height from which
+it was derived.  This is a derived materialization, not an authored asset."
+  (let* ((width (* +block-atlas-tile-size+ +block-atlas-tile-count+))
+         (pixels (make-array (list +block-atlas-tile-size+ width)
+                             :element-type '(unsigned-byte 32))))
+    (dotimes (y +block-atlas-tile-size+)
+      (dotimes (tile +block-atlas-tile-count+)
+        (dotimes (x +block-atlas-tile-size+)
+          (setf (aref pixels y (+ x (* tile +block-atlas-tile-size+)))
+                (paint-block-atlas-normal tile x y)))))
     pixels))

@@ -236,6 +236,8 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:luvcraft-session-atlas-sampler
            #:luvcraft-session-atlas-texture
            #:luvcraft-session-atlas-view
+           #:luvcraft-session-normal-atlas-texture
+           #:luvcraft-session-normal-atlas-view
            #:luvcraft-session-block-pipeline
            #:luvcraft-session-camera
            #:luvcraft-session-canvas
@@ -280,6 +282,7 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:make-block-chunk-load-request
            #:make-block-mesh-snapshot
            #:make-block-texture-atlas
+           #:make-block-normal-atlas
            #:make-default-sky-profile
            #:make-empty-little-block-world
            #:make-little-block-world

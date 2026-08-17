@@ -469,7 +469,10 @@ the frame uniform cannot silently diverge between shader and host."
                          (:binding 5
                           :resource
                           ,(luvcraft-session-shadow-comparison-sampler
-                            session)))))
+                            session))
+                         (:binding 6
+                          :resource
+                          ,(luvcraft-session-normal-atlas-view session)))))
                      shadow-bind-group
                      (create
                       (luvcraft-session-device session)
@@ -1192,6 +1195,7 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                     (* +block-atlas-tile-size+ +block-atlas-tile-count+))
                   (atlas-height +block-atlas-tile-size+)
                   (atlas-data (make-block-texture-atlas))
+                  (normal-atlas-data (make-block-normal-atlas))
                   (atlas-format
                     (ensure-block-atlas-sample-transfer
                      +block-atlas-texture-format+))
@@ -1208,6 +1212,19 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                     (keep
                      (create device (make-texture-view-descriptor
                                      :texture atlas-texture))))
+                  (normal-atlas-texture
+                    (keep
+                     (create
+                      device
+                      (make-texture-descriptor
+                       :label "block world normal atlas"
+                       :size (list atlas-width atlas-height)
+                       :dimensions :2d :format +block-normal-atlas-texture-format+
+                       :usage '(:copy-dst :texture-binding)))))
+                  (normal-atlas-view
+                    (keep
+                     (create device (make-texture-view-descriptor
+                                     :texture normal-atlas-texture))))
                   (atlas-sampler
                     (keep
                      (create device (make-sampler-descriptor
@@ -1264,7 +1281,8 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                                   (:binding 2 :type :uniform-buffer)
                                   (:binding 3 :type :texture)
                                   (:binding 4 :type :sampler)
-                                  (:binding 5 :type :sampler))))))
+                                  (:binding 5 :type :sampler)
+                                  (:binding 6 :type :texture))))))
                   (shadow-layout
                     (keep
                      (create
@@ -1486,6 +1504,8 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                      :title-base title
                      :atlas-texture atlas-texture :atlas-view atlas-view
                      :atlas-sampler atlas-sampler
+                     :normal-atlas-texture normal-atlas-texture
+                     :normal-atlas-view normal-atlas-view
                      :color-texture color-texture :color-view color-view
                      :depth-texture depth-texture :depth-view depth-view
                      :presentation-texture presentation-texture
@@ -1523,6 +1543,14 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                 (device-queue device)
                 (make-texture-copy :texture atlas-texture)
                 atlas-data
+                (make-texture-data-layout
+                 :bytes-per-row (* atlas-width 4)
+                 :rows-per-image atlas-height)
+                (list atlas-width atlas-height))
+               (write-texture
+                (device-queue device)
+                (make-texture-copy :texture normal-atlas-texture)
+                normal-atlas-data
                 (make-texture-data-layout
                  :bytes-per-row (* atlas-width 4)
                  :rows-per-image atlas-height)

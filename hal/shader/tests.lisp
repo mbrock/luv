@@ -325,7 +325,7 @@
     (ok (typep specification 'spv:shader-specification))
     (ok (eq (spv:shader-specification-stage specification) :fragment))
     (ok (= (length (spv:shader-specification-inputs specification)) 8))
-    (ok (= (length (spv:shader-specification-resources specification)) 6))
+    (ok (= (length (spv:shader-specification-resources specification)) 7))
     (ok (typep (spv:shader-binding-expression sun-direction)
                'spv:shader-call))
     (ok (typep (spv:shader-binding-expression sun-direction)

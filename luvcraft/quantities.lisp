@@ -49,10 +49,14 @@
   :non-negative-p t)
 (math:define-quantity :material-emission :kind :proportion
   :non-negative-p t)
-;;; A material's own micro-surface height, painted into the block atlas
-;;; alongside its colour.  Every block kind in this world is opaque, so the
-;;; atlas's fourth channel carries relief rather than coverage.
+;;; A material's own micro-surface height, retained in the generated normal
+;;; atlas alongside the unit normal derived from it.
 (math:define-quantity :surface-relief :kind :proportion
+  :non-negative-p t)
+;;; The normal atlas stores a tangent-space unit normal in unsigned texture
+;;; channels.  Sampling produces this encoded control value; the block shader
+;;; recentres it before placing it in the face's world-space tangent frame.
+(math:define-quantity :surface-normal-sample :kind :control-signal
   :non-negative-p t)
 (math:define-quantity :sky-propagation-level :kind :sample-count
   :non-negative-p t)
