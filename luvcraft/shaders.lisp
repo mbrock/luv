@@ -536,7 +536,7 @@
                               :sample-transfer :srgb-to-linear
                               :sample-components
                               ((:rgb :quantity :linear-rgb :unit :one)
-                               (:a :quantity :opacity :unit :one)))
+                               (:a :quantity :surface-relief :unit :one)))
                  (block-sampler :sampler :set 0 :binding 1)
                  (frame-state :uniform-block :set 0 :binding 2
                               :members #.*frame-uniform-members*)
@@ -595,10 +595,11 @@
               (* ramp-v-low (max 0.0 (- edge-v-low)))
               (* ramp-v-high (max 0.0 (- edge-v-high)))))
          (seam (clamp crease 0.0 1.0))
-         ;; Per-texel relief.  The atlas is one row of square tiles, so the
-         ;; tile a fragment belongs to is the whole part of its scaled U, and
-         ;; neighbour taps are clamped inside that tile: relief never bleeds
-         ;; across a material boundary.
+         ;; Per-texel relief, read from the height the atlas paints alongside
+         ;; each material's colour.  The atlas is one row of square tiles, so
+         ;; the tile a fragment belongs to is the whole part of its scaled U,
+         ;; and neighbour taps are clamped inside that tile: relief never
+         ;; bleeds across a material boundary.
          (atlas-u (representation (swizzle uv :x)))
          (atlas-v (representation (swizzle uv :y)))
          (tile-count 11.0)
@@ -624,23 +625,18 @@
          (v-ahead
            (vec2 (/ (+ tile-origin tile-u) tile-count)
                  (clamp (+ atlas-v texel-step) tile-low tile-high)))
-         (luma-weights (vec3 0.299 0.587 0.114))
          (height-u-back
-           (dot (representation
-                 (swizzle (sample block-atlas block-sampler u-back) :rgb))
-                luma-weights))
+           (representation
+            (swizzle (sample block-atlas block-sampler u-back) :a)))
          (height-u-ahead
-           (dot (representation
-                 (swizzle (sample block-atlas block-sampler u-ahead) :rgb))
-                luma-weights))
+           (representation
+            (swizzle (sample block-atlas block-sampler u-ahead) :a)))
          (height-v-back
-           (dot (representation
-                 (swizzle (sample block-atlas block-sampler v-back) :rgb))
-                luma-weights))
+           (representation
+            (swizzle (sample block-atlas block-sampler v-back) :a)))
          (height-v-ahead
-           (dot (representation
-                 (swizzle (sample block-atlas block-sampler v-ahead) :rgb))
-                luma-weights))
+           (representation
+            (swizzle (sample block-atlas block-sampler v-ahead) :a)))
          ;; Both shapings are sub-block detail, so both have to fade out as
          ;; soon as they stop resolving on screen; otherwise distant terrain
          ;; sparkles and shows a lit grid instead of a surface.  One measured

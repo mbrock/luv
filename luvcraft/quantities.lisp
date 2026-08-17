@@ -49,6 +49,11 @@
   :non-negative-p t)
 (math:define-quantity :material-emission :kind :proportion
   :non-negative-p t)
+;;; A material's own micro-surface height, painted into the block atlas
+;;; alongside its colour.  Every block kind in this world is opaque, so the
+;;; atlas's fourth channel carries relief rather than coverage.
+(math:define-quantity :surface-relief :kind :proportion
+  :non-negative-p t)
 (math:define-quantity :sky-propagation-level :kind :sample-count
   :non-negative-p t)
 (math:define-quantity :block-propagation-level :kind :sample-count

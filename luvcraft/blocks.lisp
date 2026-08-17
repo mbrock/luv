@@ -281,8 +281,136 @@ material and rebuild the atlas without touching the rest of the palette."))
      (+ 25 variation bezel)
      (+ 36 variation bezel))))
 
+;;; Colour is only half of what a material looks like.  The other half is its
+;;; micro-surface: whether it is granular, grooved, tufted, or faceted.  The
+;;; atlas carries that as a height field in its fourth channel, painted by the
+;;; same per-tile arithmetic that paints the colour and read by the block
+;;; shader as a gradient which perturbs the shading normal.  The channel is
+;;; free: every block kind in this world is opaque, so nothing was using it
+;;; for coverage, and the shader declares what it actually means.
+
+(defun block-atlas-lattice-hash (x y salt)
+  "A small deterministic hash of one integer lattice site into 0..255."
+  (let ((value (+ (* x 374761393) (* y 668265263) (* salt 2654435761))))
+    (setf value (logand (logxor value (ash value -13)) #xffffffff))
+    (setf value (logand (* value 1274126177) #xffffffff))
+    (ldb (byte 8 13) value)))
+
+(defun block-atlas-clump (x y salt period)
+  "Smooth 0..255 clumping at PERIOD, so a material can read as tufted."
+  (let* ((cx (floor x period))
+         (cy (floor y period))
+         (fx (/ (mod x period) (float period)))
+         (fy (/ (mod y period) (float period)))
+         (sx (* fx fx (- 3.0 (* 2.0 fx))))
+         (sy (* fy fy (- 3.0 (* 2.0 fy))))
+         (a (block-atlas-lattice-hash cx cy salt))
+         (b (block-atlas-lattice-hash (1+ cx) cy salt))
+         (c (block-atlas-lattice-hash cx (1+ cy) salt))
+         (d (block-atlas-lattice-hash (1+ cx) (1+ cy) salt)))
+    (round (+ (* (+ a (* (- b a) sx)) (- 1.0 sy))
+              (* (+ c (* (- d c) sx)) sy)))))
+
+(defgeneric paint-block-atlas-relief (tile x y)
+  (:documentation
+   "Return the 0..255 surface height of atlas tile TILE at tile-local X,Y.
+
+Like the colour, each numbered tile is one EQL method, so a live image can
+re-sculpt a single material's micro-surface and rebuild the atlas without
+touching the rest of the palette."))
+
+(defmethod paint-block-atlas-relief (tile x y)
+  "A plausible default: fine grain, so a new material is never dead flat."
+  (+ 128 (- (ash (block-atlas-lattice-hash x y (+ 91 tile)) -2) 32)))
+
+(defmethod paint-block-atlas-relief ((tile (eql 0)) x y)
+  "Grass top: blades clumped into tufts."
+  (block-atlas-byte
+   (+ (* 0.62 (block-atlas-clump x y 3 4))
+      (* 0.38 (block-atlas-lattice-hash x y 11)))))
+
+(defmethod paint-block-atlas-relief ((tile (eql 1)) x y)
+  "Grass side: a ragged fringe over dirt clods."
+  (if (< y 5)
+      (block-atlas-byte
+       (+ 60 (* 0.75 (block-atlas-lattice-hash x y 12))
+          (* 40 (- 4 y))))
+      (block-atlas-byte (* 0.85 (block-atlas-clump x y 13 5)))))
+
+(defmethod paint-block-atlas-relief ((tile (eql 2)) x y)
+  "Dirt: rounded clods with grit between them."
+  (block-atlas-byte
+   (+ (* 0.70 (block-atlas-clump x y 21 5))
+      (* 0.30 (block-atlas-lattice-hash x y 22)))))
+
+(defmethod paint-block-atlas-relief ((tile (eql 3)) x y)
+  "Stone: granular, cut by a couple of shallow cracks."
+  (let ((crack (if (or (zerop (mod (+ (* x 3) y) 11))
+                       (zerop (mod (+ x (* y 5)) 13)))
+                   -70
+                   0)))
+    (block-atlas-byte
+     (+ 150 crack
+        (* 0.45 (- (block-atlas-lattice-hash x y 31) 128))
+        (* 0.40 (- (block-atlas-clump x y 32 4) 128))))))
+
+(defmethod paint-block-atlas-relief ((tile (eql 4)) x y)
+  "Wood bark: deep vertical grooves with grain between them."
+  (let ((groove (case (mod x 5) (0 -80) (1 -30) (4 -25) (t 20))))
+    (block-atlas-byte
+     (+ 150 groove (* 0.30 (- (block-atlas-lattice-hash x y 41) 128))))))
+
+(defmethod paint-block-atlas-relief ((tile (eql 5)) x y)
+  "Wood end grain: raised concentric rings."
+  (let* ((dx (- x 7.5))
+         (dy (- y 7.5))
+         (ring (mod (floor (+ (* dx dx) (* dy dy))) 18)))
+    (block-atlas-byte
+     (+ 128 (* 7 (- ring 9))
+        (* 0.20 (- (block-atlas-lattice-hash x y 51) 128))))))
+
+(defmethod paint-block-atlas-relief ((tile (eql 6)) x y)
+  "Leaves: overlapping lobes with gaps between them."
+  (block-atlas-byte
+   (+ (* 0.80 (block-atlas-clump x y 61 4))
+      (* 0.35 (block-atlas-lattice-hash x y 62))
+      (if (evenp (+ x y)) 18 -18))))
+
+(defmethod paint-block-atlas-relief ((tile (eql 7)) x y)
+  "Sand: fine wind ripples over a soft dune."
+  (block-atlas-byte
+   (+ 128
+      (* 26 (sin (/ (+ x (* 0.6 y)) 1.7)))
+      (* 0.45 (- (block-atlas-clump x y 71 6) 128))
+      (* 0.18 (- (block-atlas-lattice-hash x y 72) 128)))))
+
+(defmethod paint-block-atlas-relief ((tile (eql 8)) x y)
+  "Snow: soft drifts with the odd crystal glint standing proud."
+  (block-atlas-byte
+   (+ (* 0.80 (block-atlas-clump x y 81 6))
+      (* 0.20 (block-atlas-lattice-hash x y 82))
+      (if (zerop (mod (+ (* x 5) (* y 7)) 23)) 60 0))))
+
+(defmethod paint-block-atlas-relief ((tile (eql 9)) x y)
+  "Crystal: sharp faceted planes meeting along the tile diagonals."
+  (let ((diagonal (abs (- x y)))
+        (anti (abs (- (+ x y) 15))))
+    (block-atlas-byte
+     (+ 110 (* 9 (- 8 (min diagonal 8))) (* 6 (- 8 (min anti 8)))))))
+
+(defmethod paint-block-atlas-relief ((tile (eql 10)) x y)
+  "Terminal graphite: flat glass inside a raised per-block bezel."
+  (let ((edge (min x y (- +block-atlas-tile-size+ 1 x)
+                   (- +block-atlas-tile-size+ 1 y))))
+    (block-atlas-byte
+     (+ 96 (* 55 (max 0 (- 2 edge)))
+        (* 0.10 (- (block-atlas-lattice-hash x y 101) 128))))))
+
 (defun make-block-texture-atlas ()
-  "Return the little world's horizontal RGBA8 atlas as packed pixel words."
+  "Return the little world's horizontal RGBA8 atlas as packed pixel words.
+
+RGB is the material's colour and A its surface height; both come from the
+same per-tile arithmetic, and neither is an asset."
   (let* ((width (* +block-atlas-tile-size+ +block-atlas-tile-count+))
          (pixels (make-array (list +block-atlas-tile-size+ width)
                              :element-type '(unsigned-byte 32))))
@@ -290,5 +418,8 @@ material and rebuild the atlas without touching the rest of the palette."))
       (dotimes (tile +block-atlas-tile-count+)
         (dotimes (x +block-atlas-tile-size+)
           (setf (aref pixels y (+ x (* tile +block-atlas-tile-size+)))
-                (paint-block-atlas-tile tile x y)))))
+                (logior (logand (paint-block-atlas-tile tile x y) #x00ffffff)
+                        (ash (block-atlas-byte
+                              (paint-block-atlas-relief tile x y))
+                             24))))))
     pixels))

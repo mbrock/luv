@@ -324,7 +324,7 @@
          (fogged (binding-named 'fogged specification)))
     (ok (typep specification 'spv:shader-specification))
     (ok (eq (spv:shader-specification-stage specification) :fragment))
-    (ok (= (length (spv:shader-specification-inputs specification)) 6))
+    (ok (= (length (spv:shader-specification-inputs specification)) 8))
     (ok (= (length (spv:shader-specification-resources specification)) 6))
     (ok (typep (spv:shader-binding-expression sun-direction)
                'spv:shader-call))
@@ -370,7 +370,7 @@
     (ok (equal (form-names
                 (spv:shader-expression-form
                  (spv:shader-binding-expression radiance)))
-               '("+" "reflected"
+               '("+" "reflected" "specular"
                  ("interpret" ("*" "albedo" "emission-input")
                   "quantity" "linear-rgb" "unit" "one"))))
     (ok (equal (form-names
@@ -402,8 +402,8 @@
            (binding-named 'shadow-projection specification)))
     (ok (typep specification 'spv:shader-specification))
     (ok (eq (spv:shader-specification-stage specification) :vertex))
-    (ok (= (length (spv:shader-specification-inputs specification)) 4))
-    (ok (= (length (spv:shader-specification-outputs specification)) 7))
+    (ok (= (length (spv:shader-specification-inputs specification)) 5))
+    (ok (= (length (spv:shader-specification-outputs specification)) 9))
     (ok (eq (spv:shader-interface-built-in clip-position) :position))
     (ok (typep resource 'spv:shader-uniform-block))
     (ok (= (spv:shader-resource-binding resource) 2))
@@ -1509,21 +1509,31 @@
          (fragment (shaders:block-world-sky-fragment-specification))
          (fragment-module (shaders:block-world-sky-fragment-module))
          (ray (binding-named 'ray vertex))
-         (unit (binding-named 'unit fragment))
+         (direction (binding-named 'direction fragment))
+         (cloud-density (binding-named 'cloud-density fragment))
          (disc (binding-named 'disc fragment)))
     (ok (eq (spv:shader-specification-stage vertex) :vertex))
     (ok (eq (spv:shader-specification-stage fragment) :fragment))
     (ok (spv:shader-type=
          (spv:shader-expression-type (spv:shader-binding-expression ray))
          :vec3))
+    ;; The sky drops out of the checked-quantity world once, deliberately,
+    ;; and is ordinary image mathematics over a unit view ray thereafter.
     (ok (equal (form-names
                 (spv:shader-expression-form
-                 (spv:shader-binding-expression unit)))
-               '("normalize" "ray-input")))
+                 (spv:shader-binding-expression direction)))
+               '("normalize" ("representation" "ray-input"))))
+    (ok (equal (form-names
+                (spv:shader-expression-form
+                 (spv:shader-binding-expression cloud-density)))
+               '("*" "deck-mask"
+                 ("smoothstep" "cloud-edge"
+                  ("+" "cloud-edge" 0.14) "cloud-field"))))
     (ok (equal (form-names
                 (spv:shader-expression-form
                  (spv:shader-binding-expression disc)))
-               '("smoothstep" "disc-outer" "disc-inner" "alignment")))
+               '("smoothstep" ("-" 1.0 "disc-limb")
+                 ("-" 1.0 ("*" 0.56 "disc-limb")) "alignment")))
     ;; All the fragment's extended mathematics shares one import.
     (ok (= 1 (length (spv:spir-v-module-extended-instruction-imports
                       fragment-module))))))

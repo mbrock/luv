@@ -315,12 +315,13 @@
                    :vertex
                    `(:module ,vertex-module
                      :buffers
-                     ((:array-stride 48
+                     ((:array-stride 64
                        :attributes
                        ((:shader-location 0 :offset 0 :format :float32x3)
                         (:shader-location 1 :offset 12 :format :float32x3)
                         (:shader-location 2 :offset 24 :format :float32x3)
-                        (:shader-location 3 :offset 36 :format :float32x3)))))
+                        (:shader-location 3 :offset 36 :format :float32x3)
+                        (:shader-location 4 :offset 48 :format :float32x4)))))
                    :fragment
                    `(:module ,fragment-module
                      :targets
