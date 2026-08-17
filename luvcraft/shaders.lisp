@@ -112,7 +112,11 @@
                            :components
                            ((:x :quantity :sky-light-level :unit :one)
                             (:y :quantity :block-light-level :unit :one)
-                            (:z :quantity :material-emission :unit :one))))
+                            (:z :quantity :material-emission :unit :one)))
+              ;; What the mesher knows about this face's four in-plane edges
+              ;; and the fragment stage cannot see: concave, flush, or convex.
+              (edge-shaping-input :vec4 :location 4
+                                  :quantity :edge-shaping :unit :one))
      :outputs ((clip-position :vec4 :built-in :position)
                (uv-shade-output :vec3 :location 0
                                 :components
@@ -132,7 +136,15 @@
                                  :unit :one)
                (shadow-depth-output :float :location 5
                                     :quantity :shadow-depth
-                                    :unit :one))
+                                    :unit :one)
+               ;; The fragment stage shapes its own normal from where the
+               ;; fragment sits inside its cell, so it needs the world point
+               ;; rather than only the face's flat normal.
+               (world-position-output :vec3 :location 6
+                                      :quantity :world-position
+                                      :unit :cell)
+               (edge-shaping-output :vec4 :location 7
+                                    :quantity :edge-shaping :unit :one))
      :resources
      ((frame-state :uniform-block :set 0 :binding 2
                    :members #.*frame-uniform-members*)))
@@ -179,7 +191,9 @@
     (set-output fog-output fog-amount)
     (set-output light-output light-input)
     (set-output shadow-uv-output (swizzle shadow-projection :xy))
-    (set-output shadow-depth-output shadow-depth)))
+    (set-output shadow-depth-output shadow-depth)
+    (set-output world-position-output world-position)
+    (set-output edge-shaping-output edge-shaping-input)))
 
 (defun block-world-vertex-specification ()
   (shader-specification-for :block-surface :vertex))
@@ -512,7 +526,11 @@
       (shadow-uv-input :vec2 :location 4
                        :quantity :shadow-uv :unit :one)
       (shadow-depth-input :float :location 5
-                          :quantity :shadow-depth :unit :one))
+                          :quantity :shadow-depth :unit :one)
+      (world-position-input :vec3 :location 6
+                            :quantity :world-position :unit :cell)
+      (edge-shaping-input :vec4 :location 7
+                          :quantity :edge-shaping :unit :one))
      :outputs ((color-output :vec4 :location 0))
      :resources ((block-atlas :texture-2d :set 0 :binding 0
                               :sample-transfer :srgb-to-linear
@@ -531,8 +549,118 @@
          (uv (swizzle uv-shade :xy))
          (ao (swizzle uv-shade :z))
          (normal normal-input)
+         ;; --- the shaped surface -------------------------------------------
+         ;; A block face is flat geometry, but it should not read as a flat
+         ;; material.  Two shapings ride on the same face: a bevel that rounds
+         ;; the last sixth of a cell toward its edge, and a per-texel relief
+         ;; read straight out of the atlas the material is already painted in.
+         ;; Both are pure normal perturbation, so no mesh changes.
+         (flat-normal (representation normal-input))
+         (surface-point (representation world-position-input))
+         (eye (representation (swizzle camera-vector :xyz)))
+         (cell (fract surface-point))
+         (axis-x (abs (swizzle flat-normal :x)))
+         (axis-y (abs (swizzle flat-normal :y)))
+         ;; A block face's own normal selects its two in-plane world axes, so
+         ;; one expression serves all six faces without a branch.
+         (tangent-u (vec3 (- 1.0 axis-x) 0.0 axis-x))
+         (tangent-v (vec3 0.0 (- 1.0 axis-y) axis-y))
+         (plane-u (mix (swizzle cell :x) (swizzle cell :z) axis-x))
+         (plane-v (mix (swizzle cell :y) (swizzle cell :z) axis-y))
+         ;; The mesher's edge classification decides what each boundary does.
+         ;; A convex edge rounds the surface over; a concave one fillets it
+         ;; into the inner corner; a flush one -- the middle of an open plain,
+         ;; where the face simply continues into an identically oriented
+         ;; neighbour -- leaves the surface alone.  Signs come straight from
+         ;; the vertex lane, so the same ramp expression serves all three.
+         (edge (representation edge-shaping-input))
+         (edge-u-low (swizzle edge :x))
+         (edge-u-high (swizzle edge :y))
+         (edge-v-low (swizzle edge :z))
+         (edge-v-high (swizzle edge :w))
+         (bevel-width 0.105)
+         (ramp-u-low (smoothstep bevel-width 0.0 plane-u))
+         (ramp-u-high (smoothstep (- 1.0 bevel-width) 1.0 plane-u))
+         (ramp-v-low (smoothstep bevel-width 0.0 plane-v))
+         (ramp-v-high (smoothstep (- 1.0 bevel-width) 1.0 plane-v))
+         (bevel-u (- (* ramp-u-high edge-u-high) (* ramp-u-low edge-u-low)))
+         (bevel-v (- (* ramp-v-high edge-v-high) (* ramp-v-low edge-v-low)))
+         (bevel-shape (+ (* tangent-u bevel-u) (* tangent-v bevel-v)))
+         ;; An inner corner is a crevice, and a crevice gathers occlusion.
+         ;; Only the filleted edges contribute; a rounded-over outer edge is
+         ;; more exposed than the face it belongs to, not less.
+         (crease
+           (+ (* ramp-u-low (max 0.0 (- edge-u-low)))
+              (* ramp-u-high (max 0.0 (- edge-u-high)))
+              (* ramp-v-low (max 0.0 (- edge-v-low)))
+              (* ramp-v-high (max 0.0 (- edge-v-high)))))
+         (seam (clamp crease 0.0 1.0))
+         ;; Per-texel relief.  The atlas is one row of square tiles, so the
+         ;; tile a fragment belongs to is the whole part of its scaled U, and
+         ;; neighbour taps are clamped inside that tile: relief never bleeds
+         ;; across a material boundary.
+         (atlas-u (representation (swizzle uv :x)))
+         (atlas-v (representation (swizzle uv :y)))
+         (tile-count 11.0)
+         (tile-texels 16.0)
+         (texel-step (/ 1.0 tile-texels))
+         (tile-low (* 0.5 texel-step))
+         (tile-high (- 1.0 tile-low))
+         (tile-origin (floor (* atlas-u tile-count)))
+         (tile-u (- (* atlas-u tile-count) tile-origin))
+         (u-back
+           (vec2 (/ (+ tile-origin
+                       (clamp (- tile-u texel-step) tile-low tile-high))
+                    tile-count)
+                 atlas-v))
+         (u-ahead
+           (vec2 (/ (+ tile-origin
+                       (clamp (+ tile-u texel-step) tile-low tile-high))
+                    tile-count)
+                 atlas-v))
+         (v-back
+           (vec2 (/ (+ tile-origin tile-u) tile-count)
+                 (clamp (- atlas-v texel-step) tile-low tile-high)))
+         (v-ahead
+           (vec2 (/ (+ tile-origin tile-u) tile-count)
+                 (clamp (+ atlas-v texel-step) tile-low tile-high)))
+         (luma-weights (vec3 0.299 0.587 0.114))
+         (height-u-back
+           (dot (representation
+                 (swizzle (sample block-atlas block-sampler u-back) :rgb))
+                luma-weights))
+         (height-u-ahead
+           (dot (representation
+                 (swizzle (sample block-atlas block-sampler u-ahead) :rgb))
+                luma-weights))
+         (height-v-back
+           (dot (representation
+                 (swizzle (sample block-atlas block-sampler v-back) :rgb))
+                luma-weights))
+         (height-v-ahead
+           (dot (representation
+                 (swizzle (sample block-atlas block-sampler v-ahead) :rgb))
+                luma-weights))
+         ;; Both shapings are sub-block detail, so both have to fade out as
+         ;; soon as they stop resolving on screen; otherwise distant terrain
+         ;; sparkles and shows a lit grid instead of a surface.  One measured
+         ;; texel footprint drives both, at their own scales.
+         (footprint
+           (max (* (abs (derivative-x atlas-u)) (* tile-count tile-texels))
+                (* (abs (derivative-y atlas-v)) tile-texels)))
+         (relief-fade (- 1.0 (smoothstep 0.30 1.10 footprint)))
+         (bevel-fade (- 1.0 (smoothstep 0.80 3.20 footprint)))
+         (relief
+           (* (+ (* tangent-u (- height-u-back height-u-ahead))
+                 (* tangent-v (- height-v-back height-v-ahead)))
+              (* 1.15 relief-fade)))
+         (bevel (* bevel-shape (* 0.42 bevel-fade)))
+         (seam-occlusion (- 1.0 (* 0.34 (* seam bevel-fade))))
+         (shaped (normalize (+ (+ flat-normal bevel) relief)))
+         (shading-normal
+           (assume-quantity shaped :quantity :world-direction :unit :one))
          (sun-direction (swizzle sun-vector :xyz))
-         (n-dot-l (max 0.0 (dot normal sun-direction)))
+         (n-dot-l (max 0.0 (dot shading-normal sun-direction)))
          (shadow-coordinate shadow-uv-input)
          (shadow-u (swizzle shadow-coordinate :x))
          (shadow-v (swizzle shadow-coordinate :y))
@@ -641,15 +769,27 @@
             sky-input))
          (ambient (swizzle ambient-vector :xyz))
          (sun-color (swizzle sun-color-vector :xyz))
+         ;; Occlusion bites harder than the raw mesh reading: the corner where
+         ;; three blocks meet is what tells the eye these are solid volumes.
+         (occlusion
+           (interpret
+            (* (expt ao 1.7)
+               (assume-quantity seam-occlusion
+                                :quantity :ambient-occlusion :unit :one))
+            :quantity :ambient-occlusion :unit :one))
          ;; A small floor keeps unlit geometry barely readable rather than
-         ;; a void; caves stay dark for the right reason.
+         ;; a void; caves stay dark for the right reason.  The ambient term
+         ;; is deliberately weaker, and the sun correspondingly stronger,
+         ;; than a display-referred renderer could afford: the filmic curve
+         ;; on presentation is what brings the sunlit half back down.
          (sky-light
-           (interpret (* ambient (+ 0.06 (* 1.34 sky-level)) ao)
+           (interpret (* ambient (+ 0.030 (* 0.86 sky-level)) occlusion)
                       :quantity :linear-rgb :unit :one))
          (sun-light
            (interpret
             (* sun-color
-               (* n-dot-l sun-visibility day-factor direct-shadow))
+               (* 2.35 n-dot-l sun-visibility day-factor direct-shadow
+                  (mix 0.55 1.0 ao)))
             :quantity :linear-rgb :unit :one))
          (torch-color
            (quantity (vec3 1.0 0.82 0.58)
@@ -663,8 +803,29 @@
            (interpret
             (* albedo (+ sky-light sun-light local-light))
             :quantity :linear-rgb :unit :one))
+         ;; One specular lobe off the same shaped normal.  Blocks are matte,
+         ;; so it is a narrow Fresnel-weighted highlight that mostly shows at
+         ;; grazing angles: wet-looking stone at a distance, a glint on a
+         ;; bevel up close, and nothing at all on a face seen head on.
+         (view-direction
+           (assume-quantity (normalize (- eye surface-point))
+                            :quantity :world-direction :unit :one))
+         (half-vector
+           (assume-quantity
+            (normalize (+ (normalize (- eye surface-point))
+                          (representation sun-direction)))
+            :quantity :world-direction :unit :one))
+         (n-dot-h (max 0.0 (dot shading-normal half-vector)))
+         (n-dot-v (max 0.0 (dot shading-normal view-direction)))
+         (fresnel (+ 0.030 (* 0.22 (expt (- 1.0 n-dot-v) 5.0))))
+         (specular
+           (interpret
+            (* sun-color
+               (* 4.5 (expt n-dot-h 26.0) fresnel
+                  sun-visibility day-factor direct-shadow occlusion))
+            :quantity :linear-rgb :unit :one))
          (radiance
-           (+ reflected
+           (+ reflected specular
               (interpret (* albedo emission-input)
                          :quantity :linear-rgb :unit :one)))
          (fog-color (swizzle fog-color-vector :xyz))

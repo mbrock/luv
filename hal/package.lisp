@@ -300,6 +300,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:make-texture-descriptor
            #:texture-format-bytes-per-texel
            #:texture-format-sample-transfer
+           #:vertex-attribute-format-component-count
            #:make-texture-copy
            #:texture-copy-texture
            #:texture-copy-mip-level

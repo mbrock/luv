@@ -273,6 +273,17 @@ has completed."))
      4)
     (:rgba16-float 8)))
 
+(defun vertex-attribute-format-component-count (format)
+  "Return the scalar lane count of a portable vertex attribute FORMAT.
+
+The vocabulary is deliberately small and float-only: it names what the
+mesh and instance products this project actually writes contain, and every
+backend is expected to accept all of it."
+  (ecase format
+    (:float32x2 2)
+    (:float32x3 3)
+    (:float32x4 4)))
+
 (defun texture-format-upload-element-type (format)
   "The packed array element type accepted by WRITE-TEXTURE for FORMAT."
   (ecase (texture-format-bytes-per-texel format)

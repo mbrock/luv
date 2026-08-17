@@ -54,6 +54,10 @@
 (math:define-quantity :block-propagation-level :kind :sample-count
   :non-negative-p t)
 (math:define-quantity :shadow-diagnostic :kind :control-signal)
+;;; Per-face edge shaping: what the mesher knows about a block face's four
+;;; in-plane boundaries.  Signed, because a concave edge and a convex one are
+;;; opposite shapings of the same surface rather than different amounts of one.
+(math:define-quantity :edge-shaping :kind :control-signal)
 (math:define-quantity :shadow-filter-radius :kind :sample-count
   :non-negative-p t)
 (math:define-quantity :view-distance :kind :lattice-coordinate

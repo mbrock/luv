@@ -24,7 +24,7 @@
             positions
             (luv.arithmetic:make-declared-quantity-specification options))))
     (luv.arithmetic:make-quantity-layout
-     12
+     16
      (list
       (projection '(0 1 2)
                   '(:quantity :world-position :unit :cell
@@ -37,7 +37,9 @@
                   '(:quantity :world-direction :unit :one :tensor-order 1))
       (projection '(9) '(:quantity :sky-light-level :unit :one))
       (projection '(10) '(:quantity :block-light-level :unit :one))
-      (projection '(11) '(:quantity :material-emission :unit :one))))))
+      (projection '(11) '(:quantity :material-emission :unit :one))
+      (projection '(12 13 14 15)
+                  '(:quantity :edge-shaping :unit :one :tensor-order 1))))))
 
 (defmethod luv.arithmetic:value-declaration-for
     ((name (eql :block-mesh-vertices)))
@@ -47,7 +49,7 @@
     :representation-type '(vector single-float)
     :quantity-layout
     (luv.arithmetic:make-repeated-quantity-layout
-     (make-block-mesh-vertex-product-layout) :stride 12)
+     (make-block-mesh-vertex-product-layout) :stride 16)
     :source-form
     '(block-mesh-vertices
       :type (vector single-float)
@@ -58,8 +60,9 @@
        (6 7 8) world-direction
        (9) sky-light-level
        (10) block-light-level
-       (11) material-emission)
-      :stride 12))))
+       (11) material-emission
+       (12 13 14 15) edge-shaping)
+      :stride 16))))
 
 (defun make-frame-uniform-product-layout ()
   "Describe the semantic lanes in luvcraft's fixed 72-float frame block."

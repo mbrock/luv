@@ -1169,7 +1169,9 @@ wrapper, this finalizer cannot run before theirs have."
                                          '(unsigned-byte 32))
                                   (typep (getf attribute :offset)
                                          '(unsigned-byte 32))
-                                  (eq :float32x3 (getf attribute :format))))
+                                  (member (getf attribute :format)
+                                          '(:float32x2 :float32x3
+                                            :float32x4))))
                            attributes))
           do (reject-gpu-request descriptor :invalid-vertex-buffer buffer)
         collect
@@ -1179,7 +1181,12 @@ wrapper, this finalizer cannot run before theirs have."
                         (list :shader-location
                               (getf attribute :shader-location)
                               :offset (getf attribute :offset)
-                              :format :r32g32b32-sfloat))
+                              :format
+                              (ecase (vertex-attribute-format-component-count
+                                      (getf attribute :format))
+                                (2 :r32g32-sfloat)
+                                (3 :r32g32b32-sfloat)
+                                (4 :r32g32b32a32-sfloat))))
                       attributes))))
 
 (defmethod create

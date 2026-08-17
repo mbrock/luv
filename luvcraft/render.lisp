@@ -226,7 +226,7 @@ check in BLOCK-WORLD-CAMERA-UNIFORM-SIZE keeps the two honest."
 ;;; presentation stack reads every frame, so a SLY eval can retune the whole
 ;;; look of the running game without rebuilding a pipeline.
 
-(defparameter *luvcraft-exposure* 1.15
+(defparameter *luvcraft-exposure* 0.85
   "Overall scene exposure multiplied into the sky profile's own exposure.")
 
 (defparameter *luvcraft-bloom-gain* 0.55
@@ -238,7 +238,7 @@ check in BLOCK-WORLD-CAMERA-UNIFORM-SIZE keeps the two honest."
 (defparameter *luvcraft-vignette* 0.16
   "Corner falloff of the presented frame, as a fraction of full brightness.")
 
-(defparameter *luvcraft-bloom-threshold* 1.05
+(defparameter *luvcraft-bloom-threshold* 1.5
   "Luminance at which a fragment starts contributing to the bloom chain.")
 
 (defparameter *luvcraft-shaft-decay* 0.955
@@ -1248,7 +1248,7 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                              :label "block world pipeline"
                              :device device :layout layout
                              :vertex-buffers
-                             '((:array-stride 48
+                             '((:array-stride 64
                                 :attributes
                                 ((:shader-location 0 :offset 0
                                   :format :float32x3)
@@ -1257,7 +1257,9 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                                  (:shader-location 2 :offset 24
                                   :format :float32x3)
                                  (:shader-location 3 :offset 36
-                                  :format :float32x3))))
+                                  :format :float32x3)
+                                 (:shader-location 4 :offset 48
+                                  :format :float32x4))))
                              :target-format +luvcraft-scene-color-format+
                              :primitive '(:topology :triangle-list)
                              :depth-stencil
@@ -1274,7 +1276,7 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                              :label "block world shadow pipeline"
                              :device device :layout shadow-layout
                              :vertex-buffers
-                             '((:array-stride 48
+                             '((:array-stride 64
                                 :attributes
                                 ((:shader-location 0 :offset 0
                                   :format :float32x3)
@@ -1283,7 +1285,9 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                                  (:shader-location 2 :offset 24
                                   :format :float32x3)
                                  (:shader-location 3 :offset 36
-                                  :format :float32x3))))
+                                  :format :float32x3)
+                                 (:shader-location 4 :offset 48
+                                  :format :float32x4))))
                              :target-format nil
                              :primitive '(:topology :triangle-list)
                              :depth-stencil

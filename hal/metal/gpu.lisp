@@ -1057,8 +1057,9 @@ compiler boundary of #58IDSR."
                                          '(unsigned-byte 32))
                                   (typep (getf attribute :offset)
                                          '(unsigned-byte 32))
-                                  (eq :float32x3
-                                      (getf attribute :format))))
+                                  (member (getf attribute :format)
+                                          '(:float32x2 :float32x3
+                                            :float32x4))))
                            attributes))
           do (reject-metal-gpu-request
               descriptor :invalid-vertex-buffer buffer)
