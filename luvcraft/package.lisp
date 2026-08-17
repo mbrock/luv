@@ -104,6 +104,7 @@ compiler which closes a program over bound fields into a scalar loop.")
                 #:vec3-component
                 #:vec3-cross
                 #:vec3-dot
+                #:vec3-length
                 #:vec3-list
                 #:vec3-normalize
                 #:vec3-scale
@@ -246,8 +247,10 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:luvcraft-session-modal-focus
            #:luvcraft-session-focus-candidate
            #:luvcraft-focus-entered
+           #:luvcraft-focus-camera-pose
            #:luvcraft-focus-left
            #:luvcraft-focus-score
+           #:luvcraft-overlay-focus-insets
            #:luvcraft-session-mesh
            #:luvcraft-session-meshed-world-revision
            #:luvcraft-session-outstanding-production

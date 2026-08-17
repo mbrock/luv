@@ -226,6 +226,21 @@
   (declare (ignore overlay session))
   nil)
 
+(defmethod luvcraft:luvcraft-overlay-focus-insets
+    ((overlay luvcraft-hotbar-overlay) session)
+  (declare (ignore session))
+  (let* ((state (hotbar-screen-state overlay))
+         (height
+           (second
+            (luv:canvas-extent
+             (luvcraft::luvcraft-session-context
+              (widget-overlay-session overlay)))))
+         (center-y (aref state 1))
+         (half-height (abs (aref state 9)))
+         (bottom-inset
+           (* 0.5 height (+ (- 1.0 center-y) half-height))))
+    (values 0.0 0.0 0.0 bottom-inset)))
+
 (defun open-luvcraft-hotbar (session &key (title "luvcraft block palette"))
   "Create and attach the screen-space McCLIM block palette for SESSION."
   (let* ((port (find-port :server-path '(:luv)))

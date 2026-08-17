@@ -72,16 +72,29 @@ crosshair inside their projected quadrilateral.  A terminal-material ray hit
 without an existing display activates that authored face, starts its Bash PTY,
 and focuses the resulting display.  Once focused, ordinary =Tab= belongs to
 the terminal for shell completion; =Shift-Tab= leaves modal focus.  Focus
-narrows the camera from 70 to 50 degrees with a short ease and hides the world
-crosshair; leaving reverses both cues.
+captures the player's view, then eases the camera toward a pose supplied by
+the focused object.  A terminal supplies its complete authored rectangle: the
+camera moves square to that plane at a distance which contains every corner
+inside a six-percent picture margin.  Screen overlays independently report
+obscured edge insets, so the McCLIM hotbar is excluded from the usable viewport
+without making terminal code depend on McCLIM.  Leaving focus eases back to the
+captured aim and the player's current eye position.  Focus also narrows the
+lens from 70 to 50 degrees and hides the world crosshair.
 
 This is the same player-facing transition whether the object is a McCLIM
 surface, a Ghostty terminal, an open book, or a mounted boat.  Those objects do
 not need a common UI superclass.  They implement focus-entered, focus-left,
-and focused-event methods according to their own semantics; other protocols
-can separately govern rendering, simulation, camera attachment, or vehicle
-motion.  Removing a focused overlay or stopping the session leaves focus
-before releasing its resources.
+focused-event, and optionally focus-camera-pose methods according to their own
+semantics; other protocols can separately govern rendering, simulation,
+camera attachment, viewport insets, or vehicle motion.  Removing a focused
+overlay or stopping the session leaves focus before releasing its resources.
+
+Evidence: the terminal projection test checks all four surface corners against
+the safe rectangle at a representative hotbar inset, then checks complete pose
+restoration.  In the live 1920 by 1280 Metal game, focus entered both from the
+saved player view and from a deliberately close, low aim at the wall's left
+edge; both approaches converged to the same uncropped head-on composition with
+114 pixels reserved for the hotbar.
 
 There is deliberately no universal Escape binding in this layer.  Escape and
 Tab are both meaningful terminal input.  The provisional shared world

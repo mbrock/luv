@@ -109,6 +109,8 @@
                            :reader luvcraft-session-world-text-glyph-cache)
    (overlays :initform nil :accessor luvcraft-session-overlays)
    (modal-focus :initform nil :accessor luvcraft-session-modal-focus)
+   (focus-camera-origin :initform nil
+                        :accessor luvcraft-session-focus-camera-origin)
    (focus-toggle-tab-down-p
     :initform nil :accessor luvcraft-session-focus-toggle-tab-down-p)
    (frame-states :initform (make-hash-table :test #'eql)
@@ -190,6 +192,75 @@
   (declare (ignore focus session))
   nil)
 
+(defgeneric luvcraft-focus-camera-pose (focus session)
+  (:documentation
+   "Return FOCUS's desired CAMERA-POSE in SESSION, or NIL for an FOV-only cue."))
+
+(defmethod luvcraft-focus-camera-pose (focus session)
+  (declare (ignore focus session))
+  nil)
+
+(defgeneric luvcraft-overlay-focus-insets (overlay session)
+  (:documentation
+   "Return left, top, right, and bottom pixel insets obscured by OVERLAY."))
+
+(defmethod luvcraft-overlay-focus-insets (overlay session)
+  (declare (ignore overlay session))
+  (values 0.0 0.0 0.0 0.0))
+
+(defun luvcraft-session-focus-insets (session)
+  (let ((left 0.0) (top 0.0) (right 0.0) (bottom 0.0))
+    (dolist (overlay (luvcraft-session-overlays session))
+      (multiple-value-bind
+          (overlay-left overlay-top overlay-right overlay-bottom)
+          (luvcraft-overlay-focus-insets overlay session)
+        (setf left (max left overlay-left)
+              top (max top overlay-top)
+              right (max right overlay-right)
+              bottom (max bottom overlay-bottom))))
+    (values left top right bottom)))
+
+(defun luvcraft-session-focus-camera-active-p (session)
+  (not (null (luvcraft-session-focus-camera-origin session))))
+
+(defun player-camera-position (player)
+  (make-vec3 (player-x player)
+             (+ (player-y player) (player-eye-height player))
+             (player-z player)))
+
+(defun luvcraft-session-return-camera-pose (session)
+  (let* ((origin (luvcraft-session-focus-camera-origin session))
+         (player (and (slot-boundp session 'player)
+                      (luvcraft-session-player session))))
+    (when origin
+      (make-camera-pose
+       (if player
+           (player-camera-position player)
+           (copy-camera-position (camera-pose-position origin)))
+       (camera-pose-yaw origin)
+       (camera-pose-pitch origin)
+       (camera-pose-field-of-view origin)))))
+
+(defun advance-luvcraft-focus-camera (session seconds)
+  "Advance SESSION's cinematic focus pose after ordinary player simulation."
+  (let ((origin (luvcraft-session-focus-camera-origin session)))
+    (when (and origin (slot-boundp session 'camera))
+      (let* ((camera (luvcraft-session-camera session))
+             (focus (luvcraft-session-modal-focus session))
+             (target
+               (if focus
+                   (or (luvcraft-focus-camera-pose focus session)
+                       (make-camera-pose
+                        (copy-camera-position (camera-position camera))
+                        (camera-yaw camera) (camera-pitch camera)
+                        +luvcraft-camera-focused-vertical-field-of-view+))
+                   (luvcraft-session-return-camera-pose session)))
+             (error (advance-camera-focus camera target seconds)))
+        (when (and (null focus) (< error 1e-4))
+          (set-camera-pose camera target)
+          (setf (luvcraft-session-focus-camera-origin session) nil)))))
+  session)
+
 (defgeneric activate-luvcraft-target (block session hit)
   (:documentation
    "Create and return a focusable interaction for targeted BLOCK, or NIL."))
@@ -239,6 +310,10 @@ mounting a vehicle, and other interactions described by #8JCMA5."
   (when (null focus)
     (error "Use UNFOCUS-LUVCRAFT-SESSION to leave modal focus."))
   (unless (eq focus (luvcraft-session-modal-focus session))
+    (when (and (slot-boundp session 'camera)
+               (null (luvcraft-session-focus-camera-origin session)))
+      (setf (luvcraft-session-focus-camera-origin session)
+            (camera-pose-from-camera (luvcraft-session-camera session))))
     (unfocus-luvcraft-session session)
     (clear-luvcraft-player-input session)
     (setf (luvcraft-session-modal-focus session) focus)

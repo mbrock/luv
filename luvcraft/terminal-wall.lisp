@@ -1373,6 +1373,73 @@ vertex layout."
                            (terminal-surface-coordinate surface column row))))
           (block-ray-hit-distance hit))))))
 
+(defun terminal-focus-camera-pose
+    (surface viewport-width viewport-height
+     &optional (left-inset 0.0) (top-inset 0.0)
+               (right-inset 0.0) (bottom-inset 0.0))
+  "Return a head-on camera pose which contains SURFACE inside the safe view."
+  (let* ((width (coerce viewport-width 'single-float))
+         (height (coerce viewport-height 'single-float))
+         (margin (* 0.06 (min width height)))
+         (left-capacity (- 1.0 (/ (* 2.0 (+ left-inset margin)) width)))
+         (right-capacity (- 1.0 (/ (* 2.0 (+ right-inset margin)) width)))
+         (top-capacity (- 1.0 (/ (* 2.0 (+ top-inset margin)) height)))
+         (bottom-capacity
+           (- 1.0 (/ (* 2.0 (+ bottom-inset margin)) height)))
+         (horizontal-capacity (min left-capacity right-capacity))
+         (vertical-capacity (+ top-capacity bottom-capacity)))
+    (unless (and (plusp horizontal-capacity) (plusp vertical-capacity))
+      (error "Focus insets leave no safe viewport inside ~Dx~D."
+             viewport-width viewport-height))
+    (let* ((frame (terminal-face-frame (terminal-surface-face surface)))
+           (right
+             (voxel-direction-vec3 (terminal-face-frame-right frame)))
+           (up (voxel-direction-vec3 (terminal-face-frame-up frame)))
+           (outward
+             (voxel-direction-vec3 (terminal-face-frame-outward frame)))
+           (forward (vec3-scale outward -1.0))
+           (surface-width (terminal-surface-physical-width surface))
+           (surface-height (terminal-surface-physical-height surface))
+           (half-width (/ surface-width 2.0))
+           (half-height (/ surface-height 2.0))
+           (lower-left (terminal-surface-lower-left-point surface))
+           (center
+             (terminal-offset-point
+              lower-left right half-width up half-height))
+           (field-of-view +luvcraft-camera-focused-vertical-field-of-view+)
+           (focal (/ (tan (/ field-of-view 2.0))))
+           (aspect (/ width height))
+           (distance
+             (max 1.5
+                  (/ (* half-width focal)
+                     (* aspect horizontal-capacity))
+                  (/ (* surface-height focal) vertical-capacity)))
+           ;; Move the eye down the surface just enough to place the terminal
+           ;; in the center of the unobscured view rather than the full frame.
+           (vertical-shift
+             (* half-height
+                (/ (- top-capacity bottom-capacity) vertical-capacity)))
+           (position
+             (terminal-offset-point
+              center outward distance up (- vertical-shift)))
+           (pitch (asin (max -1.0 (min 1.0 (vec3-y forward)))))
+           (yaw
+             (if (> (abs (cos pitch)) 1e-5)
+                 (atan (vec3-x forward) (vec3-z forward))
+                 (atan (- (vec3-z right)) (vec3-x right)))))
+      (make-camera-pose position yaw pitch field-of-view))))
+
+(defmethod luvcraft-focus-camera-pose
+    ((display terminal-display) (session luvcraft-session))
+  (destructuring-bind (width height)
+      (canvas-extent (luvcraft-session-context session))
+    (multiple-value-call
+        (lambda (left top right bottom)
+          (terminal-focus-camera-pose
+           (terminal-display-surface display) width height
+           left top right bottom))
+      (luvcraft-session-focus-insets session))))
+
 (defun block-ray-hit-face (hit)
   "Return the exposed block face through which HIT entered its block."
   (let ((coordinate (block-ray-hit-coordinate hit))

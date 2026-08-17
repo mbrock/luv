@@ -30,6 +30,15 @@
 
 (defconstant +luvcraft-camera-focus-easing-rate+ 12.0)
 
+(defstruct (camera-pose
+             (:constructor make-camera-pose
+                 (position yaw pitch field-of-view)))
+  "One complete, freely movable view pose used by a modal focus transition."
+  position
+  yaw
+  pitch
+  field-of-view)
+
 (defclass fly-camera ()
   ((position :initarg :position
              :initform (make-vec3 8.0 11.0 -6.0)
@@ -67,7 +76,6 @@
 
 (defgeneric camera-basis (camera))
 (defgeneric camera-uniform-data (camera width height))
-(defgeneric advance-camera-focus (camera focused-p seconds))
 
 (defmethod camera-basis ((camera fly-camera))
   (let* ((yaw (camera-yaw camera))
@@ -124,18 +132,64 @@ FRAME-UNIFORM-DATA from the session's sky clock and profile."
                     declaration)))
           data)))))
 
-(defmethod advance-camera-focus ((camera fly-camera) focused-p seconds)
-  "Ease CAMERA toward its focused or ordinary field of view."
-  (let* ((target
-           (if focused-p
-               +luvcraft-camera-focused-vertical-field-of-view+
-               +luvcraft-camera-vertical-field-of-view+))
-         (alpha
+(defun copy-camera-position (position)
+  (make-vec3 (vec3-x position) (vec3-y position) (vec3-z position)))
+
+(defun camera-pose-from-camera (camera)
+  (make-camera-pose
+   (copy-camera-position (camera-position camera))
+   (camera-yaw camera)
+   (camera-pitch camera)
+   (camera-field-of-view camera)))
+
+(defun shortest-angle-difference (target current)
+  (- (mod (+ (- target current) pi) (* 2 pi)) pi))
+
+(defun set-camera-pose (camera pose)
+  (let ((target (camera-pose-position pose))
+        (position (camera-position camera)))
+    (setf (vec3-x position) (vec3-x target)
+          (vec3-y position) (vec3-y target)
+          (vec3-z position) (vec3-z target)
+          (camera-yaw camera) (camera-pose-yaw pose)
+          (camera-pitch camera) (camera-pose-pitch pose)
+          (camera-field-of-view camera) (camera-pose-field-of-view pose)))
+  camera)
+
+(defun advance-camera-focus (camera target seconds)
+  "Ease CAMERA's full view pose toward TARGET and return the remaining error."
+  (let* ((alpha
            (- 1.0
               (exp (- (* +luvcraft-camera-focus-easing-rate+ seconds)))))
-         (current (camera-field-of-view camera)))
-    (setf (camera-field-of-view camera)
-          (+ current (* (- target current) alpha)))))
+         (position (camera-position camera))
+         (target-position (camera-pose-position target)))
+    (flet ((approach (current target)
+             (+ current (* (- target current) alpha))))
+      (setf (vec3-x position)
+            (approach (vec3-x position) (vec3-x target-position))
+            (vec3-y position)
+            (approach (vec3-y position) (vec3-y target-position))
+            (vec3-z position)
+            (approach (vec3-z position) (vec3-z target-position))
+            (camera-yaw camera)
+            (+ (camera-yaw camera)
+               (* (shortest-angle-difference
+                   (camera-pose-yaw target) (camera-yaw camera))
+                  alpha))
+            (camera-pitch camera)
+            (approach (camera-pitch camera) (camera-pose-pitch target))
+            (camera-field-of-view camera)
+            (approach (camera-field-of-view camera)
+                      (camera-pose-field-of-view target))))
+    (max (vec3-length
+          (make-vec3 (- (vec3-x target-position) (vec3-x position))
+                     (- (vec3-y target-position) (vec3-y position))
+                     (- (vec3-z target-position) (vec3-z position))))
+         (abs (shortest-angle-difference
+               (camera-pose-yaw target) (camera-yaw camera)))
+         (abs (- (camera-pose-pitch target) (camera-pitch camera)))
+         (abs (- (camera-pose-field-of-view target)
+                 (camera-field-of-view camera))))))
 
 ;;; The first player controller is intentionally a small scalar reference
 ;;; simulation.  Its body is distinct from the view camera, and its AABB
@@ -392,7 +446,7 @@ FRAME-UNIFORM-DATA from the session's sky clock and profile."
                            world block-x block-y block-z))))))))
 
 (defun step-block-world-player
-    (player world camera pressed-keys seconds &key jump-p)
+    (player world camera pressed-keys seconds &key jump-p (sync-camera-p t))
   "Advance the scalar player controller by one small physics step."
   (let* ((yaw (camera-yaw camera))
          (forward-amount
@@ -452,5 +506,6 @@ FRAME-UNIFORM-DATA from the session's sky clock and profile."
           (max +player-terminal-fall-speed+ (player-velocity-y player))
           (player-grounded-p player) nil)
     (move-player-axis player world :y (* (player-velocity-y player) seconds)))
-  (sync-camera-to-player camera player)
+  (when sync-camera-p
+    (sync-camera-to-player camera player))
   player)
