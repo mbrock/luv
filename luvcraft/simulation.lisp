@@ -449,12 +449,14 @@ FRAME-UNIFORM-DATA from the session's sky clock and profile."
     (player world camera pressed-keys seconds &key jump-p (sync-camera-p t))
   "Advance the scalar player controller by one small physics step."
   (let* ((yaw (camera-yaw camera))
+         ;; The arrow keys belong to ADVANCE-LUVCRAFT-KEYBOARD-LOOK, so
+         ;; walking is WASD only.
          (forward-amount
-           (- (if (camera-key-down-p pressed-keys :w :up) 1d0 0d0)
-              (if (camera-key-down-p pressed-keys :s :down) 1d0 0d0)))
+           (- (if (camera-key-down-p pressed-keys :w) 1d0 0d0)
+              (if (camera-key-down-p pressed-keys :s) 1d0 0d0)))
          (right-amount
-           (- (if (camera-key-down-p pressed-keys :d :right) 1d0 0d0)
-              (if (camera-key-down-p pressed-keys :a :left) 1d0 0d0)))
+           (- (if (camera-key-down-p pressed-keys :d) 1d0 0d0)
+              (if (camera-key-down-p pressed-keys :a) 1d0 0d0)))
          (length (sqrt (+ (* forward-amount forward-amount)
                           (* right-amount right-amount))))
          (forward-amount (if (plusp length) (/ forward-amount length) 0d0))

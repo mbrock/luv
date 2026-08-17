@@ -559,6 +559,8 @@ the frame uniform cannot silently diverge between shader and host."
             (advance-sky-clock (luvcraft-session-sky-clock session) seconds)
             (advance-block-particles
              (luvcraft-session-particle-system session) seconds)
+            (unless (luvcraft-session-focus-camera-active-p session)
+              (advance-luvcraft-keyboard-look session seconds))
             (let ((player (luvcraft-session-player session)))
               (when player
                 (incf (luvcraft-session-physics-accumulator session) seconds)
@@ -605,6 +607,15 @@ the frame uniform cannot silently diverge between shader and host."
 
 (defmethod handle-canvas-event
     ((session luvcraft-session) canvas (event canvas-key-press-event))
+  ;; Control-Q quits from anywhere, including modal focus.  On a KMSDRM
+  ;; console there is no window manager to deliver a close request, so
+  ;; without a quit key the game owns the machine until someone kills it
+  ;; over SSH.
+  (when (and (eq :q (canvas-key-event-key-name event))
+             (member :control (canvas-key-event-modifiers event)))
+    (setf (luvcraft-session-running-p session) nil)
+    (close-canvas canvas)
+    (return-from handle-canvas-event nil))
   (when (and (eq :tab (canvas-key-event-key-name event))
              (or (null (luvcraft-session-modal-focus session))
                  (member :shift (canvas-key-event-modifiers event))))
@@ -625,11 +636,24 @@ the frame uniform cannot silently diverge between shader and host."
                      (not (canvas-key-event-repeat-p event)))
             (setf (luvcraft-session-jump-requested-p session) t))
           (unless (canvas-key-event-repeat-p event)
-            (let* ((character (canvas-key-event-character event))
-                   (number (and character (digit-char-p character))))
-              (when (and number
-                         (<= 1 number (length (placeable-block-kinds))))
-                (select-luvcraft-block session number)))))))
+            (case key
+              ;; Keyboard equivalents of the pointer buttons, for consoles
+              ;; and laptops without a working click.
+              (:e (edit-luvcraft-block session :place))
+              (:x (edit-luvcraft-block session :remove))
+              (:c (pick-luvcraft-block session))
+              (:m
+               (let ((capture-p
+                       (not (luvcraft-session-pointer-captured-p session))))
+                 (set-canvas-relative-pointer-mode canvas capture-p)
+                 (setf (luvcraft-session-pointer-captured-p session)
+                       capture-p)))
+              (t
+               (let* ((character (canvas-key-event-character event))
+                      (number (and character (digit-char-p character))))
+                 (when (and number
+                            (<= 1 number (length (placeable-block-kinds))))
+                   (select-luvcraft-block session number)))))))))
   nil)
 
 (defmethod handle-canvas-event
@@ -748,6 +772,11 @@ with Space.  Once captured, left click removes the block at the centre of view
 and right click places the selected block.  Number keys select materials,
 middle click picks the targeted material, Shift sprints, and Escape releases
 the pointer.
+
+Everything also works without a pointer: the arrow keys look around, E places
+the selected block, X removes the targeted block, C picks its material, and M
+toggles pointer capture for machines whose pointing device has no buttons.
+Control-Q quits from anywhere, saving the world on the way out.
 
 Pass :PROVIDER to select the Vulkan or Metal relationship without changing
 world, simulation, streaming, or frame orchestration.  Pass :VISIBLE-P NIL to

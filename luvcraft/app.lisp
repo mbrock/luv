@@ -433,7 +433,7 @@ mounting a vehicle, and other interactions described by #8JCMA5."
     (when (slot-boundp session 'canvas)
       (setf (canvas-title (luvcraft-session-canvas session))
             (format nil
-                    "~A — [~A] ~(~A~)  ·  1–~D select  ·  shift sprint  ·  tab focus  ·  shift-tab leave"
+                    "~A — [~A] ~(~A~)  ·  1–~D select  ·  e place  ·  x mine  ·  c pick  ·  arrows look  ·  tab focus  ·  ctrl-q quit"
                     (luvcraft-session-title-base session)
                     (if number (1+ number) "?")
                     (block-kind-name block)
@@ -448,6 +448,31 @@ mounting a vehicle, and other interactions described by #8JCMA5."
       (setf (luvcraft-session-selected-block session) block)
       (update-luvcraft-session-title session))
     block))
+
+(defparameter +luvcraft-keyboard-look-rate+ 2.2d0
+  "Radians per second of camera turn while an arrow key is held.")
+
+(defun advance-luvcraft-keyboard-look (session seconds)
+  "Turn SESSION's camera with the arrow keys: a mouse for the mouseless."
+  (let* ((keys (luvcraft-session-pressed-keys session))
+         (camera (luvcraft-session-camera session))
+         (yaw-amount
+           (- (if (gethash :right keys) 1d0 0d0)
+              (if (gethash :left keys) 1d0 0d0)))
+         (pitch-amount
+           (- (if (gethash :up keys) 1d0 0d0)
+              (if (gethash :down keys) 1d0 0d0))))
+    (unless (zerop yaw-amount)
+      (incf (camera-yaw camera)
+            (* yaw-amount +luvcraft-keyboard-look-rate+ seconds)))
+    (unless (zerop pitch-amount)
+      (setf (camera-pitch camera)
+            (max -1.5
+                 (min 1.5
+                      (+ (camera-pitch camera)
+                         (* pitch-amount +luvcraft-keyboard-look-rate+
+                            seconds)))))))
+  session)
 
 (defun pick-luvcraft-block (session)
   "Select the material currently under the centre crosshair."
