@@ -351,11 +351,20 @@
            ("quantity" 0.9 "quantity" "sky-light-level" "unit" "one")
            ("quantity" 1.0 "quantity" "sky-light-level" "unit" "one")
            "sky-input")))
+    ;; The map's answer is taken only where the surface faces the light; a
+    ;; surface turned away is lit by nothing, so it is also shadowed by
+    ;; nothing.  #0604PY
+    (ok (equal
+         (form-names
+          (spv:shader-expression-form
+           (spv:shader-binding-expression
+            (binding-named 'sampled-shadow specification))))
+         '("mix" 1.0 "shadow-sample" "shadow-in-bounds")))
     (ok (equal
          (form-names
           (spv:shader-expression-form
            (spv:shader-binding-expression direct-shadow)))
-         '("mix" 1.0 "shadow-sample" "shadow-in-bounds")))
+         '("mix" 1.0 "sampled-shadow" "shadow-relevance")))
     (ok (spv:shader-type=
          (spv:shader-expression-type
           (spv:shader-binding-expression sky-light))

@@ -567,6 +567,23 @@
          (tangent-v (vec3 0.0 (- 1.0 axis-y) axis-y))
          (plane-u (mix (swizzle cell :x) (swizzle cell :z) axis-x))
          (plane-v (mix (swizzle cell :y) (swizzle cell :z) axis-y))
+         ;; The atlas coordinate and its screen derivative are needed by both
+         ;; shapings: the relief reads neighbouring texels through it, and the
+         ;; round-over sizes itself against the same measured footprint.
+         (atlas-u (representation (swizzle uv :x)))
+         (atlas-v (representation (swizzle uv :y)))
+         (tile-count 11.0)
+         (tile-texels 16.0)
+         ;; Texels per pixel: one cell is TILE-TEXELS of them.
+         (footprint
+           (max (* (abs (derivative-x atlas-u)) (* tile-count tile-texels))
+                (* (abs (derivative-y atlas-v)) tile-texels)))
+         ;; Both shapings are sub-block detail, so both have to fade out as
+         ;; soon as they stop resolving on screen; otherwise distant terrain
+         ;; sparkles and shows a lit grid instead of a surface.  One measured
+         ;; footprint drives both, at their own scales.
+         (relief-fade (- 1.0 (smoothstep 0.30 1.10 footprint)))
+         (bevel-fade (- 1.0 (smoothstep 1.60 5.00 footprint)))
          ;; The mesher's edge classification decides what each boundary does.
          ;; A convex edge rounds the surface over; a concave one fillets it
          ;; into the inner corner; a flush one -- the middle of an open plain,
@@ -578,14 +595,20 @@
          (edge-u-high (swizzle edge :y))
          (edge-v-low (swizzle edge :z))
          (edge-v-high (swizzle edge :w))
-         (bevel-width 0.105)
+         ;; A round-over is only legible if it is a few pixels wide.  Held to
+         ;; a fixed fraction of a cell it dwindles to nothing a short way off,
+         ;; and every block in the middle distance flattens back into a card;
+         ;; grown with the footprint it keeps its shape until it is genuinely
+         ;; too small to resolve.  The upper bound stops it from eating the
+         ;; face it is supposed to be an edge of.
+         (bevel-width (clamp (* 0.115 footprint) 0.105 0.185))
          (ramp-u-low (smoothstep bevel-width 0.0 plane-u))
          (ramp-u-high (smoothstep (- 1.0 bevel-width) 1.0 plane-u))
          (ramp-v-low (smoothstep bevel-width 0.0 plane-v))
          (ramp-v-high (smoothstep (- 1.0 bevel-width) 1.0 plane-v))
          (bevel-u (- (* ramp-u-high edge-u-high) (* ramp-u-low edge-u-low)))
          (bevel-v (- (* ramp-v-high edge-v-high) (* ramp-v-low edge-v-low)))
-         (bevel-shape (+ (* tangent-u bevel-u) (* tangent-v bevel-v)))
+         (bevel-lean (+ (* tangent-u bevel-u) (* tangent-v bevel-v)))
          ;; An inner corner is a crevice, and a crevice gathers occlusion.
          ;; Only the filleted edges contribute; a rounded-over outer edge is
          ;; more exposed than the face it belongs to, not less.
@@ -600,10 +623,6 @@
          ;; the tile a fragment belongs to is the whole part of its scaled U,
          ;; and neighbour taps are clamped inside that tile: relief never
          ;; bleeds across a material boundary.
-         (atlas-u (representation (swizzle uv :x)))
-         (atlas-v (representation (swizzle uv :y)))
-         (tile-count 11.0)
-         (tile-texels 16.0)
          (texel-step (/ 1.0 tile-texels))
          (tile-low (* 0.5 texel-step))
          (tile-high (- 1.0 tile-low))
@@ -637,22 +656,26 @@
          (height-v-ahead
            (representation
             (swizzle (sample block-atlas block-sampler v-ahead) :a)))
-         ;; Both shapings are sub-block detail, so both have to fade out as
-         ;; soon as they stop resolving on screen; otherwise distant terrain
-         ;; sparkles and shows a lit grid instead of a surface.  One measured
-         ;; texel footprint drives both, at their own scales.
-         (footprint
-           (max (* (abs (derivative-x atlas-u)) (* tile-count tile-texels))
-                (* (abs (derivative-y atlas-v)) tile-texels)))
-         (relief-fade (- 1.0 (smoothstep 0.30 1.10 footprint)))
-         (bevel-fade (- 1.0 (smoothstep 0.80 3.20 footprint)))
          (relief
            (* (+ (* tangent-u (- height-u-back height-u-ahead))
                  (* tangent-v (- height-v-back height-v-ahead)))
               (* 1.15 relief-fade)))
-         (bevel (* bevel-shape (* 0.42 bevel-fade)))
+         ;; A real round-over is an arc, not a leaning plane.  Adding a scaled
+         ;; tangent to the face normal can only ever reach the arctangent of
+         ;; that scale, so a strong edge needs an implausible scale and still
+         ;; bunches its shading into the last sliver.  Rotating the normal
+         ;; through an angle instead sweeps it evenly from the face toward the
+         ;; edge, which is what a fillet of that radius actually does.  The
+         ;; guarded denominator matters: over the flat middle of a face the
+         ;; lean is exactly zero, and the angle is zero with it.
+         (lean-magnitude (sqrt (dot bevel-lean bevel-lean)))
+         (lean-direction (/ bevel-lean (max 0.0001 lean-magnitude)))
+         (bevel-turn
+           (* (min 1.0 lean-magnitude) (* 0.90 bevel-fade)))
+         (rounded
+           (+ (* flat-normal (cos bevel-turn)) (* lean-direction (sin bevel-turn))))
          (seam-occlusion (- 1.0 (* 0.34 (* seam bevel-fade))))
-         (shaped (normalize (+ (+ flat-normal bevel) relief)))
+         (shaped (normalize (+ rounded relief)))
          (shading-normal
            (assume-quantity shaped :quantity :world-direction :unit :one))
          (sun-direction (swizzle sun-vector :xyz))

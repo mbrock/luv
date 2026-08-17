@@ -463,6 +463,39 @@ This widened the vertex from a 48-byte to a 64-byte stride, and required the
 portable vertex-attribute vocabulary to grow past =:float32x3= alone --- a
 gap #SKMESH's "four =:float32x3= lanes" had left standing in both backends.
 
+Two later corrections, both about making the round-over read as a *shape*
+(#YUB8CH).
+
+* A round-over is an arc, not a leaning plane
+:PROPERTIES:
+:ID: YUB8CH
+:END:
+
+The first version of #J19EBO's shaping added a scaled tangent to the face
+normal and normalized the sum.  That can only ever reach the arctangent of
+the scale --- a strength of 0.42 buys 23 degrees --- so a legible edge needs
+an implausible scale, and even then the shading bunches into the last sliver
+of the ramp because the tangent grows linearly while the angle saturates.
+
+Rotating the normal through an angle instead sweeps it evenly from the face
+toward the edge, which is what a fillet of a given radius actually does.  The
+in-plane lean gives the direction and the ramp gives the fraction of a
+quarter turn, and the normal is the corresponding point on that arc.  The
+guarded denominator matters more than it looks: over the flat middle of a
+face the lean is exactly zero, so the direction is undefined and only the
+guard keeps it from being a division by zero --- but the angle is zero there
+too, so the undefined direction is multiplied away.
+
+The second correction is that a round-over is only legible if it is a few
+pixels wide.  Held to a fixed fraction of a cell it dwindles as blocks
+recede, and everything in the middle distance flattens back into a card long
+before it is genuinely unresolvable.  The block material already measures its
+own texel footprint from screen derivatives of the atlas coordinate, for the
+relief fade; the same measurement grows the bevel width until the edge is
+worth drawing, bounded above so it never eats the face it is an edge of, and
+then fades it out.  So the two shapings share one measurement and use it in
+opposite directions: relief shrinks with distance, the round-over widens.
+
 * The atlas paints relief as well as colour
 :PROPERTIES:
 :ID: CHUKWD
@@ -1161,6 +1194,75 @@ confounds; the broad crawling receiver pattern is visible before and absent
 after an explained geometric correction; normal and shadow-only derivatives
 both improve substantially; contact remains attached; and tests, SPIR-V
 validation, runtime capture, and smoke pass.
+
+** DONE The shimmer that only noon could show
+:PROPERTIES:
+:ID: 0604PY
+:END:
+
+Intent: #X9Q2YS removed the field-wide receiver-plane acne and left cast
+shadows shimmering anyway.  Play reported the residue as worst near noon,
+which is a strong clue: a defect with a preferred hour has a mechanism that
+depends on the sun's elevation.
+
+Evidence:
+
+- A frozen-sun, frozen-camera control over 20 frames produced a first
+  derivative of exactly zero, so the capture is bit-deterministic and every
+  measured change is sun motion rather than instrument noise.  Worth doing
+  first; it costs one run and it retires a whole class of explanation.
+- Presentation now hands the =--shadow-only= diagnostic through ungraded.
+  Exposure, the filmic curve, the lens chain, and the vignette had all
+  arrived between #X9Q2YS and this work, and every one of them distorts the
+  quantity the diagnostic exists to measure.  An instrument that shares a
+  pipeline with the picture needs saying so.
+- At pinned noon the diagnostic plate showed fine vertical striping across
+  wall faces, not activity at cast-shadow boundaries.  Those are faces the
+  sun barely reaches, where the receiver plane runs almost parallel to the
+  light: every filter tap lands an ill-conditioned distance away and the
+  answer is noise.  #X9Q2YS's bounded denominator keeps that finite without
+  making it mean anything.  Near noon it is *every vertical face at once*,
+  which is the hour dependence.
+- A surface turned away from the light has no shadow decision to make, so
+  the material now fades the decision toward lit as the cosine falls, handing
+  over exactly where the denominator bound begins.  It costs nothing visually
+  because the same cosine multiplies the direct term to zero.  Raw shadow
+  visibility at noon: mean first derivative 0.00117895 to 0.00052242, changed
+  area 0.08791 to 0.03441.
+- The second cause was the light basis, and it is the one #X9Q2YS could not
+  have found at dusk.  Texel snapping stabilizes the projection against
+  translation and can do nothing about rotation, so the roll about the light
+  axis is a free choice worth making well.  World up is badly conditioned for
+  it: the sun's angle to world up changes all day, the transverse component
+  collapses toward the orbit tilt as the sun climbs, and the roll rate
+  therefore peaks at noon --- spinning the whole texel grid under the world
+  exactly when the sun is highest.  The sun's own axis of revolution
+  (=sky-sun-orbit-axis=) keeps a constant angle to the sun at every hour.
+  Noon fell further, to 0.00020979 and 0.02110: 82.2 and 76.0 percent below
+  the start.
+- The trade is real and was measured rather than assumed.  At dusk the new
+  basis is slightly *worse*, 0.00050110 to 0.00061021, because world up
+  happens to be near-stationary when the sun is low.  A uniformly conditioned
+  reference costs a little at the best hour and saves a great deal at the
+  worst one; the worst hour is what play notices.
+- In the ordinary rendered image at noon, mean first derivative fell from
+  0.00016889 to 0.00006079 (64.0 percent) and changed area from 0.02105 to
+  0.00812 (61.4 percent).  The analytic yard keeps attached pillar contact
+  and a coherent penumbra.
+- The specular lobe added with #IC14P3 was missing its cosine, which had
+  given the noise a path into the visible image on exactly the faces where it
+  was worst.
+
+The lesson worth keeping is about evidence rather than shadows: #X9Q2YS
+settled on one explanation using captures pinned at 0.70, and its
+measurements were honest.  The hour it chose was the hour where the second
+cause is weakest.  A defect that play reports as time-dependent should be
+measured across the day before it is explained.
+
+Done when: a frozen control proves the instrument; the diagnostic is
+ungraded again; both causes are separately measured at the hour that shows
+them; the day-long trade is stated rather than hidden; and contact remains
+attached.
 
 ** DONE HDR crystal bloom
 :PROPERTIES:

@@ -139,6 +139,7 @@
          ;; whole texel grid under the world exactly when the sun is highest.
          ;; The sun's own axis of revolution keeps a constant angle to the sun
          ;; at every hour, so the basis it induces simply turns with the day.
+         ;; #0604PY measures both the gain at noon and what it costs at dusk.
          (reference (sky-sun-orbit-axis))
          (right (vec3-normalize (vec3-cross reference forward)))
          (up (vec3-cross forward right))
