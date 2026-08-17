@@ -24,7 +24,8 @@ lives in TELEGRAM/NET."
       :components ((:file "sha")
                    (:file "aes")
                    (:file "bignum")
-                   (:file "rsa")))
+                   (:file "rsa")
+                   (:file "srp")))
      (:file "transport")
      (:file "envelope")
      (:file "schema")
@@ -52,9 +53,11 @@ below it does not need any of it."
   :description "Calling Telegram: application identity, layer negotiation, RPC."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("telegram/api" "telegram/net")
+  :depends-on ("telegram/api" "telegram/net" (:require #:sb-posix))
   :components ((:module "telegram"
-                :components ((:file "client")))))
+                :serial t
+                :components ((:file "client")
+                             (:file "login")))))
 
 (defsystem "telegram/net"
   :description "A TCP connection that drives the MTProto core."
@@ -77,7 +80,8 @@ below it does not need any of it."
                  (:file "primitives")
                  (:file "handshake")
                  (:file "session")
-                 (:file "schema"))))
+                 (:file "schema")
+                 (:file "login"))))
   :perform (test-op (operation component)
              (declare (ignore operation component))
              (unless (uiop:symbol-call '#:rove '#:run-suite

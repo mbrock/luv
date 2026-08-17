@@ -16,6 +16,7 @@
   (:use #:cl)
   (:local-nicknames (#:octets #:telegram.octets)
                     (#:tl #:telegram.tl)
+                    (#:crypto #:telegram.crypto)
                     (#:mt #:telegram)
                     (#:net #:telegram.net))
   (:documentation
@@ -32,9 +33,35 @@ negotiation, and one INVOKE that turns a schema object into an answer.")
            #:application-language-pack
            #:application-language
            #:application-layer
-           #:application-from-environment
            #:*application*
            #:missing-credentials
+           ;; credentials and stored sessions
+           #:application-from-environment
+           #:*credential-files*
+           #:read-dotenv
+           #:credential
+           #:*session-file*
+           #:save-session
+           #:load-session
+           #:stored-material
+           ;; logging in
+           #:login-failed
+           #:log-in
+           #:begin-login
+           #:complete-login
+           #:complete-password
+           #:connect-stored
+           #:log-out
+           #:authorized-p
+           #:authorized-user
+           #:logged-in-user
+           #:user-label
+           #:default-code-reader
+           #:default-password-reader
+           #:send-login-code
+           #:sign-in
+           #:check-password
+           #:migration-data-center
            #:initial-query
            #:invoke
            #:invoke-raw
@@ -89,21 +116,6 @@ for you."
   (unless api-id
     (error 'missing-credentials :variable "TELEGRAM_API_ID"))
   (apply #'make-instance 'application initargs))
-
-(defun application-from-environment (&rest initargs)
-  "An application identity taken from TELEGRAM_API_ID and TELEGRAM_API_HASH,
-falling back to the TDLIB_ names other clients use."
-  (flet ((from-environment (&rest names)
-           (loop for name in names
-                 thereis (let ((value (sb-ext:posix-getenv name)))
-                           (when (and value (plusp (length value))) value)))))
-    (let ((id (from-environment "TELEGRAM_API_ID" "TDLIB_API_ID"))
-          (hash (from-environment "TELEGRAM_API_HASH" "TDLIB_API_HASH")))
-      (unless id
-        (error 'missing-credentials :variable "TELEGRAM_API_ID"))
-      (apply #'make-application :api-id (parse-integer id)
-                                :api-hash (or hash "")
-                                initargs))))
 
 (defvar *application* nil
   "The application identity INVOKE uses when none is given.")

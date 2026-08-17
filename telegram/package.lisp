@@ -168,6 +168,9 @@ factorization on Lisp bignums, and RSA public keys with both of Telegram's
 padding schemes.")
   (:export #:sha-1
            #:sha-256
+           #:sha-512
+           #:hmac
+           #:pbkdf2
            #:aes-key-schedule
            #:aes-encrypt-block
            #:aes-decrypt-block
@@ -188,7 +191,16 @@ padding schemes.")
            #:rsa-encrypt
            #:rsa-required-random-length
            #:crypto-error
-           #:unknown-public-key))
+           #:unknown-public-key
+           ;; SRP, for two-factor passwords
+           #:srp-error
+           #:srp-check-password
+           #:srp-password-hash
+           #:salted-hash
+           #:check-srp-group
+           #:miller-rabin-probably-prime-p
+           #:small-primes
+           #:integer-root))
 
 (defpackage #:telegram
   (:use #:cl)

@@ -61,7 +61,7 @@ telegram.tl       the TL codec: constructors as classes, schema as records
 telegram.crypto   SHA-1/256, AES-256, IGE, expt-mod, RSA public keys
 telegram          transports, envelopes, the handshake, sessions, api.tl
 telegram.net      sockets
-telegram.client   who we say we are, and one INVOKE
+telegram.client   who we say we are, logging in, and one INVOKE
 ```
 
 The layering is one-directional and everything up to and including
@@ -85,6 +85,43 @@ The test suite replays one complete recorded exchange — resPQ through
 dh_gen_ok, arriving at a named 2048-bit key — and it is the same recording
 that an Elixir implementation (`~/exmt`) and a C++ one (`~/nxtui`) reproduce.
 The rest of the vectors come from FIPS 180-4 and FIPS 197.
+
+## Logging in
+
+Credentials come from `TELEGRAM_API_ID`/`TELEGRAM_API_HASH` — or the `TDLIB_`
+names other clients use — in the environment, in `$TELEGRAM_ENV_FILE`, or in
+one of `telegram.client:*credential-files*` (`./.env`, `~/.telegram.env`,
+`~/.env`).
+
+```sh
+scripts/telegram '(telegram.client:begin-login "+15551234567")'
+# connected to #<MTPROTO-CONNECTION 149.154.167.51:443 dc2>
+# PHONE_MIGRATE_4: moving to dc4
+# connected to #<MTPROTO-CONNECTION 149.154.167.91:443 dc4>
+# code sent by auth.sent-code-type-app to +15551234567
+
+scripts/telegram '(telegram.client:complete-login "29414")'
+# logged in as Mikael (@…) id …
+```
+
+`begin-login` follows a `PHONE_MIGRATE` to the data centre that owns the
+number, and writes the authorization key and the pending `phone_code_hash` to
+`~/.telegram-session`, so the code can arrive minutes later and in another
+process. If the account has two-factor auth, `complete-login` stops at
+`SESSION_PASSWORD_NEEDED` and `complete-password` answers it by SRP:
+
+```sh
+scripts/telegram '(telegram.client:complete-password "…")'
+```
+
+There is also `log-in`, which does the whole thing in one call and prompts
+for what it needs — password reading turns terminal echo off.
+
+Afterwards the stored key is the credential; a later run reuses it:
+
+```lisp
+(client:connect-stored (client:load-session))
+```
 
 ## Calling it
 
@@ -159,17 +196,32 @@ method, since whether a message needs acknowledging depends on its sequence
 number and nothing else — which is also why a container's members get acked
 and the container does not.
 
+**A stored session keeps the key, not the session id.** An authorization key
+is worth persisting; a session id is not, because the server also remembers
+how far its sequence numbers have got, and resuming an id with the counters
+back at zero earns a `bad_msg_notification` instead of an answer. A fresh
+session over a kept key costs one round trip and nothing else.
+
+**Round constants are computed.** FIPS 180-4 defines SHA's constants as the
+leading fractional bits of the square and cube roots of the small primes, and
+`fractional-root-bits` says exactly that, on integers, in eight lines — the
+same reason the AES S-box is derived from its definition rather than copied.
+A hundred and fifty transcribed hexadecimal words is a hundred and fifty
+chances to be wrong.
+
 **Transports are a family.** `abridged-transport` and
 `intermediate-transport` are two classes over three generic functions;
 adding the obfuscated or padded variants is a class and three methods.
 
 ## Not yet
 
-- Login. `auth.sendCode` and `auth.signIn` are ordinary `invoke` calls now,
-  but nothing drives them, and `auth.signIn` needs the SRP work for
-  two-factor accounts.
-- Session persistence, so a second run skips the handshake.
-- DC migration on `USER_MIGRATE_*` / `PHONE_MIGRATE_*`.
+- Sign-up, for a number with no account behind it.
 - The updates loop: `updates.getDifference` and a `pts`/`qts`/`date` cursor.
 - File upload and download, which need `upload.getFile` and its own
   chunking.
+- Sending requests concurrently. `invoke` waits for its answer before the
+  next request goes out, which is correct but leaves the container machinery
+  unused.
+- Migration for calls other than login: `USER_MIGRATE_*` and `FILE_MIGRATE_*`
+  are recognized by `migration-data-center` but only `begin-login` acts on
+  them.

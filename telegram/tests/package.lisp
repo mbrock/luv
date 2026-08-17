@@ -4,7 +4,8 @@
                     (#:tl #:telegram.tl)
                     (#:crypto #:telegram.crypto)
                     (#:mt #:telegram)
-                    (#:net #:telegram.net))
+                    (#:net #:telegram.net)
+                    (#:client #:telegram.client))
   (:documentation
    "Executable claims for the MTProto core.
 

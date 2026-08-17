@@ -280,10 +280,20 @@ Returns the raw result bytes, or signals the server's rpc_error."
         (error 'mt:mtproto-protocol-error
                :detail (format nil "no answer to ~A after ~D packets"
                                (or name "request") limit)))
+      ;; A request can also fail below the RPC layer -- a message id too far
+      ;; from server time, a sequence number the server has already seen.
+      ;; Those arrive as bad_msg_notification, and saying so beats handing
+      ;; back an empty result as though the server had answered.
       (let ((failure (mt:pending-request-error request)))
-        (when (typep failure 'mt:rpc-error)
-          (error 'mt:remote-rpc-error :code (mt:rpc-error-code failure)
-                                      :message (mt:rpc-error-message failure))))
+        (typecase failure
+          (mt:rpc-error
+           (error 'mt:remote-rpc-error :code (mt:rpc-error-code failure)
+                                       :message (mt:rpc-error-message failure)))
+          (mt:bad-msg-notification
+           (error 'mt:mtproto-protocol-error
+                  :detail (format nil "~A was rejected: bad_msg_notification ~D"
+                                  (or name "the request")
+                                  (mt:bad-msg-notification-error-code failure))))))
       (values (mt:pending-request-result request) request))))
 
 (defun connection-ping (connection &key (ping-id 1) (limit 8))

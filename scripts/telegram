@@ -1,0 +1,45 @@
+#!/bin/sh
+# Evaluate forms with the Telegram client loaded and an application identity
+# already in *APPLICATION*.
+#
+#   scripts/telegram '(telegram.client:begin-login "+15551234567")'
+#   scripts/telegram '(telegram.client:complete-login "12345")'
+#   scripts/telegram '(telegram.client:complete-password "secret")'
+#   scripts/telegram '(print (telegram.tl:describe-tl :messages.send-message))'
+#
+# Credentials come from TELEGRAM_API_ID/TELEGRAM_API_HASH in the environment,
+# from the dotenv file named by TELEGRAM_ENV_FILE, or from the files in
+# telegram.client:*credential-files*.
+
+set -eu
+
+project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+
+if [ "${LUV_NIX_SHELL:-}" != 1 ]; then
+  exec "$project_root/scripts/dev" "$project_root/scripts/telegram" "$@"
+fi
+
+if [ "$#" -eq 0 ]; then
+  echo "usage: scripts/telegram FORM..." >&2
+  exit 2
+fi
+
+# Rotate the positional parameters so each form gets its own --eval, in order.
+remaining=$#
+while [ "$remaining" -gt 0 ]; do
+  form=$1
+  shift
+  set -- "$@" --eval "$form"
+  remaining=$((remaining - 1))
+done
+
+exec sbcl --dynamic-space-size 6000 --noinform --disable-debugger \
+  --eval '(require :asdf)' \
+  --eval "(asdf:initialize-source-registry
+             (list :source-registry (list :directory \"$project_root\")
+                   :inherit-configuration))" \
+  --eval '(handler-bind ((warning (function muffle-warning)))
+             (asdf:load-system "telegram/client"))' \
+  --eval '(setf telegram.client:*application*
+                 (telegram.client:application-from-environment))' \
+  "$@" --quit

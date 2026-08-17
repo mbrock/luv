@@ -17,7 +17,8 @@
 but a network; LIVE-API-CHECK needs a TELEGRAM_API_ID, and reports what the
 server said either way.")
   (:export #:live-handshake-check
-           #:live-api-check))
+           #:live-api-check
+           #:live-login-check))
 
 (in-package #:telegram.live)
 
@@ -81,3 +82,61 @@ no credentials, which is why the handshake check does not ask for any."
                 (tl:tl-value nearest :country)
                 (tl:tl-value nearest :nearest-dc))
         nearest))))
+
+(defun test-code-reader (dc-id)
+  "The code Telegram's test servers send: the data centre number, repeated to
+whatever length the sentCode says.  Reading the length out of the response
+rather than assuming it is what makes this work across layers."
+  (lambda (sent-code)
+    (let* ((type (tl:tl-value sent-code :type))
+           (length (or (tl:tl-value type :length :errorp nil) 5)))
+      (with-output-to-string (out)
+        (dotimes (index length)
+          (format out "~D" dc-id))))))
+
+(defun live-login-check (&key phone-number (dc-id 2) test
+                              (application (client:application-from-environment))
+                              (session-file "/tmp/telegram-live-login.session")
+                              (read-code (if test
+                                             (test-code-reader dc-id)
+                                             #'client:default-code-reader))
+                              (stream *standard-output*))
+  "Log in for real, then look around: whoami, the updates cursor, and the
+first page of dialogs.
+
+Needs a phone number and the code Telegram sends to it, so it cannot run
+unattended.  The session goes to a scratch file rather than the usual one, so
+running this does not disturb an existing login.
+
+  (telegram.live:live-login-check :phone-number \"+15551234567\")
+
+On the test network (:TEST T) the code reader assumes Telegram's documented
+fixed code -- the data centre number repeated.  As of this writing the test
+servers no longer honour that, so :TEST T needs a code you can actually see."
+  (let ((client:*application* application))
+    (multiple-value-bind (connection user)
+        (client:log-in :phone-number phone-number
+                       :dc-id dc-id :test test
+                       :session-file session-file
+                       :read-code read-code
+                       :stream stream)
+      (unwind-protect
+           (progn
+             (format stream "~&user: ~A~%" (client:user-label user))
+             (let ((state (client:invoke connection :updates.get-state)))
+               (format stream "~&~A: pts ~D, date ~D, seq ~D~%"
+                       (tl:tl-name state)
+                       (tl:tl-value state :pts) (tl:tl-value state :date)
+                       (tl:tl-value state :seq)))
+             (let ((dialogs (client:invoke connection :messages.get-dialogs
+                                           :offset-date 0
+                                           :offset-id 0
+                                           :offset-peer (tl:make-tl
+                                                         :input-peer-empty)
+                                           :limit 10 :hash 0)))
+               (format stream "~&~A: ~D dialog~:P, ~D user~:P~%"
+                       (tl:tl-name dialogs)
+                       (length (tl:tl-value dialogs :dialogs))
+                       (length (tl:tl-value dialogs :users))))
+             user)
+        (net:close-mtproto-connection connection)))))
