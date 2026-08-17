@@ -84,6 +84,37 @@
                                        :style :luv)
                (error "luv/ghostty tests failed"))))
 
+(defsystem "luv/libav"
+  :description "A CFFI binding to FFmpeg's libav*, groveled against its headers."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :defsystem-depends-on ("cffi-grovel")
+  :depends-on ("cffi" "uiop")
+  :serial t
+  :components
+  ((:module "libav"
+    :serial t
+    :components ((:static-file "README.md")
+                 (:file "package")
+                 (:cffi-grovel-file "abi")
+                 (:file "ffi")
+                 (:file "frame"))))
+  :in-order-to ((test-op (test-op "luv/libav/test"))))
+
+(defsystem "luv/libav/test"
+  :description "Executable claims for FFmpeg's version agreement and AVFrame layout."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("luv/libav" "rove")
+  :components ((:file "libav/tests"))
+  :perform (test-op (operation component)
+             (declare (ignore operation component))
+             (unless (uiop:symbol-call '#:rove '#:run-suite
+                                       (uiop:symbol-call '#:rove '#:find-suite
+                                                         '#:luv.libav.tests)
+                                       :style :luv)
+               (error "luv/libav tests failed"))))
+
 (defsystem "luv/terminal"
   :description "Owned terminal devices for luv's libghostty-vt terminal."
   :version "0.0.1"
