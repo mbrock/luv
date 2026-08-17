@@ -255,6 +255,7 @@ offsets and of headers."
       :components
       ((:file "probe")
        (:file "ffi")
+       (:file "iosurface")
        (:file "gpu")
        (:file "canvas")))
      (:file "examples"))))

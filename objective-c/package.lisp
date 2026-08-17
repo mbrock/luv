@@ -71,6 +71,16 @@
            #:metal-buffer-contents
            #:metal-buffer-gpu-address
            #:new-metal-texture
+           #:create-iosurface
+           #:lookup-iosurface
+           #:release-iosurface
+           #:iosurface-id
+           #:iosurface-width
+           #:iosurface-height
+           #:iosurface-bytes-per-row
+           #:with-locked-iosurface
+           #:read-iosurface-pixel
+           #:new-metal-texture-for-iosurface
            #:metal-texture-resource-id
            #:replace-metal-texture-region
            #:new-metal-sampler
