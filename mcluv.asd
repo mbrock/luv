@@ -71,7 +71,7 @@
   :description "A Telegram terminal mounted on a luvcraft wall."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("mcluv/luvcraft" "telegram/chat" "sb-concurrency")
+  :depends-on ("mcluv/luvcraft" "telegram/chat" "luv/libav" "sb-concurrency")
   :components ((:file "mcclim/telegram")))
 
 (defsystem "mcluv/luvcraft-test"

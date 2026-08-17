@@ -90,6 +90,64 @@ anything having to be stored.")
   (preview "" :type string)
   (unread 0 :type integer))
 
+;;;; Pictures
+;;;;
+;;;; FFmpeg opens a still exactly the way it opens a film -- one packet, one
+;;;; frame -- so the decode path luv already has for video is also the one for
+;;;; a photograph, and no JPEG reader has to exist here.  The word order turns
+;;;; around on the way through: libav packs red in the low byte, and a CLIM
+;;;; pattern wants it in the third.
+
+(defconstant +communicator-photo-width+ 232)
+(defconstant +communicator-photo-height+ 160)
+
+(defun communicator-thumbnail-extent (photo)
+  "The size PHOTO should be drawn at, fitted into the transcript's box."
+  (let* ((width (max 1 (telegram.chat:chat-photo-width photo)))
+         (height (max 1 (telegram.chat:chat-photo-height photo)))
+         (scale (min 1.0
+                     (/ +communicator-photo-width+ width)
+                     (/ +communicator-photo-height+ height))))
+    (values (max 1 (round (* width scale)))
+            (max 1 (round (* height scale))))))
+
+(defun rgba-words-pattern-array (words)
+  (let* ((dimensions (array-dimensions words))
+         (result (make-array dimensions :element-type '(unsigned-byte 32))))
+    (dotimes (y (first dimensions) result)
+      (dotimes (x (second dimensions))
+        (let ((word (aref words y x)))
+          (setf (aref result y x)
+                (logior (ash (ldb (byte 8 24) word) 24)
+                        (ash (ldb (byte 8 0) word) 16)
+                        (ash (ldb (byte 8 8) word) 8)
+                        (ldb (byte 8 16) word))))))))
+
+(defun write-temporary-octets (bytes type)
+  (let ((path (merge-pathnames
+               (format nil "luvcraft-~36R.~A" (random (expt 2 48)) type)
+               (uiop:temporary-directory))))
+    (with-open-file (stream path :direction :output
+                                 :element-type '(unsigned-byte 8)
+                                 :if-exists :supersede
+                                 :if-does-not-exist :create)
+      (write-sequence bytes stream))
+    path))
+
+(defun decode-photo-pattern (bytes width height)
+  "Decode JPEG BYTES into a WIDTH by HEIGHT CLIM pattern, or NIL."
+  (let ((path (write-temporary-octets bytes "jpg")))
+    (unwind-protect
+         (let ((video (luv.libav:open-video path :hardware nil)))
+           (unwind-protect
+                (when (luv.libav:decode-next-frame video)
+                  (make-pattern
+                   (rgba-words-pattern-array
+                    (luv.libav:frame-rgba-words video width height))
+                   nil))
+             (luv.libav:close-video video)))
+      (ignore-errors (delete-file path)))))
+
 (defstruct transcript-line
   ;; :HEAD carries the avatar, the name, and the time; :BODY is a wrapped
   ;; continuation; :PHOTO is a picture this client can locate but not yet
@@ -101,7 +159,8 @@ anything having to be stored.")
   (text "" :type string)
   (out-p nil)
   (width 0 :type integer)
-  (height 0 :type integer))
+  (height 0 :type integer)
+  (pattern nil))
 
 (defun communicator-clock-string (unix-seconds)
   "UNIX-SECONDS as a local HH:MM."
@@ -154,6 +213,11 @@ can and mid-word when a word is longer than the whole line."
    (view :initform (make-console-view :status "starting") :accessor console-view)
    (selected :initform nil :accessor console-selected)
    (generation :initform 0 :accessor console-generation)
+   ;; Photo id to a decoded pattern, or :UNAVAILABLE for one that will not
+   ;; decode -- which has to be remembered too, or a broken picture is
+   ;; refetched on every pass forever.
+   (photos :initform (make-hash-table :test #'eql) :reader console-photos)
+   (wanted-photos :initform '() :accessor console-wanted-photos)
    (transcript-limit :initarg :transcript-limit :initform 40
                      :reader console-transcript-limit)
    (poll-interval :initarg :poll-interval :initform 2.0
@@ -201,11 +265,18 @@ a finished view for a McCLIM frame to paint."))
                     :out-p (telegram.chat:chat-message-out-p message))
                    lines)
              (when photo
-               (push (make-transcript-line
-                      :kind :photo :ink ink
-                      :width (telegram.chat:chat-photo-width photo)
-                      :height (telegram.chat:chat-photo-height photo))
-                     lines))
+               (multiple-value-bind (thumb-width thumb-height)
+                   (communicator-thumbnail-extent photo)
+                 (let ((cached (gethash (telegram.chat:chat-photo-id photo)
+                                        (console-photos console))))
+                   (unless cached
+                     (pushnew photo (console-wanted-photos console)
+                              :key #'telegram.chat:chat-photo-id))
+                   (push (make-transcript-line
+                          :kind :photo :ink ink
+                          :width thumb-width :height thumb-height
+                          :pattern (and (typep cached 'pattern) cached))
+                         lines))))
              (dolist (text (wrap-communicator-text
                             (telegram.chat:chat-message-text message)
                             +communicator-text-columns+))
@@ -225,6 +296,9 @@ a finished view for a McCLIM frame to paint."))
 
 (defun publish-console-view (console &key status failure)
   "Build the next view and hand it to whoever repaints."
+  ;; What is wanted is whatever this view turns out to reference; a picture
+  ;; scrolled out of the transcript stops being worth a round trip.
+  (setf (console-wanted-photos console) '())
   (let ((peer (console-selected-peer console)))
     (setf (console-view console)
           (make-console-view
@@ -293,13 +367,40 @@ around the whole loop, so RESUME makes it current here and nowhere else."
   (telegram.chat:synchronize-chat-updates (console-roster console))
   (publish-console-view console))
 
+(defun fetch-console-photos (console &key (limit 2))
+  "Download and decode a few of the pictures the last view asked for.
+
+A handful per pass rather than all of them: a transcript full of photographs
+would otherwise stall the update poll behind a queue of downloads, and the
+pictures appearing over a second or two is the better failure."
+  (let ((wanted (console-wanted-photos console))
+        (fetched 0))
+    (dolist (photo wanted (plusp fetched))
+      (when (>= fetched limit) (return (plusp fetched)))
+      (let ((id (telegram.chat:chat-photo-id photo)))
+        (unless (gethash id (console-photos console))
+          (setf (gethash id (console-photos console))
+                (or (handler-case
+                        (multiple-value-bind (width height)
+                            (communicator-thumbnail-extent photo)
+                          (decode-photo-pattern
+                           (telegram.chat:download-chat-photo photo)
+                           width height))
+                      (error () nil))
+                    :unavailable))
+          (incf fetched))))))
+
 (defun advance-telegram-console (console)
   (unless telegram.client:*connection*
     (open-console-connection console))
   (let ((dirty (drain-console-requests console)))
     (when (telegram.chat:pull-chat-updates (console-roster console))
       (setf dirty t))
-    (when dirty (publish-console-view console)))
+    (when dirty (publish-console-view console))
+    ;; Pictures are fetched after the view that named them, so the text is on
+    ;; the wall before the photographs land on it.
+    (when (fetch-console-photos console)
+      (publish-console-view console)))
   (sleep (console-poll-interval console)))
 
 (defun run-telegram-console (console)
@@ -466,7 +567,7 @@ face rather than a blank square."
          (heights (mapcar (lambda (line)
                             (case (transcript-line-kind line)
                               (:head 24)
-                              (:photo 96)
+                              (:photo (+ 8 (transcript-line-height line)))
                               (t 18)))
                           lines))
          (available (- +communicator-screen-bottom+ +communicator-screen-top+))
@@ -494,16 +595,21 @@ face rather than a blank square."
                             :align-x :right :align-y :center :text-size 11
                             :ink *communicator-muted-ink*))
                (:photo
-                (draw-communicator-plate
-                 pane (+ left 42) y (+ left 42 128) (+ y 88)
-                 :ink (make-rgb-color 0.18 0.18 0.18) :recessed-p t)
-                (draw-text* pane
-                            (format nil "~Dx~D"
-                                    (transcript-line-width line)
-                                    (transcript-line-height line))
-                            (+ left 106) (+ y 44)
-                            :align-x :center :align-y :center :text-size 11
-                            :ink *communicator-muted-ink*))
+                (let ((width (transcript-line-width line))
+                      (height (transcript-line-height line))
+                      (pattern (transcript-line-pattern line)))
+                  (if pattern
+                      (draw-pattern* pane pattern (+ left 42) y)
+                      ;; Still downloading, or a picture that would not
+                      ;; decode: keep its exact footprint so the transcript
+                      ;; does not jump when it arrives.
+                      (draw-rectangle* pane (+ left 42) y
+                                       (+ left 42 width) (+ y height)
+                                       :ink (make-rgb-color 0.16 0.16 0.16)))
+                  (draw-rectangle* pane (+ left 42) y
+                                   (+ left 42 width) (+ y height)
+                                   :filled nil :line-thickness 1
+                                   :ink *communicator-bezel-dark*)))
                (:body
                 (draw-text* pane (transcript-line-text line)
                             (+ left 42) (+ y 9)

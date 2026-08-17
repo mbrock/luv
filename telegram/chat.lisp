@@ -257,7 +257,15 @@ downloadable rectangle, so those are the ones offered."
                                   sorted)))
             (first sorted))))))
 
-(defun decode-chat-photo (media &key (width-limit 800))
+(defparameter *chat-photo-width-limit* 400
+  "How wide a photo size to ask for by default.
+
+Telegram stores several rectangles per picture and charges a round trip for
+whichever one is named.  A client showing pictures inline in a transcript
+wants the smallest that still looks like something, not the largest that
+exists.")
+
+(defun decode-chat-photo (media &key (width-limit *chat-photo-width-limit*))
   "The CHAT-PHOTO a messageMediaPhoto names, or NIL for anything else."
   (when (and media (eq :message-media-photo (tl-name media)))
     (let ((photo (tl:tl-value media :photo :errorp nil)))
