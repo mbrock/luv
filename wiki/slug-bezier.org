@@ -190,6 +190,71 @@ normal, texture coordinate plus packed glyph location and maxima, inverse
 Jacobian, band transform, and colour.  Band and glyph data are marked
 non-interpolated; only the render coordinate is interpolated.
 
+* DONE The reference's shape, with its constants as knobs
+:PROPERTIES:
+:ID: 3YHNO3
+:END:
+
+Read against the [[https://github.com/EricLengyel/Slug][2026 reference shaders]] and the retrospective, luv's Slug
+had the algorithm -- eligibility, two rays, weighted combination, sorted
+bands -- but not the reference's shape around it.  This figure closes the
+gaps and names what the reference hard-codes.
+
+- *Early exit.*  The reference leaves a band's loop at the first curve whose
+  largest x (or y) is more than half a pixel behind the sample; the band is
+  sorted descending for exactly that.  luv's serializer had sorted, and its
+  shader had walked every curve.  The shared language gained a termination
+  test on its fold -- =(counted-fold (index count state initial :until
+  test) update)= -- lowered to =if (...) break;= in Metal and to a
+  =LogicalAnd= of the counter test in the SPIR-V loop header, and the band
+  folds now carry a third =done= lane that [[lisp:slug-horizontal-band-step]]
+  sets from the curve's reach.  #8RQOF0's fold thereby learned what
+  #45K8GR's loops always had.
+- *Fill rule and optical weight.*  =SLUG_EVENODD= and =SLUG_WEIGHT= are
+  compile-time switches in the reference; [[lisp:slug-finish-coverage]] holds
+  both as values, an even-odd blend and an exponent (one half is the
+  reference's square root).
+- *Footprint.*  The reference measures the pixel with =fwidth=; luv measured
+  the gradient length.  Both are available and blend.
+- *Dynamic dilation.*  #J0H590 is now real for world text: the vertex stage
+  in [[lisp:block-world-text-vertex-specification]] knows a vertex's depth and,
+  from two spare frame lanes, the target's height in pixels, so it sizes
+  each em edge in pixels and slides the corner outward by the dilation
+  over that length, moving the em coordinate with it.  The 0.035-em constant
+  padding of #9G0Z19 became [[lisp:*slug-static-padding*]], zero by default;
+  the flat McCLIM path, which knows its pixel size when it lays out, takes
+  [[lisp:slug-dilation-em]] instead.
+- *Band data.*  The band count per axis is now chosen by
+  [[lisp:choose-slug-band-count]] as the reference advises -- the fewest bands
+  that minimize the fullest band -- and [[lisp:serialize-slug-outline]] lets a
+  band whose sorted list is a contiguous run of one already written point
+  into it, which the reference recommends for cache and size (a DejaVu =W=
+  falls from 157 to 79 band texels, an =O= from 172 to 122).  The overlap
+  epsilon and the maximum band count are values too.
+- *Cap-height alignment.*  [[lisp:slug-cap-height-aligned-size]] reads
+  =sCapHeight= from the OS/2 table (which ZPB-TTF does not) and returns the
+  size nearest a request at which capitals land on whole pixels: the
+  reference's substitute for hinting.  DejaVu's OS/2 table is version 1 and
+  carries none, so it answers the request unchanged there.
+
+The values live in =luv.slug= as specials -- =*slug-filter-width*=,
+=*slug-fill-rule*=, =*slug-optical-weight*=, =*slug-footprint-norm*=,
+=*slug-early-exit*=, =*slug-root-epsilon*=, =*slug-debug-view*=,
+=*slug-dilation-pixels*= -- and stand in shader source by their unstarred
+names, folded through =shader-source-value=.  For that to be live, the two
+band shaders are =define-live-shader= forms, reparsed on every pipeline
+build, where =define-shader= parses once at load; luvcraft wraps each value
+in a =:text= knob in [[lisp:make-world-text-run]]'s file, so the metabar turns
+them and the terminal walls rebuild at the next frame.  =*slug-debug-view*=
+paints every quad with its two bands' loads, red and green over sixteen,
+which is the quickest way to see what a band count buys.
+
+What was studied and left alone: the reference's packed vertex record and
+its 8-bit band maxima (luv's instance record already carries the counts and
+bounds it needs), and the multi-layer emoji path, which luv has no outlines
+for yet.  The reference's =CalcRootCode= bit trick and luv's arithmetic
+eligibility (#S2F8SA) are the same table.
+
 * DONE One fixed contour proves luv's pixel-stage mathematics
 :PROPERTIES:
 :ID: OWR8OZ

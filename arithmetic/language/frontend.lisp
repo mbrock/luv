@@ -359,9 +359,20 @@
     :reader arithmetic-counted-fold-bindings)
    (update
     :initarg :update
-    :reader arithmetic-counted-fold-update))
+    :reader arithmetic-counted-fold-update)
+   (until
+    :initarg :until
+    :initform nil
+    :reader arithmetic-counted-fold-until
+    :documentation
+    "A truth-valued expression over the index and the carried state, tested
+before each iteration; when it holds the fold stops early with the state it
+has.  NIL means the fold always runs to COUNT."))
   (:documentation
-   "A bounded value-producing fold over an index and one carried state."))
+   "A bounded value-producing fold over an index and one carried state.
+
+The binding list is (INDEX COUNT STATE INITIAL), optionally followed by
+:UNTIL TEST, whose TEST sees INDEX and STATE and ends the fold early."))
 
 (defmethod arithmetic-expression-quantity-checked-p
     ((expression arithmetic-function-call))
@@ -394,7 +405,9 @@
          (arithmetic-counted-fold-initial expression))
    (mapcar #'arithmetic-binding-expression
            (arithmetic-counted-fold-bindings expression))
-   (list (arithmetic-counted-fold-update expression))))
+   (list (arithmetic-counted-fold-update expression))
+   (let ((until (arithmetic-counted-fold-until expression)))
+     (and until (list until)))))
 
 (defgeneric arithmetic-function-definition-for (name)
   (:documentation "Return the live arithmetic definition named by NAME, or NIL."))
@@ -706,16 +719,29 @@ checked comparisons and raw flags may combine freely."))
                  (and left-layout right-layout
                       (math:quantity-layout= left-layout right-layout)))))))
 
+(defun counted-fold-form-parts (form)
+  "Destructure a COUNTED-FOLD FORM into (VALUES INDEX-NAME COUNT-FORM
+STATE-NAME INITIAL-FORM UPDATE-FORM UNTIL-FORM), or return NIL when the
+shape is not (COUNTED-FOLD (INDEX COUNT STATE INITIAL [:UNTIL TEST]) UPDATE)."
+  (when (and (= (length form) 3)
+             (consp (second form))
+             (or (= (length (second form)) 4)
+                 (and (= (length (second form)) 6)
+                      (eq (fifth (second form)) :until))))
+    (destructuring-bind (index-name count-form state-name initial-form
+                         &optional until-keyword until-form)
+        (second form)
+      (declare (ignore until-keyword))
+      (values index-name count-form state-name initial-form (third form)
+              until-form t))))
+
 (defun parse-arithmetic-counted-fold (form environment)
-  (unless (and (= (length form) 3)
-               (consp (second form))
-               (= (length (second form)) 4))
-    (error 'arithmetic-language-error
-           :form form :reason :invalid-counted-fold))
-  (destructuring-bind (operator (index-name count-form state-name initial-form)
-                       update-form)
-      form
-    (declare (ignore operator))
+  (multiple-value-bind (index-name count-form state-name initial-form
+                        update-form until-form valid-p)
+      (counted-fold-form-parts form)
+    (unless valid-p
+      (error 'arithmetic-language-error
+             :form form :reason :invalid-counted-fold))
     (unless (and (symbolp index-name) (symbolp state-name)
                  (not (eq index-name state-name)))
       (error 'arithmetic-language-error
@@ -748,6 +774,8 @@ checked comparisons and raw flags may combine freely."))
          :count count :initial initial
          :index-binding index-binding :state-binding state-binding
          :bindings update-bindings :update update
+         :until (and until-form
+                     (parse-arithmetic-expression until-form fold-environment))
          :quantity-specification
          (arithmetic-expression-quantity-specification initial)
          :quantity-layout (arithmetic-expression-quantity-layout initial)

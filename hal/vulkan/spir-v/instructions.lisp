@@ -291,6 +291,7 @@
   (convert-u-to-f 112)
   (u-convert 113)
   (f-negate 127)
+  (logical-not 168)
   (d-pdx 207)
   (d-pdy 208))
 (define-instruction vector-shuffle (left right &rest components)
@@ -331,6 +332,7 @@
   (shift-left-logical 196)
   (bitwise-and 199))
 (define-typed-binary-instructions
+  (logical-and 167)
   (i-equal 170)
   (u-greater-than 172)
   (u-greater-than-equal 174)

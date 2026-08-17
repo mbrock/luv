@@ -83,6 +83,19 @@
         (slug-texel-location (aref curve-offsets curve-index) curve-width)
       (push-slug-band-word-pair x y band-words))))
 
+(defparameter *slug-share-band-lists* t
+  "Whether a band whose sorted curve list is a contiguous run of a list
+already written points into that list instead of writing its own.  The
+reference recommends it: adjacent bands often hold the same curves, and the
+sharing shrinks the band texture and keeps the texel cache warm.")
+
+(defun slug-shared-band-offset (indices written)
+  "The texel offset at which INDICES already stands as a contiguous run of
+one of the WRITTEN (INDICES . OFFSET) lists, or NIL."
+  (loop for (list . offset) in written
+        for position = (search indices list)
+        when position return (+ offset position)))
+
 (defun pack-slug-uint16-words (words start count)
   (loop for index below count
         for word-index from start
@@ -148,16 +161,23 @@
       ;; Reserve every header so its offset can point past the complete header block.
       (loop repeat header-count
             do (push-slug-band-word-pair 0 0 band-words))
-      (loop for band in bands
-            for header from 0
-            for offset = (/ (length band-words) 2)
-            do (setf (aref band-words (* header 2))
-                     (ensure-slug-uint16
-                      (length (slug-band-curve-indices band)) :curve-count)
-                     (aref band-words (1+ (* header 2)))
-                     (ensure-slug-uint16 offset :curve-list-offset))
-               (append-slug-band-curve-locations
-                band curve-offsets curve-width band-words))
+      (let ((written nil))
+        (loop for band in bands
+              for header from 0
+              for indices = (slug-band-curve-indices band)
+              for shared = (and *slug-share-band-lists*
+                                indices
+                                (slug-shared-band-offset indices written))
+              for offset = (or shared (/ (length band-words) 2))
+              do (setf (aref band-words (* header 2))
+                       (ensure-slug-uint16 (length indices) :curve-count)
+                       (aref band-words (1+ (* header 2)))
+                       (ensure-slug-uint16 offset :curve-list-offset))
+                 (unless shared
+                   (when indices
+                     (push (cons indices offset) written))
+                   (append-slug-band-curve-locations
+                    band curve-offsets curve-width band-words))))
       (multiple-value-bind (band-x band-y)
           (slug-texel-location
            (max 0 (1- (/ (length band-words) 2))) band-width)

@@ -1,9 +1,119 @@
 ;;; Slug's quadratic outline calculation, first as a fixed proof and then as
 ;;; the data-driven band texture path used by real outlines.
+;;;
+;;; The shape of the shaders follows Lengyel's open reference implementation
+;;; (github.com/EricLengyel/Slug, 2017-2026): sorted bands with an early
+;;; exit, a nonzero or even-odd fill, an optional optical-weight boost, and
+;;; a bounding polygon dilated per vertex rather than by a constant.  The
+;;; constants the reference bakes in are named values here, so a live
+;;; pipeline can be retuned from a knob without editing shader source.
 
 (in-package #:luv.slug)
 
 (defconstant +slug-root-epsilon+ (/ 1.0 65536.0))
+
+;;; ---------------------------------------------------------------------
+;;; Tunable values.
+;;;
+;;; Each special is one number the shaders would otherwise carry as a
+;;; literal.  A shader body names it by the unstarred symbol; the parser
+;;; folds that name to a literal through SHADER-SOURCE-VALUE and remembers
+;;; it did, so a live pipeline rebuilds when the special moves.  A game that
+;;; owns a session wraps these in knobs (LUVCRAFT::DEFINE-KNOB in
+;;; luvcraft/text.lisp); here they are only the values.
+
+(defparameter *slug-filter-width* 1.0
+  "The box filter's width in pixels.  One is the reference's exact pixel
+coverage; wider softens (and, past the dilation, clips) the edge.")
+
+(defparameter *slug-fill-rule* 0.0
+  "0 fills by the nonzero winding rule, 1 by even-odd; fractions blend.")
+
+(defparameter *slug-optical-weight* 1.0
+  "The exponent applied to coverage.  1 is linear coverage; the reference's
+SLUG_WEIGHT is 0.5, a square root that boosts thin strokes.")
+
+(defparameter *slug-footprint-norm* 0.0
+  "How the pixel footprint in em space is measured from the coordinate
+derivatives: 0 is the gradient length (L2), 1 is fwidth (L1), which is what
+the reference uses.")
+
+(defparameter *slug-early-exit* 1.0
+  "1 leaves a band's sorted curve list at the first curve wholly behind
+the sample; 0 walks every curve (the reference without its break).")
+
+(defparameter *slug-root-epsilon* +slug-root-epsilon+
+  "Below this |a| a curve's polynomial is solved as linear; also the floor
+of every division in the coverage combination.")
+
+(defparameter *slug-debug-view* 0.0
+  "0 renders ink; 1 paints each glyph's quad with its band loads (red the
+horizontal band's curve count, green the vertical's, over sixteen).")
+
+(defparameter *slug-dilation-pixels* 0.6
+  "How far a glyph's bounding quad grows past its outline, in filter widths
+(pixels when the filter is one pixel wide), so the filter's half-width and a
+little more always lie inside the quad.  The reference dilates exactly half
+a pixel; a hair more forgives the per-vertex approximation of the pixel size
+across a perspective quad.")
+
+(defparameter *slug-static-padding* 0.0
+  "A constant dilation of every glyph quad in em, added on the CPU when the
+quads are laid out.  Zero leaves the work to the per-vertex dilation; the
+value luv used before dynamic dilation was 0.035.")
+
+(defmacro define-slug-source-value (name special)
+  "Let NAME stand for SPECIAL's value in shader source."
+  `(defmethod spv:shader-source-value ((name (eql ',name)))
+     (declare (ignore name))
+     (values ,special nil t)))
+
+(define-slug-source-value slug-filter-width *slug-filter-width*)
+(define-slug-source-value slug-fill-rule *slug-fill-rule*)
+(define-slug-source-value slug-optical-weight *slug-optical-weight*)
+(define-slug-source-value slug-footprint-norm *slug-footprint-norm*)
+(define-slug-source-value slug-early-exit *slug-early-exit*)
+(define-slug-source-value slug-root-epsilon *slug-root-epsilon*)
+(define-slug-source-value slug-debug-view *slug-debug-view*)
+(define-slug-source-value slug-dilation-pixels *slug-dilation-pixels*)
+
+(defun slug-dilation-em (pixels-per-em)
+  "The em distance a glyph quad laid out at PIXELS-PER-EM should grow on
+each side: the live dilation in filter widths, plus the static padding.
+For a stage that cannot dilate per vertex (a flat screen quad, whose pixel
+scale is known when it is laid out)."
+  (+ *slug-static-padding*
+     (if (plusp pixels-per-em)
+         (/ (* *slug-dilation-pixels* *slug-filter-width*) pixels-per-em)
+         0.0)))
+
+(defun slug-font-cap-height (font-loader)
+  "FONT-LOADER's sCapHeight from its OS/2 table, in font units, or NIL when
+the font has no OS/2 table or one too old (version < 2) to carry it.
+ZPB-TTF does not read OS/2, so this seeks the table itself."
+  (let ((table (zpb-ttf::table-info "OS/2" font-loader)))
+    (when (and table (>= (zpb-ttf::size table) 90))
+      (zpb-ttf::seek-to-table table font-loader)
+      (let* ((stream (zpb-ttf::input-stream font-loader))
+             (version (zpb-ttf::read-uint16 stream)))
+        (when (>= version 2)
+          ;; sCapHeight sits at byte 88 of the table; the version was 2.
+          (zpb-ttf::advance-file-position stream 86)
+          (let ((cap-height (zpb-ttf::read-int16 stream)))
+            (and (plusp cap-height) cap-height)))))))
+
+(defun slug-cap-height-aligned-size (font-loader size)
+  "The font size nearest SIZE (in pixels per em) at which FONT-LOADER's cap
+height lands on a whole number of pixels, so the tops of most capitals
+share the pixel grid: the reference's substitute for hinting.  Falls back
+to SIZE when the font declares no cap height."
+  (let ((cap-height (slug-font-cap-height font-loader))
+        (units-per-em (zpb-ttf:units/em font-loader)))
+    (if (and cap-height (plusp units-per-em))
+        (let* ((cap-em (/ cap-height units-per-em))
+               (pixels (max 1 (round (* size cap-em)))))
+          (/ pixels cap-em))
+        size)))
 
 (defun slug-root-eligibility (y1 y2 y3)
   "Return the two Slug root-eligibility bits as numeric masks.
@@ -36,12 +146,12 @@ pixel shader.  #S2F8SA"
          (other-b (- p1-other p2-other))
          (linear
            (- 1.0
-              (spv:step +slug-root-epsilon+ (abs axis-a))))
+              (spv:step slug-root-epsilon (abs axis-a))))
          (safe-a (spv:mix axis-a 1.0 linear))
          (safe-b
            (spv:mix axis-b 1.0
                     (- 1.0
-                       (spv:step +slug-root-epsilon+ (abs axis-b)))))
+                       (spv:step slug-root-epsilon (abs axis-b)))))
          (discriminant
            (max (- (* axis-b axis-b) (* axis-a p1-axis)) 0.0))
          (root-distance (sqrt discriminant))
@@ -137,22 +247,109 @@ pixel shader.  #S2F8SA"
                 (spv:swizzle vertical2 :w)
                 (spv:swizzle vertical3 :z)
                 (spv:swizzle vertical3 :w))))
-    (spv:clamp
+    (slug-finish-coverage
      (max
       (/ (abs (+ (* xcov xweight) (* ycov yweight)))
-         (max (+ xweight yweight) +slug-root-epsilon+))
-      (min (abs xcov) (abs ycov)))
-     0.0 1.0)))
+         (max (+ xweight yweight) slug-root-epsilon))
+      (min (abs xcov) (abs ycov))))))
+
+(spv:define-shader-function slug-finish-coverage (winding)
+  "Turn an unbounded signed WINDING estimate into a fill by the fill rule,
+then boost it by the optical weight.
+
+The nonzero rule saturates; even-odd folds the winding number back and forth
+between zero and one, as the reference's SLUG_EVENODD does.  The optical
+weight is an exponent: one leaves coverage linear, the reference's
+SLUG_WEIGHT is one half."
+  (let* ((nonzero (spv:clamp winding 0.0 1.0))
+         (even-odd
+           (- 1.0 (abs (- 1.0 (* (spv:fract (* winding 0.5)) 2.0)))))
+         (filled (spv:mix nonzero even-odd slug-fill-rule)))
+    (expt filled slug-optical-weight)))
 
 (spv:define-shader-function slug-combine-band-coverage
     (xcov xweight ycov yweight)
   "Combine the accumulated horizontal and vertical band traversals."
-  (spv:clamp
+  (slug-finish-coverage
    (max
     (/ (abs (+ (* xcov xweight) (* ycov yweight)))
-       (max (+ xweight yweight) +slug-root-epsilon+))
-    (min (abs xcov) (abs ycov)))
-   0.0 1.0))
+       (max (+ xweight yweight) slug-root-epsilon))
+    (min (abs xcov) (abs ycov)))))
+
+(spv:define-shader-function slug-pixels-per-em (render-coordinate)
+  "The pixel scale of the em square along each axis, from the sample
+coordinate's screen derivatives, already divided by the filter width so the
+rest of the pipeline works in filter widths rather than pixels.
+
+The footprint norm chooses between the gradient length and fwidth."
+  (let* ((coordinate-dx (spv:derivative-x render-coordinate))
+         (coordinate-dy (spv:derivative-y render-coordinate))
+         (x-gradient
+           (spv:vec2 (spv:swizzle coordinate-dx :x)
+                     (spv:swizzle coordinate-dy :x)))
+         (y-gradient
+           (spv:vec2 (spv:swizzle coordinate-dx :y)
+                     (spv:swizzle coordinate-dy :y)))
+         (length-footprint
+           (spv:vec2 (sqrt (spv:dot x-gradient x-gradient))
+                     (sqrt (spv:dot y-gradient y-gradient))))
+         (width-footprint (+ (abs coordinate-dx) (abs coordinate-dy)))
+         (ems-per-pixel
+           (spv:mix length-footprint width-footprint slug-footprint-norm)))
+    (spv:vec2
+     (/ 1.0 (max (* (spv:swizzle ems-per-pixel :x) slug-filter-width)
+                 slug-root-epsilon))
+     (/ 1.0 (max (* (spv:swizzle ems-per-pixel :y) slug-filter-width)
+                 slug-root-epsilon)))))
+
+(spv:define-shader-function slug-horizontal-band-step
+    (state curve next render-coordinate pixels-per-em)
+  "Fold one horizontal-band curve into STATE = (xcov, xweight, done).
+
+CURVE holds p1 and p2, NEXT's first two lanes p3.  DONE becomes one when the
+curve lies wholly more than half a filter width left of the sample: the
+band is sorted by descending maximum x, so nothing after it can contribute
+and the fold's :UNTIL leaves the loop.  #3YHNO3"
+  (let* ((p1 (- (spv:swizzle curve :xy) render-coordinate))
+         (p2 (- (spv:swizzle curve :zw) render-coordinate))
+         (p3 (- (spv:swizzle next :xy) render-coordinate))
+         (contribution
+           (slug-horizontal-contribution p1 p2 p3 pixels-per-em))
+         (reach
+           (* (max (spv:swizzle p1 :x) (spv:swizzle p2 :x)
+                   (spv:swizzle p3 :x))
+              (spv:swizzle pixels-per-em :x))))
+    (spv:vec3
+     (+ (spv:swizzle state :x)
+        (- (spv:swizzle contribution :x) (spv:swizzle contribution :y)))
+     (max (spv:swizzle state :y)
+          (spv:swizzle contribution :z) (spv:swizzle contribution :w))
+     (- 1.0 (spv:step -0.5 reach)))))
+
+(spv:define-shader-function slug-vertical-band-step
+    (state curve next render-coordinate pixels-per-em)
+  "Fold one vertical-band curve into STATE = (ycov, yweight, done); the
+band is sorted by descending maximum y."
+  (let* ((p1 (- (spv:swizzle curve :xy) render-coordinate))
+         (p2 (- (spv:swizzle curve :zw) render-coordinate))
+         (p3 (- (spv:swizzle next :xy) render-coordinate))
+         (contribution
+           (slug-vertical-contribution p1 p2 p3 pixels-per-em))
+         (reach
+           (* (max (spv:swizzle p1 :y) (spv:swizzle p2 :y)
+                   (spv:swizzle p3 :y))
+              (spv:swizzle pixels-per-em :y))))
+    (spv:vec3
+     (+ (spv:swizzle state :x)
+        (- (spv:swizzle contribution :y) (spv:swizzle contribution :x)))
+     (max (spv:swizzle state :y)
+          (spv:swizzle contribution :z) (spv:swizzle contribution :w))
+     (- 1.0 (spv:step -0.5 reach)))))
+
+(spv:define-shader-function slug-band-done-p (state)
+  "Whether a band fold with STATE = (cov, weight, done) may stop: the last
+curve was wholly behind the sample and the early exit is on."
+  (> (* (spv:swizzle state :z) slug-early-exit) 0.5))
 
 (spv:define-shader-function slug-texel-coordinate (address)
   "Map Slug's fixed-width linear texture ADDRESS to exact uint coordinates."
@@ -234,7 +431,7 @@ not the band-texture font renderer.  #OWR8OZ"
     (spv:vec2 0.50 0.74) (spv:vec2 0.82 0.98)
     (spv:vec2 0.86 0.70) (spv:vec2 0.92 0.38))))
 
-(spv:define-shader slug-banded-fragment-specification
+(spv:define-live-shader slug-banded-fragment-specification
     (:stage :fragment
      :inputs ((render-coordinate :vec2 :location 0)
               (pixels-per-em :vec2 :location 1))
@@ -258,7 +455,8 @@ not the band-texture font renderer.  #OWR8OZ"
          (vertical-offset (spv:swizzle vertical-header :y))
          (horizontal
            (spv:counted-fold
-               (index horizontal-count state (spv:vec2 0.0 0.0))
+               (index horizontal-count state (spv:vec3 0.0 0.0 0.0)
+                :until (slug-band-done-p state))
              (let* ((entry-address (+ horizontal-offset index))
                     (curve-location
                       (spv:swizzle
@@ -273,23 +471,13 @@ not the band-texture font renderer.  #OWR8OZ"
                              (spv:uint 4096.0))
                           (spv:uint 1.0))))
                     (curve (spv:texel-load curve-data curve-location))
-                    (next (spv:texel-load curve-data next-location))
-                    (p1 (- (spv:swizzle curve :xy) render-coordinate))
-                    (p2 (- (spv:swizzle curve :zw) render-coordinate))
-                    (p3 (- (spv:swizzle next :xy) render-coordinate))
-                    (contribution
-                      (slug-horizontal-contribution
-                       p1 p2 p3 pixels-per-em)))
-               (spv:vec2
-                (+ (spv:swizzle state :x)
-                   (- (spv:swizzle contribution :x)
-                      (spv:swizzle contribution :y)))
-                (max (spv:swizzle state :y)
-                     (spv:swizzle contribution :z)
-                     (spv:swizzle contribution :w))))))
+                    (next (spv:texel-load curve-data next-location)))
+               (slug-horizontal-band-step
+                state curve next render-coordinate pixels-per-em))))
          (vertical
            (spv:counted-fold
-               (index vertical-count state (spv:vec2 0.0 0.0))
+               (index vertical-count state (spv:vec3 0.0 0.0 0.0)
+                :until (slug-band-done-p state))
              (let* ((entry-address (+ vertical-offset index))
                     (curve-location
                       (spv:swizzle
@@ -304,20 +492,9 @@ not the band-texture font renderer.  #OWR8OZ"
                              (spv:uint 4096.0))
                           (spv:uint 1.0))))
                     (curve (spv:texel-load curve-data curve-location))
-                    (next (spv:texel-load curve-data next-location))
-                    (p1 (- (spv:swizzle curve :xy) render-coordinate))
-                    (p2 (- (spv:swizzle curve :zw) render-coordinate))
-                    (p3 (- (spv:swizzle next :xy) render-coordinate))
-                    (contribution
-                      (slug-vertical-contribution
-                       p1 p2 p3 pixels-per-em)))
-               (spv:vec2
-                (+ (spv:swizzle state :x)
-                   (- (spv:swizzle contribution :y)
-                      (spv:swizzle contribution :x)))
-                (max (spv:swizzle state :y)
-                     (spv:swizzle contribution :z)
-                     (spv:swizzle contribution :w))))))
+                    (next (spv:texel-load curve-data next-location)))
+               (slug-vertical-band-step
+                state curve next render-coordinate pixels-per-em))))
          (coverage
            (slug-combine-band-coverage
             (spv:swizzle horizontal :x) (spv:swizzle horizontal :y)
@@ -326,7 +503,7 @@ not the band-texture font renderer.  #OWR8OZ"
      color-output
      (* (spv:vec4 0.96 0.32 0.48 1.0) coverage))))
 
-(spv:define-shader slug-atlas-fragment-specification
+(spv:define-live-shader slug-atlas-fragment-specification
     (:stage :fragment
      :inputs ((render-coordinate :vec2 :location 0)
               (atlas-base :vec2 :location 1)
@@ -336,6 +513,11 @@ not the band-texture font renderer.  #OWR8OZ"
      :resources ((band-data :uint-texture-2d :binding 0)
                  (curve-data :texture-2d :binding 1))
      :outputs ((color-output :vec4 :location 0)))
+  ;; The reference's SlugRender: pick the pixel's horizontal and vertical
+  ;; band, walk each band's sorted curve list until a curve is wholly behind
+  ;; the sample, and combine the two rays' coverage by their weights.  The
+  ;; glyph's data lives at ATLAS-BASE inside shared band and curve atlases;
+  ;; every address below is relative to it.
   (let* ((one (spv:uint 1.0))
          (width (spv:uint 4096.0))
          (band-base (spv:uint (spv:swizzle atlas-base :x)))
@@ -344,27 +526,14 @@ not the band-texture font renderer.  #OWR8OZ"
            (spv:uint (spv:swizzle band-counts :x)))
          (vertical-band-count
            (spv:uint (spv:swizzle band-counts :y)))
-         (coordinate-dx (spv:derivative-x render-coordinate))
-         (coordinate-dy (spv:derivative-y render-coordinate))
-         (x-gradient
-           (spv:vec2 (spv:swizzle coordinate-dx :x)
-                     (spv:swizzle coordinate-dy :x)))
-         (y-gradient
-           (spv:vec2 (spv:swizzle coordinate-dx :y)
-                     (spv:swizzle coordinate-dy :y)))
-         (pixels-per-em
-           (spv:vec2
-            (/ 1.0 (max (sqrt (spv:dot x-gradient x-gradient))
-                        +slug-root-epsilon+))
-            (/ 1.0 (max (sqrt (spv:dot y-gradient y-gradient))
-                        +slug-root-epsilon+))))
+         (pixels-per-em (slug-pixels-per-em render-coordinate))
          (horizontal-position
            (spv:clamp
             (/ (- (spv:swizzle render-coordinate :y)
                   (spv:swizzle band-bounds :y))
                (max (- (spv:swizzle band-bounds :w)
                        (spv:swizzle band-bounds :y))
-                    +slug-root-epsilon+))
+                    slug-root-epsilon))
             0.0 1.0))
          (vertical-position
            (spv:clamp
@@ -372,7 +541,7 @@ not the band-texture font renderer.  #OWR8OZ"
                   (spv:swizzle band-bounds :x))
                (max (- (spv:swizzle band-bounds :z)
                        (spv:swizzle band-bounds :x))
-                    +slug-root-epsilon+))
+                    slug-root-epsilon))
             0.0 1.0))
          (horizontal-band-candidate
            (spv:uint
@@ -407,7 +576,8 @@ not the band-texture font renderer.  #OWR8OZ"
          (vertical-offset (spv:swizzle vertical-header :y))
          (horizontal
            (spv:counted-fold
-               (index horizontal-count state (spv:vec2 0.0 0.0))
+               (index horizontal-count state (spv:vec3 0.0 0.0 0.0)
+                :until (slug-band-done-p state))
              (let* ((entry-address (+ band-base horizontal-offset index))
                     (entry-location
                       (spv:uvec2 (mod entry-address width)
@@ -427,23 +597,13 @@ not the band-texture font renderer.  #OWR8OZ"
                       (spv:uvec2 (mod (+ curve-address one) width)
                                  (/ (+ curve-address one) width)))
                     (curve (spv:texel-load curve-data curve-location))
-                    (next (spv:texel-load curve-data next-location))
-                    (p1 (- (spv:swizzle curve :xy) render-coordinate))
-                    (p2 (- (spv:swizzle curve :zw) render-coordinate))
-                    (p3 (- (spv:swizzle next :xy) render-coordinate))
-                    (contribution
-                      (slug-horizontal-contribution
-                       p1 p2 p3 pixels-per-em)))
-               (spv:vec2
-                (+ (spv:swizzle state :x)
-                   (- (spv:swizzle contribution :x)
-                      (spv:swizzle contribution :y)))
-                (max (spv:swizzle state :y)
-                     (spv:swizzle contribution :z)
-                     (spv:swizzle contribution :w))))))
+                    (next (spv:texel-load curve-data next-location)))
+               (slug-horizontal-band-step
+                state curve next render-coordinate pixels-per-em))))
          (vertical
            (spv:counted-fold
-               (index vertical-count state (spv:vec2 0.0 0.0))
+               (index vertical-count state (spv:vec3 0.0 0.0 0.0)
+                :until (slug-band-done-p state))
              (let* ((entry-address (+ band-base vertical-offset index))
                     (entry-location
                       (spv:uvec2 (mod entry-address width)
@@ -463,21 +623,20 @@ not the band-texture font renderer.  #OWR8OZ"
                       (spv:uvec2 (mod (+ curve-address one) width)
                                  (/ (+ curve-address one) width)))
                     (curve (spv:texel-load curve-data curve-location))
-                    (next (spv:texel-load curve-data next-location))
-                    (p1 (- (spv:swizzle curve :xy) render-coordinate))
-                    (p2 (- (spv:swizzle curve :zw) render-coordinate))
-                    (p3 (- (spv:swizzle next :xy) render-coordinate))
-                    (contribution
-                      (slug-vertical-contribution p1 p2 p3 pixels-per-em)))
-               (spv:vec2
-                (+ (spv:swizzle state :x)
-                   (- (spv:swizzle contribution :y)
-                      (spv:swizzle contribution :x)))
-                (max (spv:swizzle state :y)
-                     (spv:swizzle contribution :z)
-                     (spv:swizzle contribution :w))))))
+                    (next (spv:texel-load curve-data next-location)))
+               (slug-vertical-band-step
+                state curve next render-coordinate pixels-per-em))))
          (coverage
            (slug-combine-band-coverage
             (spv:swizzle horizontal :x) (spv:swizzle horizontal :y)
-            (spv:swizzle vertical :x) (spv:swizzle vertical :y))))
-    (spv:set-output color-output (* render-color coverage))))
+            (spv:swizzle vertical :x) (spv:swizzle vertical :y)))
+         (ink (* render-color coverage))
+         ;; The debug view paints the whole quad with the two bands' loads,
+         ;; so the banding of a glyph -- and what the band count buys -- can
+         ;; be seen at a glance.
+         (band-load
+           (spv:vec4 (/ (spv:float horizontal-count) 16.0)
+                     (/ (spv:float vertical-count) 16.0)
+                     (* coverage 0.5)
+                     1.0)))
+    (spv:set-output color-output (spv:mix ink band-load slug-debug-view))))

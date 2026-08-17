@@ -1130,7 +1130,9 @@ and height in world units.  FONT-SCALE is an explicit multiplier on contain."
       (terminal-font-metrics font-loader)
     (multiple-value-bind (right up) (terminal-surface-axes surface)
      (let* ((origin (terminal-surface-lower-left-point surface))
-           (padding 0.035)
+           ;; The vertex stage dilates each quad by pixels; this is only
+           ;; the static em padding, normally zero.
+           (padding luv.slug:*slug-static-padding*)
            (data (make-array (* 24 (length occurrences))
                              :element-type 'single-float)))
       (multiple-value-bind (scale left bottom grid-width grid-height)

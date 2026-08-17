@@ -1767,7 +1767,10 @@
     (ok (= 20 (length curve-words)))
     ;; The first curve's p3 is the following curve texel's p1.
     (ok (equalp (subseq curve-words 2 4) (subseq curve-words 4 6)))
-    (ok (= 12 (slug:slug-serialized-outline-band-texel-count serialized)))
+    ;; Four headers, then the two vertical sides once (both horizontal bands
+    ;; hold exactly them, so the second points at the first's list) and the
+    ;; two horizontal sides once, likewise shared.
+    (ok (= 8 (slug:slug-serialized-outline-band-texel-count serialized)))
     (ok (equal '(4096 1)
                (slug:slug-serialized-outline-curve-texture-size serialized)))
     (ok (equal '(4096 1)
@@ -1780,21 +1783,42 @@
            (loop for index below 4
                  sum (ash (aref curve-words index) (* index 16)))))
     (ok (= #x00040002 (row-major-aref band-upload 0)))
-    (ok (= 2 (aref band-words 0)))
-    (ok (= 4 (aref band-words 1)))
+    (ok (equalp #(2 4 2 4 2 6 2 6) (subseq band-words 0 8)))
     (ok (equalp #(1 0 3 0) (subseq band-words 8 12)))
+    (ok (equalp #(2 0 0 0) (subseq band-words 12 16)))
+    (let ((slug:*slug-share-band-lists* nil))
+      (ok (= 12 (slug:slug-serialized-outline-band-texel-count
+                 (slug:serialize-slug-outline
+                  (slug:make-slug-outline :contours (list contour))
+                  :horizontal-band-count 2 :vertical-band-count 2)))))
     (ok (not (= 1/3 (slug:slug-packed-outline-max-x packed))))
     (ok (< (abs (- 1/3 (slug:slug-packed-outline-max-x packed)))
            1/1000))))
 
-(deftest slug-serialization-defaults-to-spatial-bands
+(deftest slug-serialization-chooses-band-counts-by-load
+  ;; A square's two vertical sides fall in every horizontal band however
+  ;; many there are, so one band per axis is as good as any and cheapest.
   (let ((serialized
           (slug:serialize-slug-outline
            (slug:make-slug-outline
             :contours (list (slug-test-square 0 0 1 1))))))
-    (ok (= 4 (slug:slug-serialized-outline-horizontal-band-count serialized)))
-    (ok (= 4 (slug:slug-serialized-outline-vertical-band-count serialized)))
-    (ok (> (slug:slug-serialized-outline-band-texel-count serialized) 8))))
+    (ok (= 1 (slug:slug-serialized-outline-horizontal-band-count serialized)))
+    (ok (= 1 (slug:slug-serialized-outline-vertical-band-count serialized)))
+    (ok (= 6 (slug:slug-serialized-outline-band-texel-count serialized))))
+  ;; Two squares stacked with a gap: two horizontal bands each hold one
+  ;; square's sides (a load of two) where one band would hold four.
+  (let* ((lower (slug-test-square 0 0 1 1))
+         (upper (slug-test-square 0 2 1 3))
+         (outline (slug:make-slug-outline :contours (list lower upper)))
+         (packed (slug:pack-slug-outline outline))
+         (curves (slug:slug-packed-outline-curves packed)))
+    (ok (= 2 (slug:choose-slug-band-count curves :y 0 3)))
+    (ok (= 2 (length (slug:slug-packed-outline-horizontal-bands packed))))
+    (ok (every (lambda (band)
+                 (= 2 (length (slug:slug-band-curve-indices band))))
+               (slug:slug-packed-outline-horizontal-bands packed)))
+    (let ((slug:*slug-maximum-band-count* 1))
+      (ok (= 1 (slug:choose-slug-band-count curves :y 0 3))))))
 
 (deftest zpb-ttf-glyphs-enter-slug-before-software-rasterization
   (zpb-ttf:with-font-loader
@@ -1947,6 +1971,38 @@
               :key #'symbol-name :test #'string=))
     (ok (= #x07230203
            (aref (spv:assemble-shader-specification specification) 0)))))
+
+(deftest counted-fold-until-guards-the-spir-v-loop-header
+  (let* ((specification
+           (spv:parse-shader-specification
+            'until-fold-fragment
+            '(:stage :fragment
+              :inputs ((count :float :location 0))
+              :outputs ((result :float :location 0)))
+            '((set-output result
+                          (counted-fold
+                              (index count sum 0.0 :until (> sum 10.0))
+                            (+ sum index))))))
+         (names
+           (mapcar #'spv:instruction-name
+                   (spv:lower-spir-v
+                    (spv:shader-module specification)))))
+    (ok (find "LOGICAL-NOT" names :key #'symbol-name :test #'string=))
+    (ok (find "LOGICAL-AND" names :key #'symbol-name :test #'string=))
+    (ok (find "LOOP-MERGE" names :key #'symbol-name :test #'string=))
+    (ok (= #x07230203
+           (aref (spv:assemble-shader-specification specification) 0)))
+    ;; The test must be a boolean.
+    (ok (signals
+         (spv:parse-shader-specification
+          'bad-until-fold-fragment
+          '(:stage :fragment
+            :inputs ((count :float :location 0))
+            :outputs ((result :float :location 0)))
+          '((set-output result
+                        (counted-fold (index count sum 0.0 :until sum)
+                          (+ sum index)))))
+         'spv:shader-language-error))))
 
 (deftest exact-unsigned-texel-loads-flow-through-shared-folds
   (let* ((specification (unsigned-texel-fold-probe))

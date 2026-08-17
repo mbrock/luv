@@ -211,10 +211,12 @@ some other space; the environment lanes are packed the same either way."
         (apply #'emit (append (color (sky-frame-parameters-sun-color sky))
                               (list (sky-frame-parameters-sun-angular-width
                                      sky))))
+        ;; The zenith and horizon lanes' spare w carry the target's height
+        ;; and width in pixels: what a vertex stage needs to size a pixel.
         (apply #'emit (append (color (sky-frame-parameters-zenith-color sky))
-                              (list 0.0)))
+                              (list height)))
         (apply #'emit (append (color (sky-frame-parameters-horizon-color sky))
-                              (list 0.0)))
+                              (list width)))
         (apply #'emit (append (color (sky-frame-parameters-ambient-color sky))
                               (list (sky-frame-parameters-exposure sky))))
         (apply #'emit

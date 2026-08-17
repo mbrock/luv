@@ -12,6 +12,16 @@
              (slug-outline-error-reason condition)
              (slug-outline-error-details condition)))))
 
+(defparameter *slug-maximum-band-count* 16
+  "The most bands an axis may be cut into when the count is chosen
+automatically.  The reference's format allows 256; more bands cost header
+texels and, past a point, only overlap epsilon.")
+
+(defparameter *slug-band-epsilon* 1/1024
+  "How far, in em, a band reaches past its edges when deciding which curves
+it holds, so a curve grazing a boundary is in both bands.  The reference
+suggests 1/1024.")
+
 (defstruct slug-point x y)
 (defstruct slug-quadratic start control end)
 (defstruct slug-outline contours)
@@ -122,7 +132,7 @@
           unless (slug-curve-axis-parallel-p curve membership-axis)
             do (multiple-value-bind (low high)
                    (slug-band-range curve membership-axis minimum maximum
-                                    band-count)
+                                    band-count :epsilon *slug-band-epsilon*)
                  (loop for band from low to high
                        do (push index (aref members band)))))
     (loop for indices across members
@@ -139,33 +149,65 @@
                    (slug-index-order-p curves sort-axis :ascending
                                        left right)))))))
 
+(defun slug-band-load (curves membership-axis minimum maximum band-count)
+  "Return the largest number of curves any of BAND-COUNT bands cut along
+MEMBERSHIP-AXIS holds, and the total over all bands."
+  (let ((loads (make-array band-count :initial-element 0)))
+    (loop for curve across curves
+          unless (slug-curve-axis-parallel-p curve membership-axis)
+            do (multiple-value-bind (low high)
+                   (slug-band-range curve membership-axis minimum maximum
+                                    band-count :epsilon *slug-band-epsilon*)
+                 (loop for band from low to high
+                       do (incf (aref loads band)))))
+    (values (reduce #'max loads) (reduce #'+ loads))))
+
+(defun choose-slug-band-count
+    (curves membership-axis minimum maximum
+     &optional (maximum-count *slug-maximum-band-count*))
+  "The fewest bands in [1, MAXIMUM-COUNT] that minimize the most curves any
+one band holds: the reference's advice for choosing a glyph's band counts,
+with ties going to the cheaper header block."
+  (let ((best-count 1) (best-load nil))
+    (loop for count from 1 to (max 1 (min maximum-count (length curves)))
+          do (let ((load (slug-band-load curves membership-axis
+                                         minimum maximum count)))
+               (when (or (null best-load) (< load best-load))
+                 (setf best-count count best-load load))))
+    best-count))
+
 (defun pack-slug-outline
     (outline &key horizontal-band-count vertical-band-count)
-  "Build conservative, sorted horizontal and vertical Slug curve bands."
+  "Build conservative, sorted horizontal and vertical Slug curve bands.
+
+A band count left unspecified is chosen per axis by CHOOSE-SLUG-BAND-COUNT."
   (let* ((curve-list (slug-outline-curves outline))
          (curves (coerce curve-list 'vector))
          (curve-count (length curves)))
     (when (zerop curve-count)
       (error 'slug-outline-error :reason :empty-outline))
-    (let* ((default-count (max 1 (min curve-count 16)))
-           (horizontal-count (or horizontal-band-count default-count))
-           (vertical-count (or vertical-band-count default-count)))
-      (unless (and (<= 1 horizontal-count 16)
-                   (<= 1 vertical-count 16))
+    (let* ((min-x (loop for curve across curves
+                        minimize (slug-curve-min curve :x)))
+           (min-y (loop for curve across curves
+                        minimize (slug-curve-min curve :y)))
+           (max-x (loop for curve across curves
+                        maximize (slug-curve-max curve :x)))
+           (max-y (loop for curve across curves
+                        maximize (slug-curve-max curve :y)))
+           (horizontal-count
+             (or horizontal-band-count
+                 (choose-slug-band-count curves :y min-y max-y)))
+           (vertical-count
+             (or vertical-band-count
+                 (choose-slug-band-count curves :x min-x max-x))))
+      (unless (and (<= 1 horizontal-count 255)
+                   (<= 1 vertical-count 255))
         (error 'slug-outline-error
                :reason :invalid-band-count
                :details (list horizontal-count vertical-count)))
-      (let* ((min-x (loop for curve across curves
-                          minimize (slug-curve-min curve :x)))
-             (min-y (loop for curve across curves
-                          minimize (slug-curve-min curve :y)))
-             (max-x (loop for curve across curves
-                          maximize (slug-curve-max curve :x)))
-             (max-y (loop for curve across curves
-                          maximize (slug-curve-max curve :y))))
-        (make-slug-packed-outline
-         :curves curves :min-x min-x :min-y min-y :max-x max-x :max-y max-y
-         :horizontal-bands
-         (make-slug-bands curves :y :x min-y max-y horizontal-count)
-         :vertical-bands
-         (make-slug-bands curves :x :y min-x max-x vertical-count))))))
+      (make-slug-packed-outline
+       :curves curves :min-x min-x :min-y min-y :max-x max-x :max-y max-y
+       :horizontal-bands
+       (make-slug-bands curves :y :x min-y max-y horizontal-count)
+       :vertical-bands
+       (make-slug-bands curves :x :y min-x max-x vertical-count)))))

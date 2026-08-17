@@ -113,12 +113,14 @@
                         :components
                         ((:xyz :quantity :linear-rgb :unit :one)
                          (:w :quantity :sun-disc-coordinate :unit :one)))
-      (zenith-vector :vec4      ; zenith colour, w unused
+      (zenith-vector :vec4      ; zenith colour, w target height in pixels
                      :components
-                     ((:xyz :quantity :linear-rgb :unit :one)))
-      (horizon-vector :vec4     ; horizon colour, w unused
+                     ((:xyz :quantity :linear-rgb :unit :one)
+                      (:w :quantity :target-pixel-extent :unit :one)))
+      (horizon-vector :vec4     ; horizon colour, w target width in pixels
                       :components
-                      ((:xyz :quantity :linear-rgb :unit :one)))
+                      ((:xyz :quantity :linear-rgb :unit :one)
+                       (:w :quantity :target-pixel-extent :unit :one)))
       (ambient-vector :vec4     ; ambient colour, exposure
                       :components
                       ((:xyz :quantity :linear-rgb :unit :one)))
@@ -204,9 +206,9 @@
          (up (swizzle up-vector :xyz))
          (forward (swizzle forward-vector :xyz))
          (relative (- world-position camera))
-         (view-x (dot relative right))
-         (view-y (dot relative up))
-         (view-z (interpret (dot relative forward)
+         (view-x (dot relative (swizzle right-vector :xyz)))
+         (view-y (dot relative (swizzle up-vector :xyz)))
+         (view-z (interpret (dot relative (swizzle forward-vector :xyz))
                             :quantity :view-distance :unit :cell))
          (fog-near (swizzle fog-vector :x))
          (fog-far (swizzle fog-vector :y))
@@ -292,25 +294,65 @@
      :resources
      ((frame-state :uniform-block :set 0 :binding 2
                    :members #.*frame-uniform-members*)))
-  (let* ((world-position
+  ;; Dynamic dilation, after the reference's vertex stage: the quad grows
+  ;; past the outline by a fixed number of pixels, however large or small
+  ;; the glyph lands on screen, so the pixel filter's half-width is always
+  ;; inside it and no more.  A vertex knows its own depth and the frame
+  ;; knows the target's height, which together give the pixel length of
+  ;; each em edge; the corner then slides outward along both edges by
+  ;; the dilation over that length.  Em coordinates slide with it, so the
+  ;; outline stays where it was.
+  (let* ((camera (swizzle camera-vector :xyz))
+         (right (representation (swizzle right-vector :xyz)))
+         (up (representation (swizzle up-vector :xyz)))
+         (forward (representation (swizzle forward-vector :xyz)))
+         (corner (swizzle quad-corner :xy))
+         (undilated-position
+           (+ world-origin
+              (* world-right-edge (swizzle corner :x))
+              (* world-up-edge (swizzle corner :y))))
+         (undilated-relative
+           (- undilated-position (representation camera)))
+         (undilated-depth (max (dot undilated-relative forward) 0.001))
+         (pixels-per-unit
+           (/ (* (representation (swizzle projection-vector :y))
+                 (representation (swizzle zenith-vector :w))
+                 0.5)
+              undilated-depth))
+         (right-edge-pixels
+           (* pixels-per-unit
+              (sqrt (+ (* (dot world-right-edge right)
+                          (dot world-right-edge right))
+                       (* (dot world-right-edge up)
+                          (dot world-right-edge up))))))
+         (up-edge-pixels
+           (* pixels-per-unit
+              (sqrt (+ (* (dot world-up-edge right)
+                          (dot world-up-edge right))
+                       (* (dot world-up-edge up)
+                          (dot world-up-edge up))))))
+         (dilation
+           (* luv.slug:slug-dilation-pixels luv.slug:slug-filter-width))
+         (dilated-corner
+           (+ corner
+              (* (- (* corner 2.0) (vec2 1.0 1.0))
+                 (vec2 (/ dilation (max right-edge-pixels 0.001))
+                       (/ dilation (max up-edge-pixels 0.001))))))
+         (world-position
            (assume-quantity
             (+ world-origin
-               (* world-right-edge (swizzle quad-corner :x))
-               (* world-up-edge (swizzle quad-corner :y)))
+               (* world-right-edge (swizzle dilated-corner :x))
+               (* world-up-edge (swizzle dilated-corner :y)))
             :quantity :world-position :unit :cell))
          (outline-coordinate
            (+ (swizzle outline-low :xy)
               (* (- (swizzle outline-high :xy)
                     (swizzle outline-low :xy))
-                 (swizzle quad-corner :xy))))
-         (camera (swizzle camera-vector :xyz))
-         (right (swizzle right-vector :xyz))
-         (up (swizzle up-vector :xyz))
-         (forward (swizzle forward-vector :xyz))
+                 dilated-corner)))
          (relative (- world-position camera))
-         (view-x (dot relative right))
-         (view-y (dot relative up))
-         (view-z (interpret (dot relative forward)
+         (view-x (dot relative (swizzle right-vector :xyz)))
+         (view-y (dot relative (swizzle up-vector :xyz)))
+         (view-z (interpret (dot relative (swizzle forward-vector :xyz))
                             :quantity :view-distance :unit :cell))
          (x-scale (swizzle projection-vector :x))
          (y-scale (swizzle projection-vector :y))
@@ -386,9 +428,9 @@
          (up (swizzle up-vector :xyz))
          (forward (swizzle forward-vector :xyz))
          (relative (- world-position camera))
-         (view-x (dot relative right))
-         (view-y (dot relative up))
-         (view-z (interpret (dot relative forward)
+         (view-x (dot relative (swizzle right-vector :xyz)))
+         (view-y (dot relative (swizzle up-vector :xyz)))
+         (view-z (interpret (dot relative (swizzle forward-vector :xyz))
                             :quantity :view-distance :unit :cell))
          (x-scale (swizzle projection-vector :x))
          (y-scale (swizzle projection-vector :y))
@@ -465,9 +507,9 @@
          (up (swizzle up-vector :xyz))
          (forward (swizzle forward-vector :xyz))
          (relative (- world-position camera))
-         (view-x (dot relative right))
-         (view-y (dot relative up))
-         (view-z (interpret (dot relative forward)
+         (view-x (dot relative (swizzle right-vector :xyz)))
+         (view-y (dot relative (swizzle up-vector :xyz)))
+         (view-z (interpret (dot relative (swizzle forward-vector :xyz))
                             :quantity :view-distance :unit :cell))
          (x-scale (swizzle projection-vector :x))
          (y-scale (swizzle projection-vector :y))
@@ -844,9 +886,9 @@ negative inside.  RADIUS is the corner radius in world cells."
          (up (swizzle up-vector :xyz))
          (forward (swizzle forward-vector :xyz))
          (relative (- world-position camera))
-         (view-x (dot relative right))
-         (view-y (dot relative up))
-         (view-z (interpret (dot relative forward)
+         (view-x (dot relative (swizzle right-vector :xyz)))
+         (view-y (dot relative (swizzle up-vector :xyz)))
+         (view-z (interpret (dot relative (swizzle forward-vector :xyz))
                             :quantity :view-distance :unit :cell))
          (x-scale (swizzle projection-vector :x))
          (y-scale (swizzle projection-vector :y))

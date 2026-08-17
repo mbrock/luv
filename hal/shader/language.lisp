@@ -2369,15 +2369,12 @@ rather than the language."
            :source-form form))))))
 
 (defun parse-shader-counted-fold (form environment)
-  (unless (and (= (length form) 3)
-               (consp (second form))
-               (= (length (second form)) 4))
-    (error 'shader-language-error
-           :form form :reason :invalid-counted-fold))
-  (destructuring-bind (operator (index-name count-form state-name initial-form)
-                       update-form)
-      form
-    (declare (ignore operator))
+  (multiple-value-bind (index-name count-form state-name initial-form
+                        update-form until-form valid-p)
+      (lang:counted-fold-form-parts form)
+    (unless valid-p
+      (error 'shader-language-error
+             :form form :reason :invalid-counted-fold))
     (unless (and (symbolp index-name) (symbolp state-name)
                  (not (eq index-name state-name)))
       (error 'shader-language-error
@@ -2423,11 +2420,26 @@ rather than the language."
          :count count :initial initial
          :index-binding index-binding :state-binding state-binding
          :bindings update-bindings :update update
+         :until (parse-shader-counted-fold-until until-form fold-environment)
          :type (shader-expression-type initial)
          :quantity-specification
          (shader-expression-quantity-specification initial)
          :quantity-layout (shader-expression-quantity-layout initial)
          :source-form form)))))
+
+(defun parse-shader-counted-fold-until (form environment)
+  "Parse a COUNTED-FOLD's :UNTIL test in the fold's ENVIRONMENT.
+
+The test is evaluated at the head of every iteration, seeing the index and
+the carried state, and must be a straight-line boolean: it lowers into the
+loop header, so it may not itself fold."
+  (when form
+    (let ((until (parse-shader-expression form environment)))
+      (unless (shader-type= (shader-expression-type until) :bool)
+        (error 'shader-language-error
+               :form form :reason :counted-fold-until-type
+               :details (shader-type-name (shader-expression-type until))))
+      until)))
 
 (defun parse-shader-conditional (form environment)
   (unless (= 4 (length form))
@@ -3713,6 +3725,19 @@ without turning function definitions back into source-form substitution."
        (defparameter ,variable
          (parse-shader-specification ',name ',options ',body))
        (defun ,name () ,variable))))
+
+(defmacro define-live-shader (name options &body body)
+  "Define NAME as a function that reparses its shader source on every call.
+
+Where DEFINE-SHADER parses once at load, this parses each time it is asked,
+so live named values (SHADER-SOURCE-VALUE) folded into the body are read
+afresh -- and noted in *SHADER-SOURCE-VALUE-REFERENCES* -- by every pipeline
+build, exactly as a DEFINE-SHADER-METHOD's body is.  Parsing at load still
+happens once, to fail early on a broken source."
+  `(progn
+     (parse-shader-specification ',name ',options ',body)
+     (defun ,name ()
+       (parse-shader-specification ',name ',options ',body))))
 
 ;;; Live definitions ---------------------------------------------------------
 
@@ -5268,11 +5293,34 @@ backend's context before its source-located unsupported-operation method."))
                   (ensure-shader-constant context 1.0))))
     (emit-shader-instruction context expression (list 'branch header-label))
     (let ((header (begin-shader-basic-block context header-label)))
-      (let ((condition-id (fresh-shader-id context 'fold-condition)))
+      ;; The index and state phis are prepended to the header once the back
+      ;; edge is known, so an :UNTIL test lowered here may already refer to
+      ;; them through the fold values.
+      (setf (gethash (lang:arithmetic-counted-fold-index-binding expression)
+                     (context-fold-values context))
+            index-id
+            (gethash (lang:arithmetic-counted-fold-state-binding expression)
+                     (context-fold-values context))
+            state-id)
+      (let ((condition-id (fresh-shader-id context 'fold-condition))
+            (until (lang:arithmetic-counted-fold-until expression)))
         (emit-shader-instruction
          context expression
          (list condition-id (if unsigned-p 'u-less-than 'f-ord-less-than)
                (ensure-bool-type-id context) index-id count))
+        (when until
+          (let ((until-id (lower-shader-expression context until))
+                (continue-id (fresh-shader-id context 'fold-continue-p))
+                (guarded-id (fresh-shader-id context 'fold-guarded-condition)))
+            (emit-shader-instruction
+             context expression
+             (list continue-id 'logical-not
+                   (ensure-bool-type-id context) until-id))
+            (emit-shader-instruction
+             context expression
+             (list guarded-id 'logical-and
+                   (ensure-bool-type-id context) condition-id continue-id))
+            (setf condition-id guarded-id)))
         (emit-shader-instruction
          context expression
          (list 'loop-merge merge-label continue-label 'none))
@@ -5280,12 +5328,6 @@ backend's context before its source-located unsupported-operation method."))
          context expression
          (list 'branch-conditional condition-id body-label merge-label)))
       (begin-shader-basic-block context body-label)
-      (setf (gethash (lang:arithmetic-counted-fold-index-binding expression)
-                     (context-fold-values context))
-            index-id
-            (gethash (lang:arithmetic-counted-fold-state-binding expression)
-                     (context-fold-values context))
-            state-id)
       (let ((next-state
               (lower-shader-expression
                context (lang:arithmetic-counted-fold-update expression))))

@@ -205,6 +205,10 @@
   :non-negative-p t)
 (math:define-quantity :scanline-count :kind :sample-count
   :non-negative-p t)
+;;; The render target's extent in pixels, carried in the frame uniform so a
+;;; vertex stage can size a pixel (the world text's dilation).
+(math:define-quantity :target-pixel-extent :kind :sample-count
+  :non-negative-p t)
 (math:define-quantity :font-scale :kind :control-signal
   :non-negative-p t)
 (math:define-quantity :chunk-radius :kind :sample-count
