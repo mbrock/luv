@@ -5,6 +5,12 @@ description: Use when designing, refactoring, reviewing, or optimizing performan
 
 # Designing systems in luv
 
+> **Five seconds of silence means broken.** Any command here that runs more
+> than about five seconds without printing anything is a defect to be named,
+> not a wait to be endured — usually a pipe that ate the progress output or a
+> process parked on stdin. Make it talk, `strace` it, or split it up; never
+> poll it or run it again the same way. See `luv-development` and AGENTS.md.
+
 Use one recurring shape: put semantic structure around dense, explicit work.
 Let objects and protocols name meanings, owners, domains, policies, and
 lifecycle. Let specialized arrays, packed identifiers, and closed loops move

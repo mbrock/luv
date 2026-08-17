@@ -5,6 +5,12 @@ description: Use when designing or refactoring Lisp code in this repo — a new 
 
 # Designing with CLOS in luv
 
+> **Five seconds of silence means broken.** Any command here that runs more
+> than about five seconds without printing anything is a defect to be named,
+> not a wait to be endured — usually a pipe that ate the progress output or a
+> process parked on stdin. Make it talk, `strace` it, or split it up; never
+> poll it or run it again the same way. See `luv-development` and AGENTS.md.
+
 CLOS is this project's primary design instrument, not an implementation
 detail. The aim is always the same: the *meaningful* entities of a domain
 become inspectable, redefinable, documentable objects and protocols, while
