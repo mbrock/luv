@@ -298,13 +298,11 @@ player read; a chooser of three shapes lets them recognize.")
   (let* ((mirror (widget-overlay-mirror overlay))
          (source (mirror-texture mirror)))
     (when source
-      ;; The hotbar is a HUD and must remain visible over the scene
-      ;; regardless of the block depth already in the shared pass, but the
-      ;; pipeline still has to match that pass's depth attachment, so it
-      ;; keeps the depth format and passes every depth test.
+      ;; The hotbar draws in the presentation pass, which has no depth
+      ;; attachment, so the pipeline declares no depth state -- the
+      ;; Vulkan HAL rejects any mismatch with the pass's attachments.
       (ensure-spinning-compositor-resources
        overlay (mirror-context mirror) source
-       :depth-format :depth32-float :depth-compare :always
        :target-format (luv:gpu-texture-format surface-texture))
       (let* ((state (hotbar-screen-state overlay))
              (frame-state
