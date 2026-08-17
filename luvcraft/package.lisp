@@ -358,6 +358,8 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:luvcraft-session-block-pipeline
            #:luvcraft-session-camera
            #:luvcraft-session-canvas
+           #:luvcraft-session-context
+           #:luvcraft-session-device
            #:luvcraft-session-checkpoint-writer
            #:luvcraft-session-chunk-products
            #:luvcraft-session-crosshair-pipeline
@@ -372,6 +374,7 @@ compiler which closes a program over bound fields into a scalar loop.")
            ;; session's surface rather than its insides.
            #:luvcraft-session-movement-intent
            #:luvcraft-session-pointer-captured-p
+           #:luvcraft-session-pointer-capture-suspended-p
            #:luvcraft-session-focus-toggle-tab-down-p
            #:dispatch-luvcraft-focus-event
            #:luvcraft-focus-entered

@@ -46,9 +46,10 @@
     ()
   (luvcraft:unfocus-luvcraft-session (luvcraft-command-session)))
 
+;;; Named but unbound: escape now shows the keymap, which releases the pointer
+;;; on its way.  This stays reachable by name, from a listener or a script.
 (define-command (com-release-pointer :command-table luvcraft-world
-                                     :name "Release Pointer"
-                                     :keystroke (:escape))
+                                     :name "Release Pointer")
     ()
   (let ((session (luvcraft-command-session)))
     (when (luvcraft:luvcraft-session-pointer-captured-p session)

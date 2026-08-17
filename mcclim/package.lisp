@@ -36,6 +36,25 @@
            #:mirror-compositor
            #:port-mirrors
            #:present-mirror
+           #:repaint-gpu-mirror
+           ;; Mounting a McCLIM pane inside the game: the overlay base class,
+           ;; the specials that make a frame share luvcraft's one canvas
+           ;; instead of asking for a second, and the compositor a HUD panel
+           ;; draws itself with.
+           #:luvcraft-widget-overlay
+           #:widget-overlay-session
+           #:widget-overlay-frame
+           #:widget-overlay-mirror
+           #:widget-overlay-render-state
+           #:luvcraft-widget-texture-coordinate
+           #:*embedded-mirror-target*
+           #:*embedded-mirror-context*
+           #:*embedded-mirror-device*
+           #:ensure-spinning-compositor-resources
+           #:ensure-spinning-compositor-frame-state
+           #:spinning-compositor-pipeline
+           #:spinning-frame-state-buffer
+           #:spinning-frame-state-bind-group
            #:widget-lab
            #:widget-lab-click-count
            #:widget-lab-toggle-value

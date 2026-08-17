@@ -102,6 +102,7 @@
                 :components ((:file "package")
                              (:file "frame")
                              (:file "commands")
+                             (:file "legend")
                              (:file "input"))))
   :in-order-to ((test-op (test-op "luvcraft/clim-test"))))
 

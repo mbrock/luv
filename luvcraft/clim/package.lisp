@@ -15,7 +15,8 @@
 
 (defpackage #:luvcraft.clim
   (:use #:clim-lisp #:clim)
-  (:local-nicknames (#:luv #:luv))
+  (:local-nicknames (#:luv #:luv)
+                    (#:climi #:clim-internals))
   (:export #:luvcraft-frame
            #:luvcraft-frame-session
            #:make-luvcraft-frame
@@ -36,4 +37,12 @@
            #:com-release-pointer
            #:com-start-walking
            #:com-stop-walking
-           #:com-jump))
+           #:com-jump
+           #:com-show-keymap
+           ;; The keymap legend, gathered from the tables rather than written.
+           #:luvcraft-legend
+           #:luvcraft-legend-overlay
+           #:luvcraft-legend-sections
+           #:open-luvcraft-legend
+           #:close-luvcraft-legend
+           #:toggle-luvcraft-legend))

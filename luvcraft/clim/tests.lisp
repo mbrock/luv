@@ -178,3 +178,45 @@
                                 :unshifted-character #\8 :repeat-p t))
     (ok (eq (first blocks)
             (luvcraft:luvcraft-session-selected-block session)))))
+
+;;; The legend says what the tables say.
+
+(deftest the-legend-is-read-off-the-command-tables
+  (let ((sections (luvcraft-legend-sections)))
+    (ok (equal '("Moving" "In the world" "Any time")
+               (mapcar #'car sections)))
+    (flet ((keys-for (title label)
+             (cdr (assoc label (cdr (assoc title sections :test #'string=))
+                         :test #'string=))))
+      ;; One row per command, not one per key: walking is four keys and their
+      ;; arrows on a single line.
+      (ok (equal '("W" "↑" "S" "↓" "A" "←" "D" "→" "Shift")
+                 (keys-for "Moving" "Start Walking")))
+      (ok (equal '("Space") (keys-for "Moving" "Jump")))
+      (ok (equal '("I") (keys-for "In the world" "Toggle Inventory")))
+      (ok (equal '("Esc") (keys-for "In the world" "Show Keys")))
+      (ok (equal '("F11") (keys-for "Any time" "Toggle Fullscreen")))
+      ;; Modifiers are printed, and :ANY is not: it is noise on every row.
+      (ok (equal '("⇧Tab") (keys-for "Any time" "Leave Focus")))
+      ;; Nine slots share one row, since one command means one line.
+      (ok (equal '("1" "2" "3" "4" "5" "6" "7" "8" "9")
+                 (keys-for "In the world" "Select Quickbar Slot")))
+      ;; A command owned by the movement layer is not repeated under the world
+      ;; that inherits it.
+      (ok (null (keys-for "In the world" "Start Walking"))))))
+
+(deftest a-rebound-key-changes-what-the-legend-says
+  (let ((table (clim:find-command-table 'luvcraft.clim::luvcraft-world)))
+    (unwind-protect
+         (progn
+           (clim:add-keystroke-to-command-table
+            table '(#\y) :command '(luvcraft.clim::com-toggle-inventory)
+            :errorp nil)
+           (ok (member "Y" (cdr (assoc "Toggle Inventory"
+                                       (cdr (assoc "In the world"
+                                                   (luvcraft-legend-sections)
+                                                   :test #'string=))
+                                       :test #'string=))
+                       :test #'string=)
+               "the legend follows the table rather than a written-down list"))
+      (clim:remove-keystroke-from-command-table table '(#\y) :errorp nil))))
