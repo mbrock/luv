@@ -1150,10 +1150,6 @@ submission that used them completes."
       (setf (luvcraft-session-focus-toggle-tab-down-p session) t)
       (toggle-luvcraft-session-focus session))
     (return-from handle-canvas-event nil))
-  (when (and (eq :i (canvas-key-event-key-name event))
-             (not (canvas-key-event-repeat-p event))
-             (toggle-luvcraft-inventory session))
-    (return-from handle-canvas-event nil))
   ;; RET slides the metabar of live knobs in from the left, or away again,
   ;; unless something focused -- a shell -- wants the key as text.
   (when (and (eq :return (canvas-key-event-key-name event))
@@ -1182,6 +1178,11 @@ submission that used them completes."
           ;; F takes the phone out or puts it away.
           (when (and (eq key :f) (not (canvas-key-event-repeat-p event)))
             (toggle-luvcraft-phone session))
+          ;; I opens the inventory.  Like F it lives below the focus dispatch:
+          ;; a shell or a phone being typed into owns its own letters, and the
+          ;; open inventory closes itself on I from its own focus handler.
+          (when (and (eq key :i) (not (canvas-key-event-repeat-p event)))
+            (toggle-luvcraft-inventory session))
           (unless (canvas-key-event-repeat-p event)
             (let* ((character (canvas-key-event-character event))
                    (number (and character (digit-char-p character))))
@@ -1265,6 +1266,9 @@ here -- so an unconsumed wheel event is simply the end of the matter."
 
 (defmethod handle-canvas-event
     ((session luvcraft-session) canvas (event canvas-window-focus-lost-event))
+  ;; The window losing the pointer outright ends any capture owed back to a
+  ;; modal interaction: coming back to the game is a click either way.
+  (setf (luvcraft-session-pointer-capture-suspended-p session) nil)
   (clear-luvcraft-player-input session)
   (dispatch-luvcraft-focus-event session canvas event)
   nil)

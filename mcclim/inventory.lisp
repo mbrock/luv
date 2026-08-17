@@ -527,7 +527,11 @@ every cell makes the word louder than the block it is about."
 (defmethod luvcraft:handle-luvcraft-focus-event
     ((overlay luvcraft-inventory-overlay) session canvas
      (event luv:canvas-key-press-event))
-  (if (eq :escape (luv:canvas-key-event-key-name event))
+  ;; Escape leaves, and so does another I: the key which opened the view is
+  ;; the key which puts it away, since while it is open it owns every key.
+  (if (or (eq :escape (luv:canvas-key-event-key-name event))
+          (and (eq :i (luv:canvas-key-event-key-name event))
+               (not (luv:canvas-key-event-repeat-p event))))
       (progn
         (luvcraft:unfocus-luvcraft-session session)
         t)

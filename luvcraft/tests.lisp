@@ -95,6 +95,52 @@
     (ok (equal '(:left :entered) (recording-focus-transitions near)))
     (ok (null (recording-focus-transitions far)))))
 
+(defclass recording-pointer-canvas ()
+  ((relative-p :initform nil :accessor recording-canvas-relative-p)))
+
+(defmethod set-canvas-relative-pointer-mode
+    ((canvas recording-pointer-canvas) enabled)
+  (setf (recording-canvas-relative-p canvas) (not (null enabled))))
+
+(deftest focus-borrows-mouse-look-and-hands-it-back
+  (let* ((canvas (make-instance 'recording-pointer-canvas))
+         (session (make-instance 'luvcraft-session :canvas canvas))
+         (first (make-instance 'recording-modal-focus))
+         (second (make-instance 'recording-modal-focus)))
+    (setf (recording-canvas-relative-p canvas) t
+          (luvcraft::luvcraft-session-pointer-captured-p session) t)
+    (focus-luvcraft-session session first)
+    (ok (not (recording-canvas-relative-p canvas))
+        "a focused interaction is given an ordinary cursor")
+    ;; Moving straight from one interaction to another still owes the capture.
+    (focus-luvcraft-session session second)
+    (ok (not (recording-canvas-relative-p canvas)))
+    (unfocus-luvcraft-session session)
+    (ok (recording-canvas-relative-p canvas)
+        "leaving focus puts the player back into mouse look")
+    (ok (luvcraft::luvcraft-session-pointer-captured-p session))
+    ;; A player who was not in mouse look is not put into it by focusing.
+    (setf (luvcraft::luvcraft-session-pointer-captured-p session) nil
+          (recording-canvas-relative-p canvas) nil)
+    (focus-luvcraft-session session first)
+    (unfocus-luvcraft-session session)
+    (ok (not (recording-canvas-relative-p canvas)))
+    (ok (not (luvcraft::luvcraft-session-pointer-captured-p session)))))
+
+(deftest inventory-key-belongs-to-whatever-is-focused
+  (let ((session (make-instance 'luvcraft-session))
+        (focus (make-instance 'recording-modal-focus))
+        (i (make-instance 'canvas-key-press-event
+                          :timestamp 0 :key-name :i)))
+    (focus-luvcraft-session session focus)
+    (handle-canvas-event session nil i)
+    (ok (equal (list i) (recording-focus-events focus))
+        "a shell being typed into gets its own I")
+    (unfocus-luvcraft-session session)
+    (handle-canvas-event session nil i)
+    (ok (equal (list i) (recording-focus-events focus)))
+    (ok (gethash :i (luvcraft::luvcraft-session-pressed-keys session)))))
+
 (deftest tab-focuses-and-frames-the-whole-terminal-above-the-hotbar
   (let* ((world (make-block-world :chunk-width 16
                                   :chunk-height 16

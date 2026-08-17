@@ -189,6 +189,17 @@
                  :reader luvcraft-session-pressed-keys)
    (pointer-captured-p :initform nil
                        :accessor luvcraft-session-pointer-captured-p)
+   (pointer-capture-suspended-p
+    :initform nil
+    :accessor luvcraft-session-pointer-capture-suspended-p
+    :documentation
+    "Whether mouse look was captured when the current modal focus was entered.
+
+A modal interaction wants an ordinary cursor -- a terminal's own UI is
+clicked at a place on the screen, which relative pointer mode does not have
+-- so entering focus releases the capture.  Remembering that it was held is
+what lets leaving focus put the player straight back into mouse look instead
+of making them click the world again.")
    (last-frame-time :initform nil
                     :type (or null double-float)
                     :quantity (:quantity :monotonic-frame-time :unit :second)
@@ -414,6 +425,15 @@ return its attached overlay."))
     (setf (luvcraft-session-pointer-captured-p session) nil))
   session)
 
+(defun resume-luvcraft-pointer-capture (session)
+  "Take mouse look back if the modal interaction just left had suspended it."
+  (when (shiftf (luvcraft-session-pointer-capture-suspended-p session) nil)
+    (when (and (luvcraft-session-running-p session)
+               (not (luvcraft-session-pointer-captured-p session)))
+      (set-canvas-relative-pointer-mode (luvcraft-session-canvas session) t)
+      (setf (luvcraft-session-pointer-captured-p session) t)))
+  session)
+
 (defun unfocus-luvcraft-session (session)
   "Leave SESSION's modal interaction, returning the object which was focused."
   (let ((focus (luvcraft-session-modal-focus session)))
@@ -422,6 +442,7 @@ return its attached overlay."))
       ;; safely establish another focus without being cleared afterward.
       (setf (luvcraft-session-modal-focus session) nil)
       (clear-luvcraft-player-input session)
+      (resume-luvcraft-pointer-capture session)
       (luvcraft-focus-left focus session))
     focus))
 
@@ -439,7 +460,12 @@ mounting a vehicle, and other interactions described by #8JCMA5."
       (setf (luvcraft-session-focus-camera-origin session)
             (camera-pose-from-camera (luvcraft-session-camera session))))
     (unfocus-luvcraft-session session)
-    (clear-luvcraft-player-input session)
+    ;; Read the capture back after the previous focus has returned it, so a
+    ;; focus-to-focus move keeps mouse look owed to the player rather than
+    ;; forgetting it halfway.
+    (let ((captured (luvcraft-session-pointer-captured-p session)))
+      (clear-luvcraft-player-input session)
+      (setf (luvcraft-session-pointer-capture-suspended-p session) captured))
     (setf (luvcraft-session-modal-focus session) focus)
     (handler-case
         (luvcraft-focus-entered focus session)
