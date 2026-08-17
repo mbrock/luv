@@ -29,7 +29,7 @@
     (spv:set-output clip-position (spv:vec4 x 0.0 0.0 1.0))))
 
 (spv:define-task-payload msl-task-mesh-payload
-  (payload-vertex-count :uint)
+  (payload-site :uint64)
   (payload-position (:array :vec4 32)))
 
 (spv:define-shader msl-task-probe
@@ -42,11 +42,17 @@
               (group-count :uvec3 :built-in :num-workgroups)
               (threads :uvec3 :built-in :workgroup-size)))
   (let* ((three (spv:uint 3.0))
-         (one (spv:uint 1.0)))
+         (one (spv:uint 1.0))
+         (position
+           (if (= lane (spv:uint 0.0))
+               (spv:vec4 -0.8 -0.8 0.0 1.0)
+               (if (= lane one)
+                   (spv:vec4 0.8 -0.8 0.0 1.0)
+                   (spv:vec4 0.0 0.8 0.0 1.0)))))
     (when (= lane (spv:uint 0.0))
-      (spv:set-payload payload-vertex-count three))
+      (spv:set-payload payload-site (spv:uint64 three)))
     (spv:set-payload-element
-     payload-position lane (spv:vec4 0.0 0.0 0.0 1.0))
+     payload-position lane position)
     (spv:emit-mesh-workgroups (spv:uvec3 one one one))))
 
 (spv:define-shader msl-mesh-probe
@@ -62,7 +68,7 @@
       :vertex ((position :vec4 :built-in :position)
                (uv :vec2 :location 0))
       :primitive ((primitive-color :vec4 :location 1))))
-  (let* ((vertex-count payload-vertex-count)
+  (let* ((vertex-count (spv:uint payload-site))
          (primitive-count (spv:uint 1.0)))
     (spv:set-mesh-output-counts vertex-count primitive-count)
     (when (< lane vertex-count)
@@ -77,6 +83,11 @@
                   (spv:uint 1.0)
                   (spv:uint 2.0))
        (primitive-color (spv:vec4 1.0 1.0 1.0 1.0))))))
+
+(spv:define-shader msl-mesh-fragment-probe
+    (:stage :fragment
+     :outputs ((color :vec4 :location 0)))
+  (spv:set-output color (spv:vec4 0.25 0.5 0.75 1.0)))
 
 (defun msl-binding-named (name specification)
   (find name (spv:shader-specification-bindings specification)
@@ -179,7 +190,7 @@
                :inputs ((lane :uint :built-in :local-invocation-index)))
              '((let* ((one (spv:uint 1.0)))
                  (spv:emit-mesh-workgroups (spv:uvec3 one one one))
-                 (spv:set-payload payload-vertex-count one))))))
+                 (spv:set-payload payload-site (spv:uint64 one)))))))
     (ok (eq :invalid-statement-for-stage
             (failure-reason
              'task-vertex-write
@@ -228,6 +239,8 @@
         (mesh-source
           (msl:msl-document-source (msl:compile-msl (msl-mesh-probe)))))
     (ok (search "struct MslTaskMeshPayload" task-source))
+    (ok (search "ulong payload_site;" task-source))
+    (ok (search "payload.payload_site = ulong(three);" task-source))
     (ok (search "float4 payload_position[32];" task-source))
     (ok (search "[[object]] void msl_task_probe(" task-source))
     (ok (search "object_data MslTaskMeshPayload& payload [[payload]]"
@@ -246,6 +259,7 @@
          mesh-source))
     (ok (search "object_data const MslTaskMeshPayload& payload [[payload]]"
                 mesh-source))
+    (ok (search "uint(payload.payload_site)" mesh-source))
     (ok (search "mesh_out.set_primitive_count(primitive_count);" mesh-source))
     (ok (search "mesh_out.set_vertex(lane, MslMeshProbeVertex{" mesh-source))
     (ok (search "mesh_out.set_index" mesh-source))

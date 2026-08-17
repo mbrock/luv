@@ -322,6 +322,13 @@ linear for the sRGB formats; the transfer names their RGB-channel behavior."
 :PREMULTIPLIED-ALPHA; omitted blending retains opaque replacement semantics."
   layout vertex fragment (primitive '(:topology :triangle-list)) depth-stencil)
 
+(defstruct (mesh-render-pipeline-descriptor (:include gpu-descriptor))
+  "A task/mesh render pipeline.
+
+TASK may be NIL for a direct mesh dispatch.  MAX-MESH-WORKGROUPS states the
+largest task-to-mesh amplification admitted by one task workgroup."
+  layout task mesh fragment (max-mesh-workgroups 1) depth-stencil)
+
 (defstruct (render-pass-descriptor (:include gpu-descriptor))
   color-attachments depth-stencil-attachment)
 
@@ -351,6 +358,11 @@ linear for the sRGB formats; the transfer names their RGB-channel behavior."
   (instance-count 1)
   (first-vertex 0)
   (first-instance 0))
+
+(defstruct (gpu-draw-mesh-command (:include gpu-render-pass-command))
+  x
+  (y 1)
+  (z 1))
 
 (defstruct (gpu-set-pipeline-command (:include gpu-pass-command))
   pipeline)
@@ -456,6 +468,10 @@ linear for the sRGB formats; the transfer names their RGB-channel behavior."
           (make-gpu-draw-command
            :vertex-count vertex-count :instance-count instance-count
            :first-vertex first-vertex :first-instance first-instance)))
+
+(defun draw-mesh-workgroups (pass-encoder x &optional (y 1) (z 1))
+  (encode pass-encoder
+          (make-gpu-draw-mesh-command :x x :y y :z z)))
 
 (defun write-texture (queue destination data data-layout size)
   "Issue one WebGPU-style convenience upload onto QUEUE."

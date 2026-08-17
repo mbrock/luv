@@ -192,6 +192,7 @@
     (:bool "bool")
     (:float "float")
     (:uint "uint")
+    (:uint64 "ulong")
     (:vec2 "float2")
     (:vec3 "float3")
     (:vec4 "float4")
@@ -865,6 +866,13 @@
      (expression spv:shader-call))
   (declare (ignore operator))
   (lower-msl-function-call context expression "uint"))
+
+(defmethod spv:lower-shader-call
+    ((operator (eql 'spv:uint64))
+     (context msl-lowering-context)
+     (expression spv:shader-call))
+  (declare (ignore operator))
+  (lower-msl-function-call context expression "ulong"))
 
 (defmethod spv:lower-shader-call
     ((operator (eql 'float))

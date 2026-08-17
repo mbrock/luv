@@ -59,6 +59,10 @@
     :initarg :scalar-kind
     :initform nil
     :reader shader-type-scalar-kind)
+   (bit-width
+    :initarg :bit-width
+    :initform nil
+    :reader shader-type-bit-width)
    (opaque-kind
     :initarg :opaque-kind
     :initform nil
@@ -79,26 +83,29 @@
 (defparameter *shader-types* (make-hash-table :test #'eq))
 
 (defun register-shader-type
-    (name &key component-count scalar-kind opaque-kind sample-result-type
-               image-depth-p)
+    (name &key component-count scalar-kind bit-width opaque-kind
+               sample-result-type image-depth-p)
   (setf (gethash name *shader-types*)
         (make-instance 'shader-type
                        :name name
                        :component-count component-count
                        :scalar-kind scalar-kind
+                       :bit-width bit-width
                        :opaque-kind opaque-kind
                        :sample-result-type sample-result-type
                        :image-depth-p image-depth-p)))
 
-(register-shader-type :float :component-count 1 :scalar-kind :float)
+(register-shader-type :float :component-count 1 :scalar-kind :float
+                      :bit-width 32)
 (register-shader-type :bool)
-(register-shader-type :vec2 :component-count 2 :scalar-kind :float)
-(register-shader-type :vec3 :component-count 3 :scalar-kind :float)
-(register-shader-type :vec4 :component-count 4 :scalar-kind :float)
-(register-shader-type :uint :component-count 1 :scalar-kind :uint)
-(register-shader-type :uvec2 :component-count 2 :scalar-kind :uint)
-(register-shader-type :uvec3 :component-count 3 :scalar-kind :uint)
-(register-shader-type :uvec4 :component-count 4 :scalar-kind :uint)
+(register-shader-type :vec2 :component-count 2 :scalar-kind :float :bit-width 32)
+(register-shader-type :vec3 :component-count 3 :scalar-kind :float :bit-width 32)
+(register-shader-type :vec4 :component-count 4 :scalar-kind :float :bit-width 32)
+(register-shader-type :uint :component-count 1 :scalar-kind :uint :bit-width 32)
+(register-shader-type :uint64 :component-count 1 :scalar-kind :uint :bit-width 64)
+(register-shader-type :uvec2 :component-count 2 :scalar-kind :uint :bit-width 32)
+(register-shader-type :uvec3 :component-count 3 :scalar-kind :uint :bit-width 32)
+(register-shader-type :uvec4 :component-count 4 :scalar-kind :uint :bit-width 32)
 (register-shader-type :texture-2d
                       :opaque-kind :texture-2d
                       :sample-result-type :vec4)
@@ -131,6 +138,9 @@
          (= (shader-type-component-count type) 1))))
 
 (defun shader-uint-type-p (type)
+  (shader-type= type :uint))
+
+(defun shader-unsigned-type-p (type)
   (let ((type (find-shader-type type)))
     (and (eq (shader-type-scalar-kind type) :uint)
          (= (shader-type-component-count type) 1))))
@@ -1192,12 +1202,22 @@ silent loss of meaning."
   nil)
 
 (defmethod infer-shader-call-quantity-specification
+    ((operator (eql 'uint64)) operands source-form)
+  (declare (ignore operator operands source-form))
+  nil)
+
+(defmethod infer-shader-call-quantity-specification
     ((operator (eql 'float)) operands source-form)
   (declare (ignore operator operands source-form))
   nil)
 
 (defmethod infer-shader-call-quantity-layout
     ((operator (eql 'uint)) operands source-form)
+  (declare (ignore operator operands source-form))
+  nil)
+
+(defmethod infer-shader-call-quantity-layout
+    ((operator (eql 'uint64)) operands source-form)
   (declare (ignore operator operands source-form))
   nil)
 
@@ -1437,6 +1457,16 @@ silent loss of meaning."
    operands source-form :invalid-uint-conversion)
   (find-shader-type :uint))
 
+(defmethod infer-shader-call-type
+    ((operator (eql 'uint64)) operands source-form)
+  (require-shader-types
+   (lambda (types)
+     (and (= (length types) 1)
+          (= 1 (shader-type-component-count (first types)))
+          (member (shader-type-scalar-kind (first types)) '(:float :uint))))
+   operands source-form :invalid-uint64-conversion)
+  (find-shader-type :uint64))
+
 (defmethod infer-shader-call-type ((operator (eql 'float)) operands source-form)
   (require-shader-types
    (lambda (types)
@@ -1450,9 +1480,10 @@ silent loss of meaning."
   (require-shader-types
    (lambda (types)
      (and (= (length types) 2)
-          (every #'shader-uint-type-p types)))
+          (every #'shader-unsigned-type-p types)
+          (shader-type= (first types) (second types))))
    operands source-form :invalid-unsigned-remainder)
-  (find-shader-type :uint))
+  (shader-expression-type (first operands)))
 
 (defmethod infer-shader-call-type
     ((operator (eql 'sample-compare)) operands source-form)
@@ -1657,6 +1688,8 @@ never collides with a standard symbol's function documentation:
   "Return the vertical screen-space derivative of a fragment value.")
 (define-shader-operator uint
   "Convert one scalar float or unsigned value to a 32-bit unsigned integer.")
+(define-shader-operator uint64
+  "Convert one scalar float or unsigned value to a 64-bit unsigned integer.")
 (define-shader-operator float
   "Convert one scalar float or unsigned value to a 32-bit float.")
 (define-shader-operator mod
@@ -3694,8 +3727,10 @@ structured product and source provenance.  #JDLQPN"))
                  ((eq kind :sampler) (list id 'type-sampler))
                  ((= (shader-type-component-count type) 1)
                   (ecase (shader-type-scalar-kind type)
-                    (:float (list id 'type-float 32))
-                    (:uint (list id 'type-int 32 0))))
+                    (:float (list id 'type-float
+                                  (shader-type-bit-width type)))
+                    (:uint (list id 'type-int
+                                 (shader-type-bit-width type) 0))))
                  (t
                   (list id 'type-vector
                         (ensure-shader-type-id
@@ -4362,7 +4397,7 @@ backend's context before its source-located unsupported-operation method."))
 (defmethod lower-shader-call ((operator (eql 'mod)) context expression)
   (destructuring-bind (left right) (shader-call-operands expression)
     (emit-value-instruction
-     context expression :uint 'u-mod
+     context expression (shader-expression-type expression) 'u-mod
      (list (lower-shader-expression context left)
            (lower-shader-expression context right)))))
 
@@ -4639,11 +4674,31 @@ backend's context before its source-located unsupported-operation method."))
 
 (defmethod lower-shader-call ((operator (eql 'uint)) context expression)
   (let* ((operand (first (shader-call-operands expression)))
+         (type (shader-expression-type operand))
          (value (lower-shader-expression context operand)))
-    (if (shader-uint-type-p (shader-expression-type operand))
-        (progn (alias-shader-expression context expression operand) value)
-        (emit-value-instruction context expression :uint 'convert-f-to-u
-                                (list value)))))
+    (cond ((shader-uint-type-p type)
+           (alias-shader-expression context expression operand)
+           value)
+          ((shader-unsigned-type-p type)
+           (emit-value-instruction context expression :uint 'u-convert
+                                   (list value)))
+          (t
+           (emit-value-instruction context expression :uint 'convert-f-to-u
+                                   (list value))))))
+
+(defmethod lower-shader-call ((operator (eql 'uint64)) context expression)
+  (let* ((operand (first (shader-call-operands expression)))
+         (type (shader-expression-type operand))
+         (value (lower-shader-expression context operand)))
+    (cond ((shader-type= type :uint64)
+           (alias-shader-expression context expression operand)
+           value)
+          ((shader-unsigned-type-p type)
+           (emit-value-instruction context expression :uint64 'u-convert
+                                   (list value)))
+          (t
+           (emit-value-instruction context expression :uint64 'convert-f-to-u
+                                   (list value))))))
 
 (defmethod lower-shader-call ((operator (eql 'float)) context expression)
   (let* ((operand (first (shader-call-operands expression)))
@@ -5152,10 +5207,14 @@ backend's context before its source-located unsupported-operation method."))
                   #x00010400
                   #x00010000)
               :capabilities
-              (if (member (shader-specification-stage specification)
-                          '(:task :mesh))
-                  '(shader mesh-shading-ext)
-                  '(shader))
+              (append
+               '(shader)
+               (when (gethash (find-shader-type :uint64)
+                              (context-type-ids context))
+                 '(int64))
+               (when (member (shader-specification-stage specification)
+                             '(:task :mesh))
+                 '(mesh-shading-ext)))
               :extensions
               (when (member (shader-specification-stage specification)
                             '(:task :mesh))

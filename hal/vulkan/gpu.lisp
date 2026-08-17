@@ -1268,8 +1268,16 @@ wrapper, this finalizer cannot run before theirs have."
                 :pipeline-layout pipeline-layout :render-pass render-pass
                 :vertex-buffers vertex-buffers :depth-format depth-format))
           (unless completed-p
-            (lvk:destroy-pipeline-layout
-             (vulkan-handle device) pipeline-layout)))))))
+             (lvk:destroy-pipeline-layout
+              (vulkan-handle device) pipeline-layout)))))))
+
+(defmethod create
+    ((device vulkan-gpu-device) (descriptor mesh-render-pipeline-descriptor))
+  (ensure-live-vulkan-object device :create-mesh-render-pipeline)
+  (error 'gpu-request-error
+         :operation :create-mesh-render-pipeline
+         :descriptor descriptor
+         :reason :vulkan-mesh-shader-runtime-unavailable))
 
 (defun storage-texture-bind-group-entry (descriptor layout)
   (let ((entries (bind-group-descriptor-entries descriptor)))

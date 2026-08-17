@@ -95,6 +95,16 @@
   (:documentation
    "A linked Metal 4 render pipeline and its draw-time depth state."))
 
+(defclass metal-gpu-mesh-render-pipeline (metal-gpu-render-pipeline)
+  ((task-workgroup-size
+    :initarg :task-workgroup-size
+    :reader metal-mesh-pipeline-task-workgroup-size)
+   (mesh-workgroup-size
+    :initarg :mesh-workgroup-size
+    :reader metal-mesh-pipeline-mesh-workgroup-size))
+  (:documentation
+   "A linked Metal 4 object/mesh pipeline with its dispatch geometry."))
+
 (defclass metal-gpu-command-encoder (gpu-command-encoder)
   ((device :initarg :device :reader metal-command-encoder-device)
    (allocator :initarg :allocator :accessor metal-encoder-allocator)
@@ -941,7 +951,9 @@ backend-local extension; ordinary callers use SUBMIT.  #T9K4RC"
 (defun expected-metal-function-type (stage)
   (ecase stage
     (:vertex luv.metal:+function-type-vertex+)
-    (:fragment luv.metal:+function-type-fragment+)))
+    (:fragment luv.metal:+function-type-fragment+)
+    (:task luv.metal:+function-type-object+)
+    (:mesh luv.metal:+function-type-mesh+)))
 
 (defmethod create
     ((device metal-gpu-device) (descriptor shader-module-descriptor))
@@ -1191,6 +1203,119 @@ compiler boundary of #58IDSR."
         (unless completed-p
           (when depth-state
             (luv.objective-c:release-objective-c-object depth-state))
+          (when pipeline-state
+            (luv.objective-c:release-objective-c-object pipeline-state)))))))
+
+(defun metal-shader-module-workgroup-size (module)
+  (luv.spir-v:shader-specification-workgroup-size
+   (luv.msl:msl-document-specification
+    (metal-shader-module-document module))))
+
+(defmethod create
+    ((device metal-gpu-device) (descriptor mesh-render-pipeline-descriptor))
+  "Link task, mesh, and fragment modules into a Metal 4 mesh pipeline."
+  (ensure-live-metal-object device :create-mesh-render-pipeline)
+  (let* ((layout (mesh-render-pipeline-descriptor-layout descriptor))
+         (task (mesh-render-pipeline-descriptor-task descriptor))
+         (mesh (mesh-render-pipeline-descriptor-mesh descriptor))
+         (fragment (mesh-render-pipeline-descriptor-fragment descriptor))
+         (task-module (getf task :module))
+         (mesh-module (getf mesh :module))
+         (fragment-module (getf fragment :module))
+         (task-entry-point
+           (and task-module
+                (or (getf task :entry-point)
+                    (metal-shader-module-entry-point task-module))))
+         (mesh-entry-point
+           (and mesh-module
+                (or (getf mesh :entry-point)
+                    (metal-shader-module-entry-point mesh-module))))
+         (fragment-entry-point
+           (and fragment-module
+                (or (getf fragment :entry-point)
+                    (metal-shader-module-entry-point fragment-module))))
+         (targets (getf fragment :targets))
+         (format (and (= (length targets) 1)
+                      (getf (first targets) :format)))
+         (blend (getf (first targets) :blend))
+         (max-mesh-workgroups
+           (mesh-render-pipeline-descriptor-max-mesh-workgroups descriptor))
+         (depth-stencil
+           (mesh-render-pipeline-descriptor-depth-stencil descriptor)))
+    (unless (and (or (null layout)
+                     (typep layout 'metal-gpu-bind-group-layout))
+                 (or (null task-module)
+                     (and (typep task-module 'metal-gpu-shader-module)
+                          (= (metal-shader-module-function-type task-module)
+                             luv.metal:+function-type-object+)
+                          (string= task-entry-point
+                                   (metal-shader-module-entry-point
+                                    task-module))))
+                 (typep mesh-module 'metal-gpu-shader-module)
+                 (= (metal-shader-module-function-type mesh-module)
+                    luv.metal:+function-type-mesh+)
+                 (string= mesh-entry-point
+                          (metal-shader-module-entry-point mesh-module))
+                 (typep fragment-module 'metal-gpu-shader-module)
+                 (= (metal-shader-module-function-type fragment-module)
+                    luv.metal:+function-type-fragment+)
+                 (string= fragment-entry-point
+                          (metal-shader-module-entry-point fragment-module))
+                 format
+                 (member blend '(nil :premultiplied-alpha))
+                 (typep max-mesh-workgroups '(integer 1 #.most-positive-fixnum))
+                 (null depth-stencil))
+      (reject-metal-gpu-request
+       descriptor :unsupported-metal-mesh-render-pipeline
+       (list :layout layout :depth-stencil depth-stencil
+             :max-mesh-workgroups max-mesh-workgroups)))
+    (when layout
+      (ensure-metal-object-device
+       layout (metal-bind-group-layout-device layout) device
+       :create-mesh-render-pipeline))
+    (dolist (module (remove nil
+                            (list task-module mesh-module fragment-module)))
+      (ensure-metal-object-device
+       module (metal-shader-module-device module) device
+       :create-mesh-render-pipeline))
+    (let* ((task-workgroup-size
+             (and task-module
+                  (metal-shader-module-workgroup-size task-module)))
+           (mesh-workgroup-size
+             (metal-shader-module-workgroup-size mesh-module))
+           (pipeline-state nil)
+           (completed-p nil))
+      (unwind-protect
+           (progn
+             (multiple-value-bind (pipeline diagnostic)
+                 (luv.metal:compile-metal-4-mesh-render-pipeline
+                  (metal-device-compiler device)
+                  (and task-module (metal-native-object task-module))
+                  task-entry-point task-workgroup-size
+                  (metal-native-object mesh-module) mesh-entry-point
+                  mesh-workgroup-size
+                  (metal-native-object fragment-module) fragment-entry-point
+                  (metal-render-pipeline-pixel-format format descriptor)
+                  max-mesh-workgroups
+                  :blend blend :label (gpu-descriptor-label descriptor))
+               (unless pipeline
+                 (error 'metal-gpu-error
+                        :operation :create-mesh-render-pipeline
+                        :reason :pipeline-compilation-failed
+                        :details diagnostic))
+               (setf pipeline-state pipeline))
+             (let ((pipeline
+                     (make-instance
+                      'metal-gpu-mesh-render-pipeline
+                      :label (gpu-descriptor-label descriptor)
+                      :native-object pipeline-state :device device :layout layout
+                      :vertex-buffers nil :primitive-topology :triangle-list
+                      :fragment-p t :depth-format nil :depth-stencil-state nil
+                      :task-workgroup-size task-workgroup-size
+                      :mesh-workgroup-size mesh-workgroup-size)))
+               (setf completed-p t)
+               pipeline))
+        (unless completed-p
           (when pipeline-state
             (luv.objective-c:release-objective-c-object pipeline-state)))))))
 
@@ -1663,6 +1788,8 @@ compiler boundary of #58IDSR."
     (unless pipeline
       (error 'gpu-invalid-state-error :object pass :operation :draw
              :state :no-pipeline :expected-state :pipeline-bound))
+    (when (typep pipeline 'metal-gpu-mesh-render-pipeline)
+      (reject-metal-gpu-request command :vertex-draw-with-mesh-pipeline))
     (when (and (metal-render-pipeline-layout pipeline)
                (null (metal-render-pass-bind-group pass)))
       (error 'gpu-invalid-state-error :object pass :operation :draw
@@ -1695,6 +1822,50 @@ compiler boundary of #58IDSR."
        (metal-render-pass-native-encoder pass)
        (metal-primitive-type pipeline) first-vertex vertex-count
        instance-count first-instance)
+      command)))
+
+(defun metal-size-value (size)
+  (destructuring-bind (width height depth) size
+    (list 'luv.metal::width width
+          'luv.metal::height height
+          'luv.metal::depth depth)))
+
+(defmethod encode
+    ((pass metal-render-pass-encoder) (command gpu-draw-mesh-command))
+  (ensure-metal-render-pass-state pass :draw-mesh)
+  (let ((pipeline (metal-render-pass-pipeline pass)))
+    (unless pipeline
+      (error 'gpu-invalid-state-error :object pass :operation :draw-mesh
+             :state :no-pipeline :expected-state :pipeline-bound))
+    (unless (typep pipeline 'metal-gpu-mesh-render-pipeline)
+      (reject-metal-gpu-request command :mesh-draw-with-vertex-pipeline))
+    (when (and (metal-render-pipeline-layout pipeline)
+               (null (metal-render-pass-bind-group pass)))
+      (error 'gpu-invalid-state-error :object pass :operation :draw-mesh
+             :state :bind-group-missing
+             :expected-state :pipeline-and-bind-group-bound))
+    (let ((counts (list (gpu-draw-mesh-command-x command)
+                        (gpu-draw-mesh-command-y command)
+                        (gpu-draw-mesh-command-z command))))
+      (unless (every (lambda (value) (typep value '(integer 1 *))) counts)
+        (reject-metal-gpu-request command :invalid-mesh-draw-range counts))
+      (when (metal-render-pass-argument-table pass)
+        (luv.metal:set-metal-render-argument-table
+         (metal-render-pass-native-encoder pass)
+         (metal-render-pass-argument-table pass)
+         (logior
+          (if (metal-mesh-pipeline-task-workgroup-size pipeline)
+              luv.metal:+render-stage-object+
+              0)
+          luv.metal:+render-stage-mesh+
+          luv.metal:+render-stage-fragment+)))
+      (luv.metal:draw-metal-mesh-threadgroups
+       (metal-render-pass-native-encoder pass)
+       (metal-size-value counts)
+       (metal-size-value
+        (or (metal-mesh-pipeline-task-workgroup-size pipeline) '(1 1 1)))
+       (metal-size-value
+        (metal-mesh-pipeline-mesh-workgroup-size pipeline)))
       command)))
 
 (defmethod end-pass ((pass metal-render-pass-encoder))

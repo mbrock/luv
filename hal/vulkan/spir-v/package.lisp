@@ -90,6 +90,7 @@
            #:shader-type-name
            #:shader-type-component-count
            #:shader-type-scalar-kind
+           #:shader-type-bit-width
            #:shader-type-opaque-kind
            #:shader-type-sample-result-type
            #:shader-type-image-depth-p
@@ -199,6 +200,7 @@
            #:derivative-y
            #:mix
            #:uint
+           #:uint64
            #:float
            #:uvec2
            #:uvec3

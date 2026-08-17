@@ -144,7 +144,10 @@
            'metal:set-metal-argument-table-buffer))
         (draw
           (objc:objective-c-message-description
-           'metal:draw-metal-primitives)))
+           'metal:draw-metal-primitives))
+        (draw-mesh
+          (objc:objective-c-message-description
+           'metal:draw-metal-mesh-threadgroups)))
     (ok (equal (getf size :selector) "setDrawableSize:"))
     (ok (equal (second (second (getf size :argument-types)))
                '(:struct metal::cg-size)))
@@ -154,7 +157,13 @@
     (ok (equal (getf argument-buffer :selector)
                "setAddress:attributeStride:atIndex:"))
     (ok (equal (getf draw :selector)
-               "drawPrimitives:vertexStart:vertexCount:instanceCount:baseInstance:"))))
+               "drawPrimitives:vertexStart:vertexCount:instanceCount:baseInstance:"))
+    (ok (equal
+         (getf draw-mesh :selector)
+         "drawMeshThreadgroups:threadsPerObjectThreadgroup:threadsPerMeshThreadgroup:"))
+    (ok (every (lambda (argument)
+                 (equal (second argument) '(:struct metal::mtl-size)))
+               (rest (getf draw-mesh :argument-types))))))
 
 (deftest unchecked-messages-preserve-by-value-structure-abi
   (objc:with-autorelease-pool ()
@@ -307,6 +316,102 @@
       (when pipeline (destroy pipeline))
       (when fragment-module (destroy fragment-module))
       (when vertex-module (destroy vertex-module))
+      (destroy device))))
+
+(deftest task-mesh-pipeline-carries-uint64-and-draws-on-metal-4
+  (let ((device
+          (request-gpu-device (make-instance 'metal-gpu-provider)))
+        (task-module nil)
+        (mesh-module nil)
+        (fragment-module nil)
+        (pipeline nil)
+        (target nil)
+        (readback nil)
+        (encoder nil)
+        (command-buffer nil))
+    (unwind-protect
+         (progn
+           (setf task-module
+                 (create
+                  device
+                  (make-shader-module-descriptor
+                   :label "task uint64 Metal library"
+                   :language :mathematical :code (msl-task-probe)))
+                 mesh-module
+                 (create
+                  device
+                  (make-shader-module-descriptor
+                   :label "mesh uint64 Metal library"
+                   :language :mathematical :code (msl-mesh-probe)))
+                 fragment-module
+                 (create
+                  device
+                  (make-shader-module-descriptor
+                   :label "mesh fragment Metal library"
+                   :language :mathematical :code
+                   (msl-mesh-fragment-probe)))
+                 pipeline
+                 (create
+                  device
+                  (make-mesh-render-pipeline-descriptor
+                   :label "task mesh uint64 Metal 4 pipeline"
+                   :layout nil
+                   :task `(:module ,task-module)
+                   :mesh `(:module ,mesh-module)
+                   :fragment
+                   `(:module ,fragment-module
+                     :targets ((:format :rgba8-unorm)))
+                   :max-mesh-workgroups 1))
+                 target
+                 (create
+                  device
+                  (make-texture-descriptor
+                   :label "task mesh proof target"
+                   :size '(32 32) :dimensions :2d :format :rgba8-unorm
+                   :usage '(:render-attachment :copy-src)))
+                 readback
+                 (create
+                  device
+                  (make-buffer-descriptor
+                   :label "task mesh proof readback"
+                   :size (* 32 32 4) :usage '(:copy-dst)))
+                 encoder
+                 (create
+                  device
+                  (make-command-encoder-descriptor
+                   :label "task mesh proof commands")))
+           (ok (= (metal-shader-module-function-type task-module)
+                  metal:+function-type-object+))
+           (ok (= (metal-shader-module-function-type mesh-module)
+                  metal:+function-type-mesh+))
+           (ok (typep pipeline 'metal-gpu-mesh-render-pipeline))
+           (let ((pass
+                   (begin-render-pass
+                    encoder
+                    (make-render-pass-descriptor
+                     :color-attachments
+                     `((:view ,target :load-op :clear :store-op :store
+                        :clear-value #(0.0 0.0 0.0 1.0)))))))
+             (set-pipeline pass pipeline)
+             (draw-mesh-workgroups pass 1)
+             (end-pass pass))
+           (encode
+            encoder
+            (make-gpu-copy-texture-to-buffer-command
+             :source target :destination readback))
+           (setf command-buffer (finish encoder))
+           (submit (device-queue device) command-buffer)
+           (let ((pixels (read-buffer readback)))
+             (ok (loop for index below (length pixels) by 4
+                       thereis (plusp (aref pixels index))))))
+      (when command-buffer (destroy command-buffer))
+      (when encoder (destroy encoder))
+      (when readback (destroy readback))
+      (when target (destroy target))
+      (when pipeline (destroy pipeline))
+      (when fragment-module (destroy fragment-module))
+      (when mesh-module (destroy mesh-module))
+      (when task-module (destroy task-module))
       (destroy device))))
 
 (deftest failed-metal-library-keeps-the-device-compiler-usable

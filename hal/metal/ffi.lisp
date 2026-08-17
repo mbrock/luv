@@ -70,6 +70,8 @@
 (defconstant +language-version-4-0+ (ash 4 16))
 (defconstant +function-type-vertex+ 1)
 (defconstant +function-type-fragment+ 2)
+(defconstant +function-type-mesh+ 7)
+(defconstant +function-type-object+ 8)
 (defconstant +vertex-format-float3+ 30)
 (defconstant +vertex-step-function-per-vertex+ 1)
 (defconstant +vertex-step-function-per-instance+ 2)
@@ -82,6 +84,8 @@
 (defconstant +blend-operation-add+ 0)
 (defconstant +render-stage-vertex+ (ash 1 0))
 (defconstant +render-stage-fragment+ (ash 1 1))
+(defconstant +render-stage-object+ (ash 1 3))
+(defconstant +render-stage-mesh+ (ash 1 4))
 (defconstant +compare-function-never+ 0)
 (defconstant +compare-function-less+ 1)
 (defconstant +compare-function-equal+ 2)
@@ -489,6 +493,10 @@ rejection.  Source and names cross only as in-memory NSString objects."
     ("new" :object :ownership :owned
      :class "MTL4RenderPipelineDescriptor"))
 
+(objc:define-objective-c-message %new-metal-4-mesh-render-pipeline-descriptor
+    ("new" :object :ownership :owned
+     :class "MTL4MeshRenderPipelineDescriptor"))
+
 (objc:define-objective-c-message %new-metal-4-library-function-descriptor
     ("new" :object :ownership :owned
      :class "MTL4LibraryFunctionDescriptor"))
@@ -511,6 +519,26 @@ rejection.  Source and names cross only as in-memory NSString objects."
 (objc:define-objective-c-message %set-fragment-function-descriptor
     ("setFragmentFunctionDescriptor:" :void)
   (descriptor :object))
+
+(objc:define-objective-c-message %set-object-function-descriptor
+    ("setObjectFunctionDescriptor:" :void)
+  (descriptor :object))
+
+(objc:define-objective-c-message %set-mesh-function-descriptor
+    ("setMeshFunctionDescriptor:" :void)
+  (descriptor :object))
+
+(objc:define-objective-c-message %set-max-object-threads
+    ("setMaxTotalThreadsPerObjectThreadgroup:" :void)
+  (count :uint64))
+
+(objc:define-objective-c-message %set-max-mesh-threads
+    ("setMaxTotalThreadsPerMeshThreadgroup:" :void)
+  (count :uint64))
+
+(objc:define-objective-c-message %set-max-mesh-workgroups
+    ("setMaxTotalThreadgroupsPerMeshGrid:" :void)
+  (count :uint64))
 
 (objc:define-objective-c-message %set-pipeline-vertex-descriptor
     ("setVertexDescriptor:" :void)
@@ -726,6 +754,94 @@ rejection.  Source and names cross only as in-memory NSString objects."
           (when fragment-function
             (objc:release-objective-c-object fragment-function)))))))
 
+(defun compile-metal-4-mesh-render-pipeline
+    (compiler object-library object-name object-workgroup-size
+     mesh-library mesh-name mesh-workgroup-size
+     fragment-library fragment-name color-format max-mesh-workgroups
+     &key blend label)
+  "Synchronously link object, mesh, and fragment libraries into Metal 4."
+  (objc:with-autorelease-pool ()
+    (let ((object-function nil)
+          (mesh-function nil)
+          (fragment-function nil))
+      (unwind-protect
+           (progn
+             (when object-library
+               (setf object-function
+                     (%new-metal-4-library-function-descriptor
+                      (objc:find-objective-c-class
+                       "MTL4LibraryFunctionDescriptor")))
+               (%set-function-library object-function object-library)
+               (%set-function-name
+                object-function (objc:lisp-string-to-objective-c object-name)))
+             (setf mesh-function
+                   (%new-metal-4-library-function-descriptor
+                    (objc:find-objective-c-class
+                     "MTL4LibraryFunctionDescriptor")))
+             (%set-function-library mesh-function mesh-library)
+             (%set-function-name
+              mesh-function (objc:lisp-string-to-objective-c mesh-name))
+             (when fragment-library
+               (setf fragment-function
+                     (%new-metal-4-library-function-descriptor
+                      (objc:find-objective-c-class
+                       "MTL4LibraryFunctionDescriptor")))
+               (%set-function-library fragment-function fragment-library)
+               (%set-function-name
+                fragment-function
+                (objc:lisp-string-to-objective-c fragment-name)))
+             (objc:with-owned-objective-c-object
+                 (descriptor
+                   (%new-metal-4-mesh-render-pipeline-descriptor
+                    (objc:find-objective-c-class
+                     "MTL4MeshRenderPipelineDescriptor")))
+               (when label
+                 (%set-object-label
+                  descriptor (objc:lisp-string-to-objective-c label)))
+               (when object-function
+                 (%set-object-function-descriptor descriptor object-function)
+                 (%set-max-object-threads
+                  descriptor (reduce #'* object-workgroup-size)))
+               (%set-mesh-function-descriptor descriptor mesh-function)
+               (%set-max-mesh-threads
+                descriptor (reduce #'* mesh-workgroup-size))
+               (%set-max-mesh-workgroups descriptor max-mesh-workgroups)
+               (when fragment-function
+                 (%set-fragment-function-descriptor descriptor fragment-function))
+               (when color-format
+                 (let ((attachment
+                         (%render-pipeline-color-attachment-at
+                          (%render-pipeline-color-attachments descriptor) 0)))
+                   (%set-render-pipeline-pixel-format attachment color-format)
+                   (when blend
+                     (%set-render-pipeline-blending-state
+                      attachment +blend-state-enabled+)
+                     (%set-source-rgb-blend-factor
+                      attachment +blend-factor-one+)
+                     (%set-destination-rgb-blend-factor
+                      attachment +blend-factor-one-minus-source-alpha+)
+                     (%set-rgb-blend-operation attachment +blend-operation-add+)
+                     (%set-source-alpha-blend-factor
+                      attachment +blend-factor-one+)
+                     (%set-destination-alpha-blend-factor
+                      attachment +blend-factor-one-minus-source-alpha+)
+                     (%set-alpha-blend-operation
+                      attachment +blend-operation-add+))))
+               (cffi:with-foreign-object (error :pointer)
+                 (setf (cffi:mem-ref error :pointer) (cffi:null-pointer))
+                 (let ((pipeline
+                         (%new-metal-4-render-pipeline-state
+                          compiler descriptor nil error)))
+                   (values
+                    pipeline
+                    (objective-c-error-pointer-description error))))))
+        (when fragment-function
+          (objc:release-objective-c-object fragment-function))
+        (when mesh-function
+          (objc:release-objective-c-object mesh-function))
+        (when object-function
+          (objc:release-objective-c-object object-function))))))
+
 (defun new-metal-depth-stencil-state
     (device compare-function depth-write-enabled &key label)
   "Create an owned MTLDepthStencilState for a Metal render pipeline."
@@ -789,6 +905,13 @@ rejection.  Source and names cross only as in-memory NSString objects."
   (vertex-count :uint64)
   (instance-count :uint64)
   (base-instance :uint64))
+
+(objc:define-objective-c-message draw-metal-mesh-threadgroups
+    ("drawMeshThreadgroups:threadsPerObjectThreadgroup:threadsPerMeshThreadgroup:"
+     :void)
+  (threadgroups-per-grid (:struct mtl-size))
+  (threads-per-object-threadgroup (:struct mtl-size))
+  (threads-per-mesh-threadgroup (:struct mtl-size)))
 
 (objc:define-objective-c-message copy-metal-texture
     ("copyFromTexture:toTexture:" :void)

@@ -80,6 +80,20 @@
     (ok (not (getf description :command-p)))
     (ok (null (find-class 'vk:create-instance nil)))))
 
+(deftest vulkan-device-contract-includes-shader-int64
+  (let ((description
+          (lvk:vulkan-function-description
+           'vk:get-physical-device-features)))
+    (ok (equal (getf description :foreign-name)
+               "vkGetPhysicalDeviceFeatures"))
+    (ok (= (* 55 (cffi:foreign-type-size :uint32))
+           (cffi:foreign-type-size
+            '(:struct lvk::physical-device-features))))
+    (ok (< (cffi:foreign-slot-offset
+            '(:struct lvk::physical-device-features) 'lvk::shader-float64)
+           (cffi:foreign-slot-offset
+            '(:struct lvk::physical-device-features) 'lvk::shader-int64)))))
+
 (deftest real-loader-calls-allocate-events-only-in-an-explicit-trace
   (ok (null (lvk:current-vulkan-trace)))
   (ok (plusp (length (lvk:enumerate-instance-extension-names))))

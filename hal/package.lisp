@@ -52,6 +52,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:queue-family-flags
            #:queue-family-count
            #:physical-device-queue-families
+           #:physical-device-shader-int64-p
            #:physical-memory-type
            #:physical-memory-type-flags
            #:physical-memory-type-heap-index
@@ -261,6 +262,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:gpu-render-pass-command
            #:gpu-compute-pass-command
            #:gpu-draw-command
+           #:gpu-draw-mesh-command
            #:gpu-set-pipeline-command
            #:gpu-set-bind-group-command
            #:gpu-set-vertex-buffer-command
@@ -292,6 +294,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:set-scissor-rect
            #:dispatch-workgroups
            #:draw
+           #:draw-mesh-workgroups
            #:make-device-descriptor
            #:make-buffer-descriptor
            #:make-texture-descriptor
@@ -315,6 +318,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:make-bind-group-descriptor
            #:make-compute-pipeline-descriptor
            #:make-render-pipeline-descriptor
+           #:make-mesh-render-pipeline-descriptor
            #:make-render-pass-descriptor
            #:make-command-encoder-descriptor
            #:make-gpu-clear-texture-command
@@ -328,6 +332,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:make-gpu-set-vertex-buffer-command
            #:make-gpu-dispatch-workgroups-command
            #:make-gpu-draw-command
+           #:make-gpu-draw-mesh-command
            #:vulkan-gpu-provider
            #+darwin
            #:metal-gpu-provider
@@ -347,6 +352,8 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:metal-gpu-shader-module
            #+darwin
            #:metal-gpu-render-pipeline
+           #+darwin
+           #:metal-gpu-mesh-render-pipeline
            #+darwin
            #:metal-device-compiler
            #+darwin

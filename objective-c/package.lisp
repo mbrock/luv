@@ -65,6 +65,7 @@
            #:new-metal-4-compiler
            #:compile-metal-4-library
            #:compile-metal-4-render-pipeline
+           #:compile-metal-4-mesh-render-pipeline
            #:new-metal-depth-stencil-state
            #:new-metal-buffer
            #:metal-buffer-contents
@@ -100,6 +101,7 @@
            #:set-metal-render-argument-table
            #:set-metal-scissor-rect
            #:draw-metal-primitives
+           #:draw-metal-mesh-threadgroups
            #:copy-metal-texture
            #:copy-metal-texture-to-buffer
            #:end-encoding
@@ -124,11 +126,15 @@
            #:+language-version-4-0+
            #:+function-type-vertex+
            #:+function-type-fragment+
+           #:+function-type-mesh+
+           #:+function-type-object+
            #:+primitive-topology-class-triangle+
            #:+primitive-type-triangle+
            #:+primitive-type-triangle-strip+
            #:+render-stage-vertex+
            #:+render-stage-fragment+
+           #:+render-stage-object+
+           #:+render-stage-mesh+
            #:+compare-function-never+
            #:+compare-function-less+
            #:+compare-function-equal+

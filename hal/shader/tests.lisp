@@ -101,7 +101,7 @@
     (set-output color (vec4 total total total 1.0))))
 
 (spv:define-task-payload vulkan-task-mesh-payload
-  (payload-vertex-count :uint)
+  (payload-site :uint64)
   (payload-position (:array :vec4 32)))
 
 (spv:define-shader vulkan-task-probe
@@ -116,7 +116,7 @@
   (let* ((three (spv:uint 3.0))
          (one (spv:uint 1.0)))
     (when (= lane (spv:uint 0.0))
-      (spv:set-payload payload-vertex-count three))
+      (spv:set-payload payload-site (spv:uint64 three)))
     (spv:set-payload-element
      payload-position lane (spv:vec4 0.0 0.0 0.0 1.0))
     (spv:emit-mesh-workgroups (spv:uvec3 one one one))))
@@ -134,7 +134,7 @@
       :vertex ((position :vec4 :built-in :position)
                (uv :vec2 :location 0))
       :primitive ((primitive-color :vec4 :location 1))))
-  (let* ((vertex-count payload-vertex-count)
+  (let* ((vertex-count (spv:uint payload-site))
          (primitive-count (spv:uint 1.0)))
     (spv:set-mesh-output-counts vertex-count primitive-count)
     (when (< lane vertex-count)
@@ -1851,6 +1851,8 @@
       (ok (= #x00010400 (spv:spir-v-module-version module)))
       (ok (member 'spv::mesh-shading-ext
                   (spv:spir-v-module-capabilities module)))
+      (ok (member 'spv::int64
+                  (spv:spir-v-module-capabilities module)))
       (ok (equal '("SPV_EXT_mesh_shader")
                  (spv:spir-v-module-extensions module))))
     (ok (eq 'spv::task-ext
@@ -1869,7 +1871,7 @@
     (dolist (name '(spv::selection-merge spv::emit-mesh-tasks-ext))
       (ok (find name task-names)))
     (dolist (name '(spv::set-mesh-outputs-ext spv::selection-merge
-                    spv::access-chain spv::store))
+                    spv::access-chain spv::store spv::u-convert))
       (ok (find name mesh-names)))
     (ng (find 'spv::return task-names))
     (ok (find 'spv::return mesh-names))

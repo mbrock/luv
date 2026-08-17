@@ -382,35 +382,48 @@ destroy it before destroying INSTANCE."
                      :flags queue-flags
                      :count queue-count))))))))
 
+(defun physical-device-shader-int64-p (physical-device)
+  "Whether PHYSICAL-DEVICE exposes Vulkan's core shaderInt64 feature."
+  (cffi:with-foreign-object (features '(:struct physical-device-features))
+    (clear-foreign-object features '(:struct physical-device-features))
+    (vk:get-physical-device-features physical-device features)
+    (not (zerop
+          (cffi:foreign-slot-value
+           features '(:struct physical-device-features) 'shader-int64)))))
+
 (defun create-device
     (physical-device family-index &key enabled-extension-names)
+  (unless (physical-device-shader-int64-p physical-device)
+    (error "The Vulkan physical device lacks luv's required shaderInt64 feature."))
   (with-translated-values
       ((extension-names enabled-extension-names string-list))
     (cffi:with-foreign-object (queue-priority :float)
       (setf (cffi:mem-ref queue-priority :float) 1.0)
-      (with-vk (queue-info device-queue-create-info
-                :flags 0
-                :queue-family-index family-index
-                :queue-count 1
-                :p-queue-priorities queue-priority)
-        (with-vk (timeline-features
-                  physical-device-timeline-semaphore-features
-                  :timeline-semaphore 1)
-          (with-vk (synchronization-features
-                    physical-device-synchronization-2-features
-                    :p-next timeline-features
-                    :synchronization-2 1)
-            (with-vk (create-info device-create-info
-                      :p-next synchronization-features
-                      :flags 0
-                      :queue-create-info-count 1
-                      :p-queue-create-infos queue-info
-                      :enabled-layer-count 0
-                      :pp-enabled-layer-names (cffi:null-pointer)
-                      :enabled-extension-count (length enabled-extension-names)
-                      :pp-enabled-extension-names extension-names
-                      :p-enabled-features (cffi:null-pointer))
-              (create-device-handle physical-device create-info))))))))
+      (with-vk (features physical-device-features
+                :shader-int64 1)
+        (with-vk (queue-info device-queue-create-info
+                  :flags 0
+                  :queue-family-index family-index
+                  :queue-count 1
+                  :p-queue-priorities queue-priority)
+          (with-vk (timeline-features
+                    physical-device-timeline-semaphore-features
+                    :timeline-semaphore 1)
+            (with-vk (synchronization-features
+                      physical-device-synchronization-2-features
+                      :p-next timeline-features
+                      :synchronization-2 1)
+              (with-vk (create-info device-create-info
+                        :p-next synchronization-features
+                        :flags 0
+                        :queue-create-info-count 1
+                        :p-queue-create-infos queue-info
+                        :enabled-layer-count 0
+                        :pp-enabled-layer-names (cffi:null-pointer)
+                        :enabled-extension-count (length enabled-extension-names)
+                        :pp-enabled-extension-names extension-names
+                        :p-enabled-features features)
+                (create-device-handle physical-device create-info)))))))))
 
 (defun destroy-device (device)
   (vk:destroy-device device (cffi:null-pointer))

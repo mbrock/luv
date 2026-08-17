@@ -287,6 +287,7 @@
   (load 61)
   (convert-f-to-u 109)
   (convert-u-to-f 112)
+  (u-convert 113)
   (f-negate 127)
   (d-pdx 207)
   (d-pdy 208))
@@ -382,6 +383,7 @@
 
 (define-enumeration capability
   (shader 1)
+  (int64 11)
   (mesh-shading-ext 5283))
 (define-enumeration addressing-model (logical 0))
 (define-enumeration memory-model (glsl-450 1))
