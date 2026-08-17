@@ -67,6 +67,13 @@
                (:file "mcclim/hotbar")
                (:file "mcclim/inventory")))
 
+(defsystem "mcluv/telegram"
+  :description "A Telegram terminal mounted on a luvcraft wall."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("mcluv/luvcraft" "telegram/chat" "sb-concurrency")
+  :components ((:file "mcclim/telegram")))
+
 (defsystem "mcluv/luvcraft-test"
   :description "Executable claims for McCLIM instruments embedded in luvcraft."
   :version "0.0.1"

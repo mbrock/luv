@@ -1,0 +1,802 @@
+;;; A Telegram terminal bolted to a luvcraft wall.
+;;;
+;;; The wall is the device.  Build a rectangle of terminal blocks, look at it,
+;;; press TAB to focus, and switch it to Telegram: the same surface that runs
+;;; a shell or plays a film now shows a conversation, drawn by McCLIM into the
+;;; texture the block world samples.
+;;;
+;;; Two threads meet here and only one thing crosses between them.  A console
+;;; owns a Telegram connection and a roster on its own thread, and the roster
+;;; is never touched from outside it; the game thread posts requests to a
+;;; mailbox and reads one slot, which the console fills with a finished,
+;;; immutable view.  That is the whole concurrency story: a mailbox one way, a
+;;; published snapshot the other, and no lock anywhere.  It is also why the
+;;; text is wrapped and the timestamps are formatted on the console's thread
+;;; -- by the time a frame repaints, there is nothing left to compute.
+
+(in-package #:mcluv)
+
+;;;; The panel
+;;;;
+;;;; Sizes are in texture pixels.  The wall's own rectangle decides how big
+;;;; the thing is in the world; this decides how much of it is bezel.
+
+(defconstant +communicator-width+ 720)
+(defconstant +communicator-height+ 560)
+(defconstant +communicator-inset+ 16)
+(defconstant +communicator-header-bottom+ 78)
+(defconstant +communicator-screen-top+ 86)
+(defconstant +communicator-screen-bottom+ 470)
+(defconstant +communicator-composer-top+ 480)
+(defconstant +communicator-composer-bottom+ 540)
+(defconstant +communicator-row-height+ 22)
+(defconstant +communicator-avatar-size+ 32)
+(defconstant +communicator-dialog-row-height+ 38)
+(defconstant +communicator-text-columns+ 52)
+
+(defparameter *communicator-bezel-ink* (make-rgb-color 0.55 0.51 0.43))
+(defparameter *communicator-bezel-light* (make-rgb-color 0.73 0.69 0.59))
+(defparameter *communicator-bezel-dark* (make-rgb-color 0.26 0.24 0.20))
+(defparameter *communicator-screen-ink* (make-rgb-color 0.075 0.075 0.075))
+(defparameter *communicator-row-ink* (make-rgb-color 0.125 0.125 0.125))
+(defparameter *communicator-text-ink* (make-rgb-color 0.93 0.91 0.84))
+(defparameter *communicator-muted-ink* (make-rgb-color 0.54 0.54 0.51))
+(defparameter *communicator-accent-ink* (make-rgb-color 0.45 0.72 0.42))
+
+(defparameter *communicator-sender-inks*
+  (vector (make-rgb-color 0.42 0.68 0.93)
+          (make-rgb-color 0.48 0.80 0.45)
+          (make-rgb-color 0.92 0.50 0.44)
+          (make-rgb-color 0.90 0.76 0.36)
+          (make-rgb-color 0.72 0.58 0.92)
+          (make-rgb-color 0.38 0.82 0.78)
+          (make-rgb-color 0.94 0.62 0.34)
+          (make-rgb-color 0.92 0.56 0.76))
+  "Telegram gives every participant a colour and so does this.  The choice is
+a hash of the name, so a person keeps their colour between sessions without
+anything having to be stored.")
+
+(defun communicator-name-hash (name)
+  (let ((hash 5381))
+    (loop for character across name
+          do (setf hash (logand (+ (* hash 33) (char-code character))
+                                most-positive-fixnum)))
+    hash))
+
+(defun communicator-sender-ink (name)
+  (aref *communicator-sender-inks*
+        (mod (communicator-name-hash name)
+             (length *communicator-sender-inks*))))
+
+;;;; What a frame paints
+;;;;
+;;;; One immutable value, built on the console's thread and read on the
+;;;; game's.  Publishing it is a single SETF of a slot, which is why no lock
+;;;; is needed: a repaint either sees the whole previous view or the whole
+;;;; next one.
+
+(defstruct (console-view (:constructor make-console-view))
+  (generation 0 :type integer)
+  (status "" :type string)
+  (failure nil)
+  (title "" :type string)
+  (subtitle "" :type string)
+  (dialogs '() :type list)
+  (lines '() :type list))
+
+(defstruct dialog-row
+  (key nil)
+  (label "" :type string)
+  (preview "" :type string)
+  (unread 0 :type integer))
+
+(defstruct transcript-line
+  ;; :HEAD carries the avatar, the name, and the time; :BODY is a wrapped
+  ;; continuation; :PHOTO is a picture this client can locate but not yet
+  ;; draw.
+  (kind :body)
+  (sender "" :type string)
+  (ink nil)
+  (time "" :type string)
+  (text "" :type string)
+  (out-p nil)
+  (width 0 :type integer)
+  (height 0 :type integer))
+
+(defun communicator-clock-string (unix-seconds)
+  "UNIX-SECONDS as a local HH:MM."
+  (multiple-value-bind (second minute hour)
+      (decode-universal-time (+ unix-seconds 2208988800))
+    (declare (ignore second))
+    (format nil "~2,'0D:~2,'0D" hour minute)))
+
+(defun wrap-communicator-text (text columns)
+  "TEXT broken into lines of at most COLUMNS characters, on spaces when it
+can and mid-word when a word is longer than the whole line."
+  (let ((lines '())
+        (current (make-string-output-stream))
+        (length 0))
+    (flet ((flush ()
+             (let ((line (get-output-stream-string current)))
+               (when (plusp (length line)) (push line lines)))
+             (setf length 0)))
+      (dolist (paragraph (uiop:split-string text :separator '(#\Newline)))
+        (dolist (word (remove "" (uiop:split-string paragraph
+                                                    :separator '(#\Space))
+                              :test #'string=))
+          (loop while (> (length word) columns)
+                do (flush)
+                   (push (subseq word 0 columns) lines)
+                   (setf word (subseq word columns)))
+          (when (and (plusp length) (> (+ length 1 (length word)) columns))
+            (flush))
+          (when (plusp length)
+            (write-char #\Space current)
+            (incf length))
+          (write-string word current)
+          (incf length (length word)))
+        (flush)))
+    (or (nreverse lines) (list ""))))
+
+;;;; The console
+;;;;
+;;;; A thread, a mailbox, and a slot.  The thread holds the only reference to
+;;;; the roster that anything dereferences, and its Telegram connection is
+;;;; bound thread-locally so that a console never disturbs whatever the
+;;;; listener is doing with TELEGRAM.CLIENT:*CONNECTION*.
+
+(defclass telegram-console ()
+  ((roster :initform (telegram.chat:make-roster) :reader console-roster)
+   (requests :initform (sb-concurrency:make-mailbox :name "telegram console")
+             :reader console-requests)
+   (thread :initform nil :accessor console-thread)
+   (running-p :initform t :accessor console-running-p)
+   (view :initform (make-console-view :status "starting") :accessor console-view)
+   (selected :initform nil :accessor console-selected)
+   (generation :initform 0 :accessor console-generation)
+   (transcript-limit :initarg :transcript-limit :initform 40
+                     :reader console-transcript-limit)
+   (poll-interval :initarg :poll-interval :initform 2.0
+                  :reader console-poll-interval))
+  (:documentation
+   "One Telegram connection and roster, driven on its own thread, publishing
+a finished view for a McCLIM frame to paint."))
+
+(defun console-request (console name &optional argument)
+  "Post a request to CONSOLE's thread.  Never blocks and never answers."
+  (sb-concurrency:send-message (console-requests console)
+                               (cons name argument))
+  console)
+
+(defun console-selected-peer (console)
+  (let ((key (console-selected console)))
+    (and key (telegram.chat:roster-peer (console-roster console) key))))
+
+(defun console-peer-subtitle (peer)
+  (cond ((null peer) "")
+        ((typep peer 'telegram.chat:channel-peer)
+         (if (telegram.chat:channel-peer-broadcast-p peer) "channel" "group"))
+        ((typep peer 'telegram.chat:chat-peer) "group")
+        ((telegram.chat:user-peer-bot-p peer) "bot")
+        ((telegram.chat:peer-username peer)
+         (format nil "@~A" (telegram.chat:peer-username peer)))
+        (t "private chat")))
+
+(defun console-transcript-lines (console peer)
+  "PEER's recent history as finished, wrapped transcript lines."
+  (let* ((roster (console-roster console))
+         (history (telegram.chat:peer-history roster peer))
+         (count (fill-pointer history))
+         (start (max 0 (- count (console-transcript-limit console))))
+         (lines '()))
+    (loop for index from start below count
+          for message = (aref history index)
+          for sender = (telegram.chat:message-sender-label roster message)
+          for ink = (communicator-sender-ink sender)
+          for photo = (telegram.chat:chat-message-photo message)
+          do (push (make-transcript-line
+                    :kind :head :sender sender :ink ink
+                    :time (communicator-clock-string
+                           (telegram.chat:chat-message-date message))
+                    :out-p (telegram.chat:chat-message-out-p message))
+                   lines)
+             (when photo
+               (push (make-transcript-line
+                      :kind :photo :ink ink
+                      :width (telegram.chat:chat-photo-width photo)
+                      :height (telegram.chat:chat-photo-height photo))
+                     lines))
+             (dolist (text (wrap-communicator-text
+                            (telegram.chat:chat-message-text message)
+                            +communicator-text-columns+))
+               (unless (and photo (zerop (length text)))
+                 (push (make-transcript-line :kind :body :text text) lines))))
+    (nreverse lines)))
+
+(defun console-dialog-rows (console)
+  (let ((roster (console-roster console)))
+    (loop for peer in (telegram.chat:roster-order roster)
+          repeat 24
+          collect (make-dialog-row
+                   :key (telegram.chat:peer-key peer)
+                   :label (telegram.chat:peer-label peer)
+                   :preview (console-peer-subtitle peer)
+                   :unread (telegram.chat:peer-unread-count peer)))))
+
+(defun publish-console-view (console &key status failure)
+  "Build the next view and hand it to whoever repaints."
+  (let ((peer (console-selected-peer console)))
+    (setf (console-view console)
+          (make-console-view
+           :generation (incf (console-generation console))
+           :status (or status
+                       (let ((user telegram.client:*user*))
+                         (if user
+                             (format nil "~A"
+                                     (telegram.client:user-label user))
+                             "connected")))
+           :failure failure
+           :title (if peer (telegram.chat:peer-label peer) "Conversations")
+           :subtitle (console-peer-subtitle peer)
+           :dialogs (console-dialog-rows console)
+           :lines (and peer (console-transcript-lines console peer)))))
+  console)
+
+(defgeneric apply-console-request (console name argument)
+  (:documentation
+   "Carry out one request on the console's own thread.  Returns true when the
+published view should be rebuilt.
+
+Adding a command the panel can ask for is a method here.")
+  (:method (console name argument)
+    (declare (ignore console name argument))
+    nil)
+  (:method (console (name (eql :select)) argument)
+    (setf (console-selected console) argument)
+    (let ((peer (console-selected-peer console)))
+      (when peer
+        (telegram.chat:refresh-peer-history (console-roster console) peer
+                                            :limit 40)
+        (telegram.chat:mark-peer-read peer)))
+    t)
+  (:method (console (name (eql :send)) argument)
+    (let ((peer (console-selected-peer console)))
+      (when (and peer (plusp (length argument)))
+        (telegram.chat:send-chat-message (console-roster console)
+                                         peer argument)))
+    t)
+  (:method (console (name (eql :refresh)) argument)
+    (declare (ignore argument))
+    (telegram.chat:refresh-roster-dialogs (console-roster console) :limit 40)
+    (let ((peer (console-selected-peer console)))
+      (when peer
+        (telegram.chat:refresh-peer-history (console-roster console) peer
+                                            :limit 40)))
+    t))
+
+(defun drain-console-requests (console)
+  (let ((dirty nil))
+    (dolist (request (sb-concurrency:receive-pending-messages
+                      (console-requests console))
+                     dirty)
+      (when (apply-console-request console (car request) (cdr request))
+        (setf dirty t)))))
+
+(defun open-console-connection (console)
+  "Resume the stored session and load enough to show something.
+
+The connection is this thread's: TELEGRAM.CLIENT:*CONNECTION* is rebound
+around the whole loop, so RESUME makes it current here and nowhere else."
+  (publish-console-view console :status "connecting…")
+  (telegram.client:resume)
+  (telegram.chat:refresh-roster-dialogs (console-roster console) :limit 40)
+  (telegram.chat:synchronize-chat-updates (console-roster console))
+  (publish-console-view console))
+
+(defun advance-telegram-console (console)
+  (unless telegram.client:*connection*
+    (open-console-connection console))
+  (let ((dirty (drain-console-requests console)))
+    (when (telegram.chat:pull-chat-updates (console-roster console))
+      (setf dirty t))
+    (when dirty (publish-console-view console)))
+  (sleep (console-poll-interval console)))
+
+(defun run-telegram-console (console)
+  "CONSOLE's thread.  Nothing in here touches McCLIM."
+  (let ((telegram.client:*connection* nil)
+        (telegram.client:*user* nil))
+    (unwind-protect
+         (loop while (console-running-p console)
+               do (handler-case (advance-telegram-console console)
+                    (error (condition)
+                      ;; A dropped socket is ordinary: Telegram closes an idle
+                      ;; connection and the next call notices.  Forget it and
+                      ;; the next pass resumes.
+                      (publish-console-view
+                       console :status "reconnecting…"
+                       :failure (princ-to-string condition))
+                      (ignore-errors (telegram.client:disconnect))
+                      (sleep 3))))
+      (ignore-errors (telegram.client:disconnect)))))
+
+(defun start-telegram-console (&rest initargs)
+  (let ((console (apply #'make-instance 'telegram-console initargs)))
+    (setf (console-thread console)
+          (sb-thread:make-thread (lambda () (run-telegram-console console))
+                                 :name "luvcraft telegram console"))
+    console))
+
+(defun stop-telegram-console (console)
+  (setf (console-running-p console) nil)
+  (alexandria:when-let ((thread (console-thread console)))
+    (when (sb-thread:thread-alive-p thread)
+      (ignore-errors (sb-thread:join-thread thread :timeout 5))))
+  (setf (console-thread console) nil)
+  console)
+
+;;;; Painting
+
+(defclass communicator-pane (application-pane) ())
+
+(define-application-frame luvcraft-communicator ()
+  ((console :initarg :console :reader communicator-console)
+   (display :initarg :display :initform nil :reader communicator-display)
+   ;; Which of the two screens is showing, and what is half-typed.  Both are
+   ;; the panel's own business and never leave the game thread.
+   (screen :initform :dialogs :accessor communicator-screen)
+   (draft :initform "" :accessor communicator-draft)
+   (painted :initform nil :accessor communicator-painted))
+  (:menu-bar nil)
+  (:panes
+   (communicator
+    (make-pane 'communicator-pane
+               :default-text-style (make-text-style :fix nil :normal))))
+  (:layouts
+   (default
+    (horizontally (:width +communicator-width+ :height +communicator-height+)
+      communicator))))
+
+(defun draw-communicator-plate
+    (stream left top right bottom
+     &key (ink *communicator-bezel-ink*) recessed-p (relief 0.0) (radius 4))
+  "One bevelled panel, raised or recessed, optionally standing off the wall."
+  (if (plusp relief)
+      (draw-analytic-rounded-rectangle*
+       stream left top right bottom :radius radius
+       :ink (make-relief-design ink relief))
+      (draw-rectangle* stream left top right bottom :ink ink))
+  (let ((near (if recessed-p *communicator-bezel-dark* *communicator-bezel-light*))
+        (far (if recessed-p *communicator-bezel-light* *communicator-bezel-dark*)))
+    (draw-line* stream left top right top :ink near :line-thickness 2)
+    (draw-line* stream left top left bottom :ink near :line-thickness 2)
+    (draw-line* stream left bottom right bottom :ink far :line-thickness 2)
+    (draw-line* stream right top right bottom :ink far :line-thickness 2)))
+
+(defun draw-communicator-button (stream left top right bottom glyph)
+  (draw-communicator-plate stream left top right bottom :relief 1.6 :radius 5)
+  (draw-text* stream glyph
+              (/ (+ left right) 2.0) (/ (+ top bottom) 2.0)
+              :align-x :center :align-y :center :text-size 20
+              :ink (make-rgb-color 0.16 0.15 0.13)))
+
+(defun draw-communicator-avatar (stream name left top size)
+  "A little generated head.  Telegram's own avatars are files this client
+cannot fetch yet; a hash of the name at least gives every speaker a stable
+face rather than a blank square."
+  (let* ((hash (communicator-name-hash name))
+         (ink (communicator-sender-ink name))
+         (cells 8)
+         (step (/ size cells)))
+    (draw-rectangle* stream left top (+ left size) (+ top size)
+                     :ink (make-rgb-color 0.16 0.16 0.16))
+    (dotimes (row cells)
+      (dotimes (column (ceiling cells 2))
+        (when (logbitp (mod (+ (* row 3) column) 30) hash)
+          (dolist (mirrored (list column (- cells 1 column)))
+            (draw-rectangle*
+             stream
+             (+ left (* mirrored step)) (+ top (* row step))
+             (+ left (* (1+ mirrored) step)) (+ top (* (1+ row) step))
+             :ink ink)))))
+    (draw-rectangle* stream left top (+ left size) (+ top size)
+                     :filled nil :line-thickness 1
+                     :ink *communicator-bezel-dark*)))
+
+(defun draw-communicator-header (frame pane view)
+  (let ((left +communicator-inset+)
+        (right (- +communicator-width+ +communicator-inset+)))
+    ;; The header is part of the screen, not part of the bezel: cream text on
+    ;; a lit stone frame has no contrast, and the device reads as one dark
+    ;; pane behind one raised surround.
+    (draw-communicator-plate pane left 14 right +communicator-header-bottom+
+                             :ink *communicator-screen-ink* :recessed-p t)
+    (let ((text-left (+ left (if (eq :chat (communicator-screen frame))
+                                 60 14))))
+      (when (eq :chat (communicator-screen frame))
+        (draw-communicator-button pane (+ left 6) 22 (+ left 48) 70 "‹"))
+      (draw-text* pane (console-view-title view) text-left 34
+                  :align-y :center :text-size 19 :ink *communicator-text-ink*)
+      (draw-text* pane (if (eq :chat (communicator-screen frame))
+                           (console-view-subtitle view)
+                           (console-view-status view))
+                  text-left 60
+                  :align-y :center :text-size 12
+                  :ink *communicator-muted-ink*))
+    (draw-communicator-button pane (- right 96) 22 (- right 54) 70 "⌕")
+    (draw-communicator-button pane (- right 48) 22 (- right 6) 70 "≡")))
+
+(defun draw-communicator-dialogs (pane view)
+  (let* ((left (+ +communicator-inset+ 4))
+         (right (- +communicator-width+ +communicator-inset+ 4))
+         (top +communicator-screen-top+))
+    (loop for row in (console-view-dialogs view)
+          for index from 0
+          for row-top = (+ top (* index +communicator-dialog-row-height+))
+          while (< (+ row-top +communicator-dialog-row-height+)
+                   +communicator-screen-bottom+)
+          do (when (oddp index)
+               (draw-rectangle* pane left row-top right
+                                (+ row-top +communicator-dialog-row-height+)
+                                :ink *communicator-row-ink*))
+             (draw-communicator-avatar pane (dialog-row-label row)
+                                       (+ left 6) (+ row-top 4) 30)
+             (draw-text* pane (dialog-row-label row)
+                         (+ left 46) (+ row-top 15)
+                         :align-y :center :text-size 15
+                         :ink (communicator-sender-ink (dialog-row-label row)))
+             (draw-text* pane (dialog-row-preview row)
+                         (+ left 46) (+ row-top 30)
+                         :align-y :center :text-size 11
+                         :ink *communicator-muted-ink*)
+             (when (plusp (dialog-row-unread row))
+               (draw-analytic-rounded-rectangle*
+                pane (- right 46) (+ row-top 8) (- right 10) (+ row-top 30)
+                :radius 10 :ink *communicator-accent-ink*)
+               (draw-text* pane (format nil "~D" (dialog-row-unread row))
+                           (- right 28) (+ row-top 19)
+                           :align-x :center :align-y :center :text-size 12
+                           :ink (make-rgb-color 0.05 0.1 0.05))))))
+
+(defun draw-communicator-transcript (pane view)
+  "Paint the tail of the transcript, bottom-anchored like every chat."
+  (let* ((left (+ +communicator-inset+ 6))
+         (right (- +communicator-width+ +communicator-inset+ 6))
+         (lines (console-view-lines view))
+         (heights (mapcar (lambda (line)
+                            (case (transcript-line-kind line)
+                              (:head 24)
+                              (:photo 96)
+                              (t 18)))
+                          lines))
+         (available (- +communicator-screen-bottom+ +communicator-screen-top+))
+         (total (reduce #'+ heights :initial-value 0))
+         (y +communicator-screen-top+))
+    ;; Drop whole lines off the top until the tail fits.
+    (loop while (and lines (> total available))
+          do (decf total (pop heights))
+             (pop lines))
+    (when (< total available)
+      (incf y (- available total)))
+    (loop for line in lines
+          for height in heights
+          do (ecase (transcript-line-kind line)
+               (:head
+                (draw-communicator-avatar
+                 pane (transcript-line-sender line) left (- y 2)
+                 +communicator-avatar-size+)
+                (draw-text* pane (transcript-line-sender line)
+                            (+ left 42) (+ y 10)
+                            :align-y :center :text-size 15
+                            :ink (transcript-line-ink line))
+                (draw-text* pane (transcript-line-time line)
+                            right (+ y 10)
+                            :align-x :right :align-y :center :text-size 11
+                            :ink *communicator-muted-ink*))
+               (:photo
+                (draw-communicator-plate
+                 pane (+ left 42) y (+ left 42 128) (+ y 88)
+                 :ink (make-rgb-color 0.18 0.18 0.18) :recessed-p t)
+                (draw-text* pane
+                            (format nil "~Dx~D"
+                                    (transcript-line-width line)
+                                    (transcript-line-height line))
+                            (+ left 106) (+ y 44)
+                            :align-x :center :align-y :center :text-size 11
+                            :ink *communicator-muted-ink*))
+               (:body
+                (draw-text* pane (transcript-line-text line)
+                            (+ left 42) (+ y 9)
+                            :align-y :center :text-size 14
+                            :ink *communicator-text-ink*)))
+             (incf y height))))
+
+(defun draw-communicator-composer (frame pane)
+  (let ((left +communicator-inset+)
+        (right (- +communicator-width+ +communicator-inset+))
+        (draft (communicator-draft frame)))
+    (draw-communicator-button pane left +communicator-composer-top+
+                              (+ left 44) +communicator-composer-bottom+ "+")
+    (draw-communicator-plate pane (+ left 52) (+ +communicator-composer-top+ 4)
+                             (- right 60) (- +communicator-composer-bottom+ 4)
+                             :ink (make-rgb-color 0.11 0.11 0.11)
+                             :recessed-p t)
+    (if (plusp (length draft))
+        (draw-text* pane draft (+ left 64)
+                    (/ (+ +communicator-composer-top+
+                          +communicator-composer-bottom+)
+                       2.0)
+                    :align-y :center :text-size 15
+                    :ink *communicator-text-ink*)
+        (draw-text* pane "Message…" (+ left 64)
+                    (/ (+ +communicator-composer-top+
+                          +communicator-composer-bottom+)
+                       2.0)
+                    :align-y :center :text-size 15
+                    :ink *communicator-muted-ink*))
+    ;; The caret sits after the text rather than inside it, which is all a
+    ;; single-line composer with no selection needs.
+    (let ((caret-x (+ left 66 (* 8.4 (length draft)))))
+      (draw-line* pane caret-x (+ +communicator-composer-top+ 14)
+                  caret-x (- +communicator-composer-bottom+ 14)
+                  :ink *communicator-accent-ink* :line-thickness 2))
+    (draw-communicator-button pane (- right 52) +communicator-composer-top+
+                              (- right 8) +communicator-composer-bottom+ "➤")))
+
+(defmethod handle-repaint ((pane communicator-pane) region)
+  (declare (ignore region))
+  (let* ((frame (pane-frame pane))
+         (view (console-view (communicator-console frame))))
+    (with-bounding-rectangle* (left top right bottom) pane
+      (with-sheet-medium (medium pane)
+        (when (typep medium 'luv-raster-medium)
+          (clear-raster-medium-reliefs medium))
+        ;; The bezel is the body of the device; everything else is inside it.
+        (draw-rectangle* medium left top right bottom
+                         :ink *communicator-bezel-ink*)
+        (draw-rectangle* pane (+ left 3) (+ top 3) (- right 3) (- bottom 3)
+                         :filled nil :line-thickness 3
+                         :ink *communicator-bezel-light*)
+        (draw-rectangle* pane (+ left 6) (+ top 6) (- right 6) (- bottom 6)
+                         :filled nil :line-thickness 2
+                         :ink *communicator-bezel-dark*)
+        (draw-communicator-header frame pane view)
+        (draw-communicator-plate
+         pane +communicator-inset+ (- +communicator-screen-top+ 4)
+         (- +communicator-width+ +communicator-inset+)
+         (+ +communicator-screen-bottom+ 4)
+         :ink *communicator-screen-ink* :recessed-p t)
+        (ecase (communicator-screen frame)
+          (:dialogs (draw-communicator-dialogs pane view))
+          (:chat (draw-communicator-transcript pane view)))
+        (draw-communicator-composer frame pane)
+        (alexandria:when-let ((failure (console-view-failure view)))
+          (draw-text* pane (subseq failure 0 (min 70 (length failure)))
+                      +communicator-inset+ (- +communicator-height+ 8)
+                      :align-y :center :text-size 10
+                      :ink (make-rgb-color 0.85 0.42 0.36)))))
+    (setf (communicator-painted frame)
+          (list (console-view-generation view)
+                (communicator-screen frame)
+                (communicator-draft frame)))))
+
+(defun repaint-communicator (frame)
+  (let ((mirror (sheet-direct-mirror (frame-top-level-sheet frame))))
+    (if (typep mirror 'luv-gpu-mirror)
+        (repaint-gpu-mirror mirror)
+        (progn
+          (repaint-sheet (mirror-sheet mirror) +everywhere+)
+          (present-mirror mirror))))
+  frame)
+
+(defun communicator-paint-state (frame)
+  (list (console-view-generation (console-view (communicator-console frame)))
+        (communicator-screen frame)
+        (communicator-draft frame)))
+
+;;;; The overlay on the wall
+
+(defclass luvcraft-communicator-overlay (luvcraft-widget-overlay)
+  ((display :initarg :display :reader communicator-overlay-display)))
+
+(defmethod luvcraft:encode-luvcraft-overlay
+    ((overlay luvcraft-communicator-overlay) session pass surface-texture)
+  "Draw the panel flat on its wall, in the scene, with the world's depth."
+  (let* ((mirror (widget-overlay-mirror overlay))
+         (source (mirror-texture mirror)))
+    (when source
+      (ensure-spinning-compositor-resources
+       overlay (mirror-context mirror) source
+       :depth-format :depth32-float
+       :target-format
+       (luv:gpu-texture-format
+        (luvcraft::luvcraft-session-color-texture session)))
+      (let* ((viewport-size
+               (luv:canvas-extent (luvcraft::luvcraft-session-context session)))
+             (state (world-device-clip-state
+                     overlay session (first viewport-size)
+                     (second viewport-size)))
+             (frame-state
+               (ensure-spinning-compositor-frame-state overlay surface-texture)))
+        (setf (widget-overlay-render-state overlay) state)
+        (luv:write-buffer (spinning-frame-state-buffer frame-state) state)
+        (luv:set-pipeline pass (spinning-compositor-pipeline overlay))
+        (luv:set-bind-group pass 0
+                            (spinning-frame-state-bind-group frame-state))
+        (luv:draw pass 4))))
+  overlay)
+
+(defmethod luvcraft:refresh-luvcraft-overlay
+    ((overlay luvcraft-communicator-overlay) session)
+  "Repaint only when the console has published something new, or the player
+has typed.  This runs every frame, so it has to be cheap to say no."
+  (declare (ignore session))
+  (let ((frame (widget-overlay-frame overlay)))
+    (unless (equal (communicator-paint-state frame)
+                   (communicator-painted frame))
+      (repaint-communicator frame)))
+  overlay)
+
+(defun communicator-texture-point (overlay event)
+  "Where in the panel's own pixels a pointer event landed, or NIL."
+  (alexandria:when-let
+      ((uv (luvcraft-widget-texture-coordinate
+            overlay
+            (luv:canvas-pointer-event-x event)
+            (luv:canvas-pointer-event-y event))))
+    (list (* (first uv) +communicator-width+)
+          (* (second uv) +communicator-height+))))
+
+(defun communicator-dialog-at (view y)
+  (let ((index (floor (- y +communicator-screen-top+)
+                      +communicator-dialog-row-height+)))
+    (when (and (<= 0 index) (< y +communicator-screen-bottom+))
+      (nth index (console-view-dialogs view)))))
+
+(defmethod luvcraft:handle-luvcraft-overlay-event
+    ((overlay luvcraft-communicator-overlay) session canvas
+     (event luv:canvas-pointer-event))
+  (declare (ignore session canvas))
+  (alexandria:when-let ((point (communicator-texture-point overlay event)))
+    (when (and (typep event 'luv:canvas-pointer-button-press-event)
+               (eq :left (luv:canvas-pointer-event-button event)))
+      (destructuring-bind (x y) point
+        (let* ((frame (widget-overlay-frame overlay))
+               (console (communicator-console frame))
+               (view (console-view console)))
+          (cond
+            ;; The back button, which only exists on the conversation screen.
+            ((and (eq :chat (communicator-screen frame))
+                  (< y +communicator-header-bottom+)
+                  (< x (+ +communicator-inset+ 54)))
+             (setf (communicator-screen frame) :dialogs))
+            ((< y +communicator-header-bottom+) nil)
+            ((>= y +communicator-composer-top+)
+             (when (> x (- +communicator-width+ +communicator-inset+ 56))
+               (console-request console :send (communicator-draft frame))
+               (setf (communicator-draft frame) "")))
+            ((eq :dialogs (communicator-screen frame))
+             (alexandria:when-let ((row (communicator-dialog-at view y)))
+               (console-request console :select (dialog-row-key row))
+               (setf (communicator-screen frame) :chat)))))))
+    t))
+
+(defmethod luvcraft:handle-luvcraft-focus-event
+    ((overlay luvcraft-communicator-overlay) session canvas
+     (event luv:canvas-key-press-event))
+  (declare (ignore canvas))
+  (let* ((frame (widget-overlay-frame overlay))
+         (console (communicator-console frame))
+         (key (luv:canvas-key-event-key-name event))
+         (character (luv:canvas-key-event-character event)))
+    (case key
+      ;; TAB belongs to the session: it is how the player leaves the wall,
+      ;; and a composer that ate it would trap them at the screen.
+      (:tab nil)
+      (:escape
+       ;; One Escape leaves the conversation, the next leaves the wall.
+       (if (eq :chat (communicator-screen frame))
+           (setf (communicator-screen frame) :dialogs)
+           (luvcraft:unfocus-luvcraft-session session))
+       t)
+      (:return
+       (when (eq :chat (communicator-screen frame))
+         (console-request console :send (communicator-draft frame))
+         (setf (communicator-draft frame) ""))
+       t)
+      (:backspace
+       (let ((draft (communicator-draft frame)))
+         (when (plusp (length draft))
+           (setf (communicator-draft frame)
+                 (subseq draft 0 (1- (length draft))))))
+       t)
+      (t
+       (when (and character (graphic-char-p character))
+         (setf (communicator-draft frame)
+               (concatenate 'string (communicator-draft frame)
+                            (string character))))
+       t))))
+
+;;;; The wall mode
+
+(defun communicator-world-frame (display)
+  "Centre, half-right, texture-down, and outward axes for DISPLAY's wall."
+  (let* ((surface (luvcraft:terminal-display-surface display))
+         (frame (luvcraft::terminal-face-frame
+                 (luvcraft:terminal-surface-face surface)))
+         (right (luvcraft::voxel-direction-vec3
+                 (luvcraft::terminal-face-frame-right frame)))
+         (up (luvcraft::voxel-direction-vec3
+              (luvcraft::terminal-face-frame-up frame)))
+         (outward (luvcraft::voxel-direction-vec3
+                   (luvcraft::terminal-face-frame-outward frame)))
+         (width (luvcraft::terminal-surface-physical-width surface))
+         (height (luvcraft::terminal-surface-physical-height surface))
+         (lower-left (luvcraft::terminal-surface-lower-left-point surface 0.010))
+         (center (luvcraft::terminal-offset-point
+                  lower-left right (/ width 2.0) up (/ height 2.0))))
+    (values center
+            (vec:vec3-scale right (/ width 2.0))
+            (vec:vec3-scale up (- (/ height 2.0)))
+            outward)))
+
+(defun open-luvcraft-communicator (display &key console)
+  "Mount a Telegram panel on DISPLAY's authored wall."
+  (let* ((session (luvcraft::terminal-display-session display))
+         (port (find-port :server-path '(:luv)))
+         (manager (or (first (climi::frame-managers port))
+                      (make-instance 'luv-frame-manager :port port)))
+         (console (or console (start-telegram-console)))
+         (frame
+           (let ((*embedded-mirror-target*
+                   (luvcraft:luvcraft-session-canvas session))
+                 (*embedded-mirror-context*
+                   (luvcraft::luvcraft-session-context session))
+                 (*embedded-mirror-device*
+                   (luvcraft::luvcraft-session-device session)))
+             (make-application-frame
+              'luvcraft-communicator :frame-manager manager :enable t
+              :console console :display display))))
+    (setf (frame-pretty-name frame) "telegram")
+    (let ((mirror (sheet-direct-mirror (frame-top-level-sheet frame))))
+      (multiple-value-bind (center right-axis up-axis normal-axis)
+          (communicator-world-frame display)
+        (let ((overlay
+                (make-instance
+                 'luvcraft-communicator-overlay
+                 :session session :frame frame :mirror mirror :display display
+                 :center center :right-axis right-axis :up-axis up-axis
+                 :normal-axis normal-axis
+                 ;; A little relief, so the buttons and the bezel actually
+                 ;; stand off the wall instead of being painted on it.
+                 :height-scale 0.35)))
+          (setf (mirror-compositor mirror) overlay
+                (luvcraft:terminal-display-mode-overlay display) overlay)
+          (repaint-communicator frame)
+          overlay)))))
+
+(defun close-luvcraft-communicator (overlay)
+  (let ((frame (widget-overlay-frame overlay)))
+    (stop-telegram-console (communicator-console frame)))
+  (let ((display (communicator-overlay-display overlay)))
+    (when (eq overlay (luvcraft:terminal-display-mode-overlay display))
+      (setf (luvcraft:terminal-display-mode-overlay display) nil)))
+  nil)
+
+;; Loading this system is what makes the wall offer a third mode.
+(pushnew :telegram *terminal-display-modes*)
+(setf *terminal-display-modes*
+      (sort (copy-list *terminal-display-modes*) #'<
+            :key (lambda (mode) (position mode '(:shell :film :telegram)))))
+
+(defmethod luvcraft:change-terminal-display-mode
+    ((display luvcraft:terminal-display)
+     (session luvcraft:luvcraft-session) (mode (eql :telegram)))
+  (luvcraft::stop-terminal-display-film display session)
+  (setf (luvcraft:terminal-display-mode display) mode)
+  (unless (typep (luvcraft:terminal-display-mode-overlay display)
+                 'luvcraft-communicator-overlay)
+    ;; A different mode's child was installed here; drop it and mount ours.
+    (setf (luvcraft:terminal-display-mode-overlay display) nil)
+    (open-luvcraft-communicator display))
+  display)

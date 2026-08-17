@@ -200,6 +200,16 @@ browser, while the display continues to own focus and movie lifetime."))
   (setf (terminal-display-mode display) mode)
   display)
 
+(defun terminal-display-delegate-overlay (display)
+  "DISPLAY's mode child, when the mode is one that presents through it.
+
+:SHELL drives a PTY and owns its own drawing and keys.  Every other mode
+installs a presentation overlay and works through it -- except while a film is
+actually playing, when the wall is a screen and not a control."
+  (unless (or (eq :shell (terminal-display-mode display))
+              (terminal-display-film-screen display))
+    (terminal-display-mode-overlay display)))
+
 (defun split-terminal-lines (text)
   (loop with start = 0
         for end = (position #\Newline text :start start)
@@ -1327,10 +1337,8 @@ two materials can share one placement stage without sharing a name."
 
 (defmethod refresh-luvcraft-overlay
     ((display terminal-display) (session luvcraft-session))
-  (when (and (eq :film (terminal-display-mode display))
-             (null (terminal-display-film-screen display))
-             (terminal-display-mode-overlay display))
-    (refresh-luvcraft-overlay (terminal-display-mode-overlay display) session))
+  (alexandria:when-let ((overlay (terminal-display-delegate-overlay display)))
+    (refresh-luvcraft-overlay overlay session))
   ;; The wall's shaders are as live as the block world's: a redefined
   ;; :terminal-screen or :terminal-cell method rebuilds here, at the frame
   ;; boundary, keeping the last good pipeline on failure.
@@ -1448,12 +1456,12 @@ two materials can share one placement stage without sharing a name."
              (set-bind-group pass 0
                              (terminal-display-frame-bind-group display frame))
              (draw pass 6 (length (world-text-run-glyphs glyph-run))))))
-        (:film
-         (when (and (null (terminal-display-film-screen display))
-                    (terminal-display-mode-overlay display))
-           (encode-luvcraft-overlay
-            (terminal-display-mode-overlay display)
-            session pass surface-texture))))
+        (t
+         ;; Film, Telegram, and anything a presentation extension adds later
+         ;; all draw through the mode's own overlay.
+         (alexandria:when-let
+             ((overlay (terminal-display-delegate-overlay display)))
+           (encode-luvcraft-overlay overlay session pass surface-texture))))
       ;; The glass goes on last over shell, browser, or movie: raster,
       ;; corners, and reflections belong in front of the finished picture.
       (when (and faceplate-run (plusp (terminal-cell-run-count faceplate-run)))
@@ -1495,26 +1503,21 @@ two materials can share one placement stage without sharing a name."
 
 (defmethod handle-luvcraft-focus-event
     ((display terminal-display) session canvas (event canvas-key-event))
-  (case (terminal-display-mode display)
-    (:shell
-     (let ((device (terminal-display-device display)))
-       (when device
-         (termdev:send-pty-device-canvas-key-event device event)))
-     t)
-    (:film
-     (if (and (null (terminal-display-film-screen display))
-              (terminal-display-mode-overlay display))
-         (handle-luvcraft-focus-event
-          (terminal-display-mode-overlay display) session canvas event)
-         t))))
+  (if (eq :shell (terminal-display-mode display))
+      (let ((device (terminal-display-device display)))
+        (when device
+          (termdev:send-pty-device-canvas-key-event device event))
+        t)
+      (let ((overlay (terminal-display-delegate-overlay display)))
+        (if overlay
+            (handle-luvcraft-focus-event overlay session canvas event)
+            t))))
 
 (defmethod handle-luvcraft-focus-event
     ((display terminal-display) session canvas (event canvas-event))
-  (or (and (eq :film (terminal-display-mode display))
-           (null (terminal-display-film-screen display))
-           (terminal-display-mode-overlay display)
-           (handle-luvcraft-overlay-event
-            (terminal-display-mode-overlay display) session canvas event))
+  (or (alexandria:when-let
+          ((overlay (terminal-display-delegate-overlay display)))
+        (handle-luvcraft-overlay-event overlay session canvas event))
       (handle-luvcraft-focus-control-event display session canvas event)))
 
 (defmethod luvcraft-focus-score ((display terminal-display) session)

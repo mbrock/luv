@@ -41,8 +41,23 @@
     (list :blocks
           (luvcraft:luvcraft-session-selected-block (hotbar-session frame)))))
 
+(defparameter *terminal-display-modes* '(:shell :film)
+  "The wall modes the hotbar offers, in slot order.
+
+A presentation extension which teaches CHANGE-TERMINAL-DISPLAY-MODE a new
+mode appends it here and gets a numbered slot; nothing else has to change.")
+
+(defparameter *terminal-display-mode-colors*
+  '((:shell 0.12 0.44 0.30)
+    (:film 0.47 0.24 0.58)
+    (:telegram 0.16 0.42 0.62)))
+
+(defun terminal-display-mode-color (mode)
+  (or (cdr (assoc mode *terminal-display-mode-colors*))
+      '(0.35 0.35 0.35)))
+
 (defun paint-terminal-mode-hotbar (pane display)
-  "Paint the focused terminal's two semantic modes into PANE."
+  "Paint the focused terminal's semantic modes into PANE."
   (with-bounding-rectangle* (left top right bottom) pane
     (with-sheet-medium (medium pane)
       (when (typep medium 'luv-raster-medium)
@@ -57,20 +72,19 @@
              (content-right (- right 6))
              (content-top (+ top 6))
              (content-bottom (- bottom 6))
-             (slot-width (/ (- content-right content-left) 2.0)))
-        (loop for mode in '(:shell :film)
+             (slot-width (/ (- content-right content-left)
+                            (float (max 1 (length *terminal-display-modes*))))))
+        (loop for mode in *terminal-display-modes*
               for number from 1
               for slot-left = (+ content-left (* (1- number) slot-width))
               for slot-right = (+ content-left (* number slot-width))
               for selected-p = (eq mode (luvcraft:terminal-display-mode display))
-              for colors = (ecase mode
-                             (:shell '(0.12 0.44 0.30))
-                             (:film '(0.47 0.24 0.58)))
+              for colors = (terminal-display-mode-color mode)
               do (draw-rectangle*
                   pane slot-left content-top slot-right content-bottom
                   :ink (hotbar-scaled-color colors
                                             (if selected-p 1.45 0.72)))
-                 (when (= number 2)
+                 (when (> number 1)
                    (draw-rectangle*
                     pane slot-left content-top (+ slot-left 1) content-bottom
                     :ink (make-rgb-color 0.08 0.09 0.10)))
@@ -279,9 +293,10 @@
       (let* ((frame (widget-overlay-frame overlay))
              (display (hotbar-terminal-display frame)))
         (if display
-            (let ((slot (min 2 (1+ (floor (* (first uv) 2))))))
+            (let* ((count (length *terminal-display-modes*))
+                   (slot (min (1- count) (floor (* (first uv) count)))))
               (luvcraft:change-terminal-display-mode
-               display session (nth (1- slot) '(:shell :film))))
+               display session (nth slot *terminal-display-modes*)))
             (let ((slot (min 9 (1+ (floor (* (first uv) 9))))))
               (luvcraft:select-luvcraft-block session slot)))
         (repaint-hotbar frame)))
