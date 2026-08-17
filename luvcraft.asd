@@ -88,6 +88,32 @@
                  (:file "block-world")
                  (:file "gazetteer")))))
 
+(defsystem "luvcraft/clim"
+  :description "Luvcraft's verbs as CLIM commands in an application frame."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("luvcraft" "mcluv/luvcraft" "alexandria")
+  :serial t
+  :components ((:module "luvcraft/clim"
+                :serial t
+                :components ((:file "package")
+                             (:file "frame")
+                             (:file "commands"))))
+  :in-order-to ((test-op (test-op "luvcraft/clim-test"))))
+
+(defsystem "luvcraft/clim-test"
+  :description "Executable claims for luvcraft's CLIM command vocabulary."
+  :version "0.0.1"
+  :depends-on ("luvcraft/clim" "rove")
+  :components ((:file "luvcraft/clim/tests"))
+  :perform (test-op (operation component)
+             (declare (ignore operation component))
+             (unless (uiop:symbol-call '#:rove '#:run-suite
+                                       (uiop:symbol-call '#:rove '#:find-suite
+                                                         '#:luvcraft.clim.tests)
+                                       :style :luv)
+               (error "luvcraft CLIM tests failed"))))
+
 (defsystem "luvcraft/program"
   :description "The standalone luvcraft executable with its live Slynk endpoint."
   :version "0.0.1"
