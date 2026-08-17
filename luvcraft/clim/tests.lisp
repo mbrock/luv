@@ -183,7 +183,7 @@
 
 (deftest the-legend-is-read-off-the-command-tables
   (let ((sections (luvcraft-legend-sections)))
-    (ok (equal '("Moving" "In the world" "Any time")
+    (ok (equal '("Moving" "In the world" "At a wall" "Any time")
                (mapcar #'car sections)))
     (flet ((keys-for (title label)
              (cdr (assoc label (cdr (assoc title sections :test #'string=))
@@ -198,7 +198,10 @@
       (ok (equal '("Esc") (keys-for "In the world" "show keys")))
       (ok (equal '("F11") (keys-for "Any time" "toggle fullscreen")))
       ;; Modifiers are printed, and :ANY is not: it is noise on every row.
-      (ok (equal '("⇧Tab") (keys-for "Any time" "leave focus")))
+      (ok (equal '("Shift-Tab") (keys-for "Any time" "leave focus")))
+      ;; A wall's modes are reachable, and say by which key.
+      (ok (equal '("Cmd-1") (keys-for "At a wall" "shell mode")))
+      (ok (equal '("Cmd-2") (keys-for "At a wall" "film mode")))
       ;; Nine slots share one line, because nobody needs to be told about each.
       (ok (equal '("1" "2" "3" "4" "5" "6" "7" "8" "9")
                  (keys-for "In the world" "select block")))

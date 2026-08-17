@@ -428,6 +428,17 @@ return its attached overlay."))
   (declare (ignore session))
   nil)
 
+(defgeneric luvcraft-key-hint (thing)
+  (:documentation
+   "Return a short string naming the keystroke that reaches THING, or NIL.
+
+A control which draws its own key hint would be inventing one: the keys are
+decided in the command layer above, so the drawing asks rather than guesses,
+and a rebound key changes the label on the button.")
+  (:method (thing)
+    (declare (ignore thing))
+    nil))
+
 (defun clear-luvcraft-player-input (session)
   (clear-movement-intent (luvcraft-session-movement-intent session))
   (when (luvcraft-session-pointer-captured-p session)

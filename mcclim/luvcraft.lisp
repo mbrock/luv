@@ -402,10 +402,16 @@
                      always (plusp
                              (third
                               (projected-screen-vertex state 1 1 u v)))))
-      (destructuring-bind (width height)
-          (luv:canvas-extent
-           (luvcraft::luvcraft-session-context
-            (widget-overlay-session overlay)))
+      ;; Project into the window's own coordinates rather than the drawable's.
+      ;; A pointer event carries the position SDL reports, which is in logical
+      ;; points; on a dense display the drawable is a multiple of that, and
+      ;; hit-testing a point against a quad projected into pixels misses by
+      ;; exactly the display's scale factor -- which is why no widget overlay
+      ;; could be clicked at all on a Retina Mac.
+      (let* ((canvas (luvcraft::luvcraft-session-canvas
+                      (widget-overlay-session overlay)))
+             (width (luv:canvas-width canvas))
+             (height (luv:canvas-height canvas)))
         (let* ((top-left
                  (projected-screen-vertex state width height 0.0 0.0))
                (top-right

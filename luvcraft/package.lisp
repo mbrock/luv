@@ -125,6 +125,7 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:advance-sky-clock
            #:apply-block-world-source-edits
            #:attach-luvcraft-hud
+           #:luvcraft-key-hint
            #:toggle-luvcraft-inventory
            #:toggle-luvcraft-metabar
            #:knob

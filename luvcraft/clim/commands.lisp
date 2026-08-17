@@ -155,3 +155,51 @@ other key.")
     ((focus luvcraft:critter-ride) (event luv:canvas-key-release-event))
   (declare (ignore focus event))
   'luvcraft-movement-release)
+
+;;; At a terminal.
+;;;
+;;; A wall in shell mode gives every key to the PTY, which is what makes it a
+;;; shell and not a menu; so the keys that change what the wall *is* have to be
+;;; ones no shell wants.  The command modifier is that: a terminal never sees
+;;; it, and on this platform it is already how one switches between things.
+
+(define-command (com-set-terminal-mode :command-table luvcraft-terminal
+                                       :name "Set Wall Mode")
+    ((mode 'keyword :prompt "wall mode"))
+  (let* ((session (luvcraft-command-session))
+         (focus (luvcraft:luvcraft-session-modal-focus session)))
+    (when (typep focus 'luvcraft:terminal-display)
+      (luvcraft:change-terminal-display-mode focus session mode))))
+
+(defun terminal-mode-gesture (mode)
+  "The keystroke that chooses MODE, by its place in the wall's own mode list."
+  (alexandria:when-let
+      ((index (position mode mcluv::*terminal-display-modes*)))
+    (when (< index 9)
+      (list (digit-char (1+ index)) :super))))
+
+(defun add-terminal-mode-keystrokes ()
+  "Bind each wall mode to the command modifier and its slot number."
+  (dolist (mode mcluv::*terminal-display-modes*)
+    (alexandria:when-let ((gesture (terminal-mode-gesture mode)))
+      (add-keystroke-to-command-table
+       'luvcraft-terminal gesture :function
+       (let ((mode mode))
+         (lambda (gesture numeric-argument)
+           (declare (ignore gesture numeric-argument))
+           (list 'com-set-terminal-mode mode)))
+       :errorp nil))))
+
+(add-terminal-mode-keystrokes)
+
+(defmethod luvcraft-focus-command-table
+    ((focus luvcraft:terminal-display) (event luv:canvas-key-press-event))
+  (declare (ignore focus event))
+  'luvcraft-terminal)
+
+;;; The wall's own chooser asks what key reaches a mode rather than printing a
+;;; number and hoping.  Specializing on SYMBOL beats the core's T default.
+
+(defmethod luvcraft:luvcraft-key-hint ((mode symbol))
+  (alexandria:when-let ((gesture (terminal-mode-gesture mode)))
+    (format-gesture gesture)))
