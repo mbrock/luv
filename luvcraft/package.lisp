@@ -354,6 +354,15 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:luvcraft-session-modal-focus
            #:luvcraft-session-inventory
            #:luvcraft-session-focus-candidate
+           ;; Input state.  Which keys are down, whether a jump is owed, and
+           ;; who holds the pointer are read and written by whatever layer
+           ;; interprets input; since that layer is no longer the core, they
+           ;; are part of the session's surface rather than its insides.
+           #:luvcraft-session-pressed-keys
+           #:luvcraft-session-jump-requested-p
+           #:luvcraft-session-pointer-captured-p
+           #:luvcraft-session-focus-toggle-tab-down-p
+           #:dispatch-luvcraft-focus-event
            #:luvcraft-focus-entered
            #:luvcraft-focus-camera-pose
            #:luvcraft-focus-left

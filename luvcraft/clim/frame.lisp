@@ -1,11 +1,20 @@
 (in-package #:luvcraft.clim)
 
-;;; The world command table holds the verbs a player has while nothing is
-;;; focused.  Keeping it separate from the frame's own table is what will let
-;;; a focused shell or phone contribute a table that does not inherit it: the
-;;; layering that is currently an ordered ladder of guards in
-;;; HANDLE-CANVAS-EVENT becomes table inheritance, where a key cannot leak
-;;; into a surface that never asked for it.
+;;; Input arrives in layers, and the layers are tables.
+;;;
+;;; LUVCRAFT-WINDOW holds the keys that belong to the window rather than to
+;;; anything inside it -- fullscreen, and the one gesture that leaves whatever
+;;; has taken the keyboard.  It is consulted first and nothing can shadow it,
+;;; because a surface that could swallow the key which escapes it is a trap.
+;;;
+;;; LUVCRAFT-WORLD holds the verbs a player has while nothing is focused.  It
+;;; is consulted only then; a focused shell or phone is offered its own table
+;;; instead, and by default has none.  That is the whole of the layering which
+;;; used to be an ordered ladder of guards in HANDLE-CANVAS-EVENT, where every
+;;; new global key was one more chance for a letter to leak into a surface
+;;; someone was typing into.
+
+(define-command-table luvcraft-window)
 
 (define-command-table luvcraft-world)
 
@@ -14,7 +23,7 @@
   ;; :INHERIT-MENU is what carries keystrokes across inheritance -- a command
   ;; table inherits its parents' commands by default but not their accelerators,
   ;; so without this the world's keys are defined and unreachable.
-  (:command-table (luvcraft-frame :inherit-from (luvcraft-world)
+  (:command-table (luvcraft-frame :inherit-from (luvcraft-window luvcraft-world)
                                   :inherit-menu t))
   (:menu-bar nil))
 
@@ -31,6 +40,49 @@ command runs."
 (defun luvcraft-command-session ()
   "The session the running command belongs to."
   (luvcraft-frame-session *application-frame*))
+
+(defvar *luvcraft-frames*
+  (make-hash-table :test #'eq :weakness :key :synchronized t)
+  "Each live session's application frame, held only as long as the session is.
+
+The frame belongs to this layer rather than to the game, so it is found here
+rather than stored in a session slot the core would never otherwise mention.")
+
+(defun luvcraft-session-frame (session)
+  "Return SESSION's application frame, making it on first use."
+  (or (gethash session *luvcraft-frames*)
+      (setf (gethash session *luvcraft-frames*)
+            (make-luvcraft-frame session))))
+
+(defgeneric luvcraft-focus-command-table (focus)
+  (:documentation
+   "Return the command table a focused FOCUS offers, or NIL for none.
+
+A focus with no table takes every key that the window layer did not claim,
+which is what a shell in raw mode wants: its letters are text, not verbs.  A
+focus which does want verbs answers with a table, and inheritance -- rather
+than the order of tests in a dispatch function -- decides what it also gets."))
+
+(defmethod luvcraft-focus-command-table (focus)
+  (declare (ignore focus))
+  nil)
+
+(defun luvcraft-key-command (session event)
+  "The command SESSION's current input layer binds to key EVENT, or NIL.
+
+The window layer answers first and cannot be shadowed.  After it, a focused
+object is asked through its own table and an unfocused player through the
+world's, so a key reaches exactly one layer."
+  (let ((frame (luvcraft-session-frame session))
+        (focus (luvcraft:luvcraft-session-modal-focus session)))
+    (or (canvas-key-event-command frame event
+                                  :command-table 'luvcraft-window)
+        (if focus
+            (alexandria:when-let
+                ((table (luvcraft-focus-command-table focus)))
+              (canvas-key-event-command frame event :command-table table))
+            (canvas-key-event-command frame event
+                                      :command-table 'luvcraft-world)))))
 
 ;;; Keystrokes.
 ;;;
@@ -67,8 +119,9 @@ because its modifier set differs."
          (null (set-exclusive-or
                 modifiers (canvas-key-event-gesture-modifiers event))))))
 
-(defun canvas-key-event-command (frame event)
-  "Return the command FRAME's tables bind to key EVENT, or NIL for none.
+(defun canvas-key-event-command
+    (frame event &key (command-table (frame-command-table frame)))
+  "Return the command COMMAND-TABLE binds to key EVENT, or NIL for none.
 
 LOOKUP-KEYSTROKE-COMMAND-ITEM answers with the gesture itself when nothing
 matches, and consults COMMAND-ENABLED against *APPLICATION-FRAME*, so both
@@ -76,7 +129,7 @@ are established here rather than left to the caller."
   (let* ((*application-frame* frame)
          (command
            (lookup-keystroke-command-item
-            event (frame-command-table frame)
+            event command-table
             :test #'canvas-key-event-matches-gesture-p)))
     (and (consp command) command)))
 

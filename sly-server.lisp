@@ -36,8 +36,10 @@
   (asdf:load-system :luvcraft)
   ;; The McCLIM presentation layer -- hotbar, inventory, metabar, the film
   ;; browser -- is part of the game whichever way it is started, so the
-  ;; durable image carries it just as the shipped executable does.
-  (asdf:load-system :mcluv/luvcraft)
+  ;; durable image carries it just as the shipped executable does.  So is the
+  ;; command layer above it, which is where the keyboard now lives: without it
+  ;; the game window would take mouse and movement and answer no verb at all.
+  (asdf:load-system :luvcraft/clim)
   (asdf:load-system :luv-wiki)
   (asdf:load-system :luft/render)
   (format t "~&Starting luv Slynk on 127.0.0.1:~D.~%" port)

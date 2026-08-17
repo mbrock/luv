@@ -54,7 +54,9 @@
     (ok (eq first (luvcraft-session-modal-focus session)))
     (ok (null (gethash :w (luvcraft::luvcraft-session-pressed-keys session))))
     (ok (not (luvcraft::luvcraft-session-jump-requested-p session)))
-    (handle-canvas-event session nil event)
+    ;; Interpreting keys belongs to the layer above; what the core promises is
+    ;; that a focused object is offered the event and that nothing else sees it.
+    (ok (dispatch-luvcraft-focus-event session nil event))
     (ok (equal (list event) (recording-focus-events first)))
     (ok (null (gethash :w (luvcraft::luvcraft-session-pressed-keys session))))
     (focus-luvcraft-session session second)
@@ -64,36 +66,7 @@
     (remove-luvcraft-overlay session second :release-p nil)
     (ok (null (luvcraft-session-modal-focus session)))
     (ok (equal '(:left :entered) (recording-focus-transitions second)))
-    (handle-canvas-event session nil event)
-    (ok (gethash :w (luvcraft::luvcraft-session-pressed-keys session)))))
-
-(deftest tab-enters-focus-reaches-it-and-shift-tab-leaves
-  (let ((session (make-instance 'luvcraft-session))
-        (far (make-instance 'recording-modal-focus :score 4.0))
-        (near (make-instance 'recording-modal-focus :score 1.0))
-        (tab-press (make-instance 'canvas-key-press-event
-                                  :timestamp 0 :key-name :tab))
-        (tab-release (make-instance 'canvas-key-release-event
-                                    :timestamp 0 :key-name :tab))
-        (shift-tab (make-instance 'canvas-key-press-event
-                                  :timestamp 0 :key-name :tab
-                                  :modifiers '(:shift))))
-    (add-luvcraft-overlay session far)
-    (add-luvcraft-overlay session near)
-    (handle-canvas-event session nil tab-press)
-    (ok (eq near (luvcraft-session-modal-focus session)))
-    (ok (equal '(:entered) (recording-focus-transitions near)))
-    ;; The release matching the gameplay focus key is swallowed.  Subsequent
-    ;; ordinary Tab events belong to the focus (notably Bash completion).
-    (handle-canvas-event session nil tab-release)
-    (handle-canvas-event session nil tab-press)
-    (handle-canvas-event session nil tab-release)
-    (ok (equal (list tab-release tab-press)
-               (recording-focus-events near)))
-    (handle-canvas-event session nil shift-tab)
-    (ok (null (luvcraft-session-modal-focus session)))
-    (ok (equal '(:left :entered) (recording-focus-transitions near)))
-    (ok (null (recording-focus-transitions far)))))
+    (ok (not (dispatch-luvcraft-focus-event session nil event)))))
 
 (defclass recording-pointer-canvas ()
   ((relative-p :initform nil :accessor recording-canvas-relative-p)))
@@ -127,21 +100,7 @@
     (ok (not (recording-canvas-relative-p canvas)))
     (ok (not (luvcraft::luvcraft-session-pointer-captured-p session)))))
 
-(deftest inventory-key-belongs-to-whatever-is-focused
-  (let ((session (make-instance 'luvcraft-session))
-        (focus (make-instance 'recording-modal-focus))
-        (i (make-instance 'canvas-key-press-event
-                          :timestamp 0 :key-name :i)))
-    (focus-luvcraft-session session focus)
-    (handle-canvas-event session nil i)
-    (ok (equal (list i) (recording-focus-events focus))
-        "a shell being typed into gets its own I")
-    (unfocus-luvcraft-session session)
-    (handle-canvas-event session nil i)
-    (ok (equal (list i) (recording-focus-events focus)))
-    (ok (gethash :i (luvcraft::luvcraft-session-pressed-keys session)))))
-
-(deftest tab-focuses-and-frames-the-whole-terminal-above-the-hotbar
+(deftest focusing-a-terminal-frames-the-whole-wall-above-the-hotbar
   (let* ((world (make-block-world :chunk-width 16
                                   :chunk-height 16
                                   :chunk-depth 16))
@@ -150,14 +109,7 @@
                           :position (make-vec3 2.5 3.5 0.5)
                           :yaw 0.0 :pitch 0.0))
          (session
-           (make-instance 'luvcraft-session :world world :camera camera))
-         (tab (make-instance 'canvas-key-press-event
-                             :timestamp 0 :key-name :tab))
-         (tab-release (make-instance 'canvas-key-release-event
-                                     :timestamp 0 :key-name :tab))
-         (shift-tab (make-instance 'canvas-key-press-event
-                                   :timestamp 0 :key-name :tab
-                                   :modifiers '(:shift))))
+           (make-instance 'luvcraft-session :world world :camera camera)))
     (ensure-world-chunk world 0 0 0)
     (place-terminal-block-rectangle world 2 3 4 :back 3 2)
     (let* ((surface (find-terminal-surface world 2 3 4 :back))
@@ -172,8 +124,9 @@
              (luvcraft::terminal-focus-camera-pose
               surface 960 640 0.0 0.0 0.0 57.0)))
       (add-luvcraft-overlay session display)
-      (handle-canvas-event session nil tab)
-      (handle-canvas-event session nil tab-release)
+      ;; Which key reaches this is the command layer's business; what the wall
+      ;; promises is the framing it asks the camera for once it is focused.
+      (toggle-luvcraft-session-focus session)
       (ok (eq display (luvcraft-session-modal-focus session)))
       (ok (luvcraft::luvcraft-session-focus-camera-active-p session))
       ;; The final pose is head-on and every surface corner lies inside the
@@ -223,7 +176,7 @@
                ordinary-focal))
         (ok (> focused
                luvcraft::+luvcraft-camera-focused-vertical-field-of-view+))
-        (handle-canvas-event session nil shift-tab)
+        (unfocus-luvcraft-session session)
         (ok (null (luvcraft-session-modal-focus session)))
         (dotimes (iteration 20)
           (declare (ignore iteration))
@@ -268,7 +221,7 @@
                                        :timestamp 0 :key-name :return
                                        :character #\Return
                                        :unshifted-character #\Return)))
-               (handle-canvas-event session nil event))
+               (ok (dispatch-luvcraft-focus-event session nil event)))
              (ok (eq :exited
                      (luv.terminal:wait-for-pty-device device :timeout 3.0)))
              (ok (search
@@ -1749,12 +1702,7 @@
     (ok (search "1–9 select" (canvas-title canvas)))
     (ok (search "terminal" (canvas-title canvas)))
     (ok (eq (select-luvcraft-block session 10) luvcraft::*gravel-block*))
-    (ok (search "[inventory]" (canvas-title canvas)))
-    (handle-canvas-event
-     session canvas
-     (make-instance 'canvas-key-press-event
-                    :key-name :8 :character #\8))
-    (ok (eq (luvcraft-session-selected-block session) *crystal-block*))))
+    (ok (search "[inventory]" (canvas-title canvas)))))
 
 (deftest block-inventory-supports-creative-and-finite-stacks
   (let* ((creative

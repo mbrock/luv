@@ -98,7 +98,8 @@
                 :serial t
                 :components ((:file "package")
                              (:file "frame")
-                             (:file "commands"))))
+                             (:file "commands")
+                             (:file "input"))))
   :in-order-to ((test-op (test-op "luvcraft/clim-test"))))
 
 (defsystem "luvcraft/clim-test"
@@ -118,7 +119,7 @@
   :description "The standalone luvcraft executable with its live Slynk endpoint."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luvcraft" "mcluv/luvcraft" "sb-posix" "slynk")
+  :depends-on ("luvcraft" "luvcraft/clim" "sb-posix" "slynk")
   :components ((:file "luvcraft/main"))
   :build-operation "program-op"
   :build-pathname "build/luvcraft"
