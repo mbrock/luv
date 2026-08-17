@@ -321,6 +321,7 @@ other private input modes."
                          (read-pty-stream-bytes (pty-device-stream device))
                        (stream-error ()
                          (values #() nil t)))
+                   (declare (ignore stream-error-p))
                    (when (plusp (length bytes))
                      (sb-thread:with-mutex ((pty-device-lock device))
                        (ghostty:write-terminal-bytes
@@ -329,12 +330,11 @@ other private input modes."
                        (when function (funcall function device bytes))))
                    ;; Child exit and master EOF are not ordered: a fast child
                    ;; can be reaped just before its final output becomes
-                   ;; readable.  Keep draining until the PTY itself reports
-                   ;; EOF (or the equivalent EIO handled above).
+                   ;; readable.  Drain any bytes first, then accept either
+                   ;; process exit or the PTY's EOF.
                    (when (and (or eof-p
-                                  (and stream-error-p
-                                       (process-finished-p
-                                        (pty-device-process device))))
+                                  (process-finished-p
+                                   (pty-device-process device)))
                               (zerop (length bytes)))
                      (return))
                    (when (zerop (length bytes)) (sleep 0.005)))))
