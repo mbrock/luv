@@ -30,7 +30,8 @@
    (pump :initform nil :accessor luvcraft-portal-pump)
    (running-p :initform t :accessor luvcraft-portal-running-p)
    (frames-per-second :initarg :frames-per-second :initform 30
-                      :reader luvcraft-portal-frames-per-second))
+                      :reader luvcraft-portal-frames-per-second)
+   (on-stop :initarg :on-stop :initform nil :reader luvcraft-portal-on-stop))
   (:documentation "A child game's frames on a rectangle in this game's world."))
 
 (defun luvcraft-portal-frame-bind-groups-for (portal frame)
@@ -87,7 +88,9 @@ which means the parent has not yet caught up and the pump should wait."
 (defmethod release-luvcraft-overlay ((portal luvcraft-portal))
   (setf (luvcraft-portal-running-p portal) nil)
   (let ((pump (luvcraft-portal-pump portal)))
-    (when (and pump (sb-thread:thread-alive-p pump))
+    ;; The pump itself may be the one releasing us, through ON-STOP.
+    (when (and pump (sb-thread:thread-alive-p pump)
+               (not (eq pump sb-thread:*current-thread*)))
       (sb-thread:join-thread pump :default nil)))
   (stop-luvcraft-mirror (luvcraft-portal-mirror portal))
   (with-release-warnings
@@ -121,15 +124,22 @@ which means the parent has not yet caught up and the pump should wait."
       :size (list (luvcraft-mirror-width mirror) (luvcraft-mirror-height mirror))
       :dimensions :2d :format format :usage '(:texture-binding)))))
 
-(defun open-luvcraft-portal (session &key (width 640) (height 400)
+(defun open-luvcraft-portal (session &key mirror
+                                          (width 640) (height 400)
                                           (distance 6.0) (lift 1.5)
                                           (screen-height 3.0)
+                                          rectangle on-stop
                                           (frames-per-second 30))
-  "Spawn a child game and hang its picture SCREEN-HEIGHT cells tall before the
-camera.  Returns the portal, already added to SESSION's overlays."
+  "Show a child game on a world rectangle.  With no MIRROR, spawn a child of
+WIDTH x HEIGHT points; otherwise MIRROR is a negotiated, ready one (say, from
+the portal server).  RECTANGLE, when given, is called with the picture's aspect
+and returns the world rectangle's origin and edges; by default the picture
+hangs SCREEN-HEIGHT cells tall before the camera.  ON-STOP, when given, is
+called with the portal if its pump stops on its own -- the child went away.
+Returns the portal, already added to SESSION's overlays."
   (let* ((device (luvcraft-session-device session))
          (camera (luvcraft-session-camera session))
-         (mirror (spawn-luvcraft-mirror :width width :height height))
+         (mirror (or mirror (spawn-luvcraft-mirror :width width :height height)))
          (format (canvas-format (luvcraft-session-context session)))
          (textures #()) (views #()) (sampler nil) (layout nil) (pipeline nil)
          (vertex-buffer nil) (instance-buffer nil) (portal nil))
@@ -163,8 +173,10 @@ camera.  Returns the portal, already added to SESSION's overlays."
                                                  :size (* 4 9) :usage '(:vertex :copy-dst))))
            (write-buffer vertex-buffer (make-world-text-quad-vertices))
            (multiple-value-bind (origin right-edge up-edge)
-               (video-screen-rectangle-before-camera
-                camera distance lift screen-width screen-height)
+               (if rectangle
+                   (funcall rectangle aspect)
+                   (video-screen-rectangle-before-camera
+                    camera distance lift screen-width screen-height))
              (write-buffer instance-buffer
                            (make-video-screen-instances origin right-edge up-edge)))
            (setf pipeline
@@ -190,7 +202,8 @@ camera.  Returns the portal, already added to SESSION's overlays."
                                        :layout layout :pipeline pipeline
                                        :vertex-buffer vertex-buffer
                                        :instance-buffer instance-buffer
-                                       :frames-per-second frames-per-second))
+                                       :frames-per-second frames-per-second
+                                       :on-stop on-stop))
            (setf (luvcraft-portal-pump portal)
                  (sb-thread:make-thread
                   (lambda () (pump-luvcraft-portal portal))
@@ -222,7 +235,11 @@ camera.  Returns the portal, already added to SESSION's overlays."
                      ;; Every slot is spoken for until the parent draws again.
                      (t (sleep 0.001)))))
       (error (condition)
-        (warn "The luvcraft portal pump stopped: ~A" condition)))))
+        (when (luvcraft-portal-running-p portal)
+          (warn "The luvcraft portal pump stopped: ~A" condition)
+          (setf (luvcraft-portal-running-p portal) nil)
+          (alexandria:when-let ((on-stop (luvcraft-portal-on-stop portal)))
+            (funcall on-stop portal)))))))
 
 (defun close-luvcraft-portal (session portal)
   (remove-luvcraft-overlay session portal))

@@ -160,6 +160,9 @@
 
 (defun dispatch (arguments)
   (cond
+    ;; Started inside a playing game's terminal wall: be its child.
+    ((and (null arguments) #+darwin (luvcraft-parent-socket-path) #-darwin nil)
+     (serve-luvcraft-parent))
     ((and (= (length arguments) 1)
           (member (first arguments) '("--help" "-h") :test #'string=))
      (usage))

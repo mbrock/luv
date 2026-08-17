@@ -207,6 +207,11 @@ leave the camera where it is with only the narrowed field of view."))
                            (terminal-surface-coordinate surface column row))))
           (block-ray-hit-distance hit))))))
 
+(defvar *terminal-display-counter* 0)
+
+(defun next-terminal-display-name ()
+  (format nil "wall-~D" (incf *terminal-display-counter*)))
+
 (defclass terminal-display ()
   ((session :initarg :session :initform nil :reader terminal-display-session)
    (surface :initarg :surface :reader terminal-display-surface)
@@ -216,6 +221,11 @@ leave the camera where it is with only the narrowed field of view."))
    ;; child only while its mode calls for it.
    (mode-overlay :initform nil :accessor terminal-display-mode-overlay)
    (film-screen :initform nil :accessor terminal-display-film-screen)
+   ;; The wall's name, which its shell learns as LUVCRAFT_PARENT_SCREEN, and
+   ;; the portal showing a child luvcraft that asked for that name.
+   (name :initarg :name :initform (next-terminal-display-name)
+         :reader terminal-display-name)
+   (portal :initform nil :accessor terminal-display-portal)
    (terminal :initarg :terminal :initform nil :reader terminal-display-terminal)
    (device :initarg :device :initform nil :accessor terminal-display-device)
    (presentation :initarg :presentation :initform nil
@@ -260,7 +270,45 @@ browser, while the display continues to own focus and movie lifetime."))
 (defmethod change-terminal-display-mode
     ((display terminal-display) (session luvcraft-session) (mode (eql :shell)))
   (stop-terminal-display-film display session)
+  (close-terminal-display-portal display)
   (setf (terminal-display-mode display) mode)
+  display)
+
+;;; A child luvcraft on the wall.  The shell on this wall carries the portal
+;;; server's socket in its environment; a luvcraft started there connects and
+;;; asks for this wall by name, and its picture takes the wall over until it
+;;; goes away (Ctrl-C in the shell still reaches the shell, so that is how).
+
+(defun open-terminal-display-portal (display mirror)
+  "Put the ready child MIRROR on DISPLAY's wall and switch it to :PORTAL mode."
+  (let ((session (terminal-display-session display))
+        (surface (terminal-display-surface display)))
+    (unless session
+      (error "Terminal display ~S is not attached to a session." display))
+    (close-terminal-display-portal display)
+    (stop-terminal-display-film display session)
+    (let ((portal
+            (open-luvcraft-portal
+             session
+             :mirror mirror
+             :rectangle (lambda (aspect) (terminal-film-rectangle surface aspect))
+             :on-stop (lambda (portal)
+                        (declare (ignore portal))
+                        (close-terminal-display-portal display)))))
+      (setf (terminal-display-portal display) portal
+            (terminal-display-mode display) :portal)
+      portal)))
+
+(defun close-terminal-display-portal (display)
+  "Take the child off DISPLAY's wall, if one is there, and go back to the shell."
+  (alexandria:when-let ((portal (terminal-display-portal display))
+                        (session (terminal-display-session display)))
+    (setf (terminal-display-portal display) nil)
+    (when (eq :portal (terminal-display-mode display))
+      (setf (terminal-display-mode display) :shell))
+    (forget-luvcraft-portal session portal)
+    (close-luvcraft-portal session portal)
+    (setf (terminal-display-dirty-p display) t))
   display)
 
 (defmethod change-terminal-display-mode
@@ -1559,7 +1607,10 @@ supplies a uniform whose camera is expressed in that space instead."))
 
 (defmethod release-luvcraft-overlay ((display terminal-display))
   (alexandria:when-let ((session (terminal-display-session display)))
-    (stop-terminal-display-film display session))
+    (stop-terminal-display-film display session)
+    (close-terminal-display-portal display)
+    #+darwin
+    (unregister-luvcraft-portal-screen session (terminal-display-name display)))
   (alexandria:when-let ((overlay (terminal-display-mode-overlay display)))
     (setf (terminal-display-mode-overlay display) nil)
     (release-luvcraft-overlay overlay))
@@ -1584,7 +1635,9 @@ supplies a uniform whose camera is expressed in that space instead."))
 
 (defmethod handle-luvcraft-focus-event
     ((display terminal-display) session canvas (event canvas-key-event))
-  (if (eq :shell (terminal-display-mode display))
+  ;; Keys still reach the shell under a portal: that is how the child gets
+  ;; its Ctrl-C.
+  (if (member (terminal-display-mode display) '(:shell :portal))
       (let ((device (terminal-display-device display)))
         (when device
           (termdev:send-pty-device-canvas-key-event device event))
@@ -1845,18 +1898,31 @@ generalizes."
                 (remove-luvcraft-overlay session display)))))))))
 
 (defun attach-terminal-display-shell (display)
-  "Attach an interactive login-free bash in the checkout to DISPLAY."
-  (attach-terminal-display-pty
-   display
-   :program "/bin/bash"
-   :directory (uiop:getcwd)
-   :environment
-   (cons
-    "BASH_SILENCE_DEPRECATION_WARNING=1"
-    (delete-if
-     (lambda (entry)
-       (uiop:string-prefix-p "BASH_SILENCE_DEPRECATION_WARNING=" entry))
-     (copy-list (sb-ext:posix-environ))))))
+  "Attach an interactive login-free bash in the checkout to DISPLAY.
+
+The shell learns where this game's portal server listens and which wall it is
+on, so a luvcraft started in it appears right here."
+  (let ((environment
+          (cons
+           "BASH_SILENCE_DEPRECATION_WARNING=1"
+           (delete-if
+            (lambda (entry)
+              (uiop:string-prefix-p "BASH_SILENCE_DEPRECATION_WARNING=" entry))
+            (copy-list (sb-ext:posix-environ)))))
+        (session (terminal-display-session display)))
+    #+darwin
+    (when session
+      (register-luvcraft-portal-screen
+       session (terminal-display-name display)
+       (lambda (mirror) (open-terminal-display-portal display mirror)))
+      (setf environment
+            (luvcraft-portal-environment
+             session (terminal-display-name display) environment)))
+    (attach-terminal-display-pty
+     display
+     :program "/bin/bash"
+     :directory (uiop:getcwd)
+     :environment environment)))
 
 (defun attach-terminal-display-pty (display &rest open-arguments)
   "Attach one owned PTY device to DISPLAY's existing Ghostty terminal."

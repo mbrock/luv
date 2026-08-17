@@ -27,6 +27,8 @@
                "luvcraft/world"
                "cl-dejavu"
                "sb-concurrency"
+               (:require #:sb-bsd-sockets)
+               (:require #:sb-posix)
                "uiop")
   :serial t
   :components
@@ -70,6 +72,7 @@
                  (:file "capture")
                  (:file "mirror" :if-feature :darwin)
                  (:file "portal" :if-feature :darwin)
+                 (:file "portal-server" :if-feature :darwin)
                  (:file "benchmark")
                  (:file "gazetteer"))))
   :in-order-to ((test-op (test-op "luvcraft/test"))))
