@@ -189,6 +189,15 @@ Returns a VIDEO.  The caller owns it and must CLOSE-VIDEO it."
 
 (defun close-video (video)
   "Release VIDEO's decoder, demuxer, frame, and scaler.  Idempotent."
+  ;; Teardown computes too: swscale and the demuxer both do float arithmetic
+  ;; on the way out.  An unmasked trap here would signal from inside whatever
+  ;; was releasing the video -- for luvcraft, the middle of closing the game --
+  ;; and abandon everything that had not been released yet.
+  (with-libav-native-environment
+    (close-video-1 video))
+  video)
+
+(defun close-video-1 (video)
   (when (video-scaler video)
     (%sws-free-context (video-scaler video))
     (setf (video-scaler video) nil
@@ -359,14 +368,31 @@ surface height -- so the caller has to say what it means."
   (let ((words (or array
                    (make-array (list height width)
                                :element-type '(unsigned-byte 32))))
-        (pixels (ensure-video-staging video (* width height 4)))
-        (opacity (ash alpha 24)))
+        (pixels (ensure-video-staging video (* width height 4))))
     (scale-frame-into video pixels width height (* width 4))
-    (dotimes (y height)
-      (let ((row (* y width)))
-        (dotimes (x width)
-          (setf (aref words y x)
-                (logior (logand (cffi:mem-aref pixels :uint32 (+ row x))
-                                #x00ffffff)
-                        opacity)))))
+    (copy-rgba-words pixels words (* width height) (ash alpha 24))
     words))
+
+(defun copy-rgba-words (pixels words count opacity)
+  "Copy COUNT packed words out of foreign PIXELS into WORDS, forcing OPACITY.
+
+This is a per-picture inner loop -- a modest 512-wide screen is two hundred
+thousand words every time the film advances -- so it reads the foreign memory
+through a system area pointer rather than one CFFI call per pixel."
+  (declare (type (simple-array (unsigned-byte 32) (* *)) words)
+           (type fixnum count)
+           (type (unsigned-byte 32) opacity)
+           (optimize (speed 3) (safety 0)))
+  #+sbcl
+  (let ((sap (sb-sys:int-sap (cffi:pointer-address pixels))))
+    (dotimes (index count)
+      (setf (row-major-aref words index)
+            (logior (logand (sb-sys:sap-ref-32 sap (the fixnum (* 4 index)))
+                            #x00ffffff)
+                    opacity))))
+  #-sbcl
+  (dotimes (index count)
+    (setf (row-major-aref words index)
+          (logior (logand (cffi:mem-aref pixels :uint32 index) #x00ffffff)
+                  opacity)))
+  words)

@@ -22,6 +22,7 @@
   :author "Mikael Brockman"
   :depends-on ("luv"
                "luv/ghostty"
+               "luv/libav"
                "luv/terminal/canvas"
                "luvcraft/world"
                "cl-dejavu"
@@ -51,7 +52,9 @@
                  (:file "sky")
                  (:file "frame-performance")
                  (:file "live-pipeline")
+                 (:file "release")
                  (:file "text")
+                 (:file "video-screen")
                  (:file "app")
                  (:file "streaming")
                  (:file "render")

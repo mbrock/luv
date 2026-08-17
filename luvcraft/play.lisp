@@ -25,7 +25,14 @@
         (format t "Creating luvcraft world at ~A~%" pathname)
         (values (make-empty-little-block-world) nil))))
 
+(defvar *video-pathname* nil
+  "A video file to play on a screen hanging in front of the player, or NIL.
+
+PLAY reads this so a live image can hang a film in the world without changing
+any call site: set it, STOP-PLAYING, and PLAY again.")
+
 (defun play (&key (provider luv:*gpu-provider*) tracy-p
+                  (video-pathname *video-pathname*)
                   (world-pathname (default-luvcraft-world-pathname)))
   "Open the ordinary persistent game in this Lisp and return the session.
 
@@ -49,6 +56,7 @@ game for later SLY evaluations.  STOP-PLAYING checkpoints and closes it."
                     :title "luvcraft — walk, jump, mine, and build"
                     :world world :camera camera :player player
                     :selected-block selected-block
+                    :video-pathname video-pathname
                     :checkpoint-writer writer))
           (unless session
             (stop-world-checkpoint-writer writer)))
@@ -56,15 +64,20 @@ game for later SLY evaluations.  STOP-PLAYING checkpoints and closes it."
               *session* session)))))
 
 (defun stop-playing ()
-  "Checkpoint and close the game PLAY opened, releasing its resources."
+  "Checkpoint and close the game PLAY opened, releasing its resources.
+
+*SESSION* is cleared whether or not the release succeeds, so a failed teardown
+cannot leave the image believing a game is still playing.  The failure itself
+is not swallowed: STOP-LUVCRAFT closes the window first and then signals what
+went wrong, and that condition comes out of here."
   (let ((session *session*)
         (writer *checkpoint-writer*))
-    (setf *session* nil
-          *checkpoint-writer* nil)
     (unwind-protect
          (when session
            (request-luvcraft-session-checkpoint session)
            (stop-luvcraft session))
+      (setf *session* nil
+            *checkpoint-writer* nil)
       (when writer
         (stop-world-checkpoint-writer writer)))
     (values)))
