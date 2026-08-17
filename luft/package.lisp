@@ -21,9 +21,10 @@
    #:+xz-face-extent+
    #:+yz-face-extent+
    #:+cell-extent+
-   #:+temporal-extent+
-   #:+spatial-extent+
    #:+extent-bits+
+   #:+site-sign-bit+
+   #:+negative-site-mask+
+   #:+site-tag-bits+
    #:+horizontal-capacity-bits+
    #:+vertical-coordinate-bits+
    #:+x-shift+
@@ -37,15 +38,20 @@
    #:site-z
    #:site-anchor
    #:site-extent
+   #:site-negative-p
+   #:site-positive-p
+   #:site-polarity
+   #:site-geometry
+   #:opposite-site
+   #:site-with-polarity
    #:site-extends-p
-   #:site-spatial-dimension
    #:site-dimension
    #:step-site
    #:site-forward
    #:site-backward
    #:site-boundary-low
    #:site-boundary-high
-   #:site-boundary-sign
+   #:site-boundary-polarity
    #:map-site-boundary
    #:site-coface-forward
    #:site-coface-backward
@@ -54,21 +60,15 @@
    #:make-chain
    #:chain-domain
    #:chain-count
-   #:chain-coefficient
-   #:add-chain-term
+   #:chain-site-count
+   #:chain-site-p
+   #:add-chain-site
    #:map-chain
    #:chain-sites
-   #:chain-spatial-p
    #:boundary-chain
    #:make-solid-chain
    #:solid-cell-p
    #:surface-chain
-   #:packed-term
-   #:+term-sign-bit+
-   #:pack-term
-   #:packed-term-site
-   #:packed-term-coefficient
-   #:chain-packed-terms
    #:+vertical-cell-rows+
    #:cell-bit-index
    #:chain-cell-bit-count

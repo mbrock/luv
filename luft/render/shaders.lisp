@@ -2,18 +2,18 @@
 ;;;
 ;;; The host uploads two arrays and one small uniform block:
 ;;;
-;;;   terms   (unsigned-byte 64)  the surface chain, one packed term per face
+;;;   terms   (unsigned-byte 64)  the surface chain, one signed site per face
 ;;;   bricks  vec4                a bounding sphere per +BRICK-SIZE+ terms
 ;;;   frame   uniform block       camera basis, projection, sun, sky
 ;;;
 ;;; The task stage owns one brick per workgroup and decides, uniformly, whether
 ;;; the brick's sphere meets the view frustum; if so it emits one mesh
 ;;; workgroup and hands it the brick index.  Each mesh lane then unpacks one
-;;; term straight from the u64 array: anchor, extent, and sign.  The extent
+;;; site straight from the u64 array: anchor, extent, and polarity.  The extent
 ;;; names the face's two spanning axes in canonical order, so their cross
-;;; product is the canonical orientation, and the chain sign times that
+;;; product is the canonical orientation, and the site's polarity times that
 ;;; orientation is the outward normal.  A lane whose face is absent, or which
-;;; faces away from the camera, collapses its quad to a point.  #VAABY9
+;;; faces away from the camera, collapses its quad to a point.  #AGVXGM #VAABY9
 
 (in-package #:luft.render.shaders)
 
@@ -131,8 +131,8 @@ lowering owns the target's flip."
                (uv :vec2 :location 2))))
   (let* ((term (buffer-element
                 terms (+ (* brick-index (uint +brick-size+)) lane)))
-         ;; The packed site: extent in the low bits, then X, Y, Z anchors;
-         ;; the chain's sign rides above the site in bit 60.
+         ;; The signed site: XYZ extent in the low three bits, polarity in the
+         ;; fourth, then X, Y, Z anchors.
          (extent (uint (ldb (byte luft:+extent-bits+ 0) term)))
          (anchor
            (vec3 (float (uint (ldb (byte luft:+horizontal-capacity-bits+
@@ -144,7 +144,7 @@ lowering owns the target's flip."
                  (float (uint (ldb (byte luft:+vertical-coordinate-bits+
                                           luft:+z-shift+)
                                     term)))))
-         (negative-p (= (uint (ldb (byte 1 luft:+term-sign-bit+) term))
+         (negative-p (= (uint (ldb (byte 1 luft:+site-sign-bit+) term))
                         (uint 1.0)))
          (present-p (> extent (uint 0.0)))
          (yz-face-p (= extent (uint luft:+yz-face-extent+)))
@@ -152,7 +152,7 @@ lowering owns the target's flip."
          (xy-face-p (= extent (uint luft:+xy-face-extent+)))
          ;; The two spanning axes in canonical X<Y<Z order, and their cross
          ;; product: the face's canonical orientation, which is also the
-         ;; incidence sign convention of the boundary operator.
+         ;; orientation convention of the boundary operator.
          (edge-a (if yz-face-p (vec3 0.0 1.0 0.0) (vec3 1.0 0.0 0.0)))
          (edge-b (if xy-face-p (vec3 0.0 1.0 0.0) (vec3 0.0 0.0 1.0)))
          (canonical (if yz-face-p
@@ -184,7 +184,7 @@ lowering owns the target's flip."
          (primitive-0 (* lane (uint 2.0)))
          (primitive-1 (+ primitive-0 (uint 1.0)))
          ;; Counter-clockwise from the outward side: reverse the loop when
-         ;; the sign flips the canonical orientation.
+         ;; the polarity flips the canonical orientation.
          (second-0 (if negative-p vertex-2 vertex-1))
          (third-0 (if negative-p vertex-1 vertex-2))
          (second-1 (if negative-p vertex-3 vertex-2))
@@ -831,7 +831,7 @@ The chamfer rule also emits the face normal for facet shading."
                           (float (uint (ldb (byte luft:+vertical-coordinate-bits+
                                                    luft:+z-shift+)
                                              term)))))
-                  (negative-p (= (uint (ldb (byte 1 luft:+term-sign-bit+) term))
+                  (negative-p (= (uint (ldb (byte 1 luft:+site-sign-bit+) term))
                                  (uint 1.0)))
                   (present-p (> extent (uint 0.0)))
                   (yz-face-p (= extent (uint luft:+yz-face-extent+)))

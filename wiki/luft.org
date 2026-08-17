@@ -10,67 +10,77 @@ straight from a GPU buffer.  This page records the vocabulary, the algebra
 that makes the surface fall out, the shader-language extensions the GPU path
 needed, and the shape of the pipeline.
 
-* A site is a lattice anchor and an extent mask
+* A site is a lattice anchor, an extent mask, and a polarity
 :PROPERTIES:
 :ID: KE4P5F
 :END:
 
-A /site/ is a 60-bit unsigned value: four extent bits =XYZT= in the low
-positions, then a 24-bit X anchor, a 24-bit Y anchor, and an 8-bit Z anchor.
-Each spatial extent bit says the site spans the unit interval forward from its
-anchor along that axis, so no extent is a vertex, one is an edge, two a face,
-three a cell.  Incidence is therefore canonical: the high X boundary of the
-cell at =(x,y,z)= /is/ the YZ face anchored at =(x+1,y,z)=, the same value the
-cell at =(x+1,y,z)= calls its low X boundary.  X and Y wrap with the period a
+A /site/ is a 60-bit unsigned value: three extent bits =XYZ= and one polarity
+bit in the low positions, then a 24-bit X anchor, a 24-bit Y anchor, and an
+8-bit Z anchor.  Each extent bit says the site spans the unit interval forward
+from its anchor along that axis, so no extent is a vertex, one is an edge, two
+a face, and three a cell.  The clear polarity bit is positive and the set bit
+negative; [[lisp:luft:opposite-site]] toggles it without changing the site's
+geometry.
+
+Incidence is canonical: the high X boundary of the cell at =(x,y,z)= has the
+same geometry as the low X boundary of the cell at =(x+1,y,z)=, but the two
+faces have opposite polarities.  X and Y wrap with the period a
 [[lisp:luft:world-domain]] chooses; Z is 256 non-wrapping planes.
 
-The oriented boundary of a site follows from the ordered axes in its extent:
-the high boundary along the =i=-th present axis has sign =(-1)^i=, the low
-boundary the opposite sign, and =∂∂ = 0= is an executable test in
-=luft/tests.lisp=.  Time is a fourth extent bit with no coordinate: "now" is
-an ambient origin, so temporal boundaries return an offset rather than a
-packed time.  See [[lisp:luft:make-site]] and [[lisp:luft:map-site-boundary]].
+The oriented boundary follows from the ordered axes in the extent: the high
+boundary along the =i=-th present axis has the canonical polarity =(-1)^i=,
+the low boundary has the opposite polarity, and a negative input site reverses
+every result.  Thus [[lisp:luft:map-site-boundary]] returns signed sites
+directly, and =∂∂ = 0= is an executable annihilation test in
+=luft/tests.lisp=.
 
 * A block world is a 3-chain and its surface is a boundary
 :PROPERTIES:
 :ID: 9HLYEE
 :END:
 
-A [[lisp:luft:chain]] is a finite formal sum of sites with integer
-coefficients.  A solid world is the 3-chain with coefficient one on every
-solid cell, and its visible surface is not a meshing problem but an algebraic
-fact: [[lisp:luft:boundary-chain]] applies #KE4P5F's oriented boundary to
-every term.  Two solid neighbours contribute their shared face with opposite
-signs, so it cancels; only exposed faces survive, each with coefficient
-=+1= when the solid cell lies on its low side along the missing axis and
-=-1= when it lies on the high side.  That sign times the face's canonical
-orientation is its outward normal, and =∂(∂ solid) = 0= says the surface is
-closed.  Because =∂= is linear, editing a cell later means adding or
-subtracting one cell's six-term boundary, not remeshing anything.
+A [[lisp:luft:chain]] is a collection of signed sites.  Its implementation is
+a pair of hash-table ledgers, one per polarity, both keyed by geometry with the
+polarity bit masked away.  Adding a site annihilates one opposite site already
+in the other ledger.  Private occurrence counts make that result independent
+of arrival order; an ordinary solid and its surface still contain at most one
+copy of any signed site.
+
+A solid world is the 3-chain containing one positive site for every occupied
+cell.  Its visible surface is not a meshing problem but an algebraic fact:
+[[lisp:luft:boundary-chain]] applies #KE4P5F's oriented boundary to every
+site.  Two solid neighbours send their shared face to opposite polarity
+ledgers, so the pair annihilates; only exposed signed faces survive.  A face's
+polarity reverses or preserves its canonical orientation to give its outward
+normal, and =∂(∂ solid) = 0= says the surface is closed.  Editing a cell later
+means adding its signed boundary or the opposite boundary, not remeshing
+anything.
 
 The luvcraft mesher walks chunk fields on the CPU and emits atlas-textured
 quads (see [[file:block-world.org][the block world]]); LUFT's
-[[lisp:luft:surface-chain]] is a hash table of signed face sites.  Both are
-right for their worlds; the second is what a mesh shader wants.
+[[lisp:luft:surface-chain]] is a pair of polarity ledgers holding signed face
+sites.  Both are right for their worlds; the second is what a mesh shader
+wants.
 
-* The GPU reads the surface as packed 64-bit terms
+* The GPU reads signed sites directly
 :PROPERTIES:
 :ID: AGVXGM
 :END:
 
-A [[lisp:luft:pack-term]] is one 64-bit word: the face site in its own 60
-bits and the sign of its unit coefficient in bit 60.  Sixty-one bits keep the
-word an immediate fixnum on 64-bit SBCL, and a specialized
-=(unsigned-byte 64)= vector of terms is exactly the buffer the shader reads;
-no vertex is ever built on the CPU.  The renderer orders the terms by
-eight-cell chunk, pads them to whole /bricks/ of 64, and measures one
-bounding sphere per brick as four floats — two arrays and one uniform block
-are the whole upload.
+A surface face is already one signed 60-bit site, with no separate term or
+coefficient encoding.  It remains an immediate fixnum on 64-bit SBCL, and a
+specialized vector of sites can be copied directly into the
+=(unsigned-byte 64)= buffer the shader reads; no vertex is ever built on the
+CPU.  The renderer orders the sites by eight-cell chunk, pads them to whole
+/bricks/ of [[lisp:luft.render.shaders:+brick-size+]] sites, and measures one
+bounding sphere per brick as four floats —
+two arrays and one uniform block are the whole upload.
 
-The three free bits above the sign are deliberately unearned.  A per-face
-material would fit there, but a term is a chain term, and materials belong to
-cells; the atelier is textureless on purpose until that question is asked
-properly.
+The four buffer bits above the site are deliberately unearned.  A per-face
+material would fit there, but the occurrence is still a chain site, and
+materials belong to cells; the atelier is textureless on purpose until that
+question is asked properly.
 
 * Storage buffers and bit fields enter the shader language
 :PROPERTIES:
@@ -112,11 +122,11 @@ buffer.  A task workgroup owns one brick: it reads the brick's sphere,
 tests it against the view pyramid with a workgroup-uniform expression, and
 emits one mesh workgroup or none, handing the brick index through a
 one-word payload.  Each mesh lane then loads one term with =buffer-element=,
-extracts anchor, extent, and sign with =ldb=, and writes four vertices and
+extracts anchor, extent, and polarity with =ldb=, and writes four vertices and
 two triangles.  The extent names the face's two spanning axes in canonical
 X<Y<Z order, their cross product is the canonical orientation, and the
-sign times that orientation is the outward normal — the boundary operator's
-sign convention rendered directly.  A lane whose term is zero, or whose face
+polarity times that orientation is the outward normal — the boundary
+operator's orientation rendered directly.  A lane whose site is zero, or whose face
 turns away from the camera by the exact plane test, scales its quad to a
 point instead of branching on output counts, which the language requires to
 be uniform.
@@ -191,9 +201,9 @@ is a plane-intersection construction per vertex configuration, the same
 :ID: 3QNZC1
 :END:
 
-/Intent./ Let the viewer place and remove cells by updating the surface chain
-with =±∂cell= (#9HLYEE), re-pack only the touched bricks, and upload them,
-so an edit costs six hash-table updates and one small =write-buffer=.
+/Intent./ Let the viewer place and remove cells by adding =∂cell= or its
+opposite to the surface chain (#9HLYEE), reorder only the touched bricks, and
+upload them, so an edit costs six ledger updates and one small =write-buffer=.
 
 /Evidence./ The whole-scene path already refreshes and re-uploads correctly;
 [[lisp:luft.render:refresh-scene]] rebuilds everything, which is fine for a

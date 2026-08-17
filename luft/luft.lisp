@@ -9,7 +9,8 @@
 ;;; ------------------------------------------------------------------------
 ;;; Sites
 
-;;; A site consists of a lattice-point anchor and an extent mask.  #KE4P5F
+;;; A site consists of a lattice-point anchor, an extent mask, and a polarity.
+;;; #KE4P5F
 ;;;
 ;;; Each spatial extent bit says that the site spans the unit interval
 ;;; forward from its anchor along that axis.  Thus:
@@ -24,13 +25,12 @@
 ;;; anchored at (x+1,y,z).  A face is not one of six decorations owned by a
 ;;; voxel; it is a site shared by its incident cells.
 ;;;
-;;; The temporal extent bit says analogously that the site spans the current
-;;; simulation interval [t,t+1].  The packed value deliberately contains no
-;;; temporal coordinate: "now" is an ambient origin supplied by a simulation
-;;; step, transaction, or history.  Temporal operations therefore return a
-;;; secondary offset relative to that origin.  LUFT is not a four-dimensional
-;;; worm space; it merely treats the futural time quantum as a fundamental
-;;; extrusion.
+;;; The fourth low bit is polarity.  A positive and a negative site have the
+;;; same anchor and extent but opposite orientations.  They are the geometric
+;;; equivalent of a particle and antiparticle: when both reach a chain they
+;;; annihilate.  Boundary operations put the polarity directly on each
+;;; resulting face, edge, or vertex, so no separate coefficient travels beside
+;;; the packed site.
 ;;;
 ;;; X is west/east and Y is south/north.  Each world chooses independently how
 ;;; many of the 24 available X and Y bits are significant.  Both active fields
@@ -47,23 +47,21 @@
 ;;;       8 bits  Z anchor
 ;;;      24 bits  Y anchor
 ;;;      24 bits  X anchor
-;;;       4 bits  extent mask XYZT
+;;;       1 bit   polarity (clear is positive, set is negative)
+;;;       3 bits  extent mask XYZ
 ;;;
-;;; The extent mask lives in the low bits so testing, adding, and removing an
-;;; axis is direct fixnum arithmetic.  On 64-bit SBCL, 60-bit unsigned values
-;;; are immediate fixnums with two payload bits still unused.  Canonical
-;;; incidence orientation does not need one of those bits: its sign follows
-;;; from the ordered axes already present in the extent mask.  A future use for
-;;; the spare bits should therefore be earned independently.
+;;; The extent and polarity live in the low bits so their operations are direct
+;;; fixnum arithmetic.  On 64-bit SBCL, 60-bit unsigned values are immediate
+;;; fixnums with two payload bits still unused.
 
 (deftype site ()
   '(unsigned-byte 60))
 
 (deftype extent-mask ()
-  '(unsigned-byte 4))
+  '(unsigned-byte 3))
 
 (deftype axis ()
-  '(member :x :y :z :t))
+  '(member :x :y :z))
 
 (deftype side ()
   '(member :low :high))
@@ -76,13 +74,14 @@
 (defconstant +xz-face-extent+ #b0101)
 (defconstant +yz-face-extent+ #b0110)
 (defconstant +cell-extent+ #b0111)
-(defconstant +temporal-extent+ #b1000)
-(defconstant +spatial-extent+ #b0111)
 
-(defconstant +extent-bits+ 4)
+(defconstant +extent-bits+ 3)
+(defconstant +site-sign-bit+ 3)
+(defconstant +negative-site-mask+ (ash 1 +site-sign-bit+))
+(defconstant +site-tag-bits+ 4)
 (defconstant +horizontal-capacity-bits+ 24)
 (defconstant +vertical-coordinate-bits+ 8)
-(defconstant +x-shift+ +extent-bits+)
+(defconstant +x-shift+ +site-tag-bits+)
 (defconstant +y-shift+ (+ +x-shift+ +horizontal-capacity-bits+))
 (defconstant +z-shift+ (+ +y-shift+ +horizontal-capacity-bits+))
 (defconstant +top-z+ (1- (ash 1 +vertical-coordinate-bits+)))
@@ -130,14 +129,15 @@ capacity of the packed site ABI."
   (ecase axis
     (:x #b0001)
     (:y #b0010)
-    (:z #b0100)
-    (:t #b1000)))
+    (:z #b0100)))
 
 (defun make-extent (&rest axes)
   "Return the extent mask containing AXES."
   (reduce #'logior axes :key #'axis-bit :initial-value 0))
 
-(declaim (inline site-extent site-x site-y site-z site-anchor))
+(declaim (inline site-extent site-x site-y site-z site-anchor
+                 site-negative-p site-positive-p site-polarity
+                 site-geometry opposite-site))
 (defun site-extent (site)
   (check-type site site)
   (ldb (byte +extent-bits+ 0) site))
@@ -158,6 +158,40 @@ capacity of the packed site ABI."
   "Return SITE's X, Y, and Z lattice coordinates as three values."
   (values (site-x site) (site-y site) (site-z site)))
 
+(defun site-negative-p (site)
+  "Whether SITE has negative polarity."
+  (check-type site site)
+  (logbitp +site-sign-bit+ site))
+
+(defun site-positive-p (site)
+  "Whether SITE has positive polarity."
+  (not (site-negative-p site)))
+
+(defun site-polarity (site)
+  "Return SITE's polarity, either +1 or -1."
+  (if (site-negative-p site) -1 1))
+
+(defun site-geometry (site)
+  "Return SITE's anchor and extent with positive polarity.
+
+This is the common geometric identity shared by the positive and negative
+versions of a site."
+  (check-type site site)
+  (logandc2 site +negative-site-mask+))
+
+(defun opposite-site (site)
+  "Return the same geometric site with the opposite polarity."
+  (check-type site site)
+  (logxor site +negative-site-mask+))
+
+(defun site-with-polarity (site polarity)
+  "Return SITE's geometry with POLARITY, either +1 or -1."
+  (check-type site site)
+  (check-type polarity (member 1 -1))
+  (if (minusp polarity)
+      (logior (site-geometry site) +negative-site-mask+)
+      (site-geometry site)))
+
 (defun site-valid-p (domain thing)
   "Whether THING is a canonical packed site in DOMAIN.
 
@@ -172,20 +206,23 @@ noncanonical for this domain."
               (not (and (= (site-z thing) +top-z+)
                         (logbitp 2 (site-extent thing))))))))
 
-(defun make-site (domain x y z &optional (extent +vertex-extent+))
-  "Make DOMAIN's canonical site at lattice anchor X,Y,Z with EXTENT.
+(defun make-site (domain x y z &optional (extent +vertex-extent+) (polarity 1))
+  "Make DOMAIN's canonical site at X,Y,Z with EXTENT and POLARITY.
 
 X and Y are reduced with DOMAIN's independent power-of-two masks.  Z must name
 one of the 256 non-wrapping lattice planes.  A site extending along Z must
-leave room for its high boundary and therefore cannot begin on the top plane."
+leave room for its high boundary and therefore cannot begin on the top plane.
+POLARITY is +1 or -1; positive and negative sites share one geometry."
   (check-type domain world-domain)
   (check-type x integer)
   (check-type y integer)
   (check-type z (integer 0 #.+top-z+))
   (check-type extent extent-mask)
+  (check-type polarity (member 1 -1))
   (when (and (= z +top-z+) (logbitp 2 extent))
     (error "A Z-extended site cannot be anchored on top plane ~D." +top-z+))
   (logior extent
+          (if (minusp polarity) +negative-site-mask+ 0)
           (ash (logand x (world-domain-x-mask domain)) +x-shift+)
           (ash (logand y (world-domain-y-mask domain)) +y-shift+)
           (ash z +z-shift+)))
@@ -199,16 +236,13 @@ leave room for its high boundary and therefore cannot begin on the top plane."
   "Whether SITE spans the unit interval along AXIS."
   (logtest (axis-bit axis) (site-extent site)))
 
-(defun site-spatial-dimension (site)
-  "Return SITE's dimension after ignoring temporal extent."
-  (logcount (logand +spatial-extent+ (site-extent site))))
-
 (defun site-dimension (site)
-  "Return SITE's dimension, including temporal extent."
+  "Return SITE's dimension: zero for a vertex through three for a cell."
   (logcount (site-extent site)))
 
 (defun site-with-extent (domain site extent)
-  (make-site domain (site-x site) (site-y site) (site-z site) extent))
+  (make-site domain (site-x site) (site-y site) (site-z site)
+             extent (site-polarity site)))
 
 ;;; ------------------------------------------------------------------------
 ;;; Adjacency
@@ -216,42 +250,33 @@ leave room for its high boundary and therefore cannot begin on the top plane."
 (defun step-site (domain site axis delta)
   "Translate DOMAIN's SITE along AXIS by DELTA.
 
-Return the translated packed site and a temporal-origin offset.  Spatial
-steps return zero as the second value.  Temporal steps leave the packed site
-unchanged and return DELTA, because actual time belongs to the ambient
-simulation history.  A spatial step outside the non-wrapping vertical world
-returns NIL and zero."
+The translated site keeps SITE's polarity.  A step outside the non-wrapping
+vertical world returns NIL."
   (checked-site domain site)
   (check-type delta integer)
   (ecase axis
-    (:x (values (make-site domain (+ (site-x site) delta)
-                           (site-y site) (site-z site) (site-extent site))
-                0))
-    (:y (values (make-site domain (site-x site)
-                           (+ (site-y site) delta)
-                           (site-z site) (site-extent site))
-                0))
+    (:x (make-site domain (+ (site-x site) delta)
+                   (site-y site) (site-z site) (site-extent site)
+                   (site-polarity site)))
+    (:y (make-site domain (site-x site)
+                   (+ (site-y site) delta)
+                   (site-z site) (site-extent site)
+                   (site-polarity site)))
     (:z (let ((z (+ (site-z site) delta)))
           (if (or (< z 0)
                   (> z +top-z+)
                   (and (= z +top-z+)
                        (logbitp 2 (site-extent site))))
-              (values nil 0)
-              (values (make-site domain (site-x site) (site-y site)
-                                 z (site-extent site))
-                      0))))
-    (:t (values site delta))))
+              nil
+              (make-site domain (site-x site) (site-y site)
+                         z (site-extent site) (site-polarity site)))))))
 
 (defun site-forward (domain site axis)
-  "Move DOMAIN's SITE one unit forward along AXIS.
-
-The second value is the change in ambient temporal origin; see STEP-SITE."
+  "Move DOMAIN's SITE one unit forward along AXIS."
   (step-site domain site axis 1))
 
 (defun site-backward (domain site axis)
-  "Move DOMAIN's SITE one unit backward along AXIS.
-
-The second value is the change in ambient temporal origin; see STEP-SITE."
+  "Move DOMAIN's SITE one unit backward along AXIS."
   (step-site domain site axis -1))
 
 ;;; ------------------------------------------------------------------------
@@ -263,9 +288,10 @@ The second value is the change in ambient temporal origin; see STEP-SITE."
 ;;;   low:   (x,y,z,   XY)
 ;;;   high:  (x,y,z+1, XY)
 ;;;
-;;; For a temporal extent both packed boundaries have the same spatial site.
-;;; Their secondary temporal offsets, zero and one, distinguish the boundary
-;;; at now from the boundary one simulation quantum from now.
+;;; The boundary inherits the site's polarity and may flip it according to the
+;;; fixed orientation of the low or high side.  Thus the boundary of a
+;;; negative site is exactly the opposite of the boundary of its positive
+;;; counterpart.
 
 (defun require-site-extent (site axis present-p)
   (check-type site site)
@@ -275,81 +301,89 @@ The second value is the change in ambient temporal origin; see STEP-SITE."
              site present-p axis))))
 
 (defun site-boundary-low (domain site axis)
-  "Return DOMAIN's low boundary of SITE and its temporal-origin offset."
+  "Return DOMAIN's oriented low AXIS boundary of SITE."
   (checked-site domain site)
   (require-site-extent site axis t)
-  (values (site-with-extent domain site
-                            (logandc2 (site-extent site) (axis-bit axis)))
-          0))
-
-(defun site-boundary-high (domain site axis)
-  "Return DOMAIN's high boundary of SITE and its temporal-origin offset."
-  (checked-site domain site)
-  (require-site-extent site axis t)
-  (site-forward domain
+  (site-with-polarity
    (site-with-extent domain site
                      (logandc2 (site-extent site) (axis-bit axis)))
-   axis))
+   (site-boundary-polarity site axis :low)))
 
-(defun site-boundary-sign (site axis side)
-  "Return the canonical oriented incidence coefficient, either -1 or +1.
+(defun site-boundary-high (domain site axis)
+  "Return DOMAIN's oriented high AXIS boundary of SITE."
+  (checked-site domain site)
+  (require-site-extent site axis t)
+  (site-with-polarity
+   (site-forward domain
+                 (site-with-extent
+                  domain site
+                  (logandc2 (site-extent site) (axis-bit axis)))
+                 axis)
+   (site-boundary-polarity site axis :high)))
 
-Axes are ordered X,Y,Z,T.  The high boundary along axis i has sign (-1)^i
-among the axes present in SITE; the low boundary has the opposite sign."
+(defun site-boundary-polarity (site axis side)
+  "Return the polarity of SITE's low or high AXIS boundary.
+
+Axes are ordered X,Y,Z.  The fixed orientation alternates as the present axes
+are crossed; SITE's own polarity reverses the whole result."
   (require-site-extent site axis t)
   (check-type side side)
   (let* ((bit (axis-bit axis))
          (earlier-axes (logand (site-extent site) (1- bit)))
          (high-sign (if (evenp (logcount earlier-axes)) 1 -1)))
-    (if (eq side :high) high-sign (- high-sign))))
+    (* (site-polarity site)
+       (if (eq side :high) high-sign (- high-sign)))))
 
 (defun map-site-boundary (function domain site)
-  "Call FUNCTION for every oriented codimension-one boundary of DOMAIN's SITE.
+  "Call FUNCTION for every oriented boundary piece of DOMAIN's SITE.
 
-FUNCTION receives BOUNDARY, SIGN, TEMPORAL-OFFSET, AXIS, and SIDE.  The
-temporal offset is relative to the ambient origin of SITE."
+FUNCTION receives the signed BOUNDARY site, AXIS, and SIDE."
   (checked-site domain site)
-  (dolist (axis '(:x :y :z :t) site)
+  (dolist (axis '(:x :y :z) site)
     (when (site-extends-p site axis)
       (dolist (side '(:low :high))
-        (multiple-value-bind (boundary temporal-offset)
-            (if (eq side :low)
-                (site-boundary-low domain site axis)
-                (site-boundary-high domain site axis))
-          (funcall function boundary
-                   (site-boundary-sign site axis side)
-                   temporal-offset axis side))))))
+        (funcall function
+                 (if (eq side :low)
+                     (site-boundary-low domain site axis)
+                     (site-boundary-high domain site axis))
+                 axis side)))))
 
 ;;; A boundary ordinarily has two cofaces along an axis.  The forward coface
 ;;; is anchored at the boundary itself, which is its low side.  The backward
 ;;; coface is anchored one unit earlier, making the original site its high
 ;;; side.  At the top or bottom of the vertical world one of these is absent.
-;;; Along T, the packed coface is the same in both cases, while its temporal
-;;; origin is respectively now or one tick in the past.
+;;; The coface receives whichever polarity makes the original site its exact
+;;; signed boundary, so boundary and coface remain inverses.
 
 (defun site-coface-forward (domain site axis)
   "Return DOMAIN's coface extending forward from SITE along AXIS.
 
-The second value is its temporal-origin offset.  NIL means that the coface
-would extend above the vertical world."
+NIL means that the coface would extend above the vertical world."
   (checked-site domain site)
   (require-site-extent site axis nil)
   (let ((extent (logior (site-extent site) (axis-bit axis))))
     (if (and (eq axis :z) (= (site-z site) +top-z+))
-        (values nil 0)
-        (values (site-with-extent domain site extent) 0))))
+        nil
+        (let ((coface (site-with-extent domain site extent)))
+          (site-with-polarity
+           coface
+           (* (site-polarity site)
+              (site-boundary-polarity
+               (site-with-polarity coface 1) axis :low)))))))
 
 (defun site-coface-backward (domain site axis)
   "Return DOMAIN's coface whose high AXIS boundary is SITE.
 
-The second value is its temporal-origin offset.  NIL means that the coface
-would extend below the vertical world."
+NIL means that the coface would extend below the vertical world."
   (checked-site domain site)
   (require-site-extent site axis nil)
-  (multiple-value-bind (anchor temporal-offset)
-      (site-backward domain site axis)
-    (if anchor
-        (values (site-with-extent domain
-                 anchor (logior (site-extent anchor) (axis-bit axis)))
-                temporal-offset)
-        (values nil temporal-offset))))
+  (let ((anchor (site-backward domain site axis)))
+    (when anchor
+      (let ((coface
+              (site-with-extent
+               domain anchor (logior (site-extent anchor) (axis-bit axis)))))
+        (site-with-polarity
+         coface
+         (* (site-polarity site)
+            (site-boundary-polarity
+             (site-with-polarity coface 1) axis :high)))))))
