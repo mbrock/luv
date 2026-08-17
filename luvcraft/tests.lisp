@@ -601,7 +601,7 @@
           (luv.arithmetic:repeated-quantity-layout-element-layout layout)
           (luvcraft::shader-input-product-layout specification)))))))
 
-(deftest world-text-model-carries-atlas-band-metadata
+(deftest world-text-model-carries-atlas-band-and-ink-metadata
   (let* ((center (luv.arithmetic.lisp.vec3:make-vec3 0.0 0.0 10.0))
          (serialized
            (luv.slug::make-slug-serialized-outline
@@ -634,11 +634,13 @@
     (ok (= 17.0 (aref instances 15)))
     (ok (= 29.0 (aref instances 16)))
     ;; Geometry remains padded for antialiasing, while band selection receives
-    ;; the exact bounds used by PACK-SLUG-OUTLINE.
+    ;; the exact bounds used by PACK-SLUG-OUTLINE.  Their spare Z lanes carry
+    ;; the default ink components.
     (ok (= -0.035 (aref instances 9)))
     (ok (= 1.035 (aref instances 12)))
     (ok (equalp #(0.0 0.0 0.32) (subseq instances 18 21)))
-    (ok (equalp #(1.0 1.0 0.48) (subseq instances 21 24)))))
+    (ok (equalp #(1.0 1.0 0.48) (subseq instances 21 24)))
+    (ok (= 0.96 (aref instances 17)))))
 
 (deftest terminal-grid-domain-is-an-exact-row-major-viewport
   (let ((domain (make-instance 'luvcraft::terminal-grid-domain

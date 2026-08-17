@@ -100,6 +100,56 @@
                (+ sum (float word))))))
     (set-output color (vec4 total total total 1.0))))
 
+(spv:define-task-payload vulkan-task-mesh-payload
+  (payload-vertex-count :uint)
+  (payload-position (:array :vec4 32)))
+
+(spv:define-shader vulkan-task-probe
+    (:stage :task
+     :workgroup-size (32 1 1)
+     :payload vulkan-task-mesh-payload
+     :inputs ((lane :uint :built-in :local-invocation-index)
+              (local-id :uvec3 :built-in :local-invocation-id)
+              (group :uvec3 :built-in :workgroup-id)
+              (group-count :uvec3 :built-in :num-workgroups)
+              (threads :uvec3 :built-in :workgroup-size)))
+  (let* ((three (spv:uint 3.0))
+         (one (spv:uint 1.0)))
+    (when (= lane (spv:uint 0.0))
+      (spv:set-payload payload-vertex-count three))
+    (spv:set-payload-element
+     payload-position lane (spv:vec4 0.0 0.0 0.0 1.0))
+    (spv:emit-mesh-workgroups (spv:uvec3 one one one))))
+
+(spv:define-shader vulkan-mesh-probe
+    (:stage :mesh
+     :workgroup-size (32 1 1)
+     :payload vulkan-task-mesh-payload
+     :inputs ((lane :uint :built-in :local-invocation-index)
+              (group :uvec3 :built-in :workgroup-id))
+     :mesh-output
+     (:topology :triangles
+      :max-vertices 32
+      :max-primitives 16
+      :vertex ((position :vec4 :built-in :position)
+               (uv :vec2 :location 0))
+      :primitive ((primitive-color :vec4 :location 1))))
+  (let* ((vertex-count payload-vertex-count)
+         (primitive-count (spv:uint 1.0)))
+    (spv:set-mesh-output-counts vertex-count primitive-count)
+    (when (< lane vertex-count)
+      (spv:set-mesh-vertex
+       lane
+       (position (spv:payload-element payload-position lane))
+       (uv (spv:vec2 0.0 0.0))))
+    (when (= lane (spv:uint 0.0))
+      (spv:set-mesh-primitive
+       (spv:uint 0.0)
+       (spv:uvec3 (spv:uint 0.0)
+                  (spv:uint 1.0)
+                  (spv:uint 2.0))
+       (primitive-color (spv:vec4 1.0 1.0 1.0 1.0))))))
+
 (lang:define-arithmetic-function shared-fold-probe ((count))
   (counted-fold (index count sum 0.0)
     (+ sum index)))
@@ -1774,6 +1824,67 @@
              'shared-source-migration-probe)))
   (ok (lang:arithmetic-function-definition-for
        'shared-source-migration-probe)))
+
+(deftest task-and-mesh-lower-to-validated-vulkan-shaped-spir-v
+  (let* ((task-specification (vulkan-task-probe))
+         (mesh-specification (vulkan-mesh-probe))
+         (task-lowering
+           (spv:lower-shader-specification :spir-v task-specification))
+         (mesh-lowering
+           (spv:lower-shader-specification :spir-v mesh-specification))
+         (task-module (spv:shader-lowering-module task-lowering))
+         (mesh-module (spv:shader-lowering-module mesh-lowering))
+         (task-instructions (spv:lower-spir-v task-module))
+         (mesh-instructions (spv:lower-spir-v mesh-module))
+         (task-names (mapcar #'spv:instruction-name task-instructions))
+         (mesh-names (mapcar #'spv:instruction-name mesh-instructions))
+         (task-forms
+           (write-to-string (mapcar #'spv:instruction-form task-instructions)))
+         (mesh-forms
+           (write-to-string (mapcar #'spv:instruction-form mesh-instructions)))
+         (payload-expression
+           (find-if (lambda (expression)
+                      (typep expression 'spv:shader-payload-element))
+                    (spv:shader-specification-expressions
+                     mesh-specification))))
+    (dolist (module (list task-module mesh-module))
+      (ok (= #x00010400 (spv:spir-v-module-version module)))
+      (ok (member 'spv::mesh-shading-ext
+                  (spv:spir-v-module-capabilities module)))
+      (ok (equal '("SPV_EXT_mesh_shader")
+                 (spv:spir-v-module-extensions module))))
+    (ok (eq 'spv::task-ext
+            (spv:spir-v-entry-point-execution-model
+             (first (spv:spir-v-module-entry-points task-module)))))
+    (ok (eq 'spv::mesh-ext
+            (spv:spir-v-entry-point-execution-model
+             (first (spv:spir-v-module-entry-points mesh-module)))))
+    (ok (equal '(spv::local-size)
+               (mapcar #'spv:spir-v-execution-mode-name
+                       (spv:spir-v-module-execution-modes task-module))))
+    (ok (equal '(spv::local-size spv::output-triangles-ext
+                 spv::output-vertices spv::output-primitives-ext)
+               (mapcar #'spv:spir-v-execution-mode-name
+                       (spv:spir-v-module-execution-modes mesh-module))))
+    (dolist (name '(spv::selection-merge spv::emit-mesh-tasks-ext))
+      (ok (find name task-names)))
+    (dolist (name '(spv::set-mesh-outputs-ext spv::selection-merge
+                    spv::access-chain spv::store))
+      (ok (find name mesh-names)))
+    (ng (find 'spv::return task-names))
+    (ok (find 'spv::return mesh-names))
+    (ok (search "TASK-PAYLOAD-WORKGROUP-EXT" task-forms))
+    (ok (search "TASK-PAYLOAD-WORKGROUP-EXT" mesh-forms))
+    (ok (search "PER-PRIMITIVE-EXT" mesh-forms))
+    (ok (search "PRIMITIVE-TRIANGLE-INDICES-EXT" mesh-forms))
+    (ok payload-expression)
+    (ok (gethash payload-expression
+                 (spv:shader-lowering-expression-instructions
+                  mesh-lowering)))
+    (dolist (specification (list task-specification mesh-specification))
+      (let ((words (spv:assemble-shader-specification specification)))
+        (ok (= #x07230203 (aref words 0)))
+        (ok (= #x00010400 (aref words 1)))))))
 
 (deftest shared-counted-fold-lowers-to-structured-spir-v
   (let* ((specification

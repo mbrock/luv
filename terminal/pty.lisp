@@ -135,25 +135,34 @@ Encoding happens on the PTY owner against the terminal's then-current modes."
     (funcall function (pty-device-terminal device))))
 
 (defun write-pty-stream-bytes (stream bytes)
-  ;; RUN-PROGRAM's PTY stream is character-oriented.  Latin-1 makes this a
-  ;; one-to-one byte transport without asking a codec to interpret VT data.
-  (loop for byte across bytes do (write-char (code-char byte) stream))
+  (loop for byte across bytes do (write-byte byte stream))
   (force-output stream))
 
 (defun read-pty-stream-bytes (stream &optional (capacity 4096))
-  "Return currently readable PTY octets and whether STREAM reached EOF."
+  "Return readable PTY octets, EOF status, and stream-error status."
   (let ((bytes (make-array capacity :element-type '(unsigned-byte 8)))
         (count 0)
-        (eof-p nil))
+        (eof-p nil)
+        (stream-error-p nil))
     (loop while (< count capacity)
-          for character = (read-char-no-hang stream nil :eof)
+          for byte =
+            (handler-case
+                (and (listen stream) (read-byte stream nil :eof))
+              ;; A closed PTY master reports EIO on Linux instead of an
+              ;; ordinary zero-length read.  Preserve any bytes collected
+              ;; earlier in this drain before publishing EOF.
+              (stream-error ()
+                (setf stream-error-p t)
+                :stream-error))
           do (cond
-               ((null character) (return))
-               ((eq character :eof) (setf eof-p t) (return))
+               ((null byte) (return))
+               ((eq byte :eof) (setf eof-p t) (return))
+               ((eq byte :stream-error) (return))
                (t
-                (setf (aref bytes count) (char-code character))
+                (setf (aref bytes count) byte)
                 (incf count))))
-    (values (if (= count capacity) bytes (subseq bytes 0 count)) eof-p)))
+    (values (if (= count capacity) bytes (subseq bytes 0 count))
+            eof-p stream-error-p)))
 
 (defun enable-native-pty-echo (stream)
   "Restore the ordinary terminal-driver echo disabled by RUN-PROGRAM :PTY.
@@ -307,21 +316,25 @@ other private input modes."
                  (when (eq :stop (drain-pty-device-messages device))
                    (setf close-requested-p t)
                    (return))
-                 (multiple-value-bind (bytes eof-p)
+                 (multiple-value-bind (bytes eof-p stream-error-p)
                      (handler-case
                          (read-pty-stream-bytes (pty-device-stream device))
                        (stream-error ()
-                         (values #() (process-finished-p
-                                      (pty-device-process device)))))
+                         (values #() nil t)))
                    (when (plusp (length bytes))
                      (sb-thread:with-mutex ((pty-device-lock device))
                        (ghostty:write-terminal-bytes
                         (pty-device-terminal device) bytes))
                      (let ((function (pty-device-on-output device)))
                        (when function (funcall function device bytes))))
+                   ;; Child exit and master EOF are not ordered: a fast child
+                   ;; can be reaped just before its final output becomes
+                   ;; readable.  Keep draining until the PTY itself reports
+                   ;; EOF (or the equivalent EIO handled above).
                    (when (and (or eof-p
-                                  (process-finished-p
-                                   (pty-device-process device)))
+                                  (and stream-error-p
+                                       (process-finished-p
+                                        (pty-device-process device))))
                               (zerop (length bytes)))
                      (return))
                    (when (zerop (length bytes)) (sleep 0.005)))))
@@ -457,8 +470,7 @@ other private input modes."
                          (sb-sys:make-fd-stream
                           master-fd
                           :input t :output t :dual-channel-p t
-                          :element-type 'base-char
-                          :external-format :latin-1
+                          :element-type '(unsigned-byte 8)
                           :buffering :none :auto-close t
                           :name (format nil "PTY for ~A" program)))
                       (error (condition)

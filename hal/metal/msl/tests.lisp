@@ -28,6 +28,56 @@
   (let* ((x (spv:float (mod vertex-index (spv:uint 2.0)))))
     (spv:set-output clip-position (spv:vec4 x 0.0 0.0 1.0))))
 
+(spv:define-task-payload msl-task-mesh-payload
+  (payload-vertex-count :uint)
+  (payload-position (:array :vec4 32)))
+
+(spv:define-shader msl-task-probe
+    (:stage :task
+     :workgroup-size (32 1 1)
+     :payload msl-task-mesh-payload
+     :inputs ((lane :uint :built-in :local-invocation-index)
+              (local-id :uvec3 :built-in :local-invocation-id)
+              (group :uvec3 :built-in :workgroup-id)
+              (group-count :uvec3 :built-in :num-workgroups)
+              (threads :uvec3 :built-in :workgroup-size)))
+  (let* ((three (spv:uint 3.0))
+         (one (spv:uint 1.0)))
+    (when (= lane (spv:uint 0.0))
+      (spv:set-payload payload-vertex-count three))
+    (spv:set-payload-element
+     payload-position lane (spv:vec4 0.0 0.0 0.0 1.0))
+    (spv:emit-mesh-workgroups (spv:uvec3 one one one))))
+
+(spv:define-shader msl-mesh-probe
+    (:stage :mesh
+     :workgroup-size (32 1 1)
+     :payload msl-task-mesh-payload
+     :inputs ((lane :uint :built-in :local-invocation-index)
+              (group :uvec3 :built-in :workgroup-id))
+     :mesh-output
+     (:topology :triangles
+      :max-vertices 32
+      :max-primitives 16
+      :vertex ((position :vec4 :built-in :position)
+               (uv :vec2 :location 0))
+      :primitive ((primitive-color :vec4 :location 1))))
+  (let* ((vertex-count payload-vertex-count)
+         (primitive-count (spv:uint 1.0)))
+    (spv:set-mesh-output-counts vertex-count primitive-count)
+    (when (< lane vertex-count)
+      (spv:set-mesh-vertex
+       lane
+       (position (spv:payload-element payload-position lane))
+       (uv (spv:vec2 0.0 0.0))))
+    (when (= lane (spv:uint 0.0))
+      (spv:set-mesh-primitive
+       (spv:uint 0.0)
+       (spv:uvec3 (spv:uint 0.0)
+                  (spv:uint 1.0)
+                  (spv:uint 2.0))
+       (primitive-color (spv:vec4 1.0 1.0 1.0 1.0))))))
+
 (defun msl-binding-named (name specification)
   (find name (spv:shader-specification-bindings specification)
         :key #'spv:shader-object-name
@@ -75,6 +125,131 @@
     (ok (search "vertex_index % uint(2.0f)" source))
     (ng (search "stage_in.vertex_index" source))
     (ng (search "[[stage_in]]" source))))
+
+(deftest task-and-mesh-specifications-retain-their-workgroup-contracts
+  (let* ((task (msl-task-probe))
+         (mesh (msl-mesh-probe))
+         (payload (spv:shader-specification-task-payload task))
+         (mesh-output (spv:shader-specification-mesh-output mesh)))
+    (ok (equal '(32 1 1) (spv:shader-specification-workgroup-size task)))
+    (ok (eq payload (spv:shader-specification-task-payload mesh)))
+    (ok (= 2 (length (spv:shader-task-payload-fields payload))))
+    (ok (= 32
+           (spv:shader-task-payload-field-element-count
+            (second (spv:shader-task-payload-fields payload)))))
+    (ok (eq :triangles (spv:shader-mesh-output-topology mesh-output)))
+    (ok (= 32 (spv:shader-mesh-output-max-vertices mesh-output)))
+    (ok (= 16 (spv:shader-mesh-output-max-primitives mesh-output)))
+    (ok (typep (first (spv:shader-specification-statements mesh))
+               'spv:shader-mesh-output-counts))))
+
+(deftest task-and-mesh-effects-enforce-stage-and-collective-legality
+  (flet ((failure-reason (name options body)
+           (handler-case
+               (progn
+                 (spv:parse-shader-specification name options body)
+                 nil)
+             (spv:shader-language-error (condition)
+               (spv:shader-language-error-reason condition)))))
+    (ok (eq :mesh-output-counts-not-uniform
+            (failure-reason
+             'varying-mesh-counts
+             '(:stage :mesh
+               :workgroup-size (32 1 1)
+               :inputs ((lane :uint :built-in :local-invocation-index))
+               :mesh-output
+               (:topology :triangles
+                :max-vertices 32 :max-primitives 16
+                :vertex ((position :vec4 :built-in :position))))
+             '((let* ((one (spv:uint 1.0)))
+                 (spv:set-mesh-output-counts lane one)
+                 (spv:set-mesh-vertex
+                  lane (position (spv:vec4 0.0 0.0 0.0 1.0)))
+                 (spv:set-mesh-primitive
+                  (spv:uint 0.0)
+                  (spv:uvec3 (spv:uint 0.0)
+                             (spv:uint 0.0)
+                             (spv:uint 0.0))))))))
+    (ok (eq :mesh-workgroups-emission-must-be-last
+            (failure-reason
+             'nonterminal-task-emission
+             '(:stage :task
+               :workgroup-size (1 1 1)
+               :payload msl-task-mesh-payload
+               :inputs ((lane :uint :built-in :local-invocation-index)))
+             '((let* ((one (spv:uint 1.0)))
+                 (spv:emit-mesh-workgroups (spv:uvec3 one one one))
+                 (spv:set-payload payload-vertex-count one))))))
+    (ok (eq :invalid-statement-for-stage
+            (failure-reason
+             'task-vertex-write
+             '(:stage :task
+               :workgroup-size (1 1 1)
+               :inputs ((lane :uint :built-in :local-invocation-index)))
+             '((spv:set-mesh-vertex
+                lane (position (spv:vec4 0.0 0.0 0.0 1.0)))))))
+    (ok (eq :mesh-output-count-exceeds-limit
+            (failure-reason
+             'oversized-mesh-count
+             '(:stage :mesh
+               :workgroup-size (1 1 1)
+               :inputs ((lane :uint :built-in :local-invocation-index))
+               :mesh-output
+               (:topology :triangles
+                :max-vertices 32 :max-primitives 16
+                :vertex ((position :vec4 :built-in :position))))
+             '((let* ((vertices (spv:uint 33.0))
+                      (primitives (spv:uint 1.0)))
+                 (spv:set-mesh-output-counts vertices primitives)
+                 (spv:set-mesh-vertex
+                  lane (position (spv:vec4 0.0 0.0 0.0 1.0)))
+                 (spv:set-mesh-primitive
+                  (spv:uint 0.0)
+                  (spv:uvec3 (spv:uint 0.0)
+                             (spv:uint 0.0)
+                             (spv:uint 0.0))))))))
+    (ok (eq :payload-index-out-of-bounds
+            (failure-reason
+             'payload-overrun
+             '(:stage :task
+               :workgroup-size (1 1 1)
+               :payload msl-task-mesh-payload
+               :inputs ((lane :uint :built-in :local-invocation-index)))
+             '((let* ((one (spv:uint 1.0)))
+                 (spv:set-payload-element
+                  payload-position (spv:uint 32.0)
+                  (spv:vec4 0.0 0.0 0.0 1.0))
+                 (spv:emit-mesh-workgroups
+                  (spv:uvec3 one one one)))))))))
+
+(deftest task-and-mesh-lower-to-metal-object-and-mesh-entry-points
+  (let ((task-source
+          (msl:msl-document-source (msl:compile-msl (msl-task-probe))))
+        (mesh-source
+          (msl:msl-document-source (msl:compile-msl (msl-mesh-probe)))))
+    (ok (search "struct MslTaskMeshPayload" task-source))
+    (ok (search "float4 payload_position[32];" task-source))
+    (ok (search "[[object]] void msl_task_probe(" task-source))
+    (ok (search "object_data MslTaskMeshPayload& payload [[payload]]"
+                task-source))
+    (ok (search "uint lane [[thread_index_in_threadgroup]]" task-source))
+    (ok (search "uint3 local_id [[thread_position_in_threadgroup]]"
+                task-source))
+    (ok (search "uint3 group [[threadgroup_position_in_grid]]" task-source))
+    (ok (search "uint3 group_count [[threadgroups_per_grid]]" task-source))
+    (ok (search "uint3 threads [[threads_per_threadgroup]]" task-source))
+    (ok (search "payload.payload_position[lane]" task-source))
+    (ok (search "mesh_grid.set_threadgroups_per_grid" task-source))
+    (ok (search "[[mesh]] void msl_mesh_probe(" mesh-source))
+    (ok (search
+         "metal::mesh<MslMeshProbeVertex, MslMeshProbePrimitive, 32, 16, metal::topology::triangle> mesh_out"
+         mesh-source))
+    (ok (search "object_data const MslTaskMeshPayload& payload [[payload]]"
+                mesh-source))
+    (ok (search "mesh_out.set_primitive_count(primitive_count);" mesh-source))
+    (ok (search "mesh_out.set_vertex(lane, MslMeshProbeVertex{" mesh-source))
+    (ok (search "mesh_out.set_index" mesh-source))
+    (ok (search "mesh_out.set_primitive" mesh-source))))
 
 (deftest slug-atlas-derivatives-and-band-selection-lower-to-metal
   (let ((fragment-source
