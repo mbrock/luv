@@ -190,8 +190,10 @@
                          :test #'string=))))
       ;; A direction is its own line, because walking forward and sprinting are
       ;; different things to do even though one command performs both.
-      (ok (equal '("W" "↑") (keys-for "Moving" "walk forward")))
-      (ok (equal '("D" "→") (keys-for "Moving" "walk right")))
+      (ok (equal '("W") (keys-for "Moving" "walk forward")))
+      (ok (equal '("D") (keys-for "Moving" "walk right")))
+      ;; The arrows look rather than walk: one merged row, all four keys.
+      (ok (equal '("↑" "↓" "←" "→") (keys-for "In the world" "look")))
       (ok (equal '("Shift") (keys-for "Moving" "sprint")))
       (ok (equal '("Space") (keys-for "Moving" "jump")))
       (ok (equal '("I") (keys-for "In the world" "toggle inventory")))
