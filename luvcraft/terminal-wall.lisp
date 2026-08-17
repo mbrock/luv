@@ -318,7 +318,6 @@
   :family :discover-once
   :frontier-layout :lifo-stack
   :neighborhood (:voxel-relations coplanar-directions)
-  :materialization :block-chunks
   :fields ((visited :memo t) terminal exposed)
   :constants (material outward absent-neighbor-policy coplanar-directions memo)
   :admission (and (terminal target) (exposed target))

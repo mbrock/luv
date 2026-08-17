@@ -57,9 +57,6 @@ or CROSSING.  Predicates enter arithmetic laws as unchecked flags."))
    (neighborhood
     :initarg :neighborhood
     :reader frontier-program-definition-neighborhood)
-   (materialization
-    :initarg :materialization
-    :reader frontier-program-definition-materialization)
    (fields :initarg :fields :initform nil
            :reader frontier-program-definition-fields)
    (constants :initarg :constants :initform nil
@@ -83,12 +80,12 @@ or CROSSING.  Predicates enter arithmetic laws as unchecked flags."))
   (:documentation
    "One live semantic account of frontier-shaped materialization work. #X7Q90E
 
-The definition names the dynamic family, physical frontier layout,
-neighborhood, and result materialization at an aggregate boundary, and states
-its local law: field roles, realization constants, relation predicates, and
-the arithmetic TRANSFER, ADMISSION, and PRIORITY forms over them.  Concrete
-methods on EXECUTE-FRONTIER-PROGRAM lower that account by hand;
-COMPILE-FRONTIER-PROGRAM lowers it mechanically over bound fields."))
+The definition names the dynamic family, physical frontier layout, and
+neighborhood at an aggregate boundary, and states its local law: field roles,
+realization constants, relation predicates, and the arithmetic TRANSFER,
+ADMISSION, and PRIORITY forms over them.  Concrete methods on
+EXECUTE-FRONTIER-PROGRAM lower that account by hand; COMPILE-FRONTIER-PROGRAM
+lowers it mechanically over bound fields."))
 
 (defgeneric frontier-program-definition-for (name)
   (:documentation "Return the live frontier program definition named by NAME."))
@@ -121,8 +118,8 @@ COMPILE-FRONTIER-PROGRAM lowers it mechanically over bound fields."))
           (t (error "Unknown frontier relation predicate ~S." form)))))
 
 (defun make-frontier-program-definition
-    (name &key family frontier-layout neighborhood materialization
-            fields constants predicates transfer admission priority
+    (name &key family frontier-layout neighborhood fields constants predicates
+            transfer admission priority
             retain-admissions source-form)
   (let ((definition
           (make-instance
@@ -131,7 +128,6 @@ COMPILE-FRONTIER-PROGRAM lowers it mechanically over bound fields."))
            :family family
            :frontier-layout frontier-layout
            :neighborhood neighborhood
-           :materialization materialization
            :fields (mapcar #'parse-frontier-field-role fields)
            :constants constants
            :predicates (mapcar #'parse-frontier-relation-predicate predicates)
@@ -145,13 +141,11 @@ COMPILE-FRONTIER-PROGRAM lowers it mechanically over bound fields."))
 
 (defmacro define-frontier-program
     (name &rest options
-     &key family frontier-layout neighborhood materialization
-       fields constants predicates transfer admission priority
-       retain-admissions)
+     &key family frontier-layout neighborhood fields constants predicates
+       transfer admission priority retain-admissions)
   "Define an inspectable frontier program at one EQL-specialized name."
-  (declare (ignore family frontier-layout neighborhood materialization
-                   fields constants predicates transfer admission priority
-                   retain-admissions))
+  (declare (ignore family frontier-layout neighborhood fields constants
+                   predicates transfer admission priority retain-admissions))
   (let ((query (gensym "PROGRAM-NAME"))
         (source-form `(define-frontier-program ,name ,@options)))
     `(progn

@@ -81,7 +81,6 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:frontier-program-definition-family
            #:frontier-program-definition-for
            #:frontier-program-definition-frontier-layout
-           #:frontier-program-definition-materialization
            #:frontier-program-definition-name
            #:frontier-program-definition-neighborhood
            #:frontier-program-definition-revision

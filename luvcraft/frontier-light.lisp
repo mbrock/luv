@@ -6,7 +6,6 @@
   :family :monotone-max-fixpoint
   :frontier-layout :brightest-first-buckets
   :neighborhood :voxel-face-relations
-  :materialization :sky-and-block-light-columns
   ;; The local law of voxel light.  LEVEL is the relaxed best-known field,
   ;; bound to the sky or block lane at realization; OPACITY is the entered
   ;; cell's attenuation.  A relation transfers the source level minus the
@@ -281,7 +280,6 @@ and traversal counters for inspection in a live image. #DVUZ6H"
   :family :invalidation
   :frontier-layout :brightest-first-buckets
   :neighborhood :voxel-face-relations
-  :materialization :sky-and-block-light-columns
   :fields ((level :invalidated t))
   :constants (direct-direction)
   :predicates ((direct (direction= direct-direction)))

@@ -38,8 +38,7 @@ for a greenfield, from-scratch monotone light program:
 (frontiers:define-frontier-program voxel-light-addition
   :family :monotone-max-fixpoint
   :frontier-layout :brightest-first-buckets
-  :neighborhood :voxel-face-relations
-  :materialization :sky-and-block-light-columns)
+  :neighborhood :voxel-face-relations)
 #+end_src
 
 The declaration is an inspectable CLOS definition, while its realization is
@@ -677,7 +676,6 @@ a name attached to a handwritten loop.  Voxel light reads:
   :family :monotone-max-fixpoint
   :frontier-layout :brightest-first-buckets
   :neighborhood :voxel-face-relations
-  :materialization :sky-and-block-light-columns
   :fields ((level :relaxed t) opacity)
   :constants (direct-direction)
   :predicates ((direct (direction= direct-direction)))
@@ -794,7 +792,6 @@ now is one program:
   :family :discover-once
   :frontier-layout :lifo-stack
   :neighborhood (:voxel-relations coplanar-directions)
-  :materialization :block-chunks
   :fields ((visited :memo t) terminal exposed)
   :constants (material outward absent-neighbor-policy coplanar-directions memo)
   :admission (and (terminal target) (exposed target))
