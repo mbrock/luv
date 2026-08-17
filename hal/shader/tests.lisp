@@ -717,6 +717,28 @@
     (ok (find "VECTOR-TIMES-SCALAR" names :test #'string=))
     (ok (> (length (spv:assemble-shader-specification specification)) 5))))
 
+(deftest a-first-use-vector-constructor-cannot-claim-its-type-id
+  (let ((specification
+          (spv:parse-shader-specification
+           'first-use-vector-constructor
+           '(:stage :fragment
+             :outputs ((color :vec4 :location 0)))
+           '((let* ((rgb (spv:vec3 0.0 0.0 0.0)))
+               (set-output color (vec4 rgb 1.0)))))))
+    ;; VEC3 has no interface declaration to predeclare its type.  Assembly is
+    ;; therefore the direct proof that the type and its first value received
+    ;; distinct result IDs.
+    (ok (= #x07230203
+           (aref (spv:assemble-shader-specification specification) 0)))))
+
+(deftest canonical-shader-id-reservations-never-reuse-a-claimed-id
+  (let* ((context (make-instance 'spv::shader-lowering-context))
+         (first (spv::reserve-shader-id context 'probe))
+         (second (spv::reserve-shader-id context 'probe)))
+    (ok (not (eq first second)))
+    (ok (string= "%PROBE" (symbol-name first)))
+    (ok (string= "%PROBE-2" (symbol-name second)))))
+
 (deftest depth-texture-sampling-feeds-ordinary-float-math
   (let* ((specification
            (spv:parse-shader-specification
