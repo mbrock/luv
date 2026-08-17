@@ -83,6 +83,17 @@
   :non-negative-p t)
 (math:define-quantity :player-acceleration :kind :lattice-acceleration
   :non-negative-p t)
+;;; An animal is measured in the same lattice as the player it shares the
+;;; world with, but its own dimensions and gait are its own quantities: a
+;;; turtle's walking speed is not a slow player's.
+(math:define-quantity :critter-half-width :kind :lattice-coordinate
+  :non-negative-p t)
+(math:define-quantity :critter-height :kind :lattice-coordinate
+  :non-negative-p t)
+(math:define-quantity :critter-walk-speed :kind :lattice-velocity
+  :non-negative-p t)
+(math:define-quantity :critter-behavior-duration :kind :duration
+  :non-negative-p t)
 (math:define-quantity :gravity-magnitude :kind :lattice-acceleration
   :non-negative-p t)
 (math:define-quantity :frame-duration :kind :duration
@@ -127,6 +138,8 @@
 (math:define-quantity :cloudiness :kind :proportion
   :non-negative-p t)
 (math:define-quantity :camera-yaw :kind :angular-measure
+  :character :point)
+(math:define-quantity :critter-yaw :kind :angular-measure
   :character :point)
 (math:define-quantity :camera-pitch :kind :angular-measure
   :character :point)

@@ -351,7 +351,7 @@ FRAME-UNIFORM-DATA from the session's sky clock and profile."
           (vec3-z position) (player-z player)))
   camera)
 
-(defun player-terrain-solid-p (world x y z)
+(defun world-terrain-solid-p (world x y z)
   "Treat absent horizontal terrain and the lower world boundary as solid."
   (multiple-value-bind (block status) (world-block-at world x y z)
     (if (eq status :resident)
@@ -361,36 +361,70 @@ FRAME-UNIFORM-DATA from the session's sky clock and profile."
                  (voxel-space-chunk-shape (block-world-space world)))))
           (< y height)))))
 
-(defun player-overlap-indices (minimum maximum)
+;;; A body is the small scalar contact abstraction which every walking thing
+;;; in the world shares: an upright axis-aligned box, standing on its own
+;;; position, swept one axis at a time against solid voxel cells.  The player
+;;; controller remains its reference implementation, and a critter is the same
+;;; sweep with different dimensions and a different mind above it, so the
+;;; contact code below is written against this protocol rather than against
+;;; either participant.
+
+(defgeneric body-position (body)
+  (:documentation "BODY's world position at the centre of its base."))
+(defgeneric body-velocity (body)
+  (:documentation "BODY's world velocity."))
+(defgeneric body-half-width (body)
+  (:documentation "Half the width of BODY's square horizontal footprint."))
+(defgeneric body-height (body)
+  (:documentation "How far BODY's box rises above its position."))
+(defgeneric body-grounded-p (body)
+  (:documentation "Whether BODY rested on solid terrain after its last step."))
+(defgeneric (setf body-grounded-p) (grounded-p body))
+
+(defmethod body-position ((body block-world-player)) (player-position body))
+(defmethod body-velocity ((body block-world-player)) (player-velocity body))
+(defmethod body-half-width ((body block-world-player))
+  (player-half-width body))
+(defmethod body-height ((body block-world-player)) (player-height body))
+(defmethod body-grounded-p ((body block-world-player))
+  (player-grounded-p body))
+(defmethod (setf body-grounded-p) (grounded-p (body block-world-player))
+  (setf (player-grounded-p body) grounded-p))
+
+(defun body-x (body) (vec3-x (body-position body)))
+(defun body-y (body) (vec3-y (body-position body)))
+(defun body-z (body) (vec3-z (body-position body)))
+
+(defun body-overlap-indices (minimum maximum)
   (values (floor (+ minimum +player-collision-epsilon+))
           (floor (- maximum +player-collision-epsilon+))))
 
-(defun map-player-overlapping-blocks (function player world)
-  (multiple-value-bind (minimum-x maximum-x)
-      (player-overlap-indices (- (player-x player) (player-half-width player))
-                              (+ (player-x player) (player-half-width player)))
-    (multiple-value-bind (minimum-y maximum-y)
-        (player-overlap-indices (player-y player)
-                                (+ (player-y player) (player-height player)))
-      (multiple-value-bind (minimum-z maximum-z)
-          (player-overlap-indices
-           (- (player-z player) (player-half-width player))
-           (+ (player-z player) (player-half-width player)))
-        (loop for x from minimum-x to maximum-x do
-          (loop for y from minimum-y to maximum-y do
-            (loop for z from minimum-z to maximum-z
-                  when (player-terrain-solid-p world x y z)
-                    do (funcall function x y z))))))))
+(defun map-body-overlapping-blocks (function body world)
+  (let ((half-width (body-half-width body)))
+    (multiple-value-bind (minimum-x maximum-x)
+        (body-overlap-indices (- (body-x body) half-width)
+                             (+ (body-x body) half-width))
+      (multiple-value-bind (minimum-y maximum-y)
+          (body-overlap-indices (body-y body)
+                               (+ (body-y body) (body-height body)))
+        (multiple-value-bind (minimum-z maximum-z)
+            (body-overlap-indices (- (body-z body) half-width)
+                                 (+ (body-z body) half-width))
+          (loop for x from minimum-x to maximum-x do
+            (loop for y from minimum-y to maximum-y do
+              (loop for z from minimum-z to maximum-z
+                    when (world-terrain-solid-p world x y z)
+                      do (funcall function x y z)))))))))
 
-(defun move-player-axis (player world axis distance)
-  "Move PLAYER along AXIS and clamp its AABB against solid voxel cells."
+(defun move-body-axis (body world axis distance)
+  "Move BODY along AXIS and clamp its AABB against solid voxel cells."
   (when (zerop distance)
-    (return-from move-player-axis nil))
-  (let ((position (player-position player))
-        (velocity (player-velocity player))
+    (return-from move-body-axis nil))
+  (let ((position (body-position body))
+        (velocity (body-velocity body))
         (collided-p nil))
     (incf (vec3-component position axis) distance)
-    (map-player-overlapping-blocks
+    (map-body-overlapping-blocks
      (lambda (x y z)
        (let ((coordinate (ecase axis (:x x) (:y y) (:z z))))
          (setf collided-p t
@@ -399,20 +433,20 @@ FRAME-UNIFORM-DATA from the session's sky clock and profile."
                    (min (vec3-component position axis)
                         (- coordinate
                            (ecase axis
-                             ((:x :z) (player-half-width player))
-                             (:y (player-height player)))
+                             ((:x :z) (body-half-width body))
+                             (:y (body-height body)))
                            +player-collision-epsilon+))
                    (max (vec3-component position axis)
                         (+ coordinate 1d0
                            (ecase axis
-                             ((:x :z) (player-half-width player))
+                             ((:x :z) (body-half-width body))
                              (:y 0d0))
                            +player-collision-epsilon+))))))
-     player world)
+     body world)
     (when collided-p
       (setf (vec3-component velocity axis) 0d0)
       (when (and (eq axis :y) (minusp distance))
-        (setf (player-grounded-p player) t)))
+        (setf (body-grounded-p body) t)))
     collided-p))
 
 (defun move-toward (value target maximum-change)
@@ -429,21 +463,20 @@ FRAME-UNIFORM-DATA from the session's sky clock and profile."
        (< (- (player-z player) (player-half-width player)) (1+ z))
        (> (+ (player-z player) (player-half-width player)) z)))
 
-(defun player-position-clear-p (player world x y z)
-  "Return true when PLAYER's AABB would be clear at X, Y, Z."
-  (multiple-value-bind (minimum-x maximum-x)
-      (player-overlap-indices (- x (player-half-width player))
-                              (+ x (player-half-width player)))
-    (multiple-value-bind (minimum-y maximum-y)
-        (player-overlap-indices y (+ y (player-height player)))
-      (multiple-value-bind (minimum-z maximum-z)
-          (player-overlap-indices (- z (player-half-width player))
-                                  (+ z (player-half-width player)))
-        (loop for block-x from minimum-x to maximum-x never
-          (loop for block-y from minimum-y to maximum-y thereis
-            (loop for block-z from minimum-z to maximum-z
-                  thereis (player-terrain-solid-p
-                           world block-x block-y block-z))))))))
+(defun body-position-clear-p (body world x y z)
+  "Return true when BODY's AABB would be clear standing at X, Y, Z."
+  (let ((half-width (body-half-width body)))
+    (multiple-value-bind (minimum-x maximum-x)
+        (body-overlap-indices (- x half-width) (+ x half-width))
+      (multiple-value-bind (minimum-y maximum-y)
+          (body-overlap-indices y (+ y (body-height body)))
+        (multiple-value-bind (minimum-z maximum-z)
+            (body-overlap-indices (- z half-width) (+ z half-width))
+          (loop for block-x from minimum-x to maximum-x never
+            (loop for block-y from minimum-y to maximum-y thereis
+              (loop for block-z from minimum-z to maximum-z
+                    thereis (world-terrain-solid-p
+                             world block-x block-y block-z)))))))))
 
 (defun step-block-world-player
     (player world camera pressed-keys seconds &key jump-p (sync-camera-p t))
@@ -482,18 +515,18 @@ FRAME-UNIFORM-DATA from the session's sky clock and profile."
             (player-grounded-p player) nil))
     (let* ((distance-x (* (player-velocity-x player) seconds))
            (attempted-x (+ (player-x player) distance-x))
-           (collided-x-p (move-player-axis player world :x distance-x))
+           (collided-x-p (move-body-axis player world :x distance-x))
            (distance-z (* (player-velocity-z player) seconds))
            (attempted-z (+ (player-z player) distance-z))
-           (collided-z-p (move-player-axis player world :z distance-z))
+           (collided-z-p (move-body-axis player world :z distance-z))
            (step-y (+ (player-y player) +player-step-height+))
            (clear-above-x-p
              (and collided-x-p
-                  (player-position-clear-p
+                  (body-position-clear-p
                    player world attempted-x step-y (player-z player))))
            (clear-above-z-p
              (and collided-z-p
-                  (player-position-clear-p
+                  (body-position-clear-p
                    player world (player-x player) step-y attempted-z))))
       (when (and grounded-p
                  (not jump-p)
@@ -505,7 +538,7 @@ FRAME-UNIFORM-DATA from the session's sky clock and profile."
     (setf (player-velocity-y player)
           (max +player-terminal-fall-speed+ (player-velocity-y player))
           (player-grounded-p player) nil)
-    (move-player-axis player world :y (* (player-velocity-y player) seconds)))
+    (move-body-axis player world :y (* (player-velocity-y player) seconds)))
   (when sync-camera-p
     (sync-camera-to-player camera player))
   player)

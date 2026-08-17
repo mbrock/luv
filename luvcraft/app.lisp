@@ -81,6 +81,9 @@
    (particle-system :initarg :particle-system
                     :initform (make-instance 'block-particle-system)
                     :reader luvcraft-session-particle-system)
+   (critters :initarg :critters
+             :initform (make-instance 'critter-population)
+             :reader luvcraft-session-critters)
    (title-base :initarg :title-base :initform "luvcraft"
                :reader luvcraft-session-title-base)
    (atlas-texture :initarg :atlas-texture
@@ -153,6 +156,8 @@
                   :reader luvcraft-session-post-pipeline)
    (particle-vertex-buffer :initarg :particle-vertex-buffer
                            :reader luvcraft-session-particle-vertex-buffer)
+   (critter-vertex-buffer :initarg :critter-vertex-buffer
+                          :reader luvcraft-session-critter-vertex-buffer)
    (world-text :initarg :world-text :initform nil
                :reader luvcraft-session-world-text)
    (world-text-glyph-cache :initarg :world-text-glyph-cache :initform nil
@@ -273,6 +278,29 @@ to block editing or to unrelated overlays."))
   (declare (ignore focus session))
   nil)
 
+(defgeneric luvcraft-focus-carries-player-p (focus)
+  (:documentation
+   "Whether FOCUS moves the player itself instead of the player controller.
+
+A terminal on a wall leaves the player standing in front of it and the ordinary
+scalar controller keeps running.  A mount does not: it carries the player, so
+the controller must stand down for as long as the interaction lasts."))
+
+(defmethod luvcraft-focus-carries-player-p (focus)
+  (declare (ignore focus))
+  nil)
+
+(defgeneric advance-luvcraft-focus (focus session seconds)
+  (:documentation
+   "Let FOCUS take its own turn in SESSION's simulation, before the player's.
+
+A focus which only reads input needs nothing here; a moving one -- a mount, a
+vehicle, a cutscene -- does its own work in this method."))
+
+(defmethod advance-luvcraft-focus (focus session seconds)
+  (declare (ignore focus session seconds))
+  nil)
+
 (defgeneric luvcraft-overlay-focus-insets (overlay session)
   (:documentation
    "Return left, top, right, and bottom pixel insets obscured by OVERLAY."))
@@ -342,6 +370,18 @@ to block editing or to unrelated overlays."))
   (declare (ignore block session hit))
   nil)
 
+(defgeneric activate-luvcraft-critter (critter session)
+  (:documentation
+   "Create and return a focusable interaction for targeted CRITTER, or NIL.
+
+The animal counterpart of ACTIVATE-LUVCRAFT-TARGET: an animal which can be
+mounted answers with the ride, and one which cannot answers NIL and is simply
+looked at."))
+
+(defmethod activate-luvcraft-critter (critter session)
+  (declare (ignore critter session))
+  nil)
+
 (defgeneric attach-luvcraft-hud (session)
   (:documentation
    "Attach the player HUD supplied by the loaded presentation system.
@@ -403,6 +443,24 @@ mounting a vehicle, and other interactions described by #8JCMA5."
       (handle-luvcraft-focus-event focus session canvas event)
       t)))
 
+(defun luvcraft-session-targeted-critter
+    (session &key (max-distance +luvcraft-target-reach+))
+  "Return the animal SESSION's centre view ray reaches first, and how far.
+
+An animal standing behind a wall is not targeted: whichever of the animal and
+the terrain the ray meets first is what the player is looking at."
+  (let ((camera (luvcraft-session-camera session)))
+    (multiple-value-bind (right up forward) (camera-basis camera)
+      (declare (ignore right up))
+      (multiple-value-bind (critter distance)
+          (critter-along-ray (luvcraft-session-critters session)
+                             (camera-position camera) forward max-distance)
+        (when critter
+          (let ((hit (luvcraft-session-target
+                      session :max-distance max-distance)))
+            (unless (and hit (< (block-ray-hit-distance hit) distance))
+              (values critter distance))))))))
+
 (defun luvcraft-session-focus-candidate (session)
   "Return or activate SESSION's best currently targeted focusable object."
   (or (loop with best = nil
@@ -414,6 +472,9 @@ mounting a vehicle, and other interactions described by #8JCMA5."
               do (setf best overlay
                        best-score score)
             finally (return best))
+      (alexandria:when-let
+          ((critter (luvcraft-session-targeted-critter session)))
+        (activate-luvcraft-critter critter session))
       (multiple-value-bind (hit status) (luvcraft-session-target session)
         (declare (ignore status))
         (when hit

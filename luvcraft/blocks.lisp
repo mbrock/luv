@@ -247,7 +247,7 @@ kinds through this vocabulary instead of printing CLOS object identities."
         (error "No block kind is named ~S." name))))
 
 (defconstant +block-atlas-tile-size+ 16)
-(defconstant +block-atlas-tile-count+ 23)
+(defconstant +block-atlas-tile-count+ 26)
 (defconstant +block-atlas-texture-format+ :rgba8-unorm-srgb)
 (defconstant +block-normal-atlas-texture-format+ :rgba8-unorm)
 
@@ -287,6 +287,21 @@ than arriving as authored assets."))
          (offset (if (oddp course) (floor brick-width 2) 0)))
     (or (zerop (mod y course-height))
         (zerop (mod (+ x offset) brick-width)))))
+
+(defun block-atlas-plate-distance (x y width height &key (stagger-p t))
+  "Return 0..1 distance from X,Y to the centre of its WIDTH by HEIGHT plate.
+
+The same bond BLOCK-ATLAS-BRICK-MORTAR-P reads as a mask, read as a shape
+instead: zero in the middle of a panel and one along its boundary, so a
+plated surface can be both coloured and domed from one expression."
+  (let* ((course (floor y height))
+         (offset (if (and stagger-p (oddp course)) (floor width 2) 0))
+         (u (mod (+ x offset) width))
+         (v (mod y height))
+         (half-u (/ (1- width) 2.0))
+         (half-v (/ (1- height) 2.0)))
+    (max (/ (abs (- u half-u)) half-u)
+         (/ (abs (- v half-v)) half-v))))
 
 (defgeneric paint-block-atlas-tile (tile x y)
   (:documentation
@@ -487,6 +502,54 @@ material and rebuild the atlas without touching the rest of the palette."))
         (shaded-block-atlas-pixel
          58 69 77 (round (block-atlas-variation x y tile) 4)))))
 
+;;; Not every atlas tile is a material the player places.  The last three
+;;; belong to the animals which walk over the terrain rather than to the
+;;; terrain itself: a critter model is built from small textured boxes drawn by
+;;; the ordinary block surface pipeline, so its hide is painted by exactly the
+;;; same per-tile arithmetic as stone or moss.  See CRITTERS.LISP.
+
+(defconstant +turtle-carapace-tile+ 23)
+(defconstant +turtle-skin-tile+ 24)
+(defconstant +turtle-plastron-tile+ 25)
+
+;;; A critter tile is stretched across a box face a fraction of a cell wide
+;;; rather than tiled over a whole block, so its pattern is deliberately
+;;; several times finer than a terrain material's: roughly three scutes across
+;;; a shell rather than two plates across a wall.
+
+(defconstant +turtle-scute-width+ 5)
+(defconstant +turtle-scute-height+ 4)
+
+(defmethod paint-block-atlas-tile ((tile (eql 23)) x y)
+  "Turtle carapace: small staggered scutes with dark keratin joints."
+  (let ((distance (block-atlas-plate-distance
+                   x y +turtle-scute-width+ +turtle-scute-height+))
+        (variation (round (block-atlas-variation x y tile) 3)))
+    (if (block-atlas-brick-mortar-p
+         x y +turtle-scute-width+ +turtle-scute-height+)
+        (shaded-block-atlas-pixel 56 70 40 variation)
+        (shaded-block-atlas-pixel
+         84 108 50 (+ variation (round (* 22 (- 0.75 distance))))))))
+
+(defmethod paint-block-atlas-tile ((tile (eql 24)) x y)
+  "Turtle skin: dark olive hide pebbled with paler flecks."
+  (let ((pebble (- (block-atlas-clump x y 241 3) 128))
+        (fleck (if (> (block-atlas-lattice-hash x y 242) 232) 34 0)))
+    (pack-block-atlas-rgba (+ 98 (round pebble 5) fleck)
+                           (+ 116 (round pebble 4) fleck)
+                           (+ 56 (round pebble 7) (round fleck 2)))))
+
+(defun turtle-plastron-seam-p (x y)
+  "Whether X,Y lies in the straight seam between two belly plates."
+  (or (zerop (mod x 6)) (zerop (mod y 5))))
+
+(defmethod paint-block-atlas-tile ((tile (eql 25)) x y)
+  "Turtle plastron: pale horn plates in a straight, unstaggered bond."
+  (let ((variation (round (block-atlas-variation x y tile) 4)))
+    (if (turtle-plastron-seam-p x y)
+        (shaded-block-atlas-pixel 148 130 88 variation)
+        (shaded-block-atlas-pixel 202 188 132 variation))))
+
 ;;; Colour is only half of what a material looks like.  The other half is its
 ;;; micro-surface: whether it is granular, grooved, tufted, or faceted.  The
 ;;; normal atlas carries that as a height field and the unit normal derived
@@ -681,6 +744,29 @@ material and rebuild the atlas without touching the rest of the palette."))
       68
       (block-atlas-byte
        (+ 151 (* 0.12 (- (block-atlas-lattice-hash x y 221) 128))))))
+
+(defmethod paint-block-atlas-relief ((tile (eql 23)) x y)
+  "Turtle carapace: each scute domes up out of the joint around it."
+  (let ((distance (block-atlas-plate-distance
+                   x y +turtle-scute-width+ +turtle-scute-height+)))
+    (block-atlas-byte
+     (+ (if (block-atlas-brick-mortar-p
+             x y +turtle-scute-width+ +turtle-scute-height+)
+            58
+            (+ 158 (* 52 (- 0.75 distance))))
+        (* 0.10 (- (block-atlas-lattice-hash x y 231) 128))))))
+
+(defmethod paint-block-atlas-relief ((tile (eql 24)) x y)
+  "Turtle skin: small tight pebbles all over the hide."
+  (block-atlas-byte
+   (+ 118 (* 0.34 (- (block-atlas-clump x y 241 3) 128))
+      (* 0.22 (- (block-atlas-lattice-hash x y 243) 128)))))
+
+(defmethod paint-block-atlas-relief ((tile (eql 25)) x y)
+  "Turtle plastron: flat belly plates with narrow sunken seams."
+  (block-atlas-byte
+   (+ (if (turtle-plastron-seam-p x y) 72 150)
+      (* 0.09 (- (block-atlas-lattice-hash x y 251) 128)))))
 
 (defun make-block-texture-atlas ()
   "Return the little world's horizontal RGBA8 atlas as packed pixel words.

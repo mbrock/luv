@@ -309,6 +309,213 @@
     (luvcraft::advance-block-particles system 1.0)
     (ok (zerop (block-particle-count system)))))
 
+(defun make-critter-test-world (&key (surface luvcraft::*grass-block*))
+  "A one-chunk world with a flat SURFACE top at y=1, for walking animals over."
+  (let ((world (make-block-world)))
+    (ensure-world-chunk world 0 0 0)
+    (loop for x below 16 do
+      (loop for z below 16 do
+        (setf (world-block-at world x 0 z) luvcraft::*dirt-block*
+              (world-block-at world x 1 z) surface)))
+    (relight-block-world world)
+    world))
+
+(deftest turtles-stand-on-the-ground-they-walk-over
+  (let* ((world (make-critter-test-world))
+         (turtle (spawn-critter-at :turtle world 8 2 8 4242)))
+    (ok (typep turtle 'turtle))
+    (ok (eq :turtle (critter-species turtle)))
+    (dotimes (step 1200)
+      (declare (ignorable step))
+      (advance-critter turtle world (/ 1d0 60)))
+    ;; It rests on the surface it started on, has not fallen through the
+    ;; world or climbed it, and has actually gone somewhere.
+    (ok (luvcraft::critter-grounded-p turtle))
+    (ok (< (abs (- 2d0 (critter-y turtle))) 1d-3))
+    (ok (> (+ (abs (- (critter-x turtle) 8.5d0))
+              (abs (- (critter-z turtle) 8.5d0)))
+           0.5d0))
+    ;; And it stays inside the chunk it was spawned in: a turtle walking into
+    ;; the world boundary turns away from it rather than leaving.
+    (ok (<= 0d0 (critter-x turtle) 16d0))
+    (ok (<= 0d0 (critter-z turtle) 16d0))))
+
+(deftest turtles-wander-the-same-way-from-the-same-seed
+  (let ((world (make-critter-test-world))
+        (positions '()))
+    (dotimes (attempt 2)
+      (declare (ignorable attempt))
+      (let ((turtle (spawn-critter-at :turtle world 8 2 8 777)))
+        (dotimes (step 600)
+          (declare (ignorable step))
+          (advance-critter turtle world (/ 1d0 60)))
+        (push (list (critter-x turtle) (critter-z turtle)
+                    (critter-yaw turtle))
+              positions)))
+    (ok (equal (first positions) (second positions)))))
+
+(deftest a-turtle-says-which-ground-it-lives-on
+  (let ((meadow (make-critter-test-world))
+        (bare (make-critter-test-world :surface luvcraft::*stone-block*)))
+    (ok (spawn-critter-at :turtle meadow 4 2 4 1))
+    (ok (spawn-critter-at :turtle
+                          (make-critter-test-world
+                           :surface luvcraft::*sand-block*)
+                          4 2 4 1))
+    ;; Stone is not turtle country, an occupied cell is nobody's, and a
+    ;; species nothing has claimed is an error rather than a silent absence.
+    (ok (null (spawn-critter-at :turtle bare 4 2 4 1)))
+    (setf (world-block-at meadow 4 2 4) luvcraft::*stone-block*)
+    (ok (null (spawn-critter-at :turtle meadow 4 2 4 1)))
+    (ok (signals (spawn-critter-at :axolotl meadow 4 2 4 1) 'error))))
+
+(deftest a-critter-population-fills-up-and-forgets-what-wanders-off
+  (let ((world (make-critter-test-world))
+        (population (make-instance 'critter-population :target-count 3)))
+    ;; Only the resident chunk offers sites, so the neighbourhood has to be
+    ;; visited a few times before it is as full as it wants to be.
+    (dotimes (frame 40)
+      (declare (ignorable frame))
+      (maintain-critter-population population world 8d0 8d0))
+    (ok (= 3 (critter-count population)))
+    (ok (every (lambda (critter) (typep critter 'turtle))
+               (critter-population-critters population)))
+    (maintain-critter-population population world 900d0 900d0)
+    (ok (zerop (critter-count population)))))
+
+(deftest a-critter-model-is-a-bounded-stream-of-turned-boxes
+  (let* ((world (make-critter-test-world))
+         (population (make-instance 'critter-population))
+         (turtle (spawn-critter-at :turtle world 8 2 8 5)))
+    (setf (critter-yaw turtle) 0.9d0)
+    (add-critter population turtle)
+    (let ((vertices (critter-vertices population world)))
+      (ok (typep vertices '(array single-float (*))))
+      (ok (= (length vertices)
+             (* (critter-model-box-count turtle)
+                luvcraft::+critter-vertices-per-box+
+                luvcraft::+block-mesh-floats-per-vertex+)))
+      ;; Every vertex of every turned box stays within the animal: the yaw
+      ;; rotation moves the model around its own position rather than away
+      ;; from it, whatever heading it walks on.
+      (ok (loop for offset from 0 below (length vertices)
+                by luvcraft::+block-mesh-floats-per-vertex+
+                always
+                (let ((dx (- (aref vertices offset) (critter-x turtle)))
+                      (y (aref vertices (+ offset 1)))
+                      (dz (- (aref vertices (+ offset 2))
+                             (critter-z turtle))))
+                  (and (< (sqrt (+ (* dx dx) (* dz dz))) 0.65)
+                       (<= -0.001 (- y (critter-y turtle))
+                           (critter-height turtle)))))))))
+
+(defun make-critter-riding-session (&key (world (make-critter-test-world)))
+  "A headless session with one turtle in front of a player looking at it."
+  (let* ((population (make-instance 'critter-population))
+         (turtle (spawn-critter-at :turtle world 8 2 8 3))
+         (camera (make-instance 'fly-camera
+                                :position (make-vec3 8.5d0 2.3d0 5.5d0)
+                                :yaw 0d0 :pitch 0d0))
+         (player (make-instance 'block-world-player
+                                :position (make-vec3 8.5d0 2d0 5.5d0)))
+         (session (make-instance 'luvcraft-session
+                                 :world world :camera camera :player player
+                                 :critters population)))
+    (add-critter population turtle)
+    (values session turtle player world)))
+
+(deftest looking-at-an-animal-is-looking-past-the-terrain
+  (multiple-value-bind (session turtle player world)
+      (make-critter-riding-session)
+    (declare (ignore player))
+    (ok (eq turtle (luvcraft-session-targeted-critter session)))
+    ;; A wall between the two is decided by which the ray reaches first, not by
+    ;; whether the animal is within reach.
+    (setf (world-block-at world 8 2 7) luvcraft::*stone-block*)
+    (ok (null (luvcraft-session-targeted-critter session)))
+    (setf (world-block-at world 8 2 7) nil)
+    (ok (eq turtle (luvcraft-session-targeted-critter session)))
+    ;; And an animal beyond the player's reach is out of it.
+    (setf (vec3-z (camera-position (luvcraft-session-camera session)))
+          -8d0)
+    (ok (null (luvcraft-session-targeted-critter session)))))
+
+(deftest mounting-a-turtle-carries-the-player-and-reins-the-animal
+  (multiple-value-bind (session turtle player world)
+      (make-critter-riding-session)
+    (let ((ride (toggle-luvcraft-session-focus session)))
+      (ok (typep ride 'critter-ride))
+      (ok (eq turtle (critter-ride-critter ride)))
+      (ok (eq ride (luvcraft-session-modal-focus session)))
+      ;; A mount carries the player, so the ordinary controller stands down.
+      (ok (luvcraft-focus-carries-player-p ride))
+      ;; An unridden turtle rests first; a reined one walks.
+      (setf (gethash :w (luvcraft::critter-ride-reins ride)) t)
+      (let ((start-z (critter-z turtle)))
+        (dotimes (frame 300)
+          (declare (ignorable frame))
+          (advance-critters (luvcraft-session-critters session) world
+                            (/ 1d0 60))
+          (advance-luvcraft-focus ride session (/ 1d0 60)))
+        (ok (not (turtle-resting-p turtle)))
+        (ok (> (abs (- (critter-z turtle) start-z)) 0.2d0)))
+      ;; Wherever it went, the player went too.
+      (ok (< (abs (- (player-x player) (critter-x turtle))) 1d-6))
+      (ok (< (abs (- (player-z player) (critter-z turtle))) 1d-6))
+      ;; And the camera it asks for is a seat on the animal: over its own
+      ;; footprint, above its back, facing the way it faces give or take the
+      ;; sway of its gait.
+      (let* ((pose (luvcraft-focus-camera-pose ride session))
+             (position (luvcraft::camera-pose-position pose))
+             (dx (- (vec3-x position) (critter-x turtle)))
+             (dz (- (vec3-z position) (critter-z turtle))))
+        (ok (typep pose 'luvcraft::camera-pose))
+        (ok (< (sqrt (+ (* dx dx) (* dz dz)))
+               (* 2 (critter-half-width turtle))))
+        (ok (> (vec3-y position)
+               (+ (critter-y turtle) (critter-height turtle))))
+        (ok (< (abs (luvcraft::shortest-angle-difference
+                     (luvcraft::camera-pose-yaw pose) (critter-yaw turtle)))
+               0.1d0)))
+      ;; Shift-TAB is the same toggle: it puts the rider down somewhere their
+      ;; own box fits and gives the animal its mind back.
+      (ok (eq ride (toggle-luvcraft-session-focus session)))
+      (ok (null (luvcraft-session-modal-focus session)))
+      (ok (body-position-clear-p player world (player-x player)
+                                 (player-y player) (player-z player)))
+      (ok (turtle-resting-p turtle)))))
+
+(deftest a-ride-ends-when-its-animal-does
+  (multiple-value-bind (session turtle player world)
+      (make-critter-riding-session)
+    (declare (ignore player world))
+    (let ((ride (toggle-luvcraft-session-focus session))
+          (population (luvcraft-session-critters session)))
+      (ok (typep ride 'critter-ride))
+      (setf (fill-pointer (critter-population-critters population)) 0)
+      (advance-luvcraft-focus ride session (/ 1d0 60))
+      (ok (null (luvcraft-session-modal-focus session)))
+      (ok (eq turtle (critter-ride-critter ride))))))
+
+(deftest an-animal-nobody-can-ride-is-only-looked-at
+  (let ((critter (make-instance 'critter)))
+    (ok (null (activate-luvcraft-critter critter nil)))
+    (ok (null (luvcraft-focus-carries-player-p critter)))
+    ;; And it ignores a rider's wishes rather than failing to understand them.
+    (ok (null (urge-critter critter 1d0 1d0 0.1d0)))))
+
+(deftest a-turtle-and-the-player-are-both-bodies
+  (let ((turtle (make-instance 'turtle))
+        (player (make-instance 'block-world-player)))
+    (dolist (body (list turtle player))
+      (ok (typep (body-position body) 'luvcraft::vec3))
+      (ok (typep (body-velocity body) 'luvcraft::vec3))
+      (ok (plusp (body-half-width body)))
+      (ok (plusp (body-height body)))
+      (ok (null (body-grounded-p body)))
+      (setf (body-grounded-p body) t)
+      (ok (body-grounded-p body)))))
+
 (deftest vec3-is-imported-from-its-arithmetic-representation-package
   (dolist (package-name '("LUVCRAFT.WORLD" "LUVCRAFT"))
     (multiple-value-bind (symbol status)
@@ -1384,8 +1591,8 @@
        'error))
   (let ((atlas (make-block-texture-atlas))
         (normal-atlas (make-block-normal-atlas)))
-    (ok (equal (array-dimensions atlas) '(16 368)))
-    (ok (equal (array-dimensions normal-atlas) '(16 368)))
+    (ok (equal (array-dimensions atlas) '(16 416)))
+    (ok (equal (array-dimensions normal-atlas) '(16 416)))
     (ok (subtypep (array-element-type atlas) '(unsigned-byte 32)))
     (ok (subtypep (array-element-type normal-atlas) '(unsigned-byte 32)))
     (ok (/= (aref atlas 8 8) (aref atlas 8 (+ 8 (* 3 16)))))

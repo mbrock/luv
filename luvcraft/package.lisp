@@ -172,6 +172,12 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:block-surface-emission
            #:block-world-player
            #:block-world-source
+           #:body-grounded-p
+           #:body-half-width
+           #:body-height
+           #:body-position
+           #:body-position-clear-p
+           #:body-velocity
            #:camera-basis
            #:camera-field-of-view
            #:camera-pitch
@@ -199,6 +205,44 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:chunk-light-levels-at-coordinate
            #:compare-voxel-light-solvers
            #:chunk-mesh-dependency-stamp
+           #:activate-luvcraft-critter
+           #:add-critter
+           #:advance-critter
+           #:advance-critters
+           #:advance-luvcraft-focus
+           #:critter
+           #:critter-along-ray
+           #:critter-count
+           #:critter-ray-distance
+           #:critter-ride
+           #:critter-ride-critter
+           #:critter-sway
+           #:luvcraft-focus-carries-player-p
+           #:luvcraft-session-targeted-critter
+           #:urge-critter
+           #:critter-half-width
+           #:critter-height
+           #:critter-model-box-count
+           #:critter-population
+           #:critter-population-critters
+           #:critter-population-species
+           #:critter-population-target-count
+           #:critter-position
+           #:critter-species
+           #:critter-velocity
+           #:critter-vertices
+           #:critter-x
+           #:critter-y
+           #:critter-yaw
+           #:critter-z
+           #:maintain-critter-population
+           #:map-critter-boxes
+           #:move-body-axis
+           #:spawn-critter-at
+           #:turtle
+           #:turtle-heading
+           #:turtle-resting-p
+           #:world-terrain-solid-p
            #:edit-block-at
            #:edit-block-world-source
            #:edit-luvcraft-block
@@ -275,6 +319,7 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:luvcraft-session-meshed-world-revision
            #:luvcraft-session-outstanding-production
            #:luvcraft-session-overlays
+           #:luvcraft-session-critters
            #:luvcraft-session-particle-system
            #:luvcraft-session-player
            #:luvcraft-session-production-errors

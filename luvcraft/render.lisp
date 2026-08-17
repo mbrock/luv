@@ -598,7 +598,12 @@ the frame uniform cannot silently diverge between shader and host."
            (block-particle-vertices
             (luvcraft-session-particle-system session)))
          (particle-vertex-count
-           (/ (length particle-vertices) +block-mesh-floats-per-vertex+)))
+           (/ (length particle-vertices) +block-mesh-floats-per-vertex+))
+         (critter-vertices
+           (critter-vertices (luvcraft-session-critters session)
+                             (luvcraft-session-world session)))
+         (critter-vertex-count
+           (/ (length critter-vertices) +block-mesh-floats-per-vertex+)))
     (when (or sample (tracy-connected-p))
       (let ((mesh-vertices 0)
             (mesh-draws 0))
@@ -627,10 +632,14 @@ the frame uniform cannot silently diverge between shader and host."
                     0))
               (draws (+ 2 (if (plusp text-glyph-count) 1 0)
                         (* 2 mesh-draws)
-                        (if (plusp particle-vertex-count) 1 0)))
+                        (if (plusp particle-vertex-count) 1 0)
+                        ;; The animals are drawn twice: once into the shadow
+                        ;; map and once into the scene.
+                        (if (plusp critter-vertex-count) 2 0)))
               (vertices (+ +block-world-crosshair-vertex-count+ 3
                            (* 6 text-glyph-count)
                            particle-vertex-count
+                           (* 2 critter-vertex-count)
                            (* 2 mesh-vertices))))
           (when sample
             (setf (luvcraft-frame-sample-resident-chunk-count sample)
@@ -667,7 +676,11 @@ the frame uniform cannot silently diverge between shader and host."
       (when (plusp particle-vertex-count)
         (write-buffer
          (luvcraft-session-particle-vertex-buffer session)
-         particle-vertices)))
+         particle-vertices))
+      (when (plusp critter-vertex-count)
+        (write-buffer
+         (luvcraft-session-critter-vertex-buffer session)
+         critter-vertices)))
     (with-luvcraft-frame-timing
         (sample luvcraft-frame-sample-shadow-encode-seconds
                 :luvcraft/shadow-pass)
@@ -689,6 +702,12 @@ the frame uniform cannot silently diverge between shader and host."
               (set-vertex-buffer
                pass 0 (luvcraft-chunk-product-vertex-buffer product))
               (draw pass (block-mesh-vertex-count mesh)))))
+        ;; An animal standing in the sun casts a shadow like anything else
+        ;; solid; a tumbling smash fragment deliberately does not.
+        (when (plusp critter-vertex-count)
+          (set-vertex-buffer
+           pass 0 (luvcraft-session-critter-vertex-buffer session))
+          (draw pass critter-vertex-count))
         (end-pass pass))
       (prepare-texture
        encoder (luvcraft-session-shadow-depth-texture session)
@@ -722,6 +741,10 @@ the frame uniform cannot silently diverge between shader and host."
               (set-vertex-buffer
                pass 0 (luvcraft-chunk-product-vertex-buffer product))
               (draw pass (block-mesh-vertex-count mesh)))))
+        (when (plusp critter-vertex-count)
+          (set-vertex-buffer
+           pass 0 (luvcraft-session-critter-vertex-buffer session))
+          (draw pass critter-vertex-count))
         (when (plusp particle-vertex-count)
           (set-vertex-buffer
            pass 0 (luvcraft-session-particle-vertex-buffer session))
@@ -829,6 +852,22 @@ the frame uniform cannot silently diverge between shader and host."
         :source (luvcraft-session-presentation-texture session)
         :destination surface-texture)))))
 
+(defun luvcraft-session-neighborhood-center (session)
+  "Return the world X and Z the session's neighbourhood is centred on."
+  (let ((player (luvcraft-session-player session))
+        (camera (luvcraft-session-camera session)))
+    (if player
+        (values (player-x player) (player-z player))
+        (values (camera-x camera) (camera-z camera)))))
+
+(defun advance-luvcraft-critters (session seconds)
+  "Advance SESSION's animals and keep its neighbourhood populated with them."
+  (let ((critters (luvcraft-session-critters session))
+        (world (luvcraft-session-world session)))
+    (advance-critters critters world seconds)
+    (multiple-value-bind (x z) (luvcraft-session-neighborhood-center session)
+      (maintain-critter-population critters world x z))))
+
 (defun render-luvcraft-frame (session timestamp &optional sample)
   (when (luvcraft-session-running-p session)
     (describe-luvcraft-tracy-plots)
@@ -849,8 +888,20 @@ the frame uniform cannot silently diverge between shader and host."
             (advance-sky-clock (luvcraft-session-sky-clock session) seconds)
             (advance-block-particles
              (luvcraft-session-particle-system session) seconds)
-            (let ((player (luvcraft-session-player session)))
-              (when player
+            (advance-luvcraft-critters session seconds)
+            ;; A moving interaction takes its turn after the world it moves in
+            ;; and before the player controller, which stands down entirely
+            ;; while something else is carrying the player.
+            (let ((focus (luvcraft-session-modal-focus session)))
+              (advance-luvcraft-focus focus session seconds)
+              (when (and focus (luvcraft-focus-carries-player-p focus))
+                (setf (luvcraft-session-physics-accumulator session) 0d0
+                      (luvcraft-session-jump-requested-p session) nil)))
+            (let ((player (luvcraft-session-player session))
+                  (focus (luvcraft-session-modal-focus session)))
+              (when (and player
+                         (not (and focus
+                                   (luvcraft-focus-carries-player-p focus))))
                 (incf (luvcraft-session-physics-accumulator session) seconds)
                 (loop while (>= (luvcraft-session-physics-accumulator session)
                                 +player-physics-step+)
@@ -1018,6 +1069,12 @@ the frame uniform cannot silently diverge between shader and host."
                                 player
                                 (selected-block *stone-block*)
                                 (inventory (make-block-inventory))
+                                ;; A hidden capture wanting animals in frame
+                                ;; hands in a population it has already
+                                ;; placed; the ordinary game grows its own
+                                ;; around the player as it plays.
+                                (critters
+                                 (make-instance 'critter-population))
                                 checkpoint-writer
                                 (provider *gpu-provider*)
                                 (sky-clock (make-instance 'sky-clock))
@@ -1264,6 +1321,14 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                       (make-buffer-descriptor
                        :label "block smash particle vertices"
                        :size +block-particle-buffer-size+
+                       :usage '(:vertex)))))
+                  (critter-vertex-buffer
+                    (keep
+                     (create
+                      device
+                      (make-buffer-descriptor
+                       :label "critter model vertices"
+                       :size +critter-buffer-size+
                        :usage '(:vertex)))))
                   (layout
                     (keep
@@ -1530,6 +1595,8 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                      :crosshair-pipeline crosshair-pipeline
                      :post-pipeline post-pipeline
                      :particle-vertex-buffer particle-vertex-buffer
+                     :critter-vertex-buffer critter-vertex-buffer
+                     :critters critters
                      :world-text text-run
                      :world-text-glyph-cache text-glyph-cache
                      :resources resources)))

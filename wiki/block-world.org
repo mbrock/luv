@@ -96,9 +96,13 @@ finished system.
 
 The gazetteer is a small set of semantic screenshot descriptors.  Each entry
 names a gameplay-ish view, builds or streams the world it needs, pins the sky
-clock, chooses a camera, and captures through the real hidden SDL/Vulkan path.
-The first views cover generated terrain at noon and dusk, a placed emitter on
-a dark floor, and a crystal placed on a chunk seam.
+clock, chooses a camera, places any animals it wants in shot, and captures
+through the real hidden SDL/Vulkan path.  The views cover generated terrain at
+noon and dusk, a placed emitter on a dark floor, a crystal placed on a chunk
+seam, a yard of legible cast shadows, and a meadow of posed turtles (#KTRMAO).
+A capture never runs the frame simulation, which is what keeps it
+byte-deterministic and why the animals in a view arrive already placed rather
+than growing around a player.
 
 #+begin_src sh
 scripts/luv gazetteer build/gazetteer
@@ -413,6 +417,115 @@ Solidity, opacity, and ordinary face material may be derived from a palette
 entry rather than copied into fields.  Lighting, fluids, or ecological
 readings may deserve separate fields when algorithms actually consume them.
 
+* The first animal is an entity, not a field
+:PROPERTIES:
+:ID: KTRMAO
+:END:
+
+A turtle is the first thing in the little world with a life of its own, and
+it is built the way #F6R9QA says such a thing should be: a CLOS instance with
+a position, a heading, a small mind, and an independently inspectable
+lifetime, rather than a reading of a dense field over sites.  There are a
+handful of them alive at a time, so identity costs nothing.  What stays dense
+is what is always dense here — the per-frame render product, one interleaved
+vertex array over the ordinary block atlas and block surface pipeline, like
+the smash fragments before it.
+
+Three protocols meet in an animal, kept apart because they change for
+different reasons:
+
+- =advance-critter= is its behaviour, and the only part a new species really
+  has to think about.  A turtle walks a while, rests a while, turns away from
+  what it bumps into, and never jumps.  Nothing it decides comes from a
+  random state: its choices are hashed from its seed and the number of
+  choices it has already made, the same discipline the terrain source and the
+  fragment bursts keep, so the same animal in the same world wanders the same
+  way on every machine and in every replay.
+- the *body* protocol — =body-position=, =body-half-width=, =move-body-axis=
+  — is its contact with terrain, and it is the player controller's own
+  one-axis-at-a-time AABB sweep with the player factored out of it.  Item 5
+  of #S2K5HN said that scalar reference simulation was the behaviour later
+  dense body and contact domains must preserve; an animal is the second
+  participant, and the first evidence that the protocol was about bodies
+  rather than about the player.
+- =map-critter-boxes= is its appearance: a handful of textured boxes in the
+  animal's own frame, which the emitter turns by the animal's yaw.  A model
+  never sees world coordinates.
+
+Its hide is painted by the same per-tile arithmetic as stone and moss —
+carapace scutes, plastron plates, and pebbled skin are three more
+=paint-block-atlas-tile= and =paint-block-atlas-relief= methods.  One thing a
+terrain material never needs: a block face takes a whole tile because it is a
+whole cell, while an animal's faces are each a different fraction of a cell,
+so a critter face takes the centred fraction of its tile which keeps texels
+roughly the same size everywhere on the animal.  Without that, a shell wears
+scutes the size of itself and smears the same scutes into bands around its
+rim.
+
+An animal also answers a ray for itself.  The lattice traversal of
+#B4K7WR is no use here, because a critter is not on the lattice; what the
+crosshair asks is whether the ray enters the same upright box the animal's
+feet walk in, and whichever of the animal and the terrain the ray reaches
+first is what the player is looking at.
+
+* Riding is a focus that moves
+:PROPERTIES:
+:ID: W2E5HR
+:END:
+
+Mounting a turtle is the same session transition as reading a wall terminal
+(#8JCMA5), and it is meant to feel like one: TAB enters the interaction with
+whatever the crosshair is on, shift-TAB leaves it, ordinary player input
+stands down for the duration, and the camera eases out of wherever it was
+into the pose the interaction asks for — the same easing, at the same rate,
+into the same narrowed field of view.
+
+Two things distinguish a mount from a wall, and each is one generic function:
+
+- Its pose moves, and it is a *seat* rather than a distance: the pose
+  =luvcraft-focus-camera-pose= returns is a place on the animal's own back,
+  low over its shell, so the rider is on the animal instead of watching it
+  from behind.  Being asked again every frame is what makes the ride feel like
+  the animal's gait and the animal's own slow turns; =critter-sway= adds what
+  the pose cannot carry, the rock and roll of a walking body, as a small lift
+  and a small yaw.  Where the rider sits is art direction, settled by looking
+  at screenshots, so the three numbers are parameters rather than constants.
+- It carries the player.  =luvcraft-focus-carries-player-p= answers true, the
+  scalar controller stands down completely, and =advance-luvcraft-focus= sets
+  the player's body on the animal each frame.  That is what keeps chunk
+  residency, checkpoints, and the return camera all following the ride rather
+  than the place it started from.
+
+A ridden animal is reined rather than driven.  =urge-critter= hands the
+animal the rider's wishes as bounded values in -1..1 and the animal makes of
+them what it can, which for a turtle is a slow walk and a slower turn; the
+wanted heading is held within a bounded lead of the animal's own yaw, so a
+held rein cannot run ahead of what the animal is able to follow.  Getting off
+is a small search for room, because an animal can walk under a ledge its
+rider could not stand under.
+
+** TODO Let the animals be part of the saved world
+:PROPERTIES:
+:ID: L4OMIZ
+:END:
+
+*Intent.*  A checkpoint currently saves the world description and the player
+(#TR2JNQ) and says nothing about who lives in it, so every session grows a
+fresh population around the player and yesterday's turtle is not the one you
+meet today.  An animal with an inspectable lifetime should have a lifetime
+longer than a process.
+
+*Evidence.*  The population is small, sparse, and already deterministic given
+its seed, which makes it exactly the sparse exceptional state #K5T2VF
+describes rather than a field: a save entry per living animal, naming its
+species, position, heading, and seed.  The open question is what the world
+description owes an animal that has wandered into a chunk which is no longer
+resident.
+
+*Done when.*  Riding a turtle, checkpointing, restarting, and finding the
+same animal where it was left, with a test that round-trips a population
+through a save description.
+
 * The sequence that stays fun
 :PROPERTIES:
 :ID: S2K5HN
@@ -448,6 +561,11 @@ experience:
    for level of detail to solve a visible problem.
 8. *Let processes inhabit it.*  Fluids, growth, weathering, or ecology can
    produce narrow typed fields rather than swelling one universal cell record.
+9. *Let something live in it.*  Done as a first small proof: a turtle wanders
+   the resident surface on the player's own body protocol, is drawn as turned
+   boxes on the block pipeline, and can be mounted and ridden through the
+   modal focus the wall terminals already use.  #KTRMAO and #W2E5HR record
+   what an animal is and what riding one turned out to be.
 
 This is not a dependency graph.  A particularly delightful experiment may
 pull a later item forward.
