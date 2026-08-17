@@ -15,8 +15,13 @@
 
 (in-package #:mcluv)
 
-(defparameter *paper-texture-width* 500
-  "How many texture pixels wide a sheet is drawn.")
+(defparameter *paper-texture-width* 1200
+  "How many texture pixels wide a sheet is drawn.
+
+Sized for reading distance, which is the only distance at which a page of ten
+point body text is legible at all -- on paper too.  At 500 the body landed on
+ten pixels a line and broke up; much past this it is being minified instead,
+and the mirror texture has no mipmaps, so that aliases rather than softens.")
 
 (defparameter *paper-texture-height* 680
   "How many tall.  OPEN-LUVCRAFT-PAPER rebinds this to the first page's own
@@ -69,43 +74,50 @@ cut to the page: the sheet is the whole quad and its edge is the page edge.")
             (error () '())))
     frame))
 
-(defun paper-sheet-geometry (frame)
+(defun paper-sheet-geometry (frame texture-width texture-height)
   "Where the sheet sits in the texture, and how many texture pixels a point is.
 
-The page keeps its own proportions, so a page whose shape does not match the
-texture's leaves margins rather than being stretched to fit.  The texture is
-shaped like a page to keep those margins small."
-  (let* ((available-height (- *paper-texture-height* (* 2 *paper-margin*)))
-         (available-width (- *paper-texture-width* (* 2 *paper-margin*)))
+Measured from the texture the pane actually has rather than from the
+parameter it was asked for: the first page decides the shape, later pages of
+the same document need not be the same shape, and a page that is not gets
+centred with paper around it rather than stretched."
+  (let* ((available-height (- texture-height (* 2 *paper-margin*)))
+         (available-width (- texture-width (* 2 *paper-margin*)))
          (scale (min (/ available-height (paper-page-height frame))
                      (/ available-width (paper-page-width frame))))
          (width (* scale (paper-page-width frame)))
          (height (* scale (paper-page-height frame))))
-    (values (/ (- *paper-texture-width* width) 2.0)
-            (/ (- *paper-texture-height* height) 2.0)
+    (values (/ (- texture-width width) 2.0)
+            (/ (- texture-height height) 2.0)
             width height scale)))
 
-(defun paper-run-fitted-size (pane run scale)
-  "The size to set RUN at so it occupies the box the document gave it.
+(defun paper-condense-table (pane runs scale)
+  "How much to narrow each nominal size on this page, as size to ratio.
 
-The PDF was typeset in its own font and this is not that font: at the same
-nominal size the substitute sets wider or narrower, and a line that was
-justified to the measure spills off the page.  The document already says how
-wide each line ended up, so the size is condensed until the line fits it
-again.  That keeps the page's shape -- its margins, its ragged edge, where
-the lines break -- which is what makes it read as this document rather than
-as its words."
-  (let* ((nominal (* scale (luv.mupdf:text-run-size run)))
-         (target (* scale (luv.mupdf:text-run-width run)))
-         (string (luv.mupdf:text-run-string run)))
-    (if (or (<= nominal 0.0) (<= target 0.0) (zerop (length string)))
-        nominal
-        (let ((measured (text-size pane string
-                                   :text-style (make-text-style :serif nil
-                                                                nominal))))
-          (if (<= measured target)
-              nominal
-              (max 1.0 (* nominal (/ target measured))))))))
+The PDF was set in its own font and this is not that font: the substitute
+sets about a third wider, so a line justified to the measure spills off the
+page.  The document says how wide each line ended up, so the type is
+condensed until it fits again.
+
+The ratio is worked out per nominal size and not per line.  Fitting each line
+on its own looks like the obvious thing and is wrong: neighbouring lines of
+one paragraph then get sizes a few percent apart, and a paragraph whose type
+changes size line to line reads as broken in a way that a uniformly smaller
+paragraph does not.  So the widest line of a size decides for all of them."
+  (let ((table (make-hash-table :test #'eql)))
+    (dolist (run runs table)
+      (let* ((nominal (* scale (luv.mupdf:text-run-size run)))
+             (target (* scale (luv.mupdf:text-run-width run)))
+             (string (luv.mupdf:text-run-string run)))
+        (when (and (plusp nominal) (plusp target) (plusp (length string)))
+          (let ((measured (text-size pane string
+                                     :text-style (make-text-style :serif nil
+                                                                  nominal))))
+            (when (plusp measured)
+              (let ((key (luv.mupdf:text-run-size run)))
+                (setf (gethash key table)
+                      (min (/ target measured)
+                           (gethash key table 1.0)))))))))))
 
 (defmethod handle-repaint ((pane paper-pane) region)
   (declare (ignore region))
@@ -124,24 +136,31 @@ as its words."
                (make-rgb-color 0.985 0.980 0.960)
                (make-rgb-color 0.900 0.895 0.870))))
       (multiple-value-bind (sheet-left sheet-top width height scale)
-          (paper-sheet-geometry frame)
+          (with-bounding-rectangle* (left top right bottom) pane
+            (declare (ignore left top))
+            (paper-sheet-geometry frame right bottom))
         (declare (ignore width height))
-        (dolist (run (paper-runs frame))
-          (let ((size (paper-run-fitted-size pane run scale)))
-            (when (>= size 3.0)
-              (draw-text* pane (luv.mupdf:text-run-string run)
-                          (+ sheet-left (* scale (luv.mupdf:text-run-x run)))
-                          (+ sheet-top (* scale (luv.mupdf:text-run-y run)))
-                          :align-y :top
-                          :text-size size
-                          :ink *paper-text-ink*))))
+        (let ((condense (paper-condense-table pane (paper-runs frame) scale)))
+          (dolist (run (paper-runs frame))
+            (let ((size (* scale
+                           (luv.mupdf:text-run-size run)
+                           (gethash (luv.mupdf:text-run-size run)
+                                    condense 1.0))))
+              (when (>= size 3.0)
+                (draw-text* pane (luv.mupdf:text-run-string run)
+                            (+ sheet-left (* scale (luv.mupdf:text-run-x run)))
+                            (+ sheet-top (* scale (luv.mupdf:text-run-y run)))
+                            :align-y :top
+                            :text-size size
+                            :ink *paper-text-ink*)))))
         (draw-text* pane
                     (format nil "~A  ·  ~D / ~D"
                             (file-namestring
                              (luv.mupdf:document-pathname (paper-document frame)))
                             (1+ (paper-page frame))
                             (luv.mupdf:document-page-count (paper-document frame)))
-                    (/ *paper-texture-width* 2.0) (- *paper-texture-height* 9)
+                    (/ (bounding-rectangle-width pane) 2.0)
+                    (- (bounding-rectangle-height pane) 12)
                     :align-x :center :align-y :center :text-size 10
                     :ink *paper-muted-ink*))
       (setf (paper-painted frame) (paper-paint-state frame)))))
@@ -258,7 +277,7 @@ as its words."
 ;;;; Mounting it
 
 (defun open-luvcraft-paper (session &key (pathname *paper-document-pathname*)
-                                         (distance 1.9) (width 1.9)
+                                         (distance 1.05) (width 1.25)
                                          (right-offset 0.0))
   "Hang PATHNAME in front of SESSION's camera as a sheet standing in the world.
 
@@ -269,15 +288,28 @@ looking and focused with TAB like anything else."
          (manager (or (first (climi::frame-managers port))
                       (make-instance 'luv-frame-manager :port port)))
          (document (luv.mupdf:open-document pathname))
+         ;; The texture is cut to the first page's proportions, so the quad
+         ;; hung in the world is the sheet and there is no surround to fill.
+         ;; The size is passed to the frame rather than bound around it: the
+         ;; layout is consulted somewhere the binding does not reach, and a
+         ;; page-shaped parameter that quietly failed to apply is how the
+         ;; sheet came out landscape.
+         (texture-height
+           (multiple-value-bind (page-width page-height)
+               (luv.mupdf:page-size document 0)
+             (max 64 (round (* *paper-texture-width*
+                               (/ page-height (max 1.0 page-width)))))))
          (frame
            (let ((*embedded-mirror-target*
                    (luvcraft:luvcraft-session-canvas session))
                  (*embedded-mirror-context*
                    (luvcraft::luvcraft-session-context session))
                  (*embedded-mirror-device*
-                   (luvcraft::luvcraft-session-device session)))
+                   (luvcraft::luvcraft-session-device session))
+                 (*paper-texture-height* texture-height))
              (make-application-frame
               'luvcraft-paper :frame-manager manager :enable t
+              :width *paper-texture-width* :height texture-height
               :document document))))
     (setf (frame-pretty-name frame) "paper")
     (load-paper-page frame)
