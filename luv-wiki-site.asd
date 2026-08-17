@@ -38,4 +38,6 @@
                  (:static-file "images/slug-text-proof.png")
                  (:static-file "images/slug-world-text.png")
                  (:static-file "images/slug-world-text-closeup.png")
-                 (:static-file "images/terminal-block-wall.png")))))
+                 (:static-file "images/terminal-block-wall.png")
+                 (:static-file "images/hdr-day-vista.png")
+                 (:static-file "images/hdr-night-crystal.png")))))

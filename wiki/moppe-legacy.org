@@ -103,7 +103,7 @@ The post stack is largely backend-neutral fullscreen work, while mesh stages
 should enter luv's shader language only when a concrete native pipeline makes
 their types and interfaces precise.
 
-* IDEA Transplant the post stack onto the HDR path
+* DONE Transplant the post stack onto the HDR path
 :PROPERTIES:
 :ID: VG8TGG
 :END:
@@ -113,11 +113,45 @@ and restrained bloom toward Moppe's observed order: exposure, ACES, and a
 small live grade.  Treat sun shafts (#BAP0QU) as the first post effect after
 bloom because both inputs already exist.
 
+Observed: luvcraft's presentation stage now composes in linear light in
+Moppe's order --- exposure, bloom, shafts, the same Narkowicz ACES fit, and a
+vignette --- with every parameter a live special rather than a compiled
+constant (#IC14P3).  The bright pass took Moppe's soft-knee threshold and its
+five-linear-sample gaussian directly; the difference is that each stage is a
+CLOS shader role rather than a named Metal fragment function, so a redefined
+method rebuilds its pipeline at the next frame boundary.
+
+Two of Moppe's stages were deliberately not transplanted.  The chromatic
+fringe, ghosts, grain, and CDL-style grade belong to a photographic look which
+this block world has not asked for, and none of them would be evidence of
+anything.  Auto-exposure needs the readback probe and adaptation loop, which
+is its own piece of work; the sky profile's static exposure is enough while
+the frame has no wildly varying luminance.
+
+The shafts departed further: they sweep the blurred bright image toward the
+sun's screen position rather than marching the shadow map, so the "frame-time
+cost for the half-resolution shaft march" this mark asked to measure has no
+subject yet.  #94AUTK carries the marched version as the thing to compare
+against.
+
+* IDEA March the shadow map for shafts and compare against the screen sweep
+:PROPERTIES:
+:ID: 94AUTK
+:END:
+
+Intent: #VG8TGG shipped the cheap radial sweep because terrain which occludes
+the sun is already dark in the bright image.  #BAP0QU's marched version is
+strictly better informed: it knows about occluders which are off screen or
+behind the camera, and it produces beams in air the bright image says nothing
+about.  Whether that is visible enough to pay for is a measurement, not an
+argument.
+
 Evidence to gather:
 
-- a pinned dusk capture with and without grade; and
-- representative frame-time cost for the half-resolution shaft march.
+- a low-sun forest capture of each, from the same pinned pose and clock; and
+- frame time for each at the same resolution, with the march at half
+  resolution and jittered as Moppe's is.
 
-Done when: crystal-at-night and low-sun-forest captures show exposure, tone
-mapping, bloom, and shafts composing in linear light, each stage a live
-material with inspectable parameters.
+Done when: one of the two is chosen with a capture pair and a frame-time pair
+recorded here, or both are kept with a stated reason for choosing between them
+at runtime.

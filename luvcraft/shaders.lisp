@@ -992,7 +992,8 @@ than inlined three times."
 ;;; at cloud height, stars at night, and a compact solar disc pushed well past
 ;;; display white so the lens chain has something real to bloom.  Everything
 ;;; below the horizon fades into the exact fog colour distant terrain fades
-;;; to, so silhouettes meet the sky without a seam.
+;;; to, so silhouettes meet the sky without a seam.  #9SSXDJ records why an
+;;; HDR path wants a sky with something genuinely bright in it.
 
 (define-shader-method shader-specification-for
     block-world-sky-fragment-specification
@@ -1160,6 +1161,7 @@ than inlined three times."
 ;;; stage sees the same bind group shape -- source texture, linear sampler,
 ;;; presentation uniforms -- so one layout serves the whole chain, and the
 ;;; stage that reads it is chosen by CLOS role rather than by a mode lane.
+;;; #IC14P3 records the shape this stack took and where it left its plan.
 
 (define-shader-method shader-specification-for
     bloom-bright-fragment-specification

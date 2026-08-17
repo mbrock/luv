@@ -431,7 +431,9 @@ falling through to BLOCK-SOLID-P."))
 
 The two in-plane axes are chosen exactly as the fragment stage chooses
 them from the same normal, so U and V mean the same thing on both sides of
-the vertex ABI.  Returns (VALUES U-LOW U-HIGH V-LOW V-HIGH)."
+the vertex ABI.  Returns (VALUES U-LOW U-HIGH V-LOW V-HIGH).
+
+See #J19EBO for why this is the mesher's job and not the shader's."
   (flet ((solid-p (ox oy oz)
            (block-solid-p
             (mesher-block-at mesher samples (+ x ox) (+ y oy) (+ z oz)))))

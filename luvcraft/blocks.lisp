@@ -317,7 +317,10 @@ material and rebuild the atlas without touching the rest of the palette."))
 
 Like the colour, each numbered tile is one EQL method, so a live image can
 re-sculpt a single material's micro-surface and rebuild the atlas without
-touching the rest of the palette."))
+touching the rest of the palette.
+
+See #CHUKWD for why relief lives beside colour in generated arithmetic
+rather than arriving as an authored normal map."))
 
 (defmethod paint-block-atlas-relief (tile x y)
   "A plausible default: fine grain, so a new material is never dead flat."
