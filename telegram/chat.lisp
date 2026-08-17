@@ -68,6 +68,23 @@
            #:chat-photo-height
            #:decode-chat-photo
            #:download-chat-photo
+           #:download-file-location
+           ;; documents
+           #:chat-message-document
+           #:chat-document
+           #:chat-document-p
+           #:chat-document-id
+           #:chat-document-mime-type
+           #:chat-document-size
+           #:chat-document-file-name
+           #:chat-document-video-p
+           #:chat-document-animated-p
+           #:chat-document-width
+           #:chat-document-height
+           #:chat-document-duration
+           #:chat-document-label
+           #:decode-chat-document
+           #:download-chat-document
            ;; the roster
            #:roster
            #:make-roster
@@ -221,6 +238,7 @@ wants to ask about something that may not be there at all."
   (out-p nil)
   (service-p nil)
   (photo nil)
+  (document nil)
   (text "" :type string))
 
 ;;;; Photos
@@ -281,19 +299,14 @@ exists.")
              :width (tl:tl-value size :w)
              :height (tl:tl-value size :h))))))))
 
-(defun download-chat-photo (photo &key connection (chunk 524288))
-  "Fetch PHOTO's bytes with upload.getFile and return them as one vector.
+(defun download-file-location (location &key connection (chunk 524288))
+  "Fetch everything at LOCATION with upload.getFile, as one byte vector.
 
 CHUNK has to divide a megabyte and be a multiple of 4096, which is Telegram's
-rule and not ours.  A photo stored on another data centre answers
+rule and not ours.  A file stored on another data centre answers
 FILE_MIGRATE_N rather than bytes; that is signalled, since recovering from it
 means a second connection with an exported authorization."
-  (let ((location (tl:make-tl :input-photo-file-location
-                              :id (chat-photo-id photo)
-                              :access-hash (chat-photo-access-hash photo)
-                              :file-reference (chat-photo-file-reference photo)
-                              :thumb-size (chat-photo-size-type photo)))
-        (pieces '())
+  (let ((pieces '())
         (total 0))
     (loop for offset = 0 then (+ offset chunk)
           for answer = (client:invoke (client:current-connection connection)
@@ -310,6 +323,94 @@ means a second connection with an exported authorization."
       (dolist (piece (nreverse pieces) result)
         (replace result piece :start1 cursor)
         (incf cursor (length piece))))))
+
+(defun download-chat-photo (photo &key connection (chunk 524288))
+  "PHOTO's bytes, at the size DECODE-CHAT-PHOTO settled on."
+  (download-file-location
+   (tl:make-tl :input-photo-file-location
+               :id (chat-photo-id photo)
+               :access-hash (chat-photo-access-hash photo)
+               :file-reference (chat-photo-file-reference photo)
+               :thumb-size (chat-photo-size-type photo))
+   :connection connection :chunk chunk))
+
+;;;; Documents
+;;;;
+;;;; Everything Telegram does not call a photograph is a document: a video, a
+;;;; voice note, a sticker, a PDF.  What it is is not in the constructor but
+;;;; in its attribute vector and its MIME type, which is why this reads both.
+
+(defstruct (chat-document (:constructor make-chat-document))
+  (id 0 :type integer)
+  (access-hash 0 :type integer)
+  (file-reference nil)
+  (dc-id 0 :type integer)
+  (mime-type "" :type string)
+  (size 0 :type integer)
+  (file-name nil)
+  (video-p nil)
+  (animated-p nil)
+  (width 0 :type integer)
+  (height 0 :type integer)
+  (duration 0.0d0))
+
+(defun apply-document-attribute (document attribute)
+  (case (tl-name attribute)
+    (:document-attribute-video
+     (setf (chat-document-video-p document) t
+           (chat-document-width document)
+           (or (tl:tl-value attribute :w :errorp nil) 0)
+           (chat-document-height document)
+           (or (tl:tl-value attribute :h :errorp nil) 0)
+           (chat-document-duration document)
+           (or (tl:tl-value attribute :duration :errorp nil) 0.0d0)))
+    (:document-attribute-animated
+     (setf (chat-document-animated-p document) t))
+    (:document-attribute-filename
+     (setf (chat-document-file-name document)
+           (tl:tl-value attribute :file-name :errorp nil))))
+  document)
+
+(defun decode-chat-document (media)
+  "The CHAT-DOCUMENT a messageMediaDocument names, or NIL."
+  (when (and media (eq :message-media-document (tl-name media)))
+    (let ((record (tl:tl-value media :document :errorp nil)))
+      (when (and record (eq :document (tl-name record)))
+        (let ((document
+                (make-chat-document
+                 :id (tl:tl-value record :id)
+                 :access-hash (tl:tl-value record :access-hash)
+                 :file-reference (tl:tl-value record :file-reference)
+                 :dc-id (or (tl:tl-value record :dc-id :errorp nil) 0)
+                 :mime-type (or (tl:tl-value record :mime-type) "")
+                 :size (or (tl:tl-value record :size) 0))))
+          (loop for attribute across (tl:tl-value record :attributes)
+                do (apply-document-attribute document attribute))
+          ;; A GIF arrives as a soundless mp4 with the animated attribute, and
+          ;; plays the same way anything else does.
+          (when (and (not (chat-document-video-p document))
+                     (let ((type (chat-document-mime-type document)))
+                       (and (>= (length type) 6)
+                            (string= "video/" type :end2 6))))
+            (setf (chat-document-video-p document) t))
+          document)))))
+
+(defun chat-document-label (document)
+  (or (chat-document-file-name document)
+      (if (chat-document-video-p document)
+          (format nil "video ~Dx~D" (chat-document-width document)
+                  (chat-document-height document))
+          (chat-document-mime-type document))))
+
+(defun download-chat-document (document &key connection (chunk 524288))
+  "DOCUMENT's whole content as one byte vector."
+  (download-file-location
+   (tl:make-tl :input-document-file-location
+               :id (chat-document-id document)
+               :access-hash (chat-document-access-hash document)
+               :file-reference (chat-document-file-reference document)
+               :thumb-size "")
+   :connection connection :chunk chunk))
 
 (defun media-label (media)
   "A short bracketed word for a message that carries something."
@@ -331,7 +432,9 @@ means a second connection with an exported authorization."
    "A CHAT-MESSAGE for one Message constructor, or NIL for messageEmpty.")
   (:method (name record) (declare (ignore name record)) nil)
   (:method ((name (eql :message)) record)
-    (let ((photo (decode-chat-photo (tl:tl-value record :media :errorp nil))))
+    (let* ((media (tl:tl-value record :media :errorp nil))
+           (photo (decode-chat-photo media))
+           (document (decode-chat-document media)))
       (make-chat-message
        :id (tl:tl-value record :id)
        :date (tl:tl-value record :date)
@@ -339,9 +442,10 @@ means a second connection with an exported authorization."
        :from-key (peer-reference-key (tl:tl-value record :from-id :errorp nil))
        :out-p (and (tl:tl-value record :out :errorp nil) t)
        :photo photo
-       ;; A picture with a caption shows the caption; the "[photo]" stand-in
-       ;; is for the media this client cannot draw yet.
-       :text (if photo
+       :document document
+       ;; Media this client can present shows its caption; the bracketed
+       ;; stand-in is for the kinds it still cannot.
+       :text (if (or photo (and document (chat-document-video-p document)))
                  (or (tl:tl-value record :message :errorp nil) "")
                  (message-body-text record)))))
   (:method ((name (eql :message-service)) record)

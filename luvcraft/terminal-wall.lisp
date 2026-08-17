@@ -797,8 +797,14 @@ projection remain one last-known-good cohort."
     (release-video-screen screen))
   display)
 
-(defun play-terminal-display-film (display pathname)
-  "Play PATHNAME on DISPLAY's authored wall using the session's video backend."
+(defun play-terminal-display-film (display pathname &key (hardware :required))
+  "Play PATHNAME on DISPLAY's authored wall using the session's video backend.
+
+HARDWARE is the decode policy MAKE-VIDEO-SCREEN takes.  It defaults to
+:REQUIRED, which is right for authored films whose codec is known, and wrong
+for a film that arrived from somewhere: whatever a stranger's phone recorded
+is not necessarily something this device can decode in hardware, and :AUTO
+lets it fall back to software rather than refusing to play."
   (let* ((session (terminal-display-session display))
          (surface (terminal-display-surface display)))
     (unless session
@@ -809,7 +815,7 @@ projection remain one last-known-good cohort."
              (luvcraft-session-device session)
              (luvcraft-session-camera session)
              pathname +luvcraft-scene-color-format+
-             :hardware :required
+             :hardware hardware
              :rectangle
              (lambda (aspect)
                (terminal-film-rectangle surface aspect)))))

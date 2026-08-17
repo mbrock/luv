@@ -134,6 +134,17 @@ anything having to be stored.")
       (write-sequence bytes stream))
     path))
 
+(defun video-file-type (document)
+  "An extension FFmpeg will recognize from the name alone.
+
+The demuxer probes the content anyway, but a plausible suffix costs nothing
+and makes a leftover temporary file identifiable."
+  (let* ((name (telegram.chat:chat-document-file-name document))
+         (dot (and name (position #\. name :from-end t))))
+    (if (and dot (< (1+ dot) (length name)))
+        (subseq name (1+ dot))
+        "mp4")))
+
 (defun decode-photo-pattern (bytes width height)
   "Decode JPEG BYTES into a WIDTH by HEIGHT CLIM pattern, or NIL."
   (let ((path (write-temporary-octets bytes "jpg")))
@@ -160,7 +171,8 @@ anything having to be stored.")
   (out-p nil)
   (width 0 :type integer)
   (height 0 :type integer)
-  (pattern nil))
+  (pattern nil)
+  (document nil))
 
 (defun communicator-clock-string (unix-seconds)
   "UNIX-SECONDS as a local HH:MM."
@@ -218,6 +230,13 @@ can and mid-word when a word is longer than the whole line."
    ;; refetched on every pass forever.
    (photos :initform (make-hash-table :test #'eql) :reader console-photos)
    (wanted-photos :initform '() :accessor console-wanted-photos)
+   ;; A film the console has fetched and the render thread has not started
+   ;; yet.  Opening it makes GPU resources, so the console only downloads.
+   (pending-film :initform nil :accessor console-pending-film)
+   ;; The last thing that went wrong, kept until something goes right.  A
+   ;; failure passed to one PUBLISH-CONSOLE-VIEW would otherwise be erased by
+   ;; the very next publish, which is a good way never to see an error.
+   (failure :initform nil :accessor console-failure)
    (transcript-limit :initarg :transcript-limit :initform 40
                      :reader console-transcript-limit)
    (poll-interval :initarg :poll-interval :initform 2.0
@@ -277,10 +296,20 @@ a finished view for a McCLIM frame to paint."))
                           :width thumb-width :height thumb-height
                           :pattern (and (typep cached 'pattern) cached))
                          lines))))
+             (let ((document (telegram.chat:chat-message-document message)))
+               (when (and document (telegram.chat:chat-document-video-p document))
+                 (push (make-transcript-line
+                        :kind :video :ink ink :document document
+                        :text (telegram.chat:chat-document-label document))
+                       lines)))
              (dolist (text (wrap-communicator-text
                             (telegram.chat:chat-message-text message)
                             +communicator-text-columns+))
-               (unless (and photo (zerop (length text)))
+               (unless (and (or photo
+                                (let ((d (telegram.chat:chat-message-document
+                                          message)))
+                                  (and d (telegram.chat:chat-document-video-p d))))
+                            (zerop (length text)))
                  (push (make-transcript-line :kind :body :text text) lines))))
     (nreverse lines)))
 
@@ -299,6 +328,7 @@ a finished view for a McCLIM frame to paint."))
   ;; What is wanted is whatever this view turns out to reference; a picture
   ;; scrolled out of the transcript stops being worth a round trip.
   (setf (console-wanted-photos console) '())
+  (when failure (setf (console-failure console) failure))
   (let ((peer (console-selected-peer console)))
     (setf (console-view console)
           (make-console-view
@@ -309,7 +339,7 @@ a finished view for a McCLIM frame to paint."))
                              (format nil "~A"
                                      (telegram.client:user-label user))
                              "connected")))
-           :failure failure
+           :failure (console-failure console)
            :title (if peer (telegram.chat:peer-label peer) "Conversations")
            :subtitle (console-peer-subtitle peer)
            :dialogs (console-dialog-rows console)
@@ -330,7 +360,7 @@ Adding a command the panel can ask for is a method here.")
     (let ((peer (console-selected-peer console)))
       (when peer
         (telegram.chat:refresh-peer-history (console-roster console) peer
-                                            :limit 40)
+                                            :limit (console-transcript-limit console))
         (telegram.chat:mark-peer-read peer)))
     t)
   (:method (console (name (eql :send)) argument)
@@ -339,13 +369,25 @@ Adding a command the panel can ask for is a method here.")
         (telegram.chat:send-chat-message (console-roster console)
                                          peer argument)))
     t)
+  (:method (console (name (eql :play)) argument)
+    ;; Fetch the whole film and leave it where the render thread will find
+    ;; it.  Opening it here would make GPU resources on the wrong thread.
+    (handler-case
+        (setf (console-pending-film console)
+              (write-temporary-octets
+               (telegram.chat:download-chat-document argument)
+               (video-file-type argument)))
+      (error (condition)
+        (publish-console-view
+         console :failure (princ-to-string condition))))
+    t)
   (:method (console (name (eql :refresh)) argument)
     (declare (ignore argument))
     (telegram.chat:refresh-roster-dialogs (console-roster console) :limit 40)
     (let ((peer (console-selected-peer console)))
       (when peer
         (telegram.chat:refresh-peer-history (console-roster console) peer
-                                            :limit 40)))
+                                            :limit (console-transcript-limit console))))
     t))
 
 (defun drain-console-requests (console)
@@ -363,6 +405,8 @@ The connection is this thread's: TELEGRAM.CLIENT:*CONNECTION* is rebound
 around the whole loop, so RESUME makes it current here and nowhere else."
   (publish-console-view console :status "connecting…")
   (telegram.client:resume)
+  ;; Connecting is the "something went right" that retires an old complaint.
+  (setf (console-failure console) nil)
   (telegram.chat:refresh-roster-dialogs (console-roster console) :limit 40)
   (telegram.chat:synchronize-chat-updates (console-roster console))
   (publish-console-view console))
@@ -559,21 +603,24 @@ face rather than a blank square."
                            :align-x :center :align-y :center :text-size 12
                            :ink (make-rgb-color 0.05 0.1 0.05))))))
 
-(defun draw-communicator-transcript (pane view)
-  "Paint the tail of the transcript, bottom-anchored like every chat."
-  (let* ((left (+ +communicator-inset+ 6))
-         (right (- +communicator-width+ +communicator-inset+ 6))
-         (lines (console-view-lines view))
-         (heights (mapcar (lambda (line)
-                            (case (transcript-line-kind line)
-                              (:head 24)
-                              (:photo (+ 8 (transcript-line-height line)))
-                              (t 18)))
-                          lines))
+(defun transcript-line-extent (line)
+  (case (transcript-line-kind line)
+    (:head 24)
+    (:photo (+ 8 (transcript-line-height line)))
+    (:video 46)
+    (t 18)))
+
+(defun communicator-transcript-layout (view)
+  "The tail of VIEW's transcript that fits, as (LINE TOP HEIGHT) triples.
+
+Bottom-anchored like every chat, so the newest line sits against the
+composer.  Drawing and hit-testing both read this, which is the only way a
+click can land on the picture the player is actually looking at."
+  (let* ((lines (console-view-lines view))
+         (heights (mapcar #'transcript-line-extent lines))
          (available (- +communicator-screen-bottom+ +communicator-screen-top+))
          (total (reduce #'+ heights :initial-value 0))
          (y +communicator-screen-top+))
-    ;; Drop whole lines off the top until the tail fits.
     (loop while (and lines (> total available))
           do (decf total (pop heights))
              (pop lines))
@@ -581,6 +628,14 @@ face rather than a blank square."
       (incf y (- available total)))
     (loop for line in lines
           for height in heights
+          collect (list line y height)
+          do (incf y height))))
+
+(defun draw-communicator-transcript (pane view)
+  "Paint the tail of the transcript."
+  (let ((left (+ +communicator-inset+ 6))
+        (right (- +communicator-width+ +communicator-inset+ 6)))
+    (loop for (line y height) in (communicator-transcript-layout view)
           do (ecase (transcript-line-kind line)
                (:head
                 (draw-communicator-avatar
@@ -610,12 +665,32 @@ face rather than a blank square."
                                    (+ left 42 width) (+ y height)
                                    :filled nil :line-thickness 1
                                    :ink *communicator-bezel-dark*)))
+               (:video
+                (let ((document (transcript-line-document line)))
+                  (draw-communicator-plate
+                   pane (+ left 42) y (+ left 42 260) (+ y 38)
+                   :ink (make-rgb-color 0.17 0.17 0.19) :recessed-p t)
+                  (draw-communicator-button
+                   pane (+ left 48) (+ y 4) (+ left 80) (+ y 34) "▶")
+                  (draw-text* pane (transcript-line-text line)
+                              (+ left 90) (+ y 13)
+                              :align-y :center :text-size 12
+                              :ink *communicator-text-ink*)
+                  (draw-text* pane
+                              (format nil "~,1Fs  ~,1FMB"
+                                      (telegram.chat:chat-document-duration
+                                       document)
+                                      (/ (telegram.chat:chat-document-size
+                                          document)
+                                         1048576.0))
+                              (+ left 90) (+ y 28)
+                              :align-y :center :text-size 10
+                              :ink *communicator-muted-ink*)))
                (:body
                 (draw-text* pane (transcript-line-text line)
                             (+ left 42) (+ y 9)
                             :align-y :center :text-size 14
-                            :ink *communicator-text-ink*)))
-             (incf y height))))
+                            :ink *communicator-text-ink*))))))
 
 (defun draw-communicator-composer (frame pane)
   (let ((left +communicator-inset+)
@@ -737,7 +812,23 @@ face rather than a blank square."
   "Repaint only when the console has published something new, or the player
 has typed.  This runs every frame, so it has to be cheap to say no."
   (declare (ignore session))
-  (let ((frame (widget-overlay-frame overlay)))
+  (let* ((frame (widget-overlay-frame overlay))
+         (console (communicator-console frame)))
+    ;; A film the console finished fetching is started here, on the thread
+    ;; that owns the device.  The wall stays in :TELEGRAM mode: the film
+    ;; suppresses the panel while it runs and gives it back when it stops.
+    (alexandria:when-let ((path (console-pending-film console)))
+      (setf (console-pending-film console) nil)
+      (let ((display (communicator-overlay-display overlay)))
+        (handler-case
+            (progn (luvcraft:play-terminal-display-film
+                    display path :hardware :auto)
+                   (setf (luvcraft:terminal-display-mode display) :telegram))
+          (error (condition)
+            ;; Say so on the panel rather than dropping it: a film that will
+            ;; not open is the one thing the player is waiting on.
+            (publish-console-view
+             console :failure (princ-to-string condition))))))
     (unless (equal (communicator-paint-state frame)
                    (communicator-painted frame))
       (repaint-communicator frame)))
@@ -752,6 +843,13 @@ has typed.  This runs every frame, so it has to be cheap to say no."
             (luv:canvas-pointer-event-y event))))
     (list (* (first uv) +communicator-width+)
           (* (second uv) +communicator-height+))))
+
+(defun communicator-video-line-at (view y)
+  "The playable video line at texture Y, if the click landed on one."
+  (loop for (line top height) in (communicator-transcript-layout view)
+        when (and (eq :video (transcript-line-kind line))
+                  (<= top y) (< y (+ top height)))
+          return line))
 
 (defun communicator-dialog-at (view y)
   (let ((index (floor (- y +communicator-screen-top+)
@@ -784,7 +882,13 @@ has typed.  This runs every frame, so it has to be cheap to say no."
             ((eq :dialogs (communicator-screen frame))
              (alexandria:when-let ((row (communicator-dialog-at view y)))
                (console-request console :select (dialog-row-key row))
-               (setf (communicator-screen frame) :chat)))))))
+               (setf (communicator-screen frame) :chat)))
+            (t
+             ;; A click inside a video's plate plays it on the wall.
+             (alexandria:when-let
+                 ((line (communicator-video-line-at view y)))
+               (console-request console :play
+                                (transcript-line-document line))))))))
     t))
 
 (defmethod luvcraft:handle-luvcraft-focus-event
