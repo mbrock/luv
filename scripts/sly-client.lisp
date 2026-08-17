@@ -255,6 +255,65 @@ wedged image looks like, and the difference has to be visible from here.")
            :wait t)))
     (sb-ext:process-exit-code process)))
 
+(defun run-shell-output (command)
+  "Run COMMAND under /bin/sh and return its standard output as a string."
+  (with-output-to-string (output)
+    (sb-ext:run-program
+     "/bin/sh" (list "-c" command)
+     :search nil
+     :output output
+     :error nil
+     :wait t)))
+
+(defun split-lines (text)
+  (loop with start = 0
+        for newline = (position #\Newline text :start start)
+        collect (string-right-trim '(#\Return) (subseq text start newline))
+        while newline
+        do (setf start (1+ newline))))
+
+(defstruct (port-holder (:constructor make-port-holder (pid command)))
+  pid
+  command)
+
+(defun port-holders (&optional (port *port*))
+  "The processes holding a listening socket on PORT, as lsof reports them.
+
+A dead image's shell can outlive it still holding the inherited listening
+socket, which is exactly the state where the port accepts TCP and answers
+nothing."
+  (let ((pid nil)
+        (holders nil))
+    (dolist (line (split-lines
+                   (run-shell-output
+                    (format nil "lsof -nP -iTCP:~D -sTCP:LISTEN -Fpc 2>/dev/null"
+                            port)))
+             (nreverse holders))
+      (when (plusp (length line))
+        (case (char line 0)
+          (#\p (setf pid (parse-integer (subseq line 1) :junk-allowed t)))
+          (#\c (when pid
+                 (push (make-port-holder pid (subseq line 1)) holders)
+                 (setf pid nil))))))))
+
+(defun lisp-holder-p (holder)
+  "True when HOLDER looks like a Lisp image rather than a leaked descriptor.
+
+./sly reclaims a squatted port by killing what holds it, and a Lisp is the
+one kind of holder that might be somebody's live image: it is reported, never
+killed."
+  (let ((command (string-downcase (port-holder-command holder))))
+    (or (search "sbcl" command)
+        (search "lisp" command)
+        (search "emacs" command)
+        (search "luvcraft" command))))
+
+(defun describe-port-holders (holders &optional (stream *error-output*))
+  (dolist (holder holders)
+    (format stream "  pid ~D ~A~%"
+            (port-holder-pid holder)
+            (port-holder-command holder))))
+
 (defun pid-from-file (pathname)
   (with-open-file (stream pathname :if-does-not-exist nil)
     (and stream
@@ -346,18 +405,86 @@ wedged image looks like, and the difference has to be visible from here.")
     (print-server-log-tail)
     (error "Timed out waiting for luv Slynk on ~A:~D" *host* *port*)))
 
+(defun kill-port-holders (holders signal)
+  (dolist (holder holders)
+    (run-shell (format nil "kill -~A ~D >/dev/null 2>&1"
+                       signal (port-holder-pid holder)))))
+
+(defun reclaim-port (&key quiet)
+  "Free *PORT* when it accepts TCP but no Slynk answers behind it.
+
+The usual cause is a descriptor a dead image left behind: a shell it spawned
+in the terminal wall inherited the listening socket and outlived it, so the
+kernel keeps the port bound for a process that will never accept anything.
+Nothing can close another process's descriptor, so the holders are killed --
+except a Lisp, which might be somebody's live image and is only reported."
+  (let* ((holders (port-holders))
+         (lisps (remove-if-not #'lisp-holder-p holders))
+         (leftovers (remove-if #'lisp-holder-p holders)))
+    (cond
+      ((null holders)
+       (unless quiet
+         (format *error-output*
+                 "Port ~D answered no Slynk handshake and nothing holds it now.~%"
+                 *port*))
+       t)
+      (lisps
+       (format *error-output*
+               "Port ~D is held by a Lisp that answers no Slynk handshake:~%"
+               *port*)
+       (describe-port-holders lisps)
+       (format *error-output*
+               "Kill it yourself, or set LUV_SLYNK_PORT to another port.~%")
+       nil)
+      (t
+       (format *error-output*
+               "Port ~D answers no Slynk handshake, so nothing is listening ~
+there in any useful sense.  Killing what holds it:~%"
+               *port*)
+       (describe-port-holders leftovers)
+       (kill-port-holders leftovers "TERM")
+       (loop repeat 20
+             while (port-holders)
+             do (sleep 0.1))
+       (when (port-holders)
+         (kill-port-holders (port-holders) "KILL")
+         (loop repeat 20
+               while (port-holders)
+               do (sleep 0.1)))
+       (let ((remaining (port-holders)))
+         (cond
+           (remaining
+            (format *error-output* "Port ~D is still held after SIGKILL:~%" *port*)
+            (describe-port-holders remaining)
+            nil)
+           (t
+            (format *error-output* "Reclaimed port ~D.~%" *port*)
+            t)))))))
+
+(defun live-listener-p (&key quiet)
+  "True when a Slynk belonging to this checkout is listening on *PORT*.
+
+A port that accepts TCP and then says nothing is not a listener at all; it is
+reclaimed here so the caller can start a real image on it."
+  (handler-case
+      (and (connection-available-p)
+           (progn (assert-listener-project) t))
+    (slynk-handshake-timeout ()
+      (unless (reclaim-port :quiet quiet)
+        (error "Cannot start luv Slynk: port ~D is occupied and could not be reclaimed"
+               *port*))
+      nil)))
+
 (defun start-server (&key quiet)
-  (when (connection-available-p)
-    (assert-listener-project)
+  (when (live-listener-p :quiet quiet)
     (unless quiet
       (format t "luv Slynk is already listening on ~A:~D for ~A.~%"
               *host* *port* *project-root*))
     (return-from start-server t))
   (acquire-start-lock)
   (unwind-protect
-       (if (connection-available-p)
+       (if (live-listener-p :quiet quiet)
            (progn
-             (assert-listener-project)
              (unless quiet
                (format t "luv Slynk is already listening on ~A:~D for ~A.~%"
                        *host* *port* *project-root*))
@@ -366,13 +493,12 @@ wedged image looks like, and the difference has to be visible from here.")
     (release-start-lock)))
 
 (defun ensure-server ()
-  (if (connection-available-p)
-      (unless (attach-only-p)
-        (assert-listener-project))
-      (if (attach-only-p)
-          (error "The requested external Slynk endpoint is not accepting connections on ~A:~D"
-                 *host* *port*)
-          (start-server :quiet t))))
+  (if (attach-only-p)
+      (unless (connection-available-p)
+        (error "The requested external Slynk endpoint is not accepting connections on ~A:~D"
+               *host* *port*))
+      (unless (live-listener-p :quiet t)
+        (start-server :quiet t))))
 
 (defmacro with-slynk-connection ((stream) &body body)
   `(let ((socket (make-instance 'sb-bsd-sockets:inet-socket
@@ -828,7 +954,12 @@ wedged image looks like, and the difference has to be visible from here.")
         (cond
           (handshake-error
            (format t "Port ~D accepts TCP but did not complete a Slynk handshake: ~A~%"
-                   *port* handshake-error))
+                   *port* handshake-error)
+           (let ((holders (port-holders)))
+             (when holders
+               (format t "It is held by:~%")
+               (describe-port-holders holders *standard-output*)))
+           (format t "./sly reclaim frees the port; ./sly start does it for you.~%"))
           ((and connection-p (not (listener-for-project-p listener-root)))
            (format t "Slynk port ~D belongs to ~A, not this checkout ~A.~%"
                    *port* (or listener-root "an unidentified Lisp image") *project-root*))
@@ -851,6 +982,22 @@ wedged image looks like, and the difference has to be visible from here.")
           (t
            (ignore-errors (delete-file *server-pid-path*))
            (format t "luv Slynk is not running.~%")))))))
+
+(defun run-reclaim ()
+  "Free the Slynk port, unless a working Slynk is the thing holding it."
+  (multiple-value-bind (listener-pid listener-root handshake-error)
+      (listener-identity)
+    (cond
+      ((and (null handshake-error) (or listener-pid listener-root))
+       (format t "Port ~D is a working Slynk (pid ~A, checkout ~A); ~
+nothing to reclaim.~%"
+               *port* (or listener-pid "unknown") (or listener-root "unknown"))
+       0)
+      ((null (port-holders))
+       (format t "Nothing is holding port ~D.~%" *port*)
+       0)
+      ((reclaim-port) 0)
+      (t 1))))
 
 (defparameter *game-status-form*
   "(let* ((session-symbol
@@ -1203,7 +1350,7 @@ and ends itself if it does not recover (./sly log).~%"
   (format stream "Prefix a client command with --luvcraft only to attach to a separate~%")
   (format stream "standalone build/luvcraft process.~%~%")
   (format stream "Usage: ./sly play [--fullscreen]|stop-playing|status|restart~%")
-  (format stream "       ./sly start|stop|log~%")
+  (format stream "       ./sly start|stop|log|reclaim~%")
   (format stream "       ./sly screenshot PNG~%")
   (format stream "       ./sly eval CODE [--package PACKAGE]~%")
   (format stream "       ./sly do CODE [--package PACKAGE]   (synonym for eval)~%")
@@ -1619,6 +1766,10 @@ and ends itself if it does not recover (./sly log).~%"
       ((string= command "stop-playing")
        (run-luvcraft-stop-playing arguments)
        0)
+      ((string= command "reclaim")
+       (when arguments
+         (error "reclaim does not accept arguments"))
+       (run-reclaim))
       ((string= command "log")
        (when arguments
          (error "log does not accept arguments"))

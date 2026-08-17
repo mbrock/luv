@@ -81,6 +81,8 @@ If the image lacks a new system, package, readtable, native dependency, or metho
 
 Never kill an image reported as belonging to another checkout or as Emacs/external. Stop it through its owner.
 
+If `./sly status` reports that the port accepts TCP but answers no Slynk handshake, it also names the processes holding it -- usually shells the terminal wall spawned, which inherited the listening socket and outlived their image. `./sly reclaim` kills those holders and frees the port; `./sly start` does it on its own. Neither ever kills a Lisp: a Lisp holding the port is reported so its owner can deal with it.
+
 ## Five seconds of silence means broken
 
 **A command that runs longer than about five seconds without printing anything is not slow. It is broken, and finding out how is the task now.** Waiting it out, polling it, chaining sleeps, or running it again the same way are all refusals to look. So is reporting "it seems to be taking a while": that is not a status.

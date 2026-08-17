@@ -471,9 +471,14 @@ other private input modes."
                   ;; a port that accepts connections, answers no handshake,
                   ;; and refuses to start a replacement.  A terminal has no
                   ;; business holding its parent's sockets open.
-                  (let ((limit (%descriptor-table-size)))
-                    (loop for descriptor
-                            from 3 below (if (plusp limit) limit 1024)
+                  ;;
+                  ;; The table size is a soft limit, not a census: a shell
+                  ;; whose ulimit is a million must not pay a million
+                  ;; syscalls to start.  The image's own descriptors are
+                  ;; small numbers, so a few thousand closes cover them.
+                  (let* ((limit (%descriptor-table-size))
+                         (bound (if (plusp limit) (min limit 4096) 4096)))
+                    (loop for descriptor from 3 below bound
                           do (%close descriptor)))
                   (when (and directory-pointer
                              (minusp (%chdir directory-pointer)))
