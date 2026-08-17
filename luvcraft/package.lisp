@@ -501,6 +501,9 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:luvcraft-mirror-pixel
            #:luvcraft-mirror-pixels
            #:save-luvcraft-mirror-png
+           #:luvcraft-portal
+           #:open-luvcraft-portal
+           #:close-luvcraft-portal
            #:luvcraft-mirror-frames
            #:luvcraft-session-frame-mirror
            #:start-luvcraft-tracy

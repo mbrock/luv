@@ -69,6 +69,7 @@
                  (:file "phone")
                  (:file "capture")
                  (:file "mirror" :if-feature :darwin)
+                 (:file "portal" :if-feature :darwin)
                  (:file "benchmark")
                  (:file "gazetteer"))))
   :in-order-to ((test-op (test-op "luvcraft/test"))))
