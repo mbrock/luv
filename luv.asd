@@ -84,6 +84,27 @@
                                        :style :luv)
                (error "luv/ghostty tests failed"))))
 
+(defsystem "luv/mupdf"
+  :description "A narrow CFFI binding to MuPDF: pages as pixels or as text."
+  :long-description
+  "MuPDF's objects are opaque handles with accessor functions, so this binding
+declares almost no C layouts -- only the matrix and the rectangle it passes by
+value.  Structured text comes back through MuPDF's own XML serializer rather
+than by walking its records, which keeps the whole system free of groveled
+offsets and of headers."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  ;; cffi-libffi is what lets a struct be passed by value.  MuPDF's page
+  ;; rendering takes its transform that way and there is no variant that does
+  ;; not, so the two layouts this binding declares have to be callable.
+  :depends-on ("cffi" "cffi-libffi" "uiop" "alexandria")
+  :serial t
+  :components ((:module "mupdf"
+                :serial t
+                :components ((:file "package")
+                             (:file "ffi")
+                             (:file "document")))))
+
 (defsystem "luv/libav"
   :description "A CFFI binding to FFmpeg's libav*, groveled against its headers."
   :version "0.0.1"
