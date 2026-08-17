@@ -22,15 +22,19 @@
 
 #-darwin
 (defun vulkan-video-configuration (device)
-  "Describe DEVICE to FFmpeg when its graphics queue can also decode video."
+  "Describe DEVICE and its graphics/video queues to FFmpeg."
   (when (typep device 'luv::vulkan-gpu-device)
-    (let* ((family (luv::vulkan-device-queue-family device))
-           (properties (nth family
-                            (luv.vulkan:physical-device-queue-families
-                             (luv::vulkan-device-physical-device device))))
-           (flags (and properties (luv.vulkan:queue-family-flags properties)))
+    (let* ((graphics-family (luv::vulkan-device-queue-family device))
+           (video-family (luv::vulkan-device-video-queue-family device))
+           (families (luv.vulkan:physical-device-queue-families
+                      (luv::vulkan-device-physical-device device)))
+           (graphics-flags (luv.vulkan:queue-family-flags
+                            (nth graphics-family families)))
+           (video-flags (and video-family
+                             (luv.vulkan:queue-family-flags
+                              (nth video-family families))))
            (extensions (luv::vulkan-device-extension-names device)))
-      (when (and (member :video-decode flags)
+      (when (and video-family
                  (member "VK_KHR_video_queue" extensions :test #'string=)
                  (member "VK_KHR_video_decode_queue" extensions :test #'string=))
         (list
@@ -40,21 +44,28 @@
          :get-instance-proc-addr
          (cffi:foreign-symbol-pointer
           "vkGetInstanceProcAddr" :library 'luv.vulkan::vulkan-loader)
-         :queue-family family
          :instance-extensions (luv::vulkan-device-instance-extension-names device)
          :device-extensions (luv::vulkan-device-extension-names device)
-         :video-capabilities
-         (logior
-          (if (member "VK_KHR_video_decode_h264" extensions :test #'string=)
-              #x1 0)
-          (if (member "VK_KHR_video_decode_h265" extensions :test #'string=)
-              #x2 0))
-         :queue-flags
-         (loop for flag in flags
-               sum (ecase flag
-                     (:graphics #x1) (:compute #x2) (:transfer #x4)
-                     (:sparse-binding #x8) (:video-decode #x20)
-                     (:video-encode #x40))))))))
+         :queue-families
+         (list
+          (list :index graphics-family
+                :flags (vulkan-queue-flags-value graphics-flags))
+          (list :index video-family
+                :flags (vulkan-queue-flags-value video-flags)
+                :video-capabilities
+                (logior
+                 (if (member "VK_KHR_video_decode_h264" extensions
+                             :test #'string=) #x1 0)
+                 (if (member "VK_KHR_video_decode_h265" extensions
+                             :test #'string=) #x2 0)))))))))
+
+#-darwin
+(defun vulkan-queue-flags-value (flags)
+  (loop for flag in flags
+        sum (ecase flag
+              (:graphics #x1) (:compute #x2) (:transfer #x4)
+              (:sparse-binding #x8) (:video-decode #x20)
+              (:video-encode #x40))))
 
 #+darwin
 (defun vulkan-video-configuration (device)
@@ -169,7 +180,8 @@ HEIGHT is the screen's height in cells; its width follows the film's aspect."
   (let* ((vulkan-configuration (vulkan-video-configuration device))
          (video (libav:open-video
                  pathname
-                 :hardware (cond ((typep device 'luv::metal-gpu-device) :auto)
+                 :hardware (cond #+darwin
+                                 ((typep device 'luv::metal-gpu-device) :auto)
                                  (vulkan-configuration :vulkan)
                                  (t nil))
                  :hardware-configuration vulkan-configuration))

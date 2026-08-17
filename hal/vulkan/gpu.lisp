@@ -177,6 +177,9 @@ the finalizer thread — against submission and device destruction."
    (queue-family
     :initarg :queue-family
     :reader vulkan-device-queue-family)
+   (video-queue-family
+    :initarg :video-queue-family :initform nil
+    :reader vulkan-device-video-queue-family)
    (queue
     :initform nil
     :accessor vulkan-device-queue)
@@ -255,11 +258,12 @@ and scheduled texture layouts across the canvas and REPL threads.")))
     :reader vulkan-texture-external-semaphore-value)
    (external-submitted
     :initarg :external-submitted :initform nil
-    :reader vulkan-texture-external-submitted)
+   :reader vulkan-texture-external-submitted)
    (vk-format
     :initarg :vk-format
     :reader vulkan-texture-vk-format)
    (layout
+    :initarg :layout
     :initform :undefined
     :accessor vulkan-texture-layout)))
 
@@ -491,10 +495,16 @@ visible to it.")
              :reason :no-graphics-queue
              :details physical-device)))
 
+(defun first-vulkan-video-decode-queue-family (physical-device)
+  (loop for properties in (lvk:physical-device-queue-families physical-device)
+        for index from 0
+        when (and (plusp (lvk:queue-family-count properties))
+                  (member :video-decode (lvk:queue-family-flags properties)))
+          return index))
+
 (defparameter *vulkan-video-device-extensions*
   '("VK_KHR_video_queue" "VK_KHR_video_decode_queue"
-    "VK_KHR_video_decode_h264" "VK_KHR_video_decode_h265"
-    "VK_KHR_video_maintenance1")
+    "VK_KHR_video_decode_h264" "VK_KHR_video_decode_h265")
   "Optional extensions which let FFmpeg decode on luv's VkDevice.")
 
 (defun available-vulkan-video-device-extensions (physical-device)
@@ -534,12 +544,15 @@ wrapper, this finalizer cannot run before theirs have."
 
 (defun make-vulkan-gpu-device
     (instance physical-device queue-family descriptor
-     &key debug-messenger instance-extension-names enabled-extension-names)
+     &key debug-messenger instance-extension-names enabled-extension-names
+          video-queue-family)
   "Create GPU wrappers for an already selected Vulkan device and queue."
   (let ((native-device
           (lvk:create-device
            physical-device queue-family
-           :enabled-extension-names enabled-extension-names))
+           :enabled-extension-names enabled-extension-names
+           :additional-family-indices (and video-queue-family
+                                           (list video-queue-family))))
         (timeline nil))
     (handler-case
         (let* ((native-queue
@@ -554,7 +567,8 @@ wrapper, this finalizer cannot run before theirs have."
                   :instance-extension-names instance-extension-names
                   :device-extension-names enabled-extension-names
                   :physical-device physical-device
-                  :queue-family queue-family))
+                  :queue-family queue-family
+                  :video-queue-family video-queue-family))
                (queue
                  (progn
                    (setf timeline
@@ -808,12 +822,16 @@ wrapper, this finalizer cannot run before theirs have."
                                    :operation :request-device
                                    :reason :no-physical-device)))
                       (queue-family
-                        (first-vulkan-graphics-queue-family physical-device)))
+                        (first-vulkan-graphics-queue-family physical-device))
+                      (video-queue-family
+                        (first-vulkan-video-decode-queue-family
+                         physical-device)))
                  (let ((device
                          (make-vulkan-gpu-device
                           instance physical-device queue-family descriptor
                           :debug-messenger debug-messenger
                           :instance-extension-names extensions
+                          :video-queue-family video-queue-family
                           :enabled-extension-names
                           (remove-duplicates
                            (append

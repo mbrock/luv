@@ -398,38 +398,45 @@ destroy it before destroying INSTANCE."
            features '(:struct physical-device-features) 'shader-int64)))))
 
 (defun create-device
-    (physical-device family-index &key enabled-extension-names)
+    (physical-device family-index &key enabled-extension-names
+                                       additional-family-indices)
   (unless (physical-device-shader-int64-p physical-device)
     (error "The Vulkan physical device lacks luv's required shaderInt64 feature."))
   (with-translated-values
       ((extension-names enabled-extension-names string-list))
-    (cffi:with-foreign-object (queue-priority :float)
-      (setf (cffi:mem-ref queue-priority :float) 1.0)
-      (with-vk (features physical-device-features
-                :shader-int64 1)
-        (with-vk (queue-info device-queue-create-info
-                  :flags 0
-                  :queue-family-index family-index
-                  :queue-count 1
-                  :p-queue-priorities queue-priority)
-          (with-vk (timeline-features
-                    physical-device-timeline-semaphore-features
-                    :timeline-semaphore 1)
-            (with-vk (synchronization-features
-                      physical-device-synchronization-2-features
-                      :p-next timeline-features
-                      :synchronization-2 1)
-              (with-vk (create-info device-create-info
-                        :p-next synchronization-features
-                        :flags 0
-                        :queue-create-info-count 1
-                        :p-queue-create-infos queue-info
-                        :enabled-layer-count 0
-                        :pp-enabled-layer-names (cffi:null-pointer)
-                        :enabled-extension-count (length enabled-extension-names)
-                        :pp-enabled-extension-names extension-names
-                        :p-enabled-features features)
-                (create-device-handle physical-device create-info)))))))))
+    (let* ((families (remove-duplicates
+                      (cons family-index additional-family-indices)))
+           (queue-count (length families)))
+      (cffi:with-foreign-object (queue-priority :float)
+        (setf (cffi:mem-ref queue-priority :float) 1.0)
+        (cffi:with-foreign-object
+            (queue-infos '(:struct device-queue-create-info) queue-count)
+          (loop for family in families for index from 0
+                do (fill-vk
+                    (cffi:mem-aptr queue-infos
+                                   '(:struct device-queue-create-info) index)
+                    'device-queue-create-info
+                    :flags 0 :queue-family-index family :queue-count 1
+                    :p-queue-priorities queue-priority))
+          (with-vk (features physical-device-features :shader-int64 1)
+            (with-vk (timeline-features
+                      physical-device-timeline-semaphore-features
+                      :timeline-semaphore 1)
+              (with-vk (synchronization-features
+                        physical-device-synchronization-2-features
+                        :p-next timeline-features
+                        :synchronization-2 1)
+                (with-vk (create-info device-create-info
+                          :p-next synchronization-features
+                          :flags 0
+                          :queue-create-info-count queue-count
+                          :p-queue-create-infos queue-infos
+                          :enabled-layer-count 0
+                          :pp-enabled-layer-names (cffi:null-pointer)
+                          :enabled-extension-count (length enabled-extension-names)
+                          :pp-enabled-extension-names extension-names
+                          :p-enabled-features features)
+                  (create-device-handle physical-device create-info))))))))))
 
 (defun destroy-device (device)
   (vk:destroy-device device (cffi:null-pointer))

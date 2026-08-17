@@ -3888,8 +3888,11 @@ structured product and source provenance.  #JDLQPN"))
 
 (defun reserve-shader-id (context name)
   (let ((id (shader-id name)))
-    (setf (gethash id (context-claimed-ids context)) t)
-    id))
+    (if (gethash id (context-claimed-ids context))
+        (fresh-shader-id context name)
+        (progn
+          (setf (gethash id (context-claimed-ids context)) t)
+          id))))
 
 (defun fresh-shader-id (context name)
   (let* ((base (shader-id-string name))
@@ -4440,11 +4443,16 @@ Modules whose expressions use no extended mathematics never acquire one."
       (shader-expression-provenance-name expression)))
 
 (defun emit-value-instruction (context expression type instruction operands)
-  (let ((result (fresh-shader-id context (expression-result-name expression))))
-    (emit-shader-instruction
-     context expression
-     (list* result instruction (ensure-shader-type-id context type) operands))
-    result))
+  ;; Types own their canonical names.  Claim the result type before deriving a
+  ;; value name: a first-use constructor such as (VEC3 0 0 0) otherwise lets
+  ;; both its type and its value independently choose %VEC3.
+  (let ((type-id (ensure-shader-type-id context type)))
+    (let ((result
+            (fresh-shader-id context (expression-result-name expression))))
+      (emit-shader-instruction
+       context expression
+       (list* result instruction type-id operands))
+      result)))
 
 (defun lower-shader-reference (context expression)
   (let ((target (shader-reference-target expression)))

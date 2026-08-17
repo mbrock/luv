@@ -85,6 +85,12 @@
   (reference :pointer))
 (cffi:defcfun ("av_buffer_unref" %av-buffer-unreference) :void
   (reference :pointer))
+(cffi:defcfun ("av_calloc" %av-calloc) :pointer
+  (count :size) (size :size))
+(cffi:defcfun ("av_strdup" %av-strdup) :pointer
+  (string :string))
+(cffi:defcfun ("av_free" %av-free) :void
+  (pointer :pointer))
 
 (cffi:defcfun ("av_packet_alloc" %av-packet-alloc) :pointer)
 (cffi:defcfun ("av_packet_free" %av-packet-free) :void (packet :pointer))
@@ -131,135 +137,139 @@
           when (= format wanted) return format
           finally (return (cffi:mem-aref formats :int 0)))))
 
-(cffi:defcallback choose-vulkan-format :int
-    ((context :pointer) (formats :pointer))
-  (declare (ignore context))
-  (let ((wanted (cffi:foreign-enum-value 'pixel-format :vulkan)))
-    (loop for index from 0
-          for format = (cffi:mem-aref formats :int index)
-          until (= format (cffi:foreign-enum-value 'pixel-format :none))
-          when (= format wanted) return format
-          finally (return (cffi:mem-aref formats :int 0)))))
-
 (defun allocate-foreign-string-vector (strings)
   (let* ((strings (coerce strings 'list))
-         (pointers (mapcar #'cffi:foreign-string-alloc strings))
+         ;; AVVulkanDeviceContext takes these arrays over.  Allocate them
+         ;; with libavutil too: a Nix process can contain a second libc via
+         ;; the host SBCL, making CFFI's malloc incompatible with av_free.
+         (pointers (mapcar #'%av-strdup strings))
          (vector (if pointers
-                     (cffi:foreign-alloc :pointer :count (length pointers))
+                     (%av-calloc (length pointers)
+                                 (cffi:foreign-type-size :pointer))
                      (cffi:null-pointer))))
     (loop for pointer in pointers for index from 0
           do (setf (cffi:mem-aref vector :pointer index) pointer))
     (values vector
             (lambda ()
-              (dolist (pointer pointers) (cffi:foreign-string-free pointer))
-              (unless (cffi:null-pointer-p vector) (cffi:foreign-free vector))))))
+              (dolist (pointer pointers) (%av-free pointer))
+              (unless (cffi:null-pointer-p vector) (%av-free vector))))))
 
 (defun enable-vulkan-decoding (codec-context configuration)
   "Decode into AVVkFrames allocated on the renderer's existing VkDevice.
 
 CONFIGURATION is a plist containing :INSTANCE, :PHYSICAL-DEVICE, :DEVICE,
-:GET-INSTANCE-PROC-ADDR, :QUEUE-FAMILY, and :QUEUE-FLAGS.  FFmpeg borrows the
-Vulkan handles; the caller must therefore close the video before the device."
+:GET-INSTANCE-PROC-ADDR, extension lists, and :QUEUE-FAMILIES.  FFmpeg borrows
+the Vulkan handles; the caller must therefore close the video before the
+device."
   (multiple-value-bind (instance-extensions free-instance-extensions)
       (allocate-foreign-string-vector (getf configuration :instance-extensions))
     (multiple-value-bind (device-extensions free-device-extensions)
         (allocate-foreign-string-vector (getf configuration :device-extensions))
       (let ((completed-p nil)
             (reference
-          (%av-hwdevice-context-allocate
-           (cffi:foreign-enum-value 'hardware-device-type :vulkan))))
-    (when (cffi:null-pointer-p reference)
-      (error "Could not allocate FFmpeg's Vulkan device context."))
-    (unwind-protect
-         (let* ((base (cffi:foreign-slot-value
-                       reference '(:struct av-buffer-reference) 'data))
-                (vulkan (cffi:foreign-slot-value
-                         base '(:struct av-hardware-device-context)
-                         'hardware-context))
-                (families (cffi:foreign-slot-pointer
-                           vulkan '(:struct av-vulkan-device-context)
-                           'queue-families))
-                (features (cffi:foreign-slot-pointer
-                           vulkan '(:struct av-vulkan-device-context)
-                           'device-features))
-                (family (cffi:mem-aptr
-                         families '(:struct av-vulkan-device-queue-family) 0)))
-           (loop for index below
-                   (cffi:foreign-type-size
-                    '(:struct vk-physical-device-features-2))
-                 do (setf (cffi:mem-aref features :uint8 index) 0))
-           (setf (cffi:foreign-slot-value
-                  features '(:struct vk-physical-device-features-2)
-                  'structure-type) 1000059000
-                 (cffi:foreign-slot-value
-                  (cffi:foreign-slot-pointer
-                   features '(:struct vk-physical-device-features-2) 'features)
-                  '(:struct vk-physical-device-features) 'shader-int64) 1)
-           (setf (cffi:foreign-slot-value
-                  vulkan '(:struct av-vulkan-device-context) 'allocator)
-                 (cffi:null-pointer)
-                 (cffi:foreign-slot-value
-                  vulkan '(:struct av-vulkan-device-context)
-                  'get-instance-procedure-address)
-                 (getf configuration :get-instance-proc-addr)
-                 (cffi:foreign-slot-value
-                  vulkan '(:struct av-vulkan-device-context) 'instance)
-                 (getf configuration :instance)
-                 (cffi:foreign-slot-value
-                  vulkan '(:struct av-vulkan-device-context) 'physical-device)
-                 (getf configuration :physical-device)
-                 (cffi:foreign-slot-value
-                  vulkan '(:struct av-vulkan-device-context) 'device)
-                 (getf configuration :device)
-                 (cffi:foreign-slot-value
-                  vulkan '(:struct av-vulkan-device-context)
-                  'instance-extensions) instance-extensions
-                 (cffi:foreign-slot-value
-                  vulkan '(:struct av-vulkan-device-context)
-                  'instance-extension-count)
-                 (length (getf configuration :instance-extensions))
-                 (cffi:foreign-slot-value
-                  vulkan '(:struct av-vulkan-device-context)
-                  'device-extensions) device-extensions
-                 (cffi:foreign-slot-value
-                  vulkan '(:struct av-vulkan-device-context)
-                  'device-extension-count)
-                 (length (getf configuration :device-extensions))
-                 (cffi:foreign-slot-value
-                  family '(:struct av-vulkan-device-queue-family) 'index)
-                 (getf configuration :queue-family)
-                 (cffi:foreign-slot-value
-                  family '(:struct av-vulkan-device-queue-family) 'count) 1
-                 (cffi:foreign-slot-value
-                 family '(:struct av-vulkan-device-queue-family) 'flags)
-                 (getf configuration :queue-flags)
-                 (cffi:foreign-slot-value
-                  family '(:struct av-vulkan-device-queue-family)
-                  'video-capabilities)
-                 (or (getf configuration :video-capabilities) 0)
-                 (cffi:foreign-slot-value
-                  vulkan '(:struct av-vulkan-device-context)
-                  'queue-family-count) 1)
-           (check-code (%av-hwdevice-context-initialize reference)
-                       'enable-vulkan-decoding)
-           (setf (cffi:foreign-slot-value
-                  codec-context '(:struct av-codec-context)
-                  'hardware-device-context)
-                 (%av-buffer-reference reference)
-                 (cffi:foreign-slot-value
-                 codec-context '(:struct av-codec-context) 'get-format)
-                 (cffi:callback choose-vulkan-format))
-           (setf completed-p t))
-      (cffi:with-foreign-object (cell :pointer)
-        (setf (cffi:mem-ref cell :pointer) reference)
-        (%av-buffer-unreference cell))
-      (unless completed-p
-        (funcall free-device-extensions)
-        (funcall free-instance-extensions)))
-    (values codec-context
-            (lambda ()
+              (%av-hwdevice-context-allocate
+               (cffi:foreign-enum-value 'hardware-device-type :vulkan))))
+          (when (cffi:null-pointer-p reference)
+            (error "Could not allocate FFmpeg's Vulkan device context."))
+          (unwind-protect
+               (let* ((base (cffi:foreign-slot-value
+                             reference '(:struct av-buffer-reference) 'data))
+                      (vulkan (cffi:foreign-slot-value
+                               base '(:struct av-hardware-device-context)
+                               'hardware-context))
+                      (families (cffi:foreign-slot-pointer
+                                 vulkan '(:struct av-vulkan-device-context)
+                                 'queue-families))
+                      (features (cffi:foreign-slot-pointer
+                                 vulkan '(:struct av-vulkan-device-context)
+                                 'device-features))
+                      (queue-families (getf configuration :queue-families)))
+                 (loop for index below
+                         (cffi:foreign-type-size
+                          '(:struct vk-physical-device-features-2))
+                       do (setf (cffi:mem-aref features :uint8 index) 0))
+                 (setf (cffi:foreign-slot-value
+                        features '(:struct vk-physical-device-features-2)
+                        'structure-type) 1000059000
+                       (cffi:foreign-slot-value
+                        (cffi:foreign-slot-pointer
+                         features '(:struct vk-physical-device-features-2) 'features)
+                        '(:struct vk-physical-device-features) 'shader-int64) 1)
+                 (setf (cffi:foreign-slot-value
+                        vulkan '(:struct av-vulkan-device-context) 'allocator)
+                       (cffi:null-pointer)
+                       (cffi:foreign-slot-value
+                        vulkan '(:struct av-vulkan-device-context)
+                        'get-instance-procedure-address)
+                       (getf configuration :get-instance-proc-addr)
+                       (cffi:foreign-slot-value
+                        vulkan '(:struct av-vulkan-device-context) 'instance)
+                       (getf configuration :instance)
+                       (cffi:foreign-slot-value
+                        vulkan '(:struct av-vulkan-device-context) 'physical-device)
+                       (getf configuration :physical-device)
+                       (cffi:foreign-slot-value
+                        vulkan '(:struct av-vulkan-device-context) 'device)
+                       (getf configuration :device)
+                       (cffi:foreign-slot-value
+                        vulkan '(:struct av-vulkan-device-context)
+                        'instance-extensions) instance-extensions
+                       (cffi:foreign-slot-value
+                        vulkan '(:struct av-vulkan-device-context)
+                        'instance-extension-count)
+                       (length (getf configuration :instance-extensions))
+                       (cffi:foreign-slot-value
+                        vulkan '(:struct av-vulkan-device-context)
+                        'device-extensions) device-extensions
+                       (cffi:foreign-slot-value
+                        vulkan '(:struct av-vulkan-device-context)
+                        'device-extension-count)
+                       (length (getf configuration :device-extensions))
+                       (cffi:foreign-slot-value
+                        vulkan '(:struct av-vulkan-device-context)
+                        'queue-family-count) (length queue-families))
+                 (loop for description in queue-families for index from 0
+                       for family = (cffi:mem-aptr
+                                     families
+                                     '(:struct av-vulkan-device-queue-family) index)
+                       do (setf
+                           (cffi:foreign-slot-value
+                            family '(:struct av-vulkan-device-queue-family) 'index)
+                           (getf description :index)
+                           (cffi:foreign-slot-value
+                            family '(:struct av-vulkan-device-queue-family) 'count) 1
+                           (cffi:foreign-slot-value
+                            family '(:struct av-vulkan-device-queue-family) 'flags)
+                           (getf description :flags)
+                           (cffi:foreign-slot-value
+                            family '(:struct av-vulkan-device-queue-family)
+                            'video-capabilities)
+                           (or (getf description :video-capabilities) 0)))
+                 (check-code (%av-hwdevice-context-initialize reference)
+                             'enable-vulkan-decoding)
+                 (setf (cffi:foreign-slot-value
+                        codec-context '(:struct av-codec-context)
+                        'hardware-device-context)
+                       (%av-buffer-reference reference)
+                       (cffi:foreign-slot-value
+                        codec-context '(:struct av-codec-context) 'get-format)
+                       ;; The default C callback chooses FFmpeg's first offered
+                       ;; format, which is Vulkan once HWDEVICE_CTX is attached.
+                       ;; Keeping this callback in C also avoids re-entering SBCL
+                       ;; from the middle of avcodec_receive_frame.
+                       (or (cffi:foreign-symbol-pointer
+                            "avcodec_default_get_format")
+                           (error "FFmpeg has no default pixel-format selector.")))
+                 (setf completed-p t))
+            (cffi:with-foreign-object (cell :pointer)
+              (setf (cffi:mem-ref cell :pointer) reference)
+              (%av-buffer-unreference cell))
+            (unless completed-p
               (funcall free-device-extensions)
-              (funcall free-instance-extensions)))))))
+              (funcall free-instance-extensions)))
+          (values codec-context
+                  ;; FFmpeg releases the extension arrays with its Vulkan context.
+                  (lambda () nil))))))
 
 (defun enable-videotoolbox-decoding (codec-context)
   "Ask FFmpeg to decode into reference-counted CVPixelBuffers."
