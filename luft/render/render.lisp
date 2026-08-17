@@ -199,7 +199,10 @@
 (defparameter *sky-color* (vec3:make-vec3 0.62 0.76 0.92))
 (defparameter *fog-distance* 140.0)
 (defparameter *bevel-radius* 0.22
-  "The crease rounding radius in cells, below one half.")
+  "The crease rounding radius, or chamfer width, in cells, below one half.")
+(defparameter *sanding-width* 0.05
+  "How far on either side of a chamfer's arris the :CHAMFER style softens
+the facet normal, in cells.")
 
 (defun frame-uniform-data (camera width height &optional domain)
   "Pack the frame block: camera, basis, projection, sun, sky, and domain lanes."
@@ -230,7 +233,7 @@
                (if domain (luft:world-domain-x-period domain) 1)
                (if domain (luft:world-domain-y-period domain) 1)
                *bevel-radius*)
-              0.0))
+              *sanding-width*))
       data)))
 
 ;;; ------------------------------------------------------------------------
@@ -261,7 +264,8 @@
    (pipelines :initform nil :accessor renderer-pipelines
               :documentation "A plist from style to mesh pipeline.")
    (style :initarg :style :initform :bevel :accessor renderer-style
-          :documentation "Which mesh pipeline draws: :FLAT or :BEVEL.")
+          :documentation
+          "Which pipeline draws: :FLAT, :BEVEL (rounded), or :CHAMFER.")
    (uploaded-scene :initform nil :accessor renderer-uploaded-scene))
   (:documentation "GPU resources drawing one scene from one camera."))
 
@@ -315,11 +319,22 @@
                          :label "luft bevel mesh"
                          :language :mathematical
                          :code (shaders:bevel-mesh-shader))))
+         (chamfer (create device
+                          (make-shader-module-descriptor
+                           :label "luft chamfer mesh"
+                           :language :mathematical
+                           :code (shaders:chamfer-mesh-shader))))
          (fragment (create device
                            (make-shader-module-descriptor
                             :label "luft surface fragment"
                             :language :mathematical
                             :code (shaders:surface-fragment-shader))))
+         (chamfer-fragment
+           (create device
+                   (make-shader-module-descriptor
+                    :label "luft chamfer fragment"
+                    :language :mathematical
+                    :code (shaders:chamfer-fragment-shader))))
          (layout (create device
                          (make-bind-group-layout-descriptor
                           :label "luft surface layout"
@@ -332,7 +347,7 @@
                              :type :storage-buffer)
                             (:binding ,shaders:+cells-binding+
                              :type :storage-buffer))))))
-    (flet ((pipeline (label mesh-module)
+    (flet ((pipeline (label mesh-module fragment-module)
              (create device
                      (make-mesh-render-pipeline-descriptor
                       :label label
@@ -340,18 +355,21 @@
                       :task `(:module ,task)
                       :mesh `(:module ,mesh-module)
                       :fragment
-                      `(:module ,fragment
+                      `(:module ,fragment-module
                         :targets ((:format
                                    ,(renderer-color-format renderer))))
                       :max-mesh-workgroups 1
                       :depth-stencil '(:format :depth32-float
                                        :depth-write-enabled t
                                        :depth-compare :less)))))
-      (setf (renderer-modules renderer) (list task mesh bevel fragment)
+      (setf (renderer-modules renderer)
+            (list task mesh bevel chamfer fragment chamfer-fragment)
             (renderer-layout renderer) layout
             (renderer-pipelines renderer)
-            (list :flat (pipeline "luft surface pipeline" mesh)
-                  :bevel (pipeline "luft bevel pipeline" bevel))))))
+            (list :flat (pipeline "luft surface pipeline" mesh fragment)
+                  :bevel (pipeline "luft bevel pipeline" bevel fragment)
+                  :chamfer (pipeline "luft chamfer pipeline"
+                                     chamfer chamfer-fragment))))))
 
 (defun make-renderer (&key scene camera device
                         (provider *gpu-provider*)

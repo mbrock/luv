@@ -40,7 +40,7 @@ vertices a face.")
       (projection-vector :vec4)  ; x scale, y scale, z scale, z offset
       (sun-vector :vec4)         ; direction toward the sun, ambient light
       (sky-vector :vec4)         ; sky colour, fog distance
-      (domain-vector :vec4))))   ; x period, y period, bevel radius, unused
+      (domain-vector :vec4))))   ; x period, y period, bevel radius, sanding
 
 (define-shader-function view-clip (point camera right up forward projection)
   "Homogeneous clip position of the world POINT.
@@ -287,13 +287,39 @@ beside the solid cell and beside the air cell."
             (- solid-sum)
             (vec3 0.0 0.0 0.0)))))
 
+(define-shader-function chamfer-point (point minority radius)
+  "The woodworking rule: a shared point moves half the chamfer width along
+its star's clamped minority, where the flat 45-degree facets meet."
+  (+ point (* (clamp minority (vec3 -1.0 -1.0 -1.0) (vec3 1.0 1.0 1.0))
+              (* radius 0.5))))
+
+(define-shader-function chamfer-normal (minority normal)
+  "The facet normal at a chamfered shared point, or NORMAL when flat."
+  (let* ((q (clamp minority (vec3 -1.0 -1.0 -1.0) (vec3 1.0 1.0 1.0)))
+         (length (sqrt (dot q q)))
+         (sign (if (> (dot minority normal) 0.0) 1.0 -1.0)))
+    (if (> length 0.5)
+        (* q (/ sign length))
+        normal)))
+
+(define-shader-function cross-product (a b)
+  "The right-handed cross product of two vec3 values."
+  (vec3 (- (* (swizzle a :y) (swizzle b :z)) (* (swizzle a :z) (swizzle b :y)))
+        (- (* (swizzle a :z) (swizzle b :x)) (* (swizzle a :x) (swizzle b :z)))
+        (- (* (swizzle a :x) (swizzle b :y)) (* (swizzle a :y) (swizzle b :x)))))
+
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  (defconstant +bevel-rings+ 2
-    "Subdivision rings inside the rounding radius: one is a chamfer, two a
-fillet.  The grid has 2*(rings+1) points per side.")
+  (defvar *bevel-rings* 2
+    "Subdivision rings inside the rounding radius while a mesh shader is
+generated: one is a chamfer, two a fillet.  The grid has 2*(rings+1) points
+per side.")
+
+  (defvar *bevel-rule* :round
+    "How shared points move while a mesh shader is generated: :ROUND projects
+onto fillet cylinders and corner spheres, :CHAMFER onto flat 45-degree facets.")
 
   (defun bevel-grid-side ()
-    (* 2 (1+ +bevel-rings+)))
+    (* 2 (1+ *bevel-rings*)))
 
   (defun bevel-grid-index (i j)
     (+ (* i (bevel-grid-side)) j))
@@ -304,10 +330,10 @@ mirrored from the far side."
     (let ((side (bevel-grid-side)))
       (cond ((= k 0) 0.0)
             ((= k (1- side)) 1.0)
-            ((<= k +bevel-rings+)
-             `(* radius ,(/ (float k) +bevel-rings+)))
+            ((<= k *bevel-rings*)
+             `(* radius ,(/ (float k) *bevel-rings*)))
             (t
-             `(- 1.0 (* radius ,(/ (float (- side 1 k)) +bevel-rings+)))))))
+             `(- 1.0 (* radius ,(/ (float (- side 1 k)) *bevel-rings*)))))))
 
   (defun cell-solid-bindings (name position-form)
     "LET* bindings that read the solidity of the cell at POSITION-FORM."
@@ -374,10 +400,10 @@ outright, which is exactly the rounded box.  Inner points stay on the plane."
            (v-side (if (< j half) "NEG" "POS"))
            ;; Ring steps from the nearest vertex along each axis, or NIL when
            ;; the point is beyond the radius along that axis.
-           (u-steps (cond ((< i +bevel-rings+) i)
-                          ((> i (- last +bevel-rings+)) (- last i))))
-           (v-steps (cond ((< j +bevel-rings+) j)
-                          ((> j (- last +bevel-rings+)) (- last j))))
+           (u-steps (cond ((< i *bevel-rings*) i)
+                          ((> i (- last *bevel-rings*)) (- last i))))
+           (v-steps (cond ((< j *bevel-rings*) j)
+                          ((> j (- last *bevel-rings*)) (- last j))))
            (u-edge (and u-steps (intern (format nil "EDGE-U-~A" u-side))))
            (v-edge (and v-steps (intern (format nil "EDGE-V-~A" v-side))))
            (corner (intern (format nil "CORNER-~A-~A" u-side v-side)))
@@ -403,6 +429,23 @@ outright, which is exactly the rounded box.  Inner points stay on the plane."
       (append
        `((,flat ,flat-form))
        (cond
+         ;; Woodworking: shared points move to the meeting of flat facets;
+         ;; with one ring there are no other moving points.
+         ((and (eq *bevel-rule* :chamfer)
+               (or (member i (list 0 last)) (member j (list 0 last))))
+          (let ((site-minority
+                  (cond ((and (member i (list 0 last)) (member j (list 0 last)))
+                         corner-minority)
+                        ((member i (list 0 last)) u-minority)
+                        (t v-minority))))
+            `((,point (+ anchor
+                         (* (- (chamfer-point ,flat ,site-minority radius)
+                               anchor)
+                            scale)))
+              (,normal (chamfer-normal ,site-minority normal)))))
+         ((and (eq *bevel-rule* :chamfer)
+               (or u-steps v-steps))
+          (error "Chamfer geometry has no ring points; use one ring."))
          ;; A shared vertex: its own star, and nothing else.
          ((and (member i (list 0 last)) (member j (list 0 last)))
           `((,point (+ anchor
@@ -456,11 +499,11 @@ outright, which is exactly the rounded box.  Inner points stay on the plane."
                            (+ ,v-foot (site-centre ,v-minority radius)))))))
                  ;; Distance to the nearest vertex in ring steps: along the
                  ;; edge for boundary points, the larger axis otherwise.
-                 (steps (cond (on-u-boundary (or v-steps +bevel-rings+))
-                              (on-v-boundary (or u-steps +bevel-rings+))
-                              (t (max (or u-steps +bevel-rings+)
-                                      (or v-steps +bevel-rings+)))))
-                 (falloff (max 0.0 (- 1.0 (/ (float steps) +bevel-rings+)))))
+                 (steps (cond (on-u-boundary (or v-steps *bevel-rings*))
+                              (on-v-boundary (or u-steps *bevel-rings*))
+                              (t (max (or u-steps *bevel-rings*)
+                                      (or v-steps *bevel-rings*)))))
+                 (falloff (max 0.0 (- 1.0 (/ (float steps) *bevel-rings*)))))
             `(,@base
               (,base-point (rounded-point ,flat ,base-centre ,base-minority
                                           radius))
@@ -480,10 +523,14 @@ outright, which is exactly the rounded box.  Inner points stay on the plane."
        `((,clip (view-clip ,point camera right up forward
                            projection-vector))))))
 
-  (defun bevel-mesh-shader-definition ()
-    "The BEVEL-MESH-SHADER definition: sixteen gathers, eight site rules, a
-grid of rounded points, and their triangles per face."
-    (let* ((side (bevel-grid-side))
+  (defun bevel-mesh-shader-definition
+      (&key (name 'bevel-mesh-shader) (rings 2) (rule :round))
+    "A mesh shader definition named NAME: sixteen gathers, eight site rules,
+a grid of RINGS rings of points moved by RULE, and their triangles per face.
+The chamfer rule also emits the face normal for facet shading."
+    (let* ((*bevel-rings* rings)
+           (*bevel-rule* rule)
+           (side (bevel-grid-side))
            (points (* side side))
            (primitives (* 2 (1- side) (1- side)))
            (gathers
@@ -518,32 +565,44 @@ grid of rounded points, and their triangles per face."
                         (normal ,(intern (format nil "NORMAL-~A" name)))
                         (world ,(intern (format nil "POINT-~A" name)))
                         (uv (vec2 ,(bevel-grid-parameter i)
-                                  ,(bevel-grid-parameter j))))))))))
+                                  ,(bevel-grid-parameter j)))
+                        ,@(when (eq rule :chamfer)
+                            '((face-normal normal))))))))))
         (dotimes (i (1- side))
           (dotimes (j (1- side))
-            (let ((g00 (float (bevel-grid-index i j)))
-                  (g10 (float (bevel-grid-index (1+ i) j)))
-                  (g11 (float (bevel-grid-index (1+ i) (1+ j))))
-                  (g01 (float (bevel-grid-index i (1+ j))))
-                  (primitive (float (* 2 (+ (* i (1- side)) j)))))
+            ;; Each quad's diagonal points at the nearest corner vertex, so a
+            ;; corner square splits into its two flat chamfer pieces.
+            (let* ((toward-corner-p
+                     (eq (< i (floor side 2)) (< j (floor side 2))))
+                   (a (float (bevel-grid-index i j)))
+                   (b (float (bevel-grid-index (1+ i) j)))
+                   (c (float (bevel-grid-index (1+ i) (1+ j))))
+                   (d (float (bevel-grid-index i (1+ j))))
+                   ;; Triangles (p q r) and (p r s) around the quad a b c d,
+                   ;; rotated so the diagonal is a-c or b-d.
+                   (p (if toward-corner-p a b))
+                   (q (if toward-corner-p b c))
+                   (r (if toward-corner-p c d))
+                   (s* (if toward-corner-p d a))
+                   (primitive (float (* 2 (+ (* i (1- side)) j)))))
               (setf primitive-statements
                     (append
                      primitive-statements
                      `((set-mesh-primitive
                         (+ primitive-base (uint ,primitive))
-                        (uvec3 (+ vertex-base (uint ,g00))
-                               (+ vertex-base (if negative-p (uint ,g11)
-                                                  (uint ,g10)))
-                               (+ vertex-base (if negative-p (uint ,g10)
-                                                  (uint ,g11)))))
+                        (uvec3 (+ vertex-base (uint ,p))
+                               (+ vertex-base (if negative-p (uint ,r)
+                                                  (uint ,q)))
+                               (+ vertex-base (if negative-p (uint ,q)
+                                                  (uint ,r)))))
                        (set-mesh-primitive
                         (+ primitive-base (uint ,(1+ primitive)))
-                        (uvec3 (+ vertex-base (uint ,g00))
-                               (+ vertex-base (if negative-p (uint ,g01)
-                                                  (uint ,g11)))
-                               (+ vertex-base (if negative-p (uint ,g11)
-                                                  (uint ,g01)))))))))))
-        `(define-shader bevel-mesh-shader
+                        (uvec3 (+ vertex-base (uint ,p))
+                               (+ vertex-base (if negative-p (uint ,s*)
+                                                  (uint ,r)))
+                               (+ vertex-base (if negative-p (uint ,r)
+                                                  (uint ,s*)))))))))))
+        `(define-shader ,name
              (:stage :mesh
               :workgroup-size (,+brick-size+ 1 1)
               :payload surface-brick-payload
@@ -561,7 +620,9 @@ grid of rounded points, and their triangles per face."
                :vertex ((position :vec4 :built-in :position)
                         (normal :vec3 :location 0)
                         (world :vec3 :location 1)
-                        (uv :vec2 :location 2))))
+                        (uv :vec2 :location 2)
+                        ,@(when (eq rule :chamfer)
+                            '((face-normal :vec3 :location 3))))))
            (let* ((term (buffer-element
                          terms (+ (* brick-index (uint ,+brick-size+)) lane)))
                   (extent (uint (ldb (byte luft:+extent-bits+ 0) term)))
@@ -657,6 +718,53 @@ grid of rounded points, and their triangles per face."
              ,@primitive-statements))))))
 
 #.(bevel-mesh-shader-definition)
+
+#.(bevel-mesh-shader-definition :name 'chamfer-mesh-shader :rings 1
+                                :rule :chamfer)
+
+;;; Fine woodworking shading: facets are flat, read from the screen-space
+;;; derivatives of the world position, and only the arris between a face and
+;;; its chamfer is sanded, by blending toward the face normal within a small
+;;; band on either side of the chamfer line.
+(define-shader chamfer-fragment-shader
+    (:stage :fragment
+     :inputs ((normal :vec3 :location 0)
+              (world :vec3 :location 1)
+              (uv :vec2 :location 2)
+              (face-normal :vec3 :location 3))
+     :outputs ((color :vec4 :location 0))
+     :resources ((frame :uniform-block :binding #.+frame-binding+
+                        :members #.*frame-uniform-members*)))
+  (let* ((raw-facet (cross-product (derivative-x world) (derivative-y world)))
+         (facet (normalize raw-facet))
+         (face (normalize face-normal))
+         (oriented (if (< (dot facet face) 0.0) (- facet) facet))
+         (radius (swizzle domain-vector :z))
+         (sanding (max (swizzle domain-vector :w) 0.001))
+         (u (swizzle uv :x))
+         (v (swizzle uv :y))
+         (inset (min (min u (- 1.0 u)) (min v (- 1.0 v))))
+         ;; Signed distance from the chamfer line: negative on the chamfer.
+         (arris (- inset radius))
+         (sanded (normalize (mix oriented face
+                                 (smoothstep (- sanding) sanding arris))))
+         (sun (swizzle sun-vector :xyz))
+         (ambient (swizzle sun-vector :w))
+         (diffuse (max (dot sanded sun) 0.0))
+         (light (+ ambient (* diffuse (- 1.0 ambient))))
+         (upness (swizzle sanded :z))
+         (top (vec3 0.40 0.60 0.28))
+         (side (vec3 0.58 0.50 0.40))
+         (bottom (vec3 0.28 0.26 0.25))
+         (base (if (> upness 0.5) top (if (< upness -0.5) bottom side)))
+         (shaded (* base light))
+         (camera (swizzle camera-vector :xyz))
+         (delta (- world camera))
+         (distance (sqrt (dot delta delta)))
+         (fog-far (swizzle sky-vector :w))
+         (fog (smoothstep (* 0.45 fog-far) fog-far distance))
+         (final (mix shaded (swizzle sky-vector :xyz) fog)))
+    (set-output color (vec4 final 1.0))))
 
 (defun frame-uniform-block ()
   "The frame uniform block as declared by the mesh stage."

@@ -13,6 +13,8 @@
            #:surface-task-shader
            #:surface-mesh-shader
            #:bevel-mesh-shader
+           #:chamfer-mesh-shader
+           #:chamfer-fragment-shader
            #:surface-fragment-shader
            #:frame-uniform-block))
 
@@ -50,6 +52,7 @@ of packed LUFT sites, drawn by task and mesh shaders.")
            #:renderer-extent
            #:renderer-style
            #:*bevel-radius*
+           #:*sanding-width*
            #:destroy-renderer
            #:upload-scene
            #:encode-frame

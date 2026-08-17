@@ -160,6 +160,32 @@ live frame lane.  The exact morphological answer for the mixed stars would be
 a table over the 256 vertex configurations, which #WQ611A's wave-level work
 does not need and which this heuristic postpones.
 
+* Woodworking: flat 45-degree chamfers, sanded in the fragment stage
+:PROPERTIES:
+:ID: RUAWR5
+:END:
+
+The =:chamfer= style is the one-ring case of #6TEFOS with a different rule:
+a shared point moves by exactly $\tfrac{w}{2}\,q$, half the chamfer width
+along its star's clamped minority.  For an edge that is the midline of the
+45-degree facet between the two inset faces; for a pure corner it is the one
+point where the three chamfer planes meet, and with each corner square split
+along the diagonal toward its vertex the corner falls into two flat pieces —
+a genuinely chamfered box, or a mitred cove at an inside corner, with no
+rounding anywhere.  Shading then comes from the geometry rather than from
+interpolated normals: =chamfer-fragment-shader= reads each facet's normal
+from the screen-space derivatives of the world position and only sands the
+arris between a face and its chamfer, blending toward the face normal within
+=*sanding-width*= of the chamfer line.
+
+Mixed stars are approximate here as in the rounded style, and more visibly
+so because facets are flat: where a block's chamfered vertical edge meets the
+floor's coves the true polyhedral surface is a small extra cove facet
+tangent to the floor, which lifts the shared vertex straight up by about
+$0.29\,w$, whereas the minority rule moves it diagonally.  The exact answer
+is a plane-intersection construction per vertex configuration, the same
+256-entry table #6TEFOS postpones.
+
 ** NEXT Edit cells through the linearity of the boundary
 :PROPERTIES:
 :ID: 3QNZC1
