@@ -117,27 +117,49 @@ scripts/telegram '(telegram.client:complete-password "…")'
 There is also `log-in`, which does the whole thing in one call and prompts
 for what it needs — password reading turns terminal echo off.
 
-Afterwards the stored key is the credential; a later run reuses it:
+Afterwards the stored key is the credential, and `resume` is the ordinary way
+in — no handshake, no code:
 
 ```lisp
-(client:connect-stored (client:load-session))
+(client:resume)
+;; resumed as Mikael Brockman (@mbrockman) id 362441422
+```
+
+It makes the connection current, so nothing has to be threaded through
+afterwards:
+
+```lisp
+client:*connection*   ; the connection INVOKE defaults to
+client:*user*         ; who it is logged in as
+(client:disconnect)   ; close it and forget it
 ```
 
 ## Calling it
 
 ```lisp
-(let ((client:*application* (client:application-from-environment)))
-  (client:with-telegram (connection :dc-id 2)
-    (client:invoke connection :help.get-config)))
+(client:resume)
+(client:invoke :help.get-config)
 ;; => #<config this-dc=2 dc-options=[19] …>
 ```
 
 A request is a record, built by keyword:
 
 ```lisp
-(client:invoke connection :messages.send-message
-               :peer (tl:make-tl :input-peer-self)
-               :message "hello" :random-id 1)
+(client:invoke :messages.send-message
+               :peer (tl:make-tl :input-peer-channel
+                                 :channel-id 3690254489
+                                 :access-hash -1568329345395679826)
+               :message "hello"
+               :random-id (- (random (expt 2 62)) (expt 2 61)))
+;; => #<updates updates=[3] users=[1] chats=[1] …>
+```
+
+`invoke` dispatches on what it is handed, so the connection can lead when
+there is more than one, and a record can be built beforehand:
+
+```lisp
+(client:invoke connection :help.get-config)
+(client:invoke (tl:make-tl :help.get-config))
 ```
 
 and the schema is browsable from the listener:
@@ -215,6 +237,9 @@ adding the obfuscated or padded variants is a class and three methods.
 
 ## Not yet
 
+- Peer resolution. Finding a group means paging `messages.getDialogs` and
+  matching a title by hand; there should be a `find-peer` that caches
+  `access_hash`es, since every send needs one.
 - Sign-up, for a number with no account behind it.
 - Keeping `schema/api.tl` current. It is a snapshot of layer 228, taken from
   tdlib; Telegram moves, and a constructor the snapshot lacks is a decode

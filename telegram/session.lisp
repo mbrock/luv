@@ -217,8 +217,19 @@ every handler instead of appearing in each of them."
 
 (defmethod handle-session-message ((session mtproto-session)
                                    (message mtproto-message)
-                                   (object tl:tl-object))
+                                   (object t))
+  "The fallback, specialized on T rather than on TL-OBJECT: a message may
+also arrive as a schema record, and a session that cannot be handed one has
+no business being connected to Telegram."
   (note-session-event session (list :unhandled object)))
+
+(defmethod handle-session-message ((session mtproto-session)
+                                   (message mtproto-message)
+                                   (object tl:tl-record))
+  "Anything from the API schema, which in practice means updates: Telegram
+pushes them unasked, alongside the answers to requests.  Logged by name so
+the event log stays readable, and left for a caller that wants them."
+  (note-session-event session (list :update (tl:tl-name object) object)))
 
 (defmethod handle-session-message ((session mtproto-session)
                                    (message mtproto-message)

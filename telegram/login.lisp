@@ -188,7 +188,7 @@ answer is a password."
 
 ;;;; The flow
 
-(defun authorized-user (connection)
+(defun authorized-user (&optional connection)
   "The user this session is logged in as, or NIL if it is not logged in.
 
 Asked by making the cheapest authorized call there is: an unauthorized
@@ -199,16 +199,16 @@ session gets a 401 back, which is an answer rather than a failure."
         (error error))
       nil)))
 
-(defun authorized-p (connection)
+(defun authorized-p (&optional connection)
   "Is this session logged in?"
   (and (authorized-user connection) t))
 
-(defun logged-in-user (connection)
-  "The user this session is logged in as."
-  (let ((users (invoke connection :users.get-users
+(defun logged-in-user (&optional connection)
+  "The user this session is logged in as.  Also refreshes *USER*."
+  (let ((users (invoke (current-connection connection) :users.get-users
                        :id (vector (tl:make-tl :input-user-self)))))
     (when (plusp (length users))
-      (elt users 0))))
+      (setf *user* (elt users 0)))))
 
 (defun user-label (user)
   "A short human rendering of a user, for the transcript."
@@ -216,25 +216,26 @@ session gets a 401 back, which is an answer rather than a failure."
           (tl:tl-value user :first-name) (tl:tl-value user :last-name)
           (tl:tl-value user :username) (tl:tl-value user :id)))
 
-(defun send-login-code (connection phone-number)
+(defun send-login-code (phone-number &optional connection)
   "Ask Telegram to send a login code to PHONE-NUMBER.  Returns the
 auth.sentCode, whose phone_code_hash SIGN-IN needs."
-  (invoke connection :auth.send-code
+  (invoke (current-connection connection) :auth.send-code
           :phone-number phone-number
           :api-id (application-api-id *application*)
           :api-hash (application-api-hash *application*)
           :settings (tl:make-tl :code-settings)))
 
-(defun sign-in (connection phone-number code-hash code)
+(defun sign-in (phone-number code-hash code &optional connection)
   "Complete a login with the code Telegram sent."
-  (invoke connection :auth.sign-in
+  (invoke (current-connection connection) :auth.sign-in
           :phone-number phone-number
           :phone-code-hash code-hash
           :phone-code code))
 
-(defun check-password (connection password &key entropy)
+(defun check-password (password &key connection entropy)
   "Prove knowledge of the account's two-factor password, by SRP."
-  (let* ((entropy (or entropy octets:*entropy*))
+  (let* ((connection (current-connection connection))
+         (entropy (or entropy octets:*entropy*))
          (state (invoke connection :account.get-password)))
     (unless (tl:tl-value state :has-password)
       (error 'login-failed :detail "the account has no password to check"))
@@ -296,7 +297,7 @@ PASSWORD, when given, is used instead of asking."
              (when (and stored (setf user (ignore-errors
                                            (authorized-user connection))))
                (format stream "~&already logged in as ~A~%" (user-label user))
-               (return-from log-in (values connection user)))
+               (return-from log-in (values (make-current connection user) user)))
              (unless phone-number
                (setf phone-number (prompt "Phone number: ")))
              (let ((sent nil))
@@ -304,7 +305,7 @@ PASSWORD, when given, is used instead of asking."
                ;; request is where Telegram says so.
                (loop
                  (handler-case
-                     (progn (setf sent (send-login-code connection phone-number))
+                     (progn (setf sent (send-login-code phone-number connection))
                             (return))
                    (mt:remote-rpc-error (error)
                      (let ((elsewhere (migration-data-center
@@ -318,20 +319,21 @@ PASSWORD, when given, is used instead of asking."
                        (tl:tl-name (tl:tl-value sent :type)))
                (let ((authorization
                        (handler-case
-                           (sign-in connection phone-number
+                           (sign-in phone-number
                                     (tl:tl-value sent :phone-code-hash)
-                                    (funcall read-code sent))
+                                    (funcall read-code sent)
+                                    connection)
                          (mt:remote-rpc-error (error)
                            (unless (string= "SESSION_PASSWORD_NEEDED"
                                             (mt:remote-rpc-error-message error))
                              (error error))
                            (format stream "~&this account has a password~%")
                            (check-password
-                            connection
                             (or password
                                 (funcall read-password
                                          (invoke connection
-                                                 :account.get-password))))))))
+                                                 :account.get-password)))
+                            :connection connection)))))
                  (when (eq :auth.authorization-sign-up-required
                            (tl:tl-name authorization))
                    (error 'login-failed
@@ -341,13 +343,13 @@ implemented"))
              (save-session connection session-file)
              (format stream "~&logged in as ~A~%session saved to ~A~%"
                      (user-label user) (merge-pathnames session-file))
-             (values connection user))
+             (values (make-current connection user) user))
         (when (and connection (null user))
           (net:close-mtproto-connection connection))))))
 
-(defun log-out (connection &optional (session-file *session-file*))
+(defun log-out (&key connection (session-file *session-file*))
   "End the session on Telegram's side and forget the stored key."
-  (prog1 (invoke connection :auth.log-out)
+  (prog1 (invoke (current-connection connection) :auth.log-out)
     (let ((path (probe-file (merge-pathnames session-file))))
       (when path (delete-file path)))))
 
@@ -430,11 +432,11 @@ process."
          (connection (connect-stored stored))
          (user nil))
     (unwind-protect
-         (let ((authorization (check-password connection password)))
+         (let ((authorization (check-password password :connection connection)))
            (setf user (tl:tl-value authorization :user))
            (save-session connection session-file)
            (format stream "~&logged in as ~A~%" (user-label user))
-           (values connection user))
+           (values (make-current connection user) user))
       (unless user (net:close-mtproto-connection connection)))))
 
 (defun complete-login (code &key password
@@ -455,23 +457,49 @@ and the user."
     (unwind-protect
          (let ((authorization
                  (handler-case
-                     (sign-in connection phone-number
-                              (getf stored :pending-code-hash) code)
+                     (sign-in phone-number (getf stored :pending-code-hash)
+                              code connection)
                    (mt:remote-rpc-error (error)
                      (unless (string= "SESSION_PASSWORD_NEEDED"
                                       (mt:remote-rpc-error-message error))
                        (error error))
                      (format stream "~&this account has a password~%")
                      (check-password
-                      connection
                       (or password
                           (funcall #'default-password-reader
-                                   (invoke connection :account.get-password))))))))
+                                   (invoke connection :account.get-password)))
+                      :connection connection)))))
            (when (eq :auth.authorization-sign-up-required
                      (tl:tl-name authorization))
              (error 'login-failed :detail "this number has no account"))
            (setf user (tl:tl-value authorization :user))
            (save-session connection session-file)
            (format stream "~&logged in as ~A~%" (user-label user))
-           (values connection user))
+           (values (make-current connection user) user))
       (unless user (net:close-mtproto-connection connection)))))
+
+(defun resume (&key (session-file *session-file*)
+                    (application (or *application*
+                                     (application-from-environment)))
+                    (stream nil))
+  "Reconnect with the stored authorization key and make it current.
+
+This is the ordinary way in once a login has happened: no handshake, no code,
+one round trip to find out who we are.
+
+  (resume)
+  (invoke :help.get-nearest-dc)"
+  (let* ((*application* application)
+         (stored (or (load-session session-file)
+                     (error 'login-failed
+                            :detail (format nil "no session stored at ~A"
+                                            (merge-pathnames session-file)))))
+         (connection (connect-stored stored)))
+    (setf *application* application)
+    (make-current connection)
+    (let ((user (authorized-user connection)))
+      (unless user
+        (disconnect connection)
+        (error 'login-failed :detail "the stored session is no longer authorized"))
+      (when stream (format stream "~&resumed as ~A~%" (user-label user)))
+      (values connection user))))
