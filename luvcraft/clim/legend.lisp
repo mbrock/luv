@@ -56,12 +56,38 @@ saying so would be noise on every movement row."
                     modifiers)
             (format-gesture-key key))))
 
-(defun command-table-legend-rows (table)
-  "Return TABLE's keystrokes as (LABEL . KEYS) rows, one row per command.
+(defgeneric luvcraft-command-legend-label (name arguments table)
+  (:documentation
+   "What a legend should call the command NAME applied to ARGUMENTS.
 
-Commands are merged rather than listed once per key, because a cheatsheet
-wants to say that walking is WASD and the arrows, not to say `walk' eight
-times."
+Rows are merged by this label, so it decides how coarse the legend is: one
+line per argument where the argument is the point, one line for the whole
+family where it is not.  Walking forward and sprinting are different lines
+because they are different things to do; the nine quickbar slots are one line
+because nobody needs to be told about each of them separately.")
+  (:method (name arguments table)
+    (declare (ignore arguments))
+    (string-downcase
+     (or (command-line-name-for-command name table :errorp nil)
+         (substitute #\Space #\- (symbol-name name))))))
+
+(defmethod luvcraft-command-legend-label
+    ((name (eql 'com-start-walking)) arguments table)
+  (declare (ignore table))
+  (if (eq :sprint (first arguments))
+      "sprint"
+      (format nil "walk ~(~A~)" (first arguments))))
+
+(defmethod luvcraft-command-legend-label
+    ((name (eql 'com-select-quickbar-slot)) arguments table)
+  (declare (ignore arguments table))
+  "select block")
+
+(defun command-table-legend-rows (table)
+  "Return TABLE's keystrokes as (LABEL . KEYS) rows, one row per label.
+
+Keys are merged rather than listed once each, because a cheatsheet wants to
+say that the quickbar is 1-9 rather than saying `select block' nine times."
   (let ((rows nil))
     (map-over-command-table-keystrokes
      (lambda (menu-name gesture item)
@@ -69,9 +95,8 @@ times."
        (alexandria:when-let*
            ((command (keystroke-item-command item gesture))
             (name (command-name command))
-            (label (or (command-line-name-for-command
-                        name table :errorp nil)
-                       (string-capitalize (symbol-name name)))))
+            (label (luvcraft-command-legend-label
+                    name (command-arguments command) table)))
          (let ((row (assoc label rows :test #'string=)))
            (if row
                (pushnew (format-gesture gesture) (cdr row) :test #'string=)
@@ -102,10 +127,13 @@ actually owns it rather than once per table that inherits it.")
 (defparameter *legend-margin* 26)
 (defparameter *legend-row-height* 30)
 (defparameter *legend-section-gap* 22)
-(defparameter *legend-header-height* 30)
+(defparameter *legend-header-height* 38)
 (defparameter *legend-title-height* 52)
-(defparameter *legend-keys-right* 210
-  "Where the key column ends; labels begin a gutter to its right.")
+(defparameter *legend-keys-right* 300
+  "Where the key column ends; labels begin a gutter to its right.
+
+Wide enough for the longest run of keys one command answers to, which is the
+whole number row.")
 
 (defparameter *legend-panel-ink* (make-rgb-color 0.11 0.11 0.105))
 (defparameter *legend-row-ink* (make-rgb-color 0.155 0.155 0.147))
@@ -126,7 +154,10 @@ actually owns it rather than once per table that inherits it.")
 
 (define-application-frame luvcraft-legend ()
   ((session :initarg :session :reader legend-session)
-   (sections :initform nil :accessor legend-sections))
+   ;; Gathered when the frame is made, so the very first paint already has
+   ;; them: a pane realized by ENABLE-FRAME draws before anyone can fill a slot
+   ;; in afterwards.
+   (sections :initform (luvcraft-legend-sections) :accessor legend-sections))
   (:menu-bar nil)
   (:panes (sheet (make-pane 'legend-pane)))
   (:layouts
@@ -166,7 +197,7 @@ actually owns it rather than once per table that inherits it.")
                     :ink *legend-muted-ink*)
         (let ((y *legend-title-height*))
           (dolist (section sections)
-            (draw-text* pane (car section) *legend-margin* (+ y 16)
+            (draw-text* pane (car section) *legend-margin* (+ y 14)
                         :align-y :center :text-size 14 :text-face :bold
                         :ink *legend-muted-ink*)
             (incf y *legend-header-height*)
@@ -177,8 +208,11 @@ actually owns it rather than once per table that inherits it.")
 
 (defun repaint-legend (frame)
   (let ((mirror (sheet-direct-mirror (frame-top-level-sheet frame))))
-    (when (typep mirror 'mcluv:luv-gpu-mirror)
-      (mcluv:repaint-gpu-mirror mirror)))
+    (if (typep mirror 'mcluv:luv-gpu-mirror)
+        (mcluv:repaint-gpu-mirror mirror)
+        (progn
+          (repaint-sheet (mcluv:mirror-sheet mirror) +everywhere+)
+          (mcluv:present-mirror mirror))))
   frame)
 
 ;;; ---------------------------------------------------------------------
@@ -244,6 +278,21 @@ actually owns it rather than once per table that inherits it.")
     ((overlay luvcraft-legend-overlay) session)
   (declare (ignore overlay session))
   nil)
+
+(defmethod luvcraft:luvcraft-focus-camera-pose
+    ((overlay luvcraft-legend-overlay) session)
+  "Stay exactly where the player was standing.
+
+A legend is a tool, not a thing in the world: nothing is framed, nothing is
+approached, and the view a player looks back at afterwards is the one they
+were already looking at."
+  (declare (ignore session))
+  (let ((camera (luvcraft:luvcraft-session-camera
+                 (mcluv:widget-overlay-session overlay))))
+    (luvcraft::make-camera-pose
+     (luvcraft::copy-camera-position (luvcraft:camera-position camera))
+     (luvcraft:camera-yaw camera) (luvcraft:camera-pitch camera)
+     luvcraft::+luvcraft-camera-vertical-field-of-view+)))
 
 (defmethod luvcraft:luvcraft-focus-entered
     ((overlay luvcraft-legend-overlay) session)

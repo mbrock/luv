@@ -188,22 +188,23 @@
     (flet ((keys-for (title label)
              (cdr (assoc label (cdr (assoc title sections :test #'string=))
                          :test #'string=))))
-      ;; One row per command, not one per key: walking is four keys and their
-      ;; arrows on a single line.
-      (ok (equal '("W" "↑" "S" "↓" "A" "←" "D" "→" "Shift")
-                 (keys-for "Moving" "Start Walking")))
-      (ok (equal '("Space") (keys-for "Moving" "Jump")))
-      (ok (equal '("I") (keys-for "In the world" "Toggle Inventory")))
-      (ok (equal '("Esc") (keys-for "In the world" "Show Keys")))
-      (ok (equal '("F11") (keys-for "Any time" "Toggle Fullscreen")))
+      ;; A direction is its own line, because walking forward and sprinting are
+      ;; different things to do even though one command performs both.
+      (ok (equal '("W" "↑") (keys-for "Moving" "walk forward")))
+      (ok (equal '("D" "→") (keys-for "Moving" "walk right")))
+      (ok (equal '("Shift") (keys-for "Moving" "sprint")))
+      (ok (equal '("Space") (keys-for "Moving" "jump")))
+      (ok (equal '("I") (keys-for "In the world" "toggle inventory")))
+      (ok (equal '("Esc") (keys-for "In the world" "show keys")))
+      (ok (equal '("F11") (keys-for "Any time" "toggle fullscreen")))
       ;; Modifiers are printed, and :ANY is not: it is noise on every row.
-      (ok (equal '("⇧Tab") (keys-for "Any time" "Leave Focus")))
-      ;; Nine slots share one row, since one command means one line.
+      (ok (equal '("⇧Tab") (keys-for "Any time" "leave focus")))
+      ;; Nine slots share one line, because nobody needs to be told about each.
       (ok (equal '("1" "2" "3" "4" "5" "6" "7" "8" "9")
-                 (keys-for "In the world" "Select Quickbar Slot")))
+                 (keys-for "In the world" "select block")))
       ;; A command owned by the movement layer is not repeated under the world
       ;; that inherits it.
-      (ok (null (keys-for "In the world" "Start Walking"))))))
+      (ok (null (keys-for "In the world" "walk forward"))))))
 
 (deftest a-rebound-key-changes-what-the-legend-says
   (let ((table (clim:find-command-table 'luvcraft.clim::luvcraft-world)))
@@ -212,7 +213,7 @@
            (clim:add-keystroke-to-command-table
             table '(#\y) :command '(luvcraft.clim::com-toggle-inventory)
             :errorp nil)
-           (ok (member "Y" (cdr (assoc "Toggle Inventory"
+           (ok (member "Y" (cdr (assoc "toggle inventory"
                                        (cdr (assoc "In the world"
                                                    (luvcraft-legend-sections)
                                                    :test #'string=))
