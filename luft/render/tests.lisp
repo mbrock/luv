@@ -24,13 +24,10 @@
            (/ (length terms) luft.render.shaders:+brick-size+)))
     (ok (= (length present) (luft:chain-count surface)))
     (ok (every (lambda (term)
-                 (= (luft:packed-term-coefficient term)
-                    (luft:chain-coefficient
-                     surface (luft:packed-term-site term))))
+                 (luft:chain-site-p surface term))
                present))
     (ok (every (lambda (term)
-                 (= 2 (luft:site-spatial-dimension
-                       (luft:packed-term-site term))))
+                 (= 2 (luft:site-dimension term)))
                present))
     ;; The surface is closed: its boundary vanishes.
     (ok (zerop (luft:chain-count (luft:boundary-chain surface))))))
@@ -53,13 +50,11 @@
                     (or (zerop term)
                         (flet ((reach (axis anchor center)
                                  (max (abs (- anchor center))
-                                      (abs (- (if (luft:site-extends-p
-                                                   (luft:packed-term-site term)
-                                                   axis)
+                                      (abs (- (if (luft:site-extends-p term axis)
                                                   (1+ anchor)
                                                   anchor)
                                               center)))))
-                          (let* ((site (luft:packed-term-site term))
+                          (let* ((site term)
                                  (dx (reach :x (luft:site-x site) center-x))
                                  (dy (reach :y (luft:site-y site) center-y))
                                  (dz (reach :z (luft:site-z site) center-z)))

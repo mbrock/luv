@@ -22,12 +22,12 @@
     :reader scene-domain)
    (solid
     :initarg :solid
-    :reader scene-solid
-    :documentation "The solid world: a 3-chain of unit cells.")
+   :reader scene-solid
+    :documentation "The solid world: a 3-chain of positive cells.")
    (surface
     :initform nil
     :accessor scene-surface
-    :documentation "The boundary of SOLID: exposed faces with unit signs.")
+    :documentation "The boundary of SOLID: exposed signed face sites.")
    (terms
     :initform nil
     :accessor scene-terms
@@ -50,11 +50,10 @@
   (refresh-scene (make-instance 'scene :domain domain :solid solid)))
 
 (defun term-chunk-key (term)
-  "A fixnum ordering key grouping TERM's site by chunk, then by site."
-  (let ((site (luft:packed-term-site term)))
-    (logior (ash (ash (luft:site-z site) (- +chunk-bits+)) 45)
-            (ash (ash (luft:site-y site) (- +chunk-bits+)) 24)
-            (ash (luft:site-x site) (- +chunk-bits+)))))
+  "A fixnum ordering key grouping signed site TERM by chunk, then by site."
+  (logior (ash (ash (luft:site-z term) (- +chunk-bits+)) 45)
+          (ash (ash (luft:site-y term) (- +chunk-bits+)) 24)
+          (ash (luft:site-x term) (- +chunk-bits+))))
 
 (defun order-terms-by-chunk (terms)
   "Return a fresh copy of the site-ordered TERMS grouped by chunk."
@@ -71,7 +70,7 @@
                 below (* (1+ brick) +brick-size+)
               for term = (aref terms index)
               unless (zerop term)
-                do (let* ((site (luft:packed-term-site term))
+                do (let* ((site term)
                           (x (luft:site-x site))
                           (y (luft:site-y site))
                           (z (luft:site-z site))
@@ -100,7 +99,7 @@
 (defun refresh-scene (scene)
   "Recompute SCENE's surface chain, brick-ordered terms, and brick spheres."
   (let* ((surface (luft:surface-chain (scene-solid scene)))
-         (ordered (order-terms-by-chunk (luft:chain-packed-terms surface)))
+         (ordered (order-terms-by-chunk (luft:chain-sites surface)))
          (brick-count (max 1 (ceiling (length ordered) +brick-size+)))
          (terms (make-array (* brick-count +brick-size+)
                             :element-type '(unsigned-byte 64)

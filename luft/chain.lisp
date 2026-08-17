@@ -1,166 +1,186 @@
-;;; Chains: sparse, weighted collections of sites.
+;;; Chains: collections of signed sites that annihilate in opposite pairs.
 ;;;
 ;;; LUFT uses SITE for every kind of piece in the lattice: a point, an edge, a
-;;; square face, or a cubic cell.  A CHAIN is simply a table that associates
-;;; some of those sites with integers.  For example, a solid containing two
-;;; cells starts out as the table
+;;; square face, or a cubic cell.  Every site carries its own positive or
+;;; negative polarity.  A CHAIN collects those signed sites.  For example, a
+;;; solid containing two cells starts as
 ;;;
-;;;     first cell   -> 1
-;;;     second cell  -> 1
+;;;     +first-cell
+;;;     +second-cell
 ;;;
-;;; One nonzero table entry is called a TERM.  Its integer is called its
-;;; COEFFICIENT.  In an ordinary solid world, coefficient 1 means "this cell
-;;; is present" and coefficient 0 means "it is absent."  Chains also allow -1,
-;;; 2, and other integers because later operations need to express opposite
-;;; directions, repeated contributions, and cancellation.  Storing a zero
-;;; would be pointless, so adding contributions that total zero removes the
-;;; term from the table.
+;;; Adding the opposite version of a site annihilates one existing copy:
 ;;;
-;;; The number in "3-chain" says what kind of sites the table contains.  A
+;;;     +face  plus  -face  -> nothing
+;;;
+;;; Internally, CHAIN keeps two hash tables like credit and debit ledgers.  The
+;;; keys contain only geometric identity; the choice of table supplies the
+;;; polarity bit.  A small occurrence count in each table makes addition
+;;; independent of arrival order.  The ordinary solid and its drawable surface
+;;; use at most one copy of any signed site.
+;;;
+;;; The number in "3-chain" says what kind of sites the collection contains.  A
 ;;; chain of cubic cells is a 3-chain; a chain of square faces is a 2-chain; a
 ;;; chain of edges is a 1-chain; and a chain of vertices is a 0-chain.  The
-;;; CHAIN structure itself is general and does not enforce that all its sites
-;;; have the same dimension.
+;;; CHAIN structure itself is general and does not enforce one dimension.
 ;;;
-;;; The BOUNDARY operation turns every site into the pieces around its edge:
-;;; a cell gives six faces, a face gives four edges, and an edge gives two
-;;; vertices.  So the boundary of a solid 3-chain is a 2-chain containing its
-;;; faces.  That output table is called its BOUNDARY CHAIN.  This is how
-;;; SURFACE-CHAIN finds the faces to render.
+;;; The BOUNDARY operation turns every site into the pieces around its edge: a
+;;; cell gives six faces, a face gives four edges, and an edge gives two
+;;; vertices.  The boundary of a solid 3-chain is therefore a 2-chain of faces.
+;;; This is how SURFACE-CHAIN finds the faces to render.
 ;;;
-;;; Boundary pieces carry coefficients +1 or -1.  The sign records their
-;;; direction, or ORIENTATION.  LUFT chooses one consistent sign for every
-;;; low and high boundary from the ordering X,Y,Z,T.  "Canonical incidence
-;;; sign" is the mathematical name for that choice: "incidence" just means
-;;; that a face belongs to the boundary of a cell, and "canonical" means the
-;;; sign follows the one fixed rule rather than being chosen afresh.
+;;; Boundary pieces carry their direction, or ORIENTATION, in their polarity
+;;; bit.  LUFT chooses one consistent polarity for every low and high boundary
+;;; from the ordering X,Y,Z.  The mathematical phrase "canonical incidence
+;;; sign" merely names that fixed choice.
 ;;;
-;;; That sign rule makes neighbouring solid cells cancel their shared face.
-;;; The high-X face of the first cell and the low-X face of the second cell are
-;;; the same face SITE, but they contribute opposite coefficients:
+;;; That choice makes neighbouring solid cells annihilate their shared face.
+;;; The high-X face of the first cell and the low-X face of the second cell have
+;;; the same geometry but opposite polarities:
 ;;;
-;;;     shared face  -> (+1) + (-1) = 0
+;;;     +shared-face  plus  -shared-face  -> nothing
 ;;;
-;;; The table therefore drops the shared face.  An outside face is contributed
-;;; by only one cell, so it remains with coefficient +1 or -1.  Its sign tells
-;;; the renderer which of the face's two directions points out of the solid.
+;;; An outside face arrives from only one cell, so it remains positive or
+;;; negative.  Its polarity tells the renderer which of the face's two
+;;; directions points out of the solid.
 ;;;
-;;; The same cancellation happens one dimension lower.  If we take the
-;;; boundary of the resulting faces, every edge is reached twice with opposite
-;;; signs.  Thus "the boundary of a boundary is zero" means the second result
-;;; is an empty chain.  For surfaces produced from cells, this is the useful
-;;; bookkeeping fact that the oriented faces leave no unpaired boundary edge.
+;;; The same annihilation happens one dimension lower.  Taking the boundary of
+;;; the resulting faces sends every edge once to each polarity ledger, leaving
+;;; both empty.  Thus "the boundary of a boundary is zero" means the second
+;;; result contains no signed sites.
 
 (in-package #:luft)
 
 ;;; ------------------------------------------------------------------------
 ;;; Chains
 
-(defstruct (chain (:constructor %make-chain (domain coefficients)))
-  "A sparse table from DOMAIN's sites to nonzero integer weights.
+(defstruct (chain (:constructor %make-chain
+                      (domain positive-counts negative-counts)))
+  "A normalized collection of positive and negative sites in DOMAIN.
 
-Each table entry is called a term, and its integer weight is its coefficient.
-A site whose coefficient becomes zero is removed from the table."
+The two hash tables are polarity ledgers keyed by SITE-GEOMETRY.  Opposite
+occurrences annihilate immediately, so one geometry appears in at most one
+ledger.  Counts preserve repeated unmatched occurrences without making an
+integer coefficient part of a site's public meaning."
   (domain nil :type world-domain :read-only t)
-  (coefficients (make-hash-table) :type hash-table :read-only t))
+  (positive-counts (make-hash-table) :type hash-table :read-only t)
+  (negative-counts (make-hash-table) :type hash-table :read-only t))
 
 (defmethod print-object ((chain chain) stream)
   (print-unreadable-object (chain stream :type t :identity t)
-    (format stream "~D term~:P" (chain-count chain))))
+    (format stream "~D signed site~:P" (chain-count chain))))
 
 (defun make-chain (domain)
-  "Make an empty chain for DOMAIN, with coefficient zero at every site."
+  "Make an empty collection of signed sites in DOMAIN."
   (check-type domain world-domain)
-  (%make-chain domain (make-hash-table)))
+  (%make-chain domain (make-hash-table) (make-hash-table)))
+
+(defun chain-polarity-table (chain site)
+  (if (site-negative-p site)
+      (chain-negative-counts chain)
+      (chain-positive-counts chain)))
+
+(defun chain-opposite-polarity-table (chain site)
+  (if (site-negative-p site)
+      (chain-positive-counts chain)
+      (chain-negative-counts chain)))
 
 (defun chain-count (chain)
-  "Return the number of stored sites, or terms, in CHAIN.
+  "Return the number of unmatched signed-site occurrences in CHAIN."
+  (+ (loop for count being the hash-values of (chain-positive-counts chain)
+           sum count)
+     (loop for count being the hash-values of (chain-negative-counts chain)
+           sum count)))
 
-Sites with coefficient zero are not stored and therefore are not counted."
-  (hash-table-count (chain-coefficients chain)))
-
-(defun chain-coefficient (chain site)
-  "Return SITE's integer weight in CHAIN, or zero when SITE is absent."
-  (values (gethash site (chain-coefficients chain) 0)))
-
-(defun (setf chain-coefficient) (coefficient chain site)
-  "Set SITE's integer weight in CHAIN; setting it to zero removes the term."
-  (check-type coefficient integer)
+(defun chain-site-count (chain site)
+  "Return how many unmatched copies of signed SITE occur in CHAIN."
   (checked-site (chain-domain chain) site)
-  (if (zerop coefficient)
-      (remhash site (chain-coefficients chain))
-      (setf (gethash site (chain-coefficients chain)) coefficient))
-  coefficient)
+  (gethash (site-geometry site) (chain-polarity-table chain site) 0))
 
-(defun add-chain-term (chain site coefficient)
-  "Add COEFFICIENT to SITE's current weight and return the new weight.
+(defun chain-site-p (chain site)
+  "Whether at least one unmatched copy of signed SITE occurs in CHAIN."
+  (plusp (chain-site-count chain site)))
 
-For example, adding -1 to a site whose weight is 1 cancels it and removes the
-site from CHAIN."
-  (check-type coefficient integer)
-  (setf (chain-coefficient chain site)
-        (+ (chain-coefficient chain site) coefficient)))
+(defun decrement-site-count (table geometry)
+  (let ((count (gethash geometry table 0)))
+    (cond ((= count 1) (remhash geometry table))
+          ((> count 1) (setf (gethash geometry table) (1- count)))
+          (t (error "No signed site ~S to remove." geometry)))))
+
+(defun add-chain-site (chain site)
+  "Add signed SITE to CHAIN, annihilating one opposite copy when present.
+
+The polarity bit is masked from the hash key and chooses one of CHAIN's two
+ledgers.  Return SITE."
+  (checked-site (chain-domain chain) site)
+  (let* ((geometry (site-geometry site))
+         (same (chain-polarity-table chain site))
+         (opposite (chain-opposite-polarity-table chain site)))
+    (if (plusp (gethash geometry opposite 0))
+        (decrement-site-count opposite geometry)
+        (incf (gethash geometry same 0))))
+  site)
+
+(defun map-chain-unordered (function chain)
+  "Call FUNCTION with each signed site occurrence without sorting or allocating."
+  (flet ((map-ledger (table polarity)
+           (maphash (lambda (geometry count)
+                      (loop repeat count
+                            do (funcall function
+                                        (site-with-polarity geometry polarity))))
+                    table)))
+    (map-ledger (chain-positive-counts chain) 1)
+    (map-ledger (chain-negative-counts chain) -1))
+  chain)
 
 (defun map-chain (function chain)
-  "Call FUNCTION with each SITE and COEFFICIENT of CHAIN, in site order."
-  (let ((sites (chain-sites chain)))
-    (loop for site across sites
-          do (funcall function site (chain-coefficient chain site)))
-    chain))
+  "Call FUNCTION with each signed site occurrence in CHAIN, in packed order."
+  (loop for site across (chain-sites chain)
+        do (funcall function site))
+  chain)
 
 (defun chain-sites (chain)
-  "Return CHAIN's sites in ascending packed order as a fresh vector.
+  "Return CHAIN's signed sites in ascending packed order as a fresh vector.  #AGVXGM
 
-Packed order is Z-major, then Y, then X, then extent: sorting by the packed
-word already groups terms by plane and row."
+Packed order is Z-major, then Y, then X, then extent and polarity.  Repeated
+unmatched occurrences appear repeatedly in the vector."
   (let ((sites (make-array (chain-count chain) :element-type 'site))
         (index 0))
-    (maphash (lambda (site coefficient)
-               (declare (ignore coefficient))
-               (setf (aref sites index) site)
-               (incf index))
-             (chain-coefficients chain))
+    (flet ((copy-ledger (table polarity)
+             (maphash (lambda (geometry count)
+                        (loop repeat count
+                              do
+                          (setf (aref sites index)
+                                (site-with-polarity geometry polarity))
+                          (incf index)))
+                      table)))
+      (copy-ledger (chain-positive-counts chain) 1)
+      (copy-ledger (chain-negative-counts chain) -1))
     (sort sites #'<)))
-
-(defun chain-spatial-p (chain)
-  "Whether no term of CHAIN extends along time."
-  (loop for site being the hash-keys of (chain-coefficients chain)
-        never (site-extends-p site :t)))
 
 ;;; ------------------------------------------------------------------------
 ;;; Boundaries
 
-;;; For each input term, MAP-SITE-BOUNDARY supplies every one-dimension-lower
-;;; boundary site and the +1 or -1 chosen by LUFT's orientation rule.  The
-;;; expression (* SIGN COEFFICIENT) below has a plain meaning: if the input
-;;; site has weight N, add N copies of each boundary piece, reversing the
-;;; weight for pieces whose orientation sign is -1.  Contributions to the same
-;;; boundary site are added together, which is where shared faces cancel.
+;;; MAP-SITE-BOUNDARY returns signed boundary sites directly.  BOUNDARY-CHAIN
+;;; adds each one to the appropriate polarity ledger.  When the opposite site
+;;; is already there, the pair annihilates.  This is where shared faces vanish.
 
 (defun boundary-chain (chain)
-  "Return CHAIN's boundary pieces, with direction, as a new chain.  #9HLYEE
+  "Return CHAIN's signed boundary pieces as a new chain.  #9HLYEE
 
-A cell contributes its six faces, a face contributes its four edges, and an
-edge contributes its two vertices.  Each contribution has the input site's
-integer weight, made positive or negative according to LUFT's fixed
-orientation rule.  Contributions to the same site are added, so the shared
-face of two neighbouring cells cancels.
-
-CHAIN must not contain sites that extend through time.  The two time ends of
-such a site have the same packed spatial value and can only be distinguished
-by an ambient time offset, which CHAIN has nowhere to store."
-  (unless (chain-spatial-p chain)
-    (error "The boundary of a temporal chain needs an ambient origin: ~S."
-           chain))
+A cell contributes its six signed faces, a face contributes its four signed
+edges, and an edge contributes its two signed vertices.  Opposite copies of
+one geometry annihilate, so the shared face of two neighbouring cells
+disappears."
   (let ((domain (chain-domain chain))
         (boundary (make-chain (chain-domain chain))))
-    (maphash (lambda (site coefficient)
-               (map-site-boundary
-                (lambda (face sign temporal-offset axis side)
-                  (declare (ignore temporal-offset axis side))
-                  (add-chain-term boundary face (* sign coefficient)))
-                domain site))
-             (chain-coefficients chain))
+    (map-chain-unordered
+     (lambda (site)
+       (map-site-boundary
+        (lambda (part axis side)
+          (declare (ignore axis side))
+          (add-chain-site boundary part))
+        domain site))
+     chain)
     boundary))
 
 ;;; ------------------------------------------------------------------------
@@ -169,77 +189,32 @@ by an ambient time offset, which CHAIN has nowhere to store."
 (defun make-solid-chain (domain)
   "Make an empty solid world for DOMAIN.
 
-Adding cubic cell sites with coefficient 1 turns this into what mathematics
-calls a 3-chain."
+Adding positive cubic cell sites turns this into what mathematics calls a
+3-chain."
   (make-chain domain))
 
 (defun solid-cell-p (chain x y z)
   "Whether the cell anchored at X,Y,Z is solid in CHAIN."
-  (plusp (chain-coefficient
-          chain (make-site (chain-domain chain) x y z +cell-extent+))))
+  (chain-site-p
+   chain (make-site (chain-domain chain) x y z +cell-extent+)))
 
 (defun (setf solid-cell-p) (solid-p chain x y z)
   "Make the cell anchored at X,Y,Z solid or empty in CHAIN."
-  (setf (chain-coefficient
-         chain (make-site (chain-domain chain) x y z +cell-extent+))
-        (if solid-p 1 0))
+  (let* ((site (make-site (chain-domain chain) x y z +cell-extent+))
+         (geometry (site-geometry site)))
+    (remhash geometry (chain-negative-counts chain))
+    (if solid-p
+        (setf (gethash geometry (chain-positive-counts chain)) 1)
+        (remhash geometry (chain-positive-counts chain))))
   solid-p)
 
 (defun surface-chain (solid)
-  "Return SOLID's exposed faces, each with coefficient +1 or -1.
+  "Return SOLID's exposed faces, each with positive or negative polarity.
 
-SOLID normally contains cubic cells with coefficient 1.  Neighbouring cells'
-shared faces cancel, leaving only outside faces.  Each remaining sign combines
-with the face's fixed orientation to tell the renderer which way is outward."
+SOLID normally contains one positive site for each occupied cubic cell.
+Neighbouring cells' shared faces annihilate, leaving only outside faces.  Each
+remaining face's polarity tells the renderer which way is outward."
   (boundary-chain solid))
-
-;;; ------------------------------------------------------------------------
-;;; Packed terms
-
-;;; A packed term puts one site and its coefficient into one 64-bit word.  This
-;;; compact form accepts only +1 and -1; "unit coefficient" means exactly one
-;;; of those two integers, whose magnitude is one.  The site's own 60 bits are
-;;; left unchanged, and bit 60 records whether the coefficient is negative.
-;;; Sixty-one used bits keep the word an immediate fixnum on 64-bit SBCL.  A
-;;; specialized (unsigned-byte 64) vector of these words is also exactly the
-;;; buffer a shader reads.  A general chain may contain larger coefficients
-;;; and cannot use this encoding, but a solid world's exposed faces never need
-;;; larger ones.
-
-(defconstant +term-sign-bit+ 60)
-(defconstant +term-site-mask+ (1- (ash 1 +term-sign-bit+)))
-
-(deftype packed-term ()
-  '(unsigned-byte 61))
-
-(defun pack-term (site coefficient)
-  "Pack SITE and COEFFICIENT, which must be +1 or -1, into one word.  #AGVXGM"
-  (check-type site site)
-  (check-type coefficient (member 1 -1))
-  (if (minusp coefficient)
-      (logior site (ash 1 +term-sign-bit+))
-      site))
-
-(declaim (inline packed-term-site packed-term-coefficient))
-(defun packed-term-site (term)
-  (check-type term packed-term)
-  (logand term +term-site-mask+))
-
-(defun packed-term-coefficient (term)
-  (check-type term packed-term)
-  (if (logbitp +term-sign-bit+ term) -1 1))
-
-(defun chain-packed-terms (chain)
-  "Return CHAIN's terms as a fresh (unsigned-byte 64) vector in site order.
-
-Every coefficient must be +1 or -1; see PACK-TERM."
-  (let* ((sites (chain-sites chain))
-         (terms (make-array (length sites) :element-type '(unsigned-byte 64))))
-    (loop for site across sites
-          for index from 0
-          do (setf (aref terms index)
-                   (pack-term site (chain-coefficient chain site))))
-    terms))
 
 ;;; ------------------------------------------------------------------------
 ;;; Dense cell bits
@@ -267,21 +242,21 @@ Every coefficient must be +1 or -1; see PACK-TERM."
      +vertical-cell-rows+))
 
 (defun chain-cell-bits (chain)
-  "Return CHAIN's positive cell terms as a dense (unsigned-byte 32) bit vector.
+  "Return CHAIN's positive cells as a dense (unsigned-byte 32) bit vector.
 
-Bit CELL-BIT-INDEX is set for every cell whose coefficient is positive; the
-words are ordered so that word W holds bits 32W through 32W+31."
+Bit CELL-BIT-INDEX is set for every positive cell site; the words are ordered
+so that word W holds bits 32W through 32W+31."
   (let* ((domain (chain-domain chain))
          (words (make-array (ceiling (chain-cell-bit-count domain) 32)
                             :element-type '(unsigned-byte 32)
                             :initial-element 0)))
-    (maphash (lambda (site coefficient)
-               (when (and (plusp coefficient)
-                          (= (site-extent site) +cell-extent+))
+    (maphash (lambda (site count)
+               (declare (ignore count))
+               (when (= (site-extent site) +cell-extent+)
                  (let ((index (cell-bit-index domain (site-x site)
                                               (site-y site) (site-z site))))
                    (setf (ldb (byte 1 (mod index 32))
                               (aref words (floor index 32)))
                          1))))
-             (chain-coefficients chain))
+             (chain-positive-counts chain))
     words))
