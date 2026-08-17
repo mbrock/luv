@@ -52,6 +52,7 @@
                  (:file "sky")
                  (:file "frame-performance")
                  (:file "live-pipeline")
+                 (:file "release")
                  (:file "text")
                  (:file "video-screen")
                  (:file "app")

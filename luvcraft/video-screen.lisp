@@ -202,16 +202,28 @@ HEIGHT is the screen's height in cells; its width follows the film's aspect."
                      (setf completed-p t)
                      screen)))))
         (unless completed-p
-          (when pipeline (ignore-errors (release-live-shader-pipeline pipeline)))
-          (dolist (resource resources) (ignore-errors (destroy resource)))
-          (ignore-errors (libav:close-video video)))))))
+          ;; The caller is already being told why the screen could not be
+          ;; built, so trouble unwinding it is a warning beside that.
+          (with-release-warnings
+            (when pipeline
+              (releasing :video-screen-pipeline
+                (release-live-shader-pipeline pipeline)))
+            (dolist (resource resources)
+              (releasing :video-screen-resource (destroy resource)))
+            (releasing :video-screen-film (libav:close-video video))))))))
 
 (defun release-video-screen (screen)
-  (release-live-shader-pipeline (video-screen-pipeline screen))
+  "Release SCREEN's pipeline, GPU resources, and open film.
+
+Each step is contained so that a failure early on cannot strand the film's
+decoder or the resources after it; the failures travel out through whatever
+release report is running.  See WITH-RELEASE-REPORT."
+  (releasing :video-screen-pipeline
+    (release-live-shader-pipeline (video-screen-pipeline screen)))
   (dolist (resource (video-screen-resources screen))
-    (ignore-errors (destroy resource)))
+    (releasing :video-screen-resource (destroy resource)))
   (setf (video-screen-resources screen) nil)
-  (libav:close-video (video-screen-video screen))
+  (releasing :video-screen-film (libav:close-video (video-screen-video screen)))
   (values))
 
 (defun video-screen-native-pipeline (screen)

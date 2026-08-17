@@ -64,15 +64,20 @@ game for later SLY evaluations.  STOP-PLAYING checkpoints and closes it."
               *session* session)))))
 
 (defun stop-playing ()
-  "Checkpoint and close the game PLAY opened, releasing its resources."
+  "Checkpoint and close the game PLAY opened, releasing its resources.
+
+*SESSION* is cleared whether or not the release succeeds, so a failed teardown
+cannot leave the image believing a game is still playing.  The failure itself
+is not swallowed: STOP-LUVCRAFT closes the window first and then signals what
+went wrong, and that condition comes out of here."
   (let ((session *session*)
         (writer *checkpoint-writer*))
-    (setf *session* nil
-          *checkpoint-writer* nil)
     (unwind-protect
          (when session
            (request-luvcraft-session-checkpoint session)
            (stop-luvcraft session))
+      (setf *session* nil
+            *checkpoint-writer* nil)
       (when writer
         (stop-world-checkpoint-writer writer)))
     (values)))
