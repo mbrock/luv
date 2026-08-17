@@ -698,7 +698,7 @@ negative inside.  RADIUS is the corner radius in world cells."
          (normal (normalize normal-input))
          (n-dot-l (max 0.0 (dot normal sun-direction)))
          (irradiance (+ ambient (* sun-color (* n-dot-l day-factor))))
-         (coverage (phone-glass-coverage render-coordinate half-size 0.03))
+         (coverage (phone-glass-coverage render-coordinate half-size 0.02))
          ;; The panel behind the glass: black, and lit only by what little
          ;; the room puts into it.  Off, it should read as a dark mirror.
          (panel-albedo (vec3 0.005 0.005 0.006))
@@ -751,7 +751,7 @@ negative inside.  RADIUS is the corner radius in world cells."
          (sheen (* sun-color (* (expt n-dot-h 14.0) 0.05 day-factor)))
          (scatter (* (+ sheen (* (+ ambient (* horizon 0.4)) 0.035))
                      smudge))
-         (coverage (phone-glass-coverage render-coordinate half-size 0.03))
+         (coverage (phone-glass-coverage render-coordinate half-size 0.02))
          (emission (+ sky-reflection room-reflection glint scatter)))
     ;; The glass takes nothing away from the picture under it: alpha zero,
     ;; and only what it sends back is added.

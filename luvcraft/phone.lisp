@@ -22,27 +22,27 @@
 
 (in-package #:luvcraft)
 
-;;; The slab, in the grip frame: 0.40 wide, 0.58 tall, 0.024 thin, held in
+;;; The slab, in the grip frame: 0.37 wide, 0.46 tall, 0.022 thin, held in
 ;;; front of the palm by its lower third with the thumb up one edge and the
-;;; fingers round the other.  Comically large, which is the point, and also
-;;; what makes a real terminal on it readable: the screen is proportioned
-;;; for seventy-odd condensed columns.
+;;; fingers round the other.  A little large for a phone, a little squat
+;;; for one too -- the proportions of a small handheld console -- because
+;;; what it carries is a terminal: sixty condensed columns.
 
-(defparameter *phone-half-width* 0.220d0)
-(defparameter *phone-half-height* 0.290d0)
-(defparameter *phone-half-depth* 0.012d0)
-(defparameter *phone-corner-radius* 0.030d0
-  "How far the slab's corners are rounded, in cells; the screen's too.")
-(defparameter *phone-center-height* 0.160d0
+(defparameter *phone-half-width* 0.185d0)
+(defparameter *phone-half-height* 0.230d0)
+(defparameter *phone-half-depth* 0.011d0)
+(defparameter *phone-corner-radius* 0.034d0
+  "How far the slab's corners are rounded, in cells.")
+(defparameter *phone-center-height* 0.130d0
   "The slab's centre above the palm, which holds it by its lower third.")
 (defparameter *phone-center-depth* -0.170d0
   "The slab's centre in front of the palm.")
-(defparameter *phone-screen-half-width* 0.200d0)
-(defparameter *phone-screen-half-height* 0.262d0)
+(defparameter *phone-screen-half-width* 0.168d0)
+(defparameter *phone-screen-half-height* 0.208d0)
 (defparameter *phone-screen-depth* (+ *phone-center-depth* (- *phone-half-depth*))
   "The screen plane's z in the grip frame: the slab's face toward the eye.")
 
-(defparameter *phone-terminal-rows* 46
+(defparameter *phone-terminal-rows* 35
   "How many rows of shell the phone shows; the columns follow its width.")
 (defparameter *phone-terminal-margin* 0.008
   "The bezel between the screen's edge and its font grid, in cells.")
@@ -184,7 +184,19 @@ against a per-frame uniform whose camera is expressed in the grip frame."))
 toward the player.  Held in the right hand; TAB focuses its shell."))
 
 (defmethod hand-item-name ((item phone)) "phone")
-(defmethod hand-item-box-count ((item phone)) 10)
+(defmethod hand-item-box-count ((item phone)) 4)
+
+(defmethod emit-hand-item ((item phone) body vertices palm right up forward
+                           sky-level block-level)
+  ;; The bump and the grip are boxes; the slab has real corners.
+  (call-next-method)
+  (emit-rounded-slab
+   vertices
+   (frame-point palm right up forward
+                0d0 *phone-center-height* *phone-center-depth*)
+   right up forward
+   *phone-half-width* *phone-half-height* *phone-half-depth*
+   *phone-corner-radius* +phone-body-tile+ sky-level block-level))
 
 (defmethod hand-item-carry-pose ((item phone) body)
   (declare (ignore body))
@@ -192,8 +204,12 @@ toward the player.  Held in the right hand; TAB focuses its shell."))
   ;; right of centre so the crosshair still shows past its edge; when its
   ;; shell has the focus, brought square to the centre and held a little
   ;; further off, where the narrowed field of view frames the whole screen.
-  (lerp-pose '(0.26d0 -0.28d0 0.66d0 -0.16d0 -0.16d0 0.04d0)
-             '(0.02d0 -0.19d0 0.96d0 -0.02d0 0.0d0 0.0d0)
+  ;; Carried: at arm's length and low, tipped back so it can be glanced
+  ;; at on the way somewhere without taking the view.  Focused: brought
+  ;; up square to the centre, closer, where the narrowed field of view
+  ;; frames the whole screen.
+  (lerp-pose '(0.22d0 -0.50d0 0.72d0 0.55d0 -0.12d0 0.0d0)
+             '(0.02d0 -0.13d0 0.80d0 -0.02d0 0.0d0 0.0d0)
              (phone-attention item)))
 
 (defmethod advance-hand-item ((item phone) body seconds)
@@ -219,17 +235,8 @@ toward the player.  Held in the right hand; TAB focuses its shell."))
          (cy *phone-center-height*)
          (cz *phone-center-depth*)
          (metal +phone-body-tile+))
-    ;; The slab with its corners rounded: a cross of two boxes leaves a
-    ;; notch at each corner, and a box turned forty-five degrees fills each
-    ;; notch as a chamfer, which at arm's length reads as a radius.
-    (funcall function 0d0 cy cz (- hw r) hh hd metal :stretch-p t)
-    (funcall function 0d0 cy cz hw (- hh r) hd metal :stretch-p t)
-    (let ((side (/ r (sqrt 2d0))))
-      (dolist (corner '((-1 -1) (1 -1) (-1 1) (1 1)))
-        (funcall function
-                 (* (first corner) (- hw r)) (+ cy (* (second corner) (- hh r)))
-                 cz side side hd metal :stretch-p t
-                 :tilt (list 0d0 0d0 (/ pi 4)))))
+    ;; The slab itself is not a box: see EMIT-HAND-ITEM below.
+    (declare (ignorable r))
     ;; A camera bump on the back, high on the left as seen from behind.
     (funcall function (- hw 0.06d0) (+ cy hh -0.07d0) (+ cz hd 0.006d0)
              0.030d0 0.045d0 0.006d0 metal :stretch-p t)

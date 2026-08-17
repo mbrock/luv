@@ -23,8 +23,9 @@
 
 (in-package #:luvcraft)
 
-(defconstant +player-body-box-limit+ 24
-  "The most boxes the body and its held item may emit per frame.")
+(defconstant +player-body-box-limit+ 40
+  "The most box-equivalents (36 vertices) the body and its held item may
+emit per frame; a rounded slab counts for several.")
 (defconstant +player-body-buffer-size+
   (* 4 +player-body-box-limit+
      +critter-vertices-per-box+ +block-mesh-floats-per-vertex+))
@@ -54,6 +55,16 @@ from the player."))
 
 (defgeneric hand-item-box-count (item)
   (:documentation "How many boxes MAP-HAND-ITEM-BOXES emits for ITEM."))
+
+(defgeneric emit-hand-item (item body vertices palm right up forward
+                            sky-level block-level)
+  (:documentation
+   "Append ITEM's geometry, held by BODY, to VERTICES.
+
+PALM is the world point of the grip and RIGHT UP FORWARD its unit frame.
+The default method emits the item's MAP-HAND-ITEM-BOXES; an item whose
+shape is not a heap of boxes -- a slab with genuinely round corners --
+adds to that here."))
 
 (defgeneric hand-item-carry-pose (item body)
   (:documentation
@@ -375,22 +386,111 @@ at its end."
             (when item
               (multiple-value-bind (palm grip-right grip-up grip-forward)
                   (player-body-grip-frame session)
-                (map-hand-item-boxes
-                 item body
-                 (lambda (bx by bz half-x half-y half-z tile
-                          &key (tilt '(0d0 0d0 0d0)) stretch-p
-                            (emission 0.0))
-                   (multiple-value-bind (box-right box-up box-forward)
-                       (apply #'rotate-frame
-                              grip-right grip-up grip-forward tilt)
-                     (emit-framed-box
-                      vertices
-                      (frame-point palm grip-right grip-up grip-forward
-                                   bx by bz)
-                      box-right box-up box-forward
-                      half-x half-y half-z tile
-                      sky block emission stretch-p))))))))))
+                (emit-hand-item item body vertices
+                                palm grip-right grip-up grip-forward
+                                sky block)))))))
     vertices))
+
+(defmethod emit-hand-item (item body vertices palm right up forward
+                           sky-level block-level)
+  (map-hand-item-boxes
+   item body
+   (lambda (bx by bz half-x half-y half-z tile
+            &key (tilt '(0d0 0d0 0d0)) stretch-p (emission 0.0))
+     (multiple-value-bind (box-right box-up box-forward)
+         (apply #'rotate-frame right up forward tilt)
+       (emit-framed-box
+        vertices
+        (frame-point palm right up forward bx by bz)
+        box-right box-up box-forward
+        half-x half-y half-z tile
+        sky-level block-level emission stretch-p))))
+  vertices)
+
+;;; ---------------------------------------------------------------------
+;;; A slab with round corners.
+
+(defun rounded-rectangle-outline (half-x half-y radius segments)
+  "Return the (X . Y) corners of a rounded rectangle, counter-clockwise
+from the right side's lower end, with SEGMENTS arcs per corner."
+  (let ((points nil)
+        (x (- half-x radius))
+        (y (- half-y radius)))
+    ;; Corner centres and the angle each arc starts at: lower right, upper
+    ;; right, upper left, lower left, each arc turning a quarter.
+    (loop for (cx cy start) in (list (list x (- y) (* -0.5d0 pi))
+                                     (list x y 0d0)
+                                     (list (- x) y (* 0.5d0 pi))
+                                     (list (- x) (- y) pi))
+          do (dotimes (i (1+ segments))
+               (let ((angle (+ start (* (/ i segments) 0.5d0 pi))))
+                 (push (cons (+ cx (* radius (cos angle)))
+                             (+ cy (* radius (sin angle))))
+                       points))))
+    (nreverse points)))
+
+(defun emit-rounded-slab
+    (vertices origin right up forward half-x half-y half-z radius tile
+     sky-level block-level &key (segments 6) (emission 0.0))
+  "Append a slab centred on ORIGIN with axes RIGHT UP FORWARD whose four
+corners are rounded to RADIUS in the RIGHT/UP plane: two flat faces and a
+band of quads around the edge, all wearing TILE stretched once around."
+  (let* ((outline (rounded-rectangle-outline half-x half-y radius segments))
+         (count (length outline))
+         (size +block-atlas-tile-size+)
+         (atlas-width (* size +block-atlas-tile-count+)))
+    (labels ((tile-u (u) (/ (+ (* tile size) 0.5 (* u (1- size))) atlas-width))
+             (tile-v (v) (/ (+ 0.5 (* v (1- size))) size))
+             (world-normal (nx ny nz)
+               (frame-point (make-vec3 0d0 0d0 0d0) right up forward nx ny nz))
+             (vertex (x y z normal u v)
+               (let ((point (frame-point origin right up forward x y z)))
+                 (push-block-vertex-components
+                  vertices
+                  (vec3-x point) (vec3-y point) (vec3-z point)
+                  (tile-u u) (tile-v v)
+                  (critter-face-shade (vec3-y normal))
+                  (vec3-x normal) (vec3-y normal) (vec3-z normal)
+                  sky-level block-level emission
+                  +block-face-edge-flush+ +block-face-edge-flush+
+                  +block-face-edge-flush+ +block-face-edge-flush+)))
+             (face-uv (x y)
+               (values (+ 0.5d0 (/ x (* 2 half-x)))
+                       (- 0.5d0 (/ y (* 2 half-y))))))
+      ;; The two flat faces, as fans from the centre.  The front (-z) face
+      ;; is wound to face the eye; the back the other way.
+      (dolist (side '(-1 1))
+        (let* ((z (* side half-z))
+               (normal (world-normal 0d0 0d0 side)))
+          (loop for i below count
+                for a = (nth i outline)
+                for b = (nth (mod (1+ i) count) outline)
+                do (multiple-value-bind (au av) (face-uv (car a) (cdr a))
+                     (multiple-value-bind (bu bv) (face-uv (car b) (cdr b))
+                       (vertex 0d0 0d0 z normal 0.5d0 0.5d0)
+                       (if (minusp side)
+                           (progn (vertex (car b) (cdr b) z normal bu bv)
+                                  (vertex (car a) (cdr a) z normal au av))
+                           (progn (vertex (car a) (cdr a) z normal au av)
+                                  (vertex (car b) (cdr b) z normal bu bv))))))))
+      ;; The rim: one quad per outline edge, its normal the edge's outward
+      ;; perpendicular, the tile running once around it.
+      (loop for i below count
+            for a = (nth i outline)
+            for b = (nth (mod (1+ i) count) outline)
+            for ex = (- (car b) (car a))
+            for ey = (- (cdr b) (cdr a))
+            for length = (max 1d-9 (sqrt (+ (* ex ex) (* ey ey))))
+            for normal = (world-normal (/ ey length) (- (/ ex length)) 0d0)
+            for u0 = (/ i count)
+            for u1 = (/ (1+ i) count)
+            do (vertex (car a) (cdr a) (- half-z) normal u0 0d0)
+               (vertex (car b) (cdr b) (- half-z) normal u1 0d0)
+               (vertex (car b) (cdr b) half-z normal u1 1d0)
+               (vertex (car a) (cdr a) (- half-z) normal u0 0d0)
+               (vertex (car b) (cdr b) half-z normal u1 1d0)
+               (vertex (car a) (cdr a) half-z normal u0 1d0))))
+  vertices)
 
 (defun player-body-vertices (session)
   "Build the block-pipeline vertex stream for the player's body this frame."

@@ -604,11 +604,14 @@ glint -- plus fingerprints, patches of oil that scatter a little of the
 room forward where the clean coating would not, so they show only where
 there is light to scatter and never as paint.  The slab itself is one
 even matte tone with the least relief a tile is allowed; its corners are
-rounded by a cross of two boxes with a box turned forty-five degrees in
-each notch, which at arm's length reads as a radius.  The grip takes the
+a real mesh -- two fans and a rim of quads around a rounded-rectangle
+outline (emit-rounded-slab), the one thing in the body that is not a box.  The grip takes the
 sides, never the screen.  The screen is proportioned for a real terminal:
-forty-six rows of Input Mono Condensed (from the user's own fonts when
-installed, the wall's Monaspace otherwise) give seventy-three columns.
+thirty-five rows of Input Mono Condensed (from the user's own fonts when
+installed, the wall's Monaspace otherwise) give sixty columns, on a slab
+proportioned a little like a small handheld console.  Carried, it hangs at
+arm's length and low, tipped back to be glanced at; focused, it comes up
+square and close.
 
 The wall's three modes -- shell, film, browser -- are not what the phone
 inherited; it is a shell and only a shell.  That mode switch is a kludge

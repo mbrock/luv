@@ -254,6 +254,8 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:hand-item-taken-out
            #:hand-item-put-away
            #:map-hand-item-boxes
+           #:emit-hand-item
+           #:emit-rounded-slab
            #:take-out-hand-item
            #:put-away-hand-item
            #:toggle-hand-item
