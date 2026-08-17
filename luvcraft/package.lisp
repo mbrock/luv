@@ -419,4 +419,6 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:block-world-vertex-lowering
            #:block-world-vertex-module
            #:block-world-vertex-shader
-           #:block-world-vertex-specification))
+           #:block-world-vertex-specification
+           #:focus-post-fragment-specification
+           #:focus-post-uniform-block))

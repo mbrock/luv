@@ -209,6 +209,82 @@ check in BLOCK-WORLD-CAMERA-UNIFORM-SIZE keeps the two honest."
                (luv.arithmetic:declaration-representation-type declaration))))
     data))
 
+;;; Grading is art direction, not architecture: these are the live knobs the
+;;; presentation stack reads every frame, so a SLY eval can retune the whole
+;;; look of the running game without rebuilding a pipeline.
+
+(defparameter *luvcraft-exposure* 1.15
+  "Overall scene exposure multiplied into the sky profile's own exposure.")
+
+(defparameter *luvcraft-bloom-gain* 0.55
+  "How much of the blurred bright-pass image is added back in linear light.")
+
+(defparameter *luvcraft-shaft-gain* 0.85
+  "How strongly sunlight scattered around the solar disc streaks the frame.")
+
+(defparameter *luvcraft-vignette* 0.16
+  "Corner falloff of the presented frame, as a fraction of full brightness.")
+
+(defparameter *luvcraft-bloom-threshold* 1.05
+  "Luminance at which a fragment starts contributing to the bloom chain.")
+
+(defun luvcraft-sun-screen-position (camera sky width height)
+  "The sun's presentation UV and how strongly it counts as on screen.
+
+The weight fades the solar lens effects out as the disc leaves the frame or
+falls behind the camera, so a turn of the head does not pop the shafts."
+  (multiple-value-bind (right up forward) (camera-basis camera)
+    (let* ((sun (sky-frame-parameters-sun-direction sky))
+           (view-z (vec3-dot forward sun)))
+      (if (<= view-z 0.02)
+          (values 0.5 0.5 0.0)
+          (let* ((focal (/ (tan (/ (camera-field-of-view camera) 2.0))))
+                 (aspect (/ (coerce width 'single-float) height))
+                 (clip-x (/ (* (vec3-dot right sun) (/ focal aspect)) view-z))
+                 (clip-y (- (/ (* (vec3-dot up sun) focal) view-z)))
+                 (edge (max (abs clip-x) (abs clip-y)))
+                 (weight (* (sky-smoothstep 1.45 0.80 edge)
+                            (sky-smoothstep 0.02 0.30 view-z)
+                            (sky-frame-parameters-day-factor sky))))
+            (values (coerce (* 0.5 (+ clip-x 1.0)) 'single-float)
+                    (coerce (* 0.5 (+ clip-y 1.0)) 'single-float)
+                    (coerce weight 'single-float)))))))
+
+(defun luvcraft-post-uniform-data (session width height)
+  "Pack the presentation environment: texel size, lens gains, and the sun.
+
+Lane order must match *POST-UNIFORM-MEMBERS* exactly; the construction-time
+check in LUVCRAFT-POST-UNIFORM-SIZE keeps the two honest."
+  (let* ((camera (luvcraft-session-camera session))
+         (sky (sky-frame-parameters (luvcraft-session-sky-clock session)
+                                    (luvcraft-session-sky-profile session))))
+    (multiple-value-bind (sun-u sun-v sun-weight)
+        (luvcraft-sun-screen-position camera sky width height)
+      (make-array
+       12 :element-type 'single-float
+       :initial-contents
+       (mapcar
+        (lambda (value) (coerce value 'single-float))
+        (list (/ 1.0 width) (/ 1.0 height)
+              (if (luvcraft-session-modal-focus session) 1.0 0.0)
+              (* *luvcraft-exposure* (sky-frame-parameters-exposure sky))
+              *luvcraft-bloom-gain*
+              (* *luvcraft-shaft-gain* sun-weight)
+              *luvcraft-vignette*
+              *luvcraft-bloom-threshold*
+              sun-u sun-v sun-weight
+              (/ (coerce width 'single-float) height)))))))
+
+(defun luvcraft-post-uniform-size (session)
+  "The presentation buffer byte size derived from the shader-visible block."
+  (let* ((block (luvcraft.shaders:focus-post-uniform-block))
+         (size (spv:shader-uniform-block-byte-size block))
+         (bytes (* 4 (length (luvcraft-post-uniform-data session 1 1)))))
+    (unless (= size bytes)
+      (error "Presentation uniform ABI mismatch: the shader block occupies ~
+              ~D bytes but the host packs ~D." size bytes))
+    size))
+
 (defun frame-shader-uniform-product-layout (block)
   "Flatten BLOCK's byte-offset members into frame-buffer float positions.
 
@@ -339,7 +415,8 @@ the frame uniform cannot silently diverge between shader and host."
                       (luvcraft-session-device session)
                       (make-buffer-descriptor
                        :label "block world focus post uniform"
-                       :size 16 :usage '(:uniform)))
+                       :size (luvcraft-post-uniform-size session)
+                       :usage '(:uniform)))
                      post-bind-group
                      (create
                       (luvcraft-session-device session)
@@ -480,11 +557,7 @@ the frame uniform cannot silently diverge between shader and host."
        (frame-uniform-data session (first extent) (second extent)))
       (write-buffer
        (luvcraft-frame-post-uniform-buffer frame)
-       (make-array
-        4 :element-type 'single-float
-        :initial-contents
-        (list (/ 1.0 (first extent)) (/ 1.0 (second extent))
-              (if (luvcraft-session-modal-focus session) 1.0 0.0) 0.0)))
+       (luvcraft-post-uniform-data session (first extent) (second extent)))
       (when (plusp particle-vertex-count)
         (write-buffer
          (luvcraft-session-particle-vertex-buffer session)
@@ -847,7 +920,7 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                       (make-texture-descriptor
                        :label "block world color"
                        :size extent :dimensions :2d
-                       :format (canvas-format context)
+                       :format +luvcraft-scene-color-format+
                        :usage '(:render-attachment :texture-binding
                                 :copy-src)))))
                   (color-view
@@ -1010,7 +1083,7 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                                   :format :float32x3)
                                  (:shader-location 3 :offset 36
                                   :format :float32x3))))
-                             :target-format (canvas-format context)
+                             :target-format +luvcraft-scene-color-format+
                              :primitive '(:topology :triangle-list)
                              :depth-stencil
                              '(:format :depth32-float
@@ -1057,7 +1130,7 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                                 :attributes
                                 ((:shader-location 0 :offset 0
                                   :format :float32x3))))
-                             :target-format (canvas-format context)
+                             :target-format +luvcraft-scene-color-format+
                              :primitive '(:topology :triangle-list)
                              :depth-stencil
                              '(:format :depth32-float
@@ -1079,7 +1152,7 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                                   :format :float32x3)
                                  (:shader-location 1 :offset 12
                                   :format :float32x3))))
-                             :target-format (canvas-format context)
+                             :target-format +luvcraft-scene-color-format+
                              :primitive '(:topology :triangle-list)
                              :depth-stencil
                              '(:format :depth32-float
@@ -1113,7 +1186,7 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                       (setf world-text-run
                             (make-world-text-run
                              device text-glyph-cache camera
-                             (canvas-format context)
+                             +luvcraft-scene-color-format+
                              world-text-string world-text-font-pathname
                              :distance world-text-distance
                              :lift world-text-lift

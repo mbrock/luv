@@ -13,6 +13,21 @@
   :type double-float
   :quantity (:quantity :ray-distance :unit :cell))
 
+;;; Every scene stage writes linear radiance into a floating-point attachment
+;;; instead of an already-encoded display image.  A sun disc, a specular
+;;; glint, or an emissive crystal is then allowed to be far brighter than
+;;; display white, which is exactly the signal the bloom chain feeds on and
+;;; the tonemapper rolls off.  Only the final presentation image is an sRGB
+;;; eight-bit surface.
+(defconstant +luvcraft-scene-color-format+ :rgba16-float
+  "The linear HDR attachment format shared by every scene-stage pipeline.")
+
+(defconstant +luvcraft-bloom-color-format+ :rgba16-float
+  "The reduced-resolution attachment format of the bloom and shaft chain.")
+
+(defconstant +luvcraft-bloom-divisor+ 4
+  "How much smaller each bloom chain attachment is than the frame.")
+
 (defclass luvcraft-session (canvas-event-handler)
   ((canvas :initarg :canvas :reader luvcraft-session-canvas)
    (device :initarg :device :reader luvcraft-session-device)

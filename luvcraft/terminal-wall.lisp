@@ -1142,7 +1142,7 @@ vertex layout."
                       (:shader-location 2 :offset 12 :format :float32x3)
                       (:shader-location 3 :offset 24 :format :float32x3)
                       (:shader-location 4 :offset 36 :format :float32x3))))
-                  :target-format (canvas-format (luvcraft-session-context session))
+                  :target-format +luvcraft-scene-color-format+
                   :target-blend :premultiplied-alpha
                   :primitive '(:topology :triangle-list)
                   :depth-stencil
@@ -1202,7 +1202,7 @@ vertex layout."
       (let ((glyph-run
               (make-world-text-run-from-instances
                (luvcraft-session-device session)
-               (canvas-format (luvcraft-session-context session))
+               +luvcraft-scene-color-format+
                "terminal display" font-pathname nil glyphs atlas center 1.0
                instances
                :label "terminal surface Slug glyphs")))

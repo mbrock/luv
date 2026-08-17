@@ -821,9 +821,37 @@
 (defun block-world-sky-fragment-shader ()
   (assemble-spir-v-module (block-world-sky-fragment-module)))
 
-;;; Focus presentation samples the stored scene and its depth.  Screen center
+;;; Presentation is where linear scene radiance becomes a display image.  The
+;;; scene attachment is floating point, so a sun disc or a specular glint
+;;; arrives far above display white; the lens stack composes in that linear
+;;; space, exposure scales it, and a filmic curve rolls it off.  Screen center
 ;;; lies on the framed terminal, so its depth is the focus plane; only farther
-;;; fragments receive the wide nine-tap blur.  The HUD is drawn afterward.
+;;; fragments receive the wide nine-tap blur.  The HUD is drawn afterward,
+;;; already graded, straight onto the presentation image.
+
+;;; The presentation stages share one small uniform block, written once per
+;;; frame by LUVCRAFT-POST-UNIFORM-DATA.  Member order is an ABI requirement
+;;; exactly as it is for the frame environment, so it is written once here.
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defparameter *post-uniform-members*
+    '((post-control :vec4)   ; texel u, texel v, focus blur, exposure
+      (lens-control :vec4)   ; bloom gain, shaft gain, vignette, grain
+      (sun-screen :vec4))    ; sun screen u, v, on-screen weight, aspect
+    "The presentation uniform layout shared by the post and bloom stages."))
+
+;;; Narkowicz's fitted ACES curve.  Its toe keeps shadows from turning to mud,
+;;; its shoulder compresses the sun and the crystal glow into a hot core
+;;; instead of a flat clipped patch, and it desaturates highlights the way
+;;; film does.
+(define-shader-function aces-filmic (radiance)
+  "Map linear scene radiance to display-linear [0,1] through the ACES fit."
+  (let* ((numerator
+           (* radiance (+ (* radiance 2.51) (vec3 0.03 0.03 0.03))))
+         (denominator
+           (+ (* radiance (+ (* radiance 2.43) (vec3 0.59 0.59 0.59)))
+              (vec3 0.14 0.14 0.14))))
+    (clamp (/ numerator denominator)
+           (vec3 0.0 0.0 0.0) (vec3 1.0 1.0 1.0))))
 
 (define-shader-method shader-specification-for
     focus-post-vertex-specification
@@ -846,13 +874,14 @@
      :outputs ((color-output :vec4 :location 0))
      :resources
      ((scene-color :texture-2d :set 0 :binding 0
-                   :sample-transfer :srgb-to-linear)
+                   :sample-transfer :identity)
       (scene-sampler :sampler :set 0 :binding 1)
       (scene-depth :depth-texture-2d :set 0 :binding 2)
       (post-state :uniform-block :set 0 :binding 3
-                  :members ((post-control :vec4)))))
+                  :members #.*post-uniform-members*)))
   (let* ((texel (swizzle post-control :xy))
          (active (swizzle post-control :z))
+         (exposure (swizzle post-control :w))
          (sharp (sample scene-color scene-sampler uv-input))
          (depth (swizzle (sample scene-depth scene-sampler uv-input) :x))
          (focus-depth
@@ -871,8 +900,27 @@
                  (sample scene-color scene-sampler (+ (- uv-input dx) dy))
                  (sample scene-color scene-sampler (- (+ uv-input dx) dy))
                  (sample scene-color scene-sampler (- (- uv-input dx) dy)))
-              0.0625)))
-    (set-output color-output (mix sharp blurred blur-amount))))
+              0.0625))
+         (radiance (swizzle (mix sharp blurred blur-amount) :xyz))
+         (exposed (* radiance exposure))
+         (graded (aces-filmic exposed))
+         ;; A restrained corner falloff; the frame should feel photographed,
+         ;; not port-holed.
+         (centered (- uv-input (vec2 0.5 0.5)))
+         (vignette
+           (- 1.0
+              (* (swizzle lens-control :z)
+                 (smoothstep 0.10 0.75 (dot centered centered))))))
+    (set-output color-output (vec4 (* graded vignette) 1.0))))
+
+(defun focus-post-fragment-specification ()
+  (shader-specification-for :focus-post :fragment))
+
+(defun focus-post-uniform-block ()
+  "The presentation uniform block exactly as the post stage declares it."
+  (find-if (lambda (resource) (typep resource 'shader-uniform-block))
+           (shader-specification-resources
+            (focus-post-fragment-specification))))
 
 ;;; The shadow-map pass renders the same block mesh into stored light-space
 ;;; depth.  The block fragment material samples that product with explicit
