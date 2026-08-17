@@ -371,14 +371,14 @@
            (luv.analytic:roundrect-coverage render-coordinate half-size-radius)))
     (set-output color-output (* color coverage))))
 
-;;; The terminal screen panel is one analytic world rectangle spanning the
-;;; whole display surface, drawn beneath the cell backgrounds and glyphs.  Its
-;;; material is the "magic television" glass of #7ZM22R rendered as a
-;;; view-dependent surface rather than an atlas tile: dark glass with a
-;;; Fresnel sky reflection and a sun glint, a bezel band with a lit inner
-;;; lip, and an inset-style vignette; a faint phosphor floor keeps the screen
-;;; readable as a screen at night.  It shares the cell run's instance layout,
-;;; with the fourth vector carrying the outward face normal.
+;;; The terminal is a tube behind glass, drawn as three coplanar rectangles.
+;;; This vertex stage serves the two outer ones: the phosphor plate beneath
+;;; the cell backgrounds and glyphs, and the faceplate glass above them.  Both
+;;; want the same rectangle-local coordinate, the same world position for
+;;; view-dependent shading, and the surface's own frame, so the stage hands
+;;; down the normalized right and up edges alongside the outward normal.  The
+;;; instance layout stays the cell run's, with the fourth vector carrying the
+;;; normal, so one vertex buffer description serves every terminal rectangle.
 
 (define-shader-method shader-specification-for
     terminal-screen-vertex-specification
@@ -393,7 +393,9 @@
                (render-coordinate :vec2 :location 0)
                (render-half-size :vec2 :location 1)
                (render-world-position :vec3 :location 2)
-               (render-normal :vec3 :location 3))
+               (render-normal :vec3 :location 3)
+               (render-right :vec3 :location 4)
+               (render-up :vec3 :location 5))
      :resources
      ((frame-state :uniform-block :set 0 :binding 2
                    :members #.*frame-uniform-members*)))
@@ -434,7 +436,29 @@
                 (vec2 (- u (* width 0.5)) (- v (* height 0.5))))
     (set-output render-half-size (vec2 (* width 0.5) (* height 0.5)))
     (set-output render-world-position (representation world-position))
-    (set-output render-normal normal-input)))
+    (set-output render-normal normal-input)
+    (set-output render-right (* world-right-edge (/ 1.0 width)))
+    (set-output render-up (* world-up-edge (/ 1.0 height)))))
+
+;;; Where the tube's active area stops and its bezel begins is a fact about
+;;; the panel, not about either material, so both stages ask the same two
+;;; questions instead of repeating a literal that could drift apart.
+
+(define-shader-function terminal-panel-edge-distance (coordinate half-size)
+  "World-cell distance from a panel-local point to the nearest panel edge."
+  (min (- (swizzle half-size :x) (abs (swizzle coordinate :x)))
+       (- (swizzle half-size :y) (abs (swizzle coordinate :y)))))
+
+(define-shader-function terminal-screen-coverage (edge-distance)
+  "One inside the tube's active area, zero on the bezel, resolved between."
+  (smoothstep 0.11 0.122 edge-distance))
+
+;;; The phosphor plate is the back of the tube: what the glyphs are painted
+;;; on, and what remains when the terminal is blank.  It is deliberately not
+;;; the glass -- reflections belong on the faceplate above the text, where
+;;; they can actually veil it -- so this stage only answers what the tube
+;;; emits and how its recess and bezel catch the daylight of the world it
+;;; hangs in.
 
 (define-shader-method shader-specification-for
     terminal-screen-fragment-specification
@@ -443,7 +467,83 @@
      :inputs ((render-coordinate :vec2 :location 0)
               (half-size :vec2 :location 1)
               (world-position :vec3 :location 2)
-              (normal-input :vec3 :location 3))
+              (normal-input :vec3 :location 3)
+              (right-input :vec3 :location 4)
+              (up-input :vec3 :location 5))
+     :outputs ((color-output :vec4 :location 0))
+     :resources
+     ((frame-state :uniform-block :set 0 :binding 2
+                   :members #.*frame-uniform-members*)))
+  (let* ((camera (representation (swizzle camera-vector :xyz)))
+         (sun-direction (representation (swizzle sun-vector :xyz)))
+         (day-factor (representation (swizzle sun-vector :w)))
+         (sun-color (representation (swizzle sun-color-vector :xyz)))
+         (ambient (representation (swizzle ambient-vector :xyz)))
+         (normal (normalize normal-input))
+         (view (normalize (- camera world-position)))
+         (n-dot-l (max 0.0 (dot normal sun-direction)))
+         (irradiance (+ ambient (* sun-color (* n-dot-l day-factor))))
+         (edge-distance
+           (terminal-panel-edge-distance render-coordinate half-size))
+         (screen-mask (terminal-screen-coverage edge-distance))
+         ;; Panel-local coordinates normalized to the corners, so the tube's
+         ;; falloff is a property of the picture rather than of its size.
+         (u (/ (swizzle render-coordinate :x) (swizzle half-size :x)))
+         (v (/ (swizzle render-coordinate :y) (swizzle half-size :y)))
+         (radius-squared (+ (* u u) (* v v)))
+         ;; The screen sits behind the bezel, so shade falls in from the lip,
+         ;; and a tube's own glass is brightest through the middle.
+         (inset-shade (smoothstep 0.0 0.5 (- edge-distance 0.11)))
+         (centre-weight (mix 1.0 0.55 (clamp (* radius-squared 0.7) 0.0 1.0)))
+         (vignette (* (mix 0.26 1.0 inset-shade) centre-weight))
+         (glass-albedo (vec3 0.009 0.009 0.012))
+         ;; A faint idling phosphor: warm enough to read as a lit tube rather
+         ;; than a hole, dim enough to stay black next to any real glyph.
+         (phosphor (vec3 0.0090 0.0112 0.0104))
+         (screen-color (* (+ (* glass-albedo irradiance) phosphor) vignette))
+         ;; The bezel is matte dark plastic: a lit inner lip where it turns
+         ;; toward the screen, and a slightly brighter outer chamfer.
+         (lip (smoothstep 0.08 0.11 edge-distance))
+         (chamfer (smoothstep 0.05 0.0 edge-distance))
+         (bezel-albedo
+           (mix (mix (vec3 0.021 0.020 0.022) (vec3 0.088 0.088 0.096) lip)
+                (vec3 0.042 0.040 0.041) chamfer))
+         (half-vector (normalize (+ sun-direction view)))
+         (n-dot-h (max 0.0 (dot normal half-vector)))
+         (bezel-specular
+           (* sun-color (* (expt n-dot-h 42.0) 0.09 day-factor)))
+         (bezel-color (+ (* bezel-albedo irradiance) bezel-specular))
+         (rgb (mix bezel-color screen-color screen-mask)))
+    (set-output color-output (vec4 rgb 1.0))))
+
+;;; The faceplate is the glass in front of the picture, drawn last so that
+;;; everything it does happens *to* the text rather than behind it.  It is the
+;;; whole analogue argument of the terminal, and every term in it is one
+;;; physical claim about a tube seen through coated glass:
+;;;
+;;;   - the raster is a fixed line count belonging to the panel, so it holds
+;;;     still in the world instead of crawling with the camera, and it fades
+;;;     out before it can alias rather than shimmering at a distance;
+;;;   - the glass is very slightly convex, expressed only as a bent normal,
+;;;     so the room wraps around the rim while every glyph stays exactly
+;;;     where the glyph pass drew it -- curvature as light, not as geometry;
+;;;   - mains hum and a little grain keep the picture from being perfectly
+;;;     still, at amplitudes chosen to be felt rather than seen.
+;;;
+;;; Premultiplied alpha makes one draw do both halves of that: the alpha lane
+;;; attenuates the picture underneath (raster, corners, hum, grain) and the
+;;; colour lane adds what the glass itself sends back (sky, sun, room).
+
+(define-shader-method shader-specification-for
+    terminal-faceplate-fragment-specification
+    ((role (eql :terminal-faceplate)) (stage (eql :fragment)))
+    (:stage :fragment
+     :inputs ((render-coordinate :vec2 :location 0)
+              (half-size :vec2 :location 1)
+              (world-position :vec3 :location 2)
+              (normal-input :vec3 :location 3)
+              (right-input :vec3 :location 4)
+              (up-input :vec3 :location 5))
      :outputs ((color-output :vec4 :location 0))
      :resources
      ((frame-state :uniform-block :set 0 :binding 2
@@ -455,48 +555,98 @@
          (zenith (representation (swizzle zenith-vector :xyz)))
          (horizon (representation (swizzle horizon-vector :xyz)))
          (ambient (representation (swizzle ambient-vector :xyz)))
-         (normal (normalize normal-input))
+         (elapsed (representation (swizzle fog-vector :z)))
+         (flat-normal (normalize normal-input))
+         (right (normalize right-input))
+         (up (normalize up-input))
          (view (normalize (- camera world-position)))
+         (half-x (swizzle half-size :x))
+         (half-y (swizzle half-size :y))
+         (u (/ (swizzle render-coordinate :x) half-x))
+         (v (/ (swizzle render-coordinate :y) half-y))
+         ;; A cubic bulge leaves the middle of the plate flat and turns only
+         ;; the last part of the way to the rim, which is what a real face
+         ;; does and what keeps the reflection from sliding about.
+         (bulge 0.40)
+         (normal
+           (normalize
+            (+ flat-normal
+               (+ (* right (* bulge (* u (* u u))))
+                  (* up (* bulge (* v (* v v))))))))
          (n-dot-v (max 0.0 (dot normal view)))
-         (n-dot-l (max 0.0 (dot normal sun-direction)))
-         ;; Schlick Fresnel for coated display glass: a low floor rising
-         ;; toward grazing, so a frontal view stays black and an oblique one
-         ;; picks up the sky.
-         (fresnel (+ 0.018 (* 0.982 (expt (- 1.0 n-dot-v) 5.0))))
-         ;; The mirrored view ray samples the same two-colour sky gradient
-         ;; the sky dome draws, so the glass reflects the day it stands in.
+         ;; Schlick Fresnel for coated glass: a low floor rising toward
+         ;; grazing, so a frontal view stays dark and an oblique one lights up.
+         (fresnel (+ 0.021 (* 0.979 (expt (- 1.0 n-dot-v) 5.0))))
+         ;; The mirrored view ray samples the same two-colour sky gradient the
+         ;; sky dome draws, so the glass reflects the day it stands in.
          (reflected (- (* normal (* 2.0 (dot normal view))) view))
-         (sky-height (smoothstep -0.04 0.45 (swizzle reflected :y)))
-         (sky-reflection (* (mix horizon zenith sky-height) (* fresnel 0.8)))
-         ;; A tight glint plus a broad sheen from the sun; both are held
-         ;; back at normal incidence so the screen reads as glass, not chrome.
+         (sky-height (smoothstep -0.06 0.5 (swizzle reflected :y)))
+         (sky-reflection (* (mix horizon zenith sky-height) (* fresnel 0.72)))
+         (room-reflection (* ambient (* fresnel 0.55)))
+         ;; A tight glint plus a broad sheen; the bent normal drags both of
+         ;; them into a curved streak near the rim.
          (half-vector (normalize (+ sun-direction view)))
          (n-dot-h (max 0.0 (dot normal half-vector)))
-         (glint (* (expt n-dot-h 160.0) 2.0))
-         (sheen (* (expt n-dot-h 20.0) 0.12))
-         (specular
-           (* sun-color (* (+ glint sheen) day-factor (+ 0.3 fresnel))))
-         ;; Rectangle geometry: distance to the panel edge in world cells.
+         (glint (* sun-color (* (expt n-dot-h 200.0) 2.4 day-factor)))
+         (sheen (* sun-color (* (expt n-dot-h 26.0) 0.10 day-factor)))
          (edge-distance
-           (min (- (swizzle half-size :x) (abs (swizzle render-coordinate :x)))
-                (- (swizzle half-size :y) (abs (swizzle render-coordinate :y)))))
-         (bezel-width 0.11)
-         (screen-mask (smoothstep bezel-width (+ bezel-width 0.012) edge-distance))
-         ;; The screen sits behind the bezel: shade falls in from the lip.
-         (inset-shade (smoothstep 0.0 0.45 (- edge-distance bezel-width)))
-         (vignette (mix 0.30 1.0 inset-shade))
-         (irradiance (+ ambient (* sun-color (* n-dot-l day-factor))))
-         (glass-albedo (vec3 0.008 0.009 0.011))
-         (phosphor (vec3 0.004 0.009 0.007))
-         (screen-color
-           (* (+ (* glass-albedo irradiance) phosphor sky-reflection specular)
-              vignette))
-         ;; The bezel is a matte dark frame with a lit inner lip.
-         (lip (smoothstep (- bezel-width 0.03) bezel-width edge-distance))
-         (bezel-albedo (mix (vec3 0.02 0.02 0.022) (vec3 0.09 0.09 0.10) lip))
-         (bezel-color (+ (* bezel-albedo irradiance) (* specular 0.15)))
-         (rgb (mix bezel-color screen-color screen-mask)))
-    (set-output color-output (vec4 rgb 1.0))))
+           (terminal-panel-edge-distance render-coordinate half-size))
+         (screen-mask (terminal-screen-coverage edge-distance))
+         ;; The raster: a fixed number of lines across this panel's height,
+         ;; exactly as a tube has a fixed line count whatever its diagonal.
+         (line-pitch (/ (* 2.0 half-y) 240.0))
+         (vertical-dx (derivative-x (swizzle render-coordinate :y)))
+         (vertical-dy (derivative-y (swizzle render-coordinate :y)))
+         (cells-per-pixel
+           (max (sqrt (+ (* vertical-dx vertical-dx)
+                         (* vertical-dy vertical-dy)))
+                1e-6))
+         (pixels-per-line (/ line-pitch cells-per-pixel))
+         ;; Below two pixels a line cannot be drawn, only aliased, so the
+         ;; raster leaves rather than turning into moire at a distance.
+         (raster-fade (smoothstep 1.8 3.6 pixels-per-line))
+         (line-phase (/ (swizzle render-coordinate :y) line-pitch))
+         (line-profile (+ 0.5 (* 0.5 (cos (* 6.2831855 line-phase)))))
+         (scanline (* 0.20 raster-fade (- 1.0 line-profile)))
+         ;; Attenuating the picture is only half of a raster.  A tonemapped
+         ;; frame puts bright text on the shoulder of the filmic curve, where
+         ;; a multiply barely moves it, and puts a dark terminal's background
+         ;; near black, where a multiply moves it not at all.  So the tube's
+         ;; own idle glow below carries the beam instead: energy-preserving
+         ;; about one, so the raster shapes that glow without lighting it.
+         (beam (mix 1.0 (+ 0.55 (* 0.9 line-profile)) raster-fade))
+         ;; A slow bar drifting up the picture and a fast shimmer on top of
+         ;; it: the two ways a tube betrays the mains it is plugged into.
+         (hum-phase (fract (- (* v 0.5) (* elapsed 0.052))))
+         (hum-band (expt (+ 0.5 (* 0.5 (cos (* 6.2831855 hum-phase)))) 4.0))
+         (hum (* 0.020 hum-band))
+         (flicker (* 0.008 (+ 0.5 (* 0.5 (sin (* elapsed 47.3))))))
+         ;; Grain is resampled a couple of dozen times a second rather than
+         ;; every frame, so it reads as emulsion instead of as a frame rate.
+         (grain
+           (lattice-hash
+            (vec3 (* (swizzle render-coordinate :x) 617.0)
+                  (* (swizzle render-coordinate :y) 613.0)
+                  (floor (* elapsed 26.0)))))
+         (speckle (* 0.018 grain))
+         ;; The corners of a tube are always darker than its middle, and this
+         ;; is the one such falloff that also reaches the text.
+         (corner-shade (smoothstep 0.55 1.35 (+ (* u u) (* v v))))
+         (corner (* 0.16 corner-shade))
+         ;; Glass scatters a little of the room forward instead of reflecting
+         ;; all of it, and a tube idles with a little phosphor of its own.
+         ;; Together they lift the black off the floor -- the difference
+         ;; between a screen and a hole in the wall -- and because the corner
+         ;; falloff multiplies them, this is where the shape of the tube
+         ;; actually becomes visible on an otherwise dark terminal.
+         (haze
+           (* (+ (vec3 0.0072 0.0084 0.0104) (* ambient 0.045))
+              (* beam (mix 1.0 0.30 corner-shade))))
+         (attenuation
+           (clamp (+ scanline corner hum flicker speckle) 0.0 0.6))
+         (emission (+ sky-reflection room-reflection glint sheen haze)))
+    (set-output color-output
+                (vec4 (* emission screen-mask) (* attenuation screen-mask)))))
 
 ;;; A video screen is the plainest world rectangle luvcraft draws: the same
 ;;; instance record as a terminal cell, but the fragment stage reads a decoded
