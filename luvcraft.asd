@@ -59,6 +59,7 @@
                  (:file "video-screen")
                  (:file "app")
                  (:file "riding")
+                 (:file "body")
                  (:file "streaming")
                  (:file "render")
                  (:file "play")

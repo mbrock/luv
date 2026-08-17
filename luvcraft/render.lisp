@@ -777,7 +777,10 @@ submission that used them completes."
            (critter-vertices (luvcraft-session-critters session)
                              (luvcraft-session-world session)))
          (critter-vertex-count
-           (/ (length critter-vertices) +block-mesh-floats-per-vertex+)))
+           (/ (length critter-vertices) +block-mesh-floats-per-vertex+))
+         (body-vertices (player-body-vertices session))
+         (body-vertex-count
+           (/ (length body-vertices) +block-mesh-floats-per-vertex+)))
     (when (or sample (tracy-connected-p))
       (let ((mesh-vertices 0)
             (mesh-draws 0))
@@ -809,10 +812,12 @@ submission that used them completes."
                         (if (plusp particle-vertex-count) 1 0)
                         ;; The animals are drawn twice: once into the shadow
                         ;; map and once into the scene.
-                        (if (plusp critter-vertex-count) 2 0)))
+                        (if (plusp critter-vertex-count) 2 0)
+                        (if (plusp body-vertex-count) 1 0)))
               (vertices (+ +block-world-crosshair-vertex-count+ 3
                            (* 6 text-glyph-count)
                            particle-vertex-count
+                           body-vertex-count
                            (* 2 critter-vertex-count)
                            (* 2 mesh-vertices))))
           (when sample
@@ -854,7 +859,11 @@ submission that used them completes."
       (when (plusp critter-vertex-count)
         (write-buffer
          (luvcraft-session-critter-vertex-buffer session)
-         critter-vertices)))
+         critter-vertices))
+      (when (plusp body-vertex-count)
+        (write-buffer
+         (luvcraft-session-body-vertex-buffer session)
+         body-vertices)))
     (with-luvcraft-frame-timing
         (sample luvcraft-frame-sample-shadow-encode-seconds
                 :luvcraft/shadow-pass)
@@ -919,6 +928,13 @@ submission that used them completes."
           (set-vertex-buffer
            pass 0 (luvcraft-session-critter-vertex-buffer session))
           (draw pass critter-vertex-count))
+        ;; The player's own arms and whatever they hold, drawn in the scene
+        ;; but not into the shadow map: a pair of floating forearms would
+        ;; throw a shadow that explains nothing.
+        (when (plusp body-vertex-count)
+          (set-vertex-buffer
+           pass 0 (luvcraft-session-body-vertex-buffer session))
+          (draw pass body-vertex-count))
         (when (plusp particle-vertex-count)
           (set-vertex-buffer
            pass 0 (luvcraft-session-particle-vertex-buffer session))
@@ -1090,7 +1106,9 @@ submission that used them completes."
                          (setf (luvcraft-session-jump-requested-p session) nil)
                          (decf (luvcraft-session-physics-accumulator session)
                                +player-physics-step+))))
-            (advance-luvcraft-focus-camera session seconds)))
+            (advance-luvcraft-focus-camera session seconds)
+            (advance-player-body (luvcraft-session-body session)
+                                 session seconds)))
         (with-luvcraft-frame-timing
             (sample luvcraft-frame-sample-streaming-seconds
                     :luvcraft/streaming)
@@ -1149,6 +1167,13 @@ submission that used them completes."
           (when (and (eq key :space)
                      (not (canvas-key-event-repeat-p event)))
             (setf (luvcraft-session-jump-requested-p session) t))
+          ;; F takes the phone out or puts it away; holding G brandishes
+          ;; whatever the hand holds.
+          (when (and (eq key :f) (not (canvas-key-event-repeat-p event)))
+            (toggle-luvcraft-phone session))
+          (when (eq key :g)
+            (setf (player-body-brandishing-p (luvcraft-session-body session))
+                  t))
           (unless (canvas-key-event-repeat-p event)
             (let* ((character (canvas-key-event-character event))
                    (number (and character (digit-char-p character))))
@@ -1170,6 +1195,8 @@ submission that used them completes."
     (return-from handle-canvas-event nil))
   (remhash (canvas-key-event-key-name event)
            (luvcraft-session-pressed-keys session))
+  (when (eq :g (canvas-key-event-key-name event))
+    (setf (player-body-brandishing-p (luvcraft-session-body session)) nil))
   nil)
 
 (defmethod handle-canvas-event
@@ -1481,6 +1508,14 @@ NIL to let the display choose a comfortable window."
                        :label "critter model vertices"
                        :size +critter-buffer-size+
                        :usage '(:vertex)))))
+                  (body-vertex-buffer
+                    (keep
+                     (create
+                      device
+                      (make-buffer-descriptor
+                       :label "player body vertices"
+                       :size +player-body-buffer-size+
+                       :usage '(:vertex)))))
                   (layout
                     (keep
                      (create
@@ -1749,6 +1784,7 @@ NIL to let the display choose a comfortable window."
                      :particle-vertex-buffer particle-vertex-buffer
                      :critter-vertex-buffer critter-vertex-buffer
                      :critters critters
+                     :body-vertex-buffer body-vertex-buffer
                      :world-text text-run
                      :world-text-glyph-cache text-glyph-cache
                      :resources resources)))

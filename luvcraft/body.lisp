@@ -1,0 +1,419 @@
+;;; The player's own body as seen from inside it, and what its hands hold.
+;;;
+;;; #S27JKR is the design; this is what it turned into.
+;;;
+;;; The camera has always been a disembodied eye.  This gives it a pair of
+;;; arms hanging into the bottom of the view, hands on the ends of them, and a
+;;; grip protocol so that a hand can hold something: brought up out of a
+;;; pocket, carried while walking, brandished at the world.
+;;;
+;;; The body is drawn exactly like an animal (see CRITTERS.LISP): a handful of
+;;; textured boxes on the ordinary block surface pipeline.  What differs is
+;;; the frame.  A critter's boxes turn only with its yaw; the body's boxes
+;;; live in the *view* frame -- x to the right, y up, z forward, origin at
+;;; the eye -- and turn with the whole camera, pitch included, so the hands
+;;; stay put on the screen while the head looks around.  Each box may also
+;;; carry its own small tilt, which is what lets a forearm slope up from the
+;;; screen edge and a phone lean back in the palm instead of everything
+;;; standing square to the lens.
+;;;
+;;; The first thing a hand can hold is a phone.  It is deliberately a little
+;;; too large: a slab of near-black glass with a lit screen the size of a
+;;; paperback, held up in front of the face like everyone holds theirs.
+
+(in-package #:luvcraft)
+
+(defconstant +player-body-box-limit+ 24
+  "The most boxes the body and its held item may emit per frame.")
+(defconstant +player-body-buffer-size+
+  (* 4 +player-body-box-limit+
+     +critter-vertices-per-box+ +block-mesh-floats-per-vertex+))
+
+(defconstant +player-body-equip-rate+ 7.0d0
+  "How quickly a held item rises into view or drops out of it, per second.")
+(defconstant +player-body-brandish-rate+ 9.0d0
+  "How quickly a held item is raised to the centre of the view, per second.")
+(defconstant +player-body-bob-rate+ 9.0d0
+  "Radians of walking bob per second at full walking speed.")
+
+;;; ---------------------------------------------------------------------
+;;; What a hand can hold.
+
+(defgeneric hand-item-name (item)
+  (:documentation "A short lowercase noun for ITEM, as the title shows it."))
+
+(defgeneric map-hand-item-boxes (item body function)
+  (:documentation
+   "Call FUNCTION for each textured box of ITEM as held by BODY.
+
+FUNCTION receives (X Y Z HALF-X HALF-Y HALF-Z TILE &KEY TILT STRETCH-P
+EMISSION), like MAP-CRITTER-BOXES with three extras: TILT is a (PITCH YAW
+ROLL) triple of radians turning the box about its own centre, STRETCH-P
+stretches the whole atlas tile over each face instead of keeping texels
+cell-sized, and EMISSION is the face's own light.  Coordinates are in the
+grip frame: origin at the palm, x across the fingers, y up the item, z away
+from the player."))
+
+(defgeneric hand-item-box-count (item)
+  (:documentation "How many boxes MAP-HAND-ITEM-BOXES emits for ITEM."))
+
+(defgeneric hand-item-carry-pose (item body)
+  (:documentation
+   "Where BODY holds ITEM when it is merely carried: (X Y Z PITCH YAW ROLL)
+of the grip in the view frame, before walking bob is added."))
+
+(defgeneric hand-item-brandish-pose (item body)
+  (:documentation
+   "Where BODY holds ITEM when brandishing it, in the same shape as
+HAND-ITEM-CARRY-POSE."))
+
+;;; ---------------------------------------------------------------------
+;;; The phone.
+
+(defclass phone ()
+  ((screen-emission :initarg :screen-emission :initform 1.7
+                    :accessor phone-screen-emission))
+  (:documentation
+   "A comically large phone: a graphite slab with a lit screen on the face
+toward the player.  Its screen shows a wallpaper and a grid of app icons for
+now; a terminal on it is the obvious next thing (#IK8PIN)."))
+
+(defmethod hand-item-name ((item phone)) "phone")
+(defmethod hand-item-box-count ((item phone)) 4)
+
+(defmethod hand-item-carry-pose ((item phone) body)
+  (declare (ignore body))
+  ;; Down and to the right, screen tipped back toward the eye a little, the
+  ;; way a phone sits in a hand that is not really looking at it.
+  '(0.30d0 -0.38d0 0.62d0 -0.35d0 -0.28d0 0.10d0))
+
+(defmethod hand-item-brandish-pose ((item phone) body)
+  (declare (ignore body))
+  ;; Straight up in front of the face, screen square to the eye and close
+  ;; enough that it fills a good part of the view.
+  '(0.13d0 -0.27d0 0.50d0 -0.06d0 -0.10d0 0.0d0))
+
+(defmethod map-hand-item-boxes ((item phone) body function)
+  (declare (ignore body))
+  (let ((glow (phone-screen-emission item)))
+    ;; The slab: 0.24 wide, 0.50 tall, 0.05 deep, standing up out of the
+    ;; fist, which is the palm box the arm already draws at the origin.
+    (funcall function 0d0 0.29d0 0d0 0.120d0 0.250d0 0.025d0
+             +phone-body-tile+ :stretch-p t)
+    ;; The screen sits just proud of the face toward the player (-z), inset
+    ;; from the rim.  It is the one lit surface on the body.
+    (funcall function 0d0 0.29d0 -0.028d0 0.104d0 0.228d0 0.004d0
+             +phone-screen-tile+ :stretch-p t :emission glow)
+    ;; A camera bump on the back, high on the left as seen from behind.
+    (funcall function 0.065d0 0.47d0 0.032d0 0.035d0 0.045d0 0.008d0
+             +phone-body-tile+ :stretch-p t)
+    ;; A thumb up across the lower screen: this is what makes it *held*.
+    (funcall function 0.060d0 0.09d0 -0.042d0 0.024d0 0.058d0 0.020d0
+             +player-skin-tile+ :tilt '(0d0 0d0 0.35d0))))
+
+;;; ---------------------------------------------------------------------
+;;; The body.
+
+(defclass player-body ()
+  ((hand-item :initform nil :accessor player-body-hand-item)
+   ;; How far the held item has come up into view, 0 (pocketed) to 1
+   ;; (carried).  Eased toward its target every frame so equipping is a
+   ;; motion rather than a cut.
+   (equip-amount :initform 0d0 :type double-float
+                 :accessor player-body-equip-amount)
+   (brandishing-p :initform nil :accessor player-body-brandishing-p)
+   ;; 0 (carried) to 1 (brandished), likewise eased.
+   (brandish-amount :initform 0d0 :type double-float
+                    :accessor player-body-brandish-amount)
+   ;; The walking bob, accumulated from ground speed so standing still
+   ;; stands still.
+   (bob-phase :initform 0d0 :type double-float
+              :accessor player-body-bob-phase)
+   (bob-amount :initform 0d0 :type double-float
+               :accessor player-body-bob-amount)
+   ;; A time base for the small breathing sway of a body that is not
+   ;; walking anywhere.
+   (clock :initform 0d0 :type double-float :accessor player-body-clock))
+  (:documentation "The first-person body: two arms and what they hold."))
+
+(defun equip-hand-item (body item)
+  "Put ITEM in BODY's hand, or pocket the current item when ITEM is NIL.
+
+Equipping the item already held pockets it, so one key toggles."
+  (cond ((null item)
+         (setf (player-body-hand-item body) nil))
+        ((eq item (player-body-hand-item body))
+         (setf (player-body-hand-item body) nil))
+        (t
+         (setf (player-body-hand-item body) item
+               (player-body-brandishing-p body) nil)))
+  (player-body-hand-item body))
+
+(defun toggle-luvcraft-phone (session)
+  "Take the session's phone out, or put it away."
+  (let ((body (luvcraft-session-body session)))
+    (prog1 (equip-hand-item body (or (player-body-hand-item body)
+                                     (make-instance 'phone)))
+      (update-luvcraft-session-title session))))
+
+(defun advance-player-body (body session seconds)
+  "Ease BODY's held item, brandish, and walking bob by SECONDS."
+  (flet ((ease (current target rate)
+           (let ((step (* rate seconds)))
+             (cond ((> target current) (min target (+ current step)))
+                   ((< target current) (max target (- current step)))
+                   (t current)))))
+    (incf (player-body-clock body) seconds)
+    (setf (player-body-equip-amount body)
+          (ease (player-body-equip-amount body)
+                (if (player-body-hand-item body) 1d0 0d0)
+                +player-body-equip-rate+))
+    (setf (player-body-brandish-amount body)
+          (ease (player-body-brandish-amount body)
+                (if (and (player-body-hand-item body)
+                         (player-body-brandishing-p body))
+                    1d0 0d0)
+                +player-body-brandish-rate+))
+    (let* ((player (luvcraft-session-player session))
+           (speed
+             (if (and player (player-grounded-p player))
+                 (let ((velocity (player-velocity player)))
+                   (sqrt (+ (expt (vec3-x velocity) 2)
+                            (expt (vec3-z velocity) 2))))
+                 0d0))
+           (fraction (if player
+                         (min 1d0 (/ speed (max 1d-3 (player-walk-speed player))))
+                         0d0)))
+      (incf (player-body-bob-phase body)
+            (* fraction +player-body-bob-rate+ seconds))
+      (setf (player-body-bob-amount body)
+            (ease (player-body-bob-amount body) fraction 6d0))))
+  body)
+
+;;; ---------------------------------------------------------------------
+;;; Boxes in a frame.
+
+(defun rotate-frame (right up forward pitch yaw roll)
+  "Return RIGHT UP FORWARD turned by YAW about up, then PITCH about the new
+right, then ROLL about the new forward.  A positive yaw turns forward toward
+the right; a positive pitch tips the top away from the viewer."
+  (flet ((rotate (a b angle)
+           ;; Rotate vectors A and B in their own plane by ANGLE.
+           (let ((c (cos angle)) (s (sin angle)))
+             (values
+              (make-vec3 (+ (* c (vec3-x a)) (* s (vec3-x b)))
+                         (+ (* c (vec3-y a)) (* s (vec3-y b)))
+                         (+ (* c (vec3-z a)) (* s (vec3-z b))))
+              (make-vec3 (- (* c (vec3-x b)) (* s (vec3-x a)))
+                         (- (* c (vec3-y b)) (* s (vec3-y a)))
+                         (- (* c (vec3-z b)) (* s (vec3-z a))))))))
+    (unless (zerop yaw)
+      (multiple-value-setq (forward right) (rotate forward right yaw)))
+    (unless (zerop pitch)
+      (multiple-value-setq (up forward) (rotate up forward pitch)))
+    (unless (zerop roll)
+      (multiple-value-setq (right up) (rotate right up roll)))
+    (values right up forward)))
+
+(defun frame-point (origin right up forward x y z)
+  "The world point at X RIGHT + Y UP + Z FORWARD from ORIGIN."
+  (make-vec3 (+ (vec3-x origin) (* x (vec3-x right)) (* y (vec3-x up))
+                (* z (vec3-x forward)))
+             (+ (vec3-y origin) (* x (vec3-y right)) (* y (vec3-y up))
+                (* z (vec3-y forward)))
+             (+ (vec3-z origin) (* x (vec3-z right)) (* y (vec3-z up))
+                (* z (vec3-z forward)))))
+
+(defun emit-framed-box
+    (vertices origin right up forward half-x half-y half-z tile
+     sky-level block-level emission stretch-p)
+  "Append one box centred on ORIGIN with axes RIGHT UP FORWARD to VERTICES.
+
+The box's local x, y, z are those axes; RIGHT UP FORWARD must be a unit
+orthonormal frame, so the face normals come out unit too."
+  (let* ((size +block-atlas-tile-size+)
+         (atlas-width (* size +block-atlas-tile-count+)))
+    (dolist (face *block-faces*)
+      (let* ((normal (block-face-neighbor face))
+             (nx (voxel-direction-dx normal))
+             (ny (voxel-direction-dy normal))
+             (nz (voxel-direction-dz normal))
+             (world-normal (frame-point (make-vec3 0d0 0d0 0d0)
+                                        right up forward nx ny nz))
+             (shade (critter-face-shade (vec3-y world-normal))))
+        (multiple-value-bind (scale-u scale-v)
+            (if stretch-p
+                (values 1d0 1d0)
+                (critter-face-texture-scales face half-x half-y half-z))
+          (let ((origin-u (* 0.5d0 (- 1d0 scale-u)))
+                (origin-v (* 0.5d0 (- 1d0 scale-v))))
+            (dolist (index '(0 1 2 0 2 3))
+              (let* ((corner (nth index (block-face-corners face)))
+                     (local-x (* (- (first corner) 0.5d0) 2d0 half-x))
+                     (local-y (* (- (second corner) 0.5d0) 2d0 half-y))
+                     (local-z (* (- (third corner) 0.5d0) 2d0 half-z))
+                     (point (frame-point origin right up forward
+                                         local-x local-y local-z)))
+                (multiple-value-bind (u v) (block-face-local-uv face corner)
+                  (let ((tile-u (+ origin-u (* u scale-u)))
+                        (tile-v (+ origin-v (* v scale-v))))
+                    (push-block-vertex-components
+                     vertices
+                     (vec3-x point) (vec3-y point) (vec3-z point)
+                     (/ (+ (* tile size) 0.5 (* tile-u (1- size)))
+                        atlas-width)
+                     (/ (+ 0.5 (* tile-v (1- size))) size)
+                     shade
+                     (vec3-x world-normal) (vec3-y world-normal)
+                     (vec3-z world-normal)
+                     sky-level block-level emission
+                     +block-face-edge-flush+ +block-face-edge-flush+
+                     +block-face-edge-flush+ +block-face-edge-flush+))))))))))
+  vertices)
+
+;;; ---------------------------------------------------------------------
+;;; The body's boxes.
+
+(defun player-body-light-levels (session)
+  "The normalized sky and block light where the eye is."
+  (let ((camera (luvcraft-session-camera session)))
+    (multiple-value-bind (sky block status)
+        (world-light-at (luvcraft-session-world session)
+                        (floor (camera-x camera))
+                        (floor (camera-y camera))
+                        (floor (camera-z camera)))
+      (if (eq status :resident)
+          (values (/ sky 15.0) (/ block 15.0))
+          (values 1.0 0.0)))))
+
+(defun lerp-pose (a b amount)
+  (mapcar (lambda (x y) (+ x (* (- y x) amount))) a b))
+
+(defun player-body-hand-pose (body side)
+  "Where SIDE's (:LEFT or :RIGHT) palm is in the view frame, and its tilt.
+
+Returns (X Y Z PITCH YAW ROLL).  The right hand is where a held item lives;
+the left just hangs into the corner of the view, closer to the eye when the
+right one is brandishing something so the shoulders read as turned."
+  (let* ((clock (player-body-clock body))
+         (bob-phase (player-body-bob-phase body))
+         (bob (player-body-bob-amount body))
+         (breathe (* 0.006d0 (sin (* 1.3d0 clock))))
+         (bob-x (* bob 0.020d0 (sin bob-phase)))
+         (bob-y (* bob 0.028d0 (abs (sin bob-phase))))
+         (item (player-body-hand-item body))
+         (equip (player-body-equip-amount body))
+         (brandish (player-body-brandish-amount body)))
+    (ecase side
+      (:right
+       (let* ((empty '(0.36d0 -0.40d0 0.60d0 -0.30d0 -0.35d0 0.20d0))
+              (pocket '(0.40d0 -0.72d0 0.55d0 -0.60d0 -0.35d0 0.20d0))
+              (pose (if item
+                        (lerp-pose pocket
+                                   (lerp-pose (hand-item-carry-pose item body)
+                                              (hand-item-brandish-pose item body)
+                                              brandish)
+                                   equip)
+                        (lerp-pose pocket empty (- 1d0 equip)))))
+         (destructuring-bind (x y z pitch yaw roll) pose
+           (list (+ x bob-x) (+ y bob-y breathe) z
+                 (+ pitch (* bob 0.05d0 (sin bob-phase))) yaw roll))))
+      (:left
+       (let ((pose (lerp-pose '(-0.36d0 -0.40d0 0.60d0 -0.30d0 0.35d0 -0.20d0)
+                              '(-0.30d0 -0.44d0 0.50d0 -0.20d0 0.55d0 -0.30d0)
+                              brandish)))
+         (destructuring-bind (x y z pitch yaw roll) pose
+           (list (- x bob-x) (+ y (* 0.7d0 bob-y) (- breathe)) z
+                 (- pitch (* bob 0.05d0 (sin bob-phase))) yaw roll)))))))
+
+(defun emit-player-arm
+    (vertices eye right up forward pose sign sky block)
+  "Append one arm reaching from off the bottom edge of the view to POSE.
+
+SIGN is +1 for the right arm and -1 for the left.  The forearm is a sleeved
+box sloping from the palm back toward the shoulder, which is somewhere
+behind and below the eye and never in the picture; the hand is a skin box
+at its end."
+  (destructuring-bind (x y z pitch yaw roll) pose
+    (let* ((shoulder-x (* sign 0.30d0))
+           (shoulder-y -0.62d0)
+           (shoulder-z 0.10d0)
+           (dx (- x shoulder-x)) (dy (- y shoulder-y)) (dz (- z shoulder-z))
+           (length (sqrt (+ (* dx dx) (* dy dy) (* dz dz))))
+           ;; The forearm's own frame: its z runs from shoulder to palm.
+           (arm-pitch (- (atan dy (sqrt (+ (* dx dx) (* dz dz))))))
+           (arm-yaw (atan dx dz)))
+      (multiple-value-bind (arm-right arm-up arm-forward)
+          (rotate-frame right up forward arm-pitch arm-yaw 0d0)
+        ;; The sleeve covers the far two thirds of the arm, so the wrist is
+        ;; bare skin for a little way before the hand.
+        (let ((cuff (frame-point eye right up forward
+                                 (+ shoulder-x (* 0.62d0 dx))
+                                 (+ shoulder-y (* 0.62d0 dy))
+                                 (+ shoulder-z (* 0.62d0 dz)))))
+          (emit-framed-box vertices cuff arm-right arm-up arm-forward
+                           0.075d0 0.075d0 (* 0.40d0 length)
+                           +player-sleeve-tile+ sky block 0.0 nil))
+        (let ((wrist (frame-point eye right up forward
+                                  (+ shoulder-x (* 0.90d0 dx))
+                                  (+ shoulder-y (* 0.90d0 dy))
+                                  (+ shoulder-z (* 0.90d0 dz)))))
+          (emit-framed-box vertices wrist arm-right arm-up arm-forward
+                           0.058d0 0.058d0 (* 0.14d0 length)
+                           +player-skin-tile+ sky block 0.0 nil)))
+      ;; The hand itself sits at the palm, turned as the pose says: a fist
+      ;; when empty, a grip when holding.
+      (multiple-value-bind (hand-right hand-up hand-forward)
+          (rotate-frame right up forward pitch yaw roll)
+        (let ((palm (frame-point eye right up forward x y z)))
+          (emit-framed-box vertices palm hand-right hand-up hand-forward
+                           0.080d0 0.062d0 0.070d0
+                           +player-skin-tile+ sky block 0.0 nil))))))
+
+(defun emit-player-body (vertices session)
+  "Append SESSION's first-person body -- arms, hands, held item -- to VERTICES."
+  (let* ((body (luvcraft-session-body session))
+         (camera (luvcraft-session-camera session))
+         (eye (camera-position camera)))
+    (multiple-value-bind (right up forward) (camera-basis camera)
+      (multiple-value-bind (sky block) (player-body-light-levels session)
+        (let ((right-pose (player-body-hand-pose body :right))
+              (left-pose (player-body-hand-pose body :left)))
+          (emit-player-arm vertices eye right up forward left-pose -1 sky block)
+          (emit-player-arm vertices eye right up forward right-pose 1 sky block)
+          (let ((item (player-body-hand-item body)))
+            (when item
+              (destructuring-bind (x y z pitch yaw roll) right-pose
+                (multiple-value-bind (grip-right grip-up grip-forward)
+                    (rotate-frame right up forward pitch yaw roll)
+                  (let ((palm (frame-point eye right up forward x y z)))
+                    (map-hand-item-boxes
+                     item body
+                     (lambda (bx by bz half-x half-y half-z tile
+                              &key (tilt '(0d0 0d0 0d0)) stretch-p
+                                (emission 0.0))
+                       (multiple-value-bind (box-right box-up box-forward)
+                           (apply #'rotate-frame
+                                  grip-right grip-up grip-forward tilt)
+                         (emit-framed-box
+                          vertices
+                          (frame-point palm grip-right grip-up grip-forward
+                                       bx by bz)
+                          box-right box-up box-forward
+                          half-x half-y half-z tile
+                          sky block emission stretch-p))))))))))))
+    vertices))
+
+(defun player-body-vertices (session)
+  "Build the block-pipeline vertex stream for the player's body this frame."
+  (let ((vertices
+          (make-array (* +player-body-box-limit+ +critter-vertices-per-box+
+                         +block-mesh-floats-per-vertex+)
+                      :element-type 'single-float :adjustable t
+                      :fill-pointer 0)))
+    (emit-player-body vertices session)
+    (unless (<= (length vertices)
+                (* +player-body-box-limit+ +critter-vertices-per-box+
+                   +block-mesh-floats-per-vertex+))
+      (error "The body emitted more than its ~D boxes." +player-body-box-limit+))
+    vertices))

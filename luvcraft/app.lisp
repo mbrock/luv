@@ -84,6 +84,9 @@
    (critters :initarg :critters
              :initform (make-instance 'critter-population)
              :reader luvcraft-session-critters)
+   ;; The player's own arms and hands, and what they hold.  See BODY.LISP.
+   (body :initarg :body :initform (make-instance 'player-body)
+         :reader luvcraft-session-body)
    (title-base :initarg :title-base :initform "luvcraft"
                :reader luvcraft-session-title-base)
    (atlas-texture :initarg :atlas-texture
@@ -164,6 +167,8 @@
                            :reader luvcraft-session-particle-vertex-buffer)
    (critter-vertex-buffer :initarg :critter-vertex-buffer
                           :reader luvcraft-session-critter-vertex-buffer)
+   (body-vertex-buffer :initarg :body-vertex-buffer :initform nil
+                       :reader luvcraft-session-body-vertex-buffer)
    (world-text :initarg :world-text :initform nil
                :reader luvcraft-session-world-text)
    (world-text-glyph-cache :initarg :world-text-glyph-cache :initform nil
@@ -402,7 +407,8 @@ return its attached overlay."))
 
 (defun clear-luvcraft-player-input (session)
   (clrhash (luvcraft-session-pressed-keys session))
-  (setf (luvcraft-session-jump-requested-p session) nil)
+  (setf (luvcraft-session-jump-requested-p session) nil
+        (player-body-brandishing-p (luvcraft-session-body session)) nil)
   (when (luvcraft-session-pointer-captured-p session)
     (set-canvas-relative-pointer-mode
      (luvcraft-session-canvas session) nil)
@@ -584,14 +590,16 @@ the terrain the ray meets first is what the player is looking at."
   (let* ((blocks (block-inventory-quickbar-blocks
                   (luvcraft-session-inventory session)))
          (block (luvcraft-session-selected-block session))
-         (number (position block blocks :test #'eq)))
+         (number (position block blocks :test #'eq))
+         (item (player-body-hand-item (luvcraft-session-body session))))
     (when (slot-boundp session 'canvas)
       (setf (canvas-title (luvcraft-session-canvas session))
             (format nil
-                    "~A — [~A] ~(~A~)  ·  1–~D select  ·  I inventory  ·  shift sprint  ·  tab focus"
+                    "~A — [~A] ~(~A~)~@[  ·  holding ~A~]  ·  1–~D select  ·  I inventory  ·  F phone  ·  G brandish  ·  shift sprint  ·  tab focus"
                     (luvcraft-session-title-base session)
                     (if number (1+ number) "inventory")
                     (block-kind-name block)
+                    (and item (hand-item-name item))
                     (length blocks)))))
   session)
 

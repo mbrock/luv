@@ -242,6 +242,21 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:turtle
            #:turtle-heading
            #:turtle-resting-p
+           ;; The first-person body and what it holds (BODY.LISP).
+           #:player-body
+           #:player-body-hand-item
+           #:player-body-brandishing-p
+           #:player-body-vertices
+           #:luvcraft-session-body
+           #:hand-item-name
+           #:hand-item-box-count
+           #:hand-item-carry-pose
+           #:hand-item-brandish-pose
+           #:map-hand-item-boxes
+           #:equip-hand-item
+           #:toggle-luvcraft-phone
+           #:phone
+           #:phone-screen-emission
            #:world-terrain-solid-p
            #:edit-block-at
            #:edit-block-world-source

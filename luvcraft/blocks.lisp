@@ -247,7 +247,7 @@ kinds through this vocabulary instead of printing CLOS object identities."
         (error "No block kind is named ~S." name))))
 
 (defconstant +block-atlas-tile-size+ 16)
-(defconstant +block-atlas-tile-count+ 26)
+(defconstant +block-atlas-tile-count+ 30)
 (defconstant +block-atlas-texture-format+ :rgba8-unorm-srgb)
 (defconstant +block-normal-atlas-texture-format+ :rgba8-unorm)
 
@@ -767,6 +767,88 @@ material and rebuild the atlas without touching the rest of the palette."))
   (block-atlas-byte
    (+ (if (turtle-plastron-seam-p x y) 72 150)
       (* 0.09 (- (block-atlas-lattice-hash x y 251) 128)))))
+
+;;; The player's own body and what it holds are drawn the same way as the
+;;; animals -- textured boxes on the block surface pipeline -- and paint their
+;;; hide, sleeve, and gadgets from the same atlas.  See BODY.LISP.
+
+(defconstant +player-skin-tile+ 26)
+(defconstant +player-sleeve-tile+ 27)
+(defconstant +phone-body-tile+ 28)
+(defconstant +phone-screen-tile+ 29)
+
+(defmethod paint-block-atlas-tile ((tile (eql 26)) x y)
+  "Player skin: warm hide with the faintest knuckle mottling."
+  (let ((pebble (- (block-atlas-clump x y 261 4) 128)))
+    (pack-block-atlas-rgba (+ 214 (round pebble 9))
+                           (+ 166 (round pebble 8))
+                           (+ 132 (round pebble 8)))))
+
+(defmethod paint-block-atlas-tile ((tile (eql 27)) x y)
+  "Player sleeve: a knitted teal cuff, ribbed along the arm."
+  (let ((rib (if (evenp (floor x 2)) 6 -6))
+        (variation (round (block-atlas-variation x y tile) 4)))
+    (shaded-block-atlas-pixel 44 112 118 (+ rib variation))))
+
+(defmethod paint-block-atlas-tile ((tile (eql 28)) x y)
+  "Phone body: near-black glass and aluminium with a hairline chamfer."
+  (let ((edge (if (or (zerop x) (zerop y)
+                      (= x (1- +block-atlas-tile-size+))
+                      (= y (1- +block-atlas-tile-size+)))
+                  26
+                  0))
+        (variation (round (block-atlas-variation x y tile) 6)))
+    (pack-block-atlas-rgba (+ 22 edge variation)
+                           (+ 24 edge variation)
+                           (+ 30 edge variation))))
+
+(defun phone-screen-icon-p (x y)
+  "Whether X,Y lies on one of the app icons in the phone screen's grid.
+
+The tile is stretched over the whole screen, so its sixteen rows are the
+screen's height: a status bar along the top row, three rows of four icons,
+and a dock row at the bottom."
+  (and (>= y 3) (< y 13)
+       (let ((column (mod x 4)) (row (mod (- y 3) 3)))
+         (and (>= column 1) (< column 3) (< row 2)))))
+
+(defmethod paint-block-atlas-tile ((tile (eql 29)) x y)
+  "Phone screen: a lit wallpaper gradient with a grid of little app icons."
+  (cond ((= y 0)
+         (shaded-block-atlas-pixel 236 236 240))
+        ((= y 15)
+         (shaded-block-atlas-pixel 60 66 92))
+        ((phone-screen-icon-p x y)
+         (let ((hue (block-atlas-lattice-hash (floor x 4) (floor y 3) 291)))
+           (pack-block-atlas-rgba (+ 120 (mod hue 120))
+                                  (+ 110 (mod (* 3 hue) 130))
+                                  (+ 150 (mod (* 7 hue) 100)))))
+        (t
+         (pack-block-atlas-rgba (+ 30 (* 2 y))
+                                (+ 70 (* 4 y))
+                                (+ 150 (* 5 y))))))
+
+(defmethod paint-block-atlas-relief ((tile (eql 26)) x y)
+  "Player skin: soft, barely textured."
+  (block-atlas-byte
+   (+ 128 (* 0.10 (- (block-atlas-clump x y 261 4) 128)))))
+
+(defmethod paint-block-atlas-relief ((tile (eql 27)) x y)
+  "Player sleeve: knitted ribs along the arm."
+  (block-atlas-byte (if (evenp (floor x 2)) 150 106)))
+
+(defmethod paint-block-atlas-relief ((tile (eql 28)) x y)
+  "Phone body: flat, with a raised chamfer at the rim."
+  (if (or (zerop x) (zerop y)
+          (= x (1- +block-atlas-tile-size+))
+          (= y (1- +block-atlas-tile-size+)))
+      160
+      128))
+
+(defmethod paint-block-atlas-relief ((tile (eql 29)) x y)
+  "Phone screen: glass, perfectly flat."
+  (declare (ignore x y))
+  128)
 
 (defun make-block-texture-atlas ()
   "Return the little world's horizontal RGBA8 atlas as packed pixel words.
