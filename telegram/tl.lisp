@@ -65,6 +65,96 @@ a protocol this exact, that means we read the wrong thing."))
 schema work this is information, not a defect: it names exactly what to
 define next."))
 
+;;;; The schema as data
+
+(defstruct (tl-field (:constructor make-tl-field
+                         (name keyword specification condition)))
+  "One field of a TL constructor.  CONDITION is (FLAGS-KEYWORD . BIT) when the
+field is optional, and NIL when it is always present."
+  (name "" :type string)
+  (keyword :field :type keyword)
+  (specification nil)
+  (condition nil))
+
+(defstruct (tl-definition (:constructor make-tl-definition
+                              (name keyword id function-p result-specification
+                               result-name source fields)))
+  "One line of a TL schema, in the form the codec reads."
+  (name "" :type string)
+  (keyword :constructor :type keyword)
+  (id 0 :type (unsigned-byte 32))
+  (function-p nil)
+  (result-specification nil)
+  (result-name "" :type string)
+  (source "" :type string)
+  (fields #() :type simple-vector))
+
+(defmethod print-object ((definition tl-definition) stream)
+  (print-unreadable-object (definition stream :type t)
+    (format stream "~A#~8,'0x~:[~; (function)~]"
+            (tl-definition-name definition) (tl-definition-id definition)
+            (tl-definition-function-p definition))))
+
+(defvar *tl-definitions-by-id* (make-hash-table)
+  "Constructor id to definition.")
+
+(defvar *tl-definitions-by-keyword* (make-hash-table)
+  "Constructor keyword to definition.")
+
+(defun find-tl-definition (designator &key (errorp t))
+  "The definition DESIGNATOR names: a keyword, a constructor id, a TL name
+string, or a record."
+  (or (etypecase designator
+        (tl-definition designator)
+        (keyword (gethash designator *tl-definitions-by-keyword*))
+        (integer (gethash designator *tl-definitions-by-id*))
+        (string (gethash (tl-keyword designator) *tl-definitions-by-keyword*)))
+      (when errorp
+        (error 'unknown-tl-name
+               :detail (format nil "~S names no TL constructor" designator)))))
+
+(defun tl-definition-field (definition keyword &key (errorp t))
+  "The field of DEFINITION called KEYWORD, and its index."
+  (let ((index (position keyword (tl-definition-fields definition)
+                         :key #'tl-field-keyword)))
+    (cond (index (values (aref (tl-definition-fields definition) index) index))
+          (errorp (error 'unknown-tl-name
+                         :detail (format nil "~A has no field ~S"
+                                         (tl-definition-name definition)
+                                         keyword)))
+          (t nil))))
+
+(defun map-tl-definitions (function)
+  "Call FUNCTION on every loaded definition."
+  (maphash (lambda (id definition)
+             (declare (ignore id))
+             (funcall function definition))
+           *tl-definitions-by-id*))
+
+(defun find-tl-definitions (substring &key functions types)
+  "Every definition whose TL name contains SUBSTRING, for finding one's way
+around a schema of this size from the listener."
+  (let ((found '()))
+    (map-tl-definitions
+     (lambda (definition)
+       (when (and (search substring (tl-definition-name definition)
+                          :test #'char-equal)
+                  (or (not functions) (tl-definition-function-p definition))
+                  (or (not types) (not (tl-definition-function-p definition))))
+         (push definition found))))
+    (sort found #'string< :key #'tl-definition-name)))
+
+;;;; Records
+;;;;
+;;;; A decoded message.  Dense inside -- the values are a simple vector
+;;;; parallel to the definition's fields -- and addressed by keyword outside.
+
+(defstruct (tl-record (:constructor %make-tl-record (definition values))
+                      (:copier nil))
+  "One decoded TL value: which constructor it is, and what its fields hold."
+  (definition nil :type tl-definition)
+  (values #() :type simple-vector))
+
 ;;;; Readers
 
 (defstruct (tl-reader (:constructor %make-tl-reader (octets position end)))
@@ -178,14 +268,22 @@ bytes, then zero padding up to a four-byte boundary."
                     :expected (list +bool-true-constructor+
                                     +bool-false-constructor+))))))
 
+(defun read-bare-tl-vector (reader element-reader)
+  "A bare TL `vector<t>': a count and that many elements, with no constructor
+of its own.  Returns a simple vector -- an empty one is a real value, which
+matters because an absent optional field is NIL."
+  (let ((count (take-unsigned reader 4)))
+    (let ((result (make-array count)))
+      (dotimes (index count result)
+        (setf (aref result index) (funcall element-reader reader))))))
+
 (defun read-tl-vector (reader element-reader)
-  "A boxed TL `vector', each element read by ELEMENT-READER."
+  "A boxed TL `Vector<T>', each element read by ELEMENT-READER."
   (let ((id (take-unsigned reader 4)))
     (unless (= id +vector-constructor+)
       (error 'unexpected-tl-constructor :id id
                                         :expected (list +vector-constructor+))))
-  (let ((count (take-unsigned reader 4)))
-    (loop repeat count collect (funcall element-reader reader))))
+  (read-bare-tl-vector reader element-reader))
 
 (defun read-tl-raw (reader &optional count)
   "COUNT bytes verbatim, or everything left when COUNT is omitted.  This is
@@ -291,12 +389,16 @@ Every encoder in this system is spelled with this macro."
                   (if value +bool-true-constructor+ +bool-false-constructor+)
                   4))
 
-(defun write-tl-vector (writer items element-writer)
-  "A boxed TL `vector', each element written by ELEMENT-WRITER."
-  (write-unsigned writer +vector-constructor+ 4)
+(defun write-bare-tl-vector (writer items element-writer)
+  "A bare TL `vector<t>'.  ITEMS may be any sequence."
   (write-unsigned writer (length items) 4)
-  (dolist (item items writer)
-    (funcall element-writer writer item)))
+  (map nil (lambda (item) (funcall element-writer writer item)) items)
+  writer)
+
+(defun write-tl-vector (writer items element-writer)
+  "A boxed TL `Vector<T>', each element written by ELEMENT-WRITER."
+  (write-unsigned writer +vector-constructor+ 4)
+  (write-bare-tl-vector writer items element-writer))
 
 ;;;; The typed slot vocabulary
 ;;;;
@@ -379,6 +481,35 @@ SPECIFICATION and is what methods specialize on."))
     (write-tl-vector writer value
                      (lambda (writer item) (write-tl element writer item)))))
 
+(defmethod read-tl-value ((kind (eql 'bare-vector)) specification reader)
+  (let ((element (second specification)))
+    (read-bare-tl-vector reader (lambda (reader) (read-tl element reader)))))
+
+(defmethod write-tl-value ((kind (eql 'bare-vector)) specification writer value)
+  (let ((element (second specification)))
+    (write-bare-tl-vector writer value
+                          (lambda (writer item) (write-tl element writer item)))))
+
+(defmethod read-tl-value ((kind (eql 'flags)) specification reader)
+  (declare (ignore specification))
+  (read-tl-int reader))
+
+(defmethod write-tl-value ((kind (eql 'flags)) specification writer value)
+  (declare (ignore specification))
+  (write-tl-int writer value))
+
+;;;; FLAG is the pseudo-type of a conditional field declared `true': it
+;;;; occupies a bit in the flags word and no bytes at all.  The methods exist
+;;;; so that the vocabulary is total, but DEFINE-TL-OBJECT never calls them --
+;;;; it reads and writes the bit directly.
+
+(defmethod read-tl-value ((kind (eql 'flag)) specification reader)
+  (declare (ignore specification reader))
+  t)
+
+(defmethod write-tl-value ((kind (eql 'flag)) specification writer value)
+  (declare (ignore specification value))
+  writer)
 ;;;; TL objects
 
 (defclass tl-object ()
@@ -404,13 +535,10 @@ is a table rather than a protocol.")
 
 (defgeneric tl-object-slots (designator)
   (:documentation
-   "A list of (SLOT-NAME TYPE-SPECIFICATION ACCESSOR) describing how the
+   "A list of (SLOT-NAME SPECIFICATION ACCESSOR CONDITION) describing how the
 constructor is laid out on the wire.  Printing, decoding, and encoding all
-read this one description."))
-
-(defmethod tl-object-slots ((designator t))
-  (declare (ignore designator))
-  '())
+read this one description.")
+  (:method ((designator t)) '()))
 
 (defgeneric decode-tl-body (name reader)
   (:documentation
@@ -426,12 +554,17 @@ READER and return the object."))
   (with-tl-writer (writer) (encode-tl object writer)))
 
 (defun decode-tl-object (reader)
-  "Read one boxed TL object from READER."
+  "Read one boxed TL value from READER.
+
+The class registry is consulted first and the schema table second: a handful
+of MTProto constructors are classes because methods attach to them, and
+everything Telegram publishes is a record because nothing does."
   (let* ((id (take-unsigned reader 4))
          (name (tl-constructor-name id)))
-    (unless name
-      (error 'unknown-tl-constructor :id id))
-    (decode-tl-body name reader)))
+    (cond (name (decode-tl-body name reader))
+          ((find-tl-definition id :errorp nil)
+           (decode-tl-record (find-tl-definition id) reader))
+          (t (error 'unknown-tl-constructor :id id)))))
 
 (defun decode-tl-octets (sequence &key (expect-end t))
   "Decode SEQUENCE as one boxed TL object.  By default the whole sequence
@@ -446,30 +579,78 @@ must be consumed."
   (decode-tl-object reader))
 
 (defmethod write-tl-value ((kind (eql 'object)) specification writer value)
+  "Write a boxed value: an MTProto object, a schema record, or bytes someone
+already encoded -- the last of which is what lets invokeWithLayer wrap a query
+it did not build."
   (declare (ignore specification))
-  (encode-tl value writer))
+  (if (typep value '(or tl-object tl-record))
+      (encode-tl value writer)
+      (write-tl-raw writer value)))
+
+;;;; Printing
+
+(defun format-tl-value (specification value)
+  "A short rendering of VALUE for the printer.  Deliberately shallow: these
+objects nest deeply enough that a full print is unreadable."
+  (case (tl-specification-kind specification)
+    ((int128 int256 bytes raw)
+     (if (> (length value) 12)
+         (format nil "~A…~D" (octets:octets-hex value :end 6) (length value))
+         (octets:octets-hex value)))
+    ((vector bare-vector) (format nil "[~D]" (length value)))
+    ((object) (cond ((typep value 'tl-object)
+                     (format nil "#<~(~A~)>" (type-of value)))
+                    ((tl-record-p value)
+                     (format nil "#<~A>"
+                             (tl-definition-name (tl-record-definition value))))
+                    (t (format nil "~D bytes" (length value)))))
+    ((string) (if (> (length value) 24)
+                  (format nil "~S…" (subseq value 0 24))
+                  (format nil "~S" value)))
+    ((flags) (format nil "#b~B" value))
+    (t (princ-to-string value))))
 
 (defmethod print-object ((object tl-object) stream)
   (print-unreadable-object (object stream :type t)
     (loop for (name specification accessor) in (tl-object-slots object)
-          do (format stream " ~(~A~)=~A" name
-                     (format-tl-value specification (funcall accessor object))))))
+          when (and (slot-boundp object name) (slot-value object name))
+            do (format stream " ~(~A~)=~A" name
+                       (format-tl-value specification
+                                        (funcall accessor object))))))
 
-(defun format-tl-value (specification value)
-  "A short readable rendering of VALUE for the printer.  Opaque byte fields
-print as hex because that is how every MTProto reference quotes them."
-  (case (tl-specification-kind specification)
-    ((int128 int256 bytes raw)
-     (if (> (length value) 16)
-         (format nil "~A…[~D]" (octets:octets-hex value :end 8) (length value))
-         (octets:octets-hex value)))
-    ((vector) (format nil "[~D]" (length value)))
-    (t (princ-to-string value))))
+;;;; The definer
 
 (defun slot-accessor-name (constructor slot)
   "The accessor CONSTRUCTOR-SLOT, interned where CONSTRUCTOR lives."
   (intern (concatenate 'string (symbol-name constructor) "-" (symbol-name slot))
           (symbol-package constructor)))
+
+(defstruct (tl-slot (:constructor make-tl-slot
+                        (name specification accessor condition documentation)))
+  "One slot of a constructor, as DEFINE-TL-OBJECT understands it."
+  name specification accessor condition documentation)
+
+(defun tl-slot-flag-p (slot)
+  "Does this slot occupy a bit rather than any bytes?"
+  (eq 'flag (tl-specification-kind (tl-slot-specification slot))))
+
+(defun tl-slot-flags-p (slot)
+  "Is this slot the flags word itself?"
+  (eq 'flags (tl-specification-kind (tl-slot-specification slot))))
+
+(defun tl-slot-initform (slot)
+  "The initform a slot gets, or NIL for none.
+
+An optional slot defaults to NIL, which is also how absence is spelled; a
+flags word defaults to zero because it is recomputed on the way out; a vector
+defaults to empty."
+  (cond ((tl-slot-condition slot) '(nil))
+        ((tl-slot-flags-p slot) '(0))
+        ((tl-slot-flag-p slot) '(nil))
+        ((member (tl-specification-kind (tl-slot-specification slot))
+                 '(vector bare-vector))
+         '(#()))
+        (t nil)))
 
 (defmacro define-tl-object (name (id &key (superclasses '(tl-object))
                                           (decode t) (encode t)
@@ -477,63 +658,335 @@ print as hex because that is how every MTProto reference quotes them."
                             &body slots)
   "Define the TL constructor NAME with constructor id ID.
 
-Each entry of SLOTS is (SLOT-NAME TYPE-SPECIFICATION &key documentation),
-where TYPE-SPECIFICATION is one of the symbols READ-TL-VALUE dispatches on.
+Each entry of SLOTS is
+
+    (SLOT-NAME SPECIFICATION &key flag documentation)
+
+where SPECIFICATION is one of the symbols READ-TL-VALUE dispatches on and
+FLAG, when given, is (FLAGS-SLOT . BIT): the slot is present on the wire only
+when that bit is set in that flags word.  A slot whose specification is FLAG
+occupies the bit and nothing else, which is what TL's conditional `true'
+means.  The flags word itself is recomputed when encoding, from which
+optional slots hold a value, so it never has to be maintained by hand.
+
 The form expands to an ordinary DEFCLASS plus ordinary methods, so a
-constructor whose layout the specification cannot express -- MSG-CONTAINER,
-say -- can pass :DECODE NIL or :ENCODE NIL and get a hand-written method
-instead of a special case in the macro."
-  (let* ((slot-descriptions
+constructor whose layout this cannot express -- MSG-CONTAINER, say -- passes
+:DECODE NIL or :ENCODE NIL and gets a hand-written method instead of a
+special case in the macro."
+  (let* ((slot-objects
            (loop for (slot-name specification . options) in slots
-                 collect (list slot-name
-                               (canonical-tl-specification specification)
-                               (slot-accessor-name name slot-name)
-                               (getf options :documentation))))
-         (reader (gensym "READER"))
-         (writer (gensym "WRITER"))
+                 collect (make-tl-slot slot-name
+                                       (canonical-tl-specification specification)
+                                       (slot-accessor-name name slot-name)
+                                       (getf options :flag)
+                                       (getf options :documentation))))
+         (layout (loop for slot in slot-objects
+                       collect (list (tl-slot-name slot)
+                                     (tl-slot-specification slot)
+                                     (tl-slot-accessor slot)
+                                     (tl-slot-condition slot))))
          (object (gensym "OBJECT")))
     `(progn
        ;; A constructor and its accessors are the interface: exporting them
        ;; here keeps a schema from being shadowed by a parallel export list
        ;; that has to be edited in step with it.
-       (export '(,name ,@(mapcar #'third slot-descriptions))
+       (export '(,name ,@(mapcar #'tl-slot-accessor slot-objects))
                ,(package-name (symbol-package name)))
        (defclass ,name ,superclasses
-         ,(loop for (slot-name specification accessor slot-documentation)
-                  in slot-descriptions
-                collect `(,slot-name
-                          :initarg ,(intern (symbol-name slot-name) :keyword)
-                          :accessor ,accessor
-                          ,@(when slot-documentation
-                              `(:documentation ,slot-documentation))
-                          ,@(when (eq (tl-specification-kind specification)
-                                      'vector)
-                              '(:initform '()))))
+         ,(loop for slot in slot-objects
+                collect `(,(tl-slot-name slot)
+                          :initarg ,(intern (symbol-name (tl-slot-name slot))
+                                            :keyword)
+                          :accessor ,(tl-slot-accessor slot)
+                          ,@(let ((initform (tl-slot-initform slot)))
+                              (when initform `(:initform ',(first initform))))
+                          ,@(when (tl-slot-documentation slot)
+                              `(:documentation ,(tl-slot-documentation slot)))))
          ,@(when documentation `((:documentation ,documentation))))
        (defmethod tl-constructor-id ((,object ,name)) ,id)
        (defmethod tl-constructor-id ((,object (eql ',name))) ,id)
        (setf (tl-constructor-name ,id) ',name)
-       ,(let ((layout `',(loop for (slot-name specification accessor)
-                                 in slot-descriptions
-                               collect (list slot-name specification accessor))))
-          `(progn
-             (defmethod tl-object-slots ((,object ,name)) ,layout)
-             (defmethod tl-object-slots ((,object (eql ',name))) ,layout)))
-       ,@(when decode
-           `((defmethod decode-tl-body ((,object (eql ',name)) ,reader)
-               (make-instance ',name
-                              ,@(loop for (slot-name specification)
-                                        in slot-descriptions
-                                      append
-                                      `(,(intern (symbol-name slot-name)
-                                                 :keyword)
-                                        (read-tl ',specification ,reader)))))))
-       ,@(when encode
-           `((defmethod encode-tl ((,object ,name) ,writer)
-               (write-unsigned ,writer ,id 4)
-               ,@(loop for (slot-name specification accessor)
-                         in slot-descriptions
-                       collect `(write-tl ',specification ,writer
-                                          (,accessor ,object)))
-               ,writer)))
+       (defmethod tl-object-slots ((,object ,name)) ',layout)
+       (defmethod tl-object-slots ((,object (eql ',name))) ',layout)
+       ,@(when decode (list (expand-tl-decoder name slot-objects)))
+       ,@(when encode (list (expand-tl-encoder name id slot-objects)))
        ',name)))
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun tl-flag-variables (slot-objects)
+    "A variable name for each flags word, keyed by slot name.  The variables
+are gensyms so that a schema field called READER or WRITER cannot capture
+anything."
+    (loop for slot in slot-objects
+          when (tl-slot-flags-p slot)
+            collect (cons (tl-slot-name slot)
+                          (gensym (symbol-name (tl-slot-name slot))))))
+
+  (defun tl-flag-variable (variables slot)
+    "The variable holding the flags word that SLOT's condition names."
+    (let ((condition (tl-slot-condition slot)))
+      (when condition
+        (or (cdr (assoc (car condition) variables))
+            (error "~S is conditional on ~S, which is not a flags field."
+                   (tl-slot-name slot) (car condition))))))
+
+  (defun tl-slot-decode-form (slot variables reader)
+    "How one slot is read: a bit out of its flags word, a guarded read, or an
+unconditional read."
+    (let ((flags (tl-flag-variable variables slot)))
+      (cond ((and flags (tl-slot-flag-p slot))
+             `(logbitp ,(cdr (tl-slot-condition slot)) ,flags))
+            (flags
+             `(when (logbitp ,(cdr (tl-slot-condition slot)) ,flags)
+                (read-tl ',(tl-slot-specification slot) ,reader)))
+            (t `(read-tl ',(tl-slot-specification slot) ,reader)))))
+
+  (defun expand-tl-decoder (name slot-objects)
+    "A decoder that reads the slots in wire order.
+
+LET* is doing real work here: the flags word has to be bound before the
+fields it guards are read, and TL puts it first for exactly that reason."
+    (let* ((reader (gensym "READER"))
+           (designator (gensym "NAME"))
+           (variables (tl-flag-variables slot-objects))
+           (pairs (loop for slot in slot-objects
+                        collect (cons slot
+                                      (if (tl-slot-flags-p slot)
+                                          (cdr (assoc (tl-slot-name slot)
+                                                      variables))
+                                          (gensym (symbol-name
+                                                   (tl-slot-name slot))))))))
+      `(defmethod decode-tl-body ((,designator (eql ',name)) ,reader)
+         (declare (ignore ,designator) (ignorable ,reader))
+         (let* ,(loop for (slot . variable) in pairs
+                      collect (list variable
+                                    (tl-slot-decode-form slot variables reader)))
+           (make-instance ',name
+                          ,@(loop for (slot . variable) in pairs
+                                  append (list (intern (symbol-name
+                                                        (tl-slot-name slot))
+                                                       :keyword)
+                                               variable)))))))
+
+  (defun expand-tl-encoder (name id slot-objects)
+    (let* ((writer (gensym "WRITER"))
+           (object (gensym "OBJECT"))
+           (variables (tl-flag-variables slot-objects)))
+      `(defmethod encode-tl ((,object ,name) ,writer)
+         (let ,(loop for (slot-name . variable) in variables
+                     collect
+                     `(,variable
+                       (logior
+                        ,@(loop for slot in slot-objects
+                                for condition = (tl-slot-condition slot)
+                                when (and condition
+                                          (eq slot-name (car condition)))
+                                  collect `(if (,(tl-slot-accessor slot)
+                                                ,object)
+                                               ,(ash 1 (cdr condition))
+                                               0)))))
+           (declare (ignorable ,@(mapcar #'cdr variables)))
+           (write-tl-constructor ,writer ,id)
+           ,@(loop for slot in slot-objects
+                   for flags = (tl-flag-variable variables slot)
+                   collect
+                   (cond ((tl-slot-flags-p slot)
+                          `(write-tl-int ,writer
+                                         ,(cdr (assoc (tl-slot-name slot)
+                                                      variables))))
+                         ((tl-slot-flag-p slot) nil)
+                         (flags
+                          `(when (,(tl-slot-accessor slot) ,object)
+                             (write-tl ',(tl-slot-specification slot) ,writer
+                                       (,(tl-slot-accessor slot) ,object))))
+                         (t `(write-tl ',(tl-slot-specification slot) ,writer
+                                       (,(tl-slot-accessor slot) ,object)))))
+           ,writer)))))
+
+;;;; Schema records
+
+(define-condition tl-schema-error (tl-error)
+  ((detail :initarg :detail :reader tl-schema-error-detail)
+   (line :initarg :line :initform nil :reader tl-schema-error-line))
+  (:report (lambda (condition stream)
+             (format stream "~@[Line ~D: ~]~A"
+                     (tl-schema-error-line condition)
+                     (tl-schema-error-detail condition))))
+  (:documentation "The schema text said something this reader cannot parse."))
+
+(define-condition unknown-tl-name (tl-schema-error)
+  ()
+  (:documentation "No constructor in the loaded schema goes by that name."))
+
+;;;; Names
+;;;;
+;;;; TL is camelCase with dotted namespaces; Lisp is kebab-case.  The dot
+;;;; survives, because keeping it makes the TL name recoverable by eye:
+;;;; messages.sendMessage becomes :MESSAGES.SEND-MESSAGE.  Names are keywords
+;;;; rather than symbols in a package of their own, which is what keeps the
+;;;; schema from costing ten thousand exported symbols.
+
+(defun tl-lisp-name-string (tl-name)
+  "TL-NAME rewritten in Lisp's spelling."
+  (with-output-to-string (out)
+    (loop with length = (length tl-name)
+          for index from 0 below length
+          for character = (char tl-name index)
+          for previous = (and (plusp index) (char tl-name (1- index)))
+          for next = (and (< (1+ index) length) (char tl-name (1+ index)))
+          do (cond ((char= character #\_) (write-char #\- out))
+                   ((and (upper-case-p character)
+                         previous
+                         (or (lower-case-p previous) (digit-char-p previous)
+                             (and (upper-case-p previous) next
+                                  (lower-case-p next))))
+                    (write-char #\- out)
+                    (write-char (char-upcase character) out))
+                   (t (write-char (char-upcase character) out))))))
+
+(defun tl-keyword (tl-name)
+  "The keyword naming TL-NAME."
+  (intern (tl-lisp-name-string tl-name) :keyword))
+
+(defun tl-name (record)
+  "Which constructor RECORD is, as a keyword."
+  (tl-definition-keyword (tl-record-definition record)))
+
+(defun tl-record-id (record)
+  (tl-definition-id (tl-record-definition record)))
+
+(defun tl-value (record field &key (errorp t))
+  "The value of FIELD in RECORD.  An optional field that did not arrive is
+NIL, which is also how it is spelled going out."
+  (multiple-value-bind (definition index)
+      (tl-definition-field (tl-record-definition record) field :errorp errorp)
+    (when definition
+      (aref (tl-record-values record) index))))
+
+(defun (setf tl-value) (value record field)
+  (multiple-value-bind (definition index)
+      (tl-definition-field (tl-record-definition record) field)
+    (declare (ignore definition))
+    (setf (aref (tl-record-values record) index) value)))
+
+(defun tl-values (record)
+  "RECORD's fields as a plist, omitting the ones that are absent."
+  (loop for field across (tl-definition-fields (tl-record-definition record))
+        for value across (tl-record-values record)
+        unless (or (null value) (eq :flags (tl-field-keyword field)))
+          append (list (tl-field-keyword field) value)))
+
+(defun make-tl (designator &rest fields)
+  "Build a TL value.
+
+  (make-tl :messages.send-message
+           :peer (make-tl :input-peer-self)
+           :message \"hello\" :random-id 1)
+
+Fields not given are NIL, which for an optional field means absent and for a
+required one will be caught when it is encoded.  The flags word is computed
+on the way out and never has to be given."
+  (let* ((definition (find-tl-definition designator))
+         (values (make-array (length (tl-definition-fields definition))
+                             :initial-element nil))
+         (record (%make-tl-record definition values)))
+    (loop for (field value) on fields by #'cddr
+          do (setf (tl-value record field) value))
+    record))
+
+(defmethod print-object ((record tl-record) stream)
+  (print-unreadable-object (record stream)
+    (format stream "~A" (tl-definition-name (tl-record-definition record)))
+    (loop for field across (tl-definition-fields (tl-record-definition record))
+          for value across (tl-record-values record)
+          unless (or (null value) (eq :flags (tl-field-keyword field)))
+            do (format stream " ~(~A~)=~A" (tl-field-keyword field)
+                       (format-tl-value (tl-field-specification field) value)))))
+
+(defun describe-tl (designator &optional (stream *standard-output*))
+  "Print what the schema says about DESIGNATOR."
+  (let ((definition (find-tl-definition designator)))
+    (format stream "~&~A#~8,'0x~@[ (function returning ~A)~]~%  ~A~%"
+            (tl-definition-name definition) (tl-definition-id definition)
+            (and (tl-definition-function-p definition)
+                 (tl-definition-result-name definition))
+            (tl-definition-source definition))
+    (loop for field across (tl-definition-fields definition)
+          do (format stream "  ~(~24A~) ~A~@[  [optional: ~(~A~) bit ~D]~]~%"
+                     (tl-field-keyword field)
+                     (tl-field-specification field)
+                     (car (tl-field-condition field))
+                     (cdr (tl-field-condition field))))
+    definition))
+
+;;;; The record codec
+
+(defun decode-tl-record (definition reader)
+  "Read DEFINITION's fields from READER.
+
+The flags word is read before the fields it guards -- TL puts it first for
+exactly that reason -- so one left-to-right pass is enough."
+  (let* ((fields (tl-definition-fields definition))
+         (values (make-array (length fields) :initial-element nil))
+         (flags '()))
+    (loop for index from 0 below (length fields)
+          for field = (aref fields index)
+          for specification = (tl-field-specification field)
+          for condition = (tl-field-condition field)
+          do (setf (aref values index)
+                   (cond ((null condition)
+                          (let ((value (read-tl specification reader)))
+                            (when (eq 'flags (tl-specification-kind
+                                              specification))
+                              (push (cons (tl-field-keyword field) value) flags))
+                            value))
+                         ((eq 'flag (tl-specification-kind specification))
+                          (logbitp (cdr condition)
+                                   (tl-condition-flags flags condition
+                                                       definition)))
+                         ((logbitp (cdr condition)
+                                   (tl-condition-flags flags condition
+                                                       definition))
+                          (read-tl specification reader)))))
+    (%make-tl-record definition values)))
+
+(defun tl-condition-flags (flags condition definition)
+  (or (cdr (assoc (car condition) flags))
+      (error 'tl-schema-error
+             :detail (format nil "~A reads ~(~A~) before it is set"
+                             (tl-definition-name definition)
+                             (car condition)))))
+
+(defmethod encode-tl ((record tl-record) writer)
+  (let* ((definition (tl-record-definition record))
+         (fields (tl-definition-fields definition))
+         (values (tl-record-values record)))
+    (write-tl-constructor writer (tl-definition-id definition))
+    (loop for index from 0 below (length fields)
+          for field = (aref fields index)
+          for specification = (tl-field-specification field)
+          for condition = (tl-field-condition field)
+          do (cond ((eq 'flags (tl-specification-kind specification))
+                    (write-tl-int writer (compute-tl-flags record
+                                                          (tl-field-keyword
+                                                           field))))
+                   ((eq 'flag (tl-specification-kind specification)))
+                   ((null condition)
+                    (write-tl specification writer (aref values index)))
+                   ((aref values index)
+                    (write-tl specification writer (aref values index)))))
+    writer))
+
+(defun compute-tl-flags (record flags-keyword)
+  "The flags word named FLAGS-KEYWORD, recomputed from which optional fields
+RECORD actually holds.  Nothing has to keep it in step by hand."
+  (let ((definition (tl-record-definition record)))
+    (loop with value = 0
+          for field across (tl-definition-fields definition)
+          for index from 0
+          for condition = (tl-field-condition field)
+          do (when (and condition (eq flags-keyword (car condition))
+                        (aref (tl-record-values record) index))
+               (setf value (logior value (ash 1 (cdr condition)))))
+          finally (return value))))
+

@@ -164,8 +164,8 @@
                      (tl:write-tl-vector writer '(1 2 3) #'tl:write-tl-long))))
       (ok (= tl:+vector-constructor+
              (octets:octets-integer encoded :end 4 :endian :little)))
-      (ok (equal '(1 2 3) (tl:read-tl-vector (tl:make-tl-reader encoded)
-                                             #'tl:read-tl-long)))))
+      (ok (equalp #(1 2 3) (tl:read-tl-vector (tl:make-tl-reader encoded)
+                                              #'tl:read-tl-long)))))
   (testing "and a short stream is an error rather than a silent zero"
     (signals (tl:read-tl-long (tl:make-tl-reader (hex "0102")))
              'tl:short-tl-data)))
@@ -199,7 +199,7 @@
     (ok (equalp (hex "19546f942a11278d") (mt:res-pq-pq response)))
     (ok (= 3 (length (mt:res-pq-server-public-key-fingerprints response))))
     (ok (= #xb25898df208d2603
-           (first (mt:res-pq-server-public-key-fingerprints response))))
+           (elt (mt:res-pq-server-public-key-fingerprints response) 0)))
     (testing "and re-encodes to exactly what arrived"
       (ok (equalp (hex "632416054e44b426241e8b839153122d44585ac665ba0b393e1094329eda2c42
                          d62833030819546f942a11278d00000015c4b51c0300000003268d20df9858b2

@@ -61,6 +61,11 @@ server may ask us to resend it under a corrected salt."))
    (acknowledgements :initform '() :accessor session-acknowledgements)
    (events :initform '() :accessor session-events
            :documentation "A newest-first log of what the session has seen.")
+   (initialized :initform nil :accessor session-initialized-p
+                :documentation
+                "Whether initConnection has been sent on this session.  The
+Telegram API layer requires it once per session and never again, and the
+session is the thing that knows how long `once' lasts.")
    (entropy :initarg :entropy :initform octets:*entropy* :reader session-entropy)
    (clock :initarg :clock :initform octets:*clock* :reader session-clock))
   (:documentation
@@ -185,14 +190,15 @@ in response -- an acknowledgement, a resend -- is waiting in the outbox."
 
 (defun flush-session-acknowledgements (session)
   "Send one msgs_ack for everything received since the last flush."
-  (let ((ids (nreverse (session-acknowledgements session))))
+  (let ((ids (remove-duplicates (nreverse (session-acknowledgements session)))))
     (setf (session-acknowledgements session) '())
     (when ids
       (enqueue-session-packet
        session
        (session-send session
                      (tl:encode-tl-octets
-                      (make-instance 'msgs-ack :message-ids ids)))))))
+                      (make-instance 'msgs-ack
+                                     :message-ids (coerce ids 'vector))))))))
 
 (defgeneric handle-session-message (session message object)
   (:documentation
@@ -217,10 +223,21 @@ every handler instead of appearing in each of them."
 (defmethod handle-session-message ((session mtproto-session)
                                    (message mtproto-message)
                                    (object msg-container))
-  (dolist (member (msg-container-messages object))
-    (handle-session-message session member
-                            (tl:decode-tl-octets
-                             (mtproto-message-body member)))))
+  (map nil
+       (lambda (member)
+         (handle-session-message session member
+                                 (tl:decode-tl-octets
+                                  (mtproto-message-body member))))
+       (msg-container-messages object)))
+
+(defmethod handle-session-message ((session mtproto-session)
+                                   (message mtproto-message)
+                                   (object gzip-packed))
+  "Inflate and dispatch again.  Compression is not a message kind."
+  (handle-session-message
+   session message
+   (tl:decode-tl-octets
+    (octets:decompress (gzip-packed-packed-data object)))))
 
 (defmethod handle-session-message ((session mtproto-session)
                                    (message mtproto-message)
@@ -265,7 +282,7 @@ every handler instead of appearing in each of them."
                                    (message mtproto-message)
                                    (object rpc-result))
   (let* ((message-id (rpc-result-request-message-id object))
-         (result (rpc-result-result object))
+         (result (unwrap-gzip (rpc-result-result object)))
          (request (gethash message-id (session-pending-requests session))))
     (remhash message-id (session-pending-requests session))
     (note-session-event session (list :rpc-result message-id))

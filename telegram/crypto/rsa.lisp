@@ -81,9 +81,10 @@ integer or as big-endian bytes.  MODE is :PADDED or :LEGACY."
 (defun select-public-key (keys fingerprints)
   "The first key in KEYS named by FINGERPRINTS, preferring the server's own
 ordering.  Signals UNKNOWN-PUBLIC-KEY when we hold none of them."
-  (or (loop for fingerprint in fingerprints
-            thereis (find fingerprint keys :key #'public-key-fingerprint))
-      (error 'unknown-public-key :fingerprints fingerprints)))
+  (or (some (lambda (fingerprint)
+              (find fingerprint keys :key #'public-key-fingerprint))
+            fingerprints)
+      (error 'unknown-public-key :fingerprints (coerce fingerprints 'list))))
 
 ;;;; PEM and DER
 ;;;;

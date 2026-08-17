@@ -32,6 +32,9 @@ before it can be pure: bytes of entropy and a reading of the clock.")
            #:octets-integer
            #:integer-octets
            #:base64-octets
+           #:inflate
+           #:decompress
+           #:inflate-error
            #:entropy
            #:random-octets
            #:system-entropy
@@ -85,6 +88,7 @@ how to read and write itself.")
            #:read-tl-string
            #:read-tl-bool
            #:read-tl-vector
+           #:read-bare-tl-vector
            #:read-tl-raw
            #:write-tl-int
            #:write-tl-long
@@ -96,6 +100,7 @@ how to read and write itself.")
            #:write-tl-string
            #:write-tl-bool
            #:write-tl-vector
+           #:write-bare-tl-vector
            #:write-tl-raw
            #:write-tl-constructor
            #:tl-object
@@ -113,7 +118,44 @@ how to read and write itself.")
            #:write-tl-value
            #:read-tl
            #:write-tl
-           #:+vector-constructor+))
+           #:+vector-constructor+
+           ;; the schema as data, and the records it decodes into
+           #:define-tl-schema
+           #:install-tl-schema
+           #:read-tl-schema-file
+           #:parse-tl-schema
+           #:tl-schema-error
+           #:unknown-tl-name
+           #:tl-lisp-name-string
+           #:tl-keyword
+           #:tl-definition
+           #:tl-definition-name
+           #:tl-definition-keyword
+           #:tl-definition-id
+           #:tl-definition-fields
+           #:tl-definition-function-p
+           #:tl-definition-result-specification
+           #:tl-definition-result-name
+           #:tl-definition-source
+           #:tl-definition-field
+           #:tl-field
+           #:tl-field-name
+           #:tl-field-keyword
+           #:tl-field-specification
+           #:tl-field-condition
+           #:find-tl-definition
+           #:find-tl-definitions
+           #:map-tl-definitions
+           #:describe-tl
+           #:tl-record
+           #:tl-record-p
+           #:tl-record-definition
+           #:make-tl
+           #:tl-name
+           #:tl-record-id
+           #:tl-value
+           #:tl-values
+           #:decode-tl-record))
 
 (defpackage #:telegram.crypto
   (:use #:cl)
@@ -203,6 +245,7 @@ produces.")
            #:mtproto-message-message-id
            #:mtproto-message-sequence-number
            #:mtproto-message-body
+           #:unwrap-gzip
            ;; bundled server keys
            #:+telegram-production-key-pem+
            #:+telegram-sample-key-pem+
@@ -242,6 +285,7 @@ produces.")
            #:session-last-message-id
            #:session-sent-content-messages
            #:session-pending-requests
+           #:session-initialized-p
            #:session-outbox
            #:session-events
            #:drain-session-outbox

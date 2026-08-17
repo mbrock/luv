@@ -16,7 +16,9 @@ lives in TELEGRAM/NET."
     :components
     ((:file "package")
      (:file "octets")
+     (:file "inflate")
      (:file "tl")
+     (:file "tl-schema")
      (:module "crypto"
       :serial t
       :components ((:file "sha")
@@ -31,6 +33,29 @@ lives in TELEGRAM/NET."
      (:file "session"))))
   :in-order-to ((test-op (test-op "telegram/test"))))
 
+(defsystem "telegram/api"
+  :description "Telegram's published TL schema, generated into classes."
+  :long-description
+  "One form reads schema/api.tl at compile time and expands into a class for
+every constructor, function, and abstract type in it.  Kept as its own system
+because the resulting fasl takes a few seconds to load, and the MTProto core
+below it does not need any of it."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("telegram")
+  :components ((:module "telegram"
+                :serial t
+                :components ((:static-file "schema/api.tl")
+                             (:file "api")))))
+
+(defsystem "telegram/client"
+  :description "Calling Telegram: application identity, layer negotiation, RPC."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("telegram/api" "telegram/net")
+  :components ((:module "telegram"
+                :components ((:file "client")))))
+
 (defsystem "telegram/net"
   :description "A TCP connection that drives the MTProto core."
   :version "0.0.1"
@@ -43,7 +68,7 @@ lives in TELEGRAM/NET."
   :description "Executable claims for the MTProto core, against published vectors."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("telegram" "telegram/net" "rove")
+  :depends-on ("telegram" "telegram/api" "telegram/net" "telegram/client" "rove")
   :serial t
   :components
   ((:module "telegram/tests"
@@ -51,7 +76,8 @@ lives in TELEGRAM/NET."
     :components ((:file "package")
                  (:file "primitives")
                  (:file "handshake")
-                 (:file "session"))))
+                 (:file "session")
+                 (:file "schema"))))
   :perform (test-op (operation component)
              (declare (ignore operation component))
              (unless (uiop:symbol-call '#:rove '#:run-suite
@@ -63,5 +89,5 @@ lives in TELEGRAM/NET."
   :description "An opt-in check that talks to a real Telegram data centre."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("telegram/net")
+  :depends-on ("telegram/net" "telegram/client")
   :components ((:module "telegram" :components ((:file "live")))))

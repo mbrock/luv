@@ -177,9 +177,24 @@ inside an rpc_result.")
 
 (tl:define-tl-object gzip-packed (#x3072CFA1
                                   :documentation
-                                  "A deflate-compressed payload.  Recognized
-here, but not yet inflated.")
+                                  "A deflate-compressed payload.  Telegram
+wraps anything it thinks is worth compressing in one of these, so it is a
+wrapper to see through rather than a value to hand on.")
   (packed-data bytes))
+
+(defun unwrap-gzip (octets)
+  "OCTETS with any gzip_packed wrapper stripped, however many deep.
+
+Compression is a transport decision the server makes on its own, so no layer
+above this one should ever have to know it happened."
+  (let ((bytes (octets:to-octets octets)))
+    (loop while (and (>= (length bytes) 4)
+                     (= (octets:octets-integer bytes :end 4 :endian :little)
+                        (tl:tl-constructor-id 'gzip-packed)))
+          do (setf bytes (octets:decompress
+                          (gzip-packed-packed-data
+                           (tl:decode-tl-octets bytes)))))
+    bytes))
 
 (tl:define-tl-object msg-detailed-info (#x276D3EC6)
   (message-id long)
@@ -246,26 +261,31 @@ undecoded body."))
     (make-instance
      'msg-container
      :messages
-     (loop repeat count
-           for message-id = (tl:read-tl-long reader)
-           for sequence-number = (tl:read-tl-int reader)
-           for length = (tl:read-tl-int reader)
-           do (unless (<= 0 length (tl:tl-reader-remaining reader))
-                (error 'mtproto-protocol-error
-                       :detail "implausible container member length"))
-           collect (make-instance 'mtproto-message
-                                  :message-id message-id
-                                  :sequence-number sequence-number
-                                  :body (tl:read-tl-raw reader length))))))
+     (coerce
+      (loop repeat count
+            for message-id = (tl:read-tl-long reader)
+            for sequence-number = (tl:read-tl-int reader)
+            for length = (tl:read-tl-int reader)
+            do (unless (<= 0 length (tl:tl-reader-remaining reader))
+                 (error 'mtproto-protocol-error
+                        :detail "implausible container member length"))
+            collect (make-instance 'mtproto-message
+                                   :message-id message-id
+                                   :sequence-number sequence-number
+                                   :body (tl:read-tl-raw reader length)))
+      'vector))))
 
 (defmethod tl:encode-tl ((container msg-container) writer)
   (tl:write-tl-constructor writer (tl:tl-constructor-id container))
   (tl:write-tl-int writer (length (msg-container-messages container)))
-  (dolist (message (msg-container-messages container) writer)
-    (tl:write-tl-long writer (mtproto-message-message-id message))
-    (tl:write-tl-int writer (mtproto-message-sequence-number message))
-    (tl:write-tl-int writer (length (mtproto-message-body message)))
-    (tl:write-tl-raw writer (mtproto-message-body message))))
+  (map nil
+       (lambda (message)
+         (tl:write-tl-long writer (mtproto-message-message-id message))
+         (tl:write-tl-int writer (mtproto-message-sequence-number message))
+         (tl:write-tl-int writer (length (mtproto-message-body message)))
+         (tl:write-tl-raw writer (mtproto-message-body message)))
+       (msg-container-messages container))
+  writer)
 
 ;;;; future_salts carries a bare vector of bare future_salt values, which the
 ;;;; slot vocabulary cannot spell either.
@@ -282,6 +302,7 @@ undecoded body."))
     (make-instance 'future-salts
                    :request-message-id request-message-id
                    :now now
-                   :salts (loop repeat count
-                                collect (tl:decode-tl-body 'future-salt
-                                                           reader)))))
+                   :salts (coerce (loop repeat count
+                                        collect (tl:decode-tl-body 'future-salt
+                                                                   reader))
+                                  'vector))))

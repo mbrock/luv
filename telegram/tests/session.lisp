@@ -115,8 +115,8 @@
           (let ((ack (tl:decode-tl-octets
                       (mt:encrypted-packet-body (first packets)))))
             (ok (typep ack 'mt:msgs-ack))
-            (ok (equal (list (ash 1693436741 32))
-                       (mt:msgs-ack-message-ids ack)))
+            (ok (equalp (vector (ash 1693436741 32))
+                        (mt:msgs-ack-message-ids ack)))
             (testing "as a service message, so it is even and not acknowledged back"
               (ok (evenp (mt:encrypted-packet-sequence-number
                           (first packets)))))))))))
@@ -176,8 +176,8 @@
              (ack (tl:decode-tl-octets
                    (mt:encrypted-packet-body (first packets)))))
         (ok (= 1 (length packets)))
-        (ok (equal (list (ash 1693436742 32))
-                   (mt:msgs-ack-message-ids ack)))))))
+        (ok (equalp (vector (ash 1693436742 32))
+                    (mt:msgs-ack-message-ids ack)))))))
 
 (deftest a-bad-salt-is-adopted-and-the-request-resent
   (let ((session (test-session)))
