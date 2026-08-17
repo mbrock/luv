@@ -84,8 +84,19 @@
                            :message "hello" :random-id 12345
                            :no-webpage t)))
     (testing "the flags word is computed from what is actually set"
-      (ok (equal "5ad15c5402000000c97ea07d0568656c6c6f00003930000000000000"
-                 (unhex (tl:encode-tl-octets query)))))
+      ;; Spelled out rather than compared to a fixed string: this
+      ;; constructor's id moves with the layer, and pinning the whole
+      ;; encoding here would make a schema refresh look like a regression.
+      (let ((encoded (tl:encode-tl-octets query)))
+        (ok (= (tl:tl-definition-id
+                (tl:find-tl-definition :messages.send-message))
+               (octets:octets-integer encoded :end 4 :endian :little)))
+        (testing "no_webpage is bit 1, and nothing else was set"
+          (ok (= 2 (octets:octets-integer encoded :start 4 :end 8
+                                                  :endian :little))))
+        (testing "then the peer, the text, and the random id, in order"
+          (ok (equal "c97ea07d0568656c6c6f00003930000000000000"
+                     (unhex (subseq encoded 8)))))))
     (let ((back (tl:decode-tl-octets (tl:encode-tl-octets query))))
       (ok (eq :messages.send-message (tl:tl-name back)))
       (ok (equal "hello" (tl:tl-value back :message)))

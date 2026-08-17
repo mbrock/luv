@@ -156,7 +156,7 @@ and the schema is browsable from the listener:
 
 **Two schemas, two representations, one decoder.** The thirty-odd MTProto
 constructors are classes: `handle-session-message` has a method per service
-message, so that set really is a protocol we extend. Telegram's own 2333 are
+message, so that set really is a protocol we extend. Telegram's own 2455 are
 `tl-record`s — a definition plus a vector of values — because that set is
 closed and someone else owns every name and number in it. Generating a class
 per constructor would have cost 2364 classes and 10333 exported symbols to
@@ -216,6 +216,10 @@ adding the obfuscated or padded variants is a class and three methods.
 ## Not yet
 
 - Sign-up, for a number with no account behind it.
+- Keeping `schema/api.tl` current. It is a snapshot of layer 228, taken from
+  tdlib; Telegram moves, and a constructor the snapshot lacks is a decode
+  that stops rather than one that guesses. `+api-layer+` and the schema file
+  have to move together.
 - The updates loop: `updates.getDifference` and a `pts`/`qts`/`date` cursor.
 - File upload and download, which need `upload.getFile` and its own
   chunking.

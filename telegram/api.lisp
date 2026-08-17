@@ -22,7 +22,7 @@
   (tl:define-tl-schema "schema/api.tl")
   "How many constructors and functions the loaded schema holds.")
 
-(defconstant +api-layer+ 214
+(defconstant +api-layer+ 228
   "The schema layer this snapshot is.  Every session announces it through
 invokeWithLayer, and the server answers in the dialect of the layer it was
 told, so this constant and schema/api.tl move together.")
