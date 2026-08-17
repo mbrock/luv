@@ -83,3 +83,30 @@ went wrong, and that condition comes out of here."
       (when writer
         (stop-world-checkpoint-writer writer)))
     (values)))
+
+(defun shader-knob-p (knob)
+  "Whether KNOB has been folded into a live pipeline's source, so that
+turning it rebuilds one.  Answered for the live session."
+  (and (boundp '*session*) *session*
+       (some (lambda (pipeline)
+               (assoc (knob-name knob)
+                      (live-shader-pipeline-attempted-source-values pipeline)))
+             (luvcraft-session-live-shader-pipelines *session*))))
+
+;;; ---------------------------------------------------------------------
+;;; The verbs the metabar offers.
+
+(define-action focus-target (:label "focus what the crosshair is on")
+  ;; Whatever gadget offered this button is itself the focus at the moment
+  ;; it is pressed; it must stand down before the world can be looked at.
+  (unfocus-luvcraft-session session)
+  (toggle-luvcraft-session-focus session))
+
+(define-action quit (:label "quit the game")
+  ;; The event thread cannot tear itself down: STOP-PLAYING waits for a
+  ;; frame boundary, so it runs beside the game, not inside it.
+  (sb-thread:make-thread
+   (lambda ()
+     (when (eq session *session*)
+       (stop-playing)))
+   :name "luvcraft quit"))

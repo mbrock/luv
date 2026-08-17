@@ -127,22 +127,34 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:attach-luvcraft-hud
            #:toggle-luvcraft-inventory
            #:toggle-luvcraft-metabar
-           #:tunable
-           #:tunable-name
-           #:tunable-label
-           #:tunable-group
-           #:tunable-unit
-           #:tunable-minimum
-           #:tunable-maximum
-           #:tunable-step
-           #:tunable-value
-           #:tunable-fraction
-           #:set-tunable-value
-           #:step-tunable
-           #:format-tunable-value
-           #:find-tunable
-           #:define-tunable
-           #:*tunables*
+           #:knob
+           #:scalar-knob
+           #:switch-knob
+           #:knob-name
+           #:knob-label
+           #:knob-group
+           #:knob-documentation
+           #:knob-declaration
+           #:knob-unit
+           #:knob-unit-label
+           #:unit-label
+           #:unit-abbreviation
+           #:knob-minimum
+           #:knob-maximum
+           #:knob-step
+           #:knob-value
+           #:knob-fraction
+           #:set-knob-value
+           #:step-knob
+           #:toggle-knob
+           #:realize-knob
+           #:format-knob-value
+           #:find-knob
+           #:knob-groups
+           #:knobs-in-group
+           #:shader-knob-p
+           #:define-knob
+           #:*knobs*
            #:action
            #:action-name
            #:action-label

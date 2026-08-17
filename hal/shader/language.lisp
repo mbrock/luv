@@ -2473,6 +2473,52 @@ rather than the language."
            (error 'shader-language-error
                   :form form :reason :unknown-operator :details operator)))))
 
+;;; A live named value -- a knob, in the application's word -- may stand in
+;;; shader source as a symbol.  It folds to a literal at parse time, and the
+;;; parse records what was folded, so a live pipeline can tell when the
+;;; source it was built from has quietly moved.
+
+(defgeneric shader-source-value (name)
+  (:documentation
+   "The live value NAME stands for in shader source, or NIL when NAME names
+none.  Returns (VALUES VALUE DECLARATION FOUND-P): VALUE is a real, and
+DECLARATION, when given, is a represented-value declaration whose quantity
+the literal takes on."))
+
+(defmethod shader-source-value ((name t))
+  (declare (ignore name))
+  (values nil nil nil))
+
+(defvar *shader-source-value-references* nil
+  "When bound to a cons cell, its car collects (NAME . VALUE) for every live
+named value folded while parsing, so the parser's caller can remember what
+its artifact depends on.")
+
+(defun shader-source-value-literal (form)
+  "FORM as a folded literal when it names a live shader source value."
+  (multiple-value-bind (value declaration found-p) (shader-source-value form)
+    (when found-p
+      (when *shader-source-value-references*
+        (push (cons form value) (car *shader-source-value-references*)))
+      (make-instance 'shader-literal
+                     :value (coerce value 'single-float)
+                     :type (find-shader-type :float)
+                     :quantity-specification
+                     (or (and declaration
+                              (math:declaration-quantity-specification
+                               declaration))
+                         (math:make-quantity-specification nil))
+                     :source-form form))))
+
+(defun shader-source-value-references-current-p (references)
+  "Whether every (NAME . VALUE) in REFERENCES still names that value."
+  (every (lambda (reference)
+           (multiple-value-bind (value declaration found-p)
+               (shader-source-value (car reference))
+             (declare (ignore declaration))
+             (and found-p (eql value (cdr reference)))))
+         references))
+
 (defun parse-shader-expression (form environment)
   (cond ((realp form)
          (make-instance 'shader-literal
@@ -2484,6 +2530,7 @@ rather than the language."
         ((symbolp form)
          (cond ((find-shader-environment-value form environment)
                 (make-shader-reference form environment form))
+               ((shader-source-value-literal form))
                ((and (constantp form) (boundp form)
                      (realp (symbol-value form)))
                 (make-instance 'shader-literal

@@ -45,24 +45,37 @@
     +luvcraft-shadow-depth-radius+ 96.0
   :type single-float
   :quantity (:quantity :world-distance :unit :cell))
-(luv.arithmetic:define-quantity-constant
-    +luvcraft-shadow-base-bias+ 0.00045
-  :type single-float
-  :quantity (:quantity :shadow-depth :unit :one :character :difference))
-(luv.arithmetic:define-quantity-constant
-    +luvcraft-shadow-slope-bias+ 0.0015
-  :type single-float
-  :quantity (:quantity :shadow-depth :unit :one :character :difference))
+;;; The shadow's biases and filter radii are knobs: read at frame-pack time
+;;; into the shadow control lanes, so a turn shows on the next frame.
+(defparameter *luvcraft-shadow-base-bias* 0.00045
+  "Constant depth bias applied to every shadow comparison.")
+(defparameter *luvcraft-shadow-slope-bias* 0.0015
+  "Depth bias scaled by the receiver's slope to the light.")
+(defparameter *luvcraft-shadow-minimum-filter-radius* 2.0
+  "PCF radius in shadow texels when the sun is a point.")
+(defparameter *luvcraft-shadow-maximum-filter-radius* 6.0
+  "PCF radius in shadow texels at the sun's widest.")
 
-(luv.arithmetic:define-quantity-constant
-    +luvcraft-shadow-minimum-filter-radius+ 2.0
-  :type single-float
-  :quantity (:quantity :shadow-filter-radius :unit :one))
-
-(luv.arithmetic:define-quantity-constant
-    +luvcraft-shadow-maximum-filter-radius+ 6.0
-  :type single-float
-  :quantity (:quantity :shadow-filter-radius :unit :one))
+(define-knob shadow-base-bias
+    (:group :shadows :label "base bias"
+     :quantity (:quantity :shadow-depth :unit :one :character :difference)
+     :minimum 0.0 :maximum 0.005 :step 0.00005)
+    *luvcraft-shadow-base-bias*)
+(define-knob shadow-slope-bias
+    (:group :shadows :label "slope bias"
+     :quantity (:quantity :shadow-depth :unit :one :character :difference)
+     :minimum 0.0 :maximum 0.01 :step 0.0001)
+    *luvcraft-shadow-slope-bias*)
+(define-knob shadow-minimum-filter-radius
+    (:group :shadows :label "softness, sun small"
+     :quantity (:quantity :shadow-filter-radius :unit :one)
+     :unit-label " px" :minimum 0.0 :maximum 8.0 :step 0.5)
+    *luvcraft-shadow-minimum-filter-radius*)
+(define-knob shadow-maximum-filter-radius
+    (:group :shadows :label "softness, sun wide"
+     :quantity (:quantity :shadow-filter-radius :unit :one)
+     :unit-label " px" :minimum 1.0 :maximum 24.0 :step 0.5)
+    *luvcraft-shadow-maximum-filter-radius*)
 
 (defun ensure-block-atlas-sample-transfer (format)
   "Check the host texture format against the block shader's decoded result."
@@ -211,13 +224,13 @@ some other space; the environment lanes are packed the same either way."
                                  0.0))))
         (emit (/ +luvcraft-shadow-map-size+)
               (/ +luvcraft-shadow-map-size+)
-              +luvcraft-shadow-base-bias+
-              +luvcraft-shadow-slope-bias+)
+              *luvcraft-shadow-base-bias*
+              *luvcraft-shadow-slope-bias*)
         (emit (* 2.0 +luvcraft-shadow-depth-radius+)
               (/ (* 2.0 +luvcraft-shadow-half-extent+)
                  +luvcraft-shadow-map-size+)
-              +luvcraft-shadow-minimum-filter-radius+
-              +luvcraft-shadow-maximum-filter-radius+)
+              *luvcraft-shadow-minimum-filter-radius*
+              *luvcraft-shadow-maximum-filter-radius*)
         (apply #'emit (shadow-frame-rows
                        (luvcraft-session-camera session) sky))))
     (unless (= index (length data))
@@ -254,6 +267,33 @@ some other space; the environment lanes are packed the same either way."
 
 (defparameter *luvcraft-shaft-decay* 0.955
   "Per-tap attenuation along a light shaft; nearer one reaches further.")
+
+(define-knob exposure
+    (:group :grading :quantity (:quantity :exposure :unit :one)
+     :unit-label "×" :minimum 0.2 :maximum 3.0 :step 0.05)
+    *luvcraft-exposure*)
+(define-knob bloom-threshold
+    (:group :grading :quantity (:quantity :luminance-threshold :unit :one)
+     :minimum 0.2 :maximum 6.0 :step 0.1)
+    *luvcraft-bloom-threshold*)
+(define-knob bloom-gain
+    (:group :grading :quantity (:quantity :lens-gain :unit :one)
+     :unit-label "×" :minimum 0.0 :maximum 2.0 :step 0.05)
+    *luvcraft-bloom-gain*)
+(define-knob shaft-gain
+    (:group :grading :label "light shafts"
+     :quantity (:quantity :lens-gain :unit :one)
+     :unit-label "×" :minimum 0.0 :maximum 2.0 :step 0.05)
+    *luvcraft-shaft-gain*)
+(define-knob shaft-decay
+    (:group :grading :label "shaft reach"
+     :quantity (:quantity :shaft-decay :unit :one)
+     :minimum 0.85 :maximum 0.999 :step 0.005)
+    *luvcraft-shaft-decay*)
+(define-knob vignette
+    (:group :grading :quantity (:quantity :vignette-strength :unit :one)
+     :minimum 0.0 :maximum 0.6 :step 0.02)
+    *luvcraft-vignette*)
 
 (defun luvcraft-sun-screen-position (camera sky width height)
   "The sun's presentation UV and how strongly it counts as on screen.

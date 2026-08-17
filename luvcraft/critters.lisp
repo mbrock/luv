@@ -413,7 +413,7 @@ direction of travel."
    (species :initarg :species :initform (list :turtle)
             :reader critter-population-species)
    (target-count :initarg :target-count :initform 5
-                 :reader critter-population-target-count)
+                 :accessor critter-population-target-count)
    (seed :initarg :seed :initform 8675309 :reader critter-population-seed)
    (attempt-count :initform 0 :accessor critter-population-attempt-count))
   (:documentation "The living animals near the player, and how to find more."))

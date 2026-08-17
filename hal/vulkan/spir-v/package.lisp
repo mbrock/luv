@@ -250,6 +250,9 @@
            #:shader-abstraction-p
            #:shader-source-revision
            #:shader-abstraction-revision
+           #:shader-source-value
+           #:*shader-source-value-references*
+           #:shader-source-value-references-current-p
            #:expand-shader-abstraction-call
            #:expand-shader-source-form
            #:shadow-depth-test

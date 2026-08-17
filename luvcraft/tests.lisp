@@ -676,11 +676,11 @@
               :frame-duration double-float)
              (luvcraft::+luvcraft-shadow-half-extent+ :world-distance single-float)
              (luvcraft::+luvcraft-shadow-depth-radius+ :world-distance single-float)
-             (luvcraft::+luvcraft-shadow-base-bias+ :shadow-depth single-float)
-             (luvcraft::+luvcraft-shadow-slope-bias+ :shadow-depth single-float)
-             (luvcraft::+luvcraft-shadow-minimum-filter-radius+
+             (luvcraft::shadow-base-bias :shadow-depth single-float)
+             (luvcraft::shadow-slope-bias :shadow-depth single-float)
+             (luvcraft::shadow-minimum-filter-radius
               :shadow-filter-radius single-float)
-             (luvcraft::+luvcraft-shadow-maximum-filter-radius+
+             (luvcraft::shadow-maximum-filter-radius
               :shadow-filter-radius single-float)))
     (destructuring-bind (name quantity representation) claim
       (let ((declaration

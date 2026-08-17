@@ -261,12 +261,12 @@ re-expressed in that space."
    (eye-height :initarg :eye-height :initform 1.62d0
                :type double-float
                :quantity (:quantity :player-eye-height :unit :cell)
-               :reader player-eye-height)
+               :accessor player-eye-height)
    (walk-speed :initarg :walk-speed :initform 5.0d0
                :type double-float
                :quantity (:quantity :player-walk-speed
                           :unit ((:cell 1) (:second -1)))
-               :reader player-walk-speed)
+               :accessor player-walk-speed)
    (ground-acceleration :initarg :ground-acceleration :initform 45d0
                         :type double-float
                         :quantity (:quantity :player-acceleration
@@ -281,12 +281,12 @@ re-expressed in that space."
             :type double-float
             :quantity (:quantity :gravity-magnitude
                        :unit ((:cell 1) (:second -2)))
-            :reader player-gravity)
+            :accessor player-gravity)
    (jump-speed :initarg :jump-speed :initform 8.0d0
                :type double-float
                :quantity (:quantity :player-jump-speed
                           :unit ((:cell 1) (:second -1)))
-               :reader player-jump-speed)
+               :accessor player-jump-speed)
    (grounded-p :initarg :grounded-p :initform nil
                :accessor player-grounded-p))
   (:metaclass luv.arithmetic.records:quantity-class))

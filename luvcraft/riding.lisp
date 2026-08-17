@@ -149,3 +149,20 @@ easing which brings the view here on mounting is what smooths it."
                            seconds))
            (carry-luvcraft-player session critter))))
   ride)
+
+;;; The seat's knobs, read every frame the rider is carried.
+(define-knob ride-seat-lift
+    (:label "seat lift" :group :riding
+     :quantity (:quantity :seat-offset :unit :cell)
+     :type double-float :minimum -0.5 :maximum 2.0 :step 0.02)
+    *critter-ride-seat-lift*)
+(define-knob ride-seat-offset
+    (:label "seat setback" :group :riding
+     :quantity (:quantity :seat-offset :unit :cell)
+     :type double-float :minimum -2.0 :maximum 1.0 :step 0.02)
+    *critter-ride-seat-offset*)
+(define-knob ride-seat-pitch
+    (:label "seat pitch" :group :riding
+     :quantity (:quantity :seat-pitch :unit :radian)
+     :type double-float :minimum -1.2 :maximum 0.6 :step 0.01)
+    *critter-ride-seat-pitch*)

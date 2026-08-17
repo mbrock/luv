@@ -76,6 +76,10 @@
 (defparameter *terminal-background-emission* 1.15
   "Radiance per unit of cell-background colour, held below the ink's own.")
 
+(defparameter *terminal-font-scale* 1.0
+  "The multiplier on the font size that fits a display's grid to its face;
+the default a new display takes.")
+
 ;;; The frame records screen-right, screen-up, and outward in voxel axes.  EQL
 ;;; methods keep the six closed orientations inspectable without making block
 ;;; materials or terminal surfaces branch on their names.
@@ -238,8 +242,8 @@ leave the camera where it is with only the narrowed field of view."))
                   :accessor terminal-display-faceplate-run)
    (margin :initarg :margin :initform 0.12
            :reader terminal-display-margin)
-   (font-scale :initarg :font-scale :initform 1.0
-               :reader terminal-display-font-scale)
+   (font-scale :initarg :font-scale :initform *terminal-font-scale*
+               :accessor terminal-display-font-scale)
    (dirty-p :initform nil :accessor terminal-display-dirty-p)
    (refresh-count :initform 0 :accessor terminal-display-refresh-count)
    (frame-bind-groups :initform (make-hash-table :test #'eq)
@@ -1398,6 +1402,13 @@ two materials can share one placement stage without sharing a name."
   (clrhash (terminal-display-frame-bind-groups display))
   display)
 
+(defmethod luvcraft-overlay-live-shader-pipelines ((display terminal-display))
+  (list* (world-text-run-pipeline (terminal-display-glyph-run display))
+         (loop for run in (list (terminal-display-cell-run display)
+                                (terminal-display-screen-run display)
+                                (terminal-display-faceplate-run display))
+               when run collect (terminal-cell-run-pipeline run))))
+
 (defmethod refresh-luvcraft-overlay
     ((display terminal-display) (session luvcraft-session))
   (alexandria:when-let ((overlay (terminal-display-delegate-overlay display)))
@@ -1405,13 +1416,8 @@ two materials can share one placement stage without sharing a name."
   ;; The wall's shaders are as live as the block world's: a redefined
   ;; :terminal-screen or :terminal-cell method rebuilds here, at the frame
   ;; boundary, keeping the last good pipeline on failure.
-  (refresh-live-shader-pipeline
-   (world-text-run-pipeline (terminal-display-glyph-run display)))
-  (dolist (run (list (terminal-display-cell-run display)
-                     (terminal-display-screen-run display)
-                     (terminal-display-faceplate-run display)))
-    (when run
-      (refresh-live-shader-pipeline (terminal-cell-run-pipeline run))))
+  (dolist (pipeline (luvcraft-overlay-live-shader-pipelines display))
+    (refresh-live-shader-pipeline pipeline))
   (when (terminal-display-dirty-p display)
     ;; Clearing before the snapshot preserves an output notification which
     ;; races after this point; that later notification requests another frame
@@ -1610,6 +1616,75 @@ supplies a uniform whose camera is expressed in that space instead."))
 
 (defparameter *terminal-focus-elevation* 4.5
   "Degrees the focused view stands above the screen's own centre.")
+
+;;; ---------------------------------------------------------------------
+;;; The terminal's knobs.
+;;;
+;;; The emissions and the font scale are baked into each display's glyph
+;;; instances, so a display must repopulate to show a change: that is the
+;;; TERMINAL-REALIZATION, and the knobs carrying it are TERMINAL-KNOBs.
+
+(defun terminal-displays (session)
+  "Every terminal display among SESSION's overlays."
+  (remove-if-not (lambda (overlay) (typep overlay 'terminal-display))
+                 (luvcraft-session-overlays session)))
+
+(defun mark-terminal-displays-dirty (session)
+  "Ask every terminal display in SESSION to rebuild its glyphs next frame."
+  (dolist (display (terminal-displays session))
+    (setf (terminal-display-dirty-p display) t))
+  session)
+
+(defclass terminal-realization ()
+  ()
+  (:documentation
+   "The value is baked into terminal glyph instances; every terminal display
+must repopulate."))
+
+(defmethod realize-knob progn ((knob terminal-realization) session)
+  (mark-terminal-displays-dirty session))
+
+(defclass terminal-knob (terminal-realization scalar-knob) ())
+
+(defun terminal-font-scale (session)
+  "The font scale SESSION's displays use: the first display's, or the
+default a new one would take."
+  (let ((display (first (terminal-displays session))))
+    (if display
+        (terminal-display-font-scale display)
+        *terminal-font-scale*)))
+
+(defun (setf terminal-font-scale) (scale session)
+  (setf *terminal-font-scale* scale)
+  (dolist (display (terminal-displays session))
+    (setf (terminal-display-font-scale display) scale))
+  scale)
+
+(define-knob terminal-ink-emission
+    (:label "terminal ink" :group :terminal :class 'terminal-knob
+     :quantity (:quantity :emission-gain :unit :one)
+     :unit-label "×" :minimum 0.2 :maximum 6.0 :step 0.1)
+    *terminal-ink-emission*)
+(define-knob terminal-background-emission
+    (:label "terminal background" :group :terminal :class 'terminal-knob
+     :quantity (:quantity :emission-gain :unit :one)
+     :unit-label "×" :minimum 0.0 :maximum 3.0 :step 0.05)
+    *terminal-background-emission*)
+(define-knob terminal-font-scale
+    (:label "terminal font" :group :terminal :class 'terminal-knob
+     :quantity (:quantity :font-scale :unit :one)
+     :unit-label "×" :minimum 0.3 :maximum 2.0 :step 0.05)
+    (terminal-font-scale session))
+(define-knob terminal-focus-azimuth
+    (:label "focus azimuth" :group :terminal
+     :quantity (:quantity :angle :unit :degree)
+     :minimum -30.0 :maximum 30.0 :step 0.5)
+    *terminal-focus-azimuth*)
+(define-knob terminal-focus-elevation
+    (:label "focus elevation" :group :terminal
+     :quantity (:quantity :angle :unit :degree)
+     :minimum -20.0 :maximum 20.0 :step 0.5)
+    *terminal-focus-elevation*)
 
 (defun terminal-focus-eye-direction (right up outward azimuth elevation)
   "The unit direction from a screen's centre toward a viewer standing at

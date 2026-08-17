@@ -24,6 +24,57 @@
   :coordinate-scale (1/2 1/2 1)
   :coordinate-offset (1/2 1/2 0))
 
+;;; The knobs folded into these shaders.  Each is a special this file's
+;;; source names where it once held a literal; the parser folds the current
+;;; value in, and the pipeline that folded it rebuilds when it moves
+;;; (LUVCRAFT/KNOBS.LISP).  Turning one is a shader rebuild, not a uniform
+;;; write, so they are the few literals worth that: the ones art direction
+;;; keeps asking about.
+
+(defparameter *sun-disc-scale* 4.0
+  "How many times its true angular radius the sun's disc is drawn at.")
+(defparameter *sun-disc-radiance* 30.0
+  "The disc's radiance above display white, which the bloom feeds on.")
+(defparameter *direct-light-gain* 2.35
+  "The direct sun's diffuse intensity on a lit block face.")
+(defparameter *screen-curvature* 0.40
+  "How far a terminal faceplate's normal bulges toward its rim.")
+(defparameter *scanline-count* 240.0
+  "Raster lines across a terminal faceplate's height.")
+(defparameter *scanline-depth* 0.20
+  "How dark the raster's gaps go, as a fraction of the picture.")
+(defparameter *screen-effect-ceiling* 0.6
+  "The most a faceplate's raster, hum, flicker, and grain may take.")
+
+(luvcraft:define-knob sun-disc-scale
+    (:group :sun :quantity (:quantity :sun-disc-scale :unit :one)
+     :unit-label "×" :minimum 1.0 :maximum 12.0 :step 0.5)
+    *sun-disc-scale*)
+(luvcraft:define-knob sun-disc-radiance
+    (:group :sun :quantity (:quantity :sun-disc-radiance :unit :one)
+     :minimum 0.0 :maximum 100.0 :step 1.0)
+    *sun-disc-radiance*)
+(luvcraft:define-knob direct-light-gain
+    (:group :sun :quantity (:quantity :direct-light-gain :unit :one)
+     :unit-label "×" :minimum 0.0 :maximum 6.0 :step 0.05)
+    *direct-light-gain*)
+(luvcraft:define-knob screen-curvature
+    (:group :terminal :quantity (:quantity :screen-curvature :unit :one)
+     :minimum 0.0 :maximum 1.5 :step 0.05)
+    *screen-curvature*)
+(luvcraft:define-knob scanline-count
+    (:group :terminal :quantity (:quantity :scanline-count :unit :one)
+     :minimum 60.0 :maximum 1000.0 :step 20.0)
+    *scanline-count*)
+(luvcraft:define-knob scanline-depth
+    (:group :terminal :quantity (:quantity :screen-effect-strength :unit :one)
+     :minimum 0.0 :maximum 1.0 :step 0.05)
+    *scanline-depth*)
+(luvcraft:define-knob screen-effect-ceiling
+    (:group :terminal :quantity (:quantity :screen-effect-strength :unit :one)
+     :minimum 0.0 :maximum 1.0 :step 0.05)
+    *screen-effect-ceiling*)
+
 ;;; Every stage which reads the frame environment declares the same uniform
 ;;; block at binding 2: identical member order and offsets are an ABI
 ;;; requirement, so the member list is written once and spliced at read time.
@@ -567,7 +618,7 @@
          ;; A cubic bulge leaves the middle of the plate flat and turns only
          ;; the last part of the way to the rim, which is what a real face
          ;; does and what keeps the reflection from sliding about.
-         (bulge 0.40)
+         (bulge screen-curvature)
          (normal
            (normalize
             (+ flat-normal
@@ -594,7 +645,7 @@
          (screen-mask (terminal-screen-coverage edge-distance))
          ;; The raster: a fixed number of lines across this panel's height,
          ;; exactly as a tube has a fixed line count whatever its diagonal.
-         (line-pitch (/ (* 2.0 half-y) 240.0))
+         (line-pitch (/ (* 2.0 half-y) scanline-count))
          (vertical-dx (derivative-x (swizzle render-coordinate :y)))
          (vertical-dy (derivative-y (swizzle render-coordinate :y)))
          (cells-per-pixel
@@ -607,7 +658,7 @@
          (raster-fade (smoothstep 1.8 3.6 pixels-per-line))
          (line-phase (/ (swizzle render-coordinate :y) line-pitch))
          (line-profile (+ 0.5 (* 0.5 (cos (* 6.2831855 line-phase)))))
-         (scanline (* 0.20 raster-fade (- 1.0 line-profile)))
+         (scanline (* scanline-depth raster-fade (- 1.0 line-profile)))
          ;; Attenuating the picture is only half of a raster.  A tonemapped
          ;; frame puts bright text on the shoulder of the filmic curve, where
          ;; a multiply barely moves it, and puts a dark terminal's background
@@ -643,7 +694,7 @@
            (* (+ (vec3 0.0072 0.0084 0.0104) (* ambient 0.045))
               (* beam (mix 1.0 0.30 corner-shade))))
          (attenuation
-           (clamp (+ scanline corner hum flicker speckle) 0.0 0.6))
+           (clamp (+ scanline corner hum flicker speckle) 0.0 screen-effect-ceiling))
          (emission (+ sky-reflection room-reflection glint sheen haze)))
     (set-output color-output
                 (vec4 (* emission screen-mask) (* attenuation screen-mask)))))
@@ -1172,7 +1223,7 @@ negative inside.  RADIUS is the corner radius in world cells."
          (sun-light
            (interpret
             (* sun-color
-               (* 2.35 n-dot-l sun-visibility day-factor direct-shadow
+               (* direct-light-gain n-dot-l sun-visibility day-factor direct-shadow
                   (mix 0.55 1.0 ao)))
             :quantity :linear-rgb :unit :one))
          (torch-color
@@ -1474,7 +1525,7 @@ than inlined three times."
          ;; feeds on it, and the filmic curve rolls it into a hot core
          ;; instead of a flat clipped patch.  For a small angle the cosine
          ;; threshold of an angular radius is one less half its square.
-         (disc-radius (* sun-width 4.0))
+         (disc-radius (* sun-width sun-disc-scale))
          (disc-limb (* 0.5 (* disc-radius disc-radius)))
          (disc
            (smoothstep (- 1.0 disc-limb) (- 1.0 (* 0.56 disc-limb)) alignment))
@@ -1484,7 +1535,7 @@ than inlined three times."
          (solar
            (* sun-color
               (* day-factor
-                 (+ (* disc (* 30.0 occlusion))
+                 (+ (* disc (* sun-disc-radiance occlusion))
                     (* corona (* 2.0 occlusion))))))
          (rgb (+ grounded solar)))
     (set-output color-output (vec4 rgb 1.0))))

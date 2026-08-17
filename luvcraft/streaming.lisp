@@ -904,3 +904,42 @@ It returns only after the resulting loads, lighting, and meshes are published."
       (tracy-message "streaming trace: publication complete"
                      :color #x54C878)
       after)))
+
+;;; ---------------------------------------------------------------------
+;;; The streaming knobs.
+;;;
+;;; The window is only rebuilt when its centre moves, so a knob over its
+;;; radius must forget the centre: that is the RESIDENCY-REALIZATION.  The
+;;; per-frame budgets are read each frame and need nothing.
+
+(defclass residency-realization ()
+  ()
+  (:documentation
+   "The value shapes the streaming window, which is only rebuilt when its
+centre moves; forget the centre so it rebuilds now."))
+
+(defmethod realize-knob progn ((knob residency-realization) session)
+  (setf (luvcraft-session-residency-center session) nil))
+
+(defclass residency-knob (residency-realization scalar-knob) ())
+
+(define-knob residency-radius
+    (:label "view distance" :group :streaming :class 'residency-knob
+     :quantity (:quantity :chunk-radius :unit :one)
+     :unit-label " chunks" :minimum 1 :maximum 12 :step 1)
+    (luvcraft-session-residency-radius session))
+(define-knob load-schedule-limit
+    (:label "loads per frame" :group :streaming
+     :quantity (:quantity :frame-budget :unit :one)
+     :minimum 0 :maximum 32 :step 1)
+    (luvcraft-session-load-schedule-limit session))
+(define-knob mesh-capture-limit
+    (:label "meshes per frame" :group :streaming
+     :quantity (:quantity :frame-budget :unit :one)
+     :minimum 0 :maximum 8 :step 1)
+    (luvcraft-session-mesh-capture-limit session))
+(define-knob publication-limit
+    (:label "uploads per frame" :group :streaming
+     :quantity (:quantity :frame-budget :unit :one)
+     :minimum 0 :maximum 16 :step 1)
+    (luvcraft-session-publication-limit session))
