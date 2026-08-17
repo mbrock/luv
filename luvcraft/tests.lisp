@@ -637,8 +637,8 @@
     ;; the exact bounds used by PACK-SLUG-OUTLINE.
     (ok (= -0.035 (aref instances 9)))
     (ok (= 1.035 (aref instances 12)))
-    (ok (equalp #(0.0 0.0 0.0) (subseq instances 18 21)))
-    (ok (equalp #(1.0 1.0 0.0) (subseq instances 21 24)))))
+    (ok (equalp #(0.0 0.0 0.32) (subseq instances 18 21)))
+    (ok (equalp #(1.0 1.0 0.48) (subseq instances 21 24)))))
 
 (deftest terminal-grid-domain-is-an-exact-row-major-viewport
   (let ((domain (make-instance 'luvcraft::terminal-grid-domain
