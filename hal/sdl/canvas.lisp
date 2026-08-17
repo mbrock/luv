@@ -512,12 +512,62 @@ have a main-thread host and execute directly."
                   (and (present-p :caps) :caps-lock)
                   (and (present-p :num) :num-lock)))))
 
+;; SDL's KMSDRM backend never learns the console's keymap, so a Dvorak
+;; console gets QWERTY characters from SDL_GetKeyFromScancode.  The layout
+;; override translates scancodes itself; keys it does not list (digits,
+;; space, editing keys) fall through to SDL, whose QWERTY answer matches.
+(defparameter +dvorak-scancode-characters+
+  '((:q . #\') (:w . #\,) (:e . #\.) (:r . #\p) (:t . #\y) (:y . #\f)
+    (:u . #\g) (:i . #\c) (:o . #\r) (:p . #\l)
+    (:leftbracket . #\/) (:rightbracket . #\=)
+    (:a . #\a) (:s . #\o) (:d . #\e) (:f . #\u) (:g . #\i) (:h . #\d)
+    (:j . #\h) (:k . #\t) (:l . #\n) (:semicolon . #\s) (:apostrophe . #\-)
+    (:z . #\;) (:x . #\q) (:c . #\j) (:v . #\k) (:b . #\x) (:n . #\b)
+    (:m . #\m) (:comma . #\w) (:period . #\v) (:slash . #\z)
+    (:minus . #\[) (:equals . #\]))
+  "Dvorak characters by physical scancode; unlisted keys match QWERTY.")
+
+(defparameter +us-shifted-characters+
+  '((#\1 . #\!) (#\2 . #\@) (#\3 . #\#) (#\4 . #\$) (#\5 . #\%)
+    (#\6 . #\^) (#\7 . #\&) (#\8 . #\*) (#\9 . #\() (#\0 . #\))
+    (#\' . #\") (#\, . #\<) (#\. . #\>) (#\; . #\:) (#\/ . #\?)
+    (#\- . #\_) (#\= . #\+) (#\[ . #\{) (#\] . #\}) (#\` . #\~)
+    (#\\ . #\|))
+  "The US shift pairs, which Dvorak shares for its printing characters.")
+
+(defvar *canvas-keyboard-layout* :environment
+  "Character layout override: :DVORAK, NIL to trust SDL's keymap, or
+:ENVIRONMENT to read LUV_KEYBOARD_LAYOUT at first use.")
+
+(defun canvas-keyboard-layout ()
+  (when (eq *canvas-keyboard-layout* :environment)
+    (setf *canvas-keyboard-layout*
+          (let ((name (uiop:getenv "LUV_KEYBOARD_LAYOUT")))
+            (cond ((null name) nil)
+                  ((string-equal name "dvorak") :dvorak)
+                  (t (warn "Ignoring unknown LUV_KEYBOARD_LAYOUT ~S." name)
+                     nil)))))
+  *canvas-keyboard-layout*)
+
+(defun layout-key-character (scancode modifiers)
+  "Return SCANCODE's character under the override layout, or NIL to ask SDL."
+  (case (canvas-keyboard-layout)
+    (:dvorak
+     (let ((base (cdr (assoc scancode +dvorak-scancode-characters+))))
+       (when base
+         (if (intersection '(:lshift :rshift :shift) modifiers)
+             (if (alpha-char-p base)
+                 (char-upcase base)
+                 (or (cdr (assoc base +us-shifted-characters+)) base))
+             base))))))
+
 (defun sdl-key-character (scancode modifiers)
-  "Return SCANCODE's character under SDL's current layout and MODIFIERS."
-  (let ((code (raw-sdl-key-from-scancode scancode modifiers nil)))
-    (when (or (member code '(8 9 13 27 127))
-              (<= 32 code (1- char-code-limit)))
-      (code-char code))))
+  "Return SCANCODE's character under the configured layout and MODIFIERS."
+  (or (layout-key-character scancode modifiers)
+      (let ((code (raw-sdl-key-from-scancode scancode modifiers nil)))
+        (when (or (member code '(8 9 13 27 127))
+                  (<= 32 code (1- char-code-limit)))
+          (code-char code)))))
 
 (defun dispatch-sdl-key (canvas event class)
   ;; Read fields directly from SDL_Event. Materializing cl-sdl3's

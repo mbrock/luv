@@ -610,8 +610,8 @@ the frame uniform cannot silently diverge between shader and host."
   ;; Control-Q quits from anywhere, including modal focus.  On a KMSDRM
   ;; console there is no window manager to deliver a close request, so
   ;; without a quit key the game owns the machine until someone kills it
-  ;; over SSH.
-  (when (and (eq :q (canvas-key-event-key-name event))
+  ;; over SSH.  Q is the layout's letter q, wherever that key sits.
+  (when (and (eql #\q (canvas-key-event-unshifted-character event))
              (member :control (canvas-key-event-modifiers event)))
     (setf (luvcraft-session-running-p session) nil)
     (close-canvas canvas)
@@ -636,13 +636,19 @@ the frame uniform cannot silently diverge between shader and host."
                      (not (canvas-key-event-repeat-p event)))
             (setf (luvcraft-session-jump-requested-p session) t))
           (unless (canvas-key-event-repeat-p event)
-            (case key
+            (case (unless (intersection '(:control :meta :super)
+                                        (canvas-key-event-modifiers event))
+                    (canvas-key-event-unshifted-character event))
               ;; Keyboard equivalents of the pointer buttons, for consoles
-              ;; and laptops without a working click.
-              (:e (edit-luvcraft-block session :place))
-              (:x (edit-luvcraft-block session :remove))
-              (:c (pick-luvcraft-block session))
-              (:m
+              ;; and laptops without a working click.  Dispatch on the
+              ;; layout's characters rather than scancodes, so E means the
+              ;; key that types e on a Dvorak console too -- and a chorded
+              ;; key never falls through to whatever letter shares its
+              ;; position (Dvorak Control-Q sits on the QWERTY X key).
+              (#\e (edit-luvcraft-block session :place))
+              (#\x (edit-luvcraft-block session :remove))
+              (#\c (pick-luvcraft-block session))
+              (#\m
                (let ((capture-p
                        (not (luvcraft-session-pointer-captured-p session))))
                  (set-canvas-relative-pointer-mode canvas capture-p)
