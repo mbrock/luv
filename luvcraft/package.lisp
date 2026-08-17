@@ -507,6 +507,7 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:luvcraft-portal
            #:open-luvcraft-portal
            #:close-luvcraft-portal
+           #:encode-luvcraft-portal-picture
            #:luvcraft-portal-server
            #:ensure-luvcraft-portal-server
            #:stop-luvcraft-portal-server

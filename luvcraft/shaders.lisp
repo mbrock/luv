@@ -886,6 +886,124 @@ negative inside.  RADIUS is the corner radius in world cells."
          (radiance (swizzle picture :rgb)))
     (set-output color-output (vec4 (representation radiance) 1.0))))
 
+;;; A portal is another game's picture arriving on a wall, and it should read
+;;; as exactly that: a transmission, not a window and not a movie.  The panel
+;;; is the whole terminal face; the picture sits inside it on a dark matte
+;;; with the same margin the text grid keeps, so the wall's proportions do
+;;; not change when the shell becomes a portal.  What marks the picture as
+;;; coming from elsewhere is done to its signal, not to the glass (the
+;;; faceplate above still supplies raster, hum, and reflections as it does
+;;; for text):
+;;;
+;;;   - the colour channels do not quite converge -- a radial chromatic
+;;;     fringe, nothing at the centre and a few texels at the corners;
+;;;   - alternate lines are displaced by a texel or so on a slow beat, a
+;;;     field interlace that never fully locks;
+;;;   - a soft sync bar climbs the picture, brighter than the hum bar the
+;;;     glass adds, so the two are visibly different mechanisms;
+;;;   - the picture warms up over half a second when the link opens instead
+;;;     of appearing, and its edge is a thin phosphor line on the matte.
+;;;
+;;; The uniform carries the picture rectangle in panel UV and the moment the
+;;; link opened; everything else is the frame environment's clock.
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defparameter *portal-uniform-members*
+    '((picture-rect :vec4)      ; picture u0, v0, u1, v1 within the panel
+      (portal-control :vec4))   ; opened-at seconds, texel u, texel v, unused
+    "The uniform layout of one portal panel."))
+
+(define-shader-method shader-specification-for
+    portal-screen-fragment-specification
+    ((role (eql :portal-screen)) (stage (eql :fragment)))
+    (:stage :fragment
+     :inputs ((uv-input :vec2 :location 0
+                        :quantity :texture-uv :unit :one))
+     :outputs ((color-output :vec4 :location 0))
+     :resources
+     ((portal-picture :texture-2d :set 0 :binding 0
+                      :sample-transfer :srgb-to-linear
+                      :sample-components
+                      ((:rgb :quantity :linear-rgb :unit :one)))
+      (portal-sampler :sampler :set 0 :binding 1)
+      (frame-state :uniform-block :set 0 :binding 2
+                   :members #.*frame-uniform-members*)
+      (portal-state :uniform-block :set 0 :binding 3
+                    :members #.*portal-uniform-members*)))
+  (let* ((elapsed (representation (swizzle fog-vector :z)))
+         (opened (swizzle portal-control :x))
+         (texel (swizzle portal-control :yz))
+         (rect-min (swizzle picture-rect :xy))
+         (rect-max (swizzle picture-rect :zw))
+         (rect-size (- rect-max rect-min))
+         ;; Panel UV to picture UV; the picture is where both lie in [0,1].
+         (uv (representation uv-input))
+         (picture-uv (/ (- uv rect-min) rect-size))
+         (px (swizzle picture-uv :x))
+         (py (swizzle picture-uv :y))
+         (inside-x (* (step 0.0 px) (step px 1.0)))
+         (inside-y (* (step 0.0 py) (step py 1.0)))
+         (inside (* inside-x inside-y))
+         ;; Warm-up: half a second from black to picture.
+         (age (- elapsed opened))
+         (warmth (smoothstep 0.0 0.55 age))
+         ;; Field interlace: odd picture lines drift a texel sideways on a
+         ;; slow beat, even lines the other way, never quite locking.
+         (line (floor (/ py (* 2.0 (swizzle texel :y)))))
+         (field (- (* 2.0 (fract (* line 0.5))) 0.5))
+         (weave (* field (* 2.5 (swizzle texel :x))
+                   (sin (+ (* elapsed 1.7) (* py 9.0)))))
+         ;; The odd field is a shade dimmer than the even one, so the
+         ;; interlace shows as texture where the weave alone would not.
+         (field-shade (- 1.0 (* 0.10 (+ 0.5 field))))
+         (woven (+ picture-uv (vec2 weave 0.0)))
+         ;; Chromatic fringe: red and blue pulled apart radially, growing
+         ;; with the square of the distance from the centre.
+         (centered (- woven (vec2 0.5 0.5)))
+         (radius2 (dot centered centered))
+         (fringe (* centered (* radius2 (* 22.0 (swizzle texel :x)))))
+         (red (swizzle (representation
+                        (sample portal-picture portal-sampler
+                                (assume-quantity (+ woven fringe)
+                                                 :quantity :texture-uv :unit :one)))
+                       :x))
+         (green (swizzle (representation
+                          (sample portal-picture portal-sampler
+                                  (assume-quantity woven
+                                                   :quantity :texture-uv :unit :one)))
+                         :y))
+         (blue (swizzle (representation
+                         (sample portal-picture portal-sampler
+                                 (assume-quantity (- woven fringe)
+                                                  :quantity :texture-uv :unit :one)))
+                        :z))
+         (picture (vec3 red green blue))
+         ;; The sync bar: a soft band climbing the picture every few seconds.
+         (bar-phase (fract (- (* py 0.7) (* elapsed 0.11))))
+         (bar (expt (+ 0.5 (* 0.5 (cos (* 6.2831855 bar-phase)))) 6.0))
+         (lifted (* picture (* field-shade (+ 1.0 (* 0.16 bar)))))
+         ;; A little vignette of the picture's own, inside the frame.
+         (vignette (- 1.0 (* 0.22 (smoothstep 0.30 0.95 radius2))))
+         (signal (* lifted (* vignette warmth)))
+         ;; The matte and its phosphor edge.  Distance to the picture edge in
+         ;; panel UV; the edge line is a couple of texels wide and glows a
+         ;; little further into the matte.
+         (edge-dx (max (- (swizzle rect-min :x) (swizzle uv :x))
+                       (- (swizzle uv :x) (swizzle rect-max :x))))
+         (edge-dy (max (- (swizzle rect-min :y) (swizzle uv :y))
+                       (- (swizzle uv :y) (swizzle rect-max :y))))
+         (outside-distance (max 0.0 (max edge-dx edge-dy)))
+         (line-width (* 2.5 (swizzle texel :x) (swizzle rect-size :x)))
+         (edge-line (- 1.0 (smoothstep 0.0 line-width outside-distance)))
+         (edge-glow (- 1.0 (smoothstep 0.0 (* 12.0 line-width) outside-distance)))
+         (phosphor (vec3 0.16 0.62 0.55))
+         (matte (vec3 0.0075 0.0080 0.0100))
+         (matte-color
+           (+ matte
+              (* phosphor (* warmth (+ (* 0.55 edge-line) (* 0.06 edge-glow))))))
+         (rgb (mix matte-color signal inside)))
+    (set-output color-output (vec4 rgb 1.0))))
+
 (define-shader-method shader-specification-for
     video-screen-hardware-fragment-specification
     ((role (eql :video-screen-hardware)) (stage (eql :fragment)))

@@ -291,13 +291,45 @@ browser, while the display continues to own focus and movie lifetime."))
             (open-luvcraft-portal
              session
              :mirror mirror
-             :rectangle (lambda (aspect) (terminal-film-rectangle surface aspect))
+             :attach-p nil
+             :rectangle (lambda (aspect)
+                          (terminal-portal-panel display aspect))
              :on-stop (lambda (portal)
                         (declare (ignore portal))
                         (close-terminal-display-portal display)))))
       (setf (terminal-display-portal display) portal
             (terminal-display-mode display) :portal)
       portal)))
+
+(defun terminal-portal-panel (display aspect)
+  "The portal panel for DISPLAY: the whole face, and inside it the picture
+of ASPECT fitted with the same margin the text grid keeps, so the wall's
+proportions hold when a shell becomes a portal.  Returns the panel's origin,
+right edge, and up edge, then the picture rectangle in panel UV."
+  (let* ((surface (terminal-display-surface display))
+         (surface-width (terminal-surface-physical-width surface))
+         (surface-height (terminal-surface-physical-height surface))
+         (margin (terminal-display-margin display))
+         (available-width (- surface-width (* 2 margin)))
+         (available-height (- surface-height (* 2 margin)))
+         (available-aspect (/ available-width available-height))
+         (width (if (> aspect available-aspect)
+                    available-width
+                    (* available-height aspect)))
+         (height (if (> aspect available-aspect)
+                     (/ available-width aspect)
+                     available-height))
+         (left (/ (- surface-width width) 2.0))
+         (bottom (/ (- surface-height height) 2.0)))
+    (multiple-value-bind (origin right-edge up-edge)
+        (terminal-film-rectangle surface (/ surface-width surface-height))
+      (values origin right-edge up-edge
+              ;; Panel V runs down the picture (the quad flips it), so the
+              ;; bottom margin is the top of the rectangle in UV.
+              (list (/ left surface-width)
+                    (/ bottom surface-height)
+                    (/ (+ left width) surface-width)
+                    (/ (+ bottom height) surface-height))))))
 
 (defun close-terminal-display-portal (display)
   "Take the child off DISPLAY's wall, if one is there, and go back to the shell."
@@ -1452,10 +1484,13 @@ two materials can share one placement stage without sharing a name."
 
 (defmethod luvcraft-overlay-live-shader-pipelines ((display terminal-display))
   (list* (world-text-run-pipeline (terminal-display-glyph-run display))
-         (loop for run in (list (terminal-display-cell-run display)
-                                (terminal-display-screen-run display)
-                                (terminal-display-faceplate-run display))
-               when run collect (terminal-cell-run-pipeline run))))
+         (append
+          (loop for run in (list (terminal-display-cell-run display)
+                                 (terminal-display-screen-run display)
+                                 (terminal-display-faceplate-run display))
+                when run collect (terminal-cell-run-pipeline run))
+          (alexandria:when-let ((portal (terminal-display-portal display)))
+            (luvcraft-overlay-live-shader-pipelines portal)))))
 
 (defmethod refresh-luvcraft-overlay
     ((display terminal-display) (session luvcraft-session))
@@ -1585,6 +1620,10 @@ supplies a uniform whose camera is expressed in that space instead."))
              (set-bind-group pass 0
                              (terminal-display-frame-bind-group display frame))
              (draw pass 6 (length (world-text-run-glyphs glyph-run))))))
+        (:portal
+         ;; A child game's picture, under this wall's glass like the text.
+         (alexandria:when-let ((portal (terminal-display-portal display)))
+           (encode-luvcraft-portal-picture portal session pass surface-texture)))
         (t
          ;; Film, Telegram, and anything a presentation extension adds later
          ;; all draw through the mode's own overlay.
