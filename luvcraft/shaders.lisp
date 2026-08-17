@@ -926,9 +926,22 @@
 ;;; never reads as a grid.  It is written once here and reused by the cloud
 ;;; deck, the star field, and the block surface's own detail.
 
-(define-shader-function lattice-hash (index)
-  "Hash one lattice index into the unit interval."
-  (fract (* (sin index) 43758.5453)))
+(define-shader-function lattice-hash (site)
+  "Hash one integer lattice site into the unit interval.
+
+Deliberately trigonometry-free, and deliberately a function of the whole
+site rather than of a collapsed scalar index.  Hashing x + 57y + 113z
+through a sine makes every plane of constant index share a hash, and at
+star-field frequencies those planes are plainly visible as streaks across
+the sky.  Folding the site's own components against each other has no
+preferred direction, and costs less than a sine besides."
+  (let* ((scattered (fract (* site 0.1031)))
+         (shift (dot scattered
+                     (+ (swizzle scattered :zyx)
+                        (vec3 31.32 31.32 31.32))))
+         (folded (+ scattered (vec3 shift shift shift))))
+    (fract (* (+ (swizzle folded :x) (swizzle folded :y))
+              (swizzle folded :z)))))
 
 (define-shader-function lattice-noise (point)
   "Smoothly interpolated value noise over an integer lattice."
@@ -937,20 +950,17 @@
          ;; The classic smoothstep weight: continuous first derivative at the
          ;; cell boundaries, which is what keeps the clouds from creasing.
          (weight (* offset (* offset (- (vec3 3.0 3.0 3.0) (* offset 2.0)))))
-         (index (+ (swizzle lattice :x)
-                   (* (swizzle lattice :y) 57.0)
-                   (* (swizzle lattice :z) 113.0)))
          (u (swizzle weight :x))
          (v (swizzle weight :y))
          (w (swizzle weight :z))
-         (near-low (mix (lattice-hash index)
-                        (lattice-hash (+ index 1.0)) u))
-         (near-high (mix (lattice-hash (+ index 57.0))
-                         (lattice-hash (+ index 58.0)) u))
-         (far-low (mix (lattice-hash (+ index 113.0))
-                       (lattice-hash (+ index 114.0)) u))
-         (far-high (mix (lattice-hash (+ index 170.0))
-                        (lattice-hash (+ index 171.0)) u)))
+         (near-low (mix (lattice-hash lattice)
+                        (lattice-hash (+ lattice (vec3 1.0 0.0 0.0))) u))
+         (near-high (mix (lattice-hash (+ lattice (vec3 0.0 1.0 0.0)))
+                         (lattice-hash (+ lattice (vec3 1.0 1.0 0.0))) u))
+         (far-low (mix (lattice-hash (+ lattice (vec3 0.0 0.0 1.0)))
+                       (lattice-hash (+ lattice (vec3 1.0 0.0 1.0))) u))
+         (far-high (mix (lattice-hash (+ lattice (vec3 0.0 1.0 1.0)))
+                        (lattice-hash (+ lattice (vec3 1.0 1.0 1.0))) u)))
     (mix (mix near-low near-high v) (mix far-low far-high v) w)))
 
 (define-shader-function lattice-fractal-noise (point)
