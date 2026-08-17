@@ -1,0 +1,544 @@
+#+title: Field notes on three agent harnesses
+#+startup: overview
+
+* Three earlier harnesses, read for what luv can borrow
+:PROPERTIES:
+:ID: LRDE65
+:END:
+
+Three of the author's other repositories are, more or less, LLM agent
+harnesses, and each solved a different part of the problem well enough to
+be worth remembering here before luv grows its own agent surface (an agent
+already lives inside the world terminal, #NMAD2U).  This page is a reading
+of those repositories, not a plan: what is /good/ in each, stated
+concretely enough that a later design can cite it.
+
+- *froth* (Elixir/Phoenix, Telegram-fronted, one OTP runtime): structured
+  tool output as MIME-like block trees, a content-addressed blob store with
+  a recursive pager, cache-aware context assembly, live Elixir evaluation
+  as the agent's native interface, human-in-the-loop controls instead of
+  allowlists, and a provider-neutral streaming patch model.
+- *sheaf* (Elixir/Phoenix, RDF over SQLite): one six-character handle space
+  for every paragraph, document, note, conversation and query result;
+  resolution through the graph rather than a link table; typed tool results
+  rendered separately for the model and for people; an append-only quad log
+  where every write carries a transaction identity.
+- *nxt* (C++23, one coroutine runtime for I/O, tools, and TUI): structured
+  concurrency where a batch of tool calls is a scope; a runtime dump on
+  SIGUSR1 that names the parked task; per-tool-call cgroup and PSI
+  telemetry riding along with each result; Arrow/Parquet/DuckDB traces
+  rendered through XSLT; a diff-based terminal compositor that keeps a HUD
+  pinned under scrolling output.
+
+The three voices to keep apart: what each repository actually does (cited
+by file), what any harness must therefore do (stated as a lesson), and what
+luv might choose (left to marks and later pages).
+
+* Froth: a tool result is a tree of blocks, not a string
+:PROPERTIES:
+:ID: 5GU1VI
+:END:
+
+The strongest idea in froth is =Froth.Context.Block=
+(=lib/froth/context/block.ex=): a keyword list of attributes (headers, like
+MIME parts, order preserved so =:kind= stays first), an optional binary
+body, and child blocks.  A tool returns blocks and nothing else -- it "does
+not measure bodies, does not decide whether content should be blobbed, and
+does not render anything."  Three later stages, each in one place, own
+those decisions:
+
+1. /Materialization/ (=lib/froth/context/blocks.ex=) is the only module that
+   decides inline versus external.  Text bodies over 2,400 bytes or 80
+   lines go to a blob and gain precomputed =:blob :size :lines :head :tail
+   :omitted= attributes (10 head lines, 5 tail), so renderers never touch
+   the database.  Binary bodies, decided purely by =:mime=, always blob.
+   A text body that is not JSON-safe (invalid UTF-8, embedded NUL, which
+   Postgres refuses inside JSONB) is sniffed and promoted to binary -- so a
+   shell pipeline that prints a PNG surfaces to the model as an image part,
+   and one that dumps a core file just works too.
+2. /Rendering/ (=lib/froth/context/block_html.ex=) produces the pseudo-XML
+   the model reads with HEEx function components, never string
+   concatenation, so escaping is free.  Two views over the same data:
+   =live= (full body, or head, an =omitted= element with the hint "N lines
+   omitted -- use pager to read more", tail) and =trace= (three-line,
+   160-character preview) used when an /old/ cycle is replayed inside a
+   later prompt: "the trace view is for remembering what happened, not for
+   doing more work with it."  Tag names come from the block's =:kind=
+   through a validated =safe_tag=, so shell output renders as a =shell=
+   element.  Binary blocks get a deliberately redundant placeholder body
+   (=[binary: image/png 10650 bytes -> blob:01K...]=) because a
+   self-closing tag reads as "empty output".
+3. /Provider serialization/ (=lib/froth/agent/tool_result.ex=) walks the
+   tree once for text and once for binaries, emitting real image/document
+   content parts for providers that accept them, while others still see the
+   placeholder and degrade cleanly.
+
+Lesson: separate /what the tool found/ from /how much of it the model
+sees/ from /how it is spelled for a given provider/.  Each is a policy, and
+each wants to change independently.
+
+* Froth: blobs plus a recursive pager teach the model to stop piping into head
+:PROPERTIES:
+:ID: FDMSXG
+:END:
+
+=Froth.Blob= (=lib/froth/blob.ex=) is a content-addressed store kept as
+=bytea= in Postgres so blobs stay transactional with everything else,
+deduplicated on SHA-256, and shown to the model as =blob:01K...= ULIDs that
+are globally addressable.  The pager tool (=lib/froth/tools/pager.ex=)
+offers =read | head | tail | grep | stat= with bounded integers (80 lines by
+default, grep with three lines of context and at most 50 hits) and returns
+/blocks/, each marked =no_fold= so a deliberate page is not folded again.
+A grep result that is itself large becomes a new blob returned by id: the
+pager is recursively composable.
+
+The =run_shell= description then unteaches shell habits: do not pipe into
+=head=, =tail=, =cut=, =wc -l= or =less= to avoid "too much output"; do not
+wrap things in =timeout=, =nohup= or =&=.  The harness owns truncation and
+backgrounding, so the model does not have to guess.
+
+Lesson: when the harness handles size honestly (folded, addressable,
+pageable), the model can be told to stop defending itself, and the prompt
+gets simpler and cheaper.
+
+* Froth: context is assembled for the cache, and the prompt is a page you can open
+:PROPERTIES:
+:ID: WYOFMD
+:END:
+
+=Froth.Telegram.BotContext= builds a view model and renders it as a /list of
+parts/ rather than one string, so =PromptCache= can place Anthropic
+one-hour cache breakpoints at the last chapter and a few messages back from
+the newest (a tail backoff so new messages do not invalidate the
+breakpoint).  =RecentWindow= replaces a sliding message count with a
+time-and-mass window (minimum hours, target hours, character budget,
+bucket minutes) precisely because a count-based window drops the oldest
+message on every new one and invalidates the whole cached tail (RFC 0019
+in =rfc/=, which contains measured prompt-byte breakdowns and
+=EXPLAIN ANALYZE= timings rather than intuition).
+
+Memory is layered -- chronicle volumes, weekly chapters, daily summaries,
+raw tail -- and the =timeline= tool lets the agent descend volume, week,
+day, messages by opaque stable refs (=volume:208=, =week:185=) instead of
+guessing dates.  The exact live prompt can be opened in a browser
+(=/froth/bot-context=) or printed from the shell (=mix froth.context
+--cycle latest:3=).
+
+Lesson: prompt assembly is a rendering problem with a caching problem
+inside it; make the parts explicit, make the window cache-stable, and make
+the result inspectable as a page.
+
+* Froth: live evaluation as the agent's native interface, with a detachable clock
+:PROPERTIES:
+:ID: ENM1B2
+:END:
+
+=lib/froth/tools/elixir_eval.ex= describes itself as "a capability browser
+and an Elixir evaluator" with a DISCOVER, INSPECT, ACT loop: =docs= with no
+target returns the module hierarchy (fetching and caching stdlib source for
+the running version when asked), =eval= runs against the live BEAM.
+Bindings persist per session (six-hour TTL).  Evaluation runs under a
+custom group leader implementing the =:io_request= protocol, so =IO.puts=
+inside evaluated code streams into task events live.  If evaluation does
+not finish within three seconds it detaches and returns an =eval_running=
+block carrying a task id; the shell tool does the same over a Port with
+=send_input=, signals, and an idle timeout.
+
+This is the same shape as luv's =./sly= against the durable image, and the
+lesson is the timeout: a tool call should return /something/ within a few
+seconds -- a result or a handle to the running work -- never silence.  That
+is this project's "five seconds of silence means broken" rule stated from
+the harness side.
+
+* Froth: parallel tools with a prepare/commit split, and control by button rather than allowlist
+:PROPERTIES:
+:ID: IOGTGD
+:END:
+
+=Froth.Agent.Worker= is a state machine over
+=:initial | {:thinking, task} | {:working, batch} | {:awaiting_user_input, batch} | :done=,
+running all tool uses of a turn as unlinked supervised tasks with per-tool
+timers.  RFC 0003 admits that this parallelism was once fake -- every task
+funnelled through one bot GenServer mailbox -- and the fix is visible in
+=execute_tool/3=: a short =prepare_tool= call yields an executable
+=(M,F,A)=, the work runs in the task, then =commit_tool= folds side effects
+back.  RFC 0021 makes every cycle its own supervised =CycleRuntime=,
+registered by id, subagents as children of the spawning runtime.
+
+There is no permission allowlist.  Control is human-in-the-loop over
+Telegram inline keyboards, each path its own module: =Ask= parks the cycle
+until a button or free text arrives; =AwaitControl= offers detach,
+continue, cancel, check for background tasks; =FailureIntervention=
+intercepts repeated tool errors and offers up to four numbered replies plus
+carry-on and stop; =CreditIntervention= sniffs "credit balance is too low"
+and posts a button labelled "Insert coin."  Tool results carry
+=control_outcome=, =control_data=, and =yield?=, and the worker's batch
+transition distinguishes yield (finish cycle), unresolved awaits (park),
+and continue.  Required structured =description= objects on the shell and
+eval tools (=action=, up to three =goals=, =assumptions=) are validated and
+become the user-visible narration.
+
+Lesson: the seams that matter are /prepare vs. commit/ (so parallel really
+is parallel) and /park vs. finish/ (so a human can be asked without ending
+the turn).
+
+* Froth: one span primitive, one firehose, and a patch model over every provider stream
+:PROPERTIES:
+:ID: VGXIN9
+:END:
+
+=lib/span.ex= is a single primitive for point events and open or closed
+spans, each writing a row to =events= and publishing on a firehose topic
+plus a per-cycle topic.  A cycle is consumed as a =Stream.resource= over
+that PubSub subscription; payloads over 8,000 bytes are offloaded to an
+object store with a preview kept inline.  =FollowLive= filters the firehose
+by event prefix, cycle, or span; =ToolLive= is a Telegram mini-app view of
+a running cycle with live thinking, live IO, a steer form and a stop
+button; a cache report prints per-cycle cache-creation and cache-read
+tokens.
+
+The LLM layer is provider-neutral in an unusual way: streaming deltas are
+decoded into =%LLM.Edit{op: :open | :set | :append | :merge | :delete |
+:close, resource, path, value}= applied to a store document, so Anthropic,
+OpenAI Responses and Gemini streams become one patch language, and
+=Edit.project_event/1= maps patches back to caller events such as
+=text_delta=.  A hand-rolled SSE parser exists because the library one
+could not handle CRLF line endings, "i.e. every Google API"; tests replay
+recorded SSE fixtures through the real decoder.
+
+Lesson: normalize streams to edits on a document, and record spans as
+data first, views second.
+
+* Sheaf: six characters address anything, resolved through the graph
+:PROPERTIES:
+:ID: 9P5YLW
+:END:
+
+=lib/sheaf/id.ex= mints six-character handles from a 32-symbol alphabet
+with ambiguous glyphs removed, and maps handle to IRI by concatenation onto
+a resource base: =#HCFU75= is literally the tail of a URL.  Every paragraph,
+section, document, note, image, conversation and spreadsheet query result
+is minted the same way -- one flat space, no type prefixes.  This is the
+same move as this wiki's figure IDs (#2RRDHC), taken further.
+
+=lib/sheaf/block_refs.ex= accepts five spellings -- bare, =#=-prefixed,
+bracketed, an existing =/b/= link, a code span -- and its bare-id regex
+requires at least one letter /and/ one digit so six-letter words and pure
+numbers are not swallowed.  =linkify_markdown= splits fenced and inline code
+out before rewriting, takes =exists?= and =url_for= callbacks so unresolved
+handles degrade to plain text, and eats the space an LLM leaves before
+punctuation.  Resolution is graph-driven: =Corpus.find_documents/1= takes a
+batch of ids, does one quad-pattern match on =rdf:type=, and reads the
+/named graph/ of each hit -- the containing document is whatever graph the
+block's type statement lives in.  A =ResourceResolver= then dispatches one
+handle to document, block, note, project, conversation or query result, so
+one syntax works in prose, URLs, tool arguments, and RDF; hover previews
+batch by document and compute ancestry breadcrumbs.
+
+Lesson: one short handle space, resolved by asking the store rather than
+maintaining a link table, lets the model cite by typing.
+
+* Sheaf: an append-only quad log with a working set, and doctrine about how to read it
+:PROPERTIES:
+:ID: DCH4QD
+:END:
+
+=lib/quadlog.ex= replaced a SPARQL server with three SQLite tables: an
+append-only =changes= journal (sequence, transaction IRI, polarity, the
+expanded quad), interned =terms=, and a =quads= current-state table with
+four covering indexes.  History is assertions and retractions keyed by
+transaction; the present is index-friendly.  The GenServer keeps a partial
+in-memory dataset plus a set of loaded patterns, so =load_once/1= is an
+idempotent "pull this neighbourhood into the working set."  Every
+transaction (=Sheaf.Repo.transact/3=) carries a transaction IRI and
+OpenTelemetry metadata -- provenance as a condition of writing.
+
+=docs/quadlog-access-patterns.md= is unusually good internal doctrine:
+"Quadlog is not a SPARQL server"; use =match= for broad derived indexes,
+=load_once= for request-time neighbourhoods, build a
+subject-predicate-to-objects index rather than nesting triple scans -- with
+a measured baseline (479,268 quads, document index about 365 ms warm).
+
+Lesson: a log of signed changes plus a materialized present is enough
+store for an agent, provided the access doctrine is written down beside
+it.
+
+* Sheaf: typed tool results with two renderings, and reading collapsed by default
+:PROPERTIES:
+:ID: GR1GL1
+:END:
+
+=lib/sheaf/assistant/corpus_tools.ex= builds the tool list with nearly every
+dependency injected, so tools are testable without a model, and gates them
+by tool set so a reading conversation literally cannot mutate documents.
+Tool callbacks return structs (=ToolResults.*=); =tool_result_text.ex=
+renders them as "compact reading notes for a model, not API payloads", and
+the same structs drive rich UI cards -- one representation, two audiences.
+=read= takes a list of handles and returns sections collapsed with child
+handles; =expand: true= walks descendants; repository expansion stops at
+the tree and never expands file contents; search hits return a bounded
+excerpt plus a =#content= IRI to pass back to =read=.
+
+=document_import= is one dispatcher over an action enumeration (stage,
+status, extract, inspect, import, metadata, validate) on a durable
+RDF-backed run: "one orthogonal action interface the model can compose in
+different orders, while the server retains authority over paths,
+credentials, network access, and RDF mutations."  Fetching is HTTPS-only,
+rejects private addresses and credentials, validates redirects, caps
+bytes, and hands the model file /ids/, never paths.  Writing-attention is
+four tags (=placeholder=, =needs_evidence=, =needs_revision=, =fragment=)
+stored as triples, not TODO comments.
+
+Lesson: the model-facing rendering and the human-facing rendering are two
+views of one typed value; and "collapsed with handles" is the default that
+keeps reading cheap.
+
+* Sheaf: retrieval variants, persisted context, and one URL in four representations
+:PROPERTIES:
+:ID: RLXBWB
+:END:
+
+Retrieval fuses lexical and vector hits by reciprocal-rank fusion, with a
+small bonus for a unit found by both channels.  Each text unit is embedded
+twice -- =:precise= (raw text) and =:context= (text plus title, authors,
+page context, stored at a =#sheaf-context= fragment IRI, down-weighted to
+0.85) -- and long source files add overlapping 8 KB segment variants that
+are not RDF resources and hydrate back to the file's single content block.
+The evaluation suite uses expected /text fragments/ rather than block IRIs
+as ground truth, because reimporting a document intentionally remints its
+blocks.
+
+Conversation context is persisted twice on purpose: raw provider messages
+as JSON blobs with an append index in a dedicated operational graph (tool
+schemas stored, callbacks reconstructed from current code), and the
+semantic trace as ActivityStreams with =prov= attribution in the workspace
+graph.  =write_note= is the durable output channel: append-only notes whose
+mentions are the union of passed handles and refs parsed from the text.
+The bare =/:id= path content-negotiates to LiveView HTML, Markdown, JSON or
+N-Quads with =Vary= and =Link rel=alternate= headers; reading a
+conversation as Markdown is built from the /persisted/ context "so reading
+a conversation never starts or changes it."  A stateless MCP endpoint and a
+zero-dependency CLI sit on the same six operations, so the CLI, MCP
+clients, and the in-app assistant share one corpus behaviour.
+
+Lesson: store the operational transcript and the semantic trace
+separately; expose the same handle at the same URL in every
+representation a client could want.
+
+* Nxt: one coroutine runtime under I/O, tools, and the terminal
+:PROPERTIES:
+:ID: 3J1QNQ
+:END:
+
+Nxt is three C++23 namespaces -- =nxtrt= (runtime), =nxtui= (raster, layout,
+terminal), =nxtai= (Responses client and tool execution) -- over one lazy
+=task= type.  An SSE stream, a TLS socket, a subprocess, a cgroup sampler
+and a terminal HUD are all tasks on the same =deck=, so an agent turn and
+its UI are siblings in one structured scope rather than two event loops
+bolted together.  The =deck= is a one-round pump: it swaps the ready queue
+into a local round and drains exactly that; it throws on reentrant
+pumping; and =sync_wait= throws a /runtime dump/ when a task is suspended
+with nothing ready -- deadlock reported with state, not endured.
+
+=firm= / =deed= / =catching_deed= are the structured-concurrency layer: fork
+children, join, stop together, read results afterward; =when_all=,
+=wait_any= and =with_timeout= are compositions over firms, not schedulers.
+=wish= / =wand= / =urge= / =need= split intent from platform (io_uring,
+kqueue, epoll behind a four-verb vtable), and the wand flushes once after
+each round, so a round's staged operations submit as one batch -- io_uring
+batching falls out of the scheduling discipline.  The whole model is also
+executably specified in =nxtrt/runtime.rkt=, an ontology, relational model
+and temporal spec at once, and =AGENTS.md= makes updating it policy.  The
+deliberately odd four-letter vocabulary is defended as a technique for
+keeping concepts soft and renameable.
+
+Lesson: when tools, streams and UI share one scheduler, cancellation,
+timeouts and error aggregation for a batch of tool calls are free.
+
+* Nxt: hope, or the value or the work to get it
+:PROPERTIES:
+:ID: X966Z4
+:END:
+
+The single best efficiency idea is =hope<T>=: a variant of =T= or
+=task<T>= -- "the value, or the work to get it."  =await_ready= is "holds
+the value", so a hit returns inline with no coroutine frame born; a miss
+splices the task onto the awaiting handle.  The buffer layer is a port of
+Zig's post-0.15 reader/writer: the reader owns its buffer, =take= and
+=peek= are inline and concrete, and the cold =stream_more= verb returns a
+hope touched only on refill.  Socket, TLS, HTTP body and SSE therefore
+compose with zero suspensions while every layer is buffered.
+=docs/rt-holding.md= names the endgame: give the wish an honest
+=await_ready= and the buffered feed can /be/ a wand, so deck, wand, feed
+and hope are one shape at four sizes -- "a scheduler is a buffer whose
+drain got clever."  Around it: hierarchical bitmask free-lists for bounded
+slot pools, and RFCs pushing firm bookkeeping off the heap into
+value-shaped storage.
+
+Lesson worth carrying into luv's own systems thinking: make the hot path a
+concrete inline read and let suspension be the exception the type admits.
+
+* Nxt: a hung agent is a question you can ask the process
+:PROPERTIES:
+:ID: BWXFJK
+:END:
+
+=src/nxtrt/debug.hpp= keeps process-global registries of firm snapshots
+(id, parent, children, stopping) and wait snapshots (task, token, parked
+since, wish), and =install_signal_dump= on SIGUSR1 prints the ready tasks,
+the firm tree, and every parked wish with how long it has been parked.
+=AGENTS.md= instructs: on a freeze, do not rerun the suite -- inspect the
+parked tasks and wishes.  This is the runtime-side answer to this
+project's silence rule (#NMAD2U's neighbour, the whole of =AGENTS.md=).
+
+Around it: an OpenTelemetry-shaped =trace_record= (span begin, end, event;
+parent; attributes) with observers and a =children= query, whose current
+context rides in an /ambient environment/ -- =env.hpp= is an immutable
+type-keyed snapshot shared by children and cloned on replace, dynamic
+binding for coroutines, also used for a breadcrumb path so the SSE
+transcript printer knows its nesting without threaded state.  Every tool
+subprocess runs under a transient =systemd-run= scope and is sampled every
+50 ms for memory, PIDs, CPU and PSI pressure; the observation rides along
+inside the =tool_result= so the UI can show a memory chip next to the
+call.  =NXT_STDOUT_TRACE= logs every stdout write with source location and
+a backtrace -- the tool for when a HUD and a subprocess fight over the
+terminal -- and ANSI has a =debug= mode that prints escapes visibly and is
+the non-TTY default.
+
+Lesson: the parked-wish dump, ambient trace context, and per-call resource
+telemetry are the three instruments a harness should be born with.
+
+* Nxt: traces as Arrow, rendered as cassettes through XSLT
+:PROPERTIES:
+:ID: 7FFNVT
+:END:
+
+Runs are written as Arrow IPC files (=seq, elapsed_ms, unix_ms, phase,
+event_type, data, payload_json, run_id=), compacted to zstd Parquet (about
+31 runs, 170 MB to 3 MB), and queried in place with DuckDB:
+=cassette/trace-to-xml.sql= derives turns with a window function over
+=response.created=, joins call and result rows for per-call duration, and
+dispatches content extraction per tool.  Then Parquet becomes XML becomes
+XSLT (=baltic-birch-v1.xsl=) becomes markup becomes ANSI.  The conceit is
+that a tool call is not a table row but a /cassette/ -- case, spine label,
+J-card, window onto the tape -- and that its visual language should live in
+one stylesheet rather than in hundreds of lines of C++ interleaving string
+splitting and colour tables; a template matching =result[@kind='matches']=
+is the declarative twin of a visitor case.  Every stage is a flat file, so
+every stage is inspectable, and =scripts/nxtllm-shot= runs the binary under
+a PTY and renders a contact-sheet PNG explicitly so an agent can /look at/
+what the tool cycle drew.  =nxtui.org= states the principle behind it:
+separate operational control from historical memory, with append-only
+Arrow to Parquet to DuckDB to Org chronicle to compacted summaries.
+
+Lesson: an agent's history is columnar data first; every rendering of it
+is a query plus a stylesheet.
+
+* Nxt: a HUD pinned under scrolling output, drawn from typed diffs
+:PROPERTIES:
+:ID: 2HR80Z
+:END:
+
+=nxtui= is fastidious about geometry: =ch=, =ln=, =percent= unit tags and
+strong row, column, width and height types, with vertical regions
+half-open and DECSTBM scroll regions inclusive "because that is what the
+terminal configures" -- "a value that names a row should stay a row until
+the last possible moment."  Layout is values satisfying a concept
+(width hint, height hint, render), type-erased into immutable shared
+pointers and combined declaratively (=column=, =row=, =each=, =when=,
+=either=, =range_progress_bar=).  =Slot= is the reactive seam: an atomic
+cell copied by value into the tree each frame while a coroutine elsewhere
+publishes new content and signals damage -- no observer graph.
+
+The raster is struct-of-arrays =mdspan= planes (glyphs, fg, bg, emphasis)
+with interned glyphs, and the frame delta is a ranges pipeline --
+=chunk_by= same-run, =filter= changed, =transform= to runs carrying only
+the SGR deltas.  The compositor is double-buffered and can confine
+scrolling above a bottom fixed HUD with DECSTBM, so subprocess output keeps
+scrolling while the agent HUD stays pinned, and it takes an output mutex so
+scrollback writes and HUD diffs go out as one presentation step -- the
+interleaving tear fixed at the right level.  =trace_tui= turns the
+runtime's spans into a waterfall in the same layout vocabulary.
+
+Lesson for luv's world terminal (#NMAD2U): typed rows and columns, a
+struct-of-arrays raster, and diff-runs are the same instincts the Slug
+terminal path already has; the pinned-HUD partition is the piece worth
+copying when an agent status line lives in the same cells as its output.
+
+* Nxt: tools as concepts, failures as values, streams parsed as grammars
+:PROPERTIES:
+:ID: KZ019W
+:END:
+
+Tools are structs checked by a =function_tool= concept: name, description,
+strictness, a parameters struct, a raw JSON schema literal, a parser, and
+=run= returning a task -- a missing schema is a =static_assert=.  Any
+exception becomes =tool_result{failed, "tool execution failed: ..."}=, an
+agent-visible message rather than a crash; a batch of calls is one firm of
+forked children joined together.  Subprocess capture is a two-child firm
+-- an 8 MiB-capped stdout/stderr streamer with terminate-and-wait on exit,
+and the cgroup sampler -- and truncation is never silent: the call is marked
+failed and its output rewritten as "exceeded capture limit (N bytes);
+captured prefix follows".  =rg_search= bakes in =--max-count 50
+--max-columns 200=: context discipline enforced at the tool, not by prompt.
+
+The Responses SSE stream is read as a recursive-descent parse over a
+=feed= with =peek_one= / =take_one= (=response.created=, =in_progress=,
+=output_item.added=, =content_part.added=, deltas, =done= ...) throwing a
+typed unexpected-event on protocol drift; JSON is tokenized by coroutine
+rather than materialized, and request bodies are written with =raw()= for
+pre-serialized schemas so nothing round-trips through an object model.
+The tool UI is data (=turn_view=, =call_view= with name, arguments, output,
+latest memory, state, elapsed), sanitizes untrusted subprocess text of
+escape sequences before drawing it, and caps bash output windows at eight
+wrapped lines.
+
+Lesson: bound at the tool, tell the model why something is short, and
+treat the provider stream as a grammar with a name for every violation.
+
+* What the three agree on
+:PROPERTIES:
+:ID: YY6EYZ
+:END:
+
+Read together, the three repositories converge on a few points that any
+future luv agent surface should probably accept as given:
+
+- /Results are typed values with more than one rendering./  Froth's block
+  trees (#5GU1VI), sheaf's result structs (#GR1GL1), nxt's =tool_result=
+  with telemetry (#KZ019W): the model-facing text, the human-facing view,
+  and the persisted record are projections of one datum.
+- /Size is the harness's problem./  Froth folds and pages (#FDMSXG),
+  sheaf reads collapsed with handles (#GR1GL1), nxt caps and says why
+  (#KZ019W).  In every case the model is told the truth about what was
+  omitted and given a handle to get more.
+- /Handles are short, stable, and typed by the store, not the syntax./
+  Sheaf's six characters (#9P5YLW), froth's =blob:= ULIDs and timeline
+  refs (#WYOFMD), this wiki's figure IDs.
+- /History is data first./  Froth's events and spans (#VGXIN9), sheaf's
+  quad log and doubled context store (#DCH4QD, #RLXBWB), nxt's Arrow
+  traces (#7FFNVT) -- and each of them can be re-rendered later without
+  rerunning anything.
+- /Silence is a defect the runtime must be able to explain./  Froth's
+  three-second detach (#ENM1B2), nxt's SIGUSR1 dump (#BWXFJK), and this
+  project's own rule.
+- /A cycle is a supervised scope./  Froth's CycleRuntime and
+  prepare/commit (#IOGTGD), nxt's firms (#3J1QNQ).
+
+* IDEA A luv agent surface would inherit these seams
+:PROPERTIES:
+:ID: QQRFZ1
+:END:
+
+/Intent./ Not a plan yet: an agent already talks to luv through the world
+terminal (#NMAD2U) and through =./sly=; if luv grows its own harness --
+Lisp-native tools over the durable image, results drawn into world cells,
+history in the wiki's own store -- the seams above are the ones to keep.
+
+/Evidence./ This page.  In particular #5GU1VI for the result shape,
+#9P5YLW for handles (already halfway present as figure IDs), #BWXFJK for
+the dump the =./sly= image should be able to give when a form goes quiet,
+and #2HR80Z for a HUD in the terminal wall.
+
+/Done when./ Either a NEXT mark on a concrete first slice replaces this
+IDEA, or a later page cites the figures above as its premises.

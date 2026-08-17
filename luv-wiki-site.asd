@@ -13,6 +13,7 @@
     :components ((:file "index")
                  (:file "block-world")
                  (:file "world-terminal")
+                 (:file "agent-harnesses")
                  (:file "clim-in-the-world")
                  (:file "box3d-architecture")
                  (:file "domains-and-bundles")
