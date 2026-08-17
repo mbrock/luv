@@ -4,6 +4,48 @@ when i interrupt you and ask a question, it means i want you to ANSWER
 the question and then almost always just CHILL OUT instead of ceaselessly
 continuing to fuck around with whatever my question is probably annoyed by
 
+# Five seconds of silence means broken
+
+**A command that runs longer than about five seconds without printing
+anything is not slow. It is broken, and finding out how is the task now.**
+
+This is not a style preference. Every long silence in this project so far has
+been a bug with a name, sitting behind a command that had been told to say
+nothing:
+
+- `nix build nixpkgs#foo` hanging on `channels.nixos.org` to resolve the
+  registry alias, with `2>&1 | tee` removing the TTY that `-L` prints its
+  progress to. Both the log and the terminal were empty for minutes.
+- `./sly eval` on a form that errored, printing a backtrace and then waiting
+  on stdin for a restart number, in a context whose stdin nobody was typing
+  into.
+- A silent `open-...` call that had not deadlocked at all -- the image
+  answered `(+ 1 2)` instantly the whole time -- so the silence was inside
+  one specific step that nothing had been asked to report.
+
+Never wait it out. Never poll it hoping. Never chain sleeps. Do this instead:
+
+1. **Kill it and make it talk.** Add `-L`, `--verbose`, `-x`, `--progress`.
+   Never pipe a progress-reporting command through `tee`, `head`, or a
+   pager: most write progress only to a TTY and go mute into a pipe.
+2. **Close the mouth you left open.** Redirect `< /dev/null` so anything
+   waiting on stdin fails immediately and says why, instead of waiting for a
+   keystroke that is never coming.
+3. **Ask the process what it is doing.** `ps`, `strace -f -p PID`,
+   `cat /proc/PID/wchan`, `cat /proc/PID/stack`, a thread backtrace out of
+   the Lisp image, `ss -tnp` for a socket that will never answer. One of
+   these names the thing in seconds.
+4. **Split it.** A silent compound step becomes several small steps, each of
+   which either returns or is the culprit. The one that does not come back
+   has named itself.
+5. **Long jobs run in tmux**, on a real TTY, where the pane can be read at
+   any moment -- not in a pipeline whose output arrives only at the end, and
+   not in a background task whose file stays empty.
+
+Reporting "it seems to be taking a while" is not a status. Neither is trying
+it again the same way. If a command has gone quiet, you have a defect in
+front of you: name it before doing anything else.
+
 # Start here: one Lisp, one game
 
 Everything happens in one durable SBCL image per checkout, and the game

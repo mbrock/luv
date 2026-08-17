@@ -1,0 +1,139 @@
+#+title: McCLIM surfaces in the world
+
+Luvcraft has grown a family of McCLIM instruments that live inside the block
+world: the hotbar, the inventory, the film chooser, a Telegram terminal, a
+sheet of PDF paper. They share one implementation path, and that path has a
+property nobody chose deliberately and everybody can see: the text on them is
+soft, while the text on a terminal wall standing beside them is not.
+
+This page records what that path actually is, why the difference exists, and
+what redoing it would mean. It is a design note about presentation, not about
+any one instrument; the instruments themselves are described where they live,
+and the interaction seam they share is #0U22KN.
+
+* A McCLIM surface reaches the world as a raster, not as geometry
+:PROPERTIES:
+:ID: AX9ZTA
+:END:
+
+An embedded frame is made against the session's own canvas, context, and
+device, and its mirror owns a texture. Everything the frame draws --
+=draw-text*=, =draw-analytic-rounded-rectangle*=, a decoded photograph as a
+pattern -- is rasterized into that texture at the size the frame was laid out
+at. The compositor then samples the texture across a quad placed in the
+world.
+
+So the whole surface is a picture with a resolution, chosen once, at frame
+construction. Slug is involved, but only inside the picture: it rasterizes
+glyphs into the texture, and after that they are pixels like any other. The
+sampler is created with default options over a texture with a single mip
+level, so what happens next is an ordinary bilinear resample: minification
+aliases, magnification blurs, and the thin stems of a serif face are the
+first thing either destroys.
+
+None of this is wrong for what the path was built to do. It is exactly right
+for a photograph, for a gradient, for a rounded panel edge -- content that is
+a raster already, or that has no detail finer than the texel. It is wrong for
+type.
+
+* A terminal is sharp at any distance because its glyphs are geometry
+:PROPERTIES:
+:ID: GJUPMQ
+:END:
+
+The terminal wall does not rasterize anything into a texture. It places one
+instanced quad per glyph directly in world space -- see
+[[lisp:make-terminal-display-glyph-instances]] and the world text run it
+feeds -- and Slug evaluates the outline analytically in the fragment shader,
+at whatever resolution that pixel happens to have. The glyph has no
+resolution of its own to lose.
+
+That is the whole difference. A wall read from across the map and a wall read
+from arm's length are both drawn from the same Bézier contours at the
+sampling rate of the frame being drawn, which is what #I9U71F means by the
+grid remaining authoritative through Slug, and what the atlas and instancing
+work #AT7L3S built the machinery for.
+
+#0U22KN, written before any of these instruments existed, already says it:
+reusing the world-overlay relationship is the architectural result, while
+sharing the CPU raster machinery /would preserve precisely the indirection
+this experiment is meant to remove/. The instruments built since took the
+raster machinery, and inherited the indirection.
+
+* The PDF sheet made the difference measurable
+:PROPERTIES:
+:ID: I3G0S7
+:END:
+
+A sheet of paper showing a real document is a good probe, because a page is
+mostly small type and a reader knows immediately whether it is right.
+
+MuPDF hands back each typeset line with its box, size, and font, and the
+sheet drew those with =draw-text*= at positions scaled from PDF points. At
+two and a half metres the body text was soft and broken; at reading distance
+it was clean. That looks like a legibility limit and is not one, because a
+terminal wall in the same shot at the same distance is crisp.
+
+The measurement that settles it: widening the page texture from 500 to 1400
+pixels did not improve the distant view, and neither did narrowing it to 780.
+A resolution that is merely wrong gets better when corrected. A resolution
+that /exists at all/ is the defect, and no value of it helps.
+
+Two lesser findings came out of the same probe, both symptoms of drawing a
+document through a toolkit's font mapping rather than through its own
+metrics:
+
+- The substituted serif sets about a third wider than the document's own
+  face, so lines justified to a measure overflow the page and have to be
+  condensed to fit.
+- Condensing each line independently -- the obvious implementation -- gave
+  one paragraph five different sizes between 10.13 and 11.02 pixels. Type
+  that changes size line to line reads as broken in a way that uniformly
+  smaller type does not, so the widest line of a nominal size now decides for
+  all of them.
+
+Neither would arise if the page were set from the document's own glyph
+outlines at the document's own metrics, which is what the geometry path
+would allow.
+
+* What the raster path should keep
+:PROPERTIES:
+:ID: S8LIJP
+:END:
+
+Redoing this is not a case for deleting the mirror texture. A chat transcript
+contains photographs; a decoded JPEG is a raster whose natural presentation
+is a sampled quad, and drawing it any other way would be an affectation. The
+same is true of the analytic panel fills, where the ink is smooth and the
+texel is finer than any detail in it.
+
+The split worth aiming at is by content rather than by instrument: type and
+crisp analytic edges become world geometry, while images and smooth fills
+stay a sampled surface. An instrument would then contribute both, in one
+overlay, the way a terminal wall already contributes a cell run and a glyph
+run and a faceplate run in one encode.
+
+Mipmaps and a filtering sampler are worth having regardless, since they fix
+the aliasing of everything that legitimately stays a raster. They are not a
+substitute for the split: a mipmapped picture of type is still a picture of
+type.
+
+* NEXT Draw McCLIM text as world geometry
+:PROPERTIES:
+:ID: 6XLC0P
+:END:
+
+*Intent.* Give an embedded surface a way to emit Slug glyph runs in world
+space instead of rasterizing its text into the mirror texture, so that a
+panel's type is as sharp as a terminal wall's at every distance.
+
+*Evidence.* #I3G0S7 for why texture size cannot fix it, #GJUPMQ for the path
+that already works, and the instancing and outline-cache machinery at
+#AT7L3S and #U5X6DY, which is the resource ownership a second caller would
+share. The PDF sheet is the readiest probe: one page, many sizes, and an
+obvious right answer.
+
+*Done when.* A sheet of paper and a terminal wall placed side by side are
+equally legible at the same distance, and the page's type no longer needs
+condensing to fit its measure, because it is set from the document's own
+glyph metrics rather than a substituted face's.

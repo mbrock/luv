@@ -1025,20 +1025,97 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
                 *suppress-luv-mirror-visibility*)
       (luv:show-canvas (mirror-target mirror)))))
 
+;;; Which TrueType file a CLIM text style means.  DejaVu ships with the
+;;; system and is always there; a nicer face takes over the :SANS-SERIF
+;;; family -- the default face of every McCLIM pane here -- when it can be
+;;; found.  The checkout bundles Iosevka Aile (OFL, subset to the Latin,
+;;; Greek, Cyrillic, punctuation, arrow, and symbol ranges a game UI needs)
+;;; beside Monaspace in FONTS/; a face may also be dropped into the user's
+;;; own fonts, and DejaVu stands in otherwise.
+
+(defparameter *bundled-fonts-directory*
+  (asdf:system-relative-pathname "mcluv/backend" "fonts/")
+  "The checkout's bundled fonts, captured while the system is loaded.")
+
+(defun user-font-pathname (name)
+  "The font file NAME from the bundled fonts, else the user's own fonts,
+else NIL."
+  (or (probe-file (merge-pathnames name *bundled-fonts-directory*))
+      (probe-file (merge-pathnames (format nil "Library/Fonts/~A" name)
+                                   (user-homedir-pathname)))))
+
+(defparameter *sans-serif-font-preferences*
+  '(("Iosevka Aile" "IosevkaAile-Regular.ttf" "IosevkaAile-Bold.ttf"
+     "IosevkaAile-Italic.ttf" "IosevkaAile-BoldItalic.ttf")
+    ("Input Sans" "InputSans-Regular.ttf" "InputSans-Bold.ttf"
+     "InputSans-Italic.ttf" "InputSans-BoldItalic.ttf"))
+  "Families to try for :SANS-SERIF, best first: a name and the regular,
+bold, italic, and bold-italic files looked for in the bundled and then the
+user's fonts.  Italics are optional; the upright stands in.")
+
+(defparameter *gpu-sans-serif-fonts*
+  (cons (cl-dejavu:font-pathname "DejaVuSans.ttf")
+        (cl-dejavu:font-pathname "DejaVuSans-Bold.ttf"))
+  "The regular and bold files behind the :SANS-SERIF family on the GPU
+text path; ADOPT-USER-SANS-SERIF-FONTS retargets them.")
+
+(defvar *adopted-sans-serif-family* "DejaVu Sans"
+  "The name of the family :SANS-SERIF currently resolves to.")
+
+(defun adopt-user-sans-serif-fonts ()
+  "Point both text paths' :SANS-SERIF at the best installed preference.
+
+The GPU medium reads *GPU-SANS-SERIF-FONTS*; the raster medium goes through
+MCCLIM-RENDER's *FAMILIES/FACES* table, so that is retargeted too, and any
+raster port already open forgets the faces it had cached.  Returns the
+family name adopted."
+  (loop for (name regular bold italic bold-italic)
+          in *sans-serif-font-preferences*
+        for regular-file = (user-font-pathname regular)
+        for bold-file = (user-font-pathname bold)
+        when (and regular-file bold-file)
+          do (setf *gpu-sans-serif-fonts* (cons regular-file bold-file)
+                   *adopted-sans-serif-family* name)
+             (flet ((retarget (key pathname)
+                      (when pathname
+                        (let ((entry (assoc key mcclim-truetype:*families/faces*
+                                            :test #'equal)))
+                          (if entry
+                              (setf (cdr entry) pathname)
+                              (push (cons key pathname)
+                                    mcclim-truetype:*families/faces*))))))
+               (retarget '(:sans-serif :roman) regular-file)
+               (retarget '(:sans-serif :bold) bold-file)
+               (retarget '(:sans-serif :italic)
+                         (or (user-font-pathname italic) regular-file))
+               (retarget '(:sans-serif (:bold :italic))
+                         (or (user-font-pathname bold-italic) bold-file))
+               (retarget '(:sans-serif (:italic :bold))
+                         (or (user-font-pathname bold-italic) bold-file)))
+             (dolist (port climi::*all-ports*)
+               (when (typep port 'mcclim-truetype:ttf-port-mixin)
+                 (mcclim-truetype::invalidate-port-font-cache port)
+                 ;; The basic port keeps its own memo of style to font on top
+                 ;; of the TrueType caches; without clearing it the old faces
+                 ;; keep being served.
+                 (clrhash (climi::port-text-style-mappings port))))
+             (return name)
+        finally (return *adopted-sans-serif-family*)))
+
+(adopt-user-sans-serif-fonts)
+
 (defun gpu-text-font-pathname (text-style)
   (multiple-value-bind (family face size)
       (text-style-components (climb:parse-text-style* text-style))
     (declare (ignore size))
-    (cl-dejavu:font-pathname
-     (cond
-       ((eq family :fix) "DejaVuSansMono.ttf")
-       ((eq family :serif)
-        (if (member :bold (if (listp face) face (list face)))
-            "DejaVuSerif-Bold.ttf"
-            "DejaVuSerif.ttf"))
-       ((member :bold (if (listp face) face (list face)))
-        "DejaVuSans-Bold.ttf")
-       (t "DejaVuSans.ttf")))))
+    (let ((bold-p (member :bold (if (listp face) face (list face)))))
+      (cond
+        ((eq family :fix) (cl-dejavu:font-pathname "DejaVuSansMono.ttf"))
+        ((eq family :serif)
+         (cl-dejavu:font-pathname
+          (if bold-p "DejaVuSerif-Bold.ttf" "DejaVuSerif.ttf")))
+        (bold-p (cdr *gpu-sans-serif-fonts*))
+        (t (car *gpu-sans-serif-fonts*))))))
 
 (defun gpu-text-style-size (text-style)
   (nth-value 2

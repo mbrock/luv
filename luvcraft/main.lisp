@@ -53,18 +53,20 @@
         (ignore-errors (delete-file endpoint))))))
 
 (defun usage (&optional (stream *standard-output*))
-  (format stream "Usage: luvcraft [--metal | --vulkan] [--tracy] [--world FILE]~%")
+  (format stream "Usage: luvcraft [--metal | --vulkan] [--tracy] [--fullscreen] [--world FILE]~%")
   (format stream "       luvcraft [--help | --smoke-test PNG | --vulkan-smoke-test PNG | --metal-smoke-test PNG | --metal-text-closeup PNG | --metal-benchmark [FRAMES [CSV [SCENARIO]]]]~%")
   (format stream "~%")
   (format stream "With no arguments, resume the world using Metal 4 on macOS and Vulkan elsewhere.~%")
   (format stream "--metal and --vulkan explicitly select an interactive backend.~%")
   (format stream "--tracy exposes live frame and worker zones to Tracy 0.13.1.~%")
+  (format stream "--fullscreen opens the game on the whole display instead of in a window.~%")
   (format stream "--world loads or creates the named persistent world.~%")
   (format stream "--smoke-test renders one hidden frame with the platform default and exits.~%")
   (format stream "--vulkan-smoke-test renders one hidden Vulkan frame and exits.~%")
   (format stream "--metal-smoke-test renders one hidden Metal 4 frame and exits.~%")
   (format stream "--metal-text-closeup renders the enlarged Slug world-text proof.~%")
-  (format stream "--metal-benchmark measures steady or streaming Metal frames.~%"))
+  (format stream "--metal-benchmark measures steady or streaming Metal frames.~%")
+  (format stream "--serve-surface renders a hidden game into the IOSurface named on stdin.~%"))
 
 (defun make-metal-provider ()
   #+darwin
@@ -75,7 +77,7 @@
 (defun make-vulkan-provider ()
   (make-instance 'luv:vulkan-gpu-provider))
 
-(defun run-interactive (&key provider tracy-p
+(defun run-interactive (&key provider tracy-p fullscreen-p
                              (world-pathname
                                (default-luvcraft-world-pathname)))
   "Run luvcraft until its native window closes."
@@ -84,6 +86,7 @@
   ;; leave an otherwise useful worker lane anonymous.
   (play :provider (or provider luv:*gpu-provider*)
         :tracy-p tracy-p
+        :fullscreen-p fullscreen-p
         :world-pathname world-pathname)
   (unwind-protect
        (let ((session *session*))
@@ -102,6 +105,7 @@
 (defun parse-interactive-options (arguments)
   (let ((provider nil)
         (tracy-p nil)
+        (fullscreen-p nil)
         (world-pathname (default-luvcraft-world-pathname)))
     (loop while arguments
           for argument = (pop arguments)
@@ -112,13 +116,15 @@
                 (setf provider (make-vulkan-provider)))
                ((string= argument "--tracy")
                 (setf tracy-p t))
+               ((string= argument "--fullscreen")
+                (setf fullscreen-p t))
                ((string= argument "--world")
                 (unless arguments
                   (error "--world requires a pathname."))
                 (setf world-pathname (pathname (pop arguments))))
                (t (return-from parse-interactive-options
-                    (values nil nil nil nil)))))
-    (values provider world-pathname tracy-p t)))
+                    (values nil nil nil nil nil)))))
+    (values provider world-pathname tracy-p fullscreen-p t)))
 
 (defun run-smoke-test (pathname &optional provider)
   (format t "Rendering ~A~%" pathname)
@@ -154,6 +160,9 @@
 
 (defun dispatch (arguments)
   (cond
+    ;; Started inside a playing game's terminal wall: be its child.
+    ((and (null arguments) #+darwin (luvcraft-parent-socket-path) #-darwin nil)
+     (serve-luvcraft-parent))
     ((and (= (length arguments) 1)
           (member (first arguments) '("--help" "-h") :test #'string=))
      (usage))
@@ -173,15 +182,21 @@
     ((and (= (length arguments) 2)
           (string= (first arguments) "--metal-text-closeup"))
      (run-metal-text-closeup (pathname (second arguments))))
+    ((and (= (length arguments) 1)
+          (string= (first arguments) "--serve-surface"))
+     #+darwin (serve-luvcraft-mirror)
+     #-darwin (error "--serve-surface needs IOSurface, which is Darwin only."))
     ((and (<= 1 (length arguments) 4)
           (string= (first arguments) "--metal-benchmark"))
      (run-metal-benchmark
       (second arguments) (third arguments) (fourth arguments)))
     (t
-     (multiple-value-bind (provider world-pathname tracy-p interactive-p)
+     (multiple-value-bind
+           (provider world-pathname tracy-p fullscreen-p interactive-p)
          (parse-interactive-options arguments)
        (if interactive-p
            (run-interactive :provider provider :tracy-p tracy-p
+                            :fullscreen-p fullscreen-p
                             :world-pathname world-pathname)
            (progn
              (usage *error-output*)

@@ -76,6 +76,10 @@
 (defparameter *terminal-background-emission* 1.15
   "Radiance per unit of cell-background colour, held below the ink's own.")
 
+(defparameter *terminal-font-scale* 1.0
+  "The multiplier on the font size that fits a display's grid to its face;
+the default a new display takes.")
+
 ;;; The frame records screen-right, screen-up, and outward in voxel axes.  EQL
 ;;; methods keep the six closed orientations inspectable without making block
 ;;; materials or terminal surfaces branch on their names.
@@ -137,6 +141,77 @@
    (reconciliations :initform 0
                     :accessor terminal-surface-reconciliations)))
 
+;;; A terminal display draws onto *some* rectangle.  The wall's rectangle is
+;;; a run of blocks (TERMINAL-SURFACE); a phone's is a small plane in the
+;;; hand.  Everything downstream -- glyph placement, cell backgrounds, the
+;;; screen panel and faceplate -- asks the surface only these questions.
+
+(defgeneric terminal-surface-axes (surface)
+  (:documentation
+   "Return SURFACE's unit RIGHT, UP, and OUTWARD vectors as three vec3s, in
+the coordinate space the surface's display is drawn in."))
+
+(defgeneric terminal-surface-lower-left-point (surface &optional offset)
+  (:documentation
+   "Return the point OFFSET cell-depths outside SURFACE's lower left corner,
+as seen from its outward side."))
+
+(defgeneric terminal-surface-physical-width (surface)
+  (:documentation "SURFACE's width along its right axis, in cells."))
+
+(defgeneric terminal-surface-physical-height (surface)
+  (:documentation "SURFACE's height along its up axis, in cells."))
+
+(defgeneric terminal-surface-current-p (surface &optional session)
+  (:documentation
+   "True when SURFACE's last coherently published derived state is current."))
+
+(defgeneric terminal-surface-focus-score (surface session)
+  (:documentation
+   "A non-negative score when the display on SURFACE can be entered by TAB,
+or NIL.  Lower is nearer."))
+
+(defgeneric terminal-surface-focus-camera-pose (surface session)
+  (:documentation
+   "The camera pose from which SURFACE's display is best read, or NIL to
+leave the camera where it is with only the narrowed field of view."))
+
+(defmethod terminal-surface-axes ((surface terminal-surface))
+  (let ((frame (terminal-face-frame (terminal-surface-face surface))))
+    (values (voxel-direction-vec3 (terminal-face-frame-right frame))
+            (voxel-direction-vec3 (terminal-face-frame-up frame))
+            (voxel-direction-vec3 (terminal-face-frame-outward frame)))))
+
+(defmethod terminal-surface-focus-camera-pose
+    ((surface terminal-surface) (session luvcraft-session))
+  (destructuring-bind (width height)
+      (canvas-extent (luvcraft-session-context session))
+    (multiple-value-call
+        (lambda (left top right bottom)
+          (terminal-focus-camera-pose
+           surface width height left top right bottom))
+      (luvcraft-session-focus-insets session))))
+
+(defmethod terminal-surface-focus-score
+    ((surface terminal-surface) (session luvcraft-session))
+  (multiple-value-bind (hit status) (luvcraft-session-target session)
+    (declare (ignore status))
+    (when hit
+      (let ((coordinate (block-ray-hit-coordinate hit)))
+        (when (loop for row below (terminal-surface-height surface)
+                    thereis
+                    (loop for column below (terminal-surface-width surface)
+                          thereis
+                          (equalp
+                           coordinate
+                           (terminal-surface-coordinate surface column row))))
+          (block-ray-hit-distance hit))))))
+
+(defvar *terminal-display-counter* 0)
+
+(defun next-terminal-display-name ()
+  (format nil "wall-~D" (incf *terminal-display-counter*)))
+
 (defclass terminal-display ()
   ((session :initarg :session :initform nil :reader terminal-display-session)
    (surface :initarg :surface :reader terminal-display-surface)
@@ -146,6 +221,11 @@
    ;; child only while its mode calls for it.
    (mode-overlay :initform nil :accessor terminal-display-mode-overlay)
    (film-screen :initform nil :accessor terminal-display-film-screen)
+   ;; The wall's name, which its shell learns as LUVCRAFT_PARENT_SCREEN, and
+   ;; the portal showing a child luvcraft that asked for that name.
+   (name :initarg :name :initform (next-terminal-display-name)
+         :reader terminal-display-name)
+   (portal :initform nil :accessor terminal-display-portal)
    (terminal :initarg :terminal :initform nil :reader terminal-display-terminal)
    (device :initarg :device :initform nil :accessor terminal-display-device)
    (presentation :initarg :presentation :initform nil
@@ -172,8 +252,8 @@
                   :accessor terminal-display-faceplate-run)
    (margin :initarg :margin :initform 0.12
            :reader terminal-display-margin)
-   (font-scale :initarg :font-scale :initform 1.0
-               :reader terminal-display-font-scale)
+   (font-scale :initarg :font-scale :initform *terminal-font-scale*
+               :accessor terminal-display-font-scale)
    (dirty-p :initform nil :accessor terminal-display-dirty-p)
    (refresh-count :initform 0 :accessor terminal-display-refresh-count)
    (frame-bind-groups :initform (make-hash-table :test #'eq)
@@ -190,7 +270,77 @@ browser, while the display continues to own focus and movie lifetime."))
 (defmethod change-terminal-display-mode
     ((display terminal-display) (session luvcraft-session) (mode (eql :shell)))
   (stop-terminal-display-film display session)
+  (close-terminal-display-portal display)
   (setf (terminal-display-mode display) mode)
+  display)
+
+;;; A child luvcraft on the wall.  The shell on this wall carries the portal
+;;; server's socket in its environment; a luvcraft started there connects and
+;;; asks for this wall by name, and its picture takes the wall over until it
+;;; goes away (Ctrl-C in the shell still reaches the shell, so that is how).
+
+(defun open-terminal-display-portal (display mirror)
+  "Put the ready child MIRROR on DISPLAY's wall and switch it to :PORTAL mode."
+  (let ((session (terminal-display-session display))
+        (surface (terminal-display-surface display)))
+    (unless session
+      (error "Terminal display ~S is not attached to a session." display))
+    (close-terminal-display-portal display)
+    (stop-terminal-display-film display session)
+    (let ((portal
+            (open-luvcraft-portal
+             session
+             :mirror mirror
+             :attach-p nil
+             :rectangle (lambda (aspect)
+                          (terminal-portal-panel display aspect))
+             :on-stop (lambda (portal)
+                        (declare (ignore portal))
+                        (close-terminal-display-portal display)))))
+      (setf (terminal-display-portal display) portal
+            (terminal-display-mode display) :portal)
+      portal)))
+
+(defun terminal-portal-panel (display aspect)
+  "The portal panel for DISPLAY: the whole face, and inside it the picture
+of ASPECT fitted with the same margin the text grid keeps, so the wall's
+proportions hold when a shell becomes a portal.  Returns the panel's origin,
+right edge, and up edge, then the picture rectangle in panel UV."
+  (let* ((surface (terminal-display-surface display))
+         (surface-width (terminal-surface-physical-width surface))
+         (surface-height (terminal-surface-physical-height surface))
+         (margin (terminal-display-margin display))
+         (available-width (- surface-width (* 2 margin)))
+         (available-height (- surface-height (* 2 margin)))
+         (available-aspect (/ available-width available-height))
+         (width (if (> aspect available-aspect)
+                    available-width
+                    (* available-height aspect)))
+         (height (if (> aspect available-aspect)
+                     (/ available-width aspect)
+                     available-height))
+         (left (/ (- surface-width width) 2.0))
+         (bottom (/ (- surface-height height) 2.0)))
+    (multiple-value-bind (origin right-edge up-edge)
+        (terminal-film-rectangle surface (/ surface-width surface-height))
+      (values origin right-edge up-edge
+              ;; Panel V runs down the picture (the quad flips it), so the
+              ;; bottom margin is the top of the rectangle in UV.
+              (list (/ left surface-width)
+                    (/ bottom surface-height)
+                    (/ (+ left width) surface-width)
+                    (/ (+ bottom height) surface-height))))))
+
+(defun close-terminal-display-portal (display)
+  "Take the child off DISPLAY's wall, if one is there, and go back to the shell."
+  (alexandria:when-let ((portal (terminal-display-portal display))
+                        (session (terminal-display-session display)))
+    (setf (terminal-display-portal display) nil)
+    (when (eq :portal (terminal-display-mode display))
+      (setf (terminal-display-mode display) :shell))
+    (forget-luvcraft-portal session portal)
+    (close-luvcraft-portal session portal)
+    (setf (terminal-display-dirty-p display) t))
   display)
 
 (defmethod change-terminal-display-mode
@@ -742,8 +892,8 @@ projection remain one last-known-good cohort."
            (incf (terminal-surface-reconciliations surface))))))
     (terminal-surface-state surface)))
 
-(defun terminal-surface-current-p (surface &optional session)
-  "True when SURFACE's last coherently published derived state is current."
+(defmethod terminal-surface-current-p
+    ((surface terminal-surface) &optional session)
   (eq :current (reconcile-terminal-surface surface session)))
 
 (defun terminal-surface-axis-extent (surface direction)
@@ -754,13 +904,13 @@ projection remain one last-known-good cohort."
        (* (abs (voxel-direction-dy direction)) (vec3-y extent))
        (* (abs (voxel-direction-dz direction)) (vec3-z extent)))))
 
-(defun terminal-surface-physical-width (surface)
+(defmethod terminal-surface-physical-width ((surface terminal-surface))
   (let ((frame (terminal-face-frame (terminal-surface-face surface))))
     (* (terminal-surface-width surface)
        (terminal-surface-axis-extent
         surface (terminal-face-frame-right frame)))))
 
-(defun terminal-surface-physical-height (surface)
+(defmethod terminal-surface-physical-height ((surface terminal-surface))
   (let ((frame (terminal-face-frame (terminal-surface-face surface))))
     (* (terminal-surface-height surface)
        (terminal-surface-axis-extent
@@ -824,7 +974,8 @@ lets it fall back to software rather than refusing to play."
             (terminal-display-mode display) :film)
       screen)))
 
-(defun terminal-surface-lower-left-point (surface &optional (offset 0.006))
+(defmethod terminal-surface-lower-left-point
+    ((surface terminal-surface) &optional (offset 0.006))
   "Return the metric world point OFFSET cell-depths outside the lower left."
   (let* ((origin (terminal-surface-origin surface))
          (space (block-world-space (terminal-surface-world surface)))
@@ -977,100 +1128,97 @@ and height in world units.  FONT-SCALE is an explicit multiplier on contain."
   "Place glyphs in one font grid fitted across the entire block SURFACE."
   (multiple-value-bind (font-height font-advance descender-ratio)
       (terminal-font-metrics font-loader)
-   (let* ((frame (terminal-face-frame (terminal-surface-face surface)))
-         (right (voxel-direction-vec3
-                 (terminal-face-frame-right frame)))
-         (up (voxel-direction-vec3 (terminal-face-frame-up frame)))
-         (origin (terminal-surface-lower-left-point surface))
-         (padding 0.035)
-         (data (make-array (* 24 (length occurrences))
-                           :element-type 'single-float)))
-    (multiple-value-bind (scale left bottom grid-width grid-height)
-        (fit-terminal-grid-in-surface
-         domain surface font-advance font-height margin font-scale)
-      (declare (ignore grid-width))
-      (labels ((difference (end start)
-                 (make-vec3 (- (vec3-x end) (vec3-x start))
-                            (- (vec3-y end) (vec3-y start))
-                            (- (vec3-z end) (vec3-z start))))
-               (write-values (offset values)
-                 (loop for value in values
-                       for index from offset
-                       do (setf (aref data index)
-                                (coerce value 'single-float)))))
-        (loop for occurrence in occurrences
-              for base from 0 by 24
-              for glyph = (terminal-glyph-occurrence-glyph occurrence)
-              for column = (terminal-glyph-occurrence-column occurrence)
-              for row = (terminal-glyph-occurrence-row occurrence)
-              for baseline =
-                (+ bottom grid-height
-                   (- (* (1+ row) font-height scale))
-                   (* (- descender-ratio) scale))
-              for cell-x = (+ left (* column font-advance scale))
-              for outline-left =
-                (- (luv.slug:slug-glyph-placement-outline-min-x glyph) padding)
-              for outline-bottom =
-                (- (luv.slug:slug-glyph-placement-outline-min-y glyph) padding)
-              for outline-right =
-                (+ (luv.slug:slug-glyph-placement-outline-max-x glyph) padding)
-              for outline-top =
-                (+ (luv.slug:slug-glyph-placement-outline-max-y glyph) padding)
-              for glyph-origin =
-                (terminal-offset-point
-                 origin
-                 right
-                 (+ cell-x
-                    (* (luv.slug:slug-glyph-placement-origin-x glyph) scale))
-                 up
-                 (+ baseline
-                    (* (luv.slug:slug-glyph-placement-origin-y glyph) scale)))
-              for quad-origin =
-                (terminal-offset-point
-                 glyph-origin right (* outline-left scale)
-                 up (* outline-bottom scale))
-              for right-edge =
-                (terminal-offset-point
-                 glyph-origin right (* outline-right scale)
-                 up (* outline-bottom scale))
-              for top-edge =
-                (terminal-offset-point
-                 glyph-origin right (* outline-left scale)
-                 up (* outline-top scale))
-              for resource = (luv.slug:slug-glyph-placement-resource glyph)
-              for serialized =
-                (luv.slug:slug-device-glyph-serialized resource)
-              for atlas-location =
-                (gethash resource (luv.slug:slug-glyph-atlas-locations atlas))
-              do (multiple-value-bind (red green blue)
-                     (scaled-color-linear-components
-                      (terminal-glyph-occurrence-foreground occurrence)
-                      *terminal-ink-emission*)
-                   ;; The three spare Z lanes carry the linear ink colour.
-                   (write-values
-                    base
-                    (list
-                     (vec3-x quad-origin) (vec3-y quad-origin)
-                     (vec3-z quad-origin)
-                     (vec3-x (difference right-edge quad-origin))
-                     (vec3-y (difference right-edge quad-origin))
-                     (vec3-z (difference right-edge quad-origin))
-                     (vec3-x (difference top-edge quad-origin))
-                     (vec3-y (difference top-edge quad-origin))
-                     (vec3-z (difference top-edge quad-origin))
-                     outline-left outline-bottom
-                     (luv.slug:slug-serialized-outline-horizontal-band-count
-                      serialized)
-                     outline-right outline-top
-                     (luv.slug:slug-serialized-outline-vertical-band-count
-                      serialized)
-                     (first atlas-location) (second atlas-location) red
-                     (luv.slug:slug-glyph-placement-outline-min-x glyph)
-                     (luv.slug:slug-glyph-placement-outline-min-y glyph) green
-                     (luv.slug:slug-glyph-placement-outline-max-x glyph)
-                     (luv.slug:slug-glyph-placement-outline-max-y glyph)
-                     blue))))
-        data)))))
+    (multiple-value-bind (right up) (terminal-surface-axes surface)
+     (let* ((origin (terminal-surface-lower-left-point surface))
+           (padding 0.035)
+           (data (make-array (* 24 (length occurrences))
+                             :element-type 'single-float)))
+      (multiple-value-bind (scale left bottom grid-width grid-height)
+          (fit-terminal-grid-in-surface
+           domain surface font-advance font-height margin font-scale)
+        (declare (ignore grid-width))
+        (labels ((difference (end start)
+                   (make-vec3 (- (vec3-x end) (vec3-x start))
+                              (- (vec3-y end) (vec3-y start))
+                              (- (vec3-z end) (vec3-z start))))
+                 (write-values (offset values)
+                   (loop for value in values
+                         for index from offset
+                         do (setf (aref data index)
+                                  (coerce value 'single-float)))))
+          (loop for occurrence in occurrences
+                for base from 0 by 24
+                for glyph = (terminal-glyph-occurrence-glyph occurrence)
+                for column = (terminal-glyph-occurrence-column occurrence)
+                for row = (terminal-glyph-occurrence-row occurrence)
+                for baseline =
+                  (+ bottom grid-height
+                     (- (* (1+ row) font-height scale))
+                     (* (- descender-ratio) scale))
+                for cell-x = (+ left (* column font-advance scale))
+                for outline-left =
+                  (- (luv.slug:slug-glyph-placement-outline-min-x glyph) padding)
+                for outline-bottom =
+                  (- (luv.slug:slug-glyph-placement-outline-min-y glyph) padding)
+                for outline-right =
+                  (+ (luv.slug:slug-glyph-placement-outline-max-x glyph) padding)
+                for outline-top =
+                  (+ (luv.slug:slug-glyph-placement-outline-max-y glyph) padding)
+                for glyph-origin =
+                  (terminal-offset-point
+                   origin
+                   right
+                   (+ cell-x
+                      (* (luv.slug:slug-glyph-placement-origin-x glyph) scale))
+                   up
+                   (+ baseline
+                      (* (luv.slug:slug-glyph-placement-origin-y glyph) scale)))
+                for quad-origin =
+                  (terminal-offset-point
+                   glyph-origin right (* outline-left scale)
+                   up (* outline-bottom scale))
+                for right-edge =
+                  (terminal-offset-point
+                   glyph-origin right (* outline-right scale)
+                   up (* outline-bottom scale))
+                for top-edge =
+                  (terminal-offset-point
+                   glyph-origin right (* outline-left scale)
+                   up (* outline-top scale))
+                for resource = (luv.slug:slug-glyph-placement-resource glyph)
+                for serialized =
+                  (luv.slug:slug-device-glyph-serialized resource)
+                for atlas-location =
+                  (gethash resource (luv.slug:slug-glyph-atlas-locations atlas))
+                do (multiple-value-bind (red green blue)
+                       (scaled-color-linear-components
+                        (terminal-glyph-occurrence-foreground occurrence)
+                        *terminal-ink-emission*)
+                     ;; The three spare Z lanes carry the linear ink colour.
+                     (write-values
+                      base
+                      (list
+                       (vec3-x quad-origin) (vec3-y quad-origin)
+                       (vec3-z quad-origin)
+                       (vec3-x (difference right-edge quad-origin))
+                       (vec3-y (difference right-edge quad-origin))
+                       (vec3-z (difference right-edge quad-origin))
+                       (vec3-x (difference top-edge quad-origin))
+                       (vec3-y (difference top-edge quad-origin))
+                       (vec3-z (difference top-edge quad-origin))
+                       outline-left outline-bottom
+                       (luv.slug:slug-serialized-outline-horizontal-band-count
+                        serialized)
+                       outline-right outline-top
+                       (luv.slug:slug-serialized-outline-vertical-band-count
+                        serialized)
+                       (first atlas-location) (second atlas-location) red
+                       (luv.slug:slug-glyph-placement-outline-min-x glyph)
+                       (luv.slug:slug-glyph-placement-outline-min-y glyph) green
+                       (luv.slug:slug-glyph-placement-outline-max-x glyph)
+                       (luv.slug:slug-glyph-placement-outline-max-y glyph)
+                       blue))))
+          data))))))
 
 (defun make-terminal-display-cell-instances
     (presentation surface font-loader margin font-scale)
@@ -1080,60 +1228,58 @@ Each record is origin, right edge, up edge, and linear RGB: 12 floats.  The
 edges span the exact painted rectangle; the shader pads the quad itself and
 resolves the analytic edge, so adjacent runs meet without seams."
   (multiple-value-bind (font-height font-advance) (terminal-font-metrics font-loader)
-    (let* ((domain (terminal-grid-presentation-domain presentation))
-           (frame (terminal-face-frame (terminal-surface-face surface)))
-           (right (voxel-direction-vec3 (terminal-face-frame-right frame)))
-           (up (voxel-direction-vec3 (terminal-face-frame-up frame)))
-           ;; Sit just below the glyph plane so ink always wins the depth test.
-           (origin (terminal-surface-lower-left-point surface 0.004))
-           (values nil)
-           (count 0))
-      (multiple-value-bind (scale left bottom grid-width grid-height)
-          (fit-terminal-grid-in-surface
-           domain surface font-advance font-height margin font-scale)
-        (declare (ignore grid-width))
-        (let ((cell-width (* font-advance scale))
-              (cell-height (* font-height scale)))
-          (flet ((emit (row start end background)
-                   (let ((corner
-                           (terminal-offset-point
-                            origin
-                            right (+ left (* start cell-width))
-                            up (+ bottom grid-height
-                                  (- (* (1+ row) cell-height)))))
-                         (width (* (- end start) cell-width)))
-                     (multiple-value-bind (red green blue)
-                         (scaled-color-linear-components
-                          background *terminal-background-emission*)
-                       (incf count)
-                       (push (list (vec3-x corner) (vec3-y corner) (vec3-z corner)
-                                   (* (vec3-x right) width)
-                                   (* (vec3-y right) width)
-                                   (* (vec3-z right) width)
-                                   (* (vec3-x up) cell-height)
-                                   (* (vec3-y up) cell-height)
-                                   (* (vec3-z up) cell-height)
-                                   red green blue)
-                             values)))))
-            (dotimes (row (terminal-grid-domain-rows domain))
-              (let ((run-start nil) (run-color nil))
-                (dotimes (column (terminal-grid-domain-columns domain))
-                  (multiple-value-bind (foreground background)
-                      (terminal-presentation-cell-style presentation column row)
-                    (declare (ignore foreground))
-                    (unless (eql background run-color)
-                      (when run-color (emit row run-start column run-color))
-                      (setf run-start column run-color background))))
-                (when run-color
-                  (emit row run-start (terminal-grid-domain-columns domain)
-                        run-color)))))))
-      (let ((data (make-array (* 12 count) :element-type 'single-float))
-            (index 0))
-        (dolist (record (nreverse values))
-          (dolist (value record)
-            (setf (aref data index) (coerce value 'single-float))
-            (incf index)))
-        data))))
+    (multiple-value-bind (right up) (terminal-surface-axes surface)
+      (let* ((domain (terminal-grid-presentation-domain presentation))
+             ;; Sit just below the glyph plane so ink always wins the depth test.
+             (origin (terminal-surface-lower-left-point surface 0.004))
+             (values nil)
+             (count 0))
+        (multiple-value-bind (scale left bottom grid-width grid-height)
+            (fit-terminal-grid-in-surface
+             domain surface font-advance font-height margin font-scale)
+          (declare (ignore grid-width))
+          (let ((cell-width (* font-advance scale))
+                (cell-height (* font-height scale)))
+            (flet ((emit (row start end background)
+                     (let ((corner
+                             (terminal-offset-point
+                              origin
+                              right (+ left (* start cell-width))
+                              up (+ bottom grid-height
+                                    (- (* (1+ row) cell-height)))))
+                           (width (* (- end start) cell-width)))
+                       (multiple-value-bind (red green blue)
+                           (scaled-color-linear-components
+                            background *terminal-background-emission*)
+                         (incf count)
+                         (push (list (vec3-x corner) (vec3-y corner) (vec3-z corner)
+                                     (* (vec3-x right) width)
+                                     (* (vec3-y right) width)
+                                     (* (vec3-z right) width)
+                                     (* (vec3-x up) cell-height)
+                                     (* (vec3-y up) cell-height)
+                                     (* (vec3-z up) cell-height)
+                                     red green blue)
+                               values)))))
+              (dotimes (row (terminal-grid-domain-rows domain))
+                (let ((run-start nil) (run-color nil))
+                  (dotimes (column (terminal-grid-domain-columns domain))
+                    (multiple-value-bind (foreground background)
+                        (terminal-presentation-cell-style presentation column row)
+                      (declare (ignore foreground))
+                      (unless (eql background run-color)
+                        (when run-color (emit row run-start column run-color))
+                        (setf run-start column run-color background))))
+                  (when run-color
+                    (emit row run-start (terminal-grid-domain-columns domain)
+                          run-color)))))))
+        (let ((data (make-array (* 12 count) :element-type 'single-float))
+              (index 0))
+          (dolist (record (nreverse values))
+            (dolist (value record)
+              (setf (aref data index) (coerce value 'single-float))
+              (incf index)))
+          data)))))
 
 (defun make-terminal-display-screen-instances (surface &optional (offset 0.003))
   "Build the one screen-panel record spanning the whole display surface.
@@ -1144,26 +1290,23 @@ which of the terminal's coplanar rectangles this is: the default sits just
 below the cell backgrounds, so both they and the glyphs win the depth test
 against it while it hides the block tiles behind the screen, and the
 faceplate's larger offset sits in front of the glyphs instead."
-  (let* ((frame (terminal-face-frame (terminal-surface-face surface)))
-         (right (voxel-direction-vec3 (terminal-face-frame-right frame)))
-         (up (voxel-direction-vec3 (terminal-face-frame-up frame)))
-         (outward (voxel-direction-vec3 (terminal-face-frame-outward frame)))
-         (origin (terminal-surface-lower-left-point surface offset))
-         (width (terminal-surface-physical-width surface))
-         (height (terminal-surface-physical-height surface))
-         (data (make-array 12 :element-type 'single-float))
-         (values (list (vec3-x origin) (vec3-y origin) (vec3-z origin)
-                       (* (vec3-x right) width)
-                       (* (vec3-y right) width)
-                       (* (vec3-z right) width)
-                       (* (vec3-x up) height)
-                       (* (vec3-y up) height)
-                       (* (vec3-z up) height)
-                       (vec3-x outward) (vec3-y outward) (vec3-z outward))))
-    (loop for value in values
-          for index from 0
-          do (setf (aref data index) (coerce value 'single-float)))
-    data))
+  (multiple-value-bind (right up outward) (terminal-surface-axes surface)
+    (let* ((origin (terminal-surface-lower-left-point surface offset))
+           (width (terminal-surface-physical-width surface))
+           (height (terminal-surface-physical-height surface))
+           (data (make-array 12 :element-type 'single-float))
+           (values (list (vec3-x origin) (vec3-y origin) (vec3-z origin)
+                         (* (vec3-x right) width)
+                         (* (vec3-y right) width)
+                         (* (vec3-z right) width)
+                         (* (vec3-x up) height)
+                         (* (vec3-y up) height)
+                         (* (vec3-z up) height)
+                         (vec3-x outward) (vec3-y outward) (vec3-z outward))))
+      (loop for value in values
+            for index from 0
+            do (setf (aref data index) (coerce value 'single-float)))
+      data)))
 
 (defun make-terminal-display-glyph-population
     (presentation surface glyph-cache glyphs-by-character
@@ -1315,14 +1458,12 @@ two materials can share one placement stage without sharing a name."
        presentation surface glyph-cache glyphs-by-character
        font-pathname bold-font-pathname margin font-scale)
     (let* ((lower-left (terminal-surface-lower-left-point surface))
-           (frame (terminal-face-frame (terminal-surface-face surface)))
            (center
-             (terminal-offset-point
-              lower-left
-              (voxel-direction-vec3 (terminal-face-frame-right frame))
-              (/ (terminal-surface-physical-width surface) 2.0)
-              (voxel-direction-vec3 (terminal-face-frame-up frame))
-              (/ (terminal-surface-physical-height surface) 2.0))))
+             (multiple-value-bind (right up) (terminal-surface-axes surface)
+               (terminal-offset-point
+                lower-left
+                right (/ (terminal-surface-physical-width surface) 2.0)
+                up (/ (terminal-surface-physical-height surface) 2.0)))))
       (let ((glyph-run
               (make-world-text-run-from-instances
                (luvcraft-session-device session)
@@ -1341,6 +1482,16 @@ two materials can share one placement stage without sharing a name."
   (clrhash (terminal-display-frame-bind-groups display))
   display)
 
+(defmethod luvcraft-overlay-live-shader-pipelines ((display terminal-display))
+  (list* (world-text-run-pipeline (terminal-display-glyph-run display))
+         (append
+          (loop for run in (list (terminal-display-cell-run display)
+                                 (terminal-display-screen-run display)
+                                 (terminal-display-faceplate-run display))
+                when run collect (terminal-cell-run-pipeline run))
+          (alexandria:when-let ((portal (terminal-display-portal display)))
+            (luvcraft-overlay-live-shader-pipelines portal)))))
+
 (defmethod refresh-luvcraft-overlay
     ((display terminal-display) (session luvcraft-session))
   (alexandria:when-let ((overlay (terminal-display-delegate-overlay display)))
@@ -1348,13 +1499,8 @@ two materials can share one placement stage without sharing a name."
   ;; The wall's shaders are as live as the block world's: a redefined
   ;; :terminal-screen or :terminal-cell method rebuilds here, at the frame
   ;; boundary, keeping the last good pipeline on failure.
-  (refresh-live-shader-pipeline
-   (world-text-run-pipeline (terminal-display-glyph-run display)))
-  (dolist (run (list (terminal-display-cell-run display)
-                     (terminal-display-screen-run display)
-                     (terminal-display-faceplate-run display)))
-    (when run
-      (refresh-live-shader-pipeline (terminal-cell-run-pipeline run))))
+  (dolist (pipeline (luvcraft-overlay-live-shader-pipelines display))
+    (refresh-live-shader-pipeline pipeline))
   (when (terminal-display-dirty-p display)
     ;; Clearing before the snapshot preserves an output notification which
     ;; races after this point; that later notification requests another frame
@@ -1408,6 +1554,18 @@ two materials can share one placement stage without sharing a name."
           (setf (terminal-display-dirty-p display) t)))))
   display)
 
+(defgeneric terminal-display-frame-uniform-buffer (display frame)
+  (:documentation
+   "The frame uniform buffer DISPLAY's runs draw against in FRAME.
+
+A wall draws in world coordinates against the session's own frame uniform.
+A display whose surface lives in some other space -- a phone in the hand --
+supplies a uniform whose camera is expressed in that space instead."))
+
+(defmethod terminal-display-frame-uniform-buffer
+    ((display terminal-display) frame)
+  (luvcraft-frame-uniform-buffer frame))
+
 (defun terminal-display-frame-bind-group (display frame)
   (or (gethash frame (terminal-display-frame-bind-groups display))
       (let ((group
@@ -1415,7 +1573,7 @@ two materials can share one placement stage without sharing a name."
                (make-world-text-frame-bind-groups
                 (terminal-display-glyph-run display)
                 (luvcraft-session-device (terminal-display-session display))
-                (luvcraft-frame-uniform-buffer frame))
+                (terminal-display-frame-uniform-buffer display frame))
                0)))
         (setf (gethash frame
                        (terminal-display-frame-bind-groups display))
@@ -1462,6 +1620,10 @@ two materials can share one placement stage without sharing a name."
              (set-bind-group pass 0
                              (terminal-display-frame-bind-group display frame))
              (draw pass 6 (length (world-text-run-glyphs glyph-run))))))
+        (:portal
+         ;; A child game's picture, under this wall's glass like the text.
+         (alexandria:when-let ((portal (terminal-display-portal display)))
+           (encode-luvcraft-portal-picture portal session pass surface-texture)))
         (t
          ;; Film, Telegram, and anything a presentation extension adds later
          ;; all draw through the mode's own overlay.
@@ -1484,7 +1646,10 @@ two materials can share one placement stage without sharing a name."
 
 (defmethod release-luvcraft-overlay ((display terminal-display))
   (alexandria:when-let ((session (terminal-display-session display)))
-    (stop-terminal-display-film display session))
+    (stop-terminal-display-film display session)
+    (close-terminal-display-portal display)
+    #+darwin
+    (unregister-luvcraft-portal-screen session (terminal-display-name display)))
   (alexandria:when-let ((overlay (terminal-display-mode-overlay display)))
     (setf (terminal-display-mode-overlay display) nil)
     (release-luvcraft-overlay overlay))
@@ -1509,7 +1674,9 @@ two materials can share one placement stage without sharing a name."
 
 (defmethod handle-luvcraft-focus-event
     ((display terminal-display) session canvas (event canvas-key-event))
-  (if (eq :shell (terminal-display-mode display))
+  ;; Keys still reach the shell under a portal: that is how the child gets
+  ;; its Ctrl-C.
+  (if (member (terminal-display-mode display) '(:shell :portal))
       (let ((device (terminal-display-device display)))
         (when device
           (termdev:send-pty-device-canvas-key-event device event))
@@ -1527,19 +1694,7 @@ two materials can share one placement stage without sharing a name."
       (handle-luvcraft-focus-control-event display session canvas event)))
 
 (defmethod luvcraft-focus-score ((display terminal-display) session)
-  (multiple-value-bind (hit status) (luvcraft-session-target session)
-    (declare (ignore status))
-    (when hit
-      (let ((surface (terminal-display-surface display))
-            (coordinate (block-ray-hit-coordinate hit)))
-        (when (loop for row below (terminal-surface-height surface)
-                    thereis
-                    (loop for column below (terminal-surface-width surface)
-                          thereis
-                          (equalp
-                           coordinate
-                           (terminal-surface-coordinate surface column row))))
-          (block-ray-hit-distance hit))))))
+  (terminal-surface-focus-score (terminal-display-surface display) session))
 
 ;;; A screen framed exactly square-on stops being a thing in the world and
 ;;; becomes a pasted screenshot: nothing in the picture reports that the
@@ -1553,6 +1708,75 @@ two materials can share one placement stage without sharing a name."
 
 (defparameter *terminal-focus-elevation* 4.5
   "Degrees the focused view stands above the screen's own centre.")
+
+;;; ---------------------------------------------------------------------
+;;; The terminal's knobs.
+;;;
+;;; The emissions and the font scale are baked into each display's glyph
+;;; instances, so a display must repopulate to show a change: that is the
+;;; TERMINAL-REALIZATION, and the knobs carrying it are TERMINAL-KNOBs.
+
+(defun terminal-displays (session)
+  "Every terminal display among SESSION's overlays."
+  (remove-if-not (lambda (overlay) (typep overlay 'terminal-display))
+                 (luvcraft-session-overlays session)))
+
+(defun mark-terminal-displays-dirty (session)
+  "Ask every terminal display in SESSION to rebuild its glyphs next frame."
+  (dolist (display (terminal-displays session))
+    (setf (terminal-display-dirty-p display) t))
+  session)
+
+(defclass terminal-realization ()
+  ()
+  (:documentation
+   "The value is baked into terminal glyph instances; every terminal display
+must repopulate."))
+
+(defmethod realize-knob progn ((knob terminal-realization) session)
+  (mark-terminal-displays-dirty session))
+
+(defclass terminal-knob (terminal-realization scalar-knob) ())
+
+(defun terminal-font-scale (session)
+  "The font scale SESSION's displays use: the first display's, or the
+default a new one would take."
+  (let ((display (first (terminal-displays session))))
+    (if display
+        (terminal-display-font-scale display)
+        *terminal-font-scale*)))
+
+(defun (setf terminal-font-scale) (scale session)
+  (setf *terminal-font-scale* scale)
+  (dolist (display (terminal-displays session))
+    (setf (terminal-display-font-scale display) scale))
+  scale)
+
+(define-knob terminal-ink-emission
+    (:label "terminal ink" :group :terminal :class 'terminal-knob
+     :quantity (:quantity :emission-gain :unit :one)
+     :unit-label "×" :minimum 0.2 :maximum 6.0 :step 0.1)
+    *terminal-ink-emission*)
+(define-knob terminal-background-emission
+    (:label "terminal background" :group :terminal :class 'terminal-knob
+     :quantity (:quantity :emission-gain :unit :one)
+     :unit-label "×" :minimum 0.0 :maximum 3.0 :step 0.05)
+    *terminal-background-emission*)
+(define-knob terminal-font-scale
+    (:label "terminal font" :group :terminal :class 'terminal-knob
+     :quantity (:quantity :font-scale :unit :one)
+     :unit-label "×" :minimum 0.3 :maximum 2.0 :step 0.05)
+    (terminal-font-scale session))
+(define-knob terminal-focus-azimuth
+    (:label "focus azimuth" :group :terminal
+     :quantity (:quantity :angle :unit :degree)
+     :minimum -30.0 :maximum 30.0 :step 0.5)
+    *terminal-focus-azimuth*)
+(define-knob terminal-focus-elevation
+    (:label "focus elevation" :group :terminal
+     :quantity (:quantity :angle :unit :degree)
+     :minimum -20.0 :maximum 20.0 :step 0.5)
+    *terminal-focus-elevation*)
 
 (defun terminal-focus-eye-direction (right up outward azimuth elevation)
   "The unit direction from a screen's centre toward a viewer standing at
@@ -1665,14 +1889,8 @@ generalizes."
 
 (defmethod luvcraft-focus-camera-pose
     ((display terminal-display) (session luvcraft-session))
-  (destructuring-bind (width height)
-      (canvas-extent (luvcraft-session-context session))
-    (multiple-value-call
-        (lambda (left top right bottom)
-          (terminal-focus-camera-pose
-           (terminal-display-surface display) width height
-           left top right bottom))
-      (luvcraft-session-focus-insets session))))
+  (terminal-surface-focus-camera-pose
+   (terminal-display-surface display) session))
 
 (defun block-ray-hit-face (hit)
   "Return the exposed block face through which HIT entered its block."
@@ -1711,23 +1929,39 @@ generalizes."
                         (world-coordinate-z coordinate)
                         (block-face-name face)
                         :fixture ""))
-                 (attach-terminal-display-pty
-                  display
-                  :program "/bin/bash"
-                  :directory (uiop:getcwd)
-                  :environment
-                  (cons
-                   "BASH_SILENCE_DEPRECATION_WARNING=1"
-                   (delete-if
-                    (lambda (entry)
-                      (uiop:string-prefix-p
-                       "BASH_SILENCE_DEPRECATION_WARNING=" entry))
-                    (copy-list (sb-ext:posix-environ)))))
+                 (attach-terminal-display-shell display)
                  (setf completed-p t)
                  display)
             (unless completed-p
               (when display
                 (remove-luvcraft-overlay session display)))))))))
+
+(defun attach-terminal-display-shell (display)
+  "Attach an interactive login-free bash in the checkout to DISPLAY.
+
+The shell learns where this game's portal server listens and which wall it is
+on, so a luvcraft started in it appears right here."
+  (let ((environment
+          (cons
+           "BASH_SILENCE_DEPRECATION_WARNING=1"
+           (delete-if
+            (lambda (entry)
+              (uiop:string-prefix-p "BASH_SILENCE_DEPRECATION_WARNING=" entry))
+            (copy-list (sb-ext:posix-environ)))))
+        (session (terminal-display-session display)))
+    #+darwin
+    (when session
+      (register-luvcraft-portal-screen
+       session (terminal-display-name display)
+       (lambda (mirror) (open-terminal-display-portal display mirror)))
+      (setf environment
+            (luvcraft-portal-environment
+             session (terminal-display-name display) environment)))
+    (attach-terminal-display-pty
+     display
+     :program "/bin/bash"
+     :directory (uiop:getcwd)
+     :environment environment)))
 
 (defun attach-terminal-display-pty (display &rest open-arguments)
   "Attach one owned PTY device to DISPLAY's existing Ghostty terminal."
@@ -1752,12 +1986,16 @@ generalizes."
 
 The row count follows the wall's block height; the column count is whatever
 that cell height affords across the wall's width at the font's own aspect."
+  (terminal-grid-columns-for-rows
+   surface font-pathname margin
+   (max 1 (round (* rows-per-block (terminal-surface-height surface))))))
+
+(defun terminal-grid-columns-for-rows (surface font-pathname margin rows)
+  "Return the columns ROWS of FONT afford across SURFACE, and ROWS."
   (zpb-ttf:with-font-loader (font-loader font-pathname)
     (multiple-value-bind (font-height font-advance)
         (terminal-font-metrics font-loader)
-      (let* ((rows (max 1 (round (* rows-per-block
-                                    (terminal-surface-height surface)))))
-             (available-height
+      (let* ((available-height
                (- (terminal-surface-physical-height surface) (* 2 margin)))
              (available-width
                (- (terminal-surface-physical-width surface) (* 2 margin)))
@@ -1795,6 +2033,31 @@ ROWS-PER-BLOCK rows per block height."
          surface font-pathname margin rows-per-block)
       (setf columns (or columns fitted-columns)
             rows (or rows fitted-rows)))
+    (make-terminal-display
+     session surface columns rows
+     :fixture fixture :margin margin :font-scale font-scale
+     :font-pathname font-pathname :bold-font-pathname bold-font-pathname
+     :default-foreground default-foreground)))
+
+(defun make-terminal-display
+    (session surface columns rows
+     &key (class 'terminal-display)
+          (fixture (terminal-display-fixture))
+          (margin 0.12)
+          (font-scale 1.0)
+          (font-pathname *terminal-display-font-pathname*)
+          (bold-font-pathname *terminal-display-bold-font-pathname*)
+          (default-foreground *terminal-display-default-foreground*)
+          (screen-role :terminal-screen)
+          (faceplate-role :terminal-faceplate)
+          (add-p t))
+  "Build a COLUMNS by ROWS Ghostty terminal display of CLASS on SURFACE.
+
+SURFACE is anything answering the terminal-surface protocol: a wall of
+blocks or a phone screen.  SCREEN-ROLE and FACEPLATE-ROLE name the shader
+materials of the panel behind the text and the glass in front of it; the
+defaults are the wall's tube.  The display is added to SESSION's overlays
+unless ADD-P is false."
     (let ((terminal nil)
           (glyph-cache nil)
           (glyph-run nil)
@@ -1830,18 +2093,19 @@ ROWS-PER-BLOCK rows per block height."
                      (make-terminal-cell-run
                       session glyph-run
                       (make-terminal-display-screen-instances surface)
-                      :role :terminal-screen
+                      :role screen-role
+                      :vertex-role :terminal-screen
                       :label "terminal screen panel"))
                (setf faceplate-run
                      (make-terminal-cell-run
                       session glyph-run
                       (make-terminal-display-screen-instances surface 0.008)
-                      :role :terminal-faceplate
+                      :role faceplate-role
                       :vertex-role :terminal-screen
                       :label "terminal faceplate glass"))
                (setf display
                      (make-instance
-                      'terminal-display
+                      class
                       :session session :surface surface :terminal terminal
                       :presentation presentation :glyph-cache glyph-cache
                       :glyph-run glyph-run :cell-run cell-run
@@ -1852,7 +2116,8 @@ ROWS-PER-BLOCK rows per block height."
                       :margin margin :font-scale font-scale))
                (setf (slot-value display 'glyphs-by-character)
                      glyphs-by-character))
-             (add-luvcraft-overlay session display)
+             (when add-p
+               (add-luvcraft-overlay session display))
              (setf completed-p t)
              display)
         (unless completed-p
@@ -1867,4 +2132,4 @@ ROWS-PER-BLOCK rows per block height."
           (when glyph-cache
             (ignore-errors (luv.slug:release-slug-glyph-cache glyph-cache)))
           (when terminal
-            (ignore-errors (ghostty:close-terminal terminal))))))))
+            (ignore-errors (ghostty:close-terminal terminal)))))))

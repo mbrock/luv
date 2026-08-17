@@ -8,7 +8,7 @@ TRACY_STREAMING_TRACE ?= build/luvcraft-streaming.tracy
 TRACY_MCCLIM_ROUNDRECT_TRACE ?= build/mcclim-roundrect.tracy
 TRACY_MCCLIM_PAINT_TRACE ?= build/mcclim-paints.tracy
 
-.PHONY: all luvcraft run test parinfer-check shader-validate msl-validate smoke vulkan-smoke metal-smoke metal-text-closeup metal-benchmark metal-streaming-benchmark tracy-streaming tracy-mcclim-roundrect tracy-mcclim-paints mcluv readme-screenshots mcclim-gallery wiki wiki-cli objective-c-probe metal-clear metal-shader metal-pipeline metal-draw roundrect-proof slug-proof slug-text-proof clean
+.PHONY: all luvcraft run test parinfer-check shader-validate msl-validate smoke vulkan-smoke metal-smoke metal-text-closeup metal-benchmark metal-streaming-benchmark tracy-streaming tracy-mcclim-roundrect tracy-mcclim-paints readme-screenshots mcclim-gallery wiki wiki-cli objective-c-probe metal-clear metal-shader metal-pipeline metal-draw roundrect-proof slug-proof slug-text-proof clean
 
 all: luvcraft
 
@@ -156,9 +156,6 @@ tracy-mcclim-roundrect:
 
 tracy-mcclim-paints:
 	./scripts/trace-mcclim-paints $(TRACY_MCCLIM_PAINT_TRACE)
-
-mcluv:
-	./scripts/dev sbcl --script mcclim/build.lisp
 
 readme-screenshots:
 	./scripts/dev sbcl --script scripts/readme-screenshots.lisp screenshots

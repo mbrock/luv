@@ -24,6 +24,57 @@
   :coordinate-scale (1/2 1/2 1)
   :coordinate-offset (1/2 1/2 0))
 
+;;; The knobs folded into these shaders.  Each is a special this file's
+;;; source names where it once held a literal; the parser folds the current
+;;; value in, and the pipeline that folded it rebuilds when it moves
+;;; (LUVCRAFT/KNOBS.LISP).  Turning one is a shader rebuild, not a uniform
+;;; write, so they are the few literals worth that: the ones art direction
+;;; keeps asking about.
+
+(defparameter *sun-disc-scale* 4.0
+  "How many times its true angular radius the sun's disc is drawn at.")
+(defparameter *sun-disc-radiance* 30.0
+  "The disc's radiance above display white, which the bloom feeds on.")
+(defparameter *direct-light-gain* 2.35
+  "The direct sun's diffuse intensity on a lit block face.")
+(defparameter *screen-curvature* 0.40
+  "How far a terminal faceplate's normal bulges toward its rim.")
+(defparameter *scanline-count* 240.0
+  "Raster lines across a terminal faceplate's height.")
+(defparameter *scanline-depth* 0.20
+  "How dark the raster's gaps go, as a fraction of the picture.")
+(defparameter *screen-effect-ceiling* 0.6
+  "The most a faceplate's raster, hum, flicker, and grain may take.")
+
+(luvcraft:define-knob sun-disc-scale
+    (:group :sun :quantity (:quantity :sun-disc-scale :unit :one)
+     :unit-label "×" :minimum 1.0 :maximum 12.0 :step 0.5)
+    *sun-disc-scale*)
+(luvcraft:define-knob sun-disc-radiance
+    (:group :sun :quantity (:quantity :sun-disc-radiance :unit :one)
+     :minimum 0.0 :maximum 100.0 :step 1.0)
+    *sun-disc-radiance*)
+(luvcraft:define-knob direct-light-gain
+    (:group :sun :quantity (:quantity :direct-light-gain :unit :one)
+     :unit-label "×" :minimum 0.0 :maximum 6.0 :step 0.05)
+    *direct-light-gain*)
+(luvcraft:define-knob screen-curvature
+    (:group :terminal :quantity (:quantity :screen-curvature :unit :one)
+     :minimum 0.0 :maximum 1.5 :step 0.05)
+    *screen-curvature*)
+(luvcraft:define-knob scanline-count
+    (:group :terminal :quantity (:quantity :scanline-count :unit :one)
+     :minimum 60.0 :maximum 1000.0 :step 20.0)
+    *scanline-count*)
+(luvcraft:define-knob scanline-depth
+    (:group :terminal :quantity (:quantity :screen-effect-strength :unit :one)
+     :minimum 0.0 :maximum 1.0 :step 0.05)
+    *scanline-depth*)
+(luvcraft:define-knob screen-effect-ceiling
+    (:group :terminal :quantity (:quantity :screen-effect-strength :unit :one)
+     :minimum 0.0 :maximum 1.0 :step 0.05)
+    *screen-effect-ceiling*)
+
 ;;; Every stage which reads the frame environment declares the same uniform
 ;;; block at binding 2: identical member order and offsets are an ABI
 ;;; requirement, so the member list is written once and spliced at read time.
@@ -567,7 +618,7 @@
          ;; A cubic bulge leaves the middle of the plate flat and turns only
          ;; the last part of the way to the rim, which is what a real face
          ;; does and what keeps the reflection from sliding about.
-         (bulge 0.40)
+         (bulge screen-curvature)
          (normal
            (normalize
             (+ flat-normal
@@ -594,7 +645,7 @@
          (screen-mask (terminal-screen-coverage edge-distance))
          ;; The raster: a fixed number of lines across this panel's height,
          ;; exactly as a tube has a fixed line count whatever its diagonal.
-         (line-pitch (/ (* 2.0 half-y) 240.0))
+         (line-pitch (/ (* 2.0 half-y) scanline-count))
          (vertical-dx (derivative-x (swizzle render-coordinate :y)))
          (vertical-dy (derivative-y (swizzle render-coordinate :y)))
          (cells-per-pixel
@@ -607,7 +658,7 @@
          (raster-fade (smoothstep 1.8 3.6 pixels-per-line))
          (line-phase (/ (swizzle render-coordinate :y) line-pitch))
          (line-profile (+ 0.5 (* 0.5 (cos (* 6.2831855 line-phase)))))
-         (scanline (* 0.20 raster-fade (- 1.0 line-profile)))
+         (scanline (* scanline-depth raster-fade (- 1.0 line-profile)))
          ;; Attenuating the picture is only half of a raster.  A tonemapped
          ;; frame puts bright text on the shoulder of the filmic curve, where
          ;; a multiply barely moves it, and puts a dark terminal's background
@@ -643,10 +694,119 @@
            (* (+ (vec3 0.0072 0.0084 0.0104) (* ambient 0.045))
               (* beam (mix 1.0 0.30 corner-shade))))
          (attenuation
-           (clamp (+ scanline corner hum flicker speckle) 0.0 0.6))
+           (clamp (+ scanline corner hum flicker speckle) 0.0 screen-effect-ceiling))
          (emission (+ sky-reflection room-reflection glint sheen haze)))
     (set-output color-output
                 (vec4 (* emission screen-mask) (* attenuation screen-mask)))))
+
+;;; The phone's screen is not a tube.  It is a sheet of flat glass over a
+;;; dark panel, and everything the wall's faceplate argues about -- raster,
+;;; hum, grain, the tube's convex bulge and its darker corners -- is exactly
+;;; what a retina slab does not have.  What it has instead is a rounded
+;;; edge, a Fresnel reflection of the sky it is held under, one tight glint,
+;;; and, because someone has been holding it, fingerprints: patches of oil
+;;; that scatter a little of the room forward where clean glass would not.
+;;; Both stages below share the wall's vertex stage; only the material is
+;;; the phone's own.
+
+(define-shader-function phone-glass-distance (coordinate half-size radius)
+  "Signed distance from a panel-local point to the rounded glass edge,
+negative inside.  RADIUS is the corner radius in world cells."
+  (let* ((qx (max (- (abs (swizzle coordinate :x))
+                     (- (swizzle half-size :x) radius))
+                  0.0))
+         (qy (max (- (abs (swizzle coordinate :y))
+                     (- (swizzle half-size :y) radius))
+                  0.0)))
+    (- (sqrt (+ (* qx qx) (* qy qy))) radius)))
+
+(define-shader-function phone-glass-coverage (coordinate half-size radius)
+  "One on the glass, zero past its rounded edge, resolved over one pixel."
+  (let* ((distance (phone-glass-distance coordinate half-size radius))
+         (dx (derivative-x (swizzle coordinate :x)))
+         (dy (derivative-y (swizzle coordinate :x)))
+         (pixel (max (sqrt (+ (* dx dx) (* dy dy))) 1e-5)))
+    (- 1.0 (smoothstep (- pixel) pixel distance))))
+
+(define-shader-method shader-specification-for
+    phone-screen-fragment-specification
+    ((role (eql :phone-screen)) (stage (eql :fragment)))
+    (:stage :fragment
+     :inputs ((render-coordinate :vec2 :location 0)
+              (half-size :vec2 :location 1)
+              (world-position :vec3 :location 2)
+              (normal-input :vec3 :location 3)
+              (right-input :vec3 :location 4)
+              (up-input :vec3 :location 5))
+     :outputs ((color-output :vec4 :location 0))
+     :resources
+     ((frame-state :uniform-block :set 0 :binding 2
+                   :members #.*frame-uniform-members*)))
+  (let* ((sun-direction (representation (swizzle sun-vector :xyz)))
+         (day-factor (representation (swizzle sun-vector :w)))
+         (sun-color (representation (swizzle sun-color-vector :xyz)))
+         (ambient (representation (swizzle ambient-vector :xyz)))
+         (normal (normalize normal-input))
+         (n-dot-l (max 0.0 (dot normal sun-direction)))
+         (irradiance (+ ambient (* sun-color (* n-dot-l day-factor))))
+         (coverage (phone-glass-coverage render-coordinate half-size 0.02))
+         ;; The panel behind the glass: black, and lit only by what little
+         ;; the room puts into it.  Off, it should read as a dark mirror.
+         (panel-albedo (vec3 0.005 0.005 0.006))
+         (rgb (* panel-albedo irradiance)))
+    (set-output color-output (vec4 (* rgb coverage) coverage))))
+
+(define-shader-method shader-specification-for
+    phone-glass-fragment-specification
+    ((role (eql :phone-glass)) (stage (eql :fragment)))
+    (:stage :fragment
+     :inputs ((render-coordinate :vec2 :location 0)
+              (half-size :vec2 :location 1)
+              (world-position :vec3 :location 2)
+              (normal-input :vec3 :location 3)
+              (right-input :vec3 :location 4)
+              (up-input :vec3 :location 5))
+     :outputs ((color-output :vec4 :location 0))
+     :resources
+     ((frame-state :uniform-block :set 0 :binding 2
+                   :members #.*frame-uniform-members*)))
+  (let* ((camera (representation (swizzle camera-vector :xyz)))
+         (sun-direction (representation (swizzle sun-vector :xyz)))
+         (day-factor (representation (swizzle sun-vector :w)))
+         (sun-color (representation (swizzle sun-color-vector :xyz)))
+         (zenith (representation (swizzle zenith-vector :xyz)))
+         (horizon (representation (swizzle horizon-vector :xyz)))
+         (ambient (representation (swizzle ambient-vector :xyz)))
+         (normal (normalize normal-input))
+         (view (normalize (- camera world-position)))
+         (n-dot-v (max 0.0 (dot normal view)))
+         ;; Coated glass: dark seen straight on, a mirror seen at a slant.
+         (fresnel (+ 0.018 (* 0.982 (expt (- 1.0 n-dot-v) 5.0))))
+         (reflected (- (* normal (* 2.0 (dot normal view))) view))
+         (sky-height (smoothstep -0.06 0.5 (swizzle reflected :y)))
+         (sky-reflection (* (mix horizon zenith sky-height) (* fresnel 0.8)))
+         (room-reflection (* ambient (* fresnel 0.5)))
+         (half-vector (normalize (+ sun-direction view)))
+         (n-dot-h (max 0.0 (dot normal half-vector)))
+         (glint (* sun-color (* (expt n-dot-h 320.0) 2.0 day-factor)))
+         ;; Fingerprints.  Oil on the glass scatters light forward over a
+         ;; broad lobe where the clean coating would send it away, so the
+         ;; smudges only appear where there is light to scatter -- near
+         ;; the sun's sheen and at a slant to the sky -- and never as paint.
+         (u (swizzle render-coordinate :x))
+         (v (swizzle render-coordinate :y))
+         (smudge-field
+           (lattice-fractal-noise
+            (vec3 (* u 38.0) (* v 27.0) 3.7)))
+         (smudge (* (smoothstep 0.56 0.74 smudge-field) 0.22))
+         (sheen (* sun-color (* (expt n-dot-h 14.0) 0.05 day-factor)))
+         (scatter (* (+ sheen (* (+ ambient (* horizon 0.4)) 0.035))
+                     smudge))
+         (coverage (phone-glass-coverage render-coordinate half-size 0.02))
+         (emission (+ sky-reflection room-reflection glint scatter)))
+    ;; The glass takes nothing away from the picture under it: alpha zero,
+    ;; and only what it sends back is added.
+    (set-output color-output (vec4 (* emission coverage) 0.0))))
 
 ;;; A video screen is the plainest world rectangle luvcraft draws: the same
 ;;; instance record as a terminal cell, but the fragment stage reads a decoded
@@ -725,6 +885,124 @@
   (let* ((picture (sample video-picture video-sampler uv-input))
          (radiance (swizzle picture :rgb)))
     (set-output color-output (vec4 (representation radiance) 1.0))))
+
+;;; A portal is another game's picture arriving on a wall, and it should read
+;;; as exactly that: a transmission, not a window and not a movie.  The panel
+;;; is the whole terminal face; the picture sits inside it on a dark matte
+;;; with the same margin the text grid keeps, so the wall's proportions do
+;;; not change when the shell becomes a portal.  What marks the picture as
+;;; coming from elsewhere is done to its signal, not to the glass (the
+;;; faceplate above still supplies raster, hum, and reflections as it does
+;;; for text):
+;;;
+;;;   - the colour channels do not quite converge -- a radial chromatic
+;;;     fringe, nothing at the centre and a few texels at the corners;
+;;;   - alternate lines are displaced by a texel or so on a slow beat, a
+;;;     field interlace that never fully locks;
+;;;   - a soft sync bar climbs the picture, brighter than the hum bar the
+;;;     glass adds, so the two are visibly different mechanisms;
+;;;   - the picture warms up over half a second when the link opens instead
+;;;     of appearing, and its edge is a thin phosphor line on the matte.
+;;;
+;;; The uniform carries the picture rectangle in panel UV and the moment the
+;;; link opened; everything else is the frame environment's clock.
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defparameter *portal-uniform-members*
+    '((picture-rect :vec4)      ; picture u0, v0, u1, v1 within the panel
+      (portal-control :vec4))   ; opened-at seconds, texel u, texel v, unused
+    "The uniform layout of one portal panel."))
+
+(define-shader-method shader-specification-for
+    portal-screen-fragment-specification
+    ((role (eql :portal-screen)) (stage (eql :fragment)))
+    (:stage :fragment
+     :inputs ((uv-input :vec2 :location 0
+                        :quantity :texture-uv :unit :one))
+     :outputs ((color-output :vec4 :location 0))
+     :resources
+     ((portal-picture :texture-2d :set 0 :binding 0
+                      :sample-transfer :srgb-to-linear
+                      :sample-components
+                      ((:rgb :quantity :linear-rgb :unit :one)))
+      (portal-sampler :sampler :set 0 :binding 1)
+      (frame-state :uniform-block :set 0 :binding 2
+                   :members #.*frame-uniform-members*)
+      (portal-state :uniform-block :set 0 :binding 3
+                    :members #.*portal-uniform-members*)))
+  (let* ((elapsed (representation (swizzle fog-vector :z)))
+         (opened (swizzle portal-control :x))
+         (texel (swizzle portal-control :yz))
+         (rect-min (swizzle picture-rect :xy))
+         (rect-max (swizzle picture-rect :zw))
+         (rect-size (- rect-max rect-min))
+         ;; Panel UV to picture UV; the picture is where both lie in [0,1].
+         (uv (representation uv-input))
+         (picture-uv (/ (- uv rect-min) rect-size))
+         (px (swizzle picture-uv :x))
+         (py (swizzle picture-uv :y))
+         (inside-x (* (step 0.0 px) (step px 1.0)))
+         (inside-y (* (step 0.0 py) (step py 1.0)))
+         (inside (* inside-x inside-y))
+         ;; Warm-up: half a second from black to picture.
+         (age (- elapsed opened))
+         (warmth (smoothstep 0.0 0.55 age))
+         ;; Field interlace: odd picture lines drift a texel sideways on a
+         ;; slow beat, even lines the other way, never quite locking.
+         (line (floor (/ py (* 2.0 (swizzle texel :y)))))
+         (field (- (* 2.0 (fract (* line 0.5))) 0.5))
+         (weave (* field (* 2.5 (swizzle texel :x))
+                   (sin (+ (* elapsed 1.7) (* py 9.0)))))
+         ;; The odd field is a shade dimmer than the even one, so the
+         ;; interlace shows as texture where the weave alone would not.
+         (field-shade (- 1.0 (* 0.10 (+ 0.5 field))))
+         (woven (+ picture-uv (vec2 weave 0.0)))
+         ;; Chromatic fringe: red and blue pulled apart radially, growing
+         ;; with the square of the distance from the centre.
+         (centered (- woven (vec2 0.5 0.5)))
+         (radius2 (dot centered centered))
+         (fringe (* centered (* radius2 (* 22.0 (swizzle texel :x)))))
+         (red (swizzle (representation
+                        (sample portal-picture portal-sampler
+                                (assume-quantity (+ woven fringe)
+                                                 :quantity :texture-uv :unit :one)))
+                       :x))
+         (green (swizzle (representation
+                          (sample portal-picture portal-sampler
+                                  (assume-quantity woven
+                                                   :quantity :texture-uv :unit :one)))
+                         :y))
+         (blue (swizzle (representation
+                         (sample portal-picture portal-sampler
+                                 (assume-quantity (- woven fringe)
+                                                  :quantity :texture-uv :unit :one)))
+                        :z))
+         (picture (vec3 red green blue))
+         ;; The sync bar: a soft band climbing the picture every few seconds.
+         (bar-phase (fract (- (* py 0.7) (* elapsed 0.11))))
+         (bar (expt (+ 0.5 (* 0.5 (cos (* 6.2831855 bar-phase)))) 6.0))
+         (lifted (* picture (* field-shade (+ 1.0 (* 0.16 bar)))))
+         ;; A little vignette of the picture's own, inside the frame.
+         (vignette (- 1.0 (* 0.22 (smoothstep 0.30 0.95 radius2))))
+         (signal (* lifted (* vignette warmth)))
+         ;; The matte and its phosphor edge.  Distance to the picture edge in
+         ;; panel UV; the edge line is a couple of texels wide and glows a
+         ;; little further into the matte.
+         (edge-dx (max (- (swizzle rect-min :x) (swizzle uv :x))
+                       (- (swizzle uv :x) (swizzle rect-max :x))))
+         (edge-dy (max (- (swizzle rect-min :y) (swizzle uv :y))
+                       (- (swizzle uv :y) (swizzle rect-max :y))))
+         (outside-distance (max 0.0 (max edge-dx edge-dy)))
+         (line-width (* 2.5 (swizzle texel :x) (swizzle rect-size :x)))
+         (edge-line (- 1.0 (smoothstep 0.0 line-width outside-distance)))
+         (edge-glow (- 1.0 (smoothstep 0.0 (* 12.0 line-width) outside-distance)))
+         (phosphor (vec3 0.16 0.62 0.55))
+         (matte (vec3 0.0075 0.0080 0.0100))
+         (matte-color
+           (+ matte
+              (* phosphor (* warmth (+ (* 0.55 edge-line) (* 0.06 edge-glow))))))
+         (rgb (mix matte-color signal inside)))
+    (set-output color-output (vec4 rgb 1.0))))
 
 (define-shader-method shader-specification-for
     video-screen-hardware-fragment-specification
@@ -1063,7 +1341,7 @@
          (sun-light
            (interpret
             (* sun-color
-               (* 2.35 n-dot-l sun-visibility day-factor direct-shadow
+               (* direct-light-gain n-dot-l sun-visibility day-factor direct-shadow
                   (mix 0.55 1.0 ao)))
             :quantity :linear-rgb :unit :one))
          (torch-color
@@ -1365,7 +1643,7 @@ than inlined three times."
          ;; feeds on it, and the filmic curve rolls it into a hot core
          ;; instead of a flat clipped patch.  For a small angle the cosine
          ;; threshold of an angular radius is one less half its square.
-         (disc-radius (* sun-width 4.0))
+         (disc-radius (* sun-width sun-disc-scale))
          (disc-limb (* 0.5 (* disc-radius disc-radius)))
          (disc
            (smoothstep (- 1.0 disc-limb) (- 1.0 (* 0.56 disc-limb)) alignment))
@@ -1375,7 +1653,7 @@ than inlined three times."
          (solar
            (* sun-color
               (* day-factor
-                 (+ (* disc (* 30.0 occlusion))
+                 (+ (* disc (* sun-disc-radiance occlusion))
                     (* corona (* 2.0 occlusion))))))
          (rgb (+ grounded solar)))
     (set-output color-output (vec4 rgb 1.0))))

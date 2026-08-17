@@ -59,8 +59,8 @@ above it (blocks, terrain, meshing, simulation, and the application files):
   emission in linear space, and fades distant terrain into the sky;
 - a lattice DDA ray stops distinctly at a hit, a resident miss, or absent
   terrain; an outlined Vulkan crosshair shows that ray, left and right clicks
-  remove and place, middle click picks, and number keys select placeable
-  materials;
+  remove and place, middle click picks, number keys select placeable
+  materials, and F takes out a phone with a shell on it (#S27JKR, #IK8PIN);
 - a separate player AABB advances at fixed 120 Hz against the voxel lattice,
   with gravity, grounding, wall collision, acceleration, and jumping; the eye
   camera follows the body while relative pointer input controls its view and
@@ -525,6 +525,98 @@ resident.
 *Done when.*  Riding a turtle, checkpointing, restarting, and finding the
 same animal where it was left, with a test that round-trips a population
 through a save description.
+
+* The player has a body, and the body holds things
+:PROPERTIES:
+:ID: S27JKR
+:END:
+
+Until now the player was a camera: an eye at a height above a collision
+box, with an inventory of materials and nothing to carry them in.  The
+body in [[file:../luvcraft/body.lisp][body.lisp]] gives the eye two arms.
+They hang into the bottom corners of the view, sleeve and wrist and fist,
+and they are drawn exactly as an animal is (#KTRMAO): a handful of
+textured boxes streamed through the block surface pipeline every frame,
+lit by the sky and block light where the eye stands, painted from the same
+atlas as stone and turtle hide.
+
+What differs is the frame.  A critter's boxes turn only with its yaw; the
+body's boxes live in the view frame -- right, up, and forward from the
+eye -- and turn with the whole camera, pitch included, so the hands stay
+where they are on the screen while the head looks around.  Each box may
+carry a small tilt of its own, which is what lets a forearm slope up from
+the screen edge and a phone lean back in the palm instead of everything
+standing square to the lens.  Walking bobs the hands on a phase accumulated
+from ground speed, so standing still stands still, and a breath moves them
+when nothing else does.
+
+A hand can hold something.  The held-item protocol is a few generic
+functions -- map-hand-item-boxes for the item's boxes in the grip frame,
+hand-item-carry-pose for where the right hand holds it, hand-item-name for
+the title, hand-item-taken-out and hand-item-put-away for what the item
+does about being held -- and the body eases between pocket and hand rather
+than cutting, so taking a thing out is a motion.  F takes the phone out or
+puts it away; a pocketed item keeps its state.
+
+** The phone is a wall terminal you can carry
+:PROPERTIES:
+:ID: IK8PIN
+:END:
+
+The first thing to hold is a phone, because it is funny: a slab of
+near-black glass a little too large for the hand, held up in front of the
+face the way everyone holds theirs, and on it a live shell.  It is not a
+new kind of screen.  [[file:../luvcraft/phone.lisp][phone.lisp]] builds
+the very display TERMINAL-WALL.LISP builds for a wall (#8JCMA5) --
+Ghostty terminal, PTY, Slug glyph run, cell backgrounds, screen panel,
+faceplate glass -- on a surface of its own kind.
+
+The trick is where that surface lives.  A wall's surface is a rectangle of
+blocks in world space.  The phone's is a rectangle in the *grip frame*, the
+right hand's own coordinate space, where the screen never moves.  What
+moves is the hand, and therefore, seen from the phone, the camera: each
+frame the display draws against a frame uniform whose camera lanes are the
+real camera re-expressed in grip coordinates.  Nothing about the runs is
+rebuilt for motion.  The same glyph instances that were right last frame
+are right this frame, because in their own space nothing happened.  The
+projection and near and far planes are the real ones, so depth is honest
+against the scene and the phone's own slab.  This took only making the
+surface a protocol (terminal-surface-axes, the lower-left point, physical
+width and height, currency, focus score, focus camera pose) and letting a
+display say which uniform it draws against.
+
+Focus is the same transition as a wall's: TAB with the phone out enters
+its shell and keys go to the PTY; shift-TAB leaves.  The phone offers no
+camera pose of its own, so the camera stays where the player left it and
+only the field of view narrows; the hand answers instead, easing the phone
+square to the centre of the view and a little further off, where the
+narrowed view frames the whole screen.  Putting the phone away pockets it
+with its shell still running.
+
+The phone is not a tube, and its glass says so.  The wall's screen and
+faceplate materials are the whole analogue argument of a CRT -- bezel in
+world cells, raster, hum, grain, a convex bulge -- and on a hand-sized
+slab every one of those reads as a fault.  The phone draws the same two
+panels with materials of its own (=:phone-screen=, =:phone-glass=): a flat
+black panel behind the text with rounded corners resolved analytically,
+and coated glass in front that only reflects -- Fresnel sky, one tight
+glint -- plus fingerprints, patches of oil that scatter a little of the
+room forward where the clean coating would not, so they show only where
+there is light to scatter and never as paint.  The slab itself is one
+even matte tone with the least relief a tile is allowed; its corners are
+a real mesh -- two fans and a rim of quads around a rounded-rectangle
+outline (emit-rounded-slab), the one thing in the body that is not a box.  The grip takes the
+sides, never the screen.  The screen is proportioned for a real terminal:
+thirty-five rows of Input Mono Condensed (from the user's own fonts when
+installed, the wall's Monaspace otherwise) give sixty columns, on a slab
+proportioned a little like a small handheld console.  Carried, it hangs at
+arm's length and low, tipped back to be glanced at; focused, it comes up
+square and close.
+
+The wall's three modes -- shell, film, browser -- are not what the phone
+inherited; it is a shell and only a shell.  That mode switch is a kludge
+waiting to be redesigned from the ground up, and when it is, the phone
+should be one of the things it is redesigned for.
 
 * The sequence that stays fun
 :PROPERTIES:

@@ -45,24 +45,37 @@
     +luvcraft-shadow-depth-radius+ 96.0
   :type single-float
   :quantity (:quantity :world-distance :unit :cell))
-(luv.arithmetic:define-quantity-constant
-    +luvcraft-shadow-base-bias+ 0.00045
-  :type single-float
-  :quantity (:quantity :shadow-depth :unit :one :character :difference))
-(luv.arithmetic:define-quantity-constant
-    +luvcraft-shadow-slope-bias+ 0.0015
-  :type single-float
-  :quantity (:quantity :shadow-depth :unit :one :character :difference))
+;;; The shadow's biases and filter radii are knobs: read at frame-pack time
+;;; into the shadow control lanes, so a turn shows on the next frame.
+(defparameter *luvcraft-shadow-base-bias* 0.00045
+  "Constant depth bias applied to every shadow comparison.")
+(defparameter *luvcraft-shadow-slope-bias* 0.0015
+  "Depth bias scaled by the receiver's slope to the light.")
+(defparameter *luvcraft-shadow-minimum-filter-radius* 2.0
+  "PCF radius in shadow texels when the sun is a point.")
+(defparameter *luvcraft-shadow-maximum-filter-radius* 6.0
+  "PCF radius in shadow texels at the sun's widest.")
 
-(luv.arithmetic:define-quantity-constant
-    +luvcraft-shadow-minimum-filter-radius+ 2.0
-  :type single-float
-  :quantity (:quantity :shadow-filter-radius :unit :one))
-
-(luv.arithmetic:define-quantity-constant
-    +luvcraft-shadow-maximum-filter-radius+ 6.0
-  :type single-float
-  :quantity (:quantity :shadow-filter-radius :unit :one))
+(define-knob shadow-base-bias
+    (:group :shadows :label "base bias"
+     :quantity (:quantity :shadow-depth :unit :one :character :difference)
+     :minimum 0.0 :maximum 0.005 :step 0.00005)
+    *luvcraft-shadow-base-bias*)
+(define-knob shadow-slope-bias
+    (:group :shadows :label "slope bias"
+     :quantity (:quantity :shadow-depth :unit :one :character :difference)
+     :minimum 0.0 :maximum 0.01 :step 0.0001)
+    *luvcraft-shadow-slope-bias*)
+(define-knob shadow-minimum-filter-radius
+    (:group :shadows :label "softness, sun small"
+     :quantity (:quantity :shadow-filter-radius :unit :one)
+     :unit-label " px" :minimum 0.0 :maximum 8.0 :step 0.5)
+    *luvcraft-shadow-minimum-filter-radius*)
+(define-knob shadow-maximum-filter-radius
+    (:group :shadows :label "softness, sun wide"
+     :quantity (:quantity :shadow-filter-radius :unit :one)
+     :unit-label " px" :minimum 1.0 :maximum 24.0 :step 0.5)
+    *luvcraft-shadow-maximum-filter-radius*)
 
 (defun ensure-block-atlas-sample-transfer (format)
   "Check the host texture format against the block shader's decoded result."
@@ -165,13 +178,16 @@
              (- 0.5 (/ (vec3-dot center forward) (* 2.0 depth-radius))))
        '(0.0 0.0 0.0 1.0)))))
 
-(defun frame-uniform-data (session width height)
+(defun frame-uniform-data (session width height &key camera-lanes)
   "Pack the frame environment: camera lanes plus the evaluated sky.
 
 Lane order must match *FRAME-UNIFORM-MEMBERS* exactly; the construction-time
-check in BLOCK-WORLD-CAMERA-UNIFORM-SIZE keeps the two honest."
-  (let* ((camera-lanes (camera-uniform-data
-                        (luvcraft-session-camera session) width height))
+check in BLOCK-WORLD-CAMERA-UNIFORM-SIZE keeps the two honest.  CAMERA-LANES
+may replace the session camera's own five lanes with a camera expressed in
+some other space; the environment lanes are packed the same either way."
+  (let* ((camera-lanes (or camera-lanes
+                           (camera-uniform-data
+                            (luvcraft-session-camera session) width height)))
          (sky (sky-frame-parameters (luvcraft-session-sky-clock session)
                                     (luvcraft-session-sky-profile session)))
          (data (make-array (+ (length camera-lanes) 52)
@@ -208,13 +224,13 @@ check in BLOCK-WORLD-CAMERA-UNIFORM-SIZE keeps the two honest."
                                  0.0))))
         (emit (/ +luvcraft-shadow-map-size+)
               (/ +luvcraft-shadow-map-size+)
-              +luvcraft-shadow-base-bias+
-              +luvcraft-shadow-slope-bias+)
+              *luvcraft-shadow-base-bias*
+              *luvcraft-shadow-slope-bias*)
         (emit (* 2.0 +luvcraft-shadow-depth-radius+)
               (/ (* 2.0 +luvcraft-shadow-half-extent+)
                  +luvcraft-shadow-map-size+)
-              +luvcraft-shadow-minimum-filter-radius+
-              +luvcraft-shadow-maximum-filter-radius+)
+              *luvcraft-shadow-minimum-filter-radius*
+              *luvcraft-shadow-maximum-filter-radius*)
         (apply #'emit (shadow-frame-rows
                        (luvcraft-session-camera session) sky))))
     (unless (= index (length data))
@@ -251,6 +267,33 @@ check in BLOCK-WORLD-CAMERA-UNIFORM-SIZE keeps the two honest."
 
 (defparameter *luvcraft-shaft-decay* 0.955
   "Per-tap attenuation along a light shaft; nearer one reaches further.")
+
+(define-knob exposure
+    (:group :grading :quantity (:quantity :exposure :unit :one)
+     :unit-label "×" :minimum 0.2 :maximum 3.0 :step 0.05)
+    *luvcraft-exposure*)
+(define-knob bloom-threshold
+    (:group :grading :quantity (:quantity :luminance-threshold :unit :one)
+     :minimum 0.2 :maximum 6.0 :step 0.1)
+    *luvcraft-bloom-threshold*)
+(define-knob bloom-gain
+    (:group :grading :quantity (:quantity :lens-gain :unit :one)
+     :unit-label "×" :minimum 0.0 :maximum 2.0 :step 0.05)
+    *luvcraft-bloom-gain*)
+(define-knob shaft-gain
+    (:group :grading :label "light shafts"
+     :quantity (:quantity :lens-gain :unit :one)
+     :unit-label "×" :minimum 0.0 :maximum 2.0 :step 0.05)
+    *luvcraft-shaft-gain*)
+(define-knob shaft-decay
+    (:group :grading :label "shaft reach"
+     :quantity (:quantity :shaft-decay :unit :one)
+     :minimum 0.85 :maximum 0.999 :step 0.005)
+    *luvcraft-shaft-decay*)
+(define-knob vignette
+    (:group :grading :quantity (:quantity :vignette-strength :unit :one)
+     :minimum 0.0 :maximum 0.6 :step 0.02)
+    *luvcraft-vignette*)
 
 (defun luvcraft-sun-screen-position (camera sky width height)
   "The sun's presentation UV and how strongly it counts as on screen.
@@ -390,6 +433,18 @@ the frame uniform cannot silently diverge between shader and host."
   (push resource (luvcraft-session-resources session))
   resource)
 
+(defun forget-luvcraft-resource (session resource)
+  "Drop RESOURCE from SESSION's release list, for a caller releasing it now."
+  (setf (luvcraft-session-resources session)
+        (delete resource (luvcraft-session-resources session) :test #'eq))
+  resource)
+
+(defun release-luvcraft-resource (session resource)
+  (when resource
+    (forget-luvcraft-resource session resource)
+    (destroy resource))
+  (values))
+
 (defun make-luvcraft-bloom-bind-group (session uniform-buffer view label)
   "Bind one lens-chain source: a sampled texture, linear filter, uniforms."
   (create
@@ -406,6 +461,110 @@ the frame uniform cannot silently diverge between shader and host."
   "The reduced attachment size the lens chain runs at, at least one texel."
   (list (max 1 (floor (first extent) +luvcraft-bloom-divisor+))
         (max 1 (floor (second extent) +luvcraft-bloom-divisor+))))
+
+;;; Everything below is sized to the frame rather than to the world, which
+;;; means a window resize invalidates all of it at once.  Keeping the whole
+;;; set behind one constructor is what lets START-LUVCRAFT and a live resize
+;;; agree on formats and usages without either one drifting.
+
+(defun make-luvcraft-frame-attachments (device context extent)
+  "Create every frame-sized attachment for EXTENT as a plist of GPU objects.
+
+The scene is drawn into a linear HDR colour attachment with its own depth
+buffer, the lens chain runs at a reduced extent, and the tonemapped result
+lands in a presentation image that is finally copied onto the drawable."
+  (let ((bloom-extent (luvcraft-bloom-extent extent))
+        (made nil)
+        (completed-p nil))
+    (flet ((texture (label size format usage)
+             (let ((texture
+                     (create device
+                             (make-texture-descriptor
+                              :label label :size size :dimensions :2d
+                              :format format :usage usage))))
+               (push texture made)
+               (let ((view
+                       (create device
+                               (make-texture-view-descriptor
+                                :texture texture))))
+                 (push view made)
+                 (values texture view)))))
+      (unwind-protect
+           (multiple-value-bind (color-texture color-view)
+               (texture "block world color" extent
+                        +luvcraft-scene-color-format+
+                        '(:render-attachment :texture-binding :copy-src))
+             (multiple-value-bind (depth-texture depth-view)
+                 (texture "block world depth" extent :depth32-float
+                          '(:render-attachment :texture-binding))
+               (multiple-value-bind (bloom-primary-texture bloom-primary-view)
+                   (texture "block world bloom primary" bloom-extent
+                            +luvcraft-bloom-color-format+
+                            '(:render-attachment :texture-binding))
+                 (multiple-value-bind
+                       (bloom-secondary-texture bloom-secondary-view)
+                     (texture "block world bloom secondary" bloom-extent
+                              +luvcraft-bloom-color-format+
+                              '(:render-attachment :texture-binding))
+                   (multiple-value-bind (presentation-texture presentation-view)
+                       (texture "block world presentation color" extent
+                                (canvas-format context)
+                                '(:render-attachment :copy-src))
+                     (setf completed-p t)
+                     (list :render-extent extent
+                           :color-texture color-texture
+                           :color-view color-view
+                           :depth-texture depth-texture
+                           :depth-view depth-view
+                           :bloom-primary-texture bloom-primary-texture
+                           :bloom-primary-view bloom-primary-view
+                           :bloom-secondary-texture bloom-secondary-texture
+                           :bloom-secondary-view bloom-secondary-view
+                           :presentation-texture presentation-texture
+                           :presentation-view presentation-view))))))
+        (unless completed-p
+          (mapc #'destroy made))))))
+
+(defun install-luvcraft-frame-attachments (session attachments)
+  "Adopt ATTACHMENTS as SESSION's frame-sized images, releasing them with it."
+  (flet ((adopt (key)
+           (remember-luvcraft-resource session (getf attachments key))))
+    (setf (luvcraft-session-color-texture session) (adopt :color-texture)
+          (luvcraft-session-color-view session) (adopt :color-view)
+          (luvcraft-session-depth-texture session) (adopt :depth-texture)
+          (luvcraft-session-depth-view session) (adopt :depth-view)
+          (luvcraft-session-bloom-primary-texture session)
+          (adopt :bloom-primary-texture)
+          (luvcraft-session-bloom-primary-view session)
+          (adopt :bloom-primary-view)
+          (luvcraft-session-bloom-secondary-texture session)
+          (adopt :bloom-secondary-texture)
+          (luvcraft-session-bloom-secondary-view session)
+          (adopt :bloom-secondary-view)
+          (luvcraft-session-presentation-texture session)
+          (adopt :presentation-texture)
+          (luvcraft-session-presentation-view session)
+          (adopt :presentation-view)
+          (luvcraft-session-render-extent session)
+          (getf attachments :render-extent)))
+  session)
+
+(defun release-luvcraft-frame-attachments (session)
+  "Release the frame-sized images SESSION is holding, if it has any yet."
+  (dolist (resource
+           (list (luvcraft-session-color-view session)
+                 (luvcraft-session-color-texture session)
+                 (luvcraft-session-depth-view session)
+                 (luvcraft-session-depth-texture session)
+                 (luvcraft-session-bloom-primary-view session)
+                 (luvcraft-session-bloom-primary-texture session)
+                 (luvcraft-session-bloom-secondary-view session)
+                 (luvcraft-session-bloom-secondary-texture session)
+                 (luvcraft-session-presentation-view session)
+                 (luvcraft-session-presentation-texture session)))
+    (release-luvcraft-resource session resource))
+  (setf (luvcraft-session-render-extent session) nil)
+  (values))
 
 (defun make-luvcraft-lens-pipeline (device layout role label)
   "One fullscreen lens-chain stage, named by the fragment method it runs."
@@ -571,10 +730,70 @@ the frame uniform cannot silently diverge between shader and host."
             (when post-uniform-buffer (destroy post-uniform-buffer))
             (when buffer (destroy buffer))))))))
 
+(defun discard-luvcraft-frame-states (session)
+  "Forget every cached per-drawable binding, which names images that are gone.
+
+The bind groups are keyed by drawable, not by size, so nothing else would
+notice that their scene, depth, and lens-chain views belong to the previous
+window.  Dropping them here makes the next frame rebuild them against the
+attachments the session actually holds."
+  (let ((states (luvcraft-session-frame-states session)))
+    (maphash
+     (lambda (key state)
+       (declare (ignore key))
+       (dolist (resource
+                (list* (luvcraft-frame-scene-bind-group state)
+                       (luvcraft-frame-shadow-bind-group state)
+                       (luvcraft-frame-post-bind-group state)
+                       (luvcraft-frame-bloom-scene-bind-group state)
+                       (luvcraft-frame-bloom-primary-bind-group state)
+                       (luvcraft-frame-bloom-secondary-bind-group state)
+                       (luvcraft-frame-post-uniform-buffer state)
+                       (luvcraft-frame-uniform-buffer state)
+                       (remove-duplicates
+                        (coerce (luvcraft-frame-world-text-bind-groups state)
+                                'list)
+                        :test #'eq)))
+         (release-luvcraft-resource session resource)))
+     states)
+    (clrhash states))
+  (values))
+
+(defun ensure-luvcraft-frame-extent (session)
+  "Rebuild SESSION's frame-sized images when the drawable has changed size.
+
+A window resize gives the canvas a new drawable extent while every scene,
+depth, lens-chain, and presentation image still has the old one; the final
+copy onto the drawable is then a size mismatch, which is how a resize used
+to end the game.  This runs at the top of a frame, inside the canvas
+callback that owns GPU replacement, and after the backend has already
+synchronized the drawable, so the extent asked for here is the extent this
+frame will present to.  The outgoing images stay alive until the last
+submission that used them completes."
+  (let ((extent (canvas-extent (luvcraft-session-context session))))
+    (unless (equal extent (luvcraft-session-render-extent session))
+      (log-event :luvcraft "reframing ~{~D~^x~} to ~{~D~^x~}"
+                 (or (luvcraft-session-render-extent session) '(0 0)) extent)
+      (let ((attachments
+              (make-luvcraft-frame-attachments
+               (luvcraft-session-device session)
+               (luvcraft-session-context session)
+               extent)))
+        (discard-luvcraft-frame-states session)
+        (release-luvcraft-frame-attachments session)
+        (install-luvcraft-frame-attachments session attachments))
+      ;; The crosshair is measured in pixels around the centre of the frame,
+      ;; so its clip-space vertices are only correct for one extent.
+      (write-buffer
+       (luvcraft-session-crosshair-vertex-buffer session)
+       (make-block-world-crosshair-vertices (first extent) (second extent))))
+    extent))
+
 (defun encode-luvcraft-frame
     (session surface-texture encoder &key readback-buffer sample)
   ;; The canvas callback is the ownership boundary for all GPU replacement.
   ;; MOP notifications from SLY workers have only marked these artifacts dirty.
+  (ensure-luvcraft-frame-extent session)
   (with-luvcraft-frame-timing
       (sample luvcraft-frame-sample-shader-refresh-seconds
               :luvcraft/shader-refresh)
@@ -586,7 +805,8 @@ the frame uniform cannot silently diverge between shader and host."
     (advance-video-screen (luvcraft-session-video-screen session)
                           (luvcraft-session-device session)))
   (dolist (overlay (luvcraft-session-overlays session))
-    (refresh-luvcraft-overlay overlay session))
+    (guarding-luvcraft-overlay (session overlay :overlay-refresh)
+      (refresh-luvcraft-overlay overlay session)))
   (let* ((products
            (with-luvcraft-frame-timing
                (sample luvcraft-frame-sample-mesh-publication-seconds
@@ -603,7 +823,10 @@ the frame uniform cannot silently diverge between shader and host."
            (critter-vertices (luvcraft-session-critters session)
                              (luvcraft-session-world session)))
          (critter-vertex-count
-           (/ (length critter-vertices) +block-mesh-floats-per-vertex+)))
+           (/ (length critter-vertices) +block-mesh-floats-per-vertex+))
+         (body-vertices (player-body-vertices session))
+         (body-vertex-count
+           (/ (length body-vertices) +block-mesh-floats-per-vertex+)))
     (when (or sample (tracy-connected-p))
       (let ((mesh-vertices 0)
             (mesh-draws 0))
@@ -635,10 +858,12 @@ the frame uniform cannot silently diverge between shader and host."
                         (if (plusp particle-vertex-count) 1 0)
                         ;; The animals are drawn twice: once into the shadow
                         ;; map and once into the scene.
-                        (if (plusp critter-vertex-count) 2 0)))
+                        (if (plusp critter-vertex-count) 2 0)
+                        (if (plusp body-vertex-count) 1 0)))
               (vertices (+ +block-world-crosshair-vertex-count+ 3
                            (* 6 text-glyph-count)
                            particle-vertex-count
+                           body-vertex-count
                            (* 2 critter-vertex-count)
                            (* 2 mesh-vertices))))
           (when sample
@@ -680,7 +905,11 @@ the frame uniform cannot silently diverge between shader and host."
       (when (plusp critter-vertex-count)
         (write-buffer
          (luvcraft-session-critter-vertex-buffer session)
-         critter-vertices)))
+         critter-vertices))
+      (when (plusp body-vertex-count)
+        (write-buffer
+         (luvcraft-session-body-vertex-buffer session)
+         body-vertices)))
     (with-luvcraft-frame-timing
         (sample luvcraft-frame-sample-shadow-encode-seconds
                 :luvcraft/shadow-pass)
@@ -745,6 +974,13 @@ the frame uniform cannot silently diverge between shader and host."
           (set-vertex-buffer
            pass 0 (luvcraft-session-critter-vertex-buffer session))
           (draw pass critter-vertex-count))
+        ;; The player's own arms and whatever they hold, drawn in the scene
+        ;; but not into the shadow map: a pair of floating forearms would
+        ;; throw a shadow that explains nothing.
+        (when (plusp body-vertex-count)
+          (set-vertex-buffer
+           pass 0 (luvcraft-session-body-vertex-buffer session))
+          (draw pass body-vertex-count))
         (when (plusp particle-vertex-count)
           (set-vertex-buffer
            pass 0 (luvcraft-session-particle-vertex-buffer session))
@@ -771,7 +1007,8 @@ the frame uniform cannot silently diverge between shader and host."
             (draw pass 6 (length (world-text-run-glyphs text)))))
         (dolist (overlay (reverse (luvcraft-session-overlays session)))
           (when (eq :scene (luvcraft-overlay-stage overlay))
-            (encode-luvcraft-overlay overlay session pass surface-texture)))
+            (guarding-luvcraft-overlay (session overlay :overlay-encode)
+              (encode-luvcraft-overlay overlay session pass surface-texture))))
         (unless (luvcraft-session-modal-focus session)
           (set-pipeline pass (luvcraft-session-crosshair-native-pipeline session))
           (set-bind-group pass 0 (luvcraft-frame-scene-bind-group frame))
@@ -835,7 +1072,8 @@ the frame uniform cannot silently diverge between shader and host."
         (draw pass 3)
         (dolist (overlay (reverse (luvcraft-session-overlays session)))
           (when (eq :hud (luvcraft-overlay-stage overlay))
-            (encode-luvcraft-overlay overlay session pass surface-texture)))
+            (guarding-luvcraft-overlay (session overlay :overlay-encode)
+              (encode-luvcraft-overlay overlay session pass surface-texture))))
         (end-pass pass)))
     (with-luvcraft-frame-timing
         (sample luvcraft-frame-sample-surface-copy-encode-seconds
@@ -850,7 +1088,14 @@ the frame uniform cannot silently diverge between shader and host."
        encoder
        (make-gpu-copy-texture-command
         :source (luvcraft-session-presentation-texture session)
-        :destination surface-texture)))))
+        :destination surface-texture))
+      (let ((mirror (luvcraft-session-frame-mirror session)))
+        (when mirror
+          (encode
+           encoder
+           (make-gpu-copy-texture-command
+            :source (luvcraft-session-presentation-texture session)
+            :destination mirror)))))))
 
 (defun luvcraft-session-neighborhood-center (session)
   "Return the world X and Z the session's neighbourhood is centred on."
@@ -894,12 +1139,14 @@ the frame uniform cannot silently diverge between shader and host."
             ;; A moving interaction takes its turn after the world it moves in
             ;; and before the player controller, which stands down entirely
             ;; while something else is carrying the player.
-            (let ((focus (luvcraft-session-modal-focus session)))
+            (let ((focus (luvcraft-session-modal-focus session))
+                  (intent (luvcraft-session-movement-intent session)))
               (advance-luvcraft-focus focus session seconds)
               (when (and focus (luvcraft-focus-carries-player-p focus))
                 (setf (luvcraft-session-physics-accumulator session) 0d0
-                      (luvcraft-session-jump-requested-p session) nil)))
+                      (movement-intent-jump-requested-p intent) nil)))
             (let ((player (luvcraft-session-player session))
+                  (intent (luvcraft-session-movement-intent session))
                   (focus (luvcraft-session-modal-focus session)))
               (when (and player
                          (not (and focus
@@ -910,15 +1157,17 @@ the frame uniform cannot silently diverge between shader and host."
                       do (step-block-world-player
                           player (luvcraft-session-world session)
                           (luvcraft-session-camera session)
-                          (luvcraft-session-pressed-keys session)
+                          intent
                           +player-physics-step+
-                          :jump-p (luvcraft-session-jump-requested-p session)
+                          :jump-p (movement-intent-jump-requested-p intent)
                           :sync-camera-p
                           (not (luvcraft-session-focus-camera-active-p session)))
-                         (setf (luvcraft-session-jump-requested-p session) nil)
+                         (setf (movement-intent-jump-requested-p intent) nil)
                          (decf (luvcraft-session-physics-accumulator session)
                                +player-physics-step+))))
-            (advance-luvcraft-focus-camera session seconds)))
+            (advance-luvcraft-focus-camera session seconds)
+            (advance-player-body (luvcraft-session-body session)
+                                 session seconds)))
         (with-luvcraft-frame-timing
             (sample luvcraft-frame-sample-streaming-seconds
                     :luvcraft/streaming)
@@ -945,82 +1194,6 @@ the frame uniform cannot silently diverge between shader and host."
       ;; what lets the viewer draw a frame-time graph and say which frame a zone
       ;; belongs to.
       (tracy-frame-mark))))
-
-(defmethod handle-canvas-event
-    ((session luvcraft-session) canvas (event canvas-key-press-event))
-  ;; Control-Q quits from anywhere, including modal focus.  On a KMSDRM
-  ;; console there is no window manager to deliver a close request, so
-  ;; without a quit key the game owns the machine until someone kills it
-  ;; over SSH.  Q is the layout's letter q, wherever that key sits.
-  (when (and (eql #\q (canvas-key-event-unshifted-character event))
-             (member :control (canvas-key-event-modifiers event)))
-    (setf (luvcraft-session-running-p session) nil)
-    (close-canvas canvas)
-    (return-from handle-canvas-event nil))
-  (when (and (eq :tab (canvas-key-event-key-name event))
-             (or (null (luvcraft-session-modal-focus session))
-                 (member :shift (canvas-key-event-modifiers event))))
-    (unless (canvas-key-event-repeat-p event)
-      (setf (luvcraft-session-focus-toggle-tab-down-p session) t)
-      (toggle-luvcraft-session-focus session))
-    (return-from handle-canvas-event nil))
-  (when (and (eq :i (canvas-key-event-key-name event))
-             (not (canvas-key-event-repeat-p event))
-             (toggle-luvcraft-inventory session))
-    (return-from handle-canvas-event nil))
-  (when (dispatch-luvcraft-focus-event session canvas event)
-    (return-from handle-canvas-event nil))
-  (let ((key (canvas-key-event-key-name event)))
-    (if (eq key :escape)
-        (when (luvcraft-session-pointer-captured-p session)
-          (set-canvas-relative-pointer-mode canvas nil)
-          (setf (luvcraft-session-pointer-captured-p session) nil))
-        (progn
-          (setf (gethash key (luvcraft-session-pressed-keys session)) t)
-          (when (and (eq key :space)
-                     (not (canvas-key-event-repeat-p event)))
-            (setf (luvcraft-session-jump-requested-p session) t))
-          (unless (canvas-key-event-repeat-p event)
-            (case (unless (intersection '(:control :meta :super)
-                                        (canvas-key-event-modifiers event))
-                    (canvas-key-event-unshifted-character event))
-              ;; Keyboard equivalents of the pointer buttons, for consoles
-              ;; and laptops without a working click.  Dispatch on the
-              ;; layout's characters rather than scancodes, so E means the
-              ;; key that types e on a Dvorak console too -- and a chorded
-              ;; key never falls through to whatever letter shares its
-              ;; position (Dvorak Control-Q sits on the QWERTY X key).
-              (#\e (edit-luvcraft-block session :place))
-              (#\x (edit-luvcraft-block session :remove))
-              (#\c (pick-luvcraft-block session))
-              (#\m
-               (let ((capture-p
-                       (not (luvcraft-session-pointer-captured-p session))))
-                 (set-canvas-relative-pointer-mode canvas capture-p)
-                 (setf (luvcraft-session-pointer-captured-p session)
-                       capture-p)))
-              (t
-               (let* ((character (canvas-key-event-character event))
-                      (number (and character (digit-char-p character))))
-                 (when (and number
-                            (<= 1 number
-                                (length
-                                 (block-inventory-quickbar-blocks
-                                  (luvcraft-session-inventory session)))))
-                   (select-luvcraft-block session number)))))))))
-  nil)
-
-(defmethod handle-canvas-event
-    ((session luvcraft-session) canvas (event canvas-key-release-event))
-  (when (and (eq :tab (canvas-key-event-key-name event))
-             (luvcraft-session-focus-toggle-tab-down-p session))
-    (setf (luvcraft-session-focus-toggle-tab-down-p session) nil)
-    (return-from handle-canvas-event nil))
-  (when (dispatch-luvcraft-focus-event session canvas event)
-    (return-from handle-canvas-event nil))
-  (remhash (canvas-key-event-key-name event)
-           (luvcraft-session-pressed-keys session))
-  nil)
 
 (defmethod handle-canvas-event
     ((session luvcraft-session) canvas (event canvas-pointer-wheel-event))
@@ -1082,6 +1255,9 @@ here -- so an unconsumed wheel event is simply the end of the matter."
 
 (defmethod handle-canvas-event
     ((session luvcraft-session) canvas (event canvas-window-focus-lost-event))
+  ;; The window losing the pointer outright ends any capture owed back to a
+  ;; modal interaction: coming back to the game is a click either way.
+  (setf (luvcraft-session-pointer-capture-suspended-p session) nil)
   (clear-luvcraft-player-input session)
   (dispatch-luvcraft-focus-event session canvas event)
   nil)
@@ -1099,15 +1275,19 @@ here -- so an unconsumed wheel event is simply the end of the matter."
 
 (defun start-luvcraft (&key
                                 (title "luv little block world — click, look, walk")
-                                ;; KMSDRM consoles can only present at a real
-                                ;; display mode, so allow the environment to pin
+                                ;; NIL means "as much of this display as
+                                ;; comfortably fits"; a capture asks for the
+                                ;; exact frame it intends to write out.  A
+                                ;; KMSDRM console can only present at a real
+                                ;; display mode, so the environment may pin
                                 ;; the canvas to the panel's native size.
                                 (width (let ((value (uiop:getenv "LUVCRAFT_WIDTH")))
-                                         (if value (parse-integer value) 960)))
+                                         (and value (parse-integer value))))
                                 (height (let ((value (uiop:getenv "LUVCRAFT_HEIGHT")))
-                                          (if value (parse-integer value) 640)))
+                                          (and value (parse-integer value))))
                                 (frames-per-second 60)
                                 (visible-p t)
+                                (fullscreen-p nil)
                                 (world (make-empty-little-block-world))
                                 (mesher (make-instance
                                          'exposed-face-mesher))
@@ -1161,9 +1341,12 @@ Control-Q quits from anywhere, saving the world on the way out.
 Pass :PROVIDER to select the Vulkan or Metal relationship without changing
 world, simulation, streaming, or frame orchestration.  Pass :VISIBLE-P NIL to
 keep the SDL window hidden while still exercising the real presentation path.
-Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
+Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock.  Pass
+:FULLSCREEN-P T to open on the whole display, and leave :WIDTH and :HEIGHT
+NIL to let the display choose a comfortable window."
   (let* ((canvas (make-sdl-canvas
                   :title title :width width :height height
+                  :fullscreen-p fullscreen-p
                   ;; Keep the native window hidden until its first complete
                   ;; terrain frame has been presented.  Showing it here would
                   ;; expose black initialization and sky-only streaming states.
@@ -1199,72 +1382,26 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                     resource))
              (let* ((lighting-state (attach-lighting-state world))
                   (extent (canvas-extent context))
-                  (color-texture
-                    (keep
-                     (create
-                      device
-                      (make-texture-descriptor
-                       :label "block world color"
-                       :size extent :dimensions :2d
-                       :format +luvcraft-scene-color-format+
-                       :usage '(:render-attachment :texture-binding
-                                :copy-src)))))
-                  (color-view
-                    (keep
-                     (create device (make-texture-view-descriptor
-                                     :texture color-texture))))
-                  (depth-texture
-                    (keep
-                     (create
-                      device
-                      (make-texture-descriptor
-                       :label "block world depth"
-                       :size extent :dimensions :2d :format :depth32-float
-                       :usage '(:render-attachment :texture-binding)))))
-                  (depth-view
-                    (keep
-                     (create device (make-texture-view-descriptor
-                                     :texture depth-texture))))
-                  (bloom-extent (luvcraft-bloom-extent extent))
+                  ;; Every frame-sized image comes from one constructor, which
+                  ;; a live window resize calls again with the new extent.
+                  (attachments
+                    (make-luvcraft-frame-attachments device context extent))
+                  (color-texture (keep (getf attachments :color-texture)))
+                  (color-view (keep (getf attachments :color-view)))
+                  (depth-texture (keep (getf attachments :depth-texture)))
+                  (depth-view (keep (getf attachments :depth-view)))
                   (bloom-primary-texture
-                    (keep
-                     (create
-                      device
-                      (make-texture-descriptor
-                       :label "block world bloom primary"
-                       :size bloom-extent :dimensions :2d
-                       :format +luvcraft-bloom-color-format+
-                       :usage '(:render-attachment :texture-binding)))))
+                    (keep (getf attachments :bloom-primary-texture)))
                   (bloom-primary-view
-                    (keep
-                     (create device (make-texture-view-descriptor
-                                     :texture bloom-primary-texture))))
+                    (keep (getf attachments :bloom-primary-view)))
                   (bloom-secondary-texture
-                    (keep
-                     (create
-                      device
-                      (make-texture-descriptor
-                       :label "block world bloom secondary"
-                       :size bloom-extent :dimensions :2d
-                       :format +luvcraft-bloom-color-format+
-                       :usage '(:render-attachment :texture-binding)))))
+                    (keep (getf attachments :bloom-secondary-texture)))
                   (bloom-secondary-view
-                    (keep
-                     (create device (make-texture-view-descriptor
-                                     :texture bloom-secondary-texture))))
+                    (keep (getf attachments :bloom-secondary-view)))
                   (presentation-texture
-                    (keep
-                     (create
-                      device
-                      (make-texture-descriptor
-                       :label "block world presentation color"
-                       :size extent :dimensions :2d
-                       :format (canvas-format context)
-                       :usage '(:render-attachment :copy-src)))))
+                    (keep (getf attachments :presentation-texture)))
                   (presentation-view
-                    (keep
-                     (create device (make-texture-view-descriptor
-                                     :texture presentation-texture))))
+                    (keep (getf attachments :presentation-view)))
                   (shadow-depth-texture
                     (keep
                      (create
@@ -1380,6 +1517,14 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                       (make-buffer-descriptor
                        :label "critter model vertices"
                        :size +critter-buffer-size+
+                       :usage '(:vertex)))))
+                  (body-vertex-buffer
+                    (keep
+                     (create
+                      device
+                      (make-buffer-descriptor
+                       :label "player body vertices"
+                       :size +player-body-buffer-size+
                        :usage '(:vertex)))))
                   (layout
                     (keep
@@ -1618,6 +1763,7 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                      :atlas-sampler atlas-sampler
                      :normal-atlas-texture normal-atlas-texture
                      :normal-atlas-view normal-atlas-view
+                     :render-extent extent
                      :color-texture color-texture :color-view color-view
                      :depth-texture depth-texture :depth-view depth-view
                      :presentation-texture presentation-texture
@@ -1648,6 +1794,7 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                      :particle-vertex-buffer particle-vertex-buffer
                      :critter-vertex-buffer critter-vertex-buffer
                      :critters critters
+                     :body-vertex-buffer body-vertex-buffer
                      :world-text text-run
                      :world-text-glyph-cache text-glyph-cache
                      :resources resources)))

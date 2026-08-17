@@ -1713,8 +1713,12 @@ entries as understood by FILL-SEMAPHORE-SUBMIT-INFOS."
     (device swapchain semaphore &key (timeout #xffffffffffffffff))
   (cffi:with-foreign-object (index :uint32)
     (let ((result
+            ;; An out-of-date swapchain is an ordinary answer rather than a
+            ;; failure: the window changed size and the caller is expected to
+            ;; rebuild.  Report it as the second value instead of signalling.
             (with-vulkan-results
-                (:acquire-next-image :success :suboptimal-khr)
+                (:acquire-next-image
+                 :success :suboptimal-khr :error-out-of-date-khr)
               (vk:acquire-next-image-khr
                device swapchain timeout semaphore (cffi:null-pointer) index))))
       (values (cffi:mem-ref index :uint32) result))))
@@ -1730,5 +1734,6 @@ entries as understood by FILL-SEMAPHORE-SUBMIT-INFOS."
                   :p-swapchains swapchains
                   :p-image-indices indices
                   :p-results (cffi:null-pointer))
-          (with-vulkan-results (:present :success :suboptimal-khr)
+          (with-vulkan-results
+              (:present :success :suboptimal-khr :error-out-of-date-khr)
             (vk:queue-present-khr queue present-info)))))))

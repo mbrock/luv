@@ -47,6 +47,23 @@ SLY can pause it, set a time, change its rate, or pin it without restarting.")
                1.0)))
   clock)
 
+(defun sky-clock-hour (clock)
+  "CLOCK's time of day in hours, 0 to 24."
+  (* 24.0 (sky-clock-day-fraction clock)))
+
+(defun (setf sky-clock-hour) (hour clock)
+  "Set CLOCK's time of day to HOUR, wrapping around midnight."
+  (setf (sky-clock-day-fraction clock) (mod (/ hour 24.0) 1.0))
+  hour)
+
+(defun sky-clock-minutes-per-day (clock)
+  "How many real minutes one of CLOCK's days lasts."
+  (/ 1.0 (* 60.0 (sky-clock-rate clock))))
+
+(defun (setf sky-clock-minutes-per-day) (minutes clock)
+  (setf (sky-clock-rate clock) (/ 1.0 (* 60.0 minutes)))
+  minutes)
+
 (defun sky-clock-current-day-fraction (clock)
   (or (sky-clock-pinned-day-fraction clock)
       (sky-clock-day-fraction clock)))
@@ -215,8 +232,13 @@ SLY can pause it, set a time, change its rate, or pin it without restarting.")
            (sky-frame-parameters-fog-near sky)
            (sky-frame-parameters-fog-far sky)))
 
-(defconstant +sky-sun-orbit-tilt+ 0.28
+(defparameter *sky-sun-orbit-tilt* 0.28
   "How far the solar orbit leans out of the world X/Y plane.")
+
+(define-knob sun-orbit-tilt
+    (:group :sun :quantity (:quantity :sun-orbit-tilt :unit :one)
+     :minimum 0.0 :maximum 1.0 :step 0.02)
+    *sky-sun-orbit-tilt*)
 
 (defun sky-sun-orbit-axis ()
   "The axis the sun revolves around: world Z, because the orbit is a circle
@@ -237,7 +259,7 @@ even at noon."
   (let* ((angle (* 2.0 pi (- day-fraction 0.25)))
          (x (coerce (cos angle) 'single-float))
          (y (coerce (sin angle) 'single-float))
-         (z +sky-sun-orbit-tilt+)
+         (z *sky-sun-orbit-tilt*)
          (length (sqrt (+ (* x x) (* y y) (* z z)))))
     (make-vec3 (/ x length)
                (/ y length)

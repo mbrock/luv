@@ -30,6 +30,40 @@
              (canvas-error-reason condition)
              (canvas-error-details condition)))))
 
+(defparameter *canvas-dispatch-timeout* 5.0
+  "How long a cross-thread canvas call waits before deciding it is stuck.
+
+Work handed to the canvas thread is serviced once a frame, so it completes in
+milliseconds whenever that thread is running at all.  Anything approaching
+this many seconds does not mean slow, it means the thread is not coming back
+-- and a caller that waited forever would take a REPL, a screenshot, or an
+editor session down with it, silently.  Bind it larger only for an operation
+known to be genuinely long.")
+
+(define-condition canvas-dispatch-timeout (canvas-error)
+  ((seconds
+    :initarg :seconds
+    :initform nil
+    :reader canvas-dispatch-timeout-seconds))
+  (:report
+   (lambda (condition stream)
+     (format stream
+             "The canvas thread did not service ~S on ~S within ~,1F seconds.~@
+It is not servicing requests at all: it is blocked, and every later call will ~
+queue behind the same block.  The usual cause is the render loop parked in ~
+presentation -- vkQueuePresentKHR waits forever when the compositor will not ~
+take frames, which is what a headless, locked, or unmapped session looks ~
+like.  Get a backtrace of the canvas thread before restarting anything."
+             (canvas-error-operation condition)
+             (canvas-error-canvas condition)
+             (or (canvas-dispatch-timeout-seconds condition) 0.0))))
+  (:documentation
+   "A cross-thread canvas call gave up rather than hang.
+
+This is deliberately an error and not a longer wait.  A silent unbounded wait
+on the canvas thread is indistinguishable from a crash and destroys the one
+thing an interactive image is for."))
+
 (define-condition canvas-state-error (canvas-error)
   ((state
     :initarg :state
@@ -86,7 +120,8 @@
    "Return milliseconds until CLOCK is due, or NIL to wait indefinitely."))
 
 (defgeneric service-canvas-clock (clock canvas timestamp)
-  (:documentation "Run any frame CLOCK has made due at TIMESTAMP."))
+  (:documentation
+   "Run any frame CLOCK has made due at TIMESTAMP; true if one ran."))
 
 (defmethod clock-wait-timeout ((clock demand-clock) timestamp)
   (declare (ignore clock timestamp))
@@ -121,7 +156,8 @@
                      (* interval
                         (1+ (floor (/ (- timestamp next) interval)))))
                   (+ timestamp interval))))
-      (funcall (clock-frame-function clock) canvas timestamp))))
+      (funcall (clock-frame-function clock) canvas timestamp)
+      t)))
 
 (defclass canvas ()
   ((clock
@@ -241,8 +277,13 @@ says the user asked for, not what the hardware reported."))
 (defmethod handle-canvas-event ((handler function) (canvas canvas) event)
   (funcall handler canvas event))
 
+(defvar *canvas-events-held-p* nil
+  "True on a canvas loop while its frames are held or parked by a failure:
+the window is still pumped, but no event reaches the application.")
+
 (defun dispatch-canvas-event (canvas event)
-  (handle-canvas-event (canvas-event-handler canvas) canvas event))
+  (unless *canvas-events-held-p*
+    (handle-canvas-event (canvas-event-handler canvas) canvas event)))
 
 (defstruct canvas-configuration
   "The small portable portion of a canvas presentation configuration."
@@ -272,6 +313,28 @@ says the user asked for, not what the hardware reported."))
 
 (defgeneric canvas-visible-p (canvas)
   (:documentation "Return whether CANVAS is intended to be visible."))
+
+(defgeneric canvas-health (canvas)
+  (:documentation
+   "Return a plist describing whether CANVAS's native loop is still alive.
+
+The keys are :STATE, :PHASE, :PHASE-SECONDS, :TICKS, and :STALLED-P.  A
+caller reads this to answer the question a beachballing window raises --
+is anything servicing that window at all -- without attaching a debugger."))
+
+(defgeneric canvas-stalled-seconds (canvas)
+  (:documentation
+   "Return how long CANVAS's loop has been in one phase past its deadline.
+
+NIL means the loop is healthy: either it is cycling, or it is parked in a
+bounded wait that the window system is pumping for it."))
+
+(defgeneric canvas-fullscreen-p (canvas)
+  (:documentation "Return whether CANVAS occupies its display."))
+
+(defgeneric set-canvas-fullscreen (canvas enabled)
+  (:documentation
+   "Give CANVAS its whole display, or hand it back to the window manager."))
 
 (defgeneric set-canvas-relative-pointer-mode (canvas enabled)
   (:documentation

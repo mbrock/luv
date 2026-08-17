@@ -47,11 +47,11 @@
    (production-errors :initform nil
                       :accessor luvcraft-session-production-errors)
    (publication-limit :initarg :publication-limit :initform 2
-                      :reader luvcraft-session-publication-limit)
+                      :accessor luvcraft-session-publication-limit)
    (load-schedule-limit :initarg :load-schedule-limit :initform 4
-                        :reader luvcraft-session-load-schedule-limit)
+                        :accessor luvcraft-session-load-schedule-limit)
    (mesh-capture-limit :initarg :mesh-capture-limit :initform 1
-                       :reader luvcraft-session-mesh-capture-limit)
+                       :accessor luvcraft-session-mesh-capture-limit)
    (chunk-products :initform (make-hash-table :test #'equal)
                    :reader luvcraft-session-chunk-products)
    (staged-chunk-products :initform (make-hash-table :test #'equal)
@@ -68,10 +68,10 @@
    (sky-profile :initarg :sky-profile :initform (make-default-sky-profile)
                 :accessor luvcraft-session-sky-profile)
    (shadow-diagnostic-p :initarg :shadow-diagnostic-p :initform nil
-                        :reader luvcraft-session-shadow-diagnostic-p)
+                        :accessor luvcraft-session-shadow-diagnostic-p)
    (player :initarg :player :initform nil :reader luvcraft-session-player)
    (residency-radius :initarg :residency-radius :initform 4
-                     :reader luvcraft-session-residency-radius)
+                     :accessor luvcraft-session-residency-radius)
    (residency-center :initform nil
                      :accessor luvcraft-session-residency-center)
    (selected-block :initarg :selected-block :initform *stone-block*
@@ -84,6 +84,9 @@
    (critters :initarg :critters
              :initform (make-instance 'critter-population)
              :reader luvcraft-session-critters)
+   ;; The player's own arms and hands, and what they hold.  See BODY.LISP.
+   (body :initarg :body :initform (make-instance 'player-body)
+         :reader luvcraft-session-body)
    (title-base :initarg :title-base :initform "luvcraft"
                :reader luvcraft-session-title-base)
    (atlas-texture :initarg :atlas-texture
@@ -95,16 +98,22 @@
                          :reader luvcraft-session-normal-atlas-texture)
    (normal-atlas-view :initarg :normal-atlas-view
                       :reader luvcraft-session-normal-atlas-view)
+   ;; The attachments below are the frame's own size rather than the world's,
+   ;; so a window resize replaces all of them together.  RENDER-EXTENT records
+   ;; the size they were made for; a frame that finds the drawable disagreeing
+   ;; with it rebuilds them before encoding anything.
+   (render-extent :initarg :render-extent :initform nil
+                  :accessor luvcraft-session-render-extent)
    (color-texture :initarg :color-texture
-                  :reader luvcraft-session-color-texture)
-   (color-view :initarg :color-view :reader luvcraft-session-color-view)
+                  :accessor luvcraft-session-color-texture)
+   (color-view :initarg :color-view :accessor luvcraft-session-color-view)
    (depth-texture :initarg :depth-texture
-                  :reader luvcraft-session-depth-texture)
-   (depth-view :initarg :depth-view :reader luvcraft-session-depth-view)
+                  :accessor luvcraft-session-depth-texture)
+   (depth-view :initarg :depth-view :accessor luvcraft-session-depth-view)
    (presentation-texture :initarg :presentation-texture
-                         :reader luvcraft-session-presentation-texture)
+                         :accessor luvcraft-session-presentation-texture)
    (presentation-view :initarg :presentation-view
-                      :reader luvcraft-session-presentation-view)
+                      :accessor luvcraft-session-presentation-view)
    (shadow-depth-texture :initarg :shadow-depth-texture
                          :reader luvcraft-session-shadow-depth-texture)
    (shadow-depth-view :initarg :shadow-depth-view
@@ -124,13 +133,13 @@
    ;; The lens chain ping-pongs between two reduced attachments: the blurred
    ;; bloom ends on the primary one and the light shafts on the secondary.
    (bloom-primary-texture :initarg :bloom-primary-texture :initform nil
-                          :reader luvcraft-session-bloom-primary-texture)
+                          :accessor luvcraft-session-bloom-primary-texture)
    (bloom-primary-view :initarg :bloom-primary-view :initform nil
-                       :reader luvcraft-session-bloom-primary-view)
+                       :accessor luvcraft-session-bloom-primary-view)
    (bloom-secondary-texture :initarg :bloom-secondary-texture :initform nil
-                            :reader luvcraft-session-bloom-secondary-texture)
+                            :accessor luvcraft-session-bloom-secondary-texture)
    (bloom-secondary-view :initarg :bloom-secondary-view :initform nil
-                         :reader luvcraft-session-bloom-secondary-view)
+                         :accessor luvcraft-session-bloom-secondary-view)
    (bloom-bright-pipeline :initarg :bloom-bright-pipeline :initform nil
                           :reader luvcraft-session-bloom-bright-pipeline)
    (bloom-horizontal-pipeline :initarg :bloom-horizontal-pipeline :initform nil
@@ -158,12 +167,18 @@
                            :reader luvcraft-session-particle-vertex-buffer)
    (critter-vertex-buffer :initarg :critter-vertex-buffer
                           :reader luvcraft-session-critter-vertex-buffer)
+   (body-vertex-buffer :initarg :body-vertex-buffer :initform nil
+                       :reader luvcraft-session-body-vertex-buffer)
    (world-text :initarg :world-text :initform nil
                :reader luvcraft-session-world-text)
    (world-text-glyph-cache :initarg :world-text-glyph-cache :initform nil
                            :reader luvcraft-session-world-text-glyph-cache)
    (video-screen :initarg :video-screen :initform nil
                  :accessor luvcraft-session-video-screen)
+   ;; When set, every presented frame is also copied into this texture, so
+   ;; something outside the window -- another process, through an IOSurface --
+   ;; can watch the game.
+   (frame-mirror :initform nil :accessor luvcraft-session-frame-mirror)
    (overlays :initform nil :accessor luvcraft-session-overlays)
    (modal-focus :initform nil :accessor luvcraft-session-modal-focus)
    (focus-camera-origin :initform nil
@@ -174,10 +189,28 @@
                  :reader luvcraft-session-frame-states)
    (resources :initarg :resources :initform nil
               :accessor luvcraft-session-resources)
-   (pressed-keys :initform (make-hash-table :test #'eq)
-                 :reader luvcraft-session-pressed-keys)
+   (movement-intent
+    :initform (make-movement-intent)
+    :reader luvcraft-session-movement-intent
+    :documentation "What the player is trying to do, set by the input layer.")
+   (look-intent
+    :initform (make-movement-intent)
+    :reader luvcraft-session-look-intent
+    :documentation "Where the player is trying to turn the camera, urged by
+the arrow keys: a mouse for the mouseless console.")
    (pointer-captured-p :initform nil
                        :accessor luvcraft-session-pointer-captured-p)
+   (pointer-capture-suspended-p
+    :initform nil
+    :accessor luvcraft-session-pointer-capture-suspended-p
+    :documentation
+    "Whether mouse look was captured when the current modal focus was entered.
+
+A modal interaction wants an ordinary cursor -- a terminal's own UI is
+clicked at a place on the screen, which relative pointer mode does not have
+-- so entering focus releases the capture.  Remembering that it was held is
+what lets leaving focus put the player straight back into mouse look instead
+of making them click the world again.")
    (last-frame-time :initform nil
                     :type (or null double-float)
                     :quantity (:quantity :monotonic-frame-time :unit :second)
@@ -187,8 +220,6 @@
                         :quantity (:quantity :physics-accumulated-duration
                                    :unit :second)
                         :accessor luvcraft-session-physics-accumulator)
-   (jump-requested-p :initform nil
-                     :accessor luvcraft-session-jump-requested-p)
    (running-p :initform t :accessor luvcraft-session-running-p))
   (:metaclass luv.arithmetic.records:quantity-class))
 
@@ -207,6 +238,14 @@
 (defmethod luvcraft-overlay-stage (overlay)
   (declare (ignore overlay))
   :scene)
+
+(defgeneric luvcraft-overlay-live-shader-pipelines (overlay)
+  (:documentation
+   "The live shader pipelines OVERLAY owns, so the session can count them
+among its own; none by default.")
+  (:method (overlay)
+    (declare (ignore overlay))
+    nil))
 
 (defgeneric refresh-luvcraft-overlay (overlay session)
   (:documentation
@@ -395,12 +434,21 @@ return its attached overlay."))
   nil)
 
 (defun clear-luvcraft-player-input (session)
-  (clrhash (luvcraft-session-pressed-keys session))
-  (setf (luvcraft-session-jump-requested-p session) nil)
+  (clear-movement-intent (luvcraft-session-movement-intent session))
+  (clear-movement-intent (luvcraft-session-look-intent session))
   (when (luvcraft-session-pointer-captured-p session)
     (set-canvas-relative-pointer-mode
      (luvcraft-session-canvas session) nil)
     (setf (luvcraft-session-pointer-captured-p session) nil))
+  session)
+
+(defun resume-luvcraft-pointer-capture (session)
+  "Take mouse look back if the modal interaction just left had suspended it."
+  (when (shiftf (luvcraft-session-pointer-capture-suspended-p session) nil)
+    (when (and (luvcraft-session-running-p session)
+               (not (luvcraft-session-pointer-captured-p session)))
+      (set-canvas-relative-pointer-mode (luvcraft-session-canvas session) t)
+      (setf (luvcraft-session-pointer-captured-p session) t)))
   session)
 
 (defun unfocus-luvcraft-session (session)
@@ -411,6 +459,7 @@ return its attached overlay."))
       ;; safely establish another focus without being cleared afterward.
       (setf (luvcraft-session-modal-focus session) nil)
       (clear-luvcraft-player-input session)
+      (resume-luvcraft-pointer-capture session)
       (luvcraft-focus-left focus session))
     focus))
 
@@ -428,7 +477,12 @@ mounting a vehicle, and other interactions described by #8JCMA5."
       (setf (luvcraft-session-focus-camera-origin session)
             (camera-pose-from-camera (luvcraft-session-camera session))))
     (unfocus-luvcraft-session session)
-    (clear-luvcraft-player-input session)
+    ;; Read the capture back after the previous focus has returned it, so a
+    ;; focus-to-focus move keeps mouse look owed to the player rather than
+    ;; forgetting it halfway.
+    (let ((captured (luvcraft-session-pointer-captured-p session)))
+      (clear-luvcraft-player-input session)
+      (setf (luvcraft-session-pointer-capture-suspended-p session) captured))
     (setf (luvcraft-session-modal-focus session) focus)
     (handler-case
         (luvcraft-focus-entered focus session)
@@ -437,10 +491,42 @@ mounting a vehicle, and other interactions described by #8JCMA5."
         (error condition))))
   focus)
 
+(defmacro guarding-luvcraft-overlay ((session overlay phase) &body body)
+  "Run BODY for OVERLAY; an error is OVERLAY's alone.  It is retained on the
+session's canvas with its backtrace, logged, and the overlay is taken out of
+the session -- a paint bug in a gadget must not take the world with it.
+Returns BODY's values, or NIL when the overlay failed."
+  (let ((backtrace (gensym "BACKTRACE")))
+    `(let ((,backtrace nil))
+       (handler-case
+           (handler-bind ((error (lambda (condition)
+                                   (declare (ignore condition))
+                                   (setf ,backtrace
+                                         (luv:capture-backtrace-string)))))
+             ,@body)
+         (error (condition)
+           (fuse-luvcraft-overlay ,session ,overlay ,phase condition ,backtrace)
+           nil)))))
+
+(defun fuse-luvcraft-overlay (session overlay phase condition backtrace)
+  "OVERLAY failed in PHASE with CONDITION: retain the failure and drop it.
+The overlay's resources are not released here -- this may be mid-frame,
+with its buffers still in the command stream -- so they are leaked, which
+a development image can afford and a frame cannot."
+  (luv:retain-canvas-failure (luvcraft-session-canvas session)
+                             phase condition backtrace)
+  (luv:log-event :luvcraft "overlay ~A is fused after failing in ~(~A~)"
+                 (type-of overlay) phase)
+  (remove-luvcraft-overlay session overlay :release-p nil)
+  overlay)
+
 (defun dispatch-luvcraft-focus-event (session canvas event)
   (let ((focus (luvcraft-session-modal-focus session)))
     (when focus
-      (handle-luvcraft-focus-event focus session canvas event)
+      (if (member focus (luvcraft-session-overlays session))
+          (guarding-luvcraft-overlay (session focus :focus-event)
+            (handle-luvcraft-focus-event focus session canvas event))
+          (handle-luvcraft-focus-event focus session canvas event))
       t)))
 
 (defun luvcraft-session-targeted-critter
@@ -492,7 +578,8 @@ the terrain the ray meets first is what the player is looking at."
 (defun dispatch-luvcraft-overlay-event (session canvas event)
   "Offer EVENT to SESSION's frontmost overlay and report consumption."
   (some (lambda (overlay)
-          (handle-luvcraft-overlay-event overlay session canvas event))
+          (guarding-luvcraft-overlay (session overlay :overlay-event)
+            (handle-luvcraft-overlay-event overlay session canvas event)))
         (luvcraft-session-overlays session)))
 
 (defun add-luvcraft-overlay (session overlay)
@@ -542,25 +629,32 @@ the terrain the ray meets first is what the player is looking at."
   (live-shader-pipeline-native-pipeline
    (luvcraft-session-post-pipeline session)))
 
+(defun luvcraft-session-live-shader-pipelines (session)
+  "Every live shader pipeline SESSION owns, the optional ones included."
+  (remove nil
+          (list* (luvcraft-session-block-pipeline session)
+                 (luvcraft-session-shadow-pipeline session)
+                 (luvcraft-session-sky-pipeline session)
+                 (luvcraft-session-crosshair-pipeline session)
+                 (luvcraft-session-post-pipeline session)
+                 (luvcraft-session-bloom-bright-pipeline session)
+                 (luvcraft-session-bloom-horizontal-pipeline session)
+                 (luvcraft-session-bloom-vertical-pipeline session)
+                 (luvcraft-session-sun-shaft-pipeline session)
+                 (and (luvcraft-session-world-text session)
+                      (world-text-run-pipeline
+                       (luvcraft-session-world-text session)))
+                 (and (luvcraft-session-video-screen session)
+                      (video-screen-pipeline
+                       (luvcraft-session-video-screen session)))
+                 (loop for overlay in (luvcraft-session-overlays session)
+                       append (luvcraft-overlay-live-shader-pipelines
+                               overlay)))))
+
 (defun refresh-luvcraft-shaders (session)
   "Install any successfully redefined block-world shader methods."
-  (refresh-live-shader-pipeline (luvcraft-session-block-pipeline session))
-  (refresh-live-shader-pipeline (luvcraft-session-shadow-pipeline session))
-  (refresh-live-shader-pipeline (luvcraft-session-sky-pipeline session))
-  (refresh-live-shader-pipeline (luvcraft-session-crosshair-pipeline session))
-  (refresh-live-shader-pipeline (luvcraft-session-post-pipeline session))
-  (dolist (pipeline (list (luvcraft-session-bloom-bright-pipeline session)
-                          (luvcraft-session-bloom-horizontal-pipeline session)
-                          (luvcraft-session-bloom-vertical-pipeline session)
-                          (luvcraft-session-sun-shaft-pipeline session)))
-    (when pipeline
-      (refresh-live-shader-pipeline pipeline)))
-  (when (luvcraft-session-world-text session)
-    (refresh-live-shader-pipeline
-     (world-text-run-pipeline (luvcraft-session-world-text session))))
-  (when (luvcraft-session-video-screen session)
-    (refresh-live-shader-pipeline
-     (video-screen-pipeline (luvcraft-session-video-screen session))))
+  (dolist (pipeline (luvcraft-session-live-shader-pipelines session))
+    (refresh-live-shader-pipeline pipeline))
   session)
 
 (defun luvcraft-session-target
@@ -578,14 +672,16 @@ the terrain the ray meets first is what the player is looking at."
   (let* ((blocks (block-inventory-quickbar-blocks
                   (luvcraft-session-inventory session)))
          (block (luvcraft-session-selected-block session))
-         (number (position block blocks :test #'eq)))
+         (number (position block blocks :test #'eq))
+         (item (player-body-hand-item (luvcraft-session-body session))))
     (when (slot-boundp session 'canvas)
       (setf (canvas-title (luvcraft-session-canvas session))
             (format nil
-                    "~A — [~A] ~(~A~)  ·  1–~D select  ·  e place  ·  x mine  ·  c pick  ·  I inventory  ·  shift sprint  ·  arrows look  ·  tab focus  ·  ctrl-q quit"
+                    "~A — [~A] ~(~A~)~@[  ·  holding ~A~]  ·  1–~D select  ·  e place  ·  x mine  ·  c pick  ·  I inventory  ·  F phone  ·  shift sprint  ·  arrows look  ·  tab focus  ·  ctrl-q quit"
                     (luvcraft-session-title-base session)
                     (if number (1+ number) "inventory")
                     (block-kind-name block)
+                    (and item (hand-item-name item))
                     (length blocks)))))
   session)
 
@@ -605,15 +701,11 @@ the terrain the ray meets first is what the player is looking at."
   "Radians per second of camera turn while an arrow key is held.")
 
 (defun advance-luvcraft-keyboard-look (session seconds)
-  "Turn SESSION's camera with the arrow keys: a mouse for the mouseless."
-  (let* ((keys (luvcraft-session-pressed-keys session))
+  "Turn SESSION's camera as its look intent urges: a mouse for the mouseless."
+  (let* ((intent (luvcraft-session-look-intent session))
          (camera (luvcraft-session-camera session))
-         (yaw-amount
-           (- (if (gethash :right keys) 1d0 0d0)
-              (if (gethash :left keys) 1d0 0d0)))
-         (pitch-amount
-           (- (if (gethash :up keys) 1d0 0d0)
-              (if (gethash :down keys) 1d0 0d0))))
+         (yaw-amount (movement-intent-axis intent :right :left))
+         (pitch-amount (movement-intent-axis intent :up :down)))
     (unless (zerop yaw-amount)
       (incf (camera-yaw camera)
             (* yaw-amount +luvcraft-keyboard-look-rate+ seconds)))
@@ -669,3 +761,74 @@ the terrain the ray meets first is what the player is looking at."
               (luvcraft-session-selected-block session) world x y z)))
           (request-luvcraft-session-checkpoint session)
           (values coordinate :edited))))))
+
+;;; ---------------------------------------------------------------------
+;;; The session's knobs: values that live on the session, its camera, its
+;;; player, its sky clock, its animals.  All are read every frame.
+
+(defun camera-field-of-view-degrees (camera)
+  (* (camera-field-of-view camera) (/ 180 pi)))
+
+(defun (setf camera-field-of-view-degrees) (degrees camera)
+  (setf (camera-field-of-view camera) (coerce (* degrees (/ pi 180)) 'single-float))
+  degrees)
+
+(defun camera-sensitivity-milliradians (camera)
+  (* 1000 (camera-sensitivity camera)))
+
+(defun (setf camera-sensitivity-milliradians) (milliradians camera)
+  (setf (camera-sensitivity camera) (coerce (/ milliradians 1000) 'single-float))
+  milliradians)
+
+(define-knob time-of-day
+    (:group :sky :quantity (:quantity :time-of-day :unit :hour)
+     :minimum 0.0 :maximum 24.0 :step 0.25)
+    (sky-clock-hour (luvcraft-session-sky-clock session)))
+(define-knob day-length
+    (:group :sky :quantity (:quantity :day-length :unit :minute)
+     :minimum 0.5 :maximum 60.0 :step 0.5)
+    (sky-clock-minutes-per-day (luvcraft-session-sky-clock session)))
+(define-knob freeze-time
+    (:group :sky :class 'switch-knob :label "freeze the clock"
+     :quantity (:quantity :switch :unit :one))
+    (sky-clock-paused-p (luvcraft-session-sky-clock session)))
+
+(define-knob field-of-view
+    (:group :camera :quantity (:quantity :camera-field-of-view :unit :degree)
+     :type double-float :minimum 30.0 :maximum 140.0 :step 1.0)
+    (camera-field-of-view-degrees (luvcraft-session-camera session)))
+(define-knob look-sensitivity
+    (:group :camera :label "mouse sensitivity"
+     :quantity (:quantity :look-sensitivity :unit :milliradian)
+     :unit-label " mrad/px" :minimum 0.2 :maximum 20.0 :step 0.1)
+    (camera-sensitivity-milliradians (luvcraft-session-camera session)))
+(define-knob shadow-diagnostic
+    (:group :shadows :class 'switch-knob :label "shadow diagnostic view"
+     :quantity (:quantity :switch :unit :one))
+    (luvcraft-session-shadow-diagnostic-p session))
+
+(define-knob walk-speed
+    (:group :player
+     :quantity (:quantity :player-walk-speed :unit ((:cell 1) (:second -1)))
+     :type double-float :minimum 0.5 :maximum 30.0 :step 0.5)
+    (player-walk-speed (luvcraft-session-player session)))
+(define-knob jump-speed
+    (:group :player
+     :quantity (:quantity :player-jump-speed :unit ((:cell 1) (:second -1)))
+     :type double-float :minimum 0.0 :maximum 30.0 :step 0.5)
+    (player-jump-speed (luvcraft-session-player session)))
+(define-knob gravity
+    (:group :player
+     :quantity (:quantity :gravity-magnitude :unit ((:cell 1) (:second -2)))
+     :type double-float :minimum 0.0 :maximum 100.0 :step 1.0)
+    (player-gravity (luvcraft-session-player session)))
+(define-knob eye-height
+    (:group :player :quantity (:quantity :player-eye-height :unit :cell)
+     :type double-float :minimum 0.2 :maximum 3.0 :step 0.05)
+    (player-eye-height (luvcraft-session-player session)))
+
+(define-knob critter-count
+    (:group :critters :label "animals about"
+     :quantity (:quantity :critter-count :unit :one)
+     :minimum 0 :maximum 12 :step 1)
+    (critter-population-target-count (luvcraft-session-critters session)))

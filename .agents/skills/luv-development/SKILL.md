@@ -81,6 +81,27 @@ If the image lacks a new system, package, readtable, native dependency, or metho
 
 Never kill an image reported as belonging to another checkout or as Emacs/external. Stop it through its owner.
 
+If `./sly status` reports that the port accepts TCP but answers no Slynk handshake, it also names the processes holding it -- usually shells the terminal wall spawned, which inherited the listening socket and outlived their image. `./sly reclaim` kills those holders and frees the port; `./sly start` does it on its own. Neither ever kills a Lisp: a Lisp holding the port is reported so its owner can deal with it.
+
+## Five seconds of silence means broken
+
+**A command that runs longer than about five seconds without printing anything is not slow. It is broken, and finding out how is the task now.** Waiting it out, polling it, chaining sleeps, or running it again the same way are all refusals to look. So is reporting "it seems to be taking a while": that is not a status.
+
+Silence is almost always something that was told not to speak, or something waiting for input nobody is going to send:
+
+- **A pipe ate the progress.** `-L`, `--verbose`, `-x`, and `--progress` mostly write to a TTY and go mute into `tee`, `head`, or a pager. Never pipe a progress-reporting command; run it in tmux and read the pane.
+- **Stdin was left open.** A failed `./sly eval` prints a backtrace and waits for a restart number. Redirect `< /dev/null` so it aborts and says why instead of waiting forever for a keystroke.
+- **It is talking to the network.** `nix build nixpkgs#foo` resolves the registry alias over `channels.nixos.org` and can hang there with nothing on screen; prefer a reference through this repo's pinned flake.
+
+Make it talk, then find it:
+
+1. `ps ax -o pid,ppid,etime,state,command | grep -E '[s]bcl|[n]ix|[c]c1'` — is anything actually burning CPU, or is it all sleeping?
+2. `strace -f -p PID`, `cat /proc/PID/wchan`, `cat /proc/PID/stack` — one of these names the syscall it is parked in within seconds.
+3. `ss -tnp` for a socket that will never answer.
+4. Split the silent step into several small ones. The one that does not come back has named itself.
+
+A responsive image and a stuck call are different things: if `./sly eval "(+ 1 2)" < /dev/null` returns instantly while another eval does not, the image is fine and the block is inside that specific form — take it apart rather than blaming the connection.
+
 ## Diagnose slow or stuck work
 
 1. Observe the last emitted compilation unit; a fresh worktree compiles its own source-path cache, but a normal cold project load should keep printing progress.

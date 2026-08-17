@@ -163,7 +163,39 @@
     (write-sequence octets stream)
     (force-output stream)))
 
+(defparameter *slynk-silence-notices* '(5 15 30 60)
+  "Seconds of silence at which ./sly reports that the image has not answered.
+
+After the last entry the notice repeats at that interval.  A request can take
+minutes legitimately -- loading a system, meshing a world -- so waiting is not
+itself an error, but waiting without a word is: silence is exactly what a
+wedged image looks like, and the difference has to be visible from here.")
+
+(defun report-slynk-silence (seconds)
+  (format *error-output*
+          "~&sly: no answer from ~A:~D after ~D s. It may simply be busy; ~
+`./sly status` in another shell says whether its canvas is stalled.~%"
+          *host* *port* seconds)
+  (force-output *error-output*))
+
+(defun await-slynk-packet (stream)
+  "Wait until STREAM has something to say, reporting the silence if it lasts."
+  (let* ((descriptor (sb-sys:fd-stream-fd stream))
+         (interval (or (car (last *slynk-silence-notices*)) 60))
+         (pending (rest *slynk-silence-notices*))
+         (waited 0)
+         (next (or (first *slynk-silence-notices*) interval)))
+    (loop until (listen stream)
+          do (when (sb-sys:wait-until-fd-usable
+                    descriptor :input (max 1 (- next waited)))
+               (return))
+             (setf waited next)
+             (report-slynk-silence waited)
+             (setf next (if pending (first pending) (+ waited interval))
+                   pending (rest pending)))))
+
 (defun read-packet (stream)
+  (await-slynk-packet stream)
   (let* ((header (sb-ext:octets-to-string
                   (read-exactly stream 6)
                   :external-format :ascii))
@@ -222,6 +254,65 @@
            :error nil
            :wait t)))
     (sb-ext:process-exit-code process)))
+
+(defun run-shell-output (command)
+  "Run COMMAND under /bin/sh and return its standard output as a string."
+  (with-output-to-string (output)
+    (sb-ext:run-program
+     "/bin/sh" (list "-c" command)
+     :search nil
+     :output output
+     :error nil
+     :wait t)))
+
+(defun split-lines (text)
+  (loop with start = 0
+        for newline = (position #\Newline text :start start)
+        collect (string-right-trim '(#\Return) (subseq text start newline))
+        while newline
+        do (setf start (1+ newline))))
+
+(defstruct (port-holder (:constructor make-port-holder (pid command)))
+  pid
+  command)
+
+(defun port-holders (&optional (port *port*))
+  "The processes holding a listening socket on PORT, as lsof reports them.
+
+A dead image's shell can outlive it still holding the inherited listening
+socket, which is exactly the state where the port accepts TCP and answers
+nothing."
+  (let ((pid nil)
+        (holders nil))
+    (dolist (line (split-lines
+                   (run-shell-output
+                    (format nil "lsof -nP -iTCP:~D -sTCP:LISTEN -Fpc 2>/dev/null"
+                            port)))
+             (nreverse holders))
+      (when (plusp (length line))
+        (case (char line 0)
+          (#\p (setf pid (parse-integer (subseq line 1) :junk-allowed t)))
+          (#\c (when pid
+                 (push (make-port-holder pid (subseq line 1)) holders)
+                 (setf pid nil))))))))
+
+(defun lisp-holder-p (holder)
+  "True when HOLDER looks like a Lisp image rather than a leaked descriptor.
+
+./sly reclaims a squatted port by killing what holds it, and a Lisp is the
+one kind of holder that might be somebody's live image: it is reported, never
+killed."
+  (let ((command (string-downcase (port-holder-command holder))))
+    (or (search "sbcl" command)
+        (search "lisp" command)
+        (search "emacs" command)
+        (search "luvcraft" command))))
+
+(defun describe-port-holders (holders &optional (stream *error-output*))
+  (dolist (holder holders)
+    (format stream "  pid ~D ~A~%"
+            (port-holder-pid holder)
+            (port-holder-command holder))))
 
 (defun pid-from-file (pathname)
   (with-open-file (stream pathname :if-does-not-exist nil)
@@ -314,18 +405,86 @@
     (print-server-log-tail)
     (error "Timed out waiting for luv Slynk on ~A:~D" *host* *port*)))
 
+(defun kill-port-holders (holders signal)
+  (dolist (holder holders)
+    (run-shell (format nil "kill -~A ~D >/dev/null 2>&1"
+                       signal (port-holder-pid holder)))))
+
+(defun reclaim-port (&key quiet)
+  "Free *PORT* when it accepts TCP but no Slynk answers behind it.
+
+The usual cause is a descriptor a dead image left behind: a shell it spawned
+in the terminal wall inherited the listening socket and outlived it, so the
+kernel keeps the port bound for a process that will never accept anything.
+Nothing can close another process's descriptor, so the holders are killed --
+except a Lisp, which might be somebody's live image and is only reported."
+  (let* ((holders (port-holders))
+         (lisps (remove-if-not #'lisp-holder-p holders))
+         (leftovers (remove-if #'lisp-holder-p holders)))
+    (cond
+      ((null holders)
+       (unless quiet
+         (format *error-output*
+                 "Port ~D answered no Slynk handshake and nothing holds it now.~%"
+                 *port*))
+       t)
+      (lisps
+       (format *error-output*
+               "Port ~D is held by a Lisp that answers no Slynk handshake:~%"
+               *port*)
+       (describe-port-holders lisps)
+       (format *error-output*
+               "Kill it yourself, or set LUV_SLYNK_PORT to another port.~%")
+       nil)
+      (t
+       (format *error-output*
+               "Port ~D answers no Slynk handshake, so nothing is listening ~
+there in any useful sense.  Killing what holds it:~%"
+               *port*)
+       (describe-port-holders leftovers)
+       (kill-port-holders leftovers "TERM")
+       (loop repeat 20
+             while (port-holders)
+             do (sleep 0.1))
+       (when (port-holders)
+         (kill-port-holders (port-holders) "KILL")
+         (loop repeat 20
+               while (port-holders)
+               do (sleep 0.1)))
+       (let ((remaining (port-holders)))
+         (cond
+           (remaining
+            (format *error-output* "Port ~D is still held after SIGKILL:~%" *port*)
+            (describe-port-holders remaining)
+            nil)
+           (t
+            (format *error-output* "Reclaimed port ~D.~%" *port*)
+            t)))))))
+
+(defun live-listener-p (&key quiet)
+  "True when a Slynk belonging to this checkout is listening on *PORT*.
+
+A port that accepts TCP and then says nothing is not a listener at all; it is
+reclaimed here so the caller can start a real image on it."
+  (handler-case
+      (and (connection-available-p)
+           (progn (assert-listener-project) t))
+    (slynk-handshake-timeout ()
+      (unless (reclaim-port :quiet quiet)
+        (error "Cannot start luv Slynk: port ~D is occupied and could not be reclaimed"
+               *port*))
+      nil)))
+
 (defun start-server (&key quiet)
-  (when (connection-available-p)
-    (assert-listener-project)
+  (when (live-listener-p :quiet quiet)
     (unless quiet
       (format t "luv Slynk is already listening on ~A:~D for ~A.~%"
               *host* *port* *project-root*))
     (return-from start-server t))
   (acquire-start-lock)
   (unwind-protect
-       (if (connection-available-p)
+       (if (live-listener-p :quiet quiet)
            (progn
-             (assert-listener-project)
              (unless quiet
                (format t "luv Slynk is already listening on ~A:~D for ~A.~%"
                        *host* *port* *project-root*))
@@ -334,13 +493,12 @@
     (release-start-lock)))
 
 (defun ensure-server ()
-  (if (connection-available-p)
-      (unless (attach-only-p)
-        (assert-listener-project))
-      (if (attach-only-p)
-          (error "The requested external Slynk endpoint is not accepting connections on ~A:~D"
-                 *host* *port*)
-          (start-server :quiet t))))
+  (if (attach-only-p)
+      (unless (connection-available-p)
+        (error "The requested external Slynk endpoint is not accepting connections on ~A:~D"
+               *host* *port*))
+      (unless (live-listener-p :quiet t)
+        (start-server :quiet t))))
 
 (defmacro with-slynk-connection ((stream) &body body)
   `(let ((socket (make-instance 'sb-bsd-sockets:inet-socket
@@ -524,18 +682,82 @@
   (write-packet stream (apply #'query-request operation package arguments))
   (read-eval-return stream package))
 
+(defparameter *fence-watermark-form*
+  "(cl:let ((now (cl:and (cl:find-package \"LUV\")
+                       (cl:find-symbol \"CANVAS-FAILURE-SERIAL-NOW\" \"LUV\"))))
+     (cl:princ (cl:if (cl:and now (cl:fboundp now)) (cl:funcall now) -1)))"
+  "Read out of the image before an evaluation: the canvas failure serial, so
+that afterwards we can ask what failed since.  -1 when the image has no luv.")
+
+(defparameter *fence-form*
+  "(cl:let* ((luv (cl:find-package \"LUV\"))
+            (fence (cl:and luv (cl:find-symbol \"FENCE-CANVASES\" \"LUV\")))
+            (since (cl:and luv (cl:find-symbol \"CANVAS-FAILURES-SINCE\" \"LUV\")))
+            (report (cl:and luv (cl:find-symbol \"REPORT-CANVAS-FAILURE\" \"LUV\")))
+            (title (cl:and luv (cl:find-symbol \"CANVAS-TITLE\" \"LUV\"))))
+     (cl:when (cl:and fence (cl:fboundp fence))
+       (cl:let ((outcomes (cl:funcall fence :frames 2 :timeout 3.0))
+                (failures (cl:funcall since ~D)))
+         (cl:dolist (outcome outcomes)
+           (cl:when (cl:eq (cl:cdr outcome) :timeout)
+             (cl:format cl:t \"~~&FENCE-TIMEOUT canvas ~~S ran no frame within 3 s.~~%\"
+                        (cl:funcall title (cl:car outcome)))))
+         (cl:when failures
+           (cl:format cl:t \"~~&FENCE-FAILURES ~~D~~%\" (cl:length failures))
+           (cl:dolist (failure failures)
+             (cl:funcall report failure))))))"
+  "Evaluated after every evaluation: wait for two more frames of every open
+canvas -- a frame already under way when the evaluation returned may finish
+first; the second must have begun after it -- then print every failure
+retained since the watermark, with its backtrace.  A ./sly do that broke
+the next frame says so, and exits 1.")
+
+(defvar *fence-p* t
+  "Whether EVALUATE fences on the canvas loops after the evaluation.")
+
+(defun fence-watermark-on (stream)
+  (let ((text (evaluate-captured-output-on stream *fence-watermark-form*
+                                           "CL-USER")))
+    (or (ignore-errors (parse-integer (string-trim '(#\Space #\Newline) text)))
+        -1)))
+
+(defun fence-on (stream watermark)
+  "Fence and report; true when the frames after the evaluation failed."
+  (let ((text (evaluate-captured-output-on
+               stream (format nil *fence-form* watermark) "CL-USER")))
+    (cond ((search "FENCE-FAILURES" text)
+           (format *error-output*
+                   "~&The game failed after this evaluation:~%~A~%"
+                   (string-trim '(#\Newline) text))
+           (force-output *error-output*)
+           t)
+          ((search "FENCE-TIMEOUT" text)
+           (format *error-output* "~&~A~%" (string-trim '(#\Newline) text))
+           (force-output *error-output*)
+           nil)
+          (t nil))))
+
 (defun evaluate (code package)
+  "Evaluate CODE in PACKAGE, print what it printed and what it returned, then
+fence: wait for the next frame of every open canvas and report any failure
+it retained.  A change deposited by the evaluation and only felt on the
+canvas thread a frame later still comes back to the caller.  Returns 1 when
+the frames after CODE failed, else 0."
   (with-verified-slynk-connection (stream)
-    (write-packet stream (eval-request code package))
-    (destructuring-bind (output value diagnostic-output)
-        (read-eval-return stream package)
-      (unless (zerop (length output))
-        (write-string output)
-        (unless (char= (char output (1- (length output))) #\Newline)
-          (terpri))
-        (force-output))
-      (write-diagnostic-output diagnostic-output)
-      (write-line value))))
+    (let ((watermark (if *fence-p* (fence-watermark-on stream) -1)))
+      (write-packet stream (eval-request code package))
+      (destructuring-bind (output value diagnostic-output)
+          (read-eval-return stream package)
+        (unless (zerop (length output))
+          (write-string output)
+          (unless (char= (char output (1- (length output))) #\Newline)
+            (terpri))
+          (force-output))
+        (write-diagnostic-output diagnostic-output)
+        (write-line value))
+      (if (and *fence-p* (>= watermark 0) (fence-on stream watermark))
+          1
+          0))))
 
 (defun call-inspector (stream package operation &rest arguments)
   (write-packet stream
@@ -796,7 +1018,12 @@
         (cond
           (handshake-error
            (format t "Port ~D accepts TCP but did not complete a Slynk handshake: ~A~%"
-                   *port* handshake-error))
+                   *port* handshake-error)
+           (let ((holders (port-holders)))
+             (when holders
+               (format t "It is held by:~%")
+               (describe-port-holders holders *standard-output*)))
+           (format t "./sly reclaim frees the port; ./sly start does it for you.~%"))
           ((and connection-p (not (listener-for-project-p listener-root)))
            (format t "Slynk port ~D belongs to ~A, not this checkout ~A.~%"
                    *port* (or listener-root "an unidentified Lisp image") *project-root*))
@@ -820,6 +1047,87 @@
            (ignore-errors (delete-file *server-pid-path*))
            (format t "luv Slynk is not running.~%")))))))
 
+(defun run-reclaim ()
+  "Free the Slynk port, unless a working Slynk is the thing holding it."
+  (multiple-value-bind (listener-pid listener-root handshake-error)
+      (listener-identity)
+    (cond
+      ((and (null handshake-error) (or listener-pid listener-root))
+       (format t "Port ~D is a working Slynk (pid ~A, checkout ~A); ~
+nothing to reclaim.~%"
+               *port* (or listener-pid "unknown") (or listener-root "unknown"))
+       0)
+      ((null (port-holders))
+       (format t "Nothing is holding port ~D.~%" *port*)
+       0)
+      ((reclaim-port) 0)
+      (t 1))))
+
+(defparameter *game-status-form*
+  "(let* ((session-symbol
+            (and (find-package :luvcraft)
+                 (find-symbol \"*SESSION*\" :luvcraft)))
+          (session (and session-symbol
+                        (boundp session-symbol)
+                        (symbol-value session-symbol)))
+          (health
+            (ignore-errors
+             (when session
+               (funcall (find-symbol \"CANVAS-HEALTH\" :luv)
+                        (funcall (find-symbol \"LUVCRAFT-SESSION-CANVAS\"
+                                              :luvcraft)
+                                 session))))))
+     (princ (if session :playing :idle))
+     (when health (format t \" ~S\" health)))"
+  "Read out of the image: whether a game is playing, and its canvas health.
+
+The health comes from the canvas's own loop counters rather than from asking
+the canvas thread anything, so it answers even when that thread is the thing
+that has stopped -- which is the only moment the question really matters.")
+
+(defun print-canvas-health (text)
+  "Print the canvas health plist embedded in the game status TEXT, if any."
+  (let* ((start (position #\( text))
+         (health (and start
+                      (ignore-errors
+                       (let ((*read-eval* nil))
+                         (read-from-string (subseq text start)))))))
+    (when health
+      (let ((phase (getf health :phase))
+            (seconds (getf health :phase-seconds))
+            (ticks (getf health :ticks))
+            (state (getf health :state))
+            (failure (getf health :frame-failure))
+            (failure-count (getf health :failure-count)))
+        (cond
+          ((getf health :stalled-p)
+           (format t "The canvas is STALLED in ~(~A~) for ~,1F s after ~D ~
+loop iterations. It is not servicing its window; the image logs the stall ~
+and ends itself if it does not recover (./sly log).~%"
+                   phase (or seconds 0) ticks))
+          (failure
+           (multiple-value-bind (second minute hour)
+               (decode-universal-time (getf failure :universal-time))
+             (format t "The game's frames are PARKED: a frame failed at ~
+~2,'0D:~2,'0D:~2,'0D in ~(~A~) (loop iteration ~D):~%  ~A~%The window is ~
+still pumped. Fix the cause and ./sly resume; ./sly failures shows the ~
+backtrace.~%"
+                     hour minute second (getf failure :phase)
+                     (getf failure :tick) (getf failure :report))))
+          ((not (member state '(:open :opening)))
+           (format t "The canvas is ~(~A~) after ~D loop iterations.~%"
+                   state ticks))
+          ((getf health :held-p)
+           (format t "The canvas loop is pumping with frames HELD (~D ~
+iterations); something is redefining the world.~%" ticks))
+          (t
+           (format t "The canvas loop is healthy (~(~A~), ~D iterations, ~
+~D frames).~%"
+                   phase ticks (or (getf health :frames) 0))))
+        (when (and failure-count (plusp failure-count) (not failure))
+          (format t "~D failure~:P retained on the canvas: ./sly failures ~
+shows them.~%" failure-count))))))
+
 (defun print-game-status ()
   "Say whether luvcraft:play has a live game window in the image."
   (let ((answer
@@ -827,20 +1135,14 @@
            (with-slynk-connection (stream)
              (authenticate stream)
              (evaluate-captured-output-on
-              stream
-              "(let ((session-symbol
-                       (and (find-package :luvcraft)
-                            (find-symbol \"*SESSION*\" :luvcraft))))
-                 (princ (if (and session-symbol
-                                 (boundp session-symbol)
-                                 (symbol-value session-symbol))
-                          :playing :idle)))"
-              "CL-USER")))))
+              stream *game-status-form* "CL-USER")))))
     (format t "~A~%"
             (cond ((null answer) "Game state unknown (image busy or not loaded).")
                   ((search "PLAYING" (string-upcase (princ-to-string answer)))
                    "A game is playing: ./sly screenshot PNG; ./sly stop-playing closes it.")
-                  (t "No game is playing: ./sly play starts one.")))))
+                  (t "No game is playing: ./sly play starts one.")))
+    (when answer
+      (print-canvas-health (princ-to-string answer)))))
 
 (defun evaluate-output-on (stream code &optional (package "CL-USER"))
   (write-result-string (evaluate-captured-output-on stream code package)))
@@ -1135,11 +1437,14 @@
   (format stream "explicit recovery path when that image is wrecked.~%")
   (format stream "Prefix a client command with --luvcraft only to attach to a separate~%")
   (format stream "standalone build/luvcraft process.~%~%")
-  (format stream "Usage: ./sly play|stop-playing|status|restart~%")
-  (format stream "       ./sly start|stop|log~%")
+  (format stream "Usage: ./sly play [--fullscreen]|stop-playing|status|restart~%")
+  (format stream "       ./sly start|stop|log|reclaim~%")
   (format stream "       ./sly screenshot PNG~%")
   (format stream "       ./sly eval CODE [--package PACKAGE]~%")
   (format stream "       ./sly do CODE [--package PACKAGE]   (synonym for eval)~%")
+  (format stream "       ./sly load SYSTEM...   (frames held while loading; then fenced)~%")
+  (format stream "       ./sly failures         (every error retained on the canvas, with backtraces)~%")
+  (format stream "       ./sly resume           (run frames again after a frame failure parked them)~%")
   (format stream "       ./sly parinfer [--check|--diff|--write] [--strict] [--file FILE|CODE|FILE]~%")
   (format stream "       ./sly parinfer --batch --check [--strict] FILE...~%")
   (format stream "       ./sly inspect CODE [--package PACKAGE]~%")
@@ -1395,12 +1700,16 @@
     (evaluate code "LUVCRAFT")))
 
 (defun run-luvcraft-play (arguments)
-  (when arguments
-    (error "play does not accept arguments"))
-  (when (attach-only-p)
-    (error "play owns the durable image; a standalone luvcraft is already playing"))
-  (ensure-server)
-  (evaluate "(play)" "LUVCRAFT"))
+  (let ((fullscreen-p nil))
+    (dolist (argument arguments)
+      (if (string= argument "--fullscreen")
+          (setf fullscreen-p t)
+          (error "play accepts only --fullscreen, not ~A" argument)))
+    (when (attach-only-p)
+      (error "play owns the durable image; a standalone luvcraft is already playing"))
+    (ensure-server)
+    (evaluate (if fullscreen-p "(play :fullscreen-p t)" "(play)")
+              "LUVCRAFT")))
 
 (defun run-luvcraft-stop-playing (arguments)
   (when arguments
@@ -1548,6 +1857,10 @@
       ((string= command "stop-playing")
        (run-luvcraft-stop-playing arguments)
        0)
+      ((string= command "reclaim")
+       (when arguments
+         (error "reclaim does not accept arguments"))
+       (run-reclaim))
       ((string= command "log")
        (when arguments
          (error "log does not accept arguments"))
@@ -1561,8 +1874,41 @@
        (ensure-server)
        (multiple-value-bind (code package)
            (parse-code-arguments command arguments)
-         (evaluate code package))
-       0)
+         (evaluate code package)))
+      ((string= command "load")
+       (unless arguments
+         (error "load requires at least one system name"))
+       (ensure-server)
+       ;; The frame loop is held while the world is redefined: a class
+       ;; whose reader is called mid-redefinition kills the frame that
+       ;; called it, and a redefinition is nothing a frame should run
+       ;; through.  The fence after it says whether the next frame lived.
+       (evaluate
+        (format nil "(luv:with-canvas-frames-held () ~{(asdf:load-system ~S)~^ ~})"
+                arguments)
+        "CL-USER"))
+      ((string= command "failures")
+       (when arguments
+         (error "failures does not accept arguments"))
+       (ensure-server)
+       (let ((*fence-p* nil))
+         (evaluate
+          "(cl:let ((failures
+                     (cl:loop for canvas in (luv:open-canvases)
+                              append (cl:reverse (luv:canvas-failures canvas)))))
+             (cl:if failures
+                    (cl:dolist (failure failures)
+                      (luv:report-canvas-failure failure))
+                    (cl:format cl:t \"No failures are retained on any open canvas.~~%\"))
+             (cl:length failures))"
+          "CL-USER")))
+      ((string= command "resume")
+       (when arguments
+         (error "resume does not accept arguments"))
+       (ensure-server)
+       (evaluate
+        "(cl:mapcar (cl:function luv:resume-canvas-frames) (luv:open-canvases))"
+        "CL-USER"))
       ((string= command "parinfer")
        (if (member "--batch" arguments :test #'string=)
            (run-parinfer-batch

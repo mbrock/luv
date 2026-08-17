@@ -48,15 +48,20 @@
         (second (make-instance 'recording-modal-focus))
         (event (make-instance 'canvas-key-press-event
                               :timestamp 0 :key-name :w)))
-    (setf (gethash :w (luvcraft::luvcraft-session-pressed-keys session)) t
-          (luvcraft::luvcraft-session-jump-requested-p session) t)
+    (setf (movement-urging-p (luvcraft-session-movement-intent session)
+                             :forward)
+          t
+          (movement-intent-jump-requested-p
+           (luvcraft-session-movement-intent session))
+          t)
     (ok (eq first (focus-luvcraft-session session first)))
     (ok (eq first (luvcraft-session-modal-focus session)))
-    (ok (null (gethash :w (luvcraft::luvcraft-session-pressed-keys session))))
-    (ok (not (luvcraft::luvcraft-session-jump-requested-p session)))
-    (handle-canvas-event session nil event)
+    (ok (movement-intent-still-p (luvcraft-session-movement-intent session)))
+    ;; Interpreting keys belongs to the layer above; what the core promises is
+    ;; that a focused object is offered the event and that nothing else sees it.
+    (ok (dispatch-luvcraft-focus-event session nil event))
     (ok (equal (list event) (recording-focus-events first)))
-    (ok (null (gethash :w (luvcraft::luvcraft-session-pressed-keys session))))
+    (ok (movement-intent-still-p (luvcraft-session-movement-intent session)))
     (focus-luvcraft-session session second)
     (ok (equal '(:left :entered) (recording-focus-transitions first)))
     (ok (equal '(:entered) (recording-focus-transitions second)))
@@ -64,38 +69,41 @@
     (remove-luvcraft-overlay session second :release-p nil)
     (ok (null (luvcraft-session-modal-focus session)))
     (ok (equal '(:left :entered) (recording-focus-transitions second)))
-    (handle-canvas-event session nil event)
-    (ok (gethash :w (luvcraft::luvcraft-session-pressed-keys session)))))
+    (ok (not (dispatch-luvcraft-focus-event session nil event)))))
 
-(deftest tab-enters-focus-reaches-it-and-shift-tab-leaves
-  (let ((session (make-instance 'luvcraft-session))
-        (far (make-instance 'recording-modal-focus :score 4.0))
-        (near (make-instance 'recording-modal-focus :score 1.0))
-        (tab-press (make-instance 'canvas-key-press-event
-                                  :timestamp 0 :key-name :tab))
-        (tab-release (make-instance 'canvas-key-release-event
-                                    :timestamp 0 :key-name :tab))
-        (shift-tab (make-instance 'canvas-key-press-event
-                                  :timestamp 0 :key-name :tab
-                                  :modifiers '(:shift))))
-    (add-luvcraft-overlay session far)
-    (add-luvcraft-overlay session near)
-    (handle-canvas-event session nil tab-press)
-    (ok (eq near (luvcraft-session-modal-focus session)))
-    (ok (equal '(:entered) (recording-focus-transitions near)))
-    ;; The release matching the gameplay focus key is swallowed.  Subsequent
-    ;; ordinary Tab events belong to the focus (notably Bash completion).
-    (handle-canvas-event session nil tab-release)
-    (handle-canvas-event session nil tab-press)
-    (handle-canvas-event session nil tab-release)
-    (ok (equal (list tab-release tab-press)
-               (recording-focus-events near)))
-    (handle-canvas-event session nil shift-tab)
-    (ok (null (luvcraft-session-modal-focus session)))
-    (ok (equal '(:left :entered) (recording-focus-transitions near)))
-    (ok (null (recording-focus-transitions far)))))
+(defclass recording-pointer-canvas ()
+  ((relative-p :initform nil :accessor recording-canvas-relative-p)))
 
-(deftest tab-focuses-and-frames-the-whole-terminal-above-the-hotbar
+(defmethod set-canvas-relative-pointer-mode
+    ((canvas recording-pointer-canvas) enabled)
+  (setf (recording-canvas-relative-p canvas) (not (null enabled))))
+
+(deftest focus-borrows-mouse-look-and-hands-it-back
+  (let* ((canvas (make-instance 'recording-pointer-canvas))
+         (session (make-instance 'luvcraft-session :canvas canvas))
+         (first (make-instance 'recording-modal-focus))
+         (second (make-instance 'recording-modal-focus)))
+    (setf (recording-canvas-relative-p canvas) t
+          (luvcraft::luvcraft-session-pointer-captured-p session) t)
+    (focus-luvcraft-session session first)
+    (ok (not (recording-canvas-relative-p canvas))
+        "a focused interaction is given an ordinary cursor")
+    ;; Moving straight from one interaction to another still owes the capture.
+    (focus-luvcraft-session session second)
+    (ok (not (recording-canvas-relative-p canvas)))
+    (unfocus-luvcraft-session session)
+    (ok (recording-canvas-relative-p canvas)
+        "leaving focus puts the player back into mouse look")
+    (ok (luvcraft::luvcraft-session-pointer-captured-p session))
+    ;; A player who was not in mouse look is not put into it by focusing.
+    (setf (luvcraft::luvcraft-session-pointer-captured-p session) nil
+          (recording-canvas-relative-p canvas) nil)
+    (focus-luvcraft-session session first)
+    (unfocus-luvcraft-session session)
+    (ok (not (recording-canvas-relative-p canvas)))
+    (ok (not (luvcraft::luvcraft-session-pointer-captured-p session)))))
+
+(deftest focusing-a-terminal-frames-the-whole-wall-above-the-hotbar
   (let* ((world (make-block-world :chunk-width 16
                                   :chunk-height 16
                                   :chunk-depth 16))
@@ -104,14 +112,7 @@
                           :position (make-vec3 2.5 3.5 0.5)
                           :yaw 0.0 :pitch 0.0))
          (session
-           (make-instance 'luvcraft-session :world world :camera camera))
-         (tab (make-instance 'canvas-key-press-event
-                             :timestamp 0 :key-name :tab))
-         (tab-release (make-instance 'canvas-key-release-event
-                                     :timestamp 0 :key-name :tab))
-         (shift-tab (make-instance 'canvas-key-press-event
-                                   :timestamp 0 :key-name :tab
-                                   :modifiers '(:shift))))
+           (make-instance 'luvcraft-session :world world :camera camera)))
     (ensure-world-chunk world 0 0 0)
     (place-terminal-block-rectangle world 2 3 4 :back 3 2)
     (let* ((surface (find-terminal-surface world 2 3 4 :back))
@@ -126,8 +127,9 @@
              (luvcraft::terminal-focus-camera-pose
               surface 960 640 0.0 0.0 0.0 57.0)))
       (add-luvcraft-overlay session display)
-      (handle-canvas-event session nil tab)
-      (handle-canvas-event session nil tab-release)
+      ;; Which key reaches this is the command layer's business; what the wall
+      ;; promises is the framing it asks the camera for once it is focused.
+      (toggle-luvcraft-session-focus session)
       (ok (eq display (luvcraft-session-modal-focus session)))
       (ok (luvcraft::luvcraft-session-focus-camera-active-p session))
       ;; The final pose is head-on and every surface corner lies inside the
@@ -177,7 +179,7 @@
                ordinary-focal))
         (ok (> focused
                luvcraft::+luvcraft-camera-focused-vertical-field-of-view+))
-        (handle-canvas-event session nil shift-tab)
+        (unfocus-luvcraft-session session)
         (ok (null (luvcraft-session-modal-focus session)))
         (dotimes (iteration 20)
           (declare (ignore iteration))
@@ -222,7 +224,7 @@
                                        :timestamp 0 :key-name :return
                                        :character #\Return
                                        :unshifted-character #\Return)))
-               (handle-canvas-event session nil event))
+               (ok (dispatch-luvcraft-focus-event session nil event)))
              (ok (eq :exited
                      (luv.terminal:wait-for-pty-device device :timeout 3.0)))
              (ok (search
@@ -449,8 +451,12 @@
       (ok (eq ride (luvcraft-session-modal-focus session)))
       ;; A mount carries the player, so the ordinary controller stands down.
       (ok (luvcraft-focus-carries-player-p ride))
-      ;; An unridden turtle rests first; a reined one walks.
-      (setf (gethash :w (luvcraft::critter-ride-reins ride)) t)
+      ;; An unridden turtle rests first; a reined one walks.  The rider steers
+      ;; with the session's own movement intent, the same one the player's legs
+      ;; would have read.
+      (setf (movement-urging-p (luvcraft-session-movement-intent session)
+                               :forward)
+            t)
       (let ((start-z (critter-z turtle)))
         (dotimes (frame 300)
           (declare (ignorable frame))
@@ -670,11 +676,11 @@
               :frame-duration double-float)
              (luvcraft::+luvcraft-shadow-half-extent+ :world-distance single-float)
              (luvcraft::+luvcraft-shadow-depth-radius+ :world-distance single-float)
-             (luvcraft::+luvcraft-shadow-base-bias+ :shadow-depth single-float)
-             (luvcraft::+luvcraft-shadow-slope-bias+ :shadow-depth single-float)
-             (luvcraft::+luvcraft-shadow-minimum-filter-radius+
+             (luvcraft::shadow-base-bias :shadow-depth single-float)
+             (luvcraft::shadow-slope-bias :shadow-depth single-float)
+             (luvcraft::shadow-minimum-filter-radius
               :shadow-filter-radius single-float)
-             (luvcraft::+luvcraft-shadow-maximum-filter-radius+
+             (luvcraft::shadow-maximum-filter-radius
               :shadow-filter-radius single-float)))
     (destructuring-bind (name quantity representation) claim
       (let ((declaration
@@ -1591,8 +1597,10 @@
        'error))
   (let ((atlas (make-block-texture-atlas))
         (normal-atlas (make-block-normal-atlas)))
-    (ok (equal (array-dimensions atlas) '(16 416)))
-    (ok (equal (array-dimensions normal-atlas) '(16 416)))
+    (ok (equal (array-dimensions atlas)
+               (list 16 (* 16 luvcraft::+block-atlas-tile-count+))))
+    (ok (equal (array-dimensions normal-atlas)
+               (list 16 (* 16 luvcraft::+block-atlas-tile-count+))))
     (ok (subtypep (array-element-type atlas) '(unsigned-byte 32)))
     (ok (subtypep (array-element-type normal-atlas) '(unsigned-byte 32)))
     (ok (/= (aref atlas 8 8) (aref atlas 8 (+ 8 (* 3 16)))))
@@ -1701,12 +1709,7 @@
     (ok (search "1–9 select" (canvas-title canvas)))
     (ok (search "terminal" (canvas-title canvas)))
     (ok (eq (select-luvcraft-block session 10) luvcraft::*gravel-block*))
-    (ok (search "[inventory]" (canvas-title canvas)))
-    (handle-canvas-event
-     session canvas
-     (make-instance 'canvas-key-press-event
-                    :key-name :8 :character #\8))
-    (ok (eq (luvcraft-session-selected-block session) *crystal-block*))))
+    (ok (search "[inventory]" (canvas-title canvas)))))
 
 (deftest block-inventory-supports-creative-and-finite-stacks
   (let* ((creative
@@ -1867,7 +1870,7 @@
                                 :yaw 0d0 :pitch 0d0))
          (player (make-instance 'block-world-player
                                 :position (make-vec3 1.5d0 3d0 1.5d0)))
-         (keys (make-hash-table :test #'eq)))
+         (intent (make-movement-intent)))
     (ensure-world-chunk world 0 0 0)
     (loop for x below 4 do
       (loop for z below 4 do
@@ -1875,31 +1878,31 @@
     ;; Gravity settles the body exactly on the block tops.
     (dotimes (step 240)
       (declare (ignorable step))
-      (step-block-world-player player world camera keys (/ 1d0 120d0)))
+      (step-block-world-player player world camera intent (/ 1d0 120d0)))
     (ok (< (abs (- (player-y player) 1d0)) 1d-5))
     (ok (player-grounded-p player))
     (ok (< (abs (- (camera-y camera) 2.62d0)) 1d-5))
     ;; A held right input accelerates into, but not through, a two-block wall.
     (setf (world-block-at world 3 1 1) luvcraft::*stone-block*
           (world-block-at world 3 2 1) luvcraft::*stone-block*
-          (gethash :d keys) t)
+          (movement-urging-p intent :right) t)
     (dotimes (step 120)
       (declare (ignorable step))
-      (step-block-world-player player world camera keys (/ 1d0 120d0)))
+      (step-block-world-player player world camera intent (/ 1d0 120d0)))
     (ok (<= (player-x player) 2.700001d0))
     (ok (= (player-velocity-x player) 0d0))
     (ok (< (abs (- (player-y player) 1d0)) 1d-5))
     (ok (player-grounded-p player))
-    (remhash :d keys)
+    (setf (movement-urging-p intent :right) nil)
     ;; Jump is an edge request, not a second form of flying.
     (let ((ground-y (player-y player)))
-      (step-block-world-player player world camera keys (/ 1d0 120d0)
+      (step-block-world-player player world camera intent (/ 1d0 120d0)
                                :jump-p t)
       (ok (> (player-y player) ground-y))
       (ok (not (player-grounded-p player))))
     (dotimes (step 120)
       (declare (ignorable step))
-      (step-block-world-player player world camera keys (/ 1d0 120d0)))
+      (step-block-world-player player world camera intent (/ 1d0 120d0)))
     (ok (< (abs (- (player-y player) 1d0)) 1d-5))
     (ok (player-grounded-p player))))
 
@@ -1913,17 +1916,17 @@
          (player (make-instance 'block-world-player
                                 :position (make-vec3 1.5d0 1d0 1.5d0)
                                 :grounded-p t))
-         (keys (make-hash-table :test #'eq))
+         (intent (make-movement-intent))
          (highest-y (player-y player)))
     (ensure-world-chunk world 0 0 0)
     (loop for x below 8 do
       (loop for z below 4 do
         (setf (world-block-at world x 0 z) luvcraft::*stone-block*)))
     (setf (world-block-at world 3 1 1) luvcraft::*stone-block*
-          (gethash :d keys) t)
+          (movement-urging-p intent :right) t)
     (dotimes (step 120)
       (declare (ignorable step))
-      (step-block-world-player player world camera keys (/ 1d0 120d0))
+      (step-block-world-player player world camera intent (/ 1d0 120d0))
       (setf highest-y (max highest-y (player-y player))))
     (ok (> highest-y 2d0))
     (ok (> (player-x player) 3.3d0))))

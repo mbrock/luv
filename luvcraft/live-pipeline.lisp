@@ -48,12 +48,19 @@
    (installed-abstraction-revision :initform 0
      :accessor live-shader-pipeline-installed-abstraction-revision)
    (attempted-abstraction-revision :initform 0
-     :accessor live-shader-pipeline-attempted-abstraction-revision)))
+     :accessor live-shader-pipeline-attempted-abstraction-revision)
+   ;; The live named values -- knobs -- the last attempt folded into its
+   ;; source, as (NAME . VALUE); when one no longer holds, the source has
+   ;; moved under the artifact and it rebuilds.
+   (attempted-source-values :initform nil
+     :accessor live-shader-pipeline-attempted-source-values)))
 
 (defun build-live-shader-pipeline-candidate (artifact)
   "Build a complete candidate without mutating ARTIFACT's installed state."
   (let* ((vertex-only-p
            (eq (live-shader-pipeline-stage artifact) :vertex))
+         (source-values (list nil))
+         (spv:*shader-source-value-references* source-values)
          (vertex-specification
            (cond
              ((live-shader-pipeline-vertex-role artifact)
@@ -74,10 +81,14 @@
            (and specification
                 (spv:compile-shader-specification specification)))
          (device (live-shader-pipeline-device artifact))
+         (source-values-noted
+           (setf (live-shader-pipeline-attempted-source-values artifact)
+                 (car source-values)))
          (vertex-module nil)
          (fragment-module nil)
          (pipeline nil)
          (completed-p nil))
+    (declare (ignore source-values-noted))
     (unwind-protect
          (progn
            (setf vertex-module
@@ -223,7 +234,9 @@
                    (spv:shader-definition-change-pending-p vertex-dependent))
               (> abstraction-revision
                  (live-shader-pipeline-attempted-abstraction-revision
-                  artifact)))
+                  artifact))
+              (not (spv:shader-source-value-references-current-p
+                    (live-shader-pipeline-attempted-source-values artifact))))
       (multiple-value-bind (revision event)
           (spv:shader-definition-change-snapshot dependent)
         (declare (ignore event))

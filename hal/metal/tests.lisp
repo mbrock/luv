@@ -242,7 +242,7 @@
 
 (deftest canvas-presentation-policy-is-explicit-and-provider-specific
   (ok (equal (luv::sdl-presentation-window-flags :vulkan)
-             '(:vulkan :resizable :hidden)))
+             '(:vulkan :high-pixel-density :resizable :hidden)))
   (ok (equal (luv::sdl-presentation-window-flags :metal)
              '(:metal :high-pixel-density :resizable :hidden)))
   (ok (eq :vulkan
@@ -873,3 +873,54 @@
       (when uniform (destroy uniform))
       (when terms (destroy terms))
       (destroy device))))
+
+(deftest iosurface-round-trips-by-id-and-takes-a-metal-clear
+  ;; The parent creates a surface and hands out its integer ID; a "child"
+  ;; (here, the same process) looks the ID up, wraps it as a Metal texture,
+  ;; and clears it.  The parent's original reference sees the pixels.
+  (let* ((surface (metal:create-iosurface 16 16))
+         (id (metal:iosurface-id surface))
+         (twin (metal:lookup-iosurface id))
+         (device (request-gpu-device (make-instance 'metal-gpu-provider)))
+         (native nil) (texture nil) (encoder nil) (command-buffer nil))
+    (unwind-protect
+         (progn
+           (ok twin)
+           (ok (= 16 (metal:iosurface-width twin)))
+           (setf native
+                 (metal:new-metal-texture-for-iosurface
+                  (luv::metal-native-object device) twin
+                  metal::+pixel-format-bgra8-unorm+
+                  (logior metal:+texture-usage-shader-read+
+                          metal:+texture-usage-render-target+)
+                  :label "iosurface test"))
+           (setf texture
+                 (adopt-native-texture
+                  device native
+                  (objc:objective-c-pointer
+                   (objc:retain-objective-c-object native))
+                  (make-texture-descriptor
+                   :size '(16 16) :dimensions :2d :format :bgra8-unorm
+                   :usage '(:render-attachment :texture-binding))))
+           (setf encoder
+                 (create device (make-command-encoder-descriptor
+                                 :label "iosurface clear")))
+           (end-pass
+            (begin-render-pass
+             encoder
+             (make-render-pass-descriptor
+              :color-attachments
+              `((:view ,texture :load-op :clear :store-op :store
+                 :clear-value #(1.0 0.5 0.0 1.0))))))
+           (setf command-buffer (finish encoder))
+           (submit (device-queue device) command-buffer)
+           (submitted-work-done (device-queue device))
+           (ok (equal '(0 128 255 255) (metal:read-iosurface-pixel surface 3 3)))
+           (ok (equal '(0 128 255 255) (metal:read-iosurface-pixel twin 15 15))))
+      (when command-buffer (destroy command-buffer))
+      (when encoder (destroy encoder))
+      (when texture (destroy texture))
+      (when native (objc:release-objective-c-object native))
+      (destroy device)
+      (when twin (metal:release-iosurface twin))
+      (metal:release-iosurface surface))))

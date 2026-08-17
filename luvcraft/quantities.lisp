@@ -164,3 +164,55 @@
   :character :point
   :components
   (:clip-x-coordinate :clip-y-coordinate :clip-z-coordinate))
+
+;;; Units and quantities the knobs (KNOBS.LISP) present values in.  A knob's
+;;; unit is the same vocabulary the arithmetic checks, so the metabar prints
+;;; the unit the shader would have typed.
+(math:define-unit :minute :reference :second :magnitude 60
+  :quantity-kind :duration)
+(math:define-unit :hour :reference :second :magnitude 3600
+  :quantity-kind :duration)
+(math:define-unit :degree :reference :radian
+  :magnitude #.(/ pi 180)
+  :quantity-kind :angular-measure)
+(math:define-unit :milliradian :reference :radian :magnitude 1/1000
+  :quantity-kind :angular-measure)
+
+(math:define-quantity :time-of-day :kind :duration
+  :character :point)
+(math:define-quantity :day-length :kind :duration
+  :non-negative-p t)
+(math:define-quantity :emission-gain :kind :control-signal
+  :non-negative-p t)
+(math:define-quantity :lens-gain :kind :control-signal
+  :non-negative-p t)
+(math:define-quantity :luminance-threshold :kind :control-signal
+  :non-negative-p t)
+(math:define-quantity :vignette-strength :kind :proportion
+  :non-negative-p t)
+(math:define-quantity :shaft-decay :kind :proportion
+  :non-negative-p t)
+(math:define-quantity :sun-orbit-tilt :kind :control-signal)
+(math:define-quantity :sun-disc-scale :kind :control-signal
+  :non-negative-p t)
+(math:define-quantity :sun-disc-radiance :kind :control-signal
+  :non-negative-p t)
+(math:define-quantity :direct-light-gain :kind :control-signal
+  :non-negative-p t)
+(math:define-quantity :screen-effect-strength :kind :proportion
+  :non-negative-p t)
+(math:define-quantity :screen-curvature :kind :control-signal
+  :non-negative-p t)
+(math:define-quantity :scanline-count :kind :sample-count
+  :non-negative-p t)
+(math:define-quantity :font-scale :kind :control-signal
+  :non-negative-p t)
+(math:define-quantity :chunk-radius :kind :sample-count
+  :non-negative-p t)
+(math:define-quantity :frame-budget :kind :sample-count
+  :non-negative-p t)
+(math:define-quantity :critter-count :kind :sample-count
+  :non-negative-p t)
+(math:define-quantity :seat-offset :kind :lattice-coordinate)
+(math:define-quantity :seat-pitch :kind :angular-measure)
+(math:define-quantity :switch :kind :control-signal)

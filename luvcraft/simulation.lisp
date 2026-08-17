@@ -89,48 +89,56 @@
                         (- (* (sin pitch) (cos yaw))))))
     (values right up forward)))
 
-(defun camera-key-down-p (keys &rest names)
-  (some (lambda (name) (gethash name keys)) names))
-
 (defmethod camera-uniform-data ((camera fly-camera) width height)
   "The five camera lanes of the frame uniform: position, basis, projection.
 
 The environment lanes which complete the block are packed by
 FRAME-UNIFORM-DATA from the session's sky clock and profile."
   (multiple-value-bind (right up forward) (camera-basis camera)
-    (let* ((near +luvcraft-camera-near-distance+)
-           (far +luvcraft-camera-far-distance+)
-           (focal (/ (tan (/ (camera-field-of-view camera) 2.0))))
-           (aspect (/ (coerce width 'single-float) height))
-           (projection
-             (make-vec3 (/ focal aspect) focal (/ far (- far near)))))
-      (flet ((uniform-lane (vector fourth)
-               (list (coerce (vec3-x vector) 'single-float)
-                     (coerce (vec3-y vector) 'single-float)
-                     (coerce (vec3-z vector) 'single-float)
-                     (coerce fourth 'single-float))))
-        (let* ((data
-                 (make-array
-                  20 :element-type 'single-float
-                  :initial-contents
-                  (append (uniform-lane (camera-position camera) 0.0)
-                          (uniform-lane right 0.0)
-                          (uniform-lane up 0.0)
-                          (uniform-lane forward 0.0)
-                          (uniform-lane
-                           projection (/ (- (* far near)) (- far near))))))
-               (declaration
-                 (luv.arithmetic:value-declaration-for
-                  :camera-uniform-data)))
-          (unless (typep
-                   data
-                   (luv.arithmetic:declaration-representation-type
-                    declaration))
-            (error "Camera uniform data ~S does not satisfy ~S."
-                   (type-of data)
-                   (luv.arithmetic:declaration-representation-type
-                    declaration)))
-          data)))))
+    (camera-lanes-uniform-data (camera-position camera) right up forward
+                               (camera-field-of-view camera) width height)))
+
+(defun camera-lanes-uniform-data
+    (position right up forward field-of-view width height)
+  "Pack the five camera lanes for an eye at POSITION with the unit basis
+RIGHT UP FORWARD, in whatever coordinate space those are given in.
+
+The ordinary camera packs its own pose through this; a display drawn in a
+space of its own (a phone screen in the hand) packs the same camera
+re-expressed in that space."
+  (let* ((near +luvcraft-camera-near-distance+)
+         (far +luvcraft-camera-far-distance+)
+         (focal (/ (tan (/ field-of-view 2.0))))
+         (aspect (/ (coerce width 'single-float) height))
+         (projection
+           (make-vec3 (/ focal aspect) focal (/ far (- far near)))))
+    (flet ((uniform-lane (vector fourth)
+             (list (coerce (vec3-x vector) 'single-float)
+                   (coerce (vec3-y vector) 'single-float)
+                   (coerce (vec3-z vector) 'single-float)
+                   (coerce fourth 'single-float))))
+      (let* ((data
+               (make-array
+                20 :element-type 'single-float
+                :initial-contents
+                (append (uniform-lane position 0.0)
+                        (uniform-lane right 0.0)
+                        (uniform-lane up 0.0)
+                        (uniform-lane forward 0.0)
+                        (uniform-lane
+                         projection (/ (- (* far near)) (- far near))))))
+             (declaration
+               (luv.arithmetic:value-declaration-for
+                :camera-uniform-data)))
+        (unless (typep
+                 data
+                 (luv.arithmetic:declaration-representation-type
+                  declaration))
+          (error "Camera uniform data ~S does not satisfy ~S."
+                 (type-of data)
+                 (luv.arithmetic:declaration-representation-type
+                  declaration)))
+        data))))
 
 (defun copy-camera-position (position)
   (make-vec3 (vec3-x position) (vec3-y position) (vec3-z position)))
@@ -253,12 +261,12 @@ FRAME-UNIFORM-DATA from the session's sky clock and profile."
    (eye-height :initarg :eye-height :initform 1.62d0
                :type double-float
                :quantity (:quantity :player-eye-height :unit :cell)
-               :reader player-eye-height)
+               :accessor player-eye-height)
    (walk-speed :initarg :walk-speed :initform 5.0d0
                :type double-float
                :quantity (:quantity :player-walk-speed
                           :unit ((:cell 1) (:second -1)))
-               :reader player-walk-speed)
+               :accessor player-walk-speed)
    (ground-acceleration :initarg :ground-acceleration :initform 45d0
                         :type double-float
                         :quantity (:quantity :player-acceleration
@@ -273,12 +281,12 @@ FRAME-UNIFORM-DATA from the session's sky clock and profile."
             :type double-float
             :quantity (:quantity :gravity-magnitude
                        :unit ((:cell 1) (:second -2)))
-            :reader player-gravity)
+            :accessor player-gravity)
    (jump-speed :initarg :jump-speed :initform 8.0d0
                :type double-float
                :quantity (:quantity :player-jump-speed
                           :unit ((:cell 1) (:second -1)))
-               :reader player-jump-speed)
+               :accessor player-jump-speed)
    (grounded-p :initarg :grounded-p :initform nil
                :accessor player-grounded-p))
   (:metaclass luv.arithmetic.records:quantity-class))
@@ -479,23 +487,20 @@ FRAME-UNIFORM-DATA from the session's sky clock and profile."
                              world block-x block-y block-z)))))))))
 
 (defun step-block-world-player
-    (player world camera pressed-keys seconds &key jump-p (sync-camera-p t))
-  "Advance the scalar player controller by one small physics step."
+    (player world camera intent seconds &key jump-p (sync-camera-p t))
+  "Advance the scalar player controller by one small physics step.
+
+INTENT is what the player is trying to do rather than what they pressed: the
+controller asks for directions and a hurry, and never learns that there is a
+keyboard."
   (let* ((yaw (camera-yaw camera))
-         ;; The arrow keys belong to ADVANCE-LUVCRAFT-KEYBOARD-LOOK, so
-         ;; walking is WASD only.
-         (forward-amount
-           (- (if (camera-key-down-p pressed-keys :w) 1d0 0d0)
-              (if (camera-key-down-p pressed-keys :s) 1d0 0d0)))
-         (right-amount
-           (- (if (camera-key-down-p pressed-keys :d) 1d0 0d0)
-              (if (camera-key-down-p pressed-keys :a) 1d0 0d0)))
+         (forward-amount (movement-intent-axis intent :forward :backward))
+         (right-amount (movement-intent-axis intent :right :left))
          (length (sqrt (+ (* forward-amount forward-amount)
                           (* right-amount right-amount))))
          (forward-amount (if (plusp length) (/ forward-amount length) 0d0))
          (right-amount (if (plusp length) (/ right-amount length) 0d0))
-         (sprinting-p
-           (camera-key-down-p pressed-keys :shift-left :shift-right))
+         (sprinting-p (movement-intent-sprinting-p intent))
          (speed (* (player-walk-speed player)
                    (if sprinting-p 1.65d0 1d0)))
          (target-x (* speed (+ (* (sin yaw) forward-amount)

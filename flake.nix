@@ -137,9 +137,18 @@
           ffmpeg = pkgs.ffmpeg;
           ffmpegLibraryDirectory = "${ffmpeg.lib}/lib";
           ffmpegDevelopment = ffmpeg.dev;
+          # MuPDF reads PDF.  Its shared library is found by soname the same
+          # way the libav ones are, so it needs both a place on the loader
+          # path and a pinned directory the binding can prefer.
+          # `bin` is this package's default output and holds the viewers; the
+          # shared library is in `out`, so both the loader path and the pinned
+          # directory have to name that one explicitly.
+          mupdf = pkgs.mupdf;
+          mupdfLibraryDirectory = "${mupdf.out}/lib";
           nativeLibraryPath = nixpkgs.lib.makeLibraryPath (
             [
               ffmpeg
+              mupdf.out
               pkgs.libffi
               libghosttyVt
               pkgs.harfbuzz
@@ -209,6 +218,7 @@
             runtimeInputs = [
               lisp
               ffmpeg
+              mupdf
               libghosttyVt
               pkgs.libffi
               pkgs.harfbuzz
@@ -226,6 +236,7 @@
               export LUV_SLYNK_DIR=${slyRoot}/slynk
               export LUV_TRACY_CLIENT=${tracyClientLibrary}
               export LUV_FFMPEG_LIBDIR=${ffmpegLibraryDirectory}
+              export LUV_MUPDF_LIBDIR=${mupdfLibraryDirectory}
               export CL_SOURCE_REGISTRY=${mcclim}//:${cl-sdl3}//
               # cffi-grovel compiles a C program against these headers to read
               # AVFrame's layout out of the compiler rather than transcribing
@@ -267,7 +278,7 @@
         in
         {
           inherit pkgs wpePkgs sbcl lisp nativeLibraryPath slyRoot dev;
-          inherit ffmpeg ffmpegLibraryDirectory;
+          inherit ffmpeg ffmpegLibraryDirectory mupdf mupdfLibraryDirectory;
           inherit libghosttyVt libghosttyVtLibrary;
           inherit tracyClient tracyClientLibrary;
         };
@@ -303,6 +314,7 @@
               env.lisp
               env.ffmpeg
               env.ffmpeg.dev
+              env.mupdf
               env.libghosttyVt
               env.pkgs.libffi
               env.pkgs.harfbuzz
@@ -320,6 +332,7 @@
             LUV_SLYNK_DIR = "${env.slyRoot}/slynk";
             LUV_TRACY_CLIENT = env.tracyClientLibrary;
             LUV_FFMPEG_LIBDIR = env.ffmpegLibraryDirectory;
+            LUV_MUPDF_LIBDIR = env.mupdfLibraryDirectory;
             CL_SOURCE_REGISTRY = "${mcclim}//:${cl-sdl3}//";
             CPATH = "${env.pkgs.vulkan-headers}/include";
             shellHook = ''

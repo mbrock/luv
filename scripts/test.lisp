@@ -18,7 +18,8 @@
     (setf (symbol-value (uiop:find-symbol* :*default-reporter* :rove)) :luv)
     (uiop:symbol-call :rove :use-reporter :luv)
     (dolist (system '(:luv :luv/ghostty :luv/libav :luvcraft :mcluv/backend
-                      :mcluv/luvcraft-test :luv-wiki :luft :luft/render))
+                      :mcluv/luvcraft-test :luvcraft/clim
+                      :luv-wiki :luft :luft/render))
       (format t "~&~A~%" (string-downcase (asdf:component-name (asdf:find-system system))))
       (asdf:test-system system)
       (terpri))))

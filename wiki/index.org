@@ -136,6 +136,14 @@ The following are starting paths rather than a table of settled doctrine.
   dirty render snapshots to luv's Slug text path and the existing world-overlay
   interaction seam.  Its first slice draws one fixed terminal row directly in
   the scene before attaching a live PTY.
+- [[file:agent-harnesses.org][Field notes on four agent harnesses]] reads froth, sheaf, nxt and swash for
+  what a luv agent surface should inherit: typed tool results with several
+  renderings, size handled by the harness, short handles resolved by the
+  store, history kept as data, and a runtime that can explain its silences.
+- [[file:autolith.org][Autolith: a primer on an agent that is a Lisp image]] reads the fifth
+  harness in detail: a REPL as the prompt line, tools as fbound functions,
+  request-local context with a budget, restarts as a tool argument, and a
+  self-modification ladder from =self.eval= to replay-probed image commits.
 - [[file:luft.org][LUFT: packed sites, chains, and the mesh atelier]] names every vertex,
   edge, face, and cell of a cubical world with one fixnum, treats a block
   world as a 3-chain whose boundary is its surface, and draws that surface

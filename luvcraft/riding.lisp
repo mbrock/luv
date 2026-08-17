@@ -39,13 +39,13 @@ Enough to keep the shell they are sitting on in the bottom of the frame and
 the ground the animal is walking over in the middle of it.")
 
 (defclass critter-ride ()
-  ((critter :initarg :critter :reader critter-ride-critter)
-   ;; The rider's own keys.  Modal focus clears the session's pressed keys on
-   ;; entry and receives the events itself afterwards, so the reins are held
-   ;; here rather than read out of the player controller's input.
-   (reins :initform (make-hash-table :test #'eq)
-          :reader critter-ride-reins))
-  (:documentation "A player mounted on an animal, going where it goes."))
+  ((critter :initarg :critter :reader critter-ride-critter))
+  (:documentation "A player mounted on an animal, going where it goes.
+
+The rider steers with the session's own movement intent.  Going forward is
+going forward whether the player's legs or an animal's are doing it, so a
+mount reads the same urges the player controller would have read rather than
+keeping a second copy of them."))
 
 (defmethod activate-luvcraft-critter ((critter turtle) session)
   "A turtle can be ridden.  It is not fast, but it is willing."
@@ -55,12 +55,6 @@ the ground the animal is walking over in the middle of it.")
 (defmethod luvcraft-focus-carries-player-p ((focus critter-ride))
   (declare (ignore focus))
   t)
-
-(defun critter-ride-rein-amount (ride positive negative)
-  "Return -1, 0, or 1 from the two opposed keys RIDE's rider is holding."
-  (let ((reins (critter-ride-reins ride)))
-    (- (if (gethash positive reins) 1d0 0d0)
-       (if (gethash negative reins) 1d0 0d0))))
 
 (defun carry-luvcraft-player (session critter)
   "Set the player on CRITTER's back, at rest and standing on nothing else."
@@ -101,33 +95,11 @@ on the next step."
                  (return player)
             finally (return player)))))
 
-(defmethod luvcraft-focus-entered ((ride critter-ride) session)
-  (declare (ignore session))
-  (clrhash (critter-ride-reins ride))
-  nil)
-
 (defmethod luvcraft-focus-left ((ride critter-ride) session)
   "Let the animal have its own mind back, and put the rider down safely."
-  (clrhash (critter-ride-reins ride))
   (urge-critter (critter-ride-critter ride) 0d0 0d0 0d0)
   (dismount-luvcraft-player session (critter-ride-critter ride))
   nil)
-
-(defmethod handle-luvcraft-focus-event
-    ((ride critter-ride) session canvas (event canvas-key-press-event))
-  (declare (ignore session canvas))
-  ;; Escape is the one key a rider does not hold: it belongs to the window's
-  ;; pointer capture, so it goes back to the session unconsumed.
-  (let ((key (canvas-key-event-key-name event)))
-    (cond ((eq key :escape) nil)
-          (t (setf (gethash key (critter-ride-reins ride)) t)
-             t))))
-
-(defmethod handle-luvcraft-focus-event
-    ((ride critter-ride) session canvas (event canvas-key-release-event))
-  (declare (ignore session canvas))
-  (remhash (canvas-key-event-key-name event) (critter-ride-reins ride))
-  t)
 
 (defmethod handle-luvcraft-focus-event
     ((ride critter-ride) session canvas (event canvas-event))
@@ -170,9 +142,27 @@ easing which brings the view here on mounting is what smooths it."
            ;; their own feet and hands the camera back.
            (unfocus-luvcraft-session session))
           (t
-           (urge-critter critter
-                         (critter-ride-rein-amount ride :w :s)
-                         (critter-ride-rein-amount ride :d :a)
-                         seconds)
+           (let ((intent (luvcraft-session-movement-intent session)))
+             (urge-critter critter
+                           (movement-intent-axis intent :forward :backward)
+                           (movement-intent-axis intent :right :left)
+                           seconds))
            (carry-luvcraft-player session critter))))
   ride)
+
+;;; The seat's knobs, read every frame the rider is carried.
+(define-knob ride-seat-lift
+    (:label "seat lift" :group :riding
+     :quantity (:quantity :seat-offset :unit :cell)
+     :type double-float :minimum -0.5 :maximum 2.0 :step 0.02)
+    *critter-ride-seat-lift*)
+(define-knob ride-seat-offset
+    (:label "seat setback" :group :riding
+     :quantity (:quantity :seat-offset :unit :cell)
+     :type double-float :minimum -2.0 :maximum 1.0 :step 0.02)
+    *critter-ride-seat-offset*)
+(define-knob ride-seat-pitch
+    (:label "seat pitch" :group :riding
+     :quantity (:quantity :seat-pitch :unit :radian)
+     :type double-float :minimum -1.2 :maximum 0.6 :step 0.01)
+    *critter-ride-seat-pitch*)

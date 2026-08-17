@@ -27,6 +27,8 @@
                "luvcraft/world"
                "cl-dejavu"
                "sb-concurrency"
+               (:require #:sb-bsd-sockets)
+               (:require #:sb-posix)
                "uiop")
   :serial t
   :components
@@ -37,6 +39,7 @@
                  (:file "quantities")
                  (:file "arithmetic-package")
                  (:file "arithmetic")
+                 (:file "knobs")
                  (:file "shaders")
                  (:file "fields")
                  (:file "production")
@@ -48,6 +51,7 @@
                  (:file "frontier-light")
                  (:file "mesher")
                  (:file "particles")
+                 (:file "intent")
                  (:file "simulation")
                  (:file "critters")
                  (:file "persistence")
@@ -59,11 +63,16 @@
                  (:file "video-screen")
                  (:file "app")
                  (:file "riding")
+                 (:file "body")
                  (:file "streaming")
                  (:file "render")
                  (:file "play")
                  (:file "terminal-wall")
+                 (:file "phone")
                  (:file "capture")
+                 (:file "mirror" :if-feature :darwin)
+                 (:file "portal" :if-feature :darwin)
+                 (:file "portal-server" :if-feature :darwin)
                  (:file "benchmark")
                  (:file "gazetteer"))))
   :in-order-to ((test-op (test-op "luvcraft/test"))))
@@ -85,11 +94,39 @@
                  (:file "block-world")
                  (:file "gazetteer")))))
 
+(defsystem "luvcraft/clim"
+  :description "Luvcraft's verbs as CLIM commands in an application frame."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("luvcraft" "mcluv/luvcraft" "alexandria")
+  :serial t
+  :components ((:module "luvcraft/clim"
+                :serial t
+                :components ((:file "package")
+                             (:file "frame")
+                             (:file "commands")
+                             (:file "legend")
+                             (:file "input"))))
+  :in-order-to ((test-op (test-op "luvcraft/clim-test"))))
+
+(defsystem "luvcraft/clim-test"
+  :description "Executable claims for luvcraft's CLIM command vocabulary."
+  :version "0.0.1"
+  :depends-on ("luvcraft/clim" "rove")
+  :components ((:file "luvcraft/clim/tests"))
+  :perform (test-op (operation component)
+             (declare (ignore operation component))
+             (unless (uiop:symbol-call '#:rove '#:run-suite
+                                       (uiop:symbol-call '#:rove '#:find-suite
+                                                         '#:luvcraft.clim.tests)
+                                       :style :luv)
+               (error "luvcraft CLIM tests failed"))))
+
 (defsystem "luvcraft/program"
   :description "The standalone luvcraft executable with its live Slynk endpoint."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luvcraft" "mcluv/luvcraft" "sb-posix" "slynk")
+  :depends-on ("luvcraft" "luvcraft/clim" "sb-posix" "slynk")
   :components ((:file "luvcraft/main"))
   :build-operation "program-op"
   :build-pathname "build/luvcraft"

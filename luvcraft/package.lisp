@@ -126,6 +126,42 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:apply-block-world-source-edits
            #:attach-luvcraft-hud
            #:toggle-luvcraft-inventory
+           #:toggle-luvcraft-metabar
+           #:knob
+           #:scalar-knob
+           #:switch-knob
+           #:knob-name
+           #:knob-label
+           #:knob-group
+           #:knob-documentation
+           #:knob-declaration
+           #:knob-unit
+           #:knob-unit-label
+           #:unit-label
+           #:unit-abbreviation
+           #:knob-minimum
+           #:knob-maximum
+           #:knob-step
+           #:knob-value
+           #:knob-fraction
+           #:set-knob-value
+           #:step-knob
+           #:toggle-knob
+           #:realize-knob
+           #:format-knob-value
+           #:find-knob
+           #:knob-groups
+           #:knobs-in-group
+           #:shader-knob-p
+           #:define-knob
+           #:*knobs*
+           #:action
+           #:action-name
+           #:action-label
+           #:define-action
+           #:find-action
+           #:run-action
+           #:*actions*
            #:attach-lighting-state
            #:benchmark-luvcraft-frame-performance
            #:block-chunk-load-payload
@@ -242,6 +278,27 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:turtle
            #:turtle-heading
            #:turtle-resting-p
+           ;; The first-person body and what it holds (BODY.LISP).
+           #:player-body
+           #:player-body-hand-item
+           #:player-body-pocket
+           #:player-body-vertices
+           #:luvcraft-session-body
+           #:hand-item-name
+           #:hand-item-box-count
+           #:hand-item-carry-pose
+           #:hand-item-taken-out
+           #:hand-item-put-away
+           #:map-hand-item-boxes
+           #:emit-hand-item
+           #:emit-rounded-slab
+           #:take-out-hand-item
+           #:put-away-hand-item
+           #:toggle-hand-item
+           #:toggle-luvcraft-phone
+           #:phone
+           #:phone-display
+           #:phone-terminal-display
            #:world-terrain-solid-p
            #:edit-block-at
            #:edit-block-world-source
@@ -301,6 +358,8 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:luvcraft-session-block-pipeline
            #:luvcraft-session-camera
            #:luvcraft-session-canvas
+           #:luvcraft-session-context
+           #:luvcraft-session-device
            #:luvcraft-session-checkpoint-writer
            #:luvcraft-session-chunk-products
            #:luvcraft-session-crosshair-pipeline
@@ -309,6 +368,16 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:luvcraft-session-modal-focus
            #:luvcraft-session-inventory
            #:luvcraft-session-focus-candidate
+           ;; Input state.  What the player is trying to do and who holds the
+           ;; pointer are read and written by whatever layer interprets input;
+           ;; since that layer is no longer the core, they are part of the
+           ;; session's surface rather than its insides.
+           #:luvcraft-session-movement-intent
+           #:luvcraft-session-look-intent
+           #:luvcraft-session-pointer-captured-p
+           #:luvcraft-session-pointer-capture-suspended-p
+           #:luvcraft-session-focus-toggle-tab-down-p
+           #:dispatch-luvcraft-focus-event
            #:luvcraft-focus-entered
            #:luvcraft-focus-camera-pose
            #:luvcraft-focus-left
@@ -427,8 +496,40 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:sky-keyframe
            #:sky-profile
            #:start-luvcraft
+           #:attach-luvcraft-frame-mirror
+           #:serve-luvcraft-mirror
+           #:luvcraft-mirror
+           #:spawn-luvcraft-mirror
+           #:request-luvcraft-mirror-frame
+           #:stop-luvcraft-mirror
+           #:luvcraft-mirror-pixel
+           #:luvcraft-mirror-pixels
+           #:save-luvcraft-mirror-png
+           #:luvcraft-portal
+           #:open-luvcraft-portal
+           #:close-luvcraft-portal
+           #:encode-luvcraft-portal-picture
+           #:luvcraft-portal-server
+           #:ensure-luvcraft-portal-server
+           #:stop-luvcraft-portal-server
+           #:serve-luvcraft-parent
+           #:luvcraft-parent-socket-path
+           #:open-terminal-display-portal
+           #:close-terminal-display-portal
+           #:terminal-display-name
+           #:terminal-display-portal
+           #:luvcraft-mirror-frames
+           #:luvcraft-session-frame-mirror
            #:start-luvcraft-tracy
            #:step-block-world-player
+           #:movement-intent
+           #:make-movement-intent
+           #:movement-urging-p
+           #:movement-intent-axis
+           #:movement-intent-sprinting-p
+           #:movement-intent-jump-requested-p
+           #:movement-intent-still-p
+           #:clear-movement-intent
            #:stop-luvcraft
            #:terminal-display
            #:change-terminal-display-mode

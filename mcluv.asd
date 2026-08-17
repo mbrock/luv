@@ -1,5 +1,15 @@
 (in-package #:asdf-user)
 
+(defsystem "mcluv"
+  :description "McCLIM presented through luv canvases and embedded in luvcraft."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  ;; ASDF resolves every MCLUV/... secondary system through this primary one,
+  ;; so it exists whether or not anyone loads the whole layer at once.  It is
+  ;; an aggregate rather than a program: the McCLIM surfaces luv actually runs
+  ;; are panes inside the game, not a separate application.
+  :depends-on ("mcluv/backend" "mcluv/luvcraft"))
+
 (defsystem "mcluv/backend"
   :description "An experimental McCLIM backend presented through luv canvases."
   :version "0.0.1"
@@ -66,7 +76,8 @@
                (:file "mcclim/terminal-film-browser")
                (:file "mcclim/block-icon")
                (:file "mcclim/hotbar")
-               (:file "mcclim/inventory")))
+               (:file "mcclim/inventory")
+               (:file "mcclim/metabar")))
 
 (defsystem "mcluv/telegram"
   :description "A Telegram terminal mounted on a luvcraft wall."
@@ -74,6 +85,13 @@
   :author "Mikael Brockman"
   :depends-on ("mcluv/luvcraft" "telegram/chat" "luv/libav" "sb-concurrency")
   :components ((:file "mcclim/telegram")))
+
+(defsystem "mcluv/paper"
+  :description "A sheet of PDF paper hung on a luvcraft wall."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("mcluv/luvcraft" "luv/mupdf" "cl-dejavu" "zpb-ttf")
+  :components ((:file "mcclim/paper")))
 
 (defsystem "mcluv/luvcraft-test"
   :description "Executable claims for McCLIM instruments embedded in luvcraft."
@@ -88,19 +106,3 @@
                                        :style :luv)
                (error "mcluv surveyor tests failed"))))
 
-(defsystem "mcluv/listener"
-  :description "The McCLIM Listener running on the mcluv backend."
-  :version "0.0.1"
-  :author "Mikael Brockman"
-  :depends-on ("mcluv/backend" "clim-listener")
-  :components ((:file "mcclim/listener")))
-
-(defsystem "mcluv"
-  :description "The McCLIM Listener and shader lab as a standalone luv program."
-  :version "0.0.1"
-  :author "Mikael Brockman"
-  :depends-on ("mcluv/listener" "mcluv/shader-lab")
-  :components ((:file "mcclim/main"))
-  :build-operation "program-op"
-  :build-pathname "build/mcluv"
-  :entry-point "mcluv:main")

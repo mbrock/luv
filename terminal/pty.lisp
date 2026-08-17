@@ -23,6 +23,11 @@
 (cffi:defcfun ("chdir" %chdir) :int
   (path :pointer))
 
+(cffi:defcfun ("close" %close) :int
+  (descriptor :int))
+
+(cffi:defcfun ("getdtablesize" %descriptor-table-size) :int)
+
 (cffi:defcfun ("execve" %execve) :int
   (path :pointer)
   (arguments :pointer)
@@ -457,6 +462,24 @@ other private input modes."
                  ((zerop pid)
                   ;; Everything the child needs was allocated before FORKPTY;
                   ;; cross the post-fork window with only libc calls.
+                  ;;
+                  ;; Close everything above the terminal FORKPTY just gave
+                  ;; us.  A shell in the wall would otherwise inherit every
+                  ;; descriptor the image holds, and the one that hurts is
+                  ;; the Slynk listening socket: an orphaned shell keeps the
+                  ;; port bound long after its image is gone, so ./sly finds
+                  ;; a port that accepts connections, answers no handshake,
+                  ;; and refuses to start a replacement.  A terminal has no
+                  ;; business holding its parent's sockets open.
+                  ;;
+                  ;; The table size is a soft limit, not a census: a shell
+                  ;; whose ulimit is a million must not pay a million
+                  ;; syscalls to start.  The image's own descriptors are
+                  ;; small numbers, so a few thousand closes cover them.
+                  (let* ((limit (%descriptor-table-size))
+                         (bound (if (plusp limit) (min limit 4096) 4096)))
+                    (loop for descriptor from 3 below bound
+                          do (%close descriptor)))
                   (when (and directory-pointer
                              (minusp (%chdir directory-pointer)))
                     (%exit 126))
