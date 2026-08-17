@@ -20,6 +20,7 @@
            #:pixel-format-name
            #:frame
            #:make-frame
+           #:clone-frame
            #:frame-pointer
            #:frame-live-p
            #:release-frame
@@ -32,6 +33,7 @@
            #:frame-key-p
            #:frame-plane-pointer
            #:frame-videotoolbox-pixel-buffer
+           #:frame-vulkan-frame
            #:frame-plane-pitch
            #:frame-hardware-p
            #:allocate-frame-buffer

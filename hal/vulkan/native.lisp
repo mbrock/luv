@@ -64,6 +64,12 @@
   :extractor extension-property-name
   :operation :enumerate-instance-extension-properties)
 
+(define-enumerator enumerate-device-extension-names (physical-device)
+  (vk:enumerate-device-extension-properties physical-device (cffi:null-pointer))
+  :element (:struct extension-properties)
+  :extractor extension-property-name
+  :operation :enumerate-device-extension-properties)
+
 (define-enumerator enumerate-physical-devices (instance)
   (vk:enumerate-physical-devices instance)
   :element :pointer)

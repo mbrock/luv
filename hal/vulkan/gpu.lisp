@@ -239,6 +239,23 @@ and scheduled texture layouts across the canvas and REPL threads.")))
     :initarg :owned-p
     :initform t
     :reader vulkan-texture-owned-p)
+   (external-owner
+    :initarg :external-owner
+    :initform nil
+    :reader vulkan-texture-external-owner)
+   (aspect
+    :initarg :aspect
+    :initform nil
+    :reader vulkan-texture-explicit-aspect)
+   (external-semaphore
+    :initarg :external-semaphore :initform nil
+    :reader vulkan-texture-external-semaphore)
+   (external-semaphore-value
+    :initarg :external-semaphore-value :initform 0
+    :reader vulkan-texture-external-semaphore-value)
+   (external-submitted
+    :initarg :external-submitted :initform nil
+    :reader vulkan-texture-external-submitted)
    (vk-format
     :initarg :vk-format
     :reader vulkan-texture-vk-format)
@@ -474,6 +491,17 @@ visible to it.")
              :reason :no-graphics-queue
              :details physical-device)))
 
+(defparameter *vulkan-video-device-extensions*
+  '("VK_KHR_video_queue" "VK_KHR_video_decode_queue"
+    "VK_KHR_video_decode_h264" "VK_KHR_video_decode_h265"
+    "VK_KHR_video_maintenance1")
+  "Optional extensions which let FFmpeg decode on luv's VkDevice.")
+
+(defun available-vulkan-video-device-extensions (physical-device)
+  (let ((available (lvk:enumerate-device-extension-names physical-device)))
+    (remove-if-not (lambda (name) (member name available :test #'string=))
+                   *vulkan-video-device-extensions*)))
+
 (defun install-vulkan-device-leak-finalizer (device)
   "Arrange to warn about and reclaim DEVICE if it is collected undestroyed.
 
@@ -548,7 +576,9 @@ wrapper, this finalizer cannot run before theirs have."
         (error condition)))))
 
 (defun make-borrowed-vulkan-texture
-    (device image size format vk-format &key (usage '(:copy-dst)))
+    (device image size format vk-format &key (usage '(:copy-dst)) owner aspect
+                                             (layout :undefined) semaphore
+                                             (semaphore-value 0) submitted)
   "Wrap an externally owned Vulkan IMAGE as a GPU texture."
   (make-instance
    'vulkan-gpu-texture
@@ -560,6 +590,12 @@ wrapper, this finalizer cannot run before theirs have."
    :handle image
    :device device
    :vk-format vk-format
+   :external-owner owner
+   :aspect aspect
+   :layout layout
+   :external-semaphore semaphore
+   :external-semaphore-value semaphore-value
+   :external-submitted submitted
    :owned-p nil))
 
 (defun check-vulkan-device-descriptor (descriptor)
@@ -626,6 +662,8 @@ wrapper, this finalizer cannot run before theirs have."
 (defun vulkan-gpu-format (format descriptor)
   (or (cdr (assoc format
                   '((:rgba8-unorm . :r8g8b8a8-unorm)
+                    (:r8-unorm . :r8-unorm)
+                    (:rg8-unorm . :r8g8-unorm)
                     (:rgba8-unorm-srgb . :r8g8b8a8-srgb)
                     (:bgra8-unorm . :b8g8r8a8-unorm)
                     (:bgra8-unorm-srgb . :b8g8r8a8-srgb)
@@ -643,7 +681,25 @@ wrapper, this finalizer cannot run before theirs have."
   (eq format :depth32-float))
 
 (defun vulkan-texture-aspect (texture)
-  (if (vulkan-depth-format-p (gpu-texture-format texture)) :depth :color))
+  (or (vulkan-texture-explicit-aspect texture)
+      (if (vulkan-depth-format-p (gpu-texture-format texture)) :depth :color)))
+
+(defmethod adopt-native-texture
+    ((device vulkan-gpu-device) native owner (descriptor texture-descriptor))
+  "Wrap one plane view of an AVVkFrame image without taking image ownership."
+  (ensure-live-vulkan-object device :adopt-native-texture)
+  (unless (and (listp native) (getf native :image) owner)
+    (reject-gpu-request descriptor :invalid-native-texture native))
+  (make-borrowed-vulkan-texture
+   device (getf native :image) (normalize-vulkan-texture-size descriptor)
+   (texture-descriptor-format descriptor)
+   (or (getf native :format) (vulkan-texture-format descriptor))
+   :usage (normalize-vulkan-texture-usage descriptor)
+   :owner owner :aspect (getf native :aspect)
+   :layout (or (getf native :layout) :general)
+   :semaphore (getf native :semaphore)
+   :semaphore-value (or (getf native :semaphore-value) 0)
+   :submitted (getf native :submitted)))
 
 (defun vulkan-image-usage (usages format)
   (mapcar (lambda (usage)
@@ -759,7 +815,12 @@ wrapper, this finalizer cannot run before theirs have."
                           :debug-messenger debug-messenger
                           :instance-extension-names extensions
                           :enabled-extension-names
-                          (vulkan-gpu-device-extension-names provider))))
+                          (remove-duplicates
+                           (append
+                            (vulkan-gpu-device-extension-names provider)
+                            (available-vulkan-video-device-extensions
+                             physical-device))
+                           :test #'string=))))
                    (setf native-device (vulkan-handle device)
                          completed-p t)
                    device)))
@@ -2629,17 +2690,46 @@ destroy any of them immediately after this returns."
         (let ((texture-layouts
                 (vulkan-submitted-texture-layouts command-buffers)))
           (when (plusp (length command-buffers))
-            (setf index (1+ (vulkan-queue-submission-counter queue)))
-            (lvk:submit-command-buffers
-             (vulkan-handle queue)
-             (map 'vector #'vulkan-handle command-buffers)
-             :wait-semaphores wait-semaphores
-             :signal-semaphores
-             (concatenate
-              'vector signal-semaphores
-              (vector (list (vulkan-queue-timeline queue)
-                            '(:all-commands)
-                            index))))
+            (let ((external '()))
+              (maphash
+               (lambda (texture layout)
+                 (declare (ignore layout))
+                 (let ((semaphore (vulkan-texture-external-semaphore texture)))
+                   (when (and semaphore
+                              (not (find semaphore external :key #'first)))
+                     (push (list semaphore
+                                 (vulkan-texture-external-semaphore-value texture)
+                                 texture)
+                           external))))
+               texture-layouts)
+              (setf index (1+ (vulkan-queue-submission-counter queue)))
+              (lvk:submit-command-buffers
+               (vulkan-handle queue)
+               (map 'vector #'vulkan-handle command-buffers)
+               :wait-semaphores
+               (concatenate
+                'vector wait-semaphores
+                (map 'vector (lambda (entry)
+                               (list (first entry) '(:all-commands)
+                                     (second entry)))
+                     external))
+               :signal-semaphores
+               (concatenate
+                'vector signal-semaphores
+                (map 'vector (lambda (entry)
+                               (list (first entry) '(:all-commands)
+                                     (1+ (second entry))))
+                     external)
+                (vector (list (vulkan-queue-timeline queue)
+                              '(:all-commands)
+                              index))))
+              (dolist (entry external)
+                (let* ((texture (third entry))
+                       (callback (vulkan-texture-external-submitted texture)))
+                  (when callback
+                    (funcall callback
+                             (gethash texture texture-layouts)
+                             (1+ (second entry)))))))
             (setf (vulkan-queue-submission-counter queue) index)
             (let ((resources '()))
               (loop for command-buffer across command-buffers
@@ -2811,10 +2901,13 @@ teardown lock, with DEVICE anaphorically bound to the native handle."
     (vulkan-texture-device texture)
     ((handle (vulkan-handle texture))
      (memory (vulkan-texture-memory texture))
-     (owned-p (vulkan-texture-owned-p texture)))
+     (owned-p (vulkan-texture-owned-p texture))
+     (external-owner (vulkan-texture-external-owner texture)))
   (when owned-p
     (lvk:destroy-image device handle)
-    (lvk:free-memory device memory)))
+    (lvk:free-memory device memory))
+  (when external-owner
+    (funcall external-owner)))
 
 (defmethod destroy ((device vulkan-gpu-device))
   (with-vulkan-gpu-driver-environment

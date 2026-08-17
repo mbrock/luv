@@ -217,6 +217,7 @@
               pkgs.pkg-config
               pkgs.sdl3
               pkgs.spirv-tools
+              pkgs.vulkan-headers
               pkgs.vulkan-tools
             ];
             text = ''
@@ -231,6 +232,7 @@
               # offsets.  The dev shell gets this from mkShell's buildInputs;
               # here it has to be said out loud.
               export PKG_CONFIG_PATH=${ffmpegDevelopment}/lib/pkgconfig''${PKG_CONFIG_PATH:+:}''${PKG_CONFIG_PATH:-}
+              export CPATH=${pkgs.vulkan-headers}/include''${CPATH:+:}''${CPATH:-}
               export LD_LIBRARY_PATH=${nativeLibraryPath}''${LD_LIBRARY_PATH:+:}''${LD_LIBRARY_PATH:-}
 
               ${nixpkgs.lib.optionalString (system == "x86_64-linux") ''
@@ -309,6 +311,7 @@
               env.pkgs.pkg-config
               env.pkgs.sdl3
               env.pkgs.spirv-tools
+              env.pkgs.vulkan-headers
               env.pkgs.vulkan-tools
             ];
             LD_LIBRARY_PATH = env.nativeLibraryPath;
@@ -318,6 +321,7 @@
             LUV_TRACY_CLIENT = env.tracyClientLibrary;
             LUV_FFMPEG_LIBDIR = env.ffmpegLibraryDirectory;
             CL_SOURCE_REGISTRY = "${mcclim}//:${cl-sdl3}//";
+            CPATH = "${env.pkgs.vulkan-headers}/include";
             shellHook = ''
               if [ -z "''${SDL_VIDEODRIVER:-}" ] \
                 && [ -z "''${DISPLAY:-}" ] \

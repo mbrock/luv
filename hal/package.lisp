@@ -35,6 +35,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:vulkan-function-description
            #:make-version
            #:enumerate-instance-extension-names
+           #:enumerate-device-extension-names
            #:create-instance
            #:destroy-instance
            #:debug-message

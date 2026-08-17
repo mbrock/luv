@@ -35,6 +35,8 @@
    ;; player is not allocating megabytes per picture.
    (staging :initform nil :accessor video-staging)
    (staging-size :initform 0 :accessor video-staging-size)
+   (hardware-cleanup :initarg :hardware-cleanup :initform nil
+                     :accessor video-hardware-cleanup)
    (drained-p :initform nil :accessor video-drained-p))
   (:documentation "An open video file and its decoder."))
 
@@ -75,6 +77,10 @@
 (cffi:defcfun ("av_hwdevice_ctx_create" %av-hwdevice-context-create) :int
   (reference :pointer) (type :int) (device :pointer) (options :pointer)
   (flags :int))
+(cffi:defcfun ("av_hwdevice_ctx_alloc" %av-hwdevice-context-allocate) :pointer
+  (type :int))
+(cffi:defcfun ("av_hwdevice_ctx_init" %av-hwdevice-context-initialize) :int
+  (reference :pointer))
 (cffi:defcfun ("av_buffer_ref" %av-buffer-reference) :pointer
   (reference :pointer))
 (cffi:defcfun ("av_buffer_unref" %av-buffer-unreference) :void
@@ -125,6 +131,136 @@
           when (= format wanted) return format
           finally (return (cffi:mem-aref formats :int 0)))))
 
+(cffi:defcallback choose-vulkan-format :int
+    ((context :pointer) (formats :pointer))
+  (declare (ignore context))
+  (let ((wanted (cffi:foreign-enum-value 'pixel-format :vulkan)))
+    (loop for index from 0
+          for format = (cffi:mem-aref formats :int index)
+          until (= format (cffi:foreign-enum-value 'pixel-format :none))
+          when (= format wanted) return format
+          finally (return (cffi:mem-aref formats :int 0)))))
+
+(defun allocate-foreign-string-vector (strings)
+  (let* ((strings (coerce strings 'list))
+         (pointers (mapcar #'cffi:foreign-string-alloc strings))
+         (vector (if pointers
+                     (cffi:foreign-alloc :pointer :count (length pointers))
+                     (cffi:null-pointer))))
+    (loop for pointer in pointers for index from 0
+          do (setf (cffi:mem-aref vector :pointer index) pointer))
+    (values vector
+            (lambda ()
+              (dolist (pointer pointers) (cffi:foreign-string-free pointer))
+              (unless (cffi:null-pointer-p vector) (cffi:foreign-free vector))))))
+
+(defun enable-vulkan-decoding (codec-context configuration)
+  "Decode into AVVkFrames allocated on the renderer's existing VkDevice.
+
+CONFIGURATION is a plist containing :INSTANCE, :PHYSICAL-DEVICE, :DEVICE,
+:GET-INSTANCE-PROC-ADDR, :QUEUE-FAMILY, and :QUEUE-FLAGS.  FFmpeg borrows the
+Vulkan handles; the caller must therefore close the video before the device."
+  (multiple-value-bind (instance-extensions free-instance-extensions)
+      (allocate-foreign-string-vector (getf configuration :instance-extensions))
+    (multiple-value-bind (device-extensions free-device-extensions)
+        (allocate-foreign-string-vector (getf configuration :device-extensions))
+      (let ((completed-p nil)
+            (reference
+          (%av-hwdevice-context-allocate
+           (cffi:foreign-enum-value 'hardware-device-type :vulkan))))
+    (when (cffi:null-pointer-p reference)
+      (error "Could not allocate FFmpeg's Vulkan device context."))
+    (unwind-protect
+         (let* ((base (cffi:foreign-slot-value
+                       reference '(:struct av-buffer-reference) 'data))
+                (vulkan (cffi:foreign-slot-value
+                         base '(:struct av-hardware-device-context)
+                         'hardware-context))
+                (families (cffi:foreign-slot-pointer
+                           vulkan '(:struct av-vulkan-device-context)
+                           'queue-families))
+                (features (cffi:foreign-slot-pointer
+                           vulkan '(:struct av-vulkan-device-context)
+                           'device-features))
+                (family (cffi:mem-aptr
+                         families '(:struct av-vulkan-device-queue-family) 0)))
+           (loop for index below
+                   (cffi:foreign-type-size
+                    '(:struct vk-physical-device-features-2))
+                 do (setf (cffi:mem-aref features :uint8 index) 0))
+           (setf (cffi:foreign-slot-value
+                  features '(:struct vk-physical-device-features-2)
+                  'structure-type) 1000059000
+                 (cffi:foreign-slot-value
+                  (cffi:foreign-slot-pointer
+                   features '(:struct vk-physical-device-features-2) 'features)
+                  '(:struct vk-physical-device-features) 'shader-int64) 1)
+           (setf (cffi:foreign-slot-value
+                  vulkan '(:struct av-vulkan-device-context) 'allocator)
+                 (cffi:null-pointer)
+                 (cffi:foreign-slot-value
+                  vulkan '(:struct av-vulkan-device-context)
+                  'get-instance-procedure-address)
+                 (getf configuration :get-instance-proc-addr)
+                 (cffi:foreign-slot-value
+                  vulkan '(:struct av-vulkan-device-context) 'instance)
+                 (getf configuration :instance)
+                 (cffi:foreign-slot-value
+                  vulkan '(:struct av-vulkan-device-context) 'physical-device)
+                 (getf configuration :physical-device)
+                 (cffi:foreign-slot-value
+                  vulkan '(:struct av-vulkan-device-context) 'device)
+                 (getf configuration :device)
+                 (cffi:foreign-slot-value
+                  vulkan '(:struct av-vulkan-device-context)
+                  'instance-extensions) instance-extensions
+                 (cffi:foreign-slot-value
+                  vulkan '(:struct av-vulkan-device-context)
+                  'instance-extension-count)
+                 (length (getf configuration :instance-extensions))
+                 (cffi:foreign-slot-value
+                  vulkan '(:struct av-vulkan-device-context)
+                  'device-extensions) device-extensions
+                 (cffi:foreign-slot-value
+                  vulkan '(:struct av-vulkan-device-context)
+                  'device-extension-count)
+                 (length (getf configuration :device-extensions))
+                 (cffi:foreign-slot-value
+                  family '(:struct av-vulkan-device-queue-family) 'index)
+                 (getf configuration :queue-family)
+                 (cffi:foreign-slot-value
+                  family '(:struct av-vulkan-device-queue-family) 'count) 1
+                 (cffi:foreign-slot-value
+                 family '(:struct av-vulkan-device-queue-family) 'flags)
+                 (getf configuration :queue-flags)
+                 (cffi:foreign-slot-value
+                  family '(:struct av-vulkan-device-queue-family)
+                  'video-capabilities)
+                 (or (getf configuration :video-capabilities) 0)
+                 (cffi:foreign-slot-value
+                  vulkan '(:struct av-vulkan-device-context)
+                  'queue-family-count) 1)
+           (check-code (%av-hwdevice-context-initialize reference)
+                       'enable-vulkan-decoding)
+           (setf (cffi:foreign-slot-value
+                  codec-context '(:struct av-codec-context)
+                  'hardware-device-context)
+                 (%av-buffer-reference reference)
+                 (cffi:foreign-slot-value
+                 codec-context '(:struct av-codec-context) 'get-format)
+                 (cffi:callback choose-vulkan-format))
+           (setf completed-p t))
+      (cffi:with-foreign-object (cell :pointer)
+        (setf (cffi:mem-ref cell :pointer) reference)
+        (%av-buffer-unreference cell))
+      (unless completed-p
+        (funcall free-device-extensions)
+        (funcall free-instance-extensions)))
+    (values codec-context
+            (lambda ()
+              (funcall free-device-extensions)
+              (funcall free-instance-extensions)))))))
+
 (defun enable-videotoolbox-decoding (codec-context)
   "Ask FFmpeg to decode into reference-counted CVPixelBuffers."
   #+darwin
@@ -153,7 +289,7 @@
   (declare (ignore codec-context))
   codec-context)
 
-(defun open-video (pathname &key (hardware :auto))
+(defun open-video (pathname &key (hardware :auto) hardware-configuration)
   "Open PATHNAME, find its best video stream, and start a decoder for it.
 
 Returns a VIDEO.  The caller owns it and must CLOSE-VIDEO it."
@@ -161,6 +297,7 @@ Returns a VIDEO.  The caller owns it and must CLOSE-VIDEO it."
   (let ((truename (uiop:native-namestring (truename pathname)))
         (format-context nil)
         (codec-context nil)
+        (hardware-cleanup nil)
         (video nil))
     (unwind-protect
          (with-libav-native-environment
@@ -204,6 +341,14 @@ Returns a VIDEO.  The caller owns it and must CLOSE-VIDEO it."
                      (when (eq hardware :required) (error condition))
                      (warn "VideoToolbox decode unavailable; using software: ~A"
                            condition))))
+               (when (and (eq hardware :vulkan) hardware-configuration)
+                 (handler-case
+                     (multiple-value-setq (codec-context hardware-cleanup)
+                       (enable-vulkan-decoding codec-context
+                                               hardware-configuration))
+                   (error (condition)
+                     (warn "Vulkan decode unavailable; using software: ~A"
+                           condition))))
                (check-code (%avcodec-open2 codec-context decoder
                                            (cffi:null-pointer))
                            'open-video)
@@ -213,6 +358,7 @@ Returns a VIDEO.  The caller owns it and must CLOSE-VIDEO it."
                       :pathname pathname
                       :format-context format-context
                       :codec-context codec-context
+                      :hardware-cleanup hardware-cleanup
                       :stream-index index
                       :width (cffi:foreign-slot-value
                               codec-context '(:struct av-codec-context) 'width)
@@ -231,6 +377,7 @@ Returns a VIDEO.  The caller owns it and must CLOSE-VIDEO it."
           (cffi:with-foreign-object (cell :pointer)
             (setf (cffi:mem-ref cell :pointer) codec-context)
             (%avcodec-free-context cell)))
+        (when hardware-cleanup (funcall hardware-cleanup))
         (when format-context
           (cffi:with-foreign-object (cell :pointer)
             (setf (cffi:mem-ref cell :pointer) format-context)
@@ -268,6 +415,9 @@ Returns a VIDEO.  The caller owns it and must CLOSE-VIDEO it."
       (setf (cffi:mem-ref cell :pointer) (video-codec-context video))
       (%avcodec-free-context cell))
     (setf (video-codec-context video) nil))
+  (when (video-hardware-cleanup video)
+    (funcall (video-hardware-cleanup video))
+    (setf (video-hardware-cleanup video) nil))
   (when (video-format-context video)
     (cffi:with-foreign-object (cell :pointer)
       (setf (cffi:mem-ref cell :pointer) (video-format-context video))

@@ -23,6 +23,7 @@
 (include "libavutil/buffer.h")
 (include "libavutil/frame.h")
 (include "libavutil/hwcontext.h")
+(include "libavutil/hwcontext_vulkan.h")
 (include "libavutil/pixfmt.h")
 (include "libavutil/rational.h")
 (include "libavcodec/avcodec.h")
@@ -120,6 +121,46 @@
   (buffer "buffer" :type :pointer)
   (data "data" :type :pointer)
   (size "size" :type :size))
+
+(cstruct av-hardware-device-context "AVHWDeviceContext"
+  (hardware-context "hwctx" :type :pointer))
+
+(cstruct av-vulkan-device-queue-family "AVVulkanDeviceQueueFamily"
+  (index "idx" :type :int)
+  (count "num" :type :int)
+  (flags "flags" :type :uint32)
+  (video-capabilities "video_caps" :type :uint32))
+
+(cstruct vk-physical-device-features "VkPhysicalDeviceFeatures"
+  (shader-int64 "shaderInt64" :type :uint32))
+
+(cstruct vk-physical-device-features-2 "VkPhysicalDeviceFeatures2"
+  (structure-type "sType" :type :uint32)
+  (next "pNext" :type :pointer)
+  (features "features" :type (:struct vk-physical-device-features)))
+
+(cstruct av-vulkan-device-context "AVVulkanDeviceContext"
+  (allocator "alloc" :type :pointer)
+  (get-instance-procedure-address "get_proc_addr" :type :pointer)
+  (instance "inst" :type :pointer)
+  (physical-device "phys_dev" :type :pointer)
+  (device "act_dev" :type :pointer)
+  (device-features "device_features"
+                   :type (:struct vk-physical-device-features-2))
+  (instance-extensions "enabled_inst_extensions" :type :pointer)
+  (instance-extension-count "nb_enabled_inst_extensions" :type :int)
+  (device-extensions "enabled_dev_extensions" :type :pointer)
+  (device-extension-count "nb_enabled_dev_extensions" :type :int)
+  (queue-families "qf" :type (:struct av-vulkan-device-queue-family) :count 64)
+  (queue-family-count "nb_qf" :type :int))
+
+(cstruct av-vulkan-frame "AVVkFrame"
+  (images "img" :type :pointer :count 8)
+  (access "access" :type :uint32 :count 8)
+  (layouts "layout" :type :uint32 :count 8)
+  (semaphores "sem" :type :pointer :count 8)
+  (semaphore-values "sem_value" :type :uint64 :count 8)
+  (queue-families "queue_family" :type :uint32 :count 8))
 
 ;;; Only the fields luv reads or writes.  Groveling a subset is safe precisely
 ;;; because every offset is computed rather than accumulated: leaving a field

@@ -20,6 +20,47 @@
 
 (in-package #:luvcraft)
 
+#-darwin
+(defun vulkan-video-configuration (device)
+  "Describe DEVICE to FFmpeg when its graphics queue can also decode video."
+  (when (typep device 'luv::vulkan-gpu-device)
+    (let* ((family (luv::vulkan-device-queue-family device))
+           (properties (nth family
+                            (luv.vulkan:physical-device-queue-families
+                             (luv::vulkan-device-physical-device device))))
+           (flags (and properties (luv.vulkan:queue-family-flags properties)))
+           (extensions (luv::vulkan-device-extension-names device)))
+      (when (and (member :video-decode flags)
+                 (member "VK_KHR_video_queue" extensions :test #'string=)
+                 (member "VK_KHR_video_decode_queue" extensions :test #'string=))
+        (list
+         :instance (luv::vulkan-device-instance device)
+         :physical-device (luv::vulkan-device-physical-device device)
+         :device (luv::vulkan-handle device)
+         :get-instance-proc-addr
+         (cffi:foreign-symbol-pointer
+          "vkGetInstanceProcAddr" :library 'luv.vulkan::vulkan-loader)
+         :queue-family family
+         :instance-extensions (luv::vulkan-device-instance-extension-names device)
+         :device-extensions (luv::vulkan-device-extension-names device)
+         :video-capabilities
+         (logior
+          (if (member "VK_KHR_video_decode_h264" extensions :test #'string=)
+              #x1 0)
+          (if (member "VK_KHR_video_decode_h265" extensions :test #'string=)
+              #x2 0))
+         :queue-flags
+         (loop for flag in flags
+               sum (ecase flag
+                     (:graphics #x1) (:compute #x2) (:transfer #x4)
+                     (:sparse-binding #x8) (:video-decode #x20)
+                     (:video-encode #x40))))))))
+
+#+darwin
+(defun vulkan-video-configuration (device)
+  (declare (ignore device))
+  nil)
+
 #+darwin
 (progn
   (cffi:define-foreign-library core-video
@@ -125,10 +166,13 @@ WIDTH by HEIGHT in cells, square to the camera's own basis."
   "Open PATHNAME and build a world screen playing it, facing CAMERA.
 
 HEIGHT is the screen's height in cells; its width follows the film's aspect."
-  (let* ((video (libav:open-video
+  (let* ((vulkan-configuration (vulkan-video-configuration device))
+         (video (libav:open-video
                  pathname
-                 :hardware (if (typep device 'luv::metal-gpu-device)
-                               :auto nil)))
+                 :hardware (cond ((typep device 'luv::metal-gpu-device) :auto)
+                                 (vulkan-configuration :vulkan)
+                                 (t nil))
+                 :hardware-configuration vulkan-configuration))
          (resources nil)
          (pipeline nil)
          (completed-p nil))
@@ -138,8 +182,9 @@ HEIGHT is the screen's height in cells; its width follows the film's aspect."
                   (hardware-p
                     (not (null
                           (and first-frame
-                               (libav:frame-videotoolbox-pixel-buffer
-                                first-frame))))))
+                               (or (libav:frame-videotoolbox-pixel-buffer
+                                    first-frame)
+                                   (libav:frame-vulkan-frame first-frame)))))))
              (multiple-value-bind (texture-width texture-height)
                  (if hardware-p
                      (values (libav:video-width video) (libav:video-height video))
@@ -252,7 +297,7 @@ HEIGHT is the screen's height in cells; its width follows the film's aspect."
                               :resources resources)))
                        (when first-frame
                          (if hardware-p
-                             (install-videotoolbox-picture screen device)
+                             (install-hardware-video-picture screen device)
                              (upload-video-screen-picture screen device))
                          (setf (video-screen-shown screen) 0))
                        (setf completed-p t)
@@ -384,6 +429,89 @@ release report is running.  See WITH-RELEASE-REPORT."
               (video-screen-chroma-view screen) chroma-view))))
   screen)
 
+#-darwin
+(defun vulkan-frame-element (pointer slot type index)
+  (cffi:mem-aref
+   (cffi:foreign-slot-pointer pointer '(:struct libav::av-vulkan-frame) slot)
+   type index))
+
+#-darwin
+(defun install-vulkan-picture (screen device)
+  (let* ((decoded (libav:video-frame (video-screen-video screen)))
+         (frame (libav:frame-vulkan-frame decoded)))
+    (unless frame
+      (error "FFmpeg did not return an AVVkFrame."))
+    (let* ((image (vulkan-frame-element frame 'libav::images :pointer 0))
+           (layout-value
+             (vulkan-frame-element frame 'libav::layouts :uint32 0))
+           (layout (or (cffi:foreign-enum-keyword
+                        'luv.vulkan::image-layout layout-value :errorp nil)
+                       :general))
+           (semaphore
+             (vulkan-frame-element frame 'libav::semaphores :pointer 0))
+           (semaphore-value
+             (vulkan-frame-element frame 'libav::semaphore-values :uint64 0)))
+      (labels ((plane (plane format aspect width height)
+                 (let* ((retained (libav:clone-frame decoded))
+                        (retained-vulkan-frame
+                          (libav:frame-vulkan-frame retained))
+                        (release (lambda () (libav:release-frame retained)))
+                        (submitted
+                          (lambda (new-layout new-value)
+                            (setf (cffi:mem-aref
+                                   (cffi:foreign-slot-pointer
+                                    retained-vulkan-frame
+                                    '(:struct libav::av-vulkan-frame)
+                                    'libav::layouts)
+                                   :uint32 0)
+                                  (cffi:foreign-enum-value
+                                   'luv.vulkan::image-layout new-layout)
+                                  (cffi:mem-aref
+                                   (cffi:foreign-slot-pointer
+                                    retained-vulkan-frame
+                                    '(:struct libav::av-vulkan-frame)
+                                    'libav::semaphore-values)
+                                   :uint64 0)
+                                  new-value)))
+                        (texture
+                          (adopt-native-texture
+                           device
+                           (list :image image :format format :aspect aspect
+                                 :layout layout :semaphore semaphore
+                                 :semaphore-value semaphore-value
+                                 :submitted submitted)
+                           release
+                           (make-texture-descriptor
+                            :label (format nil "FFmpeg Vulkan plane ~D" plane)
+                            :size (list width height) :dimensions :2d
+                            :format (ecase plane (0 :r8-unorm) (1 :rg8-unorm))
+                            :usage '(:texture-binding)))))
+                   (values texture
+                           (create device
+                                   (make-texture-view-descriptor
+                                    :texture texture))))))
+        (multiple-value-bind (luma luma-view)
+            (plane 0 :r8-unorm :plane-0
+                   (video-screen-texture-width screen)
+                   (video-screen-texture-height screen))
+          (multiple-value-bind (chroma chroma-view)
+              (plane 1 :r8g8-unorm :plane-1
+                     (ceiling (video-screen-texture-width screen) 2)
+                     (ceiling (video-screen-texture-height screen) 2))
+            (release-video-screen-picture screen)
+            (setf (video-screen-texture screen) luma
+                  (video-screen-view screen) luma-view
+                  (video-screen-chroma-texture screen) chroma
+                  (video-screen-chroma-view screen) chroma-view))))))
+  screen)
+
+(defun install-hardware-video-picture (screen device)
+  (if (libav:frame-vulkan-frame
+       (libav:video-frame (video-screen-video screen)))
+      #-darwin (install-vulkan-picture screen device)
+      #+darwin (error "A Vulkan frame reached the Metal backend.")
+      (install-videotoolbox-picture screen device)))
+
 (defun video-screen-due-picture (screen)
   "Return the index of the picture that should be showing now.
 
@@ -455,7 +583,7 @@ the renderer's."
                (video-screen-picture-span screen (video-screen-shown screen)))))
     (when decoded-p
       (if (video-screen-hardware-p screen)
-          (install-videotoolbox-picture screen device)
+          (install-hardware-video-picture screen device)
           (upload-video-screen-picture screen device)))
     decoded-p))
 

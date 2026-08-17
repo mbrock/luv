@@ -18,6 +18,9 @@
   ((pointer :initarg :pointer :reader frame-pointer))
   (:documentation "An explicitly owned AVFrame."))
 
+(cffi:defcfun ("av_frame_clone" %av-frame-clone) :pointer
+  (source :pointer))
+
 (defun frame-live-p (frame)
   (not (cffi:null-pointer-p (frame-pointer frame))))
 
@@ -32,6 +35,13 @@
   (let ((pointer (%av-frame-alloc)))
     (when (cffi:null-pointer-p pointer)
       (error "av_frame_alloc could not allocate an AVFrame."))
+    (make-instance 'frame :pointer pointer)))
+
+(defun clone-frame (frame)
+  "Return a new reference to FRAME and all buffers backing its picture."
+  (let ((pointer (%av-frame-clone (frame-pointer (ensure-frame-live frame)))))
+    (when (cffi:null-pointer-p pointer)
+      (error "av_frame_clone could not retain the decoded picture."))
     (make-instance 'frame :pointer pointer)))
 
 (defun release-frame (frame)
@@ -126,6 +136,12 @@ touched the CPU and FRAME's third plane holds a platform surface."
   (when (eq :videotoolbox (frame-pixel-format frame))
     (let ((buffer (frame-plane-pointer frame 3)))
       (unless (cffi:null-pointer-p buffer) buffer))))
+
+(defun frame-vulkan-frame (frame)
+  "Return FRAME's borrowed AVVkFrame, or NIL for a non-Vulkan frame."
+  (when (eq :vulkan (frame-pixel-format frame))
+    (let ((vulkan-frame (frame-plane-pointer frame 0)))
+      (unless (cffi:null-pointer-p vulkan-frame) vulkan-frame))))
 
 (defun frame-plane-pitch (frame plane)
   "Return the byte stride of FRAME's PLANE, which exceeds its width when padded."

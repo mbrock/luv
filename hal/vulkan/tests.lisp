@@ -57,6 +57,16 @@
          (cffi:foreign-enum-value
           'lvk::format :r16g16b16a16-sfloat))))
 
+(deftest video-planes-retain-the-exact-vulkan-abi-values
+  (ok (= 9 (cffi:foreign-enum-value 'lvk::format :r8-unorm)))
+  (ok (= 16 (cffi:foreign-enum-value 'lvk::format :r8g8-unorm)))
+  (ok (= #x10
+         (cffi:foreign-bitfield-value 'lvk::image-aspect-flags '(:plane-0))))
+  (ok (= #x20
+         (cffi:foreign-bitfield-value 'lvk::image-aspect-flags '(:plane-1))))
+  (ok (= #x20
+         (cffi:foreign-bitfield-value 'lvk::queue-flags '(:video-decode)))))
+
 (deftest premultiplied-alpha-retains-the-exact-vulkan-blend-factor
   (ok (= 7
          (cffi:foreign-enum-value

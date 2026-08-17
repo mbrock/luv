@@ -73,6 +73,20 @@
     (ok (eq frame (libav:release-frame frame)))
     (ok (signals (libav:frame-width frame) 'error))))
 
+(deftest cloned-frames-retain-the-picture-independently
+  (libav:with-frame (frame)
+    (setf (libav:frame-width frame) 8
+          (libav:frame-height frame) 8
+          (libav:frame-pixel-format frame) :rgba)
+    (libav:allocate-frame-buffer frame)
+    (let ((clone (libav:clone-frame frame)))
+      (unwind-protect
+           (progn
+             (libav:unreference-frame frame)
+             (ok (not (cffi:null-pointer-p
+                       (libav:frame-plane-pointer clone 0)))))
+        (libav:release-frame clone)))))
+
 (defparameter *test-pattern*
   (asdf:system-relative-pathname "luv/libav" "libav/test-pattern.mp4")
   "A ten-frame 64x48 H.264 test pattern, small enough to keep in the tree.")
