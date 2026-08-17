@@ -95,16 +95,22 @@
                          :reader luvcraft-session-normal-atlas-texture)
    (normal-atlas-view :initarg :normal-atlas-view
                       :reader luvcraft-session-normal-atlas-view)
+   ;; The attachments below are the frame's own size rather than the world's,
+   ;; so a window resize replaces all of them together.  RENDER-EXTENT records
+   ;; the size they were made for; a frame that finds the drawable disagreeing
+   ;; with it rebuilds them before encoding anything.
+   (render-extent :initarg :render-extent :initform nil
+                  :accessor luvcraft-session-render-extent)
    (color-texture :initarg :color-texture
-                  :reader luvcraft-session-color-texture)
-   (color-view :initarg :color-view :reader luvcraft-session-color-view)
+                  :accessor luvcraft-session-color-texture)
+   (color-view :initarg :color-view :accessor luvcraft-session-color-view)
    (depth-texture :initarg :depth-texture
-                  :reader luvcraft-session-depth-texture)
-   (depth-view :initarg :depth-view :reader luvcraft-session-depth-view)
+                  :accessor luvcraft-session-depth-texture)
+   (depth-view :initarg :depth-view :accessor luvcraft-session-depth-view)
    (presentation-texture :initarg :presentation-texture
-                         :reader luvcraft-session-presentation-texture)
+                         :accessor luvcraft-session-presentation-texture)
    (presentation-view :initarg :presentation-view
-                      :reader luvcraft-session-presentation-view)
+                      :accessor luvcraft-session-presentation-view)
    (shadow-depth-texture :initarg :shadow-depth-texture
                          :reader luvcraft-session-shadow-depth-texture)
    (shadow-depth-view :initarg :shadow-depth-view
@@ -124,13 +130,13 @@
    ;; The lens chain ping-pongs between two reduced attachments: the blurred
    ;; bloom ends on the primary one and the light shafts on the secondary.
    (bloom-primary-texture :initarg :bloom-primary-texture :initform nil
-                          :reader luvcraft-session-bloom-primary-texture)
+                          :accessor luvcraft-session-bloom-primary-texture)
    (bloom-primary-view :initarg :bloom-primary-view :initform nil
-                       :reader luvcraft-session-bloom-primary-view)
+                       :accessor luvcraft-session-bloom-primary-view)
    (bloom-secondary-texture :initarg :bloom-secondary-texture :initform nil
-                            :reader luvcraft-session-bloom-secondary-texture)
+                            :accessor luvcraft-session-bloom-secondary-texture)
    (bloom-secondary-view :initarg :bloom-secondary-view :initform nil
-                         :reader luvcraft-session-bloom-secondary-view)
+                         :accessor luvcraft-session-bloom-secondary-view)
    (bloom-bright-pipeline :initarg :bloom-bright-pipeline :initform nil
                           :reader luvcraft-session-bloom-bright-pipeline)
    (bloom-horizontal-pipeline :initarg :bloom-horizontal-pipeline :initform nil

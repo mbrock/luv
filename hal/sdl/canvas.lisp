@@ -7,6 +7,9 @@
     :initarg :title
     :initform "luv canvas"
     :accessor canvas-title)
+   ;; NIL width or height means "whatever suits the display this window opens
+   ;; on"; the native size is resolved once, at window creation, when SDL can
+   ;; finally be asked about the desktop.
    (width
     :initarg :width
     :initform 800
@@ -15,6 +18,12 @@
     :initarg :height
     :initform 600
     :accessor canvas-height)
+   (fullscreen-p
+    :initarg :fullscreen-p
+    :initform nil
+    :accessor canvas-fullscreen-p
+    :documentation
+    "Whether the window occupies its display's borderless fullscreen mode.")
    (x
     :initarg :x
     :initform nil
@@ -198,12 +207,69 @@ have a main-thread host and execute directly."
   (declare (ignore presentation-api))
   '(:metal :high-pixel-density :resizable :hidden))
 
+(defun sdl-canvas-window-flags (canvas)
+  "The SDL window flags CANVAS needs: its presentation API plus its own state."
+  (let ((flags (sdl-presentation-window-flags
+                (sdl-canvas-presentation-api canvas))))
+    (if (canvas-fullscreen-p canvas)
+        (cons :fullscreen flags)
+        flags)))
+
+(defparameter *sdl-default-canvas-fill* 0.8
+  "How much of a display's usable area an unsized window asks for.")
+
+(defparameter *sdl-default-canvas-aspect* 1.6
+  "The widest shape an unsized window takes before it stops following the
+display.  An ultrawide desktop is a place to put several windows, not a
+reason to open one 3.6:1 window nobody can look across.")
+
+(defparameter *sdl-fallback-canvas-size* '(1280 800)
+  "The window size to open when SDL cannot describe any display.")
+
+(defun sdl-default-canvas-size ()
+  "Return a comfortable window size for the primary display, in points.
+
+SDL_GetDisplayUsableBounds already excludes the menu bar and the dock, so a
+fraction of it is a window that fits wherever the desktop actually is.  The
+height leads and the width follows it at an ordinary aspect, never wider than
+the same fraction of the desktop.  The answer is in logical points, which is
+what SDL_CreateWindow wants: a Retina window is the same physical size as its
+low-density twin and simply resolves finer, so the density belongs in the
+drawable rather than in this number."
+  (let ((display (sdl3:get-primary-display)))
+    (multiple-value-bind (success bounds)
+        (if (zerop display)
+            (values nil nil)
+            (sdl3:get-display-usable-bounds display))
+      (if success
+          (let* ((height (max 480 (round (* *sdl-default-canvas-fill*
+                                            (sdl3:%h bounds)))))
+                 (width (max 640 (min (round (* *sdl-default-canvas-fill*
+                                                (sdl3:%w bounds)))
+                                      (round (* *sdl-default-canvas-aspect*
+                                                height))))))
+            (values width height))
+          (values-list *sdl-fallback-canvas-size*)))))
+
+(defun resolve-sdl-canvas-size (canvas)
+  "Fill in whichever of CANVAS's dimensions were left for the display to pick."
+  (unless (and (canvas-width canvas) (canvas-height canvas))
+    (multiple-value-bind (width height) (sdl-default-canvas-size)
+      (setf (canvas-width canvas) (or (canvas-width canvas) width)
+            (canvas-height canvas) (or (canvas-height canvas) height))))
+  (values (canvas-width canvas) (canvas-height canvas)))
+
 (defun make-sdl-canvas (&key (title "luv canvas") (width 800) (height 600)
-                          x y (visible-p t) (clock (make-demand-clock))
+                          x y (visible-p t) (fullscreen-p nil)
+                          (clock (make-demand-clock))
                           (presentation-api :vulkan))
-  "Construct an unrealized SDL canvas."
+  "Construct an unrealized SDL canvas.
+
+WIDTH or HEIGHT may be NIL, which asks the display for a size when the window
+is finally created."
   (make-instance 'sdl-canvas :title title :width width :height height
                               :x x :y y :visible-p visible-p :clock clock
+                              :fullscreen-p fullscreen-p
                               :presentation-api presentation-api))
 
 (defmethod canvas-size ((canvas sdl-canvas))
@@ -400,6 +466,20 @@ have a main-thread host and execute directly."
      (lambda (window) (sdl3:set-window-size window width height))))
   (setf (canvas-width canvas) width
         (canvas-height canvas) height)
+  canvas)
+
+(defmethod set-canvas-fullscreen ((canvas sdl-canvas) enabled)
+  (let ((enabled (and enabled t)))
+    (when (eq :open (canvas-state canvas))
+      (call-sdl-canvas-window-operation
+       canvas :fullscreen
+       (lambda (window)
+         (prog1 (sdl3:set-window-fullscreen window enabled)
+           ;; The new extent arrives as an ordinary resize event; letting SDL
+           ;; settle here keeps CANVAS-SIZE honest for a caller that looks
+           ;; immediately after toggling.
+           (sdl3:sync-window window)))))
+    (setf (canvas-fullscreen-p canvas) enabled))
   canvas)
 
 (defmethod raise-canvas ((canvas sdl-canvas))
@@ -744,11 +824,11 @@ ever see what the user meant."
                             (sdl3:get-error)))
                    (setf (sdl-canvas-wake-event-type canvas) wake-event-type))
                  (let ((window
-                         (sdl3:create-window
-                          (canvas-title canvas)
-                          (canvas-width canvas) (canvas-height canvas)
-                          (sdl-presentation-window-flags
-                           (sdl-canvas-presentation-api canvas)))))
+                         (multiple-value-bind (width height)
+                             (resolve-sdl-canvas-size canvas)
+                           (sdl3:create-window
+                            (canvas-title canvas) width height
+                            (sdl-canvas-window-flags canvas)))))
                    (when (cffi:null-pointer-p window)
                      (error "SDL window creation failed: ~A" (sdl3:get-error)))
                    (setf (sdl-canvas-window canvas) window)

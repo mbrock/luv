@@ -1135,7 +1135,7 @@
   (format stream "explicit recovery path when that image is wrecked.~%")
   (format stream "Prefix a client command with --luvcraft only to attach to a separate~%")
   (format stream "standalone build/luvcraft process.~%~%")
-  (format stream "Usage: ./sly play|stop-playing|status|restart~%")
+  (format stream "Usage: ./sly play [--fullscreen]|stop-playing|status|restart~%")
   (format stream "       ./sly start|stop|log~%")
   (format stream "       ./sly screenshot PNG~%")
   (format stream "       ./sly eval CODE [--package PACKAGE]~%")
@@ -1395,12 +1395,16 @@
     (evaluate code "LUVCRAFT")))
 
 (defun run-luvcraft-play (arguments)
-  (when arguments
-    (error "play does not accept arguments"))
-  (when (attach-only-p)
-    (error "play owns the durable image; a standalone luvcraft is already playing"))
-  (ensure-server)
-  (evaluate "(play)" "LUVCRAFT"))
+  (let ((fullscreen-p nil))
+    (dolist (argument arguments)
+      (if (string= argument "--fullscreen")
+          (setf fullscreen-p t)
+          (error "play accepts only --fullscreen, not ~A" argument)))
+    (when (attach-only-p)
+      (error "play owns the durable image; a standalone luvcraft is already playing"))
+    (ensure-server)
+    (evaluate (if fullscreen-p "(play :fullscreen-p t)" "(play)")
+              "LUVCRAFT")))
 
 (defun run-luvcraft-stop-playing (arguments)
   (when arguments

@@ -460,6 +460,8 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:canvas-logical-size
            #:canvas-position
            #:canvas-visible-p
+           #:canvas-fullscreen-p
+           #:set-canvas-fullscreen
            #:set-canvas-relative-pointer-mode
            #:show-canvas
            #:hide-canvas

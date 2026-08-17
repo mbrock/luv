@@ -390,6 +390,18 @@ the frame uniform cannot silently diverge between shader and host."
   (push resource (luvcraft-session-resources session))
   resource)
 
+(defun forget-luvcraft-resource (session resource)
+  "Drop RESOURCE from SESSION's release list, for a caller releasing it now."
+  (setf (luvcraft-session-resources session)
+        (delete resource (luvcraft-session-resources session) :test #'eq))
+  resource)
+
+(defun release-luvcraft-resource (session resource)
+  (when resource
+    (forget-luvcraft-resource session resource)
+    (destroy resource))
+  (values))
+
 (defun make-luvcraft-bloom-bind-group (session uniform-buffer view label)
   "Bind one lens-chain source: a sampled texture, linear filter, uniforms."
   (create
@@ -406,6 +418,110 @@ the frame uniform cannot silently diverge between shader and host."
   "The reduced attachment size the lens chain runs at, at least one texel."
   (list (max 1 (floor (first extent) +luvcraft-bloom-divisor+))
         (max 1 (floor (second extent) +luvcraft-bloom-divisor+))))
+
+;;; Everything below is sized to the frame rather than to the world, which
+;;; means a window resize invalidates all of it at once.  Keeping the whole
+;;; set behind one constructor is what lets START-LUVCRAFT and a live resize
+;;; agree on formats and usages without either one drifting.
+
+(defun make-luvcraft-frame-attachments (device context extent)
+  "Create every frame-sized attachment for EXTENT as a plist of GPU objects.
+
+The scene is drawn into a linear HDR colour attachment with its own depth
+buffer, the lens chain runs at a reduced extent, and the tonemapped result
+lands in a presentation image that is finally copied onto the drawable."
+  (let ((bloom-extent (luvcraft-bloom-extent extent))
+        (made nil)
+        (completed-p nil))
+    (flet ((texture (label size format usage)
+             (let ((texture
+                     (create device
+                             (make-texture-descriptor
+                              :label label :size size :dimensions :2d
+                              :format format :usage usage))))
+               (push texture made)
+               (let ((view
+                       (create device
+                               (make-texture-view-descriptor
+                                :texture texture))))
+                 (push view made)
+                 (values texture view)))))
+      (unwind-protect
+           (multiple-value-bind (color-texture color-view)
+               (texture "block world color" extent
+                        +luvcraft-scene-color-format+
+                        '(:render-attachment :texture-binding :copy-src))
+             (multiple-value-bind (depth-texture depth-view)
+                 (texture "block world depth" extent :depth32-float
+                          '(:render-attachment :texture-binding))
+               (multiple-value-bind (bloom-primary-texture bloom-primary-view)
+                   (texture "block world bloom primary" bloom-extent
+                            +luvcraft-bloom-color-format+
+                            '(:render-attachment :texture-binding))
+                 (multiple-value-bind
+                       (bloom-secondary-texture bloom-secondary-view)
+                     (texture "block world bloom secondary" bloom-extent
+                              +luvcraft-bloom-color-format+
+                              '(:render-attachment :texture-binding))
+                   (multiple-value-bind (presentation-texture presentation-view)
+                       (texture "block world presentation color" extent
+                                (canvas-format context)
+                                '(:render-attachment :copy-src))
+                     (setf completed-p t)
+                     (list :render-extent extent
+                           :color-texture color-texture
+                           :color-view color-view
+                           :depth-texture depth-texture
+                           :depth-view depth-view
+                           :bloom-primary-texture bloom-primary-texture
+                           :bloom-primary-view bloom-primary-view
+                           :bloom-secondary-texture bloom-secondary-texture
+                           :bloom-secondary-view bloom-secondary-view
+                           :presentation-texture presentation-texture
+                           :presentation-view presentation-view))))))
+        (unless completed-p
+          (mapc #'destroy made))))))
+
+(defun install-luvcraft-frame-attachments (session attachments)
+  "Adopt ATTACHMENTS as SESSION's frame-sized images, releasing them with it."
+  (flet ((adopt (key)
+           (remember-luvcraft-resource session (getf attachments key))))
+    (setf (luvcraft-session-color-texture session) (adopt :color-texture)
+          (luvcraft-session-color-view session) (adopt :color-view)
+          (luvcraft-session-depth-texture session) (adopt :depth-texture)
+          (luvcraft-session-depth-view session) (adopt :depth-view)
+          (luvcraft-session-bloom-primary-texture session)
+          (adopt :bloom-primary-texture)
+          (luvcraft-session-bloom-primary-view session)
+          (adopt :bloom-primary-view)
+          (luvcraft-session-bloom-secondary-texture session)
+          (adopt :bloom-secondary-texture)
+          (luvcraft-session-bloom-secondary-view session)
+          (adopt :bloom-secondary-view)
+          (luvcraft-session-presentation-texture session)
+          (adopt :presentation-texture)
+          (luvcraft-session-presentation-view session)
+          (adopt :presentation-view)
+          (luvcraft-session-render-extent session)
+          (getf attachments :render-extent)))
+  session)
+
+(defun release-luvcraft-frame-attachments (session)
+  "Release the frame-sized images SESSION is holding, if it has any yet."
+  (dolist (resource
+           (list (luvcraft-session-color-view session)
+                 (luvcraft-session-color-texture session)
+                 (luvcraft-session-depth-view session)
+                 (luvcraft-session-depth-texture session)
+                 (luvcraft-session-bloom-primary-view session)
+                 (luvcraft-session-bloom-primary-texture session)
+                 (luvcraft-session-bloom-secondary-view session)
+                 (luvcraft-session-bloom-secondary-texture session)
+                 (luvcraft-session-presentation-view session)
+                 (luvcraft-session-presentation-texture session)))
+    (release-luvcraft-resource session resource))
+  (setf (luvcraft-session-render-extent session) nil)
+  (values))
 
 (defun make-luvcraft-lens-pipeline (device layout role label)
   "One fullscreen lens-chain stage, named by the fragment method it runs."
@@ -571,10 +687,68 @@ the frame uniform cannot silently diverge between shader and host."
             (when post-uniform-buffer (destroy post-uniform-buffer))
             (when buffer (destroy buffer))))))))
 
+(defun discard-luvcraft-frame-states (session)
+  "Forget every cached per-drawable binding, which names images that are gone.
+
+The bind groups are keyed by drawable, not by size, so nothing else would
+notice that their scene, depth, and lens-chain views belong to the previous
+window.  Dropping them here makes the next frame rebuild them against the
+attachments the session actually holds."
+  (let ((states (luvcraft-session-frame-states session)))
+    (maphash
+     (lambda (key state)
+       (declare (ignore key))
+       (dolist (resource
+                (list* (luvcraft-frame-scene-bind-group state)
+                       (luvcraft-frame-shadow-bind-group state)
+                       (luvcraft-frame-post-bind-group state)
+                       (luvcraft-frame-bloom-scene-bind-group state)
+                       (luvcraft-frame-bloom-primary-bind-group state)
+                       (luvcraft-frame-bloom-secondary-bind-group state)
+                       (luvcraft-frame-post-uniform-buffer state)
+                       (luvcraft-frame-uniform-buffer state)
+                       (remove-duplicates
+                        (coerce (luvcraft-frame-world-text-bind-groups state)
+                                'list)
+                        :test #'eq)))
+         (release-luvcraft-resource session resource)))
+     states)
+    (clrhash states))
+  (values))
+
+(defun ensure-luvcraft-frame-extent (session)
+  "Rebuild SESSION's frame-sized images when the drawable has changed size.
+
+A window resize gives the canvas a new drawable extent while every scene,
+depth, lens-chain, and presentation image still has the old one; the final
+copy onto the drawable is then a size mismatch, which is how a resize used
+to end the game.  This runs at the top of a frame, inside the canvas
+callback that owns GPU replacement, and after the backend has already
+synchronized the drawable, so the extent asked for here is the extent this
+frame will present to.  The outgoing images stay alive until the last
+submission that used them completes."
+  (let ((extent (canvas-extent (luvcraft-session-context session))))
+    (unless (equal extent (luvcraft-session-render-extent session))
+      (let ((attachments
+              (make-luvcraft-frame-attachments
+               (luvcraft-session-device session)
+               (luvcraft-session-context session)
+               extent)))
+        (discard-luvcraft-frame-states session)
+        (release-luvcraft-frame-attachments session)
+        (install-luvcraft-frame-attachments session attachments))
+      ;; The crosshair is measured in pixels around the centre of the frame,
+      ;; so its clip-space vertices are only correct for one extent.
+      (write-buffer
+       (luvcraft-session-crosshair-vertex-buffer session)
+       (make-block-world-crosshair-vertices (first extent) (second extent))))
+    extent))
+
 (defun encode-luvcraft-frame
     (session surface-texture encoder &key readback-buffer sample)
   ;; The canvas callback is the ownership boundary for all GPU replacement.
   ;; MOP notifications from SLY workers have only marked these artifacts dirty.
+  (ensure-luvcraft-frame-extent session)
   (with-luvcraft-frame-timing
       (sample luvcraft-frame-sample-shader-refresh-seconds
               :luvcraft/shader-refresh)
@@ -957,6 +1131,12 @@ the frame uniform cannot silently diverge between shader and host."
              (not (canvas-key-event-repeat-p event))
              (toggle-luvcraft-inventory session))
     (return-from handle-canvas-event nil))
+  ;; Fullscreen belongs to the window rather than to anything focused inside
+  ;; it, so F11 is taken before a terminal or an overlay can read it as text.
+  (when (and (eq :f11 (canvas-key-event-key-name event))
+             (not (canvas-key-event-repeat-p event)))
+    (set-canvas-fullscreen canvas (not (canvas-fullscreen-p canvas)))
+    (return-from handle-canvas-event nil))
   (when (dispatch-luvcraft-focus-event session canvas event)
     (return-from handle-canvas-event nil))
   (let ((key (canvas-key-event-key-name event)))
@@ -1069,9 +1249,13 @@ here -- so an unconsumed wheel event is simply the end of the matter."
 
 (defun start-luvcraft (&key
                                 (title "luv little block world — click, look, walk")
-                                (width 960) (height 640)
+                                ;; NIL means "as much of this display as
+                                ;; comfortably fits"; a capture asks for the
+                                ;; exact frame it intends to write out.
+                                (width nil) (height nil)
                                 (frames-per-second 60)
                                 (visible-p t)
+                                (fullscreen-p nil)
                                 (world (make-empty-little-block-world))
                                 (mesher (make-instance
                                          'exposed-face-mesher))
@@ -1120,9 +1304,12 @@ inventory.
 Pass :PROVIDER to select the Vulkan or Metal relationship without changing
 world, simulation, streaming, or frame orchestration.  Pass :VISIBLE-P NIL to
 keep the SDL window hidden while still exercising the real presentation path.
-Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
+Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock.  Pass
+:FULLSCREEN-P T to open on the whole display, and leave :WIDTH and :HEIGHT
+NIL to let the display choose a comfortable window."
   (let* ((canvas (make-sdl-canvas
                   :title title :width width :height height
+                  :fullscreen-p fullscreen-p
                   ;; Keep the native window hidden until its first complete
                   ;; terrain frame has been presented.  Showing it here would
                   ;; expose black initialization and sky-only streaming states.
@@ -1158,72 +1345,26 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                     resource))
              (let* ((lighting-state (attach-lighting-state world))
                   (extent (canvas-extent context))
-                  (color-texture
-                    (keep
-                     (create
-                      device
-                      (make-texture-descriptor
-                       :label "block world color"
-                       :size extent :dimensions :2d
-                       :format +luvcraft-scene-color-format+
-                       :usage '(:render-attachment :texture-binding
-                                :copy-src)))))
-                  (color-view
-                    (keep
-                     (create device (make-texture-view-descriptor
-                                     :texture color-texture))))
-                  (depth-texture
-                    (keep
-                     (create
-                      device
-                      (make-texture-descriptor
-                       :label "block world depth"
-                       :size extent :dimensions :2d :format :depth32-float
-                       :usage '(:render-attachment :texture-binding)))))
-                  (depth-view
-                    (keep
-                     (create device (make-texture-view-descriptor
-                                     :texture depth-texture))))
-                  (bloom-extent (luvcraft-bloom-extent extent))
+                  ;; Every frame-sized image comes from one constructor, which
+                  ;; a live window resize calls again with the new extent.
+                  (attachments
+                    (make-luvcraft-frame-attachments device context extent))
+                  (color-texture (keep (getf attachments :color-texture)))
+                  (color-view (keep (getf attachments :color-view)))
+                  (depth-texture (keep (getf attachments :depth-texture)))
+                  (depth-view (keep (getf attachments :depth-view)))
                   (bloom-primary-texture
-                    (keep
-                     (create
-                      device
-                      (make-texture-descriptor
-                       :label "block world bloom primary"
-                       :size bloom-extent :dimensions :2d
-                       :format +luvcraft-bloom-color-format+
-                       :usage '(:render-attachment :texture-binding)))))
+                    (keep (getf attachments :bloom-primary-texture)))
                   (bloom-primary-view
-                    (keep
-                     (create device (make-texture-view-descriptor
-                                     :texture bloom-primary-texture))))
+                    (keep (getf attachments :bloom-primary-view)))
                   (bloom-secondary-texture
-                    (keep
-                     (create
-                      device
-                      (make-texture-descriptor
-                       :label "block world bloom secondary"
-                       :size bloom-extent :dimensions :2d
-                       :format +luvcraft-bloom-color-format+
-                       :usage '(:render-attachment :texture-binding)))))
+                    (keep (getf attachments :bloom-secondary-texture)))
                   (bloom-secondary-view
-                    (keep
-                     (create device (make-texture-view-descriptor
-                                     :texture bloom-secondary-texture))))
+                    (keep (getf attachments :bloom-secondary-view)))
                   (presentation-texture
-                    (keep
-                     (create
-                      device
-                      (make-texture-descriptor
-                       :label "block world presentation color"
-                       :size extent :dimensions :2d
-                       :format (canvas-format context)
-                       :usage '(:render-attachment :copy-src)))))
+                    (keep (getf attachments :presentation-texture)))
                   (presentation-view
-                    (keep
-                     (create device (make-texture-view-descriptor
-                                     :texture presentation-texture))))
+                    (keep (getf attachments :presentation-view)))
                   (shadow-depth-texture
                     (keep
                      (create
@@ -1577,6 +1718,7 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                      :atlas-sampler atlas-sampler
                      :normal-atlas-texture normal-atlas-texture
                      :normal-atlas-view normal-atlas-view
+                     :render-extent extent
                      :color-texture color-texture :color-view color-view
                      :depth-texture depth-texture :depth-view depth-view
                      :presentation-texture presentation-texture

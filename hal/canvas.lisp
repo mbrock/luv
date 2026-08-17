@@ -307,6 +307,13 @@ says the user asked for, not what the hardware reported."))
 (defgeneric canvas-visible-p (canvas)
   (:documentation "Return whether CANVAS is intended to be visible."))
 
+(defgeneric canvas-fullscreen-p (canvas)
+  (:documentation "Return whether CANVAS occupies its display."))
+
+(defgeneric set-canvas-fullscreen (canvas enabled)
+  (:documentation
+   "Give CANVAS its whole display, or hand it back to the window manager."))
+
 (defgeneric set-canvas-relative-pointer-mode (canvas enabled)
   (:documentation
    "Capture or release relative pointer motion for CANVAS."))
