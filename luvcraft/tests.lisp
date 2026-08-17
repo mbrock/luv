@@ -90,7 +90,7 @@
     (ok (equal '(:left :entered) (recording-focus-transitions near)))
     (ok (null (recording-focus-transitions far)))))
 
-(deftest tab-focuses-an-aimed-terminal-wall-and-eases-the-view
+(deftest tab-focuses-and-frames-the-whole-terminal-above-the-hotbar
   (let* ((world (make-block-world :chunk-width 16
                                   :chunk-height 16
                                   :chunk-depth 16))
@@ -111,13 +111,61 @@
     (place-terminal-block-rectangle world 2 3 4 :back 3 2)
     (let* ((surface (find-terminal-surface world 2 3 4 :back))
            (display (make-instance 'terminal-display :surface surface))
+           (ordinary-position
+             (luvcraft::copy-camera-position (camera-position camera)))
            (ordinary (camera-field-of-view camera))
-           (ordinary-focal (aref (camera-uniform-data camera 960 640) 17)))
+           (ordinary-focal (aref (camera-uniform-data camera 960 640) 17))
+           ;; The live hotbar occupies 114 pixels at 1280 high, hence 57 in
+           ;; this proportional 960 by 640 framing fixture.
+           (target
+             (luvcraft::terminal-focus-camera-pose
+              surface 960 640 0.0 0.0 0.0 57.0)))
       (add-luvcraft-overlay session display)
       (handle-canvas-event session nil tab)
       (handle-canvas-event session nil tab-release)
       (ok (eq display (luvcraft-session-modal-focus session)))
-      (luvcraft::advance-camera-focus camera t 0.1d0)
+      (ok (luvcraft::luvcraft-session-focus-camera-active-p session))
+      ;; The final pose is head-on and every surface corner lies inside the
+      ;; six-percent picture margin plus the hotbar's excluded lower region.
+      (luvcraft::set-camera-pose camera target)
+      (multiple-value-bind (right up forward) (camera-basis camera)
+        (let* ((lower-left
+                 (luvcraft::terminal-surface-lower-left-point surface))
+               (surface-right
+                 (luvcraft::voxel-direction-vec3
+                  (luvcraft::terminal-face-frame-right
+                   (luvcraft::terminal-face-frame
+                    (terminal-surface-face surface)))))
+               (surface-up
+                 (luvcraft::voxel-direction-vec3
+                  (luvcraft::terminal-face-frame-up
+                   (luvcraft::terminal-face-frame
+                    (terminal-surface-face surface)))))
+               (focal (/ (tan (/ (camera-field-of-view camera) 2.0))))
+               (aspect (/ 960.0 640.0)))
+          (flet ((clip (point)
+                   (let* ((relative
+                            (make-vec3
+                             (- (vec3-x point) (camera-x camera))
+                             (- (vec3-y point) (camera-y camera))
+                             (- (vec3-z point) (camera-z camera))))
+                          (depth (vec3-dot relative forward)))
+                     (list (/ (* (vec3-dot relative right) focal)
+                              (* depth aspect))
+                           (- (/ (* (vec3-dot relative up) focal) depth))))))
+            (loop for column in '(0.0 3.0) do
+              (loop for row in '(0.0 2.0)
+                    for point =
+                      (luvcraft::terminal-offset-point
+                       lower-left surface-right column surface-up row)
+                    for projected = (clip point)
+                    do (ok (<= -0.92001 (first projected) 0.92001))
+                       (ok (<= -0.88001 (second projected) 0.701885)))))))
+      (luvcraft::set-camera-pose
+       camera
+       (luvcraft::make-camera-pose
+        ordinary-position 0.0 0.0 ordinary))
+      (luvcraft::advance-camera-focus camera target 0.1d0)
       (let ((focused (camera-field-of-view camera)))
         (ok (< focused ordinary))
         (ok (> (aref (camera-uniform-data camera 960 640) 17)
@@ -126,8 +174,18 @@
                luvcraft::+luvcraft-camera-focused-vertical-field-of-view+))
         (handle-canvas-event session nil shift-tab)
         (ok (null (luvcraft-session-modal-focus session)))
-        (luvcraft::advance-camera-focus camera nil 0.1d0)
-        (ok (> (camera-field-of-view camera) focused))))))
+        (dotimes (iteration 20)
+          (declare (ignore iteration))
+          (luvcraft::advance-luvcraft-focus-camera session 0.1d0))
+        (ok (< (abs (- (camera-field-of-view camera) ordinary)) 1e-5))
+        (ok (< (vec3-length
+                (make-vec3
+                 (- (camera-x camera) (vec3-x ordinary-position))
+                 (- (camera-y camera) (vec3-y ordinary-position))
+                 (- (camera-z camera) (vec3-z ordinary-position))))
+               1e-5))
+        (ok (not (luvcraft::luvcraft-session-focus-camera-active-p
+                  session)))))))
 
 (deftest focused-terminal-display-sends-keys-to-its-pty
   (luv.ghostty:with-terminal (ghostty-terminal :columns 32 :rows 4)

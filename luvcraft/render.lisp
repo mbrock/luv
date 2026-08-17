@@ -556,9 +556,6 @@ the frame uniform cannot silently diverge between shader and host."
                             (max 0d0 (- timestamp last)))
                        0d0)))
             (setf (luvcraft-session-last-frame-time session) timestamp)
-            (advance-camera-focus
-             (luvcraft-session-camera session)
-             (not (null (luvcraft-session-modal-focus session))) seconds)
             (advance-sky-clock (luvcraft-session-sky-clock session) seconds)
             (advance-block-particles
              (luvcraft-session-particle-system session) seconds)
@@ -572,10 +569,13 @@ the frame uniform cannot silently diverge between shader and host."
                           (luvcraft-session-camera session)
                           (luvcraft-session-pressed-keys session)
                           +player-physics-step+
-                          :jump-p (luvcraft-session-jump-requested-p session))
+                          :jump-p (luvcraft-session-jump-requested-p session)
+                          :sync-camera-p
+                          (not (luvcraft-session-focus-camera-active-p session)))
                          (setf (luvcraft-session-jump-requested-p session) nil)
                          (decf (luvcraft-session-physics-accumulator session)
-                               +player-physics-step+))))))
+                               +player-physics-step+))))
+            (advance-luvcraft-focus-camera session seconds)))
         (with-luvcraft-frame-timing
             (sample luvcraft-frame-sample-streaming-seconds
                     :luvcraft/streaming)
