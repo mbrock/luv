@@ -309,7 +309,16 @@ have a main-thread host and execute directly."
       (setf (sdl-canvas-requests canvas)
             (nconc (sdl-canvas-requests canvas) (list request))))
     (wake-sdl-canvas canvas)
-    (sb-thread:wait-on-semaphore (sdl-canvas-request-completion request))
+    ;; Bounded, because the alternative is not "wait a little longer" but
+    ;; "hang forever with nothing on screen".  The canvas thread services this
+    ;; queue once a frame; if it has stopped doing that, no amount of waiting
+    ;; will help and every caller after this one queues behind the same block.
+    (unless (sb-thread:wait-on-semaphore
+             (sdl-canvas-request-completion request)
+             :timeout *canvas-dispatch-timeout*)
+      (error 'canvas-dispatch-timeout
+             :canvas canvas :operation :dispatch :reason :thread-unresponsive
+             :seconds *canvas-dispatch-timeout*))
     (when (sdl-canvas-request-error request)
       (error (sdl-canvas-request-error request)))
     (values-list (sdl-canvas-request-values request))))

@@ -30,6 +30,40 @@
              (canvas-error-reason condition)
              (canvas-error-details condition)))))
 
+(defparameter *canvas-dispatch-timeout* 5.0
+  "How long a cross-thread canvas call waits before deciding it is stuck.
+
+Work handed to the canvas thread is serviced once a frame, so it completes in
+milliseconds whenever that thread is running at all.  Anything approaching
+this many seconds does not mean slow, it means the thread is not coming back
+-- and a caller that waited forever would take a REPL, a screenshot, or an
+editor session down with it, silently.  Bind it larger only for an operation
+known to be genuinely long.")
+
+(define-condition canvas-dispatch-timeout (canvas-error)
+  ((seconds
+    :initarg :seconds
+    :initform nil
+    :reader canvas-dispatch-timeout-seconds))
+  (:report
+   (lambda (condition stream)
+     (format stream
+             "The canvas thread did not service ~S on ~S within ~,1F seconds.~@
+It is not servicing requests at all: it is blocked, and every later call will ~
+queue behind the same block.  The usual cause is the render loop parked in ~
+presentation -- vkQueuePresentKHR waits forever when the compositor will not ~
+take frames, which is what a headless, locked, or unmapped session looks ~
+like.  Get a backtrace of the canvas thread before restarting anything."
+             (canvas-error-operation condition)
+             (canvas-error-canvas condition)
+             (or (canvas-dispatch-timeout-seconds condition) 0.0))))
+  (:documentation
+   "A cross-thread canvas call gave up rather than hang.
+
+This is deliberately an error and not a longer wait.  A silent unbounded wait
+on the canvas thread is indistinguishable from a crash and destroys the one
+thing an interactive image is for."))
+
 (define-condition canvas-state-error (canvas-error)
   ((state
     :initarg :state

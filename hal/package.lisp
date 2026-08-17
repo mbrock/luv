@@ -437,6 +437,9 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:canvas-state-error
            #:canvas-state-error-state
            #:canvas-state-error-expected-state
+           #:canvas-dispatch-timeout
+           #:canvas-dispatch-timeout-seconds
+           #:*canvas-dispatch-timeout*
            #:canvas-configuration
            #:make-canvas-configuration
            #:canvas-configuration-device
