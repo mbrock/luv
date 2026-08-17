@@ -1384,8 +1384,8 @@
        'error))
   (let ((atlas (make-block-texture-atlas))
         (normal-atlas (make-block-normal-atlas)))
-    (ok (equal (array-dimensions atlas) '(16 176)))
-    (ok (equal (array-dimensions normal-atlas) '(16 176)))
+    (ok (equal (array-dimensions atlas) '(16 368)))
+    (ok (equal (array-dimensions normal-atlas) '(16 368)))
     (ok (subtypep (array-element-type atlas) '(unsigned-byte 32)))
     (ok (subtypep (array-element-type normal-atlas) '(unsigned-byte 32)))
     (ok (/= (aref atlas 8 8) (aref atlas 8 (+ 8 (* 3 16)))))
@@ -1443,10 +1443,15 @@
     (ok (= (block-face-tile luvcraft::*snow-block* (face :top)) 8))
     (ok (= (block-face-tile *crystal-block* (face :top)) 9))
     (ok (= (block-face-tile *terminal-block* (face :front)) 10))
+    (ok (= (block-face-tile luvcraft::*cactus-block* (face :front)) 15))
+    (ok (= (block-face-tile luvcraft::*cactus-block* (face :top)) 16))
     (ok (= (block-light-emission *crystal-block*) 12))
     (ok (= (block-surface-emission *crystal-block*) 1.2))
     (ok (= (block-surface-emission *terminal-block*) 0.16))
-    (ok (= (length (placeable-block-kinds)) 9)))
+    (ok (equal (mapcar #'block-kind-name (placeable-block-kinds))
+               '(:grass :dirt :stone :wood :leaves :sand :snow :crystal
+                 :terminal :gravel :clay :mud :moss :cactus :cobblestone
+                 :stone-bricks :bricks :planks :sandstone :slate))))
   (let ((world (make-block-world :chunk-width 2
                                  :chunk-height 2
                                  :chunk-depth 2)))
@@ -1488,7 +1493,8 @@
     (ok (eq (select-luvcraft-block session 9) *terminal-block*))
     (ok (search "1–9 select" (canvas-title canvas)))
     (ok (search "terminal" (canvas-title canvas)))
-    (ok (null (select-luvcraft-block session 10)))
+    (ok (eq (select-luvcraft-block session 10) luvcraft::*gravel-block*))
+    (ok (search "[inventory]" (canvas-title canvas)))
     (handle-canvas-event
      session canvas
      (make-instance 'canvas-key-press-event
@@ -1540,6 +1546,7 @@
                           :face-tiles '(:all 3)
                           :categories '(:building)
                           :display-color '(0.4 0.5 0.6)))
+         (base-count (length (placeable-block-kinds)))
          (inventory
            (make-block-inventory
             :blocks (append (placeable-block-kinds) (list extra))))
@@ -1548,11 +1555,11 @@
            (make-instance 'luvcraft-session
                           :canvas canvas :inventory inventory
                           :selected-block luvcraft::*grass-block*)))
-    (ok (= 10 (length (block-inventory-blocks inventory))))
+    (ok (= (1+ base-count) (length (block-inventory-blocks inventory))))
     (ok (= 9 (length (block-inventory-quickbar-blocks inventory))))
     ;; The full inventory may select a block with no number key; the title
     ;; makes that distinction visible rather than advertising a tenth key.
-    (ok (eq extra (select-luvcraft-block session 10)))
+    (ok (eq extra (select-luvcraft-block session (1+ base-count))))
     (ok (search "[inventory]" (canvas-title canvas)))
     (ok (search "1–9 select" (canvas-title canvas)))))
 

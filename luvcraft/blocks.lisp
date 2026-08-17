@@ -197,7 +197,40 @@ definition."
    "The graphite display-block material used by world-native terminals."
    :face-tiles '(:all 10)
    :categories '(:building :luminous) :display-color '(0.13 0.31 0.34)
-   :surface-emission 0.16))
+   :surface-emission 0.16)
+  (*gravel-block* :gravel
+   :face-tiles '(:all 11)
+   :categories '(:natural) :display-color '(0.46 0.44 0.40))
+  (*clay-block* :clay
+   :face-tiles '(:all 12)
+   :categories '(:natural) :display-color '(0.63 0.68 0.70))
+  (*mud-block* :mud
+   :face-tiles '(:all 13)
+   :categories '(:natural) :display-color '(0.31 0.20 0.12))
+  (*moss-block* :moss
+   :face-tiles '(:all 14)
+   :categories '(:natural) :display-color '(0.29 0.45 0.16))
+  (*cactus-block* :cactus
+   :face-tiles '(:top 16 :bottom 16 :side 15)
+   :categories '(:natural) :display-color '(0.20 0.49 0.24))
+  (*cobblestone-block* :cobblestone
+   :face-tiles '(:all 17)
+   :categories '(:building) :display-color '(0.42 0.43 0.41))
+  (*stone-bricks-block* :stone-bricks
+   :face-tiles '(:all 18)
+   :categories '(:building) :display-color '(0.53 0.54 0.51))
+  (*bricks-block* :bricks
+   :face-tiles '(:all 19)
+   :categories '(:building) :display-color '(0.63 0.28 0.19))
+  (*planks-block* :planks
+   :face-tiles '(:all 20)
+   :categories '(:building) :display-color '(0.66 0.45 0.23))
+  (*sandstone-block* :sandstone
+   :face-tiles '(:all 21)
+   :categories '(:building) :display-color '(0.79 0.68 0.43))
+  (*slate-block* :slate
+   :face-tiles '(:all 22)
+   :categories '(:building) :display-color '(0.25 0.29 0.32)))
 
 (defun placeable-block-kinds ()
   "Return the numbered material palette used by luvcraft and its tools."
@@ -214,7 +247,7 @@ kinds through this vocabulary instead of printing CLOS object identities."
         (error "No block kind is named ~S." name))))
 
 (defconstant +block-atlas-tile-size+ 16)
-(defconstant +block-atlas-tile-count+ 11)
+(defconstant +block-atlas-tile-count+ 23)
 (defconstant +block-atlas-texture-format+ :rgba8-unorm-srgb)
 (defconstant +block-normal-atlas-texture-format+ :rgba8-unorm)
 
@@ -247,6 +280,13 @@ than arriving as authored assets."))
   (pack-block-atlas-rgba (+ red variation)
                          (+ green variation)
                          (+ blue variation)))
+
+(defun block-atlas-brick-mortar-p (x y brick-width course-height)
+  "Whether X,Y lies in staggered mortar for a regular masonry bond."
+  (let* ((course (floor y course-height))
+         (offset (if (oddp course) (floor brick-width 2) 0)))
+    (or (zerop (mod y course-height))
+        (zerop (mod (+ x offset) brick-width)))))
 
 (defgeneric paint-block-atlas-tile (tile x y)
   (:documentation
@@ -353,6 +393,99 @@ material and rebuild the atlas without touching the rest of the palette."))
      (+ 18 variation bezel)
      (+ 25 variation bezel)
      (+ 36 variation bezel))))
+
+(defmethod paint-block-atlas-tile ((tile (eql 11)) x y)
+  "Gravel: mixed cool and warm stones."
+  (let* ((grain (block-atlas-lattice-hash x y 111))
+         (variation (+ (round (block-atlas-variation x y tile) 2)
+                       (- (mod grain 43) 21))))
+    (shaded-block-atlas-pixel 119 114 105 variation)))
+
+(defmethod paint-block-atlas-tile ((tile (eql 12)) x y)
+  "Clay: cool compact earth with faint horizontal bands."
+  (shaded-block-atlas-pixel
+   158 171 176
+   (+ (round (block-atlas-variation x y tile) 4)
+      (case (mod y 6) (0 -7) (1 -3) (t 2)))))
+
+(defmethod paint-block-atlas-tile ((tile (eql 13)) x y)
+  "Mud: dark wet clods with occasional glossy pockets."
+  (let ((pocket (if (> (block-atlas-lattice-hash x y 132) 232) 20 0)))
+    (shaded-block-atlas-pixel
+     78 51 31 (+ pocket (round (block-atlas-variation x y tile) 2)))))
+
+(defmethod paint-block-atlas-tile ((tile (eql 14)) x y)
+  "Moss: dense green cushions mottled across the face."
+  (let ((clump (- (block-atlas-clump x y 141 4) 128)))
+    (pack-block-atlas-rgba
+     (+ 67 (round clump 8))
+     (+ 115 (round clump 4))
+     (+ 35 (round clump 10)))))
+
+(defmethod paint-block-atlas-tile ((tile (eql 15)) x y)
+  "Cactus side: vertical ribs dotted with pale spines."
+  (let* ((rib (case (mod x 5) (0 -18) (1 8) (2 18) (3 8) (t -10)))
+         (spine (if (zerop (mod (+ (* x 3) (* y 5)) 17)) 34 0)))
+    (pack-block-atlas-rgba (+ 42 rib spine)
+                           (+ 125 rib spine)
+                           (+ 55 (round rib 2) spine))))
+
+(defmethod paint-block-atlas-tile ((tile (eql 16)) x y)
+  "Cactus top: a radial cut surface around a dark green rind."
+  (let* ((dx (- x 7.5))
+         (dy (- y 7.5))
+         (radius (sqrt (+ (* dx dx) (* dy dy))))
+         (rind (if (> radius 5.5) -35 0))
+         (ring (round (* 7 (sin (* radius 2.3))))))
+    (pack-block-atlas-rgba (+ 83 rind ring)
+                           (+ 151 rind ring)
+                           (+ 68 rind (round ring 2)))))
+
+(defmethod paint-block-atlas-tile ((tile (eql 17)) x y)
+  "Cobblestone: irregular grey stones divided by dark joints."
+  (let* ((joint (or (zerop (mod (+ x (* 2 y)) 7))
+                    (zerop (mod (+ (* 3 x) y) 13))))
+         (variation (round (block-atlas-variation x y tile) 2)))
+    (if joint
+        (shaded-block-atlas-pixel 64 66 64 variation)
+        (shaded-block-atlas-pixel 123 126 120 variation))))
+
+(defmethod paint-block-atlas-tile ((tile (eql 18)) x y)
+  "Stone bricks in a pale staggered bond."
+  (if (block-atlas-brick-mortar-p x y 8 5)
+      (shaded-block-atlas-pixel 77 79 76)
+      (shaded-block-atlas-pixel
+       139 142 135 (round (block-atlas-variation x y tile) 3))))
+
+(defmethod paint-block-atlas-tile ((tile (eql 19)) x y)
+  "Fired red bricks with warm variation and deep mortar."
+  (if (block-atlas-brick-mortar-p x y 8 5)
+      (shaded-block-atlas-pixel 83 69 61)
+      (shaded-block-atlas-pixel
+       166 72 49 (round (block-atlas-variation x y tile) 2))))
+
+(defmethod paint-block-atlas-tile ((tile (eql 20)) x y)
+  "Sawn planks with horizontal seams and wandering grain."
+  (let ((seam (zerop (mod y 5)))
+        (grain (round (* 9 (sin (/ (+ (* x 2) y) 2.4))))))
+    (if seam
+        (shaded-block-atlas-pixel 91 58 28)
+        (shaded-block-atlas-pixel 170 116 58 grain))))
+
+(defmethod paint-block-atlas-tile ((tile (eql 21)) x y)
+  "Cut sandstone with broad sediment bands."
+  (let ((band (case (mod y 7) (0 -18) (1 -8) (5 7) (t 0))))
+    (shaded-block-atlas-pixel
+     205 178 111 (+ band (round (block-atlas-variation x y tile) 4)))))
+
+(defmethod paint-block-atlas-tile ((tile (eql 22)) x y)
+  "Slate: dark blue-grey layers with fine pale cleavage lines."
+  (let ((seam (or (zerop (mod y 5))
+                  (and (zerop (mod y 3)) (> (mod (+ x y) 7) 4)))))
+    (if seam
+        (shaded-block-atlas-pixel 91 103 111)
+        (shaded-block-atlas-pixel
+         58 69 77 (round (block-atlas-variation x y tile) 4)))))
 
 ;;; Colour is only half of what a material looks like.  The other half is its
 ;;; micro-surface: whether it is granular, grooved, tufted, or faceted.  The
@@ -468,6 +601,86 @@ material and rebuild the atlas without touching the rest of the palette."))
     (block-atlas-byte
      (+ 96 (* 55 (max 0 (- 2 edge)))
         (* 0.10 (- (block-atlas-lattice-hash x y 101) 128))))))
+
+(defmethod paint-block-atlas-relief ((tile (eql 11)) x y)
+  "Gravel: sharply varying grains at nearly every texel."
+  (block-atlas-byte
+   (+ 112 (* 0.70 (- (block-atlas-lattice-hash x y 111) 96)))))
+
+(defmethod paint-block-atlas-relief ((tile (eql 12)) x y)
+  "Clay: compressed layers with very little loose grain."
+  (block-atlas-byte
+   (+ 132 (case (mod y 6) (0 -24) (1 -9) (t 4))
+      (* 0.08 (- (block-atlas-lattice-hash x y 121) 128)))))
+
+(defmethod paint-block-atlas-relief ((tile (eql 13)) x y)
+  "Mud: rounded wet clods interrupted by sunken pockets."
+  (let ((pocket (if (> (block-atlas-lattice-hash x y 132) 232) -70 0)))
+    (block-atlas-byte
+     (+ 132 pocket (* 0.42 (- (block-atlas-clump x y 131 5) 128))))))
+
+(defmethod paint-block-atlas-relief ((tile (eql 14)) x y)
+  "Moss: soft overlapping cushions."
+  (block-atlas-byte
+   (+ 112 (* 0.62 (block-atlas-clump x y 141 4))
+      (* 0.14 (- (block-atlas-lattice-hash x y 142) 128)))))
+
+(defmethod paint-block-atlas-relief ((tile (eql 15)) x y)
+  "Cactus side: strong vertical ribs with standing spines."
+  (block-atlas-byte
+   (+ 118 (case (mod x 5) (0 -55) (1 5) (2 48) (3 5) (t -28))
+      (if (zerop (mod (+ (* x 3) (* y 5)) 17)) 70 0))))
+
+(defmethod paint-block-atlas-relief ((tile (eql 16)) x y)
+  "Cactus top: gently domed flesh inside a lower rind."
+  (let* ((dx (- x 7.5))
+         (dy (- y 7.5))
+         (radius (sqrt (+ (* dx dx) (* dy dy)))))
+    (block-atlas-byte (+ 178 (- (* radius 8))
+                         (if (> radius 5.5) -35 0)))))
+
+(defmethod paint-block-atlas-relief ((tile (eql 17)) x y)
+  "Cobblestone: proud stones separated by recessed irregular joints."
+  (if (or (zerop (mod (+ x (* 2 y)) 7))
+          (zerop (mod (+ (* 3 x) y) 13)))
+      48
+      (block-atlas-byte
+       (+ 158 (* 0.28 (- (block-atlas-clump x y 171 4) 128))))))
+
+(defmethod paint-block-atlas-relief ((tile (eql 18)) x y)
+  "Stone bricks: shallow-cut mortar around worn faces."
+  (if (block-atlas-brick-mortar-p x y 8 5)
+      54
+      (block-atlas-byte
+       (+ 157 (* 0.16 (- (block-atlas-lattice-hash x y 181) 128))))))
+
+(defmethod paint-block-atlas-relief ((tile (eql 19)) x y)
+  "Fired bricks: deeper joints and rougher faces than stone masonry."
+  (if (block-atlas-brick-mortar-p x y 8 5)
+      42
+      (block-atlas-byte
+       (+ 164 (* 0.26 (- (block-atlas-lattice-hash x y 191) 128))))))
+
+(defmethod paint-block-atlas-relief ((tile (eql 20)) x y)
+  "Planks: recessed seams over gently ridged grain."
+  (if (zerop (mod y 5))
+      45
+      (block-atlas-byte
+       (+ 145 (* 18 (sin (/ (+ (* x 2) y) 2.4)))))))
+
+(defmethod paint-block-atlas-relief ((tile (eql 21)) x y)
+  "Sandstone: broad sediment layers with granular faces."
+  (block-atlas-byte
+   (+ 136 (case (mod y 7) (0 -42) (1 -18) (5 14) (t 0))
+      (* 0.14 (- (block-atlas-lattice-hash x y 211) 128)))))
+
+(defmethod paint-block-atlas-relief ((tile (eql 22)) x y)
+  "Slate: thin raised sheets divided by sharp cleavage."
+  (if (or (zerop (mod y 5))
+          (and (zerop (mod y 3)) (> (mod (+ x y) 7) 4)))
+      68
+      (block-atlas-byte
+       (+ 151 (* 0.12 (- (block-atlas-lattice-hash x y 221) 128))))))
 
 (defun make-block-texture-atlas ()
   "Return the little world's horizontal RGBA8 atlas as packed pixel words.

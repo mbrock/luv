@@ -57,6 +57,9 @@
   (ok (null (mcluv::inventory-slot-at 0.50 0.95 9)))
   (ok (eq :all (mcluv::inventory-category-at 0.05 0.12)))
   (ok (eq :building (mcluv::inventory-category-at 0.05 0.28)))
+  (ok (= -1 (mcluv::inventory-page-direction-at 0.22 0.05)))
+  (ok (= 1 (mcluv::inventory-page-direction-at 0.75 0.05)))
+  (ok (null (mcluv::inventory-page-direction-at 0.50 0.05)))
   (ok (= 0 (mcluv::inventory-quickbar-slot-at 0.20 0.56 9)))
   (ok (= 8 (mcluv::inventory-quickbar-slot-at 0.76 0.56 9)))
   (ok (mcluv::inventory-category-block-p

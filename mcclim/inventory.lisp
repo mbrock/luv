@@ -11,6 +11,7 @@
 (defconstant +inventory-grid-right+ 650)
 (defconstant +inventory-grid-bottom+ 228)
 (defconstant +inventory-grid-columns+ 5)
+(defconstant +inventory-page-size+ 10)
 (defconstant +inventory-details-left+ 658)
 (defconstant +inventory-details-right+ 832)
 (defconstant +inventory-quickbar-top+ 266)
@@ -37,6 +38,7 @@
   ((session :initarg :session :reader inventory-session)
    (visible-state :initform nil :accessor inventory-visible-state)
    (category :initform :all :accessor inventory-category)
+   (page :initform 0 :accessor inventory-page)
    (atlas :initform (luvcraft:make-block-texture-atlas)
           :reader inventory-atlas))
   (:menu-bar nil)
@@ -102,7 +104,7 @@
   (or (eq category :all)
       (member category (luvcraft:block-kind-categories block))))
 
-(defun inventory-visible-entries (frame)
+(defun inventory-filtered-entries (frame)
   (remove-if-not
    (lambda (entry)
      (inventory-category-block-p
@@ -111,10 +113,23 @@
    (luvcraft:block-inventory-entries
     (luvcraft:luvcraft-session-inventory (inventory-session frame)))))
 
+(defun inventory-page-count (frame)
+  (max 1 (ceiling (length (inventory-filtered-entries frame))
+                  +inventory-page-size+)))
+
+(defun inventory-visible-entries (frame)
+  (let* ((entries (inventory-filtered-entries frame))
+         (page (min (inventory-page frame)
+                    (1- (inventory-page-count frame))))
+         (start (* page +inventory-page-size+)))
+    (subseq entries start (min (length entries)
+                               (+ start +inventory-page-size+)))))
+
 (defun inventory-visible-state-for (frame)
   (let ((session (inventory-session frame)))
     (list
      (inventory-category frame)
+     (inventory-page frame)
      (luvcraft:luvcraft-session-selected-block session)
      (loop for entry in
              (luvcraft:block-inventory-entries
@@ -141,6 +156,23 @@
       (draw-text* pane label 49 (+ top 17)
                   :align-y :center :text-size 14
                   :ink (if selected-p +white+ *inventory-text-ink*)))))
+
+(defun draw-inventory-page-controls (frame pane)
+  (let ((page (inventory-page frame))
+        (count (inventory-page-count frame)))
+    (draw-inventory-bevel pane 166 12 200 43
+                          :ink *inventory-panel-ink* :recessed-p t)
+    (draw-inventory-bevel pane 616 12 650 43
+                          :ink *inventory-panel-ink* :recessed-p t)
+    (draw-text* pane "‹" 183 27 :align-x :center :align-y :center
+                :text-size 20
+                :ink (if (plusp page) +white+ *inventory-muted-ink*))
+    (draw-text* pane "›" 633 27 :align-x :center :align-y :center
+                :text-size 20
+                :ink (if (< page (1- count)) +white+ *inventory-muted-ink*))
+    (draw-text* pane (format nil "Inventory  ·  ~D / ~D" (1+ page) count)
+                408 27 :align-x :center :align-y :center :text-size 17
+                :ink *inventory-text-ink*)))
 
 (defun draw-inventory-entry
     (frame pane entry index left top width height)
@@ -274,9 +306,7 @@
         (draw-text* pane "Categories" 16 30
                     :align-y :center :text-size 13
                     :ink *inventory-text-ink*)
-        (draw-text* pane "Inventory" 408 27
-                    :align-x :center :align-y :center :text-size 17
-                    :ink *inventory-text-ink*)
+        (draw-inventory-page-controls frame pane)
         (loop for (category label) in *inventory-categories*
               for index from 0
               do (draw-inventory-category frame pane category label index))
@@ -406,6 +436,13 @@
       (let ((index (floor (- y 50) 39)))
         (first (nth index *inventory-categories*))))))
 
+(defun inventory-page-direction-at (u v)
+  (let ((x (* u +inventory-view-width+))
+        (y (* v +inventory-view-height+)))
+    (when (and (<= 12 y) (< y 43))
+      (cond ((and (<= 166 x) (< x 200)) -1)
+            ((and (<= 616 x) (< x 650)) 1)))))
+
 (defun inventory-slot-at (u v entry-count)
   "Return the zero-based visible inventory slot at texture U,V."
   (let ((x (* u +inventory-view-width+))
@@ -452,10 +489,19 @@
              (all-entries (luvcraft:block-inventory-entries inventory))
              (quickbar-entries
                (luvcraft:block-inventory-quickbar-entries inventory))
-             (category (inventory-category-at (first uv) (second uv))))
+             (category (inventory-category-at (first uv) (second uv)))
+             (page-direction
+               (inventory-page-direction-at (first uv) (second uv))))
         (cond
           (category
-           (setf (inventory-category frame) category)
+           (setf (inventory-category frame) category
+                 (inventory-page frame) 0)
+           (repaint-inventory frame))
+          (page-direction
+           (setf (inventory-page frame)
+                 (max 0
+                      (min (1- (inventory-page-count frame))
+                           (+ (inventory-page frame) page-direction))))
            (repaint-inventory frame))
           (t
            (let* ((visible (inventory-visible-entries frame))
