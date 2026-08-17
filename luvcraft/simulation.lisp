@@ -89,9 +89,6 @@
                         (- (* (sin pitch) (cos yaw))))))
     (values right up forward)))
 
-(defun camera-key-down-p (keys &rest names)
-  (some (lambda (name) (gethash name keys)) names))
-
 (defmethod camera-uniform-data ((camera fly-camera) width height)
   "The five camera lanes of the frame uniform: position, basis, projection.
 
@@ -490,21 +487,20 @@ re-expressed in that space."
                              world block-x block-y block-z)))))))))
 
 (defun step-block-world-player
-    (player world camera pressed-keys seconds &key jump-p (sync-camera-p t))
-  "Advance the scalar player controller by one small physics step."
+    (player world camera intent seconds &key jump-p (sync-camera-p t))
+  "Advance the scalar player controller by one small physics step.
+
+INTENT is what the player is trying to do rather than what they pressed: the
+controller asks for directions and a hurry, and never learns that there is a
+keyboard."
   (let* ((yaw (camera-yaw camera))
-         (forward-amount
-           (- (if (camera-key-down-p pressed-keys :w :up) 1d0 0d0)
-              (if (camera-key-down-p pressed-keys :s :down) 1d0 0d0)))
-         (right-amount
-           (- (if (camera-key-down-p pressed-keys :d :right) 1d0 0d0)
-              (if (camera-key-down-p pressed-keys :a :left) 1d0 0d0)))
+         (forward-amount (movement-intent-axis intent :forward :backward))
+         (right-amount (movement-intent-axis intent :right :left))
          (length (sqrt (+ (* forward-amount forward-amount)
                           (* right-amount right-amount))))
          (forward-amount (if (plusp length) (/ forward-amount length) 0d0))
          (right-amount (if (plusp length) (/ right-amount length) 0d0))
-         (sprinting-p
-           (camera-key-down-p pressed-keys :shift-left :shift-right))
+         (sprinting-p (movement-intent-sprinting-p intent))
          (speed (* (player-walk-speed player)
                    (if sprinting-p 1.65d0 1d0)))
          (target-x (* speed (+ (* (sin yaw) forward-amount)

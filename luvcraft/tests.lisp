@@ -48,17 +48,20 @@
         (second (make-instance 'recording-modal-focus))
         (event (make-instance 'canvas-key-press-event
                               :timestamp 0 :key-name :w)))
-    (setf (gethash :w (luvcraft::luvcraft-session-pressed-keys session)) t
-          (luvcraft::luvcraft-session-jump-requested-p session) t)
+    (setf (movement-urging-p (luvcraft-session-movement-intent session)
+                             :forward)
+          t
+          (movement-intent-jump-requested-p
+           (luvcraft-session-movement-intent session))
+          t)
     (ok (eq first (focus-luvcraft-session session first)))
     (ok (eq first (luvcraft-session-modal-focus session)))
-    (ok (null (gethash :w (luvcraft::luvcraft-session-pressed-keys session))))
-    (ok (not (luvcraft::luvcraft-session-jump-requested-p session)))
+    (ok (movement-intent-still-p (luvcraft-session-movement-intent session)))
     ;; Interpreting keys belongs to the layer above; what the core promises is
     ;; that a focused object is offered the event and that nothing else sees it.
     (ok (dispatch-luvcraft-focus-event session nil event))
     (ok (equal (list event) (recording-focus-events first)))
-    (ok (null (gethash :w (luvcraft::luvcraft-session-pressed-keys session))))
+    (ok (movement-intent-still-p (luvcraft-session-movement-intent session)))
     (focus-luvcraft-session session second)
     (ok (equal '(:left :entered) (recording-focus-transitions first)))
     (ok (equal '(:entered) (recording-focus-transitions second)))
@@ -448,8 +451,12 @@
       (ok (eq ride (luvcraft-session-modal-focus session)))
       ;; A mount carries the player, so the ordinary controller stands down.
       (ok (luvcraft-focus-carries-player-p ride))
-      ;; An unridden turtle rests first; a reined one walks.
-      (setf (gethash :w (luvcraft::critter-ride-reins ride)) t)
+      ;; An unridden turtle rests first; a reined one walks.  The rider steers
+      ;; with the session's own movement intent, the same one the player's legs
+      ;; would have read.
+      (setf (movement-urging-p (luvcraft-session-movement-intent session)
+                               :forward)
+            t)
       (let ((start-z (critter-z turtle)))
         (dotimes (frame 300)
           (declare (ignorable frame))
@@ -1863,7 +1870,7 @@
                                 :yaw 0d0 :pitch 0d0))
          (player (make-instance 'block-world-player
                                 :position (make-vec3 1.5d0 3d0 1.5d0)))
-         (keys (make-hash-table :test #'eq)))
+         (intent (make-movement-intent)))
     (ensure-world-chunk world 0 0 0)
     (loop for x below 4 do
       (loop for z below 4 do
@@ -1871,31 +1878,31 @@
     ;; Gravity settles the body exactly on the block tops.
     (dotimes (step 240)
       (declare (ignorable step))
-      (step-block-world-player player world camera keys (/ 1d0 120d0)))
+      (step-block-world-player player world camera intent (/ 1d0 120d0)))
     (ok (< (abs (- (player-y player) 1d0)) 1d-5))
     (ok (player-grounded-p player))
     (ok (< (abs (- (camera-y camera) 2.62d0)) 1d-5))
     ;; A held right input accelerates into, but not through, a two-block wall.
     (setf (world-block-at world 3 1 1) luvcraft::*stone-block*
           (world-block-at world 3 2 1) luvcraft::*stone-block*
-          (gethash :d keys) t)
+          (movement-urging-p intent :right) t)
     (dotimes (step 120)
       (declare (ignorable step))
-      (step-block-world-player player world camera keys (/ 1d0 120d0)))
+      (step-block-world-player player world camera intent (/ 1d0 120d0)))
     (ok (<= (player-x player) 2.700001d0))
     (ok (= (player-velocity-x player) 0d0))
     (ok (< (abs (- (player-y player) 1d0)) 1d-5))
     (ok (player-grounded-p player))
-    (remhash :d keys)
+    (setf (movement-urging-p intent :right) nil)
     ;; Jump is an edge request, not a second form of flying.
     (let ((ground-y (player-y player)))
-      (step-block-world-player player world camera keys (/ 1d0 120d0)
+      (step-block-world-player player world camera intent (/ 1d0 120d0)
                                :jump-p t)
       (ok (> (player-y player) ground-y))
       (ok (not (player-grounded-p player))))
     (dotimes (step 120)
       (declare (ignorable step))
-      (step-block-world-player player world camera keys (/ 1d0 120d0)))
+      (step-block-world-player player world camera intent (/ 1d0 120d0)))
     (ok (< (abs (- (player-y player) 1d0)) 1d-5))
     (ok (player-grounded-p player))))
 
@@ -1909,17 +1916,17 @@
          (player (make-instance 'block-world-player
                                 :position (make-vec3 1.5d0 1d0 1.5d0)
                                 :grounded-p t))
-         (keys (make-hash-table :test #'eq))
+         (intent (make-movement-intent))
          (highest-y (player-y player)))
     (ensure-world-chunk world 0 0 0)
     (loop for x below 8 do
       (loop for z below 4 do
         (setf (world-block-at world x 0 z) luvcraft::*stone-block*)))
     (setf (world-block-at world 3 1 1) luvcraft::*stone-block*
-          (gethash :d keys) t)
+          (movement-urging-p intent :right) t)
     (dotimes (step 120)
       (declare (ignorable step))
-      (step-block-world-player player world camera keys (/ 1d0 120d0))
+      (step-block-world-player player world camera intent (/ 1d0 120d0))
       (setf highest-y (max highest-y (player-y player))))
     (ok (> highest-y 2d0))
     (ok (> (player-x player) 3.3d0))))

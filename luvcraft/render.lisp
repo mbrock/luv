@@ -1087,12 +1087,14 @@ submission that used them completes."
             ;; A moving interaction takes its turn after the world it moves in
             ;; and before the player controller, which stands down entirely
             ;; while something else is carrying the player.
-            (let ((focus (luvcraft-session-modal-focus session)))
+            (let ((focus (luvcraft-session-modal-focus session))
+                  (intent (luvcraft-session-movement-intent session)))
               (advance-luvcraft-focus focus session seconds)
               (when (and focus (luvcraft-focus-carries-player-p focus))
                 (setf (luvcraft-session-physics-accumulator session) 0d0
-                      (luvcraft-session-jump-requested-p session) nil)))
+                      (movement-intent-jump-requested-p intent) nil)))
             (let ((player (luvcraft-session-player session))
+                  (intent (luvcraft-session-movement-intent session))
                   (focus (luvcraft-session-modal-focus session)))
               (when (and player
                          (not (and focus
@@ -1103,12 +1105,12 @@ submission that used them completes."
                       do (step-block-world-player
                           player (luvcraft-session-world session)
                           (luvcraft-session-camera session)
-                          (luvcraft-session-pressed-keys session)
+                          intent
                           +player-physics-step+
-                          :jump-p (luvcraft-session-jump-requested-p session)
+                          :jump-p (movement-intent-jump-requested-p intent)
                           :sync-camera-p
                           (not (luvcraft-session-focus-camera-active-p session)))
-                         (setf (luvcraft-session-jump-requested-p session) nil)
+                         (setf (movement-intent-jump-requested-p intent) nil)
                          (decf (luvcraft-session-physics-accumulator session)
                                +player-physics-step+))))
             (advance-luvcraft-focus-camera session seconds)

@@ -185,8 +185,10 @@
                  :reader luvcraft-session-frame-states)
    (resources :initarg :resources :initform nil
               :accessor luvcraft-session-resources)
-   (pressed-keys :initform (make-hash-table :test #'eq)
-                 :reader luvcraft-session-pressed-keys)
+   (movement-intent
+    :initform (make-movement-intent)
+    :reader luvcraft-session-movement-intent
+    :documentation "What the player is trying to do, set by the input layer.")
    (pointer-captured-p :initform nil
                        :accessor luvcraft-session-pointer-captured-p)
    (pointer-capture-suspended-p
@@ -209,8 +211,6 @@ of making them click the world again.")
                         :quantity (:quantity :physics-accumulated-duration
                                    :unit :second)
                         :accessor luvcraft-session-physics-accumulator)
-   (jump-requested-p :initform nil
-                     :accessor luvcraft-session-jump-requested-p)
    (running-p :initform t :accessor luvcraft-session-running-p))
   (:metaclass luv.arithmetic.records:quantity-class))
 
@@ -417,8 +417,7 @@ return its attached overlay."))
   nil)
 
 (defun clear-luvcraft-player-input (session)
-  (clrhash (luvcraft-session-pressed-keys session))
-  (setf (luvcraft-session-jump-requested-p session) nil)
+  (clear-movement-intent (luvcraft-session-movement-intent session))
   (when (luvcraft-session-pointer-captured-p session)
     (set-canvas-relative-pointer-mode
      (luvcraft-session-canvas session) nil)

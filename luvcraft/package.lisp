@@ -354,12 +354,11 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:luvcraft-session-modal-focus
            #:luvcraft-session-inventory
            #:luvcraft-session-focus-candidate
-           ;; Input state.  Which keys are down, whether a jump is owed, and
-           ;; who holds the pointer are read and written by whatever layer
-           ;; interprets input; since that layer is no longer the core, they
-           ;; are part of the session's surface rather than its insides.
-           #:luvcraft-session-pressed-keys
-           #:luvcraft-session-jump-requested-p
+           ;; Input state.  What the player is trying to do and who holds the
+           ;; pointer are read and written by whatever layer interprets input;
+           ;; since that layer is no longer the core, they are part of the
+           ;; session's surface rather than its insides.
+           #:luvcraft-session-movement-intent
            #:luvcraft-session-pointer-captured-p
            #:luvcraft-session-focus-toggle-tab-down-p
            #:dispatch-luvcraft-focus-event
@@ -483,6 +482,14 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:start-luvcraft
            #:start-luvcraft-tracy
            #:step-block-world-player
+           #:movement-intent
+           #:make-movement-intent
+           #:movement-urging-p
+           #:movement-intent-axis
+           #:movement-intent-sprinting-p
+           #:movement-intent-jump-requested-p
+           #:movement-intent-still-p
+           #:clear-movement-intent
            #:stop-luvcraft
            #:terminal-display
            #:change-terminal-display-mode

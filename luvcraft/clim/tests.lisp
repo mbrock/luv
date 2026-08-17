@@ -45,23 +45,25 @@
        (key-press :tab :modifiers '(:shift)) '(:tab :shift))))
 
 (deftest keys-resolve-to-named-commands
-  (let ((frame (test-frame)))
+  (let ((session (make-instance 'luvcraft:luvcraft-session)))
     (ok (equal '(com-toggle-inventory)
-               (canvas-key-event-command frame (key-press :i :character #\i))))
+               (luvcraft-key-command session (key-press :i :character #\i))))
     (ok (equal '(com-toggle-focus)
-               (canvas-key-event-command frame (key-press :tab))))
+               (luvcraft-key-command session (key-press :tab))))
     (ok (equal '(com-toggle-fullscreen)
-               (canvas-key-event-command frame (key-press :f11))))
+               (luvcraft-key-command session (key-press :f11))))
+    (ok (equal '(com-start-walking :forward)
+               (luvcraft-key-command session (key-press :w :character #\w))))
     ;; A key nothing binds is not a command and must not be mistaken for one:
     ;; LOOKUP-KEYSTROKE-COMMAND-ITEM answers with the gesture on a miss.
-    (ok (null (canvas-key-event-command frame (key-press :w :character #\w))))))
+    (ok (null (luvcraft-key-command session (key-press :f9))))))
 
 (deftest a-digit-carries-its-slot-as-a-command-argument
-  (let ((frame (test-frame)))
+  (let ((session (make-instance 'luvcraft:luvcraft-session)))
     (ok (equal '(com-select-quickbar-slot 3)
-               (canvas-key-event-command frame (key-press :3 :character #\3))))
+               (luvcraft-key-command session (key-press :3 :character #\3))))
     (ok (equal '(com-select-quickbar-slot 1)
-               (canvas-key-event-command frame (key-press :1 :character #\1))))))
+               (luvcraft-key-command session (key-press :1 :character #\1))))))
 
 (deftest a-command-runs-inline-on-the-calling-thread
   (let* ((session (make-instance 'luvcraft:luvcraft-session))
@@ -75,8 +77,7 @@
     (ok (execute-canvas-key-event-command frame (key-press :2 :character #\2)))
     (ok (eq (second blocks) (luvcraft:luvcraft-session-selected-block session)))
     ;; An unbound key changes nothing and says so.
-    (ok (not (execute-canvas-key-event-command
-              frame (key-press :w :character #\w))))
+    (ok (not (execute-canvas-key-event-command frame (key-press :f9))))
     (ok (eq (second blocks)
             (luvcraft:luvcraft-session-selected-block session)))))
 
@@ -120,18 +121,45 @@
     (ok (equal '(com-toggle-inventory)
                (luvcraft.clim::luvcraft-key-command session i)))))
 
-(deftest movement-keys-fall-through-to-the-held-key-state
-  (let ((session (make-instance 'luvcraft:luvcraft-session))
-        (w (key-press :w :character #\w))
-        (space (key-press :space)))
-    (luv:handle-canvas-event session nil w)
-    (ok (gethash :w (luvcraft:luvcraft-session-pressed-keys session)))
-    (luv:handle-canvas-event session nil space)
-    (ok (luvcraft:luvcraft-session-jump-requested-p session))
+(defun key-release (key-name &key modifiers)
+  (make-instance 'luv:canvas-key-release-event
+                 :timestamp 0 :key-name key-name :modifiers modifiers))
+
+(deftest walking-is-a-start-and-a-stop
+  (let* ((session (make-instance 'luvcraft:luvcraft-session))
+         (intent (luvcraft:luvcraft-session-movement-intent session)))
+    (luv:handle-canvas-event session nil (key-press :w :character #\w))
+    (ok (luvcraft:movement-urging-p intent :forward))
+    (ok (= 1d0 (luvcraft:movement-intent-axis intent :forward :backward)))
+    ;; Holding the opposite direction is standing still, and letting go of it
+    ;; leaves the first one still held -- which one axis could not remember.
+    (luv:handle-canvas-event session nil (key-press :s :character #\s))
+    (ok (zerop (luvcraft:movement-intent-axis intent :forward :backward)))
+    (luv:handle-canvas-event session nil (key-release :s))
+    (ok (= 1d0 (luvcraft:movement-intent-axis intent :forward :backward)))
+    (luv:handle-canvas-event session nil (key-release :w))
+    (ok (luvcraft:movement-intent-still-p intent))))
+
+(deftest a-movement-key-means-the-same-thing-however-it-is-modified
+  (let* ((session (make-instance 'luvcraft:luvcraft-session))
+         (intent (luvcraft:luvcraft-session-movement-intent session)))
+    ;; Shift makes a player sprint; it does not make W into another key.
     (luv:handle-canvas-event
-     session nil (make-instance 'luv:canvas-key-release-event
-                                :timestamp 0 :key-name :w))
-    (ok (not (gethash :w (luvcraft:luvcraft-session-pressed-keys session))))))
+     session nil (key-press :shift-left :modifiers '(:shift)))
+    (luv:handle-canvas-event
+     session nil (key-press :w :character #\w :modifiers '(:shift)))
+    (ok (luvcraft:movement-intent-sprinting-p intent))
+    (ok (luvcraft:movement-urging-p intent :forward))
+    (luv:handle-canvas-event
+     session nil (key-release :shift-left :modifiers '(:shift)))
+    (ok (not (luvcraft:movement-intent-sprinting-p intent)))
+    (ok (luvcraft:movement-urging-p intent :forward))))
+
+(deftest space-owes-the-player-a-jump
+  (let* ((session (make-instance 'luvcraft:luvcraft-session))
+         (intent (luvcraft:luvcraft-session-movement-intent session)))
+    (luv:handle-canvas-event session nil (key-press :space))
+    (ok (luvcraft:movement-intent-jump-requested-p intent))))
 
 (deftest the-number-row-selects-through-the-command-layer
   (let* ((session (make-instance 'luvcraft:luvcraft-session))

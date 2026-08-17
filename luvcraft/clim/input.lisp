@@ -27,12 +27,10 @@
       (when (eq :tab (luv:canvas-key-event-key-name event))
         (setf (luvcraft:luvcraft-session-focus-toggle-tab-down-p session) t))
       (return-from luv:handle-canvas-event nil)))
-  (when (luvcraft:dispatch-luvcraft-focus-event session canvas event)
-    (return-from luv:handle-canvas-event nil))
-  (let ((key (luv:canvas-key-event-key-name event)))
-    (setf (gethash key (luvcraft:luvcraft-session-pressed-keys session)) t)
-    (when (and (eq key :space) (not (luv:canvas-key-event-repeat-p event)))
-      (setf (luvcraft:luvcraft-session-jump-requested-p session) t)))
+  ;; Whatever no layer claimed belongs to the focus, and if nothing is focused
+  ;; it belongs to nobody: the player controller reads an intent now, not a
+  ;; record of which keys happened to be down.
+  (luvcraft:dispatch-luvcraft-focus-event session canvas event)
   nil)
 
 (defmethod luv:handle-canvas-event
@@ -42,8 +40,8 @@
              (luvcraft:luvcraft-session-focus-toggle-tab-down-p session))
     (setf (luvcraft:luvcraft-session-focus-toggle-tab-down-p session) nil)
     (return-from luv:handle-canvas-event nil))
-  (when (luvcraft:dispatch-luvcraft-focus-event session canvas event)
+  (alexandria:when-let ((command (luvcraft-key-command session event)))
+    (execute-frame-command (luvcraft-session-frame session) command)
     (return-from luv:handle-canvas-event nil))
-  (remhash (luv:canvas-key-event-key-name event)
-           (luvcraft:luvcraft-session-pressed-keys session))
+  (luvcraft:dispatch-luvcraft-focus-event session canvas event)
   nil)

@@ -80,3 +80,77 @@
               (list 'com-select-quickbar-slot slot)))
           :documentation (format nil "Select quickbar slot ~D" slot)
           :errorp nil))
+
+;;; Movement.
+;;;
+;;; A direction key is a start and a stop rather than a state someone reads out
+;;; of a key table later, so what the game holds is the urge itself: a rider on
+;;; an animal and a player on their own feet run the same commands and set the
+;;; same intent, and a gamepad or a recorded demo could run them too.
+
+(define-command (com-start-walking :command-table luvcraft-movement
+                                   :name "Start Walking")
+    ((direction 'keyword :prompt "direction"))
+  (setf (luvcraft:movement-urging-p
+         (luvcraft:luvcraft-session-movement-intent (luvcraft-command-session))
+         direction)
+        t))
+
+(define-command (com-stop-walking :command-table luvcraft-movement-release
+                                  :name "Stop Walking")
+    ((direction 'keyword :prompt "direction"))
+  (setf (luvcraft:movement-urging-p
+         (luvcraft:luvcraft-session-movement-intent (luvcraft-command-session))
+         direction)
+        nil))
+
+(define-command (com-jump :command-table luvcraft-movement
+                          :name "Jump"
+                          :keystroke (:space :any))
+    ()
+  (setf (luvcraft:movement-intent-jump-requested-p
+         (luvcraft:luvcraft-session-movement-intent (luvcraft-command-session)))
+        t))
+
+(defparameter *walk-keys*
+  '((:w :forward) (:up :forward)
+    (:s :backward) (:down :backward)
+    (:a :left) (:left :left)
+    (:d :right) (:right :right)
+    (:shift-left :sprint) (:shift-right :sprint))
+  "Which key urges which direction, arrows alongside the letters.
+
+Bound with :ANY because a movement key means the same thing however it is
+modified: Shift-W is a player sprinting forward, not a player pressing some
+other key.")
+
+(defun add-walk-keystrokes ()
+  "Bind every walking key to its start on the way down and its stop on the up."
+  (loop for (key direction) in *walk-keys*
+        do (flet ((walk-item (command)
+                    (let ((direction direction))
+                      (lambda (gesture numeric-argument)
+                        (declare (ignore gesture numeric-argument))
+                        (list command direction)))))
+             (add-keystroke-to-command-table
+              'luvcraft-movement (list key :any) :function
+              (walk-item 'com-start-walking) :errorp nil)
+             (add-keystroke-to-command-table
+              'luvcraft-movement-release (list key :any) :function
+              (walk-item 'com-stop-walking) :errorp nil))))
+
+(add-walk-keystrokes)
+
+;;; A rider's focus offers exactly the movement table, so steering an animal
+;;; and walking are the same commands reaching the same intent.  Everything
+;;; else a rider presses still falls to the ride itself, which wants none of it.
+
+(defmethod luvcraft-focus-command-table
+    ((focus luvcraft:critter-ride) (event luv:canvas-key-press-event))
+  (declare (ignore focus event))
+  'luvcraft-movement)
+
+(defmethod luvcraft-focus-command-table
+    ((focus luvcraft:critter-ride) (event luv:canvas-key-release-event))
+  (declare (ignore focus event))
+  'luvcraft-movement-release)

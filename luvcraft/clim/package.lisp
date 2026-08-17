@@ -22,10 +22,18 @@
            #:luvcraft-command-session
            #:canvas-key-event-matches-gesture-p
            #:canvas-key-event-command
+           #:luvcraft-key-command
+           #:luvcraft-key-event-tables
+           #:luvcraft-focus-command-table
            #:execute-canvas-key-event-command
            #:com-toggle-inventory
            #:com-toggle-phone
            #:com-toggle-metabar
            #:com-toggle-fullscreen
            #:com-toggle-focus
-           #:com-select-quickbar-slot))
+           #:com-select-quickbar-slot
+           #:com-leave-focus
+           #:com-release-pointer
+           #:com-start-walking
+           #:com-stop-walking
+           #:com-jump))

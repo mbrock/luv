@@ -48,6 +48,7 @@
                  (:file "frontier-light")
                  (:file "mesher")
                  (:file "particles")
+                 (:file "intent")
                  (:file "simulation")
                  (:file "critters")
                  (:file "persistence")

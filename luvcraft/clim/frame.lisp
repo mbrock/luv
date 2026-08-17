@@ -15,16 +15,39 @@
 ;;; someone was typing into.
 
 (define-command-table luvcraft-window)
+(define-command-table luvcraft-window-release)
 
-(define-command-table luvcraft-world)
+;;; Movement is its own table because more than one thing moves.  A player on
+;;; their own feet reaches it by inheritance from the world; a rider reaches
+;;; the very same table as their focus's, which is what makes steering an
+;;; animal and walking one vocabulary instead of two parallel ones.
+
+(define-command-table luvcraft-movement)
+(define-command-table luvcraft-movement-release)
+
+(define-command-table luvcraft-world
+  :inherit-from (luvcraft-movement)
+  :inherit-menu t)
+
+(define-command-table luvcraft-world-release
+  :inherit-from (luvcraft-movement-release)
+  :inherit-menu t)
 
 (define-application-frame luvcraft-frame ()
   ((session :initarg :session :reader luvcraft-frame-session))
+  ;; The frame's table is the whole vocabulary, inheriting every layer,
+  ;; because LOOKUP-KEYSTROKE-COMMAND-ITEM asks COMMAND-ENABLED whether the
+  ;; command it found is present *here* -- a command reachable only from a
+  ;; layer table would be looked up and then silently refused.  The layer
+  ;; tables above are what dispatch actually searches; this one is what makes
+  ;; the commands it finds legal to run.
+  ;;
   ;; :INHERIT-MENU is what carries keystrokes across inheritance -- a command
-  ;; table inherits its parents' commands by default but not their accelerators,
-  ;; so without this the world's keys are defined and unreachable.
-  (:command-table (luvcraft-frame :inherit-from (luvcraft-window luvcraft-world)
-                                  :inherit-menu t))
+  ;; table inherits its parents' commands by default but not their accelerators.
+  (:command-table (luvcraft-frame
+                   :inherit-from (luvcraft-window luvcraft-window-release
+                                  luvcraft-world luvcraft-world-release)
+                   :inherit-menu t))
   (:menu-bar nil))
 
 (defun make-luvcraft-frame (session)
@@ -54,17 +77,31 @@ rather than stored in a session slot the core would never otherwise mention.")
       (setf (gethash session *luvcraft-frames*)
             (make-luvcraft-frame session))))
 
-(defgeneric luvcraft-focus-command-table (focus)
+(defgeneric luvcraft-key-event-tables (event)
   (:documentation
-   "Return the command table a focused FOCUS offers, or NIL for none.
+   "Return the window and world command tables EVENT is looked up in.
+
+A key going down and the same key coming up are different gestures wanting
+different commands -- start walking and stop walking -- and CLIM's keystroke
+accelerators only ever fire on the way down.  Splitting the tables by event
+class is how a release gets a vocabulary of its own without the lookup having
+to ask what kind of event it is holding.")
+  (:method ((event luv:canvas-key-press-event))
+    (values 'luvcraft-window 'luvcraft-world))
+  (:method ((event luv:canvas-key-release-event))
+    (values 'luvcraft-window-release 'luvcraft-world-release)))
+
+(defgeneric luvcraft-focus-command-table (focus event)
+  (:documentation
+   "Return the command table focused FOCUS offers for EVENT, or NIL for none.
 
 A focus with no table takes every key that the window layer did not claim,
 which is what a shell in raw mode wants: its letters are text, not verbs.  A
 focus which does want verbs answers with a table, and inheritance -- rather
 than the order of tests in a dispatch function -- decides what it also gets."))
 
-(defmethod luvcraft-focus-command-table (focus)
-  (declare (ignore focus))
+(defmethod luvcraft-focus-command-table (focus event)
+  (declare (ignore focus event))
   nil)
 
 (defun luvcraft-key-command (session event)
@@ -75,14 +112,14 @@ object is asked through its own table and an unfocused player through the
 world's, so a key reaches exactly one layer."
   (let ((frame (luvcraft-session-frame session))
         (focus (luvcraft:luvcraft-session-modal-focus session)))
-    (or (canvas-key-event-command frame event
-                                  :command-table 'luvcraft-window)
-        (if focus
-            (alexandria:when-let
-                ((table (luvcraft-focus-command-table focus)))
-              (canvas-key-event-command frame event :command-table table))
-            (canvas-key-event-command frame event
-                                      :command-table 'luvcraft-world)))))
+    (multiple-value-bind (window world) (luvcraft-key-event-tables event)
+      (or (canvas-key-event-command frame event :command-table window)
+          (if focus
+              (alexandria:when-let
+                  ((table (luvcraft-focus-command-table focus event)))
+                (canvas-key-event-command frame event :command-table table))
+              (canvas-key-event-command frame event
+                                        :command-table world))))))
 
 ;;; Keystrokes.
 ;;;
@@ -107,7 +144,12 @@ A player with caps lock on is still playing the game.")
 A character in GESTURE is matched against the event's unshifted character, so
 a binding is a place on the keyboard rather than a piece of text: I is I
 whether or not caps lock is down, and Shift-I remains a different gesture
-because its modifier set differs."
+because its modifier set differs.
+
+A gesture may name :ANY in place of its modifiers, meaning the key itself
+whatever else is held with it.  Movement is like that -- shift makes a player
+sprint rather than making W into some other key -- and a gesture that had to
+enumerate its modifiers could not say so."
   (let* ((specification (if (listp gesture) gesture (list gesture)))
          (key (first specification))
          (modifiers (rest specification)))
@@ -116,8 +158,10 @@ because its modifier set differs."
             (eql key (luv:canvas-key-event-unshifted-character event)))
            (symbol
             (eq key (luv:canvas-key-event-key-name event))))
-         (null (set-exclusive-or
-                modifiers (canvas-key-event-gesture-modifiers event))))))
+         (or (member :any modifiers)
+             (null (set-exclusive-or
+                    modifiers
+                    (canvas-key-event-gesture-modifiers event)))))))
 
 (defun canvas-key-event-command
     (frame event &key (command-table (frame-command-table frame)))
