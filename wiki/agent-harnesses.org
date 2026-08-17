@@ -37,6 +37,10 @@ concretely enough that a later design can cite it.
   whose screen can be read as text, contexts as journal facts, and an RDF
   projection of the same log queried with SPARQL.
 
+A fifth harness, Autolith (Common Lisp, one self-modifying SBCL image), is
+read at length on its own page, [[file:autolith.org][#HBTNMM]]; #WU3918 there
+measures it against the convergence list below (#YY6EYZ).
+
 The three voices to keep apart: what each repository actually does (cited
 by file), what any harness must therefore do (stated as a lesson), and what
 luv might choose (left to marks and later pages).
