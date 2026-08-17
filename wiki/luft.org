@@ -129,6 +129,37 @@ draws headlessly, and [[lisp:luft.render:start-viewer]] opens a window with a
 fly camera.  Its test turns the camera straight up and expects only sky,
 which is the frustum test doing real work.
 
+* Fillets and bevels belong to edge and vertex sites
+:PROPERTIES:
+:ID: 6TEFOS
+:END:
+
+Rounding a crease is not something either face beside it can decide alone,
+and in LUFT it does not have to be: the crease is an edge site, its four
+surrounding cells are its star, and a vertex site has eight.  The star's
+solidity classifies the crease — flat, convex, concave, or saddle — and one
+rule places the shared point: move toward the star's /minority/ (the lone
+solid cell of a convex crease, the lone air cell of a concave one) so that
+the point lands on the sphere or cylinder of radius $r$ centred at
+$\text{site} + r\,q$, where $q$ is the minority direction clamped to unit
+components.  For edges that is the fillet cylinder point at $r(1-1/\sqrt2)$,
+for corners the sphere point at $r(1-1/\sqrt3)$, zero on flat and saddle
+stars, and a vertex in the middle of a crease run agrees with its edge, so
+creases stay straight.
+
+Because every face incident to a site computes that point from the same star,
+subdivided faces meet exactly and the surface is watertight without stitching
+or corner patches.  =luft/render/shaders.lisp= subdivides each face 6×6:
+boundary points use the site rule, ring points inside the radius project onto
+the nearest crease's cylinder or the corner's sphere (a pure one-cell corner
+is the exact rounded box), and mixed corners such as a block standing on a
+floor blend toward the vertex sphere by distance.  The only CPU help is
+[[lisp:luft:chain-cell-bits]], the solid chain as one bit per cell, from
+which each mesh lane gathers its sixteen star cells; the rounding radius is a
+live frame lane.  The exact morphological answer for the mixed stars would be
+a table over the 256 vertex configurations, which #WQ611A's wave-level work
+does not need and which this heuristic postpones.
+
 ** NEXT Edit cells through the linearity of the boundary
 :PROPERTIES:
 :ID: 3QNZC1
