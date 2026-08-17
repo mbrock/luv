@@ -40,3 +40,9 @@
         do (ok (typep (mcluv::hotbar-material-color number) 'clim:color))
            (ok (typep (mcluv::hotbar-material-ink number 0 80)
                       'mcluv:linear-gradient))))
+
+(deftest hotbar-is-composited-after-scene-postprocessing
+  (ok (eq :hud
+          (luvcraft:luvcraft-overlay-stage
+           (allocate-instance
+            (find-class 'mcluv:luvcraft-hotbar-overlay))))))

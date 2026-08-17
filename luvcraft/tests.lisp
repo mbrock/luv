@@ -37,6 +37,11 @@
   (declare (ignore session canvas))
   (push event (recording-focus-events focus)))
 
+(deftest overlays-default-to-the-depth-bearing-scene-stage
+  (ok (eq :scene
+          (luvcraft-overlay-stage
+           (make-instance 'recording-modal-focus)))))
+
 (deftest modal-focus-suspends-player-input-and-owns-events
   (let ((session (make-instance 'luvcraft-session))
         (first (make-instance 'recording-modal-focus))

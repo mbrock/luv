@@ -301,6 +301,10 @@ and scheduled texture layouts across the canvas and REPL threads.")))
    (render-pass
     :initarg :render-pass
     :reader vulkan-render-pipeline-render-pass)
+   (target-format
+    :initarg :target-format
+    :initform nil
+    :reader vulkan-render-pipeline-target-format)
    (vertex-buffers
     :initarg :vertex-buffers
     :initform nil
@@ -1266,7 +1270,8 @@ wrapper, this finalizer cannot run before theirs have."
                 :label (gpu-descriptor-label descriptor)
                 :handle pipeline :device device :layout layout
                 :pipeline-layout pipeline-layout :render-pass render-pass
-                :vertex-buffers vertex-buffers :depth-format depth-format))
+                :vertex-buffers vertex-buffers :target-format format
+                :depth-format depth-format))
           (unless completed-p
              (lvk:destroy-pipeline-layout
               (vulkan-handle device) pipeline-layout)))))))
@@ -2130,19 +2135,34 @@ lowering later without changing this queue-level operation."
       (ensure-vulkan-object-device
        pipeline (vulkan-render-pipeline-device pipeline) device
        :set-pipeline)
-      (unless (eq (vulkan-render-pipeline-render-pass pipeline)
-                  (vulkan-render-pass-for-format
-                   device
-                   (and (vulkan-render-pass-target pass)
-                        (gpu-texture-format
-                         (vulkan-render-pass-target pass)))
-                   pass
-                   (and (vulkan-render-pass-depth-target pass)
-                        (gpu-texture-format
-                         (vulkan-render-pass-depth-target pass)))
-                   (or (vulkan-render-pass-depth-store-op pass)
-                       :discard)))
-        (reject-gpu-request pipeline :incompatible-render-pass pass))
+      ;; Vulkan render-pass compatibility is governed by attachment formats
+      ;; and sample counts, not load/store operations.  Our textures are all
+      ;; single-sampled, so compare the two formats directly instead of the
+      ;; cached native render-pass handle (whose key also carries STORE-OP).
+      (unless
+          (and
+           (eq (vulkan-render-pipeline-target-format pipeline)
+               (and (vulkan-render-pass-target pass)
+                    (gpu-texture-format (vulkan-render-pass-target pass))))
+           (eq (vulkan-render-pipeline-depth-format pipeline)
+               (and (vulkan-render-pass-depth-target pass)
+                    (gpu-texture-format
+                     (vulkan-render-pass-depth-target pass)))))
+        (reject-gpu-request
+         pipeline :incompatible-render-pass
+         (list :pipeline-label (gpu-object-label pipeline)
+               :pipeline-target-format
+               (vulkan-render-pipeline-target-format pipeline)
+               :pipeline-depth-format
+               (vulkan-render-pipeline-depth-format pipeline)
+               :target-format
+               (and (vulkan-render-pass-target pass)
+                    (gpu-texture-format (vulkan-render-pass-target pass)))
+               :depth-format
+               (and (vulkan-render-pass-depth-target pass)
+                    (gpu-texture-format
+                     (vulkan-render-pass-depth-target pass)))
+               :depth-store-op (vulkan-render-pass-depth-store-op pass))))
       (lvk:cmd-bind-graphics-pipeline
        (vulkan-command-encoder-command-buffer encoder)
        (vulkan-handle pipeline))

@@ -149,6 +149,11 @@
 
 (defclass luvcraft-hotbar-overlay (luvcraft-widget-overlay) ())
 
+(defmethod luvcraft:luvcraft-overlay-stage
+    ((overlay luvcraft-hotbar-overlay))
+  (declare (ignore overlay))
+  :hud)
+
 (defun hotbar-screen-state (overlay)
   (let* ((source-size
            (luv:gpu-texture-size

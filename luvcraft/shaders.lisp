@@ -821,6 +821,59 @@
 (defun block-world-sky-fragment-shader ()
   (assemble-spir-v-module (block-world-sky-fragment-module)))
 
+;;; Focus presentation samples the stored scene and its depth.  Screen center
+;;; lies on the framed terminal, so its depth is the focus plane; only farther
+;;; fragments receive the wide nine-tap blur.  The HUD is drawn afterward.
+
+(define-shader-method shader-specification-for
+    focus-post-vertex-specification
+    ((role (eql :focus-post)) (stage (eql :vertex)))
+    (:stage :vertex
+     :inputs ((corner-position :vec3 :location 0))
+     :outputs ((clip-position :vec4 :built-in :position)
+               (uv-output :vec2 :location 0)))
+  (let* ((x (swizzle corner-position :x))
+         (y (swizzle corner-position :y)))
+    (set-output clip-position (vec4 x y (swizzle corner-position :z) 1.0))
+    (set-output uv-output (vec2 (* (+ x 1.0) 0.5)
+                                (* (+ y 1.0) 0.5)))))
+
+(define-shader-method shader-specification-for
+    focus-post-fragment-specification
+    ((role (eql :focus-post)) (stage (eql :fragment)))
+    (:stage :fragment
+     :inputs ((uv-input :vec2 :location 0))
+     :outputs ((color-output :vec4 :location 0))
+     :resources
+     ((scene-color :texture-2d :set 0 :binding 0
+                   :sample-transfer :srgb-to-linear)
+      (scene-sampler :sampler :set 0 :binding 1)
+      (scene-depth :depth-texture-2d :set 0 :binding 2)
+      (post-state :uniform-block :set 0 :binding 3
+                  :members ((post-control :vec4)))))
+  (let* ((texel (swizzle post-control :xy))
+         (active (swizzle post-control :z))
+         (sharp (sample scene-color scene-sampler uv-input))
+         (depth (swizzle (sample scene-depth scene-sampler uv-input) :x))
+         (focus-depth
+           (swizzle (sample scene-depth scene-sampler (vec2 0.5 0.5)) :x))
+         (blur-amount
+           (* active (smoothstep 0.0015 0.018 (- depth focus-depth))))
+         (dx (* texel (vec2 5.0 0.0)))
+         (dy (* texel (vec2 0.0 5.0)))
+         (blurred
+           (* (+ (* sharp 4.0)
+                 (* (sample scene-color scene-sampler (+ uv-input dx)) 2.0)
+                 (* (sample scene-color scene-sampler (- uv-input dx)) 2.0)
+                 (* (sample scene-color scene-sampler (+ uv-input dy)) 2.0)
+                 (* (sample scene-color scene-sampler (- uv-input dy)) 2.0)
+                 (sample scene-color scene-sampler (+ (+ uv-input dx) dy))
+                 (sample scene-color scene-sampler (+ (- uv-input dx) dy))
+                 (sample scene-color scene-sampler (- (+ uv-input dx) dy))
+                 (sample scene-color scene-sampler (- (- uv-input dx) dy)))
+              0.0625)))
+    (set-output color-output (mix sharp blurred blur-amount))))
+
 ;;; The shadow-map pass renders the same block mesh into stored light-space
 ;;; depth.  The block fragment material samples that product with explicit
 ;;; percentage-closer filtering and receiver bias above.

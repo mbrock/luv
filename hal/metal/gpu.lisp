@@ -1570,18 +1570,15 @@ compiler boundary of #58IDSR."
     (ensure-live-metal-object texture :prepare-texture)
     (ensure-metal-object-device
      texture (metal-texture-device texture) device :prepare-texture)
-    (when (metal-encoder-pending-consumer-barrier encoder)
-      (error 'gpu-invalid-state-error :object encoder
-             :operation :prepare-texture
-             :state :consumer-barrier-pending
-             :expected-state :between-passes))
     ;; Metal 4 queues do not perform ordinary MTLResource hazard tracking.
-    ;; The following render encoder consumes this texture in its fragment
-    ;; stage, so install the barrier when that native encoder is created.
-    (setf (metal-encoder-pending-consumer-barrier encoder)
-          (list luv.metal:+stage-fragment+
-                luv.metal:+stage-fragment+
-                luv.metal:+visibility-device+))
+    ;; Coalesce every texture produced by the preceding pass into the one
+    ;; producer-to-fragment barrier installed on the following encoder.  The
+    ;; command encoder retains each concrete resource independently below.
+    (unless (metal-encoder-pending-consumer-barrier encoder)
+      (setf (metal-encoder-pending-consumer-barrier encoder)
+            (list luv.metal:+stage-fragment+
+                  luv.metal:+stage-fragment+
+                  luv.metal:+visibility-device+)))
     (retain-metal-resource encoder texture))
   encoder)
 

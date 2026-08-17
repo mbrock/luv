@@ -15,6 +15,10 @@
                      :reader luvcraft-frame-scene-bind-group)
    (shadow-bind-group :initarg :shadow-bind-group
                       :reader luvcraft-frame-shadow-bind-group)
+   (post-uniform-buffer :initarg :post-uniform-buffer
+                        :reader luvcraft-frame-post-uniform-buffer)
+   (post-bind-group :initarg :post-bind-group
+                    :reader luvcraft-frame-post-bind-group)
    (world-text-bind-groups :initarg :world-text-bind-groups :initform #()
                            :reader luvcraft-frame-world-text-bind-groups)))
 
@@ -288,6 +292,8 @@ the frame uniform cannot silently diverge between shader and host."
       (let ((buffer nil)
             (scene-bind-group nil)
             (shadow-bind-group nil)
+            (post-uniform-buffer nil)
+            (post-bind-group nil)
             (world-text-bind-groups #())
             (completed-p nil))
         (unwind-protect
@@ -328,6 +334,26 @@ the frame uniform cannot silently diverge between shader and host."
                        :label "block world shadow-pass bindings"
                        :layout (luvcraft-session-shadow-layout session)
                        :entries `((:binding 2 :resource ,buffer))))
+                     post-uniform-buffer
+                     (create
+                      (luvcraft-session-device session)
+                      (make-buffer-descriptor
+                       :label "block world focus post uniform"
+                       :size 16 :usage '(:uniform)))
+                     post-bind-group
+                     (create
+                      (luvcraft-session-device session)
+                      (make-bind-group-descriptor
+                       :label "block world focus post bindings"
+                       :layout (luvcraft-session-post-layout session)
+                       :entries
+                       `((:binding 0
+                          :resource ,(luvcraft-session-color-view session))
+                         (:binding 1
+                          :resource ,(luvcraft-session-atlas-sampler session))
+                         (:binding 2
+                          :resource ,(luvcraft-session-depth-view session))
+                         (:binding 3 :resource ,post-uniform-buffer))))
                      world-text-bind-groups
                      (if (luvcraft-session-world-text session)
                          (make-world-text-frame-bind-groups
@@ -337,6 +363,8 @@ the frame uniform cannot silently diverge between shader and host."
                (remember-luvcraft-resource session buffer)
                (remember-luvcraft-resource session scene-bind-group)
                (remember-luvcraft-resource session shadow-bind-group)
+               (remember-luvcraft-resource session post-uniform-buffer)
+               (remember-luvcraft-resource session post-bind-group)
                (dolist (group
                          (remove-duplicates
                           (coerce world-text-bind-groups 'list) :test #'eq))
@@ -347,6 +375,8 @@ the frame uniform cannot silently diverge between shader and host."
                         :uniform-buffer buffer
                         :scene-bind-group scene-bind-group
                         :shadow-bind-group shadow-bind-group
+                        :post-uniform-buffer post-uniform-buffer
+                        :post-bind-group post-bind-group
                         :world-text-bind-groups world-text-bind-groups)))
                  (setf (gethash key
                                 (luvcraft-session-frame-states session))
@@ -360,6 +390,8 @@ the frame uniform cannot silently diverge between shader and host."
               (destroy group))
             (when shadow-bind-group (destroy shadow-bind-group))
             (when scene-bind-group (destroy scene-bind-group))
+            (when post-bind-group (destroy post-bind-group))
+            (when post-uniform-buffer (destroy post-uniform-buffer))
             (when buffer (destroy buffer))))))))
 
 (defun encode-luvcraft-frame
@@ -446,6 +478,13 @@ the frame uniform cannot silently diverge between shader and host."
       (write-buffer
        (luvcraft-frame-uniform-buffer frame)
        (frame-uniform-data session (first extent) (second extent)))
+      (write-buffer
+       (luvcraft-frame-post-uniform-buffer frame)
+       (make-array
+        4 :element-type 'single-float
+        :initial-contents
+        (list (/ 1.0 (first extent)) (/ 1.0 (second extent))
+              (if (luvcraft-session-modal-focus session) 1.0 0.0) 0.0)))
       (when (plusp particle-vertex-count)
         (write-buffer
          (luvcraft-session-particle-vertex-buffer session)
@@ -460,7 +499,8 @@ the frame uniform cannot silently diverge between shader and host."
                 :color-attachments nil
                 :depth-stencil-attachment
                 `(:view ,(luvcraft-session-shadow-depth-view session)
-                  :depth-load-op :clear :depth-store-op :store
+                  :depth-load-op :clear
+                  :depth-store-op :store
                   :depth-clear-value 1.0)))))
         (set-pipeline pass (luvcraft-session-shadow-native-pipeline session))
         (set-bind-group pass 0 (luvcraft-frame-shadow-bind-group frame))
@@ -487,7 +527,7 @@ the frame uniform cannot silently diverge between shader and host."
                    :clear-value #(0.43 0.68 0.92 1.0)))
                 :depth-stencil-attachment
                 `(:view ,(luvcraft-session-depth-view session)
-                  :depth-load-op :clear :depth-store-op :discard
+                  :depth-load-op :clear :depth-store-op :store
                   :depth-clear-value 1.0)))))
         ;; The sky triangle fills the frame before block geometry, with depth
         ;; writes disabled; the clear value remains only a safe fallback.
@@ -516,13 +556,35 @@ the frame uniform cannot silently diverge between shader and host."
              pass 0 (aref (luvcraft-frame-world-text-bind-groups frame) 0))
             (draw pass 6 (length (world-text-run-glyphs text)))))
         (dolist (overlay (reverse (luvcraft-session-overlays session)))
-          (encode-luvcraft-overlay overlay session pass surface-texture))
+          (when (eq :scene (luvcraft-overlay-stage overlay))
+            (encode-luvcraft-overlay overlay session pass surface-texture)))
         (unless (luvcraft-session-modal-focus session)
           (set-pipeline pass (luvcraft-session-crosshair-native-pipeline session))
           (set-bind-group pass 0 (luvcraft-frame-scene-bind-group frame))
           (set-vertex-buffer
            pass 0 (luvcraft-session-crosshair-vertex-buffer session))
           (draw pass +block-world-crosshair-vertex-count+))
+        (end-pass pass))
+      (prepare-texture encoder (luvcraft-session-color-texture session)
+                       :texture-binding)
+      (prepare-texture encoder (luvcraft-session-depth-texture session)
+                       :texture-binding)
+      (let ((pass
+              (begin-render-pass
+               encoder
+               (make-render-pass-descriptor
+                :color-attachments
+                `((:view ,(luvcraft-session-presentation-view session)
+                   :load-op :clear :store-op :store
+                   :clear-value #(0.0 0.0 0.0 1.0)))
+                :depth-stencil-attachment nil))))
+        (set-pipeline pass (luvcraft-session-post-native-pipeline session))
+        (set-bind-group pass 0 (luvcraft-frame-post-bind-group frame))
+        (set-vertex-buffer pass 0 (luvcraft-session-sky-vertex-buffer session))
+        (draw pass 3)
+        (dolist (overlay (reverse (luvcraft-session-overlays session)))
+          (when (eq :hud (luvcraft-overlay-stage overlay))
+            (encode-luvcraft-overlay overlay session pass surface-texture)))
         (end-pass pass)))
     (with-luvcraft-frame-timing
         (sample luvcraft-frame-sample-surface-copy-encode-seconds
@@ -531,12 +593,12 @@ the frame uniform cannot silently diverge between shader and host."
         (encode
          encoder
          (make-gpu-copy-texture-to-buffer-command
-          :source (luvcraft-session-color-texture session)
+          :source (luvcraft-session-presentation-texture session)
           :destination readback-buffer)))
       (encode
        encoder
        (make-gpu-copy-texture-command
-        :source (luvcraft-session-color-texture session)
+        :source (luvcraft-session-presentation-texture session)
         :destination surface-texture)))))
 
 (defun render-luvcraft-frame (session timestamp &optional sample)
@@ -786,7 +848,8 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                        :label "block world color"
                        :size extent :dimensions :2d
                        :format (canvas-format context)
-                       :usage '(:render-attachment :copy-src)))))
+                       :usage '(:render-attachment :texture-binding
+                                :copy-src)))))
                   (color-view
                     (keep
                      (create device (make-texture-view-descriptor
@@ -798,11 +861,24 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                       (make-texture-descriptor
                        :label "block world depth"
                        :size extent :dimensions :2d :format :depth32-float
-                       :usage '(:render-attachment)))))
+                       :usage '(:render-attachment :texture-binding)))))
                   (depth-view
                     (keep
                      (create device (make-texture-view-descriptor
                                      :texture depth-texture))))
+                  (presentation-texture
+                    (keep
+                     (create
+                      device
+                      (make-texture-descriptor
+                       :label "block world presentation color"
+                       :size extent :dimensions :2d
+                       :format (canvas-format context)
+                       :usage '(:render-attachment :copy-src)))))
+                  (presentation-view
+                    (keep
+                     (create device (make-texture-view-descriptor
+                                     :texture presentation-texture))))
                   (shadow-depth-texture
                     (keep
                      (create
@@ -906,6 +982,16 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                       (make-bind-group-layout-descriptor
                        :label "block world shadow-pass layout"
                        :entries '((:binding 2 :type :uniform-buffer))))))
+                  (post-layout
+                    (keep
+                     (create
+                      device
+                      (make-bind-group-layout-descriptor
+                       :label "block world focus post layout"
+                       :entries '((:binding 0 :type :texture)
+                                  (:binding 1 :type :sampler)
+                                  (:binding 2 :type :texture)
+                                  (:binding 3 :type :uniform-buffer))))))
                   (pipeline
                     (let ((artifact
                             (make-live-shader-pipeline
@@ -1001,6 +1087,23 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                                :depth-compare :always))))
                       (push artifact pipelines)
                       artifact))
+                  (post-pipeline
+                    (let ((artifact
+                            (make-live-shader-pipeline
+                             :role :focus-post
+                             :vertex-role :focus-post
+                             :label "block world focus post pipeline"
+                             :device device :layout post-layout
+                             :vertex-buffers
+                             '((:array-stride 12
+                                :attributes
+                                ((:shader-location 0 :offset 0
+                                  :format :float32x3))))
+                             :target-format (canvas-format context)
+                             :primitive '(:topology :triangle-list)
+                             :depth-stencil nil)))
+                      (push artifact pipelines)
+                      artifact))
                   (text-glyph-cache
                     (when world-text-string
                       (setf world-text-glyph-cache
@@ -1038,17 +1141,21 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
                      :atlas-sampler atlas-sampler
                      :color-texture color-texture :color-view color-view
                      :depth-texture depth-texture :depth-view depth-view
+                     :presentation-texture presentation-texture
+                     :presentation-view presentation-view
                      :shadow-depth-texture shadow-depth-texture
                      :shadow-depth-view shadow-depth-view
                      :shadow-depth-sampler shadow-depth-sampler
                      :shadow-comparison-sampler shadow-comparison-sampler
                      :layout layout :shadow-layout shadow-layout
+                     :post-layout post-layout
                      :block-pipeline pipeline
                      :shadow-pipeline shadow-pipeline
                      :sky-vertex-buffer sky-vertex-buffer
                      :sky-pipeline sky-pipeline
                      :crosshair-vertex-buffer crosshair-vertex-buffer
                      :crosshair-pipeline crosshair-pipeline
+                     :post-pipeline post-pipeline
                      :particle-vertex-buffer particle-vertex-buffer
                      :world-text text-run
                      :world-text-glyph-cache text-glyph-cache
@@ -1133,6 +1240,7 @@ Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock."
     (release-live-shader-pipeline (luvcraft-session-shadow-pipeline session))
     (release-live-shader-pipeline (luvcraft-session-sky-pipeline session))
     (release-live-shader-pipeline (luvcraft-session-crosshair-pipeline session))
+    (release-live-shader-pipeline (luvcraft-session-post-pipeline session))
     (dolist (resource (luvcraft-session-resources session))
       (destroy resource))
     (setf (luvcraft-session-resources session) nil)

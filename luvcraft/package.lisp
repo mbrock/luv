@@ -251,6 +251,7 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:luvcraft-focus-left
            #:luvcraft-focus-score
            #:luvcraft-overlay-focus-insets
+           #:luvcraft-overlay-stage
            #:luvcraft-session-mesh
            #:luvcraft-session-meshed-world-revision
            #:luvcraft-session-outstanding-production

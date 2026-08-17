@@ -52,6 +52,35 @@
       (when band-texture (destroy band-texture))
       (destroy device))))
 
+(deftest metal-coalesces-multiple-sampled-texture-preparations
+  (let* ((device
+           (request-gpu-device (make-instance 'metal-gpu-provider)))
+         (encoder nil)
+         (color nil)
+         (depth nil))
+    (unwind-protect
+         (progn
+           (setf encoder (create device (make-command-encoder-descriptor))
+                 color
+                 (create device
+                         (make-texture-descriptor
+                          :size '(8 8) :dimensions :2d :format :rgba8-unorm
+                          :usage '(:render-attachment :texture-binding)))
+                 depth
+                 (create device
+                         (make-texture-descriptor
+                          :size '(8 8) :dimensions :2d :format :depth32-float
+                          :usage '(:render-attachment :texture-binding))))
+           (prepare-texture encoder color :texture-binding)
+           (prepare-texture encoder depth :texture-binding)
+           (ok (luv::metal-encoder-pending-consumer-barrier encoder))
+           (ok (gethash color (luv::metal-encoder-resources encoder)))
+           (ok (gethash depth (luv::metal-encoder-resources encoder))))
+      (when encoder (destroy encoder))
+      (when depth (destroy depth))
+      (when color (destroy color))
+      (destroy device))))
+
 (deftest world-text-cache-reuses-shaping-and-device-glyphs
   (let* ((device
            (request-gpu-device (make-instance 'metal-gpu-provider)))

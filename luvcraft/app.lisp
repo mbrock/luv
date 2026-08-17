@@ -77,6 +77,10 @@
    (depth-texture :initarg :depth-texture
                   :reader luvcraft-session-depth-texture)
    (depth-view :initarg :depth-view :reader luvcraft-session-depth-view)
+   (presentation-texture :initarg :presentation-texture
+                         :reader luvcraft-session-presentation-texture)
+   (presentation-view :initarg :presentation-view
+                      :reader luvcraft-session-presentation-view)
    (shadow-depth-texture :initarg :shadow-depth-texture
                          :reader luvcraft-session-shadow-depth-texture)
    (shadow-depth-view :initarg :shadow-depth-view
@@ -88,6 +92,7 @@
    (layout :initarg :layout :reader luvcraft-session-layout)
    (shadow-layout :initarg :shadow-layout
                   :reader luvcraft-session-shadow-layout)
+   (post-layout :initarg :post-layout :reader luvcraft-session-post-layout)
    (block-pipeline :initarg :block-pipeline
                    :reader luvcraft-session-block-pipeline)
    (shadow-pipeline :initarg :shadow-pipeline
@@ -101,6 +106,8 @@
     :reader luvcraft-session-crosshair-vertex-buffer)
    (crosshair-pipeline :initarg :crosshair-pipeline
                        :reader luvcraft-session-crosshair-pipeline)
+   (post-pipeline :initarg :post-pipeline
+                  :reader luvcraft-session-post-pipeline)
    (particle-vertex-buffer :initarg :particle-vertex-buffer
                            :reader luvcraft-session-particle-vertex-buffer)
    (world-text :initarg :world-text :initform nil
@@ -142,6 +149,14 @@
 (defmethod encode-luvcraft-overlay (overlay session pass surface-texture)
   (declare (ignore overlay session pass surface-texture))
   nil)
+
+(defgeneric luvcraft-overlay-stage (overlay)
+  (:documentation
+   "Return :SCENE for depth-bearing overlays or :HUD for crisp presentation."))
+
+(defmethod luvcraft-overlay-stage (overlay)
+  (declare (ignore overlay))
+  :scene)
 
 (defgeneric refresh-luvcraft-overlay (overlay session)
   (:documentation
@@ -404,12 +419,17 @@ mounting a vehicle, and other interactions described by #8JCMA5."
   (live-shader-pipeline-native-pipeline
    (luvcraft-session-sky-pipeline session)))
 
+(defun luvcraft-session-post-native-pipeline (session)
+  (live-shader-pipeline-native-pipeline
+   (luvcraft-session-post-pipeline session)))
+
 (defun refresh-luvcraft-shaders (session)
   "Install any successfully redefined block-world shader methods."
   (refresh-live-shader-pipeline (luvcraft-session-block-pipeline session))
   (refresh-live-shader-pipeline (luvcraft-session-shadow-pipeline session))
   (refresh-live-shader-pipeline (luvcraft-session-sky-pipeline session))
   (refresh-live-shader-pipeline (luvcraft-session-crosshair-pipeline session))
+  (refresh-live-shader-pipeline (luvcraft-session-post-pipeline session))
   (when (luvcraft-session-world-text session)
     (refresh-live-shader-pipeline
      (world-text-run-pipeline (luvcraft-session-world-text session))))
