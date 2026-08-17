@@ -23,6 +23,12 @@
    #:+cell-extent+
    #:+temporal-extent+
    #:+spatial-extent+
+   #:+extent-bits+
+   #:+horizontal-capacity-bits+
+   #:+vertical-coordinate-bits+
+   #:+x-shift+
+   #:+y-shift+
+   #:+z-shift+
    #:make-extent
    #:make-site
    #:site-valid-p
@@ -42,4 +48,24 @@
    #:site-boundary-sign
    #:map-site-boundary
    #:site-coface-forward
-   #:site-coface-backward))
+   #:site-coface-backward
+   ;; Chains
+   #:chain
+   #:make-chain
+   #:chain-domain
+   #:chain-count
+   #:chain-coefficient
+   #:add-chain-term
+   #:map-chain
+   #:chain-sites
+   #:chain-spatial-p
+   #:boundary-chain
+   #:make-solid-chain
+   #:solid-cell-p
+   #:surface-chain
+   #:packed-term
+   #:+term-sign-bit+
+   #:pack-term
+   #:packed-term-site
+   #:packed-term-coefficient
+   #:chain-packed-terms))

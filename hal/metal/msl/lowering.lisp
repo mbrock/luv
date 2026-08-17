@@ -460,6 +460,19 @@
              (msl-occurrence-text index)))))
 
 (defmethod lower-msl-expression
+    ((context msl-lowering-context) (expression spv:shader-buffer-element))
+  (let ((index
+          (lower-msl-expression
+           context (spv:shader-buffer-element-index expression))))
+    (note-msl-occurrence
+     context expression
+     (format nil "~A[~A]"
+             (msl-identifier
+              (spv:shader-object-name
+               (spv:shader-buffer-element-buffer expression)))
+             (msl-occurrence-text index)))))
+
+(defmethod lower-msl-expression
     ((context msl-lowering-context) (expression spv:shader-call))
   (spv:lower-shader-call (spv:shader-call-operator expression)
                          context expression))
@@ -792,6 +805,30 @@
      (declare (ignore operator))
      (lower-msl-infix-call context expression ,text)))
 
+(defmethod spv:lower-shader-call
+    ((operator (eql 'spv:ldb))
+     (context msl-lowering-context)
+     (expression spv:shader-bit-field-call))
+  "Lower LDB to a logical shift and mask in the operand's own width."
+  (declare (ignore operator))
+  (let* ((value (msl-occurrence-text
+                 (lower-msl-expression
+                  context (first (spv:shader-call-operands expression)))))
+         (size (spv:shader-bit-field-size expression))
+         (position (spv:shader-bit-field-position expression))
+         (width (spv:shader-type-bit-width
+                 (spv:shader-expression-type expression)))
+         (suffix (if (= width 64) "ul" "u")))
+    (note-msl-occurrence
+     context expression
+     (cond ((and (zerop position) (= size width))
+            (format nil "(~A)" value))
+           ((= (+ size position) width)
+            (format nil "(~A >> ~D~A)" value position suffix))
+           (t
+            (format nil "((~A >> ~D~A) & 0x~X~A)"
+                    value position suffix (1- (ash 1 size)) suffix))))))
+
 (define-msl-infix-operator + "+")
 (define-msl-infix-operator - "-")
 (define-msl-infix-operator * "*")
@@ -1055,6 +1092,15 @@
         :type (format nil "constant ~A&"
                       (msl-structure-name-for
                        (spv:shader-object-name resource)))
+        :name name :attribute (format nil "[[buffer(~D)]]" binding)
+        :origin resource))
+      (:storage-buffer
+       (make-instance
+        'msl-parameter
+        :type (format nil "const device ~A*"
+                      (msl-type-name
+                       (spv:shader-storage-buffer-element-type resource)
+                       (spv:shader-object-source-form resource)))
         :name name :attribute (format nil "[[buffer(~D)]]" binding)
         :origin resource))
       (:texture-2d

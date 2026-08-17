@@ -1,0 +1,182 @@
+#+title: LUFT: packed sites, chains, and the mesh atelier
+#+startup: overview
+
+LUFT is a small complement to luv: a way of naming the vertices, edges, faces,
+and cells of a cubical world with one fixnum each, and of treating a block
+world as algebra rather than as voxels with decorations.  Its first client
+is a greenfield renderer, an atelier free of the luvcraft mesher, that draws
+a textureless block world with task and mesh shaders reading those fixnums
+straight from a GPU buffer.  This page records the vocabulary, the algebra
+that makes the surface fall out, the shader-language extensions the GPU path
+needed, and the shape of the pipeline.
+
+* A site is a lattice anchor and an extent mask
+:PROPERTIES:
+:ID: KE4P5F
+:END:
+
+A /site/ is a 60-bit unsigned value: four extent bits =XYZT= in the low
+positions, then a 24-bit X anchor, a 24-bit Y anchor, and an 8-bit Z anchor.
+Each spatial extent bit says the site spans the unit interval forward from its
+anchor along that axis, so no extent is a vertex, one is an edge, two a face,
+three a cell.  Incidence is therefore canonical: the high X boundary of the
+cell at =(x,y,z)= /is/ the YZ face anchored at =(x+1,y,z)=, the same value the
+cell at =(x+1,y,z)= calls its low X boundary.  X and Y wrap with the period a
+[[lisp:luft:world-domain]] chooses; Z is 256 non-wrapping planes.
+
+The oriented boundary of a site follows from the ordered axes in its extent:
+the high boundary along the =i=-th present axis has sign =(-1)^i=, the low
+boundary the opposite sign, and =∂∂ = 0= is an executable test in
+=luft/tests.lisp=.  Time is a fourth extent bit with no coordinate: "now" is
+an ambient origin, so temporal boundaries return an offset rather than a
+packed time.  See [[lisp:luft:make-site]] and [[lisp:luft:map-site-boundary]].
+
+* A block world is a 3-chain and its surface is a boundary
+:PROPERTIES:
+:ID: 9HLYEE
+:END:
+
+A [[lisp:luft:chain]] is a finite formal sum of sites with integer
+coefficients.  A solid world is the 3-chain with coefficient one on every
+solid cell, and its visible surface is not a meshing problem but an algebraic
+fact: [[lisp:luft:boundary-chain]] applies #KE4P5F's oriented boundary to
+every term.  Two solid neighbours contribute their shared face with opposite
+signs, so it cancels; only exposed faces survive, each with coefficient
+=+1= when the solid cell lies on its low side along the missing axis and
+=-1= when it lies on the high side.  That sign times the face's canonical
+orientation is its outward normal, and =∂(∂ solid) = 0= says the surface is
+closed.  Because =∂= is linear, editing a cell later means adding or
+subtracting one cell's six-term boundary, not remeshing anything.
+
+The luvcraft mesher walks chunk fields on the CPU and emits atlas-textured
+quads (see [[file:block-world.org][the block world]]); LUFT's
+[[lisp:luft:surface-chain]] is a hash table of signed face sites.  Both are
+right for their worlds; the second is what a mesh shader wants.
+
+* The GPU reads the surface as packed 64-bit terms
+:PROPERTIES:
+:ID: AGVXGM
+:END:
+
+A [[lisp:luft:pack-term]] is one 64-bit word: the face site in its own 60
+bits and the sign of its unit coefficient in bit 60.  Sixty-one bits keep the
+word an immediate fixnum on 64-bit SBCL, and a specialized
+=(unsigned-byte 64)= vector of terms is exactly the buffer the shader reads;
+no vertex is ever built on the CPU.  The renderer orders the terms by
+eight-cell chunk, pads them to whole /bricks/ of 64, and measures one
+bounding sphere per brick as four floats — two arrays and one uniform block
+are the whole upload.
+
+The three free bits above the sign are deliberately unearned.  A per-face
+material would fit there, but a term is a chain term, and materials belong to
+cells; the atelier is textureless on purpose until that question is asked
+properly.
+
+* Storage buffers and bit fields enter the shader language
+:PROPERTIES:
+:ID: HFX2LI
+:END:
+
+The mathematical shader language of #S4H8DR had textures, samplers, and a
+vec4-only uniform block, and no way to read an array of 64-bit words.  Two
+additions carry a term into a shader:
+
+- A =:storage-buffer= resource with an =:element= type, indexed by
+  =buffer-element=; the array has no declared length, and a bare reference to
+  the buffer is an error.  Metal lowers it to =const device T* name
+  [[buffer(n)]]= bound through the same argument-table address slot as a
+  uniform buffer, and SPIR-V to a =StorageBuffer= block holding one
+  =RuntimeArray= with an explicit stride, asking for
+  =SPV_KHR_storage_buffer_storage_class= in 1.0 modules.
+- =ldb= with a literal =(byte size position)= on a =:uint= or =:uint64=
+  value, so a shader unpacks a site with the very words =luft.lisp= uses.
+  Metal lowers it to a shift and a mask in the operand's width; SPIR-V to
+  two logical shifts, because Vulkan restricts bit-field instructions to
+  32-bit operands and the language has no 64-bit constants.
+
+Both are raw representations until interpreted: they carry no quantity, so an
+unannotated graph stays valid legacy source and an annotated one still
+refuses to mix.  The Metal HAL gained the matching =:storage= buffer usage,
+=:storage-buffer= binding type, typed =write-buffer= for unsigned arrays,
+and depth-stencil state on mesh pipelines.
+
+* Task workgroups cull bricks; mesh lanes unpack faces
+:PROPERTIES:
+:ID: VAABY9
+:END:
+
+[[file:images/luft-atelier.png]]
+
+The pipeline in =luft/render/shaders.lisp= has three stages and no vertex
+buffer.  A task workgroup owns one brick: it reads the brick's sphere,
+tests it against the view pyramid with a workgroup-uniform expression, and
+emits one mesh workgroup or none, handing the brick index through a
+one-word payload.  Each mesh lane then loads one term with =buffer-element=,
+extracts anchor, extent, and sign with =ldb=, and writes four vertices and
+two triangles.  The extent names the face's two spanning axes in canonical
+X<Y<Z order, their cross product is the canonical orientation, and the
+sign times that orientation is the outward normal — the boundary operator's
+sign convention rendered directly.  A lane whose term is zero, or whose face
+turns away from the camera by the exact plane test, scales its quad to a
+point instead of branching on output counts, which the language requires to
+be uniform.
+
+The fragment stage is textureless by design: a top, side, and bottom tone,
+a soft line where faces meet, sun and ambient light, and fog toward the sky.
+The whole atelier is =luft/render=: a scene holds the solid chain and its
+products, a renderer holds the GPU objects, [[lisp:luft.render:render-to-png]]
+draws headlessly, and [[lisp:luft.render:start-viewer]] opens a window with a
+fly camera.  Its test turns the camera straight up and expects only sky,
+which is the frustum test doing real work.
+
+** NEXT Edit cells through the linearity of the boundary
+:PROPERTIES:
+:ID: 3QNZC1
+:END:
+
+/Intent./ Let the viewer place and remove cells by updating the surface chain
+with =±∂cell= (#9HLYEE), re-pack only the touched bricks, and upload them,
+so an edit costs six hash-table updates and one small =write-buffer=.
+
+/Evidence./ The whole-scene path already refreshes and re-uploads correctly;
+[[lisp:luft.render:refresh-scene]] rebuilds everything, which is fine for a
+64×64 world but is not the point of chains.
+
+/Done when./ Clicking in the viewer changes the world without a full
+=surface-chain= recomputation, and a test shows the incremental surface equals
+the recomputed one.
+
+** IDEA Compact surviving faces inside a brick
+:PROPERTIES:
+:ID: WQ611A
+:END:
+
+/Intent./ Today a culled or back-facing lane still costs four vertices and
+two degenerate triangles because output counts must be uniform and the
+language has no workgroup memory, atomics, or subgroup ballots.  A ballot
+and prefix sum in the task stage would let a brick emit only its visible
+faces, and a mesh workgroup could serve several sparse bricks.
+
+/Evidence./ The current world draws thousands of faces at trivial cost, so
+this is not yet a bottleneck; it is the natural next language extension
+after #HFX2LI, and the first that touches wave-level semantics on both
+Metal and SPIR-V.
+
+/Done when./ A dense brick facing away from the camera emits zero mesh work,
+measured on Metal, without changing the surface encoding of #AGVXGM.
+
+** IDEA Draw the torus, not only its fundamental domain
+:PROPERTIES:
+:ID: PGRM80
+:END:
+
+/Intent./ A camera outside the fundamental domain sees a cut world: faces at
+=x=0= that a solid neighbour at =x=period-1= cancels are honestly absent.
+The mesh lane could translate its anchor by the domain period toward the
+camera, or the task stage could dispatch each brick under the nearest
+translates, so the wrap becomes visible instead of surprising.
+
+/Evidence./ The first render, taken from =x=-6=, showed exactly this cut.
+
+/Done when./ Flying across the seam of a small domain shows the world repeat
+without a gap.

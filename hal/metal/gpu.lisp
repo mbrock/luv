@@ -509,7 +509,7 @@ backend-local extension; ordinary callers use SUBMIT.  #T9K4RC"
              (otherwise nil))))
     (unless (and usage
                  (every (lambda (value)
-                          (member value '(:uniform :vertex :copy-dst)))
+                          (member value '(:uniform :storage :vertex :copy-dst)))
                         usage))
       (reject-metal-gpu-request descriptor :unsupported-buffer-usage raw))
     usage))
@@ -555,24 +555,40 @@ backend-local extension; ordinary callers use SUBMIT.  #T9K4RC"
                (metal-device-residency-set device)))
             (luv.objective-c:release-objective-c-object native-buffer)))))))
 
+(defun buffer-data-foreign-type (data)
+  "Return the CFFI element type and byte size for a one-dimensional DATA
+array of single-floats or unsigned bytes, words, or double words."
+  (let ((element-type (and (arrayp data) (= 1 (array-rank data))
+                           (array-element-type data))))
+    (cond ((null element-type) nil)
+          ((subtypep element-type 'single-float) (values :float 4))
+          ((subtypep element-type '(unsigned-byte 8)) (values :uint8 1))
+          ((subtypep element-type '(unsigned-byte 32)) (values :uint32 4))
+          ((subtypep element-type '(unsigned-byte 64)) (values :uint64 8))
+          (t nil))))
+
 (defmethod write-buffer
     ((buffer metal-gpu-buffer) data &key (offset 0))
-  "Copy a one-dimensional single-float array into shared Metal memory."
+  "Copy a one-dimensional numeric array into shared Metal memory.
+
+DATA holds single-floats or unsigned 8-, 32-, or 64-bit integers; OFFSET is
+aligned to the element size."
   (ensure-live-metal-object buffer :write-buffer)
-  (unless (and (arrayp data) (= 1 (array-rank data))
-               (nth-value 0
-                 (subtypep (array-element-type data) 'single-float)))
-    (reject-metal-gpu-request buffer :unsupported-buffer-data data))
-  (unless (and (typep offset '(unsigned-byte 64))
-               (zerop (mod offset 4))
-               (<= (+ offset (* 4 (length data)))
-                   (gpu-buffer-size buffer)))
-    (reject-metal-gpu-request
-     buffer :buffer-write-out-of-bounds
-     (list :offset offset :length (* 4 (length data)))))
-  (let ((destination (cffi:inc-pointer (metal-buffer-mapped buffer) offset)))
-    (dotimes (index (length data))
-      (setf (cffi:mem-aref destination :float index) (aref data index))))
+  (multiple-value-bind (foreign-type element-size)
+      (buffer-data-foreign-type data)
+    (unless foreign-type
+      (reject-metal-gpu-request buffer :unsupported-buffer-data data))
+    (unless (and (typep offset '(unsigned-byte 64))
+                 (zerop (mod offset element-size))
+                 (<= (+ offset (* element-size (length data)))
+                     (gpu-buffer-size buffer)))
+      (reject-metal-gpu-request
+       buffer :buffer-write-out-of-bounds
+       (list :offset offset :length (* element-size (length data)))))
+    (let ((destination (cffi:inc-pointer (metal-buffer-mapped buffer) offset)))
+      (dotimes (index (length data))
+        (setf (cffi:mem-aref destination foreign-type index)
+              (aref data index)))))
   buffer)
 
 (defmethod read-buffer
@@ -768,7 +784,8 @@ backend-local extension; ordinary callers use SUBMIT.  #T9K4RC"
                                (typep (getf entry :binding)
                                       '(unsigned-byte 32))
                                (member (getf entry :type)
-                                       '(:texture :sampler :uniform-buffer))))
+                                       '(:texture :sampler :uniform-buffer
+                                         :storage-buffer))))
                         entries)
                  (= (length bindings) (length (remove-duplicates bindings))))
       (reject-metal-gpu-request descriptor :unsupported-bind-group-layout
@@ -801,7 +818,10 @@ backend-local extension; ordinary callers use SUBMIT.  #T9K4RC"
                        (:sampler (typep resource 'metal-gpu-sampler))
                        (:uniform-buffer
                         (and (typep resource 'metal-gpu-buffer)
-                             (member :uniform (gpu-buffer-usage resource))))))
+                             (member :uniform (gpu-buffer-usage resource))))
+                       (:storage-buffer
+                        (and (typep resource 'metal-gpu-buffer)
+                             (member :storage (gpu-buffer-usage resource))))))
           (reject-metal-gpu-request descriptor :invalid-bind-group-entry
                                     layout-entry))
         (ensure-metal-object-device
@@ -1242,7 +1262,12 @@ compiler boundary of #58IDSR."
          (max-mesh-workgroups
            (mesh-render-pipeline-descriptor-max-mesh-workgroups descriptor))
          (depth-stencil
-           (mesh-render-pipeline-descriptor-depth-stencil descriptor)))
+           (mesh-render-pipeline-descriptor-depth-stencil descriptor))
+         (depth-format (and depth-stencil (getf depth-stencil :format)))
+         (depth-compare
+           (and depth-stencil (getf depth-stencil :depth-compare)))
+         (depth-write-enabled
+           (and depth-stencil (getf depth-stencil :depth-write-enabled))))
     (unless (and (or (null layout)
                      (typep layout 'metal-gpu-bind-group-layout))
                  (or (null task-module)
@@ -1265,7 +1290,12 @@ compiler boundary of #58IDSR."
                  format
                  (member blend '(nil :premultiplied-alpha))
                  (typep max-mesh-workgroups '(integer 1 #.most-positive-fixnum))
-                 (null depth-stencil))
+                 (or (null depth-stencil)
+                     (and (eq depth-format :depth32-float)
+                          (member depth-compare
+                                  '(:never :less :equal :less-or-equal
+                                    :greater :not-equal :greater-or-equal
+                                    :always)))))
       (reject-metal-gpu-request
        descriptor :unsupported-metal-mesh-render-pipeline
        (list :layout layout :depth-stencil depth-stencil
@@ -1285,6 +1315,7 @@ compiler boundary of #58IDSR."
            (mesh-workgroup-size
              (metal-shader-module-workgroup-size mesh-module))
            (pipeline-state nil)
+           (depth-state nil)
            (completed-p nil))
       (unwind-protect
            (progn
@@ -1305,18 +1336,34 @@ compiler boundary of #58IDSR."
                         :reason :pipeline-compilation-failed
                         :details diagnostic))
                (setf pipeline-state pipeline))
+             (when depth-stencil
+               (setf depth-state
+                     (luv.metal:new-metal-depth-stencil-state
+                      (metal-native-object device)
+                      (metal-compare-function depth-compare)
+                      depth-write-enabled
+                      :label (and (gpu-descriptor-label descriptor)
+                                  (format nil "~A depth state"
+                                          (gpu-descriptor-label descriptor)))))
+               (unless depth-state
+                 (error 'metal-gpu-error
+                        :operation :create-mesh-render-pipeline
+                        :reason :depth-state-creation-failed)))
              (let ((pipeline
                      (make-instance
                       'metal-gpu-mesh-render-pipeline
                       :label (gpu-descriptor-label descriptor)
                       :native-object pipeline-state :device device :layout layout
                       :vertex-buffers nil :primitive-topology :triangle-list
-                      :fragment-p t :depth-format nil :depth-stencil-state nil
+                      :fragment-p t :depth-format depth-format
+                      :depth-stencil-state depth-state
                       :task-workgroup-size task-workgroup-size
                       :mesh-workgroup-size mesh-workgroup-size)))
                (setf completed-p t)
                pipeline))
         (unless completed-p
+          (when depth-state
+            (luv.objective-c:release-objective-c-object depth-state))
           (when pipeline-state
             (luv.objective-c:release-objective-c-object pipeline-state)))))))
 
@@ -1620,7 +1667,7 @@ compiler boundary of #58IDSR."
         (when (typep resource 'metal-gpu-texture-view)
           (retain-metal-resource owner (gpu-texture-view-texture resource)))
         (ecase (getf layout-entry :type)
-          (:uniform-buffer
+          ((:uniform-buffer :storage-buffer)
            (luv.metal:set-metal-argument-table-address
             table
             (luv.metal:metal-buffer-gpu-address
@@ -1664,7 +1711,8 @@ compiler boundary of #58IDSR."
                                     :key (lambda (buffer)
                                            (getf buffer :binding))))
                         0)
-                    (metal-layout-binding-count layout :uniform-buffer)))
+                    (metal-layout-binding-count layout :uniform-buffer)
+                    (metal-layout-binding-count layout :storage-buffer)))
              (texture-count (metal-layout-binding-count layout :texture))
              (sampler-count (metal-layout-binding-count layout :sampler)))
         (when (plusp (+ buffer-count texture-count sampler-count))

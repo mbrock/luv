@@ -136,6 +136,10 @@ The following are starting paths rather than a table of settled doctrine.
   dirty render snapshots to luv's Slug text path and the existing world-overlay
   interaction seam.  Its first slice draws one fixed terminal row directly in
   the scene before attaching a live PTY.
+- [[file:luft.org][LUFT: packed sites, chains, and the mesh atelier]] names every vertex,
+  edge, face, and cell of a cubical world with one fixnum, treats a block
+  world as a 3-chain whose boundary is its surface, and draws that surface
+  with task and mesh shaders reading the packed words from a storage buffer.
 - [[file:domains-and-bundles.org][Domains, bundles, and materialized worlds]] studies why CLOS and
   structure-of-arrays storage are compatible, and what chunking, level of
   detail, procedural generation, and streaming ask of the object model.

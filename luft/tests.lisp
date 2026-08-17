@@ -167,3 +167,72 @@
                (declare (ignore site))
                (ok (zerop coefficient)))
              coefficients)))
+
+(defun cube-chain (domain x y z)
+  (let ((solid (make-solid-chain domain)))
+    (setf (solid-cell-p solid x y z) t)
+    solid))
+
+(deftest a-single-cell-bounds-six-signed-faces
+  (let* ((domain (make-world-domain :horizontal-bits 6))
+         (surface (surface-chain (cube-chain domain 3 4 5))))
+    (ok (= 6 (chain-count surface)))
+    ;; The high boundary along X carries the sign of the first axis, +1;
+    ;; the low boundary carries -1.  Along Y one earlier axis flips it.
+    (ok (= 1 (chain-coefficient
+              surface (make-site domain 4 4 5 +yz-face-extent+))))
+    (ok (= -1 (chain-coefficient
+               surface (make-site domain 3 4 5 +yz-face-extent+))))
+    (ok (= -1 (chain-coefficient
+               surface (make-site domain 3 5 5 +xz-face-extent+))))
+    (ok (= 1 (chain-coefficient
+              surface (make-site domain 3 4 5 +xz-face-extent+))))
+    (ok (= 1 (chain-coefficient
+              surface (make-site domain 3 4 6 +xy-face-extent+))))
+    (ok (= -1 (chain-coefficient
+               surface (make-site domain 3 4 5 +xy-face-extent+))))))
+
+(deftest neighbouring-cells-cancel-their-shared-face
+  (let* ((domain (make-world-domain :horizontal-bits 6))
+         (solid (make-solid-chain domain)))
+    (setf (solid-cell-p solid 3 4 5) t
+          (solid-cell-p solid 4 4 5) t)
+    (let ((surface (surface-chain solid)))
+      (ok (= 10 (chain-count surface)))
+      (ok (zerop (chain-coefficient
+                  surface (make-site domain 4 4 5 +yz-face-extent+))))
+      (ok (= 1 (chain-coefficient
+                surface (make-site domain 5 4 5 +yz-face-extent+))))
+      (ok (= 0 (chain-count (boundary-chain surface)))))))
+
+(deftest solid-surfaces-wrap-with-the-torus
+  (let* ((domain (make-world-domain :x-bits 3 :y-bits 3))
+         (solid (make-solid-chain domain)))
+    (loop for x below (world-domain-x-period domain)
+          do (setf (solid-cell-p solid x 2 2) t))
+    ;; A full ring around X has no YZ faces at all.
+    (let ((surface (surface-chain solid)))
+      (ok (= (* 4 (world-domain-x-period domain)) (chain-count surface)))
+      (ok (zerop (chain-count (boundary-chain surface)))))))
+
+(deftest packed-terms-carry-site-and-sign-in-one-fixnum
+  (let* ((domain (make-world-domain :horizontal-bits 4))
+         (surface (surface-chain (cube-chain domain 1 2 3)))
+         (terms (chain-packed-terms surface)))
+    (ok (typep terms '(simple-array (unsigned-byte 64) (*))))
+    (ok (= 6 (length terms)))
+    (ok (every (lambda (term) (typep term 'fixnum)) terms))
+    (ok (loop for index from 1 below (length terms)
+              always (< (packed-term-site (aref terms (1- index)))
+                        (packed-term-site (aref terms index)))))
+    (loop for term across terms
+          do (ok (= (packed-term-coefficient term)
+                    (chain-coefficient surface (packed-term-site term)))))
+    (ok (signals (pack-term (make-site domain 0 0 0) 2) 'type-error))))
+
+(deftest temporal-chains-have-no-packed-boundary
+  (let* ((domain (make-world-domain :horizontal-bits 4))
+         (chain (make-chain domain)))
+    (add-chain-term chain (make-site domain 0 0 0 (make-extent :x :t)) 1)
+    (ok (not (chain-spatial-p chain)))
+    (ok (signals (boundary-chain chain) 'error))))

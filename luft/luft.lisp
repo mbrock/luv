@@ -9,7 +9,7 @@
 ;;; ------------------------------------------------------------------------
 ;;; Sites
 
-;;; A site consists of a lattice-point anchor and an extent mask.
+;;; A site consists of a lattice-point anchor and an extent mask.  #KE4P5F
 ;;;
 ;;; Each spatial extent bit says that the site spans the unit interval
 ;;; forward from its anchor along that axis.  Thus:

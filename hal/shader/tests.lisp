@@ -2180,3 +2180,114 @@
               (spv:shader-language-error-reason condition)))))
     (ok (eq unknown-reason :unknown-name))
     (ok (eq type-reason :output-type-mismatch))))
+
+;;; Storage buffers and bit fields: the path a packed 64-bit site takes from a
+;;; host array into a shader.
+
+(spv:define-shader storage-site-fragment-probe
+    (:stage :fragment
+     :resources ((sites :storage-buffer :binding 1 :element :uint64)
+                 (words :storage-buffer :binding 2 :element :uvec4))
+     :outputs ((color :vec4 :location 0)))
+  (let* ((term (spv:buffer-element sites (uint 3.0)))
+         (extent (uint (ldb (byte 4 0) term)))
+         (x (uint (ldb (byte 24 4) term)))
+         (z (uint (ldb (byte 8 52) term)))
+         (word (swizzle (spv:buffer-element words extent) :x))
+         (high (ldb (byte 16 16) word))
+         (whole (ldb (byte 32 0) word))
+         (shade (/ (float (+ x z high whole)) 255.0)))
+    (set-output color (vec4 shade shade shade 1.0))))
+
+(defun storage-probe-error-reason (resources body)
+  (handler-case
+      (progn
+        (spv:parse-shader-specification
+         'storage-probe
+         `(:stage :fragment
+           :resources ,resources
+           :outputs ((color :vec4 :location 0)))
+         body)
+        nil)
+    (spv:shader-language-error (condition)
+      (spv:shader-language-error-reason condition))))
+
+(deftest storage-buffers-declare-typed-elements-and-index-them
+  (let* ((specification (storage-site-fragment-probe))
+         (sites (find 'sites (spv:shader-specification-resources specification)
+                      :key #'spv:shader-object-name :test #'string-equal))
+         (words (find 'words (spv:shader-specification-resources specification)
+                      :key #'spv:shader-object-name :test #'string-equal))
+         (term (binding-named 'term specification)))
+    (ok (typep sites 'spv:shader-storage-buffer))
+    (ok (eq (spv:find-shader-type :uint64)
+            (spv:shader-storage-buffer-element-type sites)))
+    (ok (= 8 (spv:shader-storage-buffer-element-stride sites)))
+    (ok (= 16 (spv:shader-storage-buffer-element-stride words)))
+    (ok (typep (spv:shader-binding-expression term) 'spv:shader-buffer-element))
+    (ok (eq (spv:find-shader-type :uint64)
+            (spv:shader-expression-type (spv:shader-binding-expression term))))
+    (ok (typep (spv:shader-binding-expression (binding-named 'extent specification))
+               'spv:shader-call))))
+
+(deftest storage-buffers-and-bit-fields-reject-ill-typed-source
+  (ok (eq :invalid-storage-buffer-element
+          (storage-probe-error-reason
+           '((sites :storage-buffer :binding 1))
+           '((set-output color (vec4 1.0 1.0 1.0 1.0))))))
+  (ok (eq :invalid-storage-buffer-element
+          (storage-probe-error-reason
+           '((sites :storage-buffer :binding 1 :element :uvec3))
+           '((set-output color (vec4 1.0 1.0 1.0 1.0))))))
+  (ok (eq :element-on-non-storage-buffer
+          (storage-probe-error-reason
+           '((sites :texture-2d :binding 1 :element :uint))
+           '((set-output color (vec4 1.0 1.0 1.0 1.0))))))
+  (ok (eq :storage-buffer-requires-element
+          (storage-probe-error-reason
+           '((sites :storage-buffer :binding 1 :element :vec4))
+           '((set-output color sites)))))
+  (ok (eq :buffer-index-type
+          (storage-probe-error-reason
+           '((sites :storage-buffer :binding 1 :element :vec4))
+           '((set-output color (spv:buffer-element sites 1.0))))))
+  (ok (eq :byte-specifier-exceeds-width
+          (storage-probe-error-reason
+           '((sites :storage-buffer :binding 1 :element :uint))
+           '((let* ((word (spv:buffer-element sites (uint 0.0)))
+                    (field (float (ldb (byte 8 28) word))))
+               (set-output color (vec4 field field field 1.0)))))))
+  (ok (eq :invalid-byte-specifier
+          (storage-probe-error-reason
+           '((sites :storage-buffer :binding 1 :element :uint))
+           '((let* ((word (spv:buffer-element sites (uint 0.0)))
+                    (field (float (ldb (byte 0 4) word))))
+               (set-output color (vec4 field field field 1.0)))))))
+  (ok (eq :invalid-bit-field-operand
+          (storage-probe-error-reason
+           '((sites :storage-buffer :binding 1 :element :float))
+           '((let* ((word (spv:buffer-element sites (uint 0.0)))
+                    (field (ldb (byte 8 4) word)))
+               (set-output color (vec4 field field field 1.0))))))))
+
+(deftest storage-buffers-lower-to-storage-class-runtime-arrays
+  (let* ((specification (storage-site-fragment-probe))
+         (module (spv:shader-module specification))
+         (instructions (spv:lower-spir-v module))
+         (names (mapcar #'spv:instruction-name instructions))
+         (forms (write-to-string (mapcar #'spv:instruction-form instructions)))
+         (words (spv:assemble-shader-specification specification)))
+    (ok (equal '("SPV_KHR_storage_buffer_storage_class")
+               (spv:spir-v-module-extensions module)))
+    (ok (member 'spv::int64 (spv:spir-v-module-capabilities module)))
+    (dolist (name '(spv::type-runtime-array spv::access-chain spv::load
+                    spv::shift-left-logical spv::shift-right-logical))
+      (ok (find name names)))
+    ;; Bit fields never lower to bit-field instructions, which Vulkan limits
+    ;; to 32-bit operands, nor to 64-bit mask constants.
+    (ng (find 'spv::bitwise-and names))
+    (ok (search "STORAGE-BUFFER" forms))
+    (ok (search "ARRAY-STRIDE 8" forms))
+    (ok (search "ARRAY-STRIDE 16" forms))
+    (ok (search "NON-WRITABLE" forms))
+    (ok (= #x07230203 (aref words 0)))))

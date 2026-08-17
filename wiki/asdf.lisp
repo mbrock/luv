@@ -62,7 +62,7 @@
   (remove nil (mapcar #'org-file-document (system-org-files system))))
 
 (defparameter *code-systems*
-  '("luv" "luvcraft" "mcluv" "luv-wiki" "luv-wiki-site")
+  '("luv" "luvcraft" "mcluv" "luft" "luv-wiki" "luv-wiki-site")
   "Primary names of the systems whose source files the site reads for
 definitions and figure mentions.  luv-wiki is among them so the site shows
 how it renders itself; its tests fabricate figure IDs, which is why

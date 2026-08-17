@@ -266,6 +266,8 @@
   (:opcode 27) (:result :id) (:operands :id))
 (define-instruction type-array (element-type length)
   (:opcode 28) (:result :id) (:operands :id :id))
+(define-instruction type-runtime-array (element-type)
+  (:opcode 29) (:result :id) (:operands :id))
 (define-instruction type-struct (&rest member-types)
   (:opcode 30) (:result :id) (:operands :id))
 (define-instruction type-pointer (storage-class type)
@@ -326,6 +328,7 @@
   (u-mod 137)
   (dot 148)
   (shift-right-logical 194)
+  (shift-left-logical 196)
   (bitwise-and 199))
 (define-typed-binary-instructions
   (i-equal 170)
@@ -405,7 +408,9 @@
 (define-enumeration selection-control (none 0))
 (define-enumeration decoration
   (block 2)
+  (array-stride 6)
   (built-in 11)
+  (non-writable 24)
   (per-primitive-ext 5271)
   (location 30)
   (binding 33)
@@ -453,6 +458,7 @@
   (uniform 2)
   (output 3)
   (function 7)
+  (storage-buffer 12)
   (task-payload-workgroup-ext 5402))
 (define-enumeration function-control (none 0))
 

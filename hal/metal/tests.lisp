@@ -766,3 +766,76 @@
                          (+ resources-before (* 4 state-count)))))))
          (when session
            (stop-luvcraft session)))))))
+
+(deftest metal-storage-buffers-carry-packed-words-to-mesh-pipelines
+  (let ((device
+          (request-gpu-device (make-instance 'metal-gpu-provider)))
+        (terms nil)
+        (uniform nil)
+        (layout nil)
+        (bind-group nil))
+    (unwind-protect
+         (progn
+           (setf terms
+                 (create
+                  device
+                  (make-buffer-descriptor
+                   :label "storage words" :size 32 :usage '(:storage)))
+                 uniform
+                 (create
+                  device
+                  (make-buffer-descriptor
+                   :label "storage words uniform" :size 16
+                   :usage '(:uniform))))
+           ;; Sixty-four-bit words round-trip through the shared buffer.
+           (write-buffer terms
+                         (make-array 4 :element-type '(unsigned-byte 64)
+                                       :initial-contents
+                                       '(1 #x123456789abcdef0
+                                         #xffffffffffffffff 0)))
+           (let ((bytes (read-buffer terms)))
+             (ok (= 32 (length bytes)))
+             (ok (= 1 (aref bytes 0)))
+             (ok (= #xf0 (aref bytes 8)))
+             (ok (= #x12 (aref bytes 15)))
+             (ok (= #xff (aref bytes 23))))
+           ;; A one-word offset is legal for a 64-bit array; a half word is not.
+           (write-buffer terms
+                         (make-array 1 :element-type '(unsigned-byte 64)
+                                       :initial-contents '(7))
+                         :offset 8)
+           (ok (= 7 (aref (read-buffer terms) 8)))
+           (ok (signals
+                (write-buffer terms
+                              (make-array 1 :element-type '(unsigned-byte 64)
+                                            :initial-contents '(7))
+                              :offset 4)
+                'gpu-error))
+           ;; Storage buffers bind beside uniform buffers, by usage.
+           (setf layout
+                 (create
+                  device
+                  (make-bind-group-layout-descriptor
+                   :entries '((:binding 0 :type :uniform-buffer)
+                              (:binding 1 :type :storage-buffer)))))
+           (ok (signals
+                (create
+                 device
+                 (make-bind-group-descriptor
+                  :layout layout
+                  :entries `((:binding 0 :resource ,uniform)
+                             (:binding 1 :resource ,uniform))))
+                'gpu-error))
+           (setf bind-group
+                 (create
+                  device
+                  (make-bind-group-descriptor
+                   :layout layout
+                   :entries `((:binding 0 :resource ,uniform)
+                              (:binding 1 :resource ,terms)))))
+           (ok (typep bind-group 'luv::metal-gpu-bind-group)))
+      (when bind-group (destroy bind-group))
+      (when layout (destroy layout))
+      (when uniform (destroy uniform))
+      (when terms (destroy terms))
+      (destroy device))))
