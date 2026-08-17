@@ -172,3 +172,46 @@ Every coefficient must be a unit; see PACK-TERM."
           do (setf (aref terms index)
                    (pack-term site (chain-coefficient chain site))))
     terms))
+
+;;; ------------------------------------------------------------------------
+;;; Dense cell bits
+
+;;; A solid chain over a small domain has a second natural form: one bit per
+;;; cell, indexed X-fastest then Y then Z over the domain's periods and the
+;;; 256 vertical planes.  It is the form a shader consults when it needs the
+;;; star of a site, that is, the cells around an edge or a vertex.
+
+(defconstant +vertical-cell-rows+ 256)
+
+(defun cell-bit-index (domain x y z)
+  "The dense bit index of the cell anchored at X,Y,Z in DOMAIN."
+  (+ (logand x (world-domain-x-mask domain))
+     (* (world-domain-x-period domain)
+        (+ (logand y (world-domain-y-mask domain))
+           (* (world-domain-y-period domain) z)))))
+
+(defun chain-cell-bit-count (domain)
+  "The number of cell bits DOMAIN needs."
+  (* (world-domain-x-period domain)
+     (world-domain-y-period domain)
+     +vertical-cell-rows+))
+
+(defun chain-cell-bits (chain)
+  "Return CHAIN's positive cell terms as a dense (unsigned-byte 32) bit vector.
+
+Bit CELL-BIT-INDEX is set for every cell whose coefficient is positive; the
+words are ordered so that word W holds bits 32W through 32W+31."
+  (let* ((domain (chain-domain chain))
+         (words (make-array (ceiling (chain-cell-bit-count domain) 32)
+                            :element-type '(unsigned-byte 32)
+                            :initial-element 0)))
+    (maphash (lambda (site coefficient)
+               (when (and (plusp coefficient)
+                          (= (site-extent site) +cell-extent+))
+                 (let ((index (cell-bit-index domain (site-x site)
+                                              (site-y site) (site-z site))))
+                   (setf (ldb (byte 1 (mod index 32))
+                              (aref words (floor index 32)))
+                         1))))
+             (chain-coefficients chain))
+    words))

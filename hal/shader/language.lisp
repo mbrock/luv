@@ -2211,6 +2211,12 @@ symbol naming one, else NIL."
 
 (defmethod parse-shader-operator-call
     ((operator (eql 'ldb)) form environment)
+  "Parse (LDB (BYTE SIZE POSITION) VALUE).
+
+SIZE is a positive integer.  POSITION is an integer, or a 32-bit unsigned
+expression for a field whose place is only known at run time; then the field
+must still fit the operand's width, which is checked by the caller's data
+rather than the language."
   (unless (= (length form) 3)
     (error 'shader-language-error :form form :reason :ldb-arity))
   (let* ((specifier (second form))
@@ -2219,22 +2225,36 @@ symbol naming one, else NIL."
                     (shader-constant-integer-value (second specifier))))
          (position (and size
                         (shader-constant-integer-value (third specifier))))
+         (position-expression
+           (and size (null position)
+                (parse-shader-expression (third specifier) environment)))
          (value (parse-shader-expression (third form) environment))
          (type (shader-expression-type value)))
-    (unless (and size position (plusp size) (>= position 0))
+    (unless (and size (plusp size)
+                 (or (and position (>= position 0))
+                     position-expression))
       (error 'shader-language-error
              :form form :reason :invalid-byte-specifier :details specifier))
     (unless (shader-unsigned-type-p type)
       (error 'shader-language-error
              :form form :reason :invalid-bit-field-operand
              :details (shader-type-name type)))
-    (unless (<= (+ size position) (shader-type-bit-width type))
+    (when (and position-expression
+               (not (shader-uint-type-p
+                     (shader-expression-type position-expression))))
+      (error 'shader-language-error
+             :form form :reason :byte-position-type
+             :details (shader-type-name
+                       (shader-expression-type position-expression))))
+    (unless (<= (+ size (or position 0)) (shader-type-bit-width type))
       (error 'shader-language-error
              :form form :reason :byte-specifier-exceeds-width
              :details (list specifier (shader-type-bit-width type))))
     (make-instance 'shader-bit-field-call
                    :operator operator
-                   :operands (list value)
+                   :operands (if position-expression
+                                 (list value position-expression)
+                                 (list value))
                    :size size :position position
                    :type type
                    :quantity-specification nil
@@ -4643,25 +4663,34 @@ backend's context before its source-located unsupported-operation method."))
   ;; Left-align the field, then right-align it: two logical shifts by 32-bit
   ;; amounts extract any field of a 32- or 64-bit value without bit-field
   ;; instructions, which Vulkan restricts to 32-bit operands, and without
-  ;; wide mask constants.
+  ;; wide mask constants.  A run-time position subtracts itself from the
+  ;; constant left shift.
   (let* ((type (shader-expression-type expression))
          (width (shader-type-bit-width type))
          (size (shader-bit-field-size expression))
          (position (shader-bit-field-position expression))
-         (value (lower-shader-expression
-                 context (first (shader-call-operands expression))))
+         (operands (shader-call-operands expression))
+         (value (lower-shader-expression context (first operands)))
+         (left-shift
+           (cond (position
+                  (and (< (+ size position) width)
+                       (ensure-shader-uint-constant
+                        context (- width size position))))
+                 (t
+                  (emit-value-instruction
+                   context expression :uint 'i-sub
+                   (list (ensure-shader-uint-constant context (- width size))
+                         (lower-shader-expression
+                          context (second operands)))))))
          (aligned
-           (if (= (+ size position) width)
-               value
+           (if left-shift
                (emit-value-instruction
                 context expression type 'shift-left-logical
-                (list value
-                      (ensure-shader-uint-constant
-                       context (- width size position)))))))
+                (list value left-shift))
+               value)))
     (if (= size width)
         (progn
-          (alias-shader-expression
-           context expression (first (shader-call-operands expression)))
+          (alias-shader-expression context expression (first operands))
           aligned)
         (emit-value-instruction
          context expression type 'shift-right-logical

@@ -68,4 +68,8 @@
    #:pack-term
    #:packed-term-site
    #:packed-term-coefficient
-   #:chain-packed-terms))
+   #:chain-packed-terms
+   #:+vertical-cell-rows+
+   #:cell-bit-index
+   #:chain-cell-bit-count
+   #:chain-cell-bits))

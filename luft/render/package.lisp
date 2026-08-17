@@ -7,10 +7,12 @@
            #:+frame-binding+
            #:+terms-binding+
            #:+bricks-binding+
+           #:+cells-binding+
            #:*frame-uniform-members*
            #:surface-brick-payload
            #:surface-task-shader
            #:surface-mesh-shader
+           #:bevel-mesh-shader
            #:surface-fragment-shader
            #:frame-uniform-block))
 
@@ -30,6 +32,7 @@ of packed LUFT sites, drawn by task and mesh shaders.")
            #:scene-terms
            #:scene-bricks
            #:scene-brick-count
+           #:scene-cell-bits
            #:refresh-scene
            #:fly-camera
            #:make-fly-camera
@@ -45,6 +48,8 @@ of packed LUFT sites, drawn by task and mesh shaders.")
            #:renderer-scene
            #:renderer-camera
            #:renderer-extent
+           #:renderer-style
+           #:*bevel-radius*
            #:destroy-renderer
            #:upload-scene
            #:encode-frame

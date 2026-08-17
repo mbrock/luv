@@ -811,23 +811,32 @@
      (expression spv:shader-bit-field-call))
   "Lower LDB to a logical shift and mask in the operand's own width."
   (declare (ignore operator))
-  (let* ((value (msl-occurrence-text
-                 (lower-msl-expression
-                  context (first (spv:shader-call-operands expression)))))
+  (let* ((operands (spv:shader-call-operands expression))
+         (value (msl-occurrence-text
+                 (lower-msl-expression context (first operands))))
          (size (spv:shader-bit-field-size expression))
          (position (spv:shader-bit-field-position expression))
          (width (spv:shader-type-bit-width
                  (spv:shader-expression-type expression)))
-         (suffix (if (= width 64) "ul" "u")))
+         (suffix (if (= width 64) "ul" "u"))
+         (shift (cond (position (format nil "~D~A" position suffix))
+                      ((= width 64)
+                       (format nil "ulong(~A)"
+                               (msl-occurrence-text
+                                (lower-msl-expression
+                                 context (second operands)))))
+                      (t (msl-occurrence-text
+                          (lower-msl-expression
+                           context (second operands)))))))
     (note-msl-occurrence
      context expression
-     (cond ((and (zerop position) (= size width))
+     (cond ((and position (zerop position) (= size width))
             (format nil "(~A)" value))
-           ((= (+ size position) width)
-            (format nil "(~A >> ~D~A)" value position suffix))
+           ((and position (= (+ size position) width))
+            (format nil "(~A >> ~A)" value shift))
            (t
-            (format nil "((~A >> ~D~A) & 0x~X~A)"
-                    value position suffix (1- (ash 1 size)) suffix))))))
+            (format nil "((~A >> ~A) & 0x~X~A)"
+                    value shift (1- (ash 1 size)) suffix))))))
 
 (define-msl-infix-operator + "+")
 (define-msl-infix-operator - "-")

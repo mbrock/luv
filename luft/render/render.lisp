@@ -38,7 +38,11 @@
     :documentation "Four floats per brick: bounding sphere centre and radius.")
    (brick-count
     :initform 0
-    :accessor scene-brick-count))
+    :accessor scene-brick-count)
+   (cell-bits
+    :initform nil
+    :accessor scene-cell-bits
+    :documentation "The solid chain as dense (unsigned-byte 32) cell bits."))
   (:documentation "A solid world together with its drawable surface products."))
 
 (defun make-scene (domain &key (solid (luft:make-solid-chain domain)))
@@ -105,7 +109,8 @@
     (setf (scene-surface scene) surface
           (scene-terms scene) terms
           (scene-brick-count scene) brick-count
-          (scene-bricks scene) (brick-spheres terms brick-count))
+          (scene-bricks scene) (brick-spheres terms brick-count)
+          (scene-cell-bits scene) (luft:chain-cell-bits (scene-solid scene)))
     scene))
 
 ;;; ------------------------------------------------------------------------
@@ -193,15 +198,17 @@
 (defparameter *ambient-light* 0.38)
 (defparameter *sky-color* (vec3:make-vec3 0.62 0.76 0.92))
 (defparameter *fog-distance* 140.0)
+(defparameter *bevel-radius* 0.22
+  "The crease rounding radius in cells, below one half.")
 
-(defun frame-uniform-data (camera width height)
-  "Pack the frame block: camera, basis, projection, sun, and sky lanes."
+(defun frame-uniform-data (camera width height &optional domain)
+  "Pack the frame block: camera, basis, projection, sun, sky, and domain lanes."
   (multiple-value-bind (right up forward) (camera-basis camera)
     (let* ((near *near-distance*)
            (far *far-distance*)
            (focal (/ (tan (/ (camera-field-of-view camera) 2.0))))
            (aspect (/ (coerce width 'single-float) height))
-           (data (make-array 28 :element-type 'single-float))
+           (data (make-array 32 :element-type 'single-float))
            (index 0))
       (flet ((lane (vector fourth)
                (setf (aref data index) (coerce (vec3:vec3-x vector) 'single-float)
@@ -218,7 +225,12 @@
         (lane (vec3:make-vec3 (/ focal aspect) focal (/ far (- far near)))
               (/ (- (* far near)) (- far near)))
         (lane *sun-direction* *ambient-light*)
-        (lane *sky-color* *fog-distance*))
+        (lane *sky-color* *fog-distance*)
+        (lane (vec3:make-vec3
+               (if domain (luft:world-domain-x-period domain) 1)
+               (if domain (luft:world-domain-y-period domain) 1)
+               *bevel-radius*)
+              0.0))
       data)))
 
 ;;; ------------------------------------------------------------------------
@@ -239,12 +251,17 @@
    (uniform-buffer :initform nil :accessor renderer-uniform-buffer)
    (terms-buffer :initform nil :accessor renderer-terms-buffer)
    (bricks-buffer :initform nil :accessor renderer-bricks-buffer)
+   (cells-buffer :initform nil :accessor renderer-cells-buffer)
    (terms-capacity :initform 0 :accessor renderer-terms-capacity)
    (bricks-capacity :initform 0 :accessor renderer-bricks-capacity)
+   (cells-capacity :initform 0 :accessor renderer-cells-capacity)
    (layout :initform nil :accessor renderer-layout)
    (bind-group :initform nil :accessor renderer-bind-group)
    (modules :initform nil :accessor renderer-modules)
-   (pipeline :initform nil :accessor renderer-pipeline)
+   (pipelines :initform nil :accessor renderer-pipelines
+              :documentation "A plist from style to mesh pipeline.")
+   (style :initarg :style :initform :bevel :accessor renderer-style
+          :documentation "Which mesh pipeline draws: :FLAT or :BEVEL.")
    (uploaded-scene :initform nil :accessor renderer-uploaded-scene))
   (:documentation "GPU resources drawing one scene from one camera."))
 
@@ -254,6 +271,10 @@
       (error "Frame block is ~D bytes but the host packs ~D."
              size (* 4 (length (frame-uniform-data (make-fly-camera) 1 1)))))
     size))
+
+(defun renderer-pipeline (renderer &optional (style (renderer-style renderer)))
+  (or (getf (renderer-pipelines renderer) style)
+      (error "Renderer has no ~S pipeline." style)))
 
 (defun create-renderer-targets (renderer)
   (let* ((device (renderer-device renderer))
@@ -289,6 +310,11 @@
                         :label "luft surface mesh"
                         :language :mathematical
                         :code (shaders:surface-mesh-shader))))
+         (bevel (create device
+                        (make-shader-module-descriptor
+                         :label "luft bevel mesh"
+                         :language :mathematical
+                         :code (shaders:bevel-mesh-shader))))
          (fragment (create device
                            (make-shader-module-descriptor
                             :label "luft surface fragment"
@@ -303,31 +329,38 @@
                             (:binding ,shaders:+terms-binding+
                              :type :storage-buffer)
                             (:binding ,shaders:+bricks-binding+
-                             :type :storage-buffer)))))
-         (pipeline (create device
-                           (make-mesh-render-pipeline-descriptor
-                            :label "luft surface pipeline"
-                            :layout layout
-                            :task `(:module ,task)
-                            :mesh `(:module ,mesh)
-                            :fragment
-                            `(:module ,fragment
-                              :targets ((:format
-                                         ,(renderer-color-format renderer))))
-                            :max-mesh-workgroups 1
-                            :depth-stencil '(:format :depth32-float
-                                             :depth-write-enabled t
-                                             :depth-compare :less)))))
-    (setf (renderer-modules renderer) (list task mesh fragment)
-          (renderer-layout renderer) layout
-          (renderer-pipeline renderer) pipeline)))
+                             :type :storage-buffer)
+                            (:binding ,shaders:+cells-binding+
+                             :type :storage-buffer))))))
+    (flet ((pipeline (label mesh-module)
+             (create device
+                     (make-mesh-render-pipeline-descriptor
+                      :label label
+                      :layout layout
+                      :task `(:module ,task)
+                      :mesh `(:module ,mesh-module)
+                      :fragment
+                      `(:module ,fragment
+                        :targets ((:format
+                                   ,(renderer-color-format renderer))))
+                      :max-mesh-workgroups 1
+                      :depth-stencil '(:format :depth32-float
+                                       :depth-write-enabled t
+                                       :depth-compare :less)))))
+      (setf (renderer-modules renderer) (list task mesh bevel fragment)
+            (renderer-layout renderer) layout
+            (renderer-pipelines renderer)
+            (list :flat (pipeline "luft surface pipeline" mesh)
+                  :bevel (pipeline "luft bevel pipeline" bevel))))))
 
 (defun make-renderer (&key scene camera device
                         (provider *gpu-provider*)
                         (width 1280) (height 800)
-                        (color-format :rgba8-unorm-srgb))
+                        (color-format :rgba8-unorm-srgb)
+                        (style :bevel))
   "Create every GPU object needed to draw SCENE from CAMERA at WIDTH by HEIGHT.
 
+STYLE is :BEVEL or :FLAT and may be changed later with (SETF RENDERER-STYLE).
 Without DEVICE, one is requested from PROVIDER and owned by the renderer."
   (let* ((owns-device-p (null device))
          (device (or device
@@ -337,7 +370,8 @@ Without DEVICE, one is requested from PROVIDER and owned by the renderer."
                                   :device device :owns-device-p owns-device-p
                                   :scene scene :camera camera
                                   :extent (list width height)
-                                  :color-format color-format))
+                                  :color-format color-format
+                                  :style style))
          (completed-p nil))
     (unwind-protect
          (progn
@@ -357,14 +391,17 @@ Without DEVICE, one is requested from PROVIDER and owned by the renderer."
 
 (defun destroy-renderer (renderer)
   "Release every GPU object of RENDERER, and its device when it owns one."
-  (dolist (resource (list (renderer-bind-group renderer)
-                          (renderer-pipeline renderer)
-                          (renderer-layout renderer)))
+  (dolist (resource (list* (renderer-bind-group renderer)
+                           (renderer-layout renderer)
+                           (loop for (nil pipeline) on (renderer-pipelines renderer)
+                                   by #'cddr
+                                 collect pipeline)))
     (when resource (ignore-errors (destroy resource))))
   (dolist (module (renderer-modules renderer))
     (ignore-errors (destroy module)))
   (dolist (resource (list (renderer-terms-buffer renderer)
                           (renderer-bricks-buffer renderer)
+                          (renderer-cells-buffer renderer)
                           (renderer-uniform-buffer renderer)
                           (renderer-color-view renderer)
                           (renderer-color-texture renderer)
@@ -372,11 +409,12 @@ Without DEVICE, one is requested from PROVIDER and owned by the renderer."
                           (renderer-depth-texture renderer)))
     (when resource (ignore-errors (destroy resource))))
   (setf (renderer-bind-group renderer) nil
-        (renderer-pipeline renderer) nil
+        (renderer-pipelines renderer) nil
         (renderer-layout renderer) nil
         (renderer-modules renderer) nil
         (renderer-terms-buffer renderer) nil
         (renderer-bricks-buffer renderer) nil
+        (renderer-cells-buffer renderer) nil
         (renderer-uniform-buffer renderer) nil)
   (when (renderer-owns-device-p renderer)
     (ignore-errors (destroy (renderer-device renderer))))
@@ -416,6 +454,13 @@ The second value is true when a new buffer was created."
                                (* 4 (length bricks)) "luft surface bricks")
       (when new-p (setf rebind-p t))
       (write-buffer bricks-buffer bricks))
+    (multiple-value-bind (cells-buffer new-p)
+        (ensure-storage-buffer renderer 'renderer-cells-buffer
+                               'renderer-cells-capacity
+                               (* 4 (length (scene-cell-bits scene)))
+                               "luft solid cells")
+      (when new-p (setf rebind-p t))
+      (write-buffer cells-buffer (scene-cell-bits scene)))
     (when rebind-p
       (when (renderer-bind-group renderer)
         (destroy (renderer-bind-group renderer)))
@@ -430,7 +475,9 @@ The second value is true when a new buffer was created."
                        (:binding ,shaders:+terms-binding+
                         :resource ,(renderer-terms-buffer renderer))
                        (:binding ,shaders:+bricks-binding+
-                        :resource ,(renderer-bricks-buffer renderer)))))))
+                        :resource ,(renderer-bricks-buffer renderer))
+                       (:binding ,shaders:+cells-binding+
+                        :resource ,(renderer-cells-buffer renderer)))))))
     (setf (renderer-scene renderer) scene
           (renderer-uploaded-scene renderer) scene)
     renderer))
@@ -444,7 +491,8 @@ The second value is true when a new buffer was created."
       (upload-scene renderer scene))
     (write-buffer (renderer-uniform-buffer renderer)
                   (frame-uniform-data (renderer-camera renderer)
-                                      (first extent) (second extent)))
+                                      (first extent) (second extent)
+                                      (scene-domain scene)))
     (let ((pass (begin-render-pass
                  encoder
                  (make-render-pass-descriptor
