@@ -18,8 +18,16 @@
     url = "github:wolfpld/tracy/v0.13.1";
     flake = false;
   };
+  # WPE WebKit, the embeddable browser engine, packaged out of tree.  Linux
+  # only, and by design: WPE's whole point is the accelerated-compositing
+  # handoff over EGL and linux-dmabuf, which has no Darwin equivalent (the
+  # macOS side of an embedded-browser surface would be WKWebView into an
+  # IOSurface instead).  Nothing here depends on it yet -- it is exposed as a
+  # deliberately off-to-the-side package so a Linux machine can build it into
+  # a shared cache ahead of the work that will use it.
+  inputs.nix-wpe-webkit.url = "github:eval-exec/nix-wpe-webkit";
 
-  outputs = { nixpkgs, ghostty, mcclim, cl-sdl3, tracy, ... }:
+  outputs = { nixpkgs, ghostty, mcclim, cl-sdl3, tracy, nix-wpe-webkit, ... }:
     let
       systems = [
         "x86_64-linux"
@@ -172,6 +180,13 @@
               ]);
           slyRoot =
             "${pkgs.emacsPackages.sly}/share/emacs/site-lisp/elpa/${pkgs.emacsPackages.sly.pname}-${pkgs.emacsPackages.sly.version}";
+          # A second nixpkgs instance carrying the WPE overlay, so the main
+          # `pkgs` above keeps its plain `legacyPackages` identity and nothing
+          # else in the closure is rebuilt by the overlay.
+          wpePkgs = import nixpkgs {
+            inherit system;
+            overlays = [ nix-wpe-webkit.overlays.default ];
+          };
           dev = pkgs.writeShellApplication {
             name = "luv-env";
             runtimeInputs = [
@@ -225,7 +240,7 @@
           };
         in
         {
-          inherit pkgs sbcl lisp nativeLibraryPath slyRoot dev;
+          inherit pkgs wpePkgs sbcl lisp nativeLibraryPath slyRoot dev;
           inherit libghosttyVt libghosttyVtLibrary;
           inherit tracyClient tracyClientLibrary;
         };
@@ -241,6 +256,10 @@
           libghostty-vt = env.libghosttyVt;
           tracy-client = env.tracyClient;
           default = env.lisp;
+        } // nixpkgs.lib.optionalAttrs env.pkgs.stdenv.isLinux {
+          # Reachable only by name, `nix build .#wpewebkit` on Linux: not in
+          # `default`, not in the dev shell, not in any library path.
+          wpewebkit = env.wpePkgs.wpewebkit;
         });
 
       devShells = forAllSystems (system:
