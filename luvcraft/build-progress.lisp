@@ -15,12 +15,13 @@
 ;;;; build/logs/.  The display thread writes to a dup of the original stderr,
 ;;;; so it keeps the console while everything else is being recorded.
 ;;;;
-;;;; Every line is one row of the same grid, so the kinds, the counters, the
-;;;; names and the times each keep their own column:
+;;;; Every line is one row of the same grid.  The gutter holds either a word
+;;;; or a file's place in the plan; names and times keep their columns either
+;;;; way:
 ;;;;
-;;;;   ;; system  [22/59]  luvcraft
-;;;;   ;; compile [ 6/71]  luvcraft/physics.lisp                 12s
-;;;;   ;; loaded  [22/59]  luvcraft                            31.2s
+;;;;   ;; system    luvcraft
+;;;;   ;; [ 66/150] luvcraft/physics.lisp                        12s
+;;;;   ;; done      luvcraft                                   31.2s
 
 (defpackage #:luv-build
   (:use #:cl)
@@ -57,6 +58,9 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
 (defun build-log ()
   (merge-pathnames "build.log" *log-directory*))
 
+(defun logs-root ()
+  (merge-pathnames "build/logs/" *project-root*))
+
 (defparameter *tick-interval* 0.25
   "How often the display thread wakes to redraw when no event has arrived.")
 
@@ -68,11 +72,12 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
 
 ;;; The grid
 
-(defparameter *kind-width* 8)
+(defparameter *gutter-width* 9
+  "The column holding either a word or a counter; widened by a large plan.")
 (defparameter *name-width* 44)
 (defparameter *time-width* 7)
 (defvar *counter-width* 2
-  "Digits per side of the [i/j] column, widened once the plan is known.")
+  "Digits per side of an [i/j] gutter, set once the plan is known.")
 
 ;;; The console: a dup of stderr, immune to the redirection below.
 
@@ -117,19 +122,16 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
              (format nil "~D:~2,'0D" minutes secs)))))
 
 (defun counter (index total)
+  "A file's place in the plan, for the gutter."
   (when total
-    (format nil "[~VD/~VD]" *counter-width* index *counter-width* total)))
+    (format nil "[~VD/~D]" *counter-width* index total)))
 
-(defun blank-counter ()
-  (make-string (+ 3 (* 2 *counter-width*)) :initial-element #\Space))
-
-(defun row (kind counter name &optional seconds)
-  "One line of the grid: kind, counter, name and time, each in its column."
+(defun row (gutter name &optional seconds)
+  "One line of the grid: a gutter, a name, and a time, each in its column."
   (string-right-trim
    " "
-   (format nil ";; ~VA ~A  ~VA ~V@A"
-           *kind-width* (or kind "")
-           (or counter (blank-counter))
+   (format nil ";; ~VA ~VA ~V@A"
+           *gutter-width* (or gutter "")
            *name-width* name
            *time-width* (or (format-seconds seconds) ""))))
 
@@ -149,15 +151,16 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
   (transient nil) (tripped nil) (failed nil)
   (start (get-internal-real-time)))
 
-(defun action-row (state kind label &optional seconds)
-  "The row an action gets, whether it is still running or finished."
-  (ecase kind
-    (:compile (row "compile" (counter (1+ (display-compiles-done state))
-                                      (display-compiles-total state))
-                   label seconds))
-    (:load (row "load" (counter (1+ (display-loads-done state))
-                                (display-loads-total state))
-                label seconds))))
+(defun action-row (state kind label &optional seconds runningp)
+  "The row an action gets, whether it is still running or finished.
+Compiling is the work the plan counts, so a finished compile gets the counter;
+loading only shows up when it is slow, and says so in a word.  A row still
+running says that instead, so it is never mistaken for a step that is done."
+  (row (cond (runningp "...")
+             ((eq kind :load) "load")
+             (t (counter (1+ (display-compiles-done state))
+                         (display-compiles-total state))))
+       label seconds))
 
 (defun clear-transient (state)
   (when (display-transient state)
@@ -200,12 +203,12 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
           (show-transient state (action-row state
                                             (display-current-kind state)
                                             (display-current state)
-                                            seconds)))))))
+                                            seconds t)))))))
 
 (defun trip-deadline (state seconds)
   (let ((label (display-current state)))
-    (emit state (row "DEADLINE" nil label seconds))
-    (emit state (row "note" nil
+    (emit state (row "DEADLINE" label seconds))
+    (emit state (row "note"
                      (format nil "over the ~Ds limit; LUV_BUILD_DEADLINE=0 disables it"
                              *deadline-seconds*)))
     ;; Stop ticking and let the build thread die of the error; the summary is
@@ -238,7 +241,6 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
                        (:done "built")
                        (:interrupted "stopped")
                        ((:deadline :error) "FAILED"))
-                     nil
                      (format nil "~D compiled, ~D loaded, ~D system~:P"
                              (length compiles)
                              (display-loads-done state)
@@ -248,10 +250,10 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
                                          :key #'record-seconds)))
                       (subseq slowest 0 (min 3 (length slowest)))))
       (when (> (record-seconds record) 1)
-        (emit state (row "slowest" nil (record-label record)
+        (emit state (row "slowest" (record-label record)
                          (record-seconds record)))))
     (when (and *log-directory* (member reason '(:deadline :error)))
-      (emit state (row "log" nil (failure-log state))))))
+      (emit state (row "log" (failure-log state))))))
 
 (defun handle (state message)
   (destructuring-bind (kind &rest args) message
@@ -261,20 +263,16 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
          (setf (display-systems-total state) systems
                (display-compiles-total state) compiles
                (display-loads-total state) loads
-               *counter-width* (reduce #'max (list systems compiles loads)
-                                       :key (lambda (n)
-                                              (length (princ-to-string n)))))
-         (emit state (row "plan" nil
+               *counter-width* (length (princ-to-string compiles))
+               *gutter-width* (max *gutter-width* (+ 3 (* 2 *counter-width*))))
+         (emit state (row "plan"
                           (format nil "~D systems, ~D to compile, ~D to load"
                                   systems compiles loads)))))
       (:system-begin
        (destructuring-bind (name) args
          (setf (display-system state) name
                (display-system-start state) (get-internal-real-time))
-         (emit state (row "system"
-                          (counter (1+ (display-systems-done state))
-                                   (display-systems-total state))
-                          name))))
+         (emit state (row "system" name))))
       (:system-end
        (destructuring-bind (name) args
          (let ((seconds (and (display-system-start state)
@@ -282,10 +280,7 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
            (incf (display-systems-done state))
            ;; A system that took real time says so; the quick ones do not.
            (when (and seconds (>= seconds 1))
-             (emit state (row "loaded"
-                              (counter (display-systems-done state)
-                                       (display-systems-total state))
-                              name seconds))))
+             (emit state (row "done" name seconds))))
          (setf (display-system state) nil
                (display-system-start state) nil)))
       (:begin
@@ -311,8 +306,8 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
               (emit state (action-row state :load label seconds)))
             (incf (display-loads-done state))))))
       (:note
-       (destructuring-bind (text) args
-         (emit state (row "note" nil text))))
+       (destructuring-bind (text &optional gutter) args
+         (emit state (row (or gutter "note") text))))
       (:finish
        (destructuring-bind (reason) args
          (when (and (eq reason :error) (display-current state))
@@ -452,6 +447,92 @@ logs the way the systems themselves nest: luv.log beside luv/domains.log."
     (error (e)
       (send :note (format nil "plan unavailable: ~A" e)))))
 
+;;; Keeping the logs
+
+(defun file-bytes (path)
+  (or (ignore-errors
+       (with-open-file (in path :element-type '(unsigned-byte 8))
+         (file-length in)))
+      0))
+
+(defun directory-bytes (path)
+  "Bytes under PATH, following nothing and counting each file once."
+  (let ((total 0))
+    (labels ((walk (dir)
+               (dolist (file (uiop:directory-files dir))
+                 (incf total (file-bytes file)))
+               (dolist (sub (uiop:subdirectories dir))
+                 (walk sub))))
+      (when (uiop:directory-exists-p path)
+        (walk (uiop:ensure-directory-pathname path))))
+    total))
+
+(defun human-bytes (bytes)
+  (cond ((< bytes 1024) (format nil "~DB" bytes))
+        ((< bytes (* 1024 1024)) (format nil "~,1FK" (/ bytes 1024.0)))
+        ((< bytes (* 1024 1024 1024)) (format nil "~,1FM" (/ bytes 1048576.0)))
+        (t (format nil "~,1FG" (/ bytes 1073741824.0)))))
+
+(defun log-directory-id (directory)
+  (car (last (pathname-directory directory))))
+
+(defun archive-log-directory (directory)
+  "tar.zst one build's logs and remove the directory it came from."
+  (let* ((id (log-directory-id directory))
+         (archive (merge-pathnames (format nil "~A.tar.zst" id) (logs-root))))
+    (uiop:run-program (list "tar" "--use-compress-program" "zstd -9"
+                            "-cf" (sb-ext:native-namestring archive)
+                            "-C" (sb-ext:native-namestring (logs-root))
+                            id)
+                      :output :interactive :error-output :interactive)
+    (uiop:delete-directory-tree directory :validate t)
+    archive))
+
+(defun compact-logs ()
+  "Archive every build's logs, this one and any failures left lying about.
+Returns the current build's archive, and how many were made."
+  (let ((current nil) (count 0))
+    ;; The symlink would otherwise be walked as a directory of its own.
+    (ignore-errors
+     (sb-posix:unlink (sb-ext:native-namestring
+                       (merge-pathnames "latest" (logs-root)))))
+    (dolist (directory (uiop:subdirectories (logs-root)))
+      (let ((archive (ignore-errors (archive-log-directory directory))))
+        (when archive
+          (incf count)
+          (when (equal (log-directory-id directory) *build-id*)
+            (setf current archive)))))
+    (when current
+      (ignore-errors
+       (sb-posix:symlink (file-namestring current)
+                         (sb-ext:native-namestring
+                          (merge-pathnames "latest" (logs-root))))))
+    (values current count)))
+
+(defun report-disk (reason)
+  "Say what this build's logs cost, and what the tree costs now.
+A build that worked earns the right to pack away every build's logs, including
+the failures that led up to it."
+  (let ((raw (directory-bytes *log-directory*)))
+    (if (eq reason :done)
+        (multiple-value-bind (archive count) (compact-logs)
+          (send :note (if archive
+                          (format nil "this build ~A -> ~A, ~D build~:P archived"
+                                  (human-bytes raw)
+                                  (human-bytes (file-bytes archive))
+                                  count)
+                          (format nil "~A, not packed" (human-bytes raw)))
+                "logs"))
+        (send :note (format nil "~A in ~A" (human-bytes raw)
+                            (namestring (uiop:enough-pathname *log-directory*
+                                                              *project-root*)))
+              "logs")))
+  (send :note (format nil "build/logs ~A, build/ ~A"
+                      (human-bytes (directory-bytes (logs-root)))
+                      (human-bytes (directory-bytes
+                                    (merge-pathnames "build/" *project-root*))))
+        "disk"))
+
 ;;; Entry points
 
 (defun start (project-root &key system)
@@ -485,10 +566,12 @@ logs the way the systems themselves nest: luv.log beside luv/domains.log."
   (values))
 
 (defun finish (reason)
-  "Stop the display thread, after it has printed the summary.
-Must run before SAVE-LISP-AND-DIE, which refuses to dump with threads alive."
+  "Report the disk, then stop the display thread once it has printed the last
+rows.  Must run before SAVE-LISP-AND-DIE, which refuses to dump an image while
+another thread is alive."
   (when (and *display-thread* (sb-thread:thread-alive-p *display-thread*))
+    (ignore-errors (report-disk reason))
     (send :finish reason)
-    (sb-thread:join-thread *display-thread* :timeout 10 :default nil))
+    (sb-thread:join-thread *display-thread* :timeout 60 :default nil))
   (setf *display-thread* nil)
   (values))
