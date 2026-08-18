@@ -203,18 +203,12 @@
       (ok (equal '("Esc") (keys-for "In the world" "show keys")))
       (ok (equal '("F11") (keys-for "Any time" "toggle fullscreen")))
       ;; Modifiers are printed, and :ANY is not: it is noise on every row.
-<<<<<<< HEAD
-      (ok (equal '("⇧Tab") (keys-for "Any time" "leave focus")))
-      ;; Ten slots share one line, because nobody needs to be told about each.
-      (ok (equal '("1" "2" "3" "4" "5" "6" "7" "8" "9" "0")
-=======
       (ok (equal '("Shift-Tab") (keys-for "Any time" "leave focus")))
       ;; A wall's modes are reachable, and say by which key.
       (ok (equal '("Cmd-1") (keys-for "At a wall" "shell mode")))
       (ok (equal '("Cmd-2") (keys-for "At a wall" "film mode")))
-      ;; Nine slots share one line, because nobody needs to be told about each.
-      (ok (equal '("1" "2" "3" "4" "5" "6" "7" "8" "9")
->>>>>>> 62957322054a305ab99b1f807d33ba26a24aca48
+      ;; Ten slots share one line, because nobody needs to be told about each.
+      (ok (equal '("1" "2" "3" "4" "5" "6" "7" "8" "9" "0")
                  (keys-for "In the world" "select block")))
       ;; A command owned by the movement layer is not repeated under the world
       ;; that inherits it.

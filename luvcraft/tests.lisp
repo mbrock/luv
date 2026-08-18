@@ -1679,15 +1679,9 @@
     (ok (= (block-surface-emission *terminal-block*) 0.16))
     (ok (equal (mapcar #'block-kind-name (placeable-block-kinds))
                '(:grass :dirt :stone :wood :leaves :sand :snow :crystal
-<<<<<<< HEAD
                  :terminal :urbit :gravel :clay :mud :moss :cactus
                  :cobblestone :stone-bricks :bricks :planks :sandstone
-                 :slate))))
-=======
-                 :terminal :gravel :clay :mud :moss :cactus :cobblestone
-                 :stone-bricks :bricks :planks :sandstone :slate :tape
-                :fountain :lava-spring))))
->>>>>>> 62957322054a305ab99b1f807d33ba26a24aca48
+                 :slate :tape :fountain :lava-spring))))
   (let ((world (make-block-world :chunk-width 2
                                  :chunk-height 2
                                  :chunk-depth 2)))
