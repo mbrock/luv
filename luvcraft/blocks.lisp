@@ -139,6 +139,13 @@ hang upright."
 A class of its own rather than a name test, so activating one is a method
 on the kind and no other block's activation has to know about tapes."))
 
+(defclass spring-block-kind (block-kind) ()
+  (:metaclass luv.arithmetic.records:quantity-class)
+  (:documentation
+   "A block that throws things: a fountain of water, a well of lava.  What
+it throws is decided by its name in luvcraft/balls.lisp; the class is what
+lets placing and removing one be a method rather than a name test."))
+
 (defun ensure-block-kind
     (current name &key face-tiles categories
                        (display-color '(0.5 0.5 0.5)) (placeable-p t)
@@ -255,7 +262,20 @@ and carried.  See luvcraft/tape.lisp."
    "The bright grain a progress orb is made of; never placed, only emitted."
    :face-tiles '(:all 9)
    :categories '(:luminous) :display-color '(0.9 0.95 1.0)
-   :placeable-p nil :light-emission 0 :surface-emission 5.0))
+   :placeable-p nil :light-emission 0 :surface-emission 5.0)
+  (*fountain-block* :fountain
+   "A stone basin that throws water into the air, drop by drop; see
+luvcraft/balls.lisp for what the drops do."
+   :class 'spring-block-kind
+   :face-tiles '(:top 34 :side 17 :bottom 17)
+   :categories '(:building) :display-color '(0.35 0.55 0.75))
+  (*lava-spring-block* :lava-spring
+   "A slate well of lava that spits glowing gobbets which cool where they
+land; see luvcraft/balls.lisp."
+   :class 'spring-block-kind
+   :face-tiles '(:top 35 :side 22 :bottom 22)
+   :categories '(:building :luminous) :display-color '(0.95 0.45 0.10)
+   :light-emission 11 :surface-emission 0.0))
 
 (defun placeable-block-kinds ()
   "Return the numbered material palette used by luvcraft and its tools."
@@ -272,7 +292,7 @@ kinds through this vocabulary instead of printing CLOS object identities."
         (error "No block kind is named ~S." name))))
 
 (defconstant +block-atlas-tile-size+ 16)
-(defconstant +block-atlas-tile-count+ 33)
+(defconstant +block-atlas-tile-count+ 36)
 (defconstant +block-atlas-texture-format+ :rgba8-unorm-srgb)
 (defconstant +block-normal-atlas-texture-format+ :rgba8-unorm)
 

@@ -324,6 +324,23 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:put-away-hand-item
            #:toggle-hand-item
            #:toggle-luvcraft-phone
+           #:toggle-luvcraft-ball
+           #:ball
+           #:throw-luvcraft-ball
+           #:physics-world
+           #:make-physics-world
+           #:step-physics-world
+           #:spawn-physics-body
+           #:spawn-body-of-kind
+           #:physics-body-position
+           #:physics-body-velocity
+           #:physics-body-alive-p
+           #:physics-body-sleeping-p
+           #:destroy-physics-body
+           #:physics-events
+           #:physics-world-state-hash
+           #:validate-physics-world
+           #:luvcraft-session-physics
            #:phone
            #:phone-display
            #:phone-terminal-display

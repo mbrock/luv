@@ -87,6 +87,21 @@
    ;; The player's own arms and hands, and what they hold.  See BODY.LISP.
    (body :initarg :body :initform (make-instance 'player-body)
          :reader luvcraft-session-body)
+   ;; The things with weight: balls, drops, gobbets.  See PHYSICS.LISP for
+   ;; the world and BALLS.LISP for what the game does with it.  Made on the
+   ;; first frame, when there is a block world to collide with.
+   (physics :initarg :physics :initform nil
+            :accessor luvcraft-session-physics)
+   (physics-clock :initform 0d0 :type double-float
+                  :accessor luvcraft-session-physics-clock)
+   ;; The CPU-side vertex stream the bodies are drawn from each frame, and
+   ;; how much of it the last build filled.
+   (physics-vertex-stream :initform nil
+                          :accessor luvcraft-session-physics-vertex-stream)
+   (physics-vertex-count :initform 0
+                         :accessor luvcraft-session-physics-vertex-count)
+   ;; Where the world's springs stand, found from its authored edits.
+   (springs :initform nil :accessor luvcraft-session-springs)
    (title-base :initarg :title-base :initform "luvcraft"
                :reader luvcraft-session-title-base)
    (atlas-texture :initarg :atlas-texture
@@ -169,6 +184,8 @@
                           :reader luvcraft-session-critter-vertex-buffer)
    (body-vertex-buffer :initarg :body-vertex-buffer :initform nil
                        :reader luvcraft-session-body-vertex-buffer)
+   (physics-vertex-buffer :initarg :physics-vertex-buffer :initform nil
+                          :reader luvcraft-session-physics-vertex-buffer)
    (world-text :initarg :world-text :initform nil
                :reader luvcraft-session-world-text)
    (world-text-glyph-cache :initarg :world-text-glyph-cache :initform nil
@@ -748,6 +765,11 @@ something where it stands -- a film beside a wall -- answers here.")
         (multiple-value-bind (old-block residency) (world-block-at world x y z)
           (unless (eq residency :resident)
             (return-from edit-luvcraft-block (values nil :absent)))
+          ;; The ground is about to move: whatever was asleep on it must
+          ;; find out.
+          (when (luvcraft-session-physics session)
+            (wake-physics-bodies-near (luvcraft-session-physics session)
+                                      (+ x 0.5) (+ y 0.5) (+ z 0.5) 2.5))
           (ecase action
             (:remove
              (edit-block-at nil world x y z)

@@ -16,6 +16,12 @@
     ()
   (luvcraft:toggle-luvcraft-phone (luvcraft-command-session)))
 
+(define-command (com-toggle-ball :command-table luvcraft-world
+                                 :name "Toggle Ball"
+                                 :keystroke (#\b))
+    ()
+  (luvcraft:toggle-luvcraft-ball (luvcraft-command-session)))
+
 (define-command (com-toggle-metabar :command-table luvcraft-world
                                     :name "Toggle Metabar"
                                     :keystroke (:return))

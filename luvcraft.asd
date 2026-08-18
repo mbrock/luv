@@ -29,6 +29,7 @@
                "sb-concurrency"
                (:require #:sb-bsd-sockets)
                (:require #:sb-posix)
+               (:require #:sb-simd)
                "uiop")
   :serial t
   :components
@@ -54,6 +55,8 @@
                  (:file "intent")
                  (:file "simulation")
                  (:file "critters")
+                 (:file "physics")
+                 (:file "physics-simd" :if-feature :sbcl)
                  (:file "persistence")
                  (:file "sky")
                  (:file "frame-performance")
@@ -65,6 +68,7 @@
                  (:file "app")
                  (:file "riding")
                  (:file "body")
+                 (:file "balls")
                  (:file "streaming")
                  (:file "render")
                  (:file "play")

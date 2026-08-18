@@ -834,7 +834,8 @@ submission that used them completes."
            (/ (length critter-vertices) +block-mesh-floats-per-vertex+))
          (body-vertices (player-body-vertices session))
          (body-vertex-count
-           (/ (length body-vertices) +block-mesh-floats-per-vertex+)))
+           (/ (length body-vertices) +block-mesh-floats-per-vertex+))
+         (physics-vertex-count (luvcraft-physics-vertex-count session)))
     (when (or sample (tracy-connected-p))
       (let ((mesh-vertices 0)
             (mesh-draws 0))
@@ -867,12 +868,14 @@ submission that used them completes."
                         ;; The animals are drawn twice: once into the shadow
                         ;; map and once into the scene.
                         (if (plusp critter-vertex-count) 2 0)
+                        (if (plusp physics-vertex-count) 2 0)
                         (if (plusp body-vertex-count) 1 0)))
               (vertices (+ +block-world-crosshair-vertex-count+ 3
                            (* 6 text-glyph-count)
                            particle-vertex-count
                            body-vertex-count
                            (* 2 critter-vertex-count)
+                           (* 2 physics-vertex-count)
                            (* 2 mesh-vertices))))
           (when sample
             (setf (luvcraft-frame-sample-resident-chunk-count sample)
@@ -917,7 +920,11 @@ submission that used them completes."
       (when (plusp body-vertex-count)
         (write-buffer
          (luvcraft-session-body-vertex-buffer session)
-         body-vertices)))
+         body-vertices))
+      (when (plusp physics-vertex-count)
+        (write-buffer
+         (luvcraft-session-physics-vertex-buffer session)
+         (luvcraft-physics-vertex-stream session))))
     (with-luvcraft-frame-timing
         (sample luvcraft-frame-sample-shadow-encode-seconds
                 :luvcraft/shadow-pass)
@@ -945,6 +952,11 @@ submission that used them completes."
           (set-vertex-buffer
            pass 0 (luvcraft-session-critter-vertex-buffer session))
           (draw pass critter-vertex-count))
+        ;; So do the balls, drops, and gobbets: things with weight.
+        (when (plusp physics-vertex-count)
+          (set-vertex-buffer
+           pass 0 (luvcraft-session-physics-vertex-buffer session))
+          (draw pass physics-vertex-count))
         (end-pass pass))
       (prepare-texture
        encoder (luvcraft-session-shadow-depth-texture session)
@@ -982,6 +994,10 @@ submission that used them completes."
           (set-vertex-buffer
            pass 0 (luvcraft-session-critter-vertex-buffer session))
           (draw pass critter-vertex-count))
+        (when (plusp physics-vertex-count)
+          (set-vertex-buffer
+           pass 0 (luvcraft-session-physics-vertex-buffer session))
+          (draw pass physics-vertex-count))
         ;; The player's own arms and whatever they hold, drawn in the scene
         ;; but not into the shadow map: a pair of floating forearms would
         ;; throw a shadow that explains nothing.
@@ -1147,6 +1163,7 @@ submission that used them completes."
             (advance-block-particles
              (luvcraft-session-particle-system session) seconds)
             (advance-luvcraft-critters session seconds)
+            (advance-luvcraft-physics session seconds)
             ;; A moving interaction takes its turn after the world it moves in
             ;; and before the player controller, which stands down entirely
             ;; while something else is carrying the player.
@@ -1229,6 +1246,9 @@ here -- so an unconsumed wheel event is simply the end of the matter."
        (when (eq button :left)
          (set-canvas-relative-pointer-mode canvas t)
          (setf (luvcraft-session-pointer-captured-p session) t)))
+      ((let ((item (player-body-hand-item (luvcraft-session-body session))))
+         (and item (hand-item-use item (luvcraft-session-body session)
+                                  session button))))
       ((eq button :left)
        (edit-luvcraft-block session :remove))
       ((eq button :right)
@@ -1522,6 +1542,14 @@ NIL to let the display choose a comfortable window."
                        :label "critter model vertices"
                        :size +critter-buffer-size+
                        :usage '(:vertex)))))
+                  (physics-vertex-buffer
+                    (keep
+                     (create
+                      device
+                      (make-buffer-descriptor
+                       :label "physics body vertices"
+                       :size +physics-vertex-buffer-size+
+                       :usage '(:vertex)))))
                   (body-vertex-buffer
                     (keep
                      (create
@@ -1798,6 +1826,7 @@ NIL to let the display choose a comfortable window."
                      :particle-vertex-buffer particle-vertex-buffer
                      :critter-vertex-buffer critter-vertex-buffer
                      :critters critters
+                     :physics-vertex-buffer physics-vertex-buffer
                      :body-vertex-buffer body-vertex-buffer
                      :world-text text-run
                      :world-text-glyph-cache text-glyph-cache
