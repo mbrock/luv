@@ -85,6 +85,16 @@ frame, before walking bob is added."))
   (declare (ignore item body session))
   nil)
 
+(defgeneric hand-item-use (item body session button)
+  (:documentation
+   "The player clicked BUTTON while BODY held ITEM.  Return true when the
+item did something with the click, so it does not go on to edit the world;
+the default hand holds things but does nothing with them."))
+
+(defmethod hand-item-use (item body session button)
+  (declare (ignore item body session button))
+  nil)
+
 (defgeneric advance-hand-item (item body seconds)
   (:documentation
    "Let ITEM ease its own state by SECONDS while BODY holds it."))

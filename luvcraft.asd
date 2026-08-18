@@ -29,6 +29,7 @@
                "sb-concurrency"
                (:require #:sb-bsd-sockets)
                (:require #:sb-posix)
+               (:require #:sb-simd)
                "uiop")
   :serial t
   :components
@@ -54,22 +55,27 @@
                  (:file "intent")
                  (:file "simulation")
                  (:file "critters")
+                 (:file "physics")
+                 (:file "physics-simd" :if-feature :sbcl)
                  (:file "persistence")
                  (:file "sky")
                  (:file "frame-performance")
                  (:file "live-pipeline")
                  (:file "release")
                  (:file "text")
+                 (:file "sound")
                  (:file "video-screen")
                  (:file "app")
                  (:file "riding")
                  (:file "body")
+                 (:file "balls")
                  (:file "streaming")
                  (:file "render")
                  (:file "play")
                  (:file "terminal-wall")
                  (:file "urbit")
                  (:file "phone")
+                 (:file "tape")
                  (:file "capture")
                  (:file "mirror" :if-feature :darwin)
                  (:file "portal" :if-feature :darwin)
@@ -99,7 +105,10 @@
   :description "Luvcraft's verbs as CLIM commands in an application frame."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luvcraft" "mcluv/luvcraft" "alexandria")
+  ;; The Telegram panel is part of the game: it is what the phone shows, and
+  ;; the wall's third mode.  It has to be loaded before the command layer,
+  ;; which binds a keystroke to every mode the wall offers at load time.
+  :depends-on ("luvcraft" "mcluv/luvcraft" "mcluv/telegram" "alexandria")
   :serial t
   :components ((:module "luvcraft/clim"
                 :serial t
@@ -107,6 +116,7 @@
                              (:file "frame")
                              (:file "commands")
                              (:file "legend")
+                             (:file "tape")
                              (:file "input"))))
   :in-order-to ((test-op (test-op "luvcraft/clim-test"))))
 
@@ -142,6 +152,7 @@
   :components ((:file "hal/shader/tests")
                (:file "luvcraft/world-tests")
                (:file "luvcraft/tests")
+               (:file "luvcraft/physics-tests")
                (:file "luvcraft/light-tests")
                (:file "hal/metal/msl/tests")
                (:file "hal/metal/tests" :if-feature :darwin))

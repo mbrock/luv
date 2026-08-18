@@ -432,13 +432,16 @@
          (first-loop (search "for (uint fold_index_1" source))
          (first-local
            (search "_local_1_axis_a" source))
+         (first-break
+           (search "if ((fold_state_1.z * 1.0f) > 0.5f) break;" source))
          (first-update
-           (search "fold_state_1 = float2((fold_state_1.x" source)))
+           (search "fold_state_1 = float3((fold_state_1.x" source)))
     (ok (search "texture2d<uint> band_data" source))
     (ok (search "texture2d<float> curve_data" source))
     (ok first-loop)
     (ok (search "for (uint fold_index_2" source))
-    (ok (< first-loop first-local first-update))))
+    (ok first-break)
+    (ok (< first-loop first-break first-local first-update))))
 
 (deftest counted-fold-lowers-to-a-direct-metal-loop
   (let* ((specification

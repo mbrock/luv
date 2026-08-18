@@ -115,7 +115,16 @@ scripts/telegram '(telegram.client:complete-password "…")'
 ```
 
 There is also `log-in`, which does the whole thing in one call and prompts
-for what it needs — password reading turns terminal echo off.
+for what it needs — password reading turns terminal echo off.  A caller with
+no terminal passes `:password-reader nil` to `complete-login` and gets a
+`password-required` condition instead of a prompt; that is how the in-game
+panel does it.
+
+In luvcraft the same flow runs on the phone (press `f`, then TAB): with no
+credentials it asks for an api_id and hash and writes them to
+`~/.telegram.env`; with no session it asks for a phone number, then the
+code, then a password if the account has one.  A wall terminal offers the
+panel as its third mode.
 
 Afterwards the stored key is the credential, and `resume` is the ordinary way
 in — no handshake, no code:

@@ -26,36 +26,6 @@ asking what it means is asking it."
                 (funcall (command-menu-item-value item) gesture 1)))
     (t nil)))
 
-(defun format-gesture-key (key)
-  "Name KEY the way a legend should print it."
-  (etypecase key
-    (character (string-upcase (string key)))
-    (symbol
-     (case key
-       (:return "RET")
-       (:escape "Esc")
-       (:space "Space")
-       (:tab "Tab")
-       (:up "↑") (:down "↓") (:left "←") (:right "→")
-       (:shift-left "Shift") (:shift-right "Shift")
-       (t (string-capitalize (symbol-name key)))))))
-
-(defun format-gesture (gesture)
-  "Name a whole keystroke, modifiers and all.
-
-:ANY is not printed: a key bound whatever else is held is just that key, and
-saying so would be noise on every movement row."
-  (let* ((specification (if (listp gesture) gesture (list gesture)))
-         (key (first specification))
-         (modifiers (remove :any (rest specification))))
-    (format nil "~{~A~}~A"
-            (mapcar (lambda (modifier)
-                      (case modifier
-                        (:shift "⇧") (:control "^") (:meta "⌥") (:super "⌘")
-                        (t (format nil "~A-" modifier))))
-                    modifiers)
-            (format-gesture-key key))))
-
 (defgeneric luvcraft-command-legend-label (name arguments table)
   (:documentation
    "What a legend should call the command NAME applied to ARGUMENTS.
@@ -88,6 +58,11 @@ because nobody needs to be told about each of them separately.")
   (declare (ignore arguments table))
   "select block")
 
+(defmethod luvcraft-command-legend-label
+    ((name (eql 'com-set-terminal-mode)) arguments table)
+  (declare (ignore table))
+  (format nil "~(~A~) mode" (first arguments)))
+
 (defun command-table-legend-rows (table)
   "Return TABLE's keystrokes as (LABEL . KEYS) rows, one row per label.
 
@@ -113,6 +88,7 @@ say that the quickbar is 1-9 rather than saying `select block' nine times."
 (defparameter *legend-sections*
   '(("Moving" luvcraft-movement)
     ("In the world" luvcraft-world)
+    ("At a wall" luvcraft-terminal)
     ("Any time" luvcraft-window))
   "Which tables the legend shows, in the order a player meets them.
 

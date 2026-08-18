@@ -210,26 +210,31 @@
   (declare (ignore description))
   (invalid-luvcraft-save "No world reader handles ~S." kind))
 
-(defun luvcraft-resume-save-description (camera player selected-block)
+(defun luvcraft-resume-save-description
+    (camera player selected-block &optional carried)
+  "CARRIED are the blocks the player holds that are worth writing down:
+per-instance ones such as films, which no palette would give back."
   (when (and camera player)
     (list :player-position
           (vec3-list (player-position player))
           :look (list :yaw (camera-yaw camera) :pitch (camera-pitch camera))
-          :selected-block (block-save-description selected-block))))
+          :selected-block (block-save-description selected-block)
+          :carried (mapcar #'block-save-description carried))))
 
 (defun make-luvcraft-save-description
-    (world &key camera player selected-block)
+    (world &key camera player selected-block carried)
   "Capture one immutable, printable checkpoint description.  See #TR2JNQ."
   (list :luvcraft-world
         :format-version +luvcraft-save-format-version+
         :world (world-save-description world)
         :resume (luvcraft-resume-save-description
-                 camera player selected-block)))
+                 camera player selected-block carried)))
 
 (defun restore-luvcraft-resume-save-description (description)
-  "Return CAMERA, PLAYER, and selected block restored from DESCRIPTION."
+  "Return CAMERA, PLAYER, selected block, and carried blocks restored from
+DESCRIPTION."
   (if (null description)
-      (values (make-instance 'fly-camera) nil *stone-block*)
+      (values (make-instance 'fly-camera) nil *stone-block* nil)
       (let* ((position
                (description-value description :player-position
                                   "resume state"))
@@ -238,7 +243,13 @@
              (pitch (description-value look :pitch "saved look"))
              (selected
                (description-value description :selected-block
-                                  "resume state")))
+                                  "resume state"))
+             (carried
+               (description-value description :carried "resume state"
+                                  :optional t :default nil)))
+        (unless (listp carried)
+          (invalid-luvcraft-save
+           "Carried blocks must be a list, not ~S." carried))
         (unless (and (listp position) (= (length position) 3)
                      (every #'realp position))
           (invalid-luvcraft-save
@@ -258,7 +269,8 @@
              (unless (typep block 'block-kind)
                (invalid-luvcraft-save
                 "The selected value must name a block kind, not ~S." selected))
-             block))))))
+             block)
+           (mapcar #'restore-block-value carried))))))
 
 (defun restore-luvcraft-save-description (description)
   "Return the world and resume description represented by DESCRIPTION."

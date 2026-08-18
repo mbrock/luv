@@ -229,6 +229,8 @@
               pkgs.spirv-tools
               pkgs.vulkan-headers
               pkgs.vulkan-tools
+              pkgs.vulkan-validation-layers
+              pkgs.yt-dlp
             ];
             text = ''
               export LUV_NIX_SHELL=1
@@ -237,6 +239,7 @@
               export LUV_TRACY_CLIENT=${tracyClientLibrary}
               export LUV_FFMPEG_LIBDIR=${ffmpegLibraryDirectory}
               export LUV_MUPDF_LIBDIR=${mupdfLibraryDirectory}
+              export LUV_YT_DLP=${pkgs.yt-dlp}/bin/yt-dlp
               export CL_SOURCE_REGISTRY=${mcclim}//:${cl-sdl3}//
               # cffi-grovel compiles a C program against these headers to read
               # AVFrame's layout out of the compiler rather than transcribing
@@ -244,6 +247,10 @@
               # here it has to be said out loud.
               export PKG_CONFIG_PATH=${ffmpegDevelopment}/lib/pkgconfig''${PKG_CONFIG_PATH:+:}''${PKG_CONFIG_PATH:-}
               export CPATH=${pkgs.vulkan-headers}/include''${CPATH:+:}''${CPATH:-}
+              # The layers are on the shelf, not in the loader: a run asks for
+              # them with VK_LOADER_LAYERS_ENABLE=\*validation\* when a driver
+              # crash needs a witness.
+              export VK_LAYER_PATH=${pkgs.vulkan-validation-layers}/share/vulkan/explicit_layer.d''${VK_LAYER_PATH:+:}''${VK_LAYER_PATH:-}
               export LD_LIBRARY_PATH=${nativeLibraryPath}''${LD_LIBRARY_PATH:+:}''${LD_LIBRARY_PATH:-}
 
               ${nixpkgs.lib.optionalString (system == "x86_64-linux") ''
@@ -326,6 +333,8 @@
               env.pkgs.urbit
               env.pkgs.vulkan-headers
               env.pkgs.vulkan-tools
+              env.pkgs.vulkan-validation-layers
+              env.pkgs.yt-dlp
             ];
             LD_LIBRARY_PATH = env.nativeLibraryPath;
             LUV_NIX_SHELL = "1";
@@ -336,8 +345,11 @@
             LUV_TRACY_CLIENT = env.tracyClientLibrary;
             LUV_FFMPEG_LIBDIR = env.ffmpegLibraryDirectory;
             LUV_MUPDF_LIBDIR = env.mupdfLibraryDirectory;
+            LUV_YT_DLP = "${env.pkgs.yt-dlp}/bin/yt-dlp";
             CL_SOURCE_REGISTRY = "${mcclim}//:${cl-sdl3}//";
             CPATH = "${env.pkgs.vulkan-headers}/include";
+            VK_LAYER_PATH =
+              "${env.pkgs.vulkan-validation-layers}/share/vulkan/explicit_layer.d";
             shellHook = ''
               if [ -z "''${SDL_VIDEODRIVER:-}" ] \
                 && [ -z "''${DISPLAY:-}" ] \

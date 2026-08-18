@@ -1893,7 +1893,12 @@ family name adopted."
                  command min-x min-y max-x max-y)
               (let ((atlas (luv.slug:slug-glyph-atlas-for cache glyphs))
                     (first-vertex (/ (length data) 18))
-                    (padding (max 0.035 (/ 2.0 size))))
+                    ;; The screen quad is dilated here rather than per
+                    ;; vertex: its pixel scale is SIZE, and a HiDPI canvas
+                    ;; only makes that an underestimate, which is the safe
+                    ;; side.  Two logical pixels was the old constant.
+                    (padding (max (luv.slug:slug-dilation-em size)
+                                  (/ 2.0 size))))
                 (dolist (glyph glyphs)
                   (let* ((resource
                            (luv.slug:slug-glyph-placement-resource glyph))

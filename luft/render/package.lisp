@@ -15,6 +15,13 @@
            #:bevel-mesh-shader
            #:chamfer-mesh-shader
            #:chamfer-fragment-shader
+           #:paper-fragment-shader
+           #:sky-mesh-shader
+           #:sky-fragment-shader
+           #:lens-fragment-shader
+           #:+scene-binding+
+           #:+sampler-binding+
+           #:+lens-frame-binding+
            #:surface-fragment-shader
            #:frame-uniform-block))
 
@@ -68,12 +75,16 @@ of packed LUFT sites, drawn by task and mesh shaders.")
            #:*bottom-color*
            #:*exposure*
            #:*sky-color*
+           #:*draw-sky*
+           #:*focus-distance*
+           #:*aperture*
            #:*fog-distance*
            #:destroy-renderer
            #:upload-scene
            #:encode-frame
            #:render-pixels
            #:render-to-png
+           #:downsample-pixels
            #:capture-demo-png
            #:viewer
            #:start-viewer

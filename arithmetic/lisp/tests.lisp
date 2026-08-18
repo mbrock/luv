@@ -50,6 +50,11 @@
   (counted-fold (index count sum 0)
     (if (< index limit) (+ sum index) sum)))
 
+(lisp:define-lisp-arithmetic-function cpu-capped-triangular-number
+    ((count) (cap))
+  (counted-fold (index count sum 0 :until (> sum cap))
+    (+ sum index)))
+
 (lisp:define-lisp-arithmetic-function cpu-folded-remainders ((count))
   (counted-fold (index count sum 0)
     (let* ((next (+ index 1))
@@ -96,6 +101,15 @@
                         'cpu-triangular-number)
                        10)))
     (ok (tree-contains-any-object-p lambda-expression '(dotimes)))))
+
+(deftest counted-fold-until-leaves-the-ordinary-loop-early
+  (let ((lambda-expression
+          (lisp:lower-arithmetic-function 'cpu-capped-triangular-number)))
+    ;; 0+1+2+3+4 = 10 passes the cap of 8 after index 4; index 5 is never
+    ;; added, so the fold stops with 10 rather than running on to 45.
+    (ok (= 10 (cpu-capped-triangular-number 10 8)))
+    (ok (= 45 (cpu-capped-triangular-number 10 100)))
+    (ok (tree-contains-any-object-p lambda-expression '(return)))))
 
 (deftest counted-fold-lexicals-lower-inside-the-ordinary-loop
   (let ((lambda-expression

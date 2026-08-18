@@ -254,6 +254,30 @@ part of the observable contract, which is exactly the stance a deterministic
 luv simulation would have to take before its first parallel or wide kernel —
 retrofitting it means re-deriving every reduction in the codebase.
 
+* Two sharp edges met in 2.6.7's NEON port
+:PROPERTIES:
+:ID: 4UVLSQ
+:END:
+
+Building the physics kernels (#7PAQ3M) on the new arm64 backend found two
+defects, recorded here so the next kernel does not rediscover them:
+
+- =sb-simd-neon:f32.4-sqrt= raises SIGILL whenever it executes, on any
+  operand: the vector square root's encoding is wrong.  Every other
+  operation the kernels use -- arithmetic, min and max, comparisons,
+  =f32.4-bit-select=, and, and-not, or, =make-f32.4=, =f32.4-values=,
+  =f32.4-aref= -- is correct.  The kernels take their square roots through
+  the scalar unit lane by lane, which the bitwise-agreement test shows is
+  what the vector instruction would give.
+- The compiler folds a SIMD operation on constant arguments at compile
+  time by calling its out-of-line function, and that function is a stub:
+  a form like =(f32.4-sqrt (make-f32.4 -1.0 0.0 4.0 2.0))= typed at a REPL
+  killed the durable image with SIGILL inside IR1 optimization.  Never hand
+  a wide operation constant arguments in a form the compiler will see.
+
+Both are worth reporting upstream; neither touches the layout lesson of
+#T3C8FV, which held.
+
 * What sb-simd teaches now that it can run here
 :PROPERTIES:
 :ID: E8M3JC

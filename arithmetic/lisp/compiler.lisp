@@ -422,9 +422,16 @@ declared scalar operands. #53Q1II")
     (let ((update
             (lower-lisp-arithmetic-expression
              (lang:arithmetic-counted-fold-update expression)
-             update-environment)))
+             update-environment))
+          (until
+            (let ((until (lang:arithmetic-counted-fold-until expression)))
+              (and until
+                   (lower-lisp-arithmetic-expression
+                    until fold-environment)))))
       `(let ((,state-name ,initial))
          (dotimes (,index-name ,count ,state-name)
+           ,@(when until
+               `((when ,until (return ,state-name))))
            (let* ,(nreverse update-bindings)
              (setf ,state-name ,update)))))))
 

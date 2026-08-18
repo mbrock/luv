@@ -307,8 +307,15 @@ operate on raw specialized arrays with one shared length and capacity. #LDP5UR"
            (,length-slot 0 :type fixnum)
            (,capacity-slot 0 :type fixnum)
            (,row-slot nil :type columnar-row-declaration :read-only t)
+           ;; Each lane slot carries its precise specialized array type, so
+           ;; the generated push and every direct lane access store and
+           ;; load raw elements without boxing them.
            ,@(loop for slot in lane-slots
-                   collect `(,slot #() :type vector)))
+                   for lane in lanes
+                   collect `(,slot (make-array 0 :element-type ',(getf lane :type))
+                            :type (simple-array
+                                   ,(upgraded-array-element-type (getf lane :type))
+                                   (*)))))
 
          (defun ,constructor
              (&key (capacity 16) declarations row-declaration)
@@ -468,7 +475,12 @@ per lane.  The domain, row meaning, and arrays then travel together."
            (,domain-slot nil :type t :read-only t)
            (,row-slot nil :type columnar-row-declaration :read-only t)
            ,@(loop for slot in lane-slots
-                   collect `(,slot #() :type vector :read-only t)))
+                   for lane in lanes
+                   collect `(,slot (make-array 0 :element-type ',(getf lane :type))
+                            :type (simple-array
+                                   ,(upgraded-array-element-type (getf lane :type))
+                                   (*))
+                            :read-only t)))
 
          (defun ,constructor (domain &key declarations row-declaration)
            (when (and declarations row-declaration)

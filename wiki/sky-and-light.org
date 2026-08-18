@@ -23,8 +23,13 @@ chain, and light shafts (#IC14P3).  The sky it presents became procedural
 image mathematics rather than a two-colour gradient (#9SSXDJ), and the block
 surface grew a shape of its own from what the mesher knows about each face's
 edges (#J19EBO) and what the atlas paints beside each material's colour
-(#CHUKWD).  Each phase below has a visible result and an evidence gate, so it
-can be revised from measurements without undoing the preceding phases.
+(#CHUKWD).  A later round took the shading itself toward physical argument:
+no two faces are the same card any more (#3AVEKC), the specular lobe and the
+ambient are microfacet and hemispheric rather than fitted (#2T8CCH), the sky
+became an atmosphere (#8X33G2), and the cloud deck became a plane both halves
+of the renderer can find (#RSGLTL).  Each phase below has a visible result and
+an evidence gate, so it can be revised from measurements without undoing the
+preceding phases.
 
 * What the critique changed
 :PROPERTIES:
@@ -524,6 +529,75 @@ sparkles nor shows a lit grid.  A material's relief is one EQL method, so a
 live image can re-sculpt grass tufts or stone cracks and rebuild both dense
 atlases without touching the rest of the palette.
 
+* No two faces are the same card
+:PROPERTIES:
+:ID: 3AVEKC
+:END:
+
+The atlas has one tile per material and the world has thousands of faces per
+tile, so #CHUKWD's relief only made every grass block the same card seen again
+in better light.  Three fields now make each face its own, and none of them
+costs a texel.
+
+A hash of the cell a face belongs to is constant across that face and
+different on the next one.  The cell is found by stepping half a cell back
+along the face's own normal, which lands inside the block whichever of the six
+faces this is.  Value noise over the world point knows nothing about where
+faces begin, so it drifts across a whole plain the way ground does, at a scale
+of about a dozen cells.  A grain finer than a cell supplies the last octave,
+and --- the part that matters --- two more taps of that grain, a step along
+each of the face's own in-plane axes, give its gradient there, which leans the
+shading normal.  The ground is then not merely painted unevenly but lit
+unevenly, which is what the eye actually reads as texture.
+
+Value and hue move together but not identically: brighter patches are also
+warmer, and a face's own constant drifts its hue as well as its value, so a
+plain of grass is many greens rather than one green at many brightnesses.
+Every scale fades out on the footprint that scale resolves at --- the
+texel-scale terms on the relief fade, the cell-scale ones on the bevel fade of
+#YUB8CH --- and all three amplitudes ride one =surface-detail= knob.
+
+* A roughness the relief already knew
+:PROPERTIES:
+:ID: 2T8CCH
+:END:
+
+The block material's specular was one fitted power under a Fresnel weight.  It
+is an ordinary microfacet lobe now --- GGX distribution, Smith's
+height-correlated visibility in the form that already carries the
+$1/(4\cos\theta_l\cos\theta_v)$, Schlick's Fresnel at a dielectric's four per
+cent --- which would be unremarkable except for where its roughness comes
+from.
+
+Nothing in the palette declares a roughness.  But #CHUKWD's normal atlas is
+each material's own slope at texel scale, and a steep texel is the best
+evidence available about what happens below a texel: grass tufts are rough, a
+glass pane is smooth, and the atlas already knows which is which.  So the
+roughness is read from the tangent normal's tilt.  When that relief fades out
+with distance its variance has to go somewhere, and the honest place is the
+same roughness --- Toksvig's argument --- so a highlight keeps its size across
+the draw distance instead of sharpening into a sparkle on every distant face
+at once.
+
+What is not the sun also stopped being one grey.  A face turned up sees the
+zenith, a face turned sideways the horizon, and a face turned down what the
+ground bounced; one interpolation over the normal's own vertical component,
+against the zenith and horizon colours the frame environment already carries
+for the sky, is the whole of it.  The same sky evaluated in the direction the
+surface actually reflects, weighted by roughness and a grazing Fresnel, gives
+the sheen that tells a smooth face from a rough one out of the sun.  Those two
+terms are the difference between blocks standing under this weather and blocks
+standing under a light bulb.
+
+One thing had to move that is not shading at all.  The palette was authored
+display-referred, before the renderer worked in linear radiance, and sand at
+0.59 linear reflects more light than fresh snow does.  A microfacet lobe over
+an albedo that bright is a white card with a highlight on it, so the natural
+materials came down to the range a real one occupies and the exposure came
+down with them.
+
+[[file:images/pbr-sunset-field.png]]
+
 * Phase 3: one crystal proves emission and edit propagation
 :PROPERTIES:
 :ID: SKCRYS
@@ -638,6 +712,69 @@ of constant index the same value, and at star-field frequencies those planes
 are plainly visible as streaks across the sky.  Folding a site's own
 components against each other has no preferred direction, and costs less than
 eight sines besides.
+
+* The sky became an atmosphere
+:PROPERTIES:
+:ID: 8X33G2
+:END:
+
+#9SSXDJ gave the sky something worth tone mapping.  What it drew was still a
+gradient with weather painted over it, and five of its terms were wrong in the
+same way: each was a fitted curve standing where a physical argument was
+available.
+
+- The vertical gradient resolved inside the first few degrees above level, so
+  seven eighths of the hemisphere was one flat zenith colour.  A small
+  exponent over the elevation spreads it across the whole sky, which is what
+  an optical depth along the ray does.
+- Two fitted powers stood in for the glow around the sun.  One
+  Henyey-Greenstein phase function evaluated at two asymmetries replaces both,
+  and gets for free the thing the powers could not: the same medium gives a
+  huge soft glow when the sun is low and a tight one when it is high.
+- The warm band at sunrise ran all the way round the horizon.  It is sunlight
+  that came the long way through the atmosphere, so it is the sun's own colour
+  at that hour, laid exactly where the ray runs both low and toward it.  The
+  east burns and the west stays blue.
+- Stars were value noise raised to a power, which makes blobs the size of the
+  lattice and smears them into streaks along its cell edges.  A star is a
+  point: hash the cell to a position, a magnitude, and a twinkling phase, and
+  draw a small gaussian around it.  Behind them is a galaxy band with dust
+  lanes, and opposite the sun a moon, which puts one of them up for exactly
+  the hours the other is not.
+- Below the horizon the sky stands in for terrain too far off to be resident,
+  and did it with a flat wall of fog colour.  It calls the same
+  =aerial-perspective-color= the block surface's fog calls now, so the two
+  cannot drift apart, and it samples the ray's own meeting with the ground
+  plane, so the lower half of the frame has land in it.
+
+The cirrus deck above the cumulus is new, and so is the deck lighting: one
+extra tap of the cloud field along the deck toward the sun is the shape's own
+shadow, and therefore its lit face and its dark underside.
+
+[[file:images/pbr-moonrise.png]]
+
+* A cloud deck is a plane both halves of the renderer can find
+:PROPERTIES:
+:ID: RSGLTL
+:END:
+
+The cumulus deck used to be a plane a fixed distance above the camera, sampled
+in camera-relative coordinates: clouds at infinity, which is a perfectly good
+cheat until something on the ground wants to know about them.
+
+It is a plane at a fixed height in the world now.  The sky finds it along the
+view ray; the block material finds it by following the sun up from the
+fragment, and asks the very same field the very same coverage question there.
+The answer multiplies the direct sun only --- never the ambient, which is the
+sky the cloud is part of --- and its threshold is wider than the sky's,
+because a shadow thrown from that far off is blurred by the sun's own angular
+width long before it lands.
+
+One fractal noise per fragment buys what no amount of material work could: a
+plain at noon stops being one flat sheet of light, because the weather is
+moving across it.
+
+[[file:images/pbr-cloud-shadows.png]]
 
 * Later: real-time shadows, not baked animated sunlight
 :PROPERTIES:
@@ -1292,6 +1429,29 @@ Exposure, bloom gain, threshold, shaft gain and decay, and vignette are live
 specials rather than sky-profile keyframes.  A profile lane is the better home
 once a keyframed value is actually wanted for time of day; nothing so far has
 wanted one.
+
+** DONE Materials and sky taken toward physical shading
+:PROPERTIES:
+:ID: 36LYCR
+:END:
+
+Intent: the world read flat because every face of a material was the same
+card, the specular was a fitted power, everything that was not the sun was one
+grey, and the sky's lower half was a wall of fog.  Take each of those to a
+physical argument instead: #3AVEKC, #2T8CCH, #8X33G2, #RSGLTL.
+
+Evidence: pinned captures at day fractions 0.28, 0.50, 0.72, 0.80, and 0.93,
+from a ground stance and from a vista, against the same captures before the
+change.  =make test= green throughout, including the strict parinfer pass,
+SPIR-V validation of every stage, and the material and sky shape tests updated
+to what the stages now say.  The live canvas held sixty frames a second at
+2688x1680 with the deck shadow's fractal noise in the block fragment stage.
+
+What is left is art direction rather than architecture, and all of it is on
+knobs: =surface-detail=, =surface-roughness=, =specular-gain=,
+=ambient-bounce=, =cloud-coverage=, =cloud-altitude=, =cloud-shadow-depth=,
+=sky-scatter-gain=, =star-brightness=, =moon-radiance=, and the grade's
+saturation, contrast, and aberration.
 
 ** TODO Rebuild the offscreen attachments when the canvas resizes
 :PROPERTIES:

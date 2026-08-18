@@ -6,6 +6,78 @@
 
 (in-package #:luvcraft)
 
+;;; The Slug renderer's tunable values, as knobs.  The values themselves
+;;; live in LUV.SLUG (see hal/shader/slug.lisp) and are folded into the text
+;;; shaders as literals; turning one rebuilds the world-text pipeline at the
+;;; next frame, so every glyph in the world -- signs, terminal walls, the
+;;; phone -- shows the change together.  None needs a realization: the band
+;;; texture is not affected by any of these, only the shaders that read it.
+
+(define-knob slug-filter-width
+    (:group :text :label "text filter width" :unit-label " px"
+     :minimum 0.25 :maximum 4.0 :step 0.05
+     :documentation
+     "The box filter's width in pixels.  One is exact pixel coverage; wider
+softens the edge (and needs the dilation to grow with it, which it does).")
+    luv.slug:*slug-filter-width*)
+
+(define-knob slug-dilation-pixels
+    (:group :text :label "text quad dilation" :unit-label " px"
+     :minimum 0.0 :maximum 4.0 :step 0.1
+     :documentation
+     "How far past its outline each glyph quad grows, in filter widths.  Half
+is the least that keeps the whole filter inside the quad; less clips the
+edge, more costs fragments.")
+    luv.slug:*slug-dilation-pixels*)
+
+(define-knob slug-optical-weight
+    (:group :text :label "text optical weight"
+     :minimum 0.25 :maximum 2.0 :step 0.05
+     :documentation
+     "The exponent applied to coverage.  One is linear; the reference's
+SLUG_WEIGHT is one half, which fattens thin strokes.")
+    luv.slug:*slug-optical-weight*)
+
+(define-knob slug-fill-rule
+    (:group :text :label "text even-odd fill"
+     :minimum 0.0 :maximum 1.0 :step 1.0
+     :documentation
+     "0 fills glyphs by the nonzero winding rule, 1 by even-odd (self-
+overlapping contours become holes).")
+    luv.slug:*slug-fill-rule*)
+
+(define-knob slug-footprint-norm
+    (:group :text :label "text footprint fwidth"
+     :minimum 0.0 :maximum 1.0 :step 0.1
+     :documentation
+     "How the pixel's size in em is measured: 0 the gradient length, 1 fwidth
+as the reference does; between blends.")
+    luv.slug:*slug-footprint-norm*)
+
+(define-knob slug-early-exit
+    (:group :text :label "text band early exit"
+     :minimum 0.0 :maximum 1.0 :step 1.0
+     :documentation
+     "1 stops walking a band's sorted curves at the first one wholly behind
+the sample; 0 walks them all.  The picture is the same either way.")
+    luv.slug:*slug-early-exit*)
+
+(define-knob slug-root-epsilon
+    (:group :text :label "text root epsilon"
+     :minimum 0.000001 :maximum 0.01 :step 0.000005
+     :documentation
+     "Below this |a| a curve is solved as a line rather than a quadratic; also
+the floor under the coverage divisions.")
+    luv.slug:*slug-root-epsilon*)
+
+(define-knob slug-debug-view
+    (:group :text :label "text band debug view"
+     :minimum 0.0 :maximum 1.0 :step 1.0
+     :documentation
+     "1 paints each glyph quad with its band loads: red the horizontal band's
+curve count over sixteen, green the vertical's, blue the coverage.")
+    luv.slug:*slug-debug-view*)
+
 (defclass world-text-run ()
   ((string :initarg :string :accessor world-text-run-string)
    (font-pathname :initarg :font-pathname
@@ -49,7 +121,7 @@
   "Build one dense model-and-atlas record per drawable glyph occurrence.
 
 INK is the linear RGB carried in the record's three spare lanes."
-  (let* ((padding 0.035)
+  (let* ((padding luv.slug:*slug-static-padding*)
          (middle-x (/ (+ min-x max-x) 2))
          (middle-y (/ (+ min-y max-y) 2))
          (data (make-array (* 24 (length glyphs))

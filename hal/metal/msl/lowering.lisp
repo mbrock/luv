@@ -132,6 +132,11 @@
     :initarg :bindings :initform nil
     :reader msl-counted-fold-statement-bindings)
    (update :initarg :update :reader msl-counted-fold-statement-update)
+   (until-bindings
+    :initarg :until-bindings :initform nil
+    :reader msl-counted-fold-statement-until-bindings)
+   (until :initarg :until :initform nil
+          :reader msl-counted-fold-statement-until)
    (origin :initarg :origin :reader msl-counted-fold-statement-origin)))
 
 (defclass msl-entry-point ()
@@ -572,9 +577,16 @@
               index-name
               (gethash state-binding (msl-context-references context))
               state-name)
-        (let ((preheader-statements
-                (drain-msl-pending-statements context))
-              (local-statements nil))
+        (let* ((preheader-statements
+                 (drain-msl-pending-statements context))
+               (until-expression
+                 (lang:arithmetic-counted-fold-until expression))
+               (until
+                 (and until-expression
+                      (lower-msl-expression context until-expression)))
+               (until-statements
+                 (and until (drain-msl-pending-statements context)))
+               (local-statements nil))
           (dolist (binding
                    (lang:arithmetic-counted-fold-bindings expression))
             (let* ((binding-expression
@@ -615,7 +627,10 @@
                              (lang:arithmetic-counted-fold-count expression)))
                            :count count
                            :bindings local-statements
-                           :update update :origin expression))))
+                           :update update
+                           :until-bindings until-statements
+                           :until until
+                           :origin expression))))
             (dolist (binding
                      (lang:arithmetic-counted-fold-bindings expression))
               (remhash binding (msl-context-references context)))
@@ -1321,6 +1336,14 @@
             (msl-occurrence-text (msl-counted-fold-statement-count statement))
             (msl-counted-fold-statement-index-name statement)
             (if unsigned-p "1u" "1.0f")))
+  (let ((until (msl-counted-fold-statement-until statement)))
+    (when until
+      (let ((*msl-statement-indentation* (1+ *msl-statement-indentation*)))
+        (dolist (binding (msl-counted-fold-statement-until-bindings statement))
+          (write-msl-statement binding stream)))
+      (write-msl-indent stream 1)
+      (format stream "if ~A break;~%"
+              (msl-control-condition-text (msl-occurrence-text until)))))
   (dolist (binding (msl-counted-fold-statement-bindings statement))
     (write-msl-indent stream 1)
     (format stream "~A ~A = ~A;~%"

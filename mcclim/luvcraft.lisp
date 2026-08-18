@@ -8,10 +8,14 @@
   ((session :initarg :session :reader widget-overlay-session)
    (frame :initarg :frame :reader widget-overlay-frame)
    (mirror :initarg :mirror :reader widget-overlay-mirror)
-   (center :initarg :center :reader widget-overlay-center)
-   (right-axis :initarg :right-axis :reader widget-overlay-right-axis)
-   (up-axis :initarg :up-axis :reader widget-overlay-up-axis)
-   (normal-axis :initarg :normal-axis :reader widget-overlay-normal-axis)
+   ;; Where the widget is in the world.  Written once for a widget fixed to
+   ;; a wall, and each frame for one carried in the hand.
+   (center :initarg :center :initform nil :accessor widget-overlay-center)
+   (right-axis :initarg :right-axis :initform nil
+               :accessor widget-overlay-right-axis)
+   (up-axis :initarg :up-axis :initform nil :accessor widget-overlay-up-axis)
+   (normal-axis :initarg :normal-axis :initform nil
+                :accessor widget-overlay-normal-axis)
    (height-scale :initarg :height-scale :initform 2.0
                  :reader widget-overlay-height-scale)
    (render-state :initform nil :accessor widget-overlay-render-state)
@@ -131,6 +135,20 @@
       (setf (spinning-frame-state-relief-buffer frame-state) replacement
             (spinning-frame-state-relief-capacity frame-state) capacity)))
   (spinning-frame-state-relief-buffer frame-state))
+
+(defun place-widget-overlay-on-surface (overlay display session)
+  "Put OVERLAY where DISPLAY's surface is this frame.
+
+Asked at draw time, because the surface may be a phone in a moving hand;
+for a wall the answer is the same every frame and costs a few vector ops."
+  (multiple-value-bind (center right-axis up-axis normal-axis)
+      (luvcraft:terminal-surface-panel-frame
+       (luvcraft:terminal-display-surface display) session)
+    (setf (widget-overlay-center overlay) center
+          (widget-overlay-right-axis overlay) right-axis
+          (widget-overlay-up-axis overlay) up-axis
+          (widget-overlay-normal-axis overlay) normal-axis))
+  overlay)
 
 (defun world-device-clip-state (overlay session width height)
   "Return center, right, up, and normal clip vectors for OVERLAY's surface."
@@ -402,10 +420,16 @@
                      always (plusp
                              (third
                               (projected-screen-vertex state 1 1 u v)))))
-      (destructuring-bind (width height)
-          (luv:canvas-extent
-           (luvcraft::luvcraft-session-context
-            (widget-overlay-session overlay)))
+      ;; Project into the window's own coordinates rather than the drawable's.
+      ;; A pointer event carries the position SDL reports, which is in logical
+      ;; points; on a dense display the drawable is a multiple of that, and
+      ;; hit-testing a point against a quad projected into pixels misses by
+      ;; exactly the display's scale factor -- which is why no widget overlay
+      ;; could be clicked at all on a Retina Mac.
+      (let* ((canvas (luvcraft::luvcraft-session-canvas
+                      (widget-overlay-session overlay)))
+             (width (luv:canvas-width canvas))
+             (height (luv:canvas-height canvas)))
         (let* ((top-left
                  (projected-screen-vertex state width height 0.0 0.0))
                (top-right

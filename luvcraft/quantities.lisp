@@ -205,6 +205,10 @@
   :non-negative-p t)
 (math:define-quantity :scanline-count :kind :sample-count
   :non-negative-p t)
+;;; The render target's extent in pixels, carried in the frame uniform so a
+;;; vertex stage can size a pixel (the world text's dilation).
+(math:define-quantity :target-pixel-extent :kind :sample-count
+  :non-negative-p t)
 (math:define-quantity :font-scale :kind :control-signal
   :non-negative-p t)
 (math:define-quantity :chunk-radius :kind :sample-count
@@ -216,3 +220,41 @@
 (math:define-quantity :seat-offset :kind :lattice-coordinate)
 (math:define-quantity :seat-pitch :kind :angular-measure)
 (math:define-quantity :switch :kind :control-signal)
+
+;;; What the reworked sky and surface materials measure.  Cloud cover and
+;;; star and moon radiance are sky facts; detail, roughness, and bounce are
+;;; facts about a surface's micro-structure and the light it gathers from
+;;; everything that is not the sun.  The grading pair at the end are the two
+;;; display controls the filmic curve leaves to art direction.
+(math:define-quantity :cloud-coverage :kind :proportion
+  :non-negative-p t)
+(math:define-quantity :cloud-altitude :kind :lattice-coordinate
+  :non-negative-p t)
+(math:define-quantity :cloud-shadow :kind :proportion
+  :non-negative-p t)
+(math:define-quantity :star-brightness :kind :control-signal
+  :non-negative-p t)
+(math:define-quantity :moon-radiance :kind :control-signal
+  :non-negative-p t)
+(math:define-quantity :scatter-gain :kind :control-signal
+  :non-negative-p t)
+(math:define-quantity :surface-detail :kind :proportion
+  :non-negative-p t)
+(math:define-quantity :surface-roughness :kind :proportion
+  :non-negative-p t)
+(math:define-quantity :specular-gain :kind :control-signal
+  :non-negative-p t)
+(math:define-quantity :ambient-bounce :kind :proportion
+  :non-negative-p t)
+(math:define-quantity :chromatic-aberration :kind :proportion
+  :non-negative-p t)
+(math:define-quantity :grade-saturation :kind :control-signal
+  :non-negative-p t)
+(math:define-quantity :grade-contrast :kind :control-signal
+  :non-negative-p t)
+(math:define-quantity :bounciness :kind :control-signal
+  :non-negative-p t)
+(math:define-quantity :body-count :kind :sample-count
+  :non-negative-p t)
+(math:define-quantity :substep-count :kind :sample-count
+  :non-negative-p t)

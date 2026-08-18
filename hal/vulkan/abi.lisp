@@ -13,6 +13,8 @@
 
 (defparameter +debug-utils-extension-name+ "VK_EXT_debug_utils")
 
+(defparameter +mesh-shader-extension-name+ "VK_EXT_mesh_shader")
+
 ;;; Symbolic pieces of the Vulkan vocabulary we currently speak.
 
 (cffi:defcenum (result :int32)
@@ -62,6 +64,7 @@
   (:semaphore-submit-info 1000314005)
   (:command-buffer-submit-info 1000314006)
   (:physical-device-synchronization-2-features 1000314007)
+  (:physical-device-mesh-shader-features-ext 1000328000)
   (:swapchain-create-info-khr 1000001000)
   (:present-info-khr 1000001001)
   (:debug-utils-messenger-callback-data-ext 1000128003)
@@ -120,7 +123,8 @@
   (:combined-image-sampler 1)
   (:sampled-image 2)
   (:storage-image 3)
-  (:uniform-buffer 6))
+  (:uniform-buffer 6)
+  (:storage-buffer 7))
 
 (cffi:defcenum (filter :uint32)
   (:nearest 0)
@@ -269,12 +273,15 @@
   (:transfer-src #x1)
   (:transfer-dst #x2)
   (:uniform #x10)
+  (:storage #x20)
   (:vertex #x80))
 
 (cffi:defbitfield (shader-stage-flags :uint32)
   (:vertex #x1)
   (:fragment #x10)
-  (:compute #x20))
+  (:compute #x20)
+  (:task-ext #x40)
+  (:mesh-ext #x80))
 
 (cffi:defbitfield (cull-mode-flags :uint32)
   (:front #x1)
@@ -955,6 +962,14 @@
     (:s-type :physical-device-synchronization-2-features)
   (synchronization-2 :uint32))
 
+(defvkstruct physical-device-mesh-shader-features-ext
+    (:s-type :physical-device-mesh-shader-features-ext)
+  (task-shader :uint32)
+  (mesh-shader :uint32)
+  (multiview-mesh-shader :uint32)
+  (primitive-fragment-shading-rate-mesh-shader :uint32)
+  (mesh-shader-queries :uint32))
+
 (defvkstruct surface-capabilities ()
   (min-image-count :uint32)
   (max-image-count :uint32)
@@ -1027,6 +1042,11 @@
 (defvkfun "vkGetInstanceProcAddr"
     :pointer
   (instance :pointer)
+  (name :string))
+
+(defvkfun "vkGetDeviceProcAddr"
+    :pointer
+  (device :pointer)
   (name :string))
 
 (defvkproc "vkCreateDebugUtilsMessengerEXT"

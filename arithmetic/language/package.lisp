@@ -71,6 +71,8 @@
            #:arithmetic-counted-fold-state-binding
            #:arithmetic-counted-fold-bindings
            #:arithmetic-counted-fold-update
+           #:arithmetic-counted-fold-until
+           #:counted-fold-form-parts
            #:arithmetic-state-compatible-p
            #:arithmetic-function-expressions
            #:arithmetic-function-definition-for

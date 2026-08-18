@@ -111,4 +111,29 @@
            #:slug-quadratic-outline
            #:slug-bezier-vertex-specification
            #:slug-bezier-fragment-specification
-           #:slug-banded-fragment-specification))
+           #:slug-banded-fragment-specification
+           ;; The tunable values, and their names in shader source.
+           #:*slug-filter-width*
+           #:*slug-fill-rule*
+           #:*slug-optical-weight*
+           #:*slug-footprint-norm*
+           #:*slug-early-exit*
+           #:*slug-root-epsilon*
+           #:*slug-debug-view*
+           #:*slug-dilation-pixels*
+           #:*slug-static-padding*
+           #:*slug-maximum-band-count*
+           #:*slug-band-epsilon*
+           #:*slug-share-band-lists*
+           #:slug-filter-width
+           #:slug-fill-rule
+           #:slug-optical-weight
+           #:slug-footprint-norm
+           #:slug-early-exit
+           #:slug-root-epsilon
+           #:slug-debug-view
+           #:slug-dilation-pixels
+           #:slug-dilation-em
+           #:slug-font-cap-height
+           #:slug-cap-height-aligned-size
+           #:choose-slug-band-count))

@@ -98,8 +98,10 @@
       (projection '(31) '(:quantity :sun-disc-coordinate :unit :one))
       (projection '(32 33 34)
                   '(:quantity :linear-rgb :unit :one :tensor-order 1))
+      (projection '(35) '(:quantity :target-pixel-extent :unit :one))
       (projection '(36 37 38)
                   '(:quantity :linear-rgb :unit :one :tensor-order 1))
+      (projection '(39) '(:quantity :target-pixel-extent :unit :one))
       (projection '(40 41 42)
                   '(:quantity :linear-rgb :unit :one :tensor-order 1))
       (projection '(44 45 46)
@@ -164,7 +166,9 @@
        (28 29 30) sun-color
        (31) sun-disc-coordinate
        (32 33 34) zenith-color
+       (35) target-pixel-height
        (36 37 38) horizon-color
+       (39) target-pixel-width
        (40 41 42) ambient-color
        (44 45 46) fog-color
        (47) shadow-diagnostic

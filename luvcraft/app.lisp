@@ -87,6 +87,21 @@
    ;; The player's own arms and hands, and what they hold.  See BODY.LISP.
    (body :initarg :body :initform (make-instance 'player-body)
          :reader luvcraft-session-body)
+   ;; The things with weight: balls, drops, gobbets.  See PHYSICS.LISP for
+   ;; the world and BALLS.LISP for what the game does with it.  Made on the
+   ;; first frame, when there is a block world to collide with.
+   (physics :initarg :physics :initform nil
+            :accessor luvcraft-session-physics)
+   (physics-clock :initform 0d0 :type double-float
+                  :accessor luvcraft-session-physics-clock)
+   ;; The CPU-side vertex stream the bodies are drawn from each frame, and
+   ;; how much of it the last build filled.
+   (physics-vertex-stream :initform nil
+                          :accessor luvcraft-session-physics-vertex-stream)
+   (physics-vertex-count :initform 0
+                         :accessor luvcraft-session-physics-vertex-count)
+   ;; Where the world's springs stand, found from its authored edits.
+   (springs :initform nil :accessor luvcraft-session-springs)
    (title-base :initarg :title-base :initform "luvcraft"
                :reader luvcraft-session-title-base)
    (atlas-texture :initarg :atlas-texture
@@ -169,6 +184,8 @@
                           :reader luvcraft-session-critter-vertex-buffer)
    (body-vertex-buffer :initarg :body-vertex-buffer :initform nil
                        :reader luvcraft-session-body-vertex-buffer)
+   (physics-vertex-buffer :initarg :physics-vertex-buffer :initform nil
+                          :reader luvcraft-session-physics-vertex-buffer)
    (world-text :initarg :world-text :initform nil
                :reader luvcraft-session-world-text)
    (world-text-glyph-cache :initarg :world-text-glyph-cache :initform nil
@@ -433,6 +450,17 @@ return its attached overlay."))
   (declare (ignore session))
   nil)
 
+(defgeneric luvcraft-key-hint (thing)
+  (:documentation
+   "Return a short string naming the keystroke that reaches THING, or NIL.
+
+A control which draws its own key hint would be inventing one: the keys are
+decided in the command layer above, so the drawing asks rather than guesses,
+and a rebound key changes the label on the button.")
+  (:method (thing)
+    (declare (ignore thing))
+    nil))
+
 (defun clear-luvcraft-player-input (session)
   (clear-movement-intent (luvcraft-session-movement-intent session))
   (clear-movement-intent (luvcraft-session-look-intent session))
@@ -607,7 +635,9 @@ the terrain the ray meets first is what the player is looking at."
         (luvcraft-session-world session)
         :camera (luvcraft-session-camera session)
         :player (luvcraft-session-player session)
-        :selected-block (luvcraft-session-selected-block session))))))
+        :selected-block (luvcraft-session-selected-block session)
+        :carried (block-inventory-carried-blocks
+                  (luvcraft-session-inventory session)))))))
 
 (defun luvcraft-session-pipeline (session)
   (live-shader-pipeline-native-pipeline
@@ -754,6 +784,23 @@ longer names stay reachable at the end, past the number keys."
       (update-luvcraft-session-title session))
     (values (and hit (block-ray-hit-block hit)) status)))
 
+(defgeneric luvcraft-block-placed (block session x y z)
+  (:documentation
+   "BLOCK has just been put down at X,Y,Z by the player in SESSION.
+
+Most blocks are inert and the default does nothing; a block that does
+something where it stands -- a film beside a wall -- answers here.")
+  (:method (block session x y z)
+    (declare (ignore block session x y z))
+    nil))
+
+(defgeneric luvcraft-block-removed (block session x y z)
+  (:documentation
+   "BLOCK has just been taken away from X,Y,Z by the player in SESSION.")
+  (:method (block session x y z)
+    (declare (ignore block session x y z))
+    nil))
+
 (defun edit-luvcraft-block (session action)
   "Apply ACTION (:REMOVE or :PLACE) along SESSION's centre view ray."
   (multiple-value-bind (hit status) (luvcraft-session-target session)
@@ -772,20 +819,38 @@ longer names stay reachable at the end, past the number keys."
         (multiple-value-bind (old-block residency) (world-block-at world x y z)
           (unless (eq residency :resident)
             (return-from edit-luvcraft-block (values nil :absent)))
+          ;; The ground is about to move: whatever was asleep on it must
+          ;; find out.
+          (when (luvcraft-session-physics session)
+            (wake-physics-bodies-near (luvcraft-session-physics session)
+                                      (+ x 0.5) (+ y 0.5) (+ z 0.5) 2.5))
           (ecase action
             (:remove
              (edit-block-at nil world x y z)
              (smash-block-particles
               (luvcraft-session-particle-system session)
-              old-block coordinate))
+              old-block coordinate)
+             ;; A block worth carrying is picked up rather than smashed away.
+             (when (block-kind-carried-p old-block)
+               (add-block-to-inventory
+                (luvcraft-session-inventory session) old-block 1)
+               (setf (luvcraft-session-selected-block session) old-block)
+               (update-luvcraft-session-title session))
+             (luvcraft-block-removed old-block session x y z))
             (:place
              (when old-block
                (return-from edit-luvcraft-block (values nil :blocked)))
              (when (player-overlaps-block-p
                     (luvcraft-session-player session) x y z)
                (return-from edit-luvcraft-block (values nil :blocked)))
-             (edit-block-at
-              (luvcraft-session-selected-block session) world x y z)))
+             (let ((block (luvcraft-session-selected-block session)))
+               ;; Creative materials are unlimited; a carried one is spent.
+               (when (and (block-kind-carried-p block)
+                          (not (remove-block-from-inventory
+                                (luvcraft-session-inventory session) block 1)))
+                 (return-from edit-luvcraft-block (values nil :blocked)))
+               (edit-block-at block world x y z)
+               (luvcraft-block-placed block session x y z))))
           (request-luvcraft-session-checkpoint session)
           (values coordinate :edited))))))
 

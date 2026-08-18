@@ -117,11 +117,13 @@ offsets and of headers."
     :serial t
     :components ((:static-file "README.md")
                  (:static-file "test-pattern.mp4")
+                 (:static-file "test-tone.mp4")
                  (:file "package")
                  (:cffi-grovel-file "abi")
                  (:file "ffi")
                  (:file "frame")
-                 (:file "decode"))))
+                 (:file "decode")
+                 (:file "audio"))))
   :in-order-to ((test-op (test-op "luv/libav/test"))))
 
 (defsystem "luv/libav/test"
@@ -236,6 +238,7 @@ offsets and of headers."
      (:module "sdl"
       :serial t
       :components ((:file "canvas")
+                   (:file "audio")
                    (:file "cocoa" :if-feature :darwin)))
      (:module "vulkan-backend"
       :pathname "vulkan"

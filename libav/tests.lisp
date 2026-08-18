@@ -147,3 +147,36 @@
                 (libav:libav-error-operation condition)))
         (ok (minusp (libav:libav-error-code condition)))
         (ok (plusp (length (libav:libav-error-message condition))))))))
+
+(deftest a-silent-film-has-no-audio-track
+  ;; The test pattern has no sound; asking is not an error, it is a NIL.
+  (ok (null (libav:open-audio *test-pattern*))))
+
+(deftest a-films-sound-decodes-to-mono-floats
+  ;; A one-second 440 Hz sine, made by ffmpeg beside the test pattern.
+  (let ((track (libav:open-audio
+                (asdf:system-relative-pathname "luv/libav" "libav/test-tone.mp4"))))
+    (ok track)
+    (unwind-protect
+         (progn
+           (ok (= 44100 (libav:audio-sample-rate track)))
+           (ok (= 1 (libav:audio-channel-count track)))
+           (ok (and (libav:audio-duration track)
+                    (< 0.9 (libav:audio-duration track) 1.2)))
+           (let ((total 0) (peak 0.0) (buffer nil))
+             (loop while (libav:decode-next-audio-frame track)
+                   do (multiple-value-bind (samples count)
+                          (libav:audio-frame-mono-samples track buffer)
+                        (setf buffer samples)
+                        (ok (<= count (length samples)))
+                        (dotimes (index count)
+                          (setf peak (max peak (abs (aref samples index)))))
+                        (incf total count)))
+             ;; About a second of it, and audibly a tone rather than silence
+             ;; or a decoder handing back garbage.
+             (ok (< 40000 total 50000))
+             (ok (< 0.1 peak 1.01)))
+           ;; And again from the top.
+           (libav:rewind-audio track)
+           (ok (libav:decode-next-audio-frame track)))
+      (libav:close-audio track))))

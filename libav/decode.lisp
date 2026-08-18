@@ -17,17 +17,27 @@
 
 (in-package #:luv.libav)
 
-(defclass video ()
+(defclass stream-decoder ()
   ((pathname :initarg :pathname :reader video-pathname)
    (format-context :initarg :format-context :accessor video-format-context)
    (codec-context :initarg :codec-context :accessor video-codec-context)
    (stream-index :initarg :stream-index :reader video-stream-index)
-   (width :initarg :width :reader video-width)
-   (height :initarg :height :reader video-height)
-   (frame-rate :initarg :frame-rate :reader video-frame-rate)
-   ;; The decoder's own output, reused across every picture in the file.
+   ;; The decoder's own output, reused across every frame in the file.
    (frame :initarg :frame :reader video-frame)
    (packet :initarg :packet :accessor video-packet)
+   (drained-p :initform nil :accessor video-drained-p))
+  (:documentation
+   "One demuxer and one decoder on one stream of an open file.
+
+The pump in DECODE-NEXT-FRAME is the same whatever the stream carries; a
+VIDEO adds pictures and their conversion, an AUDIO-TRACK adds samples.  The
+accessors keep the VIDEO- prefix they were born with: the picture path came
+first, and every caller of it says video."))
+
+(defclass video (stream-decoder)
+  ((width :initarg :width :reader video-width)
+   (height :initarg :height :reader video-height)
+   (frame-rate :initarg :frame-rate :reader video-frame-rate)
    ;; Lazily built, because its size depends on what the caller asks for.
    (scaler :initform nil :accessor video-scaler)
    (scaler-key :initform nil :accessor video-scaler-key)
@@ -36,8 +46,7 @@
    (staging :initform nil :accessor video-staging)
    (staging-size :initform 0 :accessor video-staging-size)
    (hardware-cleanup :initarg :hardware-cleanup :initform nil
-                     :accessor video-hardware-cleanup)
-   (drained-p :initform nil :accessor video-drained-p))
+                     :accessor video-hardware-cleanup))
   (:documentation "An open video file and its decoder."))
 
 ;;; Demuxing.
@@ -407,14 +416,15 @@ Returns a VIDEO.  The caller owns it and must CLOSE-VIDEO it."
   video)
 
 (defun close-video-1 (video)
-  (when (video-scaler video)
-    (%sws-free-context (video-scaler video))
-    (setf (video-scaler video) nil
-          (video-scaler-key video) nil))
-  (when (video-staging video)
-    (cffi:foreign-free (video-staging video))
-    (setf (video-staging video) nil
-          (video-staging-size video) 0))
+  (when (typep video 'video)
+    (when (video-scaler video)
+      (%sws-free-context (video-scaler video))
+      (setf (video-scaler video) nil
+            (video-scaler-key video) nil))
+    (when (video-staging video)
+      (cffi:foreign-free (video-staging video))
+      (setf (video-staging video) nil
+            (video-staging-size video) 0)))
   (when (video-packet video)
     (cffi:with-foreign-object (cell :pointer)
       (setf (cffi:mem-ref cell :pointer) (video-packet video))
@@ -425,7 +435,7 @@ Returns a VIDEO.  The caller owns it and must CLOSE-VIDEO it."
       (setf (cffi:mem-ref cell :pointer) (video-codec-context video))
       (%avcodec-free-context cell))
     (setf (video-codec-context video) nil))
-  (when (video-hardware-cleanup video)
+  (when (and (typep video 'video) (video-hardware-cleanup video))
     (funcall (video-hardware-cleanup video))
     (setf (video-hardware-cleanup video) nil))
   (when (video-format-context video)

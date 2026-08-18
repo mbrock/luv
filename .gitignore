@@ -5,3 +5,4 @@ build/
 capture.png
 capture.ppm
 *.fasl
+*.blend1

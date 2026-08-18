@@ -98,6 +98,32 @@ grip y, and outward is toward the eye, grip -z."))
   (when (phone-in-hand-p (phone-screen-surface-phone surface) session)
     0.0))
 
+(defmethod terminal-surface-panel-frame
+    ((surface phone-screen-surface) (session luvcraft-session)
+     &optional (offset 0.010))
+  ;; The general answer is in grip space, since that is the space the phone
+  ;; surface describes itself in; carry it into the world through wherever
+  ;; the hand is this frame.
+  (multiple-value-bind (center right-axis up-axis outward)
+      (call-next-method surface session offset)
+    (multiple-value-bind (palm grip-right grip-up grip-forward)
+        (player-body-grip-frame session)
+      (flet ((into-world (v)
+               (make-vec3 (+ (* (vec3-x v) (vec3-x grip-right))
+                             (* (vec3-y v) (vec3-x grip-up))
+                             (* (vec3-z v) (vec3-x grip-forward)))
+                          (+ (* (vec3-x v) (vec3-y grip-right))
+                             (* (vec3-y v) (vec3-y grip-up))
+                             (* (vec3-z v) (vec3-y grip-forward)))
+                          (+ (* (vec3-x v) (vec3-z grip-right))
+                             (* (vec3-y v) (vec3-z grip-up))
+                             (* (vec3-z v) (vec3-z grip-forward))))))
+        (values (frame-point palm grip-right grip-up grip-forward
+                             (vec3-x center) (vec3-y center) (vec3-z center))
+                (into-world right-axis)
+                (into-world up-axis)
+                (into-world outward))))))
+
 (defmethod terminal-surface-focus-camera-pose
     ((surface phone-screen-surface) (session luvcraft-session))
   ;; The phone is wherever the hand is; the camera stays put and only the
@@ -254,6 +280,13 @@ toward the player.  Held in the right hand; TAB focuses its shell."))
 (defun phone-in-hand-p (phone session)
   (eq phone (player-body-hand-item (luvcraft-session-body session))))
 
+(defparameter *phone-initial-mode* :shell
+  "The mode a phone's display starts in when it is first taken out.
+
+The phone is a terminal like a wall is, so :SHELL is what it knows by
+itself; a presentation extension that mounts something more phone-like --
+a messenger -- sets this when it loads, and the phone comes out showing it.")
+
 (defun ensure-phone-display (phone session)
   "The phone's terminal display, made -- with a shell in it -- on first use."
   (or (phone-display phone)
@@ -278,6 +311,9 @@ toward the player.  Held in the right hand; TAB focuses its shell."))
                (attach-terminal-display-shell display)
                (setf (phone-display phone) display
                      completed-p t)
+               (unless (eq *phone-initial-mode* :shell)
+                 (change-terminal-display-mode display session
+                                               *phone-initial-mode*))
                display)
           (unless (or completed-p (null display))
             (remove-luvcraft-overlay session display))))))

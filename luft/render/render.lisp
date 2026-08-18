@@ -122,6 +122,74 @@
         (plateau (if (and (<= 40 x 52) (<= 10 y 22)) 3.0 0.0)))
     (max 1 (floor (+ rolling plateau)))))
 
+(defun fill-box (solid x0 x1 y0 y1 z0 z1 &optional (state t))
+  "Set every cell of the closed box to STATE."
+  (loop for x from x0 to x1
+        do (loop for y from y0 to y1
+                 do (loop for z from z0 to z1
+                          do (setf (luft:solid-cell-p solid x y z) state)))))
+
+(defun carve-ravine (solid)
+  "A gap for the bridge to cross, cut where the ground was continuous."
+  (loop for y from 40 to 56
+        do (let ((width (+ 3 (floor (abs (- y 48)) 3))))
+             (loop for x from (- 30 width) to (+ 30 width)
+                   do (loop for z from 0 to 12
+                            do (setf (luft:solid-cell-p solid x y z) nil))))))
+
+(defun build-bridge (solid)
+  "A deck across the ravine on two piers, with a parapet either side.
+
+Something has to span a gap before a world has anywhere to stand and look
+down from, and a deck one cell thick with a parapet at its edge is the
+smallest thing that reads as built rather than as terrain."
+  (let ((deck 9))
+    ;; Piers down to whatever floor the ravine left.
+    (dolist (x '(26 34))
+      (fill-box solid x (1+ x) 44 45 0 (1- deck))
+      (fill-box solid x (1+ x) 51 52 0 (1- deck)))
+    ;; The deck, and a parapet along both sides with regular gaps.
+    (fill-box solid 24 36 43 53 deck deck)
+    (loop for x from 24 to 36
+          unless (zerop (mod (- x 24) 4))
+            do (setf (luft:solid-cell-p solid x 43 (+ deck 1)) t
+                     (luft:solid-cell-p solid x 53 (+ deck 1)) t))
+    ;; Ramps up to the deck at either end.
+    (loop for step from 0 to 8
+          do (fill-box solid (- 23 step) (- 23 step) 45 51
+                       0 (max 0 (- deck 1 step)))
+             (fill-box solid (+ 37 step) (+ 37 step) 45 51
+                       0 (max 0 (- deck 1 step))))))
+
+(defun build-balconies (solid)
+  "Three balconies off the tower, each a slab with a lip and a doorway."
+  (loop for (z side) in '((6 :east) (12 :north) (17 :east))
+        do (ecase side
+             (:east
+              (fill-box solid 28 31 32 35 z z)
+              (fill-box solid 31 31 32 35 (1+ z) (1+ z))
+              (fill-box solid 28 31 32 32 (1+ z) (1+ z))
+              (fill-box solid 28 31 35 35 (1+ z) (1+ z))
+              ;; The doorway it is reached through.
+              (fill-box solid 27 27 33 34 z (+ z 1) nil))
+             (:north
+              (fill-box solid 22 25 38 41 z z)
+              (fill-box solid 22 25 41 41 (1+ z) (1+ z))
+              (fill-box solid 22 22 38 41 (1+ z) (1+ z))
+              (fill-box solid 25 25 38 41 (1+ z) (1+ z))
+              (fill-box solid 23 24 37 37 z (+ z 1) nil)))))
+
+(defun build-terraces (solid)
+  "Stepped terraces below the tower: a hillside someone has taken in hand."
+  (loop for step from 0 below 5
+        for z = (+ 3 step)
+        for near = (- 18 (* 2 step))
+        do (fill-box solid near (+ near 1) (- 24 step) (+ 33 step) 0 z)
+           ;; A low retaining wall along the front of each terrace.
+           (loop for y from (- 24 step) to (+ 33 step)
+                 unless (zerop (mod y 5))
+                   do (setf (luft:solid-cell-p solid near y (1+ z)) t))))
+
 (defun make-demo-scene (&key (horizontal-bits 6))
   "A small textureless world: rolling ground, a tower, and a floating slab."
   (let* ((domain (luft:make-world-domain :horizontal-bits horizontal-bits))
@@ -148,6 +216,10 @@
                    do (loop for z from 0 to (+ 4 step)
                             do (setf (luft:solid-cell-p solid (- 39 step) y z)
                                      t))))
+    (carve-ravine solid)
+    (build-bridge solid)
+    (build-balconies solid)
+    (build-terraces solid)
     (make-scene domain :solid solid)))
 
 ;;; ------------------------------------------------------------------------
@@ -220,11 +292,21 @@
 (defparameter *exposure* 1.15
   "Exposure of the 1 - exp(-x) curve the lit colour rolls off through.")
 (defparameter *sky-color* (vec3:make-vec3 0.62 0.76 0.92))
+(defparameter *draw-sky* t
+  "Whether the background is the gradient sky pass or the flat clear colour.")
+(defparameter *focus-distance* 40.0
+  "How far the lens is focused, in cells; also the alpha channel's scale.")
+(defparameter *aperture* 0.0
+  "How strongly the focus pass softens the distance; zero is a pinhole.")
 (defparameter *fog-distance* 140.0)
 (defparameter *bevel-radius* 0.22
   "The :BEVEL style's crease-rounding radius in cells, below one half.")
-(defparameter *chamfer-width* 0.045
-  "The :CHAMFER style's subtle 45-degree crease relief in cells.")
+(defparameter *chamfer-width* 0.11
+  "The :CHAMFER style's 45-degree crease relief in cells.
+
+Wide enough that the planed facet reads as a face of its own and catches
+the light as a band rather than a hairline, and still far short of the old
+0.22-cell coves that made the world look carved.")
 (defparameter *arris-softness* 0.004
   "The narrow shading transition where a chamfer meets its original face.")
 
@@ -236,7 +318,7 @@
            (far *far-distance*)
            (focal (/ (tan (/ (camera-field-of-view camera) 2.0))))
            (aspect (/ (coerce width 'single-float) height))
-           (data (make-array 60 :element-type 'single-float))
+           (data (make-array 64 :element-type 'single-float))
            (index 0))
       (flet ((lane (vector fourth)
                (setf (aref data index) (coerce (vec3:vec3-x vector) 'single-float)
@@ -265,7 +347,10 @@
         (lane (vec3:make-vec3 *occlusion-strength* *shadow-strength* 0.0) 0.0)
         (lane *top-color* 0.0)
         (lane *side-color* 0.0)
-        (lane *bottom-color* 0.0))
+        (lane *bottom-color* 0.0)
+        (lane (vec3:make-vec3 *focus-distance* *aperture*
+                              (/ 1.0 (max 1 width)))
+              (/ 1.0 (max 1 height))))
       data)))
 
 ;;; ------------------------------------------------------------------------
@@ -283,6 +368,11 @@
    (color-view :initform nil :accessor renderer-color-view)
    (depth-texture :initform nil :accessor renderer-depth-texture)
    (depth-view :initform nil :accessor renderer-depth-view)
+   (scene-texture :initform nil :accessor renderer-scene-texture)
+   (scene-view :initform nil :accessor renderer-scene-view)
+   (sampler :initform nil :accessor renderer-sampler)
+   (lens-layout :initform nil :accessor renderer-lens-layout)
+   (lens-bind-group :initform nil :accessor renderer-lens-bind-group)
    (uniform-buffer :initform nil :accessor renderer-uniform-buffer)
    (sites-buffer :initform nil :accessor renderer-sites-buffer)
    (bricks-buffer :initform nil :accessor renderer-bricks-buffer)
@@ -297,7 +387,7 @@
               :documentation "A plist from style to mesh pipeline.")
    (style :initarg :style :initform :bevel :accessor renderer-style
           :documentation
-          "Which pipeline draws: :FLAT, :BEVEL (rounded), or :CHAMFER.")
+          "Which pipeline draws: :FLAT, :BEVEL (rounded), :CHAMFER, or :PAPER.")
    (uploaded-scene :initform nil :accessor renderer-uploaded-scene))
   (:documentation "GPU resources drawing one scene from one camera."))
 
@@ -326,13 +416,28 @@
                          :label "luft surface depth"
                          :size extent :dimensions :2d
                          :format :depth32-float
-                         :usage '(:render-attachment)))))
+                         :usage '(:render-attachment))))
+         ;; The world is drawn here and read by the focus pass; COLOR is what
+         ;; the focus pass writes and what a capture copies out.
+         (scene (create device
+                        (make-texture-descriptor
+                         :label "luft scene color"
+                         :size extent :dimensions :2d
+                         :format (renderer-color-format renderer)
+                         :usage '(:render-attachment :texture-binding)))))
     (setf (renderer-color-texture renderer) color
           (renderer-color-view renderer)
           (create device (make-texture-view-descriptor :texture color))
           (renderer-depth-texture renderer) depth
           (renderer-depth-view renderer)
-          (create device (make-texture-view-descriptor :texture depth)))))
+          (create device (make-texture-view-descriptor :texture depth))
+          (renderer-scene-texture renderer) scene
+          (renderer-scene-view renderer)
+          (create device (make-texture-view-descriptor :texture scene))
+          (renderer-sampler renderer)
+          (create device (make-sampler-descriptor
+                          :label "luft scene sampler"
+                          :mag-filter :linear :min-filter :linear)))))
 
 (defun create-renderer-pipeline (renderer)
   (let* ((device (renderer-device renderer))
@@ -367,6 +472,39 @@
                     :label "luft chamfer fragment"
                     :language :mathematical
                     :code (shaders:chamfer-fragment-shader))))
+         (paper-fragment
+           (create device
+                   (make-shader-module-descriptor
+                    :label "luft paper fragment"
+                    :language :mathematical
+                    :code (shaders:paper-fragment-shader))))
+         (sky-mesh (create device
+                           (make-shader-module-descriptor
+                            :label "luft sky mesh"
+                            :language :mathematical
+                            :code (shaders:sky-mesh-shader))))
+         (sky-fragment
+           (create device
+                   (make-shader-module-descriptor
+                    :label "luft sky fragment"
+                    :language :mathematical
+                    :code (shaders:sky-fragment-shader))))
+         (lens-fragment
+           (create device
+                   (make-shader-module-descriptor
+                    :label "luft lens fragment"
+                    :language :mathematical
+                    :code (shaders:lens-fragment-shader))))
+         (lens-layout
+           (create device
+                   (make-bind-group-layout-descriptor
+                    :label "luft lens layout"
+                    :entries `((:binding ,shaders:+scene-binding+
+                                :type :texture)
+                               (:binding ,shaders:+sampler-binding+
+                                :type :sampler)
+                               (:binding ,shaders:+lens-frame-binding+
+                                :type :uniform-buffer)))))
          (layout (create device
                          (make-bind-group-layout-descriptor
                           :label "luft surface layout"
@@ -379,29 +517,63 @@
                              :type :storage-buffer)
                             (:binding ,shaders:+cells-binding+
                              :type :storage-buffer))))))
-    (flet ((pipeline (label mesh-module fragment-module)
+    (flet ((pipeline (label mesh-module fragment-module
+                      &key (task-module task)
+                           (group layout)
+                           (depth '(:format :depth32-float
+                                    :depth-write-enabled t
+                                    :depth-compare :less)))
              (create device
                      (make-mesh-render-pipeline-descriptor
                       :label label
-                      :layout layout
-                      :task `(:module ,task)
+                      :layout group
+                      :task (and task-module `(:module ,task-module))
                       :mesh `(:module ,mesh-module)
                       :fragment
                       `(:module ,fragment-module
                         :targets ((:format
                                    ,(renderer-color-format renderer))))
                       :max-mesh-workgroups 1
-                      :depth-stencil '(:format :depth32-float
-                                       :depth-write-enabled t
-                                       :depth-compare :less)))))
+                      :depth-stencil depth))))
       (setf (renderer-modules renderer)
-            (list task mesh bevel chamfer fragment chamfer-fragment)
+            (list task mesh bevel chamfer fragment chamfer-fragment
+                  paper-fragment sky-mesh sky-fragment lens-fragment)
             (renderer-layout renderer) layout
+            (renderer-lens-layout renderer) lens-layout
             (renderer-pipelines renderer)
             (list :flat (pipeline "luft surface pipeline" mesh fragment)
                   :bevel (pipeline "luft bevel pipeline" bevel fragment)
                   :chamfer (pipeline "luft chamfer pipeline"
-                                     chamfer chamfer-fragment))))))
+                                     chamfer chamfer-fragment)
+                  ;; The paper material draws the chamfered geometry: the
+                  ;; glint it exists for lives on the planed facets.
+                  :paper (pipeline "luft paper pipeline"
+                                   chamfer paper-fragment)
+                  ;; The background: no task stage to amplify, no depth to
+                  ;; write, and it runs before anything that would hide it.
+                  :sky (pipeline "luft sky pipeline" sky-mesh sky-fragment
+                                 :task-module nil
+                                 :depth '(:format :depth32-float
+                                          :depth-write-enabled nil
+                                          :depth-compare :always))
+                  ;; The lens draws the frame the world was drawn into, so it
+                  ;; binds a group of textures rather than the world's sites.
+                  :lens (pipeline "luft lens pipeline" sky-mesh lens-fragment
+                                  :task-module nil
+                                  :group lens-layout
+                                  :depth nil)))
+      (setf (renderer-lens-bind-group renderer)
+            (create device
+                    (make-bind-group-descriptor
+                     :label "luft lens bindings"
+                     :layout lens-layout
+                     :entries
+                     `((:binding ,shaders:+scene-binding+
+                        :resource ,(renderer-scene-view renderer))
+                       (:binding ,shaders:+sampler-binding+
+                        :resource ,(renderer-sampler renderer))
+                       (:binding ,shaders:+lens-frame-binding+
+                        :resource ,(renderer-uniform-buffer renderer)))))))))
 
 (defun make-renderer (&key scene camera device
                         (provider *gpu-provider*)
@@ -410,8 +582,9 @@
                         (style :bevel))
   "Create every GPU object needed to draw SCENE from CAMERA at WIDTH by HEIGHT.
 
-STYLE is :FLAT, :BEVEL (rounded), or :CHAMFER (subtle planar crease relief),
-and may be changed later with (SETF RENDERER-STYLE).
+STYLE is :FLAT, :BEVEL (rounded), :CHAMFER (subtle planar crease relief), or
+:PAPER (the chamfered geometry in a matte, toothed material), and may be
+changed later with (SETF RENDERER-STYLE).
 Without DEVICE, one is requested from PROVIDER and owned by the renderer."
   (let* ((owns-device-p (null device))
          (device (or device
@@ -450,7 +623,12 @@ Without DEVICE, one is requested from PROVIDER and owned by the renderer."
     (when resource (ignore-errors (destroy resource))))
   (dolist (module (renderer-modules renderer))
     (ignore-errors (destroy module)))
-  (dolist (resource (list (renderer-sites-buffer renderer)
+  (dolist (resource (list (renderer-lens-bind-group renderer)
+                          (renderer-lens-layout renderer)
+                          (renderer-sampler renderer)
+                          (renderer-scene-view renderer)
+                          (renderer-scene-texture renderer)
+                          (renderer-sites-buffer renderer)
                           (renderer-bricks-buffer renderer)
                           (renderer-cells-buffer renderer)
                           (renderer-uniform-buffer renderer)
@@ -544,26 +722,53 @@ The second value is true when a new buffer was created."
                   (frame-uniform-data (renderer-camera renderer)
                                       (first extent) (second extent)
                                       (scene-domain scene)
-                                      (if (eq (renderer-style renderer) :chamfer)
+                                      (if (member (renderer-style renderer)
+                                                  '(:chamfer :paper))
                                           *chamfer-width*
                                           *bevel-radius*)))
-    (let ((pass (begin-render-pass
-                 encoder
-                 (make-render-pass-descriptor
-                  :label "luft surface pass"
-                  :color-attachments
-                  `((:view ,(renderer-color-view renderer)
-                     :load-op :clear :store-op :store
-                     :clear-value ,(vector (vec3:vec3-x sky) (vec3:vec3-y sky)
-                                           (vec3:vec3-z sky) 1.0)))
-                  :depth-stencil-attachment
-                  `(:view ,(renderer-depth-view renderer)
-                    :depth-load-op :clear :depth-store-op :discard
-                    :depth-clear-value 1.0)))))
+    (let* ((lens-p (plusp *aperture*))
+           ;; With a lens the world is drawn into the scene texture and the
+           ;; focus pass writes the capture target; without one the world
+           ;; draws straight into it and no frame is copied twice.
+           (target (if lens-p
+                       (renderer-scene-view renderer)
+                       (renderer-color-view renderer)))
+           (pass (begin-render-pass
+                  encoder
+                  (make-render-pass-descriptor
+                   :label "luft surface pass"
+                   :color-attachments
+                   `((:view ,target
+                      :load-op :clear :store-op :store
+                      :clear-value ,(vector (vec3:vec3-x sky) (vec3:vec3-y sky)
+                                            (vec3:vec3-z sky) 1.0)))
+                   :depth-stencil-attachment
+                   `(:view ,(renderer-depth-view renderer)
+                     :depth-load-op :clear :depth-store-op :discard
+                     :depth-clear-value 1.0)))))
+      (when *draw-sky*
+        (set-pipeline pass (renderer-pipeline renderer :sky))
+        (set-bind-group pass 0 (renderer-bind-group renderer))
+        (draw-mesh-workgroups pass 1))
       (set-pipeline pass (renderer-pipeline renderer))
       (set-bind-group pass 0 (renderer-bind-group renderer))
       (draw-mesh-workgroups pass (scene-brick-count scene))
-      (end-pass pass))
+      (end-pass pass)
+      (when lens-p
+        (prepare-texture encoder (renderer-scene-texture renderer)
+                         :texture-binding)
+        (let ((lens (begin-render-pass
+                     encoder
+                     (make-render-pass-descriptor
+                      :label "luft lens pass"
+                      :color-attachments
+                      `((:view ,(renderer-color-view renderer)
+                         :load-op :clear :store-op :store
+                         :clear-value #(0.0 0.0 0.0 1.0)))))))
+          (set-pipeline lens (renderer-pipeline renderer :lens))
+          (set-bind-group lens 0 (renderer-lens-bind-group renderer))
+          (draw-mesh-workgroups lens 1)
+          (end-pass lens))))
     (renderer-color-texture renderer)))
 
 (defun render-pixels (renderer)
@@ -598,11 +803,77 @@ The further values are the width, height, and colour format of the pixels."
       (when encoder (destroy encoder))
       (destroy readback))))
 
-(defun render-to-png (renderer pathname)
-  "Render one frame headlessly and write it to PATHNAME as a PNG."
+(defparameter *srgb-to-linear*
+  (let ((table (make-array 256 :element-type 'single-float)))
+    (dotimes (index 256 table)
+      (let ((value (/ (float index 1.0) 255.0)))
+        (setf (aref table index)
+              (if (<= value 0.04045)
+                  (/ value 12.92)
+                  (expt (/ (+ value 0.055) 1.055) 2.4))))))
+  "One byte to its linear value: a 256-entry table beats a per-pixel EXPT.")
+
+(defun linear-to-srgb-byte (value)
+  (let ((clamped (min 1.0 (max 0.0 value))))
+    (round (* 255.0
+              (if (<= clamped 0.0031308)
+                  (* 12.92 clamped)
+                  (- (* 1.055 (expt clamped (/ 1.0 2.4))) 0.055))))))
+
+(defun downsample-pixels (pixels width height factor &key (srgb-p t))
+  "Average FACTOR by FACTOR blocks of PIXELS, in linear light.
+
+Supersampling is the whole of the antialiasing here: there is no multisample
+path, and averaging a rendered frame is the same thing one box filter later.
+The average must be taken in linear light -- averaging sRGB bytes darkens
+every edge, which is precisely where the eye is looking."
+  (let* ((out-width (floor width factor))
+         (out-height (floor height factor))
+         (out (make-array (* 4 out-width out-height)
+                          :element-type '(unsigned-byte 8)))
+         (weight (/ 1.0 (* factor factor))))
+    (dotimes (y out-height (values out out-width out-height))
+      (dotimes (x out-width)
+        (let ((red 0.0) (green 0.0) (blue 0.0) (alpha 0.0))
+          (dotimes (dy factor)
+            (dotimes (dx factor)
+              (let ((offset (* 4 (+ (* (+ (* y factor) dy) width)
+                                    (+ (* x factor) dx)))))
+                (flet ((channel (index)
+                         (let ((byte (aref pixels (+ offset index))))
+                           (if srgb-p
+                               (aref *srgb-to-linear* byte)
+                               (/ (float byte 1.0) 255.0)))))
+                  (incf red (channel 0))
+                  (incf green (channel 1))
+                  (incf blue (channel 2))
+                  (incf alpha (/ (float (aref pixels (+ offset 3)) 1.0)
+                                 255.0))))))
+          (let ((offset (* 4 (+ (* y out-width) x))))
+            (flet ((store (index value)
+                     (setf (aref out (+ offset index))
+                           (if srgb-p
+                               (linear-to-srgb-byte (* value weight))
+                               (round (* 255.0 (min 1.0 (* value weight))))))))
+              (store 0 red)
+              (store 1 green)
+              (store 2 blue)
+              (setf (aref out (+ offset 3))
+                    (round (* 255.0 (min 1.0 (* alpha weight))))))))))))
+
+(defun render-to-png (renderer pathname &key (downsample 1))
+  "Render one frame headlessly and write it to PATHNAME as a PNG.
+
+With DOWNSAMPLE above one the renderer is presumed to have been made that
+many times oversize, and the frame is box-filtered down on the way out."
   (multiple-value-bind (pixels width height format) (render-pixels renderer)
     (ensure-directories-exist pathname)
-    (write-rgba-png pathname pixels width height format)))
+    (if (> downsample 1)
+        (multiple-value-bind (small small-width small-height)
+            (downsample-pixels pixels width height downsample
+                               :srgb-p (eq format :rgba8-unorm-srgb))
+          (write-rgba-png pathname small small-width small-height format))
+        (write-rgba-png pathname pixels width height format))))
 
 (defun capture-demo-png (pathname &key (width 1280) (height 800)
                                     (camera (make-fly-camera)))

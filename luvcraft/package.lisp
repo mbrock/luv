@@ -126,6 +126,7 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:advance-sky-clock
            #:apply-block-world-source-edits
            #:attach-luvcraft-hud
+           #:luvcraft-key-hint
            #:toggle-luvcraft-inventory
            #:toggle-luvcraft-metabar
            #:knob
@@ -178,6 +179,33 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:block-kind-face-tiles
            #:block-kind-name
            #:block-kind-named
+           #:block-kind-carried-p
+           #:block-inventory-carried-blocks
+           ;; The tape and its films; luvcraft/tape.lisp.
+           #:tape-block-kind
+           #:*tape-block*
+           #:film-block-kind
+           #:film-video-id
+           #:film-title
+           #:film-uploader
+           #:film-duration
+           #:film-upload-date
+           #:film-pathname
+           #:film-label
+           #:ensure-film
+           #:*films*
+           #:youtube-video-id
+           #:luvcraft-films-directory
+           #:yt-dlp-program
+           #:tape-download
+           #:tape-download-progress
+           #:begin-tape-download
+           #:find-tape-download
+           #:open-tape-prompt
+           #:luvcraft-block-placed
+           #:luvcraft-block-removed
+           #:film-wall-beside
+           #:show-film-beside
            #:block-inventory
            #:block-inventory-blocks
            #:block-inventory-quickbar-blocks
@@ -297,6 +325,32 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:put-away-hand-item
            #:toggle-hand-item
            #:toggle-luvcraft-phone
+           #:toggle-luvcraft-ball
+           #:ball
+           #:throw-luvcraft-ball
+           #:physics-world
+           #:make-physics-world
+           #:step-physics-world
+           #:spawn-physics-body
+           #:spawn-body-of-kind
+           #:physics-body-position
+           #:physics-body-velocity
+           #:physics-body-alive-p
+           #:physics-body-sleeping-p
+           #:destroy-physics-body
+           #:physics-events
+           #:physics-world-state-hash
+           #:validate-physics-world
+           #:physics-world-awake
+           #:physics-world-sleeping
+           #:physics-world-step-count
+           #:physics-world-terrain
+           #:clear-physics-boxes
+           #:post-physics-box
+           #:wake-physics-bodies-near
+           #:clear-physics-bodies
+           #:do-physics-events
+           #:luvcraft-session-physics
            #:phone
            #:phone-display
            #:phone-terminal-display
@@ -551,6 +605,8 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:play-terminal-display-film
            #:terminal-surface
            #:terminal-surface-face
+           #:terminal-surface-panel-frame
+           #:*phone-initial-mode*
            #:terminal-surface-height
            #:terminal-surface-origin
            #:terminal-surface-width

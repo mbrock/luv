@@ -211,10 +211,12 @@ some other space; the environment lanes are packed the same either way."
         (apply #'emit (append (color (sky-frame-parameters-sun-color sky))
                               (list (sky-frame-parameters-sun-angular-width
                                      sky))))
+        ;; The zenith and horizon lanes' spare w carry the target's height
+        ;; and width in pixels: what a vertex stage needs to size a pixel.
         (apply #'emit (append (color (sky-frame-parameters-zenith-color sky))
-                              (list 0.0)))
+                              (list height)))
         (apply #'emit (append (color (sky-frame-parameters-horizon-color sky))
-                              (list 0.0)))
+                              (list width)))
         (apply #'emit (append (color (sky-frame-parameters-ambient-color sky))
                               (list (sky-frame-parameters-exposure sky))))
         (apply #'emit
@@ -250,13 +252,17 @@ some other space; the environment lanes are packed the same either way."
 ;;; presentation stack reads every frame, so a SLY eval can retune the whole
 ;;; look of the running game without rebuilding a pipeline.
 
-(defparameter *luvcraft-exposure* 0.85
+(defparameter *luvcraft-exposure* 0.72
   "Overall scene exposure multiplied into the sky profile's own exposure.")
 
-(defparameter *luvcraft-bloom-gain* 0.55
-  "How much of the blurred bright-pass image is added back in linear light.")
+(defparameter *luvcraft-bloom-gain* 0.22
+  "How much of the blurred bright-pass image is added back in linear light.
 
-(defparameter *luvcraft-shaft-gain* 0.85
+The chain's kernel is wide and runs twice, so this is a glow spread over a
+sixth of the frame rather than a halo: past about a third it stops reading as
+light around the sun and starts reading as fog over everything.")
+
+(defparameter *luvcraft-shaft-gain* 0.30
   "How strongly sunlight scattered around the solar disc streaks the frame.")
 
 (defparameter *luvcraft-vignette* 0.16
@@ -802,6 +808,8 @@ submission that used them completes."
   ;; anything is encoded: the upload is an ordinary queue write, not part of
   ;; this frame's command stream.
   (when (luvcraft-session-video-screen session)
+    (place-video-screen-listener (luvcraft-session-video-screen session)
+                                 (luvcraft-session-camera session))
     (advance-video-screen (luvcraft-session-video-screen session)
                           (luvcraft-session-device session)))
   (dolist (overlay (luvcraft-session-overlays session))
@@ -826,7 +834,8 @@ submission that used them completes."
            (/ (length critter-vertices) +block-mesh-floats-per-vertex+))
          (body-vertices (player-body-vertices session))
          (body-vertex-count
-           (/ (length body-vertices) +block-mesh-floats-per-vertex+)))
+           (/ (length body-vertices) +block-mesh-floats-per-vertex+))
+         (physics-vertex-count (luvcraft-physics-vertex-count session)))
     (when (or sample (tracy-connected-p))
       (let ((mesh-vertices 0)
             (mesh-draws 0))
@@ -859,12 +868,14 @@ submission that used them completes."
                         ;; The animals are drawn twice: once into the shadow
                         ;; map and once into the scene.
                         (if (plusp critter-vertex-count) 2 0)
+                        (if (plusp physics-vertex-count) 2 0)
                         (if (plusp body-vertex-count) 1 0)))
               (vertices (+ +block-world-crosshair-vertex-count+ 3
                            (* 6 text-glyph-count)
                            particle-vertex-count
                            body-vertex-count
                            (* 2 critter-vertex-count)
+                           (* 2 physics-vertex-count)
                            (* 2 mesh-vertices))))
           (when sample
             (setf (luvcraft-frame-sample-resident-chunk-count sample)
@@ -909,7 +920,11 @@ submission that used them completes."
       (when (plusp body-vertex-count)
         (write-buffer
          (luvcraft-session-body-vertex-buffer session)
-         body-vertices)))
+         body-vertices))
+      (when (plusp physics-vertex-count)
+        (write-buffer
+         (luvcraft-session-physics-vertex-buffer session)
+         (luvcraft-physics-vertex-stream session))))
     (with-luvcraft-frame-timing
         (sample luvcraft-frame-sample-shadow-encode-seconds
                 :luvcraft/shadow-pass)
@@ -937,6 +952,11 @@ submission that used them completes."
           (set-vertex-buffer
            pass 0 (luvcraft-session-critter-vertex-buffer session))
           (draw pass critter-vertex-count))
+        ;; So do the balls, drops, and gobbets: things with weight.
+        (when (plusp physics-vertex-count)
+          (set-vertex-buffer
+           pass 0 (luvcraft-session-physics-vertex-buffer session))
+          (draw pass physics-vertex-count))
         (end-pass pass))
       (prepare-texture
        encoder (luvcraft-session-shadow-depth-texture session)
@@ -974,6 +994,10 @@ submission that used them completes."
           (set-vertex-buffer
            pass 0 (luvcraft-session-critter-vertex-buffer session))
           (draw pass critter-vertex-count))
+        (when (plusp physics-vertex-count)
+          (set-vertex-buffer
+           pass 0 (luvcraft-session-physics-vertex-buffer session))
+          (draw pass physics-vertex-count))
         ;; The player's own arms and whatever they hold, drawn in the scene
         ;; but not into the shadow map: a pair of floating forearms would
         ;; throw a shadow that explains nothing.
@@ -1048,12 +1072,17 @@ submission that used them completes."
           (lens-stage (luvcraft-session-bloom-bright-pipeline session)
                       (luvcraft-frame-bloom-scene-bind-group frame)
                       primary-view primary)
-          (lens-stage (luvcraft-session-bloom-horizontal-pipeline session)
-                      (luvcraft-frame-bloom-primary-bind-group frame)
-                      secondary-view secondary)
-          (lens-stage (luvcraft-session-bloom-vertical-pipeline session)
-                      (luvcraft-frame-bloom-secondary-bind-group frame)
-                      primary-view primary)
+          ;; The separable pair runs twice.  Convolving the thirteen-tap
+          ;; kernel with itself widens the glow by the square root of two
+          ;; without a second pair of attachments or a second pipeline, and
+          ;; the second pass is what turns a visible halo into light.
+          (dotimes (iteration 2)
+            (lens-stage (luvcraft-session-bloom-horizontal-pipeline session)
+                        (luvcraft-frame-bloom-primary-bind-group frame)
+                        secondary-view secondary)
+            (lens-stage (luvcraft-session-bloom-vertical-pipeline session)
+                        (luvcraft-frame-bloom-secondary-bind-group frame)
+                        primary-view primary))
           (lens-stage (luvcraft-session-sun-shaft-pipeline session)
                       (luvcraft-frame-bloom-primary-bind-group frame)
                       secondary-view secondary)))
@@ -1136,6 +1165,7 @@ submission that used them completes."
             (unless (luvcraft-session-focus-camera-active-p session)
               (advance-luvcraft-keyboard-look session seconds))
             (advance-luvcraft-critters session seconds)
+            (advance-luvcraft-physics session seconds)
             ;; A moving interaction takes its turn after the world it moves in
             ;; and before the player controller, which stands down entirely
             ;; while something else is carrying the player.
@@ -1218,6 +1248,9 @@ here -- so an unconsumed wheel event is simply the end of the matter."
        (when (eq button :left)
          (set-canvas-relative-pointer-mode canvas t)
          (setf (luvcraft-session-pointer-captured-p session) t)))
+      ((let ((item (player-body-hand-item (luvcraft-session-body session))))
+         (and item (hand-item-use item (luvcraft-session-body session)
+                                  session button))))
       ((eq button :left)
        (edit-luvcraft-block session :remove))
       ((eq button :right)
@@ -1266,6 +1299,10 @@ here -- so an unconsumed wheel event is simply the end of the matter."
     ((session luvcraft-session) canvas (event canvas-window-close-request-event))
   (declare (ignore canvas event))
   (setf (luvcraft-session-running-p session) nil)
+  ;; The window is going; the film's sound must not outlive it, playing on
+  ;; from a session nobody can see until something releases it.
+  (alexandria:when-let ((screen (luvcraft-session-video-screen session)))
+    (hush-video-screen screen))
   nil)
 
 (defmethod handle-canvas-event
@@ -1541,6 +1578,14 @@ NIL to let the display choose a comfortable window."
                       (make-buffer-descriptor
                        :label "critter model vertices"
                        :size +critter-buffer-size+
+                       :usage '(:vertex)))))
+                  (physics-vertex-buffer
+                    (keep
+                     (create
+                      device
+                      (make-buffer-descriptor
+                       :label "physics body vertices"
+                       :size +physics-vertex-buffer-size+
                        :usage '(:vertex)))))
                   (body-vertex-buffer
                     (keep
@@ -1818,6 +1863,7 @@ NIL to let the display choose a comfortable window."
                      :particle-vertex-buffer particle-vertex-buffer
                      :critter-vertex-buffer critter-vertex-buffer
                      :critters critters
+                     :physics-vertex-buffer physics-vertex-buffer
                      :body-vertex-buffer body-vertex-buffer
                      :world-text text-run
                      :world-text-glyph-cache text-glyph-cache

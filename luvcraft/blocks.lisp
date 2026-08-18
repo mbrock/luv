@@ -131,21 +131,41 @@ hang upright."
 
 (defvar *block-kinds* nil)
 
+(defclass tape-block-kind (block-kind) ()
+  (:metaclass luv.arithmetic.records:quantity-class)
+  (:documentation
+   "The film reel a player loads with a YouTube code; see luvcraft/tape.lisp.
+
+A class of its own rather than a name test, so activating one is a method
+on the kind and no other block's activation has to know about tapes."))
+
+(defclass spring-block-kind (block-kind) ()
+  (:metaclass luv.arithmetic.records:quantity-class)
+  (:documentation
+   "A block that throws things: a fountain of water, a well of lava.  What
+it throws is decided by its name in luvcraft/balls.lisp; the class is what
+lets placing and removing one be a method rather than a name test."))
+
 (defun ensure-block-kind
     (current name &key face-tiles categories
                        (display-color '(0.5 0.5 0.5)) (placeable-p t)
                        (light-opacity 15) (light-emission 0)
-                       (surface-emission 0.0))
-  "Define NAME while preserving CURRENT's identity across live redefinition."
+                       (surface-emission 0.0) (class 'block-kind))
+  "Define NAME while preserving CURRENT's identity across live redefinition.
+
+CLASS is the block kind class to make; a CURRENT of another class is
+replaced rather than reinitialized, since its methods would be the wrong
+ones."
   (let ((initargs
           (list :name name :face-tiles face-tiles :categories categories
                 :display-color display-color :placeable-p placeable-p
                 :light-opacity light-opacity :light-emission light-emission
                 :surface-emission surface-emission)))
     (if (and (typep current 'block-kind)
+             (eq (class-name (class-of current)) class)
              (eq name (block-kind-name current)))
         (apply #'reinitialize-instance current initargs)
-        (apply #'make-instance 'block-kind initargs))))
+        (apply #'make-instance class initargs))))
 
 (defmacro define-block-kinds (&body definitions)
   "Define the complete ordered block vocabulary.
@@ -237,7 +257,32 @@ number row."
    :categories '(:building) :display-color '(0.79 0.68 0.43))
   (*slate-block* :slate
    :face-tiles '(:all 22)
-   :categories '(:building) :display-color '(0.25 0.29 0.32)))
+   :categories '(:building) :display-color '(0.25 0.29 0.32))
+  (*tape-block* :tape
+   "A blank film reel.  Focus it and it asks for a YouTube code; when the
+download lands it has become a film, which is a block that can be picked up
+and carried.  See luvcraft/tape.lisp."
+   :class 'tape-block-kind
+   :face-tiles '(:front 30 :back 30 :top 31 :bottom 31 :left 31 :right 31)
+   :categories '(:building) :display-color '(0.36 0.34 0.32))
+  (*orb-mote-block* :orb-mote
+   "The bright grain a progress orb is made of; never placed, only emitted."
+   :face-tiles '(:all 9)
+   :categories '(:luminous) :display-color '(0.9 0.95 1.0)
+   :placeable-p nil :light-emission 0 :surface-emission 5.0)
+  (*fountain-block* :fountain
+   "A stone basin that throws water into the air, drop by drop; see
+luvcraft/balls.lisp for what the drops do."
+   :class 'spring-block-kind
+   :face-tiles '(:top 34 :side 17 :bottom 17)
+   :categories '(:building) :display-color '(0.35 0.55 0.75))
+  (*lava-spring-block* :lava-spring
+   "A slate well of lava that spits glowing gobbets which cool where they
+land; see luvcraft/balls.lisp."
+   :class 'spring-block-kind
+   :face-tiles '(:top 35 :side 22 :bottom 22)
+   :categories '(:building :luminous) :display-color '(0.95 0.45 0.10)
+   :light-emission 11 :surface-emission 0.0))
 
 (defun placeable-block-kinds ()
   "Return the numbered material palette used by luvcraft and its tools."
@@ -254,6 +299,7 @@ kinds through this vocabulary instead of printing CLOS object identities."
         (error "No block kind is named ~S." name))))
 
 (defconstant +block-atlas-tile-size+ 16)
+<<<<<<< HEAD
 
 ;;; The atlas textures are allocated once per renderer at full capacity,
 ;;; while the painted tiles fill a prefix.  UV arithmetic everywhere uses
@@ -267,6 +313,9 @@ kinds through this vocabulary instead of printing CLOS object identities."
 (defparameter *block-atlas-tile-count* 31
   "How many atlas tiles are painted.  A parameter rather than a constant so
 a live image adds a tile without a constant redefinition.")
+=======
+(defconstant +block-atlas-tile-count+ 36)
+>>>>>>> 62957322054a305ab99b1f807d33ba26a24aca48
 (defconstant +block-atlas-texture-format+ :rgba8-unorm-srgb)
 (defconstant +block-normal-atlas-texture-format+ :rgba8-unorm)
 
@@ -335,30 +384,30 @@ material and rebuild the atlas without touching the rest of the palette."))
 
 (defmethod paint-block-atlas-tile ((tile (eql 0)) x y)
   "Grass top."
-  (shaded-block-atlas-pixel 91 171 68 (block-atlas-variation x y tile)))
+  (shaded-block-atlas-pixel 97 142 71 (block-atlas-variation x y tile)))
 
 (defmethod paint-block-atlas-tile ((tile (eql 1)) x y)
   "Grass side: a green fringe over dirt."
   (let ((variation (block-atlas-variation x y tile)))
     (if (< y 4)
-        (shaded-block-atlas-pixel 86 158 61 variation)
-        (shaded-block-atlas-pixel 123 82 48 (round variation 2)))))
+        (shaded-block-atlas-pixel 91 133 63 variation)
+        (shaded-block-atlas-pixel 116 82 54 (round variation 2)))))
 
 (defmethod paint-block-atlas-tile ((tile (eql 2)) x y)
   "Dirt."
-  (shaded-block-atlas-pixel 126 84 49 (block-atlas-variation x y tile)))
+  (shaded-block-atlas-pixel 118 84 56 (block-atlas-variation x y tile)))
 
 (defmethod paint-block-atlas-tile ((tile (eql 3)) x y)
   "Stone, with sparse bright flecks."
   (shaded-block-atlas-pixel
-   126 132 136
+   116 121 125
    (+ (round (block-atlas-variation x y tile) 2)
       (if (zerop (mod (+ (* x 3) (* y 5)) 19)) 20 0))))
 
 (defmethod paint-block-atlas-tile ((tile (eql 4)) x y)
   "Wood bark, with vertical grain stripes."
   (shaded-block-atlas-pixel
-   116 76 39
+   108 76 46
    (+ (round (block-atlas-variation x y tile) 3)
       (if (zerop (mod x 5)) 18 0))))
 
@@ -367,25 +416,25 @@ material and rebuild the atlas without touching the rest of the palette."))
   (let* ((dx (- x 7.5))
          (dy (- y 7.5))
          (ring (mod (floor (+ (* dx dx) (* dy dy))) 18)))
-    (shaded-block-atlas-pixel 133 91 49 (- ring 9))))
+    (shaded-block-atlas-pixel 124 92 56 (- ring 9))))
 
 (defmethod paint-block-atlas-tile ((tile (eql 6)) x y)
   "Leaves: a strong checker so the canopy reads as foliage."
   (shaded-block-atlas-pixel
-   51 132 58
+   57 112 59
    (+ (block-atlas-variation x y tile) (if (evenp (+ x y)) 8 -8))))
 
 (defmethod paint-block-atlas-tile ((tile (eql 7)) x y)
   "Sand, with sparse darker grains."
   (shaded-block-atlas-pixel
-   205 185 128
+   172 157 122
    (+ (round (block-atlas-variation x y tile) 2)
       (if (zerop (mod (+ x (* y 3)) 13)) 13 0))))
 
 (defmethod paint-block-atlas-tile ((tile (eql 8)) x y)
   "Snow, with sparse glints."
   (shaded-block-atlas-pixel
-   226 238 242
+   219 231 236
    (+ (round (block-atlas-variation x y tile) 3)
       (if (zerop (mod (+ (* x 5) (* y 7)) 23)) 14 0))))
 
@@ -433,12 +482,12 @@ material and rebuild the atlas without touching the rest of the palette."))
   (let* ((grain (block-atlas-lattice-hash x y 111))
          (variation (+ (round (block-atlas-variation x y tile) 2)
                        (- (mod grain 43) 21))))
-    (shaded-block-atlas-pixel 119 114 105 variation)))
+    (shaded-block-atlas-pixel 111 107 99 variation)))
 
 (defmethod paint-block-atlas-tile ((tile (eql 12)) x y)
   "Clay: cool compact earth with faint horizontal bands."
   (shaded-block-atlas-pixel
-   158 171 176
+   146 158 163
    (+ (round (block-atlas-variation x y tile) 4)
       (case (mod y 6) (0 -7) (1 -3) (t 2)))))
 
@@ -857,6 +906,7 @@ and a dock row at the bottom."
   "Phone screen: glass, flat but for the faintest bow across the pane."
   (+ 126 (floor (+ x y) 8)))
 
+<<<<<<< HEAD
 ;;; The urbit material arrived after the gadget tiles, so its tile number
 ;;; sits past them: tile order is history, not palette order, and the
 ;;; DEFINE-BLOCK-KINDS list alone decides which number key a material gets.
@@ -881,6 +931,90 @@ and a dock row at the bottom."
   (block-atlas-byte
    (+ (if (urbit-sigil-glyph-p x y) 168 118)
       (* 0.08 (- (block-atlas-lattice-hash x y 301) 128)))))
+=======
+;;; ---------------------------------------------------------------------
+;;; The tape: a film reel, drawn flange-on and rim-on.
+
+(defun reel-radius (x y)
+  "Distance of texel X,Y from the tile's centre, in texels."
+  (let ((dx (- x 7.5)) (dy (- y 7.5)))
+    (sqrt (+ (* dx dx) (* dy dy)))))
+
+(defun reel-spoke-p (x y)
+  "Whether X,Y lies on one of the three flange spokes laid over the film."
+  (let* ((dx (- x 7.5)) (dy (- y 7.5))
+         (angle (atan dy dx)))
+    (loop for spoke in '(1.5708 3.6652 -0.5236)
+          for difference = (abs (- (mod (+ (- angle spoke) pi) (* 2 pi)) pi))
+          thereis (< (* difference (sqrt (+ (* dx dx) (* dy dy)))) 0.9))))
+
+(defun paint-reel-flange (x y label-p)
+  "A reel flange: dark corners, a bright rim, wound film showing between
+three spokes, a hub with a spindle.  LABEL-P paints a paper label on the
+film."
+  (let ((r (reel-radius x y))
+        (grain (block-atlas-variation x y 30)))
+    (cond ((> r 7.6)
+           ;; The canister the reel sits in.
+           (shaded-block-atlas-pixel 44 42 40 (round grain 4)))
+          ((> r 6.6)
+           (shaded-block-atlas-pixel 168 166 158 (round grain 3)))
+          ((> r 2.4)
+           (cond ((reel-spoke-p x y)
+                  (shaded-block-atlas-pixel 128 126 120 (round grain 3)))
+                 ((and label-p (< (abs (- y 7.5)) 1.6) (> x 8))
+                  (shaded-block-atlas-pixel 226 214 178 (round grain 6)))
+                 (t
+                  ;; Wound film: dark sepia, faint concentric rings.
+                  (shaded-block-atlas-pixel 62 44 32
+                                            (+ (round grain 4)
+                                               (if (evenp (round r)) 6 -6))))))
+          ((> r 1.1)
+           (shaded-block-atlas-pixel 150 148 140 (round grain 4)))
+          (t
+           (shaded-block-atlas-pixel 30 30 30 0)))))
+
+(defmethod paint-block-atlas-tile ((tile (eql 30)) x y)
+  "Tape flange: an empty reel, film wound dark behind its windows."
+  (paint-reel-flange x y nil))
+
+(defmethod paint-block-atlas-tile ((tile (eql 31)) x y)
+  "Reel rim: two bright flanges with the wound film's edge between them."
+  (let ((grain (block-atlas-variation x y 31)))
+    (cond ((or (< y 2) (> y 13))
+           (shaded-block-atlas-pixel 168 166 158 (round grain 3)))
+          ((or (= y 2) (= y 13))
+           (shaded-block-atlas-pixel 96 94 90 (round grain 4)))
+          (t
+           ;; The film's edge, striated along the winding.
+           (shaded-block-atlas-pixel 58 42 30
+                                     (+ (round grain 4)
+                                        (if (evenp x) 5 -5)))))))
+
+(defmethod paint-block-atlas-tile ((tile (eql 32)) x y)
+  "Film flange: a loaded reel with a paper label across the film."
+  (paint-reel-flange x y t))
+
+(defmethod paint-block-atlas-relief ((tile (eql 30)) x y)
+  "Tape flange: the rim and hub stand proud, the windows sink."
+  (let ((r (reel-radius x y)))
+    (cond ((> r 7.6) 96)
+          ((> r 6.6) 176)
+          ((reel-spoke-p x y) 160)
+          ;; The film's winding, a faint spiral of ridges.
+          ((> r 2.4) (+ 100 (if (evenp (+ x y)) 6 0)))
+          ((> r 1.1) 168)
+          (t 60))))
+
+(defmethod paint-block-atlas-relief ((tile (eql 31)) x y)
+  "Reel rim: flanges proud, the film between them lower and ribbed."
+  (cond ((or (< y 2) (> y 13)) 176)
+        ((or (= y 2) (= y 13)) 130)
+        (t (if (evenp x) 110 104))))
+
+(defmethod paint-block-atlas-relief ((tile (eql 32)) x y)
+  (paint-block-atlas-relief 30 x y))
+>>>>>>> 62957322054a305ab99b1f807d33ba26a24aca48
 
 (defun make-block-texture-atlas ()
   "Return the little world's horizontal RGBA8 atlas as packed pixel words.

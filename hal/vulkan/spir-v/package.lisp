@@ -319,6 +319,7 @@
            #:shader-expression-uniformity
            #:shader-expression-workgroup-uniform-p
            #:define-shader
+           #:define-live-shader
            #:define-shader-method
            #:shader-specification-for
            #:shader-definition-dependent

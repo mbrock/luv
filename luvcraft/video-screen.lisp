@@ -124,6 +124,13 @@
    (start :initform nil :accessor video-screen-start)
    (shown :initform -1 :accessor video-screen-shown)
    (loop-p :initarg :loop-p :initform t :reader video-screen-loop-p)
+   ;; The soundtrack, when the film has one; then it is also the clock.
+   (sound :initarg :sound :initform nil :accessor video-screen-sound)
+   (passes :initform 0 :accessor video-screen-passes
+           :documentation "Which pass of the sound the picture is on.")
+   (center :initarg :center :initform nil :reader video-screen-center
+           :documentation "The screen's middle in the world: where its sound
+comes from.")
    (resources :initarg :resources :accessor video-screen-resources))
   (:documentation "A video file playing on one world rectangle."))
 
@@ -322,7 +329,21 @@ first decoded picture actually lives in a hardware surface."
                               :vertex-buffer vertex-buffer
                               :instance-buffer instance-buffer
                               :loop-p loop-p
+                              :center (make-vec3
+                                       (+ (vec3-x origin)
+                                          (* 0.5 (+ (vec3-x right-edge)
+                                                    (vec3-x up-edge))))
+                                       (+ (vec3-y origin)
+                                          (* 0.5 (+ (vec3-y right-edge)
+                                                    (vec3-y up-edge))))
+                                       (+ (vec3-z origin)
+                                          (* 0.5 (+ (vec3-z right-edge)
+                                                    (vec3-z up-edge)))))
                               :resources resources)))
+                       ;; The sound starts as soon as the screen exists; the
+                       ;; first picture goes up against its clock.
+                       (setf (video-screen-sound screen)
+                             (open-film-sound pathname :loop-p loop-p))
                        (when first-frame
                          (if hardware-p
                              (install-hardware-video-picture screen device)
@@ -362,6 +383,10 @@ release report is running.  See WITH-RELEASE-REPORT."
     (cffi:foreign-funcall "CFRelease" :pointer
                           (video-screen-texture-cache screen) :void)
     (setf (video-screen-texture-cache screen) nil))
+  (when (video-screen-sound screen)
+    (releasing :video-screen-sound
+      (close-film-sound (video-screen-sound screen)))
+    (setf (video-screen-sound screen) nil))
   (releasing :video-screen-film (libav:close-video (video-screen-video screen)))
   (values))
 
@@ -587,16 +612,38 @@ stalls for a second owes a second of film, and paying that back inside the
 next frame stalls the world again.  Past the limit the film simply slips,
 which nobody watching a screen on a wall will mind.")
 
+(defun video-screen-sound-due-picture (screen sound)
+  "The picture due by the soundtrack's clock, or NIL to hold the last one.
+
+When the sound has started over, the picture starts over with it; while
+the previous pass's tail is still sounding, the last picture holds."
+  (let ((rate (libav:video-frame-rate (video-screen-video screen)))
+        (time (film-sound-time sound)))
+    (cond ((/= (film-sound-passes sound) (video-screen-passes screen))
+           (when (>= time 0)
+             (libav:rewind-video (video-screen-video screen))
+             (setf (video-screen-shown screen) -1
+                   (video-screen-passes screen) (film-sound-passes sound))
+             (if (and rate (plusp rate)) (floor (* time rate)) 0)))
+          ((< time 0) nil)
+          ((and rate (plusp rate)) (floor (* time rate)))
+          (t (1+ (video-screen-shown screen))))))
+
 (defun advance-video-screen (screen device)
   "Decode up to the picture that is due now and upload it.  Return true if so.
 
 Pictures that came due while the last world frame was being drawn are decoded
 and discarded rather than shown, so the film keeps the world's time instead of
-the renderer's."
-  (let ((video (video-screen-video screen))
-        (due (video-screen-due-picture screen))
-        (decoded-p nil)
-        (rewound-p nil))
+the renderer's.  A film with sound keeps the sound's time instead: the ear is
+the stricter judge, so the speaker is the clock and the picture follows."
+  (let* ((video (video-screen-video screen))
+         (sound (video-screen-sound screen))
+         (due (if sound
+                  (or (video-screen-sound-due-picture screen sound)
+                      (return-from advance-video-screen nil))
+                  (video-screen-due-picture screen)))
+         (decoded-p nil)
+         (rewound-p nil))
     (loop repeat *video-screen-catch-up-limit*
           while (< (video-screen-shown screen) due)
           do (cond ((libav:decode-next-frame video)
@@ -605,8 +652,10 @@ the renderer's."
                    ;; At most one rewind per call.  A film that decodes
                    ;; nothing at all would otherwise rewind and fail forever
                    ;; inside one world frame, which is a hang rather than a
-                   ;; dropped picture.
-                   ((and (video-screen-loop-p screen) (not rewound-p))
+                   ;; dropped picture.  With sound, the sound says when to
+                   ;; start over; a picture that runs out first just holds.
+                   ((and (video-screen-loop-p screen) (not rewound-p)
+                         (null sound))
                     (libav:rewind-video video)
                     (setf rewound-p t
                           (video-screen-start screen) (get-internal-real-time)
@@ -615,8 +664,9 @@ the renderer's."
                    (t (setf (video-screen-shown screen) due))))
     ;; Whatever the loop managed, the film's clock now reads whatever SHOWN
     ;; says, so the next call asks for the picture after this one instead of
-    ;; trying to make up the same difference all over again.
-    (when (> due (video-screen-shown screen))
+    ;; trying to make up the same difference all over again.  (The sound's
+    ;; clock is not ours to move: it simply drops the pictures it must.)
+    (when (and (null sound) (> due (video-screen-shown screen)))
       (setf (video-screen-start screen)
             (- (get-internal-real-time)
                (video-screen-picture-span screen (video-screen-shown screen)))))
@@ -632,3 +682,20 @@ the renderer's."
     (if (and rate (plusp rate) (plusp count))
         (round (* count (/ internal-time-units-per-second rate)))
         0)))
+
+(defun place-video-screen-listener (screen camera)
+  "Hear SCREEN's film from where CAMERA stands, facing as it faces."
+  (alexandria:when-let ((sound (video-screen-sound screen)))
+    (when (video-screen-center screen)
+      (multiple-value-bind (right up forward) (camera-basis camera)
+        (declare (ignore up forward))
+        (place-film-sound-listener sound (video-screen-center screen)
+                                   (camera-position camera) right))))
+  screen)
+
+(defun hush-video-screen (screen)
+  "Stop SCREEN's sound now, leaving the picture to keep its own time."
+  (alexandria:when-let ((sound (video-screen-sound screen)))
+    (setf (video-screen-sound screen) nil)
+    (close-film-sound sound))
+  screen)

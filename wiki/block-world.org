@@ -658,6 +658,11 @@ experience:
    boxes on the block pipeline, and can be mounted and ridden through the
    modal focus the wall terminals already use.  #KTRMAO and #W2E5HR record
    what an animal is and what riding one turned out to be.
+10. *Give things weight.*  Done as a first pile: spheres in columnar bodies,
+    coloured contacts, a soft-step solver with four-wide lanes, and a ball to
+    throw, a fountain, and a lava spring in the world; the player and the
+    animals push and are struck.  #V090DQ and #JAU0EF record the engine and
+    what the game does with it.
 
 This is not a dependency graph.  A particularly delightful experiment may
 pull a later item forward.

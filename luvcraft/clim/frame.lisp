@@ -29,6 +29,11 @@
   :inherit-from (luvcraft-movement)
   :inherit-menu t)
 
+;;; A focused wall's own layer.  It exists so that a shell, which is entitled
+;;; to every plain key, can still be told to become something else.
+
+(define-command-table luvcraft-terminal)
+
 (define-command-table luvcraft-world-release
   :inherit-from (luvcraft-movement-release)
   :inherit-menu t)
@@ -46,7 +51,8 @@
   ;; table inherits its parents' commands by default but not their accelerators.
   (:command-table (luvcraft-frame
                    :inherit-from (luvcraft-window luvcraft-window-release
-                                  luvcraft-world luvcraft-world-release)
+                                  luvcraft-world luvcraft-world-release
+                                  luvcraft-terminal)
                    :inherit-menu t))
   (:menu-bar nil))
 
@@ -162,6 +168,48 @@ enumerate its modifiers could not say so."
              (null (set-exclusive-or
                     modifiers
                     (canvas-key-event-gesture-modifiers event)))))))
+
+;;; Naming a keystroke.
+;;;
+;;; What a control or a legend prints beside a verb, so that nothing has to
+;;; write a key down twice.
+
+(defun format-gesture-key (key)
+  "Name KEY the way a legend should print it."
+  (etypecase key
+    (character (string-upcase (string key)))
+    (symbol
+     (case key
+       (:return "RET")
+       (:escape "Esc")
+       (:space "Space")
+       (:tab "Tab")
+       (:up "↑") (:down "↓") (:left "←") (:right "→")
+       (:shift-left "Shift") (:shift-right "Shift")
+       (t (string-capitalize (symbol-name key)))))))
+
+(defun format-gesture (gesture)
+  "Name a whole keystroke, modifiers and all.
+
+:ANY is not printed: a key bound whatever else is held is just that key, and
+saying so would be noise on every movement row."
+  (let* ((specification (if (listp gesture) gesture (list gesture)))
+         (key (first specification))
+         (modifiers (remove :any (rest specification))))
+    (format nil "~{~A~}~A"
+            (mapcar (lambda (modifier)
+                      ;; Words rather than the pretty modifier glyphs: the game
+                      ;; draws its own text with its own font, and U+2318 and
+                      ;; friends are simply absent from it, so a key printed
+                      ;; that way loses its modifier entirely.
+                      (case modifier
+                        (:shift "Shift-")
+                        (:control "Ctrl-")
+                        (:meta "Alt-")
+                        (:super "Cmd-")
+                        (t (format nil "~A-" modifier))))
+                    modifiers)
+            (format-gesture-key key))))
 
 (defun canvas-key-event-command
     (frame event &key (command-table (frame-command-table frame)))

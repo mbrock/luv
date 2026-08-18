@@ -20,7 +20,8 @@
 
 (defstruct (block-particle
              (:constructor make-block-particle
-                 (block x y z velocity-x velocity-y velocity-z size lifetime)))
+                 (block x y z velocity-x velocity-y velocity-z size lifetime
+                  &optional (gravity +block-particle-gravity+))))
   (block *stone-block* :type block-kind)
   (x 0.0 :type single-float)
   (y 0.0 :type single-float)
@@ -30,7 +31,9 @@
   (velocity-z 0.0 :type single-float)
   (size 0.12 :type single-float)
   (age 0.0 :type single-float)
-  (lifetime 0.7 :type single-float))
+  (lifetime 0.7 :type single-float)
+  ;; A smashed fragment falls; a mote of light hangs where it was put.
+  (gravity +block-particle-gravity+ :type single-float))
 
 (defclass block-particle-system ()
   ((particles
@@ -92,6 +95,27 @@
            particles)))))
   system)
 
+(defun emit-block-mote (system block x y z &key (velocity-x 0.0) (velocity-y 0.0)
+                                               (velocity-z 0.0) (size 0.05)
+                                               (lifetime 0.3) (gravity 0.0))
+  "Add one weightless BLOCK mote at X,Y,Z to SYSTEM, dropping the oldest
+fragment when the population is full."
+  (let ((particles (block-particle-system-particles system)))
+    (when (>= (length particles) +maximum-block-particles+)
+      (discard-oldest-block-particles particles 1))
+    (vector-push-extend
+     (make-block-particle block
+                          (coerce x 'single-float) (coerce y 'single-float)
+                          (coerce z 'single-float)
+                          (coerce velocity-x 'single-float)
+                          (coerce velocity-y 'single-float)
+                          (coerce velocity-z 'single-float)
+                          (coerce size 'single-float)
+                          (coerce lifetime 'single-float)
+                          (coerce gravity 'single-float))
+     particles))
+  system)
+
 (defun advance-block-particles (system seconds)
   "Advance SYSTEM by SECONDS and compact expired fragments in place."
   (check-type system block-particle-system)
@@ -104,7 +128,7 @@
         (when (< (block-particle-age particle)
                  (block-particle-lifetime particle))
           (decf (block-particle-velocity-y particle)
-                (* +block-particle-gravity+ dt))
+                (* (block-particle-gravity particle) dt))
           (incf (block-particle-x particle)
                 (* (block-particle-velocity-x particle) dt))
           (incf (block-particle-y particle)
