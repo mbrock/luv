@@ -155,6 +155,11 @@ The following are starting paths rather than a table of settled doctrine.
   the first concrete domain/bundle clients.  It separates local domain
   traversal, cross-chunk windows, semantic field products, provenance, and
   checked arithmetic kernels, then names the first extraction to perform.
+- [[file:vocabularies.org][Vocabularies as finite domains]] applies the domain and materialization
+  vocabulary to naming rather than space: atlas tiles, block materials, and
+  the tables that resolve a symbolic identity into an offset a hot loop can
+  index.  It takes a merge collision over one atlas tile number as its
+  evidence and names the invalidation rules a live vocabulary needs.
 - [[file:frontier-traversals.org][Frontiers, memoization, and materialized worlds]] studies the small Haskell
   =frontier= repository as an operational account of worklist traversal:
   unfolding, result reservation, memoization, admission, scheduling, and

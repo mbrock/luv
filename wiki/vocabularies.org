@@ -1,0 +1,335 @@
+#+title: Vocabularies as finite domains
+#+startup: overview
+
+* A vocabulary is a finite domain
+:PROPERTIES:
+:ID: SICRZO
+:END:
+
+#B8R3KF asks four questions of a finite domain: how many sites exist, which
+index names one site, how an index maps to a dense offset, and how an offset
+maps back.  A voxel chunk answers them.  So does a set of block materials, and
+so does a set of atlas tiles.  The sites are not places; they are members of a
+vocabulary.  Nothing else about the definition changes.
+
+Seeing this makes the machinery already built for space apply unchanged to
+naming.  #J7A2KD divides the world into descriptions that dispatch and domains
+that compute; a vocabulary belongs on both sides of that line at once.  Its
+members are semantic objects with protocols, and the mapping from member to
+offset is exactly the kind of small dense table a hot loop wants to index.
+
+The luv block world already contains one worked example.  =block-palette-domain=
+in [[file:../luvcraft/light.lisp][light.lisp]] declares the palette's entries as
+a finite domain, and [[lisp:block-palette-light-properties]] materializes
+propagation loss and emission over it, under a comment that states the whole
+pattern: one generic dispatch per palette entry, then dense =u8= lookups in
+every hot loop.
+
+The atlas received no such treatment.  Its tile numbers are written by hand
+into method specializers and into each material's face list.  #X3WRP1 is what
+that cost.
+
+* The tile that two branches both called thirty
+:PROPERTIES:
+:ID: X3WRP1
+:END:
+
+In August 2026 two checkouts of luvcraft added a material at the same time.
+One added the urbit block and took the next free atlas tile, 30.  The other
+added a film reel and took the next free atlas tile, 30.  Each was locally
+correct; neither could see the other.
+
+Git merged them without a conflict, because the two definitions occupy
+different regions of [[file:../luvcraft/blocks.lisp][blocks.lisp]] and never
+overlap textually.  CLOS then accepted both =(defmethod paint-block-atlas-tile
+((tile (eql 30)) x y))= definitions and let the later one win, as it should.
+No error was signalled at any layer.  The urbit block would simply have been
+painted as a film reel, and the defect would have been found by looking at a
+wall.
+
+The diagnosis is not that integers appeared in source.  It is that the tile
+vocabulary had no object at all: it existed only implicitly, as whatever set of
+methods happened to be defined.  There was nothing an index could be closed
+over, and so nothing for two branches to disagree against.  #LRCB1X states the
+property that was missing.
+
+* An index is closed by the vocabulary that interprets it
+:PROPERTIES:
+:ID: LRCB1X
+:END:
+
+An index carries no meaning on its own.  It means something exactly when it
+travels with the vocabulary that interprets it, or with a reference to one the
+reader is guaranteed to hold.  Call this *indexical closure*.
+
+This is a weaker and more useful requirement than "durable data must be
+symbolic".  A save file that embeds its own material table is closed, and
+integers inside its columns are perfectly sound — indeed preferable, since they
+are dense, comparable, and cheap.  What is unsound is an index whose vocabulary
+is implicit.
+
+By this measure the per-chunk palette in
+[[file:../luvcraft/world.lisp][world.lisp]] is not a mistake.  A
+=block-content-column= holds an adjustable palette of block objects and a
+=(unsigned-byte 16)= index per site; the palette *is* an embedded vocabulary,
+and it gives each chunk closure for free.  The awkwardness is granularity
+rather than principle: every chunk carries its own copy of a vocabulary that is
+nearly always the same one, [[lisp:ensure-block-content-palette-index]] scans it
+linearly on every placement, and #V6T1QS's demand that composition check domain
+identity is met by accident rather than by construction.
+
+A single global material vocabulary, embedded once per save, is the same
+mechanism hoisted to the level where the vocabulary actually lives.  It is only
+available once the material set closes, which is what #KSWJZG is about.
+
+* Value changes and shape changes cost differently
+:PROPERTIES:
+:ID: 8OP86P
+:END:
+
+A vocabulary that can be edited while the game runs faces two kinds of change,
+and keeping them apart is what makes live editing feel immediate.
+
+A *value change* alters what a member means without altering the membership: a
+tile's paint function is edited, a material's emission is retuned.  Cardinality
+and offsets are untouched, so every derived product that indexes by offset
+stays valid.  Repaint one lane and republish.
+
+A *shape change* alters the membership: a material or tile appears, or the
+domain is reordered.  Cardinality moves and offsets may move with it, so every
+product that baked an offset is suspect.  #A6X2RT's ownership rules decide who
+rebuilds what.
+
+The useful consequence is that *append-only assignment demotes most shape
+changes to value changes*.  If a new member always takes the next free offset
+and existing offsets never move, then adding a material leaves every mesh in
+the world correct and only grows the atlas prefix.  This is the principled form
+of the rule that luvcraft currently keeps as a comment.  It is not a taboo
+against renumbering; it is the property that stops a shape change from
+cascading through every product derived from the domain.
+
+A domain that owns its offsets can own a revision alongside them, and a
+materialization can record the revisions it was built from.  That is the
+discipline =block-chunk= already applies to content and boundary revisions,
+one level up.
+
+* Vocabulary tables and population tables keep different time
+:PROPERTIES:
+:ID: BV6V5Y
+:END:
+
+Both are dense tables resolved from semantic objects, and they invite the same
+implementation, but their cadences differ enough that the mechanism should not
+be shared thoughtlessly.
+
+A *vocabulary table* is small and changes rarely: materials, tiles, face
+directions, body kinds.  It should be maintained in one place, revision
+checked, and rebuilt when a definition changes.  A pass borrows the standing
+table and does no resolution work at all.
+
+A *population table* changes every frame: which chunks are resident, which
+faces survive culling, which sites are on the lighting frontier.  These are
+genuinely pass-local, and resolving them once per pass so the inner loop can
+run over small fixnum indices is exactly the amortization #Y0TPND describes for
+the packed frontier.
+
+The mesher today mixes the two.  It resolves its own population per pass, which
+is right, and it also calls [[lisp:block-face-tile]] once per visible face,
+which is a vocabulary lookup performed at population cadence — the smell
+#J7A2KD names, correct answers at the wrong altitude.
+
+* A film is not a material
+:PROPERTIES:
+:ID: KSWJZG
+:END:
+
+[[file:../luvcraft/tape.lisp][tape.lisp]] defines =film-block-kind= as a
+subclass of =block-kind= and makes one instance per downloaded video, each
+carrying a video id, title, uploader, duration, and pathname.  Its own
+docstring gives the reason plainly: a film is its own block kind rather than
+one entry in the palette, because the world's palette-by-identity storage then
+keeps films apart for free.
+
+The reason offered is a storage convenience, not a claim that a particular
+video is a kind of material.  Three consequences follow, and all three are
+visible in the code today.
+
+Films are never registered in =*block-kinds*=, which
+[[file:../luvcraft/blocks.lisp][=define-block-kinds=]] sets to exactly the
+static list.  So a film is an instance of the class whose purpose is to
+enumerate the material vocabulary, living outside that enumeration and
+unreachable through =block-kind-named=.
+
+Persistence must special-case them.  Its own comment says that carried blocks
+are the per-instance ones such as films, "which no palette would give back".
+
+And the material set never closes, so no global material domain can exist and
+every per-material materialization must be rebuilt per chunk palette.
+
+The same problem is solved the other way elsewhere in the same system.  A
+terminal wall carries a PTY, a surface, and a display, and does not mint a
+material per terminal: there is one shared =*terminal-block*= and the state
+hangs off coordinate-bearing surface objects.  That is the block entity
+#A6X2RT anticipates as sparse state outside dense site storage.
+
+luv might therefore treat this as evidence about the representation choice
+rather than about films.  Because materials were already heap objects with
+mutable slots, minting one more was a single line, and the door to
+per-particular materials stood open.  Closing the material vocabulary means
+moving film state to entities first; the global material domain, the removal of
+per-chunk palettes, and the migration seam in #FTDOCV all follow from it.
+
+* Baked coordinates freeze the atlas
+:PROPERTIES:
+:ID: 4SIKJM
+:END:
+
+The mesher writes an atlas coordinate into every vertex, computed from the
+tile number and the atlas width:
+
+\[ u = \frac{16\,t + \tfrac{1}{2} + 15\,u_{\text{local}}}{16 \cdot C} \]
+
+with \(C\) the tile capacity, currently 64.  A block vertex is 16 single
+floats, six per face.
+
+The divisor is the part worth noticing: \(C\) is baked into every vertex in the
+world.  That is the real reason the atlas capacity must be fixed and can never
+grow — growing it would invalidate every mesh ever built.  The capacity
+headroom in luvcraft, which allocates 64 tiles and paints a prefix of 37, is a
+workaround for a constant that a shader could have supplied as a uniform.
+
+An alternative is to carry the tile index flat and the tile-local coordinate
+interpolated, and compute the atlas coordinate per fragment.  Four things
+follow, and luv might weigh them together:
+
+- the atlas becomes free to grow at runtime, because \(C\) is no longer baked;
+- carrying a material and face identity instead of a tile index would let a
+  material be retiled without re-meshing, with the vocabulary table itself
+  living on the GPU;
+- tile-local coordinates in \([0,1]\) spend their whole mantissa on the
+  fraction that matters; and
+- greedy meshing becomes expressible, since merged faces need coordinates
+  running past 1 with a wrap in the shader, which baked atlas coordinates
+  cannot express without bleeding into a neighbouring tile.
+
+The cost is a few multiply-adds per fragment and a flat interpolation
+qualifier.  The vertex probably shrinks.
+
+* A save is a vocabulary and its columns
+:PROPERTIES:
+:ID: FTDOCV
+:END:
+
+luvcraft's saves are symbolic throughout: a block is written as
+=(:block :name :urbit)= and restored through =block-kind-named=.  This is why
+renumbering an atlas tile cannot damage an existing world, and it is a good
+property to have arrived at.
+
+It is not the only closed shape available.  A save may equally carry its
+material vocabulary as a table and its world as columns of indices into that
+table — denser, and closer to the materialization vocabulary the rest of the
+system already speaks.  #V6T1QS's contract applies unchanged: a domain, a
+closed schema, one representation per logical field, exactly domain-size values
+in each.
+
+The migration seam then becomes a single object rather than a decision at every
+site.  Loading resolves the save's vocabulary against the running one and
+produces a remap from save index to runtime index, and every awkward case is
+one row in it: a renamed material is an alias, an unknown material is a
+placeholder that still round-trips the name it stood for, and a reordered
+runtime vocabulary is merely a different permutation.  Nothing is decided per
+voxel, and the seam is an inspectable, printable, diffable table.
+
+luvcraft's current format check is an equality on
+=+luvcraft-save-format-version+=, which makes the first real bump reject every
+existing file.  A vocabulary-bearing save wants the opposite disposition:
+accept anything up to the current version, migrate forward through one step per
+version, and write only the newest, so files heal as they are saved.
+
+* NEXT Name the atlas tiles and give the domain an owner
+:PROPERTIES:
+:ID: F2IOKG
+:END:
+
+*Intent.* Replace the hand-allocated atlas tile integers with keywords, and
+make the tile vocabulary a finite domain object that assigns offsets.
+Specializers become =(eql :urbit-sigil)= rather than =(eql 36)=; a material's
+face list names tiles rather than positions; the atlas materializes over the
+domain, appending offsets and never moving one.
+
+Consider the self-naming default at the same time.  Of the twenty-eight tiles
+the blocks reference, twenty-four are used by exactly one material, so a
+default of "a material paints itself" would let sixteen of twenty-five
+materials say nothing about tiles at all, leaving only the interesting cases
+written down: grass split three ways, snow borrowing dirt underneath, the
+fountain and lava spring borrowing masonry.
+
+*Evidence.* #X3WRP1 is a collision that reached =main= and was resolved by
+hand.  #SICRZO notes that the palette light table in
+[[file:../luvcraft/light.lisp][light.lisp]] already demonstrates the shape this
+wants.
+
+*Done when.* No atlas tile integer appears in
+[[file:../luvcraft/blocks.lisp][blocks.lisp]],
+[[file:../luvcraft/balls.lisp][balls.lisp]], or the block face lists; a
+duplicate tile name is an error at definition time rather than a silently
+overridden method; and =make smoke= renders the same image byte for byte.
+
+* TODO Compute atlas coordinates in the shader
+:PROPERTIES:
+:ID: YLZYQJ
+:END:
+
+*Intent.* Carry a flat tile identity and an interpolated tile-local coordinate
+in the block vertex, and move the atlas arithmetic of #4SIKJM into the block
+world shaders, with the atlas width as a uniform.
+
+*Evidence.* The capacity constant is baked into every vertex, so the atlas
+cannot grow without invalidating every mesh; the headroom scheme exists to
+avoid exactly that.  Greedy meshing, the largest available reduction in mesh
+size, is not expressible while atlas coordinates are baked.
+
+*Done when.* The atlas capacity can be raised in a running image and existing
+chunks keep rendering correctly; the vertex is no larger than the sixteen
+floats it is today; the smoke render is unchanged.
+
+* TODO Make films block entities so the material vocabulary closes
+:PROPERTIES:
+:ID: R7MAN5
+:END:
+
+*Intent.* Give films the representation terminal walls already have: one static
+=:film= material, with per-film state in sparse coordinate-keyed entities
+outside dense site storage.  The material vocabulary then closes, which admits
+a global material domain, a single materialization of per-material properties
+rather than one per chunk palette, and the removal of the per-chunk palette
+in favour of a global material index stored directly in the site column.
+
+*Evidence.* #KSWJZG: films are =block-kind= instances deliberately absent from
+=*block-kinds*=, and persistence special-cases them for that reason.
+[[lisp:ensure-block-content-palette-index]] performs a linear scan on every
+block placement.  =block-palette-light-properties= rebuilds a table per palette
+that would otherwise be built once.
+
+*Done when.* =*block-kinds*= enumerates every material in the running image;
+per-material properties are materialized once over a global domain; an existing
+saved world containing films loads with its films intact through the remap of
+#FTDOCV.
+
+* IDEA A save is a vocabulary table and its columns
+:PROPERTIES:
+:ID: OQDNC5
+:END:
+
+*Intent.* Reshape the save format as a vocabulary table plus columnar world
+data, per #FTDOCV, and make loading a vocabulary resolution that produces an
+index remap.  Aliases, unknown materials, and reordering all become rows in
+that remap.
+
+*Evidence.* The format version check currently rejects any file it does not
+recognize exactly, which makes the first migration expensive for a game with
+two players.  The remap is the natural home for the compatibility rules that
+would otherwise be scattered through per-block restoration.
+
+*Note.* This should not move before #R7MAN5, since the vocabulary a save would
+embed is the one that does not yet close.

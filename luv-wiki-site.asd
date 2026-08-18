@@ -33,6 +33,7 @@
                  (:file "sky-and-light")
                  (:file "frontier-traversals")
                  (:file "voxel-fields-and-windows")
+                 (:file "vocabularies")
                  (:file "luft")
                  (:file "wiki-site")
                  (:static-file "site.js")

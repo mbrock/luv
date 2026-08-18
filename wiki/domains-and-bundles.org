@@ -150,6 +150,11 @@ to another chunk.  A local =chunk-domain= should therefore own local indexing
 without pretending that an absent neighbor is intrinsically air.  #H2W9DJ
 separates local storage from cross-chunk access.
 
+A domain's sites need not be places.  A vocabulary — the atlas tiles, the
+block materials — answers the same four questions, and #SICRZO takes that
+seriously enough to ask who owns the mapping from a symbolic identity to the
+offset a hot loop indexes.
+
 Different domains may cover the same region.  A full-resolution block domain,
 a coarse occupancy domain, a body domain, and a contact-constraint domain have
 different sites and legal operations even when all ultimately describe one
