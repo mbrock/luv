@@ -3897,6 +3897,8 @@ structured product and source provenance.  #JDLQPN"))
                   :accessor context-direct-values)
    (array-type-ids :initform (make-hash-table :test #'equal)
                    :accessor context-array-type-ids)
+   (bool-vector-type-ids :initform (make-hash-table :test #'eql)
+                         :accessor context-bool-vector-type-ids)
    (uniform-struct-ids :initform (make-hash-table :test #'eq)
                        :accessor context-uniform-struct-ids)
    (stage :initform nil :accessor context-stage)
@@ -4042,6 +4044,16 @@ structured product and source provenance.  #JDLQPN"))
         (append-context-form 'type-declarations context
                              (list id 'type-bool))
         id))))
+
+(defun ensure-bool-vector-type-id (context count)
+  "The OpTypeVector of COUNT booleans: a vector select's condition."
+  (or (gethash count (context-bool-vector-type-ids context))
+      (let ((id (reserve-shader-id context (format nil "BVEC~D" count))))
+        (setf (gethash count (context-bool-vector-type-ids context)) id)
+        (append-context-form
+         'type-declarations context
+         (list id 'type-vector (ensure-bool-type-id context) count))
+        id)))
 
 (defun ensure-pointer-type-id (context storage-class value-type)
   (let* ((value-id (ensure-shader-type-id context value-type))
@@ -5254,15 +5266,32 @@ backend's context before its source-located unsupported-operation method."))
 
 (defmethod lower-shader-expression-value
     (context (expression shader-conditional))
-  (emit-value-instruction
-   context expression (shader-expression-type expression) 'select
-   (list
-    (lower-shader-expression
-     context (lang:arithmetic-conditional-condition expression))
-    (lower-shader-expression
-     context (lang:arithmetic-conditional-consequent expression))
-    (lower-shader-expression
-     context (lang:arithmetic-conditional-alternative expression)))))
+  (let* ((type (shader-expression-type expression))
+         (count (shader-type-component-count (find-shader-type type)))
+         (condition
+           (lower-shader-expression
+            context (lang:arithmetic-conditional-condition expression)))
+         (consequent
+           (lower-shader-expression
+            context (lang:arithmetic-conditional-consequent expression)))
+         (alternative
+           (lower-shader-expression
+            context (lang:arithmetic-conditional-alternative expression))))
+    ;; OpSelect took one boolean per component until SPIR-V 1.4 relaxed it,
+    ;; and a stage's module version is not this expression's business, so a
+    ;; scalar condition choosing between vectors is splatted rather than
+    ;; leaned on: the wider form is valid at every version.
+    (when (and count (> count 1))
+      (let ((splat (fresh-shader-id context "CONDITION-VECTOR")))
+        (emit-shader-instruction
+         context nil
+         (list* splat 'composite-construct
+                (ensure-bool-vector-type-id context count)
+                (make-list count :initial-element condition)))
+        (setf condition splat)))
+    (emit-value-instruction
+     context expression type 'select
+     (list condition consequent alternative))))
 
 (defmethod lower-shader-expression-value
     (context (expression shader-counted-fold))
