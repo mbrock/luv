@@ -49,13 +49,6 @@
         (shaded-block-atlas-pixel 255 236 150 0)
         (shaded-block-atlas-pixel 240 96 24 (round (- vein 128) 6)))))
 
-(defmethod paint-block-atlas-relief ((tile (eql 33)) x y)
-  (declare (ignore x y))
-  128)
-(defmethod paint-block-atlas-relief ((tile (eql 34)) x y)
-  (declare (ignore x y))
-  128)
-
 ;;; ---------------------------------------------------------------------
 ;;; Body kinds: the game's palette of things a body can be.  The physics
 ;;; keeps only the index; everything the eye or the game wants is here.

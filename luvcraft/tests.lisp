@@ -1675,7 +1675,8 @@
     (ok (equal (mapcar #'block-kind-name (placeable-block-kinds))
                '(:grass :dirt :stone :wood :leaves :sand :snow :crystal
                  :terminal :gravel :clay :mud :moss :cactus :cobblestone
-                 :stone-bricks :bricks :planks :sandstone :slate :tape))))
+                 :stone-bricks :bricks :planks :sandstone :slate :tape
+                :fountain :lava-spring))))
   (let ((world (make-block-world :chunk-width 2
                                  :chunk-height 2
                                  :chunk-depth 2)))
