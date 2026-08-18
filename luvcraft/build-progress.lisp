@@ -5,7 +5,7 @@
 ;;;; SB-CONCURRENCY mailbox, which the display thread reads with a timeout, so
 ;;;; that it keeps a heartbeat even while the build says nothing.  Past a
 ;;;; deadline the display thread interrupts the build thread and the build
-;;;; fails: a file that takes more than five seconds to compile is a defect,
+;;;; fails: a file that takes more than a few seconds to compile is a defect,
 ;;;; not a slow step.
 ;;;;
 ;;;; Nothing is muted.  Compiler chatter and the C toolchain's pkg-config and
@@ -15,19 +15,21 @@
 ;;;; build/logs/.  The display thread writes to a dup of the original stderr,
 ;;;; so it keeps the console while everything else is being recorded.
 ;;;;
-;;;; The console gets one plain line per compiled file -- no cursor tricks, no
-;;;; per-file durations, nothing to redraw -- stamped with how far into the
-;;;; build it happened:
+;;;; The console gets one plain line per compiled file, printed before the work
+;;;; starts, so the stamp says when the file began and a file that never
+;;;; finishes has still named itself:
 ;;;;
-;;;;   ;; T+012.7s   65/150  luvcraft/package.lisp
+;;;;   000.1s   1/150  domains/package.lisp
 ;;;;
-;;;; Everything else is remembered rather than printed: every action with its
-;;;; place and duration goes into a record, which becomes the stats at the end
-;;;; and is saved as build.sexp beside the logs.
+;;;; Prose about the build -- what it is making, how it ended, what it cost --
+;;;; is commented, so the whole console reads as Lisp.  Everything else is
+;;;; remembered rather than printed: every action with its place and duration
+;;;; goes into a record, which becomes the closing remarks and is saved as
+;;;; build.sexp beside the logs.
 
 (defpackage #:luv-build
   (:use #:cl)
-  (:export #:start #:finish #:note #:deadline-exceeded #:deadline-exceeded-label
+  (:export #:start #:finish #:failed #:deadline-exceeded #:deadline-exceeded-label
            #:*log-directory*))
 
 (in-package #:luv-build)
@@ -39,13 +41,15 @@
     (if spec
         (let ((n (ignore-errors (parse-integer spec))))
           (if (and n (plusp n)) n nil))
-        5))
+        3))
   "Seconds a single file may compile before the build is failed.
 NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
 
 (defvar *log-directory* nil)
 (defvar *project-root* nil)
 (defvar *build-id* nil)
+(defvar *system* nil
+  "What this build is making, as ASDF names it.")
 
 (defparameter *id-characters* "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
   "The wiki's alphabet for short references; a build gets one of the same shape.")
@@ -71,8 +75,8 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
 
 ;;; The grid
 
-(defparameter *gutter-width* 9
-  "The column holding either a word or a file's place in the plan.")
+(defvar *counter-width* 8
+  "The column a file's place in the plan is right-aligned in.")
 
 ;;; The console: a dup of stderr, immune to the redirection below.
 
@@ -96,9 +100,9 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
   (when *mailbox*
     (sb-concurrency:send-message *mailbox* message)))
 
-(defun note (text)
-  "Say something on the console from outside the display thread."
-  (send :note text))
+(defun failed (text)
+  "Tell the display why the build died, from outside the display thread."
+  (send :failure text))
 
 (defun elapsed (since)
   (/ (float (- (get-internal-real-time) since) 1.0)
@@ -129,25 +133,40 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
   (loads-total nil) (loads-done 0)
   (system nil) (system-start nil)
   (current nil) (current-kind nil) (current-start nil)
-  (current-log nil) (failed nil) (failed-log nil)
+  (current-log nil) (failed nil) (failed-log nil) (failed-seconds nil)
+  (failure nil)
   (tripped nil)
   (start (get-internal-real-time)))
 
 (defun since-start (state)
   (elapsed (display-start state)))
 
-(defun emit (state gutter text &key stamp)
-  "One line: when the work started, a gutter, and what it is.
-Only the operations themselves are stamped; what frames them is not."
-  (declare (ignorable state))
-  (format *console* ";; ~8A ~V@A  ~A~%"
-          (if stamp (format nil "T+~5,1,,,'0Fs" stamp) "")
-          *gutter-width* (or gutter "") text)
+(defun say (text)
+  (format *console* "~A~%" text)
   (finish-output *console*))
 
-(defun compile-gutter (state)
-  (format nil "~D/~D" (1+ (display-compiles-done state))
-          (or (display-compiles-total state) 0)))
+(defun remark (&optional control &rest arguments)
+  "One commented line of the build's own prose, or a bare comment for a gap."
+  (say (if control
+           (concatenate 'string ";; " (apply #'format nil control arguments))
+           ";;")))
+
+(defun action-line (state label)
+  "Where a file stands in the plan, said before it is compiled."
+  (say (format nil "~5,1,,,'0Fs~V@A  ~A"
+               (since-start state)
+               *counter-width*
+               (format nil "~D/~D" (1+ (display-compiles-done state))
+                       (or (display-compiles-total state) 0))
+               label)))
+
+(defun here (path)
+  "A path in the checkout, said the way one would type it."
+  (format nil "./~A" path))
+
+(defun in-logs (name)
+  (namestring (uiop:enough-pathname (merge-pathnames name *log-directory*)
+                                    *project-root*)))
 
 (defun tick (state)
   "Watch the clock over whatever the build thread is doing."
@@ -163,10 +182,7 @@ Only the operations themselves are stamped; what frames them is not."
 
 (defun trip-deadline (state seconds)
   (let ((label (display-current state)))
-    (emit state "DEADLINE"
-          (format nil "~A took ~A, over the ~Ds limit"
-                  label (format-seconds seconds) *deadline-seconds*)
-          :stamp (since-start state))
+    (setf (display-failed-seconds state) seconds)
     ;; Stop watching and let the build thread die of the error; the report is
     ;; printed when it comes back through FINISH.  The display loop must not
     ;; block here, so the grace period is checked on a later tick.
@@ -223,42 +239,95 @@ Only the operations themselves are stamped; what frames them is not."
     path))
 
 (defun report (state reason)
-  "The stats a build is worth after the fact, and where its account is kept."
+  "What the build has to say for itself, once it is over."
+  (let ((sexp (write-sexp-log state reason))
+        (raw (directory-bytes *log-directory*)))
+    (say "")
+    (ecase reason
+      (:deadline
+       (remark "Error: DREADFUL COMPILATION UNIT!")
+       (remark)
+       (remark "Compilation of ~A was aborted." (here (display-failed state)))
+       (remark "Project policy requires under ~Ds per file." *deadline-seconds*))
+      (:error
+       (remark "Error: THE BUILD FAILED!")
+       (remark)
+       (when (display-failed state)
+         (remark "Compilation of ~A was aborted." (here (display-failed state))))
+       (when (display-failure state)
+         (remark "~A" (display-failure state))))
+      (:interrupted
+       (remark "Interrupted!")
+       (remark)
+       (remark "~D file~:P had been compiled." (display-compiles-done state)))
+      (:done
+       (report-work state)))
+    (remark)
+    (case reason
+      (:done (report-archive state raw))
+      (t
+       (when (display-failed-log state)
+         (remark "See verbose log for that system in ~A."
+                 (display-failed-log state)))
+       (remark "The whole build's structured log is in ~A."
+               (namestring (uiop:enough-pathname sexp *project-root*)))
+       (remark)
+       (report-cost)))
+    (say "")))
+
+(defun report-work (state)
+  "What a successful build did, and what took the time."
   (let* ((compiles (records-of state :compile))
          (loads (records-of state :load))
-         (slowest (sort (copy-list compiles) #'> :key #'record-seconds))
-         (sexp (write-sexp-log state reason)))
-    (emit state (ecase reason
-                  (:done "built")
-                  (:interrupted "stopped")
-                  ((:deadline :error) "FAILED"))
-          (format nil "~D compiled, ~D loaded, ~D system~:P in ~A"
-                  (length compiles) (display-loads-done state)
-                  (display-systems-done state)
-                  (format-seconds (since-start state))))
-    (emit state "spent" (format nil "~A compiling, ~A loading"
-                                (or (format-seconds (total-seconds compiles)) "0s")
-                                (or (format-seconds (total-seconds loads)) "0s")))
-    (dolist (record (subseq slowest 0 (min 3 (length slowest))))
-      (when (> (record-seconds record) 0.5)
-        (emit state "slowest" (format nil "~A ~A" (record-label record)
-                                      (format-seconds (record-seconds record))))))
-    (when (member reason '(:deadline :error))
-      (emit state "log" (failure-log state)))
-    (report-disk state sexp reason)))
+         (slowest (first (sort (copy-list compiles) #'> :key #'record-seconds))))
+    (remark "Built ~(~S~) in ~A." (or *system* :the-program)
+            (format-seconds (since-start state)))
+    (remark)
+    (remark "~D file~:P compiled, ~D loaded, ~D system~:P."
+            (length compiles) (display-loads-done state)
+            (display-systems-done state))
+    (remark "Spent ~A compiling and ~A loading."
+            (format-seconds (total-seconds compiles))
+            (format-seconds (total-seconds loads)))
+    (when (and slowest (> (record-seconds slowest) *quiet-seconds*))
+      (remark "Slowest was ~A at ~A." (here (record-label slowest))
+              (format-seconds (record-seconds slowest))))))
+
+(defun report-archive (state raw)
+  "Pack every build's logs away, and say what that came to."
+  (declare (ignorable state))
+  (multiple-value-bind (archive count) (compact-logs)
+    (if archive
+        (remark "Logs packed into ~A: ~A became ~A, ~D build~:P archived."
+                (namestring (uiop:enough-pathname archive *project-root*))
+                (human-bytes raw) (human-bytes (file-bytes archive)) count)
+        (remark "Logs are in ~A." (in-logs ""))))
+  (remark)
+  (report-cost))
+
+(defun report-cost ()
+  (remark "Note: Build logs take ~A of the ~A build directory."
+          (human-bytes (directory-bytes (logs-root)))
+          (human-bytes (directory-bytes (merge-pathnames "build/" *project-root*)))))
 
 (defun handle (state message)
   (destructuring-bind (kind &rest args) message
     (ecase kind
+      (:header
+       (remark "make ~(~S~)" *system*)
+       (remark "logs ~A" (here (string-right-trim
+                                "/" (namestring
+                                     (uiop:enough-pathname *log-directory*
+                                                           *project-root*)))))
+       (say ""))
       (:plan
        (destructuring-bind (&key systems compiles loads) args
          (setf (display-systems-total state) systems
                (display-compiles-total state) compiles
                (display-loads-total state) loads
-               *gutter-width* (max *gutter-width*
-                                   (+ 1 (* 2 (length (princ-to-string compiles))))))
-         (emit state "plan" (format nil "~D systems, ~D to compile, ~D to load"
-                                    systems compiles loads))))
+               ;; Wide enough for the last file's place, and the two spaces
+               ;; that separate it from the name.
+               *counter-width* (+ 2 (* 2 (length (princ-to-string compiles)))))))
       (:system-begin
        (destructuring-bind (name) args
          (setf (display-system state) name
@@ -278,8 +347,7 @@ Only the operations themselves are stamped; what frames them is not."
          ;; Announced before the work, so the stamp says when it began and a
          ;; file that never finishes has still named itself.
          (when (eq action-kind :compile)
-           (emit state (compile-gutter state) label
-                 :stamp (since-start state)))))
+           (action-line state label))))
       (:end
        (destructuring-bind (action-kind label seconds) args
          (push (make-record action-kind label (display-system state)
@@ -291,8 +359,11 @@ Only the operations themselves are stamped; what frames them is not."
            (:compile (incf (display-compiles-done state)))
            (:load (incf (display-loads-done state))))))
       (:note
-       (destructuring-bind (text &optional gutter) args
-         (emit state (or gutter "note") text)))
+       (destructuring-bind (text) args
+         (remark "~A" text)))
+      (:failure
+       (destructuring-bind (text) args
+         (setf (display-failure state) text)))
       (:finish
        (destructuring-bind (reason) args
          (when (and (eq reason :error) (display-current state))
@@ -306,8 +377,12 @@ Only the operations themselves are stamped; what frames them is not."
       (let ((message (sb-concurrency:receive-message *mailbox*
                                                      :timeout *tick-interval*)))
         (cond ((null message) (tick state))
-              (t (handle state message)
-                 (when (eq (first message) :finish) (return))))))))
+              (t
+               ;; A display that dies takes the whole console with it and
+               ;; leaves the build looking wedged; say so and carry on.
+               (handler-case (handle state message)
+                 (error (e) (remark "display: ~A" e)))
+               (when (eq (first message) :finish) (return))))))))
 
 ;;; Per-file logs, captured at the file descriptor level
 
@@ -453,10 +528,10 @@ logs the way the systems themselves nest: luv.log beside luv/domains.log."
     total))
 
 (defun human-bytes (bytes)
-  (cond ((< bytes 1024) (format nil "~DB" bytes))
-        ((< bytes (* 1024 1024)) (format nil "~,1FK" (/ bytes 1024.0)))
-        ((< bytes (* 1024 1024 1024)) (format nil "~,1FM" (/ bytes 1048576.0)))
-        (t (format nil "~,1FG" (/ bytes 1073741824.0)))))
+  (cond ((< bytes 1024) (format nil "~D B" bytes))
+        ((< bytes (* 1024 1024)) (format nil "~,1F KB" (/ bytes 1024.0)))
+        ((< bytes (* 1024 1024 1024)) (format nil "~,1F MB" (/ bytes 1048576.0)))
+        (t (format nil "~,1F GB" (/ bytes 1073741824.0)))))
 
 (defun log-directory-id (directory)
   (car (last (pathname-directory directory))))
@@ -494,35 +569,11 @@ Returns the current build's archive, and how many were made."
                           (merge-pathnames "latest" (logs-root))))))
     (values current count)))
 
-(defun report-disk (state sexp reason)
-  "Say what this build's account cost, and what the tree costs now.
-A build that worked earns the right to pack away every build's logs, including
-the failures that led up to it.  This runs on the display thread, after the
-sexp log is written, so the archive contains it."
-  (let ((raw (directory-bytes *log-directory*)))
-    (emit state "sexp" (namestring (uiop:enough-pathname sexp *project-root*)))
-    (if (eq reason :done)
-        (multiple-value-bind (archive count) (compact-logs)
-          (emit state "logs"
-                (if archive
-                    (format nil "this build ~A -> ~A, ~D build~:P archived"
-                            (human-bytes raw) (human-bytes (file-bytes archive))
-                            count)
-                    (format nil "~A, not packed" (human-bytes raw)))))
-        (emit state "logs"
-              (format nil "~A in ~A" (human-bytes raw)
-                      (namestring (uiop:enough-pathname *log-directory*
-                                                        *project-root*)))))
-    (emit state "disk"
-          (format nil "build/logs ~A, build/ ~A"
-                  (human-bytes (directory-bytes (logs-root)))
-                  (human-bytes (directory-bytes
-                                (merge-pathnames "build/" *project-root*)))))))
-
 ;;; Entry points
 
 (defun start (project-root &key system)
   (setf *project-root* project-root
+        *system* system
         *build-id* (make-build-id)
         *log-directory* (merge-pathnames (format nil "build/logs/~A/" *build-id*)
                                          project-root)
@@ -544,11 +595,8 @@ sexp log is written, so the archive contains it."
   ;; than interrupting the display.
   (redirect-output-to (build-log))
   (link-latest-logs)
-  ;; After the plan, so the id lines up with the columns it sets.
   (when system (report-plan system))
-  (send :note (format nil "~A in ~A" *build-id*
-                      (uiop:enough-pathname *log-directory* *project-root*))
-        "build")
+  (send :header)
   (values))
 
 (defun finish (reason)
