@@ -804,6 +804,8 @@ submission that used them completes."
   ;; anything is encoded: the upload is an ordinary queue write, not part of
   ;; this frame's command stream.
   (when (luvcraft-session-video-screen session)
+    (place-video-screen-listener (luvcraft-session-video-screen session)
+                                 (luvcraft-session-camera session))
     (advance-video-screen (luvcraft-session-video-screen session)
                           (luvcraft-session-device session)))
   (dolist (overlay (luvcraft-session-overlays session))
@@ -1266,6 +1268,10 @@ here -- so an unconsumed wheel event is simply the end of the matter."
     ((session luvcraft-session) canvas (event canvas-window-close-request-event))
   (declare (ignore canvas event))
   (setf (luvcraft-session-running-p session) nil)
+  ;; The window is going; the film's sound must not outlive it, playing on
+  ;; from a session nobody can see until something releases it.
+  (alexandria:when-let ((screen (luvcraft-session-video-screen session)))
+    (hush-video-screen screen))
   nil)
 
 (defmethod handle-canvas-event

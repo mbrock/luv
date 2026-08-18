@@ -97,6 +97,19 @@
   ((:vaapi "AV_PIX_FMT_VAAPI"))
   ((:vulkan "AV_PIX_FMT_VULKAN")))
 
+(cenum (sample-format :base-type :int)
+  ((:none "AV_SAMPLE_FMT_NONE"))
+  ((:u8 "AV_SAMPLE_FMT_U8"))
+  ((:s16 "AV_SAMPLE_FMT_S16"))
+  ((:s32 "AV_SAMPLE_FMT_S32"))
+  ((:flt "AV_SAMPLE_FMT_FLT"))
+  ((:dbl "AV_SAMPLE_FMT_DBL"))
+  ((:u8p "AV_SAMPLE_FMT_U8P"))
+  ((:s16p "AV_SAMPLE_FMT_S16P"))
+  ((:s32p "AV_SAMPLE_FMT_S32P"))
+  ((:fltp "AV_SAMPLE_FMT_FLTP"))
+  ((:dblp "AV_SAMPLE_FMT_DBLP")))
+
 (cenum (media-type :base-type :int)
   ((:unknown "AVMEDIA_TYPE_UNKNOWN"))
   ((:video "AVMEDIA_TYPE_VIDEO"))
@@ -116,6 +129,13 @@
 (cstruct av-rational "AVRational"
   (numerator "num" :type :int)
   (denominator "den" :type :int))
+
+;;; Only the count is read.  The order and mask are what a resampler needs to
+;;; place channels; luv downmixes to a point source and never asks.
+
+(cstruct av-channel-layout "AVChannelLayout"
+  (order "order" :type :int)
+  (channel-count "nb_channels" :type :int))
 
 (cstruct av-buffer-reference "AVBufferRef"
   (buffer "buffer" :type :pointer)
@@ -173,6 +193,8 @@
   (width "width" :type :int)
   (height "height" :type :int)
   (sample-count "nb_samples" :type :int)
+  (sample-rate "sample_rate" :type :int)
+  (channel-layout "ch_layout" :type (:struct av-channel-layout))
   (format "format" :type :int)
   (flags "flags" :type :int)
   (presentation-timestamp "pts" :type :int64)
@@ -208,6 +230,9 @@
   (width "width" :type :int)
   (height "height" :type :int)
   (pixel-format "pix_fmt" :type :int)
+  (sample-rate "sample_rate" :type :int)
+  (sample-format "sample_fmt" :type :int)
+  (channel-layout "ch_layout" :type (:struct av-channel-layout))
   (get-format "get_format" :type :pointer)
   (hardware-device-context "hw_device_ctx" :type :pointer))
 

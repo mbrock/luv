@@ -499,6 +499,20 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:canvas-visible-p
            #:canvas-fullscreen-p
            #:canvas-clipboard-text
+           ;; Sound out; hal/sdl/audio.lisp.
+           #:audio-sink
+           #:open-audio-sink
+           #:close-audio-sink
+           #:audio-sink-open-p
+           #:audio-sink-rate
+           #:audio-sink-channels
+           #:push-audio-sink-mono
+           #:audio-sink-queued-frames
+           #:audio-sink-queued-seconds
+           #:audio-sink-played-frames
+           #:audio-sink-frames-pushed
+           #:clear-audio-sink
+           #:audio-sink-gain
            #:set-canvas-fullscreen
            #:set-canvas-relative-pointer-mode
            #:show-canvas

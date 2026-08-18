@@ -51,4 +51,15 @@
            #:decode-next-frame
            #:rewind-video
            #:scale-frame-into
-           #:frame-rgba-words))
+           #:frame-rgba-words
+           #:stream-decoder
+           #:audio-track
+           #:open-audio
+           #:close-audio
+           #:rewind-audio
+           #:audio-sample-rate
+           #:audio-channel-count
+           #:audio-duration
+           #:decode-next-audio-frame
+           #:audio-frame-sample-count
+           #:audio-frame-mono-samples))

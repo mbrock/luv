@@ -60,6 +60,7 @@
                  (:file "live-pipeline")
                  (:file "release")
                  (:file "text")
+                 (:file "sound")
                  (:file "video-screen")
                  (:file "app")
                  (:file "riding")
