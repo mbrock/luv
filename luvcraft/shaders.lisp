@@ -35,7 +35,7 @@
   "How many times its true angular radius the sun's disc is drawn at.")
 (defparameter *sun-disc-radiance* 30.0
   "The disc's radiance above display white, which the bloom feeds on.")
-(defparameter *direct-light-gain* 2.35
+(defparameter *direct-light-gain* 2.05
   "The direct sun's diffuse intensity on a lit block face.")
 (defparameter *screen-curvature* 0.40
   "How far a terminal faceplate's normal bulges toward its rim.")
@@ -74,6 +74,96 @@
     (:group :terminal :quantity (:quantity :screen-effect-strength :unit :one)
      :minimum 0.0 :maximum 1.0 :step 0.05)
     *screen-effect-ceiling*)
+
+;;; The sky's own knobs.  Everything else about the sky arrives through the
+;;; frame environment from the day profile; these four are the art direction
+;;; the profile has no opinion about.
+
+(defparameter *sky-scatter-gain* 1.0
+  "How strongly the atmosphere's phase function brightens the sun's quarter.")
+(defparameter *cloud-coverage* 1.0
+  "The profile's cloudiness against art direction; one leaves it alone.")
+(defparameter *star-brightness* 1.7
+  "The radiance of a first-magnitude star, above display white.")
+(defparameter *moon-radiance* 3.4
+  "The full moon's radiance above display white; the bloom feeds on it.")
+
+(luvcraft:define-knob sky-scatter-gain
+    (:group :sky :quantity (:quantity :scatter-gain :unit :one)
+     :unit-label "×" :minimum 0.0 :maximum 3.0 :step 0.05)
+    *sky-scatter-gain*)
+(luvcraft:define-knob cloud-coverage
+    (:group :sky :quantity (:quantity :cloud-coverage :unit :one)
+     :unit-label "×" :minimum 0.0 :maximum 2.0 :step 0.05)
+    *cloud-coverage*)
+(luvcraft:define-knob star-brightness
+    (:group :sky :quantity (:quantity :star-brightness :unit :one)
+     :minimum 0.0 :maximum 6.0 :step 0.1)
+    *star-brightness*)
+(luvcraft:define-knob moon-radiance
+    (:group :sky :quantity (:quantity :moon-radiance :unit :one)
+     :minimum 0.0 :maximum 20.0 :step 0.2)
+    *moon-radiance*)
+
+;;; The surface knobs.  A block face is one tile of a sixteen-texel atlas
+;;; and a thousand of them are in view at once, so how far apart two faces
+;;; of the same material drift, and how the light they return is split
+;;; between the sun, the sky, and the ground, are the questions art
+;;; direction actually asks about the world's materials.
+
+(defparameter *surface-detail* 1.0
+  "How far the procedural weathering moves one face away from the next.")
+(defparameter *surface-roughness* 1.0
+  "The whole palette's micro-roughness against what its relief implies.")
+(defparameter *specular-gain* 1.0
+  "How much of the sun's microfacet lobe a block surface returns.")
+(defparameter *ambient-bounce* 0.55
+  "How much of the ground's own colour a downward face is lit by.")
+
+(luvcraft:define-knob surface-detail
+    (:group :surface :quantity (:quantity :surface-detail :unit :one)
+     :unit-label "×" :minimum 0.0 :maximum 3.0 :step 0.05)
+    *surface-detail*)
+(luvcraft:define-knob surface-roughness
+    (:group :surface :quantity (:quantity :surface-roughness :unit :one)
+     :unit-label "×" :minimum 0.3 :maximum 2.0 :step 0.05)
+    *surface-roughness*)
+(luvcraft:define-knob specular-gain
+    (:group :surface :quantity (:quantity :specular-gain :unit :one)
+     :unit-label "×" :minimum 0.0 :maximum 4.0 :step 0.05)
+    *specular-gain*)
+(luvcraft:define-knob ambient-bounce
+    (:group :surface :quantity (:quantity :ambient-bounce :unit :one)
+     :minimum 0.0 :maximum 1.5 :step 0.05)
+    *ambient-bounce*)
+
+;;; What presentation does to the graded image after the filmic curve: the
+;;; two grading controls every colourist reaches for first, and the lens's
+;;; own small dispersion.  They are folded literals rather than uniform
+;;; lanes because they are art direction, changed by hand and then left.
+
+(defparameter *chromatic-aberration* 0.40
+  "How far the lens splits red from blue at the corners, in texels.")
+(defparameter *grade-saturation* 1.10
+  "Saturation of the presented image, one being the filmic curve's own.")
+(defparameter *grade-contrast* 0.16
+  "How far the presented image is pulled toward an S-curve.")
+
+(luvcraft:define-knob chromatic-aberration
+    (:group :grading :label "aberration"
+     :quantity (:quantity :chromatic-aberration :unit :one)
+     :minimum 0.0 :maximum 3.0 :step 0.05)
+    *chromatic-aberration*)
+(luvcraft:define-knob grade-saturation
+    (:group :grading :label "saturation"
+     :quantity (:quantity :grade-saturation :unit :one)
+     :unit-label "×" :minimum 0.0 :maximum 2.0 :step 0.02)
+    *grade-saturation*)
+(luvcraft:define-knob grade-contrast
+    (:group :grading :label "contrast"
+     :quantity (:quantity :grade-contrast :unit :one)
+     :minimum 0.0 :maximum 1.0 :step 0.02)
+    *grade-contrast*)
 
 ;;; Every stage which reads the frame environment declares the same uniform
 ;;; block at binding 2: identical member order and offsets are an ABI
@@ -1229,12 +1319,78 @@ negative inside.  RADIUS is the corner radius in world cells."
          (rounded
            (+ (* flat-normal (cos bevel-turn)) (* lean-direction (sin bevel-turn))))
          (seam-occlusion (- 1.0 (* 0.34 (* seam bevel-fade))))
+         ;; --- the weathering -----------------------------------------------
+         ;; The atlas has one tile per material and the world has thousands of
+         ;; faces per tile, so on its own every grass block is the same card
+         ;; seen again.  Three fields fix that and none of them costs a texel:
+         ;; a hash of the cell a face belongs to, constant across that face and
+         ;; different on the next one; value noise over the world point itself,
+         ;; which knows nothing about where faces begin and so drifts across a
+         ;; whole plain the way real ground does; and a grain finer than a cell
+         ;; whose own gradient leans the surface, so the ground is not merely
+         ;; painted unevenly but lit unevenly.  The cell is found by stepping
+         ;; half a cell back along the face's own normal, which lands inside
+         ;; the block whichever of the six faces this is.
+         (face-cell (floor (- surface-point (* flat-normal 0.5))))
+         (face-seed (lattice-hash (+ face-cell (* flat-normal 0.37))))
+         (face-hue (lattice-hash (+ face-cell (vec3 5.21 1.37 9.13))))
+         (patch (lattice-fractal-noise (* surface-point 0.075)))
+         (grain-point (* surface-point 1.05))
+         (grain (lattice-noise grain-point))
+         ;; Two more taps of the same grain, a step along each of the face's
+         ;; own in-plane axes: their differences are the field's gradient
+         ;; there, which is exactly the tilt a bump of it would give.
+         (grain-u (lattice-noise (+ grain-point (* tangent-u 0.55))))
+         (grain-v (lattice-noise (+ grain-point (* tangent-v 0.55))))
+         (weathering
+           (clamp
+            (* surface-detail
+               (+ (* (- patch 0.5) 1.05)
+                  (+ (* (- face-seed 0.5) 0.30)
+                     (* (- grain 0.5) (* 0.30 relief-fade)))))
+            -0.42 0.42))
+         ;; Brighter patches are also warmer and duller ones cooler, and a
+         ;; face's own constant drifts its hue as well as its value: a plain
+         ;; of grass wants to be many greens, not one green at many
+         ;; brightnesses.
+         (hue-drift
+           (clamp
+            (* surface-detail
+               (+ (* (- face-hue 0.5) 0.36) (* (- patch 0.5) 0.44)))
+            -0.35 0.35))
+         (weathered-tint
+           (+ (vec3 1.0 1.0 1.0)
+              (+ (* (vec3 1.12 1.0 0.84) weathering)
+                 (* (vec3 0.13 0.02 -0.11) hue-drift))))
+         (bump-strength (* 0.85 (* relief-fade surface-detail)))
          (shaped
-           (normalize (+ (* rounded relief-z)
-                         (* tangent-u relief-x)
-                         (* tangent-v relief-y))))
+           (normalize (+ (+ (* rounded relief-z)
+                            (* tangent-u
+                               (+ relief-x (* (- grain grain-u) bump-strength))))
+                         (* tangent-v
+                            (+ relief-y
+                               (* (- grain grain-v) bump-strength))))))
          (shading-normal
            (assume-quantity shaped :quantity :world-direction :unit :one))
+         ;; --- the micro-surface --------------------------------------------
+         ;; The atlas normal is this material's own slope at texel scale, and
+         ;; the best evidence available about what happens below a texel: a
+         ;; steep texel is a rough material.  When the relief fades out with
+         ;; distance its variance has to go somewhere, and the honest place is
+         ;; the roughness -- Toksvig's argument -- so a highlight keeps its
+         ;; size across the draw distance instead of sharpening into a
+         ;; sparkle on every distant face at once.
+         (relief-slope
+           (sqrt (+ (* (swizzle tangent-normal :x) (swizzle tangent-normal :x))
+                    (* (swizzle tangent-normal :y)
+                       (swizzle tangent-normal :y)))))
+         (roughness
+           (clamp
+            (* surface-roughness
+               (+ (mix 0.40 0.92 (clamp (* relief-slope 1.7) 0.0 1.0))
+                  (+ (* 0.28 (- 1.0 relief-fade))
+                     (* 0.10 (- grain 0.5)))))
+            0.16 0.99))
          (sun-direction (swizzle sun-vector :xyz))
          (n-dot-l (max 0.0 (dot shading-normal sun-direction)))
          (shadow-coordinate shadow-uv-input)
@@ -1368,17 +1524,41 @@ negative inside.  RADIUS is the corner radius in world cells."
          ;; three blocks meet is what tells the eye these are solid volumes.
          (occlusion
            (interpret
-            (* (expt ao 1.7)
+            (* (expt ao 1.8)
                (assume-quantity seam-occlusion
                                 :quantity :ambient-occlusion :unit :one))
             :quantity :ambient-occlusion :unit :one))
+         ;; --- what is not the sun ------------------------------------------
+         ;; Everything above a face that is not the sun is still the sky, and
+         ;; the sky is not one colour: a face turned up sees the zenith, a
+         ;; face turned sideways sees the horizon, and a face turned down sees
+         ;; what the ground bounced.  One interpolation over the normal's own
+         ;; vertical component is the whole of it, and it is the difference
+         ;; between blocks standing in a world and blocks floating in a grey
+         ;; room.  The profile's ambient colour stays in the mixture: it is
+         ;; the art direction's say over light the geometry cannot explain.
+         (facing-up
+           (* 0.5 (+ 1.0 (representation (swizzle shading-normal :y)))))
+         (dome-color
+           (mix (representation (swizzle horizon-vector :xyz))
+                (representation (swizzle zenith-vector :xyz))
+                (* facing-up facing-up)))
+         (bounce-color
+           (* (representation (swizzle fog-color-vector :xyz))
+              ambient-bounce))
+         (environment
+           (assume-quantity
+            (mix bounce-color
+                 (mix (representation ambient) dome-color 0.62)
+                 facing-up)
+            :quantity :linear-rgb :unit :one))
          ;; A small floor keeps unlit geometry barely readable rather than
          ;; a void; caves stay dark for the right reason.  The ambient term
          ;; is deliberately weaker, and the sun correspondingly stronger,
          ;; than a display-referred renderer could afford: the filmic curve
          ;; on presentation is what brings the sunlit half back down.
          (sky-light
-           (interpret (* ambient (+ 0.030 (* 0.86 sky-level)) occlusion)
+           (interpret (* environment (+ 0.030 (* 0.86 sky-level)) occlusion)
                       :quantity :linear-rgb :unit :one))
          (sun-light
            (interpret
@@ -1393,15 +1573,22 @@ negative inside.  RADIUS is the corner radius in world cells."
            (interpret (* torch-color block-level)
                       :quantity :linear-rgb :unit :one))
          (albedo
-           (swizzle (sample block-atlas block-sampler uv) :rgb))
+           (assume-quantity
+            (* (representation
+                (swizzle (sample block-atlas block-sampler uv) :rgb))
+               weathered-tint)
+            :quantity :linear-rgb :unit :one))
          (reflected
            (interpret
             (* albedo (+ sky-light sun-light local-light))
             :quantity :linear-rgb :unit :one))
-         ;; One specular lobe off the same shaped normal.  Blocks are matte,
-         ;; so it is a narrow Fresnel-weighted highlight that mostly shows at
-         ;; grazing angles: wet-looking stone at a distance, a glint on a
-         ;; bevel up close, and nothing at all on a face seen head on.
+         ;; --- the microfacet lobe ------------------------------------------
+         ;; One GGX lobe off the shaped normal, with Smith's height-correlated
+         ;; visibility and a dielectric's Fresnel: blocks are not metal, so
+         ;; four per cent at normal incidence and the whole of it at a grazing
+         ;; one.  The roughness above decides everything about its shape, so a
+         ;; polished face and a tufted one differ here without differing
+         ;; anywhere else.
          (view-direction
            (assume-quantity (normalize (- eye surface-point))
                             :quantity :world-direction :unit :one))
@@ -1412,21 +1599,87 @@ negative inside.  RADIUS is the corner radius in world cells."
             :quantity :world-direction :unit :one))
          (n-dot-h (max 0.0 (dot shading-normal half-vector)))
          (n-dot-v (max 0.0 (dot shading-normal view-direction)))
-         (fresnel (+ 0.030 (* 0.22 (expt (- 1.0 n-dot-v) 5.0))))
+         (v-dot-h (max 0.0 (dot view-direction half-vector)))
+         (cosine-light (representation n-dot-l))
+         (cosine-view (representation n-dot-v))
+         (cosine-half (representation n-dot-h))
+         (alpha (* roughness roughness))
+         (alpha-squared (* alpha alpha))
+         (distribution-denominator
+           (+ (* (* cosine-half cosine-half) (- alpha-squared 1.0)) 1.0))
+         (distribution
+           (/ alpha-squared
+              (max 0.0001
+                   (* 3.14159265
+                      (* distribution-denominator distribution-denominator)))))
+         ;; Smith's height-correlated visibility already carries the
+         ;; 1/(4 cos cos) the microfacet specular would otherwise divide by.
+         (visibility-light
+           (* cosine-view
+              (sqrt (+ (* (* cosine-light cosine-light) (- 1.0 alpha-squared))
+                       alpha-squared))))
+         (visibility-view
+           (* cosine-light
+              (sqrt (+ (* (* cosine-view cosine-view) (- 1.0 alpha-squared))
+                       alpha-squared))))
+         (visibility (/ 0.5 (max 0.0001 (+ visibility-light visibility-view))))
+         (fresnel
+           (+ 0.04 (* 0.96 (expt (- 1.0 (representation v-dot-h)) 5.0))))
          ;; The cosine belongs in the specular lobe as much as in the diffuse
          ;; one: without it a highlight can appear on a face the sun cannot
          ;; reach, carrying whatever the shadow map happened to say there.
+         (sun-specular
+           (* (representation sun-color)
+              (* (* distribution (* visibility fresnel))
+                 (* cosine-light
+                    (* (representation sun-visibility)
+                       (* (representation day-factor)
+                          (* (representation direct-shadow)
+                             (* (representation occlusion)
+                                specular-gain))))))))
+         ;; The same sky again, in the direction the surface actually
+         ;; reflects: the sheen that tells a smooth face from a rough one
+         ;; out of the sun, and the one term that makes a block look like it
+         ;; is standing under this weather rather than under a light bulb.
+         (reflection-direction
+           (- (* (representation shading-normal) (* 2.0 cosine-view))
+              (representation view-direction)))
+         (reflection-up
+           (clamp (* 0.5 (+ 1.0 (swizzle reflection-direction :y))) 0.0 1.0))
+         (reflected-sky
+           (mix (representation (swizzle horizon-vector :xyz))
+                (representation (swizzle zenith-vector :xyz))
+                (* reflection-up reflection-up)))
+         (sheen
+           (* (- 1.0 roughness)
+              (+ 0.035 (* 0.32 (expt (- 1.0 cosine-view) 5.0)))))
+         (ambient-specular
+           (* reflected-sky
+              (* sheen (* (representation sky-level)
+                          (representation occlusion)))))
          (specular
-           (interpret
-            (* sun-color
-               (* 4.5 (expt n-dot-h 26.0) fresnel n-dot-l
-                  sun-visibility day-factor direct-shadow occlusion))
-            :quantity :linear-rgb :unit :one))
+           (assume-quantity (+ sun-specular ambient-specular)
+                            :quantity :linear-rgb :unit :one))
          (radiance
            (+ reflected specular
               (interpret (* albedo emission-input)
                          :quantity :linear-rgb :unit :one)))
-         (fog-color (swizzle fog-color-vector :xyz))
+         ;; Distant terrain fades into exactly the colour the sky's own ground
+         ;; half arrives at, warmed where the ray runs toward a low sun: the
+         ;; aerial perspective that puts a mile of air between here and the
+         ;; horizon.
+         (look-direction (normalize (- surface-point eye)))
+         (sun-elevation (representation (swizzle sun-direction :y)))
+         (low-sun
+           (* (representation day-factor)
+              (- 1.0 (smoothstep 0.02 0.45 sun-elevation))))
+         (fog-color
+           (assume-quantity
+            (aerial-perspective-color
+             (representation (swizzle fog-color-vector :xyz))
+             look-direction (representation sun-direction)
+             low-sun (representation day-factor))
+            :quantity :linear-rgb :unit :one))
          (fog-amount fog-input)
          (fogged (mix radiance fog-color fog-amount))
          (normal-rgba
@@ -1522,11 +1775,12 @@ negative inside.  RADIUS is the corner radius in world cells."
 (defun block-world-sky-vertex-shader ()
   (assemble-spir-v-module (block-world-sky-vertex-module)))
 
-;;; Lattice value noise is the whole procedural vocabulary the sky needs: a
+;;; Lattice value noise is the whole procedural vocabulary this file needs: a
 ;;; hash of an integer lattice index, trilinear smoothing between its corners,
 ;;; and a few octaves with the domain rotated between them so the cubic grain
 ;;; never reads as a grid.  It is written once here and reused by the cloud
-;;; deck, the star field, and the block surface's own detail.
+;;; decks, the star field, the moon's maria, and the weathering that makes one
+;;; block face differ from the next.
 
 (define-shader-function lattice-hash (site)
   "Hash one integer lattice site into the unit interval.
@@ -1588,14 +1842,116 @@ than inlined three times."
                (vec4 rotated total)))))
     (swizzle accumulated :w)))
 
-;;; The sky is image mathematics over a view ray and the frame environment:
-;;; a vertical gradient between the profile's two colours, a warm low band and
-;;; two Mie lobes around the sun, a drifting cloud deck projected onto a plane
-;;; at cloud height, stars at night, and a compact solar disc pushed well past
-;;; display white so the lens chain has something real to bloom.  Everything
-;;; below the horizon fades into the exact fog colour distant terrain fades
-;;; to, so silhouettes meet the sky without a seam.  #9SSXDJ records why an
-;;; HDR path wants a sky with something genuinely bright in it.
+(define-shader-function cloud-fractal-noise (point)
+  "Four octaves of the same noise: a cloud deck's shape down to its wisps.
+
+A deck's silhouette is decided by the first octave and its edges by the
+last, so this is the one place in the sky worth paying for a fourth.  The
+weights are the same halving series, renormalized, so the field still spans
+the unit interval and a coverage threshold means the same thing it does
+with three."
+  (let* ((accumulated
+           (counted-fold (octave 4.0 state (vec4 point 0.0))
+             (let* ((sample-point (swizzle state :xyz))
+                    (x (swizzle sample-point :x))
+                    (y (swizzle sample-point :y))
+                    (z (swizzle sample-point :z))
+                    (gain (expt 0.5 (+ octave 1.0)))
+                    (total (+ (swizzle state :w)
+                              (* (lattice-noise sample-point) gain)))
+                    (rotated
+                      (* (vec3 (+ (* 0.78 x) (* 0.63 z))
+                               (+ y 11.17)
+                               (+ (* -0.63 x) (* 0.78 z)))
+                         2.11)))
+               (vec4 rotated total)))))
+    (* (swizzle accumulated :w) 1.067)))
+
+(define-shader-function henyey-greenstein (cosine asymmetry)
+  "The Henyey-Greenstein phase function: how much light a haze sends on at
+COSINE off its original direction, for a medium of the given ASYMMETRY.
+
+One expression replaces the two fitted powers the sky used to brighten
+around the sun.  A phase function's shape is the reason a low sun has a
+huge soft glow and a high one a tight one: the same medium, the same
+number, a different angle."
+  (let* ((squared (* asymmetry asymmetry))
+         (denominator
+           (max 0.0001 (+ (+ 1.0 squared) (* -2.0 (* asymmetry cosine))))))
+    (/ (- 1.0 squared) (* 12.566371 (expt denominator 1.5)))))
+
+(define-shader-function aerial-perspective-color
+    (fog-color direction sun-direction low-sun day-factor)
+  "The colour something arbitrarily far away takes, seen along DIRECTION.
+
+Distant terrain and the sky's own ground half must agree exactly, or the
+edge of the resident world draws itself as a line.  They agree by asking
+this: the profile's fog colour, warmed where the ray runs toward a low sun
+and brightened by the same haze the sky's halo is made of, so a ridge in
+the east at dawn glows and one in the west stays cool."
+  (let* ((alignment (dot direction sun-direction))
+         (toward (max 0.0 alignment))
+         (glow (henyey-greenstein alignment 0.66))
+         (warm (mix (vec3 1.08 0.74 0.46) (vec3 1.25 0.52 0.27) low-sun)))
+    (+ (* fog-color (- 1.0 (* 0.18 (* low-sun toward))))
+       (* warm (* day-factor
+                  (+ (* glow 0.055)
+                     (* low-sun (* (* toward toward) 0.22))))))))
+
+(define-shader-function star-light (direction elapsed)
+  "One star per lattice cell of the sky, at a hashed place in its cell.
+
+Value noise raised to a power -- what the star field used to be -- makes
+smooth blobs the size of its own lattice, and they smear into streaks
+wherever the interpolation runs along a cell edge.  A star is a point, so
+this hashes the cell to a position, a magnitude, and a twinkling phase, and
+draws a small gaussian around it.  Magnitude is a steep power of its hash:
+a few bright stars and a great many faint ones, which is the actual
+distribution overhead."
+  (let* ((point (* direction 74.0))
+         (cell (floor point))
+         (local (fract point))
+         (place-x (lattice-hash (+ cell (vec3 19.7 5.3 11.1))))
+         (place-y (lattice-hash (+ cell (vec3 3.1 23.9 7.7))))
+         (place-z (lattice-hash (+ cell (vec3 41.3 13.7 29.5))))
+         ;; Keep the star off its cell's boundary so no star is ever cut in
+         ;; half by the next cell's gaussian falling off first.
+         (centre (+ (vec3 0.25 0.25 0.25)
+                    (* (vec3 place-x place-y place-z) 0.5)))
+         (offset (- local centre))
+         (radius (dot offset offset))
+         (magnitude (expt place-z 9.0))
+         (twinkle (+ 0.74 (* 0.26 (sin (+ (* elapsed 2.3)
+                                          (* place-x 43.0))))))
+         (spread (exp (* -230.0 radius))))
+    (* magnitude (* twinkle spread))))
+
+;;; The sky is image mathematics over a view ray and the frame environment.
+;;; What it argues is that everything up there is one atmosphere seen at
+;;; different depths:
+;;;
+;;;   - the vertical gradient runs the whole way from horizon to zenith
+;;;     rather than resolving in the first few degrees, because that is what
+;;;     the optical depth along a ray actually does;
+;;;   - haze thickens toward the horizon, and the sunrise band it carries
+;;;     belongs to the sun's own quarter of the compass, not all the way
+;;;     round;
+;;;   - one Henyey-Greenstein phase function, evaluated at two asymmetries,
+;;;     is the whole glow around the sun;
+;;;   - two cloud decks, each a plane at a fixed height, so the ray meets
+;;;     them farther out the closer it runs to level: thin cirrus far above,
+;;;     and the cumulus sheet whose own shadow, sampled once along the deck
+;;;     toward the sun, gives it a lit face and a dark underside;
+;;;   - at night, points for stars, a band for the galaxy, and the moon
+;;;     opposite the sun;
+;;;   - a compact solar disc pushed well past display white so the lens
+;;;     chain has something real to bloom.
+;;;
+;;; Everything below the horizon arrives at the exact fog colour distant
+;;; terrain fades to, so silhouettes meet the sky without a seam, and only
+;;; then darkens -- gently, because a stronger falloff shows up as a step
+;;; where the last resident chunk ends.  #9SSXDJ records why an HDR path
+;;; wants a sky with something genuinely bright in it.
 
 (define-shader-method shader-specification-for
     block-world-sky-fragment-specification
@@ -1609,6 +1965,7 @@ than inlined three times."
                    :members #.*frame-uniform-members*)))
   (let* ((direction (normalize (representation ray-input)))
          (elevation (swizzle direction :y))
+         (above (max elevation 0.0))
          (sun-direction (representation (swizzle sun-vector :xyz)))
          (day-factor (representation (swizzle sun-vector :w)))
          (sun-color (representation (swizzle sun-color-vector :xyz)))
@@ -1620,65 +1977,186 @@ than inlined three times."
          (cloudiness (representation (swizzle fog-vector :w)))
          ;; One number decides how much of the sky is sunrise: a sun near the
          ;; horizon warms the haze, the scatter, and the cloud faces together.
-         (low-sun
-           (* day-factor
-              (- 1.0 (smoothstep 0.10 0.55 (swizzle sun-direction :y)))))
-         (above (smoothstep -0.02 0.30 elevation))
-         (base (mix horizon zenith (expt above 0.70)))
-         (band (expt (clamp (- 1.0 (abs elevation)) 0.0 1.0) 9.0))
-         (hazed (mix base (vec3 1.05 0.60 0.32) (* 0.32 (* low-sun band))))
-         (alignment (max 0.0 (dot direction sun-direction)))
-         ;; Two Mie lobes: a broad brightening of the sun's quarter of the
-         ;; sky, and a tighter shaft that hugs the disc.
-         (broad (expt alignment 5.0))
-         (tight (expt alignment 42.0))
-         (scatter-tint
-           (mix (vec3 1.0 0.96 0.86) (vec3 1.0 0.58 0.28) low-sun))
-         (scattered
-           (+ hazed
-              (* scatter-tint
-                 (* day-factor
-                    (+ (* broad (+ 0.05 (* 0.10 low-sun)))
-                       (* tight (+ 0.10 (* 0.22 low-sun))))))))
-         ;; The cloud deck is a plane at a fixed height: the ray meets it
-         ;; farther out the closer it runs to level, which is exactly the
-         ;; perspective foreshortening real cloud decks show.
-         (deck-mask (smoothstep 0.035 0.17 elevation))
+         (sun-elevation (swizzle sun-direction :y))
+         (low-sun (* day-factor (- 1.0 (smoothstep 0.02 0.45 sun-elevation))))
+         (alignment (dot direction sun-direction))
+         (toward-sun (max 0.0 alignment))
+         ;; The sun's half of the sky, measured on the ground plane: a sunrise
+         ;; band belongs in the east, and the west should stay blue.
+         (level-ray (vec3 (swizzle direction :x) 0.0 (swizzle direction :z)))
+         (level-sun
+           (vec3 (swizzle sun-direction :x) 0.0 (swizzle sun-direction :z)))
+         (azimuth
+           (max 0.0
+                (/ (dot level-ray level-sun)
+                   (max 0.001
+                        (* (sqrt (dot level-ray level-ray))
+                           (sqrt (dot level-sun level-sun)))))))
+         ;; --- the atmosphere ---------------------------------------------
+         ;; The vertical gradient is the sky's own colour at depth; a small
+         ;; exponent spreads it across the whole hemisphere instead of
+         ;; resolving it in the first few degrees, which is what an optical
+         ;; depth along the ray actually does.
+         (gradient (expt (clamp elevation 0.0 1.0) 0.42))
+         (base (mix horizon zenith gradient))
+         (haze (exp (* -9.0 above)))
+         ;; A sunrise is sunlight that has come the long way through the
+         ;; atmosphere, so the band it paints is the sun's own colour at that
+         ;; hour, laid exactly where the ray runs both low and toward it.  Away
+         ;; from the sun's quarter of the compass the sky stays its own colour,
+         ;; which is what keeps the west blue while the east burns.
+         (warm-color (* sun-color 0.82))
+         (warm-band
+           (* low-sun (* haze (+ 0.12 (* 0.88 (* azimuth azimuth))))))
+         (hazed (mix base warm-color (clamp (* 0.92 warm-band) 0.0 1.0)))
+         (broad (henyey-greenstein alignment 0.62))
+         (tight (henyey-greenstein alignment 0.90))
+         (halo-tint (mix (vec3 1.0 0.97 0.90) (vec3 1.0 0.52 0.24) low-sun))
+         (halo-depth (mix 0.70 1.60 haze))
+         (halo
+           (* (+ (* broad (+ 0.030 (* 0.055 low-sun)))
+                 (* tight (+ 0.014 (* 0.055 low-sun))))
+              (* day-factor (* halo-depth sky-scatter-gain))))
+         (scattered (+ hazed (* halo-tint halo)))
+         ;; --- night ------------------------------------------------------
+         (night (- 1.0 (smoothstep 0.0 0.28 day-factor)))
+         ;; The galaxy is a great circle of the sky, so one fixed axis and the
+         ;; ray's distance from its plane is the whole band.
+         (galaxy-axis (vec3 0.42 0.55 -0.72))
+         (galaxy-distance (dot direction galaxy-axis))
+         (galaxy-band (exp (* -20.0 (* galaxy-distance galaxy-distance))))
+         (galaxy-structure
+           (+ (* (lattice-noise (* direction 15.0)) 0.58)
+              (* (lattice-noise (* direction 44.0)) 0.42)))
+         (galaxy
+           (* galaxy-band
+              (* (+ 0.10 (* 1.25 galaxy-structure))
+                 ;; A dust lane is the band's own darkness, not an absence of
+                 ;; stars, so it multiplies rather than subtracts.
+                 (- 1.0 (* 0.55 (smoothstep 0.42 0.66
+                                            (lattice-noise
+                                             (* direction 7.0))))))))
+         (star-visibility
+           (* night (smoothstep -0.02 0.14 elevation)))
+         (stars
+           (* (star-light direction elapsed)
+              (* star-brightness (* star-visibility (+ 1.0 (* 1.6 galaxy-band))))))
+         (starred
+           (+ (* (vec3 0.60 0.66 0.94) (* galaxy (* star-visibility 0.17)))
+              (* (vec3 0.92 0.94 1.0) stars)))
+         ;; The moon rides opposite the sun, which puts it up for exactly the
+         ;; hours the sun is not, and always full: the simple sky this world
+         ;; wants, and the one that lights its nights.
+         (moon-direction (* sun-direction -1.0))
+         (moon-alignment (dot direction moon-direction))
+         (moon-radius (* sun-width 1.7))
+         (moon-limb (* 0.5 (* moon-radius moon-radius)))
+         (moon-disc
+           (smoothstep (- 1.0 moon-limb) (- 1.0 (* 0.80 moon-limb))
+                       moon-alignment))
+         ;; The component of the ray across the moon's own direction, in units
+         ;; of its radius: the disc's face, which the maria are painted on.
+         (moon-face
+           (/ (- direction (* moon-direction moon-alignment))
+              (max 0.0001 moon-radius)))
+         (moon-maria (lattice-noise (+ (* moon-face 1.8) (vec3 13.0 5.0 9.0))))
+         (moon-shape
+           (* (+ 0.70 (* 0.50 moon-maria))
+              (- 1.0 (* 0.40 (clamp (dot moon-face moon-face) 0.0 1.0)))))
+         (moon-glow (* (expt (max 0.0 moon-alignment) 220.0) 0.30))
+         (lunar
+           (* (vec3 0.94 0.95 1.0)
+              (* night (+ (* moon-disc (* moon-radiance moon-shape))
+                          moon-glow))))
+         (nightly (+ scattered (+ starred lunar)))
+         ;; --- the cloud decks --------------------------------------------
+         (cirrus-point
+           (+ (* direction (/ 2400.0 (max elevation 0.02)))
+              (vec3 (* elapsed 6.0) 0.0 (* elapsed 2.0))))
+         (cirrus-field
+           (lattice-fractal-noise
+            (* cirrus-point (vec3 0.00105 0.00105 0.00225))))
+         (cirrus
+           (* (smoothstep 0.56 0.88 cirrus-field)
+              (* (smoothstep 0.02 0.26 elevation)
+                 (* (- 1.0 (* 0.55 (clamp cloudiness 0.0 1.0))) 0.45))))
+         (cirrus-color
+           (* (mix (vec3 1.10 1.12 1.18) (vec3 1.38 0.84 0.56)
+                   (* low-sun low-sun))
+              (max day-factor 0.05)))
+         (with-cirrus (mix nightly cirrus-color cirrus))
          (deck-point
-           (+ (* direction (/ 260.0 (max elevation 0.05)))
-              (vec3 (* elapsed 1.7) 0.0 (* elapsed 0.9))))
-         (cloud-field (lattice-fractal-noise (* deck-point 0.0062)))
-         (cloud-edge (mix 0.66 0.36 (clamp cloudiness 0.0 1.0)))
+           (+ (* direction (/ 230.0 (max elevation 0.014)))
+              (vec3 (* elapsed 2.2) 0.0 (* elapsed 1.2))))
+         (deck-scale 0.0044)
+         (cloud-field (cloud-fractal-noise (* deck-point deck-scale)))
+         ;; Coverage is the profile's cloudiness against the knob; the edge
+         ;; softens toward the horizon, where a deck's detail is far smaller
+         ;; than a pixel and a hard edge could only shimmer.
+         (coverage
+           (mix 0.82 0.46 (clamp (* cloudiness cloud-coverage) 0.0 1.0)))
+         (softness (mix 0.26 0.055 (smoothstep 0.012 0.34 elevation)))
+         (deck-mask (smoothstep 0.006 0.055 elevation))
          (cloud-density
-           (* deck-mask
-              (smoothstep cloud-edge (+ cloud-edge 0.11) cloud-field)))
-         (core (expt (clamp cloud-density 0.0 1.0) 0.75))
+           (* deck-mask (smoothstep coverage (+ coverage softness) cloud-field)))
+         (core (clamp cloud-density 0.0 1.0))
+         ;; What lies between this piece of deck and the sun, sampled along
+         ;; the deck itself: the shape's own shadow, and so its lit face.
+         (shadow-field
+           (cloud-fractal-noise
+            (* (+ deck-point (* level-sun 300.0)) deck-scale)))
+         (shadow-density
+           (smoothstep coverage (+ coverage softness) shadow-field))
+         (cloud-light (- 1.0 (* 0.70 shadow-density)))
          (cloud-lit
-           (mix (vec3 1.15 1.13 1.10) (vec3 1.25 0.86 0.58)
+           (mix (vec3 1.30 1.27 1.22) (vec3 1.48 0.94 0.58)
                 (* low-sun low-sun)))
-         (cloud-shade
-           (mix (vec3 0.50 0.58 0.74) (vec3 0.46 0.41 0.55)
+         (cloud-dark
+           (mix (vec3 0.50 0.57 0.74) (vec3 0.44 0.38 0.52)
                 (* low-sun low-sun)))
+         (cloud-body
+           (mix cloud-dark cloud-lit (* cloud-light (- 1.0 (* 0.45 core)))))
          ;; Silver lining: thin edges facing the sun glow, dense cores do not.
          (silver
            (* cloud-lit
-              (* (expt alignment 16.0)
-                 (* (- 1.0 core) (+ 0.35 (* 0.75 low-sun))))))
+              (* (expt toward-sun 14.0)
+                 (* (- 1.0 core) (+ 0.30 (* 0.85 low-sun))))))
+         ;; After sunset a deck is lit by the sky alone, so it takes the
+         ;; sky's own colour; a neutral grey at one twentieth reads warm
+         ;; against a night zenith and the eye calls it dust.
+         (night-tint
+           (mix (vec3 0.44 0.52 0.80) (vec3 1.0 1.0 1.0)
+                (smoothstep 0.0 0.35 day-factor)))
          (cloud-color
-           (* (+ (mix cloud-lit cloud-shade (* 0.82 core)) silver)
-              (max day-factor 0.05)))
-         (clouded (mix scattered cloud-color (* cloud-density 0.92)))
-         (night (- 1.0 (smoothstep 0.0 0.35 day-factor)))
-         (star-field (expt (lattice-noise (* direction 190.0)) 24.0))
-         (starred
-           (+ clouded
-              (* (vec3 0.85 0.90 1.0)
-                 (* star-field
-                    (* night (* 1.4 (smoothstep 0.02 0.35 elevation)))))))
-         ;; Only the last few degrees above level become fog; anything wider
-         ;; washes the whole sky into the haze the fog is supposed to explain.
-         (horizon-blend (smoothstep 0.085 -0.01 elevation))
-         (grounded (mix starred fog-color horizon-blend))
+           (* (* (+ cloud-body silver) night-tint) (max day-factor 0.06)))
+         ;; A deck recedes into the same haze the sky's own horizon does.
+         (cloud-reach (smoothstep 0.010 0.11 elevation))
+         (clouded
+           (mix with-cirrus (mix hazed cloud-color cloud-reach)
+                (* cloud-density 0.94)))
+         ;; --- the ground half --------------------------------------------
+         ;; Below the horizon this shader stands in for terrain too far off to
+         ;; be resident, so it must arrive at exactly the colour distant
+         ;; terrain fades to.  It may still say where the land is: the ray's
+         ;; own meeting with the ground plane gives a point to sample, and a
+         ;; wide, weak relief over it keeps the lower half from being one flat
+         ;; wall of fog.  The relief fades out at the horizon, where the plane
+         ;; runs away faster than a pixel can resolve it.
+         (aerial
+           (aerial-perspective-color fog-color direction sun-direction
+                                     low-sun day-factor))
+         (eye (representation (swizzle camera-vector :xyz)))
+         (descent (max 0.004 (- elevation)))
+         (ground-point
+           (+ eye (* direction (/ (max 1.0 (swizzle eye :y)) descent))))
+         (land (lattice-fractal-noise (* ground-point 0.0021)))
+         (land-relief
+           (* (- land 0.5) (smoothstep 0.0 -0.22 elevation)))
+         (depth-below (smoothstep 0.0 -0.35 elevation))
+         (ground
+           (* aerial (+ (- 1.0 (* 0.26 depth-below)) (* 0.44 land-relief))))
+         (grounded (mix clouded ground (smoothstep 0.060 -0.006 elevation)))
+         ;; --- the sun ----------------------------------------------------
          ;; The disc is drawn at a few times the sun's true angular radius,
          ;; the way every game sun is, and deliberately far above display
          ;; white: the floating point attachment keeps it, the bright pass
@@ -1689,13 +2167,18 @@ than inlined three times."
          (disc-limb (* 0.5 (* disc-radius disc-radius)))
          (disc
            (smoothstep (- 1.0 disc-limb) (- 1.0 (* 0.56 disc-limb)) alignment))
+         ;; A star's disc is brightest at its centre; without the limb
+         ;; darkening a sun drawn this large reads as a sticker.
+         (disc-radial
+           (clamp (/ (- 1.0 alignment) (max 0.000001 disc-limb)) 0.0 1.0))
+         (limb-darkening (- 1.0 (* 0.45 (* disc-radial disc-radial))))
          (corona
-           (+ (* (expt alignment 900.0) 0.8) (* (expt alignment 120.0) 0.22)))
-         (occlusion (- 1.0 (* (clamp cloud-density 0.0 1.0) 0.94)))
+           (+ (* (expt toward-sun 900.0) 0.8) (* (expt toward-sun 130.0) 0.22)))
+         (occlusion (- 1.0 (* core 0.94)))
          (solar
            (* sun-color
               (* day-factor
-                 (+ (* disc (* sun-disc-radiance occlusion))
+                 (+ (* disc (* sun-disc-radiance (* occlusion limb-darkening)))
                     (* corona (* 2.0 occlusion))))))
          (rgb (+ grounded solar)))
     (set-output color-output (vec4 rgb 1.0))))
@@ -1802,10 +2285,13 @@ than inlined three times."
          (knee (smoothstep threshold (+ threshold 0.75) luminance)))
     (set-output color-output (vec4 (* radiance knee) 1.0))))
 
-;;; A nine-tap gaussian expressed as five linearly filtered samples: each
-;;; offset lands between the two texels whose weights it combines.  The two
-;;; directions are separate roles rather than a uniform lane, so each pipeline
-;;; is exactly the code it runs.
+;;; A thirteen-tap gaussian expressed as seven linearly filtered samples:
+;;; each offset lands between the two texels whose weights it combines.  The
+;;; host runs the pair twice, which convolves the kernel with itself and puts
+;;; the standing deviation at about four chain texels -- a wide, soft glow
+;;; rather than a halo tight enough to read as an outline.  The two directions
+;;; are separate roles rather than a uniform lane, so each pipeline is exactly
+;;; the code it runs.
 
 (define-shader-method shader-specification-for
     bloom-horizontal-fragment-specification
@@ -1820,24 +2306,31 @@ than inlined three times."
       (post-state :uniform-block :set 0 :binding 2
                   :members #.*post-uniform-members*)))
   (let* ((span (vec2 (swizzle bloom-control :x) 0.0))
-         (near-offset (* span 1.3846154))
-         (far-offset (* span 3.2307692))
+         (near-offset (* span 1.4585))
+         (mid-offset (* span 3.4038))
+         (far-offset (* span 5.3510))
          (center
            (* (swizzle (sample source-color source-sampler uv-input) :xyz)
-              0.2270270))
+              0.1370))
          (near
            (* (+ (swizzle (sample source-color source-sampler
                                   (+ uv-input near-offset)) :xyz)
                  (swizzle (sample source-color source-sampler
                                   (- uv-input near-offset)) :xyz))
-              0.3162162))
+              0.2393))
+         (mid
+           (* (+ (swizzle (sample source-color source-sampler
+                                  (+ uv-input mid-offset)) :xyz)
+                 (swizzle (sample source-color source-sampler
+                                  (- uv-input mid-offset)) :xyz))
+              0.1394))
          (far
            (* (+ (swizzle (sample source-color source-sampler
                                   (+ uv-input far-offset)) :xyz)
                  (swizzle (sample source-color source-sampler
                                   (- uv-input far-offset)) :xyz))
-              0.0702700)))
-    (set-output color-output (vec4 (+ center near far) 1.0))))
+              0.0527)))
+    (set-output color-output (vec4 (+ (+ center near) (+ mid far)) 1.0))))
 
 (define-shader-method shader-specification-for
     bloom-vertical-fragment-specification
@@ -1852,24 +2345,31 @@ than inlined three times."
       (post-state :uniform-block :set 0 :binding 2
                   :members #.*post-uniform-members*)))
   (let* ((span (vec2 0.0 (swizzle bloom-control :y)))
-         (near-offset (* span 1.3846154))
-         (far-offset (* span 3.2307692))
+         (near-offset (* span 1.4585))
+         (mid-offset (* span 3.4038))
+         (far-offset (* span 5.3510))
          (center
            (* (swizzle (sample source-color source-sampler uv-input) :xyz)
-              0.2270270))
+              0.1370))
          (near
            (* (+ (swizzle (sample source-color source-sampler
                                   (+ uv-input near-offset)) :xyz)
                  (swizzle (sample source-color source-sampler
                                   (- uv-input near-offset)) :xyz))
-              0.3162162))
+              0.2393))
+         (mid
+           (* (+ (swizzle (sample source-color source-sampler
+                                  (+ uv-input mid-offset)) :xyz)
+                 (swizzle (sample source-color source-sampler
+                                  (- uv-input mid-offset)) :xyz))
+              0.1394))
          (far
            (* (+ (swizzle (sample source-color source-sampler
                                   (+ uv-input far-offset)) :xyz)
                  (swizzle (sample source-color source-sampler
                                   (- uv-input far-offset)) :xyz))
-              0.0702700)))
-    (set-output color-output (vec4 (+ center near far) 1.0))))
+              0.0527)))
+    (set-output color-output (vec4 (+ (+ center near) (+ mid far)) 1.0))))
 
 ;;; Crepuscular rays as a screen-space gather: march the blurred bright image
 ;;; toward the solar disc and accumulate what is still lit, attenuating with
@@ -1924,7 +2424,21 @@ than inlined three times."
   (let* ((texel (swizzle post-control :xy))
          (active (swizzle post-control :z))
          (exposure (swizzle post-control :w))
-         (sharp (sample scene-color scene-sampler uv-input))
+         (centered (- uv-input (vec2 0.5 0.5)))
+         (radial (dot centered centered))
+         ;; A lens does not focus every wavelength on the same circle, and the
+         ;; error grows with the distance off axis.  Three taps a fraction of
+         ;; a texel apart is the whole of it: nothing at the centre of the
+         ;; frame, a hair of colour at its corners.
+         (dispersion (* centered (* chromatic-aberration (* radial 0.0045))))
+         (sharp
+           (vec4
+            (swizzle
+             (sample scene-color scene-sampler (+ uv-input dispersion)) :x)
+            (swizzle (sample scene-color scene-sampler uv-input) :y)
+            (swizzle
+             (sample scene-color scene-sampler (- uv-input dispersion)) :z)
+            1.0))
          (depth (swizzle (sample scene-depth depth-sampler uv-input) :x))
          (focus-depth
            (swizzle (sample scene-depth depth-sampler (vec2 0.5 0.5)) :x))
@@ -1954,20 +2468,45 @@ than inlined three times."
               (* bloom (swizzle lens-control :x))
               (* shafts (swizzle lens-control :y))))
          (graded (aces-filmic exposed))
+         ;; The two grading controls a colourist reaches for first, in the
+         ;; order they belong in: saturation about the image's own luminance,
+         ;; then contrast as a blend toward a smoothstep, which steepens the
+         ;; midtones without ever clipping either end the way a gain about a
+         ;; pivot would.
+         (luminance (dot graded (vec3 0.2126 0.7152 0.0722)))
+         (grey (vec3 luminance luminance luminance))
+         (saturated (+ grey (* (- graded grey) grade-saturation)))
+         (curved
+           (* saturated (* saturated (- (vec3 3.0 3.0 3.0)
+                                        (* saturated 2.0)))))
+         (contrasted (mix saturated curved grade-contrast))
          ;; A restrained corner falloff; the frame should feel photographed,
          ;; not port-holed.
-         (centered (- uv-input (vec2 0.5 0.5)))
          (vignette
-           (- 1.0
-              (* (swizzle lens-control :z)
-                 (smoothstep 0.10 0.75 (dot centered centered)))))
-         ;; The shadow diagnostic is a measurement, not a picture: when the
-         ;; scene pass is writing raw visibility instead of radiance, exposure,
-         ;; the filmic curve, the lens chain, and the vignette would all
-         ;; distort exactly the quantity being measured, so presentation hands
-         ;; the value straight through.
-         (diagnostic (swizzle sun-screen :w))
-         (presented (mix (* graded vignette) radiance diagnostic)))
+           (- 1.0 (* (swizzle lens-control :z) (smoothstep 0.10 0.75 radial))))
+         ;; Eight bits per channel cannot hold a sky gradient: a wide, slowly
+         ;; changing surface crosses a quantization step every few dozen
+         ;; pixels and the eye reads the step as a contour.  Interleaved
+         ;; gradient noise, scaled so it is about half a step wherever the
+         ;; image sits on the transfer curve, turns the contour into a grain
+         ;; too fine to see.
+         (pixel (/ uv-input texel))
+         (dither-phase
+           (+ (* (swizzle pixel :x) 0.06711056) (* (swizzle pixel :y)
+                                                   0.00583715)))
+         (dither (- (fract (* 52.9829189 (fract dither-phase))) 0.5))
+         (dither-scale (* 0.0060 (expt (+ luminance 0.0025) 0.55)))
+         (presented
+           (mix (+ (* contrasted vignette)
+                   (vec3 (* dither dither-scale) (* dither dither-scale)
+                         (* dither dither-scale)))
+                radiance
+                ;; The shadow diagnostic is a measurement, not a picture: when
+                ;; the scene pass writes raw visibility instead of radiance,
+                ;; exposure, the filmic curve, the lens chain, the grade, and
+                ;; the vignette would each distort exactly the quantity being
+                ;; measured, so presentation hands the value straight through.
+                (swizzle sun-screen :w))))
     (set-output color-output (vec4 presented 1.0))))
 
 (defun focus-post-fragment-specification ()

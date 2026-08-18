@@ -252,13 +252,17 @@ some other space; the environment lanes are packed the same either way."
 ;;; presentation stack reads every frame, so a SLY eval can retune the whole
 ;;; look of the running game without rebuilding a pipeline.
 
-(defparameter *luvcraft-exposure* 0.85
+(defparameter *luvcraft-exposure* 0.72
   "Overall scene exposure multiplied into the sky profile's own exposure.")
 
-(defparameter *luvcraft-bloom-gain* 0.55
-  "How much of the blurred bright-pass image is added back in linear light.")
+(defparameter *luvcraft-bloom-gain* 0.22
+  "How much of the blurred bright-pass image is added back in linear light.
 
-(defparameter *luvcraft-shaft-gain* 0.85
+The chain's kernel is wide and runs twice, so this is a glow spread over a
+sixth of the frame rather than a halo: past about a third it stops reading as
+light around the sun and starts reading as fog over everything.")
+
+(defparameter *luvcraft-shaft-gain* 0.30
   "How strongly sunlight scattered around the solar disc streaks the frame.")
 
 (defparameter *luvcraft-vignette* 0.16
@@ -1052,12 +1056,17 @@ submission that used them completes."
           (lens-stage (luvcraft-session-bloom-bright-pipeline session)
                       (luvcraft-frame-bloom-scene-bind-group frame)
                       primary-view primary)
-          (lens-stage (luvcraft-session-bloom-horizontal-pipeline session)
-                      (luvcraft-frame-bloom-primary-bind-group frame)
-                      secondary-view secondary)
-          (lens-stage (luvcraft-session-bloom-vertical-pipeline session)
-                      (luvcraft-frame-bloom-secondary-bind-group frame)
-                      primary-view primary)
+          ;; The separable pair runs twice.  Convolving the thirteen-tap
+          ;; kernel with itself widens the glow by the square root of two
+          ;; without a second pair of attachments or a second pipeline, and
+          ;; the second pass is what turns a visible halo into light.
+          (dotimes (iteration 2)
+            (lens-stage (luvcraft-session-bloom-horizontal-pipeline session)
+                        (luvcraft-frame-bloom-primary-bind-group frame)
+                        secondary-view secondary)
+            (lens-stage (luvcraft-session-bloom-vertical-pipeline session)
+                        (luvcraft-frame-bloom-secondary-bind-group frame)
+                        primary-view primary))
           (lens-stage (luvcraft-session-sun-shaft-pipeline session)
                       (luvcraft-frame-bloom-primary-bind-group frame)
                       secondary-view secondary)))

@@ -341,30 +341,30 @@ material and rebuild the atlas without touching the rest of the palette."))
 
 (defmethod paint-block-atlas-tile ((tile (eql 0)) x y)
   "Grass top."
-  (shaded-block-atlas-pixel 91 171 68 (block-atlas-variation x y tile)))
+  (shaded-block-atlas-pixel 97 142 71 (block-atlas-variation x y tile)))
 
 (defmethod paint-block-atlas-tile ((tile (eql 1)) x y)
   "Grass side: a green fringe over dirt."
   (let ((variation (block-atlas-variation x y tile)))
     (if (< y 4)
-        (shaded-block-atlas-pixel 86 158 61 variation)
-        (shaded-block-atlas-pixel 123 82 48 (round variation 2)))))
+        (shaded-block-atlas-pixel 91 133 63 variation)
+        (shaded-block-atlas-pixel 116 82 54 (round variation 2)))))
 
 (defmethod paint-block-atlas-tile ((tile (eql 2)) x y)
   "Dirt."
-  (shaded-block-atlas-pixel 126 84 49 (block-atlas-variation x y tile)))
+  (shaded-block-atlas-pixel 118 84 56 (block-atlas-variation x y tile)))
 
 (defmethod paint-block-atlas-tile ((tile (eql 3)) x y)
   "Stone, with sparse bright flecks."
   (shaded-block-atlas-pixel
-   126 132 136
+   116 121 125
    (+ (round (block-atlas-variation x y tile) 2)
       (if (zerop (mod (+ (* x 3) (* y 5)) 19)) 20 0))))
 
 (defmethod paint-block-atlas-tile ((tile (eql 4)) x y)
   "Wood bark, with vertical grain stripes."
   (shaded-block-atlas-pixel
-   116 76 39
+   108 76 46
    (+ (round (block-atlas-variation x y tile) 3)
       (if (zerop (mod x 5)) 18 0))))
 
@@ -373,25 +373,25 @@ material and rebuild the atlas without touching the rest of the palette."))
   (let* ((dx (- x 7.5))
          (dy (- y 7.5))
          (ring (mod (floor (+ (* dx dx) (* dy dy))) 18)))
-    (shaded-block-atlas-pixel 133 91 49 (- ring 9))))
+    (shaded-block-atlas-pixel 124 92 56 (- ring 9))))
 
 (defmethod paint-block-atlas-tile ((tile (eql 6)) x y)
   "Leaves: a strong checker so the canopy reads as foliage."
   (shaded-block-atlas-pixel
-   51 132 58
+   57 112 59
    (+ (block-atlas-variation x y tile) (if (evenp (+ x y)) 8 -8))))
 
 (defmethod paint-block-atlas-tile ((tile (eql 7)) x y)
   "Sand, with sparse darker grains."
   (shaded-block-atlas-pixel
-   205 185 128
+   172 157 122
    (+ (round (block-atlas-variation x y tile) 2)
       (if (zerop (mod (+ x (* y 3)) 13)) 13 0))))
 
 (defmethod paint-block-atlas-tile ((tile (eql 8)) x y)
   "Snow, with sparse glints."
   (shaded-block-atlas-pixel
-   226 238 242
+   219 231 236
    (+ (round (block-atlas-variation x y tile) 3)
       (if (zerop (mod (+ (* x 5) (* y 7)) 23)) 14 0))))
 
@@ -439,12 +439,12 @@ material and rebuild the atlas without touching the rest of the palette."))
   (let* ((grain (block-atlas-lattice-hash x y 111))
          (variation (+ (round (block-atlas-variation x y tile) 2)
                        (- (mod grain 43) 21))))
-    (shaded-block-atlas-pixel 119 114 105 variation)))
+    (shaded-block-atlas-pixel 111 107 99 variation)))
 
 (defmethod paint-block-atlas-tile ((tile (eql 12)) x y)
   "Clay: cool compact earth with faint horizontal bands."
   (shaded-block-atlas-pixel
-   158 171 176
+   146 158 163
    (+ (round (block-atlas-variation x y tile) 4)
       (case (mod y 6) (0 -7) (1 -3) (t 2)))))
 

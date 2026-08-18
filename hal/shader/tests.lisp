@@ -1554,12 +1554,23 @@
                 (spv:shader-expression-form
                  (spv:shader-binding-expression direction)))
                '("normalize" ("representation" "ray-input"))))
+    ;; A deck is a coverage threshold over one noise field, and the width of
+    ;; that threshold is the only thing that softens toward the horizon.
     (ok (equal (form-names
                 (spv:shader-expression-form
                  (spv:shader-binding-expression cloud-density)))
                '("*" "deck-mask"
-                 ("smoothstep" "cloud-edge"
-                  ("+" "cloud-edge" 0.11) "cloud-field"))))
+                 ("smoothstep" "coverage"
+                  ("+" "coverage" "softness") "cloud-field"))))
+    ;; The deck's own shadow is the same field sampled along the deck toward
+    ;; the sun, against the same threshold: a lit face and a dark underside
+    ;; from one extra tap.
+    (ok (equal (form-names
+                (spv:shader-expression-form
+                 (spv:shader-binding-expression
+                  (binding-named 'shadow-density fragment))))
+               '("smoothstep" "coverage" ("+" "coverage" "softness")
+                 "shadow-field")))
     (ok (equal (form-names
                 (spv:shader-expression-form
                  (spv:shader-binding-expression disc)))
@@ -1568,6 +1579,43 @@
     ;; All the fragment's extended mathematics shares one import.
     (ok (= 1 (length (spv:spir-v-module-extended-instruction-imports
                       fragment-module))))))
+
+(deftest the-sky-and-the-block-surface-agree-on-what-distance-looks-like
+  ;; Below the horizon the sky stands in for terrain too far off to be
+  ;; resident, so the two stages have to arrive at the same colour or the
+  ;; edge of the resident world draws itself as a line.  They agree by
+  ;; calling the same function on the same lanes rather than by two
+  ;; expressions kept in step by hand.
+  (let* ((sky (shaders:block-world-sky-fragment-specification))
+         (surface (shaders:block-world-fragment-specification))
+         (aerial (binding-named 'aerial sky))
+         (fog-color (binding-named 'fog-color surface)))
+    (flet ((operator (expression)
+             (first (form-names (spv:shader-expression-form expression)))))
+      (ok (string= "aerial-perspective-color"
+                   (operator (spv:shader-binding-expression aerial))))
+      (ok (string= "assume-quantity"
+                   (operator (spv:shader-binding-expression fog-color))))
+      (ok (equal (form-names
+                  (spv:shader-expression-form
+                   (spv:shader-binding-expression fog-color)))
+                 '("assume-quantity"
+                   ("aerial-perspective-color"
+                    ("representation" ("swizzle" "fog-color-vector" "xyz"))
+                    "look-direction" ("representation" "sun-direction")
+                    "low-sun" ("representation" "day-factor"))
+                   "quantity" "linear-rgb" "unit" "one")))
+      ;; And the fog it feeds is still an absolute colour, mixed by the same
+      ;; amount the vertex stage measured.
+      (ok (equal (form-names
+                  (spv:shader-expression-form
+                   (spv:shader-binding-expression
+                    (binding-named 'fogged surface))))
+                 '("mix" "radiance" "fog-color" "fog-amount")))
+      (ok (eq :absolute
+              (math:quantity-specification-character
+               (spv:shader-expression-quantity-specification
+                (spv:shader-binding-expression fog-color))))))))
 
 (deftest extended-math-lowers-through-one-shared-import-in-layout-order
   (let* ((specification
