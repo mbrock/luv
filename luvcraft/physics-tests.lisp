@@ -172,3 +172,20 @@
               (ok (= scalar-hash wide-hash))
               (ok (= (luvcraft::physics-body-columns-length (physics-world-awake scalar-world))
                      (luvcraft::physics-body-columns-length (physics-world-awake wide-world))))))))))
+
+(deftest a-hard-arrival-on-a-box-reports-a-hit-with-its-owner
+  (let* ((world (make-physics-test-world))
+         (physics (make-physics-world :terrain world :kernels :scalar))
+         (hits nil))
+    ;; A ball flying at 10 cells/s into a box owned by :turtle.
+    (spawn-physics-body physics 6.5 2.6 8.5 :radius 0.25 :vx 10.0)
+    (dotimes (i 60)
+      (clear-physics-boxes physics)
+      (post-physics-box physics 8.0 2.0 8.0 9.0 2.6 9.0 :owner :turtle)
+      (step-physics-world physics)
+      (dolist (event (physics-events physics))
+        (when (eq (getf event :kind) :hit)
+          (push event hits))))
+    (ok (plusp (length hits)))
+    (ok (every (lambda (event) (eq :turtle (getf event :owner))) hits))
+    (ok (> (getf (first hits) :speed) luvcraft::*physics-hit-speed*))))
