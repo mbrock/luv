@@ -220,6 +220,12 @@
 (defparameter *exposure* 1.15
   "Exposure of the 1 - exp(-x) curve the lit colour rolls off through.")
 (defparameter *sky-color* (vec3:make-vec3 0.62 0.76 0.92))
+(defparameter *draw-sky* t
+  "Whether the background is the gradient sky pass or the flat clear colour.")
+(defparameter *focus-distance* 40.0
+  "How far the lens is focused, in cells; also the alpha channel's scale.")
+(defparameter *aperture* 0.0
+  "How strongly the focus pass softens the distance; zero is a pinhole.")
 (defparameter *fog-distance* 140.0)
 (defparameter *bevel-radius* 0.22
   "The :BEVEL style's crease-rounding radius in cells, below one half.")
@@ -236,7 +242,7 @@
            (far *far-distance*)
            (focal (/ (tan (/ (camera-field-of-view camera) 2.0))))
            (aspect (/ (coerce width 'single-float) height))
-           (data (make-array 60 :element-type 'single-float))
+           (data (make-array 64 :element-type 'single-float))
            (index 0))
       (flet ((lane (vector fourth)
                (setf (aref data index) (coerce (vec3:vec3-x vector) 'single-float)
@@ -265,7 +271,10 @@
         (lane (vec3:make-vec3 *occlusion-strength* *shadow-strength* 0.0) 0.0)
         (lane *top-color* 0.0)
         (lane *side-color* 0.0)
-        (lane *bottom-color* 0.0))
+        (lane *bottom-color* 0.0)
+        (lane (vec3:make-vec3 *focus-distance* *aperture*
+                              (/ 1.0 (max 1 width)))
+              (/ 1.0 (max 1 height))))
       data)))
 
 ;;; ------------------------------------------------------------------------
@@ -283,6 +292,11 @@
    (color-view :initform nil :accessor renderer-color-view)
    (depth-texture :initform nil :accessor renderer-depth-texture)
    (depth-view :initform nil :accessor renderer-depth-view)
+   (scene-texture :initform nil :accessor renderer-scene-texture)
+   (scene-view :initform nil :accessor renderer-scene-view)
+   (sampler :initform nil :accessor renderer-sampler)
+   (lens-layout :initform nil :accessor renderer-lens-layout)
+   (lens-bind-group :initform nil :accessor renderer-lens-bind-group)
    (uniform-buffer :initform nil :accessor renderer-uniform-buffer)
    (sites-buffer :initform nil :accessor renderer-sites-buffer)
    (bricks-buffer :initform nil :accessor renderer-bricks-buffer)
@@ -297,7 +311,7 @@
               :documentation "A plist from style to mesh pipeline.")
    (style :initarg :style :initform :bevel :accessor renderer-style
           :documentation
-          "Which pipeline draws: :FLAT, :BEVEL (rounded), or :CHAMFER.")
+          "Which pipeline draws: :FLAT, :BEVEL (rounded), :CHAMFER, or :PAPER.")
    (uploaded-scene :initform nil :accessor renderer-uploaded-scene))
   (:documentation "GPU resources drawing one scene from one camera."))
 
@@ -326,13 +340,28 @@
                          :label "luft surface depth"
                          :size extent :dimensions :2d
                          :format :depth32-float
-                         :usage '(:render-attachment)))))
+                         :usage '(:render-attachment))))
+         ;; The world is drawn here and read by the focus pass; COLOR is what
+         ;; the focus pass writes and what a capture copies out.
+         (scene (create device
+                        (make-texture-descriptor
+                         :label "luft scene color"
+                         :size extent :dimensions :2d
+                         :format (renderer-color-format renderer)
+                         :usage '(:render-attachment :texture-binding)))))
     (setf (renderer-color-texture renderer) color
           (renderer-color-view renderer)
           (create device (make-texture-view-descriptor :texture color))
           (renderer-depth-texture renderer) depth
           (renderer-depth-view renderer)
-          (create device (make-texture-view-descriptor :texture depth)))))
+          (create device (make-texture-view-descriptor :texture depth))
+          (renderer-scene-texture renderer) scene
+          (renderer-scene-view renderer)
+          (create device (make-texture-view-descriptor :texture scene))
+          (renderer-sampler renderer)
+          (create device (make-sampler-descriptor
+                          :label "luft scene sampler"
+                          :mag-filter :linear :min-filter :linear)))))
 
 (defun create-renderer-pipeline (renderer)
   (let* ((device (renderer-device renderer))
@@ -367,6 +396,39 @@
                     :label "luft chamfer fragment"
                     :language :mathematical
                     :code (shaders:chamfer-fragment-shader))))
+         (paper-fragment
+           (create device
+                   (make-shader-module-descriptor
+                    :label "luft paper fragment"
+                    :language :mathematical
+                    :code (shaders:paper-fragment-shader))))
+         (sky-mesh (create device
+                           (make-shader-module-descriptor
+                            :label "luft sky mesh"
+                            :language :mathematical
+                            :code (shaders:sky-mesh-shader))))
+         (sky-fragment
+           (create device
+                   (make-shader-module-descriptor
+                    :label "luft sky fragment"
+                    :language :mathematical
+                    :code (shaders:sky-fragment-shader))))
+         (lens-fragment
+           (create device
+                   (make-shader-module-descriptor
+                    :label "luft lens fragment"
+                    :language :mathematical
+                    :code (shaders:lens-fragment-shader))))
+         (lens-layout
+           (create device
+                   (make-bind-group-layout-descriptor
+                    :label "luft lens layout"
+                    :entries `((:binding ,shaders:+scene-binding+
+                                :type :texture)
+                               (:binding ,shaders:+sampler-binding+
+                                :type :sampler)
+                               (:binding ,shaders:+lens-frame-binding+
+                                :type :uniform-buffer)))))
          (layout (create device
                          (make-bind-group-layout-descriptor
                           :label "luft surface layout"
@@ -379,29 +441,63 @@
                              :type :storage-buffer)
                             (:binding ,shaders:+cells-binding+
                              :type :storage-buffer))))))
-    (flet ((pipeline (label mesh-module fragment-module)
+    (flet ((pipeline (label mesh-module fragment-module
+                      &key (task-module task)
+                           (group layout)
+                           (depth '(:format :depth32-float
+                                    :depth-write-enabled t
+                                    :depth-compare :less)))
              (create device
                      (make-mesh-render-pipeline-descriptor
                       :label label
-                      :layout layout
-                      :task `(:module ,task)
+                      :layout group
+                      :task (and task-module `(:module ,task-module))
                       :mesh `(:module ,mesh-module)
                       :fragment
                       `(:module ,fragment-module
                         :targets ((:format
                                    ,(renderer-color-format renderer))))
                       :max-mesh-workgroups 1
-                      :depth-stencil '(:format :depth32-float
-                                       :depth-write-enabled t
-                                       :depth-compare :less)))))
+                      :depth-stencil depth))))
       (setf (renderer-modules renderer)
-            (list task mesh bevel chamfer fragment chamfer-fragment)
+            (list task mesh bevel chamfer fragment chamfer-fragment
+                  paper-fragment sky-mesh sky-fragment lens-fragment)
             (renderer-layout renderer) layout
+            (renderer-lens-layout renderer) lens-layout
             (renderer-pipelines renderer)
             (list :flat (pipeline "luft surface pipeline" mesh fragment)
                   :bevel (pipeline "luft bevel pipeline" bevel fragment)
                   :chamfer (pipeline "luft chamfer pipeline"
-                                     chamfer chamfer-fragment))))))
+                                     chamfer chamfer-fragment)
+                  ;; The paper material draws the chamfered geometry: the
+                  ;; glint it exists for lives on the planed facets.
+                  :paper (pipeline "luft paper pipeline"
+                                   chamfer paper-fragment)
+                  ;; The background: no task stage to amplify, no depth to
+                  ;; write, and it runs before anything that would hide it.
+                  :sky (pipeline "luft sky pipeline" sky-mesh sky-fragment
+                                 :task-module nil
+                                 :depth '(:format :depth32-float
+                                          :depth-write-enabled nil
+                                          :depth-compare :always))
+                  ;; The lens draws the frame the world was drawn into, so it
+                  ;; binds a group of textures rather than the world's sites.
+                  :lens (pipeline "luft lens pipeline" sky-mesh lens-fragment
+                                  :task-module nil
+                                  :group lens-layout
+                                  :depth nil)))
+      (setf (renderer-lens-bind-group renderer)
+            (create device
+                    (make-bind-group-descriptor
+                     :label "luft lens bindings"
+                     :layout lens-layout
+                     :entries
+                     `((:binding ,shaders:+scene-binding+
+                        :resource ,(renderer-scene-view renderer))
+                       (:binding ,shaders:+sampler-binding+
+                        :resource ,(renderer-sampler renderer))
+                       (:binding ,shaders:+lens-frame-binding+
+                        :resource ,(renderer-uniform-buffer renderer)))))))))
 
 (defun make-renderer (&key scene camera device
                         (provider *gpu-provider*)
@@ -410,8 +506,9 @@
                         (style :bevel))
   "Create every GPU object needed to draw SCENE from CAMERA at WIDTH by HEIGHT.
 
-STYLE is :FLAT, :BEVEL (rounded), or :CHAMFER (subtle planar crease relief),
-and may be changed later with (SETF RENDERER-STYLE).
+STYLE is :FLAT, :BEVEL (rounded), :CHAMFER (subtle planar crease relief), or
+:PAPER (the chamfered geometry in a matte, toothed material), and may be
+changed later with (SETF RENDERER-STYLE).
 Without DEVICE, one is requested from PROVIDER and owned by the renderer."
   (let* ((owns-device-p (null device))
          (device (or device
@@ -450,7 +547,12 @@ Without DEVICE, one is requested from PROVIDER and owned by the renderer."
     (when resource (ignore-errors (destroy resource))))
   (dolist (module (renderer-modules renderer))
     (ignore-errors (destroy module)))
-  (dolist (resource (list (renderer-sites-buffer renderer)
+  (dolist (resource (list (renderer-lens-bind-group renderer)
+                          (renderer-lens-layout renderer)
+                          (renderer-sampler renderer)
+                          (renderer-scene-view renderer)
+                          (renderer-scene-texture renderer)
+                          (renderer-sites-buffer renderer)
                           (renderer-bricks-buffer renderer)
                           (renderer-cells-buffer renderer)
                           (renderer-uniform-buffer renderer)
@@ -544,26 +646,53 @@ The second value is true when a new buffer was created."
                   (frame-uniform-data (renderer-camera renderer)
                                       (first extent) (second extent)
                                       (scene-domain scene)
-                                      (if (eq (renderer-style renderer) :chamfer)
+                                      (if (member (renderer-style renderer)
+                                                  '(:chamfer :paper))
                                           *chamfer-width*
                                           *bevel-radius*)))
-    (let ((pass (begin-render-pass
-                 encoder
-                 (make-render-pass-descriptor
-                  :label "luft surface pass"
-                  :color-attachments
-                  `((:view ,(renderer-color-view renderer)
-                     :load-op :clear :store-op :store
-                     :clear-value ,(vector (vec3:vec3-x sky) (vec3:vec3-y sky)
-                                           (vec3:vec3-z sky) 1.0)))
-                  :depth-stencil-attachment
-                  `(:view ,(renderer-depth-view renderer)
-                    :depth-load-op :clear :depth-store-op :discard
-                    :depth-clear-value 1.0)))))
+    (let* ((lens-p (plusp *aperture*))
+           ;; With a lens the world is drawn into the scene texture and the
+           ;; focus pass writes the capture target; without one the world
+           ;; draws straight into it and no frame is copied twice.
+           (target (if lens-p
+                       (renderer-scene-view renderer)
+                       (renderer-color-view renderer)))
+           (pass (begin-render-pass
+                  encoder
+                  (make-render-pass-descriptor
+                   :label "luft surface pass"
+                   :color-attachments
+                   `((:view ,target
+                      :load-op :clear :store-op :store
+                      :clear-value ,(vector (vec3:vec3-x sky) (vec3:vec3-y sky)
+                                            (vec3:vec3-z sky) 1.0)))
+                   :depth-stencil-attachment
+                   `(:view ,(renderer-depth-view renderer)
+                     :depth-load-op :clear :depth-store-op :discard
+                     :depth-clear-value 1.0)))))
+      (when *draw-sky*
+        (set-pipeline pass (renderer-pipeline renderer :sky))
+        (set-bind-group pass 0 (renderer-bind-group renderer))
+        (draw-mesh-workgroups pass 1))
       (set-pipeline pass (renderer-pipeline renderer))
       (set-bind-group pass 0 (renderer-bind-group renderer))
       (draw-mesh-workgroups pass (scene-brick-count scene))
-      (end-pass pass))
+      (end-pass pass)
+      (when lens-p
+        (prepare-texture encoder (renderer-scene-texture renderer)
+                         :texture-binding)
+        (let ((lens (begin-render-pass
+                     encoder
+                     (make-render-pass-descriptor
+                      :label "luft lens pass"
+                      :color-attachments
+                      `((:view ,(renderer-color-view renderer)
+                         :load-op :clear :store-op :store
+                         :clear-value #(0.0 0.0 0.0 1.0)))))))
+          (set-pipeline lens (renderer-pipeline renderer :lens))
+          (set-bind-group lens 0 (renderer-lens-bind-group renderer))
+          (draw-mesh-workgroups lens 1)
+          (end-pass lens))))
     (renderer-color-texture renderer)))
 
 (defun render-pixels (renderer)

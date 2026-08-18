@@ -28,6 +28,12 @@ vertices a face.")
 (defconstant +bricks-binding+ 2)
 (defconstant +cells-binding+ 3)
 
+;;; The focus pass reads a drawn frame rather than the world, and so binds a
+;;; group of its own.
+(defconstant +scene-binding+ 0)
+(defconstant +sampler-binding+ 1)
+(defconstant +lens-frame-binding+ 2)
+
 ;;; Every stage declares the same frame block at the same binding: identical
 ;;; member order and offsets are the ABI, written once and spliced at read
 ;;; time.  The members are deliberately unannotated raw lanes.
@@ -55,7 +61,8 @@ lit: both the reach of shadows in cells and their cost per pixel.")
       (occlusion-vector :vec4)   ; crowding strength, shadow strength
       (top-vector :vec4)         ; the material of an upward face
       (side-vector :vec4)        ; the material of a sideways face
-      (bottom-vector :vec4))))   ; the material of a downward face
+      (bottom-vector :vec4)      ; the material of a downward face
+      (lens-vector :vec4))))     ; focus distance, aperture, texel width/height
 
 (define-shader-function view-clip (point camera right up forward projection)
   "Homogeneous clip position of the world POINT.
@@ -504,6 +511,9 @@ where the flat 45-degree facets of a convex or concave crease meet."
         normal)))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
+  (defvar *paper-grain* 0.085
+    "How deeply the paper material's tooth modulates its tone.")
+
   (defvar *bevel-rings* 2
     "Subdivision rings inside the rounding radius while a mesh shader is
 generated: one is a chamfer, two a fillet.  The grid has 2*(rings+1) points
@@ -972,6 +982,311 @@ The chamfer rule also emits the face normal for facet shading."
                                   fill-vector sky-vector ground-vector)))
     (set-output color (vec4 final 1.0))))
 
+
+;;; ------------------------------------------------------------------------
+;;; Sky: one triangle behind everything
+;;;
+;;; The clear colour is a single flat tone, which is honest and which no
+;;; photograph has.  This draws the background instead: one full-screen
+;;; triangle from a single mesh lane, shaded by the direction each pixel
+;;; looks along.  It carries the same SKY-VECTOR the fog converges to, so
+;;; the horizon of the gradient and the far end of the fog are the same
+;;; colour by construction, and the zenith is free to be deeper.
+
+(define-shader sky-mesh-shader
+    (:stage :mesh
+     :workgroup-size (1 1 1)
+     :inputs ((lane :uint :built-in :local-invocation-index))
+     :resources ((frame :uniform-block :binding #.+frame-binding+
+                        :members #.*frame-uniform-members*))
+     :mesh-output
+     (:topology :triangles
+      :max-vertices 3
+      :max-primitives 1
+      :vertex ((position :vec4 :built-in :position)
+               (ndc :vec2 :location 0))))
+  ;; The oversized triangle covering clip space: (-1,-1), (3,-1), (-1,3).
+  ;; Depth sits just inside the far plane so the pass may run first and the
+  ;; world still draws over it under an ordinary less-than test.
+  (let* ((ignored (float lane)))
+    (set-mesh-output-counts (uint 3.0) (uint 1.0))
+    (set-mesh-vertex (uint 0.0)
+                     (position (vec4 (+ -1.0 (* 0.0 ignored)) -1.0 0.99999 1.0))
+                     (ndc (vec2 -1.0 -1.0)))
+    (set-mesh-vertex (uint 1.0)
+                     (position (vec4 3.0 -1.0 0.99999 1.0))
+                     (ndc (vec2 3.0 -1.0)))
+    (set-mesh-vertex (uint 2.0)
+                     (position (vec4 -1.0 3.0 0.99999 1.0))
+                     (ndc (vec2 -1.0 3.0)))
+    (set-mesh-primitive (uint 0.0) (uvec3 (uint 0.0) (uint 1.0) (uint 2.0)))))
+
+(define-shader-function sky-radiance (direction sun-vector sun-colour-vector
+                                      sky-vector ground-vector)
+  "The background along DIRECTION: gradient, horizon haze, and the sun.
+
+The values are display-referred like SKY-VECTOR itself, not scene radiance:
+what the fog converges to and what the background paints must agree."
+  (let* ((sky (swizzle sky-vector :xyz))
+         (ground (swizzle ground-vector :xyz))
+         (sun (swizzle sun-vector :xyz))
+         (radiance (swizzle sun-colour-vector :xyz))
+         (upness (swizzle direction :z))
+         (height (clamp upness 0.0 1.0))
+         ;; A real sky darkens and saturates with height; the horizon keeps
+         ;; the fog's colour exactly so distance dissolves into it.
+         (zenith (* sky (vec3 0.62 0.72 0.94)))
+         (above (mix sky zenith (expt height 0.62)))
+         ;; Below the horizon the ground's bounce takes over, hazed.
+         (below (mix sky (* ground 1.35) (clamp (* -4.0 upness) 0.0 1.0)))
+         (band (mix below above (smoothstep -0.02 0.06 upness)))
+         (toward (clamp (dot direction sun) 0.0 1.0))
+         ;; A wide halo the eye reads as air, and a small disc it reads as
+         ;; the sun; both tinted by the light's own colour.
+         (halo (* 0.22 (expt toward 6.0)))
+         (disc (* 0.85 (smoothstep 0.9994 0.99975 toward)))
+         (glow (* radiance (+ halo disc))))
+    (clamp (+ band glow) (vec3 0.0 0.0 0.0) (vec3 1.0 1.0 1.0))))
+
+(define-shader sky-fragment-shader
+    (:stage :fragment
+     :inputs ((ndc :vec2 :location 0))
+     :outputs ((color :vec4 :location 0))
+     :resources ((frame :uniform-block :binding #.+frame-binding+
+                        :members #.*frame-uniform-members*)))
+  ;; Invert VIEW-CLIP for a ray: clip x is view-x times the projection's x
+  ;; scale over view-z, and clip y is that negated on the y scale.
+  (let* ((right (swizzle right-vector :xyz))
+         (up (swizzle up-vector :xyz))
+         (forward (swizzle forward-vector :xyz))
+         (x (/ (swizzle ndc :x) (swizzle projection-vector :x)))
+         (y (/ (swizzle ndc :y) (swizzle projection-vector :y)))
+         (direction (normalize (+ forward (- (* right x) (* up y)))))
+         (final (sky-radiance direction sun-vector sun-colour-vector
+                              sky-vector ground-vector)))
+    (set-output color (vec4 final 1.0))))
+
+;;; ------------------------------------------------------------------------
+;;; The lens: a focus pass over the drawn frame
+;;;
+;;; luvcraft's focus post (#RLXR7B) blurs by comparing each pixel's depth to
+;;; the depth under the centre of the frame, disperses colour toward the
+;;; corners, and darkens them.  This is that pass with its bloom and light
+;;; shafts left behind, reading the view distance out of alpha rather than a
+;;; depth attachment.
+
+(define-shader lens-fragment-shader
+    (:stage :fragment
+     :inputs ((ndc :vec2 :location 0))
+     :outputs ((color :vec4 :location 0))
+     :resources ((scene :texture-2d :binding #.+scene-binding+
+                        :sample-transfer :identity)
+                 (scene-sampler :sampler :binding #.+sampler-binding+)
+                 (frame :uniform-block :binding #.+lens-frame-binding+
+                        :members #.*frame-uniform-members*)))
+  (let* ((uv (+ (* ndc 0.5) (vec2 0.5 0.5)))
+         (texel (vec2 (swizzle lens-vector :z) (swizzle lens-vector :w)))
+         (aperture (swizzle lens-vector :y))
+         (centered (- uv (vec2 0.5 0.5)))
+         (radial (dot centered centered))
+         ;; A lens does not focus every wavelength on one circle, and the
+         ;; error grows off axis: three taps a fraction of a texel apart.
+         (dispersion (* centered (* radial (* 0.0055 aperture))))
+         (sharp (sample scene scene-sampler uv))
+         (fringed (vec4 (swizzle (sample scene scene-sampler
+                                         (+ uv dispersion)) :x)
+                        (swizzle sharp :y)
+                        (swizzle (sample scene scene-sampler
+                                         (- uv dispersion)) :z)
+                        (swizzle sharp :w)))
+         (depth (swizzle sharp :w))
+         (focus (swizzle (sample scene scene-sampler (vec2 0.5 0.5)) :w))
+         ;; Only what lies behind the subject softens; the near field of a
+         ;; landscape photograph is where the planed edges are.
+         (defocus (clamp (* aperture (smoothstep 0.012 0.30 (- depth focus)))
+                         0.0 1.0))
+         ;; The nine-tap tent is written out rather than factored into a
+         ;; shader function: SAMPLE reads a declared resource, and a texture
+         ;; passed as a parameter is not one.
+         (spread (* texel (+ 1.0 (* 4.0 aperture))))
+         (bx (* spread (vec2 1.0 0.0)))
+         (by (* spread (vec2 0.0 1.0)))
+         (wide (* (+ (+ (* (sample scene scene-sampler uv) 4.0)
+                        (+ (+ (* (sample scene scene-sampler (+ uv bx)) 2.0)
+                              (* (sample scene scene-sampler (- uv bx)) 2.0))
+                           (+ (* (sample scene scene-sampler (+ uv by)) 2.0)
+                              (* (sample scene scene-sampler (- uv by)) 2.0))))
+                     (+ (+ (sample scene scene-sampler (+ (+ uv bx) by))
+                           (sample scene scene-sampler (+ (- uv bx) by)))
+                        (+ (sample scene scene-sampler (- (+ uv bx) by))
+                           (sample scene scene-sampler (- (- uv bx) by)))))
+                  0.0625))
+         (mixed (mix fringed wide defocus))
+         ;; The corners of a real frame fall off; keep it gentle enough to
+         ;; read as a lens rather than as an effect.
+         (vignette (- 1.0 (* 0.42 (* radial radial))))
+         (final (* (swizzle mixed :xyz) vignette)))
+    (set-output color (vec4 final 1.0))))
+
+;;; ------------------------------------------------------------------------
+;;; Paper: a matte material for photographing the chamfers
+
+;;; The hash and its value noise come from luvcraft's sky (#GJ4CBM); they are
+;;; ordinary lattice mathematics with no luvcraft in them, and the atelier
+;;; wants a paper tooth rather than a cloud.
+(define-shader-function paper-hash (site)
+  "Hash one integer lattice site into the unit interval, without a sine."
+  (let* ((scattered (fract (* site 0.1031)))
+         (shift (dot scattered
+                     (+ (swizzle scattered :zyx)
+                        (vec3 31.32 31.32 31.32))))
+         (folded (+ scattered (vec3 shift shift shift))))
+    (fract (* (+ (swizzle folded :x) (swizzle folded :y))
+              (swizzle folded :z)))))
+
+(define-shader-function paper-noise (point)
+  "Smoothly interpolated value noise over an integer lattice."
+  (let* ((lattice (floor point))
+         (offset (fract point))
+         (weight (* offset (* offset (- (vec3 3.0 3.0 3.0) (* offset 2.0)))))
+         (u (swizzle weight :x))
+         (v (swizzle weight :y))
+         (w (swizzle weight :z))
+         (near-low (mix (paper-hash lattice)
+                        (paper-hash (+ lattice (vec3 1.0 0.0 0.0))) u))
+         (near-high (mix (paper-hash (+ lattice (vec3 0.0 1.0 0.0)))
+                         (paper-hash (+ lattice (vec3 1.0 1.0 0.0))) u))
+         (far-low (mix (paper-hash (+ lattice (vec3 0.0 0.0 1.0)))
+                       (paper-hash (+ lattice (vec3 1.0 0.0 1.0))) u))
+         (far-high (mix (paper-hash (+ lattice (vec3 0.0 1.0 1.0)))
+                        (paper-hash (+ lattice (vec3 1.0 1.0 1.0))) u)))
+    (mix (mix near-low near-high v) (mix far-low far-high v) w)))
+
+(define-shader-function paper-tooth (world)
+  "The paper's grain at WORLD: two octaves, centred on one."
+  (let* ((coarse (paper-noise (* world 3.7)))
+         (fine (paper-noise (* world 19.0))))
+    (+ 1.0 (* #.*paper-grain* (- (+ (* 0.65 coarse) (* 0.35 fine)) 0.5)))))
+
+;;; ACES's filmic fit, as luvcraft tonemaps with (#TLBJVX).  The exponential
+;;; roll-off of SURFACE-LIGHTING desaturates as it clips; this keeps a lit
+;;; chamfer's glint white without bleaching the tone beside it.
+(define-shader-function paper-tonemap (radiance)
+  "Map linear scene radiance to display-linear [0,1] through the ACES fit."
+  (let* ((numerator
+           (* radiance (+ (* radiance 2.51) (vec3 0.03 0.03 0.03))))
+         (denominator
+           (+ (* radiance (+ (* radiance 2.43) (vec3 0.59 0.59 0.59)))
+              (vec3 0.14 0.14 0.14))))
+    (clamp (/ numerator denominator)
+           (vec3 0.0 0.0 0.0) (vec3 1.0 1.0 1.0))))
+
+(define-shader-function paper-lighting
+    (base normal world occlusion shade glint camera-vector sun-vector
+     sun-colour-vector fill-vector sky-vector ground-vector)
+  "The lit colour of a matte, slightly toothed surface.
+
+Unlike SURFACE-LIGHTING this wraps the key light around the terminator
+rather than clipping it at the horizon, which is what makes a paper model
+read as paper: no face goes black merely because it turned away.  GLINT is
+the narrow specular the chamfers carry, and it alone is allowed to reach
+the white the tonemap defends."
+  (let* ((sun (swizzle sun-vector :xyz))
+         (ambient (swizzle sun-vector :w))
+         (sky (swizzle sky-vector :xyz))
+         (ground (swizzle ground-vector :xyz))
+         (exposure (swizzle ground-vector :w))
+         (radiance (swizzle sun-colour-vector :xyz))
+         (sheen (swizzle sun-colour-vector :w))
+         (camera (swizzle camera-vector :xyz))
+         (delta (- world camera))
+         (distance (sqrt (dot delta delta)))
+         (view (/ delta (- distance)))
+         ;; Half-Lambert: the terminator becomes a long soft gradient across
+         ;; the whole hemisphere instead of a hard edge at ninety degrees.
+         (facing (dot normal sun))
+         (wrapped (expt (clamp (+ 0.5 (* 0.5 facing)) 0.0 1.0) 1.55))
+         (key (* wrapped (* shade (mix 1.0 occlusion 0.45))))
+         (fill (* (swizzle fill-vector :w)
+                  (max (dot normal (swizzle fill-vector :xyz)) 0.0)))
+         (upness (swizzle normal :z))
+         (sky-weight (* occlusion (+ 0.5 (* 0.5 upness))))
+         (ground-weight (* occlusion (- 0.5 (* 0.5 upness))))
+         (half (normalize (+ sun view)))
+         ;; A hand-planed facet is not a mirror: the lobe is wide enough to
+         ;; survive a moving camera, and narrow enough to stay a line.
+         (specular (* sheen (* glint (* (max (dot normal half) 0.0)
+                                        (expt (max (dot normal half) 0.0)
+                                              90.0)))))
+         (light (+ (* radiance key)
+                   (+ (* sky (+ (* ambient sky-weight) fill))
+                      (* ground (* ambient ground-weight)))))
+         (tinted (* base (* light (paper-tooth world))))
+         (lit (+ tinted (* radiance (* specular (* shade (max facing 0.0))))))
+         (exposed (paper-tonemap (* lit exposure)))
+         (fog-far (swizzle sky-vector :w))
+         (fog (smoothstep (* 0.55 fog-far) fog-far distance)))
+    (mix exposed sky fog)))
+
+(define-shader paper-fragment-shader
+    (:stage :fragment
+     :inputs ((normal :vec3 :location 0)
+              (world :vec3 :location 1)
+              (uv :vec2 :location 2)
+              (face-normal :vec3 :location 3))
+     :outputs ((color :vec4 :location 0))
+     :resources ((frame :uniform-block :binding #.+frame-binding+
+                        :members #.*frame-uniform-members*)
+                 (cells :storage-buffer :binding #.+cells-binding+
+                        :element :uint)))
+  (let* ((raw-facet (cross-product (derivative-x world) (derivative-y world)))
+         (facet (normalize raw-facet))
+         (face (normalize face-normal))
+         (oriented (if (< (dot facet face) 0.0) (- facet) facet))
+         (width (swizzle domain-vector :z))
+         (softness (max (swizzle domain-vector :w) 0.0005))
+         (u (swizzle uv :x))
+         (v (swizzle uv :y))
+         (inset (min (min u (- 1.0 u)) (min v (- 1.0 v))))
+         (arris (- inset width))
+         (sanded (normalize (mix oriented face
+                                 (smoothstep (- softness) softness arris))))
+         ;; The chamfer alone glints: one inside the cut, falling off across
+         ;; the arris, so the highlight draws the planed edge and not the face.
+         (glint (- 1.0 (smoothstep 0.0 (* 2.0 softness) arris)))
+         (upness (swizzle face :z))
+         (base (if (> upness 0.5)
+                   (swizzle top-vector :xyz)
+                   (if (< upness -0.5)
+                       (swizzle bottom-vector :xyz)
+                       (swizzle side-vector :xyz))))
+         (walk-origin (+ world (* oriented (+ (* 2.0 width) 0.1))))
+         (walk (marched-cell-walk walk-origin (swizzle sun-vector :xyz)
+                                  cells (swizzle domain-vector :x)
+                                  (swizzle domain-vector :y)
+                                  #.*shadow-steps*))
+         ;; A paper model's shadow is soft and never quite black.
+         (shade (mix 1.0 (if (> (swizzle walk :w) 0.5) 0.30 1.0)
+                     (swizzle occlusion-vector :y)))
+         (crowding (crowded-sky walk-origin face cells
+                                (swizzle domain-vector :x)
+                                (swizzle domain-vector :y)
+                                #.*occlusion-steps*))
+         (open (- 1.0 (* (swizzle occlusion-vector :x) crowding)))
+         (final (paper-lighting base sanded world open shade glint
+                                camera-vector sun-vector sun-colour-vector
+                                fill-vector sky-vector ground-vector))
+         ;; Alpha carries this fragment's distance, scaled by the lens lane's
+         ;; focus, so the focus pass needs no depth attachment of its own:
+         ;; one texture is the whole of what it reads.
+         (delta (- world (swizzle camera-vector :xyz)))
+         (range (max (swizzle lens-vector :x) 1.0))
+         (reach (clamp (/ (sqrt (dot delta delta)) (* 2.0 range)) 0.0 1.0))
+         ;; Only a lens reads alpha.  Without one the frame is a picture, and
+         ;; a picture is opaque: a captured PNG must not come out of here
+         ;; carrying distance in its alpha channel.
+         (depth (if (> (swizzle lens-vector :y) 0.0) reach 1.0)))
+    (set-output color (vec4 final depth))))
 
 (defun frame-uniform-block ()
   "The frame uniform block as declared by the mesh stage."
