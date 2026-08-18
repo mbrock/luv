@@ -713,6 +713,23 @@ the terrain the ray meets first is what the player is looking at."
       (update-luvcraft-session-title session))
     (values (and hit (block-ray-hit-block hit)) status)))
 
+(defgeneric luvcraft-block-placed (block session x y z)
+  (:documentation
+   "BLOCK has just been put down at X,Y,Z by the player in SESSION.
+
+Most blocks are inert and the default does nothing; a block that does
+something where it stands -- a film beside a wall -- answers here.")
+  (:method (block session x y z)
+    (declare (ignore block session x y z))
+    nil))
+
+(defgeneric luvcraft-block-removed (block session x y z)
+  (:documentation
+   "BLOCK has just been taken away from X,Y,Z by the player in SESSION.")
+  (:method (block session x y z)
+    (declare (ignore block session x y z))
+    nil))
+
 (defun edit-luvcraft-block (session action)
   "Apply ACTION (:REMOVE or :PLACE) along SESSION's centre view ray."
   (multiple-value-bind (hit status) (luvcraft-session-target session)
@@ -742,7 +759,8 @@ the terrain the ray meets first is what the player is looking at."
                (add-block-to-inventory
                 (luvcraft-session-inventory session) old-block 1)
                (setf (luvcraft-session-selected-block session) old-block)
-               (update-luvcraft-session-title session)))
+               (update-luvcraft-session-title session))
+             (luvcraft-block-removed old-block session x y z))
             (:place
              (when old-block
                (return-from edit-luvcraft-block (values nil :blocked)))
@@ -755,7 +773,8 @@ the terrain the ray meets first is what the player is looking at."
                           (not (remove-block-from-inventory
                                 (luvcraft-session-inventory session) block 1)))
                  (return-from edit-luvcraft-block (values nil :blocked)))
-               (edit-block-at block world x y z))))
+               (edit-block-at block world x y z)
+               (luvcraft-block-placed block session x y z))))
           (request-luvcraft-session-checkpoint session)
           (values coordinate :edited))))))
 

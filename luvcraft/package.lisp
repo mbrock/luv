@@ -201,6 +201,10 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:begin-tape-download
            #:find-tape-download
            #:open-tape-prompt
+           #:luvcraft-block-placed
+           #:luvcraft-block-removed
+           #:film-wall-beside
+           #:show-film-beside
            #:block-inventory
            #:block-inventory-blocks
            #:block-inventory-quickbar-blocks

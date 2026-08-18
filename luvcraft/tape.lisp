@@ -438,3 +438,118 @@ BEGIN-TAPE-DOWNLOAD.")
     ;; A tape already fetching has been asked; the orb is its answer.
     (unless (find-tape-download session x y z)
       (open-tape-prompt session x y z))))
+
+;;; ---------------------------------------------------------------------
+;;; A film beside a wall plays on it.
+;;;
+;;; Put a film down touching a terminal wall and the wall shows it; pick the
+;;; film up again and the wall goes back to what it was.  The film does not
+;;; sit on the wall's face -- that would cover the screen -- but beside it: on
+;;; the floor in front, on the wall's edge, anywhere one of its six neighbours
+;;; is a terminal block with an exposed face.
+
+(defun film-wall-beside (world x y z &key viewer)
+  "Return the largest exposed terminal surface touching X,Y,Z, and the face
+it was found through, or NIL when no wall stands beside the block.
+
+VIEWER is a point (the player's eye); of two faces of one wall the side
+turned toward it wins, so a film set down before a wall lights the side the
+player is looking at rather than the one behind."
+  (let ((best nil) (best-face nil) (best-area 0))
+    (dolist (direction *block-faces*)
+      (let* ((neighbor (block-face-neighbor direction))
+             (nx (+ x (voxel-direction-dx neighbor)))
+             (ny (+ y (voxel-direction-dy neighbor)))
+             (nz (+ z (voxel-direction-dz neighbor))))
+        (when (eq (world-block-at world nx ny nz) *terminal-block*)
+          ;; Every face of that block but the one looking at us -- which
+          ;; we cover -- and the one looking away, which is the wall's back.
+          (dolist (face *block-faces*)
+            (let ((normal (block-face-neighbor face)))
+              (unless (and (= (voxel-direction-dx normal)
+                              (- (voxel-direction-dx neighbor)))
+                           (= (voxel-direction-dy normal)
+                              (- (voxel-direction-dy neighbor)))
+                           (= (voxel-direction-dz normal)
+                              (- (voxel-direction-dz neighbor))))
+                (let ((surface (find-terminal-surface
+                                world nx ny nz (block-face-name face))))
+                  (when surface
+                    (let ((area (+ (* 2 (terminal-surface-width surface)
+                                      (terminal-surface-height surface))
+                                   (if (and viewer
+                                            (plusp
+                                             (+ (* (voxel-direction-dx normal)
+                                                   (- (vec3-x viewer) nx 0.5))
+                                                (* (voxel-direction-dy normal)
+                                                   (- (vec3-y viewer) ny 0.5))
+                                                (* (voxel-direction-dz normal)
+                                                   (- (vec3-z viewer) nz 0.5)))))
+                                       1 0))))
+                      (when (> area best-area)
+                        (setf best surface
+                              best-face (block-face-name face)
+                              best-area area)))))))))))
+    (values best best-face)))
+
+(defun terminal-surface-same-wall-p (a b)
+  (and (eq (terminal-surface-face a) (terminal-surface-face b))
+       (equalp (terminal-surface-origin a) (terminal-surface-origin b))
+       (= (terminal-surface-width a) (terminal-surface-width b))
+       (= (terminal-surface-height a) (terminal-surface-height b))))
+
+(defun find-terminal-display-on (session surface)
+  "The display SESSION already has on SURFACE's wall, if any."
+  (find-if (lambda (overlay)
+             (and (typep overlay 'terminal-display)
+                  (typep (terminal-display-surface overlay) 'terminal-surface)
+                  (terminal-surface-same-wall-p
+                   (terminal-display-surface overlay) surface)))
+           (luvcraft-session-overlays session)))
+
+(defvar *film-projections* (make-hash-table :test 'equal)
+  "Which display each placed film lit, by (X Y Z): the display, and whether
+the film opened it -- in which case taking the film away closes it too.")
+
+(defun show-film-beside (session film x y z)
+  "Play FILM, which stands at X,Y,Z, on the wall beside it, if there is one.
+Return the display it plays on, or NIL."
+  (multiple-value-bind (surface face)
+      (film-wall-beside (luvcraft-session-world session) x y z
+                        :viewer (camera-position
+                                 (luvcraft-session-camera session)))
+    (when (and surface (film-pathname film)
+               (probe-file (film-pathname film)))
+      (let* ((existing (find-terminal-display-on session surface))
+             (display
+               (or existing
+                   (open-terminal-display
+                    session
+                    (world-coordinate-x (terminal-surface-origin surface))
+                    (world-coordinate-y (terminal-surface-origin surface))
+                    (world-coordinate-z (terminal-surface-origin surface))
+                    face :fixture ""))))
+        (play-terminal-display-film display (film-pathname film)
+                                    :hardware :auto)
+        (setf (gethash (list x y z) *film-projections*)
+              (cons display (null existing)))
+        (luv:log-event :luvcraft "film ~S plays on the wall beside ~D,~D,~D"
+                       (film-label film) x y z)
+        display))))
+
+(defun hide-film-beside (session x y z)
+  "The film at X,Y,Z is gone: stop what it was showing."
+  (let ((projection (gethash (list x y z) *film-projections*)))
+    (when projection
+      (remhash (list x y z) *film-projections*)
+      (destructuring-bind (display . opened-p) projection
+        (when (member display (luvcraft-session-overlays session))
+          (if opened-p
+              (remove-luvcraft-overlay session display)
+              (change-terminal-display-mode display session :shell)))))))
+
+(defmethod luvcraft-block-placed ((film film-block-kind) session x y z)
+  (show-film-beside session film x y z))
+
+(defmethod luvcraft-block-removed ((film film-block-kind) session x y z)
+  (hide-film-beside session x y z))
