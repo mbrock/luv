@@ -252,7 +252,8 @@ the slot that has none stop looking like the same kind of thing.")
                                     (- (/ (+ left right) 2.0) 20)
                                     (- (/ (+ top bottom) 2.0) 21)
                                     40)
-                   (draw-text* pane (format nil "~D" (1+ index))
+                   ;; The tenth slot's key is 0, at the end of the number row.
+                   (draw-text* pane (format nil "~D" (mod (1+ index) 10))
                                (+ left 7) (+ top 10)
                                :align-x :left :align-y :center :text-size 10
                                :ink (if selected-p
@@ -326,8 +327,9 @@ the slot that has none stop looking like the same kind of thing.")
   (let* ((mirror (widget-overlay-mirror overlay))
          (source (mirror-texture mirror)))
     (when source
-      ;; No depth state: the hotbar is a HUD and must remain visible over the
-      ;; scene regardless of the block depth already in the shared pass.
+      ;; The hotbar draws in the presentation pass, which has no depth
+      ;; attachment, so the pipeline declares no depth state -- the
+      ;; Vulkan HAL rejects any mismatch with the pass's attachments.
       (ensure-spinning-compositor-resources
        overlay (mirror-context mirror) source
        :target-format (luv:gpu-texture-format surface-texture))

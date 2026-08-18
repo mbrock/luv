@@ -1607,15 +1607,20 @@
   (let ((atlas (make-block-texture-atlas))
         (normal-atlas (make-block-normal-atlas)))
     (ok (equal (array-dimensions atlas)
-               (list 16 (* 16 luvcraft::+block-atlas-tile-count+))))
+               (list 16 (* 16 luvcraft::+block-atlas-tile-capacity+))))
     (ok (equal (array-dimensions normal-atlas)
-               (list 16 (* 16 luvcraft::+block-atlas-tile-count+))))
+               (list 16 (* 16 luvcraft::+block-atlas-tile-capacity+))))
     (ok (subtypep (array-element-type atlas) '(unsigned-byte 32)))
     (ok (subtypep (array-element-type normal-atlas) '(unsigned-byte 32)))
+    ;; Painted tiles fill a prefix of the capacity; the headroom past them
+    ;; stays zero, waiting for a live image to define a new material into it.
+    (ok (<= luvcraft::*block-atlas-tile-count*
+            luvcraft::+block-atlas-tile-capacity+))
+    (ok (zerop (aref atlas 8 (* 16 luvcraft::*block-atlas-tile-count*))))
     (ok (/= (aref atlas 8 8) (aref atlas 8 (+ 8 (* 3 16)))))
     (ok (/= (aref atlas 8 8) (aref atlas 8 (+ 8 (* 9 16)))))
     ;; The colour atlas remains ordinary opaque sRGB material colour.
-    (ok (loop for tile below luvcraft::+block-atlas-tile-count+
+    (ok (loop for tile below luvcraft::*block-atlas-tile-count*
               always (loop for x below luvcraft::+block-atlas-tile-size+
                            always (loop for y below
                                         luvcraft::+block-atlas-tile-size+
@@ -1623,7 +1628,7 @@
                                                   (ldb (byte 8 24)
                                                        (aref atlas y
                                                              (+ x (* tile 16)))))))))
-    (ok (loop for tile below luvcraft::+block-atlas-tile-count+
+    (ok (loop for tile below luvcraft::*block-atlas-tile-count*
               always (/= (ldb (byte 8 24)
                               (aref normal-atlas 3 (+ 3 (* tile 16))))
                          (ldb (byte 8 24)
@@ -1634,7 +1639,7 @@
     (ok (loop for y below luvcraft::+block-atlas-tile-size+
               always
               (loop for x below (* luvcraft::+block-atlas-tile-size+
-                                   luvcraft::+block-atlas-tile-count+)
+                                   luvcraft::*block-atlas-tile-count*)
                     for tile = (floor x luvcraft::+block-atlas-tile-size+)
                     for local-x = (mod x luvcraft::+block-atlas-tile-size+)
                     always (= (luvcraft::paint-block-atlas-relief tile local-x y)
@@ -1642,7 +1647,7 @@
     (ok (loop for y below luvcraft::+block-atlas-tile-size+
               always
               (loop for x below (* luvcraft::+block-atlas-tile-size+
-                                   luvcraft::+block-atlas-tile-count+)
+                                   luvcraft::*block-atlas-tile-count*)
                     for pixel = (aref normal-atlas y x)
                     for nx = (- (/ (ldb (byte 8 0) pixel) 127.5) 1.0)
                     for ny = (- (/ (ldb (byte 8 8) pixel) 127.5) 1.0)
@@ -1653,7 +1658,7 @@
     (ok (loop for y below luvcraft::+block-atlas-tile-size+
               thereis
               (loop for x below (* luvcraft::+block-atlas-tile-size+
-                                   luvcraft::+block-atlas-tile-count+)
+                                   luvcraft::*block-atlas-tile-count*)
                     for pixel = (aref normal-atlas y x)
                     thereis (or (/= (ldb (byte 8 0) pixel) 128)
                                 (/= (ldb (byte 8 8) pixel) 128))))))
@@ -1674,9 +1679,15 @@
     (ok (= (block-surface-emission *terminal-block*) 0.16))
     (ok (equal (mapcar #'block-kind-name (placeable-block-kinds))
                '(:grass :dirt :stone :wood :leaves :sand :snow :crystal
+<<<<<<< HEAD
+                 :terminal :urbit :gravel :clay :mud :moss :cactus
+                 :cobblestone :stone-bricks :bricks :planks :sandstone
+                 :slate))))
+=======
                  :terminal :gravel :clay :mud :moss :cactus :cobblestone
                  :stone-bricks :bricks :planks :sandstone :slate :tape
                 :fountain :lava-spring))))
+>>>>>>> 62957322054a305ab99b1f807d33ba26a24aca48
   (let ((world (make-block-world :chunk-width 2
                                  :chunk-height 2
                                  :chunk-depth 2)))
@@ -1716,10 +1727,32 @@
     (ok (eq (select-luvcraft-block session 7) luvcraft::*snow-block*))
     (ok (eq (select-luvcraft-block session 8) *crystal-block*))
     (ok (eq (select-luvcraft-block session 9) *terminal-block*))
-    (ok (search "1–9 select" (canvas-title canvas)))
+    (ok (search "1–9,0 select" (canvas-title canvas)))
     (ok (search "terminal" (canvas-title canvas)))
-    (ok (eq (select-luvcraft-block session 10) luvcraft::*gravel-block*))
+    ;; The tenth slot is the urbit material, and its chip is the 0 key.
+    (ok (eq (select-luvcraft-block session 10) luvcraft::*urbit-block*))
+    (ok (search "[0] urbit" (canvas-title canvas)))
+    (ok (eq (select-luvcraft-block session 11) luvcraft::*gravel-block*))
     (ok (search "[inventory]" (canvas-title canvas)))))
+
+(deftest urbit-wall-boots-a-comet-once-and-resumes-its-pier
+  ;; The pier lives under the checkout's build directory, named by the wall.
+  (let ((pier (urbit-pier-pathname)))
+    (ok (search "build/urbit/comet" (namestring pier))))
+  ;; A pier vere has not made an .urb in boots as a comet; one it has,
+  ;; resumes.  The urbit itself is not run here: booting a comet is a
+  ;; networked, minutes-long affair that belongs on a wall, not in a test.
+  (let* ((pier (merge-pathnames
+                (make-pathname :directory '(:relative "luv-urbit-test-pier"))
+                (uiop:temporary-directory))))
+    (unwind-protect
+         (progn
+           (ok (equal (list "-c" (namestring pier))
+                      (urbit-boot-arguments pier)))
+           (ensure-directories-exist (merge-pathnames #P".urb/" pier))
+           (ok (equal (list (namestring pier))
+                      (urbit-boot-arguments pier))))
+      (uiop:delete-directory-tree pier :validate t :if-does-not-exist :ignore))))
 
 (deftest block-inventory-supports-creative-and-finite-stacks
   (let* ((creative
@@ -1760,7 +1793,7 @@
     (ok (null (select-luvcraft-block session 3)))
     (ok (search "1–2 select" (canvas-title canvas)))))
 
-(deftest inventory-and-nine-slot-quickbar-have-independent-extents
+(deftest inventory-and-ten-slot-quickbar-have-independent-extents
   (let* ((extra
            (make-instance 'block-kind :name :test-extra
                           :face-tiles '(:all 3)
@@ -1776,12 +1809,12 @@
                           :canvas canvas :inventory inventory
                           :selected-block luvcraft::*grass-block*)))
     (ok (= (1+ base-count) (length (block-inventory-blocks inventory))))
-    (ok (= 9 (length (block-inventory-quickbar-blocks inventory))))
+    (ok (= 10 (length (block-inventory-quickbar-blocks inventory))))
     ;; The full inventory may select a block with no number key; the title
-    ;; makes that distinction visible rather than advertising a tenth key.
+    ;; makes that distinction visible rather than advertising an eleventh key.
     (ok (eq extra (select-luvcraft-block session (1+ base-count))))
     (ok (search "[inventory]" (canvas-title canvas)))
-    (ok (search "1–9 select" (canvas-title canvas)))))
+    (ok (search "1–9,0 select" (canvas-title canvas)))))
 
 (deftest gazetteer-names-semantic-gameplay-views
   (let* ((views (luvcraft-gazetteer-views))

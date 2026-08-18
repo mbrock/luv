@@ -232,7 +232,7 @@ the right; a positive pitch tips the top away from the viewer."
 The box's local x, y, z are those axes; RIGHT UP FORWARD must be a unit
 orthonormal frame, so the face normals come out unit too."
   (let* ((size +block-atlas-tile-size+)
-         (atlas-width (* size +block-atlas-tile-count+)))
+         (atlas-width (* size +block-atlas-tile-capacity+)))
     (dolist (face *block-faces*)
       (let* ((normal (block-face-neighbor face))
              (nx (voxel-direction-dx normal))
@@ -448,7 +448,7 @@ band of quads around the edge, all wearing TILE stretched once around."
   (let* ((outline (rounded-rectangle-outline half-x half-y radius segments))
          (count (length outline))
          (size +block-atlas-tile-size+)
-         (atlas-width (* size +block-atlas-tile-count+)))
+         (atlas-width (* size +block-atlas-tile-capacity+)))
     (labels ((tile-u (u) (/ (+ (* tile size) 0.5 (* u (1- size))) atlas-width))
              (tile-v (v) (/ (+ 0.5 (* v (1- size))) size))
              (world-normal (nx ny nz)

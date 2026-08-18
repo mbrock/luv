@@ -330,6 +330,7 @@
               env.pkgs.pkg-config
               env.pkgs.sdl3
               env.pkgs.spirv-tools
+              env.pkgs.urbit
               env.pkgs.vulkan-headers
               env.pkgs.vulkan-tools
               env.pkgs.vulkan-validation-layers
@@ -337,6 +338,8 @@
             ];
             LD_LIBRARY_PATH = env.nativeLibraryPath;
             LUV_NIX_SHELL = "1";
+            # The real urbit runtime (vere), which an urbit wall boots.
+            LUV_URBIT = "${env.pkgs.urbit}/bin/urbit";
             LUV_GHOSTTY_LIBRARY = env.libghosttyVtLibrary;
             LUV_SLYNK_DIR = "${env.slyRoot}/slynk";
             LUV_TRACY_CLIENT = env.tracyClientLibrary;

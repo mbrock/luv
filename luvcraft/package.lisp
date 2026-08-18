@@ -114,6 +114,7 @@ compiler which closes a program over bound fields into a scalar loop.")
   (:documentation "The interactive block world built on luv.")
   (:export #:*crystal-block*
            #:*terminal-block*
+           #:*urbit-block*
            #:*voxel-light-solver*
            #:*session*
            #:play
@@ -427,6 +428,7 @@ compiler which closes a program over bound fields into a scalar loop.")
            ;; since that layer is no longer the core, they are part of the
            ;; session's surface rather than its insides.
            #:luvcraft-session-movement-intent
+           #:luvcraft-session-look-intent
            #:luvcraft-session-pointer-captured-p
            #:luvcraft-session-pointer-capture-suspended-p
            #:luvcraft-session-focus-toggle-tab-down-p
@@ -467,6 +469,8 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:make-block-mesh-snapshot
            #:make-block-texture-atlas
            #:make-block-normal-atlas
+           #:refresh-block-atlas
+           #:refresh-luvcraft-inventory
            #:make-default-sky-profile
            #:make-empty-little-block-world
            #:make-little-block-world
@@ -478,6 +482,13 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:find-terminal-surface
            #:open-terminal-display
            #:attach-terminal-display-pty
+           #:attach-terminal-display-urbit
+           #:activate-wall-material
+           #:urbit-executable
+           #:urbit-pier-pathname
+           #:urbit-boot-arguments
+           #:*urbit-default-pier*
+           #:*urbit-pier-root*
            #:place-terminal-block-rectangle
            #:materialize-block-world-chunk
            #:materialize-little-world-chunk

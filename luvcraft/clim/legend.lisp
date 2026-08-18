@@ -49,6 +49,11 @@ because nobody needs to be told about each of them separately.")
       (format nil "walk ~(~A~)" (first arguments))))
 
 (defmethod luvcraft-command-legend-label
+    ((name (eql 'com-start-looking)) arguments table)
+  (declare (ignore arguments table))
+  "look")
+
+(defmethod luvcraft-command-legend-label
     ((name (eql 'com-select-quickbar-slot)) arguments table)
   (declare (ignore arguments table))
   "select block")

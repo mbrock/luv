@@ -891,12 +891,90 @@ ever see what the user meant."
                   (and (present-p :caps) :caps-lock)
                   (and (present-p :num) :num-lock)))))
 
+;; SDL's KMSDRM backend never learns the console's keymap, so a Dvorak
+;; console gets QWERTY characters from SDL_GetKeyFromScancode.  The layout
+;; override translates scancodes itself; keys it does not list (digits,
+;; space, editing keys) fall through to SDL, whose QWERTY answer matches.
+(defparameter +dvorak-scancode-characters+
+  '((:q . #\') (:w . #\,) (:e . #\.) (:r . #\p) (:t . #\y) (:y . #\f)
+    (:u . #\g) (:i . #\c) (:o . #\r) (:p . #\l)
+    (:leftbracket . #\/) (:rightbracket . #\=)
+    (:a . #\a) (:s . #\o) (:d . #\e) (:f . #\u) (:g . #\i) (:h . #\d)
+    (:j . #\h) (:k . #\t) (:l . #\n) (:semicolon . #\s) (:apostrophe . #\-)
+    (:z . #\;) (:x . #\q) (:c . #\j) (:v . #\k) (:b . #\x) (:n . #\b)
+    (:m . #\m) (:comma . #\w) (:period . #\v) (:slash . #\z)
+    (:minus . #\[) (:equals . #\]))
+  "Dvorak characters by physical scancode; unlisted keys match QWERTY.")
+
+(defparameter +us-shifted-characters+
+  '((#\1 . #\!) (#\2 . #\@) (#\3 . #\#) (#\4 . #\$) (#\5 . #\%)
+    (#\6 . #\^) (#\7 . #\&) (#\8 . #\*) (#\9 . #\() (#\0 . #\))
+    (#\' . #\") (#\, . #\<) (#\. . #\>) (#\; . #\:) (#\/ . #\?)
+    (#\- . #\_) (#\= . #\+) (#\[ . #\{) (#\] . #\}) (#\` . #\~)
+    (#\\ . #\|))
+  "The US shift pairs, which Dvorak shares for its printing characters.")
+
+(defvar *canvas-keyboard-layout* :environment
+  "Character layout override: :DVORAK, NIL to trust SDL's keymap, or
+:ENVIRONMENT to read LUV_KEYBOARD_LAYOUT at first use.")
+
+(defvar *canvas-swap-caps-control* :environment
+  "Whether the Caps Lock key acts as Control, as the console's
+ctrl:swapcaps option intends: T, NIL, or :ENVIRONMENT to read
+LUV_KEYBOARD_SWAP_CAPS_CONTROL at first use.  The physical Control
+keys stay Control; nobody wants Caps Lock in a game.")
+
+(defvar *canvas-caps-control-down-p* nil
+  "Whether the Caps Lock key, remapped to Control, is currently held.
+SDL's modifier state reports Caps Lock as a toggle rather than a held
+key, so the swap has to track the key itself.")
+
+(defun canvas-swap-caps-control-p ()
+  (when (eq *canvas-swap-caps-control* :environment)
+    (setf *canvas-swap-caps-control*
+          (let ((value (uiop:getenv "LUV_KEYBOARD_SWAP_CAPS_CONTROL")))
+            (and value (not (member value '("" "0") :test #'string=))))))
+  *canvas-swap-caps-control*)
+
+(defun sdl-swapped-key-modifiers (modifiers)
+  "Logical modifiers for MODIFIERS with the Caps-as-Control swap applied."
+  (let ((logical (sdl-key-modifiers modifiers)))
+    (if (canvas-swap-caps-control-p)
+        (let ((cleaned (remove :caps-lock logical)))
+          (if *canvas-caps-control-down-p*
+              (adjoin :control cleaned)
+              cleaned))
+        logical)))
+
+(defun canvas-keyboard-layout ()
+  (when (eq *canvas-keyboard-layout* :environment)
+    (setf *canvas-keyboard-layout*
+          (let ((name (uiop:getenv "LUV_KEYBOARD_LAYOUT")))
+            (cond ((null name) nil)
+                  ((string-equal name "dvorak") :dvorak)
+                  (t (warn "Ignoring unknown LUV_KEYBOARD_LAYOUT ~S." name)
+                     nil)))))
+  *canvas-keyboard-layout*)
+
+(defun layout-key-character (scancode modifiers)
+  "Return SCANCODE's character under the override layout, or NIL to ask SDL."
+  (case (canvas-keyboard-layout)
+    (:dvorak
+     (let ((base (cdr (assoc scancode +dvorak-scancode-characters+))))
+       (when base
+         (if (intersection '(:lshift :rshift :shift) modifiers)
+             (if (alpha-char-p base)
+                 (char-upcase base)
+                 (or (cdr (assoc base +us-shifted-characters+)) base))
+             base))))))
+
 (defun sdl-key-character (scancode modifiers)
-  "Return SCANCODE's character under SDL's current layout and MODIFIERS."
-  (let ((code (raw-sdl-key-from-scancode scancode modifiers nil)))
-    (when (or (member code '(8 9 13 27 127))
-              (<= 32 code (1- char-code-limit)))
-      (code-char code))))
+  "Return SCANCODE's character under the configured layout and MODIFIERS."
+  (or (layout-key-character scancode modifiers)
+      (let ((code (raw-sdl-key-from-scancode scancode modifiers nil)))
+        (when (or (member code '(8 9 13 27 127))
+                  (<= 32 code (1- char-code-limit)))
+          (code-char code)))))
 
 (defun dispatch-sdl-key (canvas event class)
   ;; Read fields directly from SDL_Event. Materializing cl-sdl3's
@@ -905,10 +983,16 @@ ever see what the user meant."
   (let* ((type '(:struct sdl3:keyboard-event))
          (window-id (cffi:foreign-slot-value event type 'sdl3::%window-id)))
     (when (sdl-canvas-window-id-p canvas window-id)
-      (let* ((scancode
+      (let* ((raw-scancode
                (cffi:foreign-slot-value event type 'sdl3::%scancode))
+             (swapped-p (and (eq raw-scancode :capslock)
+                             (canvas-swap-caps-control-p)))
+             (scancode (if swapped-p :lctrl raw-scancode))
              (modifiers (cffi:foreign-slot-value event type 'sdl3::%mod))
              (key-name (sdl-scancode-key-name scancode)))
+        (when swapped-p
+          (setf *canvas-caps-control-down-p*
+                (eq class 'canvas-key-press-event)))
         (unless (eq key-name :unknown)
           (dispatch-canvas-event
            canvas
@@ -916,7 +1000,7 @@ ever see what the user meant."
                           :timestamp
                           (cffi:foreign-slot-value event type 'sdl3::%timestamp)
                           :key-name key-name
-                          :modifiers (sdl-key-modifiers modifiers)
+                          :modifiers (sdl-swapped-key-modifiers modifiers)
                           :character (sdl-key-character scancode modifiers)
                           :unshifted-character (sdl-key-character scancode nil)
                           :repeat-p

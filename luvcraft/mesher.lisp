@@ -499,7 +499,7 @@ normalized to 0..1."
   (multiple-value-bind (local-u local-v) (block-face-local-uv face corner)
     (let* ((tile (block-face-tile block face))
            (size +block-atlas-tile-size+)
-           (width (* size +block-atlas-tile-count+))
+           (width (* size +block-atlas-tile-capacity+))
            ;; Half-texel insets make bilinear bleed impossible even if a
            ;; caller swaps the intentionally nearest-filtered sampler.
            (u (/ (+ (* tile size) 0.5 (* local-u (1- size))) width))
@@ -515,7 +515,7 @@ normalized to 0..1."
          (nz (voxel-direction-dz normal))
          (tile (block-face-tile block face))
          (size +block-atlas-tile-size+)
-         (atlas-width (* size +block-atlas-tile-count+))
+         (atlas-width (* size +block-atlas-tile-capacity+))
          (variation (block-color-variation x y z)))
     (multiple-value-bind (edge-u-low edge-u-high edge-v-low edge-v-high)
         (block-face-edge-shaping-components mesher samples nx ny nz x y z)

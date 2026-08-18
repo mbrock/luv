@@ -218,6 +218,13 @@ definition."
    :face-tiles '(:all 10)
    :categories '(:building :luminous) :display-color '(0.13 0.31 0.34)
    :surface-emission 0.16)
+  (*urbit-block* :urbit
+   "The Martian computer: a white planet sigil on a near-black field,
+the tenth quickbar material, reached by the 0 key at the end of the
+number row."
+   :face-tiles '(:all 30)
+   :categories '(:building :luminous) :display-color '(0.07 0.07 0.09)
+   :surface-emission 0.22)
   (*gravel-block* :gravel
    :face-tiles '(:all 11)
    :categories '(:natural) :display-color '(0.46 0.44 0.40))
@@ -292,7 +299,23 @@ kinds through this vocabulary instead of printing CLOS object identities."
         (error "No block kind is named ~S." name))))
 
 (defconstant +block-atlas-tile-size+ 16)
+<<<<<<< HEAD
+
+;;; The atlas textures are allocated once per renderer at full capacity,
+;;; while the painted tiles fill a prefix.  UV arithmetic everywhere uses
+;;; the capacity, which never changes over a session's life, so defining a
+;;; new material in a live image and calling REFRESH-BLOCK-ATLAS repaints
+;;; the running game's textures in place: no re-mesh, no new GPU resources,
+;;; no restart.
+(defconstant +block-atlas-tile-capacity+ 64
+  "How many tiles wide every block atlas texture is, painted or not.")
+
+(defparameter *block-atlas-tile-count* 31
+  "How many atlas tiles are painted.  A parameter rather than a constant so
+a live image adds a tile without a constant redefinition.")
+=======
 (defconstant +block-atlas-tile-count+ 36)
+>>>>>>> 62957322054a305ab99b1f807d33ba26a24aca48
 (defconstant +block-atlas-texture-format+ :rgba8-unorm-srgb)
 (defconstant +block-normal-atlas-texture-format+ :rgba8-unorm)
 
@@ -883,6 +906,32 @@ and a dock row at the bottom."
   "Phone screen: glass, flat but for the faintest bow across the pane."
   (+ 126 (floor (+ x y) 8)))
 
+<<<<<<< HEAD
+;;; The urbit material arrived after the gadget tiles, so its tile number
+;;; sits past them: tile order is history, not palette order, and the
+;;; DEFINE-BLOCK-KINDS list alone decides which number key a material gets.
+
+(defun urbit-sigil-glyph-p (x y)
+  "Whether X,Y lies on the planet sigil: a ring crossed by its equator."
+  (let* ((dx (- x 7.5))
+         (dy (- y 7.5))
+         (radius (sqrt (+ (* dx dx) (* dy dy)))))
+    (or (<= 4.4 radius 5.9)
+        (and (<= 7 y 8) (< radius 5.9)))))
+
+(defmethod paint-block-atlas-tile ((tile (eql 30)) x y)
+  "Urbit: a white planet sigil on a near-black field."
+  (if (urbit-sigil-glyph-p x y)
+      (shaded-block-atlas-pixel 232 232 236)
+      (shaded-block-atlas-pixel
+       16 17 21 (round (block-atlas-variation x y tile) 6))))
+
+(defmethod paint-block-atlas-relief ((tile (eql 30)) x y)
+  "Urbit: the sigil stands proud of a matte face."
+  (block-atlas-byte
+   (+ (if (urbit-sigil-glyph-p x y) 168 118)
+      (* 0.08 (- (block-atlas-lattice-hash x y 301) 128)))))
+=======
 ;;; ---------------------------------------------------------------------
 ;;; The tape: a film reel, drawn flange-on and rim-on.
 
@@ -965,16 +1014,20 @@ film."
 
 (defmethod paint-block-atlas-relief ((tile (eql 32)) x y)
   (paint-block-atlas-relief 30 x y))
+>>>>>>> 62957322054a305ab99b1f807d33ba26a24aca48
 
 (defun make-block-texture-atlas ()
   "Return the little world's horizontal RGBA8 atlas as packed pixel words.
 
-RGB is the material's procedural colour and A is opaque coverage."
-  (let* ((width (* +block-atlas-tile-size+ +block-atlas-tile-count+))
+RGB is the material's procedural colour and A is opaque coverage.  The
+array spans the full tile capacity; tiles past the painted count stay
+zero, waiting for a material to claim them."
+  (assert (<= *block-atlas-tile-count* +block-atlas-tile-capacity+))
+  (let* ((width (* +block-atlas-tile-size+ +block-atlas-tile-capacity+))
          (pixels (make-array (list +block-atlas-tile-size+ width)
                              :element-type '(unsigned-byte 32))))
     (dotimes (y +block-atlas-tile-size+)
-      (dotimes (tile +block-atlas-tile-count+)
+      (dotimes (tile *block-atlas-tile-count*)
         (dotimes (x +block-atlas-tile-size+)
           (setf (aref pixels y (+ x (* tile +block-atlas-tile-size+)))
                 (paint-block-atlas-tile tile x y)))))
@@ -1020,11 +1073,12 @@ map nor later texture filtering can borrow a neighbouring material's shape."
 
 RGB is a linear encoded unit normal and A is the procedural height from which
 it was derived.  This is a derived materialization, not an authored asset."
-  (let* ((width (* +block-atlas-tile-size+ +block-atlas-tile-count+))
+  (assert (<= *block-atlas-tile-count* +block-atlas-tile-capacity+))
+  (let* ((width (* +block-atlas-tile-size+ +block-atlas-tile-capacity+))
          (pixels (make-array (list +block-atlas-tile-size+ width)
                              :element-type '(unsigned-byte 32))))
     (dotimes (y +block-atlas-tile-size+)
-      (dotimes (tile +block-atlas-tile-count+)
+      (dotimes (tile *block-atlas-tile-count*)
         (dotimes (x +block-atlas-tile-size+)
           (setf (aref pixels y (+ x (* tile +block-atlas-tile-size+)))
                 (paint-block-atlas-normal tile x y)))))

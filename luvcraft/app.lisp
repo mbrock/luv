@@ -210,6 +210,11 @@
     :initform (make-movement-intent)
     :reader luvcraft-session-movement-intent
     :documentation "What the player is trying to do, set by the input layer.")
+   (look-intent
+    :initform (make-movement-intent)
+    :reader luvcraft-session-look-intent
+    :documentation "Where the player is trying to turn the camera, urged by
+the arrow keys: a mouse for the mouseless console.")
    (pointer-captured-p :initform nil
                        :accessor luvcraft-session-pointer-captured-p)
    (pointer-capture-suspended-p
@@ -458,6 +463,7 @@ and a rebound key changes the label on the button.")
 
 (defun clear-luvcraft-player-input (session)
   (clear-movement-intent (luvcraft-session-movement-intent session))
+  (clear-movement-intent (luvcraft-session-look-intent session))
   (when (luvcraft-session-pointer-captured-p session)
     (set-canvas-relative-pointer-mode
      (luvcraft-session-canvas session) nil)
@@ -701,12 +707,16 @@ the terrain the ray meets first is what the player is looking at."
     (when (slot-boundp session 'canvas)
       (setf (canvas-title (luvcraft-session-canvas session))
             (format nil
-                    "~A — [~A] ~(~A~)~@[  ·  holding ~A~]  ·  1–~D select  ·  I inventory  ·  F phone  ·  shift sprint  ·  tab focus"
+                    "~A — [~A] ~(~A~)~@[  ·  holding ~A~]  ·  ~A select  ·  e place  ·  x mine  ·  c pick  ·  I inventory  ·  F phone  ·  shift sprint  ·  arrows look  ·  tab focus  ·  ctrl-q quit"
                     (luvcraft-session-title-base session)
-                    (if number (1+ number) "inventory")
+                    ;; The tenth slot is the 0 key, so its chip says 0 rather
+                    ;; than advertising a 10 key that does not exist.
+                    (if number (mod (1+ number) 10) "inventory")
                     (block-kind-name block)
                     (and item (hand-item-name item))
-                    (length blocks)))))
+                    (if (= 10 (length blocks))
+                        "1–9,0"
+                        (format nil "1–~D" (length blocks)))))))
   session)
 
 (defun select-luvcraft-block (session number)
@@ -720,6 +730,50 @@ the terrain the ray meets first is what the player is looking at."
       (setf (luvcraft-session-selected-block session) block)
       (update-luvcraft-session-title session))
     block))
+
+(defun refresh-luvcraft-inventory (session)
+  "Give SESSION any newly defined placeable materials, in number-key order.
+
+The live half of adding a material: REFRESH-BLOCK-ATLAS repaints the wall,
+and this puts the new block on the number row of a running session.
+Existing entries keep their identity and quantities; entries the palette no
+longer names stay reachable at the end, past the number keys."
+  (let* ((inventory (luvcraft-session-inventory session))
+         (entries (block-inventory-entries inventory))
+         (palette (placeable-block-kinds)))
+    (setf (block-inventory-entries inventory)
+          (append
+           (loop for block in palette
+                 collect (or (find block entries
+                                   :key #'block-inventory-entry-block)
+                             (make-instance 'block-inventory-entry
+                                            :block block :quantity nil)))
+           (remove-if (lambda (entry)
+                        (member (block-inventory-entry-block entry) palette))
+                      entries))))
+  (update-luvcraft-session-title session)
+  session)
+
+(defparameter +luvcraft-keyboard-look-rate+ 2.2d0
+  "Radians per second of camera turn while an arrow key is held.")
+
+(defun advance-luvcraft-keyboard-look (session seconds)
+  "Turn SESSION's camera as its look intent urges: a mouse for the mouseless."
+  (let* ((intent (luvcraft-session-look-intent session))
+         (camera (luvcraft-session-camera session))
+         (yaw-amount (movement-intent-axis intent :right :left))
+         (pitch-amount (movement-intent-axis intent :up :down)))
+    (unless (zerop yaw-amount)
+      (incf (camera-yaw camera)
+            (* yaw-amount +luvcraft-keyboard-look-rate+ seconds)))
+    (unless (zerop pitch-amount)
+      (setf (camera-pitch camera)
+            (max -1.5
+                 (min 1.5
+                      (+ (camera-pitch camera)
+                         (* pitch-amount +luvcraft-keyboard-look-rate+
+                            seconds)))))))
+  session)
 
 (defun pick-luvcraft-block (session)
   "Select the material currently under the centre crosshair."

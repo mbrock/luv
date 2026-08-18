@@ -1162,6 +1162,8 @@ submission that used them completes."
             (advance-sky-clock (luvcraft-session-sky-clock session) seconds)
             (advance-block-particles
              (luvcraft-session-particle-system session) seconds)
+            (unless (luvcraft-session-focus-camera-active-p session)
+              (advance-luvcraft-keyboard-look session seconds))
             (advance-luvcraft-critters session seconds)
             (advance-luvcraft-physics session seconds)
             ;; A moving interaction takes its turn after the world it moves in
@@ -1308,12 +1310,42 @@ here -- so an unconsumed wheel event is simply the end of the matter."
   (dispatch-luvcraft-focus-event session canvas event)
   nil)
 
+(defun refresh-block-atlas (session)
+  "Repaint both block atlases into SESSION's live textures.
+
+The textures were allocated at +BLOCK-ATLAS-TILE-CAPACITY+ and every mesh's
+UVs address that fixed width, so uploading fresh pixels is the whole job:
+after redefining a tile or adding a material in the running image, call
+this and the next frame samples the new paint."
+  (let* ((device (luvcraft-session-device session))
+         (width (* +block-atlas-tile-size+ +block-atlas-tile-capacity+))
+         (height +block-atlas-tile-size+)
+         (layout (make-texture-data-layout
+                  :bytes-per-row (* width 4) :rows-per-image height)))
+    (write-texture (device-queue device)
+                   (make-texture-copy
+                    :texture (luvcraft-session-atlas-texture session))
+                   (make-block-texture-atlas)
+                   layout (list width height))
+    (write-texture (device-queue device)
+                   (make-texture-copy
+                    :texture (luvcraft-session-normal-atlas-texture session))
+                   (make-block-normal-atlas)
+                   layout (list width height)))
+  session)
+
 (defun start-luvcraft (&key
                                 (title "luv little block world — click, look, walk")
                                 ;; NIL means "as much of this display as
                                 ;; comfortably fits"; a capture asks for the
-                                ;; exact frame it intends to write out.
-                                (width nil) (height nil)
+                                ;; exact frame it intends to write out.  A
+                                ;; KMSDRM console can only present at a real
+                                ;; display mode, so the environment may pin
+                                ;; the canvas to the panel's native size.
+                                (width (let ((value (uiop:getenv "LUVCRAFT_WIDTH")))
+                                         (and value (parse-integer value))))
+                                (height (let ((value (uiop:getenv "LUVCRAFT_HEIGHT")))
+                                          (and value (parse-integer value))))
                                 (frames-per-second 60)
                                 (visible-p t)
                                 (fullscreen-p nil)
@@ -1361,6 +1393,11 @@ and right click places the selected block.  Number keys select materials,
 middle click picks the targeted material, Shift sprints, and Escape releases
 the pointer.  When a presentation extension supplies it, I opens the player
 inventory.
+
+Everything also works without a pointer: the arrow keys look around, E places
+the selected block, X removes the targeted block, C picks its material, and M
+toggles pointer capture for machines whose pointing device has no buttons.
+Control-Q quits from anywhere, saving the world on the way out.
 
 Pass :PROVIDER to select the Vulkan or Metal relationship without changing
 world, simulation, streaming, or frame orchestration.  Pass :VISIBLE-P NIL to
@@ -1456,7 +1493,7 @@ NIL to let the display choose a comfortable window."
                                      :mipmap-filter :nearest
                                      :compare :less-or-equal))))
                   (atlas-width
-                    (* +block-atlas-tile-size+ +block-atlas-tile-count+))
+                    (* +block-atlas-tile-size+ +block-atlas-tile-capacity+))
                   (atlas-height +block-atlas-tile-size+)
                   (atlas-data (make-block-texture-atlas))
                   (normal-atlas-data (make-block-normal-atlas))

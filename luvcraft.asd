@@ -73,6 +73,7 @@
                  (:file "render")
                  (:file "play")
                  (:file "terminal-wall")
+                 (:file "urbit")
                  (:file "phone")
                  (:file "tape")
                  (:file "capture")

@@ -52,6 +52,56 @@
     ()
   (luvcraft:unfocus-luvcraft-session (luvcraft-command-session)))
 
+;;; Control-Q quits from anywhere, including modal focus.  On a KMSDRM
+;;; console there is no window manager to deliver a close request, so
+;;; without a quit key the game owns the machine until someone kills it
+;;; over SSH.  It lives in the window layer for the same reason Shift-Tab
+;;; does: no surface may be able to swallow it.  Q is the layout's letter
+;;; q, wherever that key sits -- gestures match the unshifted character,
+;;; so a Dvorak console quits from its own Q.
+(define-command (com-quit :command-table luvcraft-window
+                          :name "Quit"
+                          :keystroke (#\q :control))
+    ()
+  (let ((session (luvcraft-command-session)))
+    (setf (luvcraft:luvcraft-session-running-p session) nil)
+    (luv:close-canvas (luvcraft:luvcraft-session-canvas session))))
+
+;;; Keyboard equivalents of the pointer buttons, for consoles and laptops
+;;; without a working click.
+
+(define-command (com-place-block :command-table luvcraft-world
+                                 :name "Place Block"
+                                 :keystroke (#\e))
+    ()
+  (luvcraft:edit-luvcraft-block (luvcraft-command-session) :place))
+
+(define-command (com-mine-block :command-table luvcraft-world
+                                :name "Mine Block"
+                                :keystroke (#\x))
+    ()
+  (luvcraft:edit-luvcraft-block (luvcraft-command-session) :remove))
+
+(define-command (com-pick-block :command-table luvcraft-world
+                                :name "Pick Block"
+                                :keystroke (#\c))
+    ()
+  (luvcraft:pick-luvcraft-block (luvcraft-command-session)))
+
+;;; TrackPoint look without a button: M captures and releases the pointer
+;;; by keyboard alone.
+(define-command (com-toggle-pointer-capture :command-table luvcraft-world
+                                            :name "Toggle Pointer Capture"
+                                            :keystroke (#\m))
+    ()
+  (let* ((session (luvcraft-command-session))
+         (capture-p
+           (not (luvcraft:luvcraft-session-pointer-captured-p session))))
+    (luv:set-canvas-relative-pointer-mode
+     (luvcraft:luvcraft-session-canvas session) capture-p)
+    (setf (luvcraft:luvcraft-session-pointer-captured-p session)
+          capture-p)))
+
 ;;; Named but unbound: escape now shows the keymap, which releases the pointer
 ;;; on its way.  This stays reachable by name, from a listener or a script.
 (define-command (com-release-pointer :command-table luvcraft-world
@@ -74,13 +124,14 @@
                               (luvcraft:luvcraft-session-inventory session))))
       (luvcraft:select-luvcraft-block session slot))))
 
-;;; The number row selects a quickbar slot.  Nine commands would say the same
-;;; thing nine times; a keystroke item of type :FUNCTION instead builds the
+;;; The number row selects a quickbar slot.  Ten commands would say the same
+;;; thing ten times; a keystroke item of type :FUNCTION instead builds the
 ;;; command object for the digit that was pressed, which is the ordinary CLIM
-;;; way to bind a family of keys to one verb with an argument.
-(loop for slot from 1 to 9
+;;; way to bind a family of keys to one verb with an argument.  The 0 key ends
+;;; the row where it sits on the keyboard, as the tenth slot.
+(loop for slot from 1 to 10
       do (add-keystroke-to-command-table
-          'luvcraft-world (list (digit-char slot)) :function
+          'luvcraft-world (list (digit-char (mod slot 10))) :function
           (let ((slot slot))
             (lambda (gesture numeric-argument)
               (declare (ignore gesture numeric-argument))
@@ -120,12 +171,14 @@
         t))
 
 (defparameter *walk-keys*
-  '((:w :forward) (:up :forward)
-    (:s :backward) (:down :backward)
-    (:a :left) (:left :left)
-    (:d :right) (:right :right)
+  '((:w :forward)
+    (:s :backward)
+    (:a :left)
+    (:d :right)
     (:shift-left :sprint) (:shift-right :sprint))
-  "Which key urges which direction, arrows alongside the letters.
+  "Which key urges which direction.  The arrows are deliberately absent:
+they belong to looking (see *LOOK-KEYS*), a mouse for a console whose
+pointer has no working buttons.
 
 Bound with :ANY because a movement key means the same thing however it is
 modified: Shift-W is a player sprinting forward, not a player pressing some
@@ -147,6 +200,52 @@ other key.")
               (walk-item 'com-stop-walking) :errorp nil))))
 
 (add-walk-keystrokes)
+
+;;; Looking.
+;;;
+;;; The arrow keys turn the camera the way holding a mouse-look would: a
+;;; start and a stop urging a look intent that ADVANCE-LUVCRAFT-KEYBOARD-LOOK
+;;; integrates every frame.  They live in the world layer rather than the
+;;; movement table so that a ridden animal, whose focus offers exactly the
+;;; movement vocabulary, is steered with WASD and never has its camera
+;;; wrenched by a stray arrow.
+
+(define-command (com-start-looking :command-table luvcraft-world
+                                   :name "Start Looking")
+    ((direction 'keyword :prompt "direction"))
+  (setf (luvcraft:movement-urging-p
+         (luvcraft:luvcraft-session-look-intent (luvcraft-command-session))
+         direction)
+        t))
+
+(define-command (com-stop-looking :command-table luvcraft-world-release
+                                  :name "Stop Looking")
+    ((direction 'keyword :prompt "direction"))
+  (setf (luvcraft:movement-urging-p
+         (luvcraft:luvcraft-session-look-intent (luvcraft-command-session))
+         direction)
+        nil))
+
+(defparameter *look-keys*
+  '((:up :up) (:down :down) (:left :left) (:right :right))
+  "Which arrow urges the camera which way.")
+
+(defun add-look-keystrokes ()
+  "Bind every arrow to its look on the way down and its stop on the up."
+  (loop for (key direction) in *look-keys*
+        do (flet ((look-item (command)
+                    (let ((direction direction))
+                      (lambda (gesture numeric-argument)
+                        (declare (ignore gesture numeric-argument))
+                        (list command direction)))))
+             (add-keystroke-to-command-table
+              'luvcraft-world (list key :any) :function
+              (look-item 'com-start-looking) :errorp nil)
+             (add-keystroke-to-command-table
+              'luvcraft-world-release (list key :any) :function
+              (look-item 'com-stop-looking) :errorp nil))))
+
+(add-look-keystrokes)
 
 ;;; A rider's focus offers exactly the movement table, so steering an animal
 ;;; and walking are the same commands reaching the same intent.  Everything
