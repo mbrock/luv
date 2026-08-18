@@ -4723,7 +4723,8 @@ backend's context before its source-located unsupported-operation method."))
 (defmethod lower-shader-call ((operator (eql '-)) context expression)
   (let ((operands (shader-call-operands expression)))
     (if (= (length operands) 1)
-        (if (shader-float-type-p (shader-expression-type expression))
+        (if (eq :float (shader-type-scalar-kind
+                        (find-shader-type (shader-expression-type expression))))
             (emit-value-instruction
              context expression (shader-expression-type expression) 'f-negate
              (list (lower-shader-expression context (first operands))))
