@@ -62,9 +62,11 @@ game for later SLY evaluations.  STOP-PLAYING checkpoints and closes it."
                     :checkpoint-writer writer))
           (unless session
             (stop-world-checkpoint-writer writer)))
-        ;; The films the player was carrying come back into the bag.
+        ;; The films the player was carrying come back into the bag, and the
+        ;; ones standing beside walls light them again.
         (dolist (block carried)
           (add-block-to-inventory (luvcraft-session-inventory session) block 1))
+        (relight-world-films session)
         (setf *checkpoint-writer* writer
               *session* session)))))
 

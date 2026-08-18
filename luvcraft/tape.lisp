@@ -553,3 +553,49 @@ Return the display it plays on, or NIL."
 
 (defmethod luvcraft-block-removed ((film film-block-kind) session x y z)
   (hide-film-beside session x y z))
+
+;;; ---------------------------------------------------------------------
+;;; After a restart, the films already standing in the world light their
+;;; walls again -- once the ground under them has streamed in.
+
+(defclass film-relighting ()
+  ((pending :initarg :pending :accessor film-relighting-pending
+            :documentation "The (X Y Z) of every film not yet looked at."))
+  (:documentation
+   "A drawless overlay that shows each of the world's films on its wall as
+soon as its cell is resident, then takes itself down."))
+
+(defmethod luvcraft-overlay-stage ((job film-relighting)) :none)
+
+(defun world-film-coordinates (world)
+  "The (X Y Z) of every film written into WORLD's authored edits."
+  (let ((source (block-world-source world)))
+    (when (typep source 'little-world-source)
+      (loop for coordinate being the hash-keys
+              of (block-edit-overlay-entries (little-world-source-edits source))
+              using (hash-value block)
+            when (typep block 'film-block-kind)
+              collect coordinate))))
+
+(defun relight-world-films (session)
+  "Arrange for SESSION's world's films to play on their walls again."
+  (let ((pending (world-film-coordinates (luvcraft-session-world session))))
+    (when pending
+      (add-luvcraft-overlay
+       session (make-instance 'film-relighting :pending pending)))))
+
+(defmethod refresh-luvcraft-overlay ((job film-relighting) session)
+  (let ((world (luvcraft-session-world session)))
+    (setf (film-relighting-pending job)
+          (remove-if
+           (lambda (coordinate)
+             (destructuring-bind (x y z) coordinate
+               (multiple-value-bind (block residency)
+                   (world-block-at world x y z)
+                 (when (eq residency :resident)
+                   (when (typep block 'film-block-kind)
+                     (show-film-beside session block x y z))
+                   t))))
+           (film-relighting-pending job)))
+    (unless (film-relighting-pending job)
+      (remove-luvcraft-overlay session job))))
