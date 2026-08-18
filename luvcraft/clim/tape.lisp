@@ -191,15 +191,35 @@ or say what is wrong with it and keep asking."
 (defmethod luvcraft:handle-luvcraft-focus-event
     ((overlay luvcraft-tape-prompt-overlay) session canvas
      (event luv:canvas-key-press-event))
-  (declare (ignore canvas))
   (let* ((frame (mcluv:widget-overlay-frame overlay))
          (key (luv:canvas-key-event-key-name event))
-         (character (luv:canvas-key-event-character event)))
+         (character (luv:canvas-key-event-character event))
+         (paste-p (and (eq key :v)
+                       (intersection '(:super :control)
+                                     (luv:canvas-key-event-modifiers event)))))
     (case key
       ((:escape :tab)
        (close-tape-prompt overlay session))
       ((:return :keypad-enter)
        (answer-tape-prompt overlay session))
+      ((:v)
+       ;; Cmd-V or Ctrl-V pastes: a link is what a player has on the
+       ;; clipboard, and typing eleven random letters is nobody's idea of fun.
+       (if paste-p
+           (alexandria:when-let ((text (luv:canvas-clipboard-text canvas)))
+             (setf (tape-prompt-draft frame)
+                   (concatenate 'string (tape-prompt-draft frame)
+                                (string-trim
+                                 '(#\Space #\Tab #\Return #\Newline)
+                                 (subseq text 0 (position #\Newline text))))
+                   (tape-prompt-complaint frame) nil)
+             (repaint-tape-prompt frame))
+           (when (and character (graphic-char-p character))
+             (setf (tape-prompt-draft frame)
+                   (concatenate 'string (tape-prompt-draft frame)
+                                (string character))
+                   (tape-prompt-complaint frame) nil)
+             (repaint-tape-prompt frame))))
       (:backspace
        (let ((draft (tape-prompt-draft frame)))
          (when (plusp (length draft))
