@@ -1913,28 +1913,51 @@ generalizes."
 
 (defmethod activate-luvcraft-target
     ((block block-kind) (session luvcraft-session) hit)
-  (when (eq :terminal (block-kind-name block))
-    (let* ((coordinate (block-ray-hit-coordinate hit))
-           (face (block-ray-hit-face hit)))
-      (when face
-        (let ((display nil)
-              (completed-p nil))
-          (unwind-protect
-               (progn
-                 (setf display
-                       (open-terminal-display
-                        session
-                        (world-coordinate-x coordinate)
-                        (world-coordinate-y coordinate)
-                        (world-coordinate-z coordinate)
-                        (block-face-name face)
-                        :fixture ""))
-                 (attach-terminal-display-shell display)
-                 (setf completed-p t)
-                 display)
-            (unless completed-p
-              (when display
-                (remove-luvcraft-overlay session display)))))))))
+  (activate-wall-material (block-kind-name block) session hit))
+
+(defgeneric activate-wall-material (name session hit)
+  (:documentation
+   "Create and return the wall interaction for the material named NAME, or NIL.
+
+The material vocabulary is open here the same way it is in the atlas: one
+EQL method per material which answers activation, so a new display-block
+material adds a method rather than growing a CASE.")
+  (:method (name session hit)
+    (declare (ignore name session hit))
+    nil))
+
+(defun open-activated-wall-display (session hit material attach)
+  "Open the terminal display for the MATERIAL wall HIT names and ATTACH it.
+
+ATTACH receives the fresh display and gives the wall its process; if it
+fails, the display is taken down rather than left attached to nothing."
+  (let* ((coordinate (block-ray-hit-coordinate hit))
+         (face (block-ray-hit-face hit)))
+    (when face
+      (let ((display nil)
+            (completed-p nil))
+        (unwind-protect
+             (progn
+               (setf display
+                     (open-terminal-display
+                      session
+                      (world-coordinate-x coordinate)
+                      (world-coordinate-y coordinate)
+                      (world-coordinate-z coordinate)
+                      (block-face-name face)
+                      :fixture ""
+                      :material material))
+               (funcall attach display)
+               (setf completed-p t)
+               display)
+          (unless completed-p
+            (when display
+              (remove-luvcraft-overlay session display))))))))
+
+(defmethod activate-wall-material
+    ((name (eql :terminal)) (session luvcraft-session) hit)
+  (open-activated-wall-display
+   session hit *terminal-block* #'attach-terminal-display-shell))
 
 (defun attach-terminal-display-shell (display)
   "Attach an interactive login-free bash in the checkout to DISPLAY.

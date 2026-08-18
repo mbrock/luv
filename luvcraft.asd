@@ -68,6 +68,7 @@
                  (:file "render")
                  (:file "play")
                  (:file "terminal-wall")
+                 (:file "urbit")
                  (:file "phone")
                  (:file "capture")
                  (:file "mirror" :if-feature :darwin)

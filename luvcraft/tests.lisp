@@ -1715,6 +1715,25 @@
     (ok (eq (select-luvcraft-block session 11) luvcraft::*gravel-block*))
     (ok (search "[inventory]" (canvas-title canvas)))))
 
+(deftest urbit-wall-boots-a-comet-once-and-resumes-its-pier
+  ;; The pier lives under the checkout's build directory, named by the wall.
+  (let ((pier (urbit-pier-pathname)))
+    (ok (search "build/urbit/comet" (namestring pier))))
+  ;; A pier vere has not made an .urb in boots as a comet; one it has,
+  ;; resumes.  The urbit itself is not run here: booting a comet is a
+  ;; networked, minutes-long affair that belongs on a wall, not in a test.
+  (let* ((pier (merge-pathnames
+                (make-pathname :directory '(:relative "luv-urbit-test-pier"))
+                (uiop:temporary-directory))))
+    (unwind-protect
+         (progn
+           (ok (equal (list "-c" (namestring pier))
+                      (urbit-boot-arguments pier)))
+           (ensure-directories-exist (merge-pathnames #P".urb/" pier))
+           (ok (equal (list (namestring pier))
+                      (urbit-boot-arguments pier))))
+      (uiop:delete-directory-tree pier :validate t :if-does-not-exist :ignore))))
+
 (deftest block-inventory-supports-creative-and-finite-stacks
   (let* ((creative
            (make-block-inventory :blocks (list luvcraft::*stone-block*)))
