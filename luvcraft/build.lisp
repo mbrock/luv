@@ -59,6 +59,6 @@
     ;; The compiler's account of the failure is already in a log; the summary
     ;; says which one.  This has to go through the display thread: the build's
     ;; own output is pointed at build/logs/ by now.
-    (luv-build:note (princ-to-string condition))
+    (luv-build:failed (princ-to-string condition))
     (luv-build:finish :error)
     (sb-ext:exit :code 1 :abort t)))
