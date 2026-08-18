@@ -469,6 +469,11 @@ a finished view for a McCLIM frame to paint."))
   (setf (console-login-stage console) nil
         (console-login-note console) nil
         (console-failure console) nil)
+  ;; RESUME and COMPLETE-LOGIN bind the application identity only for their
+  ;; own extent; INVOKE needs it for every call after, so give this thread
+  ;; its own.
+  (setf telegram.client:*application*
+        (telegram.client:application-from-environment))
   (publish-console-view console :status "loading…")
   (telegram.chat:refresh-roster-dialogs (console-roster console) :limit 40)
   (telegram.chat:synchronize-chat-updates (console-roster console))
