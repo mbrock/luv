@@ -11,6 +11,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
   (:export #:+portability-enumeration-extension-name+
            #:+swapchain-extension-name+
            #:+debug-utils-extension-name+
+           #:+mesh-shader-extension-name+
            #:vulkan-call-error
            #:vulkan-call-error-operation
            #:vulkan-call-error-result
@@ -54,6 +55,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:queue-family-count
            #:physical-device-queue-families
            #:physical-device-shader-int64-p
+           #:physical-device-mesh-shader-p
            #:physical-memory-type
            #:physical-memory-type-flags
            #:physical-memory-type-heap-index
@@ -94,6 +96,8 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:destroy-pipeline-layout
            #:create-compute-pipeline
            #:create-graphics-pipeline
+           #:create-mesh-graphics-pipeline
+           #:cmd-draw-mesh-tasks
            #:destroy-pipeline
            #:create-sampler
            #:destroy-sampler

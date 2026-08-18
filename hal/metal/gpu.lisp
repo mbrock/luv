@@ -559,18 +559,6 @@ backend-local extension; ordinary callers use SUBMIT.  #T9K4RC"
                (metal-device-residency-set device)))
             (luv.objective-c:release-objective-c-object native-buffer)))))))
 
-(defun buffer-data-foreign-type (data)
-  "Return the CFFI element type and byte size for a one-dimensional DATA
-array of single-floats or unsigned bytes, words, or double words."
-  (let ((element-type (and (arrayp data) (= 1 (array-rank data))
-                           (array-element-type data))))
-    (cond ((null element-type) nil)
-          ((subtypep element-type 'single-float) (values :float 4))
-          ((subtypep element-type '(unsigned-byte 8)) (values :uint8 1))
-          ((subtypep element-type '(unsigned-byte 32)) (values :uint32 4))
-          ((subtypep element-type '(unsigned-byte 64)) (values :uint64 8))
-          (t nil))))
-
 (defmethod write-buffer
     ((buffer metal-gpu-buffer) data &key (offset 0))
   "Copy a one-dimensional numeric array into shared Metal memory.

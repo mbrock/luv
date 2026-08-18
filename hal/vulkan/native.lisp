@@ -397,6 +397,13 @@ destroy it before destroying INSTANCE."
           (cffi:foreign-slot-value
            features '(:struct physical-device-features) 'shader-int64)))))
 
+(defun physical-device-mesh-shader-p (physical-device)
+  "Whether PHYSICAL-DEVICE offers VK_EXT_mesh_shader's task and mesh stages."
+  (and (member +mesh-shader-extension-name+
+               (enumerate-device-extension-names physical-device)
+               :test #'string=)
+       t))
+
 (defun create-device
     (physical-device family-index &key enabled-extension-names
                                        additional-family-indices)
@@ -426,17 +433,32 @@ destroy it before destroying INSTANCE."
                         physical-device-synchronization-2-features
                         :p-next timeline-features
                         :synchronization-2 1)
-                (with-vk (create-info device-create-info
+                ;; Asking for VK_EXT_mesh_shader admits its commands; the two
+                ;; stages themselves are features, and a pipeline whose module
+                ;; declares MeshShadingEXT is invalid without them.
+                (with-vk (mesh-features
+                          physical-device-mesh-shader-features-ext
                           :p-next synchronization-features
-                          :flags 0
-                          :queue-create-info-count queue-count
-                          :p-queue-create-infos queue-infos
-                          :enabled-layer-count 0
-                          :pp-enabled-layer-names (cffi:null-pointer)
-                          :enabled-extension-count (length enabled-extension-names)
-                          :pp-enabled-extension-names extension-names
-                          :p-enabled-features features)
-                  (create-device-handle physical-device create-info))))))))))
+                          :task-shader 1
+                          :mesh-shader 1
+                          :multiview-mesh-shader 0
+                          :primitive-fragment-shading-rate-mesh-shader 0
+                          :mesh-shader-queries 0)
+                  (with-vk (create-info device-create-info
+                            :p-next (if (member +mesh-shader-extension-name+
+                                                enabled-extension-names
+                                                :test #'string=)
+                                        mesh-features
+                                        synchronization-features)
+                            :flags 0
+                            :queue-create-info-count queue-count
+                            :p-queue-create-infos queue-infos
+                            :enabled-layer-count 0
+                            :pp-enabled-layer-names (cffi:null-pointer)
+                            :enabled-extension-count (length enabled-extension-names)
+                            :pp-enabled-extension-names extension-names
+                            :p-enabled-features features)
+                    (create-device-handle physical-device create-info)))))))))))
 
 (defun destroy-device (device)
   (vk:destroy-device device (cffi:null-pointer))
@@ -635,12 +657,17 @@ destroy it before destroying INSTANCE."
   (ecase type
     (:texture :sampled-image)
     (:sampler :sampler)
-    (:uniform-buffer :uniform-buffer)))
+    (:uniform-buffer :uniform-buffer)
+    (:storage-buffer :storage-buffer)))
 
 (defun texture-sampler-uniform-descriptor-stages (entry)
+  ;; A mesh pipeline has no vertex stage, and a resource it reads from the
+  ;; task or mesh stage must say so: a descriptor visible only to :VERTEX is
+  ;; not visible to the stages that replaced it.
   (or (getf entry :stages)
       (ecase (getf entry :type)
-        ((:texture :sampler :uniform-buffer) '(:vertex :fragment)))))
+        ((:texture :sampler :uniform-buffer :storage-buffer)
+         '(:vertex :fragment)))))
 
 (defun create-texture-sampler-uniform-descriptor-set-layout
     (device entries)
@@ -1030,6 +1057,152 @@ destroy it before destroying INSTANCE."
             (create-with-shader-names vertex-name fragment-name))
           (create-with-shader-names vertex-name (cffi:null-pointer))))))
 
+(defun device-procedure (device name)
+  (let ((procedure (vk:get-device-proc-addr device name)))
+    (when (cffi:null-pointer-p procedure)
+      (error "Vulkan device procedure ~A is unavailable." name))
+    procedure))
+
+(defun create-mesh-graphics-pipeline
+    (device mesh-module fragment-module layout render-pass
+     &key task-module (task-entry-point "main") (mesh-entry-point "main")
+          (fragment-entry-point "main")
+          depth-compare depth-write-enabled blend)
+  "Link a task, mesh, and fragment stage into one VK_EXT_mesh_shader pipeline.
+
+A mesh pipeline draws no vertices, so it carries neither a vertex input nor
+an input assembly state; the mesh stage's own OpExecutionMode names its
+output topology."
+  (labels
+      ((create-with-shader-names (task-name mesh-name fragment-name)
+         (let* ((stage-count (+ (if task-module 1 0) 1
+                                (if fragment-module 1 0))))
+           (cffi:with-foreign-object
+               (stages '(:struct pipeline-shader-stage-create-info)
+                       stage-count)
+             (let ((index -1))
+               (flet ((stage (bit module name)
+                        (fill-vk
+                         (cffi:mem-aptr
+                          stages '(:struct pipeline-shader-stage-create-info)
+                          (incf index))
+                         'pipeline-shader-stage-create-info
+                         :flags 0 :stage (list bit) :module module
+                         :p-name name
+                         :p-specialization-info (cffi:null-pointer))))
+                 (when task-module (stage :task-ext task-module task-name))
+                 (stage :mesh-ext mesh-module mesh-name)
+                 (when fragment-module
+                   (stage :fragment fragment-module fragment-name))))
+             (with-vk (viewport-state
+                       pipeline-viewport-state-create-info
+                       :flags 0 :viewport-count 1
+                       :p-viewports (cffi:null-pointer)
+                       :scissor-count 1
+                       :p-scissors (cffi:null-pointer))
+               (with-vk (rasterization
+                         pipeline-rasterization-state-create-info
+                         :flags 0 :depth-clamp-enable 0
+                         :rasterizer-discard-enable 0
+                         :polygon-mode :fill
+                         :cull-mode nil
+                         :front-face :counter-clockwise
+                         :depth-bias-enable 0
+                         :depth-bias-constant-factor 0.0
+                         :depth-bias-clamp 0.0
+                         :depth-bias-slope-factor 0.0
+                         :line-width 1.0)
+                 (with-vk (multisample
+                           pipeline-multisample-state-create-info
+                           :flags 0 :rasterization-samples :1
+                           :sample-shading-enable 0
+                           :min-sample-shading 0.0
+                           :p-sample-mask (cffi:null-pointer)
+                           :alpha-to-coverage-enable 0
+                           :alpha-to-one-enable 0)
+                   (labels
+                       ((create-with-blend (attachment-count attachments)
+                          (with-vk
+                              (blend-state
+                               pipeline-color-blend-state-create-info
+                               :flags 0 :logic-op-enable 0
+                               :logic-op :copy
+                               :attachment-count attachment-count
+                               :p-attachments attachments)
+                            (with-foreign-array
+                                (dynamic-states dynamic-state
+                                                #(:viewport :scissor))
+                              (with-vk (dynamic
+                                        pipeline-dynamic-state-create-info
+                                        :flags 0
+                                        :dynamic-state-count 2
+                                        :p-dynamic-states dynamic-states)
+                                (call-with-depth-stencil-state
+                                 depth-compare depth-write-enabled
+                                 (lambda (depth-state)
+                                   (with-vk
+                                       (create-info
+                                        graphics-pipeline-create-info
+                                        :flags 0
+                                        :stage-count stage-count
+                                        :p-stages stages
+                                        :p-vertex-input-state
+                                        (cffi:null-pointer)
+                                        :p-input-assembly-state
+                                        (cffi:null-pointer)
+                                        :p-tessellation-state
+                                        (cffi:null-pointer)
+                                        :p-viewport-state viewport-state
+                                        :p-rasterization-state rasterization
+                                        :p-multisample-state multisample
+                                        :p-depth-stencil-state depth-state
+                                        :p-color-blend-state blend-state
+                                        :p-dynamic-state dynamic
+                                        :layout layout
+                                        :render-pass render-pass
+                                        :subpass 0
+                                        :base-pipeline-handle
+                                        (cffi:null-pointer)
+                                        :base-pipeline-index -1)
+                                     (create-graphics-pipeline-handle
+                                      device create-info)))))))))
+                     (if fragment-module
+                         (with-vk (blend-attachment
+                                   pipeline-color-blend-attachment-state
+                                   :blend-enable (if blend 1 0)
+                                   :src-color-blend-factor :one
+                                   :dst-color-blend-factor
+                                   (if blend :one-minus-src-alpha :zero)
+                                   :color-blend-op :add
+                                   :src-alpha-blend-factor :one
+                                   :dst-alpha-blend-factor
+                                   (if blend :one-minus-src-alpha :zero)
+                                   :alpha-blend-op :add
+                                   :color-write-mask '(:r :g :b :a))
+                           (create-with-blend 1 blend-attachment))
+                         (create-with-blend 0 (cffi:null-pointer))))))))))
+       (with-optional-string (value function)
+         (if value
+             (cffi:with-foreign-string (pointer value)
+               (funcall function pointer))
+             (funcall function (cffi:null-pointer)))))
+    (with-optional-string
+        (and task-module task-entry-point)
+      (lambda (task-name)
+        (cffi:with-foreign-string (mesh-name mesh-entry-point)
+          (with-optional-string
+              (and fragment-module fragment-entry-point)
+            (lambda (fragment-name)
+              (create-with-shader-names task-name mesh-name
+                                        fragment-name))))))))
+
+(defun cmd-draw-mesh-tasks (device command-buffer x y z)
+  "Dispatch X by Y by Z task (or mesh) workgroups into COMMAND-BUFFER."
+  (cffi:foreign-funcall-pointer
+   (device-procedure device "vkCmdDrawMeshTasksEXT") ()
+   :pointer command-buffer :uint32 x :uint32 y :uint32 z :void)
+  (values))
+
 (defun destroy-pipeline (device pipeline)
   (vk:destroy-pipeline device pipeline (cffi:null-pointer))
   (values))
@@ -1058,11 +1231,13 @@ destroy it before destroying INSTANCE."
   (values (count :texture entries :key (lambda (entry) (getf entry :type)))
           (count :sampler entries :key (lambda (entry) (getf entry :type)))
           (count :uniform-buffer entries
+                 :key (lambda (entry) (getf entry :type)))
+          (count :storage-buffer entries
                  :key (lambda (entry) (getf entry :type)))))
 
 (defun create-texture-sampler-uniform-descriptor-pool
     (device entries &key (max-sets 1))
-  (multiple-value-bind (texture-count sampler-count uniform-count)
+  (multiple-value-bind (texture-count sampler-count uniform-count storage-count)
       (texture-sampler-uniform-pool-counts entries)
     (let ((sizes (append
                   (when (plusp texture-count)
@@ -1070,7 +1245,9 @@ destroy it before destroying INSTANCE."
                   (when (plusp sampler-count)
                     (list (list :sampler sampler-count)))
                   (when (plusp uniform-count)
-                    (list (list :uniform-buffer uniform-count))))))
+                    (list (list :uniform-buffer uniform-count)))
+                  (when (plusp storage-count)
+                    (list (list :storage-buffer storage-count))))))
       (cffi:with-foreign-object
           (pool-sizes '(:struct descriptor-pool-size) (length sizes))
         (loop for (type count) in sizes
@@ -1139,8 +1316,10 @@ destroy it before destroying INSTANCE."
                       (member (getf entry :type) '(:texture :sampler)))
                     entries))
         (buffer-count
-          (count :uniform-buffer entries
-                 :key (lambda (entry) (getf entry :type))))
+          (count-if (lambda (entry)
+                      (member (getf entry :type)
+                              '(:uniform-buffer :storage-buffer)))
+                    entries))
         (write-count (length entries)))
     (cffi:with-foreign-object
         (image-infos '(:struct descriptor-image-info) (max 1 image-count))
@@ -1202,7 +1381,7 @@ destroy it before destroying INSTANCE."
                          :p-buffer-info (cffi:null-pointer)
                          :p-texel-buffer-view (cffi:null-pointer))
                         (incf image-index)))
-                     (:uniform-buffer
+                     ((:uniform-buffer :storage-buffer)
                       (let ((buffer-info
                               (cffi:mem-aptr
                                buffer-infos
@@ -1218,7 +1397,7 @@ destroy it before destroying INSTANCE."
                          :dst-binding (getf entry :binding)
                          :dst-array-element 0
                          :descriptor-count 1
-                         :descriptor-type :uniform-buffer
+                         :descriptor-type type
                          :p-image-info (cffi:null-pointer)
                          :p-buffer-info buffer-info
                          :p-texel-buffer-view (cffi:null-pointer))
