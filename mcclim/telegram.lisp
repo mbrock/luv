@@ -1275,7 +1275,6 @@ world should not quietly move a screen on a wall somewhere behind it."
 (defmethod luvcraft:handle-luvcraft-focus-event
     ((overlay luvcraft-communicator-overlay) session canvas
      (event luv:canvas-key-press-event))
-  (declare (ignore canvas))
   (let* ((frame (widget-overlay-frame overlay))
          (key (luv:canvas-key-event-key-name event))
          (character (luv:canvas-key-event-character event)))
@@ -1294,6 +1293,23 @@ world should not quietly move a screen on a wall somewhere behind it."
        t)
       (:return
        (submit-communicator-draft frame)
+       t)
+      (:v
+       ;; Cmd-V or Ctrl-V pastes -- a two-factor password is not something
+       ;; anyone should have to type into a phone in a game -- taking the
+       ;; first line only, since the field is one line.
+       (if (intersection '(:super :control)
+                         (luv:canvas-key-event-modifiers event))
+           (alexandria:when-let ((text (luv:canvas-clipboard-text canvas)))
+             (setf (communicator-draft frame)
+                   (concatenate 'string (communicator-draft frame)
+                                (string-trim
+                                 '(#\Space #\Tab #\Return #\Newline)
+                                 (subseq text 0 (position #\Newline text))))))
+           (when (and character (graphic-char-p character))
+             (setf (communicator-draft frame)
+                   (concatenate 'string (communicator-draft frame)
+                                (string character)))))
        t)
       (:backspace
        (let ((draft (communicator-draft frame)))

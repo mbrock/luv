@@ -332,6 +332,12 @@ bounded wait that the window system is pumping for it."))
 (defgeneric canvas-fullscreen-p (canvas)
   (:documentation "Return whether CANVAS occupies its display."))
 
+(defgeneric canvas-clipboard-text (canvas)
+  (:documentation
+   "The text on the system clipboard, or NIL when there is none or the
+window system has no clipboard to ask.")
+  (:method (canvas) (declare (ignore canvas)) nil))
+
 (defgeneric set-canvas-fullscreen (canvas enabled)
   (:documentation
    "Give CANVAS its whole display, or hand it back to the window manager."))

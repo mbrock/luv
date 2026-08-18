@@ -498,6 +498,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:canvas-position
            #:canvas-visible-p
            #:canvas-fullscreen-p
+           #:canvas-clipboard-text
            #:set-canvas-fullscreen
            #:set-canvas-relative-pointer-mode
            #:show-canvas

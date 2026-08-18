@@ -501,6 +501,16 @@ is finally created."
         (canvas-height canvas) height)
   canvas)
 
+(defmethod canvas-clipboard-text ((canvas sdl-canvas))
+  ;; The clipboard belongs to the video subsystem, which only answers on
+  ;; the thread that initialized it.
+  (call-on-sdl-canvas-thread
+   canvas
+   (lambda ()
+     (when (sdl3:has-clipboard-text)
+       (let ((text (sdl3:get-clipboard-text)))
+         (and (plusp (length text)) text))))))
+
 (defmethod set-canvas-fullscreen ((canvas sdl-canvas) enabled)
   (let ((enabled (and enabled t)))
     (when (eq :open (canvas-state canvas))
