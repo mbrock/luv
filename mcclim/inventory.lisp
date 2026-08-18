@@ -239,6 +239,34 @@ every cell makes the word louder than the block it is about."
                          (+ left 5) (+ +inventory-quickbar-top+ 5)
                          :text-size 9 :ink +white+))))
 
+(defgeneric inventory-detail-rows (block entry)
+  (:documentation
+   "The (LABEL . VALUE) rows the inspector prints for BLOCK held as ENTRY.")
+  (:method ((block luvcraft:block-kind) entry)
+    (list (cons "Type" "Block")
+          (cons "Light opacity" (luvcraft:block-light-opacity block))
+          (cons "Light emission" (luvcraft:block-light-emission block))
+          (cons "Surface emission"
+                (format nil "~,2F" (luvcraft:block-surface-emission block)))
+          (cons "Stack" (inventory-entry-quantity-label entry)))))
+
+(defun inventory-clipped-label (text limit)
+  (if (and text (> (length text) limit))
+      (concatenate 'string (subseq text 0 (1- limit)) "…")
+      (or text "—")))
+
+(defmethod inventory-detail-rows ((film luvcraft:film-block-kind) entry)
+  "A film is its video: what it is called, who put it up, how long it runs."
+  (let ((duration (luvcraft:film-duration film)))
+    (list (cons "Type" "Film")
+          (cons "Title" (inventory-clipped-label (luvcraft:film-title film) 17))
+          (cons "By" (inventory-clipped-label (luvcraft:film-uploader film) 22))
+          (cons "Runs"
+                (if duration
+                    (format nil "~D:~2,'0D" (floor duration 60) (mod duration 60))
+                    "—"))
+          (cons "Stack" (inventory-entry-quantity-label entry)))))
+
 (defun draw-inventory-details (frame pane selected entry)
   (draw-text* pane "Item Inspector" 668 31
               :align-y :center :text-size 14 :ink *inventory-text-ink*)
@@ -257,14 +285,7 @@ every cell makes the word louder than the block it is about."
   (draw-line* pane 668 119 822 119 :ink *inventory-dark-edge*)
   (draw-text* pane "Details" 668 138 :align-y :center
               :text-size 13 :ink *inventory-text-ink*)
-  (loop for label in '("Type" "Light opacity" "Light emission"
-                       "Surface emission" "Stack")
-        for value in (list "Block"
-                           (luvcraft:block-light-opacity selected)
-                           (luvcraft:block-light-emission selected)
-                           (format nil "~,2F"
-                                   (luvcraft:block-surface-emission selected))
-                           (inventory-entry-quantity-label entry))
+  (loop for (label . value) in (inventory-detail-rows selected entry)
         for y from 162 by 24
         do (draw-text* pane label 668 y :align-y :center :text-size 10
                        :ink *inventory-muted-ink*)

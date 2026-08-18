@@ -69,6 +69,7 @@
                  (:file "play")
                  (:file "terminal-wall")
                  (:file "phone")
+                 (:file "tape")
                  (:file "capture")
                  (:file "mirror" :if-feature :darwin)
                  (:file "portal" :if-feature :darwin)
@@ -109,6 +110,7 @@
                              (:file "frame")
                              (:file "commands")
                              (:file "legend")
+                             (:file "tape")
                              (:file "input"))))
   :in-order-to ((test-op (test-op "luvcraft/clim-test"))))
 

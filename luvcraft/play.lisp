@@ -46,7 +46,7 @@ game for later SLY evaluations.  STOP-PLAYING checkpoints and closes it."
     (start-luvcraft-tracy))
   (multiple-value-bind (world resume-description)
       (load-or-make-luvcraft-world world-pathname)
-    (multiple-value-bind (camera player selected-block)
+    (multiple-value-bind (camera player selected-block carried)
         (restore-luvcraft-resume-save-description resume-description)
       (let ((writer (make-world-checkpoint-writer world-pathname))
             (session nil))
@@ -62,6 +62,9 @@ game for later SLY evaluations.  STOP-PLAYING checkpoints and closes it."
                     :checkpoint-writer writer))
           (unless session
             (stop-world-checkpoint-writer writer)))
+        ;; The films the player was carrying come back into the bag.
+        (dolist (block carried)
+          (add-block-to-inventory (luvcraft-session-inventory session) block 1))
         (setf *checkpoint-writer* writer
               *session* session)))))
 

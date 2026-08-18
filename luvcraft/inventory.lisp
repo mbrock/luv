@@ -83,6 +83,22 @@ the view and number-key ordering do not jump as blocks are used."
             (decf (block-inventory-entry-quantity entry) quantity))
           t)))))
 
+(defgeneric block-kind-carried-p (block)
+  (:documentation
+   "Whether BLOCK is a thing a player picks up and carries, rather than a
+material the palette gives without limit.  A film is; stone is not.")
+  (:method (block)
+    (declare (ignore block))
+    nil))
+
+(defun block-inventory-carried-blocks (inventory)
+  "Return the carried blocks INVENTORY actually holds, in order."
+  (loop for entry in (block-inventory-entries inventory)
+        for block = (block-inventory-entry-block entry)
+        for quantity = (block-inventory-entry-quantity entry)
+        when (and (block-kind-carried-p block) quantity (plusp quantity))
+          collect block))
+
 (defgeneric toggle-luvcraft-inventory (session)
   (:documentation
    "Toggle SESSION's inventory view, returning true when one is available.

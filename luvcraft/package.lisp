@@ -178,6 +178,29 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:block-kind-face-tiles
            #:block-kind-name
            #:block-kind-named
+           #:block-kind-carried-p
+           #:block-inventory-carried-blocks
+           ;; The tape and its films; luvcraft/tape.lisp.
+           #:tape-block-kind
+           #:*tape-block*
+           #:film-block-kind
+           #:film-video-id
+           #:film-title
+           #:film-uploader
+           #:film-duration
+           #:film-upload-date
+           #:film-pathname
+           #:film-label
+           #:ensure-film
+           #:*films*
+           #:youtube-video-id
+           #:luvcraft-films-directory
+           #:yt-dlp-program
+           #:tape-download
+           #:tape-download-progress
+           #:begin-tape-download
+           #:find-tape-download
+           #:open-tape-prompt
            #:block-inventory
            #:block-inventory-blocks
            #:block-inventory-quickbar-blocks

@@ -612,7 +612,9 @@ the terrain the ray meets first is what the player is looking at."
         (luvcraft-session-world session)
         :camera (luvcraft-session-camera session)
         :player (luvcraft-session-player session)
-        :selected-block (luvcraft-session-selected-block session))))))
+        :selected-block (luvcraft-session-selected-block session)
+        :carried (block-inventory-carried-blocks
+                  (luvcraft-session-inventory session)))))))
 
 (defun luvcraft-session-pipeline (session)
   (live-shader-pipeline-native-pipeline
@@ -734,15 +736,26 @@ the terrain the ray meets first is what the player is looking at."
              (edit-block-at nil world x y z)
              (smash-block-particles
               (luvcraft-session-particle-system session)
-              old-block coordinate))
+              old-block coordinate)
+             ;; A block worth carrying is picked up rather than smashed away.
+             (when (block-kind-carried-p old-block)
+               (add-block-to-inventory
+                (luvcraft-session-inventory session) old-block 1)
+               (setf (luvcraft-session-selected-block session) old-block)
+               (update-luvcraft-session-title session)))
             (:place
              (when old-block
                (return-from edit-luvcraft-block (values nil :blocked)))
              (when (player-overlaps-block-p
                     (luvcraft-session-player session) x y z)
                (return-from edit-luvcraft-block (values nil :blocked)))
-             (edit-block-at
-              (luvcraft-session-selected-block session) world x y z)))
+             (let ((block (luvcraft-session-selected-block session)))
+               ;; Creative materials are unlimited; a carried one is spent.
+               (when (and (block-kind-carried-p block)
+                          (not (remove-block-from-inventory
+                                (luvcraft-session-inventory session) block 1)))
+                 (return-from edit-luvcraft-block (values nil :blocked)))
+               (edit-block-at block world x y z))))
           (request-luvcraft-session-checkpoint session)
           (values coordinate :edited))))))
 

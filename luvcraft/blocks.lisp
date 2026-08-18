@@ -131,21 +131,34 @@ hang upright."
 
 (defvar *block-kinds* nil)
 
+(defclass tape-block-kind (block-kind) ()
+  (:metaclass luv.arithmetic.records:quantity-class)
+  (:documentation
+   "The film reel a player loads with a YouTube code; see luvcraft/tape.lisp.
+
+A class of its own rather than a name test, so activating one is a method
+on the kind and no other block's activation has to know about tapes."))
+
 (defun ensure-block-kind
     (current name &key face-tiles categories
                        (display-color '(0.5 0.5 0.5)) (placeable-p t)
                        (light-opacity 15) (light-emission 0)
-                       (surface-emission 0.0))
-  "Define NAME while preserving CURRENT's identity across live redefinition."
+                       (surface-emission 0.0) (class 'block-kind))
+  "Define NAME while preserving CURRENT's identity across live redefinition.
+
+CLASS is the block kind class to make; a CURRENT of another class is
+replaced rather than reinitialized, since its methods would be the wrong
+ones."
   (let ((initargs
           (list :name name :face-tiles face-tiles :categories categories
                 :display-color display-color :placeable-p placeable-p
                 :light-opacity light-opacity :light-emission light-emission
                 :surface-emission surface-emission)))
     (if (and (typep current 'block-kind)
+             (eq (class-name (class-of current)) class)
              (eq name (block-kind-name current)))
         (apply #'reinitialize-instance current initargs)
-        (apply #'make-instance 'block-kind initargs))))
+        (apply #'make-instance class initargs))))
 
 (defmacro define-block-kinds (&body definitions)
   "Define the complete ordered block vocabulary.
@@ -230,7 +243,19 @@ definition."
    :categories '(:building) :display-color '(0.79 0.68 0.43))
   (*slate-block* :slate
    :face-tiles '(:all 22)
-   :categories '(:building) :display-color '(0.25 0.29 0.32)))
+   :categories '(:building) :display-color '(0.25 0.29 0.32))
+  (*tape-block* :tape
+   "A blank film reel.  Focus it and it asks for a YouTube code; when the
+download lands it has become a film, which is a block that can be picked up
+and carried.  See luvcraft/tape.lisp."
+   :class 'tape-block-kind
+   :face-tiles '(:front 30 :back 30 :top 31 :bottom 31 :left 31 :right 31)
+   :categories '(:building) :display-color '(0.36 0.34 0.32))
+  (*orb-mote-block* :orb-mote
+   "The bright grain a progress orb is made of; never placed, only emitted."
+   :face-tiles '(:all 9)
+   :categories '(:luminous) :display-color '(0.9 0.95 1.0)
+   :placeable-p nil :light-emission 0 :surface-emission 5.0))
 
 (defun placeable-block-kinds ()
   "Return the numbered material palette used by luvcraft and its tools."
@@ -247,7 +272,7 @@ kinds through this vocabulary instead of printing CLOS object identities."
         (error "No block kind is named ~S." name))))
 
 (defconstant +block-atlas-tile-size+ 16)
-(defconstant +block-atlas-tile-count+ 30)
+(defconstant +block-atlas-tile-count+ 33)
 (defconstant +block-atlas-texture-format+ :rgba8-unorm-srgb)
 (defconstant +block-normal-atlas-texture-format+ :rgba8-unorm)
 
@@ -837,6 +862,89 @@ and a dock row at the bottom."
 (defmethod paint-block-atlas-relief ((tile (eql 29)) x y)
   "Phone screen: glass, flat but for the faintest bow across the pane."
   (+ 126 (floor (+ x y) 8)))
+
+;;; ---------------------------------------------------------------------
+;;; The tape: a film reel, drawn flange-on and rim-on.
+
+(defun reel-radius (x y)
+  "Distance of texel X,Y from the tile's centre, in texels."
+  (let ((dx (- x 7.5)) (dy (- y 7.5)))
+    (sqrt (+ (* dx dx) (* dy dy)))))
+
+(defun reel-spoke-p (x y)
+  "Whether X,Y lies on one of the three flange spokes laid over the film."
+  (let* ((dx (- x 7.5)) (dy (- y 7.5))
+         (angle (atan dy dx)))
+    (loop for spoke in '(1.5708 3.6652 -0.5236)
+          for difference = (abs (- (mod (+ (- angle spoke) pi) (* 2 pi)) pi))
+          thereis (< (* difference (sqrt (+ (* dx dx) (* dy dy)))) 0.9))))
+
+(defun paint-reel-flange (x y label-p)
+  "A reel flange: dark corners, a bright rim, wound film showing between
+three spokes, a hub with a spindle.  LABEL-P paints a paper label on the
+film."
+  (let ((r (reel-radius x y))
+        (grain (block-atlas-variation x y 30)))
+    (cond ((> r 7.6)
+           ;; The canister the reel sits in.
+           (shaded-block-atlas-pixel 44 42 40 (round grain 4)))
+          ((> r 6.6)
+           (shaded-block-atlas-pixel 168 166 158 (round grain 3)))
+          ((> r 2.4)
+           (cond ((reel-spoke-p x y)
+                  (shaded-block-atlas-pixel 128 126 120 (round grain 3)))
+                 ((and label-p (< (abs (- y 7.5)) 1.6) (> x 8))
+                  (shaded-block-atlas-pixel 226 214 178 (round grain 6)))
+                 (t
+                  ;; Wound film: dark sepia, faint concentric rings.
+                  (shaded-block-atlas-pixel 62 44 32
+                                            (+ (round grain 4)
+                                               (if (evenp (round r)) 6 -6))))))
+          ((> r 1.1)
+           (shaded-block-atlas-pixel 150 148 140 (round grain 4)))
+          (t
+           (shaded-block-atlas-pixel 30 30 30 0)))))
+
+(defmethod paint-block-atlas-tile ((tile (eql 30)) x y)
+  "Tape flange: an empty reel, film wound dark behind its windows."
+  (paint-reel-flange x y nil))
+
+(defmethod paint-block-atlas-tile ((tile (eql 31)) x y)
+  "Reel rim: two bright flanges with the wound film's edge between them."
+  (let ((grain (block-atlas-variation x y 31)))
+    (cond ((or (< y 2) (> y 13))
+           (shaded-block-atlas-pixel 168 166 158 (round grain 3)))
+          ((or (= y 2) (= y 13))
+           (shaded-block-atlas-pixel 96 94 90 (round grain 4)))
+          (t
+           ;; The film's edge, striated along the winding.
+           (shaded-block-atlas-pixel 58 42 30
+                                     (+ (round grain 4)
+                                        (if (evenp x) 5 -5)))))))
+
+(defmethod paint-block-atlas-tile ((tile (eql 32)) x y)
+  "Film flange: a loaded reel with a paper label across the film."
+  (paint-reel-flange x y t))
+
+(defmethod paint-block-atlas-relief ((tile (eql 30)) x y)
+  "Tape flange: the rim and hub stand proud, the windows sink."
+  (let ((r (reel-radius x y)))
+    (cond ((> r 7.6) 96)
+          ((> r 6.6) 176)
+          ((reel-spoke-p x y) 160)
+          ;; The film's winding, a faint spiral of ridges.
+          ((> r 2.4) (+ 100 (if (evenp (+ x y)) 6 0)))
+          ((> r 1.1) 168)
+          (t 60))))
+
+(defmethod paint-block-atlas-relief ((tile (eql 31)) x y)
+  "Reel rim: flanges proud, the film between them lower and ribbed."
+  (cond ((or (< y 2) (> y 13)) 176)
+        ((or (= y 2) (= y 13)) 130)
+        (t (if (evenp x) 110 104))))
+
+(defmethod paint-block-atlas-relief ((tile (eql 32)) x y)
+  (paint-block-atlas-relief 30 x y))
 
 (defun make-block-texture-atlas ()
   "Return the little world's horizontal RGBA8 atlas as packed pixel words.
