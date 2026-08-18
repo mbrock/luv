@@ -145,6 +145,7 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
   (loads-total nil) (loads-done 0)
   (system nil) (system-start nil)
   (current nil) (current-kind nil) (current-start nil) (next-tick nil)
+  (current-log nil) (failed-log nil)
   (transient nil) (tripped nil) (failed nil)
   (start (get-internal-real-time)))
 
@@ -211,6 +212,7 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
     ;; printed when it comes back through FINISH.  The display loop must not
     ;; block here, so the grace period is checked on a later tick.
     (setf (display-failed state) label
+          (display-failed-log state) (display-current-log state)
           (display-current state) nil
           (display-current-start state) nil
           (display-tripped state) (get-internal-real-time))
@@ -221,13 +223,9 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
                                             :seconds *deadline-seconds*))))))
 
 (defun failure-log (state)
-  (let ((label (or (display-failed state) (display-current state))))
-    (namestring
-     (uiop:enough-pathname
-      (if label
-          (merge-pathnames (concatenate 'string label ".log") *log-directory*)
-          (build-log))
-      *project-root*))))
+  (or (display-failed-log state)
+      (display-current-log state)
+      (namestring (uiop:enough-pathname (build-log) *project-root*))))
 
 (defun summarize (state reason)
   (clear-transient state)
@@ -291,8 +289,9 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
          (setf (display-system state) nil
                (display-system-start state) nil)))
       (:begin
-       (destructuring-bind (action-kind label) args
-         (setf (display-current state) label
+       (destructuring-bind (action-kind label &optional log) args
+         (setf (display-current-log state) log
+               (display-current state) label
                (display-current-kind state) action-kind
                (display-current-start state) (get-internal-real-time)
                (display-next-tick state) 1)))
@@ -317,7 +316,8 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
       (:finish
        (destructuring-bind (reason) args
          (when (and (eq reason :error) (display-current state))
-           (setf (display-failed state) (display-current state)))
+           (setf (display-failed state) (display-current state)
+                 (display-failed-log state) (display-current-log state)))
          (summarize state reason))))))
 
 (defun display-loop ()
@@ -334,14 +334,13 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
 (defvar *opened-logs* (make-hash-table :test #'equal))
 
 (defun log-file-for (component)
-  (let* ((path (ignore-errors (asdf:component-pathname component)))
-         (relative (and path (uiop:enough-pathname path *project-root*)))
-         (name (if (and relative (not (uiop:absolute-pathname-p relative)))
-                   (namestring relative)
-                   (format nil "systems/~A"
-                           (asdf:component-name
-                            (asdf:component-system component))))))
-    (merge-pathnames (concatenate 'string name ".log") *log-directory*)))
+  "One log per system.  A system's name may contain slashes, which nest the
+logs the way the systems themselves nest: luv.log beside luv/domains.log."
+  (merge-pathnames
+   (concatenate 'string
+                (asdf:component-name (asdf:component-system component))
+                ".log")
+   *log-directory*))
 
 (defun link-latest-logs ()
   "Point build/logs/latest at this build, so tailing a log needs no id."
@@ -361,7 +360,7 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
     (sb-posix:dup2 log 2)
     (sb-posix:close log)))
 
-(defun call-with-output-logged-to (path thunk)
+(defun call-with-output-logged-to (path thunk &optional banner)
   "Run THUNK with file descriptors 1 and 2 pointing at PATH."
   (ensure-directories-exist path)
   (let* ((fresh (not (gethash (namestring path) *opened-logs*)))
@@ -377,6 +376,10 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
       (flush)
       (sb-posix:dup2 log 1)
       (sb-posix:dup2 log 2)
+      (when banner
+        ;; Several files share one system's log; say where each one begins.
+        (format *standard-output* "~&~%;;;; ~A~%" banner)
+        (finish-output *standard-output*))
       (unwind-protect (funcall thunk)
         (flush)
         (sb-posix:dup2 saved-out 1)
@@ -396,19 +399,20 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
                 (asdf:component-name component)))))
 
 (defun call-as-action (kind component thunk)
-  (let ((label (component-label component))
-        (start (get-internal-real-time))
-        ;; Everything the compiler has to say is worth keeping, now that it is
+  (let* ((label (component-label component))
+         (log (log-file-for component))
+         (start (get-internal-real-time))
+         ;; Everything the compiler has to say is worth keeping, now that it is
         ;; written to this file's log rather than to the console: the form it
         ;; is on, and the notes ASDF would otherwise muffle.
-        (*compile-verbose* t)
-        (*compile-print* t)
-        (*load-verbose* t)
-        (*load-print* t)
-        (uiop:*uninteresting-conditions* '()))
-    (send :begin kind label)
+         (*compile-verbose* t)
+         (*compile-print* t)
+         (*load-verbose* t)
+         (*load-print* t)
+         (uiop:*uninteresting-conditions* '()))
+    (send :begin kind label (namestring (uiop:enough-pathname log *project-root*)))
     (multiple-value-prog1
-        (call-with-output-logged-to (log-file-for component) thunk)
+        (call-with-output-logged-to log thunk (format nil "~(~A~) ~A" kind label))
       (send :end kind label (elapsed start)))))
 
 (defmethod asdf:perform :around ((op asdf:compile-op) (c asdf:cl-source-file))
