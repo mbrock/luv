@@ -5,8 +5,8 @@
 ;;;; SB-CONCURRENCY mailbox, which the display thread reads with a timeout, so
 ;;;; that a file taking longer than a second starts ticking its own elapsed
 ;;;; time rather than going silent.  Past a deadline the display thread
-;;;; interrupts the build thread and the build fails: a file that takes half a
-;;;; minute to compile is a defect, not a slow step.
+;;;; interrupts the build thread and the build fails: a file that takes more
+;;;; than five seconds to compile is a defect, not a slow step.
 ;;;;
 ;;;; Nothing is muted.  Compiler chatter and the C toolchain's pkg-config and
 ;;;; gcc noise are redirected -- at the file descriptor level, since
@@ -36,7 +36,7 @@
     (if spec
         (let ((n (ignore-errors (parse-integer spec))))
           (if (and n (plusp n)) n nil))
-        30))
+        5))
   "Seconds a single file may compile before the build is failed.
 NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
 
