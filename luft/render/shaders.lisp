@@ -514,6 +514,17 @@ where the flat 45-degree facets of a convex or concave crease meet."
   (defvar *paper-grain* 0.085
     "How deeply the paper material's tooth modulates its tone.")
 
+  (defvar *paper-variation* 0.11
+    "How far one cell's tone may drift from its neighbour's, in value and
+in warmth.  Lonely Mountains: Downhill varies each object's colour a little
+against a shared palette so no two trees are the same object twice; a block
+world has the same problem in a starker form.")
+
+  (defvar *paper-roundness* 0.34
+    "How far a facet's normal is blended toward the smooth normal of its own
+cell.  Flat-shaded triangles are perfectly flat, and a little of the smooth
+variant across each face is what gives a low-poly surface its volume.")
+
   (defvar *bevel-rings* 2
     "Subdivision rings inside the rounding radius while a mesh shader is
 generated: one is a chamfer, two a fillet.  The grid has 2*(rings+1) points
@@ -1125,7 +1136,18 @@ what the fog converges to and what the background paints must agree."
          ;; The corners of a real frame fall off; keep it gentle enough to
          ;; read as a lens rather than as an effect.
          (vignette (- 1.0 (* 0.42 (* radial radial))))
-         (final (* (swizzle mixed :xyz) vignette)))
+         (shaded (* (swizzle mixed :xyz) vignette))
+         ;; A grade, in the sense a colourist means: hold the shadows toward
+         ;; the sky's blue, let the highlights run warm, and open the
+         ;; saturation a little.  Split toning is what separates a rendered
+         ;; frame from a photographed one more than any single other step.
+         (luma (dot shaded (vec3 0.2126 0.7152 0.0722)))
+         (saturated (mix (vec3 luma luma luma) shaded 1.10))
+         (lifted (+ saturated (* (vec3 0.010 0.016 0.030) (- 1.0 luma))))
+         (final (clamp (* lifted (mix (vec3 1.0 1.0 1.0)
+                                      (vec3 1.045 1.008 0.955)
+                                      luma))
+                       (vec3 0.0 0.0 0.0) (vec3 1.0 1.0 1.0))))
     (set-output color (vec4 final 1.0))))
 
 ;;; ------------------------------------------------------------------------
@@ -1255,11 +1277,30 @@ the white the tonemap defends."
          ;; the arris, so the highlight draws the planed edge and not the face.
          (glint (- 1.0 (smoothstep 0.0 (* 2.0 softness) arris)))
          (upness (swizzle face :z))
-         (base (if (> upness 0.5)
+         (tone (if (> upness 0.5)
                    (swizzle top-vector :xyz)
                    (if (< upness -0.5)
                        (swizzle bottom-vector :xyz)
                        (swizzle side-vector :xyz))))
+         ;; The cell behind this face, and two independent hashes of it: one
+         ;; moves the tone's value, the other its warmth, so a wall of cells
+         ;; stops reading as one painted surface.
+         (cell (floor (- world (* oriented 0.25))))
+         ;; Most of the drift belongs to patches several cells across, or the
+         ;; world reads as a quilt: one cell, one square.  The per-cell hash
+         ;; only breaks up the patches' own edges.
+         (patch (- (paper-noise (* cell 0.21)) 0.5))
+         (jitter (- (paper-hash cell) 0.5))
+         (warm-patch (paper-noise (+ (* cell 0.13) (vec3 19.7 7.3 3.1))))
+         (value (+ 1.0 (* #.*paper-variation*
+                          (+ (* 1.35 patch) (* 0.45 jitter)))))
+         (warmth (mix (vec3 0.965 0.99 1.04) (vec3 1.04 1.01 0.96)
+                      warm-patch))
+         (base (* tone (* warmth value)))
+         ;; A cell's own smooth normal: the direction out of its middle.  A
+         ;; little of it across each facet is the low-poly volume trick.
+         (middle (+ cell (vec3 0.5 0.5 0.5)))
+         (round-normal (normalize (- world middle)))
          (walk-origin (+ world (* oriented (+ (* 2.0 width) 0.1))))
          (walk (marched-cell-walk walk-origin (swizzle sun-vector :xyz)
                                   cells (swizzle domain-vector :x)
@@ -1273,7 +1314,9 @@ the white the tonemap defends."
                                 (swizzle domain-vector :y)
                                 #.*occlusion-steps*))
          (open (- 1.0 (* (swizzle occlusion-vector :x) crowding)))
-         (final (paper-lighting base sanded world open shade glint
+         (modelled (normalize (mix sanded round-normal
+                                   #.*paper-roundness*)))
+         (final (paper-lighting base modelled world open shade glint
                                 camera-vector sun-vector sun-colour-vector
                                 fill-vector sky-vector ground-vector))
          ;; Alpha carries this fragment's distance, scaled by the lens lane's
