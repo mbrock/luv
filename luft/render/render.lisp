@@ -122,6 +122,74 @@
         (plateau (if (and (<= 40 x 52) (<= 10 y 22)) 3.0 0.0)))
     (max 1 (floor (+ rolling plateau)))))
 
+(defun fill-box (solid x0 x1 y0 y1 z0 z1 &optional (state t))
+  "Set every cell of the closed box to STATE."
+  (loop for x from x0 to x1
+        do (loop for y from y0 to y1
+                 do (loop for z from z0 to z1
+                          do (setf (luft:solid-cell-p solid x y z) state)))))
+
+(defun carve-ravine (solid)
+  "A gap for the bridge to cross, cut where the ground was continuous."
+  (loop for y from 40 to 56
+        do (let ((width (+ 3 (floor (abs (- y 48)) 3))))
+             (loop for x from (- 30 width) to (+ 30 width)
+                   do (loop for z from 0 to 12
+                            do (setf (luft:solid-cell-p solid x y z) nil))))))
+
+(defun build-bridge (solid)
+  "A deck across the ravine on two piers, with a parapet either side.
+
+Something has to span a gap before a world has anywhere to stand and look
+down from, and a deck one cell thick with a parapet at its edge is the
+smallest thing that reads as built rather than as terrain."
+  (let ((deck 9))
+    ;; Piers down to whatever floor the ravine left.
+    (dolist (x '(26 34))
+      (fill-box solid x (1+ x) 44 45 0 (1- deck))
+      (fill-box solid x (1+ x) 51 52 0 (1- deck)))
+    ;; The deck, and a parapet along both sides with regular gaps.
+    (fill-box solid 24 36 43 53 deck deck)
+    (loop for x from 24 to 36
+          unless (zerop (mod (- x 24) 4))
+            do (setf (luft:solid-cell-p solid x 43 (+ deck 1)) t
+                     (luft:solid-cell-p solid x 53 (+ deck 1)) t))
+    ;; Ramps up to the deck at either end.
+    (loop for step from 0 to 8
+          do (fill-box solid (- 23 step) (- 23 step) 45 51
+                       0 (max 0 (- deck 1 step)))
+             (fill-box solid (+ 37 step) (+ 37 step) 45 51
+                       0 (max 0 (- deck 1 step))))))
+
+(defun build-balconies (solid)
+  "Three balconies off the tower, each a slab with a lip and a doorway."
+  (loop for (z side) in '((6 :east) (12 :north) (17 :east))
+        do (ecase side
+             (:east
+              (fill-box solid 28 31 32 35 z z)
+              (fill-box solid 31 31 32 35 (1+ z) (1+ z))
+              (fill-box solid 28 31 32 32 (1+ z) (1+ z))
+              (fill-box solid 28 31 35 35 (1+ z) (1+ z))
+              ;; The doorway it is reached through.
+              (fill-box solid 27 27 33 34 z (+ z 1) nil))
+             (:north
+              (fill-box solid 22 25 38 41 z z)
+              (fill-box solid 22 25 41 41 (1+ z) (1+ z))
+              (fill-box solid 22 22 38 41 (1+ z) (1+ z))
+              (fill-box solid 25 25 38 41 (1+ z) (1+ z))
+              (fill-box solid 23 24 37 37 z (+ z 1) nil)))))
+
+(defun build-terraces (solid)
+  "Stepped terraces below the tower: a hillside someone has taken in hand."
+  (loop for step from 0 below 5
+        for z = (+ 3 step)
+        for near = (- 18 (* 2 step))
+        do (fill-box solid near (+ near 1) (- 24 step) (+ 33 step) 0 z)
+           ;; A low retaining wall along the front of each terrace.
+           (loop for y from (- 24 step) to (+ 33 step)
+                 unless (zerop (mod y 5))
+                   do (setf (luft:solid-cell-p solid near y (1+ z)) t))))
+
 (defun make-demo-scene (&key (horizontal-bits 6))
   "A small textureless world: rolling ground, a tower, and a floating slab."
   (let* ((domain (luft:make-world-domain :horizontal-bits horizontal-bits))
@@ -148,6 +216,10 @@
                    do (loop for z from 0 to (+ 4 step)
                             do (setf (luft:solid-cell-p solid (- 39 step) y z)
                                      t))))
+    (carve-ravine solid)
+    (build-bridge solid)
+    (build-balconies solid)
+    (build-terraces solid)
     (make-scene domain :solid solid)))
 
 ;;; ------------------------------------------------------------------------
@@ -229,8 +301,12 @@
 (defparameter *fog-distance* 140.0)
 (defparameter *bevel-radius* 0.22
   "The :BEVEL style's crease-rounding radius in cells, below one half.")
-(defparameter *chamfer-width* 0.045
-  "The :CHAMFER style's subtle 45-degree crease relief in cells.")
+(defparameter *chamfer-width* 0.11
+  "The :CHAMFER style's 45-degree crease relief in cells.
+
+Wide enough that the planed facet reads as a face of its own and catches
+the light as a band rather than a hairline, and still far short of the old
+0.22-cell coves that made the world look carved.")
 (defparameter *arris-softness* 0.004
   "The narrow shading transition where a chamfer meets its original face.")
 
@@ -727,11 +803,77 @@ The further values are the width, height, and colour format of the pixels."
       (when encoder (destroy encoder))
       (destroy readback))))
 
-(defun render-to-png (renderer pathname)
-  "Render one frame headlessly and write it to PATHNAME as a PNG."
+(defparameter *srgb-to-linear*
+  (let ((table (make-array 256 :element-type 'single-float)))
+    (dotimes (index 256 table)
+      (let ((value (/ (float index 1.0) 255.0)))
+        (setf (aref table index)
+              (if (<= value 0.04045)
+                  (/ value 12.92)
+                  (expt (/ (+ value 0.055) 1.055) 2.4))))))
+  "One byte to its linear value: a 256-entry table beats a per-pixel EXPT.")
+
+(defun linear-to-srgb-byte (value)
+  (let ((clamped (min 1.0 (max 0.0 value))))
+    (round (* 255.0
+              (if (<= clamped 0.0031308)
+                  (* 12.92 clamped)
+                  (- (* 1.055 (expt clamped (/ 1.0 2.4))) 0.055))))))
+
+(defun downsample-pixels (pixels width height factor &key (srgb-p t))
+  "Average FACTOR by FACTOR blocks of PIXELS, in linear light.
+
+Supersampling is the whole of the antialiasing here: there is no multisample
+path, and averaging a rendered frame is the same thing one box filter later.
+The average must be taken in linear light -- averaging sRGB bytes darkens
+every edge, which is precisely where the eye is looking."
+  (let* ((out-width (floor width factor))
+         (out-height (floor height factor))
+         (out (make-array (* 4 out-width out-height)
+                          :element-type '(unsigned-byte 8)))
+         (weight (/ 1.0 (* factor factor))))
+    (dotimes (y out-height (values out out-width out-height))
+      (dotimes (x out-width)
+        (let ((red 0.0) (green 0.0) (blue 0.0) (alpha 0.0))
+          (dotimes (dy factor)
+            (dotimes (dx factor)
+              (let ((offset (* 4 (+ (* (+ (* y factor) dy) width)
+                                    (+ (* x factor) dx)))))
+                (flet ((channel (index)
+                         (let ((byte (aref pixels (+ offset index))))
+                           (if srgb-p
+                               (aref *srgb-to-linear* byte)
+                               (/ (float byte 1.0) 255.0)))))
+                  (incf red (channel 0))
+                  (incf green (channel 1))
+                  (incf blue (channel 2))
+                  (incf alpha (/ (float (aref pixels (+ offset 3)) 1.0)
+                                 255.0))))))
+          (let ((offset (* 4 (+ (* y out-width) x))))
+            (flet ((store (index value)
+                     (setf (aref out (+ offset index))
+                           (if srgb-p
+                               (linear-to-srgb-byte (* value weight))
+                               (round (* 255.0 (min 1.0 (* value weight))))))))
+              (store 0 red)
+              (store 1 green)
+              (store 2 blue)
+              (setf (aref out (+ offset 3))
+                    (round (* 255.0 (min 1.0 (* alpha weight))))))))))))
+
+(defun render-to-png (renderer pathname &key (downsample 1))
+  "Render one frame headlessly and write it to PATHNAME as a PNG.
+
+With DOWNSAMPLE above one the renderer is presumed to have been made that
+many times oversize, and the frame is box-filtered down on the way out."
   (multiple-value-bind (pixels width height format) (render-pixels renderer)
     (ensure-directories-exist pathname)
-    (write-rgba-png pathname pixels width height format)))
+    (if (> downsample 1)
+        (multiple-value-bind (small small-width small-height)
+            (downsample-pixels pixels width height downsample
+                               :srgb-p (eq format :rgba8-unorm-srgb))
+          (write-rgba-png pathname small small-width small-height format))
+        (write-rgba-png pathname pixels width height format))))
 
 (defun capture-demo-png (pathname &key (width 1280) (height 800)
                                     (camera (make-fly-camera)))

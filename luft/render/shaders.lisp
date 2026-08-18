@@ -520,7 +520,7 @@ in warmth.  Lonely Mountains: Downhill varies each object's colour a little
 against a shared palette so no two trees are the same object twice; a block
 world has the same problem in a starker form.")
 
-  (defvar *paper-roundness* 0.34
+  (defvar *paper-roundness* 0.40
     "How far a facet's normal is blended toward the smooth normal of its own
 cell.  Flat-shaded triangles are perfectly flat, and a little of the smooth
 variant across each face is what gives a low-poly surface its volume.")
@@ -1273,9 +1273,14 @@ the white the tonemap defends."
          (arris (- inset width))
          (sanded (normalize (mix oriented face
                                  (smoothstep (- softness) softness arris))))
-         ;; The chamfer alone glints: one inside the cut, falling off across
-         ;; the arris, so the highlight draws the planed edge and not the face.
-         (glint (- 1.0 (smoothstep 0.0 (* 2.0 softness) arris)))
+         ;; What glints is what actually tilts.  A face's UV border is not a
+         ;; crease: two coplanar cells share one, and masking by inset drew a
+         ;; bright grid across every flat wall and floor.  The facet's own
+         ;; departure from the face it cuts is the honest measure, and it is
+         ;; exactly zero wherever the surface continues flat.
+         (tilt (- 1.0 (abs (dot oriented face))))
+         (crease (smoothstep 0.015 0.30 tilt))
+         (glint crease)
          (upness (swizzle face :z))
          (tone (if (> upness 0.5)
                    (swizzle top-vector :xyz)
@@ -1314,8 +1319,11 @@ the white the tonemap defends."
                                 (swizzle domain-vector :y)
                                 #.*occlusion-steps*))
          (open (- 1.0 (* (swizzle occlusion-vector :x) crowding)))
+         ;; The same measure governs the rounding: blending every cell toward
+         ;; the normal of its own middle turns a flat wall into a wall of
+         ;; tiles, so only a creased cell is allowed to round.
          (modelled (normalize (mix sanded round-normal
-                                   #.*paper-roundness*)))
+                                   (* #.*paper-roundness* crease))))
          (final (paper-lighting base modelled world open shade glint
                                 camera-vector sun-vector sun-colour-vector
                                 fill-vector sky-vector ground-vector))

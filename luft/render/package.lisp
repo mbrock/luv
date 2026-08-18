@@ -84,6 +84,7 @@ of packed LUFT sites, drawn by task and mesh shaders.")
            #:encode-frame
            #:render-pixels
            #:render-to-png
+           #:downsample-pixels
            #:capture-demo-png
            #:viewer
            #:start-viewer
