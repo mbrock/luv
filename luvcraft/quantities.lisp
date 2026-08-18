@@ -230,6 +230,8 @@
   :non-negative-p t)
 (math:define-quantity :cloud-altitude :kind :lattice-coordinate
   :non-negative-p t)
+(math:define-quantity :cloud-shadow :kind :proportion
+  :non-negative-p t)
 (math:define-quantity :star-brightness :kind :control-signal
   :non-negative-p t)
 (math:define-quantity :moon-radiance :kind :control-signal

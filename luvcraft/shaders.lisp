@@ -87,6 +87,10 @@
   "The radiance of a first-magnitude star, above display white.")
 (defparameter *moon-radiance* 3.4
   "The full moon's radiance above display white; the bloom feeds on it.")
+(defparameter *cloud-altitude* 230.0
+  "The cumulus deck's world height, which both the sky and the ground read.")
+(defparameter *cloud-shadow-depth* 0.62
+  "How much of the direct sun a cloud takes from the ground beneath it.")
 
 (luvcraft:define-knob sky-scatter-gain
     (:group :sky :quantity (:quantity :scatter-gain :unit :one)
@@ -104,6 +108,15 @@
     (:group :sky :quantity (:quantity :moon-radiance :unit :one)
      :minimum 0.0 :maximum 20.0 :step 0.2)
     *moon-radiance*)
+(luvcraft:define-knob cloud-altitude
+    (:group :sky :quantity (:quantity :cloud-altitude :unit :one)
+     :minimum 60.0 :maximum 900.0 :step 10.0)
+    *cloud-altitude*)
+(luvcraft:define-knob cloud-shadow-depth
+    (:group :sky :label "cloud shadow"
+     :quantity (:quantity :cloud-coverage :unit :one)
+     :minimum 0.0 :maximum 1.0 :step 0.02)
+    *cloud-shadow-depth*)
 
 ;;; The surface knobs.  A block face is one tile of a sixteen-texel atlas
 ;;; and a thousand of them are in view at once, so how far apart two faces
@@ -1330,7 +1343,7 @@ negative inside.  RADIUS is the corner radius in world cells."
          ;; whose own gradient leans the surface, so the ground is not merely
          ;; painted unevenly but lit unevenly.  The cell is found by stepping
          ;; half a cell back along the face's own normal, which lands inside
-         ;; the block whichever of the six faces this is.
+         ;; the block whichever of the six faces this is.  #3AVEKC
          (face-cell (floor (- surface-point (* flat-normal 0.5))))
          (face-seed (lattice-hash (+ face-cell (* flat-normal 0.37))))
          (face-hue (lattice-hash (+ face-cell (vec3 5.21 1.37 9.13))))
@@ -1347,7 +1360,7 @@ negative inside.  RADIUS is the corner radius in world cells."
             (* surface-detail
                (+ (* (- patch 0.5) 1.05)
                   (+ (* (- face-seed 0.5) 0.30)
-                     (* (- grain 0.5) (* 0.30 relief-fade)))))
+                     (* (- grain 0.5) (* 0.30 bevel-fade)))))
             -0.42 0.42))
          ;; Brighter patches are also warmer and duller ones cooler, and a
          ;; face's own constant drifts its hue as well as its value: a plain
@@ -1362,7 +1375,9 @@ negative inside.  RADIUS is the corner radius in world cells."
            (+ (vec3 1.0 1.0 1.0)
               (+ (* (vec3 1.12 1.0 0.84) weathering)
                  (* (vec3 0.13 0.02 -0.11) hue-drift))))
-         (bump-strength (* 0.85 (* relief-fade surface-detail)))
+         ;; The grain is a cell-wide feature, so it survives to the distance
+         ;; a cell does rather than the distance a texel does.
+         (bump-strength (* 0.85 (* bevel-fade surface-detail)))
          (shaped
            (normalize (+ (+ (* rounded relief-z)
                             (* tangent-u
@@ -1379,7 +1394,7 @@ negative inside.  RADIUS is the corner radius in world cells."
          ;; distance its variance has to go somewhere, and the honest place is
          ;; the roughness -- Toksvig's argument -- so a highlight keeps its
          ;; size across the draw distance instead of sharpening into a
-         ;; sparkle on every distant face at once.
+         ;; sparkle on every distant face at once.  #2T8CCH
          (relief-slope
            (sqrt (+ (* (swizzle tangent-normal :x) (swizzle tangent-normal :x))
                     (* (swizzle tangent-normal :y)
@@ -1520,6 +1535,34 @@ negative inside.  RADIUS is the corner radius in world cells."
             sky-input))
          (ambient (swizzle ambient-vector :xyz))
          (sun-color (swizzle sun-color-vector :xyz))
+         ;; --- the deck's shadow --------------------------------------------
+         ;; The sky draws a cumulus deck on a plane at a fixed world height,
+         ;; and the ground under it should know.  Following the sun up from
+         ;; this point to that plane and asking the very same field the very
+         ;; same coverage question is the whole of it: the deck's own shadow
+         ;; sweeping across the world, which is what keeps a plain at noon
+         ;; from being one flat sheet of light.  The threshold is wider than
+         ;; the sky's, because a shadow thrown from that far off is blurred
+         ;; by the sun's own angular width long before it lands.  #RSGLTL
+         (elapsed (representation (swizzle fog-vector :z)))
+         (cloudiness (representation (swizzle fog-vector :w)))
+         (sun-climb (max 0.15 (representation (swizzle sun-direction :y))))
+         (deck-reach
+           (/ (max 8.0 (- cloud-altitude (swizzle surface-point :y)))
+              sun-climb))
+         (deck-meeting
+           (+ (+ surface-point (* (representation sun-direction) deck-reach))
+              (vec3 (* elapsed 2.2) 0.0 (* elapsed 1.2))))
+         (deck-cover (cloud-fractal-noise (* deck-meeting 0.0044)))
+         (deck-coverage
+           (mix 0.82 0.46 (clamp (* cloudiness cloud-coverage) 0.0 1.0)))
+         (cloud-shadow
+           (assume-quantity
+            (- 1.0
+               (* cloud-shadow-depth
+                  (smoothstep deck-coverage (+ deck-coverage 0.20)
+                              deck-cover)))
+            :quantity :cloud-shadow :unit :one))
          ;; Occlusion bites harder than the raw mesh reading: the corner where
          ;; three blocks meet is what tells the eye these are solid volumes.
          (occlusion
@@ -1564,7 +1607,7 @@ negative inside.  RADIUS is the corner radius in world cells."
            (interpret
             (* sun-color
                (* direct-light-gain n-dot-l sun-visibility day-factor direct-shadow
-                  (mix 0.55 1.0 ao)))
+                  cloud-shadow (mix 0.55 1.0 ao)))
             :quantity :linear-rgb :unit :one))
          (torch-color
            (quantity (vec3 1.0 0.82 0.58)
@@ -1635,8 +1678,9 @@ negative inside.  RADIUS is the corner radius in world cells."
                     (* (representation sun-visibility)
                        (* (representation day-factor)
                           (* (representation direct-shadow)
-                             (* (representation occlusion)
-                                specular-gain))))))))
+                             (* (representation cloud-shadow)
+                                (* (representation occlusion)
+                                   specular-gain)))))))))
          ;; The same sky again, in the direction the surface actually
          ;; reflects: the sheen that tells a smooth face from a rough one
          ;; out of the sun, and the one term that makes a block look like it
@@ -1888,7 +1932,7 @@ Distant terrain and the sky's own ground half must agree exactly, or the
 edge of the resident world draws itself as a line.  They agree by asking
 this: the profile's fog colour, warmed where the ray runs toward a low sun
 and brightened by the same haze the sky's halo is made of, so a ridge in
-the east at dawn glows and one in the west stays cool."
+the east at dawn glows and one in the west stays cool.  #8X33G2"
   (let* ((alignment (dot direction sun-direction))
          (toward (max 0.0 alignment))
          (glow (henyey-greenstein alignment 0.66))
@@ -1951,7 +1995,8 @@ distribution overhead."
 ;;; terrain fades to, so silhouettes meet the sky without a seam, and only
 ;;; then darkens -- gently, because a stronger falloff shows up as a step
 ;;; where the last resident chunk ends.  #9SSXDJ records why an HDR path
-;;; wants a sky with something genuinely bright in it.
+;;; wants a sky with something genuinely bright in it, and #8X33G2 what each
+;;; of these terms replaced.
 
 (define-shader-method shader-specification-for
     block-world-sky-fragment-specification
@@ -1966,6 +2011,7 @@ distribution overhead."
   (let* ((direction (normalize (representation ray-input)))
          (elevation (swizzle direction :y))
          (above (max elevation 0.0))
+         (eye (representation (swizzle camera-vector :xyz)))
          (sun-direction (representation (swizzle sun-vector :xyz)))
          (day-factor (representation (swizzle sun-vector :w)))
          (sun-color (representation (swizzle sun-color-vector :xyz)))
@@ -2085,8 +2131,13 @@ distribution overhead."
                    (* low-sun low-sun))
               (max day-factor 0.05)))
          (with-cirrus (mix nightly cirrus-color cirrus))
+         ;; The deck is a plane at a fixed height in the world, not a fixed
+         ;; height above the camera: the ground has to be able to find the
+         ;; same plane along the sun and read the same field there, or the
+         ;; shadows sweeping over it would belong to some other sky.  #RSGLTL
+         (deck-rise (max 8.0 (- cloud-altitude (swizzle eye :y))))
          (deck-point
-           (+ (* direction (/ 230.0 (max elevation 0.014)))
+           (+ (+ eye (* direction (/ deck-rise (max elevation 0.014))))
               (vec3 (* elapsed 2.2) 0.0 (* elapsed 1.2))))
          (deck-scale 0.0044)
          (cloud-field (cloud-fractal-noise (* deck-point deck-scale)))
@@ -2109,7 +2160,7 @@ distribution overhead."
            (smoothstep coverage (+ coverage softness) shadow-field))
          (cloud-light (- 1.0 (* 0.70 shadow-density)))
          (cloud-lit
-           (mix (vec3 1.30 1.27 1.22) (vec3 1.48 0.94 0.58)
+           (mix (vec3 1.22 1.20 1.16) (vec3 1.40 0.74 0.36)
                 (* low-sun low-sun)))
          (cloud-dark
            (mix (vec3 0.50 0.57 0.74) (vec3 0.44 0.38 0.52)
@@ -2145,7 +2196,6 @@ distribution overhead."
          (aerial
            (aerial-perspective-color fog-color direction sun-direction
                                      low-sun day-factor))
-         (eye (representation (swizzle camera-vector :xyz)))
          (descent (max 0.004 (- elevation)))
          (ground-point
            (+ eye (* direction (/ (max 1.0 (swizzle eye :y)) descent))))

@@ -45,4 +45,7 @@
                  (:static-file "images/slug-world-text-closeup.png")
                  (:static-file "images/terminal-block-wall.png")
                  (:static-file "images/hdr-day-vista.png")
-                 (:static-file "images/hdr-night-crystal.png")))))
+                 (:static-file "images/hdr-night-crystal.png")
+                 (:static-file "images/pbr-sunset-field.png")
+                 (:static-file "images/pbr-cloud-shadows.png")
+                 (:static-file "images/pbr-moonrise.png")))))
