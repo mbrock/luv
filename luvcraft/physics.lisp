@@ -545,7 +545,7 @@ that borrow one lane at a time rather than a whole row schema."
                       (restitution 0.3) (friction 0.5) (rolling-resistance 0.01)
                       (damping 0.05) (kind 0)
                       (collides-with-bodies-p t) (hit-report-p nil)
-                      (lifetime nil))
+                      (never-sleep-p nil) (lifetime nil))
   "Add a sphere to WORLD and return its handle."
   (let* ((awake (physics-world-awake world))
          (radius (coerce radius 'single-float))
@@ -568,7 +568,8 @@ that borrow one lane at a time rather than a whole row schema."
      (coerce rolling-resistance 'single-float) (coerce damping 'single-float)
      kind
      (logior (if collides-with-bodies-p +physics-body-collides-with-bodies+ 0)
-             (if hit-report-p +physics-body-hit-report+ 0))
+             (if hit-report-p +physics-body-hit-report+ 0)
+             (if never-sleep-p +physics-body-never-sleeps+ 0))
      (if lifetime (coerce lifetime 'single-float) -1f0)
      0f0)
     handle))
@@ -1372,6 +1373,26 @@ is always the nearer, truer contact, and it is the only one made."
       (declare (ignore box-row))
       (when (zerop box-count)
         (return-from generate-physics-box-contacts world))
+      ;; A moving box wakes the sleepers it reaches, before the awake pass
+      ;; so that they are in it.
+      (let ((woken nil))
+        (records:with-columnar-buffer-storage
+            ((count row (xs x) (ys y) (zs z) (radii radius) (handles handle))
+             (physics-world-sleeping world) physics-body-columns)
+          (declare (ignore row))
+          (dotimes (i count)
+            (let ((cx (aref xs i)) (cy (aref ys i)) (cz (aref zs i))
+                  (reach (+ (aref radii i) margin)))
+              (dotimes (b box-count)
+                (when (and (or (/= 0f0 (aref box-vxs b)) (/= 0f0 (aref box-vys b))
+                               (/= 0f0 (aref box-vzs b)))
+                           (< (- cx reach) (aref box-max-xs b)) (> (+ cx reach) (aref box-min-xs b))
+                           (< (- cy reach) (aref box-max-ys b)) (> (+ cy reach) (aref box-min-ys b))
+                           (< (- cz reach) (aref box-max-zs b)) (> (+ cz reach) (aref box-min-zs b)))
+                  (push (aref handles i) woken)
+                  (return))))))
+        (dolist (handle woken)
+          (wake-physics-body world handle)))
       (records:with-columnar-buffer-storage
           ((length row (xs x) (ys y) (zs z) (radii radius) (handles handle))
            awake physics-body-columns)

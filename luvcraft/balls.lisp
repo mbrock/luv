@@ -95,7 +95,7 @@
                    :radius 0.07 :mass 0.05 :restitution 0.15 :friction 0.2
                    :rolling-resistance 0.05 :damping 0.4 :collides-p nil
                    :lifetime 2.6 :draw-scale 0.7)
-   (make-body-kind :lava-gobbet +lava-tile+ :emission 2.4
+   (make-body-kind :lava-gobbet +lava-tile+ :emission 1.5
                    :radius 0.14 :mass 0.6 :restitution 0.0 :friction 1.0
                    :rolling-resistance 0.4 :damping 1.2 :collides-p t
                    :lifetime 7.0 :draw-scale 0.85))
@@ -523,6 +523,42 @@ AIM-RIGHT and AIM-UP; return its handle."
 (defun toggle-luvcraft-ball (session)
   "Take the session's ball out, or put it away."
   (toggle-hand-item (luvcraft-session-body session) session 'ball))
+
+;;; ---------------------------------------------------------------------
+;;; The knobs: what the metabar can turn on the physics.
+
+(defun physics-gravity-magnitude ()
+  (- *physics-gravity*))
+(defun (setf physics-gravity-magnitude) (magnitude)
+  (setf *physics-gravity* (- (coerce magnitude 'single-float)))
+  magnitude)
+
+(defun ball-bounciness ()
+  (body-kind-restitution (aref *body-kinds* (body-kind-index :ball))))
+(defun (setf ball-bounciness) (bounciness)
+  (setf (body-kind-restitution (aref *body-kinds* (body-kind-index :ball)))
+        (coerce bounciness 'single-float))
+  bounciness)
+
+(define-knob physics-gravity
+    (:group :physics :label "weight of things"
+     :quantity (:quantity :gravity-magnitude :unit ((:cell 1) (:second -2)))
+     :minimum 0.0 :maximum 60.0 :step 1.0)
+    (physics-gravity-magnitude))
+(define-knob ball-bounce
+    (:group :physics :label "bounce of a ball"
+     :quantity (:quantity :bounciness :unit :one)
+     :minimum 0.0 :maximum 1.0 :step 0.05)
+    (ball-bounciness))
+(define-knob fountain-rate
+    (:group :physics :label "drops per step"
+     :quantity (:quantity :body-count :unit :one)
+     :type integer :minimum 0 :maximum 8 :step 1)
+    *fountain-drops-per-step*)
+(define-knob physics-substeps
+    (:group :physics :quantity (:quantity :substep-count :unit :one)
+     :type integer :minimum 1 :maximum 8 :step 1)
+    *physics-substeps*)
 
 ;;; ---------------------------------------------------------------------
 ;;; Reading the physics from the metabar.

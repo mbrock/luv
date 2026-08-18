@@ -340,6 +340,15 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:physics-events
            #:physics-world-state-hash
            #:validate-physics-world
+           #:physics-world-awake
+           #:physics-world-sleeping
+           #:physics-world-step-count
+           #:physics-world-terrain
+           #:clear-physics-boxes
+           #:post-physics-box
+           #:wake-physics-bodies-near
+           #:clear-physics-bodies
+           #:do-physics-events
            #:luvcraft-session-physics
            #:phone
            #:phone-display

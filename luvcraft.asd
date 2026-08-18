@@ -151,6 +151,7 @@
   :components ((:file "hal/shader/tests")
                (:file "luvcraft/world-tests")
                (:file "luvcraft/tests")
+               (:file "luvcraft/physics-tests")
                (:file "luvcraft/light-tests")
                (:file "hal/metal/msl/tests")
                (:file "hal/metal/tests" :if-feature :darwin))

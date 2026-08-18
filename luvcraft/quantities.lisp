@@ -252,3 +252,9 @@
   :non-negative-p t)
 (math:define-quantity :grade-contrast :kind :control-signal
   :non-negative-p t)
+(math:define-quantity :bounciness :kind :control-signal
+  :non-negative-p t)
+(math:define-quantity :body-count :kind :sample-count
+  :non-negative-p t)
+(math:define-quantity :substep-count :kind :sample-count
+  :non-negative-p t)
