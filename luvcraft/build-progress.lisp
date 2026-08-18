@@ -194,8 +194,17 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
     (when *build-thread*
       (sb-thread:interrupt-thread
        *build-thread*
-       (lambda () (error 'deadline-exceeded :label label
-                                            :seconds *deadline-seconds*))))))
+       (lambda ()
+         ;; Where the compiler was when the clock ran out: the one sample
+         ;; that names a slow file's culprit without anyone waiting for it.
+         (ignore-errors
+          (with-open-file (out (merge-pathnames "deadline-backtrace.txt"
+                                                *log-directory*)
+                               :direction :output :if-exists :supersede)
+            (format out ";; ~A after ~,1Fs~%" label seconds)
+            (sb-debug:print-backtrace :stream out :count 200)))
+         (error 'deadline-exceeded :label label
+                                   :seconds *deadline-seconds*))))))
 
 ;;; What the build is worth saying about itself afterwards
 
@@ -269,6 +278,9 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
        (when (display-failed-log state)
          (remark "See verbose log for that system in ~A."
                  (display-failed-log state)))
+       (when (eq reason :deadline)
+         (remark "Where the compiler was when the clock ran out: ~A."
+                 (in-logs "deadline-backtrace.txt")))
        (remark "The whole build's structured log is in ~A."
                (namestring (uiop:enough-pathname sexp *project-root*)))
        (remark)

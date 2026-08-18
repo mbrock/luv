@@ -339,6 +339,10 @@ operate on raw specialized arrays with one shared length and capacity. #LDP5UR"
                         :initial-element ,(getf lane :initial-element))))))
 
          (defun ,grow (buffer minimum-capacity)
+           ;; Growth is rare, and one inlined REPLACE per lane over precisely
+           ;; typed arrays makes SBCL's constraint propagation take minutes on
+           ;; a buffer with a few dozen lanes.  Call REPLACE instead.
+           (declare (notinline replace))
            (let* ((old-capacity (,capacity-reader buffer))
                   (new-capacity
                     (max minimum-capacity 1 (* 2 old-capacity)))
