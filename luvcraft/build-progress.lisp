@@ -66,9 +66,6 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
 (defparameter *tick-interval* 0.25
   "How often the display thread wakes when no event has arrived.")
 
-(defparameter *heartbeat-seconds* 3
-  "How long the console may stay silent before saying what it is waiting on.")
-
 (defparameter *quiet-seconds* 0.05
   "Durations below this are noise.")
 
@@ -133,17 +130,19 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
   (system nil) (system-start nil)
   (current nil) (current-kind nil) (current-start nil)
   (current-log nil) (failed nil) (failed-log nil)
-  (spoke-at nil) (tripped nil)
+  (tripped nil)
   (start (get-internal-real-time)))
 
 (defun since-start (state)
   (elapsed (display-start state)))
 
-(defun emit (state gutter text)
-  "One line: how far into the build we are, a gutter, and what happened."
-  (setf (display-spoke-at state) (get-internal-real-time))
-  (format *console* ";; T+~5,1,,,'0Fs  ~V@A  ~A~%"
-          (since-start state) *gutter-width* (or gutter "") text)
+(defun emit (state gutter text &key stamp)
+  "One line: when the work started, a gutter, and what it is.
+Only the operations themselves are stamped; what frames them is not."
+  (declare (ignorable state))
+  (format *console* ";; ~8A ~V@A  ~A~%"
+          (if stamp (format nil "T+~5,1,,,'0Fs" stamp) "")
+          *gutter-width* (or gutter "") text)
   (finish-output *console*))
 
 (defun compile-gutter (state)
@@ -151,7 +150,7 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
           (or (display-compiles-total state) 0)))
 
 (defun tick (state)
-  "Say something while a file is taking its time, and enforce the deadline."
+  "Watch the clock over whatever the build thread is doing."
   (let ((tripped (display-tripped state)))
     (when (and tripped (> (elapsed tripped) 5))
       ;; The build thread ignored its interrupt; do not leave it running.
@@ -160,22 +159,14 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
   (let ((start (display-current-start state)))
     (when (and start *deadline-seconds*
                (> (elapsed start) *deadline-seconds*))
-      (return-from tick (trip-deadline state (elapsed start)))))
-  ;; Loading a system's worth of fasls prints nothing, and the gaps between
-  ;; actions print nothing at all, so a heartbeat stands in for them: silence
-  ;; is how a wedged build looks, and this build refuses to look wedged.
-  (when (> (elapsed (or (display-spoke-at state) (display-start state)))
-           *heartbeat-seconds*)
-    (emit state "..." (or (display-current state)
-                          (format nil "~D loaded~@[, in ~A~]"
-                                  (display-loads-done state)
-                                  (display-system state))))))
+      (trip-deadline state (elapsed start)))))
 
 (defun trip-deadline (state seconds)
   (let ((label (display-current state)))
     (emit state "DEADLINE"
           (format nil "~A took ~A, over the ~Ds limit"
-                  label (format-seconds seconds) *deadline-seconds*))
+                  label (format-seconds seconds) *deadline-seconds*)
+          :stamp (since-start state))
     ;; Stop watching and let the build thread die of the error; the report is
     ;; printed when it comes back through FINISH.  The display loop must not
     ;; block here, so the grace period is checked on a later tick.
@@ -283,7 +274,12 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
          (setf (display-current-log state) log
                (display-current state) label
                (display-current-kind state) action-kind
-               (display-current-start state) (get-internal-real-time))))
+               (display-current-start state) (get-internal-real-time))
+         ;; Announced before the work, so the stamp says when it began and a
+         ;; file that never finishes has still named itself.
+         (when (eq action-kind :compile)
+           (emit state (compile-gutter state) label
+                 :stamp (since-start state)))))
       (:end
        (destructuring-bind (action-kind label seconds) args
          (push (make-record action-kind label (display-system state)
@@ -292,11 +288,7 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
          (setf (display-current state) nil
                (display-current-start state) nil)
          (ecase action-kind
-           (:compile
-            ;; Compiling is the work the plan counts, and the only work whose
-            ;; every step is worth a line.
-            (emit state (compile-gutter state) label)
-            (incf (display-compiles-done state)))
+           (:compile (incf (display-compiles-done state)))
            (:load (incf (display-loads-done state))))))
       (:note
        (destructuring-bind (text &optional gutter) args
