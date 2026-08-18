@@ -124,7 +124,7 @@
          (ny (voxel-direction-dy normal))
          (nz (voxel-direction-dz normal))
          (tile (block-face-tile block face))
-         (atlas-width (* +block-atlas-tile-size+ +block-atlas-tile-count+))
+         (atlas-width (* +block-atlas-tile-size+ +block-atlas-tile-capacity+))
          (half-size (* 0.5 (block-particle-size particle))))
     (dolist (index '(0 1 2 0 2 3))
       (let* ((corner (nth index corners))

@@ -415,6 +415,8 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:make-block-mesh-snapshot
            #:make-block-texture-atlas
            #:make-block-normal-atlas
+           #:refresh-block-atlas
+           #:refresh-luvcraft-inventory
            #:make-default-sky-profile
            #:make-empty-little-block-world
            #:make-little-block-world

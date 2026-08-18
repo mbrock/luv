@@ -1273,6 +1273,30 @@ here -- so an unconsumed wheel event is simply the end of the matter."
   (dispatch-luvcraft-focus-event session canvas event)
   nil)
 
+(defun refresh-block-atlas (session)
+  "Repaint both block atlases into SESSION's live textures.
+
+The textures were allocated at +BLOCK-ATLAS-TILE-CAPACITY+ and every mesh's
+UVs address that fixed width, so uploading fresh pixels is the whole job:
+after redefining a tile or adding a material in the running image, call
+this and the next frame samples the new paint."
+  (let* ((device (luvcraft-session-device session))
+         (width (* +block-atlas-tile-size+ +block-atlas-tile-capacity+))
+         (height +block-atlas-tile-size+)
+         (layout (make-texture-data-layout
+                  :bytes-per-row (* width 4) :rows-per-image height)))
+    (write-texture (device-queue device)
+                   (make-texture-copy
+                    :texture (luvcraft-session-atlas-texture session))
+                   (make-block-texture-atlas)
+                   layout (list width height))
+    (write-texture (device-queue device)
+                   (make-texture-copy
+                    :texture (luvcraft-session-normal-atlas-texture session))
+                   (make-block-normal-atlas)
+                   layout (list width height)))
+  session)
+
 (defun start-luvcraft (&key
                                 (title "luv little block world — click, look, walk")
                                 ;; NIL means "as much of this display as
@@ -1432,7 +1456,7 @@ NIL to let the display choose a comfortable window."
                                      :mipmap-filter :nearest
                                      :compare :less-or-equal))))
                   (atlas-width
-                    (* +block-atlas-tile-size+ +block-atlas-tile-count+))
+                    (* +block-atlas-tile-size+ +block-atlas-tile-capacity+))
                   (atlas-height +block-atlas-tile-size+)
                   (atlas-data (make-block-texture-atlas))
                   (normal-atlas-data (make-block-normal-atlas))

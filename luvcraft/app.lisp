@@ -701,6 +701,29 @@ the terrain the ray meets first is what the player is looking at."
       (update-luvcraft-session-title session))
     block))
 
+(defun refresh-luvcraft-inventory (session)
+  "Give SESSION any newly defined placeable materials, in number-key order.
+
+The live half of adding a material: REFRESH-BLOCK-ATLAS repaints the wall,
+and this puts the new block on the number row of a running session.
+Existing entries keep their identity and quantities; entries the palette no
+longer names stay reachable at the end, past the number keys."
+  (let* ((inventory (luvcraft-session-inventory session))
+         (entries (block-inventory-entries inventory))
+         (palette (placeable-block-kinds)))
+    (setf (block-inventory-entries inventory)
+          (append
+           (loop for block in palette
+                 collect (or (find block entries
+                                   :key #'block-inventory-entry-block)
+                             (make-instance 'block-inventory-entry
+                                            :block block :quantity nil)))
+           (remove-if (lambda (entry)
+                        (member (block-inventory-entry-block entry) palette))
+                      entries))))
+  (update-luvcraft-session-title session)
+  session)
+
 (defparameter +luvcraft-keyboard-look-rate+ 2.2d0
   "Radians per second of camera turn while an arrow key is held.")
 

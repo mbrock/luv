@@ -623,7 +623,7 @@ place a critter model meets world coordinates."
          (origin-y (vec3-y position))
          (origin-z (vec3-z position))
          (size +block-atlas-tile-size+)
-         (atlas-width (* size +block-atlas-tile-count+)))
+         (atlas-width (* size +block-atlas-tile-capacity+)))
     (dolist (face *block-faces*)
       (let* ((normal (block-face-neighbor face))
              (nx (voxel-direction-dx normal))
