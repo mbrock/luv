@@ -42,6 +42,17 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
 
 (defvar *log-directory* nil)
 (defvar *project-root* nil)
+(defvar *build-id* nil)
+
+(defparameter *id-characters* "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+  "The wiki's alphabet for short references; a build gets one of the same shape.")
+
+(defun make-build-id ()
+  (let ((state (make-random-state t)))
+    (coerce (loop repeat 6
+                  collect (char *id-characters*
+                                (random (length *id-characters*) state)))
+            'string)))
 
 (defun build-log ()
   (merge-pathnames "build.log" *log-directory*))
@@ -332,6 +343,12 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
                             (asdf:component-system component))))))
     (merge-pathnames (concatenate 'string name ".log") *log-directory*)))
 
+(defun link-latest-logs ()
+  "Point build/logs/latest at this build, so tailing a log needs no id."
+  (let ((link (merge-pathnames "build/logs/latest" *project-root*)))
+    (ignore-errors (sb-posix:unlink (sb-ext:native-namestring link)))
+    (ignore-errors (sb-posix:symlink *build-id* (sb-ext:native-namestring link)))))
+
 (defun redirect-output-to (path)
   "Point file descriptors 1 and 2 at PATH for good."
   (ensure-directories-exist path)
@@ -382,11 +399,13 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
   (let ((label (component-label component))
         (start (get-internal-real-time))
         ;; Everything the compiler has to say is worth keeping, now that it is
-        ;; written to this file's log rather than to the console.
+        ;; written to this file's log rather than to the console: the form it
+        ;; is on, and the notes ASDF would otherwise muffle.
         (*compile-verbose* t)
-        (*compile-print* nil)
+        (*compile-print* t)
         (*load-verbose* t)
-        (*load-print* nil))
+        (*load-print* t)
+        (uiop:*uninteresting-conditions* '()))
     (send :begin kind label)
     (multiple-value-prog1
         (call-with-output-logged-to (log-file-for component) thunk)
@@ -433,7 +452,9 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
 
 (defun start (project-root &key system)
   (setf *project-root* project-root
-        *log-directory* (merge-pathnames "build/logs/" project-root)
+        *build-id* (make-build-id)
+        *log-directory* (merge-pathnames (format nil "build/logs/~A/" *build-id*)
+                                         project-root)
         *console* (sb-sys:make-fd-stream (sb-posix:dup 2)
                                          :output t :buffering :line
                                          :external-format :utf-8)
@@ -452,7 +473,11 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
   ;; ASDF's chatter, a compilation unit's abort summary -- lands there rather
   ;; than interrupting the display.
   (redirect-output-to (build-log))
+  (link-latest-logs)
+  ;; After the plan, so the id lines up with the columns it sets.
   (when system (report-plan system))
+  (send :note (format nil "build ~A in ~A" *build-id*
+                      (uiop:enough-pathname *log-directory* *project-root*)))
   (values))
 
 (defun finish (reason)
