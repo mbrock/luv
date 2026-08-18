@@ -673,7 +673,7 @@ address the move disturbs."
         t))))
 
 (defun sleep-physics-body (world handle)
-  "Move HANDLE's body out of the awake set; return T if it was awake."
+  "Move HANDLE's body out of the awake set; return T if it was awake. #QKS4GZ"
   (when (physics-body-alive-p world handle)
     (multiple-value-bind (set local) (physics-body-set-and-local world handle)
       (declare (ignore local))
@@ -1296,7 +1296,7 @@ The voxel grid is the static tree (#D9W4CH).  A cell's face, edge, or corner
 is only offered when no solid cell lies in the direction the sphere's centre
 overshoots it, which is what keeps a ball rolling across a floor of cells
 from catching on the seams between them: the neighbouring cell's own face
-is always the nearer, truer contact, and it is the only one made."
+is always the nearer, truer contact, and it is the only one made. #MYWH16"
   (let* ((awake (physics-world-awake world))
          (probe (physics-world-probe world))
          (margin (coerce *physics-terrain-margin* 'single-float)))
@@ -1471,7 +1471,7 @@ is always the nearer, truer contact, and it is the only one made."
 
 (defun prepare-physics-constraints (world h)
   "Colour the live contacts and fill the constraint buffer in colour order.
-Return the number of colours in use, the overflow colour counted."
+Return the number of colours in use, the overflow colour counted. #SSMPYW"
   (declare (single-float h) (optimize (speed 3) (safety 1)))
   (let* ((awake (physics-world-awake world))
          (contacts (physics-world-contacts world))
@@ -2256,7 +2256,7 @@ the substep is, for a kinematic other side's motion."))
 
 (defun step-physics-world (world &optional dt)
   "Advance WORLD by DT seconds (its step by default) and return it.
-Events from the step are then readable until the next step begins."
+Events from the step are then readable until the next step begins. #IDVK7G"
   (let* ((dt (coerce (or dt (physics-world-step-seconds world)) 'single-float))
          (substeps (max 1 *physics-substeps*))
          (h (/ dt substeps))

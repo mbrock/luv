@@ -21,7 +21,7 @@
 ;;; The claim these kernels make is testable and tested: a world stepped
 ;;; with the wide family and the same world stepped with the scalar family
 ;;; reach bit-identical state (PHYSICS-TESTS.LISP).  Neither path uses a
-;;; fused multiply-add or an approximate reciprocal, for that reason.
+;;; fused multiply-add or an approximate reciprocal, for that reason. #7PAQ3M
 
 (in-package #:luvcraft)
 

@@ -20,6 +20,10 @@ gravity, and jumping.  It is intentionally a behavioral oracle, not the
 general engine described below; this page keeps that small playable step from
 accidentally foreclosing the later one.
 
+The general engine now exists as well, at the size #G7Q3XR asked for:
+#V090DQ records what was built and #IDVK7G through #NZCNHC what it turned
+out to be.  The proposals below stand as the reasoning that led there.
+
 * The first executable seam
 :PROPERTIES:
 :ID: H7P4CX
@@ -218,6 +222,291 @@ Everything here stays live: the solver phases are generic functions one can
 redefine mid-pile, the contact domain is inspectable, and a =describe= of a
 body shows its row.  The CLOS block world already proved this style renders;
 the question this slice answers is whether it simulates.
+
+* DONE The smallest solver was built: spheres, coloured contacts, four-wide lanes
+:PROPERTIES:
+:ID: V090DQ
+:END:
+
+/Intent./  Build the slice #G7Q3XR proposed, no wider: spheres against the
+voxel lattice and each other, the Soft Step skeleton, persistent contacts,
+colouring from the first day, one scalar reference kernel and one four-wide
+kernel per instruction family, and enough game around it that the block
+world gains a ball to throw, a fountain, and a lava spring.
+
+/Evidence./  =luvcraft/physics.lisp= is the engine, =luvcraft/physics-simd.lisp=
+the wide kernels, =luvcraft/balls.lisp= the game's side, and
+=luvcraft/physics-tests.lisp= the claims.  A dropped ball rests a slop under
+its radius and sleeps; a bouncy ball rises again and a dead one does not; a
+ball rolling across cell seams neither hops nor slows; a pile of six sleeps
+and a thrown ball wakes it; a walking box pushes a ball ahead of it; a
+mortal body's contacts begin and end and it expires; a terrain edit wakes
+what stood on it; and the NEON family reaches the same state hash as the
+scalar family after 120 steps of a 200-ball pile (#7PAQ3M).  In the game,
+the ball hand item throws and scatters, the fountain and the lava spring
+throw drops and gobbets, and a turtle struck by a ball turns away.
+
+/Done when./  The eight tests above pass and the game runs them live.  They
+do, at commit =f39a687= and after.  What remains is listed in #NZCNHC.
+
+* The step as built
+:PROPERTIES:
+:ID: IDVK7G
+:END:
+
+One =step-physics-world= runs, in this order and with these owners:
+
+1. /Reset./  The event buffer empties and the terrain probe forgets its
+   chunks: nothing borrowed survives a step.
+2. /Grid./  Every body, awake or asleep, is dropped into a uniform hash
+   grid keyed by its centre, cell size a little over the largest diameter.
+3. /Pairs./  Each awake body walks the twenty-seven cells around it.  A
+   sleeping neighbour within reach is woken if the awake body is moving
+   faster than the wake speed and is otherwise leaned on as if it were
+   terrain; each awake pair is generated once, from the lower row.  Woken
+   bodies are appended to the awake set and this same pass reaches them.
+4. /Terrain./  Each awake body asks the probe about the solid cells within
+   its radius plus a margin and offers one contact per exposed face, edge,
+   or corner that passes the overshoot rule of #MYWH16.
+5. /Boxes./  Kinematic boxes the client posted -- the player, the animals --
+   first wake the sleepers they have walked into, then contact the awake
+   set as moving terrain with a velocity.
+6. /Prune./  Contact rows whose pair was not seen this step are swap-removed
+   and their hash entries patched; a touching one emits an end event.
+7. /Prepare./  Contacts are coloured (#SSMPYW) and the constraint buffer is
+   written in colour order: anchors, tangent frame, masses, softness, the
+   pre-solve approach speed, and the impulses carried from last step.
+8. /Substeps./  Four times: integrate velocities; warm start; solve with
+   bias; integrate positions into the delta lanes; relax without bias, where
+   friction and rolling resistance also act.  Static contacts sit in the
+   highest colours and are therefore solved last in each pass.
+9. /Restitution/, once, only for contacts that pushed and arrived above the
+   threshold; then the impulses go back to their contact rows, touching
+   flips emit begin and end events, and hard arrivals on boxes or on bodies
+   that asked emit hit events.
+10. /Finalize./  Deltas fold into positions, the mortal age (the sleepers
+    too), the slow accumulate sleep time and relocate to the sleeping set.
+
+Bodies are rows of one generated columnar layout in two buffers -- awake
+and sleeping -- with a handle table as forwarding address (#B5N8JT); the
+awake buffer keeps one row past its end as the static dummy every one-sided
+contact reads.  Contacts are rows of another layout, persistent, keyed by a
+packed pair; the constraint buffer is a third layout rebuilt each step.
+Every column is a specialized array; every kernel borrows them and runs a
+closed loop.  The seam #K2F6WD asked for holds: the world, its parameters,
+its events, and its kernel family are CLOS and specials; nothing inside a
+substep dispatches.
+
+* The voxel grid is the static tree, and the overshoot rule keeps seams smooth
+:PROPERTIES:
+:ID: MYWH16
+:END:
+
+A sphere near the lattice does not query a tree (#D9W4CH): it enumerates
+the cells within its reach through a probe that keeps up to eight chunks'
+storage borrowed for the step, so a neighbourhood that straddles a chunk
+edge costs a lookup only the first time.  For each solid cell the closest
+point of the cell's box to the centre gives the contact: on a face, an
+edge, or a corner, or -- when the centre is inside the box -- through the
+face of least depth.
+
+The rule that makes rolling across a floor of cells silent is about which
+of these contacts to keep.  Let the /overshoot/ of an axis be the direction
+in which the centre lies outside the box on that axis.  A contact is
+offered only if no solid cell lies in any non-empty combination of the
+overshoot directions.  A ball resting on cell A and reaching over the seam
+to cell B finds its closest point on B's top edge; but the centre overshoots
+B in the direction of A, A is solid, and so B offers nothing -- A's own top
+face, which is coplanar and nearer, is the only contact made.  Convex edges
+and corners, where the overshoot cells are air, still offer their contacts,
+which is what lets a ball roll smoothly off a ledge.  The rule is uniform:
+one neighbour to check for a face, three for an edge, seven for a corner;
+it needs the reach to stay under one cell, which bounds the radii this
+engine serves.
+
+The same closest-point machinery serves kinematic boxes with every face
+exposed and no neighbour rule.  Missing terrain is a wall, as it is for the
+walking bodies: a body near ground that has not streamed in leans on the
+boundary rather than falling through the world (#H2W9DJ).
+
+* Colours are the lanes: the constraint buffer is written in colour order
+:PROPERTIES:
+:ID: SSMPYW
+:END:
+
+Each step every live contact is given a colour by greedy bitset probing
+over awake rows (#G3W7KD): a body–body contact takes the lowest colour in
+which neither body is marked, from twenty colours; a contact with terrain
+or a box takes the highest free colour, marking only its body; what fits
+nowhere goes to the overflow colour.  A counting sort then writes the
+constraint buffer so that each colour's constraints are contiguous, and a
+small array of colour starts is all a kernel needs.
+
+Two things follow.  Because static contacts hold the top colours, they are
+solved last within every pass, the ordering Box3D found reduces
+push-through.  And because no two constraints of a colour touch the same
+awake body, four consecutive constraints of a colour can be gathered into
+=f32.4= lanes -- twelve gathers of body state per side, the constraint
+columns loaded straight -- solved together, and scattered back with no
+lane's write landing on another lane's read.  A colour's tail of fewer than
+four goes to the scalar kernel.  Kernels are generic functions on the
+world's kernel family, dispatched once per phase, never per contact.
+
+The measured colouring of a 3000-ball pile uses ten to twelve colours, so
+the twenty-four available are not close to overflow.
+
+* Bitwise agreement is the wide kernel's contract
+:PROPERTIES:
+:ID: 7PAQ3M
+:END:
+
+The claim #E8M3JC recommends -- the scalar definition is the oracle of the
+fast one -- is made strictly here: after 120 steps of a 200-ball pile, or
+200 steps of a 1000-ball one, the state hash of every position and velocity
+is identical between the scalar and the NEON families.  What buys it:
+
+- the wide arithmetic mirrors the scalar operation for operation, with the
+  same associativity, and neither uses a fused multiply-add or an
+  approximate reciprocal (#D2V7MK);
+- where the scalar kernel branches -- speculative against soft bias, the
+  friction cone, rolling resistance, whether a contact bounces -- the wide
+  kernel computes both arms and blends, and pushes any divisor it will
+  discard away from zero first;
+- within a colour the order of constraints does not matter, since they
+  share no body, so four-at-a-time is not a reordering.
+
+One sharp edge was met and routed around: sb-simd 2.6.7's NEON
+=f32.4-sqrt= is mis-encoded and raises SIGILL (#4UVLSQ), so the two square
+roots a lane group needs -- the friction and rolling clamps -- go through
+the scalar unit lane by lane, which is bit-identical to what the vector
+instruction would give.
+
+* Sleep is relocation, and boxes and edits wake
+:PROPERTIES:
+:ID: QKS4GZ
+:END:
+
+A body slower than the sleep speed for half a second -- speed measured as
+Box3D does, the larger of its velocity and half its position correction
+rate (#P8N4TC) -- is copied to the sleeping buffer and swap-removed from
+the awake one, with both moved rows' handles patched (#S5K3WM).  Its
+velocity is zeroed on the way; the eye draws both buffers.  There are no
+islands: a sleeping body is woken by any awake body faster than the wake
+speed whose reach touches it, by any moving kinematic box that overlaps it,
+by a terrain edit within a few cells (the client calls
+=wake-physics-bodies-near=), or by having its velocity set.  A slow awake
+body resting on a sleeper leans on it as if it were terrain.  Sleepers
+still age: a mortal drop that comes to rest expires on time.
+
+The consequence for a pile is Box3D's, one step at a time rather than by
+island: a thrown ball wakes what it hits, those wake their neighbours next
+step, and the whole heap sleeps again half a second after it stops.
+=validate-physics-world= walks every forwarding address and every contact
+key, the way =b3ValidateSolverSets= does, and the tests call it after each
+relocation-heavy scenario.
+
+* What a step costs
+:PROPERTIES:
+:ID: YYJGYO
+:END:
+
+Measured on the arm64 development machine, four substeps, no game running,
+each figure the mean over a run in which every body stays awake:
+
+| bodies | contacts | scalar ms | NEON ms | colours |
+|--------+----------+-----------+---------+---------|
+|   1000 |     2342 |      1.50 |    1.15 |       9 |
+|   3000 |     6687 |      4.56 |    3.96 |      10 |
+
+The same 1000 balls settle into a sleeping pile in about two seconds, after
+which a step costs 0.1 ms; the wide kernels are worth about a fifth of the
+whole step because the solve is not the whole step.  A statistical profile
+of the awake 3000-body case put the pair pass first, the NEON solve second,
+and preparation third; the pair pass is the twenty-seven-cell walk and its
+hash lookups, the natural next target if larger populations matter.
+
+The game runs a fountain (two drops a step, life 2.6 s), a lava spring, and
+a few dozen balls at three to four hundred awake bodies for about 0.25 ms a
+step, and draws every body as a cube through the block pipeline in another
+0.2 ms of vertex building.
+
+* Allocation: what the profile taught, and how not to be misled by it
+:PROPERTIES:
+:ID: QFMBFO
+:END:
+
+The step allocates only with change: a settled pile costs about a kilobyte
+a step, a violently churning 3000-body pile up to a hundred kilobytes.
+Three findings on the way there are worth keeping:
+
+- The generated columnar =-push= stored every lane through a slot typed
+  =vector=, so each single-float lane was boxed on the way in -- some four
+  hundred bytes per push, paid by every columnar client.  The lane slots now
+  carry their precise specialized array type; the physics' own row-moving
+  helpers (=define-columnar-remove-swap=, =define-columnar-copy-row=) were
+  written typed from the start.  This bears on #34G2K8: the swap-remove
+  vocabulary the physics needed is order-free and lives beside it; the
+  stable compaction that mark asks for is still the particle system's.
+- Generic-function calls with single-float arguments box those arguments,
+  so a kernel called once per colour per phase per substep cost hundreds of
+  boxes a step.  Kernels are now called once per phase and loop over
+  colours inside.
+- =sb-ext:get-bytes-consed= advances only when an allocation region closes,
+  so short measurements read zero, and it is process-wide, so a measurement
+  taken while the game renders in the same image is the render thread's
+  frame.  Every allocation figure here was taken over hundreds of steps
+  with no game playing.  The statistical profiler's =:alloc= mode charges
+  the function running when a region overflows, which is usually the
+  busiest one, not the allocating one; a heap breakdown before and after
+  under =without-gcing= names the object types instead.
+
+What still allocates under churn was not run to ground; it is proportional
+to contacts made and dropped and to events, and small enough to leave for
+now (#NZCNHC).
+
+* Things with weight, as the player meets them
+:PROPERTIES:
+:ID: JAU0EF
+:END:
+
+The engine knows spheres; the game knows kinds (=*body-kinds*= in
+=luvcraft/balls.lisp=): a ball, a marble, a water drop, a lava gobbet, each
+a tile of the atlas, a radius, a mass, a bounce, a friction, a life.  Every
+body is drawn as a cube of its tile turned by its orientation, written by
+one closed loop into the block pipeline's vertex format, so a rolling ball
+visibly rolls and a gobbet glows through the same bloom as a crystal.
+
+The ball is a hand item: B takes it out, left click throws one from the eye
+along the view with the player's own velocity added, right click scatters
+a handful of marbles.  The fountain and the lava spring are placeable
+blocks of a =spring-block-kind=; the session finds them in the world's
+authored edits, learns of new ones through =luvcraft-block-placed=, and each
+step lets each one throw what it throws, deterministically from its
+coordinate and a count.  Water drops meet only terrain and boxes, not each
+other, which is what lets a fountain be hundreds of bodies for a fraction
+of a millisecond.  The player and every animal are posted into the step as
+kinematic boxes: a walking player kicks what is underfoot, and a ball
+arriving hard on a turtle's box startles it (=critter-struck=), which is a
+step event read back into an animal's mind.
+
+* Open after the first pile
+:PROPERTIES:
+:ID: NZCNHC
+:END:
+
+- Islands.  Waking spreads a step at a time and a jittering body keeps
+  only its neighbours awake; a persistent island graph (#P8N4TC) would
+  wake and sleep piles whole.  Not needed at these populations.
+- The pair pass.  Twenty-seven cells per body and a hash lookup per
+  candidate is honest but is now the top of the profile; a sort-based
+  sweep or a two-by-two-by-two cell walk would halve it.
+- Allocation under churn: named in #QFMBFO, not yet run to ground.
+- Drawing.  A cube per body through the CPU vertex path is the animals'
+  path and is fine to a couple of thousand bodies; an instanced pipeline
+  with a per-body record is the next step if the fountain should be a
+  river.
+- Sound and persistence: a ball landing makes no sound and is not saved.
+- Shapes beyond spheres, and joints, remain what #G7Q3XR left out.
 
 * The block world is the static tree
 :PROPERTIES:
