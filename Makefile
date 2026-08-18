@@ -8,7 +8,9 @@ TRACY_STREAMING_TRACE ?= build/luvcraft-streaming.tracy
 TRACY_MCCLIM_ROUNDRECT_TRACE ?= build/mcclim-roundrect.tracy
 TRACY_MCCLIM_PAINT_TRACE ?= build/mcclim-paints.tracy
 
-.PHONY: all luvcraft run test parinfer-check shader-validate msl-validate smoke vulkan-smoke metal-smoke metal-text-closeup metal-benchmark metal-streaming-benchmark tracy-streaming tracy-mcclim-roundrect tracy-mcclim-paints readme-screenshots mcclim-gallery wiki wiki-cli objective-c-probe metal-clear metal-shader metal-pipeline metal-draw roundrect-proof slug-proof slug-text-proof clean
+FASL_CACHE := $(HOME)/.cache/common-lisp
+
+.PHONY: all luvcraft run test clean-fasls parinfer-check shader-validate msl-validate smoke vulkan-smoke metal-smoke metal-text-closeup metal-benchmark metal-streaming-benchmark tracy-streaming tracy-mcclim-roundrect tracy-mcclim-paints readme-screenshots mcclim-gallery wiki wiki-cli objective-c-probe metal-clear metal-shader metal-pipeline metal-draw roundrect-proof slug-proof slug-text-proof clean
 
 all: luvcraft
 
@@ -196,6 +198,13 @@ slug-proof:
 
 slug-text-proof:
 	./scripts/dev sbcl --script hal/metal/probes/slug-text.lisp build/slug-text-proof.png
+
+clean-fasls:
+	@for dir in $(FASL_CACHE)/*$(CURDIR); do \
+		[ -d "$$dir" ] || continue; \
+		echo "removing $$dir"; \
+		rm -rf "$$dir"; \
+	done
 
 clean:
 	rm -f ./build/luvcraft ./build/mcluv ./build/luvcraft-smoke.png ./build/luvcraft-metal-smoke.png
