@@ -13,7 +13,7 @@
   ((entries :initarg :entries :accessor block-inventory-entries))
   (:documentation "The ordered materials available to one player."))
 
-(defconstant +block-inventory-quickbar-size+ 9)
+(defconstant +block-inventory-quickbar-size+ 10)
 
 (defun make-block-inventory
     (&key (blocks (placeable-block-kinds)) (quantity nil))
@@ -38,7 +38,7 @@ unlimited supply."
           (block-inventory-entries inventory)))
 
 (defun block-inventory-quickbar-entries (inventory)
-  "Return the first nine entries addressable by number keys."
+  "Return the first ten entries addressable by number keys, 1-9 then 0."
   (let ((entries (block-inventory-entries inventory)))
     (subseq entries 0 (min +block-inventory-quickbar-size+
                            (length entries)))))

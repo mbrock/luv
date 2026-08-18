@@ -118,13 +118,14 @@
                               (luvcraft:luvcraft-session-inventory session))))
       (luvcraft:select-luvcraft-block session slot))))
 
-;;; The number row selects a quickbar slot.  Nine commands would say the same
-;;; thing nine times; a keystroke item of type :FUNCTION instead builds the
+;;; The number row selects a quickbar slot.  Ten commands would say the same
+;;; thing ten times; a keystroke item of type :FUNCTION instead builds the
 ;;; command object for the digit that was pressed, which is the ordinary CLIM
-;;; way to bind a family of keys to one verb with an argument.
-(loop for slot from 1 to 9
+;;; way to bind a family of keys to one verb with an argument.  The 0 key ends
+;;; the row where it sits on the keyboard, as the tenth slot.
+(loop for slot from 1 to 10
       do (add-keystroke-to-command-table
-          'luvcraft-world (list (digit-char slot)) :function
+          'luvcraft-world (list (digit-char (mod slot 10))) :function
           (let ((slot slot))
             (lambda (gesture numeric-argument)
               (declare (ignore gesture numeric-argument))

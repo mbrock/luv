@@ -677,12 +677,16 @@ the terrain the ray meets first is what the player is looking at."
     (when (slot-boundp session 'canvas)
       (setf (canvas-title (luvcraft-session-canvas session))
             (format nil
-                    "~A — [~A] ~(~A~)~@[  ·  holding ~A~]  ·  1–~D select  ·  e place  ·  x mine  ·  c pick  ·  I inventory  ·  F phone  ·  shift sprint  ·  arrows look  ·  tab focus  ·  ctrl-q quit"
+                    "~A — [~A] ~(~A~)~@[  ·  holding ~A~]  ·  ~A select  ·  e place  ·  x mine  ·  c pick  ·  I inventory  ·  F phone  ·  shift sprint  ·  arrows look  ·  tab focus  ·  ctrl-q quit"
                     (luvcraft-session-title-base session)
-                    (if number (1+ number) "inventory")
+                    ;; The tenth slot is the 0 key, so its chip says 0 rather
+                    ;; than advertising a 10 key that does not exist.
+                    (if number (mod (1+ number) 10) "inventory")
                     (block-kind-name block)
                     (and item (hand-item-name item))
-                    (length blocks)))))
+                    (if (= 10 (length blocks))
+                        "1–9,0"
+                        (format nil "1–~D" (length blocks)))))))
   session)
 
 (defun select-luvcraft-block (session number)

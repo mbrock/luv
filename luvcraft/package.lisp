@@ -114,6 +114,7 @@ compiler which closes a program over bound fields into a scalar loop.")
   (:documentation "The interactive block world built on luv.")
   (:export #:*crystal-block*
            #:*terminal-block*
+           #:*urbit-block*
            #:*voxel-light-solver*
            #:*session*
            #:play

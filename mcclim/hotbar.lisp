@@ -224,7 +224,8 @@ player read; a chooser of three shapes lets them recognize.")
                                     (- (/ (+ left right) 2.0) 20)
                                     (- (/ (+ top bottom) 2.0) 21)
                                     40)
-                   (draw-text* pane (format nil "~D" (1+ index))
+                   ;; The tenth slot's key is 0, at the end of the number row.
+                   (draw-text* pane (format nil "~D" (mod (1+ index) 10))
                                (+ left 7) (+ top 10)
                                :align-x :left :align-y :center :text-size 10
                                :ink (if selected-p

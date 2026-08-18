@@ -63,7 +63,10 @@
     (ok (equal '(com-select-quickbar-slot 3)
                (luvcraft-key-command session (key-press :3 :character #\3))))
     (ok (equal '(com-select-quickbar-slot 1)
-               (luvcraft-key-command session (key-press :1 :character #\1))))))
+               (luvcraft-key-command session (key-press :1 :character #\1))))
+    ;; The 0 key ends the number row as the tenth slot.
+    (ok (equal '(com-select-quickbar-slot 10)
+               (luvcraft-key-command session (key-press :0 :character #\0))))))
 
 (deftest a-command-runs-inline-on-the-calling-thread
   (let* ((session (make-instance 'luvcraft:luvcraft-session))
@@ -201,8 +204,8 @@
       (ok (equal '("F11") (keys-for "Any time" "toggle fullscreen")))
       ;; Modifiers are printed, and :ANY is not: it is noise on every row.
       (ok (equal '("⇧Tab") (keys-for "Any time" "leave focus")))
-      ;; Nine slots share one line, because nobody needs to be told about each.
-      (ok (equal '("1" "2" "3" "4" "5" "6" "7" "8" "9")
+      ;; Ten slots share one line, because nobody needs to be told about each.
+      (ok (equal '("1" "2" "3" "4" "5" "6" "7" "8" "9" "0")
                  (keys-for "In the world" "select block")))
       ;; A command owned by the movement layer is not repeated under the world
       ;; that inherits it.

@@ -198,6 +198,13 @@ definition."
    :face-tiles '(:all 10)
    :categories '(:building :luminous) :display-color '(0.13 0.31 0.34)
    :surface-emission 0.16)
+  (*urbit-block* :urbit
+   "The Martian computer: a white planet sigil on a near-black field,
+the tenth quickbar material, reached by the 0 key at the end of the
+number row."
+   :face-tiles '(:all 30)
+   :categories '(:building :luminous) :display-color '(0.07 0.07 0.09)
+   :surface-emission 0.22)
   (*gravel-block* :gravel
    :face-tiles '(:all 11)
    :categories '(:natural) :display-color '(0.46 0.44 0.40))
@@ -247,7 +254,7 @@ kinds through this vocabulary instead of printing CLOS object identities."
         (error "No block kind is named ~S." name))))
 
 (defconstant +block-atlas-tile-size+ 16)
-(defconstant +block-atlas-tile-count+ 30)
+(defconstant +block-atlas-tile-count+ 31)
 (defconstant +block-atlas-texture-format+ :rgba8-unorm-srgb)
 (defconstant +block-normal-atlas-texture-format+ :rgba8-unorm)
 
@@ -837,6 +844,31 @@ and a dock row at the bottom."
 (defmethod paint-block-atlas-relief ((tile (eql 29)) x y)
   "Phone screen: glass, flat but for the faintest bow across the pane."
   (+ 126 (floor (+ x y) 8)))
+
+;;; The urbit material arrived after the gadget tiles, so its tile number
+;;; sits past them: tile order is history, not palette order, and the
+;;; DEFINE-BLOCK-KINDS list alone decides which number key a material gets.
+
+(defun urbit-sigil-glyph-p (x y)
+  "Whether X,Y lies on the planet sigil: a ring crossed by its equator."
+  (let* ((dx (- x 7.5))
+         (dy (- y 7.5))
+         (radius (sqrt (+ (* dx dx) (* dy dy)))))
+    (or (<= 4.4 radius 5.9)
+        (and (<= 7 y 8) (< radius 5.9)))))
+
+(defmethod paint-block-atlas-tile ((tile (eql 30)) x y)
+  "Urbit: a white planet sigil on a near-black field."
+  (if (urbit-sigil-glyph-p x y)
+      (shaded-block-atlas-pixel 232 232 236)
+      (shaded-block-atlas-pixel
+       16 17 21 (round (block-atlas-variation x y tile) 6))))
+
+(defmethod paint-block-atlas-relief ((tile (eql 30)) x y)
+  "Urbit: the sigil stands proud of a matte face."
+  (block-atlas-byte
+   (+ (if (urbit-sigil-glyph-p x y) 168 118)
+      (* 0.08 (- (block-atlas-lattice-hash x y 301) 128)))))
 
 (defun make-block-texture-atlas ()
   "Return the little world's horizontal RGBA8 atlas as packed pixel words.

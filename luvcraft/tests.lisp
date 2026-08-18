@@ -1665,8 +1665,9 @@
     (ok (= (block-surface-emission *terminal-block*) 0.16))
     (ok (equal (mapcar #'block-kind-name (placeable-block-kinds))
                '(:grass :dirt :stone :wood :leaves :sand :snow :crystal
-                 :terminal :gravel :clay :mud :moss :cactus :cobblestone
-                 :stone-bricks :bricks :planks :sandstone :slate))))
+                 :terminal :urbit :gravel :clay :mud :moss :cactus
+                 :cobblestone :stone-bricks :bricks :planks :sandstone
+                 :slate))))
   (let ((world (make-block-world :chunk-width 2
                                  :chunk-height 2
                                  :chunk-depth 2)))
@@ -1706,9 +1707,12 @@
     (ok (eq (select-luvcraft-block session 7) luvcraft::*snow-block*))
     (ok (eq (select-luvcraft-block session 8) *crystal-block*))
     (ok (eq (select-luvcraft-block session 9) *terminal-block*))
-    (ok (search "1–9 select" (canvas-title canvas)))
+    (ok (search "1–9,0 select" (canvas-title canvas)))
     (ok (search "terminal" (canvas-title canvas)))
-    (ok (eq (select-luvcraft-block session 10) luvcraft::*gravel-block*))
+    ;; The tenth slot is the urbit material, and its chip is the 0 key.
+    (ok (eq (select-luvcraft-block session 10) luvcraft::*urbit-block*))
+    (ok (search "[0] urbit" (canvas-title canvas)))
+    (ok (eq (select-luvcraft-block session 11) luvcraft::*gravel-block*))
     (ok (search "[inventory]" (canvas-title canvas)))))
 
 (deftest block-inventory-supports-creative-and-finite-stacks
@@ -1750,7 +1754,7 @@
     (ok (null (select-luvcraft-block session 3)))
     (ok (search "1–2 select" (canvas-title canvas)))))
 
-(deftest inventory-and-nine-slot-quickbar-have-independent-extents
+(deftest inventory-and-ten-slot-quickbar-have-independent-extents
   (let* ((extra
            (make-instance 'block-kind :name :test-extra
                           :face-tiles '(:all 3)
@@ -1766,12 +1770,12 @@
                           :canvas canvas :inventory inventory
                           :selected-block luvcraft::*grass-block*)))
     (ok (= (1+ base-count) (length (block-inventory-blocks inventory))))
-    (ok (= 9 (length (block-inventory-quickbar-blocks inventory))))
+    (ok (= 10 (length (block-inventory-quickbar-blocks inventory))))
     ;; The full inventory may select a block with no number key; the title
-    ;; makes that distinction visible rather than advertising a tenth key.
+    ;; makes that distinction visible rather than advertising an eleventh key.
     (ok (eq extra (select-luvcraft-block session (1+ base-count))))
     (ok (search "[inventory]" (canvas-title canvas)))
-    (ok (search "1–9 select" (canvas-title canvas)))))
+    (ok (search "1–9,0 select" (canvas-title canvas)))))
 
 (deftest gazetteer-names-semantic-gameplay-views
   (let* ((views (luvcraft-gazetteer-views))
