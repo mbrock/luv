@@ -32,6 +32,7 @@
   (asdf:load-asd (merge-pathnames #P"luv-wiki.asd" project-root))
   (asdf:load-asd (merge-pathnames #P"luft.asd" project-root))
   (asdf:load-asd (merge-pathnames #P"mcluv.asd" project-root))
+  (asdf:load-asd (merge-pathnames #P"telegram.asd" project-root))
   (asdf:load-system :luv)
   (asdf:load-system :luvcraft)
   ;; The McCLIM presentation layer -- hotbar, inventory, metabar, the film

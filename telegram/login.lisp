@@ -21,6 +21,13 @@
              (format stream "Login failed: ~A." (login-failed-detail condition))))
   (:documentation "The login could not be completed."))
 
+(define-condition password-required (login-failed)
+  ((hint :initarg :hint :initform nil :reader password-required-hint))
+  (:default-initargs :detail "this account has a password")
+  (:documentation
+   "The code was accepted but the account has two-factor auth, and the caller
+asked not to be prompted for it.  COMPLETE-PASSWORD finishes the login."))
+
 ;;;; Credentials
 
 (defparameter *credential-files*
@@ -395,7 +402,7 @@ owns the number.  Returns the auth.sentCode."
            (setf connection (connect-stored nil :dc-id dc-id :test test))
            (format stream "~&connected to ~A~%" connection)
            (handler-case
-               (let ((sent (send-login-code connection phone-number)))
+               (let ((sent (send-login-code phone-number connection)))
                  (save-session connection session-file
                                :pending-phone phone-number
                                :pending-code-hash (tl:tl-value
@@ -440,12 +447,18 @@ process."
       (unless user (net:close-mtproto-connection connection)))))
 
 (defun complete-login (code &key password
+                                 (password-reader #'default-password-reader)
                                  (application (or *application*
                                                   (application-from-environment)))
                                  (session-file *session-file*)
                                  (stream *standard-output*))
   "Finish the login BEGIN-LOGIN started, using CODE.  Returns the connection
-and the user."
+and the user.
+
+If the account has a password and none is given, PASSWORD-READER is asked
+for it with the account.password object; a NIL reader signals
+PASSWORD-REQUIRED instead, for a caller with no terminal that will come back
+through COMPLETE-PASSWORD."
   (let* ((*application* application)
          (stored (or (load-session session-file)
                      (error 'login-failed :detail "no login is in progress")))
@@ -464,11 +477,13 @@ and the user."
                                       (mt:remote-rpc-error-message error))
                        (error error))
                      (format stream "~&this account has a password~%")
-                     (check-password
-                      (or password
-                          (funcall #'default-password-reader
-                                   (invoke connection :account.get-password)))
-                      :connection connection)))))
+                     (let ((state (invoke connection :account.get-password)))
+                       (unless (or password password-reader)
+                         (error 'password-required
+                                :hint (tl:tl-value state :hint)))
+                       (check-password
+                        (or password (funcall password-reader state))
+                        :connection connection))))))
            (when (eq :auth.authorization-sign-up-required
                      (tl:tl-name authorization))
              (error 'login-failed :detail "this number has no account"))

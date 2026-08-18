@@ -9,6 +9,7 @@
     (asdf:load-asd (truename "luv.asd"))
     (asdf:load-asd (truename "luvcraft.asd"))
     (asdf:load-asd (truename "mcluv.asd"))
+    (asdf:load-asd (truename "telegram.asd"))
     (asdf:load-asd (truename "luv-wiki.asd"))
     (asdf:load-asd (truename "luv-wiki-site.asd"))
     (asdf:load-asd (truename "luft.asd"))

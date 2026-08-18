@@ -305,6 +305,8 @@ a Telegram console left running behind a film is a connection nobody closes."
        :target-format
        (luv:gpu-texture-format
         (luvcraft::luvcraft-session-color-texture session)))
+      (place-widget-overlay-on-surface
+       overlay (terminal-film-browser-overlay-display overlay) session)
       (let* ((viewport-size
                (luv:canvas-extent (luvcraft::luvcraft-session-context session)))
              (state
@@ -342,28 +344,6 @@ a Telegram console left running behind a film is a connection nobody closes."
           (choose-terminal-film-browser-entry frame entry))))
     t))
 
-(defun terminal-film-browser-world-frame (display)
-  "Return center, half-right, texture-down, and outward axes for DISPLAY."
-  (let* ((surface (luvcraft:terminal-display-surface display))
-         (frame (luvcraft::terminal-face-frame
-                 (luvcraft:terminal-surface-face surface)))
-         (right (luvcraft::voxel-direction-vec3
-                 (luvcraft::terminal-face-frame-right frame)))
-         (up (luvcraft::voxel-direction-vec3
-              (luvcraft::terminal-face-frame-up frame)))
-         (outward (luvcraft::voxel-direction-vec3
-                   (luvcraft::terminal-face-frame-outward frame)))
-         (width (luvcraft::terminal-surface-physical-width surface))
-         (height (luvcraft::terminal-surface-physical-height surface))
-         (lower-left (luvcraft::terminal-surface-lower-left-point surface 0.010))
-         (center
-           (luvcraft::terminal-offset-point
-            lower-left right (/ width 2.0) up (/ height 2.0))))
-    (values center
-            (vec:vec3-scale right (/ width 2.0))
-            (vec:vec3-scale up (- (/ height 2.0)))
-            outward)))
-
 (defun open-terminal-film-browser (display)
   "Make one embedded McCLIM browser owned by DISPLAY's authored wall."
   (let* ((session (luvcraft::terminal-display-session display))
@@ -381,19 +361,17 @@ a Telegram console left running behind a film is a connection nobody closes."
               'terminal-film-browser :frame-manager manager :enable t
               :display display :directory (user-homedir-pathname)))))
     (setf (frame-pretty-name frame) "terminal wall film browser")
-    (let ((mirror (sheet-direct-mirror (frame-top-level-sheet frame))))
-      (multiple-value-bind (center right-axis up-axis normal-axis)
-          (terminal-film-browser-world-frame display)
-        (let ((overlay
-                (make-instance
-                 'terminal-film-browser-overlay
-                 :session session :frame frame :mirror mirror :display display
-                 :center center :right-axis right-axis :up-axis up-axis
-                 :normal-axis normal-axis :height-scale 0.0)))
-          (setf (mirror-compositor mirror) overlay
-                (luvcraft:terminal-display-mode-overlay display) overlay)
-          (refresh-terminal-film-browser frame :reset-offset-p t)
-          overlay)))))
+    (let* ((mirror (sheet-direct-mirror (frame-top-level-sheet frame)))
+           (overlay
+             (make-instance
+              'terminal-film-browser-overlay
+              :session session :frame frame :mirror mirror :display display
+              :height-scale 0.0)))
+      (place-widget-overlay-on-surface overlay display session)
+      (setf (mirror-compositor mirror) overlay
+            (luvcraft:terminal-display-mode-overlay display) overlay)
+      (refresh-terminal-film-browser frame :reset-offset-p t)
+      overlay)))
 
 (defmethod luvcraft:change-terminal-display-mode :after
     ((display luvcraft:terminal-display)

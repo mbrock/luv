@@ -98,7 +98,10 @@
   :description "Luvcraft's verbs as CLIM commands in an application frame."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luvcraft" "mcluv/luvcraft" "alexandria")
+  ;; The Telegram panel is part of the game: it is what the phone shows, and
+  ;; the wall's third mode.  It has to be loaded before the command layer,
+  ;; which binds a keystroke to every mode the wall offers at load time.
+  :depends-on ("luvcraft" "mcluv/luvcraft" "mcluv/telegram" "alexandria")
   :serial t
   :components ((:module "luvcraft/clim"
                 :serial t

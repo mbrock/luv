@@ -541,6 +541,8 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:play-terminal-display-film
            #:terminal-surface
            #:terminal-surface-face
+           #:terminal-surface-panel-frame
+           #:*phone-initial-mode*
            #:terminal-surface-height
            #:terminal-surface-origin
            #:terminal-surface-width

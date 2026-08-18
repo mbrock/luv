@@ -176,6 +176,31 @@ or NIL.  Lower is nearer."))
    "The camera pose from which SURFACE's display is best read, or NIL to
 leave the camera where it is with only the narrowed field of view."))
 
+(defgeneric terminal-surface-panel-frame (surface session &optional offset)
+  (:documentation
+   "Where a panel mounted flat on SURFACE sits in the world this frame.
+
+Returns the panel's centre point, its half-width vector along the surface's
+right, its half-height vector pointing *down* the texture, and the outward
+unit normal -- all in world space, OFFSET cell-depths off the face.  A wall's
+answer never changes; a surface carried in the hand answers afresh each
+frame, which is why this takes the SESSION and is asked at draw time rather
+than once at mounting.")
+  (:method (surface session &optional (offset 0.010))
+    (declare (ignore session))
+    ;; The general surface draws in world space already, so its own axes and
+    ;; corner are the answer.
+    (multiple-value-bind (right up outward) (terminal-surface-axes surface)
+      (let* ((width (terminal-surface-physical-width surface))
+             (height (terminal-surface-physical-height surface))
+             (lower-left (terminal-surface-lower-left-point surface offset))
+             (center (terminal-offset-point
+                      lower-left right (/ width 2.0) up (/ height 2.0))))
+        (values center
+                (vec3-scale right (/ width 2.0))
+                (vec3-scale up (- (/ height 2.0)))
+                outward)))))
+
 (defmethod terminal-surface-axes ((surface terminal-surface))
   (let ((frame (terminal-face-frame (terminal-surface-face surface))))
     (values (voxel-direction-vec3 (terminal-face-frame-right frame))

@@ -53,6 +53,9 @@ negotiation, and one INVOKE that turns a schema object into an answer.")
            #:stored-material
            ;; logging in
            #:login-failed
+           #:login-failed-detail
+           #:password-required
+           #:password-required-hint
            #:log-in
            #:begin-login
            #:complete-login
