@@ -478,13 +478,26 @@ written with that in mind.
 [[lisp:luft.render:atelier-scene]] and [[lisp:luft.render:atelier-cameras]]
 are generic functions on a piece's name, so a sheet can ask for all of them
 without knowing any of them and a new piece is one method and one entry in
-[[lisp:luft.render:atelier-pieces]].  There are six: =:samples=, ten stocks
-of one small object; =:arcade=, a wall of round-headed openings on a
+[[lisp:luft.render:atelier-pieces]].  There are seven: =:samples=, ten
+stocks of one small object; =:arcade=, a wall of round-headed openings on a
 stylobate under a corbelled cornice; =:turret=, a machicolated round tower
 with a curtain wall and a bailey; =:viaduct=, piers in a box canyon carrying
-a road; =:grotto=, a hall cut into a cliff behind an arched mouth; and
+a road; =:grotto=, a hall cut into a cliff behind an arched mouth;
 =:headland=, which has no building on it at all and is the landscape the
-others are supposed to stand in.
+others are supposed to stand in; and =:holm=, which is the argument that
+they compose.
+
+[[file:images/luft-holm.png]]
+
+The holm is a rock island with a walled town on it and a bridge out to the
+shore: a coastline from the slope rule, a bridge of two arches on piers
+standing in the channel, a ramp cut up through the cliff, a curtain wall
+with a round-headed gate between two turrets, a hall with an arcaded front,
+and houses of stone below and timber above under tiled roofs -- one world,
+seven stocks, and no part of it that any earlier piece did not already
+teach.  It is also where a mistake is easy to see: the bridge was built
+running /along/ its channel rather than across it, twice, and only a plan
+view said so.
 
 Each piece carries its own cameras, because a building nobody photographs
 from the right place is a building nobody has seen, and the cameras are as

@@ -236,7 +236,7 @@ the top of a wall one does not want turfed.  #JNJF28"
 
 (defun atelier-pieces ()
   "Every piece the atelier can build, in the order a sheet would show them."
-  '(:samples :arcade :turret :viaduct :grotto :headland))
+  '(:samples :arcade :turret :viaduct :grotto :headland :holm))
 
 ;;; The samples: one small object repeated in every stock there is.  A
 ;;; material sheet with one material a column tells you what each is; this
@@ -710,6 +710,162 @@ the top of a wall one does not want turfed.  #JNJF28"
                           :columns (list (list style))
                           :width width :height height
                           :supersample supersample)))
+
+(defmethod atelier-scene ((piece (eql :holm)))
+  "A rock island with a walled town on it and a bridge out to the shore.
+
+The other pieces each say one thing.  This one is the argument that they
+compose: a landscape whose cliffs come from the slope rule, a bridge whose
+arches come from the mason's vocabulary, a curtain wall with a gate and two
+turrets, and a handful of roofed houses -- all in one world, each cell of it
+knowing what it is cut from."
+  (let* ((world (make-world :horizontal-bits 6))
+         (shore 11)
+         (water 2)
+         (plateau 19)
+         (deck 13)
+         (springing 7)
+         (radius 4)
+         (piers '(15 25 35))
+         (arches '(20 30))
+         ;; The bridge runs north across the channel; ACROSS is its width.
+         (across (cons 27 32)))
+    (lay-ground world
+                :height (lambda (x y)
+                          (cond
+                            ;; The shore, falling to the water at its edge.
+                            ((< y 14)
+                             (max water (+ shore (* 1.4 (sin (/ x 11.0)))
+                                           (- (* 1.6 (max 0 (- y 9)))))))
+                            ;; The holm: a plateau inside a wandering coast.
+                            ((>= y 36)
+                             (let* ((edge (+ 2.0 (* 3.0 (sin (/ x 9.0)))
+                                             (* 1.5 (sin (/ x 3.7)))))
+                                    (inland (- y 36 edge)))
+                               (if (>= inland 0)
+                                   (+ plateau (* 1.3 (sin (/ x 12.0))
+                                                 (cos (/ y 13.0))))
+                                   (max water (+ plateau (* 9.0 inland))))))
+                            (t water)))
+                :stock :granite)
+    (grass-the-flats world :flat 1 :depth 1)
+    ;; The channel bed is dark stone, not turf: there is no water in this
+    ;; world, and a slate floor at the bottom of a cut reads as one.
+    (let ((period (luft:world-domain-x-period (world-domain world))))
+      (dotimes (x period)
+        (loop for y from 10 to 44
+              for top = (column-top world x y)
+              when (and top (<= top (1+ water)))
+                do (paint-cell world x y top :slate))))
+    ;; The bridge: piers standing in the channel, arches between them, a
+    ;; stone deck, a timber roadway, and parapets either side.
+    (with-stock (:granite)
+      (dolist (y piers)
+        (fill-box world (1- (car across)) (1+ (cdr across)) (1- y) (1+ y)
+                  water (1+ water))
+        (fill-box world (car across) (cdr across) (1- y) (1+ y)
+                  water springing)))
+    (with-stock (:limestone)
+      (fill-box world (car across) (cdr across) 12 38 water (1- deck))
+      (fill-box world (car across) (cdr across) 6 13 4 (1- deck))
+      (fill-box world (car across) (cdr across) 37 44 4 (1- deck)))
+    (dolist (arch arches)
+      (carve-arch world arch (1+ water) springing radius across :axis :y))
+    (with-stock (:granite)
+      (dolist (arch arches)
+        (ring-arch world arch (1+ water) springing radius across
+                   :axis :y :thickness 1))
+      (corbel world (car across) (cdr across) 8 42 (1- deck) 1))
+    (with-stock (:slate)
+      (fill-box world 25 34 6 44 deck deck))
+    (with-stock (:oak)
+      (fill-box world 27 32 6 44 (1+ deck) (1+ deck)))
+    (with-stock (:limestone)
+      (loop for y from 6 to 44
+            do (setf (world-cell-p world 25 y (1+ deck)) t
+                     (world-cell-p world 34 y (1+ deck)) t)
+            when (zerop (mod y 5))
+              do (setf (world-cell-p world 25 y (+ deck 2)) t
+                       (world-cell-p world 34 y (+ deck 2)) t)))
+    ;; The ramp up off the bridge into the holm, cut through its cliff.
+    (fill-box world 26 33 38 47 deck (+ plateau 5) nil)
+    (with-stock (:limestone)
+      (loop for step from 0 to 6
+            for y from 39
+            do (fill-box world 26 33 y y 0 (+ deck step))))
+    ;; The curtain wall around the town, with a gate over the ramp.
+    (with-stock (:limestone)
+      (fill-box world 14 46 45 47 plateau (+ plateau 6))
+      (fill-box world 14 16 45 61 plateau (+ plateau 6))
+      (fill-box world 44 46 45 61 plateau (+ plateau 6))
+      (corbel world 14 46 45 61 (+ plateau 7) 1)
+      (crenellate world 13 47 44 62 (+ plateau 8) :period 2 :merlon 2))
+    (carve-arch world 30 plateau (+ plateau 3) 3 (cons 45 47))
+    (with-stock (:granite)
+      (ring-arch world 30 plateau (+ plateau 3) 3 (cons 45 45)
+                 :thickness 1))
+    ;; Two turrets on the corners that face the water.
+    (dolist (corner '((15 46) (45 46)))
+      (destructuring-bind (cx cy) corner
+        (with-stock (:granite)
+          (fill-disc world cx cy 5 (1- plateau) plateau))
+        (with-stock (:limestone)
+          (fill-ring world cx cy 2 4 plateau (+ plateau 9))
+          (fill-ring world cx cy 2 5 (+ plateau 10) (+ plateau 11))
+          (fill-disc world cx cy 3 (+ plateau 11) (+ plateau 11)))
+        (with-stock (:granite)
+          (crenellate-disc world cx cy 5 (+ plateau 12) :period 2 :merlon 2))))
+    ;; The hall: an arcaded front on the yard, slate over.
+    (with-stock (:limestone)
+      (fill-box world 20 40 55 60 plateau (+ plateau 5))
+      (fill-box world 21 39 56 59 (1+ plateau) (+ plateau 5) nil))
+    (dolist (bay '(25 30 35))
+      (carve-arch world bay (1+ plateau) (+ plateau 3) 2 (cons 55 55)))
+    (with-stock (:granite)
+      (dolist (bay '(25 30 35))
+        (ring-arch world bay (1+ plateau) (+ plateau 3) 2 (cons 55 55)
+                   :thickness 1)))
+    (with-stock (:slate)
+      (loop for course from 0 below 4
+            do (fill-box world (+ 19 course) (- 41 course) 54 61
+                         (+ plateau 6 course) (+ plateau 6 course))))
+    ;; Houses along the walls, stone below and timber above, tiled over.
+    (dolist (house '((18 49) (26 49) (34 49) (39 55)))
+      (destructuring-bind (hx hy) house
+        (with-stock (:limestone)
+          (fill-box world hx (+ hx 5) hy (+ hy 4) plateau (+ plateau 2))
+          (fill-box world (1+ hx) (+ hx 4) (1+ hy) (+ hy 3)
+                    (1+ plateau) (+ plateau 2) nil))
+        (with-stock (:oak)
+          (fill-box world hx (+ hx 5) hy (+ hy 4) (+ plateau 3) (+ plateau 4))
+          (fill-box world (1+ hx) (+ hx 4) (1+ hy) (+ hy 3)
+                    (+ plateau 3) (+ plateau 4) nil))
+        (with-stock (:terracotta)
+          (loop for course from 0 below 3
+                do (fill-box world (+ hx -1 course) (+ hx 6 (- course))
+                             (1- hy) (+ hy 5)
+                             (+ plateau 5 course) (+ plateau 5 course))))))
+    ;; A bronze beacon on one turret, and rocks fallen into the channel.
+    (with-stock (:bronze)
+      (fill-disc world 45 46 2 (+ plateau 12) (+ plateau 13)))
+    (scatter-boulders world '((10 20 2) (54 22 2) (18 32 1) (48 30 1)
+                             (8 40 2) (58 36 2) (38 18 1) (20 26 1)))
+    (world-scene world)))
+
+(defmethod atelier-cameras ((piece (eql :holm)))
+  (list
+   ;; From the shore at the bridge's foot, the roadway leading the eye
+   ;; across the channel to the gate and the town on the rock above it.
+   (cons :approach (studio-camera 30.0 2.0 17.0 :look-x 30.0 :look-y 46.0
+                                  :look-z 21.0 :field-of-view 0.86))
+   ;; From the channel bed beside the bridge, looking along its flank at
+   ;; the arches, with the cliff and the wall stacked up behind.
+   (cons :channel (studio-camera 11.0 19.0 5.0 :look-x 31.0 :look-y 33.0
+                                 :look-z 15.0 :field-of-view 0.92))
+   ;; High and oblique over the town, so the plan of the walls and the
+   ;; roofs can be read at once.
+   (cons :town (studio-camera 58.0 6.0 46.0 :look-x 28.0 :look-y 50.0
+                              :look-z 19.0 :field-of-view 0.76))))
 
 (defun render-view (pathname piece camera &key (light *light*) (style :stock)
                                                (width 1200) (height 750)
