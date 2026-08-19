@@ -417,6 +417,48 @@ UPDATE-LOGIN-TOKEN and eventually becomes the authenticated session."))
   (when (qr-login-token login)
     (format nil "tg://login?token=~A" (base64url-octets (qr-login-token login)))))
 
+(defparameter *qr-encoder* "qrencode"
+  "The program that turns a URI into a module grid.  Its ASCII output is two
+characters per module with a four-module quiet zone, which is a grid to parse
+rather than a picture to decode.")
+
+(defun qr-code-modules (text)
+  "TEXT as a square bit array: 1 where the QR code is dark, 0 where it is
+light, quiet zone included.  NIL if the encoder is not there.
+
+This shells out.  A QR encoder is Reed-Solomon over GF(256) and a mask
+search, which is a fine thing to write one day and no part of logging in;
+qrencode is in the development shell and prints a grid on request."
+  (let* ((output (with-output-to-string (out)
+                   (handler-case
+                       (let ((process (sb-ext:run-program
+                                       *qr-encoder* (list "-t" "ASCII" "-o" "-" text)
+                                       :search t :wait t :output out
+                                       :error nil)))
+                         (unless (zerop (sb-ext:process-exit-code process))
+                           (return-from qr-code-modules nil)))
+                     (error () (return-from qr-code-modules nil)))))
+         (rows (with-input-from-string (in output)
+                 (loop for line = (read-line in nil nil)
+                       while line
+                       when (plusp (length line)) collect line))))
+    (when rows
+      (let* ((size (floor (length (first rows)) 2))
+             (modules (make-array (list (length rows) size)
+                                  :element-type 'bit :initial-element 0)))
+        (loop for line in rows
+              for row from 0
+              do (dotimes (column size)
+                   (when (and (< (* 2 column) (length line))
+                              (char= #\# (char line (* 2 column))))
+                     (setf (aref modules row column) 1))))
+        modules))))
+
+(defun qr-login-modules (login)
+  "LOGIN's current code as a bit array, or NIL when it has none to show."
+  (let ((uri (qr-login-uri login)))
+    (and uri (qr-code-modules uri))))
+
 (defgeneric present-qr-login (login &optional stream)
   (:documentation
    "Present LOGIN's current QR code.  Applications can add a method for
@@ -505,6 +547,31 @@ client scans and accepts it."
 
 (defun new-login-token-event-p (event)
   (and (eq :update (first event)) (eq :update-login-token (second event))))
+
+(defun poll-qr-login (login)
+  "Wait once for the phone to accept LOGIN's code, and return LOGIN.
+
+One read, as long as the connection's read timeout: a caller that also has a
+player to answer sets that short and comes back.  A quiet socket is the
+ordinary case -- nothing has been scanned yet -- and an expired token is
+refreshed whether or not anything arrived, so a code on screen is always one
+a phone can still take."
+  (let* ((session (net:connection-session (qr-login-connection login)))
+         (before (mt:session-events session))
+         (accepted nil))
+    (handler-case
+        (progn (net:pump-connection (qr-login-connection login))
+               (setf accepted (find-if #'new-login-token-event-p
+                                       (ldiff (mt:session-events session) before))))
+      (net:connection-timeout () nil))
+    (when (or accepted (qr-login-stale-p login))
+      (refresh-qr-login login))
+    login))
+
+(defun qr-login-stale-p (login)
+  "Has LOGIN's token passed the expiry Telegram gave it?"
+  (let ((expires (qr-login-expires login)))
+    (and expires (>= (octets:clock-unix-time octets:*clock*) expires))))
 
 (defun wait-for-qr-login (login &key (stream *standard-output*) (present t))
   "Pump LOGIN until a mobile client accepts its code, then return connection

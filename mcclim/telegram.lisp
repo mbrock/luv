@@ -128,7 +128,9 @@ anything having to be stored.")
   ;; words to put above the field.  NIL once there is a conversation to show.
   (login nil)
   (prompt '() :type list)
-  (secret-p nil))
+  (secret-p nil)
+  ;; At the :QR stage, the code to draw: a square bit array, dark where 1.
+  (qr nil))
 
 (defstruct dialog-row
   (key nil)
@@ -298,7 +300,10 @@ can and mid-word when a word is longer than the whole line."
    ;; connection and lives only as long as this process, which is the whole
    ;; point: a code is good for about a minute, so a login that outlived a
    ;; restart is not one to resume.
-   (login :initform nil :accessor console-login))
+   (login :initform nil :accessor console-login)
+   ;; The QR code as a bit array, rebuilt whenever the token changes.  The
+   ;; console thread encodes it so the render thread only ever draws squares.
+   (qr :initform nil :accessor console-qr))
   (:documentation
    "One Telegram connection and roster, driven on its own thread, publishing
 a finished view for a McCLIM frame to paint."))
@@ -410,7 +415,8 @@ a finished view for a McCLIM frame to paint."))
                        (console-transcript-lines console peer))
            :login stage
            :prompt (and stage (console-login-prompt console))
-           :secret-p (eq stage :password))))
+           :secret-p (eq stage :password)
+           :qr (and (eq stage :qr) (console-qr console)))))
   console)
 
 ;;;; Logging in
@@ -442,6 +448,13 @@ a finished view for a McCLIM frame to paint."))
           ""
           "api_id:"))
        (:api-hash '("Now the api_hash:"))
+       (:qr
+        '("Open Telegram on your phone, go to"
+          "Settings, Devices, Link Desktop Device,"
+          "and point it at this code."
+          ""
+          "Or type anything to use a phone number"
+          "and an SMS code instead."))
        (:phone
         '("Your phone number, with the country"
           "code, as +46701234567."
@@ -461,12 +474,13 @@ a finished view for a McCLIM frame to paint."))
 (defun forget-console-login (console)
   "Drop any login in progress, closing the connection it was holding."
   (telegram.client:abandon-login (console-login console))
-  (setf (console-login console) nil))
+  (setf (console-login console) nil
+        (console-qr console) nil))
 
 (defun enter-login-stage (console stage &key note failure)
   ;; Anything before :CODE means the login in hand is not the one being
   ;; finished, so let go of its connection rather than leaking it.
-  (unless (member stage '(:code :password))
+  (unless (member stage '(:code :password :qr))
     (forget-console-login console))
   (setf (console-login-stage console) stage
         (console-login-note console) note)
@@ -484,6 +498,7 @@ a finished view for a McCLIM frame to paint."))
   (setf (console-login-stage console) nil
         (console-login-note console) nil
         (console-login console) nil
+        (console-qr console) nil
         (console-failure console) nil)
   ;; RESUME and COMPLETE-LOGIN bind the application identity only for their
   ;; own extent; INVOKE needs it for every call after, so give this thread
@@ -494,6 +509,42 @@ a finished view for a McCLIM frame to paint."))
   (telegram.chat:refresh-roster-dialogs (console-roster console) :limit 40)
   (telegram.chat:synchronize-chat-updates (console-roster console))
   (publish-console-view console))
+
+(defun show-console-qr (console)
+  "Encode the login's current token and publish it."
+  (let ((login (console-login console)))
+    (setf (console-qr console) (telegram.client:qr-login-modules login))
+    (enter-login-stage
+     console :qr
+     :failure (unless (console-qr console)
+                "no qrencode: type anything to log in by phone instead"))))
+
+(defun begin-console-qr-login (console)
+  "Start a QR login and show its code, or fall back to asking for a number."
+  (publish-console-view console :status "asking for a code…")
+  (handler-case
+      (let ((login (telegram.client:begin-qr-login)))
+        ;; ADVANCE-TELEGRAM-CONSOLE has to come back often enough to answer
+        ;; the player, so the wait for UPDATE-LOGIN-TOKEN is many short reads
+        ;; rather than one thirty-second one.
+        (setf (telegram.net:connection-read-timeout
+               (telegram.client:qr-login-connection login))
+              1)
+        (setf (console-login console) login)
+        (show-console-qr console))
+    (error (condition)
+      (enter-login-stage console :phone :failure (princ-to-string condition)))))
+
+(defun advance-console-qr-login (console)
+  "One short wait for the phone to accept the code, then show whatever the
+login has now: the conversations, or a freshened code."
+  (let* ((login (console-login console))
+         (token (telegram.client:qr-login-token login)))
+    (telegram.client:poll-qr-login login)
+    (cond ((telegram.client:qr-login-user login)
+           (finish-console-login console))
+          ((not (equalp token (telegram.client:qr-login-token login)))
+           (show-console-qr console)))))
 
 (defgeneric answer-console-login (console stage answer)
   (:documentation
@@ -513,6 +564,10 @@ Each stage either moves to the next or, on failure, stays and says why."))
   ;; A fresh identity from the file, replacing whatever the missing one
   ;; left behind, so BEGIN-LOGIN sees the credentials just written.
   (setf telegram.client:*application* nil)
+  (enter-login-stage console :phone))
+
+(defmethod answer-console-login (console (stage (eql :qr)) answer)
+  (declare (ignore answer))
   (enter-login-stage console :phone))
 
 (defmethod answer-console-login (console (stage (eql :phone)) answer)
@@ -642,15 +697,15 @@ around the whole loop, so RESUME makes it current here and nowhere else."
       ((null (ignore-errors (telegram.client:application-from-environment)))
        (enter-login-stage console :api-id))
       ((null stored)
-       (enter-login-stage console :phone))
+       (begin-console-qr-login console))
       (t
        (handler-case
            (progn (telegram.client:resume)
                   (finish-console-login console))
          (telegram.client:login-failed (condition)
            ;; The key is stale or was logged out elsewhere: start over.
-           (enter-login-stage console :phone
-                              :failure (princ-to-string condition))))))))
+           (setf (console-failure console) (princ-to-string condition))
+           (begin-console-qr-login console)))))))
 
 (defun fetch-console-photos (console &key (limit 2))
   "Download and decode a few of the pictures the last view asked for.
@@ -679,11 +734,16 @@ pictures appearing over a second or two is the better failure."
   (unless (or telegram.client:*connection* (console-login-stage console))
     (open-console-connection console))
   (when (console-login-stage console)
-    ;; Nothing to poll while logging in; wait for the player to answer.
-    (alexandria:when-let
-        ((request (sb-concurrency:receive-message (console-requests console)
-                                                  :timeout 0.25)))
-      (apply-console-request console (car request) (cdr request)))
+    ;; Nothing to poll while logging in -- except a QR code, which is waiting
+    ;; on the phone rather than on the player.
+    (if (eq :qr (console-login-stage console))
+        (progn (drain-console-requests console)
+               (when (eq :qr (console-login-stage console))
+                 (advance-console-qr-login console)))
+        (alexandria:when-let
+            ((request (sb-concurrency:receive-message (console-requests console)
+                                                      :timeout 0.25)))
+          (apply-console-request console (car request) (cdr request))))
     (return-from advance-telegram-console))
   (let ((dirty (drain-console-requests console)))
     (when (telegram.chat:pull-chat-updates (console-roster console))
@@ -1015,9 +1075,76 @@ back, it holds its place instead of being dragged along by every arrival."
                             :align-y :center :text-size 14
                             :ink *communicator-text-ink*)))))))
 
+(defun qr-module-rectangles (modules)
+  "MODULES as a list of maximal (row column rows columns) dark rectangles.
+
+Not one rectangle per module, which is the obvious drawing and the wrong
+one: an antialiasing rasterizer gives every edge partial coverage, so two
+adjacent dark squares each cover half of the pixel column they share and
+composite to something lighter than either.  The result is a light hairline
+along every module boundary -- thinner than a pixel once the panel is
+minified onto a slab that bobs in the hand, which is to say a shimmer.  Two
+touching modules have to be one shape with no edge between them."
+  (let* ((rows (array-dimension modules 0))
+         (columns (array-dimension modules 1))
+         (taken (make-array (list rows columns) :element-type 'bit
+                                                :initial-element 0))
+         (rectangles '()))
+    (flet ((free-dark-p (row column)
+             (and (= 1 (aref modules row column))
+                  (= 0 (aref taken row column)))))
+      (dotimes (row rows (nreverse rectangles))
+        (let ((column 0))
+          (loop while (< column columns)
+                do (if (free-dark-p row column)
+                       (let ((width 0) (height 1))
+                         ;; The run to the right, then as far down as the
+                         ;; whole run repeats.
+                         (loop while (and (< (+ column width) columns)
+                                          (free-dark-p row (+ column width)))
+                               do (incf width))
+                         (loop while
+                               (and (< (+ row height) rows)
+                                    (loop for offset below width
+                                          always (free-dark-p (+ row height)
+                                                              (+ column offset))))
+                               do (incf height))
+                         (dotimes (r height)
+                           (dotimes (c width)
+                             (setf (aref taken (+ row r) (+ column c)) 1)))
+                         (push (list row column height width) rectangles)
+                         (incf column width))
+                       (incf column))))))))
+
+(defun draw-communicator-qr (pane modules top)
+  "MODULES drawn under TOP, centred in the well.  Returns the bottom edge.
+
+A QR code is read by threshold, so it wants the plainest drawing there is:
+whole light modules and whole dark ones, at an integer number of pixels per
+module on an integer origin, so no module edge lands on a fraction of a
+pixel.  The quiet zone is already in the array, and the light modules are
+painted rather than left to the well, which is the dark ink a camera would
+otherwise read as part of the code."
+  (let* ((size (array-dimension modules 0))
+         (room (- *communicator-screen-bottom* top 10))
+         (scale (max 1 (floor (min room (- *communicator-width*
+                                           (* 2 +communicator-inset+)))
+                              size)))
+         (side (* scale size))
+         (left (floor (- *communicator-width* side) 2)))
+    (draw-rectangle* pane left top (+ left side) (+ top side) :ink +white+)
+    (loop for (row column rows columns) in (qr-module-rectangles modules)
+          for x = (+ left (* scale column))
+          for y = (+ top (* scale row))
+          do (draw-rectangle* pane x y (+ x (* scale columns))
+                              (+ y (* scale rows))
+                              :ink +black+))
+    (+ top side)))
+
 (luv:zdefun (draw-communicator-login
              :zone :telegram/paint/login
-             :value (length (console-view-prompt view)))
+             :value (list (length (console-view-prompt view))
+                          (and (console-view-qr view) t)))
     (pane view)
   "The login screen: what is being asked, in the well, above the field."
   (let ((left (+ +communicator-inset+ 18))
@@ -1029,7 +1156,9 @@ back, it holds its place instead of being dragged along by every arrival."
                                 (char= #\: (char line (1- (length line)))))
                            *communicator-accent-ink*
                            *communicator-text-ink*))
-      (incf y +communicator-row-height+))))
+      (incf y +communicator-row-height+))
+    (alexandria:when-let ((modules (console-view-qr view)))
+      (draw-communicator-qr pane modules (+ y 6)))))
 
 (defun communicator-field-text (frame view)
   "What the composer shows: the draft, or one dot per character of a secret."
