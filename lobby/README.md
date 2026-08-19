@@ -18,8 +18,10 @@ Before the process can host the Service, define `luv-lobby` on port `1883` in
 the Tailscale Services admin page. The tailnet policy must permit `tag:luv` to
 auto-approve `svc:luv-lobby` and grant intended clients access to that Service.
 
-Each MQTT connection is resolved through tsnet's LocalAPI and receives a
-Tailnet principal (node name/ID, user, and tags). An unresolved connection is
+tsnet delivers Service connections through a localhost proxy, so the listener
+asks for a PROXY protocol v2 header and reads the peer's real tailnet address
+out of it (`proxyproto.go`). Each MQTT connection is then resolved through
+tsnet's LocalAPI and receives a Tailnet principal (node name/ID, user, and tags). An unresolved connection is
 denied. The broker logs those principals at connect and disconnect, and only a
 resolved principal can publish or subscribe. It currently grants every resolved
 principal every topic; use the principal hook as the place to add per-user or

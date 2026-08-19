@@ -95,8 +95,11 @@ func main() {
 	os.Unsetenv("TS_AUTHKEY")
 	defer tailnet.Close()
 
+	// tsnet hands Service connections over from a localhost proxy; the PROXY
+	// header is how the peer's real tailnet address survives that hop.
 	listener, err := tailnet.ListenService(*service, tsnet.ServiceModeTCP{
-		Port: uint16(*port),
+		Port:                 uint16(*port),
+		PROXYProtocolVersion: 2,
 	})
 	if err != nil {
 		logger.Error("attach Tailscale Service listener", "tag", defaultTag, "service_name", *service, "port", *port, "error", err)
@@ -116,7 +119,7 @@ func main() {
 		logger.Error("install Tailnet principal hook", "error", err)
 		os.Exit(1)
 	}
-	if err := broker.AddListener(listeners.NewNet("tailscale", listener)); err != nil {
+	if err := broker.AddListener(listeners.NewNet("tailscale", newProxyListener(listener))); err != nil {
 		logger.Error("attach Tailscale listener to MQTT broker", "error", err)
 		os.Exit(1)
 	}
