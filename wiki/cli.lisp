@@ -54,7 +54,7 @@ configuration is used whenever it exists."
 
 (defun ensure-systems ()
   "Register every repository-owned system so the source scan knows its files."
-  (dolist (name '("luv.asd" "luvcraft.asd" "luft.asd"
+  (dolist (name '("luv.asd" "luvcraft.asd" "telegram.asd" "luft.asd"
                   "luv-wiki.asd" "luv-wiki-site.asd"))
     (asdf:load-asd (merge-pathnames name (root)))))
 

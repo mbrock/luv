@@ -319,9 +319,10 @@ required parameters, e.g. (\"block-world\" \"t\").")
     (nreverse ids)))
 
 (defparameter *defining-operators*
-  '("defun" "defmacro" "defgeneric" "defmethod" "defclass" "defstruct" "deftype"
-    "defvar" "defparameter" "defconstant" "define-condition" "defpackage"
-    "define-symbol-macro" "defsetf" "define-modify-macro" "deftest")
+  '("defun" "defmacro" "defgeneric" "defmethod" "zdefun" "zdefmethod"
+    "defclass" "defstruct" "deftype" "defvar" "defparameter" "defconstant"
+    "define-condition" "defpackage" "define-symbol-macro" "defsetf"
+    "define-modify-macro" "deftest")
   "Operators whose top-level forms become definitions.  Any other operator
 whose name starts with DEF or DEFINE- is accepted too.")
 
@@ -330,16 +331,34 @@ whose name starts with DEF or DEFINE- is accepted too.")
     (or (member name *defining-operators* :test #'string=)
         (starts-with "def" name))))
 
+(defun zoned-definition-name-node (node)
+  "Return the actual definition name from a ZDEF name-and-options NODE."
+  (if (typep node 'lisp-list)
+      (let* ((children (element-children node))
+             (first (first children)))
+        ;; (SETF ACCESSOR) is itself a function name.  Every other list begins
+        ;; with the ordinary function name followed by :ZONE/:VALUE options.
+        (if (and (typep first 'lisp-symbol)
+                 (string-equal (lisp-symbol-name first) "setf"))
+            node
+            first))
+      node))
+
 (defun form-definition (node comments pathname line-starts package)
   "Make a DEFINITION for the top-level list NODE if it defines something."
   (let* ((children (element-children node))
          (operator (symbol-node-name (first children))))
     (when (and operator (defining-operator-p operator) (second children))
-      (let* ((name-node (second children))
+      (let* ((zoned-p (member operator '("zdefun" "zdefmethod")
+                              :test #'string-equal))
+             (name-node (if zoned-p
+                            (zoned-definition-name-node (second children))
+                            (second children)))
              (qualifiers (loop for child in (cddr children)
                                while (typep child 'lisp-symbol)
                                collect (node-text child)))
-             (method-p (string-equal operator "defmethod"))
+             (method-p (member operator '("defmethod" "zdefmethod")
+                               :test #'string-equal))
              (lambda-list (and method-p (find-if (lambda (c) (typep c 'lisp-list)) (cddr children))))
              (specializers (and lambda-list
                                 (loop for parameter in (element-children lambda-list)

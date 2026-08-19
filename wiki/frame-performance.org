@@ -83,6 +83,288 @@ native thread handoff, the untraced benchmark remains the comparison baseline,
 tests prove nesting and storage reuse, and Vulkan and Metal smoke paths remain
 valid.
 
+* Ambient telemetry is a bounded semantic skeleton
+:PROPERTIES:
+:ID: 7SOIWP
+:END:
+
+The useful ambition is broad coverage, but the unit of coverage is not every
+call.  An ambient zone should name one event, frame, pass, batch, job, queue
+drain, publication, resource transaction, or other operation whose complete
+dynamic extent means something in a timeline.  A loop may have a zone around
+the whole traversal and attach its visit or byte count; its individual sites,
+vertices, glyphs, contacts, and commands normally should not each open a zone.
+
+This gives =zdefun= and =zdefmethod= a simple admission rule.  Use them when
+the definition owns a bounded semantic operation.  Use =zone= inside a large
+definition when its phases answer different questions.  Keep ordinary
+=defun= and =defmethod= for accessors, predicates, coordinate arithmetic,
+per-element callbacks, foreign leaf calls, and tiny helpers.  Literal
+semantic names are valuable where different implementations should align
+(=:gpu/submit= on two backends); inferred package-qualified names are better
+for cold or uniquely named operations where another vocabulary adds nothing.
+
+The desired trace is therefore a semantic skeleton with measured dense work
+hanging from it, not a call graph.  This revises the deliberately sparse first
+frame proof in #OHNIWM without discarding its boundedness: broad ambient
+telemetry is admitted at coarse grains, and a focused investigation may still
+add temporary finer zones.
+
+* The first ambient-zone census
+:PROPERTIES:
+:ID: 1G3ORG
+:END:
+
+Verified now: the source index contains 7,536 top-level definitions across the
+project's ASDF systems.  A mechanical ranking selected functions and methods
+by loop ownership, body extent, boundary words, and existing trace regions;
+the list below was then reviewed to remove accessors, predicates, per-element
+geometry and arithmetic, tests, probes, and generated foreign or shader
+vocabularies.  It is intentionally generous: about two hundred candidates,
+grouped so each conversion can still be judged in context.
+
+The names are a census, not a command to wrap every body unchanged.  Large
+entries such as =encode-luvcraft-frame= and =start-luvcraft= want a zoned outer
+definition plus their existing or newly identified phases.  Queue and loop
+owners should attach counts.  Generic operations named =create= or =encode=
+belong only where the method specializer denotes a coarse resource or batch,
+not where it denotes one command.
+
+** Event, thread, and frame ownership
+
+- [[file:../hal/sdl/canvas.lisp][hal/sdl/canvas.lisp]]: =call-with-sdl-main-thread=,
+  =process-sdl-canvas-requests=, =call-on-sdl-canvas-thread=,
+  =request-canvas-frame=, =fence-canvas=, =handle-sdl-canvas-event=,
+  =wait-for-sdl-canvas-event=, =run-sdl-canvas-frame=,
+  =sdl-canvas-event-loop=, =run-sdl-canvas=, =start-sdl-canvas-thread=,
+  =open-canvas=, and =close-canvas=.  =dispatch-sdl-key= and
+  =drain-sdl-canvas-events= are already zoned; pointer motion, button, and
+  wheel dispatch are candidates only if an input trace needs that distinction.
+- [[file:../hal/vulkan/canvas.lisp][hal/vulkan/canvas.lisp]]:
+  =bind-vulkan-canvas-device=, =configure-vulkan-canvas-context=,
+  =unconfigure-vulkan-canvas-context=, =rebuild-vulkan-canvas-swapchain=,
+  =ensure-vulkan-canvas-swapchain=, =acquire-vulkan-canvas-image=, and
+  =%call-with-vulkan-canvas-frame=.
+- [[file:../hal/metal/canvas.lisp][hal/metal/canvas.lisp]]:
+  =synchronize-metal-canvas-drawable-size=,
+  =configure-metal-canvas-context=, =unconfigure-metal-canvas-context=,
+  =destroy-metal-canvas-context=, and =call-with-metal-canvas-frame=.
+- [[file:../luvcraft/render.lisp][luvcraft/render.lisp]]:
+  =make-luvcraft-frame-attachments=, =install-luvcraft-frame-attachments=,
+  =release-luvcraft-frame-attachments=, =luvcraft-frame-state=,
+  =discard-luvcraft-frame-states=, =ensure-luvcraft-frame-extent=,
+  =encode-luvcraft-frame=, =render-luvcraft-frame=, =refresh-block-atlas=,
+  =start-luvcraft=, and =stop-luvcraft=.  The existing frame-phase zones remain
+  the inner semantic partition rather than being replaced by one giant span.
+- [[file:../luvcraft/app.lisp][luvcraft/app.lisp]]:
+  =dispatch-luvcraft-focus-event= is already zoned; add
+  =refresh-luvcraft-inventory= and the coarse target activation or overlay
+  ownership operations, not every key-specialized method.
+
+** Production, residency, lighting, and meshing
+
+- [[file:../luvcraft/production.lisp][luvcraft/production.lisp]]:
+  =take-production-system-request=, =run-production-system=,
+  =schedule-production-request=, =receive-production-result-no-hang=, and
+  =stop-production-system=.  The request count and request kind are useful
+  values; the condition-variable wait should remain visible as its own phase.
+- [[file:../luvcraft/streaming.lisp][luvcraft/streaming.lisp]]:
+  =perform-production-request= methods, =maintain-generated-luvcraft-residency=,
+  =maintain-static-luvcraft-residency=, =maintain-luvcraft-residency=,
+  =destroy-luvcraft-chunk-products=,
+  =ready-luvcraft-mesh-publication-groups=,
+  =discard-stale-luvcraft-staged-products=,
+  =publish-ready-luvcraft-meshes=, =schedule-luvcraft-chunk-loads=,
+  =schedule-luvcraft-meshes=, =schedule-luvcraft-lighting=,
+  =publish-production-result= methods, =drain-luvcraft-production=,
+  =evict-luvcraft-products=, =refresh-luvcraft-mesh=, and
+  =wait-for-luvcraft-streaming-quiescence=.  Counts should distinguish
+  scheduled, drained, stale, published, and evicted products.
+- [[file:../luvcraft/light.lisp][luvcraft/light.lisp]]:
+  =capture-light-region=, =propagate-light-region=,
+  =seed-region-sky-boundaries=, =seed-region-emitters=,
+  =solve-light-region=, =publish-light-region=, =relight-block-world=,
+  =unlight-light-region=, =attach-lighting-state=, =seed-arrived-chunk=,
+  =reconcile-lighting=, and =reconcile-legacy-light-region=.  Worklist visits,
+  removals, boundary seeds, emitters, and changed chunks are the values; the
+  push/pop leaf operations are deliberately excluded.
+- [[file:../luvcraft/frontier-light.lisp][luvcraft/frontier-light.lisp]]:
+  =execute-frontier-program=, =solve-frontier-light-region=,
+  =solve-compiled-light-region=, =make-compiled-light-reconciliation=,
+  =drain-compiled-light-removals=, =reseed-compiled-open-sky=,
+  =seed-compiled-arrived-chunk=, =drain-compiled-light-additions=,
+  =reconcile-compiled-lighting=, and =compare-voxel-light-solvers=.  Existing
+  inner zones and their visit counts should be retained while the containing
+  definitions become concise.
+- [[file:../luvcraft/mesher.lisp][luvcraft/mesher.lisp]]:
+  =mesh-block-storage=, =make-block-mesh-snapshot=, and =mesh-block-world=.
+  Candidate values are visited blocks, emitted faces, and output vertices.
+- [[file:../luvcraft/terrain.lisp][luvcraft/terrain.lisp]]:
+  =populate-little-world-chunk=, =center-little-world-residency=, and
+  =little-world-landmarks-for-chunk=.
+
+** Physics, simulation, and populations
+
+- [[file:../luvcraft/physics.lisp][luvcraft/physics.lisp]]:
+  =rebuild-physics-grid=, =prune-physics-contacts=,
+  =generate-physics-body-pairs=, =generate-physics-terrain-contacts=,
+  =generate-physics-box-contacts=, =prepare-physics-constraints=,
+  =physics-integrate-velocities=, =physics-integrate-positions=,
+  =%physics-warm-start-scalar=, =physics-warm-start=,
+  =%physics-solve-contacts-scalar=, =physics-solve-contacts=,
+  =%physics-apply-restitution-scalar=, =physics-apply-restitution=,
+  =store-physics-impulses=, =finalize-physics-bodies=,
+  =wake-physics-bodies-near=, =step-physics-world=, and
+  =validate-physics-world=.  The outer step should expose body, pair, contact,
+  constraint, awake, and event counts; SIMD/scalar kernel choice belongs in a
+  value or an enclosing phase, not one zone per constraint.
+- [[file:../luvcraft/simulation.lisp][luvcraft/simulation.lisp]]:
+  =advance-camera-focus=, =map-body-overlapping-blocks=, =move-body-axis=,
+  and =step-block-world-player=.
+- [[file:../luvcraft/critters.lisp][luvcraft/critters.lisp]],
+  [[file:../luvcraft/balls.lisp][luvcraft/balls.lisp]], and
+  [[file:../luvcraft/particles.lisp][luvcraft/particles.lisp]]:
+  =maintain-critter-population=, =advance-luvcraft-physics=,
+  =build-physics-body-vertices=, and =advance-block-particles=.  Geometry
+  emitters such as =emit-critter-box= remain unzoned unless a containing batch
+  cannot explain their cost.
+- [[file:../luvcraft/world.lisp][luvcraft/world.lisp]]: =raycast-block-world=
+  is the coarse traversal candidate; coordinate and block accessors are not.
+
+** Terminals, McCLIM, and interactive surfaces
+
+- [[file:../terminal/pty.lisp][terminal/pty.lisp]]:
+  =send-pty-device-bytes=, =read-pty-stream-bytes=,
+  =perform-pty-device-message=, =drain-pty-device-messages=,
+  =update-pty-child-status=, =release-pty-device-process=,
+  =run-pty-device=, =launch-pty-child=, =open-pty-device=,
+  =wait-for-pty-device=, and =close-pty-device=.  Bytes and message counts are
+  natural values.
+- [[file:../ghostty/screen.lisp][ghostty/screen.lisp]]: =read-screen-cells=
+  and =terminal-screen=, valued by dirty cells or grid area.
+- [[file:../luvcraft/terminal-wall.lisp][luvcraft/terminal-wall.lisp]]:
+  =open-terminal-display-portal=, =discover-terminal-component=,
+  =find-terminal-surface=, =initialize-terminal-surface-dependencies=,
+  =reconcile-terminal-surface=, =make-terminal-display-glyph-instances=,
+  =make-terminal-display-cell-instances=,
+  =make-terminal-display-screen-instances=,
+  =make-terminal-display-glyph-population=, =make-terminal-cell-run=,
+  =make-terminal-display-glyph-run=, =refresh-luvcraft-overlay=,
+  =encode-luvcraft-overlay=, =handle-luvcraft-focus-event=,
+  =open-activated-wall-display=, =attach-terminal-display-shell=,
+  =attach-terminal-display-pty=, =open-terminal-display=, and
+  =make-terminal-display=.  Component sites, cells, glyphs, runs, and draw
+  populations are the useful work values.
+- [[file:../mcclim/gpu.lisp][mcclim/gpu.lisp]]:
+  =repaint-gpu-mirror=, =render-gpu-mirror-frame=, =present-mirror=,
+  =capture-gpu-mirror-screenshot=, =release-gpu-mirror-frame-states=, and the
+  coarse =ensure-gpu-mirror-*= pipeline/resource constructors.  Composition,
+  preparation, individual text batches, and upload are already zoned; drawing
+  one polygon, segment, or glyph remains below the ambient grain.
+- [[file:../mcclim/luvcraft.lisp][mcclim/luvcraft.lisp]]:
+  =prepare-direct-widget-overlay=, the coarse =encode-luvcraft-overlay=
+  methods, =ensure-world-widget-text-pipeline=,
+  =ensure-widget-overlay-relief-pipeline=, and =embed-luvcraft-frame=.
+- McCLIM instruments: =handle-repaint= methods in
+  [[file:../mcclim/hotbar.lisp][hotbar]],
+  [[file:../mcclim/inventory.lisp][inventory]],
+  [[file:../mcclim/metabar.lisp][metabar]],
+  [[file:../mcclim/terminal-film-browser.lisp][terminal film browser]],
+  [[file:../luvcraft/clim/legend.lisp][legend]],
+  [[file:../luvcraft/clim/command-menu.lisp][command menu]], and
+  [[file:../luvcraft/clim/tape.lisp][tape]].  Their substantial paint helpers
+  belong beneath those methods, following the communicator example.
+- [[file:../mcclim/telegram.lisp][mcclim/telegram.lisp]] already covers key
+  input, refresh, repaint, painting regions, preparation, and upload.  Add
+  =console-transcript-lines= only if transcript reconstruction remains visible
+  outside the paint zones.
+
+** GPU submission, resource construction, and compilation
+
+- [[file:../hal/vulkan/gpu.lisp][hal/vulkan/gpu.lisp]]:
+  =submit-vulkan-command-buffers=, =record-vulkan-texture-write=, and coarse
+  =create= methods for devices, pipelines, bind groups, and large resources.
+  Per-command =encode= methods are excluded unless they batch an entire pass.
+- [[file:../hal/metal/gpu.lisp][hal/metal/gpu.lisp]]:
+  =submit-metal-command-buffers=, =configure-metal-pass-bind-group=, and the
+  corresponding coarse device, pipeline, bind-group, and resource =create=
+  methods.  One buffer write or one encoded command is below the ambient
+  grain.
+- [[file:../hal/shader/language.lisp][hal/shader/language.lisp]]:
+  =compile-shader-specification= and the complete task, mesh, vertex, and
+  fragment entry-point lowering operations; expression-level lowering is
+  excluded.
+- [[file:../hal/metal/msl/lowering.lisp][hal/metal/msl/lowering.lisp]]:
+  =lower-traditional-msl-specification=, =lower-task-msl-specification=,
+  =lower-mesh-msl-specification=, =lower-msl-bindings=, and
+  =write-msl-entry-point=.  =lower-msl-expression= and
+  =write-msl-statement= methods are too fine for ambient use.
+- [[file:../luvcraft/frontier.lisp][luvcraft/frontier.lisp]]:
+  =compile-frontier-program=, =emit-frontier-drain-form=,
+  =emit-frontier-admit-form=, and =emit-frontier-relate-form=.  Runtime
+  execution belongs to the client operation; generated per-site forms do not
+  open zones.
+- [[file:../arithmetic/lisp/compiler.lisp][arithmetic/lisp/compiler.lisp]] and
+  [[file:../arithmetic/language/frontend.lisp][arithmetic/language/frontend.lisp]]:
+  whole-function compilation, frontend parsing, and realization boundaries;
+  individual expression-lowering methods remain ordinary methods.
+- [[file:../hal/shader/slug-cache.lisp][hal/shader/slug-cache.lisp]] and
+  [[file:../hal/shader/slug-harfbuzz.lisp][hal/shader/slug-harfbuzz.lisp]]:
+  =create-slug-glyph-atlas=, =collect-slug-shaped-glyphs=, and
+  =shape-slug-text=, valued by glyph and outline counts.
+
+** Media, portals, persistence, and tools
+
+- [[file:../libav/decode.lisp][libav/decode.lisp]]: =enable-vulkan-decoding=,
+  =enable-videotoolbox-decoding=, =open-video=, =close-video=,
+  =decode-next-frame=, =ensure-video-scaler=, =scale-frame-into=, and
+  =copy-rgba-words=.  Bytes or pixels distinguish setup, decode, conversion,
+  and copying.
+- [[file:../libav/audio.lisp][libav/audio.lisp]]: =open-audio=,
+  =decode-next-audio-frame=, and =audio-frame-mono-samples=.
+- [[file:../luvcraft/video-screen.lisp][luvcraft/video-screen.lisp]],
+  [[file:../luvcraft/tape.lisp][luvcraft/tape.lisp]], and
+  [[file:../luvcraft/sound.lisp][luvcraft/sound.lisp]]:
+  =make-video-screen=, =advance-video-screen=, =release-video-screen=,
+  =start-tape-download=, =open-film-sound=, and =run-film-sound=.
+- [[file:../luvcraft/portal.lisp][luvcraft/portal.lisp]] and
+  [[file:../luvcraft/capture.lisp][luvcraft/capture.lisp]]:
+  =open-luvcraft-portal=, =release-luvcraft-overlay=,
+  =capture-hidden-luvcraft-frames=, and =temporal-derivative-rgba=.
+- [[file:../luvcraft/persistence.lisp][luvcraft/persistence.lisp]]:
+  =make-luvcraft-save-description=,
+  =restore-luvcraft-resume-save-description=,
+  =restore-luvcraft-save-description=, =read-luvcraft-save=,
+  =write-luvcraft-save-description=, =perform-world-checkpoint=,
+  =run-world-checkpoint-writer=, =request-world-checkpoint=, and
+  =stop-world-checkpoint-writer=.
+- Developer tools are a final, low-frequency wave: source indexing and site
+  rendering in [[file:../wiki/][wiki]], Parinfer's whole-input repair/check
+  entry points, shader-lab display/build operations, and screenshot or
+  gazetteer commands.  Tests, generated vocabularies, formatters, and tiny
+  renderer nodes remain outside the ambient census.
+
+* NEXT Convert the outer runtime boundaries
+:PROPERTIES:
+:ID: G3CFYX
+:END:
+
+Intent: make one ordinary live capture explain the outer event, frame,
+production, streaming, simulation, and overlay structure before adding the
+denser subsystem waves in #1G3ORG.
+
+Evidence: the communicator instrumentation already localized a roughly
+5.4 MB keypress repaint to about 4.4 MB of McCLIM command preparation.  The
+new =zdefun=, =zdefmethod=, and =zone= forms have a zero-allocation disabled
+path, while #7SOIWP supplies a bounded admission rule for wider coverage.
+
+Done when: SDL requests/events and frame ownership, luvcraft frame and
+simulation ownership, production scheduling/draining/publication, top-level
+streaming phases, and overlay refresh/encode each have stable ambient zones;
+loop owners attach semantic counts; a representative live capture stays
+legible rather than emitting per-element spans; and the relevant tests and
+both source-structure checks pass.
+
 * DONE Stream one chunk window under measurement
 :PROPERTIES:
 :ID: 887PO7

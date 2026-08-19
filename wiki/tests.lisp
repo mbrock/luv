@@ -237,6 +237,23 @@ Nothing here refers to anything.
     (ok (wiki:find-definition "widget" definitions :kind "defclass"))
     (ok (null (wiki:find-definition "widget" definitions :kind "defun")))))
 
+(deftest definitions-index-concise-zoned-definitions
+  (let* ((source
+           "(in-package #:luv.example)
+(zdefun plain (x) x)
+(zdefun (semantic :zone :example/semantic :value (length xs)) (xs) xs)
+(zdefun ((setf property) :zone :example/property) (value object) value)
+(zdefmethod (operate :zone :example/operate) :around ((x integer) y)
+  (call-next-method))")
+         (definitions (wiki:file-definitions #p"/zoned.lisp" source))
+         (method (fourth definitions)))
+    (ok (equal (mapcar #'wiki:definition-kind definitions)
+               '("zdefun" "zdefun" "zdefun" "zdefmethod")))
+    (ok (equal (mapcar #'wiki:definition-name definitions)
+               '("plain" "semantic" "(setf property)" "operate")))
+    (ok (equal (wiki:definition-qualifiers method) '(":around")))
+    (ok (equal (wiki::definition-specializers method) '("integer" "t")))))
+
 (deftest the-stylesheet-compiles-from-definitions
   ;; The CSS syntax reads quantities, slash pairs, and --references as
   ;; objects, and everything else as usual.
