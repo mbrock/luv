@@ -24,7 +24,8 @@ host window or depend on the window being visible."
          (progn
            (present-canvas-frame
             context
-            (lambda (surface-texture encoder)
+            (lambda (surface-texture encoder presentation-time)
+              (declare (ignore presentation-time))
               (encode-luvcraft-frame
                session surface-texture encoder :readback-buffer buffer)))
            (ensure-directories-exist pathname)

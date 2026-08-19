@@ -309,9 +309,16 @@ disagree would otherwise ask for a rebuild on every single frame.")
                   (clamp-canvas-extent
                    height (second minimum) (second maximum))))))))
 
-(defun choose-vulkan-canvas-image-count (capabilities)
+(defun choose-vulkan-canvas-image-count (context capabilities)
   (let ((desired
-          (1+ (lvk:presentation-capabilities-min-image-count capabilities)))
+          (if (sdl-canvas-direct-display-p (context-canvas context))
+              ;; The minimum FIFO chain admits one image being scanned and
+              ;; one being prepared.  Another image would be another frame of
+              ;; latency and another opportunity for CPU production to run
+              ;; ahead of the actual KMS page-flip cadence.
+              (lvk:presentation-capabilities-min-image-count capabilities)
+              (1+ (lvk:presentation-capabilities-min-image-count
+                   capabilities))))
         (maximum
           (lvk:presentation-capabilities-max-image-count capabilities)))
     (if (plusp maximum) (min desired maximum) desired)))
@@ -395,7 +402,7 @@ disagree would otherwise ask for a rebuild on every single frame.")
                    (lvk:create-swapchain
                     native-device surface vk-format color-space extent
                     :min-image-count
-                    (choose-vulkan-canvas-image-count capabilities)
+                    (choose-vulkan-canvas-image-count context capabilities)
                     :usage native-usage
                     :pre-transform
                     (lvk:presentation-capabilities-current-transform
@@ -411,7 +418,11 @@ disagree would otherwise ask for a rebuild on every single frame.")
                         (lvk:get-swapchain-images native-device swapchain))
                    frame-slots
                    (make-vulkan-canvas-frame-slots
-                    native-device (min 2 (length textures)))
+                    native-device
+                    (if (sdl-canvas-direct-display-p
+                         (context-canvas context))
+                        1
+                        (min 2 (length textures))))
                    render-done
                    (make-vulkan-semaphores native-device (length textures)))
              (setf (vulkan-canvas-swapchain context) swapchain
@@ -613,7 +624,14 @@ surface still cannot supply an image and this frame should be skipped."
                        (vulkan-canvas-current-texture context) texture
                        (canvas-context-state context) :in-frame)
                  (with-cpu-trace-zone (:gpu/encode)
-                   (funcall function texture encoder))
+                   (let ((presentation-time
+                           (canvas-presentation-time
+                            (context-canvas context))))
+                     (call-with-canvas-time
+                      (context-canvas context) presentation-time
+                      (lambda ()
+                        (funcall function texture encoder
+                                 presentation-time)))))
                  (with-cpu-trace-zone (:gpu/finish-encoding)
                    (transition-vulkan-texture
                     encoder texture :present-src-khr)

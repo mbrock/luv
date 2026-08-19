@@ -259,7 +259,14 @@
                    (setf (metal-canvas-current-texture context) texture
                          (canvas-context-state context) :in-frame)
                    (with-cpu-trace-zone (:gpu/encode)
-                     (funcall function texture encoder))
+                     (let ((presentation-time
+                             (canvas-presentation-time
+                              (context-canvas context))))
+                       (call-with-canvas-time
+                        (context-canvas context) presentation-time
+                        (lambda ()
+                          (funcall function texture encoder
+                                   presentation-time)))))
                    (when (metal-encoder-active-pass encoder)
                      (error 'canvas-error :canvas (context-canvas context)
                             :operation :frame

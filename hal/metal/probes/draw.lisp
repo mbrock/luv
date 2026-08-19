@@ -89,7 +89,8 @@
                 (setf trace active-trace)
                 (luv:call-with-canvas-frame
                  context
-                 (lambda (surface-texture encoder)
+                 (lambda (surface-texture encoder presentation-time)
+                   (declare (ignore presentation-time))
                    (let ((pass
                            (luv:begin-render-pass
                             encoder

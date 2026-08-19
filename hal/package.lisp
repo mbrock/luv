@@ -549,6 +549,16 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:minimize-canvas
            #:restore-canvas
            #:request-canvas-frame
+           #:lazy-clock
+           #:make-lazy-clock
+           #:lazy-clock-now
+           #:lazy-clock-now-unadjusted
+           #:clear-lazy-clock
+           #:call-with-lazy-clock-time
+           #:canvas-time
+           #:canvas-time-unadjusted
+           #:canvas-presentation-time
+           #:make-presentation-clock
            #:make-canvas-context
            #:configure-canvas-context
            #:unconfigure-canvas-context

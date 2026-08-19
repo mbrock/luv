@@ -39,6 +39,51 @@
     (ok (= 3 (length timestamps)))
     (ok (> (luv::cadence-clock-next-frame-time clock) 10.1d0))))
 
+(deftest lazy-clock-gives-one-time-to-a-whole-turn
+  (let ((samples '(10d0 20d0 30d0))
+        (calls 0))
+    (let ((clock
+            (luv:make-lazy-clock
+             :source (lambda ()
+                       (incf calls)
+                       (pop samples)))))
+      (ok (= 10d0 (luv:lazy-clock-now clock)))
+      (ok (= 10d0 (luv:lazy-clock-now clock)))
+      (ok (= 1 calls))
+      (luv:call-with-lazy-clock-time
+       clock 99d0
+       (lambda () (ok (= 99d0 (luv:lazy-clock-now clock)))))
+      (ok (= 10d0 (luv:lazy-clock-now clock)))
+      (ok (= 20d0 (luv:lazy-clock-now-unadjusted clock)))
+      (ok (= 10d0 (luv:lazy-clock-now clock)))
+      (luv:clear-lazy-clock clock)
+      (ok (= 30d0 (luv:lazy-clock-now clock)))
+      (ok (= 3 calls)))))
+
+(deftest cadence-presentation-time-is-the-following-display-beat
+  (let* ((clock (luv:make-lazy-clock :source (lambda () 10d0)))
+         (cadence
+           (luv:make-cadence-clock
+            (lambda (canvas timestamp)
+              (declare (ignore canvas timestamp)))
+            :frames-per-second 60))
+         (canvas
+           (luv:make-sdl-canvas :clock cadence :time clock)))
+    (ok (< (abs (- (luv:canvas-presentation-time canvas)
+                   (+ 10d0 (/ 1d0 60d0))))
+           1d-12))))
+
+(deftest presentation-clock-asks-once-and-leaves-pacing-to-the-frame
+  (let* ((timestamps nil)
+        (clock
+          (luv:make-presentation-clock
+           (lambda (canvas timestamp)
+             (declare (ignore canvas))
+             (push timestamp timestamps)))))
+    (ok (= 0 (luv:clock-wait-timeout clock 4d0)))
+    (ok (luv:service-canvas-clock clock nil 4d0))
+    (ok (equal timestamps '(4d0)))))
+
 (deftest canvas-loop-failure-preserves-the-actionable-condition
   (let* ((canvas (luv:make-sdl-canvas))
          (root-cause (make-condition 'simple-error

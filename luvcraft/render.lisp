@@ -1292,81 +1292,100 @@ submission that used them completes."
     (multiple-value-bind (x z) (luvcraft-session-neighborhood-center session)
       (maintain-critter-population critters world x z))))
 
+(defun advance-luvcraft-session-to (session timestamp)
+  "Advance SESSION to the time its acquired frame is expected to be visible."
+  (let* ((last (luvcraft-session-last-frame-time session))
+         (seconds
+           (if last
+               (min +luvcraft-maximum-frame-duration+
+                    (max 0d0 (- timestamp last)))
+               0d0)))
+    (setf (luvcraft-session-last-frame-time session) timestamp)
+    (advance-sky-clock (luvcraft-session-sky-clock session) seconds)
+    (advance-block-particles
+     (luvcraft-session-particle-system session) seconds)
+    (unless (luvcraft-session-focus-camera-active-p session)
+      (advance-luvcraft-keyboard-look session seconds))
+    (advance-luvcraft-critters session seconds)
+    (advance-luvcraft-physics session seconds)
+    ;; A moving interaction takes its turn after the world it moves in and
+    ;; before the player controller, which stands down while it carries them.
+    (let ((focus (luvcraft-session-modal-focus session))
+          (intent (luvcraft-session-movement-intent session)))
+      (advance-luvcraft-focus focus session seconds)
+      (when (and focus (luvcraft-focus-carries-player-p focus))
+        (setf (luvcraft-session-physics-accumulator session) 0d0
+              (movement-intent-jump-requested-p intent) nil)))
+    (let ((player (luvcraft-session-player session))
+          (intent (luvcraft-session-movement-intent session))
+          (focus (luvcraft-session-modal-focus session)))
+      (when (and player
+                 (not (and focus (luvcraft-focus-carries-player-p focus))))
+        (incf (luvcraft-session-physics-accumulator session) seconds)
+        (zone (:simulation/player-steps
+               :value
+               (floor (luvcraft-session-physics-accumulator session)
+                      +player-physics-step+))
+          (loop while (>= (luvcraft-session-physics-accumulator session)
+                          +player-physics-step+)
+                do (step-block-world-player
+                    player (luvcraft-session-world session)
+                    (luvcraft-session-camera session) intent
+                    +player-physics-step+
+                    :jump-p (movement-intent-jump-requested-p intent)
+                    :sync-camera-p
+                    (not (luvcraft-session-focus-camera-active-p session)))
+                   (setf (movement-intent-jump-requested-p intent) nil)
+                   (decf (luvcraft-session-physics-accumulator session)
+                         +player-physics-step+)))))
+    (advance-luvcraft-focus-camera session seconds)
+    (advance-player-body (luvcraft-session-body session) session seconds)))
+
 (defun render-luvcraft-frame (session timestamp &optional sample)
+  (declare (ignore timestamp))
   (when (luvcraft-session-running-p session)
     (describe-luvcraft-tracy-plots)
     (let ((tracy-frame-start
-            (and (tracy-connected-p) (get-internal-real-time))))
+            (and (tracy-connected-p) (get-internal-real-time)))
+          (simulation-before
+            (and sample
+                 (luvcraft-frame-sample-simulation-seconds sample)))
+          (streaming-before
+            (and sample
+                 (luvcraft-frame-sample-streaming-seconds sample))))
       (with-luvcraft-frame-timing
           (sample luvcraft-frame-sample-frame-seconds :luvcraft/frame)
-        (with-luvcraft-frame-timing
-            (sample luvcraft-frame-sample-simulation-seconds
-                    :luvcraft/simulation)
-          (let* ((last (luvcraft-session-last-frame-time session))
-                 (seconds
-                   (if last
-                       (min +luvcraft-maximum-frame-duration+
-                            (max 0d0 (- timestamp last)))
-                       0d0)))
-            (setf (luvcraft-session-last-frame-time session) timestamp)
-            (advance-sky-clock (luvcraft-session-sky-clock session) seconds)
-            (advance-block-particles
-             (luvcraft-session-particle-system session) seconds)
-            (unless (luvcraft-session-focus-camera-active-p session)
-              (advance-luvcraft-keyboard-look session seconds))
-            (advance-luvcraft-critters session seconds)
-            (advance-luvcraft-physics session seconds)
-            ;; A moving interaction takes its turn after the world it moves in
-            ;; and before the player controller, which stands down entirely
-            ;; while something else is carrying the player.
-            (let ((focus (luvcraft-session-modal-focus session))
-                  (intent (luvcraft-session-movement-intent session)))
-              (advance-luvcraft-focus focus session seconds)
-              (when (and focus (luvcraft-focus-carries-player-p focus))
-                (setf (luvcraft-session-physics-accumulator session) 0d0
-                      (movement-intent-jump-requested-p intent) nil)))
-            (let ((player (luvcraft-session-player session))
-                  (intent (luvcraft-session-movement-intent session))
-                  (focus (luvcraft-session-modal-focus session)))
-              (when (and player
-                         (not (and focus
-                                   (luvcraft-focus-carries-player-p focus))))
-                (incf (luvcraft-session-physics-accumulator session) seconds)
-                (zone (:simulation/player-steps
-                       :value
-                       (floor (luvcraft-session-physics-accumulator session)
-                              +player-physics-step+))
-                  (loop while (>=
-                               (luvcraft-session-physics-accumulator session)
-                               +player-physics-step+)
-                        do (step-block-world-player
-                            player (luvcraft-session-world session)
-                            (luvcraft-session-camera session)
-                            intent
-                            +player-physics-step+
-                            :jump-p (movement-intent-jump-requested-p intent)
-                            :sync-camera-p
-                            (not
-                             (luvcraft-session-focus-camera-active-p session)))
-                           (setf (movement-intent-jump-requested-p intent) nil)
-                           (decf (luvcraft-session-physics-accumulator session)
-                                 +player-physics-step+)))))
-            (advance-luvcraft-focus-camera session seconds)
-            (advance-player-body (luvcraft-session-body session)
-                                 session seconds)))
-        (with-luvcraft-frame-timing
-            (sample luvcraft-frame-sample-streaming-seconds
-                    :luvcraft/streaming)
-          (maintain-luvcraft-residency session)
-          (evict-luvcraft-products session))
         (with-luvcraft-frame-timing
             (sample luvcraft-frame-sample-presentation-seconds
                     :luvcraft/presentation)
           (present-canvas-frame
            (luvcraft-session-context session)
-           (lambda (surface-texture encoder)
+           (lambda (surface-texture encoder presentation-time)
+             ;; Acquisition is the timing boundary: simulation and every
+             ;; visual clock now describe the beat this particular drawable
+             ;; is predicted to reach, not when the outer timer happened to
+             ;; ask for work.
+             (with-luvcraft-frame-timing
+                 (sample luvcraft-frame-sample-simulation-seconds
+                         :luvcraft/simulation)
+               (advance-luvcraft-session-to session presentation-time))
+             (with-luvcraft-frame-timing
+                 (sample luvcraft-frame-sample-streaming-seconds
+                         :luvcraft/streaming)
+               (maintain-luvcraft-residency session)
+               (evict-luvcraft-products session))
              (encode-luvcraft-frame
-              session surface-texture encoder :sample sample)))))
+              session surface-texture encoder :sample sample))))
+        ;; PRESENTATION encloses acquisition and submission now, so remove
+        ;; the explicitly measured application phases nested inside it.  This
+        ;; preserves the sample's old meaning while letting acquisition choose
+        ;; the frame's target time.
+        (when sample
+          (decf (luvcraft-frame-sample-presentation-seconds sample)
+                (+ (- (luvcraft-frame-sample-simulation-seconds sample)
+                      simulation-before)
+                   (- (luvcraft-frame-sample-streaming-seconds sample)
+                      streaming-before)))))
       (when tracy-frame-start
         (tracy-plot
          "frame CPU ms"
@@ -1615,7 +1634,9 @@ Control-Q quits from anywhere, saving the world on the way out.
 Pass :PROVIDER to select the Vulkan or Metal relationship without changing
 world, simulation, streaming, or frame orchestration.  Pass :VISIBLE-P NIL to
 keep the SDL window hidden while still exercising the real presentation path.
-Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock.  Pass
+Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock.  On KMSDRM any
+non-NIL value selects display-paced animation because FIFO scanout, rather
+than an independent host timer, owns the available frame rate.  Pass
 :FULLSCREEN-P T to open on the whole display, and leave :WIDTH and :HEIGHT
 NIL to let the display choose a comfortable window."
   (let* ((canvas (make-sdl-canvas
@@ -2130,11 +2151,15 @@ NIL to let the display choose a comfortable window."
                     (render-luvcraft-frame session timestamp))))
                (setf (canvas-clock canvas)
                      (if frames-per-second
-                         (make-cadence-clock
-                          (lambda (native-canvas timestamp)
-                            (declare (ignore native-canvas))
-                            (render-luvcraft-frame session timestamp))
-                          :frames-per-second frames-per-second)
+                         (let ((frame-function
+                                 (lambda (native-canvas timestamp)
+                                   (declare (ignore native-canvas))
+                                   (render-luvcraft-frame session timestamp))))
+                           (if (luv::sdl-canvas-direct-display-p canvas)
+                               (make-presentation-clock frame-function)
+                               (make-cadence-clock
+                                frame-function
+                                :frames-per-second frames-per-second)))
                          (make-demand-clock))
                      completed-p t)
                session)))

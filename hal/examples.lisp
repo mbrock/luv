@@ -103,7 +103,8 @@ object with STOP-CLEAR-COLOR-DEMO."
          (extent (canvas-extent context)))
     (present-canvas-frame
      context
-     (lambda (surface-texture encoder)
+     (lambda (surface-texture encoder presentation-time)
+       (declare (ignore presentation-time))
        (let ((pass (begin-compute-pass encoder)))
          (encode
           pass

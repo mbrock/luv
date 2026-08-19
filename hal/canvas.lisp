@@ -79,31 +79,87 @@ thing an interactive image is for."))
              (canvas-state-error-state condition)
              (canvas-state-error-expected-state condition)))))
 
+(defun monotonic-seconds ()
+  (/ (get-internal-real-time)
+     (coerce internal-time-units-per-second 'double-float)))
+
+(defclass lazy-clock ()
+  ((source
+    :initarg :source
+    :initform #'monotonic-seconds
+    :reader lazy-clock-source)
+   (timestamp
+    :initform nil
+    :accessor lazy-clock-timestamp))
+  (:documentation
+   "A clock which samples its source once, then retains that time until cleared.
+
+An event-loop turn therefore has one coherent NOW.  Rendering may temporarily
+override it with a predicted presentation time without changing the source."))
+
+(defun make-lazy-clock (&key (source #'monotonic-seconds))
+  (make-instance 'lazy-clock :source source))
+
+(defun lazy-clock-now (clock)
+  (or (lazy-clock-timestamp clock)
+      (setf (lazy-clock-timestamp clock)
+            (funcall (lazy-clock-source clock)))))
+
+(defun lazy-clock-now-unadjusted (clock)
+  "Sample CLOCK's source without consulting or changing its remembered time."
+  (funcall (lazy-clock-source clock)))
+
+(defun clear-lazy-clock (clock)
+  (setf (lazy-clock-timestamp clock) nil)
+  clock)
+
+(defun call-with-lazy-clock-time (clock timestamp function)
+  "Call FUNCTION while CLOCK consistently denotes TIMESTAMP."
+  (let ((saved (lazy-clock-timestamp clock)))
+    (unwind-protect
+         (progn
+           (setf (lazy-clock-timestamp clock) timestamp)
+           (funcall function))
+      (setf (lazy-clock-timestamp clock) saved))))
+
 (defclass canvas-clock () ()
   (:documentation "A policy object deciding when a canvas should run frames."))
 
 (defclass demand-clock (canvas-clock) ()
   (:documentation "A clock whose frames happen only when explicitly requested."))
 
-(defclass cadence-clock (canvas-clock)
+(defclass animated-clock (canvas-clock)
+  ((frame-function
+    :initarg :frame-function
+    :reader clock-frame-function))
+  (:documentation "A clock which owns a continuously animated frame function."))
+
+(defclass cadence-clock (animated-clock)
   ((frames-per-second
     :initarg :frames-per-second
     :initform 60
     :reader clock-frames-per-second)
-   (frame-function
-    :initarg :frame-function
-    :reader clock-frame-function)
    (next-frame-time
     :initform nil
     :accessor cadence-clock-next-frame-time))
   (:documentation "A clock which calls a frame function at a regular cadence."))
 
+(defclass presentation-clock (animated-clock) ()
+  (:documentation
+   "A clock paced by presentation availability inside its frame function.
+
+It requests exactly one frame per event-loop turn.  A direct-display backend
+blocks acquiring that frame until FIFO scanout releases an image, so no
+independent host timer competes with the display's cadence."))
+
+(defmethod initialize-instance :after ((clock animated-clock) &key)
+  (unless (functionp (clock-frame-function clock))
+    (error "FRAME-FUNCTION must be a function.")))
+
 (defmethod initialize-instance :after ((clock cadence-clock) &key)
   (unless (and (realp (clock-frames-per-second clock))
                (plusp (clock-frames-per-second clock)))
-    (error "FRAMES-PER-SECOND must be a positive real number."))
-  (unless (functionp (clock-frame-function clock))
-    (error "FRAME-FUNCTION must be a function.")))
+    (error "FRAMES-PER-SECOND must be a positive real number.")))
 
 (defun make-demand-clock ()
   "Construct a clock for explicitly requested frames."
@@ -114,6 +170,10 @@ thing an interactive image is for."))
   (make-instance 'cadence-clock
                  :frame-function frame-function
                  :frames-per-second frames-per-second))
+
+(defun make-presentation-clock (frame-function)
+  "Construct a clock whose frame acquisition supplies its cadence."
+  (make-instance 'presentation-clock :frame-function frame-function))
 
 (defgeneric clock-wait-timeout (clock timestamp)
   (:documentation
@@ -159,16 +219,50 @@ thing an interactive image is for."))
       (funcall (clock-frame-function clock) canvas timestamp)
       t)))
 
+(defmethod clock-wait-timeout ((clock presentation-clock) timestamp)
+  (declare (ignore clock timestamp))
+  0)
+
+(defmethod service-canvas-clock
+    ((clock presentation-clock) canvas timestamp)
+  (funcall (clock-frame-function clock) canvas timestamp)
+  t)
+
 (defclass canvas ()
   ((clock
     :initarg :clock
     :initform (make-demand-clock)
     :accessor canvas-clock)
+   (time
+    :initarg :time
+    :initform (make-lazy-clock)
+    :reader canvas-time-source)
    (event-handler
     :initarg :event-handler
     :initform nil
     :accessor canvas-event-handler))
   (:documentation "A native destination with a lifetime and frame clock."))
+
+(defun canvas-time (canvas)
+  "Return the one stable time shared by CANVAS's current event-loop turn."
+  (lazy-clock-now (canvas-time-source canvas)))
+
+(defun canvas-time-unadjusted (canvas)
+  "Sample CANVAS's underlying monotonic time without changing logical NOW."
+  (lazy-clock-now-unadjusted (canvas-time-source canvas)))
+
+(defun clear-canvas-time (canvas)
+  (clear-lazy-clock (canvas-time-source canvas)))
+
+(defun call-with-canvas-time (canvas timestamp function)
+  (call-with-lazy-clock-time (canvas-time-source canvas) timestamp function))
+
+(defgeneric canvas-presentation-time (canvas)
+  (:documentation
+   "Predict when a frame acquired now will become visible on CANVAS."))
+
+(defmethod canvas-presentation-time ((canvas canvas))
+  (canvas-time canvas))
 
 (defmethod (setf canvas-clock) :before (clock (canvas canvas))
   (declare (ignore canvas))
@@ -409,8 +503,9 @@ When CONFIGURATION is omitted, return the context unconfigured."))
 
 (defgeneric call-with-canvas-frame (context function)
   (:documentation
-   "Acquire a frame texture, call FUNCTION with texture and encoder, and
-complete presentation.  FUNCTION runs on the canvas's native frame thread."))
+   "Acquire a frame texture, call FUNCTION with texture, encoder, and predicted
+presentation time, then complete presentation.  FUNCTION runs on the canvas's
+native frame thread, with CANVAS-TIME overridden to that same prediction."))
 
 (defun present-canvas-frame (context function)
   "Schedule and present one frame through CONTEXT."
@@ -424,7 +519,8 @@ complete presentation.  FUNCTION runs on the canvas's native frame thread."))
   "Clear and present one frame through CONTEXT."
   (present-canvas-frame
    context
-   (lambda (texture encoder)
+   (lambda (texture encoder presentation-time)
+     (declare (ignore presentation-time))
      (encode encoder
              (make-gpu-clear-texture-command
               :texture texture

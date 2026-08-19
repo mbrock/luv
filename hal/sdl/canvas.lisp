@@ -383,16 +383,63 @@ arbitrary window dimensions commonly fail in SDL_Vulkan_CreateSurface."
             (canvas-height canvas) (or (canvas-height canvas) height))))
   (values (canvas-width canvas) (canvas-height canvas)))
 
+(defun sdl-canvas-direct-display-p (canvas)
+  "Whether CANVAS is hosted directly by SDL's KMSDRM video driver."
+  (flet ((direct-p ()
+           (string-equal "kmsdrm" (sdl3:get-current-video-driver))))
+    (if (sdl-canvas-native-thread-p canvas)
+        (direct-p)
+        (call-on-sdl-canvas-thread canvas #'direct-p))))
+
+(defun sdl-canvas-refresh-rate (canvas)
+  "Return CANVAS's current display refresh rate, or NIL when SDL omits it."
+  (flet ((refresh-rate ()
+           (let* ((window (sdl-canvas-window canvas))
+                  (display
+                    (if (and window (not (cffi:null-pointer-p window)))
+                        (sdl3:get-display-for-window window)
+                        (sdl3:get-primary-display)))
+                  (mode (unless (zerop display)
+                          (sdl3:get-current-display-mode display))))
+             (when mode
+               (let ((numerator (sdl3:%refresh-rate-numerator mode))
+                     (denominator (sdl3:%refresh-rate-denominator mode))
+                     (approximate (sdl3:%refresh-rate mode)))
+                 (cond ((and (plusp numerator) (plusp denominator))
+                        (/ (float numerator 1d0) denominator))
+                       ((plusp approximate)
+                        (float approximate 1d0))))))))
+    (if (sdl-canvas-native-thread-p canvas)
+        (refresh-rate)
+        (call-on-sdl-canvas-thread canvas #'refresh-rate))))
+
+(defmethod canvas-presentation-time ((canvas sdl-canvas))
+  ;; Drawable acquisition has already happened when this is queried.  A
+  ;; cadence frame is intended for its following beat; direct display is
+  ;; paced by FIFO image release and uses the panel's real refresh interval.
+  (let* ((clock (canvas-clock canvas))
+         (rate (cond ((typep clock 'cadence-clock)
+                      (clock-frames-per-second clock))
+                     ((typep clock 'presentation-clock)
+                      (sdl-canvas-refresh-rate canvas))))
+         ;; Acquisition may have blocked since the event loop cached its
+         ;; coherent NOW.  Prediction starts from a fresh underlying sample,
+         ;; then the backend temporarily overrides logical time with it.
+         (now (canvas-time-unadjusted canvas)))
+    (if rate (+ now (/ 1d0 rate)) now)))
+
 (defun make-sdl-canvas (&key (title "luv canvas") (width 800) (height 600)
                           x y (visible-p t) (fullscreen-p nil)
                           (clock (make-demand-clock))
+                          (time (make-lazy-clock))
                           (presentation-api :vulkan))
   "Construct an unrealized SDL canvas.
 
 WIDTH or HEIGHT may be NIL, which asks the display for a size when the window
 is finally created."
   (make-instance 'sdl-canvas :title title :width width :height height
-                              :x x :y y :visible-p visible-p :clock clock
+                              :x x :y y :visible-p visible-p
+                              :clock clock :time time
                               :fullscreen-p fullscreen-p
                               :presentation-api presentation-api))
 
@@ -634,10 +681,7 @@ is finally created."
      canvas
      (lambda ()
        (let ((*cpu-trace* trace))
-         (funcall function
-                  (/ (get-internal-real-time)
-                     (coerce internal-time-units-per-second
-                             'double-float))))))))
+         (funcall function (canvas-time canvas)))))))
 
 ;;; What went wrong, kept.
 ;;;
@@ -839,7 +883,7 @@ seconds.  This is how a caller who just changed the world finds out what
 the next frame made of the change."
   (let* ((start-frames (sdl-canvas-frame-count canvas))
          (start-ticks (sdl-canvas-ticks canvas))
-         (cadence-p (typep (canvas-clock canvas) 'cadence-clock))
+         (cadence-p (typep (canvas-clock canvas) 'animated-clock))
          (deadline (+ (get-internal-real-time)
                       (* timeout internal-time-units-per-second))))
     (wake-sdl-canvas canvas)
@@ -859,10 +903,6 @@ the next frame made of the change."
   (mapcar (lambda (canvas)
             (cons canvas (fence-canvas canvas :frames frames :timeout timeout)))
           (open-canvases)))
-
-(defun canvas-timestamp ()
-  (/ (get-internal-real-time)
-     (coerce internal-time-units-per-second 'double-float)))
 
 (defun sdl-canvas-window-event-p (canvas event)
   (= (sdl3:%window-id event)
@@ -1305,7 +1345,7 @@ in FRAME-FAILURE; a frame that runs counts."
   (loop until (sdl-canvas-close-requested-p canvas)
         do (enter-sdl-canvas-phase canvas :requests)
            (process-sdl-canvas-requests canvas)
-           (let ((timestamp (canvas-timestamp))
+           (let ((timestamp (canvas-time canvas))
                  ;; Held or parked, the loop still pumps the window; it only
                  ;; stops running the application through it.
                  (*canvas-events-held-p*
@@ -1316,11 +1356,17 @@ in FRAME-FAILURE; a frame that runs counts."
                (run-sdl-canvas-frame canvas timestamp))
              (unless (sdl-canvas-close-requested-p canvas)
                (enter-sdl-canvas-phase canvas :waiting)
-               (wait-for-sdl-canvas-event
-                canvas
-                (if *canvas-events-held-p*
-                    (max 1 (round (* 1000 *canvas-event-wait-slice*)))
-                    (sdl-canvas-wait-milliseconds canvas (canvas-timestamp))))))
+               (let ((milliseconds
+                       (if *canvas-events-held-p*
+                           (max 1
+                                (round (* 1000 *canvas-event-wait-slice*)))
+                           (sdl-canvas-wait-milliseconds
+                            canvas (canvas-time canvas)))))
+                 ;; The next event or loop turn deserves a fresh real time.
+                 ;; If an event handler asks first, its answer remains stable
+                 ;; through the following request and frame phases.
+                 (clear-canvas-time canvas)
+                 (wait-for-sdl-canvas-event canvas milliseconds))))
            (incf (sdl-canvas-ticks canvas))))
 
 ;;; The watchdog.
