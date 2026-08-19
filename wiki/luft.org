@@ -369,17 +369,26 @@ draws the chamfered geometry of #RUAWR5, which is what these materials are
 for, and lights it from the occupancy field of #TI9NJP: a soft shadow and a
 smooth crowding, so the edges stay crisp while the light stays gentle.
 
-Two of the numbers do most of the work.  Wood gets its figure from a bundle
-of pith lines running along a grain axis on a loose lattice: the point's
-distance from the nearest pith, jittered per trunk and warped by a slow
-turbulence, is banded into growth rings.  A face cutting /across/ the axis
-therefore meets the rings as circles and a face along it as the long streaks
-of a sawn board, and nothing has to be told which it is
-([[lisp:luft.render.shaders::stock-grain]]).  A metal gets the hemisphere
-about its mirror direction and almost no diffuse, which is what makes bronze
-read as bronze rather than as brown paint with a white spot on it; the
-weathering measure of the field then puts verdigris in every hollow and
-leaves every ridge polished.
+Three procedurals do most of the work, and they are three different kinds
+of thing.  A /grain/ is growth: wood gets its figure from a bundle of pith
+lines running along an axis on a loose lattice, and the point's distance
+from the nearest pith, jittered per trunk and warped by a slow turbulence,
+is banded into rings.  A face cutting /across/ the axis therefore meets the
+rings as circles and a face along it as the long streaks of a sawn board,
+and nothing has to be told which it is
+([[lisp:luft.render.shaders::stock-grain]]); the same code with the rings
+nearly off and the wander far up is the veining of marble.  A /mottle/ is
+simply patchiness at the scale of a cell or two, which is what a stone
+wants.  A /bond/ is neither: it is a way of putting a wall together, and
+[[lisp:luft.render.shaders::stock-courses]] reads the bed joints off Z, the
+perpends off the face's own horizontal, and staggers them half a brick each
+course, which is the whole of what a stretcher bond is.
+
+A metal is a fourth case again.  Bronze gets the hemisphere about its
+mirror direction and almost no diffuse, which is what makes it read as a
+metal rather than as brown paint with a white spot on it; the weathering
+measure of the field then puts verdigris in every hollow and leaves every
+ridge polished.
 
 ** How a cell says which stock it is
 :PROPERTIES:

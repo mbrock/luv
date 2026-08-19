@@ -628,7 +628,9 @@ the palette repeat slot zero so a stale site can never read rubbish."
           ;; The albedo lanes' fourth components are spare; the first
           ;; carries the grain's pith spacing.
           (loop for face in '(:top :side :bottom)
-                for spare in (list (material-spacing material) 0.0 0.0)
+                for spare in (list (material-spacing material)
+                                   (material-courses material)
+                                   0.0)
                 for colour = (material-albedo material face)
                 do (quad (list (vec3:vec3-x colour) (vec3:vec3-y colour)
                                (vec3:vec3-z colour) spare)))

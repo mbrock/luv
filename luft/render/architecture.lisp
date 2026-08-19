@@ -295,7 +295,7 @@ is a model of a tree; both are what a tree is at this distance."
                              ;; slope rule leaves it bare: a plain grey
                              ;; backdrop, which is what a chart wants.
                              (min 13.0
-                                  (max 0.0 (* 4.5 (+ (- y 50)
+                                  (max 0.0 (* 4.5 (+ (- y 55)
                                                      (* 0.8 (sin (/ x 6.0)))
                                                      (* 0.5 (sin (/ x 2.7)))))))))
                 :stock :granite)
@@ -303,7 +303,7 @@ is a model of a tree; both are what a tree is at this distance."
     (loop for name in names
           for index from 0
           for x = (+ 13 (* 12 (mod index 4)))
-          for y = (+ 18 (* 14 (floor index 4)))
+          for y = (+ 15 (* 11 (floor index 4)))
           for base = (or (column-top world x y) grade)
           do (with-stock (name)
                ;; A plinth, a block on it, a step on that.
@@ -328,8 +328,8 @@ is a model of a tree; both are what a tree is at this distance."
   (list
    ;; High and back, so every stock stands in one frame and each can be
    ;; judged against its neighbours under one light.
-   (cons :all (studio-camera 31.0 1.0 24.0 :look-x 31.0 :look-y 34.0
-                             :look-z 3.0 :field-of-view 1.06))
+   (cons :all (studio-camera 31.0 0.0 33.0 :look-x 31.0 :look-y 33.0
+                             :look-z 2.0 :field-of-view 0.98))
    ;; Obliquely across the rows at eye height, where the arrises catch the
    ;; light and the near stocks can be judged against the far ones.
    (cons :row (studio-camera 8.0 3.0 11.0 :look-x 52.0 :look-y 30.0
@@ -368,7 +368,7 @@ is a model of a tree; both are what a tree is at this distance."
       (dolist (bay bays)
         (ring-arch world bay floor springing radius across :thickness 1)))
     ;; A string course, a corbelled cornice, and a parapet with gaps.
-    (with-stock (:granite)
+    (with-stock (:marble)
       (fill-box world 4 60 (1- (car across)) (1+ (cdr across))
                 (+ head 2) (+ head 2)))
     (with-stock (:limestone)
@@ -879,7 +879,7 @@ knowing what it is cut from."
     ;; Houses along the walls, stone below and timber above, tiled over.
     (dolist (house '((18 49) (26 49) (34 49) (39 55)))
       (destructuring-bind (hx hy) house
-        (with-stock (:limestone)
+        (with-stock (:brick)
           (fill-box world hx (+ hx 5) hy (+ hy 4) plateau (+ plateau 2))
           (fill-box world (1+ hx) (+ hx 4) (1+ hy) (+ hy 3)
                     (1+ plateau) (+ plateau 2) nil))

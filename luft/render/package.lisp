@@ -125,6 +125,7 @@ mesh shaders.")
            #:material-names
            #:material-lanes
            #:material-spacing
+           #:material-courses
            #:material-albedo
            #:*material*
            #:*top-color*

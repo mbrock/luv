@@ -74,6 +74,42 @@ FIBRE-CONTRAST the finer noise stretched along the grain between them."
                    0.5)))
     (- 1.0 (+ (* ring-contrast late) (* fibre-contrast fibre)))))
 
+(define-shader-function stock-fold (u)
+  "How far U is from the nearest whole number, doubled: zero on a joint."
+  (let* ((f (fract u)))
+    (* 2.0 (min f (- 1.0 f)))))
+
+(define-shader-function stock-courses (world face courses width)
+  "The mortar grid of a coursed wall at WORLD, one between the joints.
+
+COURSES is how many courses of brick go to the cell and WIDTH how wide the
+joint is as a fraction of a course.  Bed joints run level, so they are read
+off Z; perpends run between them and are staggered half a brick every
+course, which is the whole of what a stretcher bond is.  A face whose
+normal is vertical is a paving rather than a wall, and takes its two
+directions from the plan instead."
+  (let* ((flat (< (abs (swizzle face :z)) 0.5))
+         (v (if flat (swizzle world :z) (swizzle world :y)))
+         (h (if flat
+                (if (> (abs (swizzle face :x)) 0.5)
+                    (swizzle world :y)
+                    (swizzle world :x))
+                (swizzle world :x)))
+         (course (* v courses))
+         (row (floor course))
+         ;; A brick is twice as long as it is high, and every other course
+         ;; begins half a brick along.
+         (stagger (* 0.5 (- (/ row 2.0) (floor (/ row 2.0)))))
+         (along (+ (* h (* courses 0.5)) stagger))
+         (bed (smoothstep 0.0 width (stock-fold course)))
+         (perpend (smoothstep 0.0 (* width 1.4) (stock-fold along)))
+         (joint (min bed perpend))
+         ;; Each brick a little different from its neighbour, which is what
+         ;; keeps a coursed wall from reading as graph paper.
+         (brick (vec3 (floor along) (float row) 0.0))
+         (shade (+ 0.88 (* 0.24 (paper-hash brick)))))
+    (mix 0.62 shade joint)))
+
 (define-shader-function stock-mottle (world scale contrast)
   "The patchiness of a stone at WORLD, one for none: two octaves about one."
   (let* ((coarse (- (paper-noise (* world scale)) 0.5))
@@ -246,6 +282,12 @@ goes up."
               (grain (stock-grain world axis spacing rings wander
                                   ring-contrast fibre-contrast))
               (mottle (stock-mottle world mottle-scale mottle-contrast))
+              ;; The second spare component says how many courses of brick
+              ;; go to the cell; zero, and the wall is not coursed at all.
+              (courses (swizzle side-lane :w))
+              (bond (if (> courses 0.0)
+                        (stock-courses world face courses 0.16)
+                        1.0))
               ;; The cell behind this face, and two hashes of it: a wall of
               ;; cells should not read as one painted surface.
               (cell (floor (- world (* oriented 0.25))))
@@ -265,7 +307,7 @@ goes up."
               (ridge (smoothstep 0.02 0.34 (- relief)))
               (hollow (smoothstep 0.02 0.30 relief))
               (worn (+ 1.0 (* wear (- (* 0.55 ridge) (* 0.95 hollow)))))
-              (tone (* albedo (* (* grain mottle) (* drift worn))))
+              (tone (* albedo (* (* grain (* mottle bond)) (* drift worn))))
               (aged (mix tone patina-colour (* patina hollow)))
               ;; The planed facet: paler on wood, where the cut crosses the
               ;; fibre; brighter on metal, where handling polishes it.
@@ -333,6 +375,9 @@ reaches.")
    (grain-axis
     :initarg :grain-axis :initform '(0.0 0.0 1.0) :reader material-grain-axis
     :documentation "The direction the grain runs, as a list of three floats.")
+   (courses
+    :initarg :courses :initform 0.0 :reader material-courses
+    :documentation "Courses of brick to the cell, or zero for uncoursed.")
    (spacing
     :initarg :spacing :initform 2.7 :reader material-spacing
     :documentation "Cells between pith lines across the grain.
@@ -474,6 +519,25 @@ is the whole of what it is cut from.  #PWMCOL")
   ;; on a slate floor comes out as a target painted on the paving.
   :gloss 0.30 :polish 55.0 :lift 1.40
   :mottle-scale 1.8 :mottle 0.20 :wear 0.30 :drift 0.06 :rim 0.20)
+
+(define-material :brick
+  ;; Fired clay laid in a stretcher bond: the one material here whose
+  ;; figure is not a grain or a mottle but a way of putting it together.
+  :top '(0.140 0.055 0.034) :side '(0.126 0.048 0.030)
+  :bottom '(0.064 0.024 0.015)
+  :courses 3.0
+  :gloss 0.05 :polish 18.0 :lift 1.14
+  :mottle-scale 3.2 :mottle 0.22 :wear 0.35 :drift 0.06 :rim 0.07)
+
+(define-material :marble
+  ;; The grain machinery with the rings almost turned off and the wander
+  ;; turned up is veining: a pale stone with a dark seam wandering through.
+  :top '(0.480 0.470 0.445) :side '(0.440 0.430 0.408)
+  :bottom '(0.215 0.210 0.200)
+  :gloss 0.75 :polish 150.0 :lift 1.20
+  :grain-axis '(0.0 0.0 1.0) :spacing 9.0 :rings 2.0
+  :ring-contrast 0.26 :wander 2.8 :fibre 0.04
+  :mottle-scale 1.4 :mottle 0.10 :wear 0.15 :drift 0.04 :rim 0.14)
 
 (define-material :terracotta
   ;; Fired earth: warm, slightly chalky, lighter where it has been rubbed.
