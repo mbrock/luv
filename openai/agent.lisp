@@ -103,10 +103,14 @@ proxies can speak the same small protocol."
     agent))
 
 (defun close-agent (agent)
-  "Close AGENT's WebSocket.  It is safe to call more than once."
+  "Begin AGENT's normal WebSocket close handshake.
+
+WEBSOCKET-DRIVER forcibly destroys its reader thread in CLOSE-CONNECTION;
+doing that while SBCL is in SSL I/O can corrupt the image.  A close frame lets
+the reader receive the peer's reply and finish in its own thread instead."
   (unless (agent-closed-p agent)
     (setf (agent-closed-p agent) t)
-    (websocket-driver:close-connection (agent-socket agent)))
+    (websocket-driver:send (agent-socket agent) "" :type :close :code 1000))
   agent)
 
 (defun enqueue-agent-event (agent event)
@@ -161,8 +165,7 @@ hyphens), so compare keys in their punctuation-free spelling."
          (cons "tools" (encoded-tools (agent-tools agent)))
          (cons "tool_choice" "auto")
          (cons "parallel_tool_calls" t)
-         (cons "stream" t)
-         (cons "store" '(:false)))
+         (cons "stream" t))
    (let ((reasoning (json-object "effort" (agent-reasoning-effort agent)
                                  "summary" (agent-reasoning-summary agent))))
      (if reasoning (list (cons "reasoning" reasoning)) '()))))
@@ -214,6 +217,7 @@ calling thread.  Function calls run their TOOL here too, then continue with a
 response.append carrying its function_call_output."
   (sb-thread:with-mutex ((agent-turn-lock agent))
     (let ((text-output "") (reasoning-output "") (usage nil) (done nil)
+          (items-with-text-deltas (make-hash-table :test #'equal))
           (tool-append-p nil))
       (send-json agent
                  (if (agent-created-p agent)
@@ -234,6 +238,9 @@ response.append carrying its function_call_output."
                   (let ((type (json-value event :type)))
                     (cond
                      ((string= type "response.output_text.delta")
+                      (setf (gethash (json-value event :item-id)
+                                     items-with-text-deltas)
+                            t)
                       (setf text-output
                             (append-string text-output (json-value event :delta))))
                      ((or (string= type "response.reasoning_summary_text.delta")
@@ -252,8 +259,12 @@ response.append carrying its function_call_output."
                            (let ((item (json-value event :item)))
                              (and item (string= (json-value item :type) "message"))))
                       (setf text-output
-                            (append-string text-output
-                                           (output-item-text (json-value event :item)))))
+                            (let ((item (json-value event :item)))
+                              (if (gethash (json-value item :id)
+                                           items-with-text-deltas)
+                                  text-output
+                                  (append-string text-output
+                                                 (output-item-text item))))))
                      ((member type '("response.completed" "response.done") :test #'string=)
                       (let ((response (json-value event :response)))
                         (when response
