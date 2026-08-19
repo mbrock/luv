@@ -96,6 +96,16 @@ nearby work mark instead of appending a disconnected status page.
 
 The following are starting paths rather than a table of settled doctrine.
 
+** Engineering the implementation
+:PROPERTIES:
+:ID: 0L51TG
+:END:
+
+- [[file:technical-debt.org][Technical debt that multiplies truths]] ranks the current architectural debt
+  by the number of places that must agree.  It names concrete deletion cuts,
+  protocol extractions, and ownership boundaries rather than treating file
+  size or unfinished experiments as debt by themselves.
+
 ** GPU semantics and implementation
 :PROPERTIES:
 :ID: G4R8PU

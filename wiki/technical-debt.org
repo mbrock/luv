@@ -1,0 +1,315 @@
+#+title: Technical debt that multiplies truths
+#+startup: overview
+
+* What this audit counts as debt
+:PROPERTIES:
+:ID: J97QHX
+:END:
+
+This is a source audit of luv and luvcraft at =58b0a3afb75f=.  It ranks code
+that makes one change require several coordinated edits, preserves an obsolete
+runtime path, or puts a contract on the wrong side of a subsystem boundary.
+Large files and long explanations are not debt by themselves.  The problem is
+when they conceal several independent sources of truth.
+
+The ranking comes from reading the systems, packages, largest implementation
+files, backend seams, session lifetime, shader lowering, voxel lighting, and
+their call sites.  It is a work map, not a request to rewrite everything.
+
+* Ranked cut list
+:PROPERTIES:
+:ID: OUKQ2A
+:END:
+
+| Rank | Debt | Why it compounds | First safe cut |
+|------+--------------------------------------+------------------------------------------+---------------------------------------------|
+|    1 | Luvcraft session and render lifetime | One GPU object appears in several ledgers | Extract one renderer that owns its resources |
+|    2 | McCLIM GPU command dispatch           | A new command edits four type tables       | Put command phases behind generic functions |
+|    3 | Shared shader IR lives in SPIR-V      | Both backends depend on one backend's name | Extract =luv.shader= and backend lowerings   |
+|    4 | The HAL boundary is only half-owned   | Backends disagree on portable inputs; video bypasses HAL | Normalize once; add an interop protocol |
+|    5 | Three voxel-light runtime solvers     | Oracle, experiment, and production coexist | Close dispatch; move or delete old paths     |
+|    6 | Serial umbrella systems hide islands  | Optional features enlarge every core load  | Extract only the already-visible islands     |
+|    7 | Compatibility entry points without clients | Tests keep obsolete surfaces alive    | Delete the high-confidence queue             |
+
+Ranks 1--5 are architectural.  Ranks 6--7 are useful supporting cuts, but
+splitting systems or deleting aliases will not repair duplicated ownership or
+dispatch on its own.
+
+* 1. The session has several resource ownership truths
+:PROPERTIES:
+:ID: V9VH79
+:END:
+
+[[file:../luvcraft/app.lisp][=luvcraft-session=]] has about one hundred slots spanning world production,
+simulation, input, GPU attachments, layouts, pipelines, video, text, overlays,
+and frame state.  [[lisp:luvcraft:start-luvcraft]] is 623 lines.  During startup
+a GPU object can simultaneously be a lexical binding, a named session slot,
+an element of =resources=, or an element of the separate =pipelines= list:
+
+#+begin_src lisp
+(flet ((keep (resource)
+         (push resource resources)
+         resource))
+  (let* ((color-texture (keep (getf attachments :color-texture)))
+         ...
+         (pipeline
+           (let ((artifact (make-luvcraft-live-pipeline ...)))
+             (push artifact pipelines)
+             artifact))
+         (session
+           (make-instance 'luvcraft-session
+                          :color-texture color-texture
+                          :block-pipeline pipeline
+                          :resources resources)))
+    ...))
+#+end_src
+
+Resize code must replace named slots /and/ update the resource bag.
+[[lisp:luvcraft:stop-luvcraft]] separately enumerates ten pipeline accessors,
+then destroys the resource bag, then releases video, text, canvas, and device.
+The teardown is careful; the debt is that correctness depends on every future
+resource author remembering every ledger.
+
+The first extraction should be semantic, not a giant constructor macro:
+
+#+begin_src lisp
+(defclass luvcraft-renderer ()
+  ((frame-attachments :initarg :frame-attachments :accessor frame-attachments)
+   (pipelines         :initarg :pipelines         :reader renderer-pipelines)
+   (layouts           :initarg :layouts           :reader renderer-layouts)))
+
+(defmethod release-luvcraft-component ((renderer luvcraft-renderer)) ...)
+(defmethod resize-luvcraft-component ((renderer luvcraft-renderer) extent) ...)
+#+end_src
+
+The renderer should be the sole runtime owner of those objects.  A small
+transactional resource helper may protect construction failure, but the
+finished owner must not also depend on a catch-all session resource list.
+Later extractions can give production/streaming and simulation the same shape;
+the session then coordinates owners instead of being all of them.
+
+* 2. McCLIM implements one open command vocabulary four times
+:PROPERTIES:
+:ID: A0JOG7
+:END:
+
+[[file:../mcclim/gpu.lisp][=mcclim/gpu.lisp=]] defines solid, analytic, relief, gradient, lattice,
+image, and text command structures.  Their algebra is repeated in four
+=etypecase= tables:
+
+| Phase | Function | Repeated decision |
+|-------+--------------------------------+------------------------------------|
+| Compose pane streams | =compose-gpu-mirror-media= | Copy and rebase the command |
+| Prepare frame data | =prepare-gpu-frame-commands= | Preserve or turn it into a prepared command |
+| Set clipping | =gpu-frame-command-clip= | Select the command's clip accessor |
+| Encode draws | =render-gpu-mirror-frame= | Select pipeline, bindings, buffer, and draw fields |
+
+For example, the clip operation alone knows every prepared command type:
+
+#+begin_src lisp
+(defun gpu-frame-command-clip (command)
+  (etypecase command
+    (gpu-solid-command (gpu-solid-command-clip command))
+    ...
+    (gpu-prepared-text-command
+     (gpu-prepared-text-command-clip command))))
+#+end_src
+
+Adding one draw family therefore requires shotgun surgery across distant
+parts of a 2,692-line file.  This is an owned, growing vocabulary, so it wants
+an open protocol:
+
+#+begin_src lisp
+(defgeneric rebase-gpu-command (command offsets))
+(defgeneric prepare-gpu-command (command mirror frame-build))
+(defgeneric gpu-command-clip (command))
+(defgeneric encode-gpu-command (command pass frame-state))
+#+end_src
+
+The command structures can remain compact method specializers, and a common
+included draw structure can hold =first-vertex=, =vertex-count=, and =clip=.
+The dense vertex arrays should remain arrays.  This follows the already useful
+portable =encode=/=enqueue= command seam described by #D8F3QM; it does not ask
+for a retained object graph or a class per vertex.
+
+* 3. The shared shader language is trapped inside the SPIR-V backend
+:PROPERTIES:
+:ID: TUVTOM
+:END:
+
+[[file:../hal/shader/language.lisp][=hal/shader/language.lisp=]] is 5,757 lines and begins with
+=(in-package #:luv.spir-v)=.  It contains the backend-neutral type system,
+source graph, parser, quantity checking, definition revision tracking, lowering
+protocol, and SPIR-V lowering.  Metal's direct MSL lowering consequently
+specializes a SPIR-V-named protocol over SPIR-V-named portable objects:
+
+#+begin_src lisp
+(defmethod spv:lower-shader-specification
+    ((target msl-target) (specification spv:shader-specification))
+  "Lower the shared shader graph directly to a structured MSL document."
+  ...)
+#+end_src
+
+The source has already outgrown that ownership: #LVKEYO describes one shared
+typed graph with sibling SPIR-V and MSL lowerings.  The package graph still
+says that SPIR-V owns both siblings.  The permanent source also carries
+=eval-when= migrations that unintern old portable operators and repair old
+accessors in a live image.
+
+Extract three explicit layers:
+
+#+begin_example
+luv.shader       types, source graph, parser, revision, lowering protocol
+luv.spir-v       literal SPIR-V model and SPIR-V lowering methods
+luv.msl          structured MSL model and MSL lowering methods
+#+end_example
+
+Do this as a package/file move before redesigning the language.  Update the
+remaining =shader-abstraction-revision= callers to =shader-source-revision=,
+restart the durable image at the package boundary, and then delete the one-time
+live migration shims.  The split makes the architecture in #LVKEYO true in the
+loader as well as in the prose.
+
+* 4. The HAL boundary is only half-owned
+:PROPERTIES:
+:ID: YI8ZE7
+:END:
+
+The portable descriptor types live in [[file:../hal/gpu.lisp][=hal/gpu.lisp=]], but each backend
+independently defines what their input shapes and errors mean.  Vulkan accepts
+a list or vector of two or three texture dimensions and canonicalizes it to
+=(width height 1)=.  Metal accepts only a two-element list and leaves it
+two-dimensional.  Vulkan reports =:unsupported-features= and
+=:unsupported-limits= separately; Metal collapses both into
+=:unsupported-requirements=.  Similar keyword/list/vector normalization is
+repeated for buffer and texture usage.
+
+Backend capability differences are legitimate.  Portable syntax and error
+shape changing with the selected backend are not.  Move descriptor
+canonicalization and common structural checks into the portable layer; hand a
+canonical descriptor to each backend for capability checks and native enum
+translation.  Closed Vulkan and Metal enum tables should remain backend-local.
+
+The same uncertain boundary is more serious in
+[[file:../luvcraft/video-screen.lisp][=luvcraft/video-screen.lisp=]].  Game code tests private backend classes,
+reads =luv::vulkan-device-*= and =luv::metal-native-object= slots, interprets
+=libav::av-vulkan-frame=, and performs CoreVideo FFI.  Reader conditionals then
+choose the platform path.  This contradicts the useful HAL seam in #A7N4XP:
+
+#+begin_src lisp
+(when (typep device 'luv::vulkan-gpu-device)
+  (list :instance (luv::vulkan-device-instance device) ...))
+
+(luv.objective-c:objective-c-pointer
+ (luv::metal-native-object device))
+#+end_src
+
+Introduce a narrow interop extension, for example
+=video-decode-configuration= and =adopt-decoded-video-frame= generic functions.
+Backend/video bridge files should own native handles and return portable
+textures/views plus an explicit owner.  Luvcraft should own playback policy and
+the screen; it should not decode Vulkan or CoreVideo ownership records.
+
+* 5. Voxel lighting keeps oracle, experiment, and production live
+:PROPERTIES:
+:ID: S6421N
+:END:
+
+The default =*voxel-light-solver*= is =:compiled=, but the runtime still offers
+three complete from-scratch paths: =:legacy=, handwritten =:frontier=, and
+=:compiled=.  The incremental protocol is more dangerous: its unspecialized
+method ignores the solver and silently invokes the legacy reconciler.
+
+#+begin_src lisp
+(defmethod reconcile-light-region-using (solver state region)
+  (declare (ignore solver))
+  (reconcile-legacy-light-region state region))
+#+end_src
+
+A misspelled or future solver therefore succeeds using the wrong algorithm.
+The handwritten frontier transfer loop also duplicates the relation compiled
+by the production frontier realization.  The differential work in #X7Q90E,
+#PJY6E1, and #K3WRD3 has made this duplication useful evidence; it need not
+remain a permanent runtime choice.
+
+Make unknown solver names signal immediately.  Delete the handwritten
+=:frontier= runtime path now that the compiled path is the production proof.
+Keep the legacy solver only as a differential test oracle in a test/reference
+system; if an operational recovery path is genuinely required, name it
+explicitly and record its use rather than making it the fallback.  Rename
+comparison slots from =frontier-*= to =candidate-*= so the diagnostic does not
+preserve the retired implementation in its interface.
+
+* 6. Serial umbrella systems conceal useful dependency islands
+:PROPERTIES:
+:ID: 74HG89
+:END:
+
+=luvcraft/core= serially loads roughly forty files and unconditionally depends
+on the GPU stack, Ghostty, libav, terminal/canvas, world, simulation, media,
+network-facing features, rendering, and capture/tool helpers.  Its 686-line package file also
+defines both =luvcraft.frontier= and the broad =luvcraft= package.  The =luv=
+umbrella similarly loads the shared shader language only after Vulkan's
+SPIR-V package and model.
+
+The result is unnecessary compile/load fanout and an image that is harder to
+repair when one optional dependency changes.  =luvcraft/world= proves that a
+small renderer-independent island can exist without turning the project into
+dozens of micro-systems.
+
+Extract only boundaries already demanded above: =luv/shader=, a frontier
+kernel system, the renderer owner, and platform video bridges.  Keep =luv= and
+=luvcraft/core= as convenience umbrellas.  ASDF decomposition should express
+ownership and optionality, not merely make the component list shorter.
+
+* 7. A high-confidence deletion queue
+:PROPERTIES:
+:ID: H03JVK
+:END:
+
+These are smaller than the architectural debts, but removing them first will
+reduce the surface that later refactors must carry:
+
+- [[file:../luvcraft/shaders.lisp][=block-world-crosshair-vertex-module/shader=]] hand-builds literal SPIR-V
+  after the same file defines the mathematical vertex specification.  The live
+  renderer uses the specification, while one HAL test still tests the literal
+  shader.  Delete the literal builder and make the test compile the production
+  specification.
+- =find-gnome= and =place-gnome= are exported compatibility aliases with no
+  repository callers.  Delete them in favor of =find-agent= and =spawn-agent=.
+- =shader-abstraction-revision= is a compatibility alias still used by the live
+  pipeline and one shader test.  Migrate those callers and remove the alias.
+- =make-block-content-column :palette= and the palette-plus-indices branch of
+  =install-world-chunk-storage= have no non-compatibility callers.  Require the
+  vocabulary-backed =block-content-column= that production already transfers.
+- =emit-block-face= and =mesh-block-world= are explicitly compatibility APIs;
+  only tests call them.  Delete them and test =mesh-block-snapshot= or
+  =mesh-block-chunk=, unless a named development tool is made their real owner.
+- Remove the shader package's one-time =unintern=/=fmakunbound= migrations when
+  rank 3 deliberately restarts the image.  Do not let live-upgrade scaffolding
+  become a permanent load phase.
+
+The persistence migration for old saved gnome edits is different: saved data
+is an external boundary.  Keep versioned persistence migrations until the
+supported save floor is intentionally raised.
+
+* A workable order
+:PROPERTIES:
+:ID: CWKEY9
+:END:
+
+1. Delete the uncalled aliases, obsolete crosshair module, and compatibility
+   constructors; point their tests at production entry points.
+2. Close voxel solver dispatch and retire the handwritten runtime solver.
+3. Replace McCLIM's four command type tables with methods, one phase at a time.
+4. Extract the renderer as the sole owner of frame attachments, layouts, and
+   pipelines; then make session start/stop orchestration use that owner.
+5. Split the shader package and normalize portable GPU descriptors.  This is
+   the deliberate durable-image restart boundary.
+6. Move native video import behind backend methods and reflect the resulting
+   ownership islands in ASDF.
+
+Each step has a local stopping condition: one fewer parallel dispatch table,
+one fewer resource ledger, one fewer selectable obsolete algorithm, or no
+backend-private name above HAL.  That is a more useful measure than smaller
+files alone.

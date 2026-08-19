@@ -11,6 +11,7 @@
   ((:module "wiki"
     :default-component-class "luv.wiki:org-file"
     :components ((:file "index")
+                 (:file "technical-debt")
                  (:file "block-world")
                  (:file "world-terminal")
                  (:file "agent-harnesses")
