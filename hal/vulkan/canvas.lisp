@@ -838,16 +838,9 @@ native targets only from observed or already-scheduled native timestamps."
                   (clamp-canvas-extent
                    height (second minimum) (second maximum))))))))
 
-(defun choose-vulkan-canvas-image-count (context capabilities)
+(defun choose-vulkan-canvas-image-count (capabilities)
   (let ((desired
-          (if (sdl-canvas-direct-display-p (context-canvas context))
-              ;; The minimum FIFO chain admits one image being scanned and
-              ;; one being prepared.  Another image would be another frame of
-              ;; latency and another opportunity for CPU production to run
-              ;; ahead of the actual KMS page-flip cadence.
-              (lvk:presentation-capabilities-min-image-count capabilities)
-              (1+ (lvk:presentation-capabilities-min-image-count
-                   capabilities))))
+          (1+ (lvk:presentation-capabilities-min-image-count capabilities)))
         (maximum
           (lvk:presentation-capabilities-max-image-count capabilities)))
     (if (plusp maximum) (min desired maximum) desired)))
@@ -936,7 +929,7 @@ native targets only from observed or already-scheduled native timestamps."
                    (lvk:create-swapchain
                     native-device surface vk-format color-space extent
                     :min-image-count
-                    (choose-vulkan-canvas-image-count context capabilities)
+                    (choose-vulkan-canvas-image-count capabilities)
                     :usage native-usage
                     :pre-transform
                     (lvk:presentation-capabilities-current-transform
@@ -953,11 +946,7 @@ native targets only from observed or already-scheduled native timestamps."
                         (lvk:get-swapchain-images native-device swapchain))
                    frame-slots
                    (make-vulkan-canvas-frame-slots
-                    native-device
-                    (if (sdl-canvas-direct-display-p
-                         (context-canvas context))
-                        1
-                        (min 2 (length textures))))
+                    native-device (min 2 (length textures)))
                    render-done
                    (make-vulkan-semaphores native-device (length textures)))
              (when present-timing-p
