@@ -25,7 +25,8 @@
                              (:file "field")
                              (:file "material")
                              (:file "render")
-                             (:file "studio"))))
+                             (:file "studio")
+                             (:file "architecture"))))
   :in-order-to ((test-op (test-op "luft/render/test"))))
 
 (defsystem "luft/program"

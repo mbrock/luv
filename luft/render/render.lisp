@@ -86,20 +86,28 @@
   "Whether WORLD is solid at X,Y,Z."
   (luft:solid-cell-p (world-solid world) x y z))
 
+(defun world-vertical-p (z)
+  "Whether Z names a cell row a world can hold: the world has a floor and
+a ceiling, and building code that runs off either end is building nothing
+rather than making an error."
+  (and (integerp z) (<= 0 z (- luft:+vertical-cell-rows+ 2))))
+
 (defun (setf world-cell-p) (state world x y z)
   "Make WORLD solid or empty at X,Y,Z, stamping *STOCK* where it fills."
-  (setf (luft:solid-cell-p (world-solid world) x y z) state)
-  (when state
-    (setf (aref (world-slots world)
-                (luft:cell-bit-index (world-domain world) x y z))
-          (world-stock-slot world *stock*)))
+  (when (world-vertical-p z)
+    (setf (luft:solid-cell-p (world-solid world) x y z) state)
+    (when state
+      (setf (aref (world-slots world)
+                  (luft:cell-bit-index (world-domain world) x y z))
+            (world-stock-slot world *stock*))))
   state)
 
 (defun paint-cell (world x y z &optional (material *stock*))
   "Give the cell at X,Y,Z of WORLD the stock MATERIAL, solid or not."
-  (setf (aref (world-slots world)
-              (luft:cell-bit-index (world-domain world) x y z))
-        (world-stock-slot world material))
+  (when (world-vertical-p z)
+    (setf (aref (world-slots world)
+                (luft:cell-bit-index (world-domain world) x y z))
+          (world-stock-slot world material)))
   material)
 
 (defclass scene ()
@@ -445,14 +453,22 @@ walked on, which is the whole argument for a world knowing its stocks."
   "The :INK style's line width in pixels of the rendered frame.")
 (defparameter *exposure* 1.15
   "Exposure of the 1 - exp(-x) curve the lit colour rolls off through.")
-(defparameter *sky-color* (vec3:make-vec3 0.62 0.76 0.92))
+(defparameter *sky-color* (vec3:make-vec3 0.56 0.71 0.90)
+  "The colour of the horizon, which the fog also converges to.
+
+Deep enough that stone reads against it: a sky written at the value the eye
+takes off a photograph leaves every building silhouetted on nothing.")
 (defparameter *draw-sky* t
   "Whether the background is the gradient sky pass or the flat clear colour.")
 (defparameter *focus-distance* 40.0
   "How far the lens is focused, in cells; also the alpha channel's scale.")
 (defparameter *aperture* 0.0
   "How strongly the focus pass softens the distance; zero is a pinhole.")
-(defparameter *fog-distance* 140.0)
+(defparameter *fog-distance* 240.0
+  "How far away the world has gone entirely to sky.
+
+Far enough that a sixty-cell world does not dissolve at its own horizon:
+fog is for saying that distance exists, not for hiding the far bank.")
 (defparameter *bevel-radius* 0.22
   "The :BEVEL style's crease-rounding radius in cells, below one half.")
 (defparameter *chamfer-width* 0.11
@@ -542,14 +558,14 @@ more than the edges of walls, the way weather wears a top.")
   ;; to draw the plan of a building on the ground beside it.
   :sun '(-0.78 0.36 0.30) :sun-color '(1.02 0.94 0.86)
   :sky '(0.60 0.74 0.94) :fill '(0.55 -0.45 0.35) :fill-strength 0.26
-  :ambient 0.40 :fog 190.0 :exposure 1.12)
+  :ambient 0.40 :fog 320.0 :exposure 1.12)
 
 (define-light :noon
   ;; Almost overhead: tops blaze, walls fall away, and every shadow is a
   ;; small hard pool underneath the thing that casts it.
   :sun '(0.18 0.12 0.97) :sun-color '(1.12 1.06 0.98)
   :sky '(0.55 0.72 0.96) :fill '(-0.4 -0.4 0.2) :fill-strength 0.22
-  :ambient 0.46 :fog 220.0 :exposure 1.05 :sheen 0.20)
+  :ambient 0.46 :fog 360.0 :exposure 1.05 :sheen 0.20)
 
 (define-light :evening
   ;; The sun nearly down and very warm; the sky behind it goes rose, the
@@ -557,7 +573,7 @@ more than the edges of walls, the way weather wears a top.")
   :sun '(0.86 -0.28 0.16) :sun-color '(1.35 0.86 0.54)
   :sky '(0.62 0.60 0.72) :ground '(0.30 0.22 0.20)
   :fill '(-0.55 0.42 0.30) :fill-strength 0.34
-  :ambient 0.34 :fog 110.0 :exposure 1.25 :sheen 0.26)
+  :ambient 0.34 :fog 170.0 :exposure 1.25 :sheen 0.26)
 
 (define-light :overcast
   ;; No sun to speak of: everything is the sky, occlusion does all the
@@ -565,7 +581,7 @@ more than the edges of walls, the way weather wears a top.")
   :sun '(0.10 0.15 0.98) :sun-color '(0.42 0.44 0.48)
   :sky '(0.74 0.77 0.82) :ground '(0.32 0.32 0.30)
   :fill '(-0.3 -0.3 0.6) :fill-strength 0.30
-  :ambient 0.72 :fog 130.0 :exposure 0.95 :shadow 0.35 :occlusion 0.95
+  :ambient 0.72 :fog 210.0 :exposure 0.95 :shadow 0.35 :occlusion 0.95
   :sheen 0.06)
 
 (defmacro with-light ((name) &body body)
@@ -608,10 +624,13 @@ the palette repeat slot zero so a stale site can never read rubbish."
       (dotimes (slot shaders:+stock-slots+ data)
         (let* ((name (aref names (if (< slot (length names)) slot 0)))
                (material (find-material name)))
-          (dolist (face '(:top :side :bottom))
-            (let ((colour (material-albedo material face)))
-              (quad (list (vec3:vec3-x colour) (vec3:vec3-y colour)
-                          (vec3:vec3-z colour) 0.0))))
+          ;; The albedo lanes' fourth components are spare; the first
+          ;; carries the grain's pith spacing.
+          (loop for face in '(:top :side :bottom)
+                for spare in (list (material-spacing material) 0.0 0.0)
+                for colour = (material-albedo material face)
+                do (quad (list (vec3:vec3-x colour) (vec3:vec3-y colour)
+                               (vec3:vec3-z colour) spare)))
           (mapc #'quad (material-lanes material)))))))
 
 (defun frame-uniform-data

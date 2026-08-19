@@ -1074,8 +1074,8 @@ what the fog converges to and what the background paints must agree."
          (height (clamp upness 0.0 1.0))
          ;; A real sky darkens and saturates with height; the horizon keeps
          ;; the fog's colour exactly so distance dissolves into it.
-         (zenith (* sky (vec3 0.62 0.72 0.94)))
-         (above (mix sky zenith (expt height 0.62)))
+         (zenith (* sky (vec3 0.50 0.64 0.92)))
+         (above (mix sky zenith (expt height 0.45)))
          ;; Below the horizon the ground's bounce takes over, hazed.
          (below (mix sky (* ground 1.35) (clamp (* -4.0 upness) 0.0 1.0)))
          (band (mix below above (smoothstep -0.02 0.06 upness)))

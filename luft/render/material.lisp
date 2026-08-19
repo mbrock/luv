@@ -239,7 +239,11 @@ goes up."
                           (if (< upness -0.5)
                               (swizzle bottom-lane :xyz)
                               (swizzle side-lane :xyz))))
-              (grain (stock-grain world axis 2.7 rings wander
+              ;; The albedo lanes have a spare fourth component each; the
+              ;; first carries how far apart the pith lines run, which is
+              ;; the difference between a plank and a whole beam.
+              (spacing (max (swizzle top-lane :w) 0.25))
+              (grain (stock-grain world axis spacing rings wander
                                   ring-contrast fibre-contrast))
               (mottle (stock-mottle world mottle-scale mottle-contrast))
               ;; The cell behind this face, and two hashes of it: a wall of
@@ -329,6 +333,12 @@ reaches.")
    (grain-axis
     :initarg :grain-axis :initform '(0.0 0.0 1.0) :reader material-grain-axis
     :documentation "The direction the grain runs, as a list of three floats.")
+   (spacing
+    :initarg :spacing :initform 2.7 :reader material-spacing
+    :documentation "Cells between pith lines across the grain.
+
+Small for a world of planks laminated together, large for one cut from
+whole trees; it decides how often a face meets a ring's centre.")
    (rings
     :initarg :rings :initform 0.0 :reader material-rings
     :documentation "Growth rings to the cell across the grain.")
@@ -391,11 +401,13 @@ so a material may speak only of its finish and its figure."
 ;;; value squared: 0.25 here is a mid brown on the screen, not a dark one.
 
 (define-material :turf
-  ;; The world's own default earth, so :STOCK with nothing set matches the
-  ;; other styles.  Turf is matte, patchy at the scale of a few cells, and
-  ;; wears at its edges the way a path does.
+  ;; Grass over soil.  The side colour matters more than the top one: on a
+  ;; landscape whose turf is one cell deep, every ledge shows its own edge,
+  ;; and a bright earth there turns a green hillside into a beige one.
+  :top '(0.108 0.205 0.058) :side '(0.130 0.092 0.052)
+  :bottom '(0.062 0.045 0.026)
   :gloss 0.02 :polish 12.0 :lift 1.06
-  :mottle-scale 0.55 :mottle 0.30 :wear 0.35 :drift 0.09 :rim 0.05)
+  :mottle-scale 0.55 :mottle 0.34 :wear 0.35 :drift 0.10 :rim 0.05)
 
 ;;; Wood.  The albedos are low because wood is dark: a mid-brown board is
 ;;; about a fifth of the light back, and anything written at the value the
@@ -407,7 +419,8 @@ so a material may speak only of its finish and its figure."
   :top '(0.115 0.040 0.020) :side '(0.104 0.035 0.017)
   :bottom '(0.058 0.020 0.010)
   :gloss 0.55 :polish 90.0 :lift 1.30
-  :grain-axis '(0.0 1.0 0.0) :rings 11.0 :ring-contrast 0.36 :wander 0.09
+  :grain-axis '(0.0 1.0 0.0) :spacing 3.4 :rings 14.0
+  :ring-contrast 0.30 :wander 0.08
   :fibre 0.11 :drift 0.04 :mottle-scale 0.9 :mottle 0.09 :rim 0.04)
 
 (define-material :oak
@@ -415,7 +428,8 @@ so a material may speak only of its finish and its figure."
   :top '(0.185 0.118 0.058) :side '(0.168 0.104 0.050)
   :bottom '(0.088 0.055 0.026)
   :gloss 0.22 :polish 45.0 :lift 1.22
-  :grain-axis '(1.0 0.0 0.0) :rings 7.5 :ring-contrast 0.30 :wander 0.14
+  :grain-axis '(1.0 0.0 0.0) :spacing 3.9 :rings 10.0
+  :ring-contrast 0.23 :wander 0.12
   :fibre 0.14 :drift 0.05 :mottle-scale 0.8 :mottle 0.08 :rim 0.05)
 
 (define-material :walnut
@@ -423,7 +437,8 @@ so a material may speak only of its finish and its figure."
   :top '(0.052 0.026 0.015) :side '(0.046 0.023 0.013)
   :bottom '(0.026 0.013 0.007)
   :gloss 0.42 :polish 70.0 :lift 1.50
-  :grain-axis '(0.0 0.0 1.0) :rings 9.0 :ring-contrast 0.40 :wander 0.12
+  :grain-axis '(0.0 0.0 1.0) :spacing 3.1 :rings 12.0
+  :ring-contrast 0.32 :wander 0.10
   :fibre 0.13 :drift 0.04 :mottle-scale 0.9 :mottle 0.09 :rim 0.04)
 
 ;;; Stone.  No grain; a mottle at the scale of a cell or two, wear at every
@@ -440,18 +455,19 @@ so a material may speak only of its finish and its figure."
 (define-material :granite
   ;; Cool, dense, speckled: the cliff of the inspiration photographs, whose
   ;; facets read blue in the shade and near-white in the sun.
-  :top '(0.166 0.166 0.172) :side '(0.142 0.142 0.148)
-  :bottom '(0.070 0.070 0.074)
-  :gloss 0.14 :polish 30.0 :lift 1.24
-  :mottle-scale 2.4 :mottle 0.34 :wear 0.45 :drift 0.11 :rim 0.11)
+  :top '(0.178 0.178 0.184) :side '(0.152 0.152 0.158)
+  :bottom '(0.074 0.074 0.078)
+  :gloss 0.14 :polish 30.0 :lift 1.26
+  :mottle-scale 2.2 :mottle 0.42 :wear 0.48 :drift 0.17 :rim 0.11)
 
 (define-material :slate
   ;; Nearly black, faintly blue, split in courses: a roof or a paving.
-  :top '(0.038 0.042 0.052) :side '(0.031 0.035 0.043)
-  :bottom '(0.017 0.019 0.023)
+  :top '(0.058 0.063 0.076) :side '(0.048 0.052 0.063)
+  :bottom '(0.024 0.026 0.032)
+  ;; No rings: bedding planes are not growth rings, and a wood figure laid
+  ;; on a slate floor comes out as a target painted on the paving.
   :gloss 0.30 :polish 55.0 :lift 1.40
-  :grain-axis '(0.0 0.0 1.0) :rings 2.2 :ring-contrast 0.16 :wander 0.35
-  :fibre 0.07 :mottle-scale 1.8 :mottle 0.16 :wear 0.30 :rim 0.20)
+  :mottle-scale 1.8 :mottle 0.20 :wear 0.30 :drift 0.06 :rim 0.20)
 
 (define-material :terracotta
   ;; Fired earth: warm, slightly chalky, lighter where it has been rubbed.

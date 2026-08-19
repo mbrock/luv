@@ -141,6 +141,22 @@ mesh shaders.")
            #:downsample-pixels
            #:capture-demo-png
            #:make-studio-scene
+           #:atelier-scene
+           #:atelier-cameras
+           #:atelier-pieces
+           #:render-piece-sheet
+           #:render-light-sheet
+           #:fill-disc
+           #:fill-ring
+           #:carve-arch
+           #:ring-arch
+           #:corbel
+           #:crenellate
+           #:crenellate-disc
+           #:fill-stairs
+           #:spiral-stair
+           #:ground-height
+           #:lay-ground
            #:studio-cameras
            #:studio-camera
            #:render-contact-sheet
