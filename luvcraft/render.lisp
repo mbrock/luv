@@ -109,8 +109,9 @@
   (let ((vertices (make-array 0 :element-type 'single-float
                                 :adjustable t :fill-pointer 0))
         (origin-x (if x (- x (/ width 2.0)) 0.0))
-        ;; Screen coordinates grow downward; clip coordinates grow upward.
-        (origin-y (if y (- (/ height 2.0) y) 0.0)))
+        ;; The Vulkan viewport already turns clip Y into downward-growing
+        ;; screen coordinates, so pointer Y keeps its sign here.
+        (origin-y (if y (- y (/ height 2.0)) 0.0)))
     (labels ((clip-x (pixels) (/ (* 2.0 pixels) width))
              (clip-y (pixels) (/ (* 2.0 pixels) height))
              (vertex (x y color)
