@@ -1,0 +1,41 @@
+[Please experiment with this!!!]
+
+This representation gives you a much stronger way to pursue the “ZSnes
+reconstruction alphabet, but for voxel topology” idea.
+
+The eight occupied-or-empty cells around a lattice vertex form an
+8-bit signature. There are 256 raw signatures, but cube rotations,
+reflections, and solid/air complementation reduce them to a relatively
+small family of canonical cases—the same sort of symmetry reduction
+that makes marching-cubes case tables manageable.
+
+You could have a local reconstruction alphabet whose entries answer:
+
+Is this a convex corner, a concave corner, a diagonal contact, a
+tunnel-like saddle, or a flat continuation?  Where should the shared
+vertex move?  What edge strips and corner caps should exist?  What
+normal or normal cone should each feature have?  Should diagonally
+touching solids remain separated or receive a bridge?  How rounded
+should the feature become at this level of detail?
+
+The important difference from ordinary marching cubes is that you do
+not have to abandon the cubical world or pretend it was sampled from
+an unknown smooth scalar field. The cellular complex is
+authoritative. The case table is merely choosing a geometric
+realization of known cell incidence.
+
+A particularly clean mesh-shader decomposition would be site-centric:
+
+each exposed face emits its central face patch; each relevant edge
+site emits one bevel or fillet strip; each relevant vertex site emits
+one corner cap.
+
+Because each edge and vertex is globally canonical, every feature has
+exactly one owner without being “owned by a voxel.” That should reduce
+duplicate computation and make increasingly elaborate fillets easier
+to reason about. The classic pipeline fallback can reserve a fixed
+maximum number of slots for each feature and collapse unused ones,
+exactly as your current fallback collapses unavailable geometry.
+
+This feels like the path from the present fixed chamfer to something
+that looks deliberately modeled rather than merely rounded.

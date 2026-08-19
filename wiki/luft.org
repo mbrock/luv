@@ -253,10 +253,17 @@ silhouettes and inside meetings lose the perfectly sharp edge that makes a
 block world look synthetic, without pretending the geometry is literal
 woodworking.
 
-A shared point moves by exactly $\tfrac{w}{2}\,q$, half the setback along its
-clamped minority direction.  At an edge this is the midline of a flat
-45-degree facet between two offset faces; at a pure corner it is where three
-small chamfer planes meet.  The default =*chamfer-width*= is 0.045 cell:
+A shared point on a crease moves by exactly $\tfrac{w}{2}\,q$, half the
+setback along its clamped minority direction: the midline of a flat
+45-degree facet between two offset faces.  At a pure corner three such
+facets meet, and a corner planed by three 45-degree cuts should end in a
+triangle, not run to a point: the corner is truncated by a plane across all
+three axes, an equilateral triangle whose vertices are the offset faces'
+corners and whose edge midpoints are the facets' midlines.  Each face's
+corner grid square is one planar kite of that triangle once the corner point
+moves to its centroid, $\tfrac{2w}{3}$ along every axis
+([[lisp:luft.render.shaders::chamfer-point]]); mixed corners keep the
+midline rule.  The default =*chamfer-width*= is 0.045 cell:
 enough to catch the studio lights and soften terrain notches without bringing
 back the old 0.22-cell carved coves.  The rounded style keeps its independent
 =*bevel-radius*=.
@@ -267,6 +274,93 @@ derivatives of world position.  Only the arris where the original face meets
 the cut receives a narrow =*arris-softness*= transition, currently 0.004 cell;
 the chamfer itself stays planar.  The overhead view regression now exercises
 rounded, flat, and chamfered pipelines and finds no sky-visible cracks.
+
+* Rounding is the half-level set of the smoothed occupancy
+:PROPERTIES:
+:ID: TI9NJP
+:END:
+
+[[file:images/luft-field-corners.png]]
+
+The star rules of #6TEFOS place each shared point by classifying its eight
+cells, and the studio of #UTRJ2T shows where that runs out: a block standing
+on a floor, a bar's foot, any /mixed/ corner where a convex crease meets two
+concave ones.  There the vertical fillet flares into a skirt and the floor's
+points and the block's points, placed by different cases, fold into each
+other (left column above).  The =:field= style replaces the classification
+with a definition (right column).
+
+Smooth the solid's indicator with a tent kernel of half-width $R$ along each
+axis.  The result $F$ is the fraction of solid under the tent: one deep
+inside, zero in open air, exactly one half on a flat wall, and $C^1$
+everywhere because a tent integrated against a step is a quadratic ramp.
+The rounded solid /is/ the set $F = \tfrac12$.  Every grid point of every
+face, boundary or inner, takes three Newton steps onto that set along
+$\nabla F$, and the surface normal is $-\nabla F$.  Faces incident to a site
+agree without any stitching because the projection is a function of position
+alone; a convex crease becomes a fillet and a concave one a cove of the same
+reach $R$; and a mixed star becomes whatever smooth blend the field makes of
+it, which is always one surface.  With $R \le \tfrac12$ the tent overlaps
+two cells along each axis, so $F$ and $\nabla F$ cost eight cell reads each,
+the price of a trilinear sample (=luft/render/field.lisp=).
+
+The fragment stage reads the same field at its own world position and takes
+its normal from the gradient there, so the rounding shades smoothly however
+coarse the grid -- so smoothly that the =:soft= style draws the six-vertex
+flat quads under this very fragment shader and rounds by light alone, at a
+distance indistinguishable from the projected grid.  The fragment reads the
+field once more under a half-cell tent to learn whether it sits in a hollow
+or on a ridge: =*wear-strength*= lightens ridges and darkens cavities by
+that measure, the wear of a handled thing.  Its shadow is the field's too:
+where every other style walks the sun ray cell by cell and answers yes or
+no, so that shadow outlines are staircases of cells, the field style samples
+the half-cell tent along the ray and keeps the greatest occupancy met, and
+the outline softens over about a cell like the shadow of an area light
+([[lisp:luft.render.shaders::field-shadow]]).  The turf and earth tones
+meet across the fillet by the smooth normal's upness rather than along a
+line through its middle.  The tent may be wider along Z than across
+(=*field-vertical-radius*=), rounding the edges of floors and roofs more
+than those of walls as weather does, though at extreme ratios the three
+Newton steps leave visible wobbles.  The watertightness test of #RUAWR5
+passes for the field as for every other style.
+
+* The same field read as a drawing
+:PROPERTIES:
+:ID: JM9807
+:END:
+
+[[file:images/luft-ink.png]]
+
+A line drawing of a block world is its creases, and the field of #TI9NJP
+knows where those are without any edge detection: wherever the smooth normal
+has turned away from the face normal.  The =:ink= style draws the flat
+six-vertex quads and inks every crease, convex edges and concave coves
+alike, as a pen would; bands the key light into a few flat tones; keeps the
+field's soft shadow as a wash; and fades into the paper with distance
+instead of fogging.  A pen keeps its width on the page, so the band is
+=*ink-width*= pixels wide, measured by how fast the tilt changes across the
+screen (the fragment's derivatives), and never wider than the crease itself.
+The field's occlusion is the same idea turned along the normal: a few
+samples of the half-cell tent out from the point, nearer ones weighted more,
+replace the four cell walks of =crowded-sky= with a measure that is smooth
+because the field is ([[lisp:luft.render.shaders::field-occlusion]]).
+
+* The studio: a world of stars under the same cameras
+:PROPERTIES:
+:ID: UTRJ2T
+:END:
+
+A shaping rule is judged at its sites, and the demonstration world has
+thousands of them and shows none well.  [[lisp:luft.render:make-studio-scene]]
+builds a floor carrying one exhibit of each crease and corner kind -- a lone
+cube, a bar, an L, a slab, a block, a pillar; the same things floating so
+every corner is pure; two cubes meeting along an edge and two at a vertex; a
+pit, a trench, stairs, a ledge, an inner corner; a doorway and a roofed nook
+-- and [[lisp:luft.render:render-contact-sheet]] renders every named camera
+of [[lisp:luft.render:studio-cameras]] in every style at several times the
+output size, box filtered down, into one PNG, cameras down and styles
+across.  The sheets in this page come from it, and a change to any rule is
+judged by rendering one.
 
 ** NEXT Edit cells through the linearity of the boundary
 :PROPERTIES:
