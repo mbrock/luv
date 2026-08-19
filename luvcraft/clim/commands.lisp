@@ -113,12 +113,15 @@
   (string-equal (or (uiop:getenv "LUV_KEYBOARD_LAYOUT") "") "dvorak"))
 
 (defun add-place-block-keystroke ()
-  "Bind place to QWERTY E's physical key under the configured layout."
-  (dolist (key '(#\e #\.))
+  "Bind place to QWERTY E's physical key, independently of its layout text."
+  ;; Clear the older character bindings too when this definition is loaded
+  ;; into a live image.  On Wayland a Dvorak physical D carries both key name
+  ;; :D and character #\e; a #\e place binding would outrank walking right.
+  (dolist (key '(:e #\e #\.))
     (remove-keystroke-from-command-table 'luvcraft-world (list key)
                                          :errorp nil))
   (add-keystroke-to-command-table
-   'luvcraft-world (list (if (dvorak-controls-p) #\. #\e))
+   'luvcraft-world '(:e)
    :command '(com-place-block) :errorp nil))
 
 (add-place-block-keystroke)

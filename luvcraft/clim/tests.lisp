@@ -77,18 +77,20 @@
     ;; LOOKUP-KEYSTROKE-COMMAND-ITEM answers with the gesture on a miss.
     (ok (null (luvcraft-key-command session (key-press :f8))))))
 
-(deftest dvorak-controls-use-the-wasd-places-without-the-e-collision
+(deftest physical-dvorak-control-positions-do-not-collide
   (ok (equal '((#\, :forward) (#\o :backward) (#\a :left) (#\e :right)
                (:shift-left :sprint) (:shift-right :sprint))
              (luvcraft.clim::walk-keys-for-layout :dvorak)))
-  (when (luvcraft.clim::dvorak-controls-p)
-    (let ((session (make-instance 'luvcraft:luvcraft-session)))
-      (ok (equal '(com-start-walking :right)
-                 (luvcraft-key-command session
-                                       (key-press :d :character #\e))))
-      (ok (equal '(luvcraft.clim::com-place-block)
-                 (luvcraft-key-command session
-                                       (key-press :e :character #\.)))))))
+  (let ((session (make-instance 'luvcraft:luvcraft-session)))
+    ;; Wayland supplies the Dvorak character as well as the physical scancode.
+    ;; The physical D position must walk even though its text is E.
+    (ok (equal '(com-start-walking :right)
+               (luvcraft-key-command session
+                                     (key-press :d :character #\e))))
+    ;; Place remains the physical QWERTY E position, whose Dvorak text is a dot.
+    (ok (equal '(luvcraft.clim::com-place-block)
+               (luvcraft-key-command session
+                                     (key-press :e :character #\.))))))
 
 (deftest m-x-searches-the-executable-command-vocabulary
   (let ((entries (luvcraft-command-menu-entries)))
