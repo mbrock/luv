@@ -250,6 +250,7 @@
               env.lisp
               env.ffmpeg
               env.ffmpeg.dev
+              env.pkgs.go
               env.mupdf
               env.libghosttyVt
               env.pkgs.libffi

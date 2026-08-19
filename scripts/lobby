@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Run the repository's tailnet-only MQTT lobby inside the pinned dev shell.
+set -euo pipefail
+
+project_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+cd "$project_root/lobby"
+exec "$project_root/scripts/dev" go run . "$@"
