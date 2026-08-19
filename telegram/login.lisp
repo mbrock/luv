@@ -360,6 +360,184 @@ implemented"))
     (let ((path (probe-file (merge-pathnames session-file))))
       (when path (delete-file path)))))
 
+;;;; QR login
+;;;;
+;;;; A login token is deliberately an object rather than a string: it owns a
+;;;; live unauthorised connection, can be refreshed, and sometimes has to move
+;;;; itself to another data centre.  The three constructors Telegram returns
+;;;; are its closed, externally-owned vocabulary, so TOKEN-RESULT quite
+;;;; properly CASEs on their TL names.
+
+(defclass qr-login ()
+  ((connection :initarg :connection :accessor qr-login-connection)
+   (application :initarg :application :reader qr-login-application)
+   (session-file :initarg :session-file :reader qr-login-session-file)
+   (test :initarg :test :reader qr-login-test-p)
+   (token :initform nil :accessor qr-login-token)
+   (expires :initform nil :accessor qr-login-expires)
+   (user :initform nil :accessor qr-login-user))
+  (:documentation
+   "One pending Telegram QR login, including the connection which receives
+UPDATE-LOGIN-TOKEN and eventually becomes the authenticated session."))
+
+(defmethod print-object ((login qr-login) stream)
+  (print-unreadable-object (login stream :type t)
+    (format stream "~A~@[ expires ~D~]~@[ as ~A~]"
+            (qr-login-connection login) (qr-login-expires login)
+            (and (qr-login-user login) (user-label (qr-login-user login))))))
+
+(defparameter +base64url-alphabet+
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+  "The unpadded URL-safe base64 alphabet Telegram puts in tg:// login links.")
+
+(defun base64url-octets (octets)
+  "Encode OCTETS as unpadded URL-safe base64."
+  (let* ((length (length octets))
+         (result (make-string (ceiling (* 8 length) 6)))
+         (out 0))
+    (loop for start from 0 below length by 3
+          for first = (aref octets start)
+          for second = (and (< (1+ start) length) (aref octets (1+ start)))
+          for third = (and (< (+ start 2) length) (aref octets (+ start 2)))
+          for word = (logior (ash first 16) (ash (or second 0) 8) (or third 0))
+          do (flet ((emit (shift)
+                     (setf (char result out)
+                           (char +base64url-alphabet+
+                                 (ldb (byte 6 shift) word)))
+                     (incf out)))
+               (emit 18)
+               (emit 12)
+               (when second (emit 6))
+               (when third (emit 0))))
+    result))
+
+(defun qr-login-uri (login)
+  "The tg:// URL to encode as LOGIN's QR code, or NIL after it completes."
+  (when (qr-login-token login)
+    (format nil "tg://login?token=~A" (base64url-octets (qr-login-token login)))))
+
+(defgeneric present-qr-login (login &optional stream)
+  (:documentation
+   "Present LOGIN's current QR code.  Applications can add a method for
+their own surface; the standard method uses qrencode when it is available and
+always prints the tg:// URL as a useful fallback."))
+
+(defmethod present-qr-login ((login qr-login) &optional (stream *standard-output*))
+  (let ((uri (qr-login-uri login)))
+    (when uri
+      (format stream "~&Scan this Telegram login code (expires at Unix time ~D):~%"
+              (qr-login-expires login))
+      (handler-case
+          (let ((process (sb-ext:run-program
+                          "qrencode" (list "-t" "UTF8" "-o" "-" uri)
+                          :search t :wait t :output stream :error stream)))
+            (unless (zerop (sb-ext:process-exit-code process))
+              (format stream "~A~%" uri)))
+        (error ()
+          (format stream "~A~%" uri)))
+      (finish-output stream)))
+  login)
+
+(defun qr-login-token-result (login result)
+  "Install RESULT from auth.exportLoginToken or auth.importLoginToken.
+Returns LOGIN.  A migrate result opens an unauthorised session at its target
+data centre and imports the single-use token there."
+  (case (tl:tl-name result)
+    (:auth.login-token
+     (setf (qr-login-token login) (tl:tl-value result :token)
+           (qr-login-expires login) (tl:tl-value result :expires))
+     login)
+    (:auth.login-token-success
+     (setf (qr-login-token login) nil
+           (qr-login-expires login) nil
+           (qr-login-user login) (tl:tl-value (tl:tl-value result :authorization) :user))
+     (save-session (qr-login-connection login) (qr-login-session-file login))
+     (setf *application* (qr-login-application login))
+     (make-current (qr-login-connection login) (qr-login-user login))
+     login)
+    (:auth.login-token-migrate-to
+     (let* ((old (qr-login-connection login))
+            (connection (connect-stored nil :dc-id (tl:tl-value result :dc-id)
+                                        :test (qr-login-test-p login))))
+       (setf (qr-login-connection login) connection)
+       (net:close-mtproto-connection old)
+       (qr-login-token-result
+        login
+        (let ((*application* (qr-login-application login)))
+          (invoke connection :auth.import-login-token :token (tl:tl-value result :token))))))
+    (otherwise
+     (error 'login-failed
+            :detail (format nil "unexpected QR login result ~(~A~)"
+                            (tl:tl-name result))))))
+
+(defun refresh-qr-login (login)
+  "Ask Telegram for LOGIN's current token, following a data-centre migration.
+The returned QR-LOGIN is either ready to present or has completed."
+  (let ((*application* (qr-login-application login)))
+    (qr-login-token-result
+     login
+     (invoke (qr-login-connection login) :auth.export-login-token
+             :api-id (application-api-id *application*)
+             :api-hash (application-api-hash *application*)
+             :except-ids #()))))
+
+(defun begin-qr-login (&key (dc-id 2) test
+                             (application (or *application*
+                                              (application-from-environment)))
+                             (session-file *session-file*))
+  "Create and return a pending QR login.  Call QR-LOGIN-URI to draw its code,
+then WAIT-FOR-QR-LOGIN to receive the authorization after a mobile Telegram
+client scans and accepts it."
+  (let ((*application* application)
+        (connection nil))
+    (unwind-protect
+         (let ((login (make-instance 'qr-login :application application
+                                               :session-file session-file :test test
+                                               :connection
+                                               (setf connection
+                                                     (connect-stored nil :dc-id dc-id
+                                                                          :test test)))))
+           (refresh-qr-login login)
+           (setf connection nil)
+           login)
+      (when connection (net:close-mtproto-connection connection)))))
+
+(defun new-login-token-event-p (event)
+  (and (eq :update (first event)) (eq :update-login-token (second event))))
+
+(defun wait-for-qr-login (login &key (stream *standard-output*) (present t))
+  "Pump LOGIN until a mobile client accepts its code, then return connection
+and user.  A quiet 30-second socket is the normal token-expiry path: obtain
+and present a fresh code instead of treating that silence as a failure."
+  (when present (present-qr-login login stream))
+  (loop until (qr-login-user login)
+        do (let* ((session (net:connection-session (qr-login-connection login)))
+                  (old-events (mt:session-events session)))
+             (handler-case
+                 (net:pump-connection (qr-login-connection login))
+               (net:connection-timeout ()
+                 (refresh-qr-login login)
+                 (when present (present-qr-login login stream))))
+             (when (find-if #'new-login-token-event-p
+                            (ldiff (mt:session-events session) old-events))
+               (refresh-qr-login login)
+               (when present (present-qr-login login stream)))))
+  (values (qr-login-connection login) (qr-login-user login)))
+
+(defun log-in-with-qr (&key (dc-id 2) test
+                            (application (or *application*
+                                             (application-from-environment)))
+                            (session-file *session-file*)
+                            (stream *standard-output*))
+  "Display a Telegram QR login and wait for it to be accepted.  Returns the
+connection and user, and saves the resulting authorization key."
+  (let ((login (begin-qr-login :dc-id dc-id :test test :application application
+                               :session-file session-file)))
+    (unwind-protect
+         (wait-for-qr-login login :stream stream)
+      (unless (qr-login-user login)
+        (net:close-mtproto-connection (qr-login-connection login))))))
+
 ;;;; Logging in without a terminal
 ;;;;
 ;;;; LOG-IN reads the code from whoever is at the keyboard, which is no use

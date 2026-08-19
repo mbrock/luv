@@ -120,6 +120,23 @@ no terminal passes `:password-reader nil` to `complete-login` and gets a
 `password-required` condition instead of a prompt; that is how the in-game
 panel does it.
 
+### QR login
+
+Telegram's mobile-app QR login is public MTProto, not a private desktop
+feature.  `log-in-with-qr` exports a short-lived token, renders it in the
+terminal, and keeps its unauthenticated connection alive for the
+`updateLoginToken` that arrives when the phone accepts it.  The completed
+session is saved exactly like a code login.
+
+```sh
+scripts/telegram '(telegram.client:log-in-with-qr)'
+```
+
+The small `qr-login` object is also available when a different surface wants
+to render the URI itself: `begin-qr-login`, `qr-login-uri`, and
+`wait-for-qr-login`.  The default terminal presenter uses `qrencode` from the
+development shell and falls back to printing the `tg://login?...` URI.
+
 In luvcraft the same flow runs on the phone (press `f`, then TAB): with no
 credentials it asks for an api_id and hash and writes them to
 `~/.telegram.env`; with no session it asks for a phone number, then the

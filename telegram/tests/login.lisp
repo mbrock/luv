@@ -192,6 +192,18 @@ is the one the server would have accepted."
 
 ;;;; Credentials and stored sessions
 
+(deftest qr-login-uri-is-unpadded-url-safe-base64
+  (let ((login (make-instance 'client:qr-login :connection nil :application nil
+                                               :session-file "unused" :test nil)))
+    (client::qr-login-token-result
+     login (tl:make-tl :auth.login-token :expires 123
+                                         :token (ascii "any carnal pleasure.")))
+    (ok (= 123 (client:qr-login-expires login)))
+    (ok (equal "tg://login?token=YW55IGNhcm5hbCBwbGVhc3VyZS4"
+               (client:qr-login-uri login)))
+    (setf (client:qr-login-token login) (hex "ff ef fe"))
+    (ok (equal "tg://login?token=_-_-" (client:qr-login-uri login)))))
+
 (deftest dotenv-files-are-read-the-way-people-write-them
   (let ((path (merge-pathnames "telegram-dotenv-test.env"
                                (uiop:temporary-directory))))
