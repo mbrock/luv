@@ -90,16 +90,20 @@ NAME: wrapped horizontally, air above and below the vertical world."
                        (float (ldb (byte 1 (mod ,index (uint 32.0)))
                                    ,word))))))))
 
-  (defun occupancy-field-bindings (name point-form radius-form)
+  (defun occupancy-field-bindings (name point-form radius-form
+                                   &optional (vertical-radius-form radius-form))
     "LET* bindings computing the tent-smoothed occupancy at POINT-FORM as
-NAME: a vec4 of gradient and value.  RADIUS-FORM is the tent's half-width,
-at most one half.  The bindings read CELLS, PERIOD-X, and PERIOD-Y from the
-enclosing shader.
+NAME: a vec4 of gradient and value.  RADIUS-FORM is the tent's half-width
+along X and Y and VERTICAL-RADIUS-FORM along Z, each at most one half; a
+wider vertical tent rounds the edges of floors and roofs more than those of
+walls, as weather does.  The bindings read CELLS, PERIOD-X, and PERIOD-Y
+from the enclosing shader.
 
 The lower and upper cell layers are summed separately by TENT-LAYER and
 combined along Z here."
     (let ((p (intern (format nil "~A-POINT" name)))
           (r (intern (format nil "~A-RADIUS" name)))
+          (rz (intern (format nil "~A-VERTICAL-RADIUS" name)))
           (a0 (intern (format nil "~A-A0" name)))
           (b0 (intern (format nil "~A-B0" name)))
           (c0 (intern (format nil "~A-C0" name)))
@@ -115,11 +119,12 @@ combined along Z here."
       (flet ((cell (i j k) (intern (format nil "~A-CELL-~D~D~D" name i j k))))
         `((,p ,point-form)
           (,r (clamp ,radius-form 0.01 0.5))
+          (,rz (clamp ,vertical-radius-form 0.01 0.5))
           ;; The lower cell along each axis, and the position of the
           ;; boundary between the two cells relative to the point.
           (,a0 (floor (- (swizzle ,p :x) ,r)))
           (,b0 (floor (- (swizzle ,p :y) ,r)))
-          (,c0 (floor (- (swizzle ,p :z) ,r)))
+          (,c0 (floor (- (swizzle ,p :z) ,rz)))
           (,u (- (+ ,a0 1.0) (swizzle ,p :x)))
           (,v (- (+ ,b0 1.0) (swizzle ,p :y)))
           (,w (- (+ ,c0 1.0) (swizzle ,p :z)))
@@ -134,8 +139,8 @@ combined along Z here."
           (,high (vec4 ,(cell 0 0 1) ,(cell 1 0 1) ,(cell 0 1 1) ,(cell 1 1 1)))
           ;; The lower layer's weight along Z and its slope; the upper
           ;; layer's are one less that weight and the negative slope.
-          (,cz (tent-cdf ,w ,r))
-          (,tz (tent ,w ,r))
+          (,cz (tent-cdf ,w ,rz))
+          (,tz (tent ,w ,rz))
           (,below (tent-layer ,low ,u ,v ,r))
           (,above (tent-layer ,high ,u ,v ,r))
           (,name (vec4 (+ (* (swizzle ,below :x) ,cz)
@@ -164,6 +169,35 @@ or FALLBACK where the gradient vanishes."
         (- (normalize gradient))
         fallback)))
 
+(define-shader-abstraction field-shadow (origin direction steps reach)
+  "How much of the sun a point at ORIGIN loses, zero to one, by the field.
+
+The cell walk of MARCHED-CELL-WALK answers yes or no per cell, so its shadow
+outlines are staircases of cells.  This samples the half-cell tent field
+along the ray from ORIGIN toward DIRECTION instead, STEPS times out to REACH
+cells, closer together near the point, and keeps the greatest occupancy
+met: a ray grazing a block's edge sees a fraction of solid, and the outline
+softens over about a cell.  It reads CELLS, PERIOD-X, and PERIOD-Y from the
+enclosing shader, and is a fold because the field's bindings cannot live
+in an expression."
+  `(smoothstep 0.30 0.70
+     (swizzle
+      (counted-fold (%shadow-index ,(float steps) %shadow-state
+                     (vec4 0.0 0.0 0.0 0.0))
+        (let* ((%shadow-fraction (/ (+ (float %shadow-index) 1.0)
+                                    ,(float steps)))
+               ;; Nearer samples sit closer together: the penumbra of a
+               ;; near occluder is the one the eye reads.
+               (%shadow-distance
+                 (+ 0.55 (* (- ,reach 0.55)
+                            (* %shadow-fraction (sqrt %shadow-fraction)))))
+               (%shadow-point (+ ,origin (* ,direction %shadow-distance)))
+               ,@(occupancy-field-bindings '%shadow-field '%shadow-point 0.5)
+               (%shadow-seen (max (swizzle %shadow-state :x)
+                                  (swizzle %shadow-field :w))))
+          (vec4 %shadow-seen 0.0 0.0 0.0)))
+      :x)))
+
 ;;; The vertex stage: the two-ring grid, every point projected.
 (defmethod surface-vertices-per-face ((style (eql :field)))
   (grid-vertices-per-face 2))
@@ -181,8 +215,16 @@ or FALLBACK where the gradient vanishes."
 ;;; lightened and cavities darkened, is the simplest honest use of that.
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  (defun field-fragment-shader-definition ()
-    "The field fragment shader, spliced around two field samples."
+  (defvar *field-shadow-steps* 14
+    "Field samples along a sun ray: the cost of a soft shadow per pixel.")
+  (defvar *field-shadow-reach* 12.0
+    "How far in cells the field shadow looks toward the sun.")
+
+  (defun field-fragment-shader-definition (&key (shadow :field))
+    "The field fragment shader, spliced around two field samples.
+
+SHADOW is :FIELD for the soft shadow sampled from the field, or :WALK for
+the cell walk every other style uses."
     `(define-shader field-fragment-shader
          (:stage :fragment
           :inputs ((normal :vec3 :location 0)
@@ -196,14 +238,19 @@ or FALLBACK where the gradient vanishes."
        (let* ((period-x (swizzle domain-vector :x))
               (period-y (swizzle domain-vector :y))
               (radius (swizzle domain-vector :z))
-              ,@(occupancy-field-bindings 'field 'world 'radius)
+              (vertical-radius (swizzle domain-vector :w))
+              ,@(occupancy-field-bindings 'field 'world 'radius
+                                          'vertical-radius)
               (smooth (field-normal field (normalize normal)))
+              ;; The materials meet across the fillet rather than along a
+              ;; line through its middle: turf thins out as the ground
+              ;; turns downward.
               (upness (swizzle smooth :z))
-              (tone (if (> upness 0.5)
-                        (swizzle top-vector :xyz)
-                        (if (< upness -0.5)
-                            (swizzle bottom-vector :xyz)
-                            (swizzle side-vector :xyz))))
+              (tone (mix (mix (swizzle side-vector :xyz)
+                              (swizzle bottom-vector :xyz)
+                              (smoothstep -0.35 -0.75 upness))
+                         (swizzle top-vector :xyz)
+                         (smoothstep 0.25 0.75 upness)))
               ;; Wear: under a half-cell tent, a ridge has less than half
               ;; the solid around it and a hollow more.  The strength rides
               ;; in the occlusion lane's third component.
@@ -212,12 +259,22 @@ or FALLBACK where the gradient vanishes."
               (wear (swizzle occlusion-vector :z))
               (worn (* tone (+ 1.0 (* wear (- (* 0.8 (max 0.0 (- relief)))
                                               (* 1.4 (max 0.0 relief)))))))
-              (walk-origin (+ world (* smooth (+ (* 2.0 radius) 0.1))))
-              (walk (marched-cell-walk walk-origin (swizzle sun-vector :xyz)
-                                       cells period-x period-y
-                                       ,*shadow-steps*))
-              (shade (mix 1.0 (if (> (swizzle walk :w) 0.5) 0.0 1.0)
-                          (swizzle occlusion-vector :y)))
+              (walk-origin (+ world (* smooth (+ (* 2.0 (max radius vertical-radius))
+                                                 0.1))))
+              (lost ,(ecase shadow
+                       (:walk
+                        `(if (> (swizzle (marched-cell-walk
+                                          walk-origin (swizzle sun-vector :xyz)
+                                          cells period-x period-y
+                                          ,*shadow-steps*)
+                                         :w)
+                                0.5)
+                             1.0 0.0))
+                       (:field
+                        `(field-shadow world (swizzle sun-vector :xyz)
+                                       ,*field-shadow-steps*
+                                       ,*field-shadow-reach*))))
+              (shade (mix 1.0 (- 1.0 lost) (swizzle occlusion-vector :y)))
               (crowding (crowded-sky walk-origin smooth cells period-x period-y
                                      ,*occlusion-steps*))
               (open (- 1.0 (* (swizzle occlusion-vector :x) crowding)))

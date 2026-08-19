@@ -58,6 +58,7 @@ with the loop reversed when NEGATIVE-P."
 The renderer multiplies this by the site count to size its draw."))
 
 (defmethod surface-vertices-per-face ((style (eql :flat))) 6)
+(defmethod surface-vertices-per-face ((style (eql :soft))) 6)
 
 (define-shader surface-vertex-shader
     (:stage :vertex
@@ -287,12 +288,17 @@ vertex placed by RULE, :CHAMFER or :ROUND, from its nearest corner's star."
                      ;; three Newton steps onto the half-level set of the
                      ;; tent-smoothed occupancy (luft/render/field.lisp) and
                      ;; its normal from the gradient there.
-                     `(,@(occupancy-field-bindings 'field-0 'flat 'radius)
-                       (point-1 (field-step flat field-0 radius))
-                       ,@(occupancy-field-bindings 'field-1 'point-1 'radius)
-                       (point-2 (field-step point-1 field-1 radius))
-                       ,@(occupancy-field-bindings 'field-2 'point-2 'radius)
-                       (shaped (field-step point-2 field-2 radius))
+                     `((vertical-radius (swizzle domain-vector :w))
+                       (reach (max radius vertical-radius))
+                       ,@(occupancy-field-bindings 'field-0 'flat 'radius
+                                                   'vertical-radius)
+                       (point-1 (field-step flat field-0 reach))
+                       ,@(occupancy-field-bindings 'field-1 'point-1 'radius
+                                                   'vertical-radius)
+                       (point-2 (field-step point-1 field-1 reach))
+                       ,@(occupancy-field-bindings 'field-2 'point-2 'radius
+                                                   'vertical-radius)
+                       (shaped (field-step point-2 field-2 reach))
                        (shaped-normal (field-normal field-2 normal))))
                     (:chamfer
                      ;; Woodworking: shared points move to the meeting of

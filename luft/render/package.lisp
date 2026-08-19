@@ -75,6 +75,7 @@ mesh shaders.")
            #:*bevel-radius*
            #:*chamfer-width*
            #:*arris-softness*
+           #:*field-vertical-radius*
            #:*sun-direction*
            #:*sun-color*
            #:*sheen-strength*

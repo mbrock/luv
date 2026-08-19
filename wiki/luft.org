@@ -306,11 +306,23 @@ the price of a trilinear sample (=luft/render/field.lisp=).
 
 The fragment stage reads the same field at its own world position and takes
 its normal from the gradient there, so the rounding shades smoothly however
-coarse the grid, and reads it once more under a half-cell tent to learn
-whether it sits in a hollow or on a ridge: =*wear-strength*= lightens ridges
-and darkens cavities by that measure, the wear of a handled thing.  The
-watertightness test of #RUAWR5 now passes for the field as for every other
-style.
+coarse the grid -- so smoothly that the =:soft= style draws the six-vertex
+flat quads under this very fragment shader and rounds by light alone, at a
+distance indistinguishable from the projected grid.  The fragment reads the
+field once more under a half-cell tent to learn whether it sits in a hollow
+or on a ridge: =*wear-strength*= lightens ridges and darkens cavities by
+that measure, the wear of a handled thing.  Its shadow is the field's too:
+where every other style walks the sun ray cell by cell and answers yes or
+no, so that shadow outlines are staircases of cells, the field style samples
+the half-cell tent along the ray and keeps the greatest occupancy met, and
+the outline softens over about a cell like the shadow of an area light
+([[lisp:luft.render.shaders::field-shadow]]).  The turf and earth tones
+meet across the fillet by the smooth normal's upness rather than along a
+line through its middle.  The tent may be wider along Z than across
+(=*field-vertical-radius*=), rounding the edges of floors and roofs more
+than those of walls as weather does, though at extreme ratios the three
+Newton steps leave visible wobbles.  The watertightness test of #RUAWR5
+passes for the field as for every other style.
 
 * The studio: a world of stars under the same cameras
 :PROPERTIES:

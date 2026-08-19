@@ -112,19 +112,26 @@ The exhibits stand far enough apart that no two share a star."
     (pathname &key (scene (make-studio-scene))
                    (cameras (studio-cameras))
                    (styles '(:flat :bevel :chamfer :paper))
+                   (columns (mapcar #'list styles))
                    (width 320) (height 240) (supersample 3)
                    (technique *default-technique*)
                    (effects '(:sky))
                    (renderer nil))
-  "Render every CAMERA in every STYLE and tile them into one PNG at PATHNAME.
+  "Render every CAMERA in every column and tile them into one PNG at PATHNAME.
 
 Each tile is WIDTH by HEIGHT, rendered SUPERSAMPLE times larger and box
-filtered down in linear light.  Rows are cameras, columns are styles.  With
-RENDERER, that renderer (whose extent must match) draws instead of a fresh
-one; its scene and camera are restored afterwards."
-  (let* ((columns (length styles))
+filtered down in linear light.  Rows are cameras; columns are STYLES, or
+COLUMNS given explicitly as lists of a style followed by special variables
+and values to bind while that column renders, so one sheet can compare one
+style under several knobs:
+
+  :columns ((:field) (:field *bevel-radius* 0.12 *field-vertical-radius* 0.45))
+
+With RENDERER, that renderer (whose extent must match) draws instead of a
+fresh one; its scene and camera are restored afterwards."
+  (let* ((styles (remove-duplicates (mapcar #'first columns)))
          (rows (length cameras))
-         (sheet-width (* columns width))
+         (sheet-width (* (length columns) width))
          (sheet-height (* rows height))
          (sheet (make-array (* 4 sheet-width sheet-height)
                             :element-type '(unsigned-byte 8)
@@ -149,12 +156,16 @@ one; its scene and camera are restored afterwards."
            (loop for (nil . camera) in cameras
                  for row from 0
                  do (setf (renderer-camera renderer) camera)
-                    (loop for style in styles
+                    (loop for (style . specials) in columns
                           for column from 0
                           do (setf (renderer-style renderer) style)
                              (multiple-value-bind (pixels big-width big-height
                                                    pixel-format)
-                                 (render-pixels renderer)
+                                 (progv (loop for (name nil) on specials by #'cddr
+                                              collect name)
+                                        (loop for (nil value) on specials by #'cddr
+                                              collect value)
+                                   (render-pixels renderer))
                                (setf format pixel-format)
                                (multiple-value-bind (tile tile-width tile-height)
                                    (if (> supersample 1)

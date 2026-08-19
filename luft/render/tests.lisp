@@ -96,7 +96,7 @@
       (luft.render::standalone-render-options "full" :vertex)
     (ok (eq :full mode))
     (ok (eq :bevel style))
-    (ok (equal '(:flat :bevel :chamfer :paper :field) pipelines))
+    (ok (equal '(:flat :bevel :chamfer :paper :field :soft) pipelines))
     (ok (equal '(:sky :lens) effects))
     (ok (eq :vertex technique))))
 

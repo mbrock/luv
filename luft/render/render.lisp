@@ -290,7 +290,7 @@ smallest thing that reads as built rather than as terrain."
   "How darkly the sun's walk shadows a point; zero switches shadows off.")
 (defparameter *occlusion-strength* 0.75
   "How deeply the crowding of nearby cells darkens the ambient hemisphere.")
-(defparameter *wear-strength* 0.0
+(defparameter *wear-strength* 0.6
   "How strongly the :FIELD style lightens ridges and darkens hollows.")
 (defparameter *exposure* 1.15
   "Exposure of the 1 - exp(-x) curve the lit colour rolls off through.")
@@ -312,10 +312,20 @@ the light as a band rather than a hairline, and still far short of the old
 0.22-cell coves that made the world look carved.")
 (defparameter *arris-softness* 0.004
   "The narrow shading transition where a chamfer meets its original face.")
+(defparameter *field-vertical-radius* nil
+  "The :FIELD style's tent half-width along Z, or NIL for *BEVEL-RADIUS*.
+
+Wider than the horizontal radius, it rounds the edges of floors and roofs
+more than the edges of walls, the way weather wears a top.")
 
 (defun frame-uniform-data
-    (camera width height &optional domain (surface-width *bevel-radius*))
-  "Pack the frame block: camera, basis, projection, sun, sky, and domain lanes."
+    (camera width height &optional domain (surface-width *bevel-radius*)
+                                  (surface-detail *arris-softness*))
+  "Pack the frame block: camera, basis, projection, sun, sky, and domain lanes.
+
+SURFACE-WIDTH is the style's rounding radius or chamfer width, and
+SURFACE-DETAIL its second lane: the arris softness of a chamfer, or the
+vertical radius of the field."
   (multiple-value-bind (right up forward) (camera-basis camera)
     (let* ((near *near-distance*)
            (far *far-distance*)
@@ -343,7 +353,7 @@ the light as a band rather than a hairline, and still far short of the old
                (if domain (luft:world-domain-x-period domain) 1)
                (if domain (luft:world-domain-y-period domain) 1)
                surface-width)
-              *arris-softness*)
+              surface-detail)
         (lane *sun-color* *sheen-strength*)
         (lane *fill-direction* *fill-strength*)
         (lane *ground-color* *exposure*)
@@ -591,7 +601,7 @@ amplifies bricks with task and mesh shaders and needs VK_EXT_mesh_shader.")
   '(:flat :bevel :chamfer :paper))
 
 (defmethod technique-styles ((technique (eql :vertex)))
-  '(:flat :bevel :chamfer :paper :field))
+  '(:flat :bevel :chamfer :paper :field :soft))
 
 (defgeneric create-technique-pipelines (technique renderer)
   (:documentation
@@ -671,7 +681,7 @@ modules, each NIL when nothing configured wants it."
        (create-renderer-module renderer :luft/shader/lens-fragment
                                "luft lens fragment"
                                (shaders:lens-fragment-shader)))
-     (when (member :field styles)
+     (when (intersection styles '(:field :soft))
        (create-renderer-module renderer :luft/shader/field-fragment
                                "luft field fragment"
                                (shaders:field-fragment-shader))))))
@@ -761,7 +771,7 @@ modules, each NIL when nothing configured wants it."
 (defmethod create-technique-pipelines ((technique (eql :vertex)) renderer)
   (let ((styles (renderer-pipeline-styles renderer))
         surface bevel chamfer field screen)
-    (when (member :flat styles)
+    (when (intersection styles '(:flat :soft))
       (setf surface (create-renderer-module
                      renderer :luft/shader/surface-vertex
                      "luft surface vertex"
@@ -817,6 +827,11 @@ modules, each NIL when nothing configured wants it."
         (when (member :field styles)
           (pipeline :field :luft/pipeline/field "luft field pipeline"
                     field field-fragment))
+        ;; Soft: the flat quads under the field's shading, rounding as
+        ;; light alone.
+        (when (member :soft styles)
+          (pipeline :soft :luft/pipeline/soft "luft soft pipeline"
+                    surface field-fragment))
         (when (renderer-effect-p renderer :sky)
           (pipeline :sky :luft/pipeline/sky "luft sky pipeline"
                     screen sky-fragment
@@ -1063,7 +1078,12 @@ The second value is true when a new buffer was created."
                                       (if (member (renderer-style renderer)
                                                   '(:chamfer :paper))
                                           *chamfer-width*
-                                          *bevel-radius*)))
+                                          *bevel-radius*)
+                                      (if (member (renderer-style renderer)
+                                                  '(:field :soft))
+                                          (or *field-vertical-radius*
+                                              *bevel-radius*)
+                                          *arris-softness*)))
     (let* ((surface-pipeline
              (getf (renderer-pipelines renderer) (renderer-style renderer)))
            (sky-pipeline (getf (renderer-pipelines renderer) :sky))
@@ -1376,7 +1396,7 @@ many times oversize, and the frame is box-filtered down on the way out."
            (values :clear :flat nil nil technique))
           ((string= mode "sky")
            (values :sky :flat nil '(:sky) technique))
-          ((member mode '("flat" "bevel" "chamfer" "paper" "field") :test #'string=)
+          ((member mode '("flat" "bevel" "chamfer" "paper" "field" "soft") :test #'string=)
            (let ((style (intern (string-upcase mode) :keyword)))
              (unless (member style styles)
                (error "The ~(~A~) technique does not draw ~A; it draws ~
@@ -1387,7 +1407,7 @@ many times oversize, and the frame is box-filtered down on the way out."
                    styles '(:sky :lens) technique))
           (t
            (error "Unknown LUFT_RENDER_MODE ~S; use clear, sky, flat, bevel, ~
-chamfer, paper, field, or full." name)))))
+chamfer, paper, field, soft, or full." name)))))
 
 (zdefun (start-viewer :zone :luft/start-viewer)
     (&key (scene (make-demo-scene))
