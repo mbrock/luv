@@ -100,6 +100,21 @@
                        :value (block-save-description block)))
    #'coordinate-key< :key (lambda (edit) (getf edit :at))))
 
+(defun restore-world-edit-block-value (description)
+  "Restore one authored edit, migrating the retired gnome block to air.
+
+Gnomes became embodied agents rather than terrain after save format version 1
+had already written them as block edits.  This compatibility belongs at the
+world-edit boundary: a legacy gnome occupied a cell, so removing that obsolete
+occupant means an explicit air edit.  Other uses of block descriptions remain
+strict; in particular a selected or carried block cannot silently become air."
+  (multiple-value-bind (kind fields)
+      (tagged-description-values description "block value")
+    (if (and (eq kind :block)
+             (eq (description-value fields :name "block value") :gnome))
+        nil
+        (restore-block-save-description kind fields))))
+
 (defun restore-block-edit-overlay (descriptions)
   (unless (listp descriptions)
     (invalid-luvcraft-save "World edits must be a list, not ~S." descriptions))
@@ -116,7 +131,9 @@
            "A world edit coordinate must contain three integers, not ~S."
            coordinate))
         (destructuring-bind (x y z) coordinate
-          (record-block-edit overlay (restore-block-value value) x y z))))))
+          (record-block-edit overlay
+                             (restore-world-edit-block-value value)
+                             x y z))))))
 
 (defgeneric world-source-save-description (source)
   (:documentation

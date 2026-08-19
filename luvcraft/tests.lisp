@@ -1660,7 +1660,18 @@
        (restore-block-save-description :block '(:name :missing-material))))
   (ok (signals
        (restore-world-source-save-description
-        :little-world '(:source-version 99 :seed 1 :edits ())))))
+       :little-world '(:source-version 99 :seed 1 :edits ())))))
+
+(deftest retired-gnome-world-edits-migrate-to-explicit-air
+  (let ((overlay
+          (restore-block-edit-overlay
+           '((:at (48 6 -82) :value (:block :name :gnome))))))
+    (multiple-value-bind (block present-p)
+        (block-edit-at overlay 48 6 -82)
+      (ok present-p)
+      (ok (null block)))
+    (ok (equal (block-edit-overlay-save-descriptions overlay)
+               '((:at (48 6 -82) :value (:air)))))))
 
 (deftest asynchronous-world-checkpoints-flush-the-latest-description
   (uiop:with-temporary-file
