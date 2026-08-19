@@ -147,7 +147,12 @@ rather than making an error."
     :initarg :stocks
     :initform nil
     :accessor scene-stocks
-    :documentation "The material of each stock slot, or NIL for *MATERIAL*."))
+    :documentation "The material of each stock slot, or NIL for *MATERIAL*.")
+   (slot-words
+    :initform nil
+    :accessor scene-slot-words
+    :documentation "SLOTS packed eight nibbles to a word, as the GPU reads
+them: the same dense cell order as the occupancy bits."))
   (:documentation "A solid world together with its drawable surface products."))
 
 (defun make-scene (domain &key (solid (luft:make-solid-chain domain))
@@ -240,6 +245,28 @@ way that normal points, and the solid is the cell on the inward side."
                        (aref sites index))
                   (aref slots (luft:cell-bit-index domain x y z)))))))))
 
+(defun pack-slot-words (scene)
+  "SCENE's stock slots packed eight nibbles to a 32-bit word.
+
+The vertex stage asks a cell what it is cut from in order to decide how
+wide the creases around it are planed, so the slots have to be on the GPU
+in the same dense order the occupancy bits use.  A scene with no slots of
+its own packs to zeros, which is slot zero, which is *MATERIAL*."
+  (let* ((domain (scene-domain scene))
+         (count (luft:chain-cell-bit-count domain))
+         (words (make-array (ceiling count 8)
+                            :element-type '(unsigned-byte 32)
+                            :initial-element 0))
+         (slots (scene-slots scene)))
+    (when slots
+      (dotimes (index count)
+        (let ((slot (aref slots index)))
+          (unless (zerop slot)
+            (setf (ldb (byte 4 (* 4 (mod index 8)))
+                       (aref words (floor index 8)))
+                  (logand slot #xf))))))
+    words))
+
 (defun refresh-scene (scene)
   "Recompute SCENE's surface chain, brick-ordered sites, and brick spheres."
   (let* ((surface (luft:surface-chain (scene-solid scene)))
@@ -258,6 +285,7 @@ way that normal points, and the solid is the cell on the inward side."
           (scene-cell-bits scene) (luft:chain-cell-bits (scene-solid scene)))
     (when (scene-slots scene)
       (stamp-site-stocks sites (scene-domain scene) (scene-slots scene)))
+    (setf (scene-slot-words scene) (pack-slot-words scene))
     scene))
 
 ;;; ------------------------------------------------------------------------
@@ -630,7 +658,7 @@ the palette repeat slot zero so a stale site can never read rubbish."
           (loop for face in '(:top :side :bottom)
                 for spare in (list (material-spacing material)
                                    (material-courses material)
-                                   0.0)
+                                   (material-chamfer material))
                 for colour = (material-albedo material face)
                 do (quad (list (vec3:vec3-x colour) (vec3:vec3-y colour)
                                (vec3:vec3-z colour) spare)))
@@ -669,7 +697,7 @@ vertical radius of the field."
            (far *far-distance*)
            (focal (/ (tan (/ (camera-field-of-view camera) 2.0))))
            (aspect (/ (coerce width 'single-float) height))
-           (data (make-array 64 :element-type 'single-float))
+           (data (make-array 76 :element-type 'single-float))
            (index 0))
       (flet ((lane (vector fourth)
                (setf (aref data index) (coerce (vec3:vec3-x vector) 'single-float)
@@ -678,7 +706,11 @@ vertical radius of the field."
                      (aref data (+ index 2))
                      (coerce (vec3:vec3-z vector) 'single-float)
                      (aref data (+ index 3)) (coerce fourth 'single-float))
-               (incf index 4)))
+               (incf index 4))
+             (quad (floats)
+               (loop for value in floats
+                     do (setf (aref data index) (coerce value 'single-float))
+                        (incf index))))
         (lane (camera-position camera) 0.0)
         (lane right 0.0)
         (lane up 0.0)
@@ -702,7 +734,10 @@ vertical radius of the field."
         (lane *bottom-color* 0.0)
         (lane (vec3:make-vec3 *focus-distance* *aperture*
                               (/ 1.0 (max 1 width)))
-              (/ 1.0 (max 1 height))))
+              (/ 1.0 (max 1 height)))
+        (quad (deform-lane))
+        (quad (deform-centre-lane domain))
+        (quad (arris-lane)))
       data)))
 
 ;;; ------------------------------------------------------------------------
@@ -730,6 +765,8 @@ vertical radius of the field."
    (bricks-buffer :initform nil :accessor renderer-bricks-buffer)
    (cells-buffer :initform nil :accessor renderer-cells-buffer)
    (stocks-buffer :initform nil :accessor renderer-stocks-buffer)
+   (slots-buffer :initform nil :accessor renderer-slots-buffer)
+   (slots-capacity :initform 0 :accessor renderer-slots-capacity)
    (sites-capacity :initform 0 :accessor renderer-sites-capacity)
    (bricks-capacity :initform 0 :accessor renderer-bricks-capacity)
    (cells-capacity :initform 0 :accessor renderer-cells-capacity)
@@ -1121,7 +1158,7 @@ stock fragment modules, each NIL when nothing configured wants it."
 
 (defmethod create-technique-pipelines ((technique (eql :vertex)) renderer)
   (let ((styles (renderer-pipeline-styles renderer))
-        surface bevel chamfer field screen)
+        surface bevel chamfer stock field screen)
     (when (intersection styles '(:flat :soft :ink))
       (setf surface (create-renderer-module
                      renderer :luft/shader/surface-vertex
@@ -1132,11 +1169,18 @@ stock fragment modules, each NIL when nothing configured wants it."
                    renderer :luft/shader/bevel-vertex
                    "luft bevel vertex"
                    (shaders:bevel-vertex-shader))))
-    (when (intersection styles '(:chamfer :paper :stock))
+    (when (intersection styles '(:chamfer :paper))
       (setf chamfer (create-renderer-module
                      renderer :luft/shader/chamfer-vertex
                      "luft chamfer vertex"
                      (shaders:chamfer-vertex-shader))))
+    ;; The stock has a chamfer stage of its own: one width per site, and
+    ;; the lattice bent between the site rules and the projection.
+    (when (member :stock styles)
+      (setf stock (create-renderer-module
+                   renderer :luft/shader/stock-vertex
+                   "luft stock vertex"
+                   (shaders:stock-vertex-shader))))
     (when (member :field styles)
       (setf field (create-renderer-module
                    renderer :luft/shader/field-vertex
@@ -1180,7 +1224,7 @@ stock fragment modules, each NIL when nothing configured wants it."
         ;; about what a planed arris does with the light.
         (when (member :stock styles)
           (pipeline :stock :luft/pipeline/stock "luft stock pipeline"
-                    chamfer stock-fragment))
+                    stock stock-fragment))
         (when (member :field styles)
           (pipeline :field :luft/pipeline/field "luft field pipeline"
                     field field-fragment))
@@ -1245,6 +1289,8 @@ stock fragment modules, each NIL when nothing configured wants it."
                        (:binding ,shaders:+cells-binding+
                         :type :storage-buffer)
                        (:binding ,shaders:+stocks-binding+
+                        :type :storage-buffer)
+                       (:binding ,shaders:+slots-binding+
                         :type :storage-buffer))))))))
 
 (defun create-lens-bind-group (renderer)
@@ -1353,6 +1399,7 @@ one is requested from PROVIDER and owned by the renderer."
                           (renderer-bricks-buffer renderer)
                           (renderer-cells-buffer renderer)
                           (renderer-stocks-buffer renderer)
+                          (renderer-slots-buffer renderer)
                           (renderer-uniform-buffer renderer)
                           (renderer-color-view renderer)
                           (renderer-color-texture renderer)
@@ -1367,6 +1414,7 @@ one is requested from PROVIDER and owned by the renderer."
         (renderer-bricks-buffer renderer) nil
         (renderer-cells-buffer renderer) nil
         (renderer-stocks-buffer renderer) nil
+        (renderer-slots-buffer renderer) nil
         (renderer-uniform-buffer renderer) nil)
   (when (renderer-owns-device-p renderer)
     (ignore-errors (destroy (renderer-device renderer))))
@@ -1415,6 +1463,13 @@ The second value is true when a new buffer was created."
                                "luft solid cells")
       (when new-p (setf rebind-p t))
       (write-buffer cells-buffer (scene-cell-bits scene)))
+    (multiple-value-bind (slots-buffer new-p)
+        (ensure-storage-buffer renderer 'renderer-slots-buffer
+                               'renderer-slots-capacity
+                               (* 4 (length (scene-slot-words scene)))
+                               "luft cell stocks")
+      (when new-p (setf rebind-p t))
+      (write-buffer slots-buffer (scene-slot-words scene)))
     (when rebind-p
       (when (renderer-bind-group renderer)
         (destroy (renderer-bind-group renderer)))
@@ -1433,7 +1488,9 @@ The second value is true when a new buffer was created."
                        (:binding ,shaders:+cells-binding+
                         :resource ,(renderer-cells-buffer renderer))
                        (:binding ,shaders:+stocks-binding+
-                        :resource ,(renderer-stocks-buffer renderer)))))))
+                        :resource ,(renderer-stocks-buffer renderer))
+                       (:binding ,shaders:+slots-binding+
+                        :resource ,(renderer-slots-buffer renderer)))))))
     (setf (renderer-scene renderer) scene
           (renderer-uploaded-scene renderer) scene)
     renderer))

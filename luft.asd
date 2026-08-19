@@ -24,6 +24,7 @@
                              (:file "vertex-shaders")
                              (:file "field")
                              (:file "material")
+                             (:file "lattice")
                              (:file "render")
                              (:file "studio")
                              (:file "architecture"))))

@@ -274,6 +274,94 @@
           (luft:solid-cell-p solid 6 5 2) t)
     (make-scene domain :solid solid)))
 
+(defun mixed-stock-scene ()
+  "A floor of one stock carrying shapes of several others.
+
+Every kind of star is in it, and no two adjacent things are cut from the
+same stock, so a rule that lets two faces disagree about a shared crease
+has somewhere to show it."
+  (let ((world (make-world :horizontal-bits 4)))
+    (with-stock (:limestone)
+      (dotimes (x 16) (dotimes (y 16) (setf (world-cell-p world x y 0) t))))
+    (with-stock (:oak)
+      (setf (world-cell-p world 4 4 1) t
+            (world-cell-p world 6 4 1) t
+            (world-cell-p world 6 5 1) t
+            (world-cell-p world 6 5 2) t))
+    (with-stock (:granite)
+      ;; A two-by-two with one cell missing: mixed corners, where a
+      ;; classification taken from a face rather than from the star gives
+      ;; two incident faces two different answers.
+      (setf (world-cell-p world 9 9 1) t
+            (world-cell-p world 10 9 1) t
+            (world-cell-p world 10 10 1) t
+            (world-cell-p world 9 10 2) t))
+    (with-stock (:brick)
+      (setf (world-cell-p world 12 4 1) t
+            (world-cell-p world 12 5 1) t
+            (world-cell-p world 13 5 1) t
+            (world-cell-p world 13 5 2) t
+            (world-cell-p world 4 11 1) t
+            (world-cell-p world 4 12 1) t))
+    (world-scene world)))
+
+(deftest a-site-width-and-a-bent-lattice-keep-the-surface-closed
+  ;; The two experiments of #V0YCZA, put to the same question the shaping
+  ;; rules were put to: straight down onto a floor, any sky inside it is a
+  ;; crack.  A deformation cannot open one, because it is a function of
+  ;; position alone and the faces incident to a site all hand it the same
+  ;; position.  A per-site chamfer can, and did: a width taken from the
+  ;; sign of the minority's dot with the /face's/ normal is coherent at an
+  ;; edge and not at a mixed corner, and an inset that varies from site to
+  ;; site tears a seam even where the displacements agree.
+  (let* ((width 220)
+         (height 220)
+         (*chamfer-width* 0.3)
+         (renderer (make-renderer
+                    :scene (mixed-stock-scene)
+                    :camera (make-fly-camera
+                             :position (vec3:make-vec3 8.0 8.0 9.0)
+                             :yaw 0.0 :pitch -1.5
+                             :field-of-view 0.75)
+                    :width width :height height
+                    :style :stock :pipeline-styles '(:stock)
+                    :effects nil)))
+    (unwind-protect
+         (dolist (rule '(:uniform :relief :stock))
+           (let ((*chamfer-rule* rule))
+             (ok (zerop (count-pixels (render-pixels renderer) width height
+                                      #'sky-pixel-p
+                                      :from-row 25 :to-row 195))
+                 (format nil "~A chamfers are watertight" rule))
+             (loop for (kind strength scale)
+                     in '((:lean 0.2 6.0) (:taper 0.02 6.0) (:bend 0.02 6.0)
+                          (:twist 0.05 6.0) (:swirl 1.2 6.0)
+                          (:billow 2.0 6.0) (:globe 0.02 6.0))
+                   do (let ((*deformation* kind)
+                            (*deform-strength* strength)
+                            (*deform-scale* scale))
+                        (ok (zerop (count-pixels (render-pixels renderer)
+                                                 width height #'sky-pixel-p
+                                                 :from-row 25 :to-row 195))
+                            (format nil "~A chamfers survive a ~A lattice"
+                                    rule kind))))))
+      (destroy-renderer renderer))))
+
+(deftest every-deformation-has-a-lane-and-none-moves-its-own-centre
+  (ok (equal '(:none :lean :taper :bend :twist :swirl :billow :globe)
+             luft.render.shaders:*deformations*))
+  (ok (zerop (luft.render.shaders:deformation-index :none)))
+  (ok (signals (luft.render.shaders:deformation-index :nonesuch) 'error))
+  ;; The centre lane is the middle of the world's floor unless told
+  ;; otherwise, because a deformation about a corner throws the world off
+  ;; the screen.
+  (let ((domain (luft:make-world-domain :horizontal-bits 6)))
+    (ok (equal '(32.0 32.0 0.0 0.0)
+               (luft.render::deform-centre-lane domain)))
+    (let ((luft.render::*deform-centre* '(1 2 3)))
+      (ok (equal '(1.0 2.0 3.0 0.0)
+                 (luft.render::deform-centre-lane domain))))))
+
 (deftest shaped-surfaces-are-watertight-from-above
   ;; Straight down onto the floor, every pixel inside the floor is ground:
   ;; a crack between shaped faces would let the sky through.  Every style

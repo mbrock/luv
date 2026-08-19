@@ -30,6 +30,7 @@ pipeline; the flat pipeline uses the same bricks at four vertices a face.")
 (defconstant +bricks-binding+ 2)
 (defconstant +cells-binding+ 3)
 (defconstant +stocks-binding+ 4)
+(defconstant +slots-binding+ 5)
 
 ;;; A LUFT site occupies sixty bits and travels to the GPU in sixty-four, so
 ;;; four bits are free above it.  The packed site spends them on which stock
@@ -75,7 +76,11 @@ lit: both the reach of shadows in cells and their cost per pixel.")
       (top-vector :vec4)         ; the material of an upward face
       (side-vector :vec4)        ; the material of a sideways face
       (bottom-vector :vec4)      ; the material of a downward face
-      (lens-vector :vec4))))     ; focus distance, aperture, texel width/height
+      (lens-vector :vec4)        ; focus distance, aperture, texel width/height
+      ;; The lattice: how it is bent, and how wide its creases are planed.
+      (deform-vector :vec4)      ; deformation index, strength, scale, spare
+      (deform-centre-vector :vec4) ; the point every deformation fixes
+      (arris-vector :vec4))))    ; chamfer rule, convex and concave factors
 
 (define-shader-function view-clip (point camera right up forward projection)
   "Homogeneous clip position of the world POINT.

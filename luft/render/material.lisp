@@ -210,7 +210,15 @@ goes up."
                    (world :vec3 :location 1)
                    (uv :vec2 :location 2)
                    (face-normal :vec3 :location 3)
-                   (stock :float :location 4))
+                   (stock :float :location 4)
+                   ;; The rest position: where this fragment is in the
+                   ;; lattice, whatever the lattice has been bent into.
+                   ;; Everything looked up in the world -- the occupancy
+                   ;; field, the grain, the cell's own tone, the shadow --
+                   ;; is looked up there, and only the view is taken from
+                   ;; the bent position.
+                   (rest :vec3 :location 5)
+                   (bent-normal :vec3 :location 6))
           :outputs ((color :vec4 :location 0))
           :resources ((frame :uniform-block :binding ,+frame-binding+
                              :members ,*frame-uniform-members*)
@@ -220,25 +228,38 @@ goes up."
                               :element :vec4)))
        (let* ((period-x (swizzle domain-vector :x))
               (period-y (swizzle domain-vector :y))
-              (width (swizzle domain-vector :z))
               (softness (max (swizzle domain-vector :w) 0.0005))
-              ;; The facet, from the derivatives of the world position, and
-              ;; the face it was planed off.
-              (raw-facet (cross-product (derivative-x world)
-                                        (derivative-y world)))
-              (facet (normalize raw-facet))
+              ;; Two facets, one in each space.  The rest facet says what
+              ;; the geometry is -- flat wall or planed arris -- and cannot
+              ;; be fooled by a bent lattice; the bent facet is what the
+              ;; light actually falls on.
+              (rest-facet (normalize (cross-product (derivative-x rest)
+                                                    (derivative-y rest))))
               (face (normalize face-normal))
-              (oriented (if (< (dot facet face) 0.0) (- facet) facet))
+              (oriented-rest (if (< (dot rest-facet face) 0.0)
+                                 (- rest-facet) rest-facet))
+              (bent-facet (normalize (cross-product (derivative-x world)
+                                                    (derivative-y world))))
+              (bent (normalize bent-normal))
+              (oriented (if (< (dot bent-facet bent) 0.0)
+                            (- bent-facet) bent-facet))
               (u (swizzle uv :x))
               (v (swizzle uv :y))
               (inset (min (min u (- 1.0 u)) (min v (- 1.0 v))))
+              ;; The arris band is measured against the band the grid
+              ;; reserves, not against what each site took of it: the UV
+              ;; the fragment interpolates is the parameter /before/ the
+              ;; shared points moved, and that runs from nothing to the
+              ;; reserved radius whatever the site did with it.
+              (width (swizzle domain-vector :z))
               (arris (- inset width))
-              (sanded (normalize
-                       (mix oriented face
-                            (smoothstep (- softness) softness arris))))
+              (sanding (smoothstep (- softness) softness arris))
+              (sanded (normalize (mix oriented bent sanding)))
+              (sanded-rest (normalize (mix oriented-rest face sanding)))
               ;; What is really planed: the tilt away from the face, zero on
-              ;; a flat wall however its cells are divided.
-              (tilt (- 1.0 (abs (dot oriented face))))
+              ;; a flat wall however its cells are divided, and measured in
+              ;; the lattice so that a bend does not read as a chamfer.
+              (tilt (- 1.0 (abs (dot oriented-rest face))))
               (planed (smoothstep 0.015 0.30 tilt))
               ;; The stock the solid behind this face is cut from: the
               ;; site's own four bits, and its eight lanes of the table.
@@ -279,18 +300,18 @@ goes up."
               ;; first carries how far apart the pith lines run, which is
               ;; the difference between a plank and a whole beam.
               (spacing (max (swizzle top-lane :w) 0.25))
-              (grain (stock-grain world axis spacing rings wander
+              (grain (stock-grain rest axis spacing rings wander
                                   ring-contrast fibre-contrast))
-              (mottle (stock-mottle world mottle-scale mottle-contrast))
+              (mottle (stock-mottle rest mottle-scale mottle-contrast))
               ;; The second spare component says how many courses of brick
               ;; go to the cell; zero, and the wall is not coursed at all.
               (courses (swizzle side-lane :w))
               (bond (if (> courses 0.0)
-                        (stock-courses world face courses 0.16)
+                        (stock-courses rest face courses 0.16)
                         1.0))
               ;; The cell behind this face, and two hashes of it: a wall of
               ;; cells should not read as one painted surface.
-              (cell (floor (- world (* oriented 0.25))))
+              (cell (floor (- rest (* oriented-rest 0.25))))
               (patch (- (paper-noise (* cell 0.21)) 0.5))
               (jitter (- (paper-hash cell) 0.5))
               (drift (+ 1.0 (* drift-strength
@@ -302,7 +323,7 @@ goes up."
               ;; A third-cell tent, not a half-cell one: the band must hug
               ;; the arris, or the wear is a soft gradient down the whole
               ;; face and the crispness the chamfer was cut for is gone.
-              ,@(occupancy-field-bindings 'wide 'world 0.32)
+              ,@(occupancy-field-bindings 'wide 'rest 0.32)
               (relief (- (swizzle wide :w) 0.5))
               (ridge (smoothstep 0.02 0.34 (- relief)))
               (hollow (smoothstep 0.02 0.30 relief))
@@ -312,11 +333,15 @@ goes up."
               ;; The planed facet: paler on wood, where the cut crosses the
               ;; fibre; brighter on metal, where handling polishes it.
               (stock (* aged (mix 1.0 lift planed)))
-              (lost (field-shadow world (swizzle sun-vector :xyz)
+              ;; The light lives in the lattice, not in the bent world:
+              ;; the shadow ray is walked through the rest occupancy along
+              ;; the sun's own direction, so shadows bend with the geometry
+              ;; rather than being cast across it.
+              (lost (field-shadow rest (swizzle sun-vector :xyz)
                                   ,*field-shadow-steps*
                                   ,*field-shadow-reach*))
               (shade (mix 1.0 (- 1.0 lost) (swizzle occlusion-vector :y)))
-              (crowding (field-occlusion world sanded
+              (crowding (field-occlusion rest sanded-rest
                                          ,*field-occlusion-steps*
                                          ,*field-occlusion-reach*))
               (open (- 1.0 (* (swizzle occlusion-vector :x) crowding)))
@@ -375,6 +400,14 @@ reaches.")
    (grain-axis
     :initarg :grain-axis :initform '(0.0 0.0 1.0) :reader material-grain-axis
     :documentation "The direction the grain runs, as a list of three floats.")
+   (chamfer
+    :initarg :chamfer :initform 1.0 :reader material-chamfer
+    :documentation "What the :STOCK chamfer rule multiplies a crease by.
+
+A stock that takes a clean arris -- a planed board, a cast rail -- asks for
+more than one; a stock that crumbles at an edge asks for less.  The rule
+takes the least any solid cell of a star asks for, so the sharper stock
+always wins.")
    (courses
     :initarg :courses :initform 0.0 :reader material-courses
     :documentation "Courses of brick to the cell, or zero for uncoursed.")
@@ -457,6 +490,7 @@ is the whole of what it is cut from.  #PWMCOL")
   ;; and a bright earth there turns a green hillside into a beige one.
   :top '(0.108 0.205 0.058) :side '(0.130 0.092 0.052)
   :bottom '(0.062 0.045 0.026)
+  :chamfer 0.32
   :gloss 0.02 :polish 12.0 :lift 1.06
   :mottle-scale 0.55 :mottle 0.34 :wear 0.35 :drift 0.10 :rim 0.05)
 
@@ -469,6 +503,7 @@ is the whole of what it is cut from.  #PWMCOL")
   ;; oiled rather than lacquered, its chamfer paler than its face.
   :top '(0.115 0.040 0.020) :side '(0.104 0.035 0.017)
   :bottom '(0.058 0.020 0.010)
+  :chamfer 1.0
   :gloss 0.55 :polish 90.0 :lift 1.30
   :grain-axis '(0.0 1.0 0.0) :spacing 3.4 :rings 14.0
   :ring-contrast 0.30 :wander 0.08
@@ -478,6 +513,7 @@ is the whole of what it is cut from.  #PWMCOL")
   ;; Paler, cooler, coarser: a floor rather than a table top.
   :top '(0.185 0.118 0.058) :side '(0.168 0.104 0.050)
   :bottom '(0.088 0.055 0.026)
+  :chamfer 0.95
   :gloss 0.22 :polish 45.0 :lift 1.22
   :grain-axis '(1.0 0.0 0.0) :spacing 3.9 :rings 10.0
   :ring-contrast 0.23 :wander 0.12
@@ -487,6 +523,7 @@ is the whole of what it is cut from.  #PWMCOL")
   ;; The dark stripe of the butcher block, nearly black in the latewood.
   :top '(0.052 0.026 0.015) :side '(0.046 0.023 0.013)
   :bottom '(0.026 0.013 0.007)
+  :chamfer 1.0
   :gloss 0.42 :polish 70.0 :lift 1.50
   :grain-axis '(0.0 0.0 1.0) :spacing 3.1 :rings 12.0
   :ring-contrast 0.32 :wander 0.10
@@ -499,6 +536,7 @@ is the whole of what it is cut from.  #PWMCOL")
   ;; A warm pale building stone, matte, weathered at every edge.
   :top '(0.322 0.280 0.203) :side '(0.290 0.250 0.180)
   :bottom '(0.146 0.126 0.090)
+  :chamfer 0.55
   :gloss 0.04 :polish 16.0 :lift 1.10
   :mottle-scale 1.3 :mottle 0.22 :wear 0.55 :drift 0.07
   :patina 0.22 :patina-color '(0.085 0.095 0.068) :rim 0.10)
@@ -508,6 +546,7 @@ is the whole of what it is cut from.  #PWMCOL")
   ;; facets read blue in the shade and near-white in the sun.
   :top '(0.178 0.178 0.184) :side '(0.152 0.152 0.158)
   :bottom '(0.074 0.074 0.078)
+  :chamfer 0.28
   :gloss 0.14 :polish 30.0 :lift 1.26
   :mottle-scale 2.2 :mottle 0.42 :wear 0.48 :drift 0.17 :rim 0.11)
 
@@ -517,6 +556,7 @@ is the whole of what it is cut from.  #PWMCOL")
   :bottom '(0.024 0.026 0.032)
   ;; No rings: bedding planes are not growth rings, and a wood figure laid
   ;; on a slate floor comes out as a target painted on the paving.
+  :chamfer 0.75
   :gloss 0.30 :polish 55.0 :lift 1.40
   :mottle-scale 1.8 :mottle 0.20 :wear 0.30 :drift 0.06 :rim 0.20)
 
@@ -526,6 +566,7 @@ is the whole of what it is cut from.  #PWMCOL")
   :top '(0.140 0.055 0.034) :side '(0.126 0.048 0.030)
   :bottom '(0.064 0.024 0.015)
   :courses 3.0
+  :chamfer 0.38
   :gloss 0.05 :polish 18.0 :lift 1.14
   :mottle-scale 3.2 :mottle 0.22 :wear 0.35 :drift 0.06 :rim 0.07)
 
@@ -534,6 +575,7 @@ is the whole of what it is cut from.  #PWMCOL")
   ;; turned up is veining: a pale stone with a dark seam wandering through.
   :top '(0.480 0.470 0.445) :side '(0.440 0.430 0.408)
   :bottom '(0.215 0.210 0.200)
+  :chamfer 0.85
   :gloss 0.75 :polish 150.0 :lift 1.20
   :grain-axis '(0.0 0.0 1.0) :spacing 9.0 :rings 2.0
   :ring-contrast 0.26 :wander 2.8 :fibre 0.04
@@ -543,6 +585,7 @@ is the whole of what it is cut from.  #PWMCOL")
   ;; Fired earth: warm, slightly chalky, lighter where it has been rubbed.
   :top '(0.185 0.068 0.036) :side '(0.166 0.060 0.032)
   :bottom '(0.086 0.031 0.016)
+  :chamfer 0.5
   :gloss 0.06 :polish 20.0 :lift 1.18
   :mottle-scale 1.1 :mottle 0.20 :wear 0.40 :drift 0.08 :rim 0.08)
 
@@ -552,6 +595,7 @@ is the whole of what it is cut from.  #PWMCOL")
   ;; metal, which is what makes a metal look like one.
   :top '(0.098 0.058 0.022) :side '(0.086 0.051 0.019)
   :bottom '(0.045 0.026 0.010)
+  :chamfer 0.95
   :gloss 1.80 :polish 120.0 :metallic 1.0 :lift 1.90
   :mottle-scale 1.6 :mottle 0.14 :wear 0.50
   :patina 0.70 :patina-color '(0.042 0.098 0.076) :rim 0.22)
@@ -562,6 +606,7 @@ is the whole of what it is cut from.  #PWMCOL")
   ;; that says where one branch layer ends and the next begins.
   :top '(0.036 0.072 0.042) :side '(0.026 0.054 0.032)
   :bottom '(0.013 0.026 0.016)
+  :chamfer 0.45
   :gloss 0.06 :polish 22.0 :lift 1.14
   :mottle-scale 2.8 :mottle 0.36 :wear 0.0 :drift 0.16 :rim 0.08)
 
@@ -569,6 +614,7 @@ is the whole of what it is cut from.  #PWMCOL")
   ;; A broadleaf crown: yellower, lighter, and more broken up than a fir.
   :top '(0.078 0.118 0.038) :side '(0.060 0.092 0.030)
   :bottom '(0.030 0.046 0.015)
+  :chamfer 0.45
   :gloss 0.05 :polish 18.0 :lift 1.12
   :mottle-scale 2.0 :mottle 0.46 :wear 0.0 :drift 0.20 :rim 0.08)
 
@@ -577,6 +623,7 @@ is the whole of what it is cut from.  #PWMCOL")
   ;; the one that shows what the light alone is doing.
   :top '(0.400 0.382 0.342) :side '(0.372 0.354 0.316)
   :bottom '(0.186 0.177 0.158)
+  :chamfer 0.65
   :gloss 0.03 :polish 14.0 :lift 1.05
   :mottle-scale 0.7 :mottle 0.10 :wear 0.25 :drift 0.05 :rim 0.06)
 

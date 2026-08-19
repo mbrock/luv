@@ -6,6 +6,12 @@
 packed sites.")
   (:export #:+brick-size+
            #:+stocks-binding+
+           #:+slots-binding+
+           #:*deformations*
+           #:deformation-index
+           #:deform-point
+           #:deform-normal
+           #:stock-vertex-shader
            #:+stock-slots+
            #:+stock-lanes+
            #:+site-stock-shift+
@@ -126,8 +132,16 @@ mesh shaders.")
            #:material-lanes
            #:material-spacing
            #:material-courses
+           #:material-chamfer
            #:material-albedo
            #:*material*
+           #:*deformation*
+           #:*deform-strength*
+           #:*deform-scale*
+           #:*deform-centre*
+           #:*chamfer-rule*
+           #:*relief-convex*
+           #:*relief-concave*
            #:*top-color*
            #:*side-color*
            #:*bottom-color*
