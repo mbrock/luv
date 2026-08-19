@@ -1274,7 +1274,7 @@ family name adopted."
 (defun gpu-font-metric (text-style reader)
   (let ((pathname (gpu-text-font-pathname text-style))
         (size (gpu-text-style-size text-style)))
-    (zpb-ttf:with-font-loader (font pathname)
+    (let ((font (luv.slug:slug-font-loader pathname)))
       (* size (/ (funcall reader font) (zpb-ttf:units/em font))))))
 
 (defmethod text-style-ascent (text-style (medium luv-gpu-medium))
@@ -1298,7 +1298,7 @@ family name adopted."
          (text (subseq (string string) start end))
          (font (gpu-text-font-pathname text-style))
          (size (gpu-text-style-size text-style))
-         (shaped (luv.slug:shape-slug-text text font))
+         (shaped (luv.slug:slug-shaped-text-for font text))
          (unit (/ size (luv.slug:slug-shaped-text-units-per-em shaped)))
          (width (* unit (luv.slug:slug-shaped-text-x-advance shaped)))
          (ascent (gpu-font-metric text-style #'zpb-ttf:ascender))
@@ -2228,7 +2228,7 @@ solid ink."
             cache font-pathname (gpu-text-command-string command)))
          (size (gpu-text-command-size command))
          (color (gpu-text-command-color command)))
-    (zpb-ttf:with-font-loader (font-loader font-pathname)
+    (let ((font-loader (luv.slug:slug-font-loader font-pathname)))
       (let ((glyphs
               (luv.slug:make-slug-glyph-placements
                shaped font-loader cache font-pathname)))

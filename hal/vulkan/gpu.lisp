@@ -960,11 +960,16 @@ as its own element type rather than as reinterpreted floats."
         (reject-gpu-request
          buffer :buffer-write-out-of-bounds
          (list :offset offset :length (* element-size (length data)))))
-      (let ((destination
-              (cffi:inc-pointer (vulkan-buffer-mapped buffer) offset)))
-        (dotimes (index (length data))
-          (setf (cffi:mem-aref destination foreign-type index)
-                (aref data index))))))
+      ;; One memcpy from the pinned storage vector: the element types
+      ;; BUFFER-DATA-FOREIGN-TYPE admits are all stored unboxed, so the
+      ;; bytes in the Lisp vector are the bytes the GPU wants.
+      (let ((destination (vulkan-buffer-mapped buffer)))
+        (sb-kernel:with-array-data ((vector data) (start 0) (end (length data)))
+          (sb-sys:with-pinned-objects (vector)
+            (sb-kernel:system-area-ub8-copy
+             (sb-sys:vector-sap vector) (* start element-size)
+             destination offset
+             (* element-size (- end start))))))))
   buffer)
 
 (defmethod read-buffer

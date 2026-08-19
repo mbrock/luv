@@ -74,6 +74,7 @@
            #:slug-outline-from-zpb-glyph
            #:make-slug-glyph-from-zpb-glyph
            #:load-slug-glyph-index
+           #:slug-font-loader
            #:load-slug-glyph
            #:map-slug-outline-points
            #:normalize-slug-glyph-outline
@@ -101,6 +102,7 @@
            #:slug-glyph-cache
            #:make-slug-glyph-cache
            #:cached-slug-shaped-text
+           #:slug-shaped-text-for
            #:make-slug-glyph-placements
            #:slug-text-extents
            #:slug-glyph-atlas-for

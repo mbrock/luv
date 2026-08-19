@@ -241,9 +241,10 @@ shader, the mark that turning it rebuilds one."
     (draw-rectangle* pane *metabar-track-left* (- track-y 4)
                      knob-x (+ track-y 4)
                      :ink *metabar-fill-ink*)
-    (draw-circle* pane knob-x track-y 9 :ink *metabar-knob-ink*)
-    (draw-circle* pane knob-x track-y 9 :filled nil :line-thickness 1
-                  :ink *metabar-panel-ink*)))
+    ;; The knob's rim is a slightly larger disc beneath it: filled circles
+    ;; are one analytic shape each, an unfilled ring is a polygon.
+    (draw-circle* pane knob-x track-y 10 :ink *metabar-panel-ink*)
+    (draw-circle* pane knob-x track-y 9 :ink *metabar-knob-ink*)))
 
 (defmethod draw-metabar-knob (frame pane (knob luvcraft:switch-knob) top selected-p)
   ;; A pill at the right: filled and to the right when on.

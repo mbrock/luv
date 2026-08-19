@@ -23,25 +23,57 @@
    (entries :initform (make-hash-table :test #'equal)
             :reader slug-glyph-cache-entries)
    (atlases :initform (make-hash-table :test #'equal)
-            :reader slug-glyph-cache-atlases)
-   (shaped-texts :initform (make-hash-table :test #'equal)
-                 :reader slug-glyph-cache-shaped-texts))
+            :reader slug-glyph-cache-atlases))
   (:documentation
    "Reusable HarfBuzz results and exact Slug GPU outlines owned by one device."))
 
 (defun make-slug-glyph-cache (device)
   (make-instance 'slug-glyph-cache :device device))
 
+(defvar *slug-font-keys* (make-hash-table :test #'equal :synchronized t)
+  "Resolved font keys by the namestring asked for: TRUENAME is a few
+system calls and some consing, and is asked for once per glyph.")
+
 (defun slug-font-key (font-pathname)
-  (namestring (truename font-pathname)))
+  (let ((name (namestring font-pathname)))
+    (or (gethash name *slug-font-keys*)
+        (setf (gethash name *slug-font-keys*)
+              (namestring (truename font-pathname))))))
+
+;;; One parsed font per file for the whole process.  Opening a TTF with
+;;; ZPB-TTF reads and parses its tables, which is far too much to do per
+;;; string per frame; the loader keeps its stream and is never closed.
+
+(defvar *slug-font-loaders* (make-hash-table :test #'equal)
+  "Open ZPB-TTF font loaders, keyed by the font file's true name.")
+
+(defvar *slug-font-loaders-lock*
+  (sb-thread:make-mutex :name "slug font loaders"))
+
+(defun slug-font-loader (font-pathname)
+  "The process-wide open ZPB-TTF loader for FONT-PATHNAME."
+  (let ((key (slug-font-key font-pathname)))
+    (sb-thread:with-mutex (*slug-font-loaders-lock*)
+      (or (gethash key *slug-font-loaders*)
+          (setf (gethash key *slug-font-loaders*)
+                (zpb-ttf:open-font-loader key))))))
+
+(defvar *slug-shaped-texts* (make-hash-table :test #'equal :synchronized t)
+  "HarfBuzz results for the whole process, by font key, string, and
+direction.  Shaping does not depend on the device, and measuring text
+(TEXT-SIZE) happens with no device cache at hand, so one table serves all.")
+
+(defun slug-shaped-text-for (font-pathname string &key direction)
+  "Return one durable HarfBuzz result for an exact font, string, and direction."
+  (let ((key (list (slug-font-key font-pathname) string direction)))
+    (or (gethash key *slug-shaped-texts*)
+        (setf (gethash key *slug-shaped-texts*)
+              (shape-slug-text string font-pathname :direction direction)))))
 
 (defun cached-slug-shaped-text (cache font-pathname string &key direction)
   "Return one durable HarfBuzz result for an exact font, string, and direction."
-  (let* ((key (list (slug-font-key font-pathname) string direction))
-         (shaped-texts (slug-glyph-cache-shaped-texts cache)))
-    (or (gethash key shaped-texts)
-        (setf (gethash key shaped-texts)
-              (shape-slug-text string font-pathname :direction direction)))))
+  (declare (ignore cache))
+  (slug-shaped-text-for font-pathname string :direction direction))
 
 (defun create-slug-device-glyph (key glyph-id font-loader)
   (let* ((glyph (load-slug-glyph-index glyph-id font-loader))
@@ -192,7 +224,6 @@
            (slug-glyph-cache-atlases cache))
   (clrhash (slug-glyph-cache-atlases cache))
   (clrhash (slug-glyph-cache-entries cache))
-  (clrhash (slug-glyph-cache-shaped-texts cache))
   (values))
 
 (defun make-slug-glyph-placements
