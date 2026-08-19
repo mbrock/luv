@@ -224,9 +224,20 @@
       packages = forAllSystems (system:
         let
           env = environmentFor system;
+          luv-lobby = env.pkgs.buildGoModule {
+            pname = "luv-lobby";
+            version = "0.1.0";
+            src = ./.;
+            modRoot = "lobby";
+            vendorHash = "sha256-afdRnQqH2j8bWzK8GLrpCKofji6ilIXvWStngar2G20=";
+            postInstall = ''
+              mv "$out/bin/lobby" "$out/bin/luv-lobby"
+            '';
+          };
         in {
           sbcl = env.sbcl;
           lisp = env.lisp;
+          inherit luv-lobby;
           ffmpeg = env.ffmpeg;
           libghostty-vt = env.libghosttyVt;
           tracy-client = env.tracyClient;
