@@ -661,11 +661,83 @@ BODY returns."
 
 ;;; Block content is a narrow semantic field.  The presentable value is a
 ;;; shared Lisp object (or NIL for air); the physical column is a dense u16
-;;; palette index.  A site is an offset in a domain, not an object with an
-;;; identity or allocation of its own.  Computational code should borrow the
-;;; aggregate storage below and dispatch once per chunk.  Single-site world
-;;; access still resolves through coordinate descriptors and a chunk key; it
-;;; is for inspectors, sparse interaction, and other genuinely row-shaped work.
+;;; offset under the world's block vocabulary.  A site is an offset in a
+;;; domain, not an object with an identity or allocation of its own.
+;;; Computational code should borrow the aggregate storage below and dispatch
+;;; once per chunk.  Single-site world access still resolves through
+;;; coordinate descriptors and a chunk key; it is for inspectors, sparse
+;;; interaction, and other genuinely row-shaped work.
+
+;;; The block vocabulary is the finite domain a content column's indices are
+;;; closed by: an append-only, world-wide ordering of block objects with NIL
+;;; (air) at offset zero.  One world has one vocabulary, so every chunk's u16
+;;; columns mean the same thing, snapshots need no translation, and per-kind
+;;; tables can be materialized once per vocabulary revision rather than once
+;;; per chunk.  Membership grows only when a never-seen block is placed;
+;;; offsets never move, so a shape change leaves every existing column and
+;;; derived product valid.  See #CPCZDB.
+
+(defclass block-vocabulary ()
+  ((members :initarg :members :reader block-vocabulary-members)
+   (offsets :initarg :offsets :reader %block-vocabulary-offsets)
+   (revision :initform 0 :reader block-vocabulary-revision))
+  (:documentation
+   "An append-only finite domain of block objects; NIL is always offset 0.
+
+MEMBERS is the adjustable vector interpreting every dense offset; borrowing
+it as a palette is the ordinary way whole-domain code reads block identity."))
+
+(defun make-block-vocabulary (&key members)
+  "Return a vocabulary with NIL at offset 0 followed by MEMBERS in order."
+  (let ((vector (make-array 1 :adjustable t :fill-pointer 1
+                              :initial-element nil))
+        (offsets (make-hash-table :test #'eq)))
+    (setf (gethash nil offsets) 0)
+    (let ((vocabulary (make-instance 'block-vocabulary
+                                     :members vector :offsets offsets)))
+      (when members
+        (loop for block across members
+              do (block-vocabulary-offset vocabulary block)))
+      vocabulary)))
+
+(defun block-vocabulary-cardinality (vocabulary)
+  (length (block-vocabulary-members vocabulary)))
+
+(defmethod domains:domain-cardinality ((vocabulary block-vocabulary))
+  (block-vocabulary-cardinality vocabulary))
+
+(defun block-vocabulary-member (vocabulary offset)
+  "Return the block object interpreted by OFFSET under VOCABULARY."
+  (aref (block-vocabulary-members vocabulary) offset))
+
+(defun block-vocabulary-offset (vocabulary block &optional (intern-p t))
+  "Return BLOCK's dense offset, appending it when INTERN-P and it is new.
+
+Return NIL for an unknown block when INTERN-P is false."
+  (let ((offsets (%block-vocabulary-offsets vocabulary)))
+    (multiple-value-bind (offset present-p) (gethash block offsets)
+      (cond (present-p offset)
+            ((not intern-p) nil)
+            (t
+             (let* ((members (block-vocabulary-members vocabulary))
+                    (next (length members)))
+               (unless (<= next #xffff)
+                 (error "A block vocabulary cannot contain more than 65536 members."))
+               (vector-push-extend block members)
+               (setf (gethash block offsets) next)
+               (incf (slot-value vocabulary 'revision))
+               next))))))
+
+(defun block-vocabulary-translation (source target)
+  "Return a u16 vector mapping every SOURCE offset to its TARGET offset.
+
+TARGET interns any member it lacks, so the translation is always total."
+  (let* ((members (block-vocabulary-members source))
+         (translation (make-array (length members)
+                                  :element-type '(unsigned-byte 16))))
+    (dotimes (offset (length members) translation)
+      (setf (aref translation offset)
+            (block-vocabulary-offset target (aref members offset))))))
 
 (defclass block-content-column ()
   ((domain :initarg :domain :reader block-content-column-domain)
@@ -673,23 +745,28 @@ BODY returns."
     :initarg :definition
     :initform (luvcraft.world.fields:field-definition-for :block-content)
     :reader block-content-column-definition)
-   (palette :initarg :palette :reader block-content-column-palette)
+   (vocabulary :initarg :vocabulary :reader block-content-column-vocabulary)
    (indices :initarg :indices :reader block-content-column-indices)))
+
+(defun block-content-column-palette (column)
+  "Return the vocabulary's member vector interpreting COLUMN's indices."
+  (block-vocabulary-members (block-content-column-vocabulary column)))
 
 (defmethod initialize-instance :after ((column block-content-column) &key)
   (let ((domain (block-content-column-domain column))
-        (palette (block-content-column-palette column))
+        (vocabulary (block-content-column-vocabulary column))
         (indices (block-content-column-indices column)))
     (check-type domain chunk-domain)
-    (check-type palette vector)
+    (check-type vocabulary block-vocabulary)
     (check-type indices (array (unsigned-byte 16) (*)))
     (unless (= (length indices) (chunk-domain-cardinality domain))
       (error "Block content has ~D indices; domain ~S requires ~D."
              (length indices) domain (chunk-domain-cardinality domain)))
-    (dotimes (offset (length indices))
-      (unless (< (aref indices offset) (length palette))
-        (error "Palette index ~D at offset ~D exceeds palette length ~D."
-               (aref indices offset) offset (length palette))))))
+    (let ((cardinality (block-vocabulary-cardinality vocabulary)))
+      (dotimes (offset (length indices))
+        (unless (< (aref indices offset) cardinality)
+          (error "Vocabulary offset ~D at offset ~D exceeds cardinality ~D."
+                 (aref indices offset) offset cardinality))))))
 
 (defmethod fields:field-representation-domain ((column block-content-column))
   (block-content-column-domain column))
@@ -704,26 +781,46 @@ BODY returns."
   (declare (ignore field-name))
   column)
 
-(defun make-block-content-column (domain &key palette indices)
+(defun make-block-content-column (domain &key vocabulary palette indices)
+  "Make a content column over DOMAIN under VOCABULARY.
+
+For compatibility a PALETTE vector (NIL first) may stand in for a vocabulary;
+it becomes a fresh vocabulary with the same ordering."
   (make-instance
    'block-content-column
    :domain domain
-   :palette (or palette
-                (make-array 1 :adjustable t :fill-pointer 1
-                              :initial-element nil))
+   :vocabulary (or vocabulary
+                   (if palette
+                       (let ((fresh (make-block-vocabulary)))
+                         (loop for block across palette
+                               do (block-vocabulary-offset fresh block))
+                         fresh)
+                       (make-block-vocabulary)))
    :indices (or indices
                 (make-array (chunk-domain-cardinality domain)
                             :element-type '(unsigned-byte 16)
                             :initial-element 0))))
 
-(defun rebind-block-content-column (column domain)
-  "Bind COLUMN's transferred storage to the authoritative resident DOMAIN."
-  (if (eq (block-content-column-domain column) domain)
-      column
-      (make-block-content-column
-       domain
-       :palette (block-content-column-palette column)
-       :indices (block-content-column-indices column))))
+(defun rebind-block-content-column (column domain &optional vocabulary)
+  "Bind COLUMN's transferred storage to the resident DOMAIN and VOCABULARY.
+
+The caller owns COLUMN's storage: when its vocabulary differs from the
+target, the indices are translated in place so the same dense array serves
+under the new interpretation."
+  (let ((vocabulary (or vocabulary (block-content-column-vocabulary column))))
+    (if (and (eq (block-content-column-domain column) domain)
+             (eq (block-content-column-vocabulary column) vocabulary))
+        column
+        (let ((indices (block-content-column-indices column)))
+          (unless (eq (block-content-column-vocabulary column) vocabulary)
+            (let ((translation
+                    (block-vocabulary-translation
+                     (block-content-column-vocabulary column) vocabulary)))
+              (dotimes (offset (length indices))
+                (setf (aref indices offset)
+                      (aref translation (aref indices offset))))))
+          (make-block-content-column
+           domain :vocabulary vocabulary :indices indices)))))
 
 (defun block-content-at-offset (column offset)
   (aref (block-content-column-palette column)
@@ -750,12 +847,7 @@ specialized arrays rather than describing individual cells through CLOS."))
      ,@body))
 
 (defun ensure-block-content-palette-index (column block)
-  (or (position block (block-content-column-palette column) :test #'eq)
-      (let ((next-index (length (block-content-column-palette column))))
-        (unless (<= next-index #xffff)
-          (error "A block-content palette cannot contain more than 65536 states."))
-        (vector-push-extend block (block-content-column-palette column))
-        next-index)))
+  (block-vocabulary-offset (block-content-column-vocabulary column) block))
 
 (defun set-block-content-at-offset (column offset block)
   (let* ((indices (block-content-column-indices column))
@@ -782,7 +874,9 @@ specialized arrays rather than describing individual cells through CLOS."))
    ;; content.  NIL until a lighting solver publishes a field.
    (light-field :initform nil :accessor block-chunk-light-field)))
 
-(defun make-block-chunk (domain &key change-hook (incarnation 0) content)
+(defun make-block-chunk (domain &key change-hook (incarnation 0) content
+                                    vocabulary)
+  "Make a chunk over DOMAIN, binding CONTENT (or fresh air) to VOCABULARY."
   (check-type domain chunk-domain)
   (unless (or (null change-hook) (functionp change-hook))
     (error "A block chunk change hook must be a function or NIL."))
@@ -791,8 +885,10 @@ specialized arrays rather than describing individual cells through CLOS."))
                  :incarnation incarnation
                  :change-hook change-hook
                  :content (if content
-                              (rebind-block-content-column content domain)
-                              (make-block-content-column domain))))
+                              (rebind-block-content-column
+                               content domain vocabulary)
+                              (make-block-content-column
+                               domain :vocabulary vocabulary))))
 
 (defmethod fields:materialized-field-representation
     ((chunk block-chunk) (field-name (eql :block-content)))
@@ -908,6 +1004,9 @@ work.  Whole-domain algorithms should use WITH-BLOCK-CONTENT-STORAGE."
    (source :initarg :source :initform nil :reader block-world-source)
    (chunks :initform (make-hash-table :test #'equal)
            :reader block-world-chunks)
+   ;; The one vocabulary every resident chunk's content column is closed by.
+   (vocabulary :initarg :vocabulary :initform (make-block-vocabulary)
+               :reader block-world-vocabulary)
    (revision :initform 0 :reader block-world-revision)
    (residency-revision :initform 0
                        :reader block-world-residency-revision)
@@ -990,6 +1089,7 @@ including when FUNCTION exits non-locally after making a partial change."
    domain
    :incarnation (next-block-world-chunk-incarnation world)
    :content content
+   :vocabulary (block-world-vocabulary world)
    :change-hook
    (lambda (changed-chunk local-x local-y local-z)
      (note-block-world-change world)
@@ -1028,7 +1128,9 @@ including when FUNCTION exits non-locally after making a partial change."
 The caller gives WORLD ownership of CONTENT and must not mutate it afterward.
 For compatibility, CONTENT may be a palette followed by INDICES, but producers
 should transfer a BLOCK-CONTENT-COLUMN.  Installation rebinds that aggregate to
-the authoritative resident domain and publishes it in one single-writer step."
+the authoritative resident domain and WORLD's vocabulary, translating its
+indices in place if it was produced under another vocabulary, and publishes
+it in one single-writer step."
   (check-type world block-world)
   (when (nth-value 1 (world-chunk-at world x y z))
     (error "Chunk (~D ~D ~D) is already resident." x y z))
@@ -1040,9 +1142,8 @@ the authoritative resident domain and publishes it in one single-writer step."
                (make-block-content-column domain
                                           :palette content
                                           :indices indices))))
-    (let* ((content (rebind-block-content-column transferred domain))
-           (chunk (make-world-owned-block-chunk
-                   world domain :content content)))
+    (let* ((chunk (make-world-owned-block-chunk
+                   world domain :content transferred)))
       (setf (gethash (chunk-key x y z) (block-world-chunks world)) chunk)
       (incf (slot-value world 'residency-revision))
       (note-block-world-change world)

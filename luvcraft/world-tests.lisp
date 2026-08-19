@@ -363,6 +363,48 @@
                 (block-content-column-domain
                  (block-chunk-content second))))))))
 
+(deftest one-world-vocabulary-closes-every-chunk-column
+  (let* ((world (make-block-world :chunk-width 2
+                                  :chunk-height 2
+                                  :chunk-depth 2))
+         (stone (list :stone))
+         (dirt (list :dirt))
+         (first (ensure-world-chunk world 0 0 0))
+         (second (ensure-world-chunk world 1 0 0))
+         (vocabulary (block-world-vocabulary world)))
+    ;; Both chunks are closed by the same vocabulary, so the same block has
+    ;; the same index everywhere and palettes are one shared vector.
+    (setf (chunk-block-at-offset first 0) stone
+          (chunk-block-at-offset second 0) dirt
+          (chunk-block-at-offset second 1) stone)
+    (ok (eq (block-content-column-palette (block-chunk-content first))
+            (block-content-column-palette (block-chunk-content second))))
+    (ok (= 1 (block-vocabulary-offset vocabulary stone nil)))
+    (ok (= 2 (block-vocabulary-offset vocabulary dirt nil)))
+    (ok (null (block-vocabulary-offset vocabulary (list :unknown) nil)))
+    (ok (= 1 (aref (block-content-column-indices (block-chunk-content first)) 0)))
+    (ok (= 1 (aref (block-content-column-indices (block-chunk-content second)) 1)))
+    (ok (= 3 (block-vocabulary-cardinality vocabulary)))
+    ;; A column produced under another world's vocabulary is translated in
+    ;; place when it is installed, and new members are appended, not moved.
+    (let* ((other (make-block-world :chunk-width 2
+                                    :chunk-height 2
+                                    :chunk-depth 2))
+           (foreign (ensure-world-chunk other 0 0 0))
+           (sand (list :sand)))
+      (setf (chunk-block-at-offset foreign 0) sand
+            (chunk-block-at-offset foreign 1) stone)
+      (ok (= 1 (aref (block-content-column-indices (block-chunk-content foreign)) 0)))
+      (let ((installed (install-world-chunk-storage
+                        world 0 1 0 (block-chunk-content foreign))))
+        (ok (eq (block-content-column-vocabulary (block-chunk-content installed))
+                vocabulary))
+        (ok (eq (chunk-block-at-offset installed 0) sand))
+        (ok (eq (chunk-block-at-offset installed 1) stone))
+        (ok (= 3 (block-vocabulary-offset vocabulary sand nil)))
+        (ok (= 1 (block-vocabulary-offset vocabulary stone nil)))
+        (ok (= 4 (block-vocabulary-cardinality vocabulary)))))))
+
 (deftest resident-lattice-raycast
   (let* ((world (make-block-world :chunk-width 4
                                   :chunk-height 4

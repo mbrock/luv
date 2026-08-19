@@ -70,19 +70,21 @@ integers inside its columns are perfectly sound — indeed preferable, since the
 are dense, comparable, and cheap.  What is unsound is an index whose vocabulary
 is implicit.
 
-By this measure the per-chunk palette in
-[[file:../luvcraft/world.lisp][world.lisp]] is not a mistake.  A
-=block-content-column= holds an adjustable palette of block objects and a
-=(unsigned-byte 16)= index per site; the palette *is* an embedded vocabulary,
-and it gives each chunk closure for free.  The awkwardness is granularity
-rather than principle: every chunk carries its own copy of a vocabulary that is
-nearly always the same one, [[lisp:ensure-block-content-palette-index]] scans it
+By this measure the per-chunk palette that
+[[file:../luvcraft/world.lisp][world.lisp]] carried until August 2026 was not
+a mistake.  A =block-content-column= held an adjustable palette of block
+objects and a =(unsigned-byte 16)= index per site; the palette *was* an
+embedded vocabulary, and it gave each chunk closure for free.  The awkwardness
+was granularity rather than principle: every chunk carried its own copy of a
+vocabulary that was nearly always the same one, the palette was scanned
 linearly on every placement, and #V6T1QS's demand that composition check domain
-identity is met by accident rather than by construction.
+identity was met by accident rather than by construction.
 
-A single global material vocabulary, embedded once per save, is the same
-mechanism hoisted to the level where the vocabulary actually lives.  It is only
-available once the material set closes, which is what #KSWJZG is about.
+#CPCZDB records hoisting that vocabulary to the world: one [[lisp:block-vocabulary]]
+per =block-world=, append-only, with every chunk column closed by it.  A
+vocabulary embedded once per save is the same mechanism hoisted one level
+further; it is only available once the material set closes, which is what
+#KSWJZG is about.
 
 * Value changes and shape changes cost differently
 :PROPERTIES:
@@ -135,10 +137,12 @@ genuinely pass-local, and resolving them once per pass so the inner loop can
 run over small fixnum indices is exactly the amortization #Y0TPND describes for
 the packed frontier.
 
-The mesher today mixes the two.  It resolves its own population per pass, which
-is right, and it also calls [[lisp:block-face-tile]] once per visible face,
-which is a vocabulary lookup performed at population cadence — the smell
-#J7A2KD names, correct answers at the wrong altitude.
+The mesher used to mix the two: it resolved its own population per pass, which
+is right, and it also called [[lisp:block-face-tile]] once per visible face and
+=block-solid-p= once per neighbour sample — vocabulary lookups performed at
+population cadence, the smell #J7A2KD names, correct answers at the wrong
+altitude.  #FIGJ9R records the fix: the mesher now gathers the vocabulary
+table once per job and its loop reads only dense columns.
 
 * A film is not a material
 :PROPERTIES:
@@ -310,6 +314,62 @@ passes.  =make smoke= remains byte-identical at
 chunks keep rendering correctly; the vertex is no larger than the sixteen
 floats it is today; the smoke render is unchanged.
 
+* DONE The mesher gathers first and then runs one dense loop
+:PROPERTIES:
+:ID: FIGJ9R
+:END:
+
+*Intent.* Stop the mesher from asking a CLOS block object, through a generic
+function, what it is — once per neighbour sample, some twenty times per face.
+Gather instead: project the (small, closed) block vocabulary through
+=block-solid-p=, =block-surface-emission= and =block-face-tile= into flat
+per-offset tables once per mesh job, and mesh straight out of the snapshot's
+=u16= index and =u8= light columns with hoisted strides.
+
+*Evidence.* A statistical profile of the old loop showed about thirty percent
+of time in PCL dispatch, twenty percent in generic =FLOOR= from per-sample
+coordinate decomposition, and nothing at all in the tile vocabulary lookup
+that had been suspected.  [[lisp:gather-block-mesh-kind-tables]] now builds
+the tables and [[lisp:mesh-block-halo]] is the loop; owner-side meshing goes
+through the same snapshot as the workers, and [[lisp:make-block-mesh-snapshot]]
+copies its halo as slabs from the neighbouring chunks.  The output is
+bit-identical to the old mesher across every resident chunk of a played
+world; for sixty chunks, meshing fell from 396 ms to about 10 ms and snapshot
+capture from 118 ms to about 2 ms.
+
+*Done when.* The loop touches no block or face object and no generic
+function per sample; =sb-sprof= shows no PCL frames under =mesh-block-halo=;
+meshes are unchanged.
+
+* DONE The world owns one block vocabulary
+:PROPERTIES:
+:ID: CPCZDB
+:END:
+
+*Intent.* Replace the per-chunk palette with one append-only vocabulary per
+=block-world=, so that every chunk's =u16= column means the same thing, a
+mesh snapshot needs no palette translation, a block placement is a hash
+lookup rather than a linear scan, and per-kind tables can in time be
+materialized once per vocabulary revision rather than once per chunk.
+
+*Evidence.* [[lisp:block-vocabulary]] in world.lisp: NIL (air) is always offset
+zero, members only append, and a revision counts the appends.  A
+=block-content-column= binds to a vocabulary; =block-content-column-palette=
+still answers the member vector, so whole-domain borrowers in light, physics
+and the mesher read it unchanged.  A column produced under another world's
+vocabulary — as the streaming worker's throwaway world produces them — is
+translated in place by [[lisp:block-vocabulary-translation]] when it is
+installed, which is #FTDOCV's remap at chunk granularity.  The mesh snapshot
+freezes the member vector by copying and uses its length as the index of an
+absent halo sample, so a vocabulary that grows after capture cannot change
+what a captured index means.  Films still take an offset per video, which is
+what #R7MAN5 would close.
+
+*Done when.* All chunk columns of a world share one vocabulary object; a
+transferred column installs with its members appended and its indices
+remapped; the world and mesh tests pass and the played world renders as
+before.
+
 * TODO Make films block entities so the material vocabulary closes
 :PROPERTIES:
 :ID: R7MAN5
@@ -323,15 +383,17 @@ rather than one per chunk palette, and the removal of the per-chunk palette
 in favour of a global material index stored directly in the site column.
 
 *Evidence.* #KSWJZG: films are =block-kind= instances deliberately absent from
-=*block-kinds*=, and persistence special-cases them for that reason.
-[[lisp:ensure-block-content-palette-index]] performs a linear scan on every
-block placement.  =block-palette-light-properties= rebuilds a table per palette
-that would otherwise be built once.
+=*block-kinds*=, and persistence special-cases them for that reason.  Since
+#CPCZDB the world vocabulary is already global and append-only, so a film
+costs one offset per video rather than a palette entry per chunk; what
+remains open is that the vocabulary cannot be enumerated from =*block-kinds*=
+alone, and =block-palette-light-properties= still rebuilds its table per
+capture rather than once per vocabulary revision.
 
 *Done when.* =*block-kinds*= enumerates every material in the running image;
-per-material properties are materialized once over a global domain; an existing
-saved world containing films loads with its films intact through the remap of
-#FTDOCV.
+per-material properties are materialized once per vocabulary revision; an
+existing saved world containing films loads with its films intact through the
+remap of #FTDOCV.
 
 * IDEA A save is a vocabulary table and its columns
 :PROPERTIES:

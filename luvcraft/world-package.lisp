@@ -34,6 +34,16 @@
            #:block-content-column-domain
            #:block-content-column-indices
            #:block-content-column-palette
+           #:block-content-column-vocabulary
+           #:block-vocabulary
+           #:block-vocabulary-cardinality
+           #:block-vocabulary-member
+           #:block-vocabulary-members
+           #:block-vocabulary-offset
+           #:block-vocabulary-revision
+           #:block-vocabulary-translation
+           #:block-world-vocabulary
+           #:make-block-vocabulary
            #:block-content-at-offset
            #:block-edit-at
            #:block-edit-overlay

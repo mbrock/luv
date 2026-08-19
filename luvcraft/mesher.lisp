@@ -87,17 +87,24 @@
    (domain :initarg :domain :reader block-mesh-snapshot-domain)
    (content-definition :initarg :content-definition
                        :reader block-mesh-snapshot-content-definition)
+   ;; A frozen copy of the world vocabulary's members at capture time: the
+   ;; halo's u16 indices are closed by it.  Its length is the ABSENT index,
+   ;; one past the last member, so a halo sample outside resident terrain is
+   ;; a distinct member of the snapshot's own vocabulary.
    (palette :initarg :palette :reader block-mesh-snapshot-palette)
-   (target-indices :initarg :target-indices
-                   :reader block-mesh-snapshot-target-indices)
    (halo-fields :initarg :halo-fields
                 :reader block-mesh-snapshot-halo-fields))
   (:documentation
    "An immutable dense chunk plus one-cell halo transferred to a CPU worker.
 
-The snapshot owns compact u16 columns, but its small palette contains the same
-shared semantic block descriptors used by the world.  Cell identity does not
-cross the thread boundary, and the worker never observes live chunk storage."))
+The snapshot owns compact u16 columns whose indices are the world vocabulary's
+own offsets, frozen by copying the member vector; the copy's length stands for
+an absent sample.  Cell identity does not cross the thread boundary, and the
+worker never observes live chunk storage."))
+
+(declaim (inline block-mesh-snapshot-absent-index))
+(defun block-mesh-snapshot-absent-index (snapshot)
+  (length (the simple-vector (block-mesh-snapshot-palette snapshot))))
 
 (declaim
  (inline block-mesh-snapshot-halo-domain
@@ -294,9 +301,8 @@ decomposition and storage order beneath it.  See #K3KZTG."
   (let ((offset (block-mesh-halo-offset-components
                  (block-mesh-snapshot-halo-domain snapshot) x y z)))
     (if (and offset
-             ;; Zero is absent.  Resident air has its own palette entry.
-             (not (zerop (aref (block-mesh-snapshot-sample-indices snapshot)
-                               offset))))
+             (/= (aref (block-mesh-snapshot-sample-indices snapshot) offset)
+                 (block-mesh-snapshot-absent-index snapshot)))
         (values snapshot offset :available)
         (values nil nil :unavailable))))
 
@@ -401,7 +407,7 @@ falling through to BLOCK-SOLID-P."))
 ;;; face object, or a generic function per sample.  The vocabulary is small
 ;;; and closed -- it changes only when someone redefines a kind at the REPL
 ;;; -- so the gathering is cheap and the protocol generics still decide what
-;;; each kind means.
+;;; each kind means.  See #FIGJ9R.
 
 (defstruct (block-mesh-kind-tables (:constructor %make-block-mesh-kind-tables))
   "Per-palette-index answers the mesher gathered before its dense loop."
@@ -416,22 +422,24 @@ falling through to BLOCK-SOLID-P."))
 (defun gather-block-mesh-kind-tables (mesher palette)
   "Project PALETTE through the block protocol into flat per-index tables.
 
-Palette index zero denotes an absent sample and takes its occupancy from the
-mesher's absent-neighbor policy.  Index one is resident air (NIL); every
-other entry is a block kind.  Faces are numbered in *BLOCK-FACES* order."
-  (let* ((count (length palette))
+The tables have one more row than PALETTE: the final row is the absent
+sample, whose occupancy comes from the mesher's absent-neighbor policy.
+Index zero is air (NIL); every other entry is a block kind.  Faces are
+numbered in *BLOCK-FACES* order."
+  (let* ((count (1+ (length palette)))
+         (absent (length palette))
          (solid (make-array count :element-type 'bit :initial-element 0))
          (emission (make-array count :element-type 'single-float
                                      :initial-element 0.0))
          (tiles (make-array (* 6 count) :element-type '(unsigned-byte 16)
                                         :initial-element 0))
          (policy (exposed-face-mesher-absent-neighbor-policy mesher)))
-    (setf (sbit solid 0)
+    (setf (sbit solid absent)
           (ecase policy
             (:air 0)
             (:solid (if (block-solid-p *stone-block*) 1 0))
             (:error 0)))
-    (loop for index from 1 below count
+    (loop for index from 0 below absent
           for block = (aref palette index)
           do (when (block-solid-p block)
                (setf (sbit solid index) 1))
@@ -491,7 +499,7 @@ other entry is a block kind.  Faces are numbered in *BLOCK-FACES* order."
 
 (declaim (inline block-mesh-corner-shade-and-light))
 (defun block-mesh-corner-shade-and-light
-    (solid indices sky block-light base nstep s1step s2step)
+    (solid indices sky block-light absent base nstep s1step s2step)
   "Return (VALUES AO SKY BLOCK) for one vertex corner.
 
 BASE is the halo offset of the face's own cell; NSTEP steps across the face
@@ -502,6 +510,7 @@ contributes nothing, and the diagonal is unreachable behind two sides."
   (declare (type (simple-array bit (*)) solid)
            (type (simple-array (unsigned-byte 16) (*)) indices)
            (type (simple-array (unsigned-byte 8) (*)) sky block-light)
+           (type (unsigned-byte 16) absent)
            (type block-mesh-halo-index base)
            (type block-mesh-halo-step nstep s1step s2step)
            (optimize (speed 3) (safety 0)))
@@ -520,7 +529,7 @@ contributes nothing, and the diagonal is unreachable behind two sides."
     (declare (type block-mesh-halo-index n a b d)
              (type fixnum sky-sum block-sum count))
     (flet ((consider (index offset)
-             (unless (zerop index)
+             (unless (= index absent)
                (incf sky-sum (aref sky offset))
                (incf block-sum (aref block-light offset))
                (incf count))))
@@ -561,6 +570,7 @@ per-sample accessors produced, so existing meshes and tests agree."
            (ignore depth)
            (optimize (speed 3) (safety 0)))
   (let* ((face (svref faces face-index))
+         (absent (1- (length solid)))
          (nx (block-mesh-face-table-nx face))
          (ny (block-mesh-face-table-ny face))
          (nz (block-mesh-face-table-nz face))
@@ -588,6 +598,7 @@ per-sample accessors produced, so existing meshes and tests agree."
     (declare (type (simple-array fixnum (12)) corners)
              (type (simple-array fixnum (8)) uvs)
              (type (integer -1 1) nx ny nz)
+             (type (unsigned-byte 16) absent)
              (type block-mesh-halo-step xstep ystep zstep nstep ustep vstep
                    s1step s2step)
              (type single-float tile emission variation))
@@ -634,7 +645,7 @@ per-sample accessors produced, so existing meshes and tests agree."
                                    (type block-mesh-halo-step sign1 sign2))
                           (multiple-value-bind (ao sky-level block-level)
                               (block-mesh-corner-shade-and-light
-                               solid indices sky block-light
+                               solid indices sky block-light absent
                                base nstep sign1 sign2)
                             (declare (type single-float ao sky-level
                                            block-level))
@@ -670,7 +681,7 @@ the world coordinate of the chunk's first interior cell."
            (type fixnum origin-x origin-y origin-z)
            (optimize (speed 3) (safety 1)))
   (when (eq :error (exposed-face-mesher-absent-neighbor-policy mesher))
-    (when (find 0 indices)
+    (when (find (length palette) indices)
       (error "Meshing reached absent terrain around chunk at (~D ~D ~D)."
              origin-x origin-y origin-z)))
   (let* ((tables (gather-block-mesh-kind-tables mesher palette))
@@ -783,12 +794,12 @@ world, with neighbours and light read from a fresh snapshot of its chunk."
       (unless chunk
         (error "Cannot emit a face from absent chunk (~D ~D ~D)."
                chunk-x chunk-y chunk-z))
-      (let* ((snapshot (make-block-mesh-snapshot world chunk nil))
+      ;; BLOCK may be one the world has never held; interning it first keeps
+      ;; the snapshot's frozen vocabulary able to name it.
+      (let* ((palette-index
+               (block-vocabulary-offset (block-world-vocabulary world) block))
+             (snapshot (make-block-mesh-snapshot world chunk nil))
              (palette (block-mesh-snapshot-palette snapshot))
-             (palette-index
-               (or (position block palette :test #'eq)
-                   (progn (vector-push-extend block palette)
-                          (1- (length palette)))))
              (domain (block-mesh-snapshot-domain snapshot))
              (shape (voxel-space-chunk-shape (chunk-domain-space domain)))
              (width (+ 2 (chunk-shape-width shape)))
@@ -812,22 +823,14 @@ world, with neighbours and light read from a fresh snapshot of its chunk."
         (loop for value across scratch do (vector-push value vertices))
         vertices))))
 
-(defun block-mesh-snapshot-palette-index (block palette indices)
-  (or (gethash block indices)
-      (let ((index (length palette)))
-        (unless (< index #xffff)
-          (error "A mesh snapshot cannot contain more than 65534 block states."))
-        (vector-push-extend block palette)
-        (setf (gethash block indices) index)
-        index)))
-
 (defun make-block-mesh-snapshot (world chunk dependency-stamp)
   "Copy CHUNK and its one-cell halo into immutable worker-owned columns.
 
-The halo is gathered one resident neighbour at a time: each of the up to 27
-chunks contributes a dense slab copied by direct index arithmetic, with its
-palette translated into the snapshot's through a small per-chunk table.  No
-per-cell coordinate decomposition or block object lookup is involved."
+Every resident chunk's indices are already offsets under WORLD's vocabulary,
+so the halo is gathered by plain slab copies from the up to 27 neighbours,
+with no per-cell decomposition, translation, or block object lookup.  The
+vocabulary's members are frozen into the snapshot by copying; their count is
+the index written for absent halo samples."
   (let* ((domain (block-chunk-domain chunk))
          (halo-domain (make-block-mesh-halo-domain domain))
          (shape (voxel-space-chunk-shape (chunk-domain-space domain)))
@@ -837,14 +840,9 @@ per-cell coordinate decomposition or block object lookup is involved."
          (sample-width (+ width 2))
          (sample-height (+ height 2))
          (sample-depth (+ depth 2))
-         ;; Index zero denotes an absent sample.  Index one denotes resident
-         ;; air, whose semantic descriptor is also NIL.
-         (palette (make-array 2 :adjustable t :fill-pointer 2
-                                :initial-contents '(nil nil)))
-         (palette-indices (make-hash-table :test #'eq))
-         (target-indices
-           (make-array (domains:domain-cardinality domain)
-                       :element-type '(unsigned-byte 16)))
+         (vocabulary (block-world-vocabulary world))
+         (palette (coerce (block-vocabulary-members vocabulary) 'simple-vector))
+         (absent (length palette))
          (content-definition
            (fields:materialized-field-definition
             (block-chunk-content chunk) :block-content))
@@ -865,7 +863,8 @@ per-cell coordinate decomposition or block object lookup is involved."
          (neighborhood (make-block-mesh-neighborhood world chunk)))
     (declare (type (integer 1 4096) width height depth
                    sample-width sample-height sample-depth))
-    (setf (gethash nil palette-indices) 1)
+    (unless (< absent #x10000)
+      (error "The block vocabulary is too large to leave an absent index."))
     (records:with-columnar-materialization-storage
         ((borrowed-domain extent row
                           (sample-indices content-index)
@@ -878,6 +877,7 @@ per-cell coordinate decomposition or block object lookup is involved."
       (check-type sample-indices (simple-array (unsigned-byte 16) (*)))
       (check-type sky-samples (simple-array (unsigned-byte 8) (*)))
       (check-type block-light-samples (simple-array (unsigned-byte 8) (*)))
+      (fill sample-indices absent)
       (flet ((slab (dx dy dz)
                "Copy neighbour (DX DY DZ)'s cells that fall inside the halo."
                (let ((neighbour
@@ -888,12 +888,13 @@ per-cell coordinate decomposition or block object lookup is involved."
                        (neighbour-domain neighbour-palette neighbour-indices)
                        neighbour
                      (declare (ignore neighbour-domain))
+                     (unless (eq neighbour-palette
+                                 (block-vocabulary-members vocabulary))
+                       (error "Chunk ~S is not under world ~S's vocabulary."
+                              neighbour world))
                      (check-type neighbour-indices
                                  (simple-array (unsigned-byte 16) (*)))
-                     (let* ((translation
-                              (make-array (length neighbour-palette)
-                                          :element-type '(unsigned-byte 16)))
-                            (field (block-chunk-light-field neighbour))
+                     (let* ((field (block-chunk-light-field neighbour))
                             (sky (and field (chunk-light-field-sky-levels field)))
                             (block-light
                               (and field (chunk-light-field-block-levels field)))
@@ -907,17 +908,12 @@ per-cell coordinate decomposition or block object lookup is involved."
                             ;; Halo sample coordinate of local (lx0 ly0 lz0).
                             (sx0 (1+ (+ (* dx width) lx0)))
                             (sy0 (1+ (+ (* dy height) ly0)))
-                            (sz0 (1+ (+ (* dz depth) lz0))))
-                       (declare (type (simple-array (unsigned-byte 16) (*))
-                                      translation)
-                                (type (or null (simple-array (unsigned-byte 8) (*)))
+                            (sz0 (1+ (+ (* dz depth) lz0)))
+                            (run (1+ (- lx1 lx0))))
+                       (declare (type (or null (simple-array (unsigned-byte 8) (*)))
                                       sky block-light)
-                                (type fixnum lx0 lx1 ly0 ly1 lz0 lz1 sx0 sy0 sz0))
-                       (loop for index from 0 below (length neighbour-palette)
-                             do (setf (aref translation index)
-                                      (block-mesh-snapshot-palette-index
-                                       (aref neighbour-palette index)
-                                       palette palette-indices)))
+                                (type fixnum lx0 lx1 ly0 ly1 lz0 lz1 sx0 sy0 sz0
+                                      run))
                        (loop for lz of-type fixnum from lz0 to lz1
                              for sz of-type fixnum from sz0 do
                          (loop for ly of-type fixnum from ly0 to ly1
@@ -926,22 +922,16 @@ per-cell coordinate decomposition or block object lookup is involved."
                                  (target (+ sx0 (* sample-width
                                                    (+ sy (* sample-height sz))))))
                              (declare (type fixnum source target))
-                             (loop for lx of-type fixnum from lx0 to lx1 do
-                               (setf (aref sample-indices target)
-                                     (aref translation
-                                           (aref neighbour-indices source)))
-                               (when sky
-                                 (setf (aref sky-samples target)
-                                       (aref sky source)
-                                       (aref block-light-samples target)
-                                       (aref block-light source)))
-                               (incf source)
-                               (incf target)))))
-                       (when (and (zerop dx) (zerop dy) (zerop dz))
-                         (dotimes (offset (length neighbour-indices))
-                           (setf (aref target-indices offset)
-                                 (aref translation
-                                       (aref neighbour-indices offset)))))))))))
+                             (replace sample-indices neighbour-indices
+                                      :start1 target :end1 (+ target run)
+                                      :start2 source)
+                             (when sky
+                               (replace sky-samples sky
+                                        :start1 target :end1 (+ target run)
+                                        :start2 source)
+                               (replace block-light-samples block-light
+                                        :start1 target :end1 (+ target run)
+                                        :start2 source)))))))))))
         (loop for dz from -1 to 1 do
           (loop for dy from -1 to 1 do
             (loop for dx from -1 to 1 do
@@ -951,7 +941,7 @@ per-cell coordinate decomposition or block object lookup is involved."
      :key (block-chunk-key chunk) :dependency-stamp dependency-stamp
      :domain domain
      :content-definition content-definition
-     :palette palette :target-indices target-indices
+     :palette palette
      :halo-fields halo-fields)))
 
 (defmethod mesh-block-world
