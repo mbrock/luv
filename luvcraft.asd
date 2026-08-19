@@ -198,7 +198,7 @@
   :description "The standalone luvcraft executable with its live Slynk endpoint."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luvcraft" "sb-posix" "slynk")
+  :depends-on ("luvcraft/agent" "sb-posix" "slynk")
   :components ((:file "luvcraft/main"))
   :build-operation "program-op"
   :build-pathname "build/luvcraft"

@@ -203,6 +203,7 @@
               pkgs.libffi
               libghosttyVt
               pkgs.harfbuzz
+              pkgs.openssl
               tracyClient
               pkgs.sdl3
               pkgs.sdl3-image

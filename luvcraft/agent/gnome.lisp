@@ -808,7 +808,7 @@ the figure's bobbing and any future step interpolation are only presentation."
   (apply #'spawn-agent arguments))
 
 (define-command (com-spawn-agent :command-table luvcraft.clim::luvcraft-world
-                                  :name "Spawn Agent")
+                                  :name "Spawn Gnome")
     ()
-  "Spawn a visible agent a few discrete cells ahead of the player."
+  "Spawn a visible gnome agent a few discrete cells ahead of the player."
   (spawn-agent :session (luvcraft.clim::luvcraft-command-session)))
