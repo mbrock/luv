@@ -16,9 +16,7 @@
 ;;; line is subtitled.
 
 (defparameter *gnome-name* "gnome")
-(defparameter *gnome-body-width* 240)
-(defparameter *gnome-body-height* 360)
-(defparameter *gnome-body-world-width* 0.82)
+(defparameter *gnome-body-radius* 0.62)
 (defparameter *gnome-body-world-height* 1.42)
 
 (defparameter +clear-ink+ (compose-in (make-rgb-color 0 0 0) (make-opacity 0.0))
@@ -437,112 +435,131 @@ title or bubble shows only what its pane draws."))
         frame))))
 
 ;;; ---------------------------------------------------------------------
-;;; The visible body: a scene widget, not terrain.
+;;; The visible body: a sphere-traced scene object, not terrain.
 
-(defclass gnome-body-pane
-    (climi::never-repaint-background-mixin application-pane) ())
-
-(define-application-frame gnome-body-frame ()
-  ((gnome :initarg :gnome :reader body-frame-gnome))
-  (:menu-bar nil)
-  (:panes (sheet (make-pane 'gnome-body-pane :background +clear-ink+
-                            :width *gnome-body-width*
-                            :height *gnome-body-height*
-                            :min-width *gnome-body-width*
-                            :min-height *gnome-body-height*
-                            :max-width *gnome-body-width*
-                            :max-height *gnome-body-height*)))
-  (:layouts (default sheet)))
-
-(defmethod handle-repaint ((pane gnome-body-pane) region)
-  (declare (ignore region))
-  (with-sheet-medium (medium pane)
-    (when (typep medium 'mcluv:luv-raster-medium)
-      (mcluv::clear-raster-medium-reliefs medium)))
-  ;; Boots and coat are low and broad; the face and conical hat make the
-  ;; figure legible at the scale of an ordinary block without turning it back
-  ;; into one.  These retained drawing commands are rendered directly in the
-  ;; scene by the world-widget pipeline.
-  (draw-ellipse* pane 78 330 42 0 0 14 :filled t
-                 :ink (make-rgb-color 0.10 0.08 0.07))
-  (draw-ellipse* pane 162 330 42 0 0 14 :filled t
-                 :ink (make-rgb-color 0.10 0.08 0.07))
-  (mcluv:draw-analytic-rounded-rectangle*
-   pane 52 190 188 330 :radius 28 :ink (make-rgb-color 0.16 0.31 0.62))
-  (draw-ellipse* pane 120 174 56 0 0 54 :filled t
-                 :ink (make-rgb-color 0.91 0.70 0.55))
-  (draw-polygon* pane '((66 172) (174 172) (157 278) (120 303) (83 278))
-                 :filled t :ink (make-rgb-color 0.91 0.90 0.85))
-  (draw-ellipse* pane 99 171 6 0 0 7 :filled t
-                 :ink (make-rgb-color 0.07 0.08 0.11))
-  (draw-ellipse* pane 141 171 6 0 0 7 :filled t
-                 :ink (make-rgb-color 0.07 0.08 0.11))
-  (draw-polygon* pane '((120 14) (57 158) (183 158))
-                 :filled t :ink (make-rgb-color 0.80 0.16 0.13))
-  (mcluv:draw-analytic-rounded-rectangle*
-   pane 51 143 189 172 :radius 13 :ink (make-rgb-color 0.58 0.08 0.08)))
-
-(defclass gnome-body-overlay (mcluv:luvcraft-world-widget-overlay)
-  ((gnome :initarg :gnome :reader body-overlay-gnome)))
+(defclass gnome-body-overlay ()
+  ((gnome :initarg :gnome :reader body-overlay-gnome)
+   (pipeline :initarg :pipeline :accessor gnome-body-pipeline)
+   (vertex-buffer :initarg :vertex-buffer :accessor gnome-body-vertex-buffer)
+   (instance-buffer :initarg :instance-buffer :accessor gnome-body-instance-buffer)
+   (instance-data :initarg :instance-data :reader gnome-body-instance-data)))
 
 (defmethod luvcraft:luvcraft-focus-score
     ((overlay gnome-body-overlay) session)
   (declare (ignore overlay session))
   nil)
 
-(defun place-gnome-body (overlay session)
-  "Place OVERLAY at its agent's discrete cell, with a purely visual bob."
+(defmethod luvcraft::luvcraft-overlay-live-shader-pipelines
+    ((overlay gnome-body-overlay))
+  (list (gnome-body-pipeline overlay)))
+
+(defun place-gnome-body (overlay)
+  "Publish OVERLAY's center and radius, with a purely visual bob."
   (let* ((gnome (body-overlay-gnome overlay))
-         (camera (luvcraft:luvcraft-session-camera session))
          (phase (/ (get-internal-real-time)
                    (float internal-time-units-per-second 1.0)))
          (bob (* 0.025 (sin (* phase 2.2))))
-         (center (luvcraft::make-vec3
-                  (+ (gnome-x gnome) 0.5)
-                  (+ (gnome-y gnome) (/ *gnome-body-world-height* 2.0) bob)
-                  (+ (gnome-z gnome) 0.5)))
-         (half-width (/ *gnome-body-world-width* 2.0))
-         (half-height (/ *gnome-body-world-height* 2.0)))
-    (multiple-value-bind (right up forward) (luvcraft:camera-basis camera)
-      (declare (ignore up))
-      (let ((flat-right (luvcraft::make-vec3 (luvcraft::vec3-x right) 0.0
-                                             (luvcraft::vec3-z right))))
-        (setf (mcluv::widget-overlay-center overlay) center
-              (mcluv::widget-overlay-right-axis overlay)
-              (luvcraft::vec3-scale flat-right half-width)
-              (mcluv::widget-overlay-up-axis overlay)
-              (luvcraft::make-vec3 0.0 (- half-height) 0.0)
-              (mcluv::widget-overlay-normal-axis overlay)
-              (luvcraft::vec3-scale forward -1.0)))))
+         (data (gnome-body-instance-data overlay)))
+    (setf (aref data 0) (coerce (+ (gnome-x gnome) 0.5) 'single-float)
+          (aref data 1) (coerce (+ (gnome-y gnome) 0.70 bob) 'single-float)
+          (aref data 2) (coerce (+ (gnome-z gnome) 0.5) 'single-float)
+          (aref data 3) (coerce *gnome-body-radius* 'single-float))
+    (luv:write-buffer (gnome-body-instance-buffer overlay) data))
   overlay)
 
 (defmethod luvcraft:encode-luvcraft-overlay
     ((overlay gnome-body-overlay) session pass surface-texture)
-  (declare (ignore pass))
-  (place-gnome-body overlay session)
-  (let ((viewport-size
-          (luv:canvas-extent (luvcraft:luvcraft-session-context session))))
-    (mcluv:prepare-direct-widget-overlay
-     overlay session surface-texture
-     (mcluv::world-device-clip-state
-      overlay session (first viewport-size) (second viewport-size))))
+  (place-gnome-body overlay)
+  (let ((frame (luvcraft::luvcraft-frame-state session surface-texture)))
+    (luv:set-pipeline
+     pass
+     (luvcraft::live-shader-pipeline-native-pipeline
+      (gnome-body-pipeline overlay)))
+    (luv:set-vertex-buffer pass 0 (gnome-body-vertex-buffer overlay))
+    (luv:set-vertex-buffer pass 1 (gnome-body-instance-buffer overlay))
+    (luv:set-bind-group pass 0 (luvcraft::luvcraft-frame-scene-bind-group frame))
+    (luv:draw pass 6 1))
   overlay)
+
+(defmethod luvcraft:release-luvcraft-overlay ((overlay gnome-body-overlay))
+  (when (gnome-body-pipeline overlay)
+    (luvcraft::release-live-shader-pipeline (gnome-body-pipeline overlay))
+    (setf (gnome-body-pipeline overlay) nil))
+  (dolist (resource (list (gnome-body-instance-buffer overlay)
+                          (gnome-body-vertex-buffer overlay)))
+    (when resource (luv:destroy resource)))
+  (setf (gnome-body-instance-buffer overlay) nil
+        (gnome-body-vertex-buffer overlay) nil)
+  (when (eq overlay (gnome-body (body-overlay-gnome overlay)))
+    (setf (gnome-body (body-overlay-gnome overlay)) nil))
+  (values))
 
 (defun ensure-gnome-body (gnome)
   (or (gnome-body gnome)
       (let* ((session (gnome-session gnome))
-             (frame (make-embedded-frame session 'gnome-body-frame
-                                         :gnome gnome))
-             (mirror (sheet-direct-mirror (frame-top-level-sheet frame)))
-             (overlay (make-instance 'gnome-body-overlay
-                                     :session session :frame frame
-                                     :mirror mirror :gnome gnome)))
-        (setf (frame-pretty-name frame) "agent body"
-              (mcluv:mirror-compositor mirror) overlay
-              (gnome-body gnome) overlay)
-        (luvcraft:add-luvcraft-overlay session overlay)
-        (mcluv:repaint-gpu-mirror mirror)
-        overlay)))
+             (device (luvcraft:luvcraft-session-device session))
+             (vertex-data (luvcraft::make-world-text-quad-vertices))
+             (instance-data (make-array 4 :element-type 'single-float))
+             (vertex-buffer nil)
+             (instance-buffer nil)
+             (pipeline nil)
+             (completed-p nil))
+        (unwind-protect
+             (progn
+               (setf vertex-buffer
+                     (luv:create
+                      device
+                      (luv:make-buffer-descriptor
+                       :label "gnome SDF proxy"
+                       :size (* 4 (length vertex-data))
+                       :usage '(:vertex :copy-dst)))
+                     instance-buffer
+                     (luv:create
+                      device
+                      (luv:make-buffer-descriptor
+                       :label "gnome SDF instance"
+                       :size (* 4 (length instance-data))
+                       :usage '(:vertex :copy-dst)))
+                     pipeline
+                     (luvcraft::make-live-shader-pipeline
+                      :role :gnome-sdf
+                      :vertex-role :gnome-sdf
+                      :label "gnome sphere SDF pipeline"
+                      :device device
+                      :layout
+                      (luvcraft::live-shader-pipeline-layout
+                       (luvcraft:luvcraft-session-block-pipeline session))
+                      :vertex-buffers
+                      '((:array-stride 12
+                         :attributes
+                         ((:shader-location 0 :offset 0 :format :float32x3)))
+                        (:array-stride 16 :step-mode :instance
+                         :attributes
+                         ((:shader-location 1 :offset 0 :format :float32x4))))
+                      :target-format luvcraft::+luvcraft-scene-color-format+
+                      :target-blend :premultiplied-alpha
+                      :primitive '(:topology :triangle-list)
+                      :depth-stencil
+                      '(:format :depth32-float
+                        :depth-write-enabled nil
+                        :depth-compare :less)))
+               (luv:write-buffer vertex-buffer vertex-data)
+               (let ((overlay (make-instance 'gnome-body-overlay
+                                             :gnome gnome :pipeline pipeline
+                                             :vertex-buffer vertex-buffer
+                                             :instance-buffer instance-buffer
+                                             :instance-data instance-data)))
+                 (place-gnome-body overlay)
+                 (setf (gnome-body gnome) overlay
+                       completed-p t)
+                 (luvcraft:add-luvcraft-overlay session overlay)
+                 overlay))
+          (unless completed-p
+            (when pipeline
+              (ignore-errors
+                (luvcraft::release-live-shader-pipeline pipeline)))
+            (when instance-buffer (ignore-errors (luv:destroy instance-buffer)))
+            (when vertex-buffer (ignore-errors (luv:destroy vertex-buffer))))))))
 
 (defun ensure-gnome-dialogue (gnome)
   (or (gnome-dialogue gnome)

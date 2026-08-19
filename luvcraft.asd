@@ -193,6 +193,7 @@
                              (:file "commands")
                              (:file "hud")
                              (:file "wall")
+                             (:file "shaders")
                              (:file "gnome")))))
 
 (defsystem "luvcraft/program"
