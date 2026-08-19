@@ -1767,24 +1767,29 @@ many times oversize, and the frame is box-filtered down on the way out."
     (&optional (name (uiop:getenv "LUFT_RENDER_MODE"))
                (technique (standalone-render-technique)))
   "Return MODE, STYLE, PIPELINE-STYLES, EFFECTS, and TECHNIQUE for standalone NAME."
-  (let ((mode (string-downcase (or name "flat")))
+  (let ((mode (string-downcase (or name "full")))
         (styles (technique-styles technique)))
     (cond ((string= mode "clear")
            (values :clear :flat nil nil technique))
           ((string= mode "sky")
            (values :sky :flat nil '(:sky) technique))
-          ((member mode '("flat" "bevel" "chamfer" "paper" "field" "soft" "ink") :test #'string=)
+          ((member mode '("flat" "bevel" "chamfer" "paper" "stock" "field"
+                          "soft" "ink")
+                   :test #'string=)
            (let ((style (intern (string-upcase mode) :keyword)))
              (unless (member style styles)
                (error "The ~(~A~) technique does not draw ~A; it draws ~
 ~{~(~A~)~^, ~}." technique mode styles))
              (values style style (list style) nil technique)))
           ((string= mode "full")
-           (values :full (if (member :bevel styles) :bevel :chamfer)
+           ;; The stock style is what the world is meant to be seen in: the
+           ;; crisp chamfered geometry, the field's soft light, and every
+           ;; cell drawn in whatever it is cut from.
+           (values :full (if (member :stock styles) :stock :chamfer)
                    styles '(:sky :lens) technique))
           (t
            (error "Unknown LUFT_RENDER_MODE ~S; use clear, sky, flat, bevel, ~
-chamfer, paper, field, soft, ink, or full." name)))))
+chamfer, paper, stock, field, soft, ink, or full." name)))))
 
 (zdefun (start-viewer :zone :luft/start-viewer)
     (&key (scene (make-demo-scene))

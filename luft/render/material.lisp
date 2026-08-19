@@ -492,6 +492,22 @@ is the whole of what it is cut from.  #PWMCOL")
   :mottle-scale 1.6 :mottle 0.14 :wear 0.50
   :patina 0.70 :patina-color '(0.042 0.098 0.076) :rim 0.22)
 
+(define-material :conifer
+  ;; Not a stock at all, strictly: the dark blue-green mass of a fir, dense
+  ;; enough that the chamfer on every step of its skirt is the only thing
+  ;; that says where one branch layer ends and the next begins.
+  :top '(0.036 0.072 0.042) :side '(0.026 0.054 0.032)
+  :bottom '(0.013 0.026 0.016)
+  :gloss 0.06 :polish 22.0 :lift 1.14
+  :mottle-scale 2.8 :mottle 0.36 :wear 0.0 :drift 0.16 :rim 0.08)
+
+(define-material :leaf
+  ;; A broadleaf crown: yellower, lighter, and more broken up than a fir.
+  :top '(0.078 0.118 0.038) :side '(0.060 0.092 0.030)
+  :bottom '(0.030 0.046 0.015)
+  :gloss 0.05 :polish 18.0 :lift 1.12
+  :mottle-scale 2.0 :mottle 0.46 :wear 0.0 :drift 0.20 :rim 0.08)
+
 (define-material :plaster
   ;; Limewash on render: the flattest, quietest thing in the palette, and
   ;; the one that shows what the light alone is doing.

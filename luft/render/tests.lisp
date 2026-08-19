@@ -161,18 +161,28 @@
   (multiple-value-bind (mode style pipelines effects technique)
       (luft.render::standalone-render-options "full" :mesh)
     (ok (eq :full mode))
-    (ok (eq :bevel style))
+    (ok (eq :stock style))
     (ok (equal '(:flat :bevel :chamfer :paper :stock) pipelines))
     (ok (equal '(:sky :lens) effects))
     (ok (eq :mesh technique)))
   (multiple-value-bind (mode style pipelines effects technique)
       (luft.render::standalone-render-options "full" :vertex)
     (ok (eq :full mode))
-    (ok (eq :bevel style))
+    (ok (eq :stock style))
     (ok (equal '(:flat :bevel :chamfer :paper :stock :field :soft :ink)
                    pipelines))
     (ok (equal '(:sky :lens) effects))
-    (ok (eq :vertex technique))))
+    (ok (eq :vertex technique)))
+  ;; A mode of its own selects only its own pipeline, the stock included.
+  (multiple-value-bind (mode style pipelines effects technique)
+      (luft.render::standalone-render-options "stock" :vertex)
+    (ok (equal '(:stock :stock (:stock) nil :vertex)
+               (list mode style pipelines effects technique))))
+  ;; And with nothing named at all, the atelier opens on the whole world.
+  (multiple-value-bind (mode style)
+      (luft.render::standalone-render-options nil :vertex)
+    (ok (eq :full mode))
+    (ok (eq :stock style))))
 
 (deftest vertex-pulling-draws-whole-grids-per-face
   ;; Six vertices draw a flat quad; the chamfer grid of one ring has four

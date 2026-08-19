@@ -212,6 +212,40 @@ the top of a wall one does not want turfed.  #JNJF28"
                 (loop for k from 0 below depth
                       do (paint-cell world x y (- top k) stock))))))))))
 
+(defun plant-tree (world x y &key (kind :fir) (height 10)
+                                  (trunk :walnut) (crown nil) (ceiling 72))
+  "Set a tree on the ground at X,Y.
+
+A fir is a trunk with discs of decreasing radius up it, two levels to each
+step, so the crown comes out as a stepped cone whose every skirt the
+chamfer gives an edge to.  A round tree is a ball of three discs.  Neither
+is a model of a tree; both are what a tree is at this distance."
+  (let ((base (or (column-top world x y ceiling) 0)))
+    (ecase kind
+      (:fir
+       (with-stock (trunk)
+         (fill-box world x x y y (1+ base) (+ base 2)))
+       (with-stock ((or crown :conifer))
+         (loop for level from 0 below (- height 2)
+               for radius = (max 0 (- 2 (floor (* 3 level) (max 1 height))))
+               do (fill-disc world x y radius
+                             (+ base 3 level) (+ base 3 level)))
+         (fill-box world x x y y (+ base height 1) (+ base height 1))))
+      (:round
+       (with-stock (trunk)
+         (fill-box world x x y y (1+ base) (+ base 3)))
+       (with-stock ((or crown :leaf))
+         (fill-disc world x y 1 (+ base 4) (+ base 4))
+         (fill-disc world x y 2 (+ base 5) (+ base 6))
+         (fill-disc world x y 1 (+ base 7) (+ base 7)))))
+    world))
+
+(defun plant-wood (world places &key (kind :fir) (crown nil))
+  "Plant a tree at each X, Y, HEIGHT of PLACES."
+  (dolist (place places world)
+    (destructuring-bind (x y height) place
+      (plant-tree world x y :kind kind :height height :crown crown))))
+
 (defun scatter-boulders (world places &key (stock :granite) (ceiling 72))
   "Set a boulder of the given radius on the ground at each X, Y, RADIUS."
   (with-stock (stock)
@@ -359,6 +393,11 @@ the top of a wall one does not want turfed.  #JNJF28"
     (with-stock (:granite)
       (fill-box world 22 22 11 11 (1- grade) (+ grade 1))
       (fill-box world 42 42 13 13 (1- grade) grade))
+    ;; A row of firs behind the back wall, so the building has a horizon
+    ;; that is not sky, and two round trees out on the lawn.
+    (plant-wood world '((12 46 12) (20 48 14) (28 45 13) (36 48 12)
+                        (44 46 14) (52 47 12)))
+    (plant-wood world '((14 9 8) (30 10 8)) :kind :round)
     (world-scene world)))
 
 (defmethod atelier-cameras ((piece (eql :arcade)))
@@ -612,6 +651,9 @@ the top of a wall one does not want turfed.  #JNJF28"
     (grass-the-flats world :flat 1 :depth 1)
     (scatter-boulders world '((17 22 2) (21 17 1) (46 23 2) (50 18 1)
                              (13 16 1) (42 20 1) (26 21 2) (39 25 1)))
+    ;; Firs on the apron, and two on the cliff top, for scale.
+    (plant-wood world '((11 12 10) (19 8 12) (44 10 11) (52 14 10)
+                        (24 12 8) (40 6 12) (8 24 9) (55 26 9)))
     (world-scene world)))
 
 (defmethod atelier-cameras ((piece (eql :grotto)))
@@ -671,6 +713,11 @@ the top of a wall one does not want turfed.  #JNJF28"
         (let ((top (or (column-top world (first stone) (second stone)) 17)))
           (fill-box world (first stone) (first stone)
                     (second stone) (second stone) top (+ top 4)))))
+    ;; A wood on the plateau, thinning toward the exposed edge.
+    (plant-wood world '((22 55 9) (29 59 11) (37 57 10) (45 53 9)
+                        (17 51 8) (51 58 10) (41 61 11) (12 56 9)
+                        (57 54 8) (33 52 7) (25 49 8) (48 48 7)))
+    (plant-wood world '((20 47 7) (44 45 7)) :kind :round)
     ;; The path: one worn line just back from the edge, in the soil the
     ;; turf has been walked off.  A path is a repainting, not a building.
     (loop for x from 2 to 61
@@ -692,8 +739,8 @@ the top of a wall one does not want turfed.  #JNJF28"
                                :look-z 10.0 :field-of-view 0.76))
    ;; On the plateau by the standing stones, the cairn closing the view
    ;; and the edge falling away past it.
-   (cons :top (studio-camera 50.0 58.0 25.0 :look-x 30.0 :look-y 42.0
-                             :look-z 18.0 :field-of-view 0.80))))
+   (cons :top (studio-camera 59.0 28.0 26.0 :look-x 28.0 :look-y 48.0
+                             :look-z 17.0 :field-of-view 0.82))))
 
 ;;; ------------------------------------------------------------------------
 ;;; Sheets of the pieces
@@ -850,6 +897,10 @@ knowing what it is cut from."
       (fill-disc world 45 46 2 (+ plateau 12) (+ plateau 13)))
     (scatter-boulders world '((10 20 2) (54 22 2) (18 32 1) (48 30 1)
                              (8 40 2) (58 36 2) (38 18 1) (20 26 1)))
+    ;; Firs on the shore behind the bridgehead, and two round trees in the
+    ;; yard, which is the whole of the town's planting.
+    (plant-wood world '((10 6 12) (18 3 10) (42 4 11) (52 8 12) (22 8 9)))
+    (plant-wood world '((22 53 7) (37 51 7)) :kind :round)
     (world-scene world)))
 
 (defmethod atelier-cameras ((piece (eql :holm)))

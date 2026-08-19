@@ -164,6 +164,8 @@ mesh shaders.")
            #:grass-the-flats
            #:column-top
            #:scatter-boulders
+           #:plant-tree
+           #:plant-wood
            #:arch-rise
            #:studio-cameras
            #:studio-camera
