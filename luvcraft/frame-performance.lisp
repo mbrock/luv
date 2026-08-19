@@ -37,16 +37,18 @@
   (let ((record (gensym "SAMPLE"))
         (started (gensym "STARTED")))
     `(with-cpu-trace-zone (,zone)
-       (let ((,record ,sample))
-         (if ,record
-             (let ((,started (get-internal-real-time)))
-               (unwind-protect
-                    (progn ,@body)
-                 (incf (,accessor ,record)
-                       (/ (- (get-internal-real-time) ,started)
-                          (coerce internal-time-units-per-second
-                                  'double-float)))))
-             (progn ,@body))))))
+       (let* ((,record ,sample)
+              (,started (and ,record (get-internal-real-time))))
+         ;; One body serves sampled and unsampled frames.  Besides making the
+         ;; semantic guarantee obvious, this keeps a large render pass from
+         ;; appearing twice in the compiler IR at every timing boundary.
+         (unwind-protect
+              (progn ,@body)
+           (when ,record
+             (incf (,accessor ,record)
+                   (/ (- (get-internal-real-time) ,started)
+                      (coerce internal-time-units-per-second
+                              'double-float)))))))))
 
 ;;; Tracy watches the same frame path live, where the sample struct above
 ;;; watches a fixed batch of frames and prints the result.  The two are meant

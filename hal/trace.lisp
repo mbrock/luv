@@ -230,13 +230,15 @@ it.  #OHNIWM"
     `(with-tracy-zone
          (,name ,@(when tracy-value-supplied-p
                     `(:value ,tracy-value)))
-       (let ((,trace *cpu-trace*))
-         (if ,trace
-             (let ((,index (begin-cpu-trace-zone ,trace ,name)))
-               (unwind-protect
-                    (progn ,@body)
-                 (end-cpu-trace-zone ,trace ,index)))
-             (progn ,@body))))))
+       (let* ((,trace *cpu-trace*)
+              (,index (and ,trace (begin-cpu-trace-zone ,trace ,name))))
+         ;; BODY occurs once so nested instrumentation does not multiply the
+         ;; compiler's input.  TRACE, rather than INDEX, guards cleanup because
+         ;; zero is a valid first zone index.
+         (unwind-protect
+              (progn ,@body)
+           (when ,trace
+             (end-cpu-trace-zone ,trace ,index)))))))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defun zoned-definition-name-and-options (specification)

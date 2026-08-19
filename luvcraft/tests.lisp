@@ -1221,6 +1221,22 @@
     (value)
   value)
 
+(defun tree-occurrences (needle tree)
+  (cond ((eq needle tree) 1)
+        ((consp tree)
+         (+ (tree-occurrences needle (car tree))
+            (tree-occurrences needle (cdr tree))))
+        (t 0)))
+
+(deftest instrumentation-macros-keep-their-body-singular
+  (dolist (form
+           '((with-tracy-zone (:test/expansion) compile-marker)
+             (with-cpu-trace-zone (:test/expansion) compile-marker)
+             (with-luvcraft-frame-timing
+                 (nil luvcraft-frame-sample-frame-seconds :test/expansion)
+               compile-marker)))
+    (ok (= 1 (tree-occurrences 'compile-marker (macroexpand-1 form))))))
+
 (deftest concise-zones-preserve-definitions-and-infer-stable-names
   (let ((trace (make-cpu-trace :label "concise zones")))
     (with-cpu-trace (trace)

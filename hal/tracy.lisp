@@ -259,33 +259,39 @@ survive SAVE-LISP-AND-DIE even though the Lisp pointer object does.  A computed
 NAME still works through luv's source-location table, which is slower but
 reuses the same stable foreign record instead of growing Tracy's allocation
 table on every entry."
-  (let ((context (gensym "CONTEXT"))
+  (let ((enabled (gensym "ENABLED"))
+        (context (gensym "CONTEXT"))
         (location-cell (gensym "LOCATION-CELL"))
         (literal (tracy-literal-zone-name name))
         (file (if *compile-file-truename*
                   (namestring *compile-file-truename*)
                   "")))
-    `(if *tracy*
-         (let* (,@(when literal
-                    `((,location-cell (load-time-value (cons nil nil) nil))))
-                (,context
-                 ,(if literal
-                      `(%tracy-emit-zone-begin
-                        (or (car ,location-cell)
-                            (setf (car ,location-cell)
-                                  (tracy-source-location
-                                   ,literal :file ,file :color ,color)))
-                        1)
-                      `(%tracy-emit-zone-begin
-                        (tracy-source-location
-                         (tracy-zone-name ,name) :file ,file :color ,color)
-                        1))))
-            (unwind-protect
-                 (progn ,@body)
-              ,@(when value-supplied-p
-                  `((%tracy-emit-zone-value ,context ,value)))
-              (%tracy-emit-zone-end ,context)))
-         (progn ,@body))))
+    `(let (,@(when literal
+               `((,location-cell (load-time-value (cons nil nil) nil))))
+           (,enabled *tracy*)
+           (,context nil))
+       (when ,enabled
+         (setf ,context
+               ,(if literal
+                    `(%tracy-emit-zone-begin
+                      (or (car ,location-cell)
+                          (setf (car ,location-cell)
+                                (tracy-source-location
+                                 ,literal :file ,file :color ,color)))
+                      1)
+                    `(%tracy-emit-zone-begin
+                      (tracy-source-location
+                       (tracy-zone-name ,name) :file ,file :color ,color)
+                      1))))
+       ;; Keep BODY in the expansion exactly once.  Duplicating it into active
+       ;; and inactive branches made nested frame instrumentation multiply a
+       ;; large caller's compiler input even though only one branch ran.
+       (unwind-protect
+            (progn ,@body)
+         (when ,enabled
+           ,@(when value-supplied-p
+               `((%tracy-emit-zone-value ,context ,value)))
+           (%tracy-emit-zone-end ,context))))))
 
 ;;; Frames, plots, and messages.
 
