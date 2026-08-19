@@ -35,6 +35,31 @@ emit per frame; a rounded slab counts for several.")
 (defconstant +player-body-bob-rate+ 9.0d0
   "Radians of walking bob per second at full walking speed.")
 
+;;; The eye bobs with the body.  The head is highest passing over the
+;;; standing leg and lowest at each footfall, so the eye rises twice per
+;;; bob cycle and sways once; the arms above already follow the same phase,
+;;; so the two motions read as one body walking.  These are knobs so the
+;;; gait can be tuned from play without a rebuild.
+(defparameter *player-view-bob-lift* 0.045d0
+  "Peak-to-trough rise of the eye over one step, in cells.")
+(defparameter *player-view-bob-sway* 0.022d0
+  "Sideways amplitude of the eye over one stride, in cells.")
+(defparameter *player-view-land-dip* 0.035d0
+  "Eye dip per cell-per-second of landing speed, in cells.")
+(defparameter *player-view-land-seconds* 0.28d0
+  "How long the landing dip takes to go down and come back.")
+
+(define-knob view-bob-lift
+    (:group :player :label "bob lift"
+     :quantity (:quantity :player-eye-height :unit :cell)
+     :type double-float :minimum 0d0 :maximum 0.15d0 :step 0.005d0)
+    *player-view-bob-lift*)
+(define-knob view-bob-sway
+    (:group :player :label "bob sway"
+     :quantity (:quantity :player-eye-height :unit :cell)
+     :type double-float :minimum 0d0 :maximum 0.1d0 :step 0.005d0)
+    *player-view-bob-sway*)
+
 ;;; ---------------------------------------------------------------------
 ;;; What a hand can hold.
 
@@ -122,6 +147,16 @@ the default hand holds things but does nothing with them."))
               :accessor player-body-bob-phase)
    (bob-amount :initform 0d0 :type double-float
                :accessor player-body-bob-amount)
+   ;; The landing: the last downward speed seen while airborne, whether the
+   ;; body was on the ground last frame, and how deep and how far along
+   ;; the current landing dip is.
+   (airborne-speed :initform 0d0 :type double-float
+                   :accessor player-body-airborne-speed)
+   (grounded-p :initform t :accessor player-body-grounded-p)
+   (land-depth :initform 0d0 :type double-float
+               :accessor player-body-land-depth)
+   (land-elapsed :initform 1d0 :type double-float
+                 :accessor player-body-land-elapsed)
    ;; A time base for the small breathing sway of a body that is not
    ;; walking anywhere.
    (clock :initform 0d0 :type double-float :accessor player-body-clock))
@@ -187,8 +222,54 @@ it away when it is already the thing in hand.  Returns what is now held."
       (incf (player-body-bob-phase body)
             (* fraction +player-body-bob-rate+ seconds))
       (setf (player-body-bob-amount body)
-            (ease (player-body-bob-amount body) fraction 6d0))))
+            (ease (player-body-bob-amount body) fraction 6d0))
+      (when player
+        (let ((grounded-p (player-grounded-p player)))
+          (cond ((not grounded-p)
+                 (setf (player-body-airborne-speed body)
+                       (min (player-body-airborne-speed body)
+                            (player-velocity-y player))))
+                ((not (player-body-grounded-p body))
+                 ;; Touchdown: the knees take the fall speed.
+                 (setf (player-body-land-depth body)
+                       (min 0.3d0
+                            (* *player-view-land-dip*
+                               (max 0d0
+                                    (- (player-body-airborne-speed body)))))
+                       (player-body-land-elapsed body) 0d0
+                       (player-body-airborne-speed body) 0d0)))
+          (setf (player-body-grounded-p body) grounded-p))
+        (incf (player-body-land-elapsed body) seconds)
+        (unless (or (luvcraft-session-focus-camera-active-p session)
+                    (let ((focus (luvcraft-session-modal-focus session)))
+                      (and focus (luvcraft-focus-carries-player-p focus))))
+          (place-player-view body player (luvcraft-session-camera session))))))
   body)
+
+(defun player-body-view-offset (body)
+  "The eye's displacement from the player's nominal eye point, as (SWAY
+LIFT): SWAY along the camera's right, LIFT along world up."
+  (let* ((phase (player-body-bob-phase body))
+         (bob (player-body-bob-amount body))
+         (lift (* bob *player-view-bob-lift* (- (expt (sin phase) 2) 0.5d0)))
+         (sway (* bob *player-view-bob-sway* (sin phase)))
+         (elapsed (player-body-land-elapsed body))
+         (dip (if (< elapsed *player-view-land-seconds*)
+                  (* (player-body-land-depth body)
+                     (sin (* pi (/ elapsed *player-view-land-seconds*))))
+                  0d0)))
+    (values sway (- lift dip))))
+
+(defun place-player-view (body player camera)
+  "Put CAMERA at PLAYER's eye, displaced by BODY's walking bob and landing."
+  (sync-camera-to-player camera player)
+  (multiple-value-bind (sway lift) (player-body-view-offset body)
+    (let ((position (camera-position camera))
+          (yaw (camera-yaw camera)))
+      (incf (vec3-x position) (* sway (cos yaw)))
+      (incf (vec3-z position) (- (* sway (sin yaw))))
+      (incf (vec3-y position) lift)))
+  camera)
 
 ;;; ---------------------------------------------------------------------
 ;;; Boxes in a frame.
