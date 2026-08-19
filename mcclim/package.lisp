@@ -88,6 +88,7 @@
            #:capture-default-shader-lab-screenshot
            #:capture-gpu-mirror-screenshot
            #:draw-analytic-rounded-rectangle*
+           #:draw-lattice*
            #:linear-gradient
            #:radial-gradient
            #:make-linear-gradient

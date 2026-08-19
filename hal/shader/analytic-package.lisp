@@ -5,4 +5,5 @@
   (:export #:roundrect-signed-distance
            #:roundrect-coverage
            #:roundrect-vertex-specification
-           #:roundrect-fragment-specification))
+           #:roundrect-fragment-specification
+           #:lattice-fragment-specification))

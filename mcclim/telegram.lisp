@@ -524,12 +524,6 @@ a finished view for a McCLIM frame to paint."))
   (publish-console-view console :status "asking for a code…")
   (handler-case
       (let ((login (telegram.client:begin-qr-login)))
-        ;; ADVANCE-TELEGRAM-CONSOLE has to come back often enough to answer
-        ;; the player, so the wait for UPDATE-LOGIN-TOKEN is many short reads
-        ;; rather than one thirty-second one.
-        (setf (telegram.net:connection-read-timeout
-               (telegram.client:qr-login-connection login))
-              1)
         (setf (console-login console) login)
         (show-console-qr console))
     (error (condition)
@@ -537,12 +531,21 @@ a finished view for a McCLIM frame to paint."))
 
 (defun advance-console-qr-login (console)
   "One short wait for the phone to accept the code, then show whatever the
-login has now: the conversations, or a freshened code."
+login has now: the conversations, the password question, or a fresh code."
   (let* ((login (console-login console))
          (token (telegram.client:qr-login-token login)))
     (telegram.client:poll-qr-login login)
     (cond ((telegram.client:qr-login-user login)
            (finish-console-login console))
+          ((telegram.client:qr-login-password-hint login)
+           ;; The phone said yes and the account has a password: same
+           ;; question as a code login's, answered over this connection.
+           (setf (console-qr console) nil)
+           (enter-login-stage
+            console :password
+            :note (let ((hint (telegram.client:qr-login-password-hint login)))
+                    (when (plusp (length hint))
+                      (format nil "hint: ~A" hint)))))
           ((not (equalp token (telegram.client:qr-login-token login)))
            (show-console-qr console)))))
 
@@ -766,10 +769,17 @@ pictures appearing over a second or two is the better failure."
                     (error (condition)
                       ;; A dropped socket is ordinary: Telegram closes an idle
                       ;; connection and the next call notices.  Forget it and
-                      ;; the next pass resumes.
+                      ;; the next pass resumes.  Any login in progress owned
+                      ;; that connection, so it is over too: let it go and
+                      ;; clear its stage, or the loop would keep polling a
+                      ;; dead socket at a question no answer can advance --
+                      ;; the panel stuck saying "reconnecting" forever.
                       (publish-console-view
                        console :status "reconnecting…"
                        :failure (princ-to-string condition))
+                      (ignore-errors (forget-console-login console))
+                      (setf (console-login-stage console) nil
+                            (console-login-note console) nil)
                       (ignore-errors (telegram.client:disconnect))
                       (sleep 3))))
       (ignore-errors (forget-console-login console))
@@ -1075,70 +1085,20 @@ back, it holds its place instead of being dragged along by every arrival."
                             :align-y :center :text-size 14
                             :ink *communicator-text-ink*)))))))
 
-(defun qr-module-rectangles (modules)
-  "MODULES as a list of maximal (row column rows columns) dark rectangles.
-
-Not one rectangle per module, which is the obvious drawing and the wrong
-one: an antialiasing rasterizer gives every edge partial coverage, so two
-adjacent dark squares each cover half of the pixel column they share and
-composite to something lighter than either.  The result is a light hairline
-along every module boundary -- thinner than a pixel once the panel is
-minified onto a slab that bobs in the hand, which is to say a shimmer.  Two
-touching modules have to be one shape with no edge between them."
-  (let* ((rows (array-dimension modules 0))
-         (columns (array-dimension modules 1))
-         (taken (make-array (list rows columns) :element-type 'bit
-                                                :initial-element 0))
-         (rectangles '()))
-    (flet ((free-dark-p (row column)
-             (and (= 1 (aref modules row column))
-                  (= 0 (aref taken row column)))))
-      (dotimes (row rows (nreverse rectangles))
-        (let ((column 0))
-          (loop while (< column columns)
-                do (if (free-dark-p row column)
-                       (let ((width 0) (height 1))
-                         ;; The run to the right, then as far down as the
-                         ;; whole run repeats.
-                         (loop while (and (< (+ column width) columns)
-                                          (free-dark-p row (+ column width)))
-                               do (incf width))
-                         (loop while
-                               (and (< (+ row height) rows)
-                                    (loop for offset below width
-                                          always (free-dark-p (+ row height)
-                                                              (+ column offset))))
-                               do (incf height))
-                         (dotimes (r height)
-                           (dotimes (c width)
-                             (setf (aref taken (+ row r) (+ column c)) 1)))
-                         (push (list row column height width) rectangles)
-                         (incf column width))
-                       (incf column))))))))
-
 (defun draw-communicator-qr (pane modules top)
   "MODULES drawn under TOP, centred in the well.  Returns the bottom edge.
 
-A QR code is read by threshold, so it wants the plainest drawing there is:
-whole light modules and whole dark ones, at an integer number of pixels per
-module on an integer origin, so no module edge lands on a fraction of a
-pixel.  The quiet zone is already in the array, and the light modules are
-painted rather than left to the well, which is the dark ink a camera would
-otherwise read as part of the code."
-  (let* ((size (array-dimension modules 0))
-         (room (- *communicator-screen-bottom* top 10))
-         (scale (max 1 (floor (min room (- *communicator-width*
-                                           (* 2 +communicator-inset+)))
-                              size)))
-         (side (* scale size))
-         (left (floor (- *communicator-width* side) 2)))
-    (draw-rectangle* pane left top (+ left side) (+ top side) :ink +white+)
-    (loop for (row column rows columns) in (qr-module-rectangles modules)
-          for x = (+ left (* scale column))
-          for y = (+ top (* scale row))
-          do (draw-rectangle* pane x y (+ x (* scale columns))
-                              (+ y (* scale rows))
-                              :ink +black+))
+One DRAW-LATTICE* primitive: the whole code -- paper, quiet zone, and
+modules together -- is a single analytic shape whose fragment integrates
+the module grid exactly over each pixel's footprint, so no module edge can
+composite against another and nothing shimmers as the phone moves.  Whole
+pixels per module stopped mattering when the filtering became exact, so
+the code simply fills the well."
+  (let* ((side (min (- *communicator-screen-bottom* top 10)
+                    (- *communicator-width* (* 2 +communicator-inset+))))
+         (left (/ (- *communicator-width* side) 2)))
+    (draw-lattice* pane modules left top (+ left side) (+ top side)
+                   :ink +black+)
     (+ top side)))
 
 (luv:zdefun (draw-communicator-login

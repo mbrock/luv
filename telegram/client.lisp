@@ -84,6 +84,7 @@ negotiation, and one INVOKE that turns a schema object into an answer.")
            #:qr-login-connection
            #:qr-login-token
            #:qr-login-expires
+           #:qr-login-password-hint
            #:qr-login-uri
            #:qr-login-modules
            #:qr-code-modules

@@ -82,6 +82,15 @@ mirror's identity: a later target may be a texture presented on a 3D quad."))
    (image-paints
     :initform (make-hash-table :test #'eq)
     :reader gpu-mirror-image-paints)
+   (lattice-vertex-module
+    :initform nil :accessor gpu-mirror-lattice-vertex-module)
+   (lattice-fragment-module
+    :initform nil :accessor gpu-mirror-lattice-fragment-module)
+   (lattice-layout :initform nil :accessor gpu-mirror-lattice-layout)
+   (lattice-pipeline :initform nil :accessor gpu-mirror-lattice-pipeline)
+   (lattice-paints
+    :initform (make-hash-table :test #'eq)
+    :reader gpu-mirror-lattice-paints)
    (slug-cache :initform nil :accessor gpu-mirror-slug-cache)
    (text-vertex-module :initform nil
                        :accessor gpu-mirror-text-vertex-module)

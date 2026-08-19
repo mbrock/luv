@@ -23,6 +23,15 @@
 
 (defstruct gpu-prepared-image-command paint first-vertex vertex-count clip)
 
+;; A lattice command's vertices live in the ANALYTIC vertex stream: the
+;; record is the same twelve floats with the lanes reinterpreted (cell
+;; coordinates, grid dimensions, the inked cells' color), so the lattice
+;; family borrows the analytic buffer and both analytic vertex stages, and
+;; differs only in its fragment shader and its summed-area texture.
+(defstruct gpu-lattice-command modules first-vertex vertex-count clip)
+
+(defstruct gpu-prepared-lattice-command paint first-vertex vertex-count clip)
+
 (defstruct gpu-text-command
   string x y font-pathname size color align-x align-y clip)
 
@@ -810,6 +819,119 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
             medium x1 y1 x2 y2 radius filled))
          options))
 
+;;; The lattice primitive: a grid of unit cells as ONE analytic shape.
+;;;
+;;; Drawn as many rectangles, every shared module edge is a compositing
+;;; boundary: two half-covered fragments of the same ink OVER-composite to
+;;; three quarters, a hairline that shimmers as the surface moves.  As one
+;;; primitive there is no interior boundary at all -- the fragment shader
+;;; integrates the grid exactly over its own footprint (see
+;;; hal/shader/lattice.lisp), so the drawing is seam-proof by construction
+;;; rather than by alignment.
+
+(defun gpu-medium-append-lattice-quad (medium modules x1 y1 x2 y2 color)
+  "Append MODULES as one exactly box-filtered lattice quad, or return NIL."
+  (let* ((rows (array-dimension modules 0))
+         (columns (array-dimension modules 1)))
+    (when (and (plusp rows) (plusp columns))
+      (let* ((x-axis (list (/ (- x2 x1) columns) 0.0))
+             (y-axis (list 0.0 (/ (- y2 y1) rows)))
+             (padding (gpu-medium-analytic-padding medium x-axis y-axis)))
+        (when padding
+          (let* ((vertices (gpu-medium-analytic-vertices medium))
+                 (first-vertex (/ (length vertices) 12))
+                 (origin (list x1 y1))
+                 (left (- padding))
+                 (right (+ columns padding))
+                 (top (- padding))
+                 (bottom (+ rows padding)))
+            (flet ((vertex (x y)
+                     (gpu-medium-push-analytic-vertex
+                      medium origin x-axis y-axis x y
+                      columns rows 0.0 color)))
+              (vertex left bottom)
+              (vertex right bottom)
+              (vertex right top)
+              (vertex left bottom)
+              (vertex right top)
+              (vertex left top))
+            (vector-push-extend
+             (make-gpu-lattice-command
+              :modules modules
+              :first-vertex first-vertex :vertex-count 6
+              :clip (gpu-medium-clip-rectangle medium))
+             (gpu-medium-commands medium))
+            t))))))
+
+(defgeneric medium-draw-lattice* (medium modules x1 y1 x2 y2)
+  (:documentation
+   "Draw MODULES -- a bit array of unit cells, 1 where inked -- filling the
+rectangle as one exactly filtered primitive when MEDIUM supports it.  The
+medium's ink paints the inked cells, the zero cells are white paper, and
+the paper's edge is the primitive's own filtered boundary."))
+
+(defmethod medium-draw-lattice* (medium modules x1 y1 x2 y2)
+  ;; Portable decomposition: white paper, then one rectangle per inked
+  ;; cell.  Hairlines between adjacent cells are this decomposition's
+  ;; nature; a backend with the primitive has none.
+  (let* ((rows (array-dimension modules 0))
+         (columns (array-dimension modules 1))
+         (cell-width (/ (- x2 x1) columns))
+         (cell-height (/ (- y2 y1) rows))
+         (ink (medium-ink medium)))
+    (setf (medium-ink medium) +white+)
+    (unwind-protect
+         (medium-draw-rectangle* medium x1 y1 x2 y2 t)
+      (setf (medium-ink medium) ink))
+    (dotimes (row rows)
+      (dotimes (column columns)
+        (when (= 1 (aref modules row column))
+          (let ((left (+ x1 (* column cell-width)))
+                (top (+ y1 (* row cell-height))))
+            (medium-draw-rectangle*
+             medium left top
+             (+ left cell-width) (+ top cell-height) t)))))))
+
+(defmethod medium-draw-lattice*
+    ((medium luv-gpu-medium) modules x1 y1 x2 y2)
+  (let ((color (ignore-errors (gpu-medium-color medium))))
+    (unless (and color
+                 (gpu-medium-append-lattice-quad
+                  medium modules x1 y1 x2 y2 color))
+      (call-next-method))))
+
+(climi::def-grecording draw-lattice
+    (climi::gs-transformation-mixin)
+    (modules x1 y1 x2 y2)
+  (with-bounding-rectangle* (left top right bottom)
+      (transform-region
+       (medium-transformation stream)
+       (make-rectangle* x1 y1 x2 y2))
+    (values left top right bottom)))
+
+(defmethod medium-draw-lattice* :around
+    ((stream output-recording-stream) modules x1 y1 x2 y2)
+  (cond
+    ((stream-recording-p stream)
+     (let ((record
+             (make-instance
+              'draw-lattice-output-record
+              :stream stream :modules modules
+              :x1 x1 :y1 y1 :x2 x2 :y2 y2)))
+       (stream-add-output-record stream record)))
+    ((stream-drawing-p stream)
+     (with-sheet-medium (medium stream)
+       (medium-draw-lattice* medium modules x1 y1 x2 y2)))))
+
+(defun draw-lattice* (sheet modules x1 y1 x2 y2 &rest options)
+  "Draw a unit-cell bit grid as one exactly filtered backend primitive.
+INK paints the inked cells on white paper; the whole grid, paper edge
+included, is a single coverage computation, so nothing in it can seam."
+  (apply #'invoke-with-drawing-options sheet
+         (lambda (medium)
+           (medium-draw-lattice* medium modules x1 y1 x2 y2))
+         options))
+
 (defmethod medium-draw-bezigon* :around
     ((medium luv-gpu-medium) coordinates closed filled)
   (with-gpu-medium-fallback (medium :bezigon)
@@ -947,6 +1069,15 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
                         :vertex-count
                         (gpu-analytic-command-vertex-count command)
                         :clip (gpu-analytic-command-clip command)))
+                      (gpu-lattice-command
+                       (make-gpu-lattice-command
+                        :modules (gpu-lattice-command-modules command)
+                        :first-vertex
+                        (+ analytic-offset
+                           (gpu-lattice-command-first-vertex command))
+                        :vertex-count
+                        (gpu-lattice-command-vertex-count command)
+                        :clip (gpu-lattice-command-clip command)))
                       (gpu-relief-analytic-command
                        (make-gpu-relief-analytic-command
                         :first-vertex
@@ -1239,6 +1370,15 @@ family name adopted."
      (luv:destroy (gpu-image-paint-texture paint)))
    (gpu-mirror-image-paints mirror))
   (clrhash (gpu-mirror-image-paints mirror))
+  (maphash
+   (lambda (modules paint)
+     (declare (ignore modules))
+     (alexandria:when-let ((group (gpu-lattice-paint-bind-group paint)))
+       (luv:destroy group))
+     (luv:destroy (gpu-lattice-paint-view paint))
+     (luv:destroy (gpu-lattice-paint-texture paint)))
+   (gpu-mirror-lattice-paints mirror))
+  (clrhash (gpu-mirror-lattice-paints mirror))
   (maphash (lambda (atlas group)
              (declare (ignore atlas))
              (luv:destroy group))
@@ -1270,6 +1410,10 @@ family name adopted."
                   (gpu-mirror-image-fragment-module mirror)
                   (gpu-mirror-image-vertex-module mirror)
                   (gpu-mirror-image-layout mirror)
+                  (gpu-mirror-lattice-pipeline mirror)
+                  (gpu-mirror-lattice-fragment-module mirror)
+                  (gpu-mirror-lattice-vertex-module mirror)
+                  (gpu-mirror-lattice-layout mirror)
                   (gpu-mirror-layout mirror)))
     (when resource (luv:destroy resource)))
   (setf (gpu-mirror-pipeline mirror) nil
@@ -1289,6 +1433,10 @@ family name adopted."
         (gpu-mirror-image-fragment-module mirror) nil
         (gpu-mirror-image-vertex-module mirror) nil
         (gpu-mirror-image-layout mirror) nil
+        (gpu-mirror-lattice-pipeline mirror) nil
+        (gpu-mirror-lattice-fragment-module mirror) nil
+        (gpu-mirror-lattice-vertex-module mirror) nil
+        (gpu-mirror-lattice-layout mirror) nil
         (gpu-mirror-layout mirror) nil
         (gpu-mirror-uniform-buffer mirror) nil
         (gpu-mirror-bind-group mirror) nil
@@ -1505,6 +1653,64 @@ family name adopted."
           (dolist (resource (remove nil (list pipeline fragment vertex)))
             (luv:destroy resource)))))))
 
+(defun ensure-gpu-mirror-lattice-pipeline (mirror device format)
+  ;; The lattice family reuses the analytic vertex stage and vertex layout
+  ;; wholesale -- its vertices live in the analytic buffer -- and differs
+  ;; only in the fragment stage and the summed-area texture it reads.
+  (unless (gpu-mirror-lattice-pipeline mirror)
+    (let ((vertex nil) (fragment nil) (layout nil) (pipeline nil)
+          (completed-p nil))
+      (unwind-protect
+           (progn
+             (setf vertex
+                   (luv:create
+                    device
+                    (luv:make-shader-module-descriptor
+                     :label "McCLIM lattice vertex" :language :mathematical
+                     :code (luv.analytic:roundrect-vertex-specification)))
+                   fragment
+                   (luv:create
+                    device
+                    (luv:make-shader-module-descriptor
+                     :label "McCLIM lattice fragment" :language :mathematical
+                     :code (luv.analytic:lattice-fragment-specification)))
+                   layout
+                   (luv:create
+                    device
+                    (luv:make-bind-group-layout-descriptor
+                     :label "McCLIM lattice table"
+                     :entries '((:binding 0 :type :texture))))
+                   pipeline
+                   (luv:create
+                    device
+                    (luv:make-render-pipeline-descriptor
+                     :label "direct McCLIM lattice"
+                     :layout layout
+                     :vertex
+                     `(:module ,vertex
+                       :buffers
+                       ((:array-stride 48
+                         :attributes
+                         ((:shader-location 0 :offset 0 :format :float32x3)
+                          (:shader-location 1 :offset 12 :format :float32x3)
+                          (:shader-location 2 :offset 24 :format :float32x3)
+                          (:shader-location 3 :offset 36
+                           :format :float32x3)))))
+                     :fragment
+                     `(:module ,fragment
+                       :targets
+                       ((:format ,format :blend :premultiplied-alpha)))
+                     :primitive '(:topology :triangle-list))))
+             (setf (gpu-mirror-lattice-vertex-module mirror) vertex
+                   (gpu-mirror-lattice-fragment-module mirror) fragment
+                   (gpu-mirror-lattice-layout mirror) layout
+                   (gpu-mirror-lattice-pipeline mirror) pipeline
+                   completed-p t))
+        (unless completed-p
+          (dolist (resource
+                    (remove nil (list pipeline layout fragment vertex)))
+            (luv:destroy resource)))))))
+
 (defun ensure-gpu-mirror-text-pipeline (mirror device format)
   (unless (gpu-mirror-text-pipeline mirror)
     (let ((vertex nil) (fragment nil) (layout nil) (pipeline nil)
@@ -1652,6 +1858,7 @@ family name adopted."
     (ensure-gpu-mirror-relief-pipeline mirror device format)
     (ensure-gpu-mirror-gradient-analytic-pipeline mirror device format)
     (ensure-gpu-mirror-image-pipeline mirror device format)
+    (ensure-gpu-mirror-lattice-pipeline mirror device format)
     (ensure-gpu-mirror-text-pipeline mirror device format)))
 
 (defun ensure-embedded-gpu-mirror-preparation-resources (mirror device)
@@ -1873,6 +2080,82 @@ family name adopted."
                           (remove nil (list bind-group view texture)))
                   (luv:destroy resource)))))))))
 
+(defstruct gpu-lattice-paint texture view bind-group)
+
+(defun lattice-summed-area-table (modules)
+  "MODULES (a ROWS x COLUMNS bit array, 1 where a cell is inked) as its
+summed-area table on the (ROWS+1) x (COLUMNS+1) node lattice, packed for an
+RG16-UINT texture with the count in the low word.
+
+Node (row, column) counts the inked cells strictly below and left of it.
+The table of a unit-cell-constant function is exactly bilinear within each
+cell, which is what lets the fragment shader recover continuous box
+integrals from four taps.  Sixteen bits hold any grid up to 256 x 256 of
+solid ink."
+  (let* ((rows (array-dimension modules 0))
+         (columns (array-dimension modules 1))
+         (table (make-array (list (1+ rows) (1+ columns))
+                            :element-type '(unsigned-byte 32)
+                            :initial-element 0)))
+    (dotimes (row rows table)
+      (dotimes (column columns)
+        (setf (aref table (1+ row) (1+ column))
+              (+ (aref modules row column)
+                 (aref table row (1+ column))
+                 (aref table (1+ row) column)
+                 (- (aref table row column))))))))
+
+(defun ensure-gpu-lattice-paint (mirror modules)
+  "The summed-area texture for MODULES, cached by the grid's identity."
+  (let ((cache (gpu-mirror-lattice-paints mirror)))
+    (or (gethash modules cache)
+        (let* ((table (lattice-summed-area-table modules))
+               (height (array-dimension table 0))
+               (width (array-dimension table 1))
+               (device (mirror-device mirror))
+               (texture nil) (view nil) (bind-group nil)
+               (completed-p nil))
+          (unwind-protect
+               (progn
+                 (setf texture
+                       (luv:create
+                        device
+                        (luv:make-texture-descriptor
+                         :label "cached McCLIM lattice table"
+                         :size (list width height) :dimensions :2d
+                         :format :rg16-uint
+                         :usage '(:texture-binding :copy-dst)))
+                       view
+                       (luv:create
+                        device
+                        (luv:make-texture-view-descriptor
+                         :texture texture)))
+                 (luv:write-texture
+                  (luv:device-queue device)
+                  (luv:make-texture-copy :texture texture)
+                  table
+                  (luv:make-texture-data-layout
+                   :bytes-per-row (* 4 width)
+                   :rows-per-image height)
+                  (list width height))
+                 (when (gpu-mirror-lattice-layout mirror)
+                   (setf bind-group
+                         (luv:create
+                          device
+                          (luv:make-bind-group-descriptor
+                           :label "cached McCLIM lattice bindings"
+                           :layout (gpu-mirror-lattice-layout mirror)
+                           :entries `((:binding 0 :resource ,view))))))
+                 (let ((paint (make-gpu-lattice-paint
+                               :texture texture :view view
+                               :bind-group bind-group)))
+                   (setf (gethash modules cache) paint
+                         completed-p t)
+                   paint))
+            (unless completed-p
+              (dolist (resource (remove nil (list bind-group view texture)))
+                (luv:destroy resource))))))))
+
 (defun ensure-gpu-text-bind-group (mirror atlas)
   (or (gethash atlas (gpu-mirror-text-bind-groups mirror))
       (setf (gethash atlas (gpu-mirror-text-bind-groups mirror))
@@ -2029,6 +2312,14 @@ family name adopted."
                   (gpu-analytic-command command)
                   (gpu-relief-analytic-command command)
                   (gpu-gradient-analytic-command command)
+                  (gpu-lattice-command
+                   (make-gpu-prepared-lattice-command
+                    :paint
+                    (ensure-gpu-lattice-paint
+                     mirror (gpu-lattice-command-modules command))
+                    :first-vertex (gpu-lattice-command-first-vertex command)
+                    :vertex-count (gpu-lattice-command-vertex-count command)
+                    :clip (gpu-lattice-command-clip command)))
                   (gpu-image-command
                    (make-gpu-prepared-image-command
                     :paint
@@ -2051,6 +2342,8 @@ family name adopted."
      (gpu-relief-analytic-command-clip command))
     (gpu-gradient-analytic-command
      (gpu-gradient-analytic-command-clip command))
+    (gpu-prepared-lattice-command
+     (gpu-prepared-lattice-command-clip command))
     (gpu-prepared-image-command
      (gpu-prepared-image-command-clip command))
     (gpu-prepared-text-command
@@ -2277,6 +2570,21 @@ family name adopted."
                               command)
                              1
                              (gpu-gradient-analytic-command-first-vertex
+                              command)))
+                           (gpu-prepared-lattice-command
+                            (luv:set-pipeline
+                             pass (gpu-mirror-lattice-pipeline mirror))
+                            (luv:set-bind-group
+                             pass 0
+                             (gpu-lattice-paint-bind-group
+                              (gpu-prepared-lattice-command-paint command)))
+                            (luv:set-vertex-buffer pass 0 analytic-buffer)
+                            (luv:draw
+                             pass
+                             (gpu-prepared-lattice-command-vertex-count
+                              command)
+                             1
+                             (gpu-prepared-lattice-command-first-vertex
                               command)))
                            (gpu-prepared-image-command
                             (luv:set-pipeline

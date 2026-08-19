@@ -376,6 +376,12 @@ implemented"))
    (test :initarg :test :reader qr-login-test-p)
    (token :initform nil :accessor qr-login-token)
    (expires :initform nil :accessor qr-login-expires)
+   (password-hint :initform nil :accessor qr-login-password-hint
+                  :documentation
+                  "NIL until the accepted token stops at the account's
+two-factor password; then the account's hint string, possibly empty.  The
+token phase is over at that point: ask the person for their password and
+finish with COMPLETE-PASSWORD over this same connection.")
    (user :initform nil :accessor qr-login-user))
   (:documentation
    "One pending Telegram QR login, including the connection which receives
@@ -504,25 +510,58 @@ data centre and imports the single-use token there."
                                         :test (qr-login-test-p login))))
        (setf (qr-login-connection login) connection)
        (net:close-mtproto-connection old)
-       (qr-login-token-result
+       (qr-login-token-step
         login
-        (let ((*application* (qr-login-application login)))
-          (invoke connection :auth.import-login-token :token (tl:tl-value result :token))))))
+        (lambda ()
+          (let ((*application* (qr-login-application login)))
+            (invoke connection :auth.import-login-token
+                    :token (tl:tl-value result :token)))))))
     (otherwise
      (error 'login-failed
             :detail (format nil "unexpected QR login result ~(~A~)"
                             (tl:tl-name result))))))
 
+(defun note-qr-password-gate (login)
+  "The phone accepted LOGIN's token, and the account has a password.
+
+The token phase is over -- there is nothing left to present or refresh --
+and the connection is one SRP exchange away from an authorization.  Remember
+the account's hint so a caller can ask for the password, and finish through
+COMPLETE-PASSWORD."
+  (setf (qr-login-token login) nil
+        (qr-login-expires login) nil
+        (qr-login-password-hint login)
+        (or (ignore-errors
+              (tl:tl-value (invoke (qr-login-connection login)
+                                   :account.get-password)
+                           :hint))
+            ""))
+  login)
+
+(defun qr-login-token-step (login thunk)
+  "Install THUNK's token-phase result on LOGIN, stopping at the password.
+
+SESSION_PASSWORD_NEEDED is not a failure of the login but its next stage:
+the phone has already said yes."
+  (handler-case (qr-login-token-result login (funcall thunk))
+    (mt:remote-rpc-error (error)
+      (unless (string= "SESSION_PASSWORD_NEEDED"
+                       (mt:remote-rpc-error-message error))
+        (error error))
+      (note-qr-password-gate login))))
+
 (defun refresh-qr-login (login)
   "Ask Telegram for LOGIN's current token, following a data-centre migration.
-The returned QR-LOGIN is either ready to present or has completed."
+The returned QR-LOGIN is ready to present, has completed, or is waiting on
+the account's password."
   (let ((*application* (qr-login-application login)))
-    (qr-login-token-result
+    (qr-login-token-step
      login
-     (invoke (qr-login-connection login) :auth.export-login-token
-             :api-id (application-api-id *application*)
-             :api-hash (application-api-hash *application*)
-             :except-ids #()))))
+     (lambda ()
+       (invoke (qr-login-connection login) :auth.export-login-token
+               :api-id (application-api-id *application*)
+               :api-hash (application-api-hash *application*)
+               :except-ids #())))))
 
 (defun begin-qr-login (&key (dc-id 2) test
                              (application (or *application*
@@ -548,22 +587,34 @@ client scans and accepts it."
 (defun new-login-token-event-p (event)
   (and (eq :update (first event)) (eq :update-login-token (second event))))
 
-(defun poll-qr-login (login)
-  "Wait once for the phone to accept LOGIN's code, and return LOGIN.
+(defun poll-qr-login (login &key (timeout 1))
+  "Wait up to TIMEOUT seconds for the phone to accept LOGIN's code.
 
-One read, as long as the connection's read timeout: a caller that also has a
-player to answer sets that short and comes back.  A quiet socket is the
-ordinary case -- nothing has been scanned yet -- and an expired token is
-refreshed whether or not anything arrived, so a code on screen is always one
-a phone can still take."
-  (let* ((session (net:connection-session (qr-login-connection login)))
+Returns LOGIN, whose PASSWORD-HINT or USER says what happened.  A quiet
+socket is the ordinary case -- nothing has been scanned yet -- and an
+expired token is refreshed whether or not anything arrived, so a code on
+screen is always one a phone can still take.
+
+Only the wait itself runs at TIMEOUT: the connection's own read timeout is
+put back before the export that follows an acceptance, because that call
+does round trips -- possibly including a whole handshake at another data
+centre -- that a polling deadline would cut off mid-login."
+  (when (or (qr-login-user login) (qr-login-password-hint login))
+    (return-from poll-qr-login login))
+  (let* ((connection (qr-login-connection login))
+         (session (net:connection-session connection))
          (before (mt:session-events session))
+         (previous (net:connection-read-timeout connection))
          (accepted nil))
-    (handler-case
-        (progn (net:pump-connection (qr-login-connection login))
-               (setf accepted (find-if #'new-login-token-event-p
-                                       (ldiff (mt:session-events session) before))))
-      (net:connection-timeout () nil))
+    (setf (net:connection-read-timeout connection) timeout)
+    (unwind-protect
+         (handler-case
+             (progn (net:pump-connection connection)
+                    (setf accepted
+                          (find-if #'new-login-token-event-p
+                                   (ldiff (mt:session-events session) before))))
+           (net:connection-timeout () nil))
+      (setf (net:connection-read-timeout connection) previous))
     (when (or accepted (qr-login-stale-p login))
       (refresh-qr-login login))
     login))
@@ -579,17 +630,24 @@ and user.  A quiet 30-second socket is the normal token-expiry path: obtain
 and present a fresh code instead of treating that silence as a failure."
   (when present (present-qr-login login stream))
   (loop until (qr-login-user login)
-        do (let* ((session (net:connection-session (qr-login-connection login)))
-                  (old-events (mt:session-events session)))
-             (handler-case
-                 (net:pump-connection (qr-login-connection login))
-               (net:connection-timeout ()
+        when (qr-login-password-hint login)
+          do (let ((hint (qr-login-password-hint login)))
+               (format stream "~&this account has a password~@[ (hint: ~A)~]~%"
+                       (and (plusp (length hint)) hint))
+               (complete-password
+                login (prompt-quietly "Password: ") :stream stream))
+        else
+          do (let* ((session (net:connection-session (qr-login-connection login)))
+                    (old-events (mt:session-events session)))
+               (handler-case
+                   (net:pump-connection (qr-login-connection login))
+                 (net:connection-timeout ()
+                   (refresh-qr-login login)
+                   (when present (present-qr-login login stream))))
+               (when (find-if #'new-login-token-event-p
+                              (ldiff (mt:session-events session) old-events))
                  (refresh-qr-login login)
-                 (when present (present-qr-login login stream))))
-             (when (find-if #'new-login-token-event-p
-                            (ldiff (mt:session-events session) old-events))
-               (refresh-qr-login login)
-               (when present (present-qr-login login stream)))))
+                 (when present (present-qr-login login stream)))))
   (values (qr-login-connection login) (qr-login-user login)))
 
 (defun log-in-with-qr (&key (dc-id 2) test
@@ -768,16 +826,35 @@ through COMPLETE-PASSWORD with the same LOGIN."
                            :connection connection))))
      stream)))
 
-(defun complete-password (login password &key (stream *standard-output*))
-  "Answer the two-factor challenge LOGIN stopped at, and finish it.
+(defgeneric complete-password (login password &key stream)
+  (:documentation
+   "Answer the two-factor challenge LOGIN stopped at, and finish it.
 
-The code has already been accepted at that point, so this needs no new one --
-only the connection the login is still holding."
+The code or token has already been accepted at that point, so this needs no
+new one -- only the connection the login is still holding."))
+
+(defmethod complete-password
+    ((login code-login) password &key (stream *standard-output*))
   (let ((*application* (code-login-application login))
         (connection (or (code-login-connection login)
                         (error 'login-failed :detail "this login was abandoned"))))
     (finish-code-login login (check-password password :connection connection)
                        stream)))
+
+(defmethod complete-password
+    ((login qr-login) password &key (stream *standard-output*))
+  (let* ((*application* (qr-login-application login))
+         (connection (or (qr-login-connection login)
+                         (error 'login-failed :detail "this login was abandoned")))
+         (authorization (check-password password :connection connection))
+         (user (tl:tl-value authorization :user)))
+    (setf (qr-login-password-hint login) nil
+          (qr-login-user login) user)
+    (save-session connection (qr-login-session-file login))
+    (setf *application* (qr-login-application login))
+    (when stream (format stream "~&logged in as ~A~%" (user-label user)))
+    (make-current connection user)
+    login))
 
 (defun resume (&key (session-file *session-file*)
                     (application (or *application*
