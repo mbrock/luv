@@ -104,13 +104,25 @@
     (ok (not (luvcraft::luvcraft-session-pointer-captured-p session)))))
 
 (deftest software-cursor-follows-screen-pointer-coordinates
-  (let ((center (luvcraft::make-block-world-crosshair-vertices 200 100))
+  (let ((center (luvcraft::make-luvcraft-cursor-vertices 200 100 100 50))
         (top-left
-          (luvcraft::make-block-world-crosshair-vertices 200 100 0 0)))
+          (luvcraft::make-luvcraft-cursor-vertices 200 100 0 0)))
     ;; The Vulkan viewport performs the Y inversion: moving from the centre to
     ;; the top-left subtracts one in both vertex-coordinate axes here.
     (ok (= -1.0 (- (aref top-left 0) (aref center 0))))
     (ok (= -1.0 (- (aref top-left 1) (aref center 1))))))
+
+(deftest pointer-reports-coalesce-into-latest-frame-state
+  (let ((session (make-instance 'luvcraft-session)))
+    (setf (luvcraft::luvcraft-session-pointer-dirty-p session) nil)
+    (dolist (point '((12.0 18.0) (40.0 55.0) (91.0 73.0)))
+      (luvcraft::note-luvcraft-pointer-position
+       session
+       (make-instance 'luv:canvas-pointer-motion-event
+                      :timestamp 0 :x (first point) :y (second point))))
+    (ok (= 91.0 (luvcraft::luvcraft-session-pointer-x session)))
+    (ok (= 73.0 (luvcraft::luvcraft-session-pointer-y session)))
+    (ok (luvcraft::luvcraft-session-pointer-dirty-p session))))
 
 (deftest focusing-a-terminal-frames-the-whole-wall-above-the-hotbar
   (let* ((world (make-block-world :chunk-width 16

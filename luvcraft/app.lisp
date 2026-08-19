@@ -215,6 +215,7 @@ the arrow keys: a mouse for the mouseless console.")
                        :accessor luvcraft-session-pointer-captured-p)
    (pointer-x :initform nil :accessor luvcraft-session-pointer-x)
    (pointer-y :initform nil :accessor luvcraft-session-pointer-y)
+   (pointer-dirty-p :initform t :accessor luvcraft-session-pointer-dirty-p)
    (software-cursor-p :initarg :software-cursor-p :initform nil
                       :reader luvcraft-session-software-cursor-p)
    (pointer-capture-suspended-p

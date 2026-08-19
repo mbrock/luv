@@ -43,6 +43,7 @@
                            :reader luvcraft-frame-world-text-bind-groups)))
 
 (defconstant +block-world-crosshair-vertex-count+ 24)
+(defconstant +luvcraft-cursor-vertex-count+ 18)
 (defconstant +luvcraft-shadow-map-size+ 2048)
 (luv.arithmetic:define-quantity-constant
     +luvcraft-maximum-frame-duration+ 0.1d0
@@ -134,6 +135,36 @@
       (rectangle -8.0 -0.75 8.0 0.75 '(0.96 0.98 1.0)))
     (ensure-vertex-product-contract
      vertices :crosshair-vertices +block-world-crosshair-vertex-count+
+     (luvcraft.shaders:block-world-crosshair-vertex-specification))))
+
+(defun make-luvcraft-cursor-vertices (width height x y)
+  "Make a high-contrast arrow cursor whose tip is screen position X,Y."
+  (let ((vertices (make-array 0 :element-type 'single-float
+                                :adjustable t :fill-pointer 0))
+        (origin-x (- x (/ width 2.0)))
+        (origin-y (- y (/ height 2.0))))
+    (labels ((vertex (x y color)
+               (dolist (component
+                        (list (/ (* 2.0 (+ origin-x x)) width)
+                              (/ (* 2.0 (+ origin-y y)) height)
+                              0.0
+                              (first color) (second color) (third color)))
+                 (vector-push-extend (coerce component 'single-float)
+                                     vertices)))
+             (triangle (a b c color)
+               (dolist (point (list a b c))
+                 (vertex (first point) (second point) color))))
+      ;; A charcoal silhouette stays legible over both the pale inventory and
+      ;; the bright world.  Its angled tail makes the hotspot unmistakably the
+      ;; upper-left tip rather than the centre of another crosshair.
+      (triangle '(0 0) '(2 23) '(8 16) '(0.05 0.06 0.07))
+      (triangle '(6 14) '(15 25) '(10 29) '(0.05 0.06 0.07))
+      (triangle '(6 14) '(10 29) '(2 19) '(0.05 0.06 0.07))
+      (triangle '(2 4) '(3 18) '(7 14) '(0.96 0.98 1.0))
+      (triangle '(6 16) '(13 25) '(10 27) '(0.82 0.88 0.92))
+      (triangle '(6 16) '(10 27) '(4 19) '(0.82 0.88 0.92)))
+    (ensure-vertex-product-contract
+     vertices :crosshair-vertices +luvcraft-cursor-vertex-count+
      (luvcraft.shaders:block-world-crosshair-vertex-specification))))
 
 (defun make-block-world-sky-vertices ()
@@ -868,10 +899,11 @@ submission that used them completes."
        (make-block-world-crosshair-vertices (first extent) (second extent)))
       (write-buffer
        (luvcraft-session-cursor-vertex-buffer session)
-       (make-block-world-crosshair-vertices
+       (make-luvcraft-cursor-vertices
         (first extent) (second extent)
         (or (luvcraft-session-pointer-x session) (/ (first extent) 2.0))
-        (or (luvcraft-session-pointer-y session) (/ (second extent) 2.0)))))
+        (or (luvcraft-session-pointer-y session) (/ (second extent) 2.0))))
+      (setf (luvcraft-session-pointer-dirty-p session) nil))
     extent))
 
 (zdefun (encode-luvcraft-frame :zone :luvcraft/encode-frame)
@@ -1189,11 +1221,21 @@ submission that used them completes."
         ;; crosshair geometry at their last position after the HUD itself.
         (when (and (luvcraft-session-software-cursor-p session)
                    (luvcraft-session-modal-focus session))
+          ;; Motion events publish only the newest pointer state.  Consume it
+          ;; once at the frame boundary, no matter how many reports SDL drained.
+          (when (shiftf (luvcraft-session-pointer-dirty-p session) nil)
+            (write-buffer
+             (luvcraft-session-cursor-vertex-buffer session)
+             (make-luvcraft-cursor-vertices
+              (first extent) (second extent)
+              (or (luvcraft-session-pointer-x session) (/ (first extent) 2.0))
+              (or (luvcraft-session-pointer-y session)
+                  (/ (second extent) 2.0)))))
           (set-pipeline pass (luvcraft-session-cursor-native-pipeline session))
           (set-bind-group pass 0 (luvcraft-frame-scene-bind-group frame))
           (set-vertex-buffer
            pass 0 (luvcraft-session-cursor-vertex-buffer session))
-          (draw pass +block-world-crosshair-vertex-count+))
+          (draw pass +luvcraft-cursor-vertex-count+))
         (end-pass pass)))
     (with-luvcraft-frame-timing
         (sample luvcraft-frame-sample-surface-copy-encode-seconds
@@ -1332,14 +1374,8 @@ here -- so an unconsumed wheel event is simply the end of the matter."
 
 (defun note-luvcraft-pointer-position (session event)
   (setf (luvcraft-session-pointer-x session) (canvas-pointer-event-x event)
-        (luvcraft-session-pointer-y session) (canvas-pointer-event-y event))
-  (when (luvcraft-session-cursor-vertex-buffer session)
-    (let ((extent (canvas-extent (luvcraft-session-context session))))
-      (write-buffer
-       (luvcraft-session-cursor-vertex-buffer session)
-       (make-block-world-crosshair-vertices
-        (first extent) (second extent)
-        (canvas-pointer-event-x event) (canvas-pointer-event-y event))))))
+        (luvcraft-session-pointer-y session) (canvas-pointer-event-y event)
+        (luvcraft-session-pointer-dirty-p session) t))
 
 (defmethod handle-canvas-event
     ((session luvcraft-session) canvas (event canvas-pointer-button-press-event))
@@ -1715,6 +1751,10 @@ NIL to let the display choose a comfortable window."
                   (crosshair-vertices
                     (make-block-world-crosshair-vertices
                      (first extent) (second extent)))
+                  (cursor-vertices
+                    (make-luvcraft-cursor-vertices
+                     (first extent) (second extent)
+                     (/ (first extent) 2.0) (/ (second extent) 2.0)))
                   (crosshair-vertex-buffer
                     (keep
                      (create
@@ -1729,7 +1769,7 @@ NIL to let the display choose a comfortable window."
                       device
                       (make-buffer-descriptor
                        :label "luvcraft software cursor vertices"
-                       :size (* 4 (length crosshair-vertices))
+                       :size (* 4 (length cursor-vertices))
                        :usage '(:vertex)))))
                   (layout
                     (keep
@@ -2026,7 +2066,7 @@ NIL to let the display choose a comfortable window."
                      :resources resources)))
                (write-buffer sky-vertex-buffer sky-vertices)
                (write-buffer crosshair-vertex-buffer crosshair-vertices)
-               (write-buffer cursor-vertex-buffer crosshair-vertices)
+               (write-buffer cursor-vertex-buffer cursor-vertices)
                (write-texture
                 (device-queue device)
                 (make-texture-copy :texture atlas-texture)
