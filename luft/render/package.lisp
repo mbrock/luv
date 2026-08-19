@@ -22,6 +22,7 @@ packed sites.")
            #:surface-vertex-shader
            #:field-vertex-shader
            #:field-fragment-shader
+           #:ink-fragment-shader
            #:bevel-vertex-shader
            #:chamfer-vertex-shader
            #:sky-vertex-shader
@@ -85,6 +86,7 @@ mesh shaders.")
            #:*ground-color*
            #:*occlusion-strength*
            #:*wear-strength*
+           #:*ink-width*
            #:*shadow-strength*
            #:*top-color*
            #:*side-color*

@@ -161,11 +161,14 @@ fresh one; its scene and camera are restored afterwards."
                           do (setf (renderer-style renderer) style)
                              (multiple-value-bind (pixels big-width big-height
                                                    pixel-format)
-                                 (progv (loop for (name nil) on specials by #'cddr
-                                              collect name)
-                                        (loop for (nil value) on specials by #'cddr
-                                              collect value)
-                                   (render-pixels renderer))
+                                 (let ((*ink-width* (* *ink-width* supersample)))
+                                   (progv (loop for (name nil) on specials
+                                                  by #'cddr
+                                                collect name)
+                                          (loop for (nil value) on specials
+                                                  by #'cddr
+                                                collect value)
+                                     (render-pixels renderer)))
                                (setf format pixel-format)
                                (multiple-value-bind (tile tile-width tile-height)
                                    (if (> supersample 1)

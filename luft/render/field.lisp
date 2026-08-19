@@ -192,11 +192,36 @@ in an expression."
                  (+ 0.55 (* (- ,reach 0.55)
                             (* %shadow-fraction (sqrt %shadow-fraction)))))
                (%shadow-point (+ ,origin (* ,direction %shadow-distance)))
-               ,@(occupancy-field-bindings '%shadow-field '%shadow-point 0.5)
+               ,@(occupancy-field-bindings '%shadow-field '%shadow-point 0.42)
                (%shadow-seen (max (swizzle %shadow-state :x)
                                   (swizzle %shadow-field :w))))
           (vec4 %shadow-seen 0.0 0.0 0.0)))
       :x)))
+
+(define-shader-abstraction field-occlusion (origin normal steps reach)
+  "How much the world crowds ORIGIN's hemisphere, zero to one, by the field.
+
+CROWDED-SKY walks four rays cell by cell; this reads the half-cell tent at
+STEPS points along NORMAL out to REACH cells, nearer ones closer together
+and weighted more, and sums the occupancy found there.  Open sky above a
+floor reads nothing; a wall beside it, an overhang above it, or the inside
+of a pit reads more the nearer it is, smoothly, since the field is."
+  `(clamp
+    (* ,(/ 2.2 steps)
+       (swizzle
+        (counted-fold (%ao-index ,(float steps) %ao-state
+                       (vec4 0.0 0.0 0.0 0.0))
+          (let* ((%ao-fraction (/ (+ (float %ao-index) 1.0) ,(float steps)))
+                 (%ao-distance (+ 0.3 (* (- ,reach 0.3)
+                                         (* %ao-fraction %ao-fraction))))
+                 (%ao-point (+ ,origin (* ,normal %ao-distance)))
+                 ,@(occupancy-field-bindings '%ao-field '%ao-point 0.5)
+                 (%ao-sum (+ (swizzle %ao-state :x)
+                             (* (swizzle %ao-field :w)
+                                (- 1.25 %ao-fraction)))))
+            (vec4 %ao-sum 0.0 0.0 0.0)))
+        :x))
+    0.0 1.0))
 
 ;;; The vertex stage: the two-ring grid, every point projected.
 (defmethod surface-vertices-per-face ((style (eql :field)))
@@ -220,11 +245,17 @@ in an expression."
   (defvar *field-shadow-reach* 12.0
     "How far in cells the field shadow looks toward the sun.")
 
-  (defun field-fragment-shader-definition (&key (shadow :field))
+  (defvar *field-occlusion-steps* 4
+    "Field samples along the normal for occlusion.")
+  (defvar *field-occlusion-reach* 2.5
+    "How far in cells the field occlusion looks along the normal.")
+
+  (defun field-fragment-shader-definition (&key (shadow :field)
+                                                (occlusion :field))
     "The field fragment shader, spliced around two field samples.
 
 SHADOW is :FIELD for the soft shadow sampled from the field, or :WALK for
-the cell walk every other style uses."
+the cell walk every other style uses; OCCLUSION likewise :FIELD or :WALK."
     `(define-shader field-fragment-shader
          (:stage :fragment
           :inputs ((normal :vec3 :location 0)
@@ -275,13 +306,105 @@ the cell walk every other style uses."
                                        ,*field-shadow-steps*
                                        ,*field-shadow-reach*))))
               (shade (mix 1.0 (- 1.0 lost) (swizzle occlusion-vector :y)))
-              (crowding (crowded-sky walk-origin smooth cells period-x period-y
-                                     ,*occlusion-steps*))
+              (crowding ,(ecase occlusion
+                           (:walk
+                            `(crowded-sky walk-origin smooth cells
+                                          period-x period-y
+                                          ,*occlusion-steps*))
+                           (:field
+                            `(field-occlusion world smooth
+                                              ,*field-occlusion-steps*
+                                              ,*field-occlusion-reach*))))
               (open (- 1.0 (* (swizzle occlusion-vector :x) crowding)))
-              (final (surface-lighting worn smooth world open shade
+              ;; One cell's tone drifts a little from its neighbour's, in
+              ;; value and in warmth, as the paper material's does, so a
+              ;; wall of cells stops reading as one painted surface.
+              (cell (floor (- world (* smooth 0.25))))
+              (patch (- (paper-noise (* cell 0.21)) 0.5))
+              (jitter (- (paper-hash cell) 0.5))
+              (drift (+ 1.0 (* 0.08 (+ (* 1.35 patch) (* 0.45 jitter)))))
+              (warm-patch (paper-noise (+ (* cell 0.13) (vec3 19.7 7.3 3.1))))
+              (warmth (mix (vec3 0.975 0.99 1.03) (vec3 1.03 1.01 0.97)
+                           warm-patch))
+              (final (surface-lighting (* worn (* warmth drift))
+                                       smooth world open shade
                                        camera-vector sun-vector
                                        sun-colour-vector fill-vector
                                        sky-vector ground-vector)))
          (set-output color (vec4 final 1.0))))))
 
 #.(field-fragment-shader-definition)
+
+;;; ------------------------------------------------------------------------
+;;; Ink: the same field read as a drawing
+;;;
+;;; A line drawing of a block world is its creases, and the field knows
+;;; where those are without any edge detection: wherever the smooth normal
+;;; leaves the face normal.  The :INK style draws the flat quads, inks every
+;;; crease -- convex edges and concave coves alike, as a pen would -- bands
+;;; the key light into a few flat tones, and keeps the soft shadow as a
+;;; wash.  The page is a warm paper white and the ink a cool near-black.
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun ink-fragment-shader-definition ()
+    "The ink fragment shader, spliced around a field sample."
+    `(define-shader ink-fragment-shader
+         (:stage :fragment
+          :inputs ((normal :vec3 :location 0)
+                   (world :vec3 :location 1)
+                   (uv :vec2 :location 2))
+          :outputs ((color :vec4 :location 0))
+          :resources ((frame :uniform-block :binding ,+frame-binding+
+                             :members ,*frame-uniform-members*)
+                      (cells :storage-buffer :binding ,+cells-binding+
+                             :element :uint)))
+       (let* ((period-x (swizzle domain-vector :x))
+              (period-y (swizzle domain-vector :y))
+              (radius (swizzle domain-vector :z))
+              (vertical-radius (swizzle domain-vector :w))
+              (face (normalize normal))
+              ,@(occupancy-field-bindings 'field 'world 'radius
+                                          'vertical-radius)
+              (smooth (field-normal field face))
+              ;; The line: how far the smooth normal has turned from the
+              ;; face, which is zero on a plane and 1 - cos 45 on a crease.
+              ;; A pen keeps its width on the page, so the band is as many
+              ;; pixels as the ink lane asks, measured by how fast the tilt
+              ;; changes across the screen, and never wider than the crease.
+              (tilt (- 1.0 (dot smooth face)))
+              (tilt-rate (max (+ (abs (derivative-x tilt))
+                                 (abs (derivative-y tilt)))
+                              0.0001))
+              (nib (swizzle occlusion-vector :w))
+              (threshold (max (- 0.29 (* nib tilt-rate)) 0.03))
+              (line (smoothstep (- threshold tilt-rate) (+ threshold tilt-rate)
+                                tilt))
+              ;; The wash: banded key light and the soft shadow.
+              (sun (swizzle sun-vector :xyz))
+              (lost (field-shadow world sun ,*field-shadow-steps*
+                                  ,*field-shadow-reach*))
+              (facing (max (dot face sun) 0.0))
+              (key (* facing (- 1.0 (* 0.85 lost))))
+              (band (+ (* 0.55 (smoothstep 0.18 0.26 key))
+                       (* 0.45 (smoothstep 0.58 0.66 key))))
+              (crowding (field-occlusion world face
+                                         ,*field-occlusion-steps*
+                                         ,*field-occlusion-reach*))
+              (upness (swizzle face :z))
+              ;; Turf is a pale wash, earth a paler one, on paper white.
+              (paper (vec3 0.96 0.94 0.88))
+              (turf (vec3 0.78 0.86 0.68))
+              (earth (vec3 0.90 0.84 0.74))
+              (tone (if (> upness 0.5) turf (if (< upness -0.5) earth earth)))
+              (lit (mix (* tone 0.66) paper (* band (- 1.0 (* 0.5 crowding)))))
+              (ink (vec3 0.16 0.15 0.18))
+              (drawn (mix lit ink line))
+              ;; Distance fades the drawing into the paper rather than fog.
+              (delta (- world (swizzle camera-vector :xyz)))
+              (distance (sqrt (dot delta delta)))
+              (fade (smoothstep (* 0.4 (swizzle sky-vector :w))
+                                (swizzle sky-vector :w) distance))
+              (final (mix drawn paper fade)))
+         (set-output color (vec4 final 1.0))))))
+
+#.(ink-fragment-shader-definition)

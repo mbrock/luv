@@ -59,6 +59,7 @@ The renderer multiplies this by the site count to size its draw."))
 
 (defmethod surface-vertices-per-face ((style (eql :flat))) 6)
 (defmethod surface-vertices-per-face ((style (eql :soft))) 6)
+(defmethod surface-vertices-per-face ((style (eql :ink))) 6)
 
 (define-shader surface-vertex-shader
     (:stage :vertex

@@ -60,7 +60,7 @@ lit: both the reach of shadows in cells and their cost per pixel.")
       (sun-colour-vector :vec4)  ; sun radiance, sheen strength
       (fill-vector :vec4)        ; direction toward the fill light, strength
       (ground-vector :vec4)      ; ground bounce colour, exposure
-      (occlusion-vector :vec4)   ; crowding strength, shadow strength, wear
+      (occlusion-vector :vec4)   ; crowding, shadow, wear, ink width
       (top-vector :vec4)         ; the material of an upward face
       (side-vector :vec4)        ; the material of a sideways face
       (bottom-vector :vec4)      ; the material of a downward face

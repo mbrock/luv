@@ -324,6 +324,27 @@ than those of walls as weather does, though at extreme ratios the three
 Newton steps leave visible wobbles.  The watertightness test of #RUAWR5
 passes for the field as for every other style.
 
+* The same field read as a drawing
+:PROPERTIES:
+:ID: JM9807
+:END:
+
+[[file:images/luft-ink.png]]
+
+A line drawing of a block world is its creases, and the field of #TI9NJP
+knows where those are without any edge detection: wherever the smooth normal
+has turned away from the face normal.  The =:ink= style draws the flat
+six-vertex quads and inks every crease, convex edges and concave coves
+alike, as a pen would; bands the key light into a few flat tones; keeps the
+field's soft shadow as a wash; and fades into the paper with distance
+instead of fogging.  A pen keeps its width on the page, so the band is
+=*ink-width*= pixels wide, measured by how fast the tilt changes across the
+screen (the fragment's derivatives), and never wider than the crease itself.
+The field's occlusion is the same idea turned along the normal: a few
+samples of the half-cell tent out from the point, nearer ones weighted more,
+replace the four cell walks of =crowded-sky= with a measure that is smooth
+because the field is ([[lisp:luft.render.shaders::field-occlusion]]).
+
 * The studio: a world of stars under the same cameras
 :PROPERTIES:
 :ID: UTRJ2T
