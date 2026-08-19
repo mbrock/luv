@@ -67,12 +67,11 @@
   (line :uint32)
   (color :uint32))
 
-;;; TracyCZoneCtx is `struct { uint32_t id; int32_t active; }'.  Every ABI luv
-;;; builds for returns that in the register a uint64_t would use -- id in the
-;;; low half, active in the high half -- so the context travels as an opaque
-;;; word.  Passing it as a structure instead would route the hot path through
-;;; libffi, which costs more per zone than the measurement it is taking.
-;;; LUVCRAFT.TESTS checks the claim rather than trusting it.
+;;; TracyCZoneCtx is deliberately opaque.  In Tracy 0.14 it grew from two
+;;; 32-bit fields to those fields plus a 64-bit on-demand connection id.  The
+;;; native shim retains exact contexts in a thread-local nesting stack, so the
+;;; Lisp hot path neither translates a structure through libffi nor allocates
+;;; a Lisp representation that can go stale at the next Tracy upgrade.
 
 (cffi:defcfun ("___tracy_startup_profiler" %tracy-startup-profiler) :void)
 
@@ -80,16 +79,16 @@
 
 (cffi:defcfun ("___tracy_connected" %tracy-connected) :int32)
 
-(cffi:defcfun ("___tracy_emit_zone_begin" %tracy-emit-zone-begin) :uint64
+(cffi:defcfun ("luv_tracy_emit_zone_begin" %tracy-emit-zone-begin) :void
   (source-location :pointer)
   (active :int32))
 
-(cffi:defcfun ("___tracy_emit_zone_end" %tracy-emit-zone-end) :void
-  (context :uint64))
+(cffi:defcfun ("luv_tracy_emit_zone_end" %tracy-emit-zone-end) :void)
 
-(cffi:defcfun ("___tracy_emit_zone_value" %tracy-emit-zone-value) :void
-  (context :uint64)
+(cffi:defcfun ("luv_tracy_emit_zone_value" %tracy-emit-zone-value) :void
   (value :uint64))
+
+(cffi:defcfun ("luv_tracy_zone_depth" %tracy-zone-depth) :size)
 
 (cffi:defcfun ("___tracy_set_thread_name" %tracy-set-thread-name) :void
   (name :pointer))
@@ -260,7 +259,6 @@ NAME still works through luv's source-location table, which is slower but
 reuses the same stable foreign record instead of growing Tracy's allocation
 table on every entry."
   (let ((enabled (gensym "ENABLED"))
-        (context (gensym "CONTEXT"))
         (location-cell (gensym "LOCATION-CELL"))
         (literal (tracy-literal-zone-name name))
         (file (if *compile-file-truename*
@@ -268,30 +266,28 @@ table on every entry."
                   "")))
     `(let (,@(when literal
                `((,location-cell (load-time-value (cons nil nil) nil))))
-           (,enabled *tracy*)
-           (,context nil))
+           (,enabled *tracy*))
        (when ,enabled
-         (setf ,context
-               ,(if literal
-                    `(%tracy-emit-zone-begin
-                      (or (car ,location-cell)
-                          (setf (car ,location-cell)
-                                (tracy-source-location
-                                 ,literal :file ,file :color ,color)))
-                      1)
-                    `(%tracy-emit-zone-begin
-                      (tracy-source-location
-                       (tracy-zone-name ,name) :file ,file :color ,color)
-                      1))))
+         ,(if literal
+              `(%tracy-emit-zone-begin
+                (or (car ,location-cell)
+                    (setf (car ,location-cell)
+                          (tracy-source-location
+                           ,literal :file ,file :color ,color)))
+                1)
+              `(%tracy-emit-zone-begin
+                (tracy-source-location
+                 (tracy-zone-name ,name) :file ,file :color ,color)
+                1)))
        ;; Keep BODY in the expansion exactly once.  Duplicating it into active
        ;; and inactive branches made nested frame instrumentation multiply a
        ;; large caller's compiler input even though only one branch ran.
        (unwind-protect
             (progn ,@body)
-         (when ,enabled
-           ,@(when value-supplied-p
-               `((%tracy-emit-zone-value ,context ,value)))
-           (%tracy-emit-zone-end ,context))))))
+           (when ,enabled
+             ,@(when value-supplied-p
+                 `((%tracy-emit-zone-value ,value)))
+             (%tracy-emit-zone-end))))))
 
 ;;; Frames, plots, and messages.
 

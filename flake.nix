@@ -96,6 +96,7 @@
                   -DTRACY_NO_SYSTEM_TRACING \
                   -Ipublic \
                   public/TracyClient.cpp \
+                  ${./hal/tracy-context.cpp} \
                   ${nixpkgs.lib.optionalString pkgs.stdenv.isDarwin
                       "-install_name $out/lib/libTracyClient${extension}"} \
                   ${nixpkgs.lib.optionalString pkgs.stdenv.isLinux

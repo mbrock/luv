@@ -1398,28 +1398,27 @@
         (ok (not (luvcraft::luvcraft-streaming-trace-state-quiescent-p
                   state)))))))
 
-(deftest tracy-zone-contexts-travel-as-a-single-word
-  ;; The binding spells TracyCZoneCtx as a uint64 rather than as the structure
-  ;; it is, which keeps zone entry and exit out of libffi but makes an ABI
-  ;; claim: that `struct { uint32_t id; int32_t active; }' comes back in the
-  ;; register a word would, id low and active high.  Check it on whatever
-  ;; machine is running rather than trusting it on one nobody has tried.
+(deftest tracy-zone-contexts-remain-natively-nested
+  ;; The shim owns TracyCZoneCtx values at their native size.  Lisp observes
+  ;; only the stack discipline that WITH-TRACY-ZONE relies on, so adding fields
+  ;; to Tracy's opaque context cannot silently truncate zone-end events again.
   (if (not (luv:tracy-client-available-p))
       (ok t "This machine has no Tracy client to check the zone ABI against.")
       (let ((ours (not luv:*tracy*)))
         (unwind-protect
              (progn
                (luv:start-tracy :application-name "luv tests")
-               (let* ((location (luv::tracy-source-location "test/abi"))
-                      (outer (luv::%tracy-emit-zone-begin location 1))
-                      (inner (luv::%tracy-emit-zone-begin location 1))
-                      (active (if (luv:tracy-connected-p) 1 0)))
-                 (luv::%tracy-emit-zone-end inner)
-                 (luv::%tracy-emit-zone-end outer)
-                 ;; A structure returned indirectly would leave the high half
-                 ;; holding whatever the register happened to contain.
-                 (ok (= active (ldb (byte 32 32) outer)))
-                 (ok (= active (ldb (byte 32 32) inner)))))
+               (let ((location (luv::tracy-source-location "test/abi")))
+                 (ok (zerop (luv::%tracy-zone-depth)))
+                 (luv::%tracy-emit-zone-begin location 1)
+                 (ok (= 1 (luv::%tracy-zone-depth)))
+                 (luv::%tracy-emit-zone-begin location 1)
+                 (ok (= 2 (luv::%tracy-zone-depth)))
+                 (luv::%tracy-emit-zone-value 2)
+                 (luv::%tracy-emit-zone-end)
+                 (ok (= 1 (luv::%tracy-zone-depth)))
+                 (luv::%tracy-emit-zone-end)
+                 (ok (zerop (luv::%tracy-zone-depth)))))
           (when ours (luv:stop-tracy))))))
 
 (deftest texture-preparation-is-a-backend-neutral-command
