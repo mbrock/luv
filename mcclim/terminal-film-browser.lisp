@@ -359,6 +359,10 @@ a Telegram console left running behind a film is a connection nobody closes."
     ((display luvcraft:terminal-display)
      (session luvcraft:luvcraft-session) (mode (eql :film)))
   (declare (ignore session mode))
-  (unless (displace-terminal-mode-overlay
-           display 'terminal-film-browser-overlay)
-    (open-terminal-film-browser display)))
+  ;; A detached display still has useful logical mode behavior (and is how
+  ;; the core geometry is tested), but it has no canvas on which to mount a
+  ;; browser overlay.
+  (when (luvcraft::terminal-display-session display)
+    (unless (displace-terminal-mode-overlay
+             display 'terminal-film-browser-overlay)
+      (open-terminal-film-browser display))))

@@ -312,10 +312,11 @@ operate on raw specialized arrays with one shared length and capacity. #LDP5UR"
            ;; load raw elements without boxing them.
            ,@(loop for slot in lane-slots
                    for lane in lanes
-                   collect `(,slot (make-array 0 :element-type ',(getf lane :type))
-                            :type (simple-array
-                                   ,(upgraded-array-element-type (getf lane :type))
-                                   (*)))))
+                   collect `(,slot
+                             (make-array 0 :element-type ',(getf lane :type))
+                             :type (simple-array
+                                    ,(upgraded-array-element-type (getf lane :type))
+                                    (*)))))
 
          (defun ,constructor
              (&key (capacity 16) declarations row-declaration)
@@ -480,11 +481,12 @@ per lane.  The domain, row meaning, and arrays then travel together."
            (,row-slot nil :type columnar-row-declaration :read-only t)
            ,@(loop for slot in lane-slots
                    for lane in lanes
-                   collect `(,slot (make-array 0 :element-type ',(getf lane :type))
-                            :type (simple-array
-                                   ,(upgraded-array-element-type (getf lane :type))
-                                   (*))
-                            :read-only t)))
+                   collect `(,slot
+                             (make-array 0 :element-type ',(getf lane :type))
+                             :type (simple-array
+                                    ,(upgraded-array-element-type (getf lane :type))
+                                    (*))
+                             :read-only t)))
 
          (defun ,constructor (domain &key declarations row-declaration)
            (when (and declarations row-declaration)

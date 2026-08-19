@@ -28,7 +28,7 @@
 (defmacro define-wide-physics-kernels (family package &key blend)
   "Define the PHYSICS-* kernel methods for FAMILY using PACKAGE's f32.4
 operations.  BLEND is :bit-select where the package has F32.4-BIT-SELECT
-and :and-or where it must be built from F32.4-AND, F32.4-ANDC1, F32.4-OR."
+and :and-or where SSE2's U32.4 comparison masks select the float lane bits."
   (flet ((sym (name) (intern name package)))
     (let ((f32.4 (sym "F32.4"))
           (make (sym "MAKE-F32.4"))
@@ -44,12 +44,27 @@ and :and-or where it must be built from F32.4-AND, F32.4-ANDC1, F32.4-OR."
                (let ((select (sym "F32.4-BIT-SELECT")))
                  (lambda (mask then else) `(,select ,mask ,then ,else))))
               (:and-or
-               (let ((wand (sym "F32.4-AND")) (wandc1 (sym "F32.4-ANDC1"))
-                     (wor (sym "F32.4-OR")) (cast (sym "F32.4!")))
+               (let ((wand (sym "U32.4-AND")) (wandc1 (sym "U32.4-ANDC1"))
+                     (wor (sym "U32.4-OR")) (cast (sym "U32.4!"))
+                     (make (sym "MAKE-F32.4")))
                  (lambda (mask then else)
-                   (let ((m (gensym "MASK")))
-                     `(let ((,m (,cast ,mask)))
-                        (,wor (,wand ,m ,then) (,wandc1 ,m ,else))))))))))
+                   (let ((m (gensym "MASK")) (bits (gensym "BITS"))
+                         (m0 (gensym "M0")) (m1 (gensym "M1"))
+                         (m2 (gensym "M2")) (m3 (gensym "M3")))
+                     ;; SSE2 comparisons produce U32.4 masks, while SBCL's
+                     ;; SSE F32.4! cast cannot reinterpret a P128 value.  Do
+                     ;; the bit selection in the integer view, then retag its
+                     ;; four lanes as floats.  In a compiled kernel the casts
+                     ;; into U32.4 are register moves; only this final retag is
+                     ;; expanded lane by lane.
+                     `(let* ((,m ,mask)
+                             (,bits
+                              (,wor
+                               (,wand ,m (,cast ,then))
+                               (,wandc1 ,m (,cast ,else)))))
+                        (multiple-value-bind (,m0 ,m1 ,m2 ,m3)
+                            (sb-ext:%simd-pack-singles ,bits)
+                          (,make ,m0 ,m1 ,m2 ,m3))))))))))
       `(macrolet ((%wide-physics-warm-start (&rest args)
                     (list* ',(intern (format nil "%~A-PHYSICS-WARM-START" family)) args))
                   (%wide-physics-solve-contacts (&rest args)
