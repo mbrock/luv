@@ -15,7 +15,7 @@
   # the viewer negotiate an exact protocol version and refuse to talk across a
   # mismatch.
   inputs.tracy = {
-    url = "github:wolfpld/tracy/v0.13.1";
+    url = "github:wolfpld/tracy/v0.14.0";
     flake = false;
   };
   # WPE WebKit, the embeddable browser engine, packaged out of tree.  Linux
@@ -79,7 +79,7 @@
           #                   macOS has no system tracing to lose anyway
           tracyClient = pkgs.stdenv.mkDerivation {
             pname = "tracy-client";
-            version = "0.13.1";
+            version = "0.14.0";
             src = tracy;
             dontConfigure = true;
             buildPhase =
@@ -121,6 +121,57 @@
           };
           tracyClientLibrary =
             "${tracyClient}/lib/libTracyClient${pkgs.stdenv.hostPlatform.extensions.sharedLibrary}";
+          tracyImGui = pkgs.fetchFromGitHub {
+            name = "ImGui";
+            owner = "ocornut";
+            repo = "imgui";
+            rev = "v1.92.9b-docking";
+            hash = "sha256-PknWLxYuXQ73TCFN+eKOJDNLGbg/ZqKSF6mFxkJG6vI=";
+          };
+          tracyMd4c = pkgs.fetchFromGitHub {
+            name = "md4c";
+            owner = "mity";
+            repo = "md4c";
+            rev = "65c6c9d72cebd9a731aaa5597414ce04d9ea5de3";
+            hash = "sha256-UMIebye8pQkiTjhbz3btTqPapzoqOnPHrtbPitc717A=";
+          };
+          tracyNfd = pkgs.fetchFromGitHub {
+            name = "nfd";
+            owner = "btzy";
+            repo = "nativefiledialog-extended";
+            rev = "3cd252a8f7ca32419b1ca235c2990ba6a0ecba7c";
+            hash = "sha256-BV4FdH+AfNXAbLfipBPMGkJmggo59Kf4NIgKQ0hsB9g=";
+            fetchSubmodules = true;
+          };
+          # nixpkgs may lag the protocol release pinned above.  Build its GUI
+          # and capture tools from the same source as the embedded client: a
+          # Tracy viewer and client from different releases cannot connect.
+          tracyTools = pkgs.tracy.overrideAttrs (_final: previous: {
+            version = "0.14.0";
+            src = tracy;
+            # The development viewer does not need whole-program LTO, whose
+            # opaque final link otherwise spends tens of seconds silent.
+            cmakeFlags = previous.cmakeFlags ++ [ "-DNO_LTO=ON" ];
+            # fetchFromGitHub unpacked the old source into ./tracy; a flake
+            # input is named ./source.  Keep nixpkgs' vendored CPM setup, but
+            # point its one source-tree copy at the input's actual directory.
+            postUnpack = builtins.replaceStrings
+              [ "./tracy/" ] [ "./source/" ] previous.postUnpack + ''
+                rm -rf ImGui
+                cp -R ${tracyImGui} ImGui
+                chmod -R u+w ImGui
+                cp -R ${tracyMd4c} md4c
+                chmod -R u+w md4c
+                appendToVar cmakeFlags -DCPM_md4c_SOURCE=$(pwd)/md4c
+                rm -rf nfd
+                cp -R ${tracyNfd} nfd
+                chmod -R u+w nfd
+              '';
+            postInstall = builtins.replaceStrings
+              [ "--replace-fail Exec=/usr/bin/tracy Exec=tracy" ]
+              [ ''--replace-fail "Exec=tracy-profiler %f" "Exec=tracy %f"'' ]
+              previous.postInstall;
+          });
           # FFmpeg is here for its libraries, not its command line: libavcodec
           # and friends are the one decoder front door that reaches hardware
           # video decode on both of our platforms, VideoToolbox on Darwin and
@@ -217,7 +268,7 @@
           inherit pkgs wpePkgs sbcl lisp nativeLibraryPath slyRoot;
           inherit ffmpeg ffmpegLibraryDirectory mupdf mupdfLibraryDirectory;
           inherit libghosttyVt libghosttyVtLibrary;
-          inherit tracyClient tracyClientLibrary;
+          inherit tracyClient tracyClientLibrary tracyTools;
         };
     in
     {
@@ -241,6 +292,7 @@
           ffmpeg = env.ffmpeg;
           libghostty-vt = env.libghosttyVt;
           tracy-client = env.tracyClient;
+          tracy = env.tracyTools;
           default = env.lisp;
         } // nixpkgs.lib.optionalAttrs env.pkgs.stdenv.isLinux {
           # Reachable only by name, `nix build .#wpewebkit` on Linux: not in
@@ -271,7 +323,7 @@
               env.pkgs.pkg-config
               env.pkgs.sdl3
               env.pkgs.spirv-tools
-              env.pkgs.tracy
+              env.tracyTools
               env.pkgs.urbit
               env.pkgs.vulkan-headers
               env.pkgs.vulkan-tools
@@ -285,8 +337,8 @@
             LUV_GHOSTTY_LIBRARY = env.libghosttyVtLibrary;
             LUV_SLYNK_DIR = "${env.slyRoot}/slynk";
             LUV_TRACY_CLIENT = env.tracyClientLibrary;
-            LUV_TRACY_CAPTURE = "${env.pkgs.tracy}/bin/tracy-capture";
-            LUV_TRACY_PROFILER = "${env.pkgs.tracy}/bin/tracy";
+            LUV_TRACY_CAPTURE = "${env.tracyTools}/bin/tracy-capture";
+            LUV_TRACY_PROFILER = "${env.tracyTools}/bin/tracy";
             LUV_FFMPEG_LIBDIR = env.ffmpegLibraryDirectory;
             LUV_MUPDF_LIBDIR = env.mupdfLibraryDirectory;
             LUV_YT_DLP = "${env.pkgs.yt-dlp}/bin/yt-dlp";

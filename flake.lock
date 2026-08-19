@@ -186,16 +186,16 @@
     "tracy": {
       "flake": false,
       "locked": {
-        "lastModified": 1765493162,
-        "narHash": "sha256-D4aQ5kSfWH9qEUaithR0W/E5pN5on0n9YoBHeMggMSE=",
+        "lastModified": 1786302391,
+        "narHash": "sha256-526OmdEXN8jW7OxouR3vqy/vQPTQoGfqBw1oJHULd5U=",
         "owner": "wolfpld",
         "repo": "tracy",
-        "rev": "05cceee0df3b8d7c6fa87e9638af311dbabc63cb",
+        "rev": "099df3de3dc37eca4712c06b8320fb9c53596edd",
         "type": "github"
       },
       "original": {
         "owner": "wolfpld",
-        "ref": "v0.13.1",
+        "ref": "v0.14.0",
         "repo": "tracy",
         "type": "github"
       }

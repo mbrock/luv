@@ -27,8 +27,8 @@
 ;;; START-TRACY notices that it has no lifetime entry points to call.
 
 (cffi:define-foreign-library tracy-client
-  (:darwin (:or "libTracyClient.dylib" "libTracyClient.0.13.1.dylib"))
-  (:unix (:or "libTracyClient.so" "libTracyClient.so.0.13.1"))
+  (:darwin (:or "libTracyClient.dylib" "libTracyClient.0.14.0.dylib"))
+  (:unix (:or "libTracyClient.so" "libTracyClient.so.0.14.0"))
   (t (:default "libTracyClient")))
 
 (defvar *tracy-client* nil

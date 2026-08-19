@@ -58,7 +58,7 @@
   (format stream "~%")
   (format stream "With no arguments, resume the world using Metal 4 on macOS and Vulkan elsewhere.~%")
   (format stream "--metal and --vulkan explicitly select an interactive backend.~%")
-  (format stream "--tracy exposes live frame and worker zones to Tracy 0.13.1.~%")
+  (format stream "--tracy exposes live frame and worker zones to Tracy 0.14.0.~%")
   (format stream "--fullscreen opens the game on the whole display instead of in a window.~%")
   (format stream "--world loads or creates the named persistent world.~%")
   (format stream "--smoke-test renders one hidden frame with the platform default and exits.~%")
