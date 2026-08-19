@@ -45,17 +45,30 @@
            (allocate-instance
             (find-class 'mcluv:luvcraft-hotbar-overlay))))))
 
-(deftest physical-mcclim-text-replays-in-the-world-pass
+(deftest mcclim-text-replays-in-each-overlays-final-pass
   (ok (subtypep 'mcluv::terminal-film-browser-overlay
                 'mcluv:luvcraft-world-widget-overlay))
   (ok (not (subtypep 'mcluv:luvcraft-hotbar-overlay
                      'mcluv:luvcraft-world-widget-overlay)))
+  (dolist (class '(mcluv:luvcraft-hotbar-overlay
+                   mcluv:luvcraft-inventory-overlay
+                   mcluv::luvcraft-metabar-overlay))
+    (ok (subtypep class 'mcluv:luvcraft-hud-widget-overlay)))
   (let ((overlay
           (allocate-instance
            (find-class 'mcluv:luvcraft-world-widget-overlay)))
         (command (mcluv::make-gpu-prepared-text-command)))
     (ok (not (mcluv::gpu-command-rasterized-p overlay command)))
     (ok (mcluv::gpu-command-rasterized-p nil command)))
+  (ok (null
+       (mcluv::direct-widget-text-depth-stencil
+        (allocate-instance
+         (find-class 'mcluv:luvcraft-hud-widget-overlay)))))
+  (ok (equal '(:format :depth32-float
+               :depth-write-enabled nil :depth-compare :less)
+             (mcluv::direct-widget-text-depth-stencil
+              (allocate-instance
+               (find-class 'mcluv:luvcraft-world-widget-overlay)))))
   (let ((specification (mcluv::world-widget-slug-vertex-specification)))
     (ok (> (length (spv:assemble-shader-specification specification)) 5))
     (ok (search "using namespace metal"

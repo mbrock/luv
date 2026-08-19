@@ -138,13 +138,13 @@ equally legible at the same distance, and the page's type no longer needs
 condensing to fit its measure, because it is set from the document's own
 glyph metrics rather than a substituted face's.
 
-Physical McCLIM gadgets now retain the backend's prepared semantic command
-stream. Their backing texture omits Slug text commands, while the world
-compositor replays the already-shaped 72-byte Slug vertices into the game's
-scene pass with the gadget's center/right/up transform. Outline coverage is
-therefore evaluated at the final framebuffer pixel; panels, gradients, and
-images remain in the sampled backing layer. The Telegram phone and film
-browser use this hybrid compositor, while HUD panes deliberately keep the
-ordinary texture path. The PDF sheet keeps its analogous document-specific
-world text run because its glyphs and metrics come from MuPDF rather than a
-McCLIM text command.
+McCLIM gadgets now retain the backend's prepared semantic command stream.
+Their backing texture omits Slug text commands, while a direct compositor
+replays the already-shaped 72-byte Slug vertices into the gadget's final
+pass. Physical surfaces use their center/right/up world transform in the
+depth-tested scene pass; HUD panes use the same affine shader against their
+screen-space transform in the depthless presentation pass. Outline coverage
+is therefore evaluated at the final framebuffer pixel in both cases, while
+panels, gradients, and images remain in the sampled backing layer. The PDF
+sheet keeps its analogous document-specific world text run because its glyphs
+and metrics come from MuPDF rather than a McCLIM text command.

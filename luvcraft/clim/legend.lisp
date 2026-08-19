@@ -199,7 +199,7 @@ whole number row.")
 ;;; ---------------------------------------------------------------------
 ;;; The overlay: a panel in the middle of the screen.
 
-(defclass luvcraft-legend-overlay (mcluv:luvcraft-widget-overlay) ())
+(defclass luvcraft-legend-overlay (mcluv:luvcraft-hud-widget-overlay) ())
 
 (defmethod luvcraft:luvcraft-overlay-stage ((overlay luvcraft-legend-overlay))
   (declare (ignore overlay))

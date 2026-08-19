@@ -298,7 +298,7 @@ shader, the mark that turning it rebuilds one."
 ;;; ---------------------------------------------------------------------
 ;;; The overlay: a strip on the left that slides.
 
-(defclass luvcraft-metabar-overlay (luvcraft-widget-overlay)
+(defclass luvcraft-metabar-overlay (luvcraft-hud-widget-overlay)
   ((slide :initform 0d0 :accessor metabar-slide
           :documentation "0 off the left edge, 1 fully out; eased.")
    (open-p :initform t :accessor metabar-open-p)

@@ -30,6 +30,11 @@
   (declare (ignore session canvas))
   (push event (recording-focus-events focus)))
 
+(deftest modal-hud-panes-use-the-direct-presentation-compositor
+  (dolist (class '(luvcraft.clim::luvcraft-legend-overlay
+                   luvcraft.clim::luvcraft-tape-prompt-overlay))
+    (ok (subtypep class 'mcluv:luvcraft-hud-widget-overlay))))
+
 (deftest a-keystroke-is-a-place-on-the-keyboard
   (ok (canvas-key-event-matches-gesture-p
        (key-press :i :character #\i) '(#\i)))

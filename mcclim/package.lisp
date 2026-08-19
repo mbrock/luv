@@ -42,7 +42,9 @@
            ;; instead of asking for a second, and the compositor a HUD panel
            ;; draws itself with.
            #:luvcraft-widget-overlay
+           #:luvcraft-direct-widget-overlay
            #:luvcraft-world-widget-overlay
+           #:luvcraft-hud-widget-overlay
            #:widget-overlay-session
            #:widget-overlay-frame
            #:widget-overlay-mirror

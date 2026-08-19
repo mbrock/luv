@@ -385,7 +385,7 @@ every cell makes the word louder than the block it is about."
   (setf (inventory-visible-state frame) (inventory-visible-state-for frame))
   frame)
 
-(defclass luvcraft-inventory-overlay (luvcraft-widget-overlay)
+(defclass luvcraft-inventory-overlay (luvcraft-hud-widget-overlay)
   ((visible-p :initform t :accessor inventory-overlay-visible-p)))
 
 (defmethod luvcraft:encode-luvcraft-overlay :around

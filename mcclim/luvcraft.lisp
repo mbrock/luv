@@ -26,7 +26,7 @@
                            :accessor widget-overlay-relief-fragment-module)
    (relief-pipeline :initform nil :accessor widget-overlay-relief-pipeline)))
 
-(defclass luvcraft-world-widget-overlay (luvcraft-widget-overlay)
+(defclass luvcraft-direct-widget-overlay (luvcraft-widget-overlay)
   ((text-device :initform nil :accessor world-widget-text-device)
    (text-layout :initform nil :accessor world-widget-text-layout)
    (text-vertex-module :initform nil
@@ -36,16 +36,45 @@
    (text-pipeline :initform nil :accessor world-widget-text-pipeline)
    (text-target-format :initform nil
                        :accessor world-widget-text-target-format)
+   (text-depth-stencil :initform nil
+                       :accessor world-widget-text-depth-stencil)
    (text-bind-groups
     :initform (make-hash-table :test #'equal)
     :reader world-widget-text-bind-groups))
   (:documentation
-   "A physical McCLIM surface whose semantic GPU commands may enter the
-game's scene pass directly.  Its texture remains the backing layer for image
-and broad-area paint; Slug text is evaluated at the final framebuffer pixel."))
+   "A McCLIM surface whose semantic GPU commands may enter its final pass.
+
+Its texture remains the backing layer for images and broad-area paint; Slug
+text is evaluated at the final framebuffer pixel."))
+
+(defclass luvcraft-world-widget-overlay (luvcraft-direct-widget-overlay) ()
+  (:documentation "A direct McCLIM surface mounted in the 3D scene."))
+
+(defclass luvcraft-hud-widget-overlay (luvcraft-direct-widget-overlay) ()
+  (:documentation "A direct McCLIM surface mounted in the presentation HUD."))
+
+(eval-when (:load-toplevel :execute)
+  ;; These method coordinates moved from the world-only class to the shared
+  ;; direct compositor.  DEFMethod replaces one coordinate but cannot know
+  ;; that an old coordinate has become obsolete in a durable image.
+  (flet ((forget-method (name qualifiers specializer-names)
+           (when (fboundp name)
+             (let* ((generic (fdefinition name))
+                    (specializers
+                      (mapcar #'find-class specializer-names))
+                    (method
+                      (find-method generic qualifiers specializers nil)))
+               (when method (remove-method generic method))))))
+    (forget-method 'gpu-command-rasterized-p nil
+                   '(luvcraft-world-widget-overlay
+                     gpu-prepared-text-command))
+    (forget-method 'release-raster-mirror-compositor '(:before)
+                   '(luvcraft-world-widget-overlay))
+    (forget-method 'luvcraft:encode-luvcraft-overlay '(:after)
+                   '(luvcraft-world-widget-overlay t t t))))
 
 (defmethod gpu-command-rasterized-p
-    ((overlay luvcraft-world-widget-overlay)
+    ((overlay luvcraft-direct-widget-overlay)
      (command gpu-prepared-text-command))
   (declare (ignore overlay command))
   nil)
@@ -101,18 +130,50 @@ and broad-area paint; Slug text is evaluated at the final framebuffer pixel."))
         (world-widget-text-pipeline overlay) nil
         (world-widget-text-fragment-module overlay) nil
         (world-widget-text-vertex-module overlay) nil
-        (world-widget-text-target-format overlay) nil)
+        (world-widget-text-target-format overlay) nil
+        (world-widget-text-depth-stencil overlay) nil)
   overlay)
 
 (defmethod release-raster-mirror-compositor :before
-    ((overlay luvcraft-world-widget-overlay))
+    ((overlay luvcraft-direct-widget-overlay))
   (clear-world-widget-text-resources overlay))
 
-(defun ensure-world-widget-text-pipeline (overlay target-format)
+(defgeneric direct-widget-text-target-format
+    (overlay session surface-texture)
+  (:documentation "The actual color attachment format for direct text."))
+
+(defmethod direct-widget-text-target-format
+    ((overlay luvcraft-world-widget-overlay) session surface-texture)
+  (declare (ignore overlay surface-texture))
+  (luv:gpu-texture-format
+   (luvcraft::luvcraft-session-color-texture session)))
+
+(defmethod direct-widget-text-target-format
+    ((overlay luvcraft-hud-widget-overlay) session surface-texture)
+  (declare (ignore overlay session))
+  (luv:gpu-texture-format surface-texture))
+
+(defgeneric direct-widget-text-depth-stencil (overlay)
+  (:documentation "The final pass depth declaration for direct text."))
+
+(defmethod direct-widget-text-depth-stencil
+    ((overlay luvcraft-world-widget-overlay))
+  (declare (ignore overlay))
+  '(:format :depth32-float
+    :depth-write-enabled nil :depth-compare :less))
+
+(defmethod direct-widget-text-depth-stencil
+    ((overlay luvcraft-hud-widget-overlay))
+  (declare (ignore overlay))
+  nil)
+
+(defun ensure-world-widget-text-pipeline (overlay target-format depth-stencil)
   (let ((device (spinning-compositor-device overlay)))
     (unless (and (eq device (world-widget-text-device overlay))
                  (eq target-format
                      (world-widget-text-target-format overlay))
+                 (equal depth-stencil
+                        (world-widget-text-depth-stencil overlay))
                  (world-widget-text-pipeline overlay))
       (clear-world-widget-text-resources overlay)
       (let ((layout nil) (vertex nil) (fragment nil) (pipeline nil)
@@ -164,13 +225,12 @@ and broad-area paint; Slug text is evaluated at the final framebuffer pixel."))
                          :targets
                          ((:format ,target-format
                            :blend :premultiplied-alpha)))
-                       :depth-stencil
-                       '(:format :depth32-float
-                         :depth-write-enabled nil :depth-compare :less)
+                       :depth-stencil depth-stencil
                        :primitive '(:topology :triangle-list))))
                (setf (world-widget-text-device overlay) device
                      (world-widget-text-layout overlay) layout
                      (world-widget-text-target-format overlay) target-format
+                     (world-widget-text-depth-stencil overlay) depth-stencil
                      (world-widget-text-vertex-module overlay) vertex
                      (world-widget-text-fragment-module overlay) fragment
                      (world-widget-text-pipeline overlay) pipeline
@@ -594,21 +654,31 @@ for a wall the answer is the same every frame and costs a few vector ops."
                   (luv:set-scissor-rect pass x y width height)
                   t))))))))
 
+(defmethod luvcraft:encode-luvcraft-overlay :before
+    ((overlay luvcraft-direct-widget-overlay) session pass surface-texture)
+  (declare (ignore session pass surface-texture))
+  ;; Primary methods set this only when they actually draw their backing
+  ;; layer.  A hidden inventory or fully retracted metabar must not replay the
+  ;; previous visible frame's text.
+  (setf (widget-overlay-render-state overlay) nil))
+
 (defmethod luvcraft:encode-luvcraft-overlay :after
-    ((overlay luvcraft-world-widget-overlay) session pass surface-texture)
-  "Replay retained Slug commands on the physical surface at scene resolution."
+    ((overlay luvcraft-direct-widget-overlay) session pass surface-texture)
+  "Replay retained Slug commands in OVERLAY's final render pass."
   (let* ((mirror (widget-overlay-mirror overlay))
          (commands (gpu-mirror-prepared-commands mirror))
          (text-buffer (gpu-mirror-retained-text-buffer mirror)))
     (when (and commands text-buffer (widget-overlay-render-state overlay))
       (let* ((target-format
-               (luv:gpu-texture-format
-                (luvcraft::luvcraft-session-color-texture session)))
+               (direct-widget-text-target-format
+                overlay session surface-texture))
+             (depth-stencil (direct-widget-text-depth-stencil overlay))
              (frame-state
                (ensure-spinning-compositor-frame-state overlay surface-texture))
              (active-clip (list :unset))
              (clip-visible-p t))
-        (ensure-world-widget-text-pipeline overlay target-format)
+        (ensure-world-widget-text-pipeline
+         overlay target-format depth-stencil)
         (luv:set-pipeline pass (world-widget-text-pipeline overlay))
         (luv:set-vertex-buffer pass 0 text-buffer)
         (dolist (command commands)

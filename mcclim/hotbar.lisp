@@ -289,7 +289,7 @@ the slot that has none stop looking like the same kind of thing.")
         (hotbar-visible-state-for frame))
   frame)
 
-(defclass luvcraft-hotbar-overlay (luvcraft-widget-overlay) ())
+(defclass luvcraft-hotbar-overlay (luvcraft-hud-widget-overlay) ())
 
 (defmethod luvcraft:luvcraft-overlay-stage
     ((overlay luvcraft-hotbar-overlay))

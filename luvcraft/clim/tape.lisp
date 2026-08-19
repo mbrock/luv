@@ -129,7 +129,7 @@ in the middle of the view wants to be read from where the player stands.")
                    half-width 0.0 0.0 0.0
                    0.0 half-height 0.0 0.0)))))
 
-(defclass luvcraft-tape-prompt-overlay (mcluv:luvcraft-widget-overlay) ())
+(defclass luvcraft-tape-prompt-overlay (mcluv:luvcraft-hud-widget-overlay) ())
 
 (defmethod luvcraft:luvcraft-overlay-stage ((overlay luvcraft-tape-prompt-overlay))
   (declare (ignore overlay))
