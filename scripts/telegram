@@ -5,6 +5,7 @@
 #   scripts/telegram '(telegram.client:begin-login "+15551234567")'
 #   scripts/telegram '(telegram.client:complete-login "12345")'
 #   scripts/telegram '(telegram.client:complete-password "secret")'
+#   scripts/telegram '(telegram.client:log-in-with-qr)'
 #   scripts/telegram '(print (telegram.tl:describe-tl :messages.send-message))'
 #
 # Credentials come from TELEGRAM_API_ID/TELEGRAM_API_HASH in the environment,

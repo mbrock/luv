@@ -321,6 +321,7 @@
               env.pkgs.mesa
               env.pkgs.python3
               env.pkgs.pkg-config
+              env.pkgs.qrencode
               env.pkgs.sdl3
               env.pkgs.spirv-tools
               env.tracyTools

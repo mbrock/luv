@@ -72,6 +72,18 @@ negotiation, and one INVOKE that turns a schema object into an answer.")
            #:sign-in
            #:check-password
            #:migration-data-center
+           ;; QR login
+           #:qr-login
+           #:qr-login-connection
+           #:qr-login-token
+           #:qr-login-expires
+           #:qr-login-uri
+           #:qr-login-user
+           #:begin-qr-login
+           #:refresh-qr-login
+           #:wait-for-qr-login
+           #:log-in-with-qr
+           #:present-qr-login
            #:initial-query
            #:invoke
            #:invoke-query
