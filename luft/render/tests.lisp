@@ -14,6 +14,34 @@
         sum (loop for x below width
                   count (funcall predicate pixels (* 4 (+ x (* y width)))))))
 
+(deftest renderer-creation-steps-leave-traces-and-breadcrumbs
+  (let ((trace (luv:make-cpu-trace :label "luft creation test"))
+        (stream (make-string-output-stream)))
+    (let ((luv:*log-stream* stream)
+          (luv:*log-categories* '(:luft)))
+      (ok (eq :created
+              (luv:with-cpu-trace (trace)
+                (luft.render::with-renderer-creation-step
+                    (:luft/test-creation "test creation")
+                  :created))))
+      (let ((zones (luv:cpu-trace-zones trace)))
+        (ok (= 1 (length zones)))
+        (ok (eq :luft/test-creation
+                (luv:cpu-trace-zone-name (first zones)))))
+      (let ((log (get-output-stream-string stream)))
+        (ok (search "begin test creation" log))
+        (ok (search "complete test creation" log))
+        (ok (not (search "interrupted test creation" log))))
+      (handler-case
+          (luft.render::with-renderer-creation-step
+              (:luft/test-interruption "test interruption")
+            (error "deliberate test interruption"))
+        (error () nil))
+      (let ((log (get-output-stream-string stream)))
+        (ok (search "begin test interruption" log))
+        (ok (search "interrupted test interruption" log))
+        (ok (not (search "complete test interruption" log)))))))
+
 (deftest demo-scene-sites-are-its-surface-in-whole-bricks
   (let* ((scene (make-demo-scene))
          (surface (scene-surface scene))
